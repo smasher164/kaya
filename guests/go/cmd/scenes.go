@@ -23,6 +23,7 @@ import (
 	"dev.kaya/guests/go/entry"
 	"dev.kaya/guests/go/feed"
 	"dev.kaya/guests/go/filedialog"
+	"dev.kaya/guests/go/fullscreen"
 	"dev.kaya/guests/go/gallery"
 	"dev.kaya/guests/go/grid"
 	"dev.kaya/guests/go/grow"
@@ -87,6 +88,7 @@ var scenes = map[string]func() *kaya.App{
 	"entry":      entry.App,
 	"feed":       feed.App,
 	"filedialog": filedialog.App,
+	"fullscreen": fullscreen.App,
 	"gallery":    gallery.App,
 	"grid":       grid.App,
 	"grow":       grow.App,

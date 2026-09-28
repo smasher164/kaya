@@ -1192,6 +1192,31 @@ if (isMainThread) {
   check("reply rides the show record as its placeholder", shipped.flat().some((r) => JSON.stringify([...r]) === JSON.stringify([...wire.tx_show_notification(31, 0, "Maya", "", "Message")])));
   fire(wire.parse_occurrence(repliedBytes(31, "On my way")));
   check("a notification_replied reaches the bound handler with its text", replySeen.length === 1 && typeof replySeen[0] === "object" && replySeen[0].replied === "On my way");
+
+  // FULLSCREEN (docs/fullscreen-plan.md): the prop rides the window
+  // construct, and fullscreen_changed reaches the handler bound on THAT
+  // window's construct with the Bool, persistently.
+  const fullscreenBytes = (window: number, on: boolean): Uint8Array => {
+    const b = new Uint8Array(32);
+    const v = new DataView(b.buffer);
+    v.setUint32(0, 32, true);
+    v.setUint16(4, wire.OCC_FULLSCREEN_CHANGED, true);
+    v.setBigUint64(8, BigInt(window), true);
+    v.setUint32(16, wire.VALUE_BOOL, true);
+    v.setUint32(20, 1, true);
+    b[24] = on ? 1 : 0;
+    return b;
+  };
+  const screens: [number, boolean][] = [];
+  shipped.length = 0;
+  app.build(() => {
+    app.window({ fullscreen: true, onFullscreenChanged: (on) => screens.push([0, on]) });
+    app.window({ windowId: 1950, fullscreen: false, onFullscreenChanged: (on) => screens.push([1950, on]) });
+  });
+  const fsRecords = shipped.flat().map((r) => JSON.stringify([...r]));
+  check("fullscreen rides the window construct's records", fsRecords.includes(JSON.stringify([...wire.tx_set_window_fullscreen(0, true)])) && fsRecords.includes(JSON.stringify([...wire.tx_set_window_fullscreen(1950, false)])));
+  for (const [w, on] of [[0, false], [1950, true], [0, true], [77, false]] as [number, boolean][]) fire(wire.parse_occurrence(fullscreenBytes(w, on)));
+  check("each window's fullscreen_changed reaches its own handler, persistently", JSON.stringify(screens) === JSON.stringify([[0, false], [1950, true], [0, true]]));
   check("an unclaimed notification_result announces the drop, naming the id", droppedSaid.trim() === "kaya: notification 41 outcome refused reached no handler — none was bound at the show and no process-level handler is registered (kaya.onNotificationActivation)");
 
   // ------------------------------------------------- app links (§4)

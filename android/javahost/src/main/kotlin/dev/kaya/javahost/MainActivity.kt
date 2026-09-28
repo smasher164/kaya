@@ -62,6 +62,7 @@ object GuestStart : KayaGuestStart {
             "undo" -> Undo::app
             "ranges" -> Ranges::app
             "dirty" -> Dirty::app
+            "fullscreen" -> Fullscreen::app
             "save" -> Save::app
             "filedialog" -> FileDialog::app
             "styling" -> Styling::app

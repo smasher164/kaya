@@ -89,6 +89,20 @@ main = do
     check (seen == [NotificationReplied "On my way"])
       ("a reply did not reach the bound handler with its text: " ++ show seen)
 
+  -- FULLSCREEN (docs/fullscreen-plan.md): fullscreen_changed reaches the
+  -- handler bound on THAT window's construct with the Bool, persistently.
+  screens <- newIORef ([] :: [(Word64, Bool)])
+  buildTx app $ do
+    window primary [WFullscreen True, WOnFullscreenChanged (\on -> modifyIORef' screens (++ [(0, on)]))]
+    createWindow 1950 [WOnFullscreenChanged (\on -> modifyIORef' screens (++ [(1950, on)]))]
+  fullscreenChangedTo app 0 False
+  fullscreenChangedTo app 1950 True
+  fullscreenChangedTo app 0 True
+  fullscreenChangedTo app 77 False
+  readIORef screens >>= \seen ->
+    check (seen == [(0, False), (1950, True), (0, True)])
+      ("fullscreen_changed did not reach each window's own handler, persistently: " ++ show seen)
+
   -- AND THE DROP IS ANNOUNCED, compared in full: a drop nobody announced
   -- is R5's defect class, and this sentence is the only signal a
   -- relaunched process's author gets that nothing listened.

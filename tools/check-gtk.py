@@ -453,6 +453,8 @@ PY
         && run_exact_test \\
             gtk::frame_tests::gtk_frame_memory_beats_the_declaration_and_yields_to_a_resize \\
         && run_exact_test \\
+            gtk::frame_tests::gtk_frame_memory_skips_a_fullscreen_frame \\
+        && run_exact_test \\
             gtk::notify_tests::gtk_notification_timer_parameter_parses_as_the_action_declares \\
         && run_exact_test \\
             gtk::weight_tests::gtk_weights_clamp_to_the_brand_font_named_instances \\

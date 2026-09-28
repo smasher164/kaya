@@ -2472,6 +2472,8 @@ public final class KayaApp {
     private var sheetDismissed: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var dismissRequested: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var sectionSelected: [UInt64: (KayaAppTx) throws -> Void] = [:]
+    // NOT one-shot (docs/fullscreen-plan.md).
+    private var fullscreenChanged: [UInt64: (KayaAppTx, Bool) throws -> Void] = [:]
     var alerts: [UInt64: (KayaAppTx, KayaAlertChoice) throws -> Void] = [:]
     var liveAlert: UInt64 = 0
     var liveFileDialog: UInt64 = 0
@@ -3392,6 +3394,16 @@ public final class KayaApp {
         windowClosed[window] = handler
     }
 
+    func onFullscreenChanged(_ window: UInt64, _ handler: @escaping (KayaAppTx, Bool) throws -> Void) {
+        fullscreenChanged[window] = handler
+    }
+
+    func fullscreenChangedTo(_ window: UInt64, _ on: Bool) {
+        if let handler = fullscreenChanged[window] {
+            dispatch { try build { tx in try handler(tx, on) } }
+        }
+    }
+
     /// Per-entry navigation registrations; the popped one retires with
     /// its one pop.
     func onEntryPopped(_ entry: UInt64, _ handler: @escaping (KayaAppTx) throws -> Void) {
@@ -3656,6 +3668,8 @@ public final class KayaApp {
                 if let handler = dismissRequested[id] {
                     dispatch { try build(handler) }
                 }
+            case (UInt16(KAYA_OCCURRENCE_FULLSCREEN_CHANGED), _):
+                fullscreenChangedTo(id, checked)
             case (UInt16(KAYA_OCCURRENCE_SECTION_SELECTED), _):
                 // NOT one-shot: sections never die (id is the section;
                 // the window rides as the payload).
@@ -5444,10 +5458,12 @@ public final class KayaAppTx {
         panes: UInt32? = nil, sectionsPresentation: KayaSectionsPresentation? = nil,
         appearance: KayaAppearance? = nil,
         inset: Double? = nil,
+        fullscreen: Bool? = nil,
         onCloseRequested: ((KayaAppTx) throws -> Void)? = nil,
         onClosed: ((KayaAppTx) throws -> Void)? = nil,
         onUndone: ((KayaAppTx, String, KayaUndoDelta) throws -> Void)? = nil,
         onRedone: ((KayaAppTx, String, KayaUndoDelta) throws -> Void)? = nil,
+        onFullscreenChanged: ((KayaAppTx, Bool) throws -> Void)? = nil,
         menus: [KayaMenuItem]? = nil
     ) {
         tx.createWindow(id)
@@ -5456,9 +5472,10 @@ public final class KayaAppTx {
             vetoClose: vetoClose, dirty: dirty, rememberFrame: rememberFrame,
             panes: panes,
             sectionsPresentation: sectionsPresentation,
-            appearance: appearance, inset: inset,
+            appearance: appearance, inset: inset, fullscreen: fullscreen,
             onCloseRequested: onCloseRequested, onClosed: onClosed,
             onUndone: onUndone, onRedone: onRedone,
+            onFullscreenChanged: onFullscreenChanged,
             menus: menus)
     }
 
@@ -5469,6 +5486,10 @@ public final class KayaAppTx {
     /// by default and 0 for full bleed, and keeps the platform's SAFE
     /// AREA. `panes:` is the CEILING on how many stack entries present
     /// side by side; the root refuses 0 and anything above 3.
+    /// `fullscreen:` is whether the window fills its screen, and
+    /// `onFullscreenChanged:` fires when the USER changes it through the
+    /// platform's own door, never for the app's own write
+    /// (docs/fullscreen-plan.md).
     public func window(
         _ id: UInt64 = 0, title: String? = nil, width: Double? = nil,
         height: Double? = nil, vetoClose: Bool? = nil, dirty: Bool? = nil,
@@ -5476,10 +5497,12 @@ public final class KayaAppTx {
         panes: UInt32? = nil, sectionsPresentation: KayaSectionsPresentation? = nil,
         appearance: KayaAppearance? = nil,
         inset: Double? = nil,
+        fullscreen: Bool? = nil,
         onCloseRequested: ((KayaAppTx) throws -> Void)? = nil,
         onClosed: ((KayaAppTx) throws -> Void)? = nil,
         onUndone: ((KayaAppTx, String, KayaUndoDelta) throws -> Void)? = nil,
         onRedone: ((KayaAppTx, String, KayaUndoDelta) throws -> Void)? = nil,
+        onFullscreenChanged: ((KayaAppTx, Bool) throws -> Void)? = nil,
         menus: [KayaMenuItem]? = nil
     ) {
         if let title { tx.setWindowTitle(id, title) }
@@ -5498,8 +5521,10 @@ public final class KayaAppTx {
         // default window (docs/tasks-s2b-plan.md R1-R3).
         if let appearance { tx.setWindowAppearance(id, appearance.rawValue) }
         if let inset { tx.setWindowInset(id, inset) }
+        if let fullscreen { tx.setWindowFullscreen(id, fullscreen) }
         if let onCloseRequested { app.onCloseRequested(id, onCloseRequested) }
         if let onClosed { app.onWindowClosed(id, onClosed) }
+        if let onFullscreenChanged { app.onFullscreenChanged(id, onFullscreenChanged) }
         // The history handlers ride the window construct because the
         // LEDGER is per window.
         if let onUndone { app.onUndone(id, onUndone) }

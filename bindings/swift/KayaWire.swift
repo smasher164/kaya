@@ -2807,15 +2807,37 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
         }
         if kind == UInt16(KAYA_OCCURRENCE_NOTIFICATION_REPLIED) {
             // An answer carrying one value: id + the Value.
+            let vtype = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)
             let valueLen = Int(raw.loadUnaligned(fromByteOffset: 20, as: UInt32.self))
-            let text = String(decoding: raw[24..<(24 + valueLen)], as: UTF8.self)
-            return (kind, id, [], .str(text), [], nil, nil, [])
+            let value: KayaValue
+            switch vtype {
+            case UInt32(KAYA_VALUE_BOOL):
+                value = .bool(raw[24] != 0)
+            case UInt32(KAYA_VALUE_I64):
+                value = .i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: 24, as: UInt64.self)))
+            case UInt32(KAYA_VALUE_F64):
+                value = .f64(Double(bitPattern: raw.loadUnaligned(fromByteOffset: 24, as: UInt64.self)))
+            default:
+                value = .str(String(decoding: raw[24..<(24 + valueLen)], as: UTF8.self))
+            }
+            return (kind, id, [], value, [], nil, nil, [])
         }
         if kind == UInt16(KAYA_OCCURRENCE_FULLSCREEN_CHANGED) {
             // An answer carrying one value: id + the Value.
+            let vtype = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)
             let valueLen = Int(raw.loadUnaligned(fromByteOffset: 20, as: UInt32.self))
-            let text = String(decoding: raw[24..<(24 + valueLen)], as: UTF8.self)
-            return (kind, id, [], .str(text), [], nil, nil, [])
+            let value: KayaValue
+            switch vtype {
+            case UInt32(KAYA_VALUE_BOOL):
+                value = .bool(raw[24] != 0)
+            case UInt32(KAYA_VALUE_I64):
+                value = .i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: 24, as: UInt64.self)))
+            case UInt32(KAYA_VALUE_F64):
+                value = .f64(Double(bitPattern: raw.loadUnaligned(fromByteOffset: 24, as: UInt64.self)))
+            default:
+                value = .str(String(decoding: raw[24..<(24 + valueLen)], as: UTF8.self))
+            }
+            return (kind, id, [], value, [], nil, nil, [])
         }
         if kind == UInt16(KAYA_OCCURRENCE_FILE_DIALOG_RESULT) {
             // id, a count, then three Values per file

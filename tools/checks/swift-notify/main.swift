@@ -65,6 +65,38 @@ app.notificationAnswer(31, .replied("On my way"))
 check(replied == [.replied("On my way")],
       "a reply did not reach the bound handler with its text: \(replied)")
 
+// FULLSCREEN (docs/fullscreen-plan.md): fullscreen_changed reaches the
+// handler bound on THAT window's construct with the Bool, persistently.
+var screens: [String] = []
+try! app.build { tx in
+    tx.window(fullscreen: true, onFullscreenChanged: { _, on in screens.append("0 \(on)") })
+    tx.createWindow(1950, onFullscreenChanged: { _, on in screens.append("1950 \(on)") })
+}
+// The record decodes to its Bool: the value-answer arm once read every value
+// as a Str, and a Bool then arrived as false.
+for on in [true, false] {
+    var rec = [UInt8](repeating: 0, count: 32)
+    func put<T: FixedWidthInteger>(_ v: T, _ at: Int) {
+        withUnsafeBytes(of: v.littleEndian) { rec.replaceSubrange(at..<(at + MemoryLayout<T>.size), with: $0) }
+    }
+    put(UInt32(32), 0)
+    put(UInt16(KAYA_OCCURRENCE_FULLSCREEN_CHANGED), 4)
+    put(UInt64(1950), 8)
+    put(UInt32(KAYA_VALUE_BOOL), 16)
+    put(UInt32(1), 20)
+    rec[24] = on ? 1 : 0
+    let decoded = kayaParseOccurrence(rec)
+    check(decoded?.0 == UInt16(KAYA_OCCURRENCE_FULLSCREEN_CHANGED) && decoded?.1 == 1950
+              && decoded?.3 == .bool(on),
+          "fullscreen_changed \(on) decoded as \(String(describing: decoded?.3))")
+}
+app.fullscreenChangedTo(0, false)
+app.fullscreenChangedTo(1950, true)
+app.fullscreenChangedTo(0, true)
+app.fullscreenChangedTo(77, false)
+check(screens == ["0 false", "1950 true", "0 true"],
+      "fullscreen_changed did not reach each window's own handler, persistently: \(screens)")
+
 // AND THE DROP IS ANNOUNCED, compared in full: a drop nobody announced is
 // R5's defect class, and this sentence is the only signal a relaunched
 // process's author gets that nothing listened. The child re-exec is the

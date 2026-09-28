@@ -106,6 +106,21 @@ public final class NotifyOrderCheck {
         check(replied.equals(List.of(new KayaApp.NotificationOutcome.Replied("On my way"))),
                 "a reply did not reach the bound handler with its text: " + replied);
 
+        // FULLSCREEN (docs/fullscreen-plan.md): fullscreen_changed reaches the
+        // handler bound on THAT window's construct with the Bool, persistently.
+        record Screen(long window, boolean on) {}
+        List<Screen> screens = new ArrayList<>();
+        app.build((java.util.function.Consumer<KayaApp.Tx>) tx -> {
+            tx.window(0).fullscreen(true).onFullscreenChanged((inner, on) -> screens.add(new Screen(0, on)));
+            tx.createWindow(1950).onFullscreenChanged((inner, on) -> screens.add(new Screen(1950, on)));
+        });
+        app.fullscreenChangedTo(0, false);
+        app.fullscreenChangedTo(1950, true);
+        app.fullscreenChangedTo(0, true);
+        app.fullscreenChangedTo(77, false);
+        check(screens.equals(List.of(new Screen(0, false), new Screen(1950, true), new Screen(0, true))),
+                "fullscreen_changed did not reach each window's own handler, persistently: " + screens);
+
         System.out.println("notify-order: OK — the one-shot wins, an unknown id "
                 + "reaches the process handler, it does not retire, and an "
                 + "unclaimed result announces its drop");

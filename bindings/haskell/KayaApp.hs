@@ -128,6 +128,7 @@ module KayaApp
     onNotificationActivation,
     notificationResult,
     notificationAnswer,
+    fullscreenChangedTo,
     linkRoute,
     linkOpened,
     -- appPendingRoutes (the link-route check's own read of the parked
@@ -481,6 +482,13 @@ capabilities = do
         ((bits .&. R.capEmojiPicker) /= 0)
         ((bits .&. R.capNotificationReply) /= 0)
     )
+
+-- | The fullscreen_changed arm, a function so guests\/haskell's
+-- NotifyOrderCheck can drive it (docs\/fullscreen-plan.md). NOT one-shot.
+fullscreenChangedTo :: App -> Word64 -> Bool -> IO ()
+fullscreenChangedTo app ident on = do
+  handlers <- readIORef (app.appFullscreenChanged)
+  dispatch (mapM_ ($ on) (Map.lookup ident handlers))
 
 -- | The notification_result decision, in a function of its own because
 -- the ring loop's branch has no seam a test can reach (the ring is C
@@ -994,8 +1002,13 @@ data WindowAttr
     -- mounted root, in layout units — LAYOUT, not appearance
     -- (docs/styling-plan.md D3).
     WInset Double
+  | -- | Whether the window fills its screen (docs/fullscreen-plan.md).
+    WFullscreen Bool
   | WOnCloseRequested (IO ())
   | WOnClosed (IO ())
+  | -- | Hear the USER take this window into or out of fullscreen through
+    -- the platform's own door; the app's own 'WFullscreen' never echoes.
+    WOnFullscreenChanged (Bool -> IO ())
   | -- | Hear an undo kaya routed in this window: the step's label —
     -- EMPTY for a typing episode — and what the core put back. THE
     -- DELTA IS THE ONLY NOTIFICATION (the echo doctrine).
@@ -1032,8 +1045,10 @@ window n = mapM_ apply
     apply (WDirty v) = emitB (W.txSetWindowDirty n v)
     apply (WRememberFrame v) = emitB (W.txSetWindowRememberFrame n v)
     apply (WInset units) = emitB (W.txSetWindowInset n units)
+    apply (WFullscreen v) = emitB (W.txSetWindowFullscreen n v)
     apply (WOnCloseRequested handler) = pendB (PCloseRequested n handler)
     apply (WOnClosed handler) = pendB (PWindowClosed n handler)
+    apply (WOnFullscreenChanged handler) = pendB (PFullscreenChanged n handler)
     apply (WOnUndone handler) = pendB (PUndone n handler)
     apply (WOnRedone handler) = pendB (PRedone n handler)
     apply (WMenus menus) =
@@ -4033,6 +4048,7 @@ register app pending = case pending of
   PDismissRequested n handler -> modifyIORef' (app.appDismissRequested) (Map.insert n handler)
   PCloseRequested n handler -> modifyIORef' (app.appCloseRequested) (Map.insert n handler)
   PWindowClosed n handler -> modifyIORef' (app.appWindowClosed) (Map.insert n handler)
+  PFullscreenChanged n handler -> modifyIORef' (app.appFullscreenChanged) (Map.insert n handler)
   -- The undo pair keys the same per-WINDOW tables the dispatch loop
   -- reads; n is the window construct's id.
   PUndone n handler -> modifyIORef' (app.appUndone) (Map.insert n handler)
@@ -4280,6 +4296,7 @@ newApp =
     <*> newIORef Map.empty -- appNodeTimes
     <*> newIORef Map.empty -- appCloseRequested
     <*> newIORef Map.empty -- appWindowClosed
+    <*> newIORef Map.empty -- appFullscreenChanged
     <*> newIORef Map.empty -- appEntryPopped
     <*> newIORef Map.empty -- appSectionSelected
     <*> newIORef Map.empty -- appBackRequested
@@ -4547,6 +4564,9 @@ dispatchLoop app = do
       | kind == W.occKindDismissRequested -> do
           handlers <- readIORef (app.appDismissRequested)
           dispatch (mapM_ id (Map.lookup ident handlers))
+          dispatchLoop app
+      | kind == W.occKindFullscreenChanged -> do
+          fullscreenChangedTo app ident (case payload of Just (W.VBool b) -> b; _ -> False)
           dispatchLoop app
       | kind == W.occKindSectionSelected -> do
           -- NOT one-shot: sections never die, and the user can return any

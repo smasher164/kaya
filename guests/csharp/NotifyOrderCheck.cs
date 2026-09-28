@@ -83,6 +83,45 @@ static class NotifyOrderCheck
         Check(replied.Count == 1 && replied[0] is NotificationOutcome.Replied("On my way"),
             "a reply did not reach the bound handler with its text");
 
+        // FULLSCREEN (docs/fullscreen-plan.md): the prop rides the window
+        // construct, and fullscreen_changed reaches the handler bound on THAT
+        // window's construct with the Bool, persistently.
+        var fullscreen = new List<(ulong, bool)>();
+        var fsRecords = new List<byte[]>();
+        app.Build(tx =>
+        {
+            tx.Window(fullscreen: true, onFullscreenChanged: (inner, on) => fullscreen.Add((0, on)));
+            tx.CreateWindow(1950, fullscreen: false,
+                onFullscreenChanged: (inner, on) => fullscreen.Add((1950, on)));
+            fsRecords.AddRange(tx.Records);
+        });
+        Check(fsRecords.Exists(r => r.AsSpan().SequenceEqual(KayaWire.TxSetWindowFullscreen(0, true)))
+              && fsRecords.Exists(r => r.AsSpan().SequenceEqual(KayaWire.TxSetWindowFullscreen(1950, false))),
+            "fullscreen did not ride the window construct's records");
+        // The record decodes to its Bool: the value-answer arm once read
+        // every value as a Str, and a Bool then arrived as false.
+        foreach (bool on in new[] { true, false })
+        {
+            var rec = new byte[32];
+            BitConverter.GetBytes(32u).CopyTo(rec, 0);
+            BitConverter.GetBytes(KayaWire.OccKindFullscreenChanged).CopyTo(rec, 4);
+            BitConverter.GetBytes(1950ul).CopyTo(rec, 8);
+            BitConverter.GetBytes(KayaWire.ValueBool).CopyTo(rec, 16);
+            BitConverter.GetBytes(1u).CopyTo(rec, 20);
+            rec[24] = on ? (byte)1 : (byte)0;
+            Check(KayaWire.ParseOccurrence(rec, out var fsKind, out var fsId, out _, out var fsPayload)
+                  && fsKind == KayaWire.OccKindFullscreenChanged && fsId == 1950
+                  && fsPayload is bool decoded && decoded == on,
+                $"fullscreen_changed {on} decoded as {fsPayload?.GetType().Name ?? "null"} {fsPayload}");
+        }
+        app.FullscreenChangedTo(0, false);
+        app.FullscreenChangedTo(1950, true);
+        app.FullscreenChangedTo(0, true);
+        app.FullscreenChangedTo(77, false);
+        Check(fullscreen.Count == 3 && fullscreen[0] == (0ul, false)
+              && fullscreen[1] == (1950ul, true) && fullscreen[2] == (0ul, true),
+            "fullscreen_changed did not reach each window's own handler, persistently");
+
         Console.WriteLine("notify-order: OK — the one-shot wins, an unknown id "
             + "reaches the process handler, it does not retire, and an "
             + "unclaimed result announces its drop");

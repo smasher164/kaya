@@ -2,7 +2,8 @@
 
 Status: DESIGNED 2026-09-28; DEPTH BUILT 2026-09-28 (the spec, the core, the
 Rust binding, the SwiftUI arm on macOS and iOS, the scene green on the mac
-lane); breadth open (docs/deferred.md, "BUILD — fullscreen"). The roadmap's second piece for the
+lane); BREADTH BUILT 2026-09-28 (GTK, WinUI and Compose, all nine bindings,
+the scene on five lanes; docs/deferred.md, "BUILD — fullscreen"). The roadmap's second piece for the
 video editor (its program monitor) and a piece of the media player and
 photo gallery archetypes. Every choice below is RECOMMENDED; §8 names the
 two a maintainer may want to overturn, and neither blocks the build.
@@ -56,7 +57,7 @@ that leave fullscreen on Escape (a video player's) do it in the app.
 | SwiftUI, iOS | `.statusBarHidden(on)` and `.persistentSystemOverlays(on ? .hidden : .automatic)` on the root | none |
 | GTK | `gtk_window_fullscreen` / `unfullscreen` | `notify::fullscreened`, minus kaya's own |
 | WinUI | `AppWindow.SetPresenter(FullScreen / Overlapped)` | `AppWindow.Changed` with `DidPresenterChange`, minus kaya's own |
-| Compose | `WindowInsetsControllerCompat.hide(systemBars())` with `BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE`; `show` to leave | none |
+| Compose | `WindowInsetsControllerCompat.hide(systemBars())` with `BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE`; `show` to leave; read back through `isVisible(statusBars())` (§4.4) | none |
 
 On a phone, fullscreen is the platform's immersive mode: the status bar
 and the navigation bar (Android) or home indicator (iOS) go away, which is
@@ -114,8 +115,24 @@ that wants that keeps it in `prefs()`.
    run on the wayland slots only.
 3. **Windows**: `FullScreenPresenter` under the lane's session, and
    what `Changed` reports for kaya's own `SetPresenter`.
+   MEASURED 2026-09-28 on the lane's VM (the fullscreen leg's verb trace, a
+   forced red): `SetPresenterByKind(FullScreen)` works under the lane's
+   session, the window going from 556x378 to the display's 1280x800 and back
+   to 556x378 on `Overlapped`. `AppWindow.Changed` with `DidPresenterChange`
+   fires SYNCHRONOUSLY inside kaya's own `SetPresenterByKind`, 4 to 17 ms
+   into the call, with the apply still holding the backend's state — so the
+   handler never settles inline: it queues the settle on the dispatcher, and
+   the shared door (crates/kaya/src/fullscreen.rs) drops kaya's own
+   transition there. F11 reaches the dress through the thread key hook, which
+   is now installed at setup rather than only by a menubar.
 4. **The phones' readbacks**: iOS's `statusBarManager.isStatusBarHidden`
    on the window scene; Android's `getRootWindowInsets().isVisible(systemBars())`.
+   **AMENDED, MEASURED 2026-09-28 on the lane's emulator:**
+   `isVisible(systemBars())` reads FALSE in a plain window. `isVisible` answers
+   for EVERY type in its mask, and `systemBars()` includes the caption bar a
+   phone never shows. The Android reading is `isVisible(statusBars())`, the
+   iOS reading's twin. `hide(systemBars())` lands fast: the insets read hidden
+   19 ms after the ask.
 
 ## §5 — How a leg sees it
 

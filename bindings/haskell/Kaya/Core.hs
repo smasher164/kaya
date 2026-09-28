@@ -395,6 +395,7 @@ data Pending
   | PDismissRequested !Word64 (IO ())
   | PCloseRequested !Word64 (IO ())
   | PWindowClosed !Word64 (IO ())
+  | PFullscreenChanged !Word64 (Bool -> IO ())
   | PUndone !Word64 (Text -> UndoDelta -> IO ())
   | PRedone !Word64 (Text -> UndoDelta -> IO ())
   | PChange !Word64 (Text -> IO ())
@@ -1590,6 +1591,7 @@ data App = App
     -- scope to the thing that creates them.
     appCloseRequested :: IORef (Map.Map Word64 (IO ())),
     appWindowClosed :: IORef (Map.Map Word64 (IO ())),
+    appFullscreenChanged :: IORef (Map.Map Word64 (Bool -> IO ())),
     -- Per-entry navigation handlers, keyed by entry surface id (the
     -- request-bound alert precedent).
     appEntryPopped :: IORef (Map.Map Word64 (IO ())),

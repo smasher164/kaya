@@ -45,6 +45,8 @@ mod split;
 mod scroll;
 #[path = "scrollto.rs"]
 mod scrollto;
+#[path = "fullscreen.rs"]
+mod fullscreen;
 #[path = "progress.rs"]
 mod progress;
 #[path = "select.rs"]
@@ -182,6 +184,7 @@ fn app(ctx: kaya::AppCtx) {
         // And its sideways strip under KAYA_LOCALE=ar-EG (tools/scenes/scrollrtl.steps).
         Ok("scroll") | Ok("scrollrtl") => scroll::app(ctx),
         Ok("scrollto") => scrollto::app(ctx),
+        Ok("fullscreen") => fullscreen::app(ctx),
         Ok("progress") => progress::app(ctx),
         Ok("select") => select::app(ctx),
         Ok("radio") => radio::app(ctx),

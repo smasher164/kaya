@@ -12953,3 +12953,33 @@ activates the accessory app; and a toggle during or just after a transition
 fails, leaving the window in neither state, so writes are held until one turn
 after `did*`. Probes and numbers: docs/fullscreen-plan.md §4.1.
 
+
+## `isVisible(systemBars())` is false in a plain Android window (measured 2026-09-28)
+
+`WindowInsetsCompat.isVisible(mask)` answers for EVERY type in the mask, and
+`systemBars()` includes the caption bar, which a phone never shows. On the
+lane's emulator the fullscreen leg read "on" before anything was hidden and
+after `show(systemBars())`, fifteen seconds of retries each time. Read one
+bar: KayaCompose.kt's `immersiveReading` asks `statusBars()`
+(docs/fullscreen-plan.md §4.4); check-verbs' immersive clause holds it.
+
+## A value-answer occurrence was decoded as a Str in C# and Swift (2026-09-28)
+
+kaya-bindgen's value-answer arm (`id + one Value`) was written for
+`notification_replied`, whose value is text, and the C# and Swift emitters
+read every such value as UTF-8 bytes. `fullscreen_changed` carries a Bool, so
+both bindings handed their handler `false` for every change; Go, Python, JS,
+Java, OCaml and Haskell parse the value by its tag. The linux C# leg read
+"off" after the user turned fullscreen on. Both emitters now switch on the
+tag, and guests/csharp/NotifyOrderCheck.cs and tools/checks/swift-notify
+decode a real record of each Bool.
+
+## AppWindow.Changed fires inside SetPresenterByKind (measured 2026-09-28)
+
+On the WinUI lane's VM, `Changed` with `DidPresenterChange` is raised
+synchronously inside kaya's own `SetPresenterByKind`, while the apply still
+holds the backend's state. A handler that settled inline would find the
+state borrowed; winui/mod.rs's `watch_fullscreen` queues the settle on the
+dispatcher. The WinUI chord hook was also installed only by a menubar build,
+so a window with no catalog never saw F11: `setup` installs it now
+(docs/fullscreen-plan.md §4.3).

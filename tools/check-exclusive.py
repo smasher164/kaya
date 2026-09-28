@@ -424,6 +424,23 @@ def census(texts, lanes=None, tools=None):
                     out.append(f"tools/lib/lanes/win.py: {name!r} ends the block before the one "
                                f"{leg!r} opens — the drain between blocks joins it and "
                                + blame.format(leg=leg))
+    # 5b. A WINDOWS LEG THAT TAKES A WINDOW FULLSCREEN IS EXCLUSIVE: the
+    # window covers the VM's display and the user half presses F11 on the
+    # system input queue (docs/fullscreen-plan.md §5). Read out of the scene
+    # scripts, the mac clause's way.
+    if win is not None:
+        for leg in win.legs():
+            scene, _lang = win.scene_lang(leg)
+            steps = ROOT / "tools/scenes" / f"{scene}.steps"
+            if not steps.exists():
+                continue
+            takes = [line for line in steps.read_text(encoding="utf-8").splitlines()
+                     if re.match(r"(expect_fullscreen|user_fullscreen)\b.*\bon\s*$", line.strip())]
+            if takes and leg not in win.EXCLUSIVE:
+                out.append(f"tools/lib/lanes/win.py: {leg!r} is not EXCLUSIVE, yet its scene takes "
+                           f"a window fullscreen ({takes[0].strip()!r}), which covers the VM's "
+                           f"display and presses F11 on the system input queue "
+                           f"(docs/fullscreen-plan.md §5)")
     # 6. THE COORDINATOR HANDS THE DIRECTORY; THE SWEEP YIELDS.
     if 'os.environ["KAYA_EXCLUSIVE_DIR"] = ' not in texts["tools/validate-all.py"]:
         out.append("tools/validate-all.py: never sets KAYA_EXCLUSIVE_DIR — the lanes cannot share "
@@ -616,7 +633,15 @@ _hand = gate.doctor("run-leg's display wait cut", REAL["tools/run-leg.py"],
 watched("a hand run of a display leg that never waits", {**REAL, "tools/run-leg.py": _hand},
         "a hand run of a DISPLAY_SCENES leg")
 
-gate.negatives_ran(20)
+# 21. A WINDOWS FULLSCREEN LEG BACK IN THE POOL.
+_win_pooled = gate.doctor("fullscreen_go taken out of the windows EXCLUSIVE set",
+                          gate.read(WIN_LANE), r'\n *"fullscreen_go", ', "\n             ")
+_win_pooled_mod = gate.scratch() / "win-fullscreen-pooled.py"
+_win_pooled_mod.write_text(_win_pooled, encoding="utf-8")
+watched("a windows fullscreen leg run in the pool", REAL,
+        "'fullscreen_go' is not EXCLUSIVE", lanes={**MODS, "windows": load_lane(_win_pooled_mod)})
+
+gate.negatives_ran(21)
 
 gate.counted("windows legs whose scene posts a notification",
              sorted(MODS["windows"].notification_legs(str(ROOT / "tools/scenes"))), floor=2)

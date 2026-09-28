@@ -34,21 +34,27 @@ of its last frame found what no step reads.
     own resource keys (the layer fill, its hairline, its top-leading corner);
     check-universal-props holds the layer and its release.
 
-## BUILD — fullscreen (docs/fullscreen-plan.md), depth on the mac
+## ~~BUILD — fullscreen (docs/fullscreen-plan.md), depth on the mac~~ COMPLETE 2026-09-28: breadth on GTK (wayland slots), WinUI and Compose, the sugar and handler in all nine bindings, the scene on five lanes (validate-all --only fullscreen: mac 9, linux 8, windows 6, ios 3, android 3 legs PASS); the C floor reads the occurrence through kaya.h, as it does section_selected and notification_replied
 KEY: fullscreen, fullscreen_changed, expect_fullscreen, user_fullscreen, kayaKeepFullscreenDoor, KayaImmersive, WPROP_FULLSCREEN
 
 The depth slice: the spec prop and occurrence, the core's mirror, the Rust
 binding, the SwiftUI arm on macOS and iOS, and the fullscreen scene green on
 the mac lane (EXCLUSIVE behind the HID-idle wait). What breadth owes:
-  - **DEPTH STUB: fullscreen on gtk** — F11 as dress and
+  - ~~**DEPTH STUB: fullscreen on gtk**~~ — LANDED 2026-09-28: the shared door
+    (crates/kaya/src/fullscreen.rs), F11 on a bubble-phase controller that
+    stands aside for a catalog chord; was: F11 as dress and
     `gtk_window_fullscreen`; the legs run on the wayland slots only, since
     Xvfb with no window manager ignores the request (plan §4.2, measured).
-  - **DEPTH STUB: fullscreen on winui** — F11 as dress and
+  - ~~**DEPTH STUB: fullscreen on winui**~~ — LANDED 2026-09-28: SetPresenterByKind,
+    Changed settled on the dispatcher (it fires inside the call, plan §4.3
+    measured), F11 in the chord hook after the catalog; was: F11 as dress and
     `AppWindow.SetPresenter`; plan §4.3 is measured first.
-  - **DEPTH STUB: fullscreen on compose** — immersive mode through
+  - ~~**DEPTH STUB: fullscreen on compose**~~ — LANDED 2026-09-28: immersive mode,
+    read back through `isVisible(statusBars())` since `systemBars()` reads
+    false in a plain window (plan §4.4, amended); was: immersive mode through
     WindowInsetsControllerCompat; plan §4.4's readback is measured first.
-  - The iOS leg (the arm is built; UNWIRED_SCENES in tools/lib/lanes/ios.py
-    until the user half is dropped through the lane table), the other eight
+  - LANDED 2026-09-28, each: the iOS leg (the phones cut the user half at
+    `user_fullscreen` and run the app's way back), the other eight
     bindings' `fullscreen` sugar and `fullscreen_changed` handler (held open by
     check-sugar-surface), and the C floor's reading of the occurrence.
 

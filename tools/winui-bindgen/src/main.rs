@@ -550,6 +550,10 @@ fn main() {
         // are those members' parameter and property types, which the filter
         // does not pull transitively (docs/traps.md).
         "Microsoft.UI.Windowing.AppWindowChangedEventArgs".to_string(),
+        // FULLSCREEN (docs/fullscreen-plan.md §3): the presenter AppWindow
+        // wears, set and read by kind, and the base type its getter answers.
+        "Microsoft.UI.Windowing.AppWindowPresenter".to_string(),
+        "Microsoft.UI.Windowing.AppWindowPresenterKind".to_string(),
         "Microsoft.UI.Windowing.DisplayArea".to_string(),
         "Microsoft.UI.Windowing.DisplayAreaFallback".to_string(),
         "Windows.Graphics.RectInt32".to_string(),

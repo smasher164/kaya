@@ -6596,6 +6596,17 @@ pub mod Microsoft {
                         .map(|| result__)
                     }
                 }
+                pub fn Presenter(&self) -> windows_core::Result<AppWindowPresenter> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Presenter)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
                 pub fn Size(
                     &self,
                 ) -> windows_core::Result<super::super::super::Windows::Graphics::SizeInt32>
@@ -6736,6 +6747,32 @@ pub mod Microsoft {
                         (windows_core::Interface::vtable(this).SetIconWithIconId)(
                             windows_core::Interface::as_raw(this),
                             iconid,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn SetPresenter<P0>(&self, appwindowpresenter: P0) -> windows_core::Result<()>
+                where
+                    P0: windows_core::Param<AppWindowPresenter>,
+                {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetPresenter)(
+                            windows_core::Interface::as_raw(this),
+                            appwindowpresenter.param().abi(),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn SetPresenterByKind(
+                    &self,
+                    appwindowpresenterkind: AppWindowPresenterKind,
+                ) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetPresenterByKind)(
+                            windows_core::Interface::as_raw(this),
+                            appwindowpresenterkind,
                         )
                         .ok()
                     }
@@ -6974,6 +7011,22 @@ pub mod Microsoft {
                         .and_then(|| windows_core::Type::from_abi(result__))
                     })
                 }
+                pub fn CreateWithPresenter<P0>(
+                    appwindowpresenter: P0,
+                ) -> windows_core::Result<AppWindow>
+                where
+                    P0: windows_core::Param<AppWindowPresenter>,
+                {
+                    Self::IAppWindowStatics(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).CreateWithPresenter)(
+                            windows_core::Interface::as_raw(this),
+                            appwindowpresenter.param().abi(),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
                 fn IAppWindowStatics<
                     R,
                     F: FnOnce(&IAppWindowStatics) -> windows_core::Result<R>,
@@ -7109,6 +7162,59 @@ pub mod Microsoft {
             }
             unsafe impl Send for AppWindowChangedEventArgs {}
             unsafe impl Sync for AppWindowChangedEventArgs {}
+            #[repr(transparent)]
+            #[derive(Clone, Debug, Eq, PartialEq)]
+            pub struct AppWindowPresenter(windows_core::IUnknown);
+            windows_core::imp::interface_hierarchy!(
+                AppWindowPresenter,
+                windows_core::IUnknown,
+                windows_core::IInspectable
+            );
+            impl AppWindowPresenter {
+                pub fn Kind(&self) -> windows_core::Result<AppWindowPresenterKind> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Kind)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+            }
+            impl windows_core::RuntimeType for AppWindowPresenter {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_class::<Self, IAppWindowPresenter>();
+            }
+            unsafe impl windows_core::Interface for AppWindowPresenter {
+                type Vtable = <IAppWindowPresenter as windows_core::Interface>::Vtable;
+                const IID: windows_core::GUID =
+                    <IAppWindowPresenter as windows_core::Interface>::IID;
+            }
+            impl windows_core::RuntimeName for AppWindowPresenter {
+                const NAME: &'static str = "Microsoft.UI.Windowing.AppWindowPresenter";
+            }
+            unsafe impl Send for AppWindowPresenter {}
+            unsafe impl Sync for AppWindowPresenter {}
+            #[repr(transparent)]
+            #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+            pub struct AppWindowPresenterKind(pub i32);
+            impl AppWindowPresenterKind {
+                pub const Default: Self = Self(0i32);
+                pub const CompactOverlay: Self = Self(1i32);
+                pub const FullScreen: Self = Self(2i32);
+                pub const Overlapped: Self = Self(3i32);
+            }
+            impl windows_core::TypeKind for AppWindowPresenterKind {
+                type TypeKind = windows_core::CopyType;
+            }
+            impl windows_core::RuntimeType for AppWindowPresenterKind {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::from_slice(
+                        b"enum(Microsoft.UI.Windowing.AppWindowPresenterKind;i4)",
+                    );
+            }
             #[repr(transparent)]
             #[derive(Clone, Debug, Eq, PartialEq)]
             pub struct AppWindowTitleBar(windows_core::IUnknown);
@@ -7873,7 +7979,10 @@ pub mod Microsoft {
                     *mut core::ffi::c_void,
                     *mut super::super::super::Windows::Graphics::PointInt32,
                 ) -> windows_core::HRESULT,
-                Presenter: usize,
+                pub Presenter: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
                 pub Size: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut super::super::super::Windows::Graphics::SizeInt32,
@@ -7922,8 +8031,16 @@ pub mod Microsoft {
                     super::IconId,
                 )
                     -> windows_core::HRESULT,
-                SetPresenter: usize,
-                SetPresenterByKind: usize,
+                pub SetPresenter: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub SetPresenterByKind: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    AppWindowPresenterKind,
+                )
+                    -> windows_core::HRESULT,
                 pub Show:
                     unsafe extern "system" fn(*mut core::ffi::c_void) -> windows_core::HRESULT,
                 pub ShowWithActivation: unsafe extern "system" fn(
@@ -8102,6 +8219,38 @@ pub mod Microsoft {
                 ZOrderBelowWindowId: usize,
             }
             windows_core::imp::define_interface!(
+                IAppWindowPresenter,
+                IAppWindowPresenter_Vtbl,
+                0xbc3042c2_c6c6_5632_8989_ff0ec6d3b40d
+            );
+            impl windows_core::RuntimeType for IAppWindowPresenter {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IAppWindowPresenter_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub Kind: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut AppWindowPresenterKind,
+                ) -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IAppWindowPresenterFactory,
+                IAppWindowPresenterFactory_Vtbl,
+                0x62082e3c_1368_5238_90d1_e932dc718a82
+            );
+            impl windows_core::RuntimeType for IAppWindowPresenterFactory {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IAppWindowPresenterFactory_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+            }
+            windows_core::imp::define_interface!(
                 IAppWindowStatics,
                 IAppWindowStatics_Vtbl,
                 0x3c315c24_d540_5d72_b518_b226b83627cb
@@ -8118,7 +8267,12 @@ pub mod Microsoft {
                     *mut core::ffi::c_void,
                     *mut *mut core::ffi::c_void,
                 ) -> windows_core::HRESULT,
-                CreateWithPresenter: usize,
+                pub CreateWithPresenter: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
                 CreateWithPresenterAndOwner: usize,
                 GetFromWindowId: usize,
             }

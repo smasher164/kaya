@@ -24,7 +24,8 @@ SCENES = [
     "background", "stall", "milestone2", "entry", "gallery", "todos",
     "reorder", "feed", "grow", "layout", "align", "window", "panels",
     "confirm", "nav", "split", "panes", "table", "scroll",
-    "progress", "select", "radio", "grid", "textarea", "search", "submit", "scrollto", "sections",
+    "progress", "select", "radio", "grid", "textarea", "search", "submit", "scrollto", "fullscreen",
+    "sections",
     "menus", "commands", "a11y", "a11yrows", "filedialog",
     "clipboard", "undo", "dirty", "ranges", "save", "styling",
     "typeface", "toolbar", "identity", "assets", "adaptive", "dnd", "pickers", "sliders", "tooltips",
@@ -55,7 +56,13 @@ EXCLUSIVE = {"dnd_rust", "dnd_python", "dnd_js", "dnd_go", "dnd_csharp", "dnd_ja
              "tasksbig_rust", "formatbig_rust",
              # THE 24-HOUR CLOCK LEG: the Region keys are the user's
              # (CLOCK24_LEGS), written before and restored after.
-             "clock24_rust"}
+             "clock24_rust",
+             # FULLSCREEN (docs/fullscreen-plan.md §5): the window covers the
+             # VM's display and the user half presses F11 on the system
+             # input queue, so a neighbour taking the foreground would take
+             # the key.
+             "fullscreen_rust", "fullscreen_python", "fullscreen_js",
+             "fullscreen_go", "fullscreen_csharp", "fullscreen_java"}
 
 # The legs that run under the user's 24-hour clock: HKCU\Control Panel\
 # International's iTime and sShortTime, written by deploy-win before the leg
@@ -493,6 +500,26 @@ ORDER = [
     [
      "scrollto_rust", "scrollto_python", "scrollto_js",
      "scrollto_go", "scrollto_csharp", "scrollto_java",
+    ],
+    # EACH fullscreen LEG ALONE, submit's reason: F11 is a real keystroke on
+    # the system queue, and the window covers the display (EXCLUSIVE above).
+    [
+     "fullscreen_rust",
+    ],
+    [
+     "fullscreen_python",
+    ],
+    [
+     "fullscreen_js",
+    ],
+    [
+     "fullscreen_go",
+    ],
+    [
+     "fullscreen_csharp",
+    ],
+    [
+     "fullscreen_java",
     ],
     # The filedialog family, ONE LEG PER DRAIN: the Shell's dialog is
     # OS-GLOBAL modal chrome — it must hold the FOREGROUND to be driven,

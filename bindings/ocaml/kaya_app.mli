@@ -1046,10 +1046,12 @@ val window :
   ?panes:int ->
   ?sections_presentation:Sections_presentation.t ->
   ?appearance:Appearance.t ->
+  ?fullscreen:bool ->
   ?on_close_requested:(unit -> unit) ->
   ?on_closed:(unit -> unit) ->
   ?on_undone:(string -> undo_delta -> unit) ->
   ?on_redone:(string -> undo_delta -> unit) ->
+  ?on_fullscreen_changed:(bool -> unit) ->
   ?menus:(unit -> menu_item) list -> ?id:int64 -> unit -> unit
 
 (* Create an auxiliary window (capability-gated); materializes hidden,
@@ -1065,10 +1067,12 @@ val create_window :
   ?panes:int ->
   ?sections_presentation:Sections_presentation.t ->
   ?appearance:Appearance.t ->
+  ?fullscreen:bool ->
   ?on_close_requested:(unit -> unit) ->
   ?on_closed:(unit -> unit) ->
   ?on_undone:(string -> undo_delta -> unit) ->
   ?on_redone:(string -> undo_delta -> unit) ->
+  ?on_fullscreen_changed:(bool -> unit) ->
   ?menus:(unit -> menu_item) list -> int64 -> unit
 
 (* Close and forget an auxiliary window. *)

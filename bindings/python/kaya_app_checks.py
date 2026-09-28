@@ -3169,6 +3169,50 @@ finally:
 check("a notification_replied reaches the bound handler with its text",
       reply_seen == [kaya.NotificationReply("On my way")])
 
+# FULLSCREEN (docs/fullscreen-plan.md): the prop rides the window construct,
+# scene and live alike, and fullscreen_changed reaches the handler bound on
+# THAT window's construct with the Bool, persistently.
+def _packed_fullscreen_changed(window, on):
+    value = struct.pack("<II", kaya.wire.VALUE_BOOL, 1) + bytes([int(on)])
+    value += b"\0" * (-len(value) % 8)
+    body = struct.pack("<Q", window) + value
+    return struct.pack("<IHH", 8 + len(body),
+                       kaya.wire.OCC_FULLSCREEN_CHANGED, 0) + body
+
+
+fs_seen = []
+app_fs = kaya.App()
+with app_fs.window(fullscreen=True,
+                   on_fullscreen_changed=lambda on: fs_seen.append((0, on))):
+    fs_scene_records = list(kaya._tx)
+    kaya.column()
+check("fullscreen rides the scene window's records",
+      kaya.wire.tx_set_window_fullscreen(0, True) in fs_scene_records)
+with app_fs.build():
+    app_fs.window(fullscreen=False)
+    fs_live_records = list(kaya._tx)
+check("the live window call packs the fullscreen write",
+      kaya.wire.tx_set_window_fullscreen(0, False) in fs_live_records)
+with app_fs.create_window(1950, fullscreen=True,
+                          on_fullscreen_changed=lambda on: fs_seen.append((1950, on))):
+    fs_aux_records = list(kaya._tx)
+    kaya.column()
+check("an auxiliary window carries fullscreen too",
+      kaya.wire.tx_set_window_fullscreen(1950, True) in fs_aux_records)
+check("fullscreen_changed decodes to its window and Bool",
+      kaya.wire.parse_occurrence(_packed_fullscreen_changed(1950, True))[1:]
+      == (1950, [], True))
+_fs_occs = [kaya.wire.parse_occurrence(_packed_fullscreen_changed(w, on))
+            for w, on in ((0, False), (1950, True), (0, True), (77, False))]
+kaya.runtime.next_occurrence = (
+    lambda: _fs_occs.pop(0) if _fs_occs else None)
+try:
+    app_fs._dispatch_loop()
+finally:
+    kaya.runtime.next_occurrence = _real_next_n
+check("each window's fullscreen_changed reaches its own handler, persistently",
+      fs_seen == [(0, False), (1950, True), (0, True)])
+
 # THE PROCESS-LEVEL HANDLER (docs/tasks-s9-plan.md R1). A tap on a
 # reminder after the app has exited relaunches the process, and THAT
 # process never called show — so the one-shot table is empty for the id

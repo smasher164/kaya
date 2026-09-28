@@ -26,7 +26,8 @@ use bindings::Microsoft::UI::Dispatching::{DispatcherQueue, DispatcherQueueHandl
 // caption buttons where they were (microsoft-ui-xaml#9863).
 use bindings::Microsoft::UI::Windowing::TitleBarHeightOption;
 use bindings::Microsoft::UI::Windowing::{
-    AppWindow, AppWindowChangedEventArgs, DisplayArea, DisplayAreaFallback,
+    AppWindow, AppWindowChangedEventArgs, AppWindowPresenterKind, DisplayArea,
+    DisplayAreaFallback,
 };
 use bindings::Windows::Graphics::{PointInt32, RectInt32, SizeInt32};
 use bindings::Microsoft::UI::Xaml::Controls::{
@@ -571,6 +572,8 @@ struct CoreState {
     /// veto_close per window id (primary included; default false).
     window_veto: HashMap<u64, bool>,
     remember_frame: HashMap<u64, bool>,
+    /// Per window, the fullscreen door's bookkeeping (docs/fullscreen-plan.md).
+    fullscreen: HashMap<u64, crate::fullscreen::Door>,
     /// Windows that opened at a remembered frame: memory wins over the
     /// width/height a launch DECLARES and loses to the first runtime
     /// request (docs/tasks-s4-plan.md P4). Told apart BY VALUE, never by
@@ -8880,6 +8883,11 @@ unsafe extern "system" fn key_hook(code: i32, wparam: usize, lparam: isize) -> i
                 }
                 return 1; // consumed: this catalog owns the chord
             }
+            // THE DRESS (docs/fullscreen-plan.md §2), after the catalog: an
+            // app chord on its key returned above.
+            if spelling == crate::fullscreen::DRESS_KEY && fullscreen_dress() {
+                return 1;
+            }
         }
     }
     let hook = KEY_HOOK.with(|h| h.get());
@@ -15341,7 +15349,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (WindowProp::VetoClose, Value::Bool(on)) => {
                     core.window_veto.insert(window.0, *on);
                 }
-                (WindowProp::Fullscreen, _) => crate::depth_stub("fullscreen"),
+                (WindowProp::Fullscreen, Value::Bool(on)) => {
+                    let now = presenter_fullscreen(&target)?;
+                    let request =
+                        core.fullscreen.entry(window.0).or_default().app_writes(*on, now);
+                    request_fullscreen(&target, window.0, request)?;
+                }
                 // Opting out FORGETS: a window that keeps a frame from
                 // before the prop would still open remembered.
                 (WindowProp::RememberFrame, Value::Bool(on)) => {
@@ -15376,6 +15389,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 core.frame_from_memory.insert(window.0);
             }
             watch_frame(&aux, window.0)?;
+            watch_fullscreen(&aux, window.0)?;
             subclass(&aux, window.0)?;
             core.aux_windows.insert(window.0, aux);
             // A WINDOW BORN AFTER THE DECLARATION still belongs to the
@@ -15386,6 +15400,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
         }
         ApplyOp::DestroyWindow { window } => {
             core.window_veto.remove(&window.0);
+            core.fullscreen.remove(&window.0);
             core.tearing_down.insert(window.0);
             if let Some(aux) = core.aux_windows.remove(&window.0) {
                 // Close() on an already-chrome-closed window errors, and
@@ -18326,6 +18341,8 @@ unsafe extern "system" {
     // so menu legs run serially).
     fn SetForegroundWindow(hwnd: isize) -> i32;
     fn GetForegroundWindow() -> isize;
+    /// The dress key's window: the calling thread's active one.
+    fn GetActiveWindow() -> isize;
     /// THE PHANTOM'S READING AND THE DANCE'S ATTACH ROUTE (docs/deferred.md,
     /// the phantom notification window): what the foreground holder IS, and
     /// the foreground-lock bypass that wins against it. Declared one by one
@@ -18667,17 +18684,20 @@ fn restore_frame(window: &Window, id: u64) -> Option<RectInt32> {
 }
 
 /// The line a save would write, or None when this window must not be
-/// saved: the app's opt-out (P4), and a frame the platform has not sized
-/// yet. PURE, because it is the decision the save turns on and the guest
+/// saved: the app's opt-out (P4), a window filling its screen or on its way
+/// into or out of it (docs/fullscreen-plan.md §3), and a frame the platform
+/// has not sized yet. PURE, because it is the decision the save turns on and the guest
 /// that runs winui::tests has no window to ask (tools/deploy-win.py's unit
 /// phase).
 fn frame_to_save(
     remember: &HashMap<u64, bool>,
     window: u64,
+    fills_screen: bool,
     at: PointInt32,
     size: SizeInt32,
 ) -> Option<String> {
-    if !frame_remembered(remember, window) || size.Width <= 0 || size.Height <= 0 {
+    if !frame_remembered(remember, window) || fills_screen || size.Width <= 0 || size.Height <= 0
+    {
         return None;
     }
     Some(frame_line(at.X, at.Y, size.Width, size.Height))
@@ -18697,7 +18717,9 @@ fn save_frame_now(window: u64) {
         let (Ok(at), Ok(size)) = (app_window.Position(), app_window.Size()) else {
             return false;
         };
-        if let Some(line) = frame_to_save(&core.remember_frame, window, at, size) {
+        let now = presenter_fullscreen(&target).unwrap_or(false);
+        let fills_screen = core.fullscreen.get(&window).map_or(now, |door| door.fills_screen(now));
+        if let Some(line) = frame_to_save(&core.remember_frame, window, fills_screen, at, size) {
             let key = frame_key(window);
             // A frame that did not move is not a write: the pump raises
             // Changed for a presenter, a z-order and a visibility change too.
@@ -18783,6 +18805,127 @@ fn watch_frame(window: &Window, id: u64) -> windows_core::Result<()> {
     Ok(())
 }
 
+// ------------------------------------------ fullscreen (docs/fullscreen-plan.md)
+
+/// The presenter the window wears, the toolkit's own state.
+fn presenter_fullscreen(window: &Window) -> windows_core::Result<bool> {
+    Ok(window.AppWindow()?.Presenter()?.Kind()? == AppWindowPresenterKind::FullScreen)
+}
+
+fn request_fullscreen(target: &Window, window: u64, request: Option<bool>) -> windows_core::Result<()> {
+    let Some(on) = request else { return Ok(()) };
+    let app_window = target.AppWindow()?;
+    #[cfg(feature = "harness")]
+    crate::vtrace::note(
+        "fullscreen",
+        format_args!(
+            "window#{window} request {on}, presenter {:?}, size {:?}",
+            app_window.Presenter().and_then(|p| p.Kind()).map(|k| k.0),
+            app_window.Size().map(|s| (s.Width, s.Height))
+        ),
+    );
+    #[cfg(not(feature = "harness"))]
+    let _ = window;
+    app_window.SetPresenterByKind(if on {
+        AppWindowPresenterKind::FullScreen
+    } else {
+        AppWindowPresenterKind::Overlapped
+    })
+}
+
+/// `AppWindow.Changed` with DidPresenterChange, settled on the pump and never
+/// inline: kaya's own SetPresenterByKind may raise it inside an apply.
+fn watch_fullscreen(window: &Window, id: u64) -> windows_core::Result<()> {
+    let changed = TypedEventHandler::<AppWindow, AppWindowChangedEventArgs>::new(
+        move |_, args| {
+            if let Some(args) = args.as_ref()
+                && args.DidPresenterChange()?
+            {
+                #[cfg(feature = "harness")]
+                crate::vtrace::note(
+                    "fullscreen",
+                    format_args!(
+                        "window#{id} Changed DidPresenterChange, inside an apply: {}",
+                        CORE.with(|slot| slot.try_borrow_mut().is_err())
+                    ),
+                );
+                enqueue_fullscreen_settled(id);
+            }
+            Ok(())
+        },
+    );
+    window.AppWindow()?.Changed(&changed)?;
+    Ok(())
+}
+
+fn enqueue_fullscreen_settled(window: u64) {
+    if let Some(dispatcher) = DISPATCHER.get() {
+        let handler = DispatcherQueueHandler::new(move || {
+            fullscreen_settled(window);
+            Ok(())
+        });
+        let _ = dispatcher.0.TryEnqueue(&handler);
+    }
+}
+
+fn fullscreen_settled(window: u64) {
+    let borrowed = CORE.with(|slot| {
+        let Ok(mut core) = slot.try_borrow_mut() else { return true };
+        let Some(core) = core.as_mut() else { return false };
+        let Ok(target) = winui_window(core, window) else { return false };
+        let Ok(now) = presenter_fullscreen(&target) else { return false };
+        let settled = core.fullscreen.entry(window).or_default().settled(now);
+        #[cfg(feature = "harness")]
+        crate::vtrace::note(
+            "fullscreen",
+            format_args!("window#{window} settled at {now}: {settled:?}"),
+        );
+        if let Some(on) = settled.report {
+            core.scene.user_fullscreen_changed(WindowId(window), on);
+            core.occurrences.send(Occurrence::FullscreenChanged { window: WindowId(window), on });
+        }
+        let _ = request_fullscreen(&target, window, settled.request);
+        false
+    });
+    if borrowed {
+        enqueue_fullscreen_settled(window);
+    }
+}
+
+/// The dress key (§2), reached from the key hook only when no catalog chord
+/// took it. The window is the thread's active one; the request runs on the
+/// pump, never inside the hook.
+fn fullscreen_dress() -> bool {
+    let active = unsafe { GetActiveWindow() };
+    let window = CORE.with(|slot| {
+        let core = slot.try_borrow().ok()?;
+        let core = core.as_ref()?;
+        std::iter::once(0)
+            .chain(core.aux_windows.keys().copied())
+            .find(|id| window_hwnd(core, *id) == Some(active))
+    });
+    let Some(window) = window else { return false };
+    if let Some(dispatcher) = DISPATCHER.get() {
+        let handler = DispatcherQueueHandler::new(move || {
+            CORE.with_borrow_mut(|core| -> windows_core::Result<()> {
+                let Some(core) = core.as_mut() else { return Ok(()) };
+                let target = winui_window(core, window)?;
+                let now = presenter_fullscreen(&target)?;
+                let request = core.fullscreen.entry(window).or_default().user_door(now);
+                request_fullscreen(&target, window, request)
+            })
+        });
+        let _ = dispatcher.0.TryEnqueue(&handler);
+    }
+    true
+}
+
+fn window_hwnd(core: &CoreState, window: u64) -> Option<isize> {
+    let target = winui_window(core, window).ok()?;
+    let native: IWindowNative = windows_core::Interface::cast(&target).ok()?;
+    native.window_handle().ok()
+}
+
 fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<()> {
     let window = Window::new()?;
     // Recording mode tiles parallel legs so per-window captures never
@@ -18824,6 +18967,10 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
     // declaration's veto, and the drain clears that after one batch.
     let restored_frame = restore_frame(&window, 0);
     watch_frame(&window, 0)?;
+    watch_fullscreen(&window, 0)?;
+    // The F11 dress rides the chord hook, which a window with no catalog
+    // chord would otherwise never install (docs/fullscreen-plan.md §2).
+    ensure_key_hook();
 
     // The close grammar (veto/report) rides a WNDPROC subclass; the
     // non-veto primary falls through into the Closed handler below.
@@ -18962,6 +19109,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             window_dirty: HashMap::new(),
             window_veto: HashMap::new(),
             remember_frame: HashMap::new(),
+            fullscreen: HashMap::new(),
             frame_from_memory: std::collections::BTreeSet::from_iter(
                 restored_frame.map(|_| 0u64),
             ),
@@ -23580,12 +23728,67 @@ impl crate::harness::Stage for WinUiStage {
         caption.starts_with(DIRTY_MARK)
     }
 
-    fn window_fullscreen(&self, _: u64) -> bool {
-        crate::depth_stub("fullscreen")
+    /// The presenter AppWindow wears (docs/fullscreen-plan.md §5), never the
+    /// prop.
+    fn window_fullscreen(&self, window: u64) -> bool {
+        Self::on_ui_read(move |core| presenter_fullscreen(&winui_window(core, window)?))
+            .unwrap_or_else(|e| {
+                panic!("kaya: expect_fullscreen could not read window#{window}'s presenter: {e}")
+            })
     }
 
-    fn user_fullscreen(&self, _: u64, _: bool) {
-        crate::depth_stub("fullscreen")
+    /// The dress key on the system input queue, as `shortcut` delivers a
+    /// chord (docs/fullscreen-plan.md §2, §5); returns once the presenter
+    /// reads `on` with no transition in flight.
+    fn user_fullscreen(&self, window: u64, on: bool) {
+        use std::time::{Duration, Instant};
+        let word = |b: bool| if b { "on" } else { "off" };
+        let read = move || {
+            Self::on_ui_read(move |core| {
+                let now = presenter_fullscreen(&winui_window(core, window)?)?;
+                Ok((now, core.fullscreen.get(&window).and_then(|door| door.flight)))
+            })
+        };
+        let settle_by = Instant::now() + Duration::from_secs(5);
+        let (before, flight) = loop {
+            let reading = read().unwrap_or_else(|e| {
+                panic!("kaya: user_fullscreen could not read window#{window}'s presenter: {e}")
+            });
+            if reading.1.is_none() || Instant::now() > settle_by {
+                break reading;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        assert!(
+            flight.is_none() && before != on,
+            "kaya: user_fullscreen {}: window#{window} reads {} with {flight:?} in flight \
+             before the door was driven",
+            word(on),
+            word(before)
+        );
+        Self::foreground_guest("user_fullscreen");
+        const VK_F11: u8 = 0x7A;
+        const KEYEVENTF_KEYUP: u32 = 0x2;
+        unsafe {
+            keybd_event(VK_F11, 0, 0, 0);
+            keybd_event(VK_F11, 0, KEYEVENTF_KEYUP, 0);
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let reading = read();
+            if let Ok((now, None)) = reading
+                && now == on
+            {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "kaya: user_fullscreen {}: F11 left window#{window} reading {reading:?} \
+                 (presenter is FullScreen, flight) after 5s",
+                word(on)
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 
     fn close_window(&self, window: u64) {
@@ -28768,17 +28971,20 @@ mod tests {
         let size = SizeInt32 { Width: 900, Height: 620 };
         let mut remember = HashMap::new();
         assert_eq!(
-            frame_to_save(&remember, 0, at, size),
+            frame_to_save(&remember, 0, false, at, size),
             Some("120 40 900 620".to_owned())
         );
         remember.insert(0, true);
-        assert!(frame_to_save(&remember, 0, at, size).is_some());
+        assert!(frame_to_save(&remember, 0, false, at, size).is_some());
         remember.insert(0, false);
-        assert_eq!(frame_to_save(&remember, 0, at, size), None);
-        assert!(frame_to_save(&remember, 1, at, size).is_some());
+        assert_eq!(frame_to_save(&remember, 0, false, at, size), None);
+        assert!(frame_to_save(&remember, 1, false, at, size).is_some());
         // A window the platform has not sized yet is not a frame.
         let no_size = SizeInt32 { Width: 0, Height: 620 };
-        assert_eq!(frame_to_save(&HashMap::new(), 0, at, no_size), None);
+        assert_eq!(frame_to_save(&HashMap::new(), 0, false, at, no_size), None);
+        // NO FRAME WHILE FULLSCREEN (docs/fullscreen-plan.md §3): the screen's
+        // rectangle is not the one the user will get back.
+        assert_eq!(frame_to_save(&HashMap::new(), 0, true, at, size), None);
 
         assert_eq!(frame_key(0), "kaya.window.0.frame");
         assert_eq!(frame_key(7), "kaya.window.7.frame");

@@ -38,7 +38,8 @@ import time
 SCENES = [
     "background", "stall", "milestone2", "entry", "gallery", "todos",
     "reorder", "feed", "grow", "layout", "align", "window", "panels",
-    "confirm", "nav", "split", "panes", "table", "scroll", "scrollto", "progress",
+    "confirm", "nav", "split", "panes", "table", "scroll", "scrollto", "fullscreen",
+    "progress",
     "select", "radio", "grid", "textarea", "sections", "menus",
     "commands", "a11y", "a11yrows", "filedialog", "clipboard", "undo",
     "dirty", "ranges", "save", "styling", "toolbar", "identity",
@@ -50,7 +51,7 @@ SCENES = [
 # has not landed — built and run rust-only until their guests arrive,
 # when they move into SCENES.
 DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows",
-                "format", "flexshrink", "listrow", "tints", "badge", "emoji", "fullscreen"]
+                "format", "flexshrink", "listrow", "tints", "badge", "emoji"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -205,8 +206,8 @@ ORDER = [
     ("drain",),
     # Fullscreen moves the host's display to a new Space and activates the
     # guest (docs/fullscreen-plan.md §4.1): alone between drains, and
-    # EXCLUSIVE below.
-    ("fullscreen", ("rust",)),
+    # EXCLUSIVE below, one leg at a time.
+    ("fullscreen", LANGS),
     ("drain",),
     # A row wider than its window (docs/flex-shrink-plan.md §6).
     ("flexshrink", ("rust",)),

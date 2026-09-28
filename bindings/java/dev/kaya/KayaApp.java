@@ -335,6 +335,8 @@ public final class KayaApp {
     final java.util.Map<Long, Consumer<Tx>> sheetDismissed = new java.util.HashMap<>();
     final java.util.Map<Long, Consumer<Tx>> dismissRequested = new java.util.HashMap<>();
     final java.util.Map<Long, Consumer<Tx>> sectionSelected = new java.util.HashMap<>();
+    // NOT one-shot (docs/fullscreen-plan.md).
+    final java.util.Map<Long, BiConsumer<Tx, Boolean>> fullscreenChanged = new java.util.HashMap<>();
     private final java.util.Map<Long, BiConsumer<Tx, java.util.List<PickedFile>>> fileDialogs =
             new java.util.HashMap<>();
     // One-shot, keyed by the GUEST's notification id (the alert's
@@ -1558,6 +1560,13 @@ public final class KayaApp {
      * retiring with the result; else the process-level one, which does
      * not; else the drop is announced.
      */
+    void fullscreenChangedTo(long window, boolean on) {
+        BiConsumer<Tx, Boolean> handler = fullscreenChanged.get(window);
+        if (handler != null) {
+            dispatch(tx -> handler.accept(tx, on));
+        }
+    }
+
     void notificationResult(long id, int outcome) {
         notificationAnswer(id, NotificationOutcome.fromWire(outcome));
     }
@@ -2368,6 +2377,22 @@ public final class KayaApp {
          */
         public WindowRef rememberFrame(boolean on) {
             tx.emit(KayaWire.txSetWindowRememberFrame(id, on));
+            return this;
+        }
+
+        /** Whether the window fills its screen (docs/fullscreen-plan.md); a
+         * toggle writes {@code !on} from the state the app already holds. */
+        public WindowRef fullscreen(boolean on) {
+            tx.emit(KayaWire.txSetWindowFullscreen(id, on));
+            return this;
+        }
+
+        /** Binds a handler to THIS window that fires with the new state each
+         * time the USER changes it through the platform's own door; the
+         * app's own write never echoes (docs/fullscreen-plan.md). NOT
+         * one-shot. */
+        public WindowRef onFullscreenChanged(BiConsumer<Tx, Boolean> handler) {
+            app.fullscreenChanged.put(id, handler);
             return this;
         }
 
@@ -9067,6 +9092,8 @@ public final class KayaApp {
                 if (handler != null) {
                     dispatch(handler);
                 }
+            } else if (occ.kind == KayaWire.OCC_KIND_FULLSCREEN_CHANGED) {
+                fullscreenChangedTo(occ.id, Boolean.TRUE.equals(occ.payload));
             } else if (occ.kind == KayaWire.OCC_KIND_SECTION_SELECTED) {
                 // NOT one-shot: sections never die, and the user can
                 // return any number of times (id is the section; the

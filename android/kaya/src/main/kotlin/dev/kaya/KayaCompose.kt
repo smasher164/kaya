@@ -35,6 +35,10 @@ import android.view.KeyEvent
 import android.view.ViewTreeObserver
 import android.webkit.MimeTypeMap
 import androidx.activity.ComponentActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
@@ -1307,6 +1311,9 @@ object KayaSceneModel {
     /// it. `expect_dirty` still reads it, so a backend that dropped the
     /// prop fails. The title is NEVER rewritten (D1).
     var windowDirty = false
+    /// The app's fullscreen prop (wprop 11), lowered to immersive mode
+    /// (docs/fullscreen-plan.md §3, §8.2) and re-installed on every attach.
+    var windowFullscreen = false
     // Context catalogs by anchored WIDGET id. Each attach APPENDS one
     // root — a widget's roots ACCUMULATE in attach order (the bindings
     // emit one attach per root), never replace. A template attachment
@@ -2662,6 +2669,36 @@ object KayaCompose {
      * is ever written, so this is a plain resource lookup and NOT a
      * relaunch (docs/canvas-plan.md §6, the setApplicationNightMode deaths).
      */
+    /** Immersive mode (docs/fullscreen-plan.md §3): the system bars hidden,
+     *  a swipe showing them transiently. Android has no user door that
+     *  leaves it, so fullscreen_changed never fires here (§2). */
+    internal fun installImmersive(activity: ComponentActivity, on: Boolean) {
+        val controller = WindowCompat.getInsetsController(activity.window, activity.window.decorView)
+        if (on) {
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
+        immersiveAskedAtMs = android.os.SystemClock.elapsedRealtime()
+        KayaDiag.note("fullscreen: immersive ${if (on) "on" else "off"} asked")
+    }
+
+    @Volatile
+    internal var immersiveAskedAtMs = 0L
+
+    /** expect_fullscreen's reading: the root's insets, never the prop —
+     *  "on" when the status bar is not visible, the iOS reading's twin. NOT
+     *  systemBars(): its isVisible answers for EVERY type in the mask, and
+     *  the caption bar a phone never shows keeps it false in a plain window
+     *  (measured on the lane's emulator, docs/fullscreen-plan.md §4.4). */
+    internal fun immersiveReading(activity: ComponentActivity): String {
+        val insets = ViewCompat.getRootWindowInsets(activity.window.decorView)
+            ?: return "unreadable (the decor view has no root insets)"
+        return if (insets.isVisible(WindowInsetsCompat.Type.statusBars())) "off" else "on"
+    }
+
     private fun installAppearanceBackground(activity: ComponentActivity, want: String?) {
         val base = activity.resources.configuration
         val resolved =
@@ -2709,6 +2746,7 @@ object KayaCompose {
         // theme's again (tools/check-appearance.py).
         readAppearanceOverride()
         installAppearanceBackground(activity, appearanceAsked())
+        if (KayaSceneModel.windowFullscreen) installImmersive(activity, true)
         readComplianceKnobs()
         // THE LAG-FREE HALF OF THE STRAGGLER-BACK GATE
         // (KayaHarnessAccessibility.dismiss): a dialog on top means this
@@ -3327,7 +3365,12 @@ object KayaCompose {
                         // the task label stays the app's own string.
                         WPROP_DIRTY -> KayaSceneModel.windowDirty = readBool(b)
                         WPROP_REMEMBER_FRAME -> readBool(b)
-                        WPROP_FULLSCREEN -> depthStub("fullscreen")
+                        WPROP_FULLSCREEN -> {
+                            KayaSceneModel.windowFullscreen = readBool(b)
+                            mountedActivity?.let {
+                                installImmersive(it, KayaSceneModel.windowFullscreen)
+                            }
+                        }
                         WPROP_INSET -> KayaSceneModel.windowInset = readF64(b)
                         // PROCESS-WIDE FROM THE DEFAULT WINDOW
                         // (docs/tasks-s2b-plan.md R1-R3). Both halves,
@@ -9095,8 +9138,36 @@ object KayaCompose {
                         // so no wait (tools/check-verbs.py's REFUSED).
                         failures.add("close_window: this host has no chrome close")
                     }
-                    "expect_fullscreen" -> depthStub("fullscreen")
-                    "user_fullscreen" -> depthStub("fullscreen")
+                    "expect_fullscreen" -> {
+                        // The ROOT'S INSETS, never the prop
+                        // (docs/fullscreen-plan.md §5): the system bars'
+                        // visibility the immersive arm moves. window 0 is
+                        // the one surface this host has.
+                        val target = parts.getOrNull(1) ?: ""
+                        val explicit = target.startsWith("window#")
+                        val wid =
+                            if (explicit) target.removePrefix("window#").toLongOrNull() ?: -1
+                            else 0L
+                        val prefix = if (explicit) "window#$wid " else ""
+                        val want = if (parts.getOrNull(if (explicit) 2 else 1) == "on") "on" else "off"
+                        val got =
+                            if (wid != 0L) "unreadable (this host has window 0 alone)"
+                            else onUi(activity) { immersiveReading(activity) }
+                        if (got == want) {
+                            observed.add("${prefix}fullscreen $want")
+                            KayaDiag.note(
+                                "fullscreen: insets read $got " +
+                                    "${android.os.SystemClock.elapsedRealtime() - immersiveAskedAtMs}ms after the last ask")
+                        } else {
+                            failures.add("${prefix}fullscreen $got, wanted $want")
+                        }
+                    }
+                    "user_fullscreen" -> {
+                        failures.add(
+                            "user_fullscreen: Android has no user door into or out of " +
+                                "fullscreen (docs/fullscreen-plan.md §2); the phone " +
+                                "lanes drop the user half of the scene")
+                    }
                     "expect_dirty" -> {
                         // THE UNSAVED-WORK MARK (docs/dirty-plan.md D5).
                         // Every other backend reads its CHROME; HERE THE

@@ -609,6 +609,8 @@ type app = {
   sheet_dismissed : (int64, unit -> unit) Hashtbl.t;
   dismiss_requested : (int64, unit -> unit) Hashtbl.t;
   section_selected : (int64, unit -> unit) Hashtbl.t;
+  (* NOT one-shot (docs/fullscreen-plan.md). *)
+  fullscreen_changed : (int64, bool -> unit) Hashtbl.t;
   alert_handlers : (int64, Alert_choice.t -> unit) Hashtbl.t;
   mutable next_alert : int64;
   (* One-shot, keyed by the GUEST's notification id (the alert's
@@ -789,6 +791,7 @@ let create () =
     sheet_dismissed = Hashtbl.create 8;
     dismiss_requested = Hashtbl.create 8;
     section_selected = Hashtbl.create 8;
+    fullscreen_changed = Hashtbl.create 8;
     alert_handlers = Hashtbl.create 8;
     next_alert = 0L;
     notification_handlers = Hashtbl.create 8;
@@ -2795,8 +2798,9 @@ end
 let window ?title ?width ?height ?inset ?veto_close ?dirty ?remember_frame
     ?panes
     ?(sections_presentation : Sections_presentation.t option)
-    ?(appearance : Appearance.t option)
-    ?on_close_requested ?on_closed ?on_undone ?on_redone ?menus ?(id = 0L) () =
+    ?(appearance : Appearance.t option) ?fullscreen
+    ?on_close_requested ?on_closed ?on_undone ?on_redone ?on_fullscreen_changed ?menus
+    ?(id = 0L) () =
   let tx = the_tx () in
   Option.iter (fun t -> emit tx (Kaya_wire.tx_set_window_title id t)) title;
   Option.iter (fun w -> emit tx (Kaya_wire.tx_set_window_width id w)) width;
@@ -2832,6 +2836,14 @@ let window ?title ?width ?height ?inset ?veto_close ?dirty ?remember_frame
   Option.iter
     (fun a -> emit tx (Kaya_wire.tx_set_window_appearance id (Appearance.wire a)))
     appearance;
+  (* docs/fullscreen-plan.md: [~on_fullscreen_changed] hears the USER's
+     door only; the app's own [~fullscreen] write never echoes. *)
+  Option.iter
+    (fun v -> emit tx (Kaya_wire.tx_set_window_fullscreen id v))
+    fullscreen;
+  Option.iter
+    (fun f -> Hashtbl.replace tx.app.fullscreen_changed id f)
+    on_fullscreen_changed;
   (* The handlers ride the declaration: [~on_close_requested] fires per
      chrome close while veto_close is armed (answer with [destroy_window]
      to agree); [~on_closed] fires when the non-veto auxiliary is
@@ -2859,14 +2871,16 @@ let window ?title ?width ?height ?inset ?veto_close ?dirty ?remember_frame
    root); materializes hidden, [mount_in] presents. *)
 let create_window ?title ?width ?height ?inset ?veto_close ?dirty
     ?remember_frame ?panes
-    ?sections_presentation ?appearance
-    ?on_close_requested ?on_closed ?on_undone ?on_redone ?menus id =
+    ?sections_presentation ?appearance ?fullscreen
+    ?on_close_requested ?on_closed ?on_undone ?on_redone ?on_fullscreen_changed ?menus
+    id =
   let tx = the_tx () in
   emit tx (Kaya_wire.tx_create_window id);
   window ?title ?width ?height ?inset ?veto_close ?dirty ?remember_frame
     ?panes
-    ?sections_presentation ?appearance
-    ?on_close_requested ?on_closed ?on_undone ?on_redone ?menus ~id ()
+    ?sections_presentation ?appearance ?fullscreen
+    ?on_close_requested ?on_closed ?on_undone ?on_redone ?on_fullscreen_changed ?menus
+    ~id ()
 
 (* Close and forget an auxiliary window — also the veto grammar's
    confirmation and the reconciliation after a chrome close. *)
@@ -5224,6 +5238,11 @@ let dispatch_loop app =
            (match Hashtbl.find_opt app.dismiss_requested id with
            | Some handler -> dispatch app handler
            | None -> ())
+         else if kind = Kaya_wire.occ_kind_fullscreen_changed then
+           (match (Hashtbl.find_opt app.fullscreen_changed id, payload) with
+           | Some handler, Some (Kaya_wire.Bool on) ->
+               dispatch app (fun () -> handler on)
+           | _ -> ())
          else if kind = Kaya_wire.occ_kind_section_selected then
            (* NOT one-shot: sections never die, and the user can return any
               number of times (id is the section; the window rides as the

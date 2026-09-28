@@ -846,6 +846,8 @@ sealed record WindowClosed(ulong Id, List<object> Keys) : Occurrence(Id, Keys);
 
 sealed record SectionSelected(ulong Id, List<object> Keys) : Occurrence(Id, Keys);
 
+sealed record FullscreenChanged(ulong Id, List<object> Keys, bool On) : Occurrence(Id, Keys);
+
 sealed record EntryPopped(ulong Id, List<object> Keys) : Occurrence(Id, Keys);
 
 sealed record BackRequested(ulong Id, List<object> Keys) : Occurrence(Id, Keys);
@@ -1204,6 +1206,11 @@ sealed class KayaApp
     /// one-shot handler bound at the show first, retiring with the
     /// result; else the process-level one, which does not; else the drop
     /// is announced.
+    internal void FullscreenChangedTo(ulong window, bool on)
+    {
+        if (fullscreenChanged.TryGetValue(window, out var fn)) Dispatch(tx => fn(tx, on));
+    }
+
     internal void NotificationResult(ulong id, NotificationOutcome outcome)
     {
         if (notifications.Remove(id, out var fn))
@@ -1361,6 +1368,8 @@ sealed class KayaApp
     internal readonly Dictionary<ulong, Action<Tx>> dismissRequested = new();
     internal readonly Dictionary<ulong, Action<Tx>> sectionSelected = new();
     internal readonly Dictionary<ulong, Action<Tx>> windowClosed = new();
+    // NOT one-shot (docs/fullscreen-plan.md).
+    internal readonly Dictionary<ulong, Action<Tx, bool>> fullscreenChanged = new();
     // The ledger's two reports, keyed by WINDOW because the ledger is
     // (docs/undo-plan.md §3). NOT one-shot, unlike the alert's table: a
     // history is walked as often as the user likes.
@@ -2310,6 +2319,7 @@ sealed class KayaApp
             case KayaWire.OccKindCloseRequested: return new CloseRequested(id, keys);
             case KayaWire.OccKindWindowClosed: return new WindowClosed(id, keys);
             case KayaWire.OccKindSectionSelected: return new SectionSelected(id, keys);
+            case KayaWire.OccKindFullscreenChanged: return new FullscreenChanged(id, keys, flag);
             case KayaWire.OccKindEntryPopped: return new EntryPopped(id, keys);
             case KayaWire.OccKindBackRequested: return new BackRequested(id, keys);
             case KayaWire.OccKindSheetDismissed: return new SheetDismissed(id, keys);
@@ -2497,6 +2507,9 @@ sealed class KayaApp
                 case SectionSelected section
                     when sectionSelected.TryGetValue(section.Id, out var onSection):
                     Dispatch(onSection);
+                    break;
+                case FullscreenChanged fullscreen:
+                    FullscreenChangedTo(fullscreen.Id, fullscreen.On);
                     break;
                 case EntryPopped popped:
                     // One-shot: the entry is gone; both registrations
@@ -4152,15 +4165,19 @@ sealed class Tx : IDisposable
     /// layout units, 16 by default, 0 full bleed, negative refused, a safe
     /// area separate (docs/styling-plan.md D3). panes: the CEILING on
     /// side-by-side stack entries, 1 to 3 (docs/multicolumn-plan.md).
+    /// fullscreen: whether the window fills its screen; onFullscreenChanged
+    /// fires when the USER changes it through the platform's own door, never
+    /// for the app's own write (docs/fullscreen-plan.md).
     public void Window(
         string? title = null, double? width = null, double? height = null,
         bool? vetoClose = null, uint? panes = null, bool? dirty = null,
         bool? rememberFrame = null,
         double? inset = null, SectionsPresentation? sectionsPresentation = null,
-        Appearance? appearance = null,
+        Appearance? appearance = null, bool? fullscreen = null,
         Action<Tx>? onCloseRequested = null, Action<Tx>? onClosed = null,
         Action<Tx, string, UndoDelta>? onUndone = null,
         Action<Tx, string, UndoDelta>? onRedone = null,
+        Action<Tx, bool>? onFullscreenChanged = null,
         MenuItem[]? menus = null, ulong id = 0)
     {
         if (title is { } t) Records.Add(KayaWire.TxSetWindowTitle(id, t));
@@ -4180,8 +4197,10 @@ sealed class Tx : IDisposable
         // default window (docs/tasks-s2b-plan.md R1-R3).
         if (appearance is { } ap)
             Records.Add(KayaWire.TxSetWindowAppearance(id, (long)ap));
+        if (fullscreen is { } fs) Records.Add(KayaWire.TxSetWindowFullscreen(id, fs));
         if (onCloseRequested is { } r) App.closeRequested[id] = r;
         if (onClosed is { } c) App.windowClosed[id] = c;
+        if (onFullscreenChanged is { } fc) App.fullscreenChanged[id] = fc;
         // Each fires every time kaya routes an undo (or a redo) there,
         // with the group's label — EMPTY for a typing episode — and what
         // the core put back. THE DELTA IS THE ONLY NOTIFICATION: applying
@@ -4209,16 +4228,18 @@ sealed class Tx : IDisposable
         bool? vetoClose = null, uint? panes = null, bool? dirty = null,
         bool? rememberFrame = null,
         double? inset = null, SectionsPresentation? sectionsPresentation = null,
-        Appearance? appearance = null,
+        Appearance? appearance = null, bool? fullscreen = null,
         Action<Tx>? onCloseRequested = null, Action<Tx>? onClosed = null,
         Action<Tx, string, UndoDelta>? onUndone = null,
         Action<Tx, string, UndoDelta>? onRedone = null,
+        Action<Tx, bool>? onFullscreenChanged = null,
         MenuItem[]? menus = null)
     {
         Records.Add(KayaWire.TxCreateWindow(id));
         Window(title, width, height, vetoClose, panes, dirty, rememberFrame, inset,
             sectionsPresentation,
-            appearance, onCloseRequested, onClosed, onUndone, onRedone, menus, id);
+            appearance, fullscreen, onCloseRequested, onClosed, onUndone, onRedone,
+            onFullscreenChanged, menus, id);
     }
 
     /// Request a modal alert (the request/result grammar). The result

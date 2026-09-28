@@ -5415,7 +5415,8 @@ def _window_props(window: int, title: str | None, width: float | None,
                   dirty: bool | None, panes: int | None,
                   sections_presentation: SectionsPresentation | str | int | None,
                   appearance: Appearance | str | int | None,
-                  inset: float | None, remember_frame: bool | None) -> None:
+                  inset: float | None, remember_frame: bool | None,
+                  fullscreen: bool | None = None) -> None:
     """The window construct's props — ONE place, so the scene scope and
     the live call cannot drift apart."""
     records = _records()
@@ -5430,6 +5431,8 @@ def _window_props(window: int, title: str | None, width: float | None,
     if remember_frame is not None:
         records.append(wire.tx_set_window_remember_frame(
             window, bool(remember_frame)))
+    if fullscreen is not None:
+        records.append(wire.tx_set_window_fullscreen(window, bool(fullscreen)))
     if panes is not None:
         records.append(wire.tx_set_window_panes(window, int(panes)))
     if sections_presentation is not None:
@@ -5482,7 +5485,8 @@ class _TxScope:
                  remember_frame: bool | None = None, panes: int | None = None,
                  sections_presentation: SectionsPresentation | str | int | None = None,
                  appearance: Appearance | str | int | None = None,
-                 inset: float | None = None, push: bool = False,
+                 inset: float | None = None, fullscreen: bool | None = None,
+                 push: bool = False,
                  intercept_back: bool | None = None,
                  on_popped: Callable[[], object] | None = None,
                  on_back: Callable[[], object] | None = None,
@@ -5511,6 +5515,7 @@ class _TxScope:
         self._veto_close = veto_close
         self._dirty = dirty
         self._remember_frame = remember_frame
+        self._fullscreen = fullscreen
         self._panes = panes
         self._sections_presentation = sections_presentation
         self._appearance = appearance
@@ -5650,7 +5655,7 @@ class _TxScope:
             self._window, self._title, self._width, self._height,
             self._veto_close, self._dirty, self._panes,
             self._sections_presentation, self._appearance, self._inset,
-            self._remember_frame)
+            self._remember_frame, self._fullscreen)
         return self
 
     def __exit__(self, exc_type: Any, exc: Any,
@@ -5766,6 +5771,8 @@ class App:
         # Per-window lifecycle handlers, keyed by window id.
         self._close_requested: dict[int, Callable[[], object]] = {}
         self._window_closed: dict[int, Callable[[], object]] = {}
+        # NOT one-shot, like the history below (docs/fullscreen-plan.md).
+        self._fullscreen_changed: dict[int, Callable[[bool], object]] = {}
         # NOT one-shot: a history is walked as often as the user likes.
         self._undone: dict[int, Callable[[str, UndoDelta], object]] = {}
         self._redone: dict[int, Callable[[str, UndoDelta], object]] = {}
@@ -5886,10 +5893,12 @@ class App:
                       sections_presentation: SectionsPresentation | str | int | None = None,
                       appearance: Appearance | str | int | None = None,
                       inset: float | None = None,
+                      fullscreen: bool | None = None,
                       on_close_requested: Callable[[], object] | None = None,
                       on_closed: Callable[[], object] | None = None,
                       on_undone: Callable[[str, UndoDelta], object] | None = None,
-                      on_redone: Callable[[str, UndoDelta], object] | None = None
+                      on_redone: Callable[[str, UndoDelta], object] | None = None,
+                      on_fullscreen_changed: Callable[[bool], object] | None = None
                       ) -> _TxScope:
         """An auxiliary surface's scene scope: create_window plus its
         props on entry, and the single top-level container mounts INTO IT
@@ -5904,13 +5913,15 @@ class App:
             self._close_requested[int(window_id)] = on_close_requested
         if on_closed is not None:
             self._window_closed[int(window_id)] = on_closed
+        if on_fullscreen_changed is not None:
+            self._fullscreen_changed[int(window_id)] = on_fullscreen_changed
         self._register_history(window_id, on_undone, on_redone)
         return _TxScope(
             self, mount_on_exit=True, window=window_id, create=True,
             title=title, width=width, height=height, veto_close=veto_close,
             dirty=dirty, remember_frame=remember_frame, panes=panes,
             sections_presentation=sections_presentation,
-            appearance=appearance, inset=inset)
+            appearance=appearance, inset=inset, fullscreen=fullscreen)
 
     def window(self, title: str | None = None, *, width: float | None = None,
                height: float | None = None, veto_close: bool | None = None,
@@ -5919,10 +5930,12 @@ class App:
                sections_presentation: SectionsPresentation | str | int | None = None,
                appearance: Appearance | str | int | None = None,
                inset: float | None = None,
+               fullscreen: bool | None = None,
                on_close_requested: Callable[[], object] | None = None,
                on_closed: Callable[[], object] | None = None,
                on_undone: Callable[[str, UndoDelta], object] | None = None,
                on_redone: Callable[[str, UndoDelta], object] | None = None,
+               on_fullscreen_changed: Callable[[bool], object] | None = None,
                window_id: int = 0) -> _TxScope | _LiveWindow:
         """The scene scope: an ambient transaction whose single top-level
         container mounts into the default window on exit. `title` names
@@ -5962,12 +5975,19 @@ class App:
         this surface, with the group's label — EMPTY for a typing episode
         kaya took back itself — and the whole restored state. Per window
         and PERSISTENT. on_redone is its twin; neither fires for a
-        native-tier undo (docs/undo-plan.md A6)."""
+        native-tier undo (docs/undo-plan.md A6).
+
+        `fullscreen` says whether the window fills its screen, and
+        on_fullscreen_changed(on) fires when the USER changes it through
+        the platform's own door; the app's own write never echoes
+        (docs/fullscreen-plan.md)."""
         window_id = int(window_id)
         if on_close_requested is not None:
             self._close_requested[window_id] = on_close_requested
         if on_closed is not None:
             self._window_closed[window_id] = on_closed
+        if on_fullscreen_changed is not None:
+            self._fullscreen_changed[window_id] = on_fullscreen_changed
         self._register_history(window_id, on_undone, on_redone)
         if _tx is not None:
             # THE LIVE FORM: a transaction is already open, so the props
@@ -5976,7 +5996,7 @@ class App:
             _require_app_thread()
             _window_props(window_id, title, width, height, veto_close,
                           dirty, panes, sections_presentation, appearance,
-                          inset, remember_frame)
+                          inset, remember_frame, fullscreen)
             return _LiveWindow()
         return _TxScope(
             self, mount_on_exit=True, window=window_id,
@@ -5984,7 +6004,7 @@ class App:
             veto_close=veto_close, dirty=dirty,
             remember_frame=remember_frame, panes=panes,
             sections_presentation=sections_presentation,
-            appearance=appearance, inset=inset)
+            appearance=appearance, inset=inset, fullscreen=fullscreen)
 
     def build(self) -> _TxScope:
         """An ambient transaction without the mount — for mutations
@@ -6304,6 +6324,11 @@ class App:
                 handler = self._section_selected.get(ident)
                 if handler is not None:
                     self._dispatch(handler)
+                continue
+            if kind == wire.OCC_FULLSCREEN_CHANGED:
+                handler = self._fullscreen_changed.get(ident)
+                if handler is not None:
+                    self._dispatch(handler, bool(payload))
                 continue
             if kind == wire.OCC_BACK_REQUESTED:
                 handler = self._back_requested.get(ident)

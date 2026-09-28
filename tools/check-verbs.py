@@ -642,6 +642,53 @@ def pump_start(swift_src=None, entry_src=None):
 
 
 
+# --- THE COMPOSE IMMERSIVE ARM (docs/fullscreen-plan.md §3, §5) ---------
+# expect_fullscreen reads the ROOT'S INSETS and never the prop: a reader of
+# KayaSceneModel.windowFullscreen passes the scene with the bars still up,
+# the check-appearance read-back rule one feature over. The prop's arm
+# installs immersive mode with the transient-bars behavior, and a phone's
+# user_fullscreen refuses rather than pretending. NO LANE CAN SEE THE
+# BEHAVIOR: no leg swipes the bars in.
+def compose_immersive(kotlin_src=None):
+    bad = []
+    kt = re.sub(r"//[^\n]*", "", kotlin_src if kotlin_src is not None
+                else real(KOTLIN))
+    arm = re.search(r'"expect_fullscreen" -> \{(.*?)\n                    \}\n',
+                    kt, re.S)
+    if not arm:
+        bad.append("KayaCompose.kt has no expect_fullscreen arm this clause "
+                   "can read (a finding, never a skip)")
+    else:
+        if "immersiveReading(activity)" not in arm.group(1):
+            bad.append("expect_fullscreen does not read immersiveReading — "
+                       "the root's insets are the toolkit's answer")
+        if "windowFullscreen" in arm.group(1):
+            bad.append("expect_fullscreen reads KayaSceneModel.windowFullscreen, "
+                       "the prop — a leg would pass with the bars still up")
+    reading = re.search(r"fun immersiveReading\(.*?\n    \}\n", kt, re.S)
+    if not reading or "getRootWindowInsets(" not in reading.group(0) \
+            or ".isVisible(WindowInsetsCompat.Type.statusBars())" not in reading.group(0) \
+            or "windowFullscreen" in reading.group(0):
+        bad.append("immersiveReading does not answer from the root insets' "
+                   "status bar visibility")
+    install = re.search(r"fun installImmersive\(.*?\n    \}\n", kt, re.S)
+    if not install or "BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE" not in install.group(0) \
+            or ".hide(WindowInsetsCompat.Type.systemBars())" not in install.group(0) \
+            or ".show(WindowInsetsCompat.Type.systemBars())" not in install.group(0):
+        bad.append("installImmersive does not hide the system bars with the "
+                   "transient-bars behavior and show them to leave "
+                   "(docs/fullscreen-plan.md §3)")
+    prop = re.search(r"WPROP_FULLSCREEN -> \{(.*?)\n                        \}", kt, re.S)
+    if not prop or "installImmersive(" not in prop.group(1):
+        bad.append("the WPROP_FULLSCREEN arm does not install immersive mode")
+    user = re.search(r'"user_fullscreen" -> \{(.*?)\n                    \}\n', kt, re.S)
+    if not user or "failures.add(" not in user.group(1) \
+            or "installImmersive" in user.group(1):
+        bad.append("user_fullscreen does not refuse on Android, which has no "
+                   "user door (docs/fullscreen-plan.md §2)")
+    return bad
+
+
 # --- THE VERB TRACE: one ring, three harnesses ------------------------
 # crates/kaya/src/vtrace.rs writes what every verb did ONLY WHEN THE RUN
 # FAILS (docs/deferred.md, the flight recorder's BUILD entry). NO LANE CAN
@@ -946,6 +993,12 @@ if pump_out:
 
 notify_auth_out = notify_auth()
 notify_auth_status = 1 if notify_auth_out else 0
+immersive_out = compose_immersive()
+immersive_status = 1 if immersive_out else 0
+if immersive_out:
+    print("check-verbs: the Compose immersive arm reads or writes the wrong "
+          "thing:", file=sys.stderr)
+    print("\n".join(immersive_out), file=sys.stderr)
 if notify_auth_out:
     print("check-verbs: notification authorization asks where a decided "
           "status must answer — a post made from a platform-started "
@@ -1264,6 +1317,35 @@ for rel, pattern, repl, label, finding in (
     kwargs = ({"entry_src": drifted} if rel == SWIFT_ENTRY
               else {"swift_src": drifted})
     score = introduced(pump_start(**kwargs), pump_out, finding)
+    named, total = score.split("/")
+    if named == "0" or named != total:
+        print(f"check-verbs: SELF-TEST FAIL ({label} scored {score} "
+              f"named/introduced findings, want them equal and "
+              f"nonzero)", file=sys.stderr)
+        raise SystemExit(1)
+
+# AND THE IMMERSIVE ARM'S OWN, four negatives, each watched.
+for pattern, repl, label, finding in (
+    (r"(            else onUi\(activity\) \{ )immersiveReading\(activity\)",
+     'if (KayaSceneModel.windowFullscreen) "on" else "off"',
+     "expect_fullscreen reading the prop",
+     "reads KayaSceneModel.windowFullscreen|does not read immersiveReading"),
+    (r"(            controller\.systemBarsBehavior =\n *)"
+     r"WindowInsetsControllerCompat\.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE",
+     "WindowInsetsControllerCompat.BEHAVIOR_DEFAULT",
+     "the transient-bars behavior dropped", "transient-bars behavior"),
+    (r"(                            KayaSceneModel\.windowFullscreen = readBool\(b\)\n)"
+     r" *mountedActivity\?\.let \{\n *installImmersive\(it, "
+     r"KayaSceneModel\.windowFullscreen\)\n *\}",
+     "",
+     "the prop never installed", "does not install immersive mode"),
+    (r'("user_fullscreen" -> \{\n *)failures\.add\(',
+     "installImmersive(activity, false); observed.add(",
+     "a phone user door that pretends", "does not refuse on Android"),
+):
+    drifted = perturb(f"immersive ({label})", KOTLIN, pattern, repl)
+    score = introduced(compose_immersive(kotlin_src=drifted), immersive_out,
+                       finding)
     named, total = score.split("/")
     if named == "0" or named != total:
         print(f"check-verbs: SELF-TEST FAIL ({label} scored {score} "
@@ -2896,7 +2978,7 @@ if (clip_status or window_status or ink_status or ax_status
         or metrics_status or keyed_status or drop_line_status
         or vtrace_status or norm_status or ind_status
         or answer_status or seed_focus_status or notify_auth_status
-        or pump_status):
+        or pump_status or immersive_status):
     raise SystemExit(1)
 g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"({len(canvas_rows)} of them the canvas vocabularies) + "
@@ -2914,4 +2996,5 @@ g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"+ the wayland clipboard seed's focus request "
           f"+ notification authorization asked only while undecided "
           f"+ the interpreter's pump started without a window "
+          f"+ the Compose immersive arm read from the insets "
           f"+ spec hash against 2 interpreters")

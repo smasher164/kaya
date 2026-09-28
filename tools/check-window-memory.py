@@ -29,6 +29,11 @@ dev_shell_or_die()
 #      it, cut and compiled with tools/checks/swiftui-fullscreen.swift over a
 #      window double that never reaches the window server — the app's write
 #      wins over a user change it overrode (docs/fullscreen-plan.md §1).
+#   D  STATIC, any host: the fullscreen rule on the two Rust backends
+#      (docs/fullscreen-plan.md §2, §3), whose decisions are
+#      crates/kaya/src/fullscreen.rs's unit tests. No scene reads either
+#      half: the save skip saves nothing a leg asserts, and no scene declares
+#      an app shortcut on F11, so a dress that took the key first is green.
 
 import os
 import platform
@@ -273,6 +278,99 @@ refuses("a save that remembers a fullscreen frame",
 
 negatives = 6
 
+# --- Clause D: the Rust backends' callsites. --------------------------
+GTK = "crates/kaya/src/gtk.rs"
+WINUI = "crates/kaya/src/winui/mod.rs"
+
+
+def rust_fn(text, name):
+    """The body of `fn name(`, comments and strings blanked, or None."""
+    return braced(strip(text), r"\bfn " + re.escape(name) + r"\(")
+
+
+def rust_backends(gtk, winui):
+    bad = []
+    save = rust_fn(gtk, "save_frame_now")
+    if save is None or not re.search(
+            r"if !frame_savable\(core\.fullscreen\.get\(&window\), "
+            r"target\.is_fullscreen\(\)\) \{\s*return;", save):
+        bad.append(f"{GTK}: save_frame_now no longer skips a window filling its "
+                   f"screen or on its way into or out of it (frame_savable)")
+    dress = rust_fn(gtk, "watch_fullscreen")
+    if dress is None or "PropagationPhase::Bubble" not in dress \
+            or "PropagationPhase::Capture" in dress:
+        bad.append(f"{GTK}: the F11 dress no longer rides the BUBBLE phase, after "
+                   f"the application's accelerators")
+    door = rust_fn(gtk, "fullscreen_dress")
+    if door is None or "dress_key_free(" not in door or "user_door(" not in door \
+            or door.index("dress_key_free(") > door.index("user_door("):
+        bad.append(f"{GTK}: fullscreen_dress takes the key without asking the "
+                   f"catalog first (crate::fullscreen::dress_key_free)")
+    to_save = rust_fn(winui, "frame_to_save")
+    if to_save is None or "|| fills_screen ||" not in to_save:
+        bad.append(f"{WINUI}: frame_to_save no longer refuses a window filling its "
+                   f"screen")
+    wsave = rust_fn(winui, "save_frame_now")
+    if wsave is None or "door.fills_screen(now)" not in wsave \
+            or "frame_to_save(&core.remember_frame, window, fills_screen," not in wsave:
+        bad.append(f"{WINUI}: save_frame_now no longer hands the door's fills_screen "
+                   f"to frame_to_save")
+    hook = rust_fn(winui, "key_hook")
+    consumed = "return 1;" if hook is None else hook
+    if hook is None or "menu_shortcuts.get(&spelling)" not in hook \
+            or "crate::fullscreen::DRESS_KEY" not in hook \
+            or hook.index("crate::fullscreen::DRESS_KEY") \
+            < hook.index("menu_shortcuts.get(&spelling)") \
+            or consumed.index("return 1;") > hook.index("crate::fullscreen::DRESS_KEY"):
+        bad.append(f"{WINUI}: key_hook reaches the F11 dress before the catalog's "
+                   f"own chord has been consumed")
+    return bad
+
+
+real_gtk, real_winui = gate.read(GTK), gate.read(WINUI)
+for line in rust_backends(real_gtk, real_winui):
+    gate.finding(line)
+
+
+def refuses_rust(label, gtk, winui, want):
+    gate.negative(label, lambda: rust_backends(gtk, winui), want=want)
+
+
+refuses_rust("a GTK save that remembers a fullscreen frame",
+             gate.doctor("the GTK fullscreen-skip perturbation", real_gtk,
+                         r"if !frame_savable\(core\.fullscreen\.get\(&window\), "
+                         r"target\.is_fullscreen\(\)\) \{", "if false {"),
+             real_winui, want="save_frame_now no longer skips")
+refuses_rust("a GTK dress that takes F11 before the app's accelerators",
+             gate.doctor("the GTK dress phase perturbation", real_gtk,
+                         r"keys\.set_propagation_phase\(gtk4::PropagationPhase::Bubble\);\n"
+                         r"    keys\.connect_key_pressed",
+                         "keys.set_propagation_phase(gtk4::PropagationPhase::Capture);\n"
+                         "    keys.connect_key_pressed"),
+             real_winui, want="BUBBLE phase")
+refuses_rust("a GTK dress that never asks the catalog",
+             gate.doctor("the GTK catalog-check perturbation", real_gtk,
+                         r"let free = crate::fullscreen::dress_key_free\(\n"
+                         r" *core\.menus\.borrow\(\)\.items\.values\(\)\.map\(\|item\| "
+                         r"item\.shortcut\.as_str\(\)\),\n *\);",
+                         "let free = true;"),
+             real_winui, want="without asking the catalog")
+refuses_rust("a WinUI save that remembers a fullscreen frame",
+             real_gtk,
+             gate.doctor("the WinUI fullscreen-skip perturbation", real_winui,
+                         r"\|\| fills_screen \|\| ", "|| "),
+             want="frame_to_save no longer refuses")
+refuses_rust("a WinUI dress reached before the catalog's chord",
+             real_gtk,
+             gate.doctor("the WinUI dress-order perturbation", real_winui,
+                         r"( *if let Some\(key\) = key_name\(wparam as u32\) \{\n)",
+                         r"\1            if key == crate::fullscreen::DRESS_KEY "
+                         r"&& fullscreen_dress() { return 1; }\n"),
+             want="before the catalog's own chord")
+negatives += 5
+gate.counted("lines of the two Rust backends read for clause D",
+             len(real_gtk.splitlines()) + len(real_winui.splitlines()), floor=20000)
+
 # --- Clause B: the rule, driven, where the toolchain exists. ----------
 if platform.system() != "Darwin":
     print("check-window-memory: clause B (the six by-value cases, the "
@@ -483,4 +581,5 @@ for name, label, pattern, repl, want in FS_NEGATIVES:
 gate.negatives_ran(negatives)
 gate.verdict("6 by-value cases, 2 frame spellings, 6 malformed lines, the "
              "clamp, the coalesced save and the opt-out; the fullscreen "
-             "block's app-write-wins rule")
+             "block's app-write-wins rule; the Rust backends' fullscreen "
+             "save skip and F11 dress")

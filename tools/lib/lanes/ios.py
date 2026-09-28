@@ -22,8 +22,8 @@ body's IOS_*_SCENES assignments.
 # naming a different one where two scenes share an app: a scene selects a
 # SCRIPT, never an app (`listdetail:split` is the only such pair).
 SWIFT_ENTRIES = [
-    "milestone2", "stall", "entry", "search", "submit", "scrollto", "gallery", "todos",
-    "reorder", "feed", "grow", "align", "layout",
+    "milestone2", "stall", "entry", "search", "submit", "scrollto", "fullscreen", "gallery",
+    "todos", "reorder", "feed", "grow", "align", "layout",
     "confirm", "nav", "listdetail:split", "scroll", "progress",
     "select", "radio", "grid", "textarea", "sections",
     "menus", "commands", "a11y", "a11yrows", "clipboard",
@@ -40,8 +40,8 @@ SWIFT_ENTRIES = [
 # rust-only canvas scenes, plus `editor` off-list below — a Go app with
 # no swift guest to mirror (docs/editor-plan.md).
 GO_SCENES = [
-    "milestone2", "stall", "entry", "search", "submit", "scrollto", "gallery", "todos",
-    "reorder", "feed", "grow", "align", "layout",
+    "milestone2", "stall", "entry", "search", "submit", "scrollto", "fullscreen", "gallery",
+    "todos", "reorder", "feed", "grow", "align", "layout",
     "confirm", "nav", "listdetail", "scroll", "progress",
     "select", "radio", "grid", "textarea", "sections",
     "menus", "commands", "a11y", "a11yrows", "clipboard",
@@ -80,6 +80,8 @@ RUST_SCENES = [
     "clock24",
     # A row wider than its window (docs/flex-shrink-plan.md §6).
     "flexshrink", "scrollto",
+    # Immersive mode (docs/fullscreen-plan.md §3); MODS cuts the user half.
+    "fullscreen",
     # The common list-row shapes (docs/deferred.md).
     "listrow",
     # The platform tints on a filled container (docs/tints-plan.md).
@@ -143,10 +145,15 @@ DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes"]
 # three suites with the breadth slice (docs/slider-plan.md §5), and
 # tooltips with its own (docs/tooltip-plan.md §5) — the iOS arm is the
 # shared interpreter's `.help`, which lands on the accessibility hint,
-# and expect_help reads it there. fullscreen is the depth slice
-# (docs/fullscreen-plan.md): the iOS immersive arm is built, and its leg,
-# with the user half dropped since a phone has no door, joins at breadth.
-UNWIRED_SCENES = ["fullscreen"]
+# and expect_help reads it there.
+UNWIRED_SCENES = []
+
+# The fullscreen scene's app-only way back after the cut, the same steps as
+# tools/lib/lanes/android.py's FULLSCREEN_APP_TAIL: no user change arrives.
+FULLSCREEN_APP_TAIL = ('click button#0; expect label#0 "asked for a window"; '
+                       'expect_fullscreen off; click button#1; '
+                       'expect label#2 "pings 2"; '
+                       'expect label#1 "no change from the user"')
 
 # Per-leg modifiers, keyed (suite, scene). `cut` names the verb this host
 # cannot express (everything from it on is dropped, printed); `drop` names
@@ -233,6 +240,14 @@ MODS = {
         "drop": (("resize_window", "900x620"),
                  ("expect_window_size", "900x620")),
         "keep": "expect_pref expect_no_pref expect_appearance"},
+    # A PHONE HAS NO USER DOOR OUT OF FULLSCREEN (docs/fullscreen-plan.md §2):
+    # the cut takes the user half, and the extra runs the app's way back.
+    ("swift", "fullscreen"): {"cut": "user_fullscreen", "keep": "expect_fullscreen",
+                              "extra": FULLSCREEN_APP_TAIL},
+    ("go", "fullscreen"): {"cut": "user_fullscreen", "keep": "expect_fullscreen",
+                           "extra": FULLSCREEN_APP_TAIL},
+    ("rust-swiftui", "fullscreen"): {"cut": "user_fullscreen", "keep": "expect_fullscreen",
+                                     "extra": FULLSCREEN_APP_TAIL},
     ("rust-swiftui", "adaptive"): {
         "extra": 'expect_axis row@narrow "vertical"; expect_grid_columns grid@sheet 1; '
                  'expect_grid_columns grid@fit 1',

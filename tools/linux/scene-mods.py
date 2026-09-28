@@ -5,6 +5,10 @@ per line, for the leg's KAYA_SELFTEST_SCRIPT. Every dropped step is named on
 stderr; a refused drop exits 1 with the shared grammar's sentence.
 
     tools/linux/scene-mods.py <scene>
+    tools/linux/scene-mods.py --protocols <scene>
+
+The second form prints the session protocols the scene's legs run on, and
+names on stderr each one the lane table (WAYLAND_ONLY) leaves out.
 """
 import pathlib
 import sys
@@ -15,9 +19,21 @@ import scene_cut  # noqa: E402
 from lanes import linux as lane  # noqa: E402
 
 
+def protocols(scene):
+    why = lane.WAYLAND_ONLY.get(scene)
+    if why is None:
+        print("x11 wayland")
+        return 0
+    print(f"scene-mods: {scene}: NOT RUN on x11 ({why})", file=sys.stderr)
+    print("wayland")
+    return 0
+
+
 def main(argv):
+    if len(argv) == 2 and argv[0] == "--protocols":
+        return protocols(argv[1])
     if len(argv) != 1:
-        print("usage: tools/linux/scene-mods.py <scene>", file=sys.stderr)
+        print("usage: tools/linux/scene-mods.py [--protocols] <scene>", file=sys.stderr)
         return 2
     scene = argv[0]
     path = ROOT / f"tools/scenes/{scene}.steps"

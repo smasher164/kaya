@@ -14,3 +14,11 @@ MODS = {
                        "expect_notification expect_badge",
                        "no Linux desktop draws a notification's reply field (R1)"),)},
 }
+
+# The scenes whose legs run on the wayland slots alone, each with the reason
+# tools/linux/scene-mods.py --protocols prints for the x11 legs not run.
+WAYLAND_ONLY = {
+    "fullscreen": "Xvfb runs no window manager, and gtk_window_fullscreen asks "
+                  "one through _NET_WM_STATE: measured doing nothing there "
+                  "(docs/fullscreen-plan.md §4.2)",
+}

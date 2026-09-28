@@ -2792,15 +2792,29 @@ static class KayaWire
         if (kind == OccKindNotificationReplied)
         {
             // An answer carrying one value: id + the Value.
+            uint vtype = BitConverter.ToUInt32(rec, 16);
             int valueLen = (int)BitConverter.ToUInt32(rec, 20);
-            payload = Encoding.UTF8.GetString(rec, 24, valueLen);
+            switch (vtype)
+            {
+                case ValueBool: payload = rec[24] != 0; break;
+                case ValueI64: payload = BitConverter.ToInt64(rec, 24); break;
+                case ValueF64: payload = BitConverter.ToDouble(rec, 24); break;
+                default: payload = Encoding.UTF8.GetString(rec, 24, valueLen); break;
+            }
             return true;
         }
         if (kind == OccKindFullscreenChanged)
         {
             // An answer carrying one value: id + the Value.
+            uint vtype = BitConverter.ToUInt32(rec, 16);
             int valueLen = (int)BitConverter.ToUInt32(rec, 20);
-            payload = Encoding.UTF8.GetString(rec, 24, valueLen);
+            switch (vtype)
+            {
+                case ValueBool: payload = rec[24] != 0; break;
+                case ValueI64: payload = BitConverter.ToInt64(rec, 24); break;
+                case ValueF64: payload = BitConverter.ToDouble(rec, 24); break;
+                default: payload = Encoding.UTF8.GetString(rec, 24, valueLen); break;
+            }
             return true;
         }
         if (kind == OccKindFileDialogResult)

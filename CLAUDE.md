@@ -1018,7 +1018,12 @@ in docs/deferred.md.
    saving and restoring nothing. 19 watched negatives, counts printed —
    five doctoring the static census, fourteen recompiling a doctored copy
    of the cut and demanding the probe's OWN sentence back, since a half of
-   the probe nobody has seen go red is a sentence nobody has seen print),
+   the probe nobody has seen go red is a sentence nobody has seen print.
+   AND THE RUST BACKENDS' FULLSCREEN CALLSITES SINCE 2026-09-28 (clause
+   D, docs/fullscreen-plan.md §2, §3): GTK and WinUI save no frame while a
+   window fills its screen, and their F11 dress runs after the app's own
+   chord — no scene declares an app shortcut on F11, so a dress that took
+   the key first is green everywhere; five watched negatives),
    `tools/check-canvas-blit.py` (KAYA RASTERIZES, BACKENDS BLIT — the
    canvas architecture's one rule (docs/canvas-plan.md §1.1), in the
    three places NO SCENE CAN FAIL. A backend that interpreted a draw op

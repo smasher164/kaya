@@ -16,6 +16,8 @@ mod canvas;
 mod fault;
 #[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(dead_code))]
 mod flex;
+#[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(dead_code))]
+mod fullscreen;
 /// The formatter door (docs/compliance-plan.md §2.3).
 pub mod fmt;
 /// The catalog (docs/compliance-plan.md §2.4).

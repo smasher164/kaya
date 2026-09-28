@@ -4895,6 +4895,8 @@ struct CoreState {
     /// Window memory's opt-out per window (wprop 10; absent means
     /// remembered — docs/tasks-s4-plan.md P4).
     remember_frame: HashMap<u64, bool>,
+    /// Per window, the fullscreen door's bookkeeping (docs/fullscreen-plan.md).
+    fullscreen: HashMap<u64, crate::fullscreen::Door>,
     /// Windows that opened from the store, and the width/height each one's
     /// app DECLARED — the by-VALUE rule (docs/tasks-s4-plan.md P4): memory
     /// beats the launch declaration, and the first write whose value
@@ -5345,6 +5347,12 @@ fn frame_remembered(remember: &HashMap<u64, bool>, window: u64) -> bool {
     remember.get(&window) != Some(&false)
 }
 
+/// docs/fullscreen-plan.md §3: a window filling its screen, or on its way
+/// into or out of it, has no frame to remember.
+fn frame_savable(door: Option<&crate::fullscreen::Door>, fullscreen: bool) -> bool {
+    !door.map_or(fullscreen, |door| door.fills_screen(fullscreen))
+}
+
 /// One frame write, gated on the opt-out and on the window still being
 /// here. Re-armed rather than skipped when CORE is borrowed: this runs off
 /// a `notify` that can fire INSIDE an apply's `set_default_size`.
@@ -5363,6 +5371,9 @@ fn save_frame_now(window: u64) {
         let Some(target) = gtk_window_read(core, window) else {
             return;
         };
+        if !frame_savable(core.fullscreen.get(&window), target.is_fullscreen()) {
+            return;
+        }
         let (width, height) = gtk4::prelude::GtkWindowExt::default_size(&target);
         if width <= 0 || height <= 0 {
             return;
@@ -5409,6 +5420,97 @@ fn watch_frame(window: &gtk4::Window, id: u64) {
     use gtk4::prelude::GtkWindowExt;
     window.connect_default_width_notify(move |_| schedule_frame_save(id));
     window.connect_default_height_notify(move |_| schedule_frame_save(id));
+}
+
+/// docs/fullscreen-plan.md §2, §3: the toplevel's own state, and the dress
+/// key. The key rides the BUBBLE phase, after the application's accelerators
+/// (a capture-phase controller GTK installs), and still stands aside for a
+/// catalog chord on it.
+fn watch_fullscreen(window: &gtk4::Window, id: u64) {
+    window.connect_fullscreened_notify(move |_| fullscreen_settled(id));
+    let keys = gtk4::EventControllerKey::new();
+    keys.set_propagation_phase(gtk4::PropagationPhase::Bubble);
+    keys.connect_key_pressed(move |_, key, _, state| {
+        let chord = gdk::ModifierType::CONTROL_MASK
+            | gdk::ModifierType::SHIFT_MASK
+            | gdk::ModifierType::ALT_MASK
+            | gdk::ModifierType::SUPER_MASK
+            | gdk::ModifierType::META_MASK;
+        if key != gdk::Key::F11 || state.intersects(chord) {
+            return glib::Propagation::Proceed;
+        }
+        if fullscreen_dress(id) {
+            glib::Propagation::Stop
+        } else {
+            glib::Propagation::Proceed
+        }
+    });
+    window.add_controller(keys);
+}
+
+/// The dress key pressed: the user's door, unless the catalog owns the key.
+fn fullscreen_dress(window: u64) -> bool {
+    CORE.with(|slot| {
+        let Ok(mut core) = slot.try_borrow_mut() else { return false };
+        let Some(core) = core.as_mut() else { return false };
+        let free = crate::fullscreen::dress_key_free(
+            core.menus.borrow().items.values().map(|item| item.shortcut.as_str()),
+        );
+        if !free {
+            return false;
+        }
+        let Some(target) = gtk_window_read(core, window) else {
+            return false;
+        };
+        let now = target.is_fullscreen();
+        let request = core.fullscreen.entry(window).or_default().user_door(now);
+        request_fullscreen(&target, window, request);
+        true
+    })
+}
+
+fn request_fullscreen(target: &gtk4::Window, window: u64, request: Option<bool>) {
+    #[cfg(feature = "harness")]
+    crate::vtrace::note(
+        "fullscreen",
+        format_args!("window#{window} request {request:?}, toolkit {}", target.is_fullscreen()),
+    );
+    #[cfg(not(feature = "harness"))]
+    let _ = window;
+    match request {
+        Some(true) => target.fullscreen(),
+        Some(false) => target.unfullscreen(),
+        None => {}
+    }
+}
+
+/// `notify::fullscreened`: the toplevel's state moved. Re-armed rather than
+/// skipped when CORE is borrowed, save_frame_now's reason.
+fn fullscreen_settled(window: u64) {
+    CORE.with(|slot| {
+        let Ok(mut core) = slot.try_borrow_mut() else {
+            glib::timeout_add_local_once(std::time::Duration::from_millis(8), move || {
+                fullscreen_settled(window);
+            });
+            return;
+        };
+        let Some(core) = core.as_mut() else { return };
+        let Some(target) = gtk_window_read(core, window) else {
+            return;
+        };
+        let now = target.is_fullscreen();
+        let settled = core.fullscreen.entry(window).or_default().settled(now);
+        #[cfg(feature = "harness")]
+        crate::vtrace::note(
+            "fullscreen",
+            format_args!("window#{window} settled at {now}: {settled:?}"),
+        );
+        if let Some(on) = settled.report {
+            core.scene.user_fullscreen_changed(WindowId(window), on);
+            core.occurrences.send(Occurrence::FullscreenChanged { window: WindowId(window), on });
+        }
+        request_fullscreen(&target, window, settled.request);
+    });
 }
 
 /// The APPLY flavor: same lookup, but a miss is a bug and says so. THE
@@ -11864,7 +11966,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         .expect("every kaya window installs its chrome")
                         .set_visible(*on);
                 }
-                (WindowProp::Fullscreen, _) => crate::depth_stub("fullscreen"),
+                (WindowProp::Fullscreen, Value::Bool(on)) => {
+                    let target = gtk_window(core, window.0);
+                    let now = target.is_fullscreen();
+                    let request =
+                        core.fullscreen.entry(window.0).or_default().app_writes(*on, now);
+                    request_fullscreen(&target, window.0, request);
+                }
                 // Opting out FORGETS: a window that keeps a frame from
                 // before the prop would still open remembered.
                 (WindowProp::RememberFrame, Value::Bool(on)) => {
@@ -11926,6 +12034,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 .build()
                 .upcast::<gtk4::Window>();
             watch_frame(&aux, window.0);
+            watch_fullscreen(&aux, window.0);
             watch_sidebar_width(&aux, window.0);
             // A NEW WINDOW WITH NO TITLE WEARS THE APP'S NAME
             // (docs/app-identity-plan.md I9). Written into `window_titles`
@@ -11975,6 +12084,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             let gone = core.window_roots.remove(&window.0);
             note_dead_subtree(core, gone);
             core.window_titles.remove(&window.0);
+            core.fullscreen.remove(&window.0);
             core.app_titled.remove(&window.0);
             core.identity_icon_on.remove(&window.0);
             core.back_buttons.remove(&window.0);
@@ -15514,7 +15624,7 @@ mod chrome_tests {
 #[cfg(test)]
 mod frame_tests {
     use super::{
-        FrameMemory, clamp_frame, frame_line, frame_remembered, parse_frame,
+        FrameMemory, clamp_frame, frame_line, frame_remembered, frame_savable, parse_frame,
         runtime_frame_write,
     };
     use std::collections::HashMap;
@@ -15559,6 +15669,27 @@ mod frame_tests {
         // The key is crate::prefs's ONE spelling, never composed here.
         assert_eq!(crate::prefs::window_frame_key(0), "kaya.window.0.frame");
         assert_eq!(crate::prefs::window_frame_key(7), "kaya.window.7.frame");
+    }
+
+    /// NO FRAME WHILE FULLSCREEN (docs/fullscreen-plan.md §3), which no scene
+    /// reads: the fullscreen scene saves nothing it later asserts.
+    #[test]
+    fn gtk_frame_memory_skips_a_fullscreen_frame() {
+        use crate::fullscreen::Door;
+        assert!(frame_savable(None, false));
+        assert!(!frame_savable(None, true));
+        let mut door = Door::default();
+        assert!(frame_savable(Some(&door), false));
+        // On the way in: the toolkit still reads windowed.
+        door.app_writes(true, false);
+        assert!(!frame_savable(Some(&door), false));
+        door.settled(true);
+        assert!(!frame_savable(Some(&door), true));
+        // On the way out, and back.
+        door.app_writes(false, true);
+        assert!(!frame_savable(Some(&door), true));
+        door.settled(false);
+        assert!(frame_savable(Some(&door), false));
     }
 
     /// THE BY-VALUE RULE (docs/tasks-s4-plan.md P4), which no scene can
@@ -15753,6 +15884,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             window.connect_default_height_notify(|_| schedule_window_metrics());
             schedule_window_metrics();
             watch_frame(window.upcast_ref::<gtk4::Window>(), 0);
+            watch_fullscreen(window.upcast_ref::<gtk4::Window>(), 0);
             watch_sidebar_width(window.upcast_ref::<gtk4::Window>(), 0);
         }
         // The normalized root inset: 16 units INSIDE the root, via the CSS box
@@ -16013,6 +16145,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 child_sheet: HashMap::new(),
                 panes: HashMap::new(),
                 remember_frame: HashMap::new(),
+                fullscreen: HashMap::new(),
                 frame_memory: HashMap::from_iter(
                     restored_frame.map(|_| (0u64, FrameMemory::default())),
                 ),
@@ -16182,11 +16315,12 @@ struct GtkStage;
 /// choice at startup: an explicit GDK_BACKEND wins, else wayland when
 /// a display is offered.
 #[cfg(feature = "harness")]
-/// Esc through the platform's own input path, the type verb's two tools:
-/// wtype after the seat tap on wayland, xdotool with the pid's window
-/// focused on x11 — an AdwDialog lives INSIDE its window on both.
+/// One key through the platform's own input path, the type verb's two
+/// tools: wtype after the seat tap on wayland, xdotool with the pid's window
+/// focused on x11 — an AdwDialog lives INSIDE its window on both. `keysym`
+/// is the name both tools take (Escape, F11); `verb` names the step.
 #[cfg(feature = "harness")]
-fn send_escape_key(x11_window: Option<u64>) {
+fn send_platform_key(keysym: &str, verb: &'static str, x11_window: Option<u64>) {
     let hold = if TYPED_ONCE.swap(true, std::sync::atomic::Ordering::SeqCst) {
         "150"
     } else {
@@ -16195,7 +16329,7 @@ fn send_escape_key(x11_window: Option<u64>) {
     let (tool, args): (&str, Vec<String>) = if linux_wayland_session() {
         (
             "wtype",
-            ["-P", "F24", "-s", hold, "-p", "F24", "-s", "20", "-k", "Escape"]
+            ["-P", "F24", "-s", hold, "-p", "F24", "-s", "20", "-k", keysym]
                 .iter()
                 .map(|a| (*a).to_owned())
                 .collect(),
@@ -16222,7 +16356,7 @@ fn send_escape_key(x11_window: Option<u64>) {
                 "40".to_owned(), "40".to_owned(), "windowfocus".to_owned(), window,
             ]);
         }
-        args.extend(["key".to_owned(), "Escape".to_owned()]);
+        args.extend(["key".to_owned(), keysym.to_owned()]);
         ("xdotool", args)
     };
     let out = std::process::Command::new(tool)
@@ -16230,13 +16364,13 @@ fn send_escape_key(x11_window: Option<u64>) {
         .output()
         .unwrap_or_else(|e| {
             panic!(
-                "kaya: dismiss_sheet needs {tool}: {e} — the lane image installs it \
+                "kaya: {verb} needs {tool}: {e} — the lane image installs it \
                  (tools/linux/Dockerfile)"
             )
         });
     // The record a red reads: which tool, which window, and what it said.
     crate::vtrace::note(
-        "dismiss_sheet",
+        verb,
         format_args!(
             "{tool} {} -> exit {:?} stderr={:?}",
             args.join(" "),
@@ -19625,12 +19759,66 @@ impl crate::harness::Stage for GtkStage {
         }
     }
 
-    fn window_fullscreen(&self, _: u64) -> bool {
-        crate::depth_stub("fullscreen")
+    /// The toplevel's own state as the compositor last configured it
+    /// (docs/fullscreen-plan.md §5), never the prop.
+    fn window_fullscreen(&self, window: u64) -> bool {
+        Self::on_main(move |core| match gtk_window_read(core, window) {
+            Some(target) => target.is_fullscreen(),
+            None => panic!(
+                "kaya: expect_fullscreen read window#{window}, which this process \
+                 does not hold (live windows: {})",
+                live_windows(core)
+            ),
+        })
     }
 
-    fn user_fullscreen(&self, _: u64, _: bool) {
-        crate::depth_stub("fullscreen")
+    /// The dress key through the platform's own input path, as `type`
+    /// delivers keys (docs/fullscreen-plan.md §2, §5); returns once the
+    /// toplevel reads `on` with no transition in flight.
+    fn user_fullscreen(&self, window: u64, on: bool) {
+        use std::time::{Duration, Instant};
+        let word = |b: bool| if b { "on" } else { "off" };
+        let read = move || {
+            Self::on_main(move |core| {
+                let now = gtk_window_read(core, window).map(|w| w.is_fullscreen());
+                let flight = core.fullscreen.get(&window).and_then(|door| door.flight);
+                (now, flight)
+            })
+        };
+        let settle_by = Instant::now() + Duration::from_secs(5);
+        let (before, flight) = loop {
+            let (now, flight) = read();
+            if flight.is_none() || Instant::now() > settle_by {
+                break (now, flight);
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        let Some(before) = before else {
+            panic!("kaya: user_fullscreen {}: window#{window} is not held by this process", word(on));
+        };
+        assert!(
+            flight.is_none() && before != on,
+            "kaya: user_fullscreen {}: window#{window} reads {} with {flight:?} in flight \
+             before the door was driven",
+            word(on),
+            word(before)
+        );
+        send_platform_key("F11", "user_fullscreen", None);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let (now, flight) = read();
+            if now == Some(on) && flight.is_none() {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "kaya: user_fullscreen {}: F11 left window#{window} reading {:?} with \
+                 {flight:?} in flight after 5s",
+                word(on),
+                now.map(word)
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 
     fn close_window(&self, window: u64) {
@@ -20104,7 +20292,7 @@ impl crate::harness::Stage for GtkStage {
             Some(xid)
         });
         let Some(xid) = target else { return };
-        send_escape_key(xid);
+        send_platform_key("Escape", "dismiss_sheet", xid);
     }
     fn back(&self, window: u64) {
         Self::on_main(move |core| {

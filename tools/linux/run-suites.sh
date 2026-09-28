@@ -30,7 +30,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) the foreign suites load;
 # --example alone would build only the rlib it depends on.
-SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto"
+SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen"
 # Depth-slice scenes, rust only. `windowed` and `canvas` are rust BY
 # DESIGN rather than by depth — the compiled conformance scenes every
 # lane runs (docs/virtualization-plan.md §6.3, docs/canvas-plan.md
@@ -809,6 +809,20 @@ if [ ! -s "$identity_icon" ]; then
     exit 1
 fi
 echo "identity: the declared mark resolves at $identity_icon ($(wc -c <"$identity_icon") bytes)"
+
+# Whether a scene's legs run on this protocol: tools/lib/lanes/linux.py's
+# WAYLAND_ONLY, read through scene-mods.py, which names each one it leaves out.
+scene_runs_on() { # scene proto
+    local protocols
+    if ! protocols="$(python3 tools/linux/scene-mods.py --protocols "$1")"; then
+        echo "run-suites: the $1 scene's protocols could not be read (above)" >&2
+        exit 1
+    fi
+    case " $protocols " in
+        *" $2 "*) return 0 ;;
+    esac
+    return 1
+}
 
 for proto in x11 wayland; do
     run "$proto" rust "$CARGO_TARGET_DIR/debug/examples/milestone2"
@@ -1601,6 +1615,22 @@ for proto in x11 wayland; do
     run "$proto" scrollto-haskell env KAYA_SELFTEST=scrollto "$(hs_bin scrollto)"
     run "$proto" scrollto-java env KAYA_SELFTEST=scrollto KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.guests.Main
+    # FULLSCREEN (docs/fullscreen-plan.md §5), on the protocols the lane
+    # table admits.
+    if scene_runs_on fullscreen "$proto"; then
+        run "$proto" fullscreen-rust env KAYA_SELFTEST=fullscreen "$CARGO_TARGET_DIR/debug/examples/fullscreen"
+        run "$proto" fullscreen-python env KAYA_SELFTEST=fullscreen KAYA_LIB="$LIB" \
+            python3 guests/python/fullscreen.py
+        run "$proto" fullscreen-js env KAYA_SELFTEST=fullscreen KAYA_LIB="$LIB" \
+            node guests/js/fullscreen.ts
+        run "$proto" fullscreen-go env KAYA_SELFTEST=fullscreen /tmp/go-guests/kaya-go
+        run "$proto" fullscreen-csharp env KAYA_SELFTEST=fullscreen KAYA_LIB="$LIB" \
+            dotnet exec "$CS_GUEST"
+        run "$proto" fullscreen-ocaml env KAYA_SELFTEST=fullscreen KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/fullscreen.exe
+        run "$proto" fullscreen-haskell env KAYA_SELFTEST=fullscreen "$(hs_bin fullscreen)"
+        run "$proto" fullscreen-java env KAYA_SELFTEST=fullscreen KAYA_LIB="$LIB" \
+            java -cp /tmp/java-guests dev.kaya.guests.Main
+    fi
     run "$proto" scroll-rust env KAYA_SELFTEST=scroll "$CARGO_TARGET_DIR/debug/examples/scroll"
     # The sideways strip in Arabic (docs/hscroll-plan.md §4).
     run "$proto" scrollrtl-rust env KAYA_LOCALE=ar-EG KAYA_SELFTEST=scrollrtl \

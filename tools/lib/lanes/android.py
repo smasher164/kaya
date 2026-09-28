@@ -71,6 +71,8 @@ LEGS = {
         "tints-compose",
         "tintsdark-compose",
         "scrollto-compose",
+        # Immersive mode (docs/fullscreen-plan.md §3): MODS cuts the user half.
+        "fullscreen-compose",
         "sizepolicy-compose", "adaptive-compose", "feed-compose",
         "grow-compose", "align-compose", "layout-compose",
         "stall-compose", "confirm-compose", "filedialog-compose",
@@ -142,7 +144,7 @@ LEGS = {
         "align-jvm", "layout-jvm", "stall-jvm",
         "confirm-jvm", "nav-jvm", "scroll-jvm",
         "progress-jvm", "select-jvm", "radio-jvm",
-        "grid-jvm", "textarea-jvm", "search-jvm", "submit-jvm", "scrollto-jvm", "sections-jvm",
+        "grid-jvm", "textarea-jvm", "search-jvm", "submit-jvm", "scrollto-jvm", "fullscreen-jvm", "sections-jvm",
         "menus-jvm", "toolbar-jvm", "identity-jvm",
         "listdetail-jvm", "commands-jvm", "clipboard-jvm",
         "background-jvm", "undo-jvm", "filedialog-jvm",
@@ -162,7 +164,7 @@ LEGS = {
         "layout-go", "stall-go", "confirm-go",
         "nav-go", "scroll-go", "progress-go",
         "select-go", "radio-go", "grid-go",
-        "textarea-go", "search-go", "submit-go", "scrollto-go", "sections-go", "menus-go",
+        "textarea-go", "search-go", "submit-go", "scrollto-go", "fullscreen-go", "sections-go", "menus-go",
         "toolbar-go", "identity-go", "listdetail-go",
         "commands-go", "clipboard-go", "background-go",
         "undo-go", "filedialog-go", "save-go",
@@ -264,6 +266,14 @@ FLAGS = {
     "assets-jvm": {"asset_dir": True},
 }
 
+# The fullscreen scene's app-only way back after the cut, the same steps as
+# tools/lib/lanes/ios.py's FULLSCREEN_APP_TAIL: no user change arrives, so
+# the label still says so.
+FULLSCREEN_APP_TAIL = ('click button#0;expect label#0 "asked for a window";'
+                       'expect_fullscreen off;click button#1;'
+                       'expect label#2 "pings 2";'
+                       'expect label#1 "no change from the user";')
+
 # Script modifiers, keyed by SCENE and shared by every suite that runs it
 # — the two mobile lanes take the same list and grammar, since two
 # answers to one question is how lanes drift. `cut` is
@@ -296,6 +306,11 @@ MODS = {
                         "expect_sheet_detent medium;dismiss_sheet;"
                         "expect_sheets 0;"},
     "editor": {"cut": ("close_window", "expect_dirty", "")},
+    # A PHONE HAS NO USER DOOR OUT OF IMMERSIVE MODE (docs/fullscreen-plan.md
+    # §2): the swiped-in bars are transient. The cut takes the user half, and
+    # the append runs the app's own way back, which reads the insets again.
+    "fullscreen": {"cut": ("user_fullscreen", "expect_fullscreen", ""),
+                   "append": FULLSCREEN_APP_TAIL},
     "identity": {"drop": ((("expect_title window#1",), "expect_app_icon",
                            "no auxiliary windows"),)},
     # A phone app is handed no FOREIGN drag source (docs/dnd-plan.md D9),

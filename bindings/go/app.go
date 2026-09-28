@@ -272,6 +272,7 @@ type App struct {
 	// Window lifecycle: one handler each, receiving the window id.
 	closeRequested map[uint64]func(*Tx)
 	windowClosed   map[uint64]func(*Tx)
+	fullscreenChanged map[uint64]func(*Tx, bool)
 	entryPopped    map[uint64]func(*Tx)
 	backRequested  map[uint64]func(*Tx)
 	// Per-sheet, keyed by sheet surface id (docs/sheet-plan.md).
@@ -385,6 +386,7 @@ func NewApp() *App {
 		sectionSelected: make(map[uint64]func(*Tx)),
 		closeRequested: make(map[uint64]func(*Tx)),
 		windowClosed:   make(map[uint64]func(*Tx)),
+		fullscreenChanged: make(map[uint64]func(*Tx, bool)),
 		nodeHandlers:   make(map[uint64]func(*Tx, []any)),
 		widgetChanges:  make(map[uint64]func(*Tx, string)),
 		nodeChanges:    make(map[uint64]func(*Tx, []any, string)),
@@ -3181,6 +3183,12 @@ func (tx *Tx) SetBadge(count uint32) {
 // out of this body: the one-shot handler bound at Show first, retiring
 // with the result; else the process-level one, which does not; else the
 // drop is announced.
+func (a *App) fullscreenChangedTo(window uint64, on bool) {
+	if fn := a.fullscreenChanged[window]; fn != nil {
+		a.dispatch(func(tx *Tx) { fn(tx, on) })
+	}
+}
+
 func (a *App) notificationResult(id uint64, choice NotificationResult) {
 	if fn := a.notifications[id]; fn != nil {
 		delete(a.notifications, id)
@@ -4089,6 +4097,14 @@ func (w WindowRef) RememberFrame(on bool) WindowRef {
 	return w
 }
 
+// Fullscreen says whether the window fills its screen
+// (docs/fullscreen-plan.md); a toggle writes !on from the state the app
+// already holds.
+func (w WindowRef) Fullscreen(on bool) WindowRef {
+	w.tx.emit(TxSetWindowFullscreen(w.id, on))
+	return w
+}
+
 // Inset sets the window's CONTENT INSET in layout units — LAYOUT, not
 // appearance (docs/styling-plan.md D3). 16 unless you say otherwise; 0
 // is full bleed, honored unconditionally because the inset is kaya's own
@@ -4112,6 +4128,15 @@ func (w WindowRef) OnCloseRequested(fn func(*Tx)) WindowRef {
 // reconciles), and retires with it.
 func (w WindowRef) OnClosed(fn func(*Tx)) WindowRef {
 	w.tx.app.windowClosed[w.id] = fn
+	return w
+}
+
+// OnFullscreenChanged binds a handler to THIS window that fires with the
+// new state each time the USER changes it through the platform's own door;
+// the app's own Fullscreen write never echoes (docs/fullscreen-plan.md).
+// NOT one-shot.
+func (w WindowRef) OnFullscreenChanged(fn func(*Tx, bool)) WindowRef {
+	w.tx.app.fullscreenChanged[w.id] = fn
 	return w
 }
 
@@ -6376,6 +6401,8 @@ func (a *App) Serve() {
 				delete(a.entryPopped, id)
 				a.dispatch(func(tx *Tx) { fn(tx) })
 			}
+		case kind == occFullscreenChanged:
+			a.fullscreenChangedTo(id, checked)
 		case kind == occSectionSelected:
 			// NOT one-shot: sections never die. A programmatic
 			// SelectSection never lands here (the echo doctrine).

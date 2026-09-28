@@ -647,9 +647,20 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             name.to_uppercase()
         ));
         c.line(&format!("            // {}", crate::VALUE_ANSWER_MARK));
+        c.line("            let vtype = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)");
         c.line("            let valueLen = Int(raw.loadUnaligned(fromByteOffset: 20, as: UInt32.self))");
-        c.line("            let text = String(decoding: raw[24..<(24 + valueLen)], as: UTF8.self)");
-        c.line("            return (kind, id, [], .str(text), [], nil, nil, [])");
+        c.line("            let value: KayaValue");
+        c.line("            switch vtype {");
+        c.line("            case UInt32(KAYA_VALUE_BOOL):");
+        c.line("                value = .bool(raw[24] != 0)");
+        c.line("            case UInt32(KAYA_VALUE_I64):");
+        c.line("                value = .i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: 24, as: UInt64.self)))");
+        c.line("            case UInt32(KAYA_VALUE_F64):");
+        c.line("                value = .f64(Double(bitPattern: raw.loadUnaligned(fromByteOffset: 24, as: UInt64.self)))");
+        c.line("            default:");
+        c.line("                value = .str(String(decoding: raw[24..<(24 + valueLen)], as: UTF8.self))");
+        c.line("            }");
+        c.line("            return (kind, id, [], value, [], nil, nil, [])");
         c.line("        }");
     }
     // The picker's answer is a LIST OF RECORDS, which no single

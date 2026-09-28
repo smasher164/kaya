@@ -133,6 +133,9 @@ public final class Main {
             case "dirty":
                 app = Dirty::app;
                 break;
+            case "fullscreen":
+                app = Fullscreen::app;
+                break;
             case "dnd":
                 app = Dnd::app;
                 break;

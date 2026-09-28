@@ -4638,6 +4638,8 @@ export type WindowProps = {
    * docs/tasks-s2b-plan.md R1-R3). */
   appearance?: AppearanceName;
   inset?: number;
+  /** Whether the window fills its screen (docs/fullscreen-plan.md). */
+  fullscreen?: boolean;
 };
 
 export type WindowOptions = WindowProps & {
@@ -4645,6 +4647,9 @@ export type WindowOptions = WindowProps & {
   onClosed?: () => void;
   onUndone?: (label: string, delta: UndoDelta) => void;
   onRedone?: (label: string, delta: UndoDelta) => void;
+  /** Fires when the USER changes fullscreen through the platform's own
+   * door; the app's own write never echoes (docs/fullscreen-plan.md). */
+  onFullscreenChanged?: (on: boolean) => void;
   windowId?: number;
 };
 
@@ -4660,6 +4665,7 @@ function windowProps(window: number, p: WindowProps): void {
   if (p.sectionsPresentation !== undefined) recs.push(wire.tx_set_window_sections_presentation(window, sectionsPresentationValue(p.sectionsPresentation)));
   if (p.appearance !== undefined) recs.push(wire.tx_set_window_appearance(window, appearanceValue(p.appearance)));
   if (p.inset !== undefined) recs.push(wire.tx_set_window_inset(window, Number(p.inset)));
+  if (p.fullscreen !== undefined) recs.push(wire.tx_set_window_fullscreen(window, Boolean(p.fullscreen)));
   if (p.width !== undefined || p.height !== undefined) {
     if (p.width === undefined || p.height === undefined) throw new Error("kaya: window width and height travel together");
     recs.push(wire.tx_set_window_width(window, Number(p.width)));
@@ -4817,6 +4823,8 @@ export class App {
   /** @internal */ readonly _sectionSelected = new Map<number, () => void>();
   /** @internal */ readonly _closeRequested = new Map<number, () => void>();
   /** @internal */ readonly _windowClosed = new Map<number, () => void>();
+  /** @internal NOT one-shot (docs/fullscreen-plan.md). */
+  readonly _fullscreenChanged = new Map<number, (on: boolean) => void>();
   /** @internal */ readonly _undone = new Map<number, (label: string, delta: UndoDelta) => void>();
   /** @internal */ readonly _redone = new Map<number, (label: string, delta: UndoDelta) => void>();
   /** @internal */ readonly _collections = new Map<number, Collection<unknown, unknown>>();
@@ -4901,6 +4909,7 @@ export class App {
   createWindow<T>(windowId: number, opts: WindowOptions, body: () => T): T {
     if (opts.onCloseRequested !== undefined) this._closeRequested.set(windowId, opts.onCloseRequested);
     if (opts.onClosed !== undefined) this._windowClosed.set(windowId, opts.onClosed);
+    if (opts.onFullscreenChanged !== undefined) this._fullscreenChanged.set(windowId, opts.onFullscreenChanged);
     this._registerHistory(windowId, opts.onUndone, opts.onRedone);
     return runScope<T>("window", body, windowId, () => {
       records().push(wire.tx_create_window(windowId));
@@ -4921,6 +4930,7 @@ export class App {
     const windowId = opts.windowId ?? 0;
     if (opts.onCloseRequested !== undefined) this._closeRequested.set(windowId, opts.onCloseRequested);
     if (opts.onClosed !== undefined) this._windowClosed.set(windowId, opts.onClosed);
+    if (opts.onFullscreenChanged !== undefined) this._fullscreenChanged.set(windowId, opts.onFullscreenChanged);
     this._registerHistory(windowId, opts.onUndone, opts.onRedone);
     if (_tx !== null) {
       // THE LIVE FORM: a transaction is already open, so the props join
@@ -5211,6 +5221,11 @@ export class App {
       const handler = this._entryPopped.get(ident);
       this._entryPopped.delete(ident);
       if (handler !== undefined) this._dispatch(handler);
+      return;
+    }
+    if (kind === wire.OCC_FULLSCREEN_CHANGED) {
+      const handler = this._fullscreenChanged.get(ident);
+      if (handler !== undefined) this._dispatch(handler as Handler, payload === true);
       return;
     }
     if (kind === wire.OCC_SECTION_SELECTED) {

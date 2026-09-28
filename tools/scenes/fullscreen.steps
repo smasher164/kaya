@@ -15,12 +15,19 @@ expect label#1 "no change from the user"
 user_fullscreen off
 expect_fullscreen off
 expect label#1 "the user turned fullscreen off"
+# The app's copy followed the user, so its toggle enters fullscreen again; a
+# copy that ignored the user would still say on and leave instead.
+click button#0
+expect label#0 "asked for fullscreen"
+expect_fullscreen on
+click button#0
+expect label#0 "asked for a window"
+expect_fullscreen off
 user_fullscreen on
 expect_fullscreen on
 expect label#1 "the user turned fullscreen on"
-# The app's copy followed the user, so its toggle now leaves fullscreen.
+# And the other way: a copy that ignored the user would say off and stay.
 click button#0
-expect label#0 "asked for a window"
 expect_fullscreen off
 click button#1
 expect label#2 "pings 2"
