@@ -1,6 +1,6 @@
 # Range control research: UIKit/SwiftUI, AppKit, GTK 4/GNOME
 
-Method: repos shallow-cloned into scratchpad/range/src and read; issue trackers via GitHub API / GitLab.
+Method: repos shallow-cloned into scratchpad/range/src (gone) and read; issue trackers via GitHub API / GitLab.
 "read" = I read the source; "unverified" = not confirmed from source or primary doc.
 
 ## iOS: yonat/MultiSlider (master a5dbf58, 2025-08-09)

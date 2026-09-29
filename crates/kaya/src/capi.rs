@@ -114,6 +114,10 @@ pub const KAYA_OCCURRENCE_FULLSCREEN_CHANGED: u16 = 35;
 /// COLOR_CHANGED { tag; I64 color } — a settled colour, 0xRRGGBBAA
 /// (docs/color-picker-plan.md §2).
 pub const KAYA_OCCURRENCE_COLOR_CHANGED: u16 = 36;
+/// RANGE_CHANGED / RANGE_COMMITTED { tag; F64 low; F64 high }
+/// (docs/range-plan.md §2).
+pub const KAYA_OCCURRENCE_RANGE_CHANGED: u16 = 37;
+pub const KAYA_OCCURRENCE_RANGE_COMMITTED: u16 = 38;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -131,6 +135,8 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_NOTIFICATION_REPLIED == ring::REC_NOTIFICATION_REPLIED
         && KAYA_OCCURRENCE_FULLSCREEN_CHANGED == ring::REC_FULLSCREEN_CHANGED
         && KAYA_OCCURRENCE_COLOR_CHANGED == ring::REC_COLOR_CHANGED
+        && KAYA_OCCURRENCE_RANGE_CHANGED == ring::REC_RANGE_CHANGED
+        && KAYA_OCCURRENCE_RANGE_COMMITTED == ring::REC_RANGE_COMMITTED
         && KAYA_OCCURRENCE_SECTION_SELECTED == ring::REC_SECTION_SELECTED
         && KAYA_OCCURRENCE_MENU_ACTIVATED == ring::REC_MENU_ACTIVATED
         && KAYA_OCCURRENCE_MENU_TOGGLED == ring::REC_MENU_TOGGLED
@@ -777,6 +783,7 @@ pub const KAYA_KIND_LABELED: u32 = 18;
 pub const KAYA_KIND_SEARCH: u32 = 19;
 pub const KAYA_KIND_NUMBER_FIELD: u32 = 20;
 pub const KAYA_KIND_COLOR_PICKER: u32 = 21;
+pub const KAYA_KIND_RANGE: u32 = 22;
 const _: () = assert!(
     KAYA_KIND_COLUMN == wire::KIND_COLUMN
         && KAYA_KIND_BUTTON == wire::KIND_BUTTON
@@ -799,6 +806,7 @@ const _: () = assert!(
         && KAYA_KIND_SEARCH == wire::KIND_SEARCH
         && KAYA_KIND_NUMBER_FIELD == wire::KIND_NUMBER_FIELD
         && KAYA_KIND_COLOR_PICKER == wire::KIND_COLOR_PICKER
+        && KAYA_KIND_RANGE == wire::KIND_RANGE
 );
 // Completeness, not just agreement: a value pin cannot see a FORGOTTEN
 // export (docs/traps.md, "A value pin cannot see a FORGOTTEN sibling").
@@ -816,7 +824,7 @@ const _: () = {
         n
     };
     assert!(
-        kinds == 21,
+        kinds == 22,
         "the spec kind enum grew: export the new KAYA_KIND_* above, extend the pin, and bump          this count"
     );
 };
@@ -910,6 +918,12 @@ pub const KAYA_PROP_MAX_HEIGHT: u32 = 43;
 /// translucency switch (docs/color-picker-plan.md §2).
 pub const KAYA_PROP_COLOR: u32 = 44;
 pub const KAYA_PROP_ALPHA: u32 = 45;
+/// A range's thumbs, gap and thumb labels (docs/range-plan.md §2).
+pub const KAYA_PROP_LOW: u32 = 46;
+pub const KAYA_PROP_HIGH: u32 = 47;
+pub const KAYA_PROP_MIN_GAP: u32 = 48;
+pub const KAYA_PROP_LOW_LABEL: u32 = 49;
+pub const KAYA_PROP_HIGH_LABEL: u32 = 50;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -1075,7 +1089,7 @@ const _: () = assert!(
 // Completeness for the occurrence exports (docs/traps.md): a new spec
 // occurrence trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 36,
+    crate::spec::SPEC.occurrence.len() == 38,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -1151,6 +1165,11 @@ const _: () = assert!(
         && KAYA_PROP_MAX_HEIGHT == wire::PROP_MAX_HEIGHT
         && KAYA_PROP_COLOR == wire::PROP_COLOR
         && KAYA_PROP_ALPHA == wire::PROP_ALPHA
+        && KAYA_PROP_LOW == wire::PROP_LOW
+        && KAYA_PROP_HIGH == wire::PROP_HIGH
+        && KAYA_PROP_MIN_GAP == wire::PROP_MIN_GAP
+        && KAYA_PROP_LOW_LABEL == wire::PROP_LOW_LABEL
+        && KAYA_PROP_HIGH_LABEL == wire::PROP_HIGH_LABEL
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -1427,7 +1446,7 @@ const _: () = {
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 45,
+    crate::spec::PROPS.len() == 50,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(
@@ -4111,6 +4130,47 @@ pub unsafe extern "C" fn kaya_emit_value_committed(tag: *const u8, tag_len: usiz
     state()
         .ring
         .push_record(ring::REC_VALUE_COMMITTED, &wire::value_committed_body(tag, value));
+}
+
+/// Presentation side: THE RANGE'S ONE CLAMP (docs/range-plan.md §3 rule 2):
+/// a moved thumb's raw value snapped to `step`, inside `min..=max` and
+/// `gap` from `other`. `low` is nonzero for the low thumb. Every arm's
+/// value path calls it and writes the answer back into its control.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_range_clamp(
+    min: f64,
+    max: f64,
+    step: f64,
+    gap: f64,
+    low: u8,
+    other: f64,
+    raw: f64,
+) -> f64 {
+    crate::range::clamp_thumb(min, max, step, gap, low != 0, other, raw)
+}
+
+/// Presentation side: emit a range's pair, live (`committed` 0) on every
+/// movement or once per gesture (`committed` nonzero), `tag` the range's
+/// CREATE tag (docs/range-plan.md §2). Do not combine with kaya_run.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_emit_range(
+    tag: *const u8,
+    tag_len: usize,
+    low: f64,
+    high: f64,
+    committed: u8,
+) {
+    assert!(!tag.is_null() && tag_len != 0, "kaya: empty range tag");
+    let tag = unsafe { std::slice::from_raw_parts(tag, tag_len) };
+    if !stamped_tag_is_live(tag, "a range move") {
+        return;
+    }
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send_range_tag(tag, low, high, committed != 0);
+        return;
+    }
+    let kind = if committed != 0 { ring::REC_RANGE_COMMITTED } else { ring::REC_RANGE_CHANGED };
+    state().ring.push_record(kind, &wire::range_body(tag, low, high));
 }
 
 /// Presentation side: the field SUBMITTED (docs/submit-plan.md S1) — `tag`

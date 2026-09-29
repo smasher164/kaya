@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x0d0ad42b8674c264
+SPEC_HASH = 0xee277a9499e5e52d
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -50,6 +50,7 @@ KIND_LABELED = 18
 KIND_SEARCH = 19
 KIND_NUMBER_FIELD = 20
 KIND_COLOR_PICKER = 21
+KIND_RANGE = 22
 DRAW_OP_MOVE_TO = 1
 DRAW_OP_LINE_TO = 2
 DRAW_OP_CLOSE = 3
@@ -120,6 +121,11 @@ PROP_MAX_WIDTH = 42
 PROP_MAX_HEIGHT = 43
 PROP_COLOR = 44
 PROP_ALPHA = 45
+PROP_LOW = 46
+PROP_HIGH = 47
+PROP_MIN_GAP = 48
+PROP_LOW_LABEL = 49
+PROP_HIGH_LABEL = 50
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -407,6 +413,8 @@ OCC_SUBMITTED = 33
 OCC_NOTIFICATION_REPLIED = 34
 OCC_FULLSCREEN_CHANGED = 35
 OCC_COLOR_CHANGED = 36
+OCC_RANGE_CHANGED = 37
+OCC_RANGE_COMMITTED = 38
 
 
 def _pad(b: bytes) -> bytes:
@@ -1414,6 +1422,81 @@ def tx_bind_alpha_element(widget_id: int, level: int = 0, field: int = 0) -> byt
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_ALPHA, SOURCE_ELEMENT, level, field))
 
 
+def tx_set_low(widget_id: int, low: float) -> bytes:
+    """set_property with a constant low value (float)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_LOW, SOURCE_CONST) + _enc.value(low))
+
+
+def tx_bind_low(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound low value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_LOW, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_low_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_LOW, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_high(widget_id: int, high: float) -> bytes:
+    """set_property with a constant high value (float)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_HIGH, SOURCE_CONST) + _enc.value(high))
+
+
+def tx_bind_high(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound high value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_HIGH, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_high_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_HIGH, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_min_gap(widget_id: int, min_gap: float) -> bytes:
+    """set_property with a constant min_gap value (float)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_MIN_GAP, SOURCE_CONST) + _enc.value(min_gap))
+
+
+def tx_bind_min_gap(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound min_gap value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_MIN_GAP, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_min_gap_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_MIN_GAP, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_low_label(widget_id: int, low_label: str) -> bytes:
+    """set_property with a constant low_label value (str)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_LOW_LABEL, SOURCE_CONST) + _enc.value(low_label))
+
+
+def tx_bind_low_label(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound low_label value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_LOW_LABEL, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_low_label_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_LOW_LABEL, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_high_label(widget_id: int, high_label: str) -> bytes:
+    """set_property with a constant high_label value (str)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_HIGH_LABEL, SOURCE_CONST) + _enc.value(high_label))
+
+
+def tx_bind_high_label(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound high_label value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_HIGH_LABEL, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_high_label_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_HIGH_LABEL, SOURCE_ELEMENT, level, field))
+
+
 def tx_set_window_title(window: int, title: str) -> bytes:
     """set_window_prop with a constant title value (str); window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_TITLE, SOURCE_CONST) + _enc.value(title))
@@ -1784,7 +1867,7 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
     value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED):
         return kind, None, [], None
     if kind == OCC_ALERT_RESULT:
         # A request's one answer: id + the u32 code.
@@ -1931,7 +2014,7 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
         name, at = parse_value(buf, at)
         value, at = parse_value(buf, at)
         return kind, ident, keys, [removed, start, stop, name, value]
-    if kind in (OCC_DRAW_REQUESTED, OCC_TICK,):
+    if kind in (OCC_DRAW_REQUESTED, OCC_TICK, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED,):
         # The canvas asks carry a run of BARE values after the
         # key path — the assigned size, and a tick's frame time
         # — with no count in front, so they are read until the

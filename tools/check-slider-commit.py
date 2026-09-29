@@ -768,6 +768,137 @@ gtk_color_watched("a GTK set_color written quietly", gate.doctor(
     r"\1core.apply_quiet.set(true);\1core.color_pickers[i].button.set_rgba(&rgba_of(color));"),
     "set_color does not move")
 
+# THE RANGE IS THE SAME RULE TWICE (docs/range-plan.md §3 rules 2, 3, 8):
+# `set_value range#0 low 3.2` is one finished gesture by construction, so an
+# arm committing the pair on every drag event, or skipping the clamp on a
+# path the scene never drives (a drag, VoiceOver's adjust), passes
+# tools/scenes/range.steps byte for byte. The mac assistive set arrives as
+# the thumb's action (measured §4.2), so the action's target is that door.
+def swiftui_range_findings(source):
+    out = []
+    moved = block_after(source, "func kayaRangeMoved(")
+    if not moved:
+        return [f"{SWIFTUI}: func kayaRangeMoved is gone — the one commit path "
+                f"this clause holds both thumbs' doors to"]
+    if "KayaHost.rangeClamp(" not in moved or "if v != raw { restore(v) }" not in moved:
+        out.append(f"{SWIFTUI}: kayaRangeMoved no longer clamps through the core and "
+                   f"writes the answer back — a thumb could rest past the other (§3 rule 2)")
+    emits = len(re.findall(r"KayaHost\.emitRange\(", source))
+    if emits != 2 or moved.count("KayaHost.emitRange(") != 2:
+        out.append(f"{SWIFTUI}: KayaHost.emitRange is called {emits} time(s); both calls "
+                   f"belong inside kayaRangeMoved, so no path publishes a pair past it")
+    settled = block_after(
+        moved, "if final && (lo != node.committedLow || hi != node.committedHigh)")
+    if "committed: true" not in settled:
+        out.append(f"{SWIFTUI}: kayaRangeMoved commits a pair equal to the last settled one, "
+                   f"or commits without a finished gesture (§2)")
+    changed = block_after(source, "@objc func changed(_ sender: KayaRangeThumb)")
+    if "let final = type != .leftMouseDown && type != .leftMouseDragged" not in changed:
+        out.append(f"{SWIFTUI}: the mac thumb's action no longer tells a drag from its end — "
+                   f"a drag would commit on every event")
+    if "thumb.action = #selector(changed(_:))" not in source:
+        out.append(f"{SWIFTUI}: the mac thumbs' action is not the range's changed — the "
+                   f"assistive set, which arrives as that action (§4.2), would skip the clamp")
+    thumb_ios = block_after(source, "final class KayaRangeThumbSlider: UISlider")
+    for piece in ("override func accessibilityIncrement() { range?.nudge(self, by: 1) }",
+                  "override func accessibilityDecrement() { range?.nudge(self, by: -1) }"):
+        if piece not in thumb_ios:
+            out.append(f"{SWIFTUI}: the iOS thumb lacks `{piece}` — VoiceOver's adjust "
+                       f"would move the UISlider past the clamp and commit nothing (§3 rules 3, 8)")
+    # §3 rule 4: a press goes to a thumb by the midpoint split, never by
+    # which native slider is on top; no scene can see it, since set_value
+    # drives a thumb's control directly (measured only in the §4.2 probe).
+    for anchor in ("final class KayaRangeView: NSView", "final class KayaRangeTrack: UIView"):
+        hit = block_after(block_after(source, anchor), "override func hitTest(")
+        if "kayaRangeLowTakes(" not in hit:
+            out.append(f"{SWIFTUI}: {anchor}'s hitTest no longer routes by kayaRangeLowTakes — "
+                       f"a press would go to whichever slider is on top (§3 rule 4)")
+    doors = [changed, thumb_ios]
+    for anchor in ("@objc func moved(_ sender: KayaRangeThumbSlider)",
+                   "@objc func released(_ sender: KayaRangeThumbSlider)"):
+        doors.append(block_after(source, anchor))
+    for anchor in ("func nudge(_ thumb: KayaRangeThumb, by direction: Double)",
+                   "func nudge(_ thumb: KayaRangeThumbSlider, by direction: Double)"):
+        doors.append(block_after(source, anchor))
+    at = 0
+    while True:
+        at = source.find("func kayaDriveThumb(", at)
+        if at < 0:
+            break
+        doors.append(block_after(source[at:], "func kayaDriveThumb("))
+        at += 1
+    calls = len(re.findall(r"(?<!func )kayaRangeMoved\(", source))
+    inside = sum(len(re.findall(r"kayaRangeMoved\(", d)) for d in doors)
+    if calls != inside:
+        out.append(f"{SWIFTUI}: kayaRangeMoved is called {calls} time(s) and {inside} of "
+                   f"them sit in a door (the mac action, the iOS move and release, a key, "
+                   f"set_value's drive) — a move anywhere else is no user's")
+    return out
+
+
+gate.counted("swiftui range commit-path calls read",
+             len(re.findall(r"(?<!func )kayaRangeMoved\(", SWIFT_SOURCE)), floor=7)
+
+
+def range_watched(label, source, fragment):
+    if not gate.negative(label, lambda: swiftui_range_findings(source), want=fragment):
+        return
+    print(f"check-slider-commit: watched refusing: {label}")
+
+
+# R1. A PAIR COMMITTED AGAIN, or at every movement.
+range_watched("a range committing the settled pair again", gate.doctor(
+    "the settled-pair compare", SWIFT_SOURCE,
+    r"if final && \(lo != node\.committedLow \|\| hi != node\.committedHigh\) \{",
+    "if final {"), "equal to the last settled one")
+
+# R2. THE MAC ACTION CALLS EVERY DRAG EVENT FINAL.
+range_watched("a mac thumb committing every drag event", gate.doctor(
+    "the drag test", SWIFT_SOURCE,
+    r"(@objc func changed\(_ sender: KayaRangeThumb\) \{\n(?:.*\n){2})"
+    r"(\s*)let final = type != \.leftMouseDown && type != \.leftMouseDragged\n",
+    r"\1\2let final = true\n"), "tells a drag from its end")
+
+# R3. AN EMIT PAST THE COMMIT PATH.
+range_watched("a range pair emitted outside kayaRangeMoved", gate.doctor(
+    "a third emit", SWIFT_SOURCE,
+    r"(@objc func changed\(_ sender: KayaRangeThumb\) \{\n)",
+    r"\1            if let node { KayaHost.emitRange(node.tag, node.low, node.high, "
+    r"committed: true) }\n"),
+    "is called 3 time(s)")
+
+# R4. THE CLAMP'S ANSWER NOT WRITTEN BACK.
+range_watched("a clamp whose answer stays out of the control", gate.doctor(
+    "the write-back", SWIFT_SOURCE,
+    r"    if v != raw \{ restore\(v\) \}\n(    let \(lo, hi\) = low)", r"\1"),
+    "writes the answer back")
+
+# R5. THE iOS ASSISTIVE ADJUST LEFT TO UIKIT.
+range_watched("an iOS thumb whose VoiceOver increment skips the clamp", gate.doctor(
+    "the assistive increment", SWIFT_SOURCE,
+    r"        override func accessibilityIncrement\(\) \{ range\?\.nudge\(self, by: 1\) \}\n", ""),
+    "VoiceOver's adjust")
+
+# R6. THE MAC THUMBS' ACTION ROUTED AWAY, taking the assistive set with it.
+range_watched("a mac thumb whose action is not the range's", gate.doctor(
+    "the thumbs' action", SWIFT_SOURCE,
+    r"thumb\.action = #selector\(changed\(_:\)\)", "thumb.action = nil"),
+    "the assistive set")
+
+# R8. THE PRESS ROUTED BY Z-ORDER.
+range_watched("a mac range whose hitTest is the stack's", gate.doctor(
+    "the midpoint split", SWIFT_SOURCE,
+    r"let lowTakes = kayaRangeLowTakes\(p\.x, lowCentre: centre\(low\)\.x, "
+    r"highCentre: centre\(high\)\.x\)",
+    "let lowTakes = false"), "no longer routes by kayaRangeLowTakes")
+
+# R7. A MOVE OUTSIDE EVERY DOOR.
+range_watched("a range moved from the surface's apply", gate.doctor(
+    "a move in apply", SWIFT_SOURCE,
+    r"(            high\.doubleValue = node\.high\n)",
+    r"\1            kayaRangeMoved(node, low: true, node.low, final: true) { _ in }\n"),
+    "sit in a door")
+
 for line in gtk_color_findings(REAL[GTK]):
     gate.finding(line)
 for line in census(REAL):
@@ -776,7 +907,10 @@ for line in winui_color_findings(REAL[WINUI]):
     gate.finding(line)
 for line in swiftui_color_findings(SWIFT_SOURCE):
     gate.finding(line)
+for line in swiftui_range_findings(SWIFT_SOURCE):
+    gate.finding(line)
 for line in compose_color_findings(REAL[COMPOSE]):
     gate.finding(line)
 
-gate.verdict("the commit rule holds on every landed slider arm and every colour picker arm")
+gate.verdict("the commit rule holds on every landed slider arm, every colour picker arm "
+             "and the SwiftUI range")

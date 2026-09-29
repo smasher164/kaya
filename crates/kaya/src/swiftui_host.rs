@@ -130,6 +130,9 @@ pub struct KayaHostApi {
     /// settled colour it answered.
     pub color_quantize: extern "C" fn(f64, f64, f64, f64) -> u32,
     pub emit_color_changed: unsafe extern "C" fn(*const u8, usize, i64),
+    /// docs/range-plan.md §3 rule 2: the one clamp, and the pair it settled.
+    pub range_clamp: extern "C" fn(f64, f64, f64, f64, u8, f64, f64) -> f64,
+    pub emit_range: unsafe extern "C" fn(*const u8, usize, f64, f64, u8),
     pub blob_data: unsafe extern "C" fn(u64, *mut usize) -> *const u8,
     pub blob_count: unsafe extern "C" fn() -> u64,
     /// The protocol fingerprint (capi::kaya_spec_hash), asserted by the
@@ -511,6 +514,8 @@ pub(crate) fn run() -> i32 {
         emit_time_changed: kaya_emit_time_changed,
         color_quantize: crate::capi::kaya_color_quantize,
         emit_color_changed: crate::capi::kaya_emit_color_changed,
+        range_clamp: crate::capi::kaya_range_clamp,
+        emit_range: crate::capi::kaya_emit_range,
         blob_data: kaya_blob_data,
         blob_count: kaya_blob_count,
         spec_hash: crate::capi::kaya_spec_hash,

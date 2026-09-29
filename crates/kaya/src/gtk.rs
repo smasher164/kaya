@@ -3906,6 +3906,7 @@ fn kind_registry(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<gtk4
         K::Slider => core.sliders.iter().map(|w| w.scale.clone().upcast()).collect(),
         K::Entry => core.entries.iter().map(|w| w.clone().upcast()).collect(),
         K::Search => core.searches.iter().map(|w| w.clone().upcast()).collect(),
+        K::Range => crate::depth_stub("range"),
         K::ColorPicker => core.color_pickers.iter().map(|f| f.button.clone().upcast()).collect(),
         K::NumberField => core.number_fields.iter().map(|f| f.spin.clone().upcast()).collect(),
         K::Label => core.labels.clone(),
@@ -8896,6 +8897,7 @@ fn context_anchor_id(core: &CoreState, t: crate::harness::Target) -> u64 {
         K::Canvas => core.canvases[resolve(t.index, core.canvases.len())].clone().upcast(),
         // The harness rejects editable text before the stage sees it
         // (their native context menus are dress).
+        K::Range => crate::depth_stub("range"),
         K::ColorPicker => core.color_pickers[resolve(t.index, core.color_pickers.len())]
             .button
             .clone()
@@ -11568,6 +11570,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.grids.push(grid.clone());
                     NativeWidget::Grid(grid)
                 }
+                WidgetKind::Range => crate::depth_stub("range"),
                 WidgetKind::ColorPicker => {
                     let dialog = gtk4::ColorDialog::new();
                     dialog.set_with_alpha(false);
@@ -14159,6 +14162,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 // numbers, so each of the four re-derives both: the props
                 // arrive in no guaranteed order (the core checks their
                 // relations at the END of the transaction).
+                // The vertical slider (docs/range-plan.md §6: `inverted` for a
+                // bottom minimum) is the range's breadth slice.
+                (NativeWidget::Slider(_), Prop::Axis, _) => crate::depth_stub("range"),
                 (NativeWidget::Slider(slider), Prop::Min, Value::F64(v)) => {
                     slider.scale.adjustment().set_lower(v);
                     slider_marks(slider);
@@ -18370,6 +18376,22 @@ impl crate::harness::Stage for GtkStage {
 
     /// The CONTROL's value in the one fixed spelling, never the mirror
     /// beside it (docs/slider-plan.md S8).
+    fn set_thumb(&self, _: crate::harness::Target, _: crate::harness::Thumb, _: f64) {
+        crate::depth_stub("range")
+    }
+
+    fn nudge_thumb(&self, _: crate::harness::Target, _: crate::harness::Thumb, _: bool) {
+        crate::depth_stub("range")
+    }
+
+    fn thumb_fraction(&self, _: crate::harness::Target, _: Option<crate::harness::Thumb>) -> String {
+        crate::depth_stub("range")
+    }
+
+    fn ax_thumb(&self, _: crate::harness::Target, _: crate::harness::Thumb) -> String {
+        crate::depth_stub("range")
+    }
+
     fn control_value(&self, t: crate::harness::Target) -> String {
         if t.kind == crate::harness::TargetKind::NumberField {
             return Self::on_main(move |core| {
@@ -21987,6 +22009,7 @@ fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk
         K::Label => try_resolve(target.index, core.labels.len()).map(|i| core.labels[i].clone()),
         K::Entry => nth!(core.entries),
         K::Search => nth!(core.searches),
+        K::Range => crate::depth_stub("range"),
         K::ColorPicker => try_resolve(target.index, core.color_pickers.len())
             .map(|i| core.color_pickers[i].swatch.clone().upcast()),
         K::NumberField => try_resolve(target.index, core.number_fields.len())

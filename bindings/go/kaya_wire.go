@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x0d0ad42b8674c264
+	SpecHash uint64 = 0xee277a9499e5e52d
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -50,6 +50,7 @@ const (
 	KindSearch = 19
 	KindNumberField = 20
 	KindColorPicker = 21
+	KindRange = 22
 	DrawOpMoveTo = 1
 	DrawOpLineTo = 2
 	DrawOpClose = 3
@@ -120,6 +121,11 @@ const (
 	PropMaxHeight = 43
 	PropColor = 44
 	PropAlpha = 45
+	PropLow = 46
+	PropHigh = 47
+	PropMinGap = 48
+	PropLowLabel = 49
+	PropHighLabel = 50
 	WpropTitle = 1
 	WpropWidth = 2
 	WpropHeight = 3
@@ -406,6 +412,8 @@ const (
 	occNotificationReplied = 34
 	occFullscreenChanged = 35
 	occColorChanged = 36
+	occRangeChanged = 37
+	occRangeCommitted = 38
 )
 
 func (d Detent) String() string {
@@ -2722,6 +2730,166 @@ func TxBindAlphaElement(widgetID uint64, level uint32, field uint32) []byte {
 	return endRecord(b)
 }
 
+// TxSetLow: set_property with a constant low value.
+func TxSetLow(widgetID uint64, low float64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropLow)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, low)
+	return endRecord(b)
+}
+
+// TxBindLow: set_property with a signal-bound low value.
+func TxBindLow(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropLow)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindLowElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindLowElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropLow)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetHigh: set_property with a constant high value.
+func TxSetHigh(widgetID uint64, high float64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropHigh)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, high)
+	return endRecord(b)
+}
+
+// TxBindHigh: set_property with a signal-bound high value.
+func TxBindHigh(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropHigh)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindHighElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindHighElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropHigh)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetMinGap: set_property with a constant min_gap value.
+func TxSetMinGap(widgetID uint64, minGap float64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropMinGap)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, minGap)
+	return endRecord(b)
+}
+
+// TxBindMinGap: set_property with a signal-bound min_gap value.
+func TxBindMinGap(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropMinGap)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindMinGapElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindMinGapElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropMinGap)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetLowLabel: set_property with a constant low_label value.
+func TxSetLowLabel(widgetID uint64, lowLabel string) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropLowLabel)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, lowLabel)
+	return endRecord(b)
+}
+
+// TxBindLowLabel: set_property with a signal-bound low_label value.
+func TxBindLowLabel(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropLowLabel)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindLowLabelElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindLowLabelElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropLowLabel)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetHighLabel: set_property with a constant high_label value.
+func TxSetHighLabel(widgetID uint64, highLabel string) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropHighLabel)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, highLabel)
+	return endRecord(b)
+}
+
+// TxBindHighLabel: set_property with a signal-bound high_label value.
+func TxBindHighLabel(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropHighLabel)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindHighLabelElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindHighLabelElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropHighLabel)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
 // TxSetWindowTitle: set_window_prop with a constant title value (window 0, the primary surface).
 func TxSetWindowTitle(window uint64, title string) []byte {
 	b := beginRecord(txSetWindowProp)
@@ -3408,7 +3576,7 @@ func parseValue(rec []byte, at int) (any, int) {
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted && kind != occSheetDismissed && kind != occDismissRequested && kind != occSubmitted && kind != occNotificationReplied && kind != occFullscreenChanged && kind != occColorChanged {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted && kind != occSheetDismissed && kind != occDismissRequested && kind != occSubmitted && kind != occNotificationReplied && kind != occFullscreenChanged && kind != occColorChanged && kind != occRangeChanged && kind != occRangeCommitted {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])
@@ -3661,7 +3829,7 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 		value, at = parseValue(rec, at)
 		payload = []any{removed, start, stop, attr, value}
 	}
-	if kind == occDrawRequested || kind == occTick {
+	if kind == occDrawRequested || kind == occTick || kind == occRangeChanged || kind == occRangeCommitted {
 		// The canvas asks carry a run of BARE values after the key
 		// path — the assigned size, and a tick's frame time — with
 		// no count in front, so they are read until the record ends

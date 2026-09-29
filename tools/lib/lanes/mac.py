@@ -51,7 +51,7 @@ SCENES = [
 # has not landed — built and run rust-only until their guests arrive,
 # when they move into SCENES.
 DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows",
-                "format", "flexshrink", "listrow", "tints", "badge", "emoji"]
+                "format", "flexshrink", "listrow", "tints", "badge", "emoji", "range"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -242,6 +242,10 @@ ORDER = [
     ("badge", ("rust",)),
     # The emoji button (docs/emoji-picker-plan.md): the character palette.
     ("emoji", ("rust",)),
+    # The range and the vertical slider (docs/range-plan.md §5): RUST ALONE
+    # while the eight bindings' sugar is the breadth slice. set_value drives
+    # the thumbs' own controls and nudge an in-process key, so it pools.
+    ("range", ("rust",)),
     ("richtext", ("rust", "python", "js", "go", "csharp", "java", "swift",
                   "ocaml", "haskell")),
     ("ownundo", ("rust", "python", "js", "go", "csharp", "java", "swift",

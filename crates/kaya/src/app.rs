@@ -1992,6 +1992,25 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// The least distance between a range's thumbs, in value units
+    /// (docs/range-plan.md §2); a multiple of the step when one is declared.
+    pub fn min_gap(self, gap: f64) -> Self {
+        self.tx.set(self.id, Prop::MinGap, gap);
+        self
+    }
+
+    /// What a range's low thumb speaks to an assistive reader
+    /// (docs/range-plan.md §8 ruling 2); unset, the range's a11y_label.
+    pub fn low_label(self, label: impl Into<String>) -> Self {
+        self.tx.set(self.id, Prop::LowLabel, label.into());
+        self
+    }
+
+    pub fn high_label(self, label: impl Into<String>) -> Self {
+        self.tx.set(self.id, Prop::HighLabel, label.into());
+        self
+    }
+
     /// End the chain: the durable id, releasing the transaction
     /// borrow.
     pub fn id(self) -> WidgetId {
@@ -3394,6 +3413,28 @@ impl<'a> Tx<'a> {
         Widget { id: w, out: (), tx: self }
     }
 
+    /// A range over min..max with its thumbs at low and high
+    /// (docs/range-plan.md): moves arrive through `on_range`, each
+    /// gesture's settled pair through `on_range_commit`.
+    pub fn range(&mut self, min: f64, max: f64, low: f64, high: f64) -> Widget<'_, 'a> {
+        let w = self.widget(WidgetKind::Range);
+        self.set(w, Prop::Min, min);
+        self.set(w, Prop::Max, max);
+        self.set(w, Prop::Low, low);
+        self.set(w, Prop::High, high);
+        Widget { id: w, out: (), tx: self }
+    }
+
+    /// A range whose thumbs bind two float signals; writes never echo.
+    pub fn range_bound(&mut self, min: f64, max: f64, low: SignalId, high: SignalId) -> Widget<'_, 'a> {
+        let w = self.widget(WidgetKind::Range);
+        self.set(w, Prop::Min, min);
+        self.set(w, Prop::Max, max);
+        self.bind(w, Prop::Low, low);
+        self.bind(w, Prop::High, high);
+        Widget { id: w, out: (), tx: self }
+    }
+
     /// A slider whose position binds a float signal. Property writes never
     /// echo an occurrence, so a handler's own writes cannot loop back.
     pub fn slider_bound(&mut self, min: f64, max: f64, value: SignalId) -> Widget<'_, 'a> {
@@ -4576,6 +4617,28 @@ impl<'b> Row<'_, 'b> {
         self.tpl().slider(min, max, src)
     }
 
+    pub fn range(
+        &mut self,
+        min: f64,
+        max: f64,
+        low: impl Into<TplSource<F64Kind>>,
+        high: impl Into<TplSource<F64Kind>>,
+    ) -> TemplateNodeId {
+        self.tpl().range(min, max, low, high)
+    }
+
+    pub fn min_gap(&mut self, node: TemplateNodeId, gap: f64) {
+        self.tpl().min_gap(node, gap)
+    }
+
+    pub fn low_label(&mut self, node: TemplateNodeId, label: impl Into<TplSource<StrKind>>) {
+        self.tpl().low_label(node, label)
+    }
+
+    pub fn high_label(&mut self, node: TemplateNodeId, label: impl Into<TplSource<StrKind>>) {
+        self.tpl().high_label(node, label)
+    }
+
     pub fn step(&mut self, node: TemplateNodeId, step: f64) {
         self.tpl().step(node, step)
     }
@@ -5067,6 +5130,24 @@ impl<M> Messages<M> {
         );
     }
 
+    /// A range's thumbs moving, both values (docs/range-plan.md §2).
+    pub fn on_range(&self, w: WidgetId, f: impl Fn(f64, f64) -> M + 'static) {
+        self.widgets.borrow_mut().entry(w.0).or_default().push(Box::new(move |occ| match occ {
+                Occurrence::RangeChanged { low, high, .. } => Some(f(*low, *high)),
+                _ => None,
+            }),
+        );
+    }
+
+    /// The pair a range gesture SETTLED ON, once per gesture (§3 rule 3).
+    pub fn on_range_commit(&self, w: WidgetId, f: impl Fn(f64, f64) -> M + 'static) {
+        self.widgets.borrow_mut().entry(w.0).or_default().push(Box::new(move |occ| match occ {
+                Occurrence::RangeCommitted { low, high, .. } => Some(f(*low, *high)),
+                _ => None,
+            }),
+        );
+    }
+
     /// A date picker's committed picks (docs/datetime-plan.md D7).
     pub fn on_date(&self, w: WidgetId, f: impl Fn(crate::Date) -> M + 'static) {
         self.widgets.borrow_mut().entry(w.0).or_default().push(Box::new(move |occ| match occ {
@@ -5193,6 +5274,28 @@ impl<M> Messages<M> {
         self.nodes.borrow_mut().entry(n.0).or_default().push(Box::new(move |occ| match occ {
                 Occurrence::InstanceValueCommitted { path, value, .. } => {
                     Some(f(path.clone(), *value))
+                }
+                _ => None,
+            }),
+        );
+    }
+
+    /// A stamped range's moves, keys first.
+    pub fn on_range_node(&self, n: TemplateNodeId, f: impl Fn(Path, f64, f64) -> M + 'static) {
+        self.nodes.borrow_mut().entry(n.0).or_default().push(Box::new(move |occ| match occ {
+                Occurrence::InstanceRangeChanged { path, low, high, .. } => {
+                    Some(f(path.clone(), *low, *high))
+                }
+                _ => None,
+            }),
+        );
+    }
+
+    /// A stamped range's settled pair, keys first.
+    pub fn on_range_commit_node(&self, n: TemplateNodeId, f: impl Fn(Path, f64, f64) -> M + 'static) {
+        self.nodes.borrow_mut().entry(n.0).or_default().push(Box::new(move |occ| match occ {
+                Occurrence::InstanceRangeCommitted { path, low, high, .. } => {
+                    Some(f(path.clone(), *low, *high))
                 }
                 _ => None,
             }),
@@ -5668,7 +5771,9 @@ impl<M> Messages<M> {
                 | Occurrence::TextEdited { id, .. }
                 | Occurrence::TextFormatted { id, .. }
                 | Occurrence::TimeChanged { id, .. }
-                | Occurrence::ColorChanged { id, .. } => self
+                | Occurrence::ColorChanged { id, .. }
+                | Occurrence::RangeChanged { id, .. }
+                | Occurrence::RangeCommitted { id, .. } => self
                     .widgets
                     .borrow()
                     .get(&id.0)
@@ -5687,7 +5792,9 @@ impl<M> Messages<M> {
                 | Occurrence::InstanceTextEdited { node, .. }
                 | Occurrence::InstanceTextFormatted { node, .. }
                 | Occurrence::InstanceTimeChanged { node, .. }
-                | Occurrence::InstanceColorChanged { node, .. } => self
+                | Occurrence::InstanceColorChanged { node, .. }
+                | Occurrence::InstanceRangeChanged { node, .. }
+                | Occurrence::InstanceRangeCommitted { node, .. } => self
                     .nodes
                     .borrow()
                     .get(&node.0)
@@ -7953,6 +8060,39 @@ impl<'b> Tpl<'_, 'b> {
         n
     }
 
+    /// A stamped range whose thumbs come from two sources, a row's own
+    /// fields being the point (a clip's trim in and out; docs/range-plan.md
+    /// §2). Moves arrive as `InstanceRangeChanged` with the copy's keys.
+    pub fn range(
+        &mut self,
+        min: f64,
+        max: f64,
+        low: impl Into<TplSource<F64Kind>>,
+        high: impl Into<TplSource<F64Kind>>,
+    ) -> TemplateNodeId {
+        let n = self.widget(WidgetKind::Range);
+        self.set(n, Prop::Min, min);
+        self.set(n, Prop::Max, max);
+        self.apply_source(n, Prop::Low, low.into().inner);
+        self.apply_source(n, Prop::High, high.into().inner);
+        n
+    }
+
+    /// A stamped range's least gap (docs/range-plan.md §2), constant
+    /// across the copies.
+    pub fn min_gap(&mut self, node: TemplateNodeId, gap: f64) {
+        self.set(node, Prop::MinGap, gap);
+    }
+
+    /// What a stamped range's thumbs speak (docs/range-plan.md §8 ruling 2).
+    pub fn low_label(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
+        self.apply_source(node, Prop::LowLabel, src.into().inner);
+    }
+
+    pub fn high_label(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
+        self.apply_source(node, Prop::HighLabel, src.into().inner);
+    }
+
     /// A dropdown over its options, with the SELECTED INDEX from a source.
     /// The options are label children of the prototype, so every copy
     /// offers the same list and only the choice varies — a per-row option
@@ -9284,6 +9424,10 @@ mod tests {
                     | Occurrence::InstanceTimeChanged { .. }
                     | Occurrence::ColorChanged { .. }
                     | Occurrence::InstanceColorChanged { .. }
+                    | Occurrence::RangeChanged { .. }
+                    | Occurrence::InstanceRangeChanged { .. }
+                    | Occurrence::RangeCommitted { .. }
+                    | Occurrence::InstanceRangeCommitted { .. }
                     | Occurrence::MenuActivated { .. }
                     | Occurrence::InstanceMenuActivated { .. }
                     | Occurrence::MenuToggled { .. }

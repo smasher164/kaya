@@ -124,6 +124,8 @@ VERB_FEATURE = {
     # docs/color-picker-plan.md §5, the same reasoning.
     "set_color": "colorpicker",
     "expect_color": "colorpicker",
+    # docs/range-plan.md §5, the same reasoning.
+    "expect_thumb": "range",
     # docs/sheet-plan.md §4. The verbs, not the scene name: the task
     # manager's quick-add will open a sheet without being called after
     # it, and a backend still declaring depth_stub("sheet") has to hold

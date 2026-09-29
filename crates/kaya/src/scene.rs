@@ -952,6 +952,9 @@ pub(crate) struct Scene {
     /// docs/color-picker-plan.md §3 rule 3, the same shape again.
     color_decls: HashMap<(bool, u64), ColorDecl>,
     color_dirty: Vec<(bool, u64)>,
+    /// docs/range-plan.md §3 rule 1, the same shape again.
+    range_decls: HashMap<(bool, u64), RangeDecl>,
+    range_dirty: Vec<(bool, u64)>,
     /// Live labelled rows touched this transaction, checked for shape at
     /// its end (docs/forms-plan.md §2) once every child has arrived.
     labeled_dirty: Vec<WidgetId>,
@@ -1051,11 +1054,15 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
                 || is_choice(kind)
         }
         // docs/number-field-plan.md §2: the number field takes the slider's
-        // range and step, never its ticks.
+        // range and step, never its ticks. The range takes all four
+        // (docs/range-plan.md §2).
         Prop::Min | Prop::Max | Prop::Step => {
-            matches!(kind, WidgetKind::Slider | WidgetKind::NumberField)
+            matches!(kind, WidgetKind::Slider | WidgetKind::NumberField | WidgetKind::Range)
         }
-        Prop::TickSpacing => matches!(kind, WidgetKind::Slider),
+        Prop::TickSpacing => matches!(kind, WidgetKind::Slider | WidgetKind::Range),
+        Prop::Low | Prop::High | Prop::MinGap | Prop::LowLabel | Prop::HighLabel => {
+            kind == WidgetKind::Range
+        }
         // The pickers' own slots (docs/datetime-plan.md §3): a date and its
         // inclusive range on the date picker, a time and its minute step on
         // the time picker. A time has no range (D4).
@@ -1082,7 +1089,12 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         Prop::Align => matches!(kind, WidgetKind::Column | WidgetKind::Row),
         // The arrangement axis: the two constructor kinds are one node
         // this parameterizes (docs/adaptive-layout-plan.md D1).
-        Prop::Axis => matches!(kind, WidgetKind::Column | WidgetKind::Row | WidgetKind::Scroll),
+        // A slider takes it too (docs/range-plan.md §2); a range refuses it
+        // until an app asks for a vertical range (ruling 6).
+        Prop::Axis => matches!(
+            kind,
+            WidgetKind::Column | WidgetKind::Row | WidgetKind::Scroll | WidgetKind::Slider
+        ),
         Prop::Filled => matches!(kind, WidgetKind::Column | WidgetKind::Row),
         Prop::FollowsEnd => kind == WidgetKind::Scroll,
         Prop::MaxLines => kind == WidgetKind::Textarea,
@@ -1637,6 +1649,8 @@ fn prop_value_type(prop: Prop) -> ValueType {
         // Packed 0xRRGGBBAA (docs/color-picker-plan.md §2), Date's precedent.
         Prop::Color => ValueType::I64,
         Prop::Alpha => ValueType::Bool,
+        Prop::Low | Prop::High | Prop::MinGap => ValueType::F64,
+        Prop::LowLabel | Prop::HighLabel => ValueType::Str,
         Prop::Step | Prop::TickSpacing => ValueType::F64,
         Prop::Source => ValueType::Blob,
         Prop::Grow => ValueType::F64,
@@ -2055,6 +2069,58 @@ impl ColorDecl {
     }
 }
 
+/// A range's declared numbers (docs/range-plan.md §3 rule 1), refused on
+/// the complete declaration so an app writes its props in any order.
+#[derive(Clone, Copy, Debug)]
+struct RangeDecl {
+    slider: SliderRange,
+    low: Option<f64>,
+    high: Option<f64>,
+    min_gap: f64,
+}
+
+impl Default for RangeDecl {
+    fn default() -> Self {
+        RangeDecl { slider: SliderRange::default(), low: None, high: None, min_gap: 0.0 }
+    }
+}
+
+impl RangeDecl {
+    fn note(&mut self, prop: Prop, value: &Value) -> bool {
+        let Value::F64(x) = value else { return false };
+        match prop {
+            Prop::Min => self.slider.min = *x,
+            Prop::Max => self.slider.max = *x,
+            Prop::Step => self.slider.step = *x,
+            Prop::TickSpacing => self.slider.tick_spacing = *x,
+            Prop::Low => self.low = Some(*x),
+            Prop::High => self.high = Some(*x),
+            Prop::MinGap => self.min_gap = *x,
+            _ => return false,
+        }
+        true
+    }
+
+    fn refusal(&self, who: &str) -> Option<String> {
+        let RangeDecl { slider: s, min_gap, .. } = *self;
+        let (low, high) = (self.low.unwrap_or(s.min), self.high.unwrap_or(s.max));
+        let why = if !(min_gap.is_finite() && min_gap >= 0.0) {
+            format!("min_gap {min_gap} must be finite and not below 0")
+        } else if !(s.min <= low && high <= s.max) {
+            format!("low {low} and high {high} must lie inside its range {}..{}", s.min, s.max)
+        } else if low > high {
+            format!("low {low} is above high {high}")
+        } else if high - low < min_gap - 1e-9 * min_gap.max(1.0) {
+            format!("high {high} - low {low} is less than its min_gap {min_gap}")
+        } else if s.step > 0.0 && min_gap > 0.0 && !divides_evenly(min_gap, s.step) {
+            format!("min_gap {min_gap} is not a multiple of its step {}", s.step)
+        } else {
+            return SliderRange { value: None, ..s }.refusal("range", who);
+        };
+        Some(format!("kaya: range {who}: {why} (docs/range-plan.md §3 rule 1)"))
+    }
+}
+
 /// Does `unit` fit `span` a whole number of times (at least once)? Read
 /// with a relative tolerance, since 0.1 * 3 is not 0.3 in binary.
 /// The labelled row's shape (docs/forms-plan.md §2): a label first, the
@@ -2104,37 +2170,44 @@ fn divides_evenly(span: f64, unit: f64) -> bool {
 
 impl SliderRange {
     fn check(&self, id: u64) {
+        if let Some(why) = self.refusal("slider", &id.to_string()) {
+            panic!("{why}");
+        }
+    }
+
+    fn refusal(&self, kind: &str, id: &str) -> Option<String> {
         if let Some(value) = self.value {
-            assert!(
-                (self.min..=self.max).contains(&value),
-                "kaya: slider {id}: value {value} is outside its range {}..{} (docs/slider-plan.md, \
-                 What the core polices)",
-                self.min, self.max
-            );
-        }
-        let span = self.max - self.min;
-        if self.step > 0.0 {
-            assert!(
-                divides_evenly(span, self.step),
-                "kaya: slider {id}: step {} does not divide its range {}..{} evenly",
-                self.step, self.min, self.max
-            );
-        }
-        if self.tick_spacing > 0.0 {
-            assert!(
-                divides_evenly(span, self.tick_spacing),
-                "kaya: slider {id}: tick_spacing {} does not divide its range {}..{} evenly",
-                self.tick_spacing, self.min, self.max
-            );
-            if self.step > 0.0 {
-                assert!(
-                    divides_evenly(self.tick_spacing, self.step),
-                    "kaya: slider {id}: tick_spacing {} is not a multiple of step {}, so a \
-                     tick would sit where the thumb cannot rest",
-                    self.tick_spacing, self.step
-                );
+            if !(self.min..=self.max).contains(&value) {
+                return Some(format!(
+                    "kaya: {kind} {id}: value {value} is outside its range {}..{} (docs/slider-plan.md, \
+                     What the core polices)",
+                    self.min, self.max
+                ));
             }
         }
+        let span = self.max - self.min;
+        if self.step > 0.0 && !divides_evenly(span, self.step) {
+            return Some(format!(
+                "kaya: {kind} {id}: step {} does not divide its range {}..{} evenly",
+                self.step, self.min, self.max
+            ));
+        }
+        if self.tick_spacing > 0.0 {
+            if !divides_evenly(span, self.tick_spacing) {
+                return Some(format!(
+                    "kaya: {kind} {id}: tick_spacing {} does not divide its range {}..{} evenly",
+                    self.tick_spacing, self.min, self.max
+                ));
+            }
+            if self.step > 0.0 && !divides_evenly(self.tick_spacing, self.step) {
+                return Some(format!(
+                    "kaya: {kind} {id}: tick_spacing {} is not a multiple of step {}, so a \
+                     tick would sit where the thumb cannot rest",
+                    self.tick_spacing, self.step
+                ));
+            }
+        }
+        None
     }
 }
 
@@ -2695,6 +2768,14 @@ impl Scene {
         }
     }
 
+    fn note_range_prop(&mut self, key: (bool, u64), prop: Prop, value: &Value) {
+        if self.range_decls.entry(key).or_default().note(prop, value)
+            && !self.range_dirty.contains(&key)
+        {
+            self.range_dirty.push(key);
+        }
+    }
+
     fn note_slider_prop(&mut self, key: (bool, u64), prop: Prop, value: &Value) {
         let Value::F64(x) = value else { return };
         let range = self.slider_ranges.entry(key).or_default();
@@ -2865,6 +2946,9 @@ impl Scene {
                             if kind == WidgetKind::ColorPicker {
                                 self.note_color_prop((false, widget.0), prop, &v);
                             }
+                            if kind == WidgetKind::Range {
+                                self.note_range_prop((false, widget.0), prop, &v);
+                            }
                             // The select index's upper bound is scene
                             // state: options added SO FAR in op order, so
                             // "add options, then select" is the required
@@ -2985,6 +3069,9 @@ impl Scene {
                             }
                             if kind == WidgetKind::ColorPicker {
                                 self.note_color_prop((false, widget.0), prop, &current);
+                            }
+                            if kind == WidgetKind::Range {
+                                self.note_range_prop((false, widget.0), prop, &current);
                             }
                             // Same stance for the select index's upper
                             // bound: checked here against the current
@@ -4487,6 +4574,14 @@ impl Scene {
                 }
             }
         }
+        for key in std::mem::take(&mut self.range_dirty) {
+            if let Some(decl) = self.range_decls.get(&key) {
+                let who = if key.0 { format!("template node {}", key.1) } else { key.1.to_string() };
+                if let Some(msg) = decl.refusal(&who) {
+                    panic!("{msg}");
+                }
+            }
+        }
         // The labelled row's SHAPE, on the complete declaration
         // (docs/forms-plan.md §2): a label, one control, at most one
         // trailing button.
@@ -4578,6 +4673,40 @@ impl Scene {
                 }
                 panic!("{msg}");
             }
+        }
+
+        // Barrier: a signal-bound range's COALESCED thumbs against its
+        // declaration (docs/range-plan.md §3 rule 1), both signals of a pair
+        // read together, the same rollback on a refusal.
+        let mut ranges: Vec<WidgetId> = Vec::new();
+        for id in &dirty {
+            for (widget, _) in self.bindings.get(id).into_iter().flatten() {
+                if self.range_decls.contains_key(&(false, widget.0)) && !ranges.contains(widget) {
+                    ranges.push(*widget);
+                }
+            }
+        }
+        for widget in ranges {
+            let mut decl = self.range_decls[&(false, widget.0)];
+            for (sid, bound) in &self.bindings {
+                for (w, prop) in bound {
+                    if *w == widget {
+                        decl.note(*prop, &self.signals[sid]);
+                    }
+                }
+            }
+            if let Some(msg) = decl.refusal(&widget.0.to_string()) {
+                match group.take() {
+                    Some(cap) => self.rollback_group(&cap, &rollback),
+                    None => {
+                        for (sid, old) in &rollback {
+                            self.signals.insert(*sid, old.clone());
+                        }
+                    }
+                }
+                panic!("{msg}");
+            }
+            self.range_decls.insert((false, widget.0), decl);
         }
 
         // Barrier: every widget this batch created must be reachable from a
@@ -6519,6 +6648,9 @@ impl Scene {
                         if node_kind == WidgetKind::ColorPicker {
                             self.note_color_prop((true, widget.0), prop, v);
                         }
+                        if node_kind == WidgetKind::Range {
+                            self.note_range_prop((true, widget.0), prop, v);
+                        }
                     }
                     PropValue::Signal(id) => {
                         let current = self.signals.get(id).unwrap_or_else(|| {
@@ -6534,6 +6666,9 @@ impl Scene {
                         }
                         if node_kind == WidgetKind::ColorPicker {
                             self.note_color_prop((true, widget.0), prop, &current);
+                        }
+                        if node_kind == WidgetKind::Range {
+                            self.note_range_prop((true, widget.0), prop, &current);
                         }
                     }
                     PropValue::Element { level, field } => {
@@ -12672,6 +12807,142 @@ mod tests {
     #[should_panic(expected = "has no property Color")]
     fn only_a_color_picker_holds_a_color() {
         let mut ops = color_picker(&[(Prop::Color, Value::I64(0x3366_99FF))]);
+        ops[0] = TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Slider };
+        Scene::new().apply(ops);
+    }
+
+    fn range(props: &[(Prop, Value)]) -> Vec<TxOp> {
+        let mut ops = vec![TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Range }];
+        for (prop, v) in props {
+            ops.push(TxOp::SetProperty { widget: WidgetId(1), prop: *prop, value: PropValue::Const(v.clone()) });
+        }
+        ops.push(TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) });
+        ops
+    }
+
+    fn trim(low: f64, high: f64) -> Vec<(Prop, Value)> {
+        vec![
+            (Prop::Min, Value::F64(0.0)),
+            (Prop::Max, Value::F64(10.0)),
+            (Prop::Step, Value::F64(0.5)),
+            (Prop::MinGap, Value::F64(1.0)),
+            (Prop::Low, Value::F64(low)),
+            (Prop::High, Value::F64(high)),
+        ]
+    }
+
+    /// docs/range-plan.md §3 rule 1: the complete declaration is read at
+    /// the end of the transaction, so an app writes its thumbs in either
+    /// order, and the range carries its identity tag.
+    #[test]
+    fn a_range_is_checked_on_its_complete_declaration() {
+        let mut props = trim(2.0, 8.0);
+        props.reverse();
+        let ops = Scene::new().apply(range(&props));
+        assert!(ops.iter().any(|op| matches!(op, ApplyOp::Create { kind: WidgetKind::Range, tag: Some(_), .. })));
+        let mut moved = trim(2.0, 8.0);
+        moved.push((Prop::High, Value::F64(9.5)));
+        moved.push((Prop::Low, Value::F64(9.0)));
+        moved.push((Prop::High, Value::F64(10.0)));
+        Scene::new().apply(range(&moved));
+    }
+
+    #[test]
+    #[should_panic(expected = "range 1: low 8 is above high 2")]
+    fn a_ranges_thumbs_out_of_order_are_refused() {
+        Scene::new().apply(range(&trim(8.0, 2.0)));
+    }
+
+    #[test]
+    #[should_panic(expected = "range 1: low -1 and high 8 must lie inside its range 0..10")]
+    fn a_ranges_thumb_outside_its_bounds_is_refused() {
+        Scene::new().apply(range(&trim(-1.0, 8.0)));
+    }
+
+    #[test]
+    #[should_panic(expected = "range 1: high 5.5 - low 5 is less than its min_gap 1")]
+    fn a_ranges_thumbs_closer_than_the_gap_are_refused() {
+        Scene::new().apply(range(&trim(5.0, 5.5)));
+    }
+
+    #[test]
+    #[should_panic(expected = "range 1: min_gap 0.75 is not a multiple of its step 0.5")]
+    fn a_ranges_gap_off_the_step_is_refused() {
+        let mut props = trim(2.0, 8.0);
+        props.push((Prop::MinGap, Value::F64(0.75)));
+        Scene::new().apply(range(&props));
+    }
+
+    #[test]
+    #[should_panic(expected = "range 1: step 3 does not divide its range 0..10 evenly")]
+    fn a_ranges_step_is_the_sliders_rule() {
+        let mut props = trim(3.0, 9.0);
+        props.push((Prop::MinGap, Value::F64(3.0)));
+        props.push((Prop::Step, Value::F64(3.0)));
+        Scene::new().apply(range(&props));
+    }
+
+    /// Ruling 6 (docs/video-editor-plan.md): the slider takes `axis`, a
+    /// range refuses it until an app asks for a vertical range.
+    #[test]
+    #[should_panic(expected = "Range has no property Axis")]
+    fn a_range_refuses_axis() {
+        let mut props = trim(2.0, 8.0);
+        props.push((Prop::Axis, Value::I64(crate::wire::AXIS_VERTICAL as i64)));
+        Scene::new().apply(range(&props));
+    }
+
+    #[test]
+    fn a_slider_takes_axis() {
+        Scene::new().apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Slider },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Axis,
+                value: PropValue::Const(Value::I64(crate::wire::AXIS_VERTICAL as i64)),
+            },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+    }
+
+    /// A LATER pair of signal writes is read together at the barrier: one
+    /// moving both thumbs passes in either order, one crossing them is
+    /// refused and the signals put back.
+    #[test]
+    fn a_bound_ranges_signal_writes_are_checked_together_and_rolled_back() {
+        let mut ops = vec![
+            TxOp::CreateSignal { id: SignalId(1), initial: Value::F64(2.0) },
+            TxOp::CreateSignal { id: SignalId(2), initial: Value::F64(8.0) },
+        ];
+        let mut props = trim(2.0, 8.0);
+        props.retain(|(p, _)| !matches!(p, Prop::Low | Prop::High));
+        ops.extend(range(&props));
+        for (sid, prop) in [(1, Prop::Low), (2, Prop::High)] {
+            ops.insert(ops.len() - 1, TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop,
+                value: PropValue::Signal(SignalId(sid)),
+            });
+        }
+        let mut scene = Scene::new();
+        scene.apply(ops);
+        scene.apply(vec![
+            TxOp::WriteSignal { id: SignalId(1), value: Value::F64(8.5) },
+            TxOp::WriteSignal { id: SignalId(2), value: Value::F64(9.5) },
+        ]);
+        let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            scene.apply(vec![TxOp::WriteSignal { id: SignalId(1), value: Value::F64(9.0) }]);
+        }));
+        let why = refused.expect_err("a crossing write reached the range");
+        let why = why.downcast_ref::<String>().cloned().unwrap_or_default();
+        assert!(why.contains("range 1: high 9.5 - low 9 is less than its min_gap 1"), "{why}");
+        assert_eq!(scene.signals[&SignalId(1)], Value::F64(8.5));
+    }
+
+    #[test]
+    #[should_panic(expected = "Slider has no property Low")]
+    fn only_a_range_holds_thumbs() {
+        let mut ops = range(&[(Prop::Low, Value::F64(0.2))]);
         ops[0] = TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Slider };
         Scene::new().apply(ops);
     }

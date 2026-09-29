@@ -1,6 +1,6 @@
 # Range controls: Compose material3, Material Components (Views), React Native libraries
 
-Source read: files downloaded with curl into scratchpad/range/src and read directly (not summarised by a model).
+Source read: files downloaded with curl into scratchpad/range/src (gone) and read directly (not summarised by a model).
 
 ## 1. Jetpack Compose material3 `RangeSlider`
 

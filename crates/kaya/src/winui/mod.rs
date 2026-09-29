@@ -14584,6 +14584,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // platform's own — the TextBox template's `DeleteButton` —
                 // and AutoSuggestBox is refused, both measured
                 // (docs/measurements/search-winui-2026-09-06.md).
+                WidgetKind::Range => crate::depth_stub("range"),
                 WidgetKind::ColorPicker => {
                     let swatch = ColorSwatch::new()?;
                     let cell = std::sync::Arc::new(ColorCell::new(
@@ -16865,6 +16866,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.aligns.insert(id, mode);
                     core.child_order.mark(id);
                 }
+                // The vertical slider (docs/range-plan.md §6) is the range's
+                // breadth slice.
+                (NativeWidget::Slider(_), Prop::Axis, _) => crate::depth_stub("range"),
                 // THE SLIDER'S FOUR SHAPE PROPS (docs/slider-plan.md S1, S5,
                 // S7, S9). Each moves its slot in the cell and re-applies the
                 // whole shape, since WinUI coerces a value against the range
@@ -20093,6 +20097,7 @@ fn registry_widget_at(core: &CoreState, kind: crate::harness::TargetKind, i: usi
         K::Grid => id_of!(core.grids, NativeWidget::Grid2D(grid), grid),
         K::Textarea => core.textarea_ids.get(i).copied(),
         K::Search => core.search_ids.get(i).copied(),
+        K::Range => crate::depth_stub("range"),
         K::ColorPicker => core.color_picker_ids.get(i).copied(),
         K::NumberField => core.number_field_ids.get(i).copied(),
         K::Canvas => core.canvas_ids.get(i).copied(),
@@ -20387,6 +20392,7 @@ fn target_element(
         // target answers — the text, the focus, the a11y peer — is the
         // TextBox's (docs/search-plan.md S7).
         K::Search => nth!(core.searches),
+        K::Range => crate::depth_stub("range"),
         K::ColorPicker => nth!(core.color_pickers),
         K::NumberField => nth!(core.number_fields),
         K::DatePicker => nth!(core.date_pickers),
@@ -20508,6 +20514,7 @@ fn registry_ids(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<u64> 
         K::Grid => ids!(core.grids, NativeWidget::Grid2D(grid), grid),
         K::Textarea => core.textarea_ids.clone(),
         K::Search => core.search_ids.clone(),
+        K::Range => crate::depth_stub("range"),
         K::ColorPicker => core.color_picker_ids.clone(),
         K::NumberField => core.number_field_ids.clone(),
         K::Canvas => core.canvas_ids.clone(),
@@ -22329,6 +22336,22 @@ impl crate::harness::Stage for WinUiStage {
         });
     }
 
+    fn set_thumb(&self, _: crate::harness::Target, _: crate::harness::Thumb, _: f64) {
+        crate::depth_stub("range")
+    }
+
+    fn nudge_thumb(&self, _: crate::harness::Target, _: crate::harness::Thumb, _: bool) {
+        crate::depth_stub("range")
+    }
+
+    fn thumb_fraction(&self, _: crate::harness::Target, _: Option<crate::harness::Thumb>) -> String {
+        crate::depth_stub("range")
+    }
+
+    fn ax_thumb(&self, _: crate::harness::Target, _: crate::harness::Thumb) -> String {
+        crate::depth_stub("range")
+    }
+
     fn control_value(&self, t: crate::harness::Target) -> String {
         if t.kind == crate::harness::TargetKind::NumberField {
             return Self::on_ui_read(move |core| {
@@ -23392,6 +23415,7 @@ impl crate::harness::Stage for WinUiStage {
                 K::Grid => find(core, K::Grid, &core.grids, &id),
                 K::Textarea => find(core, K::Textarea, &core.textareas, &id),
                 K::Search => find(core, K::Search, &core.searches, &id),
+                K::Range => crate::depth_stub("range"),
                 K::ColorPicker => find(core, K::ColorPicker, &core.color_pickers, &id),
                 K::NumberField => find(core, K::NumberField, &core.number_fields, &id),
                 K::Canvas => find(core, K::Canvas, &core.canvases, &id),

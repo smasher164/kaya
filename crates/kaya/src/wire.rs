@@ -233,6 +233,7 @@ pub(crate) const KIND_LABELED: u32 = 18;
 pub(crate) const KIND_SEARCH: u32 = 19;
 pub(crate) const KIND_NUMBER_FIELD: u32 = 20;
 pub(crate) const KIND_COLOR_PICKER: u32 = 21;
+pub(crate) const KIND_RANGE: u32 = 22;
 
 // Draw opcodes (docs/canvas-plan.md §3.3). The op stream is a flat run
 // of tagged values: one of these as an i64, then its operands.
@@ -430,6 +431,11 @@ pub(crate) const PROP_MAX_WIDTH: u32 = 42;
 pub(crate) const PROP_MAX_HEIGHT: u32 = 43;
 pub(crate) const PROP_COLOR: u32 = 44;
 pub(crate) const PROP_ALPHA: u32 = 45;
+pub(crate) const PROP_LOW: u32 = 46;
+pub(crate) const PROP_HIGH: u32 = 47;
+pub(crate) const PROP_MIN_GAP: u32 = 48;
+pub(crate) const PROP_LOW_LABEL: u32 = 49;
+pub(crate) const PROP_HIGH_LABEL: u32 = 50;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
@@ -917,6 +923,7 @@ fn widget_kind(raw: u32) -> WidgetKind {
         KIND_SEARCH => WidgetKind::Search,
         KIND_NUMBER_FIELD => WidgetKind::NumberField,
         KIND_COLOR_PICKER => WidgetKind::ColorPicker,
+        KIND_RANGE => WidgetKind::Range,
         other => panic!("kaya: unknown widget kind {other}"),
     }
 }
@@ -968,6 +975,11 @@ fn prop(raw: u32) -> Prop {
         PROP_MAX_HEIGHT => Prop::MaxHeight,
         PROP_COLOR => Prop::Color,
         PROP_ALPHA => Prop::Alpha,
+        PROP_LOW => Prop::Low,
+        PROP_HIGH => Prop::High,
+        PROP_MIN_GAP => Prop::MinGap,
+        PROP_LOW_LABEL => Prop::LowLabel,
+        PROP_HIGH_LABEL => Prop::HighLabel,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -2990,6 +3002,45 @@ pub fn decode_color_changed_tag(tag: &[u8], packed: i64) -> Occurrence {
     }
 }
 
+/// docs/range-plan.md §2: the tag, then LOW and HIGH as two F64 values,
+/// `draw_body`'s run of bare values.
+pub fn range_body(tag: &[u8], low: f64, high: f64) -> Vec<u8> {
+    let mut b = Vec::with_capacity(tag.len() + 32);
+    b.extend_from_slice(tag);
+    let mut blobs = Vec::new();
+    write_value(&mut b, &Value::F64(low), &mut blobs);
+    write_value(&mut b, &Value::F64(high), &mut blobs);
+    b
+}
+
+pub fn decode_range_tag(tag: &[u8], low: f64, high: f64, committed: bool) -> Occurrence {
+    let mut r = Reader { buf: tag, at: 0, blobs: &|_| None };
+    let id = r.u64();
+    let path = r.path();
+    match (path.is_empty(), committed) {
+        (true, false) => Occurrence::RangeChanged { id: WidgetId(id), low, high },
+        (true, true) => Occurrence::RangeCommitted { id: WidgetId(id), low, high },
+        (false, false) => Occurrence::InstanceRangeChanged { node: TemplateNodeId(id), path, low, high },
+        (false, true) => Occurrence::InstanceRangeCommitted { node: TemplateNodeId(id), path, low, high },
+    }
+}
+
+/// `range_body`'s inverse over a whole occurrence body.
+#[cfg(test)]
+pub fn decode_range_body(body: &[u8], committed: bool) -> Occurrence {
+    let mut r = Reader { buf: body, at: 0, blobs: &|_| None };
+    let _ = r.u64();
+    let _ = r.path();
+    let tag_len = r.at;
+    let num = |v: Value| match v {
+        Value::F64(n) => n,
+        other => panic!("kaya: a range occurrence carries {other:?}, wanted f64"),
+    };
+    let low = num(r.value());
+    let high = num(r.value());
+    decode_range_tag(&body[..tag_len], low, high, committed)
+}
+
 pub fn decode_toggled_tag(tag: &[u8], checked: bool) -> Occurrence {
     let mut r = Reader { buf: tag, at: 0, blobs: &|_| None };
     let id = r.u64();
@@ -4166,6 +4217,7 @@ fn kind_raw(kind: WidgetKind) -> u32 {
         WidgetKind::Search => KIND_SEARCH,
         WidgetKind::NumberField => KIND_NUMBER_FIELD,
         WidgetKind::ColorPicker => KIND_COLOR_PICKER,
+        WidgetKind::Range => KIND_RANGE,
     }
 }
 
@@ -4429,6 +4481,11 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::MaxHeight => PROP_MAX_HEIGHT,
         Prop::Color => PROP_COLOR,
         Prop::Alpha => PROP_ALPHA,
+        Prop::Low => PROP_LOW,
+        Prop::High => PROP_HIGH,
+        Prop::MinGap => PROP_MIN_GAP,
+        Prop::LowLabel => PROP_LOW_LABEL,
+        Prop::HighLabel => PROP_HIGH_LABEL,
     }
 }
 
@@ -4949,6 +5006,21 @@ mod tests {
                 size: (10.0, 20.0),
             }
         );
+    }
+
+    /// docs/range-plan.md §2: the pair rides after the key path as two bare
+    /// F64 values, draw_requested's shape, and decodes by kind.
+    #[test]
+    fn a_range_pair_round_trips_live_and_stamped() {
+        let live = range_body(&click_tag(4, &[]), 2.0, 8.5);
+        assert_eq!(decode_range_body(&live, false), Occurrence::RangeChanged { id: WidgetId(4), low: 2.0, high: 8.5 });
+        assert_eq!(decode_range_body(&live, true), Occurrence::RangeCommitted { id: WidgetId(4), low: 2.0, high: 8.5 });
+        let keys = [Value::from("b")];
+        assert_eq!(
+            decode_range_body(&range_body(&click_tag(9, &keys), 3.0, 7.0), true),
+            Occurrence::InstanceRangeCommitted { node: TemplateNodeId(9), path: keys.to_vec(), low: 3.0, high: 7.0 }
+        );
+        assert_eq!(live.len(), click_tag(4, &[]).len() + 2 * 16);
     }
 
     /// BOTH DIALOG REQUESTS, out and back, because what can break is the

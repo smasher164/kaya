@@ -689,6 +689,12 @@ pub enum Occurrence {
     /// (docs/color-picker-plan.md §3 rule 2): never a drag's intermediate.
     ColorChanged { id: WidgetId, color: Color },
     InstanceColorChanged { node: TemplateNodeId, path: Path, color: Color },
+    /// A range's thumbs moved, both values (docs/range-plan.md §2).
+    RangeChanged { id: WidgetId, low: f64, high: f64 },
+    InstanceRangeChanged { node: TemplateNodeId, path: Path, low: f64, high: f64 },
+    /// A range gesture's settled pair, once per gesture (§3 rule 3).
+    RangeCommitted { id: WidgetId, low: f64, high: f64 },
+    InstanceRangeCommitted { node: TemplateNodeId, path: Path, low: f64, high: f64 },
     /// A menu action fired — clicked OR invoked through its shortcut:
     /// ONE occurrence, one dispatch path (DESIGN.md, Menus).
     MenuActivated { item: MenuItemId },
@@ -1051,6 +1057,10 @@ pub enum WidgetKind {
     /// A COLOUR PICKER (docs/color-picker-plan.md): a swatch opening the
     /// platform's own colour surface; each settled choice is color_changed.
     ColorPicker,
+    /// A RANGE (docs/range-plan.md): two thumbs on one track sharing the
+    /// slider's min, max and step; range_changed and range_committed carry
+    /// both values.
+    Range,
 }
 
 /// An sRGB colour, 8 bits a channel, straight alpha: what a colour picker
@@ -1312,7 +1322,7 @@ impl WidgetKind {
     /// export `WidgetKind` into the public header as an opaque handle no C
     /// caller can use. `cfg(test)` because the sweeps that walk it are tests.
     #[cfg(test)]
-    pub(crate) const ALL: [WidgetKind; 21] = [
+    pub(crate) const ALL: [WidgetKind; 22] = [
         WidgetKind::Column,
         WidgetKind::Button,
         WidgetKind::Label,
@@ -1334,6 +1344,7 @@ impl WidgetKind {
         WidgetKind::Search,
         WidgetKind::NumberField,
         WidgetKind::ColorPicker,
+        WidgetKind::Range,
     ];
 
     /// Whether a widget of this kind carries an identity tag — the
@@ -1356,7 +1367,8 @@ impl WidgetKind {
             | WidgetKind::TimePicker
             | WidgetKind::Search
             | WidgetKind::NumberField
-            | WidgetKind::ColorPicker => true,
+            | WidgetKind::ColorPicker
+            | WidgetKind::Range => true,
             // Exhaustive on purpose — no wildcard. A kind added to the
             // spec lands here as a compile error, which is the moment to
             // decide whether it reports.
@@ -1581,6 +1593,13 @@ pub enum Prop {
     Color,
     /// Whether a colour picker's user may choose translucency (Bool).
     Alpha,
+    /// A range's thumbs (F64; docs/range-plan.md §2), the least distance
+    /// between them, and what each thumb speaks (Str).
+    Low,
+    High,
+    MinGap,
+    LowLabel,
+    HighLabel,
     /// The app owns a rich textarea's undo (Bool-valued; docs/rich-text-plan.md
     /// R6, §14): the native stack is off, the ledger never banks it, and
     /// Edit>Undo/Redo reach the app through the role item's own activation.
@@ -2533,6 +2552,22 @@ impl OccSink {
                     let body = crate::wire::color_changed_body(&tag, color.packed());
                     ring.push_record(crate::ring::REC_COLOR_CHANGED, &body);
                 }
+                Occurrence::RangeChanged { id, low, high } => {
+                    let tag = crate::wire::click_tag(id.0, &[]);
+                    ring.push_record(crate::ring::REC_RANGE_CHANGED, &crate::wire::range_body(&tag, low, high));
+                }
+                Occurrence::InstanceRangeChanged { node, path, low, high } => {
+                    let tag = crate::wire::click_tag(node.0, &path);
+                    ring.push_record(crate::ring::REC_RANGE_CHANGED, &crate::wire::range_body(&tag, low, high));
+                }
+                Occurrence::RangeCommitted { id, low, high } => {
+                    let tag = crate::wire::click_tag(id.0, &[]);
+                    ring.push_record(crate::ring::REC_RANGE_COMMITTED, &crate::wire::range_body(&tag, low, high));
+                }
+                Occurrence::InstanceRangeCommitted { node, path, low, high } => {
+                    let tag = crate::wire::click_tag(node.0, &path);
+                    ring.push_record(crate::ring::REC_RANGE_COMMITTED, &crate::wire::range_body(&tag, low, high));
+                }
                 Occurrence::ValueChanged { id, value } => {
                     let tag = crate::wire::click_tag(id.0, &[]);
                     let body = crate::wire::value_changed_body(&tag, value);
@@ -2786,6 +2821,20 @@ impl OccSink {
                     crate::ring::REC_VALUE_CHANGED,
                     &crate::wire::value_changed_body(tag, value),
                 );
+            }
+        }
+    }
+
+    /// A range's pair, live or committed (docs/range-plan.md §2).
+    pub(crate) fn send_range_tag(&self, tag: &[u8], low: f64, high: f64, committed: bool) {
+        match self {
+            OccSink::Mpsc(tx) => {
+                crate::stall::enqueued();
+                let _ = tx.send(Inbox::Occ(crate::wire::decode_range_tag(tag, low, high, committed)));
+            }
+            OccSink::Ring(ring) => {
+                let kind = if committed { crate::ring::REC_RANGE_COMMITTED } else { crate::ring::REC_RANGE_CHANGED };
+                ring.push_record(kind, &crate::wire::range_body(tag, low, high));
             }
         }
     }

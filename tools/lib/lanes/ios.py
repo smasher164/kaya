@@ -154,7 +154,10 @@ DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes"]
 # tooltips with its own (docs/tooltip-plan.md §5) — the iOS arm is the
 # shared interpreter's `.help`, which lands on the accessibility hint,
 # and expect_help reads it there.
-UNWIRED_SCENES = []
+# The range's iOS arm (two UISliders over a drawn track) and the rotated
+# fader are built; their legs are the breadth slice's to measure
+# (docs/range-plan.md §4.2, §4.3).
+UNWIRED_SCENES = ["range"]
 
 # The fullscreen scene's app-only way back after the cut, the same steps as
 # tools/lib/lanes/android.py's FULLSCREEN_APP_TAIL: no user change arrives.

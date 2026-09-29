@@ -12997,3 +12997,12 @@ deprecated and the macOS pass builds with -warnings-as-errors; an opaque well
 still holds colours opaque under both stamps (the same leg's `26A269FF`
 lines). The guard is that leg on the mac lane: red in three runs without
 the line, green with it.
+
+## A slider's snap is not decimal-exact (measured 2026-09-29)
+
+The snap every arm and the range's core clamp share is `min + k * step`, so a
+vertical fader at 0.25 stepping by 0.05 moved to `0.30000000000000004`, and
+that is the value the app's handler heard (`volume: 0.30000000000000004` on
+the range scene's first run, the mac lane). A scene that reads a handler's
+spelling of a fractional step needs a step that is exact in binary (0.25,
+0.5), and an app that shows such a value formats it itself.

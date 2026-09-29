@@ -384,6 +384,10 @@ name = "colorpicker"
 path = "../../guests/rust/colorpicker.rs"
 
 [[example]]
+name = "range"
+path = "../../guests/rust/range.rs"
+
+[[example]]
 name = "sliders"
 path = "../../guests/rust/sliders.rs"
 

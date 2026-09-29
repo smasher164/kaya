@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x0d0ad42b8674c264;
+    public const ulong SpecHash = 0xee277a9499e5e52d;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -48,6 +48,7 @@ static class KayaWire
     public const uint KindSearch = 19;
     public const uint KindNumberField = 20;
     public const uint KindColorPicker = 21;
+    public const uint KindRange = 22;
     public const uint DrawOpMoveTo = 1;
     public const uint DrawOpLineTo = 2;
     public const uint DrawOpClose = 3;
@@ -118,6 +119,11 @@ static class KayaWire
     public const uint PropMaxHeight = 43;
     public const uint PropColor = 44;
     public const uint PropAlpha = 45;
+    public const uint PropLow = 46;
+    public const uint PropHigh = 47;
+    public const uint PropMinGap = 48;
+    public const uint PropLowLabel = 49;
+    public const uint PropHighLabel = 50;
     public const uint WpropTitle = 1;
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
@@ -404,6 +410,8 @@ static class KayaWire
     public const ushort OccKindNotificationReplied = 34;
     public const ushort OccKindFullscreenChanged = 35;
     public const ushort OccKindColorChanged = 36;
+    public const ushort OccKindRangeChanged = 37;
+    public const ushort OccKindRangeCommitted = 38;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -2269,6 +2277,131 @@ static class KayaWire
         return Finish(stream, w, TxKindSetProperty);
     }
 
+    /// set_property with a constant low value.
+    public static byte[] TxSetLow(ulong widgetId, double low)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropLow); w.Write(SourceConst);
+        EncodeValue(w, low);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound low value.
+    public static byte[] TxBindLow(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropLow); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindLowElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropLow); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant high value.
+    public static byte[] TxSetHigh(ulong widgetId, double high)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropHigh); w.Write(SourceConst);
+        EncodeValue(w, high);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound high value.
+    public static byte[] TxBindHigh(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropHigh); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindHighElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropHigh); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant min_gap value.
+    public static byte[] TxSetMinGap(ulong widgetId, double minGap)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropMinGap); w.Write(SourceConst);
+        EncodeValue(w, minGap);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound min_gap value.
+    public static byte[] TxBindMinGap(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropMinGap); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindMinGapElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropMinGap); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant low_label value.
+    public static byte[] TxSetLowLabel(ulong widgetId, string lowLabel)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropLowLabel); w.Write(SourceConst);
+        EncodeValue(w, lowLabel);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound low_label value.
+    public static byte[] TxBindLowLabel(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropLowLabel); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindLowLabelElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropLowLabel); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant high_label value.
+    public static byte[] TxSetHighLabel(ulong widgetId, string highLabel)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropHighLabel); w.Write(SourceConst);
+        EncodeValue(w, highLabel);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound high_label value.
+    public static byte[] TxBindHighLabel(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropHighLabel); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindHighLabelElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropHighLabel); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
     /// set_window_prop with a constant title value (window 0, the primary surface).
     public static byte[] TxSetWindowTitle(ulong window, string title)
     {
@@ -2841,7 +2974,7 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted && kind != OccKindSheetDismissed && kind != OccKindDismissRequested && kind != OccKindSubmitted && kind != OccKindNotificationReplied && kind != OccKindFullscreenChanged && kind != OccKindColorChanged)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted && kind != OccKindSheetDismissed && kind != OccKindDismissRequested && kind != OccKindSubmitted && kind != OccKindNotificationReplied && kind != OccKindFullscreenChanged && kind != OccKindColorChanged && kind != OccKindRangeChanged && kind != OccKindRangeCommitted)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         if (kind == OccKindAlertResult)
@@ -3048,7 +3181,7 @@ static class KayaWire
             }
             payload = new List<object> { removed, start, stop, pair[0], pair[1] };
         }
-        if (kind == OccKindDrawRequested || kind == OccKindTick)
+        if (kind == OccKindDrawRequested || kind == OccKindTick || kind == OccKindRangeChanged || kind == OccKindRangeCommitted)
         {
             // The canvas asks carry a run of BARE values after the
             // key path — the assigned size, and a tick's frame time

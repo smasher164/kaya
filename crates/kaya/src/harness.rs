@@ -101,6 +101,27 @@ pub enum TargetKind {
     /// The drawing surface: the canvas verbs' target, and nothing
     /// else's — a canvas has no text, no value and no activation.
     Canvas,
+    /// The range (docs/range-plan.md §5): the slider's verbs with a thumb
+    /// word after the target.
+    Range,
+}
+
+/// Which of a range's two thumbs a step drives or reads
+/// (docs/range-plan.md §5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Thumb {
+    Low,
+    High,
+}
+
+impl Thumb {
+    fn parse(word: &str, line: &str) -> Result<Thumb, String> {
+        match word {
+            "low" => Ok(Thumb::Low),
+            "high" => Ok(Thumb::High),
+            other => Err(format!("a range's thumb is low or high, not {other:?}: {line:?}")),
+        }
+    }
 }
 
 /// The state an `expect_menu` step asserts, exactly as the steps
@@ -190,6 +211,17 @@ pub enum Step {
     /// One step of a number field through the platform's stepping door,
     /// `true` up (docs/number-field-plan.md §3 rule 6).
     Nudge(Target, bool),
+    /// A range's thumb driven through its own control (docs/range-plan.md
+    /// §5): `set_value range#0 low 3.2`, one finished gesture.
+    SetThumb(Target, Thumb, f64),
+    /// One keyboard step of a range's thumb, committed at once.
+    NudgeThumb(Target, Thumb, bool),
+    /// A thumb's centre as a fraction of its travel from the left (or the
+    /// bottom, vertical), two decimals, read from the platform's geometry:
+    /// a slider's one thumb, or a range's named one.
+    ExpectThumb(Target, Option<Thumb>, String),
+    /// One thumb's accessible element, `slider/<label>`.
+    ExpectAxThumb(Target, Thumb, String),
     SetText(Target, String),
     /// The search field's clear affordance (docs/search-plan.md S5).
     ClearSearch(Target),
@@ -734,6 +766,10 @@ impl Step {
             | Step::ClearSearch(t)
             | Step::Unfocus(t)
             | Step::Nudge(t, _)
+            | Step::SetThumb(t, _, _)
+            | Step::NudgeThumb(t, _, _)
+            | Step::ExpectThumb(t, _, _)
+            | Step::ExpectAxThumb(t, _, _)
             | Step::ContextOpen(t)
             | Step::ExpectHeightFits(t)
             | Step::ExpectFill(t, _) => vec![t],
@@ -888,6 +924,10 @@ impl Step {
             Step::ExpectValue { .. } => true,
             Step::Unfocus { .. } => false,
             Step::Nudge { .. } => false,
+            Step::SetThumb { .. } => false,
+            Step::NudgeThumb { .. } => false,
+            Step::ExpectThumb { .. } => true,
+            Step::ExpectAxThumb { .. } => true,
             Step::SetText { .. } => false,
             Step::ClearSearch { .. } => false,
             Step::ExpectPlaceholder { .. } => true,
@@ -1016,6 +1056,14 @@ impl Step {
 }
 
 
+/// A thumb's position as `expect_thumb` spells it (docs/range-plan.md §5):
+/// two decimals, trailing zeros and point dropped.
+pub fn spelled_fraction(value: f64) -> String {
+    let s = format!("{:.2}", (value * 100.0).round() / 100.0);
+    let s = s.trim_end_matches('0').trim_end_matches('.');
+    if s.is_empty() || s == "-" || s == "-0" { "0".to_owned() } else { s.to_owned() }
+}
+
 /// What a backend supplies: its native calls, each hopping to its UI
 /// thread internally and blocking until applied.
 ///
@@ -1070,6 +1118,18 @@ pub trait Stage: Send + 'static {
     /// One step through the number field's own stepping door (a stepper
     /// button where the platform draws one, the arrow key where it does not).
     fn nudge(&self, target: Target, up: bool);
+    /// Drive one of a range's thumbs THROUGH its control as one finished
+    /// gesture (docs/range-plan.md §5); the clamp and the commit are the
+    /// control's own path.
+    fn set_thumb(&self, target: Target, thumb: Thumb, value: f64);
+    /// One keyboard step of a range's thumb (§3 rule 4).
+    fn nudge_thumb(&self, target: Target, thumb: Thumb, up: bool);
+    /// A thumb's centre as a fraction of its travel, two decimals, from the
+    /// left (horizontal) or the bottom (vertical), in the platform's own
+    /// geometry; `None` is a slider's one thumb (docs/range-plan.md §5).
+    fn thumb_fraction(&self, target: Target, thumb: Option<Thumb>) -> String;
+    /// One range thumb's accessible element as `role/label`.
+    fn ax_thumb(&self, target: Target, thumb: Thumb) -> String;
     fn set_text(&self, target: Target, text: &str);
     /// Deliver `text` to the FOCUSED widget as real platform keystrokes.
     /// THE CONTRACT, since every backend implements it separately:
@@ -1751,13 +1811,42 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 let (target, value) = rest
                     .split_once(char::is_whitespace)
                     .ok_or_else(|| format!("set_value wants a target and a number: {line:?}"))?;
-                Step::SetValue(
-                    parse_target(target)?,
-                    value
-                        .trim()
-                        .parse()
-                        .map_err(|_| format!("set_value wants a number: {line:?}"))?,
-                )
+                let target = parse_target(target)?;
+                let number = |text: &str| {
+                    text.trim().parse::<f64>().map_err(|_| format!("set_value wants a number: {line:?}"))
+                };
+                if target.kind == TargetKind::Range {
+                    let (thumb, value) = value.trim().split_once(char::is_whitespace).ok_or_else(|| {
+                        format!("set_value on a range wants a thumb (low|high) and a number: {line:?}")
+                    })?;
+                    Step::SetThumb(target, Thumb::parse(thumb, line)?, number(value)?)
+                } else {
+                    Step::SetValue(target, number(value)?)
+                }
+            }
+            "expect_thumb" => {
+                let (target, text) = rest
+                    .split_once(char::is_whitespace)
+                    .ok_or_else(|| format!("expect_thumb wants a target and a fraction: {line:?}"))?;
+                let target = parse_target(target)?;
+                let (thumb, text) = match target.kind {
+                    TargetKind::Slider => (None, text),
+                    TargetKind::Range => {
+                        let (thumb, text) = text.trim().split_once(char::is_whitespace).ok_or_else(|| {
+                            format!("expect_thumb on a range wants a thumb (low|high) and a fraction: {line:?}")
+                        })?;
+                        (Some(Thumb::parse(thumb, line)?), text)
+                    }
+                    _ => return Err(format!("expect_thumb reads a slider or a range, not {target:?}")),
+                };
+                let want = parse_string(text)?;
+                if want.parse::<f64>().ok().map(spelled_fraction).as_deref() != Some(want.as_str()) {
+                    return Err(format!(
+                        "expect_thumb wants a fraction in two decimals, trailing zeros dropped \
+                         (0.25, 0.2, 1), got {want:?} in {line:?}"
+                    ));
+                }
+                Step::ExpectThumb(target, thumb, want)
             }
             "set_date" => {
                 let (target, date) = rest
@@ -1782,16 +1871,20 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     .split_once(char::is_whitespace)
                     .ok_or_else(|| format!("expect_value wants a target and a string: {line:?}"))?;
                 let want = parse_string(text)?;
-                let canonical = want.parse::<f64>().ok().map(spelled_slider);
-                if canonical.as_deref() != Some(want.as_str()) {
+                let target = parse_target(target)?;
+                let arity = if target.kind == TargetKind::Range { 2 } else { 1 };
+                let words: Vec<&str> = want.split(' ').collect();
+                let canonical = words.len() == arity
+                    && words.iter().all(|w| w.parse::<f64>().ok().map(spelled_slider).as_deref() == Some(*w));
+                if !canonical {
                     return Err(format!(
-                        "expect_value wants a number in its fixed spelling (up to six \
-                         decimals, no trailing zeros: 0.75, 40), got {want:?} in {line:?}"
+                        "expect_value wants {arity} number(s) in the fixed spelling (up to six \
+                         decimals, no trailing zeros: 0.75, 40; a range's two space-separated), \
+                         got {want:?} in {line:?}"
                     ));
                 }
-                let target = parse_target(target)?;
-                if !matches!(target.kind, TargetKind::Slider | TargetKind::NumberField) {
-                    return Err(format!("expect_value reads a slider or a number field, not {target:?}"));
+                if !matches!(target.kind, TargetKind::Slider | TargetKind::NumberField | TargetKind::Range) {
+                    return Err(format!("expect_value reads a slider, a range or a number field, not {target:?}"));
                 }
                 Step::ExpectValue(target, want)
             }
@@ -1807,15 +1900,25 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     .split_once(char::is_whitespace)
                     .ok_or_else(|| format!("nudge wants a target and up or down: {line:?}"))?;
                 let target = parse_target(target)?;
-                if target.kind != TargetKind::NumberField {
-                    return Err(format!("nudge steps a number field, not {target:?}"));
-                }
-                let up = match way.trim() {
+                let (thumb, way) = match target.kind {
+                    TargetKind::NumberField | TargetKind::Slider => (None, way.trim()),
+                    TargetKind::Range => {
+                        let (thumb, way) = way.trim().split_once(char::is_whitespace).ok_or_else(|| {
+                            format!("nudge on a range wants a thumb (low|high) and up or down: {line:?}")
+                        })?;
+                        (Some(Thumb::parse(thumb, line)?), way.trim())
+                    }
+                    _ => return Err(format!("nudge steps a number field, a slider or a range, not {target:?}")),
+                };
+                let up = match way {
                     "up" => true,
                     "down" => false,
                     other => return Err(format!("nudge goes up or down, not {other:?}: {line:?}")),
                 };
-                Step::Nudge(target, up)
+                match thumb {
+                    Some(thumb) => Step::NudgeThumb(target, thumb, up),
+                    None => Step::Nudge(target, up),
+                }
             }
             "set_color" => {
                 let (target, color) = rest
@@ -2699,9 +2802,19 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
                     format!("expect_ax wants a target and a \"role/label\" string: {line:?}")
                 })?;
-                let want = parse_string(text)?;
-                check_ax(&want).map_err(|e| format!("{e}: {line:?}"))?;
-                Step::ExpectAx(parse_target(target)?, want)
+                let target = parse_target(target)?;
+                if target.kind == TargetKind::Range && !text.trim_start().starts_with('"') {
+                    let (thumb, text) = text.trim().split_once(char::is_whitespace).ok_or_else(|| {
+                        format!("expect_ax on a range's thumb wants low|high and a \"role/label\": {line:?}")
+                    })?;
+                    let want = parse_string(text)?;
+                    check_ax(&want).map_err(|e| format!("{e}: {line:?}"))?;
+                    Step::ExpectAxThumb(target, Thumb::parse(thumb, line)?, want)
+                } else {
+                    let want = parse_string(text)?;
+                    check_ax(&want).map_err(|e| format!("{e}: {line:?}"))?;
+                    Step::ExpectAx(target, want)
+                }
             }
             "resize_window" => {
                 let (window, rest) = parse_window_target(rest);
@@ -3001,6 +3114,7 @@ fn parse_target_kind(kind: &str, spec: &str) -> Result<TargetKind, String> {
         "search" => TargetKind::Search,
         "number_field" => TargetKind::NumberField,
         "color_picker" => TargetKind::ColorPicker,
+        "range" => TargetKind::Range,
         other => return Err(format!("unknown target kind {other:?} in {spec:?}")),
     })
 }
@@ -3906,7 +4020,7 @@ fn run_with_log(
                 other => Err(format!("expect_color reads colour pickers — not {other:?}")),
             }),
             Step::ExpectValue(t, want) => Some(match t.kind {
-                TargetKind::Slider | TargetKind::NumberField => poll(|| {
+                TargetKind::Slider | TargetKind::NumberField | TargetKind::Range => poll(|| {
                     let got = stage.control_value(*t);
                     if got == *want {
                         Ok(got)
@@ -3930,6 +4044,36 @@ fn run_with_log(
                 await_answer(answered);
                 None
             }
+            Step::SetThumb(t, thumb, v) => {
+                await_quiet();
+                let answered = crate::scene::answers();
+                stage.set_thumb(*t, *thumb, *v);
+                await_answer(answered);
+                None
+            }
+            Step::NudgeThumb(t, thumb, up) => {
+                await_quiet();
+                let answered = crate::scene::answers();
+                stage.nudge_thumb(*t, *thumb, *up);
+                await_answer(answered);
+                None
+            }
+            Step::ExpectThumb(t, thumb, want) => Some(poll(|| {
+                let got = stage.thumb_fraction(*t, *thumb);
+                if got == *want {
+                    Ok(format!("thumb {got}"))
+                } else {
+                    Err(format!("thumb {got:?}, wanted {want:?}"))
+                }
+            })),
+            Step::ExpectAxThumb(t, thumb, want) => Some(poll(|| {
+                let seen = stage.ax_thumb(*t, *thumb);
+                if seen == *want {
+                    Ok(format!("ax {want:?}"))
+                } else {
+                    Err(format!("ax {seen:?}, wanted {want:?}"))
+                }
+            })),
             Step::ExpectPicker(t, want) => Some(match t.kind {
                 TargetKind::DatePicker | TargetKind::TimePicker => poll(|| {
                     let got = stage.picker_value(*t);
@@ -5204,7 +5348,7 @@ fn run_with_log(
                 }))
             }
             Step::ExpectAxis(t, want) => {
-                if !matches!(t.kind, TargetKind::Column | TargetKind::Row) {
+                if !matches!(t.kind, TargetKind::Column | TargetKind::Row | TargetKind::Slider) {
                     Some(Err(format!("{t:?} is not a container target")))
                 } else {
                     Some(poll(|| {
@@ -5704,6 +5848,7 @@ fn target_spec(t: &Target) -> String {
         TargetKind::Search => "search",
         TargetKind::NumberField => "number_field",
         TargetKind::ColorPicker => "color_picker",
+        TargetKind::Range => "range",
     };
     if let Some(id) = t.id {
         t.keys.map_or_else(
@@ -6644,6 +6789,42 @@ mod tests {
         assert!(parse("type \"kaya 1.0 (x)\"").is_ok());
     }
 
+    /// The range's verbs (docs/range-plan.md §5): a thumb word after a range
+    /// target, both values in one fixed spelling, and the thumb's fraction.
+    #[test]
+    fn the_ranges_verbs_parse_and_refuse() {
+        let range = Target { kind: TargetKind::Range, index: 0, id: None, keys: None };
+        let slider = Target { kind: TargetKind::Slider, index: 1, id: None, keys: None };
+        assert_eq!(parse("set_value range#0 low 3.2").unwrap()[0], Step::SetThumb(range, Thumb::Low, 3.2));
+        assert!(parse("set_value range#0 3.2").is_err());
+        assert!(parse("set_value range#0 middle 3").is_err());
+        assert_eq!(parse("expect_value range#0 \"2 8\"").unwrap()[0], Step::ExpectValue(range, "2 8".into()));
+        assert!(parse("expect_value range#0 \"2\"").is_err());
+        assert!(parse("expect_value range#0 \"2.0 8\"").is_err());
+        assert!(parse("expect_value slider#0 \"2 8\"").is_err());
+        assert_eq!(parse("nudge range#0 high down").unwrap()[0], Step::NudgeThumb(range, Thumb::High, false));
+        assert_eq!(parse("nudge slider#1 up").unwrap()[0], Step::Nudge(slider, true));
+        assert!(parse("nudge range#0 up").is_err());
+        assert_eq!(parse("expect_thumb slider#1 \"0.25\"").unwrap()[0], Step::ExpectThumb(slider, None, "0.25".into()));
+        assert_eq!(
+            parse("expect_thumb range#0 low \"0.2\"").unwrap()[0],
+            Step::ExpectThumb(range, Some(Thumb::Low), "0.2".into())
+        );
+        assert!(parse("expect_thumb range#0 low \"0.20\"").is_err());
+        assert!(parse("expect_thumb label#0 \"0.2\"").is_err());
+        assert_eq!(
+            parse("expect_ax range#0 low \"slider/In\"").unwrap()[0],
+            Step::ExpectAxThumb(range, Thumb::Low, "slider/In".into())
+        );
+        assert_eq!(parse("expect_ax range#0 \"group/Trim\"").unwrap()[0], Step::ExpectAx(range, "group/Trim".into()));
+        assert!(Step::ExpectThumb(slider, None, "1".into()).is_assertion());
+        assert!(!Step::SetThumb(range, Thumb::High, 1.0).is_assertion());
+        assert_eq!(spelled_fraction(0.25), "0.25");
+        assert_eq!(spelled_fraction(0.2), "0.2");
+        assert_eq!(spelled_fraction(0.996), "1");
+        assert_eq!(spelled_fraction(0.0), "0");
+    }
+
     /// The number field's verbs (docs/number-field-plan.md §5): the value
     /// read in the slider's fixed spelling on both kinds, and the two doors
     /// on the number field alone.
@@ -6660,7 +6841,7 @@ mod tests {
         assert_eq!(parse("nudge number_field#0 up").unwrap()[0], Step::Nudge(field, true));
         assert_eq!(parse("nudge number_field#0 down").unwrap()[0], Step::Nudge(field, false));
         assert!(parse("nudge number_field#0 left").is_err());
-        assert!(parse("nudge slider#0 up").is_err());
+        assert!(parse("nudge label#0 up").is_err());
         assert!(!Step::Unfocus(field).is_assertion() && !Step::Nudge(field, true).is_assertion());
         let stage = MockStage {
             seen: Box::leak(Box::new(Mutex::new(Vec::new()))),
@@ -6794,6 +6975,14 @@ mod tests {
         }
         fn unfocus(&self, _: Target) {}
         fn nudge(&self, _: Target, _: bool) {}
+        fn set_thumb(&self, _: Target, _: Thumb, _: f64) {}
+        fn nudge_thumb(&self, _: Target, _: Thumb, _: bool) {}
+        fn thumb_fraction(&self, _: Target, _: Option<Thumb>) -> String {
+            String::new()
+        }
+        fn ax_thumb(&self, _: Target, _: Thumb) -> String {
+            String::new()
+        }
         fn set_text(&self, _: Target, _: &str) {}
         fn type_text(&self, text: &str) {
             self.seen.lock().unwrap().push(format!("type {text}"));
@@ -7789,6 +7978,14 @@ mod tests {
             }
             fn unfocus(&self, _: Target) {}
             fn nudge(&self, _: Target, _: bool) {}
+            fn set_thumb(&self, _: Target, _: Thumb, _: f64) {}
+            fn nudge_thumb(&self, _: Target, _: Thumb, _: bool) {}
+            fn thumb_fraction(&self, _: Target, _: Option<Thumb>) -> String {
+                String::new()
+            }
+            fn ax_thumb(&self, _: Target, _: Thumb) -> String {
+                String::new()
+            }
             fn set_text(&self, _: Target, _: &str) {}
             fn type_text(&self, _: &str) {}
             fn read_label(&self, _: Target) -> String {
@@ -8142,6 +8339,14 @@ mod tests {
             }
             fn unfocus(&self, _: Target) {}
             fn nudge(&self, _: Target, _: bool) {}
+            fn set_thumb(&self, _: Target, _: Thumb, _: f64) {}
+            fn nudge_thumb(&self, _: Target, _: Thumb, _: bool) {}
+            fn thumb_fraction(&self, _: Target, _: Option<Thumb>) -> String {
+                String::new()
+            }
+            fn ax_thumb(&self, _: Target, _: Thumb) -> String {
+                String::new()
+            }
             fn set_text(&self, _: Target, _: &str) {}
             fn type_text(&self, _: &str) {}
             fn read_label(&self, _: Target) -> String {

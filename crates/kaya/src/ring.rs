@@ -72,6 +72,9 @@ pub(crate) const REC_NOTIFICATION_REPLIED: u16 = 34;
 pub(crate) const REC_FULLSCREEN_CHANGED: u16 = 35;
 /// docs/color-picker-plan.md §2.
 pub(crate) const REC_COLOR_CHANGED: u16 = 36;
+/// docs/range-plan.md §2.
+pub(crate) const REC_RANGE_CHANGED: u16 = 37;
+pub(crate) const REC_RANGE_COMMITTED: u16 = 38;
 
 /// Wire framing of every record, exported through the C header so direct
 /// consumers cast a pointer instead of bit-twiddling. Little-endian;

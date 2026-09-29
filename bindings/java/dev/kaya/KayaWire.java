@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x0d0ad42b8674c264L;
+    public static final long SPEC_HASH = 0xee277a9499e5e52dL;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -49,6 +49,7 @@ public final class KayaWire {
     public static final int KIND_SEARCH = 19;
     public static final int KIND_NUMBER_FIELD = 20;
     public static final int KIND_COLOR_PICKER = 21;
+    public static final int KIND_RANGE = 22;
     public static final int DRAW_OP_MOVE_TO = 1;
     public static final int DRAW_OP_LINE_TO = 2;
     public static final int DRAW_OP_CLOSE = 3;
@@ -119,6 +120,11 @@ public final class KayaWire {
     public static final int PROP_MAX_HEIGHT = 43;
     public static final int PROP_COLOR = 44;
     public static final int PROP_ALPHA = 45;
+    public static final int PROP_LOW = 46;
+    public static final int PROP_HIGH = 47;
+    public static final int PROP_MIN_GAP = 48;
+    public static final int PROP_LOW_LABEL = 49;
+    public static final int PROP_HIGH_LABEL = 50;
     public static final int WPROP_TITLE = 1;
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
@@ -405,6 +411,8 @@ public final class KayaWire {
     public static final short OCC_KIND_NOTIFICATION_REPLIED = 34;
     public static final short OCC_KIND_FULLSCREEN_CHANGED = 35;
     public static final short OCC_KIND_COLOR_CHANGED = 36;
+    public static final short OCC_KIND_RANGE_CHANGED = 37;
+    public static final short OCC_KIND_RANGE_COMMITTED = 38;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -2150,6 +2158,121 @@ public final class KayaWire {
         return finish(b);
     }
 
+    /** set_property with a constant low value. */
+    public static byte[] txSetLow(long widgetId, double low) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_LOW).putInt(SOURCE_CONST);
+        encodeValue(b, low);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound low value. */
+    public static byte[] txBindLow(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_LOW).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindLowElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_LOW).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant high value. */
+    public static byte[] txSetHigh(long widgetId, double high) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_HIGH).putInt(SOURCE_CONST);
+        encodeValue(b, high);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound high value. */
+    public static byte[] txBindHigh(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_HIGH).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindHighElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_HIGH).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant min_gap value. */
+    public static byte[] txSetMinGap(long widgetId, double minGap) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_MIN_GAP).putInt(SOURCE_CONST);
+        encodeValue(b, minGap);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound min_gap value. */
+    public static byte[] txBindMinGap(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_MIN_GAP).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindMinGapElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_MIN_GAP).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant low_label value. */
+    public static byte[] txSetLowLabel(long widgetId, String lowLabel) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_LOW_LABEL).putInt(SOURCE_CONST);
+        encodeValue(b, lowLabel);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound low_label value. */
+    public static byte[] txBindLowLabel(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_LOW_LABEL).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindLowLabelElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_LOW_LABEL).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant high_label value. */
+    public static byte[] txSetHighLabel(long widgetId, String highLabel) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_HIGH_LABEL).putInt(SOURCE_CONST);
+        encodeValue(b, highLabel);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound high_label value. */
+    public static byte[] txBindHighLabel(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_HIGH_LABEL).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindHighLabelElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_HIGH_LABEL).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
     /** set_window_prop with a constant title value (window 0, the primary surface). */
     public static byte[] txSetWindowTitle(long window, String title) {
         Enc b = begin(TX_KIND_SET_WINDOW_PROP);
@@ -2819,7 +2942,7 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED && kind != OCC_KIND_FULLSCREEN_CHANGED && kind != OCC_KIND_COLOR_CHANGED) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED && kind != OCC_KIND_FULLSCREEN_CHANGED && kind != OCC_KIND_COLOR_CHANGED && kind != OCC_KIND_RANGE_CHANGED && kind != OCC_KIND_RANGE_COMMITTED) {
             return null;
         }
         long id = b.getLong(8);
@@ -3040,7 +3163,7 @@ public final class KayaWire {
             Object value = parseValue(rec, b, cursor);
             payload = List.of(removed, start, stop, name, value);
         }
-        if (kind == OCC_KIND_DRAW_REQUESTED || kind == OCC_KIND_TICK) {
+        if (kind == OCC_KIND_DRAW_REQUESTED || kind == OCC_KIND_TICK || kind == OCC_KIND_RANGE_CHANGED || kind == OCC_KIND_RANGE_COMMITTED) {
             // The canvas asks carry a run of BARE values after the
             // key path — the assigned size, and a tick's frame time —
             // with no count in front, so they are read until the

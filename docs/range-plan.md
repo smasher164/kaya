@@ -1,6 +1,8 @@
 # The range and the vertical slider: the design pass
 
-Status: DESIGNED 2026-09-29; nothing built. The video editor's trim control
+Status: DESIGNED 2026-09-29; the DEPTH slice built the same day (the core,
+the Rust binding, the SwiftUI arm on macOS and iOS, tools/scenes/range.steps
+green on the mac; §4.2's mac rows MEASURED; breadth in docs/deferred.md). The video editor's trim control
 and its volume fader (docs/video-editor-plan.md §4, ruling 6, RULED
 2026-09-28: a separate `range` kind, horizontal, two thumbs for trim in and
 out; the vertical fader is the `axis` a row, column and scroll take, now
@@ -165,6 +167,39 @@ at the root, per ruling 6, until an app asks for a vertical range.
    and a layout that swaps Compose's constraints so the box is tall; under
    `KAYA_LOCALE=ar-EG`, that none flips.
 
+   MEASURED 2026-09-29, macOS 26 (a probe window driven only by events
+   posted into its own queue and the AX API against its own pid, the host
+   idle 150-350s; docs/probes/range-stack-mac-2026-09-29.swift):
+   - Two `NSSlider`s whose cell's `drawBar(inside:flipped:)` draws nothing,
+     in one container that draws the bar and the fill: the knobs' centres
+     sit on the drawn bar's centre line (both cells' `barRect` coincide),
+     and the picture is one track under two native knobs.
+   - The container's `hitTest` answering by the midpoint split sends every
+     press to the right slider, a click on the track included (that slider
+     warps to it). At a tie (gap 0) the side of the shared centre the press
+     lands on picks, at press-down: 3pt left moved the low thumb, 3pt right
+     the high one.
+   - The clamp in the slider's action stops a thumb at the gap and writes
+     it back: low dragged to the end (raw 10) landed at `high - min_gap`.
+   - The assistive path goes through the same action: `AXValue` set to 9.5
+     on the low `AXSlider` and `AXIncrement` both arrive as the slider's
+     action and are clamped and written back. `NSApp.currentEvent` there is
+     stale (the last real event), which the slider's final test reads as
+     final. An in-process `setAccessibilityValue` does NOT move an
+     `NSSlider`: it stores an override the reader then reports, so no arm
+     may call it on a live slider.
+   - The reader sees `AXGroup` (the range's label) holding two `AXSlider`s,
+     each named by its own label, each with the whole range as its bounds
+     and increment/decrement actions (rule 7 as written).
+   - `NSSlider.isVertical`: the minimum is at the bottom and the Up arrow
+     reaches `moveUp:`, which KayaNSSlider already turns into +nudge.
+   - A thumb's centre travels from half a knob in from each end of the bar,
+     so `expect_thumb` reads the fraction of that TRAVEL (§5 amended).
+   - Probe mechanics only: a posted drag reaches `NSSliderCell`'s tracking
+     only while `NSEvent.pressedMouseButtons` says a button is down (it
+     reads the hardware), and its tracking loop takes one posted drag per
+     gesture; the harness drives through `set_value`, never a drag.
+
 ## §5. How a leg sees it
 
 A new shared scene, `range.steps`, one guest per language: a range 0..10
@@ -183,8 +218,10 @@ handlers write. And `sliders.steps` gains a vertical fader.
   field's precedent).
 - `expect_axis slider#1 "vertical"` and `expect_thumb slider#1 "0.25"`: the
   orientation read from the control, and the thumb's centre as a fraction
-  of the track from the LEFT edge (horizontal) or the BOTTOM (vertical) in
-  the platform's own geometry, two decimals; `expect_thumb range#0 low
+  of its travel (its centre at the minimum to its centre at the maximum,
+  AMENDED 2026-09-29 from "of the track": the knob rests half its width in
+  from each end, §4) from the LEFT edge (horizontal) or the BOTTOM
+  (vertical) in the platform's own geometry, two decimals; `expect_thumb range#0 low
   "0.2"` reads one thumb.
 - `expect_ax range#0 "group/Trim"`, `expect_ax range#0 low "slider/In"`.
 - a stamped range per row commits with its row's key.

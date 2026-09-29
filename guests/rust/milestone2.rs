@@ -103,6 +103,10 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             | Occurrence::InstanceTimeChanged { .. }
             | Occurrence::ColorChanged { .. }
             | Occurrence::InstanceColorChanged { .. }
+            | Occurrence::RangeChanged { .. }
+            | Occurrence::InstanceRangeChanged { .. }
+            | Occurrence::RangeCommitted { .. }
+            | Occurrence::InstanceRangeCommitted { .. }
             | Occurrence::Pasted { .. }
             | Occurrence::InstancePasted { .. }
             | Occurrence::Dropped { .. }

@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x0d0ad42b8674c264n;
+export const SPEC_HASH = 0xee277a9499e5e52dn;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -43,6 +43,7 @@ export const KIND_LABELED = 18;
 export const KIND_SEARCH = 19;
 export const KIND_NUMBER_FIELD = 20;
 export const KIND_COLOR_PICKER = 21;
+export const KIND_RANGE = 22;
 export const DRAW_OP_MOVE_TO = 1;
 export const DRAW_OP_LINE_TO = 2;
 export const DRAW_OP_CLOSE = 3;
@@ -113,6 +114,11 @@ export const PROP_MAX_WIDTH = 42;
 export const PROP_MAX_HEIGHT = 43;
 export const PROP_COLOR = 44;
 export const PROP_ALPHA = 45;
+export const PROP_LOW = 46;
+export const PROP_HIGH = 47;
+export const PROP_MIN_GAP = 48;
+export const PROP_LOW_LABEL = 49;
+export const PROP_HIGH_LABEL = 50;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -400,6 +406,8 @@ export const OCC_SUBMITTED = 33;
 export const OCC_NOTIFICATION_REPLIED = 34;
 export const OCC_FULLSCREEN_CHANGED = 35;
 export const OCC_COLOR_CHANGED = 36;
+export const OCC_RANGE_CHANGED = 37;
+export const OCC_RANGE_COMMITTED = 38;
 
 const text_encoder = new TextEncoder();
 const text_decoder = new TextDecoder("utf-8", { fatal: true });
@@ -1934,6 +1942,96 @@ export function tx_bind_alpha_element(widget_id: number, level = 0, field = 0): 
   return enc.end(TX_SET_PROPERTY);
 }
 
+/** set_property with a constant low value. */
+export function tx_set_low(widget_id: number, low: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_LOW); enc.u32(SOURCE_CONST); enc.value(low);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound low value. */
+export function tx_bind_low(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_LOW); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_low_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_LOW); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant high value. */
+export function tx_set_high(widget_id: number, high: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_HIGH); enc.u32(SOURCE_CONST); enc.value(high);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound high value. */
+export function tx_bind_high(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_HIGH); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_high_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_HIGH); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant min_gap value. */
+export function tx_set_min_gap(widget_id: number, min_gap: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MIN_GAP); enc.u32(SOURCE_CONST); enc.value(min_gap);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound min_gap value. */
+export function tx_bind_min_gap(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MIN_GAP); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_min_gap_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MIN_GAP); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant low_label value. */
+export function tx_set_low_label(widget_id: number, low_label: string): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_LOW_LABEL); enc.u32(SOURCE_CONST); enc.value(low_label);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound low_label value. */
+export function tx_bind_low_label(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_LOW_LABEL); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_low_label_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_LOW_LABEL); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant high_label value. */
+export function tx_set_high_label(widget_id: number, high_label: string): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_HIGH_LABEL); enc.u32(SOURCE_CONST); enc.value(high_label);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound high_label value. */
+export function tx_bind_high_label(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_HIGH_LABEL); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_high_label_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_HIGH_LABEL); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
 /** set_window_prop with a constant title value; window 0, the primary surface. */
 export function tx_set_window_title(window: number, title: string): Uint8Array {
   enc.begin(); enc.u64(window); enc.u32(WPROP_TITLE); enc.u32(SOURCE_CONST); enc.value(title);
@@ -2380,7 +2478,7 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const size = view.getUint32(0, true);
   const kind = view.getUint16(4, true);
-  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED].includes(kind)) return { kind, id: null, keys: [], payload: null };
+  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED].includes(kind)) return { kind, id: null, keys: [], payload: null };
   if (kind === OCC_ALERT_RESULT) {
     // A request's one answer: id + the u32 code.
     return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };
@@ -2574,7 +2672,7 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
     [value, at] = parse_value(buf, at);
     return { kind, id: ident, keys, payload: [removed, start, stop, name, value] };
   }
-  if ([OCC_DRAW_REQUESTED, OCC_TICK].includes(kind)) {
+  if ([OCC_DRAW_REQUESTED, OCC_TICK, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED].includes(kind)) {
     // The canvas asks carry a run of BARE values after the key path with
     // no count in front, read until the record ends (docs/canvas-plan.md §3.2.1).
     const tail: Decoded[] = [];

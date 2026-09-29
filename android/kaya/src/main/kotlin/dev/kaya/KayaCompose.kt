@@ -2072,7 +2072,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x0d0ad42b8674c264uL
+    private const val SPEC_HASH: ULong = 0xee277a9499e5e52duL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -2305,6 +2305,7 @@ object KayaCompose {
     const val KIND_SEARCH = 19
     const val KIND_NUMBER_FIELD = 20
     const val KIND_COLOR_PICKER = 21
+    const val KIND_RANGE = 22
     private const val PROP_TEXT = 1
     private const val PROP_CHECKED = 2
     private const val PROP_VALUE = 3
@@ -2339,6 +2340,11 @@ object KayaCompose {
     private const val PROP_MAX_HEIGHT = 43
     private const val PROP_COLOR = 44
     private const val PROP_ALPHA = 45
+    private const val PROP_LOW = 46
+    private const val PROP_HIGH = 47
+    private const val PROP_MIN_GAP = 48
+    private const val PROP_LOW_LABEL = 49
+    private const val PROP_HIGH_LABEL = 50
     private const val FILE_CONTENT_IMAGES = 1
     private const val PROP_COLUMNS = 11
     // The accessibility identifier (never spoken) and label (spoken).
@@ -3244,6 +3250,7 @@ object KayaCompose {
                         KIND_LABELED -> KayaSceneModel.labeleds.add(node)
                         KIND_SEARCH -> KayaSceneModel.searches.add(node)
                         KIND_COLOR_PICKER -> KayaSceneModel.colorPickers.add(node)
+                        KIND_RANGE -> depthStub("range")
                         KIND_NUMBER_FIELD -> {
                             // docs/number-field-plan.md §2: unset bounds are
                             // ±2^53, the step 1, and the field shows its
@@ -3289,8 +3296,12 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.spacing = readF64(b)
                         PROP_ALIGN ->
                             KayaSceneModel.nodes[id]!!.align = readI64(b)
-                        PROP_AXIS ->
+                        PROP_AXIS -> {
+                            // The vertical slider (docs/range-plan.md §6) is
+                            // the range's breadth slice.
+                            if (KayaSceneModel.nodes[id]!!.kind == KIND_SLIDER) depthStub("range")
                             KayaSceneModel.nodes[id]!!.axis = readI64(b)
+                        }
                         PROP_INDETERMINATE ->
                             KayaSceneModel.nodes[id]!!.indeterminate = readBool(b)
                         PROP_FILL ->
@@ -3322,6 +3333,8 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.maxHeight = readF64(b)
                         PROP_COLOR -> KayaSceneModel.nodes[id]!!.color = readI64(b)
                         PROP_ALPHA -> KayaSceneModel.nodes[id]!!.alpha = readBool(b)
+                        PROP_LOW, PROP_HIGH, PROP_MIN_GAP, PROP_LOW_LABEL, PROP_HIGH_LABEL ->
+                            depthStub("range")
                         // docs/rich-text-plan.md §14: this platform's lever
                         // is `clearHistory()`, so taking ownership drops what
                         // the field had banked.
@@ -7036,6 +7049,7 @@ object KayaCompose {
             "search" -> KayaSceneModel.searches
             "number_field" -> KayaSceneModel.numberFields
             "color_picker" -> KayaSceneModel.colorPickers
+            "range" -> depthStub("range")
             "textarea" -> KayaSceneModel.textareas
             "date_picker" -> KayaSceneModel.datePickers
             "time_picker" -> KayaSceneModel.timePickers
@@ -8221,7 +8235,9 @@ object KayaCompose {
                         if (!ok) failures.add("no such target ${parts[1]}")
                         else kayaAwaitAnswer(answered)
                     }
+                    "expect_thumb" -> depthStub("range")
                     "set_value" -> {
+                        if (parts[1].startsWith("range")) depthStub("range")
                         // THROUGH THE COMMIT PATH a user's gesture takes
                         // (docs/slider-plan.md S8), as one finished
                         // gesture: the step's snap, the range's clamp,
@@ -8313,6 +8329,7 @@ object KayaCompose {
                         }
                     }
                     "expect_value" -> {
+                        if (parts[1].startsWith("range")) depthStub("range")
                         // The slider's value in the one fixed spelling
                         // (docs/slider-plan.md S8): the state the composable
                         // draws from IS the control's value here.
@@ -10452,6 +10469,7 @@ object KayaCompose {
                         }
                     }
                     "expect_axis" -> {
+                        if (parts[1].startsWith("slider")) depthStub("range")
                         // The axis the render actually used, recorded at
                         // layout time (kayaContainerAxis) — never the
                         // model's field: a backend that ignored the write
@@ -10836,6 +10854,7 @@ object KayaCompose {
                         else failures.add("$got menus, wanted $want")
                     }
                     "expect_ax" -> {
+                        if (parts[1].startsWith("range")) depthStub("range")
                         val template = kayaExpandTemplate(activity, quoted(parts.drop(2)))
                         val want = template.text
                         val node = kayaWidgetTarget(parts[1])
@@ -14606,6 +14625,7 @@ private fun KayaRenderCore(
             KayaTextField(node, a11y, boxFill, singleLine = true, search = true)
         KayaCompose.KIND_NUMBER_FIELD -> KayaNumberField(node, a11y, boxFill)
         KayaCompose.KIND_COLOR_PICKER -> KayaColorButton(node, a11y, boxFill)
+        KayaCompose.KIND_RANGE -> depthStub("range")
         KayaCompose.KIND_LABELED -> {
             // THE LABELLED ROW (docs/forms-plan.md §3): Material's own
             // labelled row, the value trailing and a WIDE control folded

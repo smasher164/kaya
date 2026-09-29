@@ -247,6 +247,13 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // whether its user may choose translucency (off: the alpha is FF).
     ("color", 44, PropKind::Color),
     ("alpha", 45, PropKind::Bool),
+    // docs/range-plan.md §2: a range's two thumbs, the least distance
+    // between them, and what each thumb speaks.
+    ("low", 46, PropKind::F64),
+    ("high", 47, PropKind::F64),
+    ("min_gap", 48, PropKind::F64),
+    ("low_label", 49, PropKind::Str),
+    ("high_label", 50, PropKind::Str),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -3172,6 +3179,36 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   held. A property write never echoes \
                   (docs/color-picker-plan.md §2, §3).",
         },
+        Record {
+            kind: 37,
+            name: "range_changed",
+            fields: &[
+                f("id", FieldTy::U64),
+                f("path_len", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("span", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "path_len key values follow, then the range's LOW and HIGH \
+                  as two F64 values, on every movement of either thumb \
+                  (docs/range-plan.md §2). A handler never sees half a \
+                  trim. A property write never echoes.",
+        },
+        Record {
+            kind: 38,
+            name: "range_committed",
+            fields: &[
+                f("id", FieldTy::U64),
+                f("path_len", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("span", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "range_changed's body, ONCE PER GESTURE on either thumb: a \
+                  release, a key, an assistive adjust (docs/range-plan.md \
+                  §3 rule 3). Not sent when the pair equals the last \
+                  committed one; a property write never echoes.",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -3227,6 +3264,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("search", 19),
                 ("number_field", 20),
                 ("color_picker", 21),
+                ("range", 22),
             ],
         },
         EnumSpec {
@@ -3335,6 +3373,11 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("max_height", 43),
                 ("color", 44),
                 ("alpha", 45),
+                ("low", 46),
+                ("high", 47),
+                ("min_gap", 48),
+                ("low_label", 49),
+                ("high_label", 50),
             ],
         },
         EnumSpec {
@@ -3887,6 +3930,8 @@ mod tests {
                 ("notification_replied", crate::ring::REC_NOTIFICATION_REPLIED),
                 ("fullscreen_changed", crate::ring::REC_FULLSCREEN_CHANGED),
                 ("color_changed", crate::ring::REC_COLOR_CHANGED),
+                ("range_changed", crate::ring::REC_RANGE_CHANGED),
+                ("range_committed", crate::ring::REC_RANGE_COMMITTED),
             ]
         );
     }
@@ -4107,6 +4152,7 @@ mod tests {
                     ("kind", "search") => wire::KIND_SEARCH,
                     ("kind", "number_field") => wire::KIND_NUMBER_FIELD,
                     ("kind", "color_picker") => wire::KIND_COLOR_PICKER,
+                    ("kind", "range") => wire::KIND_RANGE,
                     ("draw_op", _) => canvas_pin(wire::DRAW_OPS, name),
                     ("paint", _) => canvas_pin(wire::PAINTS, name),
                     ("fill_rule", _) => canvas_pin(wire::FILL_RULES, name),
@@ -4161,6 +4207,11 @@ mod tests {
                     ("prop", "max_height") => wire::PROP_MAX_HEIGHT,
                     ("prop", "color") => wire::PROP_COLOR,
                     ("prop", "alpha") => wire::PROP_ALPHA,
+                    ("prop", "low") => wire::PROP_LOW,
+                    ("prop", "high") => wire::PROP_HIGH,
+                    ("prop", "min_gap") => wire::PROP_MIN_GAP,
+                    ("prop", "low_label") => wire::PROP_LOW_LABEL,
+                    ("prop", "high_label") => wire::PROP_HIGH_LABEL,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,

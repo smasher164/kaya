@@ -1,6 +1,6 @@
 # The web platform: two-thumb range controls
 
-Source files downloaded for reading live in `scratchpad/range/web/`.
+Source files downloaded for reading live in `scratchpad/range/web/ (gone)`.
 
 ## 1. WAI-ARIA APG, Multi-Thumb Slider pattern
 

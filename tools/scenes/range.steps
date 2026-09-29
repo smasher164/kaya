@@ -1,0 +1,57 @@
+# The range and the vertical slider (docs/range-plan.md §5). Both values are
+# read from the CONTROL (expect_value, space-separated, the slider's spelling)
+# and from the labels the guest's handlers write; thumbs are named after the
+# target.
+expect_value range#0 "2 8"
+expect label#0 "live: 2 8"
+expect label#1 "commits: 0"
+expect_thumb range#0 low "0.2"
+expect_thumb range#0 high "0.8"
+# A driven move goes THROUGH the thumb's own control: 3.2 snaps to the step,
+# the pair moves live and commits once.
+set_value range#0 low 3.2
+expect_value range#0 "3 8"
+expect label#0 "live: 3 8"
+expect label#1 "commits: 1 at 3 8"
+# The thumbs stop at the gap: low asked past high rests at high - min_gap.
+set_value range#0 low 9.5
+expect_value range#0 "7 8"
+expect label#1 "commits: 2 at 7 8"
+# A high thumb asked below low stops too, where it already was, so no pair
+# moves and nothing commits.
+set_value range#0 high 1
+expect_value range#0 "7 8"
+settle 700
+expect label#1 "commits: 2 at 7 8"
+# The echo negative: button#0 writes the low signal PROGRAMMATICALLY. The
+# control moves; nothing may fire, live or committed.
+click button#0
+expect_value range#0 "1 8"
+expect_thumb range#0 low "0.1"
+settle 700
+expect label#0 "live: 7 8"
+expect label#1 "commits: 2 at 7 8"
+# The keyboard: a thumb's arrow moves it by the step and commits at once.
+nudge range#0 high down
+expect_value range#0 "1 7.5"
+expect label#1 "commits: 3 at 1 7.5"
+# The vertical fader: the minimum at the bottom, Up raises it.
+expect_axis slider#0 "horizontal"
+expect_axis slider#1 "vertical"
+expect_thumb slider#0 "0.5"
+expect_thumb slider#1 "0.25"
+nudge slider#1 up
+expect_value slider#1 "0.5"
+expect label#2 "volume: 0.5"
+expect_thumb slider#1 "0.5"
+# The template zone: a stamped range per clip commits with its row's key.
+expect_value range@clip[b] "3 7"
+set_value range@clip[b] high 9
+expect label#3 "clip b: 3 9"
+expect_value range@clip[b] "3 9"
+expect_value range@clip[a] "1 4"
+# The accessible shape: a group of two sliders, each named by its thumb.
+expect_ax range#0 "group/Trim"
+expect_ax range#0 low "slider/In"
+expect_ax range#0 high "slider/Out"
+expect_ax slider#1 "slider/Volume"

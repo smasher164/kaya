@@ -24,7 +24,7 @@ public enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x0d0ad42b8674c264
+let kayaSpecHash: UInt64 = 0xee277a9499e5e52d
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
 func kayaPackDate(_ year: Int, _ month: Int, _ day: Int) -> Int64 {
@@ -2140,6 +2140,166 @@ struct KayaTx {
         self.end(kayaAt)
     }
 
+    /// set_property with a constant low value.
+    mutating func setLow(_ widgetId: UInt64, _ low: Double) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_LOW))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.f64(low))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound low value.
+    mutating func bindLow(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_LOW))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindLowElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_LOW))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
+    /// set_property with a constant high value.
+    mutating func setHigh(_ widgetId: UInt64, _ high: Double) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_HIGH))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.f64(high))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound high value.
+    mutating func bindHigh(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_HIGH))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindHighElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_HIGH))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
+    /// set_property with a constant min_gap value.
+    mutating func setMinGap(_ widgetId: UInt64, _ minGap: Double) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_MIN_GAP))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.f64(minGap))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound min_gap value.
+    mutating func bindMinGap(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_MIN_GAP))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindMinGapElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_MIN_GAP))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
+    /// set_property with a constant low_label value.
+    mutating func setLowLabel(_ widgetId: UInt64, _ lowLabel: String) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_LOW_LABEL))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.str(lowLabel))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound low_label value.
+    mutating func bindLowLabel(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_LOW_LABEL))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindLowLabelElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_LOW_LABEL))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
+    /// set_property with a constant high_label value.
+    mutating func setHighLabel(_ widgetId: UInt64, _ highLabel: String) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_HIGH_LABEL))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.str(highLabel))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound high_label value.
+    mutating func bindHighLabel(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_HIGH_LABEL))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindHighLabelElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_HIGH_LABEL))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
     /// set_window_prop with a constant title value (window 0, the primary surface).
     mutating func setWindowTitle(_ window: UInt64, _ title: String) {
         let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
@@ -2869,6 +3029,8 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             || kind == UInt16(KAYA_OCCURRENCE_NOTIFICATION_REPLIED)
             || kind == UInt16(KAYA_OCCURRENCE_FULLSCREEN_CHANGED)
             || kind == UInt16(KAYA_OCCURRENCE_COLOR_CHANGED)
+            || kind == UInt16(KAYA_OCCURRENCE_RANGE_CHANGED)
+            || kind == UInt16(KAYA_OCCURRENCE_RANGE_COMMITTED)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {
@@ -3120,6 +3282,8 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
         }
         if kind == UInt16(KAYA_OCCURRENCE_DRAW_REQUESTED)
             || kind == UInt16(KAYA_OCCURRENCE_TICK)
+            || kind == UInt16(KAYA_OCCURRENCE_RANGE_CHANGED)
+            || kind == UInt16(KAYA_OCCURRENCE_RANGE_COMMITTED)
         {
             // The canvas asks carry a run of BARE values after the
             // key path — the assigned size, and a tick's frame time

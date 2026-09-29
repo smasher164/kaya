@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x0d0ad42b8674c264ULL
+#define KAYA_SPEC_HASH 0xee277a9499e5e52dULL
 
 
 /* Create a signal holding `initial`. */
@@ -2246,6 +2246,166 @@ static inline void kaya_tx_bind_alpha_element(KayaTx *tx, uint64_t widget_id, ui
     kaya_wire_end(tx, kaya_at);
 }
 
+/* set_property with a constant low value. */
+static inline void kaya_tx_set_low(KayaTx *tx, uint64_t widget_id, double low) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_LOW);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_f64(low));
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a signal-bound low value. */
+static inline void kaya_tx_bind_low(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_LOW);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_low_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_LOW);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a constant high value. */
+static inline void kaya_tx_set_high(KayaTx *tx, uint64_t widget_id, double high) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_HIGH);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_f64(high));
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a signal-bound high value. */
+static inline void kaya_tx_bind_high(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_HIGH);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_high_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_HIGH);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a constant min_gap value. */
+static inline void kaya_tx_set_min_gap(KayaTx *tx, uint64_t widget_id, double min_gap) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_MIN_GAP);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_f64(min_gap));
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a signal-bound min_gap value. */
+static inline void kaya_tx_bind_min_gap(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_MIN_GAP);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_min_gap_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_MIN_GAP);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a constant low_label value. */
+static inline void kaya_tx_set_low_label(KayaTx *tx, uint64_t widget_id, const char *low_label) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_LOW_LABEL);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_str(low_label));
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a signal-bound low_label value. */
+static inline void kaya_tx_bind_low_label(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_LOW_LABEL);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_low_label_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_LOW_LABEL);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a constant high_label value. */
+static inline void kaya_tx_set_high_label(KayaTx *tx, uint64_t widget_id, const char *high_label) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_HIGH_LABEL);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_str(high_label));
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a signal-bound high_label value. */
+static inline void kaya_tx_bind_high_label(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_HIGH_LABEL);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_high_label_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_HIGH_LABEL);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, kaya_at);
+}
+
 /* set_menu_prop with a constant label value. */
 static inline void kaya_tx_set_menu_label(KayaTx *tx, uint64_t item, const char *label) {
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
@@ -2695,6 +2855,64 @@ static inline int kaya_parse_tick(const uint8_t *rec, uint64_t *id,
                                    uint32_t max_vals, uint32_t *n_vals) {
     const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
     if (r->header.kind != KAYA_OCCURRENCE_TICK)
+        return 0;
+    *id = r->id;
+    *n_keys = r->path_len;
+    *n_vals = 0;
+    size_t at = sizeof(KayaRecordButtonClicked);
+    for (uint32_t k = 0; k < r->path_len; k++) {
+        KayaVal scratch;
+        at = kaya_parse_value(rec, at, k < max_keys ? &keys[k] : &scratch);
+    }
+    while (at < r->header.size) {
+        KayaVal scratch;
+        int room = *n_vals < max_vals;
+        at = kaya_parse_value(rec, at, room ? &vals[*n_vals] : &scratch);
+        (*n_vals)++;
+    }
+    return 1;
+}
+
+/* Decode a range_changed occurrence: id plus path_len key-path values,
+ * then the trailing run of bare values (width and height in
+ * points, and a tick's frame time in seconds) — read to the end
+ * of the record, since the run carries no count. Returns 1 and
+ * fills the outputs, or 0 for other kinds. */
+static inline int kaya_parse_range_changed(const uint8_t *rec, uint64_t *id,
+                                            KayaVal *keys, uint32_t max_keys,
+                                            uint32_t *n_keys, KayaVal *vals,
+                                            uint32_t max_vals, uint32_t *n_vals) {
+    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
+    if (r->header.kind != KAYA_OCCURRENCE_RANGE_CHANGED)
+        return 0;
+    *id = r->id;
+    *n_keys = r->path_len;
+    *n_vals = 0;
+    size_t at = sizeof(KayaRecordButtonClicked);
+    for (uint32_t k = 0; k < r->path_len; k++) {
+        KayaVal scratch;
+        at = kaya_parse_value(rec, at, k < max_keys ? &keys[k] : &scratch);
+    }
+    while (at < r->header.size) {
+        KayaVal scratch;
+        int room = *n_vals < max_vals;
+        at = kaya_parse_value(rec, at, room ? &vals[*n_vals] : &scratch);
+        (*n_vals)++;
+    }
+    return 1;
+}
+
+/* Decode a range_committed occurrence: id plus path_len key-path values,
+ * then the trailing run of bare values (width and height in
+ * points, and a tick's frame time in seconds) — read to the end
+ * of the record, since the run carries no count. Returns 1 and
+ * fills the outputs, or 0 for other kinds. */
+static inline int kaya_parse_range_committed(const uint8_t *rec, uint64_t *id,
+                                              KayaVal *keys, uint32_t max_keys,
+                                              uint32_t *n_keys, KayaVal *vals,
+                                              uint32_t max_vals, uint32_t *n_vals) {
+    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
+    if (r->header.kind != KAYA_OCCURRENCE_RANGE_COMMITTED)
         return 0;
     *id = r->id;
     *n_keys = r->path_len;

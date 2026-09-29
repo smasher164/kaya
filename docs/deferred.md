@@ -9,6 +9,39 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
+## BUILD — the range and the vertical slider (docs/range-plan.md), depth on the mac (2026-09-29); the GTK, WinUI and Compose arms, the iOS legs, rangertl, the sliders scene's fader and the other eight bindings are the breadth slice
+KEY: range, KIND_RANGE, range_changed, range_committed, min_gap, low_label, high_label, on_range, on_range_commit, kaya_range_clamp, clamp_thumb, expect_thumb, set_thumb, nudge_thumb, ax_thumb, vertical slider, slider axis, rangertl, DEPTH STUB range
+
+The depth slice: kind 22 with `low`, `high`, `min_gap`, `low_label` and
+`high_label`, the slider's `min`/`max`/`step`/`tick_spacing`, the
+`range_changed`/`range_committed` occurrences carrying both values, the root's
+refusals on the complete declaration and at the signal barrier, the one clamp
+(`range::clamp_thumb`, `kaya_range_clamp`), the slider taking `axis`, the Rust
+sugar in both zones, the SwiftUI arm (the stacked pair measured in plan §4 on
+the mac, and built unmeasured on iOS with the rotated fader), and
+tools/scenes/range.steps green on the mac lane. What breadth owes:
+  - **DEPTH STUB: range on gtk** — two subclassed GtkScales answering
+    `contains` near their knob over a drawn trough, and the vertical slider's
+    `inverted`, measured per plan §4.2/§4.3 first.
+  - **DEPTH STUB: range on winui** — two Sliders in one Grid cell with the
+    track parts hidden and z-order set on PointerMoved, and
+    `Orientation::Vertical`, measured per plan §4.2/§4.3 first.
+  - **DEPTH STUB: range on compose** — material3's RangeSlider (plan §4.1's
+    five measurements first) and the rotated fader.
+  - The iOS legs: tools/lib/lanes/ios.py's UNWIRED_SCENES holds `range` until
+    the two UISliders' hit routing, the rotated fader's hit box, accessibility
+    frame and adjust direction are measured (plan §4.2, §4.3).
+  - `rangertl.steps` (plan §5, rule 6's wall) and the vertical fader in
+    `sliders.steps`; the depth scene carries the fader for now.
+  - The other eight bindings' `range`, its props and two handlers in both
+    zones, and `axis` on a slider (check-sugar-surface is red on them by
+    design until then).
+  - An app write crossing a thumb the USER moved: the root checks the app's
+    declared pair, which does not follow user moves, so a write of `low`
+    above a user-lowered `high` passes the root and reaches the control
+    crossed. Measure what each arm shows and decide whether the arm holds the
+    pair or the root reads the committed values.
+
 ## ~~BUILD — the colour picker (docs/color-picker-plan.md), depth on the mac (2026-09-28); the GTK, WinUI and Compose arms, the iOS legs, pick_color and the other eight bindings are the breadth slice~~ COMPLETE 2026-09-28: every item below LANDED except `pick_color`, which moved to its own entry ("BUILD — the colour picker's panel scene"); colorpicker legs on all five lanes, validation in the breadth commit
 KEY: colour picker, color_picker, color picker, KIND_COLOR_PICKER, colorpicker, colorpanel, color_changed, on_color, PropKind::Color, set_color, expect_color, pick_color, kaya_color_quantize, Color type, DEPTH STUB colorpicker
 

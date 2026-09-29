@@ -158,6 +158,14 @@
 #define KAYA_OCCURRENCE_COLOR_CHANGED 36
 
 /**
+ * RANGE_CHANGED / RANGE_COMMITTED { tag; F64 low; F64 high }
+ * (docs/range-plan.md §2).
+ */
+#define KAYA_OCCURRENCE_RANGE_CHANGED 37
+
+#define KAYA_OCCURRENCE_RANGE_COMMITTED 38
+
+/**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
  *   CREATE_SIGNAL:     u64 signal_id, value
@@ -803,6 +811,8 @@
 
 #define KAYA_KIND_COLOR_PICKER 21
 
+#define KAYA_KIND_RANGE 22
+
 /**
  * Property keys.
  */
@@ -948,6 +958,19 @@
 #define KAYA_PROP_COLOR 44
 
 #define KAYA_PROP_ALPHA 45
+
+/**
+ * A range's thumbs, gap and thumb labels (docs/range-plan.md §2).
+ */
+#define KAYA_PROP_LOW 46
+
+#define KAYA_PROP_HIGH 47
+
+#define KAYA_PROP_MIN_GAP 48
+
+#define KAYA_PROP_LOW_LABEL 49
+
+#define KAYA_PROP_HIGH_LABEL 50
 
 /**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
@@ -1588,6 +1611,11 @@ typedef struct KayaHostApi {
    */
   uint32_t (*color_quantize)(double, double, double, double);
   void (*emit_color_changed)(const uint8_t*, uintptr_t, int64_t);
+  /**
+   * docs/range-plan.md §3 rule 2: the one clamp, and the pair it settled.
+   */
+  double (*range_clamp)(double, double, double, double, uint8_t, double, double);
+  void (*emit_range)(const uint8_t*, uintptr_t, double, double, uint8_t);
   const uint8_t *(*blob_data)(uint64_t, uintptr_t*);
   uint64_t (*blob_count)(void);
   /**
@@ -2614,6 +2642,31 @@ void kaya_emit_value_changed(const uint8_t *tag, uintptr_t tag_len, double value
  * Do not combine with kaya_run.
  */
 void kaya_emit_value_committed(const uint8_t *tag, uintptr_t tag_len, double value);
+
+/**
+ * Presentation side: THE RANGE'S ONE CLAMP (docs/range-plan.md §3 rule 2):
+ * a moved thumb's raw value snapped to `step`, inside `min..=max` and
+ * `gap` from `other`. `low` is nonzero for the low thumb. Every arm's
+ * value path calls it and writes the answer back into its control.
+ */
+double kaya_range_clamp(double min,
+                        double max,
+                        double step,
+                        double gap,
+                        uint8_t low,
+                        double other,
+                        double raw);
+
+/**
+ * Presentation side: emit a range's pair, live (`committed` 0) on every
+ * movement or once per gesture (`committed` nonzero), `tag` the range's
+ * CREATE tag (docs/range-plan.md §2). Do not combine with kaya_run.
+ */
+void kaya_emit_range(const uint8_t *tag,
+                     uintptr_t tag_len,
+                     double low,
+                     double high,
+                     uint8_t committed);
 
 /**
  * Presentation side: the field SUBMITTED (docs/submit-plan.md S1) — `tag`

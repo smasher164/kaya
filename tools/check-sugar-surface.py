@@ -159,27 +159,27 @@ def kind_case(kind):
 def check_kind(kind, findings=None):
     snake, pascal, camel = kind_case(kind)
     check("rust", "crates/kaya/src/app.rs", kind,
-          f"pub fn {snake}[a-z_]*(<[^>]*>)?\\(", findings)
+          f"pub fn {snake}(_[a-z_]*)?(<[^>]*>)?\\(", findings)
     check("python", "bindings/python/kaya/__init__.py", kind,
-          f"^def {snake}[a-z_]*\\(", findings)
+          f"^def {snake}(_[a-z_]*)?\\(", findings)
     check("go", "bindings/go/app.go", kind,
-          f"func \\(tx \\*Tx\\) {pascal}[A-Za-z]*\\(", findings)
+          f"func \\(tx \\*Tx\\) {pascal}([A-Z][A-Za-z]*)?\\(", findings)
     check("csharp", "bindings/csharp/KayaApp.cs", kind,
-          f"public (Widget|void|T) {pascal}[A-Za-z]*(<[^>]*>)?\\(", findings)
+          f"public (Widget|void|T) {pascal}([A-Z][A-Za-z]*)?(<[^>]*>)?\\(", findings)
     check("java", "bindings/java/dev/kaya/KayaApp.java", kind,
-          f"public Widget {camel}[A-Za-z]*\\(", findings)
+          f"public Widget {camel}([A-Z][A-Za-z]*)?\\(", findings)
     # The generic arm is the container spelling since X3 (`func row<R>(`),
     # and the zone is KayaAppTx's block — see SWIFT_LIVE_ZONE above.
     check("swift", "bindings/swift/KayaApp.swift", kind,
-          f"func {camel}[A-Za-z]*(<[^>]*>)?\\(", findings,
+          f"func {camel}([A-Z][A-Za-z]*)?(<[^>]*>)?\\(", findings,
           zone=SWIFT_LIVE_ZONE)
     # Leading whitespace allowed: row/column are Declare-class methods.
     check("haskell", "bindings/haskell/KayaApp.hs", kind,
-          f"^[[:space:]]*{camel}[A-Za-z]* ::", findings)
+          f"^[[:space:]]*{camel}([A-Z][A-Za-z]*)? ::", findings)
     check("ocaml", "bindings/ocaml/kaya_app.ml", kind,
-          f"^let {snake}[a-z_]* ", findings)
+          f"^let {snake}(_[a-z_]*)? ", findings)
     check("js", "bindings/js/kaya/index.ts", kind,
-          f"^export function {camel}[A-Za-z]*(<[^>]*>)?\\(", findings)
+          f"^export function {camel}([A-Z][A-Za-z]*)?(<[^>]*>)?\\(", findings)
 
 
 # --- THE TEXT-RANGE SURFACE, in all nine --------------------------
@@ -4613,6 +4613,19 @@ if multiword_fake != 9:
     selftest_exit(f"check-sugar-surface: self-test failed "
                   f"({multiword_fake}/9 patterns fired for a multi-word "
                   f"kind that exists nowhere)")
+# AND A PREFIX FAKE (docs/range-plan.md's depth slice, 2026-09-29): a kind
+# whose name begins another name was satisfied by it, since each row took
+# the kind word plus ANY letters — `range` stood in OCaml's
+# `let ranged_act_bounds` and Haskell's `rangedActBounds ::`. `slide` begins
+# `slider` in all nine, so every row must still find nothing for it.
+fake = []
+check_kind("slide", findings=fake)
+prefix_fake = sum(1 for m in fake if "no live-zone constructor" in m)
+if prefix_fake != 9:
+    selftest_exit(f"check-sugar-surface: self-test failed "
+                  f"({prefix_fake}/9 patterns fired for `slide`, a kind that "
+                  f"is only the start of `slider`)")
+print(f"check-sugar-surface: prefix fake `slide` fired {prefix_fake}/9")
 print("check-sugar-surface: kind-name derivation watched: "
       f"one-word fake {fake_failures}/9, multi-word fake "
       f"{multiword_fake}/9, and "

@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x0d0ad42b8674c264
+specHash = 0xee277a9499e5e52d
 
 valueBool :: Word32
 valueBool = 1
@@ -94,6 +94,8 @@ kindNumberField :: Word32
 kindNumberField = 20
 kindColorPicker :: Word32
 kindColorPicker = 21
+kindRange :: Word32
+kindRange = 22
 drawOpMoveTo :: Word32
 drawOpMoveTo = 1
 drawOpLineTo :: Word32
@@ -234,6 +236,16 @@ propColor :: Word32
 propColor = 44
 propAlpha :: Word32
 propAlpha = 45
+propLow :: Word32
+propLow = 46
+propHigh :: Word32
+propHigh = 47
+propMinGap :: Word32
+propMinGap = 48
+propLowLabel :: Word32
+propLowLabel = 49
+propHighLabel :: Word32
+propHighLabel = 50
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -806,6 +818,10 @@ occKindFullscreenChanged :: Word16
 occKindFullscreenChanged = 35
 occKindColorChanged :: Word16
 occKindColorChanged = 36
+occKindRangeChanged :: Word16
+occKindRangeChanged = 37
+occKindRangeCommitted :: Word16
+occKindRangeCommitted = 38
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -1971,6 +1987,101 @@ txBindAlphaElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propAlpha <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
+-- set_property with a constant low value.
+txSetLow :: Word64 -> Double -> Builder
+txSetLow widgetId low = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propLow <> word32LE sourceConst
+    <> encodeValue (VF64 low))
+
+-- set_property with a signal-bound low value.
+txBindLow :: Word64 -> Word64 -> Builder
+txBindLow widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propLow <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindLowElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindLowElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propLow <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant high value.
+txSetHigh :: Word64 -> Double -> Builder
+txSetHigh widgetId high = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propHigh <> word32LE sourceConst
+    <> encodeValue (VF64 high))
+
+-- set_property with a signal-bound high value.
+txBindHigh :: Word64 -> Word64 -> Builder
+txBindHigh widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propHigh <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindHighElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindHighElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propHigh <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant min_gap value.
+txSetMinGap :: Word64 -> Double -> Builder
+txSetMinGap widgetId minGap = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propMinGap <> word32LE sourceConst
+    <> encodeValue (VF64 minGap))
+
+-- set_property with a signal-bound min_gap value.
+txBindMinGap :: Word64 -> Word64 -> Builder
+txBindMinGap widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propMinGap <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindMinGapElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindMinGapElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propMinGap <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant low_label value.
+txSetLowLabel :: Word64 -> String -> Builder
+txSetLowLabel widgetId lowLabel = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propLowLabel <> word32LE sourceConst
+    <> encodeValue (VStr lowLabel))
+
+-- set_property with a signal-bound low_label value.
+txBindLowLabel :: Word64 -> Word64 -> Builder
+txBindLowLabel widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propLowLabel <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindLowLabelElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindLowLabelElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propLowLabel <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant high_label value.
+txSetHighLabel :: Word64 -> String -> Builder
+txSetHighLabel widgetId highLabel = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propHighLabel <> word32LE sourceConst
+    <> encodeValue (VStr highLabel))
+
+-- set_property with a signal-bound high_label value.
+txBindHighLabel :: Word64 -> Word64 -> Builder
+txBindHighLabel widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propHighLabel <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindHighLabelElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindHighLabelElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propHighLabel <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
 -- set_window_prop with a constant title value (window 0, the primary surface).
 txSetWindowTitle :: Word64 -> String -> Builder
 txSetWindowTitle window title = wireRecord txKindSetWindowProp
@@ -2447,7 +2558,7 @@ parseOccurrence ::
   IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues, Maybe DropValues, [Value]))
 parseOccurrence redeem rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted && kind /= occKindSheetDismissed && kind /= occKindDismissRequested && kind /= occKindSubmitted && kind /= occKindNotificationReplied && kind /= occKindFullscreenChanged && kind /= occKindColorChanged
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted && kind /= occKindSheetDismissed && kind /= occKindDismissRequested && kind /= occKindSubmitted && kind /= occKindNotificationReplied && kind /= occKindFullscreenChanged && kind /= occKindColorChanged && kind /= occKindRangeChanged && kind /= occKindRangeCommitted
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64
@@ -2562,7 +2673,7 @@ parseOccurrence redeem rec = do
           -- frame time — with no count in front, so they are
           -- read until the record ends (canvas-plan §3.2.1).
           tail_ <-
-            if kind == occKindDrawRequested || kind == occKindTick
+            if kind == occKindDrawRequested || kind == occKindTick || kind == occKindRangeChanged || kind == occKindRangeCommitted
               then do
                 stop <- peekByteOff rec 0 :: IO Word32
                 let rest at acc
