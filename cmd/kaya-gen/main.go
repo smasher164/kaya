@@ -409,6 +409,10 @@ func generateRecord(w func(string, ...any), strct *ast.StructType, name, key str
 	w("\treturn r.c.Slider(r.t, min, max, f, onChange)")
 	w("}")
 	w("")
+	w("func (r %sRow) NumberField(f kaya.Field[float64], onCommit func(*kaya.Tx, %s, float64)) kaya.Node {", lowerFirst(name), key)
+	w("\treturn r.c.NumberField(r.t, f, onCommit)")
+	w("}")
+	w("")
 	// THE PROPS, on the same surface as the constructors that hand out
 	// the nodes they take. Without them this surface — the one a record
 	// guest actually writes — could give a stamped copy no a11y name and
@@ -424,6 +428,10 @@ func generateRecord(w func(string, ...any), strct *ast.StructType, name, key str
 	w("func (r %sRow) SetStep(n kaya.Node, step float64) { r.t.SetStep(n, step) }", lowerFirst(name))
 	w("")
 	w("func (r %sRow) SetTickSpacing(n kaya.Node, spacing float64) { r.t.SetTickSpacing(n, spacing) }", lowerFirst(name))
+	w("")
+	w("func (r %sRow) SetMin(n kaya.Node, min float64) { r.t.SetMin(n, min) }", lowerFirst(name))
+	w("")
+	w("func (r %sRow) SetMax(n kaya.Node, max float64) { r.t.SetMax(n, max) }", lowerFirst(name))
 	w("")
 	w("func (r %sRow) SetA11yID(n kaya.Node, id string) { r.t.SetA11yID(n, id) }", lowerFirst(name))
 	w("func (r %sRow) ContextMenu(n kaya.Node, c *kaya.ContextCatalog) { r.t.ContextMenu(n, c) }", lowerFirst(name))
