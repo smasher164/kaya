@@ -232,6 +232,7 @@ pub(crate) const KIND_TIME_PICKER: u32 = 17;
 pub(crate) const KIND_LABELED: u32 = 18;
 pub(crate) const KIND_SEARCH: u32 = 19;
 pub(crate) const KIND_NUMBER_FIELD: u32 = 20;
+pub(crate) const KIND_COLOR_PICKER: u32 = 21;
 
 // Draw opcodes (docs/canvas-plan.md §3.3). The op stream is a flat run
 // of tagged values: one of these as an i64, then its operands.
@@ -427,6 +428,8 @@ pub(crate) const PROP_MAX_LINES: u32 = 40;
 pub(crate) const PROP_SYMBOL: u32 = 41;
 pub(crate) const PROP_MAX_WIDTH: u32 = 42;
 pub(crate) const PROP_MAX_HEIGHT: u32 = 43;
+pub(crate) const PROP_COLOR: u32 = 44;
+pub(crate) const PROP_ALPHA: u32 = 45;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
@@ -913,6 +916,7 @@ fn widget_kind(raw: u32) -> WidgetKind {
         KIND_LABELED => WidgetKind::Labeled,
         KIND_SEARCH => WidgetKind::Search,
         KIND_NUMBER_FIELD => WidgetKind::NumberField,
+        KIND_COLOR_PICKER => WidgetKind::ColorPicker,
         other => panic!("kaya: unknown widget kind {other}"),
     }
 }
@@ -962,6 +966,8 @@ fn prop(raw: u32) -> Prop {
         PROP_SYMBOL => Prop::Symbol,
         PROP_MAX_WIDTH => Prop::MaxWidth,
         PROP_MAX_HEIGHT => Prop::MaxHeight,
+        PROP_COLOR => Prop::Color,
+        PROP_ALPHA => Prop::Alpha,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -2966,6 +2972,24 @@ pub fn decode_time_changed_tag(tag: &[u8], packed: i64) -> Occurrence {
     }
 }
 
+/// docs/color-picker-plan.md §2: the tag, then the packed colour as one I64.
+pub fn color_changed_body(tag: &[u8], packed: i64) -> Vec<u8> {
+    date_changed_body(tag, packed)
+}
+
+pub fn decode_color_changed_tag(tag: &[u8], packed: i64) -> Occurrence {
+    let mut r = Reader { buf: tag, at: 0, blobs: &|_| None };
+    let id = r.u64();
+    let path = r.path();
+    let color = crate::protocol::Color::from_packed(packed)
+        .unwrap_or_else(|why| panic!("kaya: a backend emitted a colour that is not one: {why}"));
+    if path.is_empty() {
+        Occurrence::ColorChanged { id: WidgetId(id), color }
+    } else {
+        Occurrence::InstanceColorChanged { node: TemplateNodeId(id), path, color }
+    }
+}
+
 pub fn decode_toggled_tag(tag: &[u8], checked: bool) -> Occurrence {
     let mut r = Reader { buf: tag, at: 0, blobs: &|_| None };
     let id = r.u64();
@@ -4141,6 +4165,7 @@ fn kind_raw(kind: WidgetKind) -> u32 {
         WidgetKind::Labeled => KIND_LABELED,
         WidgetKind::Search => KIND_SEARCH,
         WidgetKind::NumberField => KIND_NUMBER_FIELD,
+        WidgetKind::ColorPicker => KIND_COLOR_PICKER,
     }
 }
 
@@ -4402,6 +4427,8 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::Symbol => PROP_SYMBOL,
         Prop::MaxWidth => PROP_MAX_WIDTH,
         Prop::MaxHeight => PROP_MAX_HEIGHT,
+        Prop::Color => PROP_COLOR,
+        Prop::Alpha => PROP_ALPHA,
     }
 }
 

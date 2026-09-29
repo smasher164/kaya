@@ -87,6 +87,10 @@ pub enum TargetKind {
     /// Return or `unfocus`, stepped by `nudge`, read by `expect` (its text)
     /// and `expect_value` (its committed value).
     NumberField,
+    /// The colour picker (docs/color-picker-plan.md §5): driven by
+    /// `set_color` through its commit door, read by `expect_color`, sampled
+    /// by `expect_ink`'s `center`.
+    ColorPicker,
     /// Grids are targetable under the container convention: only index
     /// 0, only in a scene that keeps exactly one grid
     /// (tools/check-steps.py).
@@ -170,6 +174,12 @@ pub enum Step {
     /// (a programmatic write, GTK's out-of-range snap) where occurrences
     /// and labels can only measure an absence.
     ExpectPicker(Target, String),
+    /// A user's colour choice through the picker's commit door, WITHOUT
+    /// opening the surface (docs/color-picker-plan.md §5).
+    SetColor(Target, crate::Color),
+    /// The CONTROL's colour, `RRGGBBAA`, read back from the platform
+    /// control (expect_picker's shape and reason).
+    ExpectColor(Target, String),
     /// The CONTROL's value in the fixed spelling (docs/slider-plan.md S8): a
     /// slider's position or a number field's committed value
     /// (docs/number-field-plan.md §5).
@@ -733,6 +743,8 @@ impl Step {
             | Step::SetDate(t, _)
             | Step::SetTime(t, _)
             | Step::ExpectPicker(t, _)
+            | Step::SetColor(t, _)
+            | Step::ExpectColor(t, _)
             | Step::ExpectValue(t, _)
             | Step::SetText(t, _)
             | Step::Expect(t, _)
@@ -871,6 +883,8 @@ impl Step {
             Step::SetDate { .. } => false,
             Step::SetTime { .. } => false,
             Step::ExpectPicker { .. } => true,
+            Step::SetColor { .. } => false,
+            Step::ExpectColor { .. } => true,
             Step::ExpectValue { .. } => true,
             Step::Unfocus { .. } => false,
             Step::Nudge { .. } => false,
@@ -1037,6 +1051,14 @@ pub trait Stage: Send + 'static {
     /// never kaya's model of it, which would make the scene agree with
     /// itself.
     fn picker_value(&self, target: Target) -> String;
+    /// A user's colour choice through the picker's COMMIT DOOR without
+    /// opening its surface (docs/color-picker-plan.md §5): the control's
+    /// value moves and its commit runs as a settled choice would. An opaque
+    /// picker lands the colour opaque, as the control itself does (§4.1).
+    fn set_color(&self, target: Target, color: crate::Color);
+    /// The CONTROL's colour as `RRGGBBAA`, read from the toolkit and
+    /// quantized by the core, never kaya's model of it.
+    fn color_value(&self, target: Target) -> String;
     /// The CONTROL's value, spelled by [`spelled_slider`] — a slider's
     /// position or a number field's committed value, read from the toolkit,
     /// never kaya's model (docs/slider-plan.md S8, docs/number-field-plan.md §5).
@@ -1795,6 +1817,31 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 };
                 Step::Nudge(target, up)
             }
+            "set_color" => {
+                let (target, color) = rest
+                    .split_once(char::is_whitespace)
+                    .ok_or_else(|| format!("set_color wants a target and RRGGBBAA: {line:?}"))?;
+                Step::SetColor(
+                    parse_target(target)?,
+                    color.trim().parse().map_err(|why| format!("set_color: {why} in {line:?}"))?,
+                )
+            }
+            "expect_color" => {
+                let (target, text) = rest
+                    .split_once(char::is_whitespace)
+                    .ok_or_else(|| format!("expect_color wants a target and a string: {line:?}"))?;
+                let want = parse_string(text)?;
+                let canonical = want
+                    .parse::<crate::Color>()
+                    .map_err(|why| format!("expect_color: {why} in {line:?}"))?
+                    .to_string();
+                if canonical != want {
+                    return Err(format!(
+                        "expect_color spells a colour in capitals, {canonical:?}, not {want:?}: {line:?}"
+                    ));
+                }
+                Step::ExpectColor(parse_target(target)?, want)
+            }
             "expect_picker" => {
                 let (target, text) = rest
                     .split_once(char::is_whitespace)
@@ -1990,7 +2037,17 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                          got {spec:?}"
                     )
                 })?;
-                Step::ExpectInk(target, points.trim().to_owned(), want.trim().to_owned())
+                // A colour picker's swatch is each platform's size, so its
+                // one probe point is named (docs/color-picker-plan.md §5).
+                let points = points.trim();
+                if (target.kind == TargetKind::ColorPicker) != (points == "center") {
+                    return Err(format!(
+                        "expect_ink samples a colour picker at `center` and a canvas at \
+                         <x,y> points, got {points:?} on {:?}: {line:?}",
+                        target.kind
+                    ));
+                }
+                Step::ExpectInk(target, points.to_owned(), want.trim().to_owned())
             }
             "expect_raster" => {
                 let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
@@ -2943,6 +3000,7 @@ fn parse_target_kind(kind: &str, spec: &str) -> Result<TargetKind, String> {
         "labeled" => TargetKind::Labeled,
         "search" => TargetKind::Search,
         "number_field" => TargetKind::NumberField,
+        "color_picker" => TargetKind::ColorPicker,
         other => return Err(format!("unknown target kind {other:?} in {spec:?}")),
     })
 }
@@ -3829,6 +3887,24 @@ fn run_with_log(
                 await_answer(answered);
                 None
             }
+            Step::SetColor(t, c) => {
+                await_quiet();
+                let answered = crate::scene::answers();
+                stage.set_color(*t, *c);
+                await_answer(answered);
+                None
+            }
+            Step::ExpectColor(t, want) => Some(match t.kind {
+                TargetKind::ColorPicker => poll(|| {
+                    let got = stage.color_value(*t);
+                    if got == *want {
+                        Ok(got)
+                    } else {
+                        Err(format!("{t:?} holds {got:?}, wanted {want:?}"))
+                    }
+                }),
+                other => Err(format!("expect_color reads colour pickers — not {other:?}")),
+            }),
             Step::ExpectValue(t, want) => Some(match t.kind {
                 TargetKind::Slider | TargetKind::NumberField => poll(|| {
                     let got = stage.control_value(*t);
@@ -5627,6 +5703,7 @@ fn target_spec(t: &Target) -> String {
         TargetKind::Labeled => "labeled",
         TargetKind::Search => "search",
         TargetKind::NumberField => "number_field",
+        TargetKind::ColorPicker => "color_picker",
     };
     if let Some(id) = t.id {
         t.keys.map_or_else(
@@ -6377,6 +6454,33 @@ mod tests {
     }
 
     #[test]
+    fn color_verbs_parse_eight_capital_hex_digits_only() {
+        let steps = parse(
+            "set_color color_picker#0 E01B2480\nexpect_color color_picker@swatch[b] \"336699FF\"\n\
+             expect_ink color_picker#0 \"center = light 3584E4 dark 3584E4\"\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            steps[0],
+            Step::SetColor(Target { kind: TargetKind::ColorPicker, index: 0, .. }, c)
+                if c == crate::Color::rgba(0xE0, 0x1B, 0x24, 0x80)
+        ));
+        assert!(matches!(&steps[1], Step::ExpectColor(_, s) if s == "336699FF"));
+        assert!(matches!(&steps[2], Step::ExpectInk(_, p, _) if p == "center"));
+        for bad in [
+            "set_color color_picker#0 336699",
+            "set_color color_picker#0 #336699FF",
+            "set_color color_picker#0 GG6699FF",
+            "expect_color color_picker#0 \"336699ff\"",
+            "expect_color color_picker#0 \"blue\"",
+            "expect_ink color_picker#0 \"50,50 = light 3584E4 dark 3584E4\"",
+            "expect_ink canvas#0 \"center = light 3584E4 dark 3584E4\"",
+        ] {
+            assert!(parse(bad).is_err(), "{bad} parsed");
+        }
+    }
+
+    #[test]
     fn save_verbs_parse() {
         assert_eq!(
             parse("expect_save_dialog $TMP/kaya-save-$PID copy").unwrap()[0],
@@ -6675,6 +6779,12 @@ mod tests {
         }
         fn set_time(&self, t: Target, tm: crate::Time) {
             self.seen.lock().unwrap().push(format!("set_time {t:?} {tm}"));
+        }
+        fn set_color(&self, t: Target, c: crate::Color) {
+            self.seen.lock().unwrap().push(format!("set_color {t:?} {c}"));
+        }
+        fn color_value(&self, _: Target) -> String {
+            "336699FF".to_string()
         }
         fn picker_value(&self, _: Target) -> String {
             "2026-09-04".to_string()
@@ -7667,6 +7777,10 @@ mod tests {
             fn set_value(&self, _: Target, _: f64) {}
             fn set_date(&self, _: Target, _: crate::Date) {}
             fn set_time(&self, _: Target, _: crate::Time) {}
+            fn set_color(&self, _: Target, _: crate::Color) {}
+            fn color_value(&self, _: Target) -> String {
+                String::new()
+            }
             fn picker_value(&self, _: Target) -> String {
                 String::new()
             }
@@ -8016,6 +8130,10 @@ mod tests {
             fn set_value(&self, _: Target, _: f64) {}
             fn set_date(&self, _: Target, _: crate::Date) {}
             fn set_time(&self, _: Target, _: crate::Time) {}
+            fn set_color(&self, _: Target, _: crate::Color) {}
+            fn color_value(&self, _: Target) -> String {
+                String::new()
+            }
             fn picker_value(&self, _: Target) -> String {
                 String::new()
             }

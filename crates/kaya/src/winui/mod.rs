@@ -14575,6 +14575,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // platform's own — the TextBox template's `DeleteButton` —
                 // and AutoSuggestBox is refused, both measured
                 // (docs/measurements/search-winui-2026-09-06.md).
+                WidgetKind::ColorPicker => crate::depth_stub("colorpicker"),
                 WidgetKind::NumberField => {
                     // The box parses and formats through kaya's own formatter
                     // (`KayaNumberText`), clamps natively and raises ValueChanged
@@ -20046,6 +20047,7 @@ fn registry_widget_at(core: &CoreState, kind: crate::harness::TargetKind, i: usi
         K::Grid => id_of!(core.grids, NativeWidget::Grid2D(grid), grid),
         K::Textarea => core.textarea_ids.get(i).copied(),
         K::Search => core.search_ids.get(i).copied(),
+        K::ColorPicker => crate::depth_stub("colorpicker"),
         K::NumberField => core.number_field_ids.get(i).copied(),
         K::Canvas => core.canvas_ids.get(i).copied(),
         K::DatePicker => core.date_picker_ids.get(i).copied(),
@@ -20339,6 +20341,7 @@ fn target_element(
         // target answers — the text, the focus, the a11y peer — is the
         // TextBox's (docs/search-plan.md S7).
         K::Search => nth!(core.searches),
+        K::ColorPicker => crate::depth_stub("colorpicker"),
         K::NumberField => nth!(core.number_fields),
         K::DatePicker => nth!(core.date_pickers),
         K::TimePicker => nth!(core.time_pickers),
@@ -20459,6 +20462,7 @@ fn registry_ids(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<u64> 
         K::Grid => ids!(core.grids, NativeWidget::Grid2D(grid), grid),
         K::Textarea => core.textarea_ids.clone(),
         K::Search => core.search_ids.clone(),
+        K::ColorPicker => crate::depth_stub("colorpicker"),
         K::NumberField => core.number_field_ids.clone(),
         K::Canvas => core.canvas_ids.clone(),
         K::DatePicker => core.date_picker_ids.clone(),
@@ -22234,6 +22238,14 @@ impl crate::harness::Stage for WinUiStage {
             Ok(())
         });
     }
+    fn set_color(&self, _: crate::harness::Target, _: crate::Color) {
+        crate::depth_stub("colorpicker")
+    }
+
+    fn color_value(&self, _: crate::harness::Target) -> String {
+        crate::depth_stub("colorpicker")
+    }
+
     fn picker_value(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| Ok(winui_picker_reading(core, t)))
             .unwrap_or_else(|e| format!("<unreadable: {e}>"))
@@ -23319,6 +23331,7 @@ impl crate::harness::Stage for WinUiStage {
                 K::Grid => find(core, K::Grid, &core.grids, &id),
                 K::Textarea => find(core, K::Textarea, &core.textareas, &id),
                 K::Search => find(core, K::Search, &core.searches, &id),
+                K::ColorPicker => crate::depth_stub("colorpicker"),
                 K::NumberField => find(core, K::NumberField, &core.number_fields, &id),
                 K::Canvas => find(core, K::Canvas, &core.canvases, &id),
                 K::DatePicker => find(core, K::DatePicker, &core.date_pickers, &id),
@@ -25288,6 +25301,9 @@ impl crate::harness::Stage for WinUiStage {
     /// `PrintWindow` is synchronous and leaves nothing outstanding. Every
     /// angle-bracketed answer says what it MEASURED (invariant 3).
     fn canvas_ink(&self, target: crate::harness::Target, points: &str) -> String {
+        if target.kind == crate::harness::TargetKind::ColorPicker {
+            crate::depth_stub("colorpicker")
+        }
         let points = points.to_owned();
         Self::on_ui_read(move |core| {
             // THE APPEARANCE RIDES THE ANSWER (§6): the display raster

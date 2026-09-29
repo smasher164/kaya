@@ -66,6 +66,11 @@ impl ValueKind for DateKind {
 impl ValueKind for TimeKind {
     const TYPE: ValueType = ValueType::I64;
 }
+/// docs/color-picker-plan.md §2: an sRGB colour, a packed I64 on the wire.
+pub struct ColorKind;
+impl ValueKind for ColorKind {
+    const TYPE: ValueType = ValueType::I64;
+}
 
 /// A first-class typed projection: one field of a record type, by
 /// position, for the two sites with no record instance in hand — binding a
@@ -139,6 +144,12 @@ impl From<crate::Date> for TplSource<DateKind> {
 impl From<crate::Time> for TplSource<TimeKind> {
     fn from(t: crate::Time) -> Self {
         TplSource { inner: SourceInner::Const(Value::from(t)), _kind: PhantomData }
+    }
+}
+
+impl From<crate::Color> for TplSource<ColorKind> {
+    fn from(c: crate::Color) -> Self {
+        TplSource { inner: SourceInner::Const(Value::from(c)), _kind: PhantomData }
     }
 }
 
@@ -363,6 +374,20 @@ impl KayaField for crate::Time {
             Value::I64(n) => crate::Time::from_packed(*n)
                 .unwrap_or_else(|why| panic!("kaya: a Time field holds {n}, which is not one: {why}")),
             other => panic!("kaya: expected a Time field (I64 on the wire), model holds {other:?}"),
+        }
+    }
+}
+
+impl KayaField for crate::Color {
+    type Kind = ColorKind;
+    fn to_value(&self) -> Value {
+        Value::from(*self)
+    }
+    fn from_value(v: &Value) -> Self {
+        match v {
+            Value::I64(n) => crate::Color::from_packed(*n)
+                .unwrap_or_else(|why| panic!("kaya: a Color field holds {n}, which is not one: {why}")),
+            other => panic!("kaya: expected a Color field (I64 on the wire), model holds {other:?}"),
         }
     }
 }
@@ -1931,6 +1956,13 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// Let a colour picker's user choose translucency (off by default:
+    /// docs/color-picker-plan.md §3 rule 3).
+    pub fn alpha(self, on: bool) -> Self {
+        self.tx.set(self.id, Prop::Alpha, on);
+        self
+    }
+
     /// A slider's granularity: the thumb rests only on `min + k * step`
     /// (docs/slider-plan.md S1). Must divide the range evenly; 0 is
     /// continuous, the default.
@@ -3405,6 +3437,21 @@ impl<'a> Tx<'a> {
         Widget { id: w, out: (), tx: self }
     }
 
+    /// A colour picker holding `color` (docs/color-picker-plan.md): the
+    /// platform's swatch, opening its colour surface. Settled choices
+    /// arrive through `on_color`; `.alpha(true)` allows translucency.
+    pub fn color_picker(&mut self, color: crate::Color) -> Widget<'_, 'a> {
+        let w = self.widget(WidgetKind::ColorPicker);
+        self.set(w, Prop::Color, color);
+        Widget { id: w, out: (), tx: self }
+    }
+
+    pub fn color_picker_bound(&mut self, color: SignalId) -> Widget<'_, 'a> {
+        let w = self.widget(WidgetKind::ColorPicker);
+        self.bind(w, Prop::Color, color);
+        Widget { id: w, out: (), tx: self }
+    }
+
     /// A dropdown select over its options — each option becomes a label
     /// child (labels only, scene-checked), `selected` the initial 0-based
     /// index (domain-checked at the root against the option count).
@@ -4434,6 +4481,10 @@ impl<'b> Row<'_, 'b> {
         self.tpl().time_picker(src)
     }
 
+    pub fn color_picker(&mut self, src: impl Into<TplSource<ColorKind>>) -> TemplateNodeId {
+        self.tpl().color_picker(src)
+    }
+
     pub fn button(&mut self, src: impl Into<TplSource<StrKind>>) -> TemplateNodeId {
         self.tpl().button(src)
     }
@@ -5030,6 +5081,15 @@ impl<M> Messages<M> {
         );
     }
 
+    /// A colour picker's settled choices (docs/color-picker-plan.md §3).
+    pub fn on_color(&self, w: WidgetId, f: impl Fn(crate::Color) -> M + 'static) {
+        self.widgets.borrow_mut().entry(w.0).or_default().push(Box::new(move |occ| match occ {
+                Occurrence::ColorChanged { color, .. } => Some(f(*color)),
+                _ => None,
+            }),
+        );
+    }
+
     /// A select's picks: the new 0-based option index. Rides the
     /// value_changed record (the index travels as f64), so this is
     /// on_value with the index reading.
@@ -5150,6 +5210,17 @@ impl<M> Messages<M> {
         self.nodes.borrow_mut().entry(n.0).or_default().push(Box::new(move |occ| match occ {
                 Occurrence::InstanceTimeChanged { path, time, .. } => {
                     Some(f(path.clone(), *time))
+                }
+                _ => None,
+            }),
+        );
+    }
+
+    /// A stamped colour picker's settled choice, keys first.
+    pub fn on_color_node(&self, n: TemplateNodeId, f: impl Fn(Path, crate::Color) -> M + 'static) {
+        self.nodes.borrow_mut().entry(n.0).or_default().push(Box::new(move |occ| match occ {
+                Occurrence::InstanceColorChanged { path, color, .. } => {
+                    Some(f(path.clone(), *color))
                 }
                 _ => None,
             }),
@@ -5592,7 +5663,8 @@ impl<M> Messages<M> {
                 | Occurrence::DateChanged { id, .. }
                 | Occurrence::TextEdited { id, .. }
                 | Occurrence::TextFormatted { id, .. }
-                | Occurrence::TimeChanged { id, .. } => self
+                | Occurrence::TimeChanged { id, .. }
+                | Occurrence::ColorChanged { id, .. } => self
                     .widgets
                     .borrow()
                     .get(&id.0)
@@ -5610,7 +5682,8 @@ impl<M> Messages<M> {
                 | Occurrence::InstanceDateChanged { node, .. }
                 | Occurrence::InstanceTextEdited { node, .. }
                 | Occurrence::InstanceTextFormatted { node, .. }
-                | Occurrence::InstanceTimeChanged { node, .. } => self
+                | Occurrence::InstanceTimeChanged { node, .. }
+                | Occurrence::InstanceColorChanged { node, .. } => self
                     .nodes
                     .borrow()
                     .get(&node.0)
@@ -7663,6 +7736,14 @@ impl<'b> Tpl<'_, 'b> {
         n
     }
 
+    /// A colour picker whose value comes from a source, the row's own
+    /// `Color` field included (docs/color-picker-plan.md §2).
+    pub fn color_picker(&mut self, src: impl Into<TplSource<ColorKind>>) -> TemplateNodeId {
+        let n = self.widget(WidgetKind::ColorPicker);
+        self.apply_source(n, Prop::Color, src.into().inner);
+        n
+    }
+
     /// A button whose caption comes from any addressable source — a
     /// constant per stamped copy, a signal, or the element's own field.
     /// Clicks on a stamped copy arrive as `InstanceButtonClicked`,
@@ -9191,6 +9272,8 @@ mod tests {
                     | Occurrence::InstanceDateChanged { .. }
                     | Occurrence::TimeChanged { .. }
                     | Occurrence::InstanceTimeChanged { .. }
+                    | Occurrence::ColorChanged { .. }
+                    | Occurrence::InstanceColorChanged { .. }
                     | Occurrence::MenuActivated { .. }
                     | Occurrence::InstanceMenuActivated { .. }
                     | Occurrence::MenuToggled { .. }

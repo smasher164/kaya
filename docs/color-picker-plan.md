@@ -1,6 +1,10 @@
 # The colour picker: the design pass
 
-Status: DESIGNED 2026-09-28, not built. The roadmap's fourth piece for the
+Status: DESIGNED 2026-09-28; the DEPTH SLICE BUILT 2026-09-28 (the spec, the
+core, the generators, the harness, the SwiftUI arm, the Rust binding and
+tools/scenes/colorpicker.steps on the mac lane; docs/deferred.md holds the
+breadth). §4.1 and §4.5 are MEASURED and AMEND §5 in two places, marked
+below. The roadmap's fourth piece for the
 video editor ("a new kind, native on four lanes and synthesized on
 Android"; docs/deferred.md's forcing-app entry names the colour picker
 among the editor's triggers), where the inspector sets a title's colour,
@@ -123,6 +127,33 @@ Nothing here lets an app paint a widget.
    wells with different `alpha` each get their own `showsAlpha` although
    the panel is shared. If SwiftUI hides the door, the arm hosts an
    `NSColorWell` directly (`NSViewRepresentable`).
+
+   MEASURED 2026-09-28 (macOS 26.6.2; probes driving the panel with events
+   posted into the probe's own queue, never the host's input, the host idle
+   over 29 minutes each run):
+   - SwiftUI's `ColorPicker` IS an `NSColorWell` (`PlatformColorWell`),
+     style `.default`, AX role `AXColorWell`, opening the SHARED panel.
+   - Its binding moves on EVERY drag event (a down and six drags set it seven
+     times), and `NSColorPanel.shared.isContinuous = false` changes nothing.
+     A hosted `NSColorWell` gets its action TWICE per drag event.
+   - The panel's mouse up is invisible to a local event monitor: the wheel's
+     tracking loop takes it. THE DOOR: the tracking loop runs in
+     `NSEventTrackingRunLoopMode`, so a block scheduled at the panel's mouse
+     down with `RunLoop.main.perform(inModes: [.default])` runs once, after
+     the mouse up, holding the final colour; the arm keeps the drag's colours
+     pending and commits that one.
+   - `supportsAlpha` is per well and the shared panel's `showsAlpha` follows
+     the active well. An opaque well HOLDS EVERY COLOUR OPAQUE: a panel
+     colour at alpha 0.5 and an app write of `E01B2480` both read back with
+     alpha FF. `NSColorWell`'s own default is `supportsAlpha` on.
+   - An app write `well.color =` sends no action, so the mac arm needs no
+     quiet guard for the echo.
+   - The arm hosts `NSColorWell(style: .default)` directly, the same control,
+     so the door and the read-back have a well to hold.
+   - The panel's hex field is in the PANEL'S SELECTED COLOUR SPACE, not sRGB:
+     `E01B24` typed into it in the RGB sliders mode committed `E9332FFF`
+     (one action, since a keyboard change is no gesture). `pick_color` on the
+     mac must choose the sRGB space first, or type into a field that is sRGB.
 2. **The iOS commit.** Whether SwiftUI's binding exposes the continuous
    flag; if not, the arm presents `UIColorPickerViewController` itself
    behind a swatch so the delegate's noncontinuous select is the door.
@@ -138,6 +169,14 @@ Nothing here lets an app paint a widget.
    `0x336699FF` reads back `336699FF` from the control; a P3 colour
    outside sRGB comes back clamped, the same bytes on the two Apple arms.
 
+   MEASURED on the mac 2026-09-28: `336699FF` round-trips exactly; Display P3
+   (1, 0, 0) reads back through `usingColorSpace(.sRGB)` as exactly (1, 0, 0),
+   AppKit clamping before the quantizer does, so `FF0000FF`. The iOS half is
+   the breadth slice's. THE SWATCH'S PIXELS: the well's own cache is 8-bit in
+   the DISPLAY profile, and through it 336699, E01B24, 3584E4, 26A269, 808080,
+   F6D32D, 000000 and FFFFFF read back exactly while 1C71D8 reads 1E71D8, two
+   off in red and outside the ruled ±1; the scene samples 3584E4 (§5).
+
 ## §5. How a leg sees it
 
 A new shared scene, `colorpicker.steps`, one guest per language: a picker
@@ -149,13 +188,21 @@ writes in fixed hex.
   apply direction is otherwise invisible).
 - `set_color color_picker#0 E01B24FF`: the label reads `color: E01B24FF`
   once, and `expect_color` agrees.
-- `set_color color_picker#0 E01B2480` on the opaque picker is refused by
-  the verb naming `alpha`; on the second picker it commits `E01B2480`.
-- a button writes `color(0x1C71D8FF)`: `expect_color` moves, the label does
-  not (the echo check, with the one deliberate settle).
-- `expect_ink color_picker#0 "center = light 1C71D8 dark 1C71D8"`: the
+- `set_color color_picker#0 26A26980` on the opaque picker LANDS OPAQUE:
+  the control reads `26A269FF` and the label `color: 26A269FF`; on the
+  second picker `E01B2480` commits whole. AMENDED 2026-09-28 from "refused by
+  the verb naming `alpha`": rule 3 promises an opaque picker's value is
+  always FF, and AppKit's own well holds any colour opaque by either route
+  (§4.1), so the verb that stands for a user's choice gets what a user gets.
+  The ROOT still refuses an app write (§3 rule 3). Every backend owes the
+  same answer.
+- a button writes `color(0x3584E4FF)`: `expect_color` moves, the label does
+  not (the echo check, with the one deliberate settle); a `set_color` of
+  the colour already held emits nothing either.
+- `expect_ink color_picker#0 "center = light 3584E4 dark 3584E4"`: the
   swatch is drawn in the value, sampled at its centre within the ±1 the
   mac's colour-managed window needs (docs/canvas-plan.md, the ink ruling).
+  AMENDED from 1C71D8, which the display profile moves by two (§4.5).
   `expect_ink` learns a colour-picker target, whose one probe point is
   spelled `center` since the swatch's size is each platform's.
 - a stamped picker per row commits with its row's key.

@@ -14,7 +14,7 @@ import UserNotifications
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x82d49a79abf3ca9a
+let kayaSpecHash: UInt64 = 0x0d0ad42b8674c264
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -183,6 +183,7 @@ private let kindTimePicker: UInt32 = 17
 private let kindLabeled: UInt32 = 18
 private let kindSearch: UInt32 = 19
 private let kindNumberField: UInt32 = 20
+private let kindColorPicker: UInt32 = 21
 private let propText: UInt32 = 1
 private let propChecked: UInt32 = 2
 private let propColumns: UInt32 = 11
@@ -270,6 +271,10 @@ private let propMaxLines: UInt32 = 40
 private let propSymbol: UInt32 = 41
 private let propMaxWidth: UInt32 = 42
 private let propMaxHeight: UInt32 = 43
+/// A colour picker's packed 0xRRGGBBAA and its translucency switch
+/// (docs/color-picker-plan.md §2).
+private let propColor: UInt32 = 44
+private let propAlpha: UInt32 = 45
 private let fileContentImages: UInt32 = 1
 private let tintAccent: Int64 = 1
 private let tintSuccess: Int64 = 2
@@ -730,6 +735,9 @@ final class KayaNode: Identifiable {
     var maxDate: Int64 = 0
     var time: Int64 = 0
     var minuteStep = 1
+    /// docs/color-picker-plan.md §2: opaque black until the app says.
+    var color: Int64 = 0x0000_00FF
+    var alpha = false
     // The decoded native image (nil is the placeholder class) and its size
     // as the harness's "WxH" observation ("0x0" before a source lands or
     // after a failed decode).
@@ -1118,12 +1126,14 @@ final class KayaSceneModel {
     var labeleds: [KayaNode] = []
     var searches: [KayaNode] = []
     var numberFields: [KayaNode] = []
+    var colorPickers: [KayaNode] = []
 
     /// Every kind registry, so a destroyed node leaves all of them at once.
     static let registries: [ReferenceWritableKeyPath<KayaSceneModel, [KayaNode]>] = [
         \.buttons, \.checkboxes, \.labels, \.entryWidgets, \.sliders, \.datePickers,
         \.timePickers, \.images, \.canvases, \.columns, \.rows, \.scrolls, \.progresses,
         \.selects, \.radios, \.grids, \.textareas, \.labeleds, \.searches, \.numberFields,
+        \.colorPickers,
     ]
 
     func forget(_ id: UInt64) {
@@ -5005,6 +5015,17 @@ enum KayaHost {
         }
     }
 
+    /// docs/color-picker-plan.md §3 rule 1 and §2.
+    static func colorQuantize(_ r: Double, _ g: Double, _ b: Double, _ a: Double) -> UInt32 {
+        api.color_quantize(r, g, b, a)
+    }
+
+    static func emitColorChanged(_ tag: [UInt8], _ packed: Int64) {
+        tag.withUnsafeBufferPointer { buffer in
+            api.emit_color_changed(buffer.baseAddress, UInt(buffer.count), packed)
+        }
+    }
+
     // --- ROW WINDOWING (docs/virtualization-plan.md §3) ---------------
     //
     // EVERY ONE IS NIL-GUARDED: the tools/checks probes host this render path
@@ -5481,6 +5502,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case kindTextarea: kayaScene.textareas.append(node)
                 case kindLabeled: kayaScene.labeleds.append(node)
                 case kindSearch: kayaScene.searches.append(node)
+                case kindColorPicker: kayaScene.colorPickers.append(node)
                 case kindNumberField:
                     // docs/number-field-plan.md §2: unset bounds are ±2^53, the
                     // step 1, and the field shows its value from the start.
@@ -6119,6 +6141,11 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case (propMinuteStep, valueF64):
                     kayaScene.nodes[id]!.minuteStep =
                         Int(raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self))
+                case (propColor, valueI64):
+                    kayaScene.nodes[id]!.color =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
+                case (propAlpha, valueBool):
+                    kayaScene.nodes[id]!.alpha = raw[body + 24] != 0
                 case (propGrow, valueF64):
                     kayaScene.nodes[id]!.grow =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
@@ -6776,6 +6803,9 @@ private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
         // (measured 2026-09-04 on the pickers scene): the closed set's
         // `datetime` (docs/datetime-plan.md P4).
         case "AXDateTimeArea": return "datetime"
+        // Every platform's swatch is a button (docs/color-picker-plan.md §5);
+        // NSColorWell publishes AXColorWell (measured 2026-09-28, §4.1).
+        case "AXColorWell": return "button"
         case kAXImageRole: return "image"
         case kAXProgressIndicatorRole: return "progress"
         // A chooser is a chooser everywhere and spelled differently
@@ -7859,6 +7889,7 @@ private func kayaAnyTarget(_ spec: Substring) -> KayaNode? {
     case "labeled": return kayaTarget(spec, "labeled", kayaScene.labeleds)
     case "search": return kayaTarget(spec, "search", kayaScene.searches)
     case "number_field": return kayaTarget(spec, "number_field", kayaScene.numberFields)
+    case "color_picker": return kayaTarget(spec, "color_picker", kayaScene.colorPickers)
     default: return nil
     }
 }
@@ -8387,6 +8418,47 @@ private func kayaRunScript(_ script: String) {
                         control, to: isTime ? kayaDateFromPackedTime(packed) : kayaDateFromPackedDate(packed))
                 }
                 kayaAwaitAnswer(answered)
+            case "set_color":
+                // A user's choice through the commit door, the surface never
+                // opened (docs/color-picker-plan.md §5).
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
+                guard parts.count > 2, let packed = kayaParseColor(String(parts[2])) else {
+                    failures.append("set_color wants RRGGBBAA, got \(parts.count > 2 ? String(parts[2]) : "nothing")")
+                    break
+                }
+                let colorNode = DispatchQueue.main.sync {
+                    kayaTarget(parts[1], "color_picker", kayaScene.colorPickers)
+                }
+                guard let colorNode else {
+                    failures.append("no such target \(parts[1])")
+                    break
+                }
+                guard let well = kayaAwaitOnMain({ kayaColorWells[colorNode.id] }) else {
+                    failures.append("\(parts[1]) has no colour well after 5000ms")
+                    break
+                }
+                DispatchQueue.main.sync { kayaDriveColor(colorNode, well, packed) }
+                kayaAwaitAnswer(answered)
+            case "expect_color":
+                // The CONTROL's colour, never the node's (expect_picker's rule).
+                let want = kayaQuoted(Array(parts[2...]))
+                let colorNode = DispatchQueue.main.sync {
+                    kayaTarget(parts[1], "color_picker", kayaScene.colorPickers)
+                }
+                let got: String? = colorNode.flatMap { node in
+                    guard let well = kayaAwaitOnMain({ kayaColorWells[node.id] }) else { return nil }
+                    return DispatchQueue.main.sync {
+                        kayaColorControlValue(well).map(kayaSpelledColor) ?? "<a colour with no sRGB reading>"
+                    }
+                }
+                if let got, got == want {
+                    observed.append(got)
+                } else if let got {
+                    failures.append("\(parts[1]) holds \"\(got)\", wanted \"\(want)\"")
+                } else {
+                    failures.append("no such target \(parts[1])")
+                }
             case "expect_picker":
                 // The CONTROL's value, never the node's: the one observation
                 // for the silent cases (docs/datetime-plan.md D8).
@@ -10516,6 +10588,12 @@ private func kayaRunScript(_ script: String) {
                 let inkPoints = inkHalves.first ?? ""
                 let wantInk = inkHalves.count == 2 ? inkHalves[1] : ""
                 let gotInk = DispatchQueue.main.sync { () -> String in
+                    if inkSpec.hasPrefix("color_picker") {
+                        guard let node = kayaTarget(inkSpec, "color_picker", kayaScene.colorPickers),
+                            let well = kayaColorWells[node.id]
+                        else { return "<no colour well \(inkSpec)>" }
+                        return kayaColorInk(well)
+                    }
                     guard let node = kayaTarget(inkSpec, "canvas", kayaScene.canvases) else {
                         return "<no canvas \(inkSpec)>"
                     }
@@ -12907,6 +12985,296 @@ func kayaPickerCommitted(_ node: KayaNode, isTime: Bool, _ picked: Date, restore
                 picker.date = kayaDateFromPackedDate(node.date)
             }
         }
+    }
+#endif
+
+// ---- the colour picker (docs/color-picker-plan.md) --------------------------
+
+/// The one quantizer is the core's (§3 rule 1): the platform converts to sRGB,
+/// kaya clamps and rounds.
+func kayaColorQuantize(_ r: Double, _ g: Double, _ b: Double, _ a: Double) -> Int64 {
+    Int64(KayaHost.colorQuantize(r, g, b, a))
+}
+
+/// The fixed spelling every scene reads (harness.rs Color Display): `336699FF`.
+func kayaSpelledColor(_ packed: Int64) -> String {
+    String(format: "%08llX", packed)
+}
+
+func kayaParseColor(_ s: String) -> Int64? {
+    guard s.count == 8, s.allSatisfy(\.isHexDigit), let v = UInt32(s, radix: 16) else { return nil }
+    return Int64(v)
+}
+
+/// THE ONE COMMIT PATH, user or driven (§3 rule 2): a settled choice mirrors
+/// the node and emits; a choice equal to the held value emits nothing.
+func kayaColorCommitted(_ node: KayaNode, _ packed: Int64) {
+    if packed == node.color { return }
+    kayaUserWrite { node.color = packed }
+    KayaHost.emitColorChanged(node.tag, packed)
+}
+
+#if os(macOS)
+    nonisolated(unsafe) var kayaColorWells: [UInt64: NSColorWell] = [:]
+    nonisolated(unsafe) var kayaColorGesture = false
+    nonisolated(unsafe) var kayaColorPending: [UInt64: Int64] = [:]
+    nonisolated(unsafe) var kayaColorDoor: Any?
+
+    func kayaNSColor(_ packed: Int64) -> NSColor {
+        NSColor(
+            srgbRed: CGFloat((packed >> 24) & 0xFF) / 255, green: CGFloat((packed >> 16) & 0xFF) / 255,
+            blue: CGFloat((packed >> 8) & 0xFF) / 255, alpha: CGFloat(packed & 0xFF) / 255)
+    }
+
+    func kayaColorOf(_ color: NSColor) -> Int64? {
+        guard let c = color.usingColorSpace(.sRGB) else { return nil }
+        return kayaColorQuantize(c.redComponent, c.greenComponent, c.blueComponent, c.alphaComponent)
+    }
+
+    /// THE GESTURE'S END IN THE SHARED PANEL (§4.1, measured): the panel moves
+    /// the well on every drag event and has no "done", and its tracking loop
+    /// swallows the mouse up, so the panel's mouse down opens a gesture and a
+    /// block that runs only in the DEFAULT run-loop mode closes it — after the
+    /// tracking loop, in NSEventTrackingRunLoopMode, has returned.
+    func kayaColorDoorInstall() {
+        guard kayaColorDoor == nil else { return }
+        kayaColorDoor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { event in
+            if !kayaColorGesture, NSColorPanel.sharedColorPanelExists,
+                event.window === NSColorPanel.shared
+            {
+                kayaColorGesture = true
+                RunLoop.main.perform(inModes: [.default]) { kayaColorGestureEnded() }
+            }
+            return event
+        }
+    }
+
+    func kayaColorGestureEnded() {
+        kayaColorGesture = false
+        let settled = kayaColorPending
+        kayaColorPending = [:]
+        for (id, packed) in settled {
+            if let node = kayaScene.nodes[id] { kayaColorCommitted(node, packed) }
+        }
+    }
+
+    final class KayaColorCoordinator: NSObject {
+        var node: KayaNode
+        var applied: Int64 = -1
+        init(node: KayaNode) { self.node = node }
+        @objc func changed(_ sender: NSColorWell) {
+            guard let packed = kayaColorOf(sender.color) else { return }
+            if kayaColorGesture {
+                kayaColorPending[node.id] = packed
+            } else {
+                kayaColorCommitted(node, packed)
+            }
+        }
+    }
+
+    /// NSColorWell in its default style, hosted (§6): SwiftUI's ColorPicker is
+    /// this same well (§4.1), and hosting it gives the door and the read-back
+    /// a control to hold. `supportsAlpha` off makes AppKit hold every colour
+    /// opaque, by either route (§4.1).
+    struct KayaColorSurface: NSViewRepresentable {
+        let node: KayaNode
+
+        func makeCoordinator() -> KayaColorCoordinator {
+            KayaColorCoordinator(node: node)
+        }
+
+        func makeNSView(context: Context) -> NSColorWell {
+            kayaColorDoorInstall()
+            let well = NSColorWell(style: .default)
+            well.target = context.coordinator
+            well.action = #selector(KayaColorCoordinator.changed(_:))
+            kayaColorWells[node.id] = well
+            apply(well, context.coordinator)
+            return well
+        }
+
+        func updateNSView(_ well: NSColorWell, context: Context) {
+            context.coordinator.node = node
+            kayaColorWells[node.id] = well
+            apply(well, context.coordinator)
+        }
+
+        static func dismantleNSView(_ well: NSColorWell, coordinator: KayaColorCoordinator) {
+            if well.isActive { well.deactivate() }
+            if kayaColorWells[coordinator.node.id] === well {
+                kayaColorWells.removeValue(forKey: coordinator.node.id)
+            }
+            kayaColorPending.removeValue(forKey: coordinator.node.id)
+        }
+
+        /// Only a colour the MODEL moved reaches the well, so a re-render in
+        /// the middle of a drag never puts the panel back.
+        private func apply(_ well: NSColorWell, _ coordinator: KayaColorCoordinator) {
+            well.supportsAlpha = node.alpha
+            if coordinator.applied != node.color {
+                coordinator.applied = node.color
+                well.color = kayaNSColor(node.color)
+            }
+        }
+    }
+
+    /// A user's choice without the panel (§5): the well moves and its own
+    /// action runs, outside any gesture.
+    func kayaDriveColor(_ node: KayaNode, _ well: NSColorWell, _ packed: Int64) {
+        well.color = kayaNSColor(packed)
+        well.sendAction(well.action, to: well.target)
+    }
+
+    func kayaColorControlValue(_ well: NSColorWell) -> Int64? {
+        kayaColorOf(well.color)
+    }
+
+    /// The swatch's own pixels (§5): the well's own cache, since the macOS 26
+    /// well is hosted SwiftUI inside it (§4.1).
+    @MainActor func kayaColorInk(_ well: NSColorWell) -> String {
+        guard let rep = well.bitmapImageRepForCachingDisplay(in: well.bounds) else {
+            return "<AppKit made no bitmap for a \(well.bounds.size) well>"
+        }
+        well.cacheDisplay(in: well.bounds, to: rep)
+        guard let cg = rep.cgImage else { return "<the cached well carried no image>" }
+        return "\(kayaCanvasAppearance()) " + kayaSampleRGB(cg, [(50, 50)])
+    }
+#else
+    nonisolated(unsafe) var kayaColorWells: [UInt64: UIColorWell] = [:]
+
+    func kayaUIColor(_ packed: Int64) -> UIColor {
+        UIColor(
+            red: CGFloat((packed >> 24) & 0xFF) / 255, green: CGFloat((packed >> 16) & 0xFF) / 255,
+            blue: CGFloat((packed >> 8) & 0xFF) / 255, alpha: CGFloat(packed & 0xFF) / 255)
+    }
+
+    /// UIKit's colour, converted to sRGB by the platform (an extended P3 value
+    /// comes back clamped by the quantizer). An opaque picker's colour is held
+    /// opaque, as AppKit's well holds it (§3 rule 3).
+    func kayaColorOf(_ color: UIColor, opaque: Bool) -> Int64? {
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+            let c = color.cgColor.converted(to: space, intent: .defaultIntent, options: nil),
+            let parts = c.components, parts.count == 4
+        else { return nil }
+        return kayaColorQuantize(parts[0], parts[1], parts[2], opaque ? 1 : parts[3])
+    }
+
+    /// The swatch presents the platform's picker itself (§4.2): the delegate's
+    /// NONCONTINUOUS select is the gesture's end, which UIColorWell's own
+    /// value-changed does not say.
+    final class KayaColorCoordinator: NSObject, UIColorPickerViewControllerDelegate {
+        var node: KayaNode
+        var applied: Int64 = -1
+        weak var well: UIColorWell?
+        init(node: KayaNode) { self.node = node }
+
+        @objc func open(_ sender: UIControl) {
+            var top = sender.window?.rootViewController
+            while let next = top?.presentedViewController { top = next }
+            guard let top else { return }
+            let picker = UIColorPickerViewController()
+            picker.supportsAlpha = node.alpha
+            picker.selectedColor = kayaUIColor(node.color)
+            picker.delegate = self
+            picker.modalPresentationStyle = .popover
+            picker.popoverPresentationController?.sourceView = sender
+            top.present(picker, animated: true)
+        }
+
+        func colorPickerViewController(
+            _ viewController: UIColorPickerViewController, didSelect color: UIColor, continuously: Bool
+        ) {
+            guard !continuously, let packed = kayaColorOf(color, opaque: !node.alpha) else { return }
+            well?.selectedColor = kayaUIColor(packed)
+            kayaColorCommitted(node, packed)
+        }
+    }
+
+    /// The platform's swatch, drawn by a UIColorWell that takes no touches, on
+    /// a control that opens the picker (rule 5, §6).
+    final class KayaColorSwatch: UIControl {
+        let well = UIColorWell()
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            well.isUserInteractionEnabled = false
+            well.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(well)
+            NSLayoutConstraint.activate([
+                well.leadingAnchor.constraint(equalTo: leadingAnchor),
+                well.trailingAnchor.constraint(equalTo: trailingAnchor),
+                well.topAnchor.constraint(equalTo: topAnchor),
+                well.bottomAnchor.constraint(equalTo: bottomAnchor),
+            ])
+            isAccessibilityElement = true
+            accessibilityTraits = .button
+        }
+        required init?(coder: NSCoder) { nil }
+        override var intrinsicContentSize: CGSize { well.intrinsicContentSize }
+    }
+
+    struct KayaColorSurface: UIViewRepresentable {
+        let node: KayaNode
+
+        func makeCoordinator() -> KayaColorCoordinator {
+            KayaColorCoordinator(node: node)
+        }
+
+        func makeUIView(context: Context) -> KayaColorSwatch {
+            let swatch = KayaColorSwatch()
+            swatch.setContentHuggingPriority(.required, for: .horizontal)
+            swatch.setContentHuggingPriority(.required, for: .vertical)
+            swatch.addTarget(
+                context.coordinator, action: #selector(KayaColorCoordinator.open(_:)),
+                for: .touchUpInside)
+            context.coordinator.well = swatch.well
+            kayaColorWells[node.id] = swatch.well
+            apply(swatch, context.coordinator)
+            return swatch
+        }
+
+        func updateUIView(_ swatch: KayaColorSwatch, context: Context) {
+            context.coordinator.node = node
+            kayaColorWells[node.id] = swatch.well
+            apply(swatch, context.coordinator)
+        }
+
+        func sizeThatFits(_ proposal: ProposedViewSize, uiView: KayaColorSwatch, context: Context)
+            -> CGSize?
+        {
+            uiView.intrinsicContentSize
+        }
+
+        static func dismantleUIView(_ swatch: KayaColorSwatch, coordinator: KayaColorCoordinator) {
+            if kayaColorWells[coordinator.node.id] === swatch.well {
+                kayaColorWells.removeValue(forKey: coordinator.node.id)
+            }
+        }
+
+        private func apply(_ swatch: KayaColorSwatch, _ coordinator: KayaColorCoordinator) {
+            swatch.well.supportsAlpha = node.alpha
+            if coordinator.applied != node.color {
+                coordinator.applied = node.color
+                swatch.well.selectedColor = kayaUIColor(node.color)
+            }
+        }
+    }
+
+    func kayaDriveColor(_ node: KayaNode, _ well: UIColorWell, _ packed: Int64) {
+        guard let held = kayaColorOf(kayaUIColor(packed), opaque: !node.alpha) else { return }
+        well.selectedColor = kayaUIColor(held)
+        kayaColorCommitted(node, held)
+    }
+
+    func kayaColorControlValue(_ well: UIColorWell) -> Int64? {
+        well.selectedColor.flatMap { kayaColorOf($0, opaque: false) }
+    }
+
+    @MainActor func kayaColorInk(_ well: UIColorWell) -> String {
+        let image = UIGraphicsImageRenderer(bounds: well.bounds).image { _ in
+            _ = well.drawHierarchy(in: well.bounds, afterScreenUpdates: true)
+        }
+        guard let cg = image.cgImage else { return "<the well rendered no image>" }
+        return "\(kayaCanvasAppearance()) " + kayaSampleRGB(cg, [(50, 50)])
     }
 #endif
 
@@ -18190,6 +18558,11 @@ struct KayaRender: View {
                 .fixedSize()
         case kindTimePicker:
             KayaPickerSurface(node: node, isTime: true)
+                .fixedSize()
+        case kindColorPicker:
+            // The platform's swatch, hosted (docs/color-picker-plan.md §6): its
+            // surface's settled choices are the commit.
+            KayaColorSurface(node: node)
                 .fixedSize()
         case kindEntry:
             KayaEntry(node: node, flexVertical: flexVertical)

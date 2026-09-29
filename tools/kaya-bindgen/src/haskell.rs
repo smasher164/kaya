@@ -9,7 +9,7 @@ use crate::{Ctx, is_padding, prop_variants, record_params, tx_fields, window_pro
 pub const RESERVED: &[&str] = &[
     "encodeValue", "encodeValues", "encodeVariantSchemas", "wireRecord", "parseValue", "parseOccurrence",
     "canonicalizeShortcut", "shortcutNamedKeys",
-    "packDate", "unpackDate", "packTime", "unpackTime",
+    "packDate", "unpackDate", "packTime", "unpackTime", "packColor", "unpackColor",
     "case", "class", "data", "default", "deriving", "do", "else", "foreign", "if", "import",
     "in", "infix", "infixl", "infixr", "instance", "let", "module", "newtype", "of", "then",
     "type", "where",
@@ -152,6 +152,16 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("unpackTime packed =");
     c.line("  let n = fromIntegral packed :: Int");
     c.line("   in (n `div` 100, n `mod` 100)");
+    c.line("");
+    c.line("-- An sRGB colour as the wire's I64: 0xRRGGBBAA, straight alpha.");
+    c.line("packColor :: Int -> Int -> Int -> Int -> Int64");
+    c.line("packColor r g b a = fromIntegral (((r * 256 + g) * 256 + b) * 256 + a)");
+    c.line("");
+    c.line("-- A wire colour's channels.");
+    c.line("unpackColor :: Int64 -> (Int, Int, Int, Int)");
+    c.line("unpackColor packed =");
+    c.line("  let n = fromIntegral packed :: Int");
+    c.line("   in (n `div` 16777216 `mod` 256, n `div` 65536 `mod` 256, n `div` 256 `mod` 256, n `mod` 256)");
 
     for (prop, _, kind) in prop_variants(spec) {
         let pc = pascal(prop);
@@ -175,6 +185,11 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 "hour minute".to_string(),
                 "Int -> Int".to_string(),
                 "VI64 (packTime hour minute)".to_string(),
+            ),
+            crate::PropKind::Color => (
+                "r g b a".to_string(),
+                "Int -> Int -> Int -> Int".to_string(),
+                "VI64 (packColor r g b a)".to_string(),
             ),
         };
         c.line("");
@@ -390,8 +405,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::F64 => (camel(prop), "Double", format!("VF64 {}", camel(prop))),
             crate::PropKind::Blob => ("handle".to_string(), "Word64", "VBlob handle".to_string()),
             crate::PropKind::Enum(_) => (camel(prop), "Int64", format!("VI64 {}", camel(prop))),
-            crate::PropKind::Date | crate::PropKind::Time => {
-                unreachable!("no menu prop is a date or time")
+            crate::PropKind::Date | crate::PropKind::Time | crate::PropKind::Color => {
+                unreachable!("no menu prop is a date, a time or a colour")
             }
         };
         c.line("");

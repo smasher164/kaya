@@ -99,6 +99,11 @@ pub enum PropKind {
     /// `hour * 100 + minute` (14:30 is 1430). Minutes are the unit; no
     /// slot for seconds (docs/datetime-plan.md D3).
     Time,
+    /// An sRGB colour, 8 bits a channel with straight alpha, packed
+    /// `0xRRGGBBAA` into the I64 (docs/color-picker-plan.md §2): the Date
+    /// precedent, a label the generators turn into a component-taking
+    /// setter and decoder in every binding.
+    Color,
 }
 
 /// Properties with their wire ids and value kinds; kept in lockstep
@@ -238,6 +243,10 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // scales up. Positive; images only.
     ("max_width", 42, PropKind::F64),
     ("max_height", 43, PropKind::F64),
+    // docs/color-picker-plan.md §2: a colour picker's committed value, and
+    // whether its user may choose translucency (off: the alpha is FF).
+    ("color", 44, PropKind::Color),
+    ("alpha", 45, PropKind::Bool),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -3147,6 +3156,22 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   rule: the window has already changed, and an app's own \
                   write of the fullscreen window prop never echoes.",
         },
+        Record {
+            kind: 36,
+            name: "color_changed",
+            fields: &[
+                f("id", FieldTy::U64),
+                f("path_len", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: Some(PropKind::Color),
+            doc: "path_len key values follow, then the colour picker's new \
+                  COMMITTED value as one Color (an I64 value, 0xRRGGBBAA, \
+                  sRGB, straight alpha): a settled choice, never a drag's \
+                  intermediate colour, and never a value equal to the one \
+                  held. A property write never echoes \
+                  (docs/color-picker-plan.md §2, §3).",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -3201,6 +3226,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("labeled", 18),
                 ("search", 19),
                 ("number_field", 20),
+                ("color_picker", 21),
             ],
         },
         EnumSpec {
@@ -3307,6 +3333,8 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("symbol", 41),
                 ("max_width", 42),
                 ("max_height", 43),
+                ("color", 44),
+                ("alpha", 45),
             ],
         },
         EnumSpec {
@@ -3858,6 +3886,7 @@ mod tests {
                 ("submitted", crate::ring::REC_SUBMITTED),
                 ("notification_replied", crate::ring::REC_NOTIFICATION_REPLIED),
                 ("fullscreen_changed", crate::ring::REC_FULLSCREEN_CHANGED),
+                ("color_changed", crate::ring::REC_COLOR_CHANGED),
             ]
         );
     }
@@ -4077,6 +4106,7 @@ mod tests {
                     ("kind", "labeled") => wire::KIND_LABELED,
                     ("kind", "search") => wire::KIND_SEARCH,
                     ("kind", "number_field") => wire::KIND_NUMBER_FIELD,
+                    ("kind", "color_picker") => wire::KIND_COLOR_PICKER,
                     ("draw_op", _) => canvas_pin(wire::DRAW_OPS, name),
                     ("paint", _) => canvas_pin(wire::PAINTS, name),
                     ("fill_rule", _) => canvas_pin(wire::FILL_RULES, name),
@@ -4129,6 +4159,8 @@ mod tests {
                     ("prop", "symbol") => wire::PROP_SYMBOL,
                     ("prop", "max_width") => wire::PROP_MAX_WIDTH,
                     ("prop", "max_height") => wire::PROP_MAX_HEIGHT,
+                    ("prop", "color") => wire::PROP_COLOR,
+                    ("prop", "alpha") => wire::PROP_ALPHA,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,

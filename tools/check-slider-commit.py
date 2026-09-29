@@ -25,6 +25,13 @@ dev_shell_or_die()
 # THE TABLE GROWS BY ITSELF: a backend still refusing the two props through
 # `depth_stub("sliders")` has no arm to hold, and the moment its stub goes
 # this gate demands a row. That is the half nobody has to remember.
+#
+# THE COLOUR PICKER IS THE SAME RULE (docs/color-picker-plan.md §3 rule 2,
+# §7): `set_color` is one settled choice by construction, so a SwiftUI arm
+# committing on every drag event in the shared panel passes
+# tools/scenes/colorpicker.steps byte for byte. The mac door is measured
+# (§4.1): the panel's mouse down opens a gesture and a DEFAULT-mode perform
+# closes it after the tracking loop.
 
 import re
 
@@ -234,8 +241,64 @@ def census(sources, rows=ROWS):
     return out
 
 
+SWIFTUI = "swift/KayaSwiftUI.swift"
+
+
+def swiftui_color_findings(source):
+    """Every colour commit sits behind the gesture's end or a closed surface."""
+    out = []
+    commit = block_after(source, "func kayaColorCommitted(")
+    if not commit:
+        return [f"{SWIFTUI}: func kayaColorCommitted is gone — the one commit "
+                f"path this clause holds every door to"]
+    emits = len(re.findall(r"KayaHost\.emitColorChanged\(", source))
+    if emits != 1 or "KayaHost.emitColorChanged(" not in commit:
+        out.append(f"{SWIFTUI}: KayaHost.emitColorChanged is called {emits} time(s); "
+                   f"the one call belongs inside kayaColorCommitted, so no path "
+                   f"publishes a colour past the doors")
+    if "if packed == node.color { return }" not in commit:
+        out.append(f"{SWIFTUI}: kayaColorCommitted commits a colour equal to the "
+                   f"held one — a choice that changes nothing emits nothing (§2)")
+    door = block_after(source, "func kayaColorDoorInstall()")
+    for piece in (".leftMouseDown", "NSColorPanel.shared",
+                  "RunLoop.main.perform(inModes: [.default])", "kayaColorGestureEnded()"):
+        if piece not in door:
+            out.append(f"{SWIFTUI}: the mac door lacks `{piece}` — the panel's mouse "
+                       f"down opens the gesture and only a .default-mode perform "
+                       f"runs after its tracking loop (§4.1)")
+    changed = block_after(source, "@objc func changed(_ sender: NSColorWell)")
+    if not re.search(r"if kayaColorGesture \{\s*kayaColorPending\[node\.id\] = packed\s*"
+                     r"\} else \{\s*kayaColorCommitted\(node, packed\)", changed):
+        out.append(f"{SWIFTUI}: the well's action commits without asking whether a "
+                   f"panel gesture is open — a drag in the panel then publishes one "
+                   f"color_changed per event (§4.1: two actions per drag event)")
+    select = block_after(source, "didSelect color: UIColor, continuously: Bool")
+    if "guard !continuously" not in select:
+        out.append(f"{SWIFTUI}: the iOS picker's select commits a continuous "
+                   f"selection — only the noncontinuous one ends the gesture (§4.2)")
+    doors = [changed, block_after(source, "func kayaColorGestureEnded()"), select]
+    at = 0
+    while True:
+        at = source.find("func kayaDriveColor(", at)
+        if at < 0:
+            break
+        doors.append(block_after(source[at:], "func kayaDriveColor("))
+        at += 1
+    calls = len(re.findall(r"(?<!func )kayaColorCommitted\(", source))
+    inside = sum(len(re.findall(r"kayaColorCommitted\(", d)) for d in doors)
+    if calls != inside:
+        out.append(f"{SWIFTUI}: kayaColorCommitted is called {calls} time(s) and "
+                   f"{inside} of them sit in a door (the well's action outside a "
+                   f"gesture, the gesture's end, the iOS noncontinuous select, "
+                   f"set_color's drive) — a commit anywhere else is a drag's")
+    return out
+
+
 REAL = {path: gate.read(path) for path, _ in BACKENDS}
 gate.counted("backend arms read", len(REAL), floor=3)
+SWIFT_SOURCE = gate.read(SWIFTUI)
+gate.counted("swiftui colour commit calls read",
+             len(re.findall(r"(?<!func )kayaColorCommitted\(", SWIFT_SOURCE)), floor=4)
 
 
 def watched(label, sources, fragment, rows=ROWS):
@@ -320,7 +383,56 @@ compose_no_end = gate.doctor(
 watched("a Compose slider with no onValueChangeFinished",
         {**REAL, COMPOSE: compose_no_end}, "no onValueChangeFinished at all")
 
+
+def color_watched(label, source, fragment):
+    if not gate.negative(label, lambda: swiftui_color_findings(source), want=fragment):
+        return
+    print(f"check-slider-commit: watched refusing: {label}")
+
+
+# 11. THE MAC DOOR CLOSES IN THE TRACKING MODE — the block would run between
+#     two drag events.
+color_watched("a colour door closing in the common modes", gate.doctor(
+    "the colour door's mode", SWIFT_SOURCE,
+    r"RunLoop\.main\.perform\(inModes: \[\.default\]\)",
+    "RunLoop.main.perform(inModes: [.common])"), "only a .default-mode perform")
+
+# 12. THE WELL'S ACTION IGNORES THE GESTURE.
+color_watched("a well committing every panel drag event", gate.doctor(
+    "the gesture check", SWIFT_SOURCE,
+    r"if kayaColorGesture \{\n(\s*)kayaColorPending\[node\.id\] = packed\n(\s*)\} else \{",
+    r"if false {\n\1kayaColorPending[node.id] = packed\n\2} else {"),
+    "one color_changed per event")
+
+# 13. iOS: THE CONTINUOUS SELECT COMMITS.
+color_watched("an iOS picker committing continuous selections", gate.doctor(
+    "the continuous guard", SWIFT_SOURCE,
+    r"guard !continuously, let packed", "guard let packed"),
+    "commits a continuous")
+
+# 14. AN EMIT PAST THE COMMIT PATH.
+color_watched("a colour emitted outside kayaColorCommitted", gate.doctor(
+    "a second emit", SWIFT_SOURCE,
+    r"(@objc func changed\(_ sender: NSColorWell\) \{\n)",
+    r"\1            KayaHost.emitColorChanged(node.tag, 0)\n"),
+    "is called 2 time(s)")
+
+# 15. A COMMIT OUTSIDE EVERY DOOR.
+color_watched("a colour committed from the surface's apply", gate.doctor(
+    "a commit in apply", SWIFT_SOURCE,
+    r"(            well\.supportsAlpha = node\.alpha\n)",
+    r"\1            kayaColorCommitted(node, node.color)\n"),
+    "sit in a door")
+
+# 16. THE SAME COLOUR COMMITS AGAIN.
+color_watched("a commit of the held colour", gate.doctor(
+    "the same-value return", SWIFT_SOURCE,
+    r"    if packed == node\.color \{ return \}\n", ""),
+    "equal to the held one")
+
 for line in census(REAL):
     gate.finding(line)
+for line in swiftui_color_findings(SWIFT_SOURCE):
+    gate.finding(line)
 
-gate.verdict("the commit rule holds on every landed slider arm")
+gate.verdict("the commit rule holds on every landed slider arm and the SwiftUI colour picker")

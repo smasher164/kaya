@@ -949,6 +949,9 @@ pub(crate) struct Scene {
     /// The number field's twin of the two above (docs/number-field-plan.md §2).
     number_ranges: HashMap<(bool, u64), crate::number_field::NumberRange>,
     number_dirty: Vec<(bool, u64)>,
+    /// docs/color-picker-plan.md §3 rule 3, the same shape again.
+    color_decls: HashMap<(bool, u64), ColorDecl>,
+    color_dirty: Vec<(bool, u64)>,
     /// Live labelled rows touched this transaction, checked for shape at
     /// its end (docs/forms-plan.md §2) once every child has arrived.
     labeled_dirty: Vec<WidgetId>,
@@ -1058,6 +1061,8 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // the time picker. A time has no range (D4).
         Prop::Date | Prop::MinDate | Prop::MaxDate => matches!(kind, WidgetKind::DatePicker),
         Prop::Time | Prop::MinuteStep => matches!(kind, WidgetKind::TimePicker),
+        // docs/color-picker-plan.md §2.
+        Prop::Color | Prop::Alpha => matches!(kind, WidgetKind::ColorPicker),
         Prop::Indeterminate => matches!(kind, WidgetKind::Progress),
         Prop::Source => matches!(kind, WidgetKind::Image),
         // Layout weight is kind-agnostic: any child of a row/column may
@@ -1124,6 +1129,7 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
                 | WidgetKind::Radio
                 | WidgetKind::DatePicker
                 | WidgetKind::TimePicker
+                | WidgetKind::ColorPicker
         ),
         // Semantic emphasis (docs/styling-plan.md D4). KIND legality here
         // is the union of the variants' homes; WHICH variant fits which
@@ -1159,6 +1165,7 @@ fn check_command(kind: WidgetKind, command: CommandKind) {
                 | WidgetKind::TimePicker
                 | WidgetKind::Search
                 | WidgetKind::NumberField
+                | WidgetKind::ColorPicker
         ),
     };
     assert!(ok, "kaya: command {command:?} does not apply to {kind:?}");
@@ -1627,6 +1634,9 @@ fn prop_value_type(prop: Prop) -> ValueType {
         // precedent, an I64 the spec labels.
         Prop::Date | Prop::MinDate | Prop::MaxDate | Prop::Time => ValueType::I64,
         Prop::MinuteStep => ValueType::F64,
+        // Packed 0xRRGGBBAA (docs/color-picker-plan.md §2), Date's precedent.
+        Prop::Color => ValueType::I64,
+        Prop::Alpha => ValueType::Bool,
         Prop::Step | Prop::TickSpacing => ValueType::F64,
         Prop::Source => ValueType::Blob,
         Prop::Grow => ValueType::F64,
@@ -2023,6 +2033,28 @@ impl Default for SliderRange {
     }
 }
 
+/// A colour picker's declared value and translucency switch
+/// (docs/color-picker-plan.md §3 rule 3): alpha off refuses a colour whose
+/// alpha is not FF, checked on the complete declaration so the two props may
+/// arrive in either order.
+#[derive(Clone, Copy, Debug, Default)]
+struct ColorDecl {
+    alpha: bool,
+    color: Option<crate::protocol::Color>,
+}
+
+impl ColorDecl {
+    fn refusal(&self, who: &str) -> Option<String> {
+        let color = self.color?;
+        (!self.alpha && !color.is_opaque()).then(|| {
+            format!(
+                "kaya: colour picker {who}: color {color} is translucent while its `alpha` is \
+                 off; turn alpha on or write an opaque colour (docs/color-picker-plan.md §3 rule 3)"
+            )
+        })
+    }
+}
+
 /// Does `unit` fit `span` a whole number of times (at least once)? Read
 /// with a relative tolerance, since 0.1 * 3 is not 0.3 in binary.
 /// The labelled row's shape (docs/forms-plan.md §2): a label first, the
@@ -2271,6 +2303,11 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
             lines.is_finite() && *lines >= 1.0 && lines.fract() == 0.0,
             "kaya: max_lines is a whole number of lines, at least 1, got {lines}"
         );
+    }
+    if let (Prop::Color, Value::I64(packed)) = (prop, value) {
+        if let Err(why) = crate::protocol::Color::from_packed(*packed) {
+            panic!("kaya: {prop:?} on {kind:?}: {why}");
+        }
     }
     if let (Prop::MaxWidth | Prop::MaxHeight, Value::F64(bound)) = (prop, value) {
         assert!(
@@ -2644,6 +2681,20 @@ impl Scene {
         }
     }
 
+    fn note_color_prop(&mut self, key: (bool, u64), prop: Prop, value: &Value) {
+        let decl = self.color_decls.entry(key).or_default();
+        match (prop, value) {
+            (Prop::Alpha, Value::Bool(on)) => decl.alpha = *on,
+            (Prop::Color, Value::I64(packed)) => {
+                decl.color = crate::protocol::Color::from_packed(*packed).ok();
+            }
+            _ => return,
+        }
+        if !self.color_dirty.contains(&key) {
+            self.color_dirty.push(key);
+        }
+    }
+
     fn note_slider_prop(&mut self, key: (bool, u64), prop: Prop, value: &Value) {
         let Value::F64(x) = value else { return };
         let range = self.slider_ranges.entry(key).or_default();
@@ -2811,6 +2862,9 @@ impl Scene {
                             if kind == WidgetKind::NumberField {
                                 self.note_number_prop((false, widget.0), prop, &v);
                             }
+                            if kind == WidgetKind::ColorPicker {
+                                self.note_color_prop((false, widget.0), prop, &v);
+                            }
                             // The select index's upper bound is scene
                             // state: options added SO FAR in op order, so
                             // "add options, then select" is the required
@@ -2928,6 +2982,9 @@ impl Scene {
                             }
                             if kind == WidgetKind::NumberField {
                                 self.note_number_prop((false, widget.0), prop, &current);
+                            }
+                            if kind == WidgetKind::ColorPicker {
+                                self.note_color_prop((false, widget.0), prop, &current);
                             }
                             // Same stance for the select index's upper
                             // bound: checked here against the current
@@ -4422,6 +4479,14 @@ impl Scene {
                 range.check(&who);
             }
         }
+        for key in std::mem::take(&mut self.color_dirty) {
+            if let Some(decl) = self.color_decls.get(&key) {
+                let who = if key.0 { format!("template node {}", key.1) } else { key.1.to_string() };
+                if let Some(msg) = decl.refusal(&who) {
+                    panic!("{msg}");
+                }
+            }
+        }
         // The labelled row's SHAPE, on the complete declaration
         // (docs/forms-plan.md §2): a label, one control, at most one
         // trailing button.
@@ -4485,6 +4550,33 @@ impl Scene {
                         panic!("{msg}");
                     }
                 }
+            }
+        }
+
+        // Barrier: a signal-bound colour picker's COALESCED colour against
+        // its alpha switch (docs/color-picker-plan.md §3 rule 3), before any
+        // fan-out, restoring the batch's signals on a refusal.
+        for id in &dirty {
+            let Some(bound) = self.bindings.get(id) else { continue };
+            let Value::I64(packed) = self.signals[id] else { continue };
+            let refusal = bound.iter().find_map(|(widget, prop)| {
+                if *prop != Prop::Color {
+                    return None;
+                }
+                let decl = self.color_decls.get(&(false, widget.0))?;
+                ColorDecl { color: crate::protocol::Color::from_packed(packed).ok(), ..*decl }
+                    .refusal(&widget.0.to_string())
+            });
+            if let Some(msg) = refusal {
+                match group.take() {
+                    Some(cap) => self.rollback_group(&cap, &rollback),
+                    None => {
+                        for (sid, old) in &rollback {
+                            self.signals.insert(*sid, old.clone());
+                        }
+                    }
+                }
+                panic!("{msg}");
             }
         }
 
@@ -6424,6 +6516,9 @@ impl Scene {
                         if node_kind == WidgetKind::NumberField {
                             self.note_number_prop((true, widget.0), prop, v);
                         }
+                        if node_kind == WidgetKind::ColorPicker {
+                            self.note_color_prop((true, widget.0), prop, v);
+                        }
                     }
                     PropValue::Signal(id) => {
                         let current = self.signals.get(id).unwrap_or_else(|| {
@@ -6436,6 +6531,9 @@ impl Scene {
                         }
                         if node_kind == WidgetKind::NumberField {
                             self.note_number_prop((true, widget.0), prop, &current);
+                        }
+                        if node_kind == WidgetKind::ColorPicker {
+                            self.note_color_prop((true, widget.0), prop, &current);
                         }
                     }
                     PropValue::Element { level, field } => {
@@ -12484,6 +12582,97 @@ mod tests {
             prop: Prop::Value,
             value: PropValue::Signal(SignalId(1)),
         });
+        Scene::new().apply(ops);
+    }
+
+    fn color_picker(props: &[(Prop, Value)]) -> Vec<TxOp> {
+        let mut ops = vec![TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::ColorPicker }];
+        for (prop, v) in props {
+            ops.push(TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: *prop,
+                value: PropValue::Const(v.clone()),
+            });
+        }
+        ops.push(TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) });
+        ops
+    }
+
+    /// docs/color-picker-plan.md §3 rule 3: alpha is read with the colour on
+    /// the complete declaration, so either order is admitted, and the picker
+    /// carries its identity tag.
+    #[test]
+    fn a_color_picker_takes_a_translucent_color_only_with_alpha_on() {
+        let translucent = Value::I64(0xE01B_2480);
+        Scene::new().apply(color_picker(&[(Prop::Color, Value::I64(0x3366_99FF))]));
+        Scene::new().apply(color_picker(&[(Prop::Color, translucent.clone()), (Prop::Alpha, Value::Bool(true))]));
+        let ops = Scene::new().apply(color_picker(&[(Prop::Alpha, Value::Bool(true)), (Prop::Color, translucent)]));
+        assert!(ops.iter().any(|op| matches!(op, ApplyOp::Create { kind: WidgetKind::ColorPicker, tag: Some(_), .. })));
+    }
+
+    #[test]
+    #[should_panic(expected = "colour picker 1: color E01B2480 is translucent while its `alpha` is off")]
+    fn a_color_pickers_translucent_color_without_alpha_is_refused() {
+        Scene::new().apply(color_picker(&[(Prop::Color, Value::I64(0xE01B_2480))]));
+    }
+
+    #[test]
+    #[should_panic(expected = "colour picker 1: color E01B2480 is translucent")]
+    fn a_color_pickers_alpha_turned_off_under_a_translucent_color_is_refused() {
+        Scene::new().apply(color_picker(&[
+            (Prop::Alpha, Value::Bool(true)),
+            (Prop::Color, Value::I64(0xE01B_2480)),
+            (Prop::Alpha, Value::Bool(false)),
+        ]));
+    }
+
+    #[test]
+    #[should_panic(expected = "colour picker 1: color E01B2480 is translucent")]
+    fn a_color_pickers_bound_color_is_checked_at_bind() {
+        let mut ops = vec![TxOp::CreateSignal { id: SignalId(1), initial: Value::I64(0xE01B_2480) }];
+        ops.extend(color_picker(&[]));
+        ops.insert(ops.len() - 1, TxOp::SetProperty {
+            widget: WidgetId(1),
+            prop: Prop::Color,
+            value: PropValue::Signal(SignalId(1)),
+        });
+        Scene::new().apply(ops);
+    }
+
+    /// A LATER write through the bound signal is refused at the barrier and
+    /// puts the signal back, so the picker never holds what it refused.
+    #[test]
+    fn a_translucent_write_to_an_opaque_pickers_signal_is_refused_and_rolled_back() {
+        let mut ops = vec![TxOp::CreateSignal { id: SignalId(1), initial: Value::I64(0x3366_99FF) }];
+        ops.extend(color_picker(&[]));
+        ops.insert(ops.len() - 1, TxOp::SetProperty {
+            widget: WidgetId(1),
+            prop: Prop::Color,
+            value: PropValue::Signal(SignalId(1)),
+        });
+        let mut scene = Scene::new();
+        scene.apply(ops);
+        let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            scene.apply(vec![TxOp::WriteSignal { id: SignalId(1), value: Value::I64(0xE01B_2480) }]);
+        }));
+        let why = refused.expect_err("a translucent write reached an opaque picker");
+        let why = why.downcast_ref::<String>().cloned().unwrap_or_default();
+        assert!(why.contains("colour picker 1: color E01B2480 is translucent"), "{why}");
+        assert_eq!(scene.signals[&SignalId(1)], Value::I64(0x3366_99FF));
+        scene.apply(vec![TxOp::WriteSignal { id: SignalId(1), value: Value::I64(0xE01B_24FF) }]);
+    }
+
+    #[test]
+    #[should_panic(expected = "is not a packed colour")]
+    fn a_color_past_32_bits_is_refused() {
+        Scene::new().apply(color_picker(&[(Prop::Color, Value::I64(0x1_0000_0000))]));
+    }
+
+    #[test]
+    #[should_panic(expected = "has no property Color")]
+    fn only_a_color_picker_holds_a_color() {
+        let mut ops = color_picker(&[(Prop::Color, Value::I64(0x3366_99FF))]);
+        ops[0] = TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Slider };
         Scene::new().apply(ops);
     }
 

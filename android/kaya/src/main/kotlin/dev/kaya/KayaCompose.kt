@@ -2048,7 +2048,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x82d49a79abf3ca9auL
+    private const val SPEC_HASH: ULong = 0x0d0ad42b8674c264uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -2280,6 +2280,7 @@ object KayaCompose {
     const val KIND_LABELED = 18
     const val KIND_SEARCH = 19
     const val KIND_NUMBER_FIELD = 20
+    const val KIND_COLOR_PICKER = 21
     private const val PROP_TEXT = 1
     private const val PROP_CHECKED = 2
     private const val PROP_VALUE = 3
@@ -2312,6 +2313,8 @@ object KayaCompose {
     private const val PROP_SYMBOL = 41
     private const val PROP_MAX_WIDTH = 42
     private const val PROP_MAX_HEIGHT = 43
+    private const val PROP_COLOR = 44
+    private const val PROP_ALPHA = 45
     private const val FILE_CONTENT_IMAGES = 1
     private const val PROP_COLUMNS = 11
     // The accessibility identifier (never spoken) and label (spoken).
@@ -3216,6 +3219,7 @@ object KayaCompose {
                         KIND_TIME_PICKER -> KayaSceneModel.timePickers.add(node)
                         KIND_LABELED -> KayaSceneModel.labeleds.add(node)
                         KIND_SEARCH -> KayaSceneModel.searches.add(node)
+                        KIND_COLOR_PICKER -> depthStub("colorpicker")
                         KIND_NUMBER_FIELD -> {
                             // docs/number-field-plan.md §2: unset bounds are
                             // ±2^53, the step 1, and the field shows its
@@ -3292,6 +3296,7 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.maxWidth = readF64(b)
                         PROP_MAX_HEIGHT ->
                             KayaSceneModel.nodes[id]!!.maxHeight = readF64(b)
+                        PROP_COLOR, PROP_ALPHA -> depthStub("colorpicker")
                         // docs/rich-text-plan.md §14: this platform's lever
                         // is `clearHistory()`, so taking ownership drops what
                         // the field had banked.
@@ -7002,6 +7007,7 @@ object KayaCompose {
             "grid" -> KayaSceneModel.grids
             "search" -> KayaSceneModel.searches
             "number_field" -> KayaSceneModel.numberFields
+            "color_picker" -> depthStub("colorpicker")
             "textarea" -> KayaSceneModel.textareas
             "date_picker" -> KayaSceneModel.datePickers
             "time_picker" -> KayaSceneModel.timePickers
@@ -8201,6 +8207,12 @@ object KayaCompose {
                         }
                         if (!ok) failures.add("no such target ${parts[1]}")
                         else kayaAwaitAnswer(answered)
+                    }
+                    "set_color" -> {
+                        depthStub("colorpicker")
+                    }
+                    "expect_color" -> {
+                        depthStub("colorpicker")
                     }
                     "set_date", "set_time" -> {
                         // THROUGH THE COMMIT PATH a user's confirm takes
@@ -10260,6 +10272,7 @@ object KayaCompose {
                     // it does not depend on the host's appearance
                     // (kayaInkForMode).
                     "expect_ink" -> {
+                        if (parts[1].startsWith("color_picker")) depthStub("colorpicker")
                         val spec = quoted(parts.drop(2))
                         val halves = spec.split(" = ")
                         val points = halves.firstOrNull() ?: ""
@@ -14529,6 +14542,7 @@ private fun KayaRenderCore(
         KayaCompose.KIND_SEARCH ->
             KayaTextField(node, a11y, boxFill, singleLine = true, search = true)
         KayaCompose.KIND_NUMBER_FIELD -> KayaNumberField(node, a11y, boxFill)
+        KayaCompose.KIND_COLOR_PICKER -> depthStub("colorpicker")
         KayaCompose.KIND_LABELED -> {
             // THE LABELLED ROW (docs/forms-plan.md §3): Material's own
             // labelled row, the value trailing and a WIDE control folded

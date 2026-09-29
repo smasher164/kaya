@@ -1,0 +1,40 @@
+# The colour picker (docs/color-picker-plan.md §5). set_color is a user's
+# settled choice through the control's commit door with the surface never
+# opened; expect_color reads the CONTROL's colour back as RRGGBBAA, and the
+# guest's handler writes what it heard in the same spelling.
+expect_color color_picker#0 "336699FF"
+expect_color color_picker#1 "26A269FF"
+expect label#0 "color: none"
+expect label#1 "alpha: none"
+set_color color_picker#0 E01B24FF
+expect label#0 "color: E01B24FF"
+expect_color color_picker#0 "E01B24FF"
+# Alpha off: a translucent choice lands opaque, as the control itself holds
+# it (§3 rule 3, §4.1), and the app hears the opaque colour.
+set_color color_picker#0 26A26980
+expect_color color_picker#0 "26A269FF"
+expect label#0 "color: 26A269FF"
+# Alpha on: the translucent choice commits whole.
+set_color color_picker#1 E01B2480
+expect label#1 "alpha: E01B2480"
+expect_color color_picker#1 "E01B2480"
+# The echo negative: button#0 writes the opaque picker's signal
+# PROGRAMMATICALLY; the control moves and nothing emits. A choice equal to
+# the held colour emits nothing either. The one deliberate settle, since the
+# expect below asserts an absence.
+click button#0
+expect_color color_picker#0 "3584E4FF"
+set_color color_picker#0 3584E4FF
+settle 700
+expect label#0 "color: 26A269FF"
+# The swatch is drawn in the value, sampled at its centre.
+expect_ink color_picker#0 "center = light 3584E4 dark 3584E4"
+# The template zone: a stamped picker bound to the row's own Color field,
+# driven by its key; the handler hears the key first.
+expect_color color_picker@fill[b] "F6D32DFF"
+set_color color_picker@fill[b] 813D9CFF
+expect label#2 "row b: 813D9CFF"
+expect_color color_picker@fill[b] "813D9CFF"
+expect_color color_picker@fill[a] "E66100FF"
+# Every platform's swatch is a button (§5).
+expect_ax color_picker#0 "button/Title colour"

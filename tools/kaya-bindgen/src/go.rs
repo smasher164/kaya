@@ -238,6 +238,16 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("func UnpackTime(packed int64) (hour, minute int) {");
     c.line("\treturn int(packed / 100), int(packed % 100)");
     c.line("}");
+    c.line("");
+    c.line("// PackColor: an sRGB colour as the wire's I64, 0xRRGGBBAA, straight alpha.");
+    c.line("func PackColor(r, g, b, a uint8) int64 {");
+    c.line("\treturn int64(r)<<24 | int64(g)<<16 | int64(b)<<8 | int64(a)");
+    c.line("}");
+    c.line("");
+    c.line("// UnpackColor: a wire colour's channels.");
+    c.line("func UnpackColor(packed int64) (r, g, b, a uint8) {");
+    c.line("\treturn uint8(packed >> 24), uint8(packed >> 16), uint8(packed >> 8), uint8(packed)");
+    c.line("}");
 
     for (prop, _, kind) in prop_variants(spec) {
         let pc = camel(prop);
@@ -270,6 +280,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::Time => (
                 "hour, minute int".to_string(),
                 "encodeValue(b, PackTime(hour, minute))".to_string(),
+            ),
+            crate::PropKind::Color => (
+                "r, g, bl, a uint8".to_string(),
+                "encodeValue(b, PackColor(r, g, bl, a))".to_string(),
             ),
         };
         c.line("");
@@ -537,8 +551,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 "encodeValue(b, BlobHandle(handle))".to_string(),
             ),
             crate::PropKind::Enum(_) => (param(prop), "int64", format!("encodeValue(b, {})", param(prop))),
-            crate::PropKind::Date | crate::PropKind::Time => {
-                unreachable!("no menu prop is a date or time")
+            crate::PropKind::Date | crate::PropKind::Time | crate::PropKind::Color => {
+                unreachable!("no menu prop is a date, a time or a colour")
             }
         };
         c.line("");

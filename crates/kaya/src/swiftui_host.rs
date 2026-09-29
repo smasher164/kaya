@@ -126,6 +126,10 @@ pub struct KayaHostApi {
     /// The pickers' committed values, packed (docs/datetime-plan.md D2).
     pub emit_date_changed: unsafe extern "C" fn(*const u8, usize, i64),
     pub emit_time_changed: unsafe extern "C" fn(*const u8, usize, i64),
+    /// docs/color-picker-plan.md §3 rule 1: the one quantizer, and the
+    /// settled colour it answered.
+    pub color_quantize: extern "C" fn(f64, f64, f64, f64) -> u32,
+    pub emit_color_changed: unsafe extern "C" fn(*const u8, usize, i64),
     pub blob_data: unsafe extern "C" fn(u64, *mut usize) -> *const u8,
     pub blob_count: unsafe extern "C" fn() -> u64,
     /// The protocol fingerprint (capi::kaya_spec_hash), asserted by the
@@ -505,6 +509,8 @@ pub(crate) fn run() -> i32 {
         emit_value_committed: kaya_emit_value_committed,
         emit_date_changed: kaya_emit_date_changed,
         emit_time_changed: kaya_emit_time_changed,
+        color_quantize: crate::capi::kaya_color_quantize,
+        emit_color_changed: crate::capi::kaya_emit_color_changed,
         blob_data: kaya_blob_data,
         blob_count: kaya_blob_count,
         spec_hash: crate::capi::kaya_spec_hash,

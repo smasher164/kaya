@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x82d49a79abf3ca9a
+specHash = 0x0d0ad42b8674c264
 
 valueBool :: Word32
 valueBool = 1
@@ -92,6 +92,8 @@ kindSearch :: Word32
 kindSearch = 19
 kindNumberField :: Word32
 kindNumberField = 20
+kindColorPicker :: Word32
+kindColorPicker = 21
 drawOpMoveTo :: Word32
 drawOpMoveTo = 1
 drawOpLineTo :: Word32
@@ -228,6 +230,10 @@ propMaxWidth :: Word32
 propMaxWidth = 42
 propMaxHeight :: Word32
 propMaxHeight = 43
+propColor :: Word32
+propColor = 44
+propAlpha :: Word32
+propAlpha = 45
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -798,6 +804,8 @@ occKindNotificationReplied :: Word16
 occKindNotificationReplied = 34
 occKindFullscreenChanged :: Word16
 occKindFullscreenChanged = 35
+occKindColorChanged :: Word16
+occKindColorChanged = 36
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -1097,6 +1105,16 @@ unpackTime :: Int64 -> (Int, Int)
 unpackTime packed =
   let n = fromIntegral packed :: Int
    in (n `div` 100, n `mod` 100)
+
+-- An sRGB colour as the wire's I64: 0xRRGGBBAA, straight alpha.
+packColor :: Int -> Int -> Int -> Int -> Int64
+packColor r g b a = fromIntegral (((r * 256 + g) * 256 + b) * 256 + a)
+
+-- A wire colour's channels.
+unpackColor :: Int64 -> (Int, Int, Int, Int)
+unpackColor packed =
+  let n = fromIntegral packed :: Int
+   in (n `div` 16777216 `mod` 256, n `div` 65536 `mod` 256, n `div` 256 `mod` 256, n `mod` 256)
 
 -- set_property with a constant text value.
 txSetText :: Word64 -> String -> Builder
@@ -1915,6 +1933,44 @@ txBindMaxHeightElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propMaxHeight <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
+-- set_property with a constant color value. An sRGB colour, packed 0xRRGGBBAA on the wire.
+txSetColor :: Word64 -> Int -> Int -> Int -> Int -> Builder
+txSetColor widgetId r g b a = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propColor <> word32LE sourceConst
+    <> encodeValue (VI64 (packColor r g b a)))
+
+-- set_property with a signal-bound color value.
+txBindColor :: Word64 -> Word64 -> Builder
+txBindColor widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propColor <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindColorElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindColorElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propColor <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant alpha value.
+txSetAlpha :: Word64 -> Bool -> Builder
+txSetAlpha widgetId alpha = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propAlpha <> word32LE sourceConst
+    <> encodeValue (VBool alpha))
+
+-- set_property with a signal-bound alpha value.
+txBindAlpha :: Word64 -> Word64 -> Builder
+txBindAlpha widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propAlpha <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindAlphaElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindAlphaElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propAlpha <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
 -- set_window_prop with a constant title value (window 0, the primary surface).
 txSetWindowTitle :: Word64 -> String -> Builder
 txSetWindowTitle window title = wireRecord txKindSetWindowProp
@@ -2391,7 +2447,7 @@ parseOccurrence ::
   IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues, Maybe DropValues, [Value]))
 parseOccurrence redeem rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted && kind /= occKindSheetDismissed && kind /= occKindDismissRequested && kind /= occKindSubmitted && kind /= occKindNotificationReplied && kind /= occKindFullscreenChanged
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted && kind /= occKindSheetDismissed && kind /= occKindDismissRequested && kind /= occKindSubmitted && kind /= occKindNotificationReplied && kind /= occKindFullscreenChanged && kind /= occKindColorChanged
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64
@@ -2469,7 +2525,7 @@ parseOccurrence redeem rec = do
                 op <- peekByteOff rec at' :: IO Word32
                 return (Just (VI64 (fromIntegral op)))
               else
-            if kind == occKindTextChanged || kind == occKindToggled || kind == occKindValueChanged || kind == occKindMenuToggled || kind == occKindMenuValueChanged || kind == occKindDateChanged || kind == occKindTimeChanged || kind == occKindValueCommitted || kind == occKindSubmitted
+            if kind == occKindTextChanged || kind == occKindToggled || kind == occKindValueChanged || kind == occKindMenuToggled || kind == occKindMenuValueChanged || kind == occKindDateChanged || kind == occKindTimeChanged || kind == occKindValueCommitted || kind == occKindSubmitted || kind == occKindColorChanged
               then do
                 (v, _) <- parseValue rec at'
                 return (Just v)

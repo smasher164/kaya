@@ -3854,6 +3854,7 @@ fn kind_registry(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<gtk4
         K::Slider => core.sliders.iter().map(|w| w.scale.clone().upcast()).collect(),
         K::Entry => core.entries.iter().map(|w| w.clone().upcast()).collect(),
         K::Search => core.searches.iter().map(|w| w.clone().upcast()).collect(),
+        K::ColorPicker => crate::depth_stub("colorpicker"),
         K::NumberField => core.number_fields.iter().map(|f| f.spin.clone().upcast()).collect(),
         K::Label => core.labels.clone(),
         K::Column => core.columns.iter().map(|w| w.clone().upcast()).collect(),
@@ -8842,6 +8843,7 @@ fn context_anchor_id(core: &CoreState, t: crate::harness::Target) -> u64 {
         K::Canvas => core.canvases[resolve(t.index, core.canvases.len())].clone().upcast(),
         // The harness rejects editable text before the stage sees it
         // (their native context menus are dress).
+        K::ColorPicker => crate::depth_stub("colorpicker"),
         K::Entry | K::Textarea | K::Search | K::NumberField => {
             panic!("kaya: editable text is not a context anchor (v1)")
         }
@@ -11510,6 +11512,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.grids.push(grid.clone());
                     NativeWidget::Grid(grid)
                 }
+                WidgetKind::ColorPicker => crate::depth_stub("colorpicker"),
                 WidgetKind::NumberField => {
                     // docs/number-field-plan.md §6. ALWAYS, and the input
                     // handler answers the committed value for text the door
@@ -17511,6 +17514,7 @@ impl crate::harness::Stage for GtkStage {
                         }
                     }
                 }
+                K::ColorPicker => crate::depth_stub("colorpicker"),
                 K::NumberField => {
                     match crate::harness::try_resolve(target.index, core.number_fields.len()) {
                         None => "<no such target>".to_owned(),
@@ -18194,6 +18198,14 @@ impl crate::harness::Stage for GtkStage {
 
     /// The CONTROL's value in fixed digits, read off the calendar and the
     /// spins — never the mirrored state beside them.
+    fn set_color(&self, _: crate::harness::Target, _: crate::Color) {
+        crate::depth_stub("colorpicker")
+    }
+
+    fn color_value(&self, _: crate::harness::Target) -> String {
+        crate::depth_stub("colorpicker")
+    }
+
     fn picker_value(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
             if t.kind == crate::harness::TargetKind::TimePicker {
@@ -21309,6 +21321,9 @@ impl crate::harness::Stage for GtkStage {
     /// Every angle-bracketed answer says what it MEASURED (invariant 3),
     /// never a guess about which layer lost the picture.
     fn canvas_ink(&self, target: crate::harness::Target, points: &str) -> String {
+        if target.kind == crate::harness::TargetKind::ColorPicker {
+            crate::depth_stub("colorpicker")
+        }
         let points = points.to_owned();
         Self::on_main(move |core| {
             use gtk4::prelude::{NativeExt, PaintableExt, WidgetExt};
@@ -21828,6 +21843,7 @@ fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk
         K::Label => try_resolve(target.index, core.labels.len()).map(|i| core.labels[i].clone()),
         K::Entry => nth!(core.entries),
         K::Search => nth!(core.searches),
+        K::ColorPicker => crate::depth_stub("colorpicker"),
         K::NumberField => try_resolve(target.index, core.number_fields.len())
             .map(|i| core.number_fields[i].spin.clone().upcast()),
         K::Textarea => nth!(core.textareas),

@@ -18,6 +18,7 @@ pub const RESERVED: &[&str] = &[
     // redeclare in the same scope. swift.rs has the twin.
     "kaya_at",
     "kaya_pack_date", "kaya_unpack_date", "kaya_pack_time", "kaya_unpack_time",
+    "kaya_pack_color", "kaya_unpack_color",
 ];
 
 pub fn emit(spec: &ProtocolSpec) -> String {
@@ -298,6 +299,20 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    *hour = (int32_t)(packed / 100);");
     c.line("    *minute = (int32_t)(packed % 100);");
     c.line("}");
+    c.line("");
+    c.line("/* An sRGB colour as the wire's I64: 0xRRGGBBAA, straight alpha. */");
+    c.line("static inline int64_t kaya_pack_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {");
+    c.line("    return (int64_t)r << 24 | (int64_t)g << 16 | (int64_t)b << 8 | (int64_t)a;");
+    c.line("}");
+    c.line("");
+    c.line("/* A wire colour's channels, through the out params. */");
+    c.line("static inline void kaya_unpack_color(int64_t packed, uint8_t *r, uint8_t *g, uint8_t *b,");
+    c.line("                                     uint8_t *a) {");
+    c.line("    *r = (uint8_t)(packed >> 24);");
+    c.line("    *g = (uint8_t)(packed >> 16);");
+    c.line("    *b = (uint8_t)(packed >> 8);");
+    c.line("    *a = (uint8_t)packed;");
+    c.line("}");
 
     for (prop, _, kind) in prop_variants(spec) {
         let up = prop.to_uppercase();
@@ -317,6 +332,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::Time => (
                 "int32_t hour, int32_t minute".to_string(),
                 "kaya_i64(kaya_pack_time(hour, minute))".to_string(),
+            ),
+            crate::PropKind::Color => (
+                "uint8_t r, uint8_t g, uint8_t b, uint8_t a".to_string(),
+                "kaya_i64(kaya_pack_color(r, g, b, a))".to_string(),
             ),
         };
         c.line("");
@@ -365,8 +384,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::F64 => ("double ", "kaya_f64", *prop),
             crate::PropKind::Blob => ("uint64_t ", "kaya_blob", "handle"),
             crate::PropKind::Enum(_) => ("int64_t ", "kaya_i64", *prop),
-            crate::PropKind::Date | crate::PropKind::Time => {
-                unreachable!("no menu prop is a date or time")
+            crate::PropKind::Date | crate::PropKind::Time | crate::PropKind::Color => {
+                unreachable!("no menu prop is a date, a time or a colour")
             }
         };
         c.line("");
@@ -542,6 +561,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::Time => {
                 c.line(" * and fills the outputs, or 0 for other kinds. A Time is a civil");
                 c.line(" * time packed HHMM; kaya_unpack_time reads its components. */");
+            }
+            crate::PropKind::Color => {
+                c.line(" * and fills the outputs, or 0 for other kinds. A Color is sRGB");
+                c.line(" * packed 0xRRGGBBAA; kaya_unpack_color reads its channels. */");
             }
             _ => c.line(" * and fills the outputs, or 0 for other kinds. */"),
         }

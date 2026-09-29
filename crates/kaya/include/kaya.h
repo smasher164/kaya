@@ -152,6 +152,12 @@
 #define KAYA_OCCURRENCE_FULLSCREEN_CHANGED 35
 
 /**
+ * COLOR_CHANGED { tag; I64 color } — a settled colour, 0xRRGGBBAA
+ * (docs/color-picker-plan.md §2).
+ */
+#define KAYA_OCCURRENCE_COLOR_CHANGED 36
+
+/**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
  *   CREATE_SIGNAL:     u64 signal_id, value
@@ -795,6 +801,8 @@
 
 #define KAYA_KIND_NUMBER_FIELD 20
 
+#define KAYA_KIND_COLOR_PICKER 21
+
 /**
  * Property keys.
  */
@@ -932,6 +940,14 @@
 #define KAYA_PROP_MAX_WIDTH 42
 
 #define KAYA_PROP_MAX_HEIGHT 43
+
+/**
+ * A colour picker's value, packed 0xRRGGBBAA in the int64, and its
+ * translucency switch (docs/color-picker-plan.md §2).
+ */
+#define KAYA_PROP_COLOR 44
+
+#define KAYA_PROP_ALPHA 45
 
 /**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
@@ -1566,6 +1582,12 @@ typedef struct KayaHostApi {
    */
   void (*emit_date_changed)(const uint8_t*, uintptr_t, int64_t);
   void (*emit_time_changed)(const uint8_t*, uintptr_t, int64_t);
+  /**
+   * docs/color-picker-plan.md §3 rule 1: the one quantizer, and the
+   * settled colour it answered.
+   */
+  uint32_t (*color_quantize)(double, double, double, double);
+  void (*emit_color_changed)(const uint8_t*, uintptr_t, int64_t);
   const uint8_t *(*blob_data)(uint64_t, uintptr_t*);
   uint64_t (*blob_count)(void);
   /**
@@ -2556,6 +2578,21 @@ void kaya_emit_toggled(const uint8_t *tag, uintptr_t tag_len, uint8_t checked);
  * the backend, not in the app). Do not combine with kaya_run.
  */
 void kaya_emit_date_changed(const uint8_t *tag, uintptr_t tag_len, int64_t packed);
+
+/**
+ * Presentation side: THE ONE QUANTIZER (docs/color-picker-plan.md §3 rule
+ * 1). A backend converts its surface's colour to sRGB through its own
+ * platform and hands the four components here; every backend clamps and
+ * rounds alike. Answers 0xRRGGBBAA.
+ */
+uint32_t kaya_color_quantize(double r, double g, double b, double a);
+
+/**
+ * Presentation side: emit a colour picker's SETTLED choice, `packed` the
+ * kaya_color_quantize answer (docs/color-picker-plan.md §2). Do not
+ * combine with kaya_run.
+ */
+void kaya_emit_color_changed(const uint8_t *tag, uintptr_t tag_len, int64_t packed);
 
 /**
  * Presentation side: emit a time picker's committed value, `packed` as

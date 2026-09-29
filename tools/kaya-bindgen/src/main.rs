@@ -184,6 +184,7 @@ pub(crate) fn date_note(kind: &PropKind) -> &'static str {
     match kind {
         PropKind::Date => " A civil date, packed YYYYMMDD on the wire.",
         PropKind::Time => " A civil time, packed HHMM on the wire.",
+        PropKind::Color => " An sRGB colour, packed 0xRRGGBBAA on the wire.",
         _ => "",
     }
 }

@@ -20,6 +20,7 @@ pub const RESERVED: &[&str] = &[
     // packs the buffer offset
     "kayaAt",
     "kayaPackDate", "kayaUnpackDate", "kayaPackTime", "kayaUnpackTime",
+    "kayaPackColor", "kayaUnpackColor",
 ];
 
 fn camel(name: &str) -> String {
@@ -99,6 +100,17 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("/// A wire time's components.");
     c.line("func kayaUnpackTime(_ packed: Int64) -> (hour: Int, minute: Int) {");
     c.line("    (Int(packed / 100), Int(packed % 100))");
+    c.line("}");
+    c.line("");
+    c.line("/// An sRGB colour as the wire's I64: 0xRRGGBBAA, straight alpha.");
+    c.line("func kayaPackColor(_ r: UInt8, _ g: UInt8, _ b: UInt8, _ a: UInt8) -> Int64 {");
+    c.line("    Int64(r) << 24 | Int64(g) << 16 | Int64(b) << 8 | Int64(a)");
+    c.line("}");
+    c.line("");
+    c.line("/// A wire colour's channels.");
+    c.line("func kayaUnpackColor(_ packed: Int64) -> (r: UInt8, g: UInt8, b: UInt8, a: UInt8) {");
+    c.line("    (UInt8(truncatingIfNeeded: packed >> 24), UInt8(truncatingIfNeeded: packed >> 16),");
+    c.line("     UInt8(truncatingIfNeeded: packed >> 8), UInt8(truncatingIfNeeded: packed))");
     c.line("}");
     c.line("");
     c.line("struct KayaTx {");
@@ -225,6 +237,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::Time => (
                 "_ hour: Int, _ minute: Int".to_string(),
                 ".i64(kayaPackTime(hour, minute))".to_string(),
+            ),
+            crate::PropKind::Color => (
+                "_ r: UInt8, _ g: UInt8, _ b: UInt8, _ a: UInt8".to_string(),
+                ".i64(kayaPackColor(r, g, b, a))".to_string(),
             ),
         };
         c.line("");
@@ -421,8 +437,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::F64 => (camel(prop), "Double", format!(".f64({})", camel(prop))),
             crate::PropKind::Blob => ("handle".to_string(), "UInt64", ".blob(handle)".to_string()),
             crate::PropKind::Enum(_) => (camel(prop), "Int64", format!(".i64({})", camel(prop))),
-            crate::PropKind::Date | crate::PropKind::Time => {
-                unreachable!("no menu prop is a date or time")
+            crate::PropKind::Date | crate::PropKind::Time | crate::PropKind::Color => {
+                unreachable!("no menu prop is a date, a time or a colour")
             }
         };
         c.line("");

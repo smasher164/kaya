@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x82d49a79abf3ca9a;
+    public const ulong SpecHash = 0x0d0ad42b8674c264;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -47,6 +47,7 @@ static class KayaWire
     public const uint KindLabeled = 18;
     public const uint KindSearch = 19;
     public const uint KindNumberField = 20;
+    public const uint KindColorPicker = 21;
     public const uint DrawOpMoveTo = 1;
     public const uint DrawOpLineTo = 2;
     public const uint DrawOpClose = 3;
@@ -115,6 +116,8 @@ static class KayaWire
     public const uint PropSymbol = 41;
     public const uint PropMaxWidth = 42;
     public const uint PropMaxHeight = 43;
+    public const uint PropColor = 44;
+    public const uint PropAlpha = 45;
     public const uint WpropTitle = 1;
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
@@ -400,6 +403,7 @@ static class KayaWire
     public const ushort OccKindSubmitted = 33;
     public const ushort OccKindNotificationReplied = 34;
     public const ushort OccKindFullscreenChanged = 35;
+    public const ushort OccKindColorChanged = 36;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -1126,6 +1130,18 @@ static class KayaWire
     public static (int Hour, int Minute) UnpackTime(long packed)
     {
         return ((int)(packed / 100), (int)(packed % 100));
+    }
+
+    /// An sRGB colour as the wire's I64: 0xRRGGBBAA, straight alpha.
+    public static long PackColor(byte r, byte g, byte b, byte a)
+    {
+        return (long)r << 24 | (long)g << 16 | (long)b << 8 | a;
+    }
+
+    /// A wire colour's channels.
+    public static (byte R, byte G, byte B, byte A) UnpackColor(long packed)
+    {
+        return ((byte)(packed >> 24), (byte)(packed >> 16), (byte)(packed >> 8), (byte)packed);
     }
 
     /// set_property with a constant text value.
@@ -2203,6 +2219,56 @@ static class KayaWire
         return Finish(stream, w, TxKindSetProperty);
     }
 
+    /// set_property with a constant color value. An sRGB colour, packed 0xRRGGBBAA on the wire.
+    public static byte[] TxSetColor(ulong widgetId, byte r, byte g, byte b, byte a)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropColor); w.Write(SourceConst);
+        EncodeValue(w, PackColor(r, g, b, a));
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound color value.
+    public static byte[] TxBindColor(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropColor); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindColorElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropColor); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant alpha value.
+    public static byte[] TxSetAlpha(ulong widgetId, bool alpha)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropAlpha); w.Write(SourceConst);
+        EncodeValue(w, alpha);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound alpha value.
+    public static byte[] TxBindAlpha(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropAlpha); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindAlphaElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropAlpha); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
     /// set_window_prop with a constant title value (window 0, the primary surface).
     public static byte[] TxSetWindowTitle(ulong window, string title)
     {
@@ -2775,7 +2841,7 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted && kind != OccKindSheetDismissed && kind != OccKindDismissRequested && kind != OccKindSubmitted && kind != OccKindNotificationReplied && kind != OccKindFullscreenChanged)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted && kind != OccKindSheetDismissed && kind != OccKindDismissRequested && kind != OccKindSubmitted && kind != OccKindNotificationReplied && kind != OccKindFullscreenChanged && kind != OccKindColorChanged)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         if (kind == OccKindAlertResult)
@@ -2892,7 +2958,7 @@ static class KayaWire
         {
             payload = BitConverter.ToUInt32(rec, 20);
         }
-        if (kind == OccKindTextChanged || kind == OccKindToggled || kind == OccKindValueChanged || kind == OccKindMenuToggled || kind == OccKindMenuValueChanged || kind == OccKindDateChanged || kind == OccKindTimeChanged || kind == OccKindValueCommitted || kind == OccKindSubmitted)
+        if (kind == OccKindTextChanged || kind == OccKindToggled || kind == OccKindValueChanged || kind == OccKindMenuToggled || kind == OccKindMenuValueChanged || kind == OccKindDateChanged || kind == OccKindTimeChanged || kind == OccKindValueCommitted || kind == OccKindSubmitted || kind == OccKindColorChanged)
         {
             uint ptype = BitConverter.ToUInt32(rec, at);
             int plen = BitConverter.ToInt32(rec, at + 4);

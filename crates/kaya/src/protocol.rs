@@ -685,6 +685,10 @@ pub enum Occurrence {
     /// The user committed a new time in a time picker.
     TimeChanged { id: WidgetId, time: Time },
     InstanceTimeChanged { node: TemplateNodeId, path: Path, time: Time },
+    /// The user settled on a colour in a colour picker
+    /// (docs/color-picker-plan.md §3 rule 2): never a drag's intermediate.
+    ColorChanged { id: WidgetId, color: Color },
+    InstanceColorChanged { node: TemplateNodeId, path: Path, color: Color },
     /// A menu action fired — clicked OR invoked through its shortcut:
     /// ONE occurrence, one dispatch path (DESIGN.md, Menus).
     MenuActivated { item: MenuItemId },
@@ -1044,6 +1048,87 @@ pub enum WidgetKind {
     /// slider's value, min, max and step, committing once per Return, focus
     /// loss or step as value_committed; kaya formats and parses its text.
     NumberField,
+    /// A COLOUR PICKER (docs/color-picker-plan.md): a swatch opening the
+    /// platform's own colour surface; each settled choice is color_changed.
+    ColorPicker,
+}
+
+/// An sRGB colour, 8 bits a channel, straight alpha: what a colour picker
+/// holds (docs/color-picker-plan.md §2). On the wire ONE I64, `0xRRGGBBAA`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Color {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub a: u8,
+}
+
+impl Color {
+    pub const fn rgb(r: u8, g: u8, b: u8) -> Color {
+        Color { r, g, b, a: 0xFF }
+    }
+
+    pub const fn rgba(r: u8, g: u8, b: u8, a: u8) -> Color {
+        Color { r, g, b, a }
+    }
+
+    /// `Color::from_hex(0x336699FF)`, the canvas palette's spelling.
+    pub const fn from_hex(rgba: u32) -> Color {
+        Color { r: (rgba >> 24) as u8, g: (rgba >> 16) as u8, b: (rgba >> 8) as u8, a: rgba as u8 }
+    }
+
+    pub const fn hex(self) -> u32 {
+        (self.r as u32) << 24 | (self.g as u32) << 16 | (self.b as u32) << 8 | self.a as u32
+    }
+
+    pub const fn is_opaque(self) -> bool {
+        self.a == 0xFF
+    }
+
+    pub fn packed(self) -> i64 {
+        self.hex() as i64
+    }
+
+    pub fn from_packed(packed: i64) -> Result<Color, String> {
+        u32::try_from(packed)
+            .map(Color::from_hex)
+            .map_err(|_| format!("{packed} is not a packed colour (0xRRGGBBAA)"))
+    }
+
+    /// THE ONE QUANTIZER (docs/color-picker-plan.md §3 rule 1): every
+    /// backend hands the sRGB components its platform converted to here,
+    /// so they all clamp and round alike. NaN reads as 0.
+    pub fn quantize(r: f64, g: f64, b: f64, a: f64) -> Color {
+        fn q(v: f64) -> u8 {
+            if v.is_nan() { 0 } else { (v.clamp(0.0, 1.0) * 255.0).round() as u8 }
+        }
+        Color { r: q(r), g: q(g), b: q(b), a: q(a) }
+    }
+}
+
+impl std::fmt::Display for Color {
+    /// The fixed spelling every scene reads: `336699FF`.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:08X}", self.hex())
+    }
+}
+
+impl std::str::FromStr for Color {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Color, String> {
+        if s.len() != 8 || !s.bytes().all(|c| c.is_ascii_hexdigit()) {
+            return Err(format!("{s:?} is not a colour (RRGGBBAA, eight hex digits)"));
+        }
+        u32::from_str_radix(s, 16)
+            .map(Color::from_hex)
+            .map_err(|_| format!("{s:?} is not a colour (RRGGBBAA)"))
+    }
+}
+
+impl From<Color> for Value {
+    fn from(c: Color) -> Value {
+        Value::I64(c.packed())
+    }
 }
 
 /// A civil calendar date, the value a date picker holds
@@ -1202,7 +1287,7 @@ impl WidgetKind {
     /// export `WidgetKind` into the public header as an opaque handle no C
     /// caller can use. `cfg(test)` because the sweeps that walk it are tests.
     #[cfg(test)]
-    pub(crate) const ALL: [WidgetKind; 20] = [
+    pub(crate) const ALL: [WidgetKind; 21] = [
         WidgetKind::Column,
         WidgetKind::Button,
         WidgetKind::Label,
@@ -1223,6 +1308,7 @@ impl WidgetKind {
         WidgetKind::Labeled,
         WidgetKind::Search,
         WidgetKind::NumberField,
+        WidgetKind::ColorPicker,
     ];
 
     /// Whether a widget of this kind carries an identity tag — the
@@ -1244,7 +1330,8 @@ impl WidgetKind {
             | WidgetKind::DatePicker
             | WidgetKind::TimePicker
             | WidgetKind::Search
-            | WidgetKind::NumberField => true,
+            | WidgetKind::NumberField
+            | WidgetKind::ColorPicker => true,
             // Exhaustive on purpose — no wildcard. A kind added to the
             // spec lands here as a compile error, which is the moment to
             // decide whether it reports.
@@ -1464,6 +1551,11 @@ pub enum Prop {
     /// §2): the picture scales down inside both, never up.
     MaxWidth,
     MaxHeight,
+    /// A colour picker's value (I64 on the wire, `0xRRGGBBAA`,
+    /// PropKind::Color; docs/color-picker-plan.md §2).
+    Color,
+    /// Whether a colour picker's user may choose translucency (Bool).
+    Alpha,
     /// The app owns a rich textarea's undo (Bool-valued; docs/rich-text-plan.md
     /// R6, §14): the native stack is off, the ledger never banks it, and
     /// Edit>Undo/Redo reach the app through the role item's own activation.
@@ -2406,6 +2498,16 @@ impl OccSink {
                     let body = crate::wire::time_changed_body(&tag, time.packed());
                     ring.push_record(crate::ring::REC_TIME_CHANGED, &body);
                 }
+                Occurrence::ColorChanged { id, color } => {
+                    let tag = crate::wire::click_tag(id.0, &[]);
+                    let body = crate::wire::color_changed_body(&tag, color.packed());
+                    ring.push_record(crate::ring::REC_COLOR_CHANGED, &body);
+                }
+                Occurrence::InstanceColorChanged { node, path, color } => {
+                    let tag = crate::wire::click_tag(node.0, &path);
+                    let body = crate::wire::color_changed_body(&tag, color.packed());
+                    ring.push_record(crate::ring::REC_COLOR_CHANGED, &body);
+                }
                 Occurrence::ValueChanged { id, value } => {
                     let tag = crate::wire::click_tag(id.0, &[]);
                     let body = crate::wire::value_changed_body(&tag, value);
@@ -2631,6 +2733,21 @@ impl OccSink {
         }
     }
 
+    pub(crate) fn send_color_tag(&self, tag: &[u8], packed: i64) {
+        match self {
+            OccSink::Mpsc(tx) => {
+                crate::stall::enqueued();
+                let _ = tx.send(Inbox::Occ(crate::wire::decode_color_changed_tag(tag, packed)));
+            }
+            OccSink::Ring(ring) => {
+                ring.push_record(
+                    crate::ring::REC_COLOR_CHANGED,
+                    &crate::wire::color_changed_body(tag, packed),
+                );
+            }
+        }
+    }
+
     /// The same fast path for a slider move: the stored tag plus the
     /// new value.
     pub(crate) fn send_value_tag(&self, tag: &[u8], value: f64) {
@@ -2764,6 +2881,36 @@ impl OccSink {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// docs/color-picker-plan.md §3 rule 1: the one quantizer clamps each
+    /// channel to 0..1 and rounds half away from zero, and every 8-bit
+    /// value survives the float round trip exactly.
+    #[test]
+    fn the_quantizer_clamps_rounds_and_round_trips_every_byte() {
+        for v in 0..=255u8 {
+            let f = v as f64 / 255.0;
+            assert_eq!(Color::quantize(f, f, f, f), Color::rgba(v, v, v, v), "{v}");
+        }
+        assert_eq!(Color::quantize(1.09, -0.23, -0.15, 1.0), Color::rgb(0xFF, 0, 0));
+        assert_eq!(Color::quantize(f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.5), Color::rgba(0, 0xFF, 0, 0x80));
+        assert_eq!(Color::quantize(51.4 / 255.0, 51.6 / 255.0, 0.4 / 255.0, 1.0), Color::rgb(51, 52, 0));
+    }
+
+    #[test]
+    fn a_color_packs_as_rrggbbaa_and_spells_in_capitals() {
+        let c = Color::from_hex(0x3366_99FF);
+        assert_eq!((c.r, c.g, c.b, c.a), (0x33, 0x66, 0x99, 0xFF));
+        assert_eq!(c.packed(), 0x3366_99FF);
+        assert_eq!(Color::from_packed(0xE01B_2480), Ok(Color::rgba(0xE0, 0x1B, 0x24, 0x80)));
+        assert!(Color::from_packed(-1).is_err());
+        assert!(Color::from_packed(0x1_0000_0000).is_err());
+        assert_eq!(c.to_string(), "336699FF");
+        assert_eq!("e01b2480".parse::<Color>(), Ok(Color::rgba(0xE0, 0x1B, 0x24, 0x80)));
+        for bad in ["336699", "#336699F", "+336699F", "GG6699FF", "336699FF0"] {
+            assert!(bad.parse::<Color>().is_err(), "{bad} parsed");
+        }
+        assert_eq!(Value::from(c), Value::I64(0x3366_99FF));
+    }
 
     /// The negative for the mode divergence: Android's Write must ask for
     /// TRUNCATION EXPLICITLY, because the provider's bare `w` is

@@ -216,6 +216,18 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    {");
     c.line("        return ((int)(packed / 100), (int)(packed % 100));");
     c.line("    }");
+    c.line("");
+    c.line("    /// An sRGB colour as the wire's I64: 0xRRGGBBAA, straight alpha.");
+    c.line("    public static long PackColor(byte r, byte g, byte b, byte a)");
+    c.line("    {");
+    c.line("        return (long)r << 24 | (long)g << 16 | (long)b << 8 | a;");
+    c.line("    }");
+    c.line("");
+    c.line("    /// A wire colour's channels.");
+    c.line("    public static (byte R, byte G, byte B, byte A) UnpackColor(long packed)");
+    c.line("    {");
+    c.line("        return ((byte)(packed >> 24), (byte)(packed >> 16), (byte)(packed >> 8), (byte)packed);");
+    c.line("    }");
 
     for (prop, _, kind) in prop_variants(spec) {
         let pc = pascal(prop);
@@ -248,6 +260,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::Time => (
                 "int hour, int minute".to_string(),
                 "EncodeValue(w, PackTime(hour, minute));".to_string(),
+            ),
+            crate::PropKind::Color => (
+                "byte r, byte g, byte b, byte a".to_string(),
+                "EncodeValue(w, PackColor(r, g, b, a));".to_string(),
             ),
         };
         c.line("");
@@ -491,8 +507,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 "long",
                 format!("EncodeValue(w, {});", camel(prop)),
             ),
-            crate::PropKind::Date | crate::PropKind::Time => {
-                unreachable!("no menu prop is a date or time")
+            crate::PropKind::Date | crate::PropKind::Time | crate::PropKind::Color => {
+                unreachable!("no menu prop is a date, a time or a colour")
             }
         };
         c.line("");

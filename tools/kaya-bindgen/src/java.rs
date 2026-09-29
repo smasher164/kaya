@@ -211,6 +211,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    /** A civil time, unpacked from the wire's I64. */");
     c.line("    public record CivilTime(int hour, int minute) {}");
     c.line("");
+    c.line("    /** An sRGB colour's channels, unpacked from the wire's I64. */");
+    c.line("    public record ColorChannels(int r, int g, int b, int a) {}");
+    c.line("");
     c.line("    /** A civil date as the wire's I64: year * 10000 + month * 100 + day. */");
     c.line("    public static long packDate(int year, int month, int day) {");
     c.line("        return (long) year * 10000 + (long) month * 100 + day;");
@@ -230,6 +233,17 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    /** A wire time's components. */");
     c.line("    public static CivilTime unpackTime(long packed) {");
     c.line("        return new CivilTime((int) (packed / 100), (int) (packed % 100));");
+    c.line("    }");
+    c.line("");
+    c.line("    /** An sRGB colour as the wire's I64: 0xRRGGBBAA, straight alpha. */");
+    c.line("    public static long packColor(int r, int g, int b, int a) {");
+    c.line("        return (long) (r & 0xFF) << 24 | (g & 0xFF) << 16 | (b & 0xFF) << 8 | (a & 0xFF);");
+    c.line("    }");
+    c.line("");
+    c.line("    /** A wire colour's channels. */");
+    c.line("    public static ColorChannels unpackColor(long packed) {");
+    c.line("        return new ColorChannels((int) (packed >> 24 & 0xFF), (int) (packed >> 16 & 0xFF),");
+    c.line("                (int) (packed >> 8 & 0xFF), (int) (packed & 0xFF));");
     c.line("    }");
 
     for (prop, _, kind) in prop_variants(spec) {
@@ -264,6 +278,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::Time => (
                 "int hour, int minute".to_string(),
                 "encodeValue(b, packTime(hour, minute));".to_string(),
+            ),
+            crate::PropKind::Color => (
+                "int r, int g, int bl, int a".to_string(),
+                "encodeValue(b, packColor(r, g, bl, a));".to_string(),
             ),
         };
         c.line("");
@@ -519,8 +537,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 "long",
                 format!("encodeValue(b, {});", camel(prop)),
             ),
-            crate::PropKind::Date | crate::PropKind::Time => {
-                unreachable!("no menu prop is a date or time")
+            crate::PropKind::Date | crate::PropKind::Time | crate::PropKind::Color => {
+                unreachable!("no menu prop is a date, a time or a colour")
             }
         };
         c.line("");

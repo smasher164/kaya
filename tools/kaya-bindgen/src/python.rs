@@ -10,6 +10,7 @@ use crate::{Ctx, PropKind, is_padding, prop_variants, record_params, tx_fields, 
 pub const RESERVED: &[&str] = &[
     "_enc", "record", "parse_value", "parse_occurrence", "parse_representation", "struct", "BlobHandle",
     "canonicalize_shortcut", "pack_date", "unpack_date", "pack_time", "unpack_time",
+    "pack_color", "unpack_color",
     "and", "as", "assert", "async", "await", "break", "class", "continue", "def", "del",
     "elif", "else", "except", "finally", "for", "from", "global", "if", "import", "in",
     "is", "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try", "while",
@@ -147,6 +148,16 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    \"\"\"A wire time as (hour, minute).\"\"\"");
     c.line("    return packed // 100, packed % 100");
     c.line("");
+    c.line("");
+    c.line("def pack_color(r: int, g: int, b: int, a: int) -> int:");
+    c.line("    \"\"\"An sRGB colour as the wire's I64: 0xRRGGBBAA, straight alpha.\"\"\"");
+    c.line("    return (r << 24) | (g << 16) | (b << 8) | a");
+    c.line("");
+    c.line("");
+    c.line("def unpack_color(packed: int) -> tuple[int, int, int, int]:");
+    c.line("    \"\"\"A wire colour as (r, g, b, a).\"\"\"");
+    c.line("    return packed >> 24 & 0xFF, packed >> 16 & 0xFF, packed >> 8 & 0xFF, packed & 0xFF");
+    c.line("");
 
     for r in spec.tx {
         if r.name == "set_property" || r.name == "set_window_prop" {
@@ -207,6 +218,11 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 "hour: int, minute: int".to_string(),
                 "a civil time, packed HHMM",
                 "_enc.value(pack_time(hour, minute))".to_string(),
+            ),
+            PropKind::Color => (
+                "r: int, g: int, b: int, a: int".to_string(),
+                "an sRGB colour, packed 0xRRGGBBAA",
+                "_enc.value(pack_color(r, g, b, a))".to_string(),
             ),
         };
         c.line("");
@@ -390,8 +406,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 "_enc.value(BlobHandle(handle))".to_string(),
             ),
             PropKind::Enum(_) => (format!("{prop}: int"), "int", format!("_enc.value(int({prop}))")),
-            PropKind::Date | PropKind::Time => {
-                unreachable!("no menu prop is a date or time")
+            PropKind::Date | PropKind::Time | PropKind::Color => {
+                unreachable!("no menu prop is a date, a time or a colour")
             }
         };
         c.line("");

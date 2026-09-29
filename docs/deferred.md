@@ -9,6 +9,43 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
+## BUILD — the colour picker (docs/color-picker-plan.md), depth on the mac (2026-09-28); the GTK, WinUI and Compose arms, the iOS legs, pick_color and the other eight bindings are the breadth slice
+KEY: colour picker, color_picker, color picker, KIND_COLOR_PICKER, colorpicker, colorpanel, color_changed, on_color, PropKind::Color, set_color, expect_color, pick_color, kaya_color_quantize, Color type, DEPTH STUB colorpicker
+
+The depth slice: kind 21 with `color` (PropKind::Color, packed 0xRRGGBBAA
+on the I64) and `alpha`, the `color_changed` occurrence, the root refusing a
+translucent colour on an opaque picker (const, at bind, and a later signal
+write at the barrier with the signal put back), the one quantizer
+(`Color::quantize`, `kaya_color_quantize`), component-taking generated
+setters and pack/unpack helpers in all nine wire files, `kaya::Color` and
+the Rust sugar in both zones, the SwiftUI arm (a hosted NSColorWell with the
+measured gesture door on the mac; a UIColorWell swatch presenting
+UIColorPickerViewController on iOS), and tools/scenes/colorpicker.steps green
+on the mac lane. What breadth owes:
+  - **DEPTH STUB: colorpicker on gtk** — GtkColorDialogButton, the commit
+    being `choose_rgba` finishing with a colour, `notify::rgba` behind the
+    quiet guard (plan §4.3, §6).
+  - **DEPTH STUB: colorpicker on winui** — a swatch Button opening a Flyout
+    with ColorPicker; `Flyout.Closed` is the commit (plan §4.4); ColorPicker
+    and Flyout join tools/winui-bindgen's filter.
+  - **DEPTH STUB: colorpicker on compose** — the synthesized Material sheet
+    (plan §6, §8 ruling 2 as recommended), committing on dismissal.
+  - The iOS legs — the arm is built and compiles; UNWIRED in
+    tools/lib/lanes/ios.py until §4.2 and the ink read (drawHierarchy of the
+    UIColorWell) are measured on the simulator.
+  - `pick_color` and a `colorpanel` scene — the real surfaces typed into;
+    the mac leg joins HOST_UI_SCENES (plan §5). Reachable on the mac in
+    process (the depth measured it), but the panel's hex field is in the
+    panel's selected colour space, so `E01B24` typed there committed
+    `E9332FFF` (plan §4.1): the verb must pick sRGB first.
+  - `color_picker`, `alpha`, `on_color` and a `Color` type in the other
+    eight bindings, both zones, and `Color` as a record field type in their
+    record generators; check-sugar-surface is red by design until then.
+  - The mac's `set_color` alpha answer differs from the plan's first draft:
+    a translucent choice on an opaque picker LANDS OPAQUE (AppKit's own
+    well does this by either route, measured), and every backend owes the
+    same answer (plan §5, amended).
+
 ## ~~BUILD — the number field (docs/number-field-plan.md), depth on the mac (2026-09-28); the GTK, WinUI and Compose arms, the iOS legs and the other eight bindings are the breadth slice~~ COMPLETE 2026-09-28: every item below LANDED; validate-all --only numberfield ALL PASS (76 legs, five lanes) and the full matrix green on four lanes, the mac's only non-green legs the two fullscreen display legs NOT RUN on a busy host and passed by hand after
 KEY: number field, number_field, KIND_NUMBER_FIELD, numberfield, numberfieldde, parse_number, number_text, number_commit, number_step, expect_value, unfocus, nudge, fmt:field, DEPTH STUB numberfield
 

@@ -645,7 +645,11 @@ in docs/deferred.md.
    the TABLE, a census run with a row withheld. Ten watched negatives,
    counts printed — per backend the per-movement commit, the missing end
    and an end that is not final, WinUI's pointer read renamed away, and
-   the withheld row),
+   the withheld row. AND THE COLOUR PICKER SINCE 2026-09-28
+   (docs/color-picker-plan.md §4.1): `set_color` is one settled choice, so
+   the SwiftUI arm's every commit is held inside a door, the mac panel's
+   gesture closed by a `.default`-mode perform, iOS's noncontinuous select,
+   and one emit behind the held-colour check; six more watched negatives),
    `tools/check-submit.py` (SUBMITTED PUBLISHES THROUGH THE GESTURE'S DOOR
    ALONE (docs/submit-plan.md S1-S4, S6): an entry's or search field's
    Return and a submitting textarea's Return or Send key, and no scene can

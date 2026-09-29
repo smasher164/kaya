@@ -101,6 +101,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             | Occurrence::InstanceDateChanged { .. }
             | Occurrence::TimeChanged { .. }
             | Occurrence::InstanceTimeChanged { .. }
+            | Occurrence::ColorChanged { .. }
+            | Occurrence::InstanceColorChanged { .. }
             | Occurrence::Pasted { .. }
             | Occurrence::InstancePasted { .. }
             | Occurrence::Dropped { .. }

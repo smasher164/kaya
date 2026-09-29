@@ -10,7 +10,7 @@ use crate::{Ctx, is_padding, prop_variants, record_params, tx_fields, window_pro
 pub const RESERVED: &[&str] = &[
     "encode_value", "encode_values", "encode_variant_schemas", "finish", "parse_value", "parse_occurrence", "parse_representation",
     "canonicalize_shortcut", "shortcut_named_keys",
-    "pack_date", "unpack_date", "pack_time", "unpack_time",
+    "pack_date", "unpack_date", "pack_time", "unpack_time", "pack_color", "unpack_color",
     "and", "as", "assert", "begin", "class", "constraint", "do", "done", "downto", "else",
     "end", "exception", "external", "false", "for", "fun", "function", "functor", "if", "in",
     "include", "inherit", "initializer", "lazy", "let", "match", "method", "module", "mutable",
@@ -151,6 +151,15 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("let unpack_time packed =");
     c.line("  let n = Int64.to_int packed in");
     c.line("  (n / 100, n mod 100)");
+    c.line("");
+    c.line("(* An sRGB colour as the wire's I64: 0xRRGGBBAA, straight alpha. *)");
+    c.line("let pack_color r g b a =");
+    c.line("  Int64.of_int ((r lsl 24) lor (g lsl 16) lor (b lsl 8) lor a)");
+    c.line("");
+    c.line("(* A wire colour's channels. *)");
+    c.line("let unpack_color packed =");
+    c.line("  let n = Int64.to_int packed in");
+    c.line("  ((n lsr 24) land 0xFF, (n lsr 16) land 0xFF, (n lsr 8) land 0xFF, n land 0xFF)");
 
     for (prop, _, kind) in prop_variants(spec) {
         // Blob setters take the u64 kaya_blob_register handle.
@@ -167,6 +176,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::Time => (
                 "hour minute".to_string(),
                 "I64 (pack_time hour minute)".to_string(),
+            ),
+            crate::PropKind::Color => (
+                "r g bl a".to_string(),
+                "I64 (pack_color r g bl a)".to_string(),
             ),
         };
         c.line("");
@@ -394,8 +407,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::F64 => (format!("F64 {prop}"), *prop),
             crate::PropKind::Blob => ("Blob handle".to_string(), "handle"),
             crate::PropKind::Enum(_) => (format!("I64 {prop}"), *prop),
-            crate::PropKind::Date | crate::PropKind::Time => {
-                unreachable!("no menu prop is a date or time")
+            crate::PropKind::Date | crate::PropKind::Time | crate::PropKind::Color => {
+                unreachable!("no menu prop is a date, a time or a colour")
             }
         };
         c.line("");

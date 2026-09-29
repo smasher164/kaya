@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x82d49a79abf3ca9aL;
+    public static final long SPEC_HASH = 0x0d0ad42b8674c264L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -48,6 +48,7 @@ public final class KayaWire {
     public static final int KIND_LABELED = 18;
     public static final int KIND_SEARCH = 19;
     public static final int KIND_NUMBER_FIELD = 20;
+    public static final int KIND_COLOR_PICKER = 21;
     public static final int DRAW_OP_MOVE_TO = 1;
     public static final int DRAW_OP_LINE_TO = 2;
     public static final int DRAW_OP_CLOSE = 3;
@@ -116,6 +117,8 @@ public final class KayaWire {
     public static final int PROP_SYMBOL = 41;
     public static final int PROP_MAX_WIDTH = 42;
     public static final int PROP_MAX_HEIGHT = 43;
+    public static final int PROP_COLOR = 44;
+    public static final int PROP_ALPHA = 45;
     public static final int WPROP_TITLE = 1;
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
@@ -401,6 +404,7 @@ public final class KayaWire {
     public static final short OCC_KIND_SUBMITTED = 33;
     public static final short OCC_KIND_NOTIFICATION_REPLIED = 34;
     public static final short OCC_KIND_FULLSCREEN_CHANGED = 35;
+    public static final short OCC_KIND_COLOR_CHANGED = 36;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -1076,6 +1080,9 @@ public final class KayaWire {
     /** A civil time, unpacked from the wire's I64. */
     public record CivilTime(int hour, int minute) {}
 
+    /** An sRGB colour's channels, unpacked from the wire's I64. */
+    public record ColorChannels(int r, int g, int b, int a) {}
+
     /** A civil date as the wire's I64: year * 10000 + month * 100 + day. */
     public static long packDate(int year, int month, int day) {
         return (long) year * 10000 + (long) month * 100 + day;
@@ -1095,6 +1102,17 @@ public final class KayaWire {
     /** A wire time's components. */
     public static CivilTime unpackTime(long packed) {
         return new CivilTime((int) (packed / 100), (int) (packed % 100));
+    }
+
+    /** An sRGB colour as the wire's I64: 0xRRGGBBAA, straight alpha. */
+    public static long packColor(int r, int g, int b, int a) {
+        return (long) (r & 0xFF) << 24 | (g & 0xFF) << 16 | (b & 0xFF) << 8 | (a & 0xFF);
+    }
+
+    /** A wire colour's channels. */
+    public static ColorChannels unpackColor(long packed) {
+        return new ColorChannels((int) (packed >> 24 & 0xFF), (int) (packed >> 16 & 0xFF),
+                (int) (packed >> 8 & 0xFF), (int) (packed & 0xFF));
     }
 
     /** set_property with a constant text value. */
@@ -2086,6 +2104,52 @@ public final class KayaWire {
         return finish(b);
     }
 
+    /** set_property with a constant color value. An sRGB colour, packed 0xRRGGBBAA on the wire. */
+    public static byte[] txSetColor(long widgetId, int r, int g, int bl, int a) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_COLOR).putInt(SOURCE_CONST);
+        encodeValue(b, packColor(r, g, bl, a));
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound color value. */
+    public static byte[] txBindColor(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_COLOR).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindColorElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_COLOR).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant alpha value. */
+    public static byte[] txSetAlpha(long widgetId, boolean alpha) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_ALPHA).putInt(SOURCE_CONST);
+        encodeValue(b, alpha);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound alpha value. */
+    public static byte[] txBindAlpha(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_ALPHA).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindAlphaElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_ALPHA).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
     /** set_window_prop with a constant title value (window 0, the primary surface). */
     public static byte[] txSetWindowTitle(long window, String title) {
         Enc b = begin(TX_KIND_SET_WINDOW_PROP);
@@ -2755,7 +2819,7 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED && kind != OCC_KIND_FULLSCREEN_CHANGED) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED && kind != OCC_KIND_FULLSCREEN_CHANGED && kind != OCC_KIND_COLOR_CHANGED) {
             return null;
         }
         long id = b.getLong(8);
@@ -2914,7 +2978,7 @@ public final class KayaWire {
         if (kind == OCC_KIND_SORT_REQUESTED) {
             payload = b.getInt(20);
         }
-        if (kind == OCC_KIND_TEXT_CHANGED || kind == OCC_KIND_TOGGLED || kind == OCC_KIND_VALUE_CHANGED || kind == OCC_KIND_MENU_TOGGLED || kind == OCC_KIND_MENU_VALUE_CHANGED || kind == OCC_KIND_DATE_CHANGED || kind == OCC_KIND_TIME_CHANGED || kind == OCC_KIND_VALUE_COMMITTED || kind == OCC_KIND_SUBMITTED) {
+        if (kind == OCC_KIND_TEXT_CHANGED || kind == OCC_KIND_TOGGLED || kind == OCC_KIND_VALUE_CHANGED || kind == OCC_KIND_MENU_TOGGLED || kind == OCC_KIND_MENU_VALUE_CHANGED || kind == OCC_KIND_DATE_CHANGED || kind == OCC_KIND_TIME_CHANGED || kind == OCC_KIND_VALUE_COMMITTED || kind == OCC_KIND_SUBMITTED || kind == OCC_KIND_COLOR_CHANGED) {
             int ptype = b.getInt(at);
             int plen = b.getInt(at + 4);
             switch (ptype) {

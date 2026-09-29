@@ -111,6 +111,9 @@ pub const KAYA_OCCURRENCE_SUBMITTED: u16 = 33;
 pub const KAYA_OCCURRENCE_NOTIFICATION_REPLIED: u16 = 34;
 /// FULLSCREEN_CHANGED { u64 window; Bool on } (docs/fullscreen-plan.md).
 pub const KAYA_OCCURRENCE_FULLSCREEN_CHANGED: u16 = 35;
+/// COLOR_CHANGED { tag; I64 color } — a settled colour, 0xRRGGBBAA
+/// (docs/color-picker-plan.md §2).
+pub const KAYA_OCCURRENCE_COLOR_CHANGED: u16 = 36;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -127,6 +130,7 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_SUBMITTED == ring::REC_SUBMITTED
         && KAYA_OCCURRENCE_NOTIFICATION_REPLIED == ring::REC_NOTIFICATION_REPLIED
         && KAYA_OCCURRENCE_FULLSCREEN_CHANGED == ring::REC_FULLSCREEN_CHANGED
+        && KAYA_OCCURRENCE_COLOR_CHANGED == ring::REC_COLOR_CHANGED
         && KAYA_OCCURRENCE_SECTION_SELECTED == ring::REC_SECTION_SELECTED
         && KAYA_OCCURRENCE_MENU_ACTIVATED == ring::REC_MENU_ACTIVATED
         && KAYA_OCCURRENCE_MENU_TOGGLED == ring::REC_MENU_TOGGLED
@@ -772,6 +776,7 @@ pub const KAYA_KIND_TIME_PICKER: u32 = 17;
 pub const KAYA_KIND_LABELED: u32 = 18;
 pub const KAYA_KIND_SEARCH: u32 = 19;
 pub const KAYA_KIND_NUMBER_FIELD: u32 = 20;
+pub const KAYA_KIND_COLOR_PICKER: u32 = 21;
 const _: () = assert!(
     KAYA_KIND_COLUMN == wire::KIND_COLUMN
         && KAYA_KIND_BUTTON == wire::KIND_BUTTON
@@ -793,6 +798,7 @@ const _: () = assert!(
         && KAYA_KIND_LABELED == wire::KIND_LABELED
         && KAYA_KIND_SEARCH == wire::KIND_SEARCH
         && KAYA_KIND_NUMBER_FIELD == wire::KIND_NUMBER_FIELD
+        && KAYA_KIND_COLOR_PICKER == wire::KIND_COLOR_PICKER
 );
 // Completeness, not just agreement: a value pin cannot see a FORGOTTEN
 // export (docs/traps.md, "A value pin cannot see a FORGOTTEN sibling").
@@ -810,7 +816,7 @@ const _: () = {
         n
     };
     assert!(
-        kinds == 20,
+        kinds == 21,
         "the spec kind enum grew: export the new KAYA_KIND_* above, extend the pin, and bump          this count"
     );
 };
@@ -900,6 +906,10 @@ pub const KAYA_PROP_MAX_LINES: u32 = 40;
 pub const KAYA_PROP_SYMBOL: u32 = 41;
 pub const KAYA_PROP_MAX_WIDTH: u32 = 42;
 pub const KAYA_PROP_MAX_HEIGHT: u32 = 43;
+/// A colour picker's value, packed 0xRRGGBBAA in the int64, and its
+/// translucency switch (docs/color-picker-plan.md §2).
+pub const KAYA_PROP_COLOR: u32 = 44;
+pub const KAYA_PROP_ALPHA: u32 = 45;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -1065,7 +1075,7 @@ const _: () = assert!(
 // Completeness for the occurrence exports (docs/traps.md): a new spec
 // occurrence trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 35,
+    crate::spec::SPEC.occurrence.len() == 36,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -1139,6 +1149,8 @@ const _: () = assert!(
         && KAYA_PROP_SYMBOL == wire::PROP_SYMBOL
         && KAYA_PROP_MAX_WIDTH == wire::PROP_MAX_WIDTH
         && KAYA_PROP_MAX_HEIGHT == wire::PROP_MAX_HEIGHT
+        && KAYA_PROP_COLOR == wire::PROP_COLOR
+        && KAYA_PROP_ALPHA == wire::PROP_ALPHA
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -1415,7 +1427,7 @@ const _: () = {
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 43,
+    crate::spec::PROPS.len() == 45,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(
@@ -4008,6 +4020,37 @@ pub unsafe extern "C" fn kaya_emit_date_changed(tag: *const u8, tag_len: usize, 
     state()
         .ring
         .push_record(ring::REC_DATE_CHANGED, &wire::date_changed_body(tag, packed));
+}
+
+/// Presentation side: THE ONE QUANTIZER (docs/color-picker-plan.md §3 rule
+/// 1). A backend converts its surface's colour to sRGB through its own
+/// platform and hands the four components here; every backend clamps and
+/// rounds alike. Answers 0xRRGGBBAA.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_color_quantize(r: f64, g: f64, b: f64, a: f64) -> u32 {
+    crate::protocol::Color::quantize(r, g, b, a).hex()
+}
+
+/// Presentation side: emit a colour picker's SETTLED choice, `packed` the
+/// kaya_color_quantize answer (docs/color-picker-plan.md §2). Do not
+/// combine with kaya_run.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_emit_color_changed(tag: *const u8, tag_len: usize, packed: i64) {
+    assert!(!tag.is_null() && tag_len != 0, "kaya: empty colour picker tag");
+    let tag = unsafe { std::slice::from_raw_parts(tag, tag_len) };
+    if !stamped_tag_is_live(tag, "a colour change") {
+        return;
+    }
+    if let Err(why) = crate::protocol::Color::from_packed(packed) {
+        panic!("kaya: kaya_emit_color_changed: {why}");
+    }
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send_color_tag(tag, packed);
+        return;
+    }
+    state()
+        .ring
+        .push_record(ring::REC_COLOR_CHANGED, &wire::color_changed_body(tag, packed));
 }
 
 /// Presentation side: emit a time picker's committed value, `packed` as

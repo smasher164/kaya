@@ -75,7 +75,8 @@ GATES = {
     "check-native-undo": ["crates", "swift", "android"],
     # The slider commit rule is a lowering: no binding stands between the
     # occurrence and the four arms.
-    "check-slider-commit": ["crates", "android"],
+    # swift/ for the colour picker's commit door (docs/color-picker-plan.md §4.1).
+    "check-slider-commit": ["crates", "swift", "android"],
     # The search field's one clear path and platform identity are lowerings
     # in three files; swift/ because the Mac and iOS arms live there.
     "check-search": ["crates", "swift", "android"],

@@ -150,7 +150,10 @@ DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes"]
 # tooltips with its own (docs/tooltip-plan.md §5) — the iOS arm is the
 # shared interpreter's `.help`, which lands on the accessibility hint,
 # and expect_help reads it there.
-UNWIRED_SCENES = []
+# The colour picker's iOS arm (a UIColorWell swatch presenting
+# UIColorPickerViewController) is built and its legs are the breadth slice's
+# to measure (docs/color-picker-plan.md §4.2).
+UNWIRED_SCENES = ["colorpicker"]
 
 # The fullscreen scene's app-only way back after the cut, the same steps as
 # tools/lib/lanes/android.py's FULLSCREEN_APP_TAIL: no user change arrives.

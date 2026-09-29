@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x82d49a79abf3ca9a
+SPEC_HASH = 0x0d0ad42b8674c264
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -49,6 +49,7 @@ KIND_TIME_PICKER = 17
 KIND_LABELED = 18
 KIND_SEARCH = 19
 KIND_NUMBER_FIELD = 20
+KIND_COLOR_PICKER = 21
 DRAW_OP_MOVE_TO = 1
 DRAW_OP_LINE_TO = 2
 DRAW_OP_CLOSE = 3
@@ -117,6 +118,8 @@ PROP_MAX_LINES = 40
 PROP_SYMBOL = 41
 PROP_MAX_WIDTH = 42
 PROP_MAX_HEIGHT = 43
+PROP_COLOR = 44
+PROP_ALPHA = 45
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -403,6 +406,7 @@ OCC_DISMISS_REQUESTED = 32
 OCC_SUBMITTED = 33
 OCC_NOTIFICATION_REPLIED = 34
 OCC_FULLSCREEN_CHANGED = 35
+OCC_COLOR_CHANGED = 36
 
 
 def _pad(b: bytes) -> bytes:
@@ -482,6 +486,16 @@ def pack_time(hour: int, minute: int) -> int:
 def unpack_time(packed: int) -> tuple[int, int]:
     """A wire time as (hour, minute)."""
     return packed // 100, packed % 100
+
+
+def pack_color(r: int, g: int, b: int, a: int) -> int:
+    """An sRGB colour as the wire's I64: 0xRRGGBBAA, straight alpha."""
+    return (r << 24) | (g << 16) | (b << 8) | a
+
+
+def unpack_color(packed: int) -> tuple[int, int, int, int]:
+    """A wire colour as (r, g, b, a)."""
+    return packed >> 24 & 0xFF, packed >> 16 & 0xFF, packed >> 8 & 0xFF, packed & 0xFF
 
 
 def tx_create_signal(signal_id: int, initial: Value) -> bytes:
@@ -1370,6 +1384,36 @@ def tx_bind_max_height_element(widget_id: int, level: int = 0, field: int = 0) -
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_MAX_HEIGHT, SOURCE_ELEMENT, level, field))
 
 
+def tx_set_color(widget_id: int, r: int, g: int, b: int, a: int) -> bytes:
+    """set_property with a constant color value (an sRGB colour, packed 0xRRGGBBAA)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_COLOR, SOURCE_CONST) + _enc.value(pack_color(r, g, b, a)))
+
+
+def tx_bind_color(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound color value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_COLOR, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_color_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_COLOR, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_alpha(widget_id: int, alpha: bool) -> bytes:
+    """set_property with a constant alpha value (bool)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_ALPHA, SOURCE_CONST) + _enc.value(alpha))
+
+
+def tx_bind_alpha(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound alpha value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_ALPHA, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_alpha_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_ALPHA, SOURCE_ELEMENT, level, field))
+
+
 def tx_set_window_title(window: int, title: str) -> bytes:
     """set_window_prop with a constant title value (str); window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_TITLE, SOURCE_CONST) + _enc.value(title))
@@ -1740,7 +1784,7 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
     value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED):
         return kind, None, [], None
     if kind == OCC_ALERT_RESULT:
         # A request's one answer: id + the u32 code.
@@ -1851,7 +1895,7 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
     payload = None
     if kind in (OCC_SORT_REQUESTED,):
         (payload,) = struct.unpack_from("<I", buf, 20)
-    if kind in (OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_SUBMITTED,):
+    if kind in (OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_SUBMITTED, OCC_COLOR_CHANGED,):
         payload, at = parse_value(buf, at)
     if kind in (OCC_PASTED,):
         clip, values, at = parse_clip(buf, at)

@@ -14,7 +14,7 @@ pub const RESERVED: &[&str] = &[
     "enc", "record", "Encoder", "parse_value", "parse_clip", "parse_representation",
     "parse_occurrence", "BlobHandle", "I64", "canonicalize_shortcut", "occurrence_blob",
     "install_occurrence_blob", "redeem_occurrence_blob", "text_encoder", "text_decoder",
-    "pack_date", "unpack_date", "pack_time", "unpack_time",
+    "pack_date", "unpack_date", "pack_time", "unpack_time", "pack_color", "unpack_color",
     "arguments", "await", "break", "case", "catch", "class", "const", "continue", "debugger",
     "default", "delete", "do", "else", "enum", "eval", "export", "extends", "false", "finally",
     "for", "function", "if", "implements", "import", "in", "instanceof", "interface", "let",
@@ -46,6 +46,10 @@ fn value_expr(kind: &PropKind, prop: &str) -> (String, String) {
         PropKind::Time => (
             "hour: number, minute: number".to_string(),
             "enc.value(new I64(pack_time(hour, minute)))".to_string(),
+        ),
+        PropKind::Color => (
+            "r: number, g: number, b: number, a: number".to_string(),
+            "enc.value(new I64(pack_color(r, g, b, a)))".to_string(),
         ),
     }
 }
@@ -277,6 +281,16 @@ export function record(kind: number, body: Uint8Array): Uint8Array {
     c.line("export function unpack_time(packed: number): [hour: number, minute: number] {");
     c.line("  return [Math.trunc(packed / 100), packed % 100];");
     c.line("}");
+    c.line("");
+    c.line("/** An sRGB colour as the wire's I64: 0xRRGGBBAA, straight alpha. */");
+    c.line("export function pack_color(r: number, g: number, b: number, a: number): number {");
+    c.line("  return ((r * 256 + g) * 256 + b) * 256 + a;");
+    c.line("}");
+    c.line("");
+    c.line("/** A wire colour as [r, g, b, a]. */");
+    c.line("export function unpack_color(packed: number): [r: number, g: number, b: number, a: number] {");
+    c.line("  return [Math.trunc(packed / 16777216) % 256, Math.trunc(packed / 65536) % 256, Math.trunc(packed / 256) % 256, packed % 256];");
+    c.line("}");
 
     for (prop, _, kind) in prop_variants(spec) {
         let up = prop.to_uppercase();
@@ -433,8 +447,8 @@ export function record(kind: number, body: Uint8Array): Uint8Array {
                 format!("{prop}: string"),
                 format!("enc.value(canonicalize_shortcut({prop}))"),
             ),
-            PropKind::Date | PropKind::Time => {
-                unreachable!("no menu prop is a date or time")
+            PropKind::Date | PropKind::Time | PropKind::Color => {
+                unreachable!("no menu prop is a date, a time or a colour")
             }
             other => value_expr(other, prop),
         };

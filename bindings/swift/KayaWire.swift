@@ -24,7 +24,7 @@ public enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x82d49a79abf3ca9a
+let kayaSpecHash: UInt64 = 0x0d0ad42b8674c264
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
 func kayaPackDate(_ year: Int, _ month: Int, _ day: Int) -> Int64 {
@@ -44,6 +44,17 @@ func kayaPackTime(_ hour: Int, _ minute: Int) -> Int64 {
 /// A wire time's components.
 func kayaUnpackTime(_ packed: Int64) -> (hour: Int, minute: Int) {
     (Int(packed / 100), Int(packed % 100))
+}
+
+/// An sRGB colour as the wire's I64: 0xRRGGBBAA, straight alpha.
+func kayaPackColor(_ r: UInt8, _ g: UInt8, _ b: UInt8, _ a: UInt8) -> Int64 {
+    Int64(r) << 24 | Int64(g) << 16 | Int64(b) << 8 | Int64(a)
+}
+
+/// A wire colour's channels.
+func kayaUnpackColor(_ packed: Int64) -> (r: UInt8, g: UInt8, b: UInt8, a: UInt8) {
+    (UInt8(truncatingIfNeeded: packed >> 24), UInt8(truncatingIfNeeded: packed >> 16),
+     UInt8(truncatingIfNeeded: packed >> 8), UInt8(truncatingIfNeeded: packed))
 }
 
 struct KayaTx {
@@ -2065,6 +2076,70 @@ struct KayaTx {
         self.end(kayaAt)
     }
 
+    /// set_property with a constant color value. An sRGB colour, packed 0xRRGGBBAA on the wire.
+    mutating func setColor(_ widgetId: UInt64, _ r: UInt8, _ g: UInt8, _ b: UInt8, _ a: UInt8) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_COLOR))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.i64(kayaPackColor(r, g, b, a)))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound color value.
+    mutating func bindColor(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_COLOR))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindColorElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_COLOR))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
+    /// set_property with a constant alpha value.
+    mutating func setAlpha(_ widgetId: UInt64, _ alpha: Bool) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_ALPHA))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.bool(alpha))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound alpha value.
+    mutating func bindAlpha(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_ALPHA))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindAlphaElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_ALPHA))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
     /// set_window_prop with a constant title value (window 0, the primary surface).
     mutating func setWindowTitle(_ window: UInt64, _ title: String) {
         let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
@@ -2793,6 +2868,7 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             || kind == UInt16(KAYA_OCCURRENCE_SUBMITTED)
             || kind == UInt16(KAYA_OCCURRENCE_NOTIFICATION_REPLIED)
             || kind == UInt16(KAYA_OCCURRENCE_FULLSCREEN_CHANGED)
+            || kind == UInt16(KAYA_OCCURRENCE_COLOR_CHANGED)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {
@@ -2932,6 +3008,7 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             || kind == UInt16(KAYA_OCCURRENCE_TIME_CHANGED)
             || kind == UInt16(KAYA_OCCURRENCE_VALUE_COMMITTED)
             || kind == UInt16(KAYA_OCCURRENCE_SUBMITTED)
+            || kind == UInt16(KAYA_OCCURRENCE_COLOR_CHANGED)
         {
             let ptype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)
             let plen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))

@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x82d49a79abf3ca9an;
+export const SPEC_HASH = 0x0d0ad42b8674c264n;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -42,6 +42,7 @@ export const KIND_TIME_PICKER = 17;
 export const KIND_LABELED = 18;
 export const KIND_SEARCH = 19;
 export const KIND_NUMBER_FIELD = 20;
+export const KIND_COLOR_PICKER = 21;
 export const DRAW_OP_MOVE_TO = 1;
 export const DRAW_OP_LINE_TO = 2;
 export const DRAW_OP_CLOSE = 3;
@@ -110,6 +111,8 @@ export const PROP_MAX_LINES = 40;
 export const PROP_SYMBOL = 41;
 export const PROP_MAX_WIDTH = 42;
 export const PROP_MAX_HEIGHT = 43;
+export const PROP_COLOR = 44;
+export const PROP_ALPHA = 45;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -396,6 +399,7 @@ export const OCC_DISMISS_REQUESTED = 32;
 export const OCC_SUBMITTED = 33;
 export const OCC_NOTIFICATION_REPLIED = 34;
 export const OCC_FULLSCREEN_CHANGED = 35;
+export const OCC_COLOR_CHANGED = 36;
 
 const text_encoder = new TextEncoder();
 const text_decoder = new TextDecoder("utf-8", { fatal: true });
@@ -1108,6 +1112,16 @@ export function pack_time(hour: number, minute: number): number {
 /** A wire time as [hour, minute]. */
 export function unpack_time(packed: number): [hour: number, minute: number] {
   return [Math.trunc(packed / 100), packed % 100];
+}
+
+/** An sRGB colour as the wire's I64: 0xRRGGBBAA, straight alpha. */
+export function pack_color(r: number, g: number, b: number, a: number): number {
+  return ((r * 256 + g) * 256 + b) * 256 + a;
+}
+
+/** A wire colour as [r, g, b, a]. */
+export function unpack_color(packed: number): [r: number, g: number, b: number, a: number] {
+  return [Math.trunc(packed / 16777216) % 256, Math.trunc(packed / 65536) % 256, Math.trunc(packed / 256) % 256, packed % 256];
 }
 
 /** set_property with a constant text value. */
@@ -1884,6 +1898,42 @@ export function tx_bind_max_height_element(widget_id: number, level = 0, field =
   return enc.end(TX_SET_PROPERTY);
 }
 
+/** set_property with a constant color value. An sRGB colour, packed 0xRRGGBBAA on the wire. */
+export function tx_set_color(widget_id: number, r: number, g: number, b: number, a: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_COLOR); enc.u32(SOURCE_CONST); enc.value(new I64(pack_color(r, g, b, a)));
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound color value. */
+export function tx_bind_color(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_COLOR); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_color_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_COLOR); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant alpha value. */
+export function tx_set_alpha(widget_id: number, alpha: boolean): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_ALPHA); enc.u32(SOURCE_CONST); enc.value(alpha);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound alpha value. */
+export function tx_bind_alpha(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_ALPHA); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_alpha_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_ALPHA); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
 /** set_window_prop with a constant title value; window 0, the primary surface. */
 export function tx_set_window_title(window: number, title: string): Uint8Array {
   enc.begin(); enc.u64(window); enc.u32(WPROP_TITLE); enc.u32(SOURCE_CONST); enc.value(title);
@@ -2330,7 +2380,7 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const size = view.getUint32(0, true);
   const kind = view.getUint16(4, true);
-  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED].includes(kind)) return { kind, id: null, keys: [], payload: null };
+  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED].includes(kind)) return { kind, id: null, keys: [], payload: null };
   if (kind === OCC_ALERT_RESULT) {
     // A request's one answer: id + the u32 code.
     return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };
@@ -2468,7 +2518,7 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
   // The u32 slot the tag family calls `reserved` is a real value on
   // these (sort_requested's column) — read before the generic tail.
   if ([OCC_SORT_REQUESTED].includes(kind)) payload = read_u32(buf, 20);
-  if ([OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_SUBMITTED].includes(kind)) [payload, at] = parse_value(buf, at);
+  if ([OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_SUBMITTED, OCC_COLOR_CHANGED].includes(kind)) [payload, at] = parse_value(buf, at);
   // A paste rides a click tag VERBATIM, so the key path above is already
   // read and the clip sits after it.
   if ([OCC_PASTED].includes(kind)) [payload, at] = parse_clip(buf, at);

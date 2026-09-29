@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x82d49a79abf3ca9aULL
+#define KAYA_SPEC_HASH 0x0d0ad42b8674c264ULL
 
 
 /* Create a signal holding `initial`. */
@@ -790,6 +790,20 @@ static inline int64_t kaya_pack_time(int32_t hour, int32_t minute) {
 static inline void kaya_unpack_time(int64_t packed, int32_t *hour, int32_t *minute) {
     *hour = (int32_t)(packed / 100);
     *minute = (int32_t)(packed % 100);
+}
+
+/* An sRGB colour as the wire's I64: 0xRRGGBBAA, straight alpha. */
+static inline int64_t kaya_pack_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+    return (int64_t)r << 24 | (int64_t)g << 16 | (int64_t)b << 8 | (int64_t)a;
+}
+
+/* A wire colour's channels, through the out params. */
+static inline void kaya_unpack_color(int64_t packed, uint8_t *r, uint8_t *g, uint8_t *b,
+                                     uint8_t *a) {
+    *r = (uint8_t)(packed >> 24);
+    *g = (uint8_t)(packed >> 16);
+    *b = (uint8_t)(packed >> 8);
+    *a = (uint8_t)packed;
 }
 
 /* set_property with a constant text value. */
@@ -2168,6 +2182,70 @@ static inline void kaya_tx_bind_max_height_element(KayaTx *tx, uint64_t widget_i
     kaya_wire_end(tx, kaya_at);
 }
 
+/* set_property with a constant color value. An sRGB colour, packed 0xRRGGBBAA on the wire. */
+static inline void kaya_tx_set_color(KayaTx *tx, uint64_t widget_id, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_COLOR);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_i64(kaya_pack_color(r, g, b, a)));
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a signal-bound color value. */
+static inline void kaya_tx_bind_color(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_COLOR);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_color_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_COLOR);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a constant alpha value. */
+static inline void kaya_tx_set_alpha(KayaTx *tx, uint64_t widget_id, int alpha) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_ALPHA);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_bool(alpha));
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a signal-bound alpha value. */
+static inline void kaya_tx_bind_alpha(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_ALPHA);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_alpha_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_ALPHA);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, kaya_at);
+}
+
 /* set_menu_prop with a constant label value. */
 static inline void kaya_tx_set_menu_label(KayaTx *tx, uint64_t item, const char *label) {
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
@@ -2548,6 +2626,25 @@ static inline int kaya_parse_submitted(const uint8_t *rec, uint64_t *id,
                                         uint32_t *n_keys, KayaVal *payload) {
     const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
     if (r->header.kind != KAYA_OCCURRENCE_SUBMITTED)
+        return 0;
+    *id = r->id;
+    *n_keys = r->path_len;
+    size_t at = sizeof(KayaRecordButtonClicked);
+    for (uint32_t k = 0; k < r->path_len && k < max_keys; k++)
+        at = kaya_parse_value(rec, at, &keys[k]);
+    kaya_parse_value(rec, at, payload);
+    return 1;
+}
+
+/* Decode a color_changed occurrence: same identity head as a click, then
+ * its payload as one Color value (strings point into rec). Returns 1
+ * and fills the outputs, or 0 for other kinds. A Color is sRGB
+ * packed 0xRRGGBBAA; kaya_unpack_color reads its channels. */
+static inline int kaya_parse_color_changed(const uint8_t *rec, uint64_t *id,
+                                            KayaVal *keys, uint32_t max_keys,
+                                            uint32_t *n_keys, KayaVal *payload) {
+    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
+    if (r->header.kind != KAYA_OCCURRENCE_COLOR_CHANGED)
         return 0;
     *id = r->id;
     *n_keys = r->path_len;

@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x82d49a79abf3ca9aL
+let spec_hash = 0x0d0ad42b8674c264L
 
 let value_bool = 1
 let value_i64 = 2
@@ -65,6 +65,7 @@ let kind_time_picker = 17
 let kind_labeled = 18
 let kind_search = 19
 let kind_number_field = 20
+let kind_color_picker = 21
 let draw_op_move_to = 1
 let draw_op_line_to = 2
 let draw_op_close = 3
@@ -133,6 +134,8 @@ let prop_max_lines = 40
 let prop_symbol = 41
 let prop_max_width = 42
 let prop_max_height = 43
+let prop_color = 44
+let prop_alpha = 45
 let wprop_title = 1
 let wprop_width = 2
 let wprop_height = 3
@@ -418,6 +421,7 @@ let occ_kind_dismiss_requested = 32
 let occ_kind_submitted = 33
 let occ_kind_notification_replied = 34
 let occ_kind_fullscreen_changed = 35
+let occ_kind_color_changed = 36
 
 let pad8 b =
   while Buffer.length b mod 8 <> 0 do
@@ -933,6 +937,15 @@ let pack_time hour minute = Int64.of_int ((hour * 100) + minute)
 let unpack_time packed =
   let n = Int64.to_int packed in
   (n / 100, n mod 100)
+
+(* An sRGB colour as the wire's I64: 0xRRGGBBAA, straight alpha. *)
+let pack_color r g b a =
+  Int64.of_int ((r lsl 24) lor (g lsl 16) lor (b lsl 8) lor a)
+
+(* A wire colour's channels. *)
+let unpack_color packed =
+  let n = Int64.to_int packed in
+  ((n lsr 24) land 0xFF, (n lsr 16) land 0xFF, (n lsr 8) land 0xFF, n land 0xFF)
 
 (* set_property with a constant text value. *)
 let tx_set_text widget_id text =
@@ -2052,6 +2065,58 @@ let tx_bind_max_height_element ?(level = 0) ?(field = 0) widget_id =
       Buffer.add_int32_le b (Int32.of_int level);
       Buffer.add_int32_le b (Int32.of_int field))
 
+(* set_property with a constant color value. An sRGB colour, packed 0xRRGGBBAA on the wire. *)
+let tx_set_color widget_id r g bl a =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_color);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (I64 (pack_color r g bl a)))
+
+(* set_property with a signal-bound color value. *)
+let tx_bind_color widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_color);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_color_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_color);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
+(* set_property with a constant alpha value. *)
+let tx_set_alpha widget_id alpha =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_alpha);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Bool alpha))
+
+(* set_property with a signal-bound alpha value. *)
+let tx_bind_alpha widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_alpha);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_alpha_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_alpha);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
 (* set_window_prop with a constant title value (window 0, the primary surface). *)
 let tx_set_window_title window title =
   finish tx_kind_set_window_prop (fun b ->
@@ -2607,7 +2672,7 @@ let parse_clip byte at =
    value), None for clicks. None for pad/unknown kinds. *)
 let parse_occurrence byte =
   let kind = u16_at byte 4 in
-  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended && kind <> occ_kind_date_changed && kind <> occ_kind_time_changed && kind <> occ_kind_value_committed && kind <> occ_kind_notification_result && kind <> occ_kind_link_opened && kind <> occ_kind_text_edited && kind <> occ_kind_text_formatted && kind <> occ_kind_sheet_dismissed && kind <> occ_kind_dismiss_requested && kind <> occ_kind_submitted && kind <> occ_kind_notification_replied && kind <> occ_kind_fullscreen_changed then None
+  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended && kind <> occ_kind_date_changed && kind <> occ_kind_time_changed && kind <> occ_kind_value_committed && kind <> occ_kind_notification_result && kind <> occ_kind_link_opened && kind <> occ_kind_text_edited && kind <> occ_kind_text_formatted && kind <> occ_kind_sheet_dismissed && kind <> occ_kind_dismiss_requested && kind <> occ_kind_submitted && kind <> occ_kind_notification_replied && kind <> occ_kind_fullscreen_changed && kind <> occ_kind_color_changed then None
   else begin
     (* ids are guest-allocated and small; the low u32 is the story. *)
     let id = u32_at byte 8 in
@@ -2696,7 +2761,7 @@ let parse_occurrence byte =
       if kind = occ_kind_drag_ended then
         Some (I64 (Int64.of_int (u32_at byte !at)))
       else
-      if kind = occ_kind_text_changed || kind = occ_kind_toggled || kind = occ_kind_value_changed || kind = occ_kind_menu_toggled || kind = occ_kind_menu_value_changed || kind = occ_kind_date_changed || kind = occ_kind_time_changed || kind = occ_kind_value_committed || kind = occ_kind_submitted then
+      if kind = occ_kind_text_changed || kind = occ_kind_toggled || kind = occ_kind_value_changed || kind = occ_kind_menu_toggled || kind = occ_kind_menu_value_changed || kind = occ_kind_date_changed || kind = occ_kind_time_changed || kind = occ_kind_value_committed || kind = occ_kind_submitted || kind = occ_kind_color_changed then
         Some (fst (parse_value byte !at))
       else None
     in
