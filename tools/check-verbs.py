@@ -3027,6 +3027,120 @@ for label, pattern, finding in (
         fail(f"check-verbs SELF-TEST: the Compose kind census passed with "
              f"{label}")
 
+# THE RANGE'S ARMS IN BOTH INTERPRETERS (docs/range-plan.md §7): the verb
+# census is satisfied by a label, so an arm that lost the thumb word, the
+# range's prop arms or its drive reads every range step as a slider's.
+def kotlin_if_arm(src, verb):
+    """The first block of a `"<verb>" -> if (..) { .. }` arm: the branch a
+    range or slider target takes."""
+    at = src.find(f'"{verb}" -> if (')
+    if at < 0:
+        return None
+    return balanced(src, src.index("{", src.index(") {", at) + 2))
+
+
+def swift_where_arm(src, head):
+    at = src.find(head)
+    if at < 0:
+        return None
+    indent = src[src.rfind("\n", 0, at) + 1:at]
+    nxt = re.search(r"^" + indent + r"(?:case |default:|\})", src[at + len(head):], re.M)
+    return src[at: at + len(head) + (nxt.start() if nxt else 0)]
+
+
+def kotlin_set_prop(src):
+    at = src.find("APPLY_SET_PROP -> {")
+    return balanced(src, src.index("{", at)) if at >= 0 else None
+
+
+def swift_set_prop(src):
+    at = src.find("case (propLow, valueF64):")
+    return src[at - 4000: at + 4000] if at >= 0 else None
+
+
+RANGE_ARMS = (
+    (KOTLIN, "the set_value arm's range drive",
+     lambda t: kotlin_action_arm(t, "set_value"),
+     ('startsWith("range")', "kayaRangeSetProgress(")),
+    (KOTLIN, "the expect_value arm's two thumbs",
+     lambda t: kotlin_action_arm(t, "expect_value"),
+     ('startsWith("range")', "kayaRangeThumbs(")),
+    (KOTLIN, "the expect_thumb arm's thumb word",
+     lambda t: kotlin_action_arm(t, "expect_thumb"),
+     ('parts[2] == "low"', "kayaThumbTravel(")),
+    (KOTLIN, "the expect_ax arm's thumb branch",
+     lambda t: kotlin_if_arm(t, "expect_ax"),
+     ('parts[2] == "low"', "kayaAxThumb(")),
+    (KOTLIN, "the expect_axis arm's slider branch",
+     lambda t: kotlin_if_arm(t, "expect_axis"),
+     ("kayaTravelAxis(",)),
+    (KOTLIN, "the range's prop arms", kotlin_set_prop,
+     ("PROP_LOW ->", "PROP_HIGH ->", "PROP_MIN_GAP ->", "PROP_LOW_LABEL ->",
+      "PROP_HIGH_LABEL ->")),
+    (SWIFT, "the set_value arm's range drive",
+     lambda t: swift_action_arm(t, "set_value"),
+     ('hasPrefix("range")', "kayaDriveThumb(")),
+    (SWIFT, "the expect_value arm's two thumbs",
+     lambda t: swift_action_arm(t, "expect_value"),
+     ('hasPrefix("range")', "kayaControlThumbValue(")),
+    (SWIFT, "the expect_thumb arm's thumb word",
+     lambda t: swift_action_arm(t, "expect_thumb"),
+     ('parts[2] == "low"', "kayaThumbFraction(")),
+    (SWIFT, "the expect_ax arm's thumb branch",
+     lambda t: swift_where_arm(t, 'case "expect_ax" where parts[1].hasPrefix("range")'),
+     ('"." + parts[2]',)),
+    (SWIFT, "the range's prop arms", swift_set_prop,
+     ("case (propLow, valueF64)", "case (propHigh, valueF64)",
+      "case (propMinGap, valueF64)", "case (propLowLabel, valueStr)",
+      "case (propHighLabel, valueStr)")),
+)
+
+
+def range_arms(sources=None):
+    sources = sources or {}
+    bad, read = [], 0
+    for rel, what, reader, needles in RANGE_ARMS:
+        body = reader(sources.get(rel) or real(rel))
+        if body is None:
+            bad.append(f"{rel}: {what} — the arm is not where the reader "
+                       f"looks, so the census would agree with anything")
+            continue
+        read += 1
+        for needle in needles:
+            if needle not in body:
+                bad.append(f"{rel}: {what} no longer names `{needle}` — a "
+                           f"range step would be read as a slider's, or "
+                           f"not at all")
+    return bad, read
+
+
+range_out, range_read = range_arms()
+g.counted("range arms read in both interpreters", range_read,
+          floor=len(RANGE_ARMS))
+range_status = 1 if range_out else 0
+for line in range_out:
+    print(f"check-verbs: {line}", file=sys.stderr)
+for rel, label, pattern in (
+    (KOTLIN, "the Compose range drive", r"kayaRangeSetProgress\(activity, parts\)"),
+    (KOTLIN, "the Compose thumb word in expect_thumb",
+     r'kayaThumbTravel\(it\.id, if \(parts\[2\] == "low"\)'),
+    (KOTLIN, "the Compose ax thumb branch", r"onUi\(activity\) \{ kayaAxThumb\("),
+    (KOTLIN, "the Compose slider axis read", r"kayaTravelAxis\(it\.id\)"),
+    (KOTLIN, "the Compose min_gap arm", r"PROP_MIN_GAP -> KayaSceneModel"),
+    (KOTLIN, "the Compose expect_value thumbs",
+     r"kayaRangeThumbs\(activity, node\.id\)\?\.joinToString"),
+    (SWIFT, "the SwiftUI range drive", r"kayaDriveThumb\(control, node: node, low: parts"),
+    (SWIFT, "the SwiftUI thumb word in expect_thumb",
+     r'return kayaThumbFraction\(control, low: parts\[2\] == "low"\)'),
+    (SWIFT, "the SwiftUI ax thumb id", r'kayaAxRead\(id \+ "\." \+ parts\[2\]\)'),
+    (SWIFT, "the SwiftUI high_label arm", r"case \(propHighLabel, valueStr\)"),
+):
+    cut = g.doctor(f"range arms: {label} cut", real(rel), pattern, "kayaCut(")
+    found, _ = range_arms({rel: cut})
+    print(f"check-verbs: range-arms negative ({label}): {len(found)} finding(s)")
+    if not found:
+        fail(f"check-verbs SELF-TEST: the range arm census passed with {label} cut")
+
 # clip_mirrors() ran first and printed its own findings; its verdict
 # is read here so there is exactly ONE verdict line.
 if (clip_status or window_status or ink_status or ax_status
@@ -3034,7 +3148,8 @@ if (clip_status or window_status or ink_status or ax_status
         or metrics_status or keyed_status or drop_line_status
         or vtrace_status or norm_status or ind_status
         or answer_status or seed_focus_status or notify_auth_status
-        or pump_status or immersive_status or kind_status):
+        or pump_status or immersive_status or kind_status
+        or range_status):
     raise SystemExit(1)
 g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"({len(canvas_rows)} of them the canvas vocabularies) + "
@@ -3054,4 +3169,5 @@ g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"+ the interpreter's pump started without a window "
           f"+ the Compose immersive arm read from the insets "
           f"+ every Compose kind's create and render arms "
+          f"+ the range's arms in both interpreters "
           f"+ spec hash against 2 interpreters")

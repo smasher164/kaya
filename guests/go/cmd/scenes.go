@@ -40,6 +40,7 @@ import (
 	"dev.kaya/guests/go/pickers"
 	"dev.kaya/guests/go/progress"
 	"dev.kaya/guests/go/radio"
+	rangescene "dev.kaya/guests/go/range"
 	"dev.kaya/guests/go/ranges"
 	"dev.kaya/guests/go/reorder"
 	"dev.kaya/guests/go/richlabel"
@@ -113,6 +114,8 @@ var scenes = map[string]func() *kaya.App{
 	"sliders":    sliders.App,
 	"progress":   progress.App,
 	"radio":      radio.App,
+	"range":      rangescene.App,
+	"rangertl":   rangescene.App,
 	"ranges":     ranges.App,
 	"richlabel":  richlabel.App,
 	"richrows":   richrows.App,

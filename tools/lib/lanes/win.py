@@ -25,7 +25,7 @@ SCENES = [
     "reorder", "feed", "grow", "layout", "align", "window", "panels",
     "confirm", "nav", "split", "panes", "table", "scroll",
     "progress", "select", "radio", "grid", "textarea", "search", "submit", "scrollto", "fullscreen",
-    "numberfield", "colorpicker",
+    "numberfield", "colorpicker", "range",
     "sections",
     "menus", "commands", "a11y", "a11yrows", "filedialog",
     "clipboard", "undo", "dirty", "ranges", "save", "styling",
@@ -285,6 +285,10 @@ ORDER = [
      # the exe and no .py or .ts; the other five legs join this line with
      # their guests.
      "sliders_rust", "sliders_python", "sliders_js", "sliders_go", "sliders_csharp", "sliders_java",
+     # The range pools for the sliders' reason: `set_value` drives a thumb's
+     # own Slider, and a nudge is one arrow key to a focused thumb, the
+     # number field's Tab one control over (docs/range-plan.md §5).
+     "range_rust", "range_python", "range_js", "range_go", "range_csharp", "range_java",
     "tooltips_rust", "tooltips_python", "tooltips_js", "tooltips_go", "tooltips_csharp", "tooltips_java",
      # The sheet pool: the modal Popup and the close button's own route,
      # no real mouse and no OS-global key (docs/sheet-plan.md U1).
@@ -325,6 +329,9 @@ ORDER = [
      "tasksrtl_rust",
      # The scroll guest's sideways strip in Arabic (docs/hscroll-plan.md §4).
      "scrollrtl_rust",
+     # The range guest in Arabic (docs/range-plan.md §3 rules 5, 6): the range
+     # mirrors, the vertical fader does not.
+     "rangertl_rust",
      # THE RICH LABEL (docs/rich-text-plan.md §15). POOLED, unlike its
      # richtext neighbour: a label is read-only, so the scene clicks two
      # buttons and reads the runs back — no typed input, no composition, no
@@ -741,7 +748,7 @@ def launcher(leg):
 GUEST_STEM = {"listdetail": "split", "formatde": "format", "formatar": "format",
               "taskspersist": "tasks", "links": "tasks", "tasksrtl": "tasks",
               "tasksbig": "tasks", "formatbig": "format", "clock24": "format",
-              "scrollrtl": "scroll", "numberfieldde": "numberfield"}
+              "scrollrtl": "scroll", "numberfieldde": "numberfield", "rangertl": "range"}
 
 
 def guest_stem(scene):

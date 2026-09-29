@@ -649,6 +649,14 @@ private func kayaAssignedSize(_ tail: [KayaValue]) -> KayaViewbox? {
     return KayaViewbox(w, h)
 }
 
+/// A range occurrence's two values, low then high (docs/range-plan.md §2).
+private func kayaRangePair(_ tail: [KayaValue]) -> (Double, Double)? {
+    guard tail.count >= 2, case .f64(let low) = tail[0], case .f64(let high) = tail[1] else {
+        return nil
+    }
+    return (low, high)
+}
+
 /// A tick's third value, the frame's time in seconds. A draw_requested
 /// carries none and answers 0.
 private func kayaFrameTime(_ tail: [KayaValue]) -> Double {
@@ -2460,6 +2468,10 @@ public final class KayaApp {
     private var nodeValues: [UInt64: (KayaAppTx, [KayaValue], Double) throws -> Void] = [:]
     private var widgetCommits: [UInt64: (KayaAppTx, Double) throws -> Void] = [:]
     private var nodeCommits: [UInt64: (KayaAppTx, [KayaValue], Double) throws -> Void] = [:]
+    private var widgetRanges: [UInt64: (KayaAppTx, Double, Double) throws -> Void] = [:]
+    private var nodeRanges: [UInt64: (KayaAppTx, [KayaValue], Double, Double) throws -> Void] = [:]
+    private var widgetRangeCommits: [UInt64: (KayaAppTx, Double, Double) throws -> Void] = [:]
+    private var nodeRangeCommits: [UInt64: (KayaAppTx, [KayaValue], Double, Double) throws -> Void] = [:]
     private var widgetDates: [UInt64: (KayaAppTx, KayaDate) throws -> Void] = [:]
     private var nodeDates: [UInt64: (KayaAppTx, [KayaValue], KayaDate) throws -> Void] = [:]
     private var widgetColors: [UInt64: (KayaAppTx, KayaColor) throws -> Void] = [:]
@@ -3057,6 +3069,32 @@ public final class KayaApp {
         nodeCommits[n.id] = handler
     }
 
+    /// A live range's thumbs moving, both values (docs/range-plan.md §2).
+    func onRangeChanged(_ w: KayaWidget, _ handler: @escaping (KayaAppTx, Double, Double) throws -> Void) {
+        widgetRanges[w.id] = handler
+    }
+
+    func onRangeChanged(
+        _ n: KayaNodeHandle,
+        _ handler: @escaping (KayaAppTx, [KayaValue], Double, Double) throws -> Void
+    ) {
+        nodeRanges[n.id] = handler
+    }
+
+    /// The pair a range gesture SETTLED ON, once per gesture.
+    func onRangeCommitted(
+        _ w: KayaWidget, _ handler: @escaping (KayaAppTx, Double, Double) throws -> Void
+    ) {
+        widgetRangeCommits[w.id] = handler
+    }
+
+    func onRangeCommitted(
+        _ n: KayaNodeHandle,
+        _ handler: @escaping (KayaAppTx, [KayaValue], Double, Double) throws -> Void
+    ) {
+        nodeRangeCommits[n.id] = handler
+    }
+
     /// Register a toggle handler for a template checkbox; it also
     /// receives the stamped copy's keys, outermost first.
     func onToggle(
@@ -3629,6 +3667,20 @@ public final class KayaApp {
                 if let handler = nodeCommits[id] {
                     dispatch { try build { tx in try handler(tx, keys, value) } }
                 }
+            case (UInt16(KAYA_OCCURRENCE_RANGE_CHANGED), true),
+                (UInt16(KAYA_OCCURRENCE_RANGE_COMMITTED), true):
+                let table = kind == UInt16(KAYA_OCCURRENCE_RANGE_CHANGED)
+                    ? widgetRanges : widgetRangeCommits
+                if let handler = table[id], let (low, high) = kayaRangePair(tail) {
+                    dispatch { try build { tx in try handler(tx, low, high) } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_RANGE_CHANGED), false),
+                (UInt16(KAYA_OCCURRENCE_RANGE_COMMITTED), false):
+                let table = kind == UInt16(KAYA_OCCURRENCE_RANGE_CHANGED)
+                    ? nodeRanges : nodeRangeCommits
+                if let handler = table[id], let (low, high) = kayaRangePair(tail) {
+                    dispatch { try build { tx in try handler(tx, keys, low, high) } }
+                }
             case (UInt16(KAYA_OCCURRENCE_DATE_CHANGED), true):
                 if let handler = widgetDates[id] {
                     dispatch { try build { tx in try handler(tx, kayaDate(packed: packed)) } }
@@ -4123,7 +4175,8 @@ public final class KayaAppTx {
     }
 
     /// A container's arrangement axis, the dynamic path beside the
-    /// creation kind (docs/adaptive-layout-plan.md D2). Containers only.
+    /// creation kind (docs/adaptive-layout-plan.md D2), and a slider's
+    /// orientation (docs/range-plan.md §2).
     public func setAxis(_ w: KayaWidget, _ axis: KayaAxis) {
         tx.setAxis(w.id, axis.rawValue)
     }
@@ -4639,7 +4692,7 @@ public final class KayaAppTx {
     public func slider(
         min: Double = 0.0, max: Double = 1.0, value: Double = 0.0,
         step: Double? = nil, tickSpacing: Double? = nil,
-        bind: KayaSignal? = nil,
+        bind: KayaSignal? = nil, axis: KayaAxis? = nil,
         onChange: ((KayaAppTx, Double) throws -> Void)? = nil,
         onCommit: ((KayaAppTx, Double) throws -> Void)? = nil,
         grow: Double? = nil
@@ -4654,8 +4707,44 @@ public final class KayaAppTx {
         } else {
             tx.setValue(w.id, value)
         }
+        if let axis { tx.setAxis(w.id, axis.rawValue) }
         if let onChange { app.onValueChanged(w, onChange) }
         if let onCommit { app.onValueCommitted(w, onCommit) }
+        if let grow { setGrow(w, grow) }
+        return w
+    }
+
+    /// A range over min...max with its thumbs at low and high
+    /// (docs/range-plan.md), its handlers co-located and each handed BOTH
+    /// values. `bind` takes the two thumbs' float signals instead of
+    /// constants; a write never echoes.
+    @discardableResult
+    public func range(
+        min: Double = 0.0, max: Double = 1.0, low: Double = 0.0, high: Double = 1.0,
+        step: Double? = nil, tickSpacing: Double? = nil, minGap: Double? = nil,
+        lowLabel: String? = nil, highLabel: String? = nil,
+        bind: (low: KayaSignal, high: KayaSignal)? = nil,
+        onChange: ((KayaAppTx, Double, Double) throws -> Void)? = nil,
+        onCommit: ((KayaAppTx, Double, Double) throws -> Void)? = nil,
+        grow: Double? = nil
+    ) -> KayaWidget {
+        let w = widget(UInt32(KAYA_KIND_RANGE))
+        tx.setMin(w.id, min)
+        tx.setMax(w.id, max)
+        if let bind {
+            tx.bindLow(w.id, bind.low.id)
+            tx.bindHigh(w.id, bind.high.id)
+        } else {
+            tx.setLow(w.id, low)
+            tx.setHigh(w.id, high)
+        }
+        if let step { tx.setStep(w.id, step) }
+        if let tickSpacing { tx.setTickSpacing(w.id, tickSpacing) }
+        if let minGap { tx.setMinGap(w.id, minGap) }
+        if let lowLabel { tx.setLowLabel(w.id, lowLabel) }
+        if let highLabel { tx.setHighLabel(w.id, highLabel) }
+        if let onChange { app.onRangeChanged(w, onChange) }
+        if let onCommit { app.onRangeCommitted(w, onCommit) }
         if let grow { setGrow(w, grow) }
         return w
     }
@@ -6003,6 +6092,32 @@ public final class KayaTpl {
         tx.tx.bindA11yLabelElement(n.id, level: level, field: f.index)
     }
 
+    /// What a stamped range's low thumb speaks (docs/range-plan.md §8 ruling 2).
+    func setLowLabel(_ n: KayaNodeHandle, _ label: String) {
+        tx.tx.setLowLabel(n.id, label)
+    }
+
+    func setLowLabel(_ n: KayaNodeHandle, _ s: KayaSignal) {
+        tx.tx.bindLowLabel(n.id, s.id)
+    }
+
+    public func setLowLabel(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<String>) {
+        tx.tx.bindLowLabelElement(n.id, level: level, field: f.index)
+    }
+
+    /// What a stamped range's high thumb speaks (docs/range-plan.md §8 ruling 2).
+    func setHighLabel(_ n: KayaNodeHandle, _ label: String) {
+        tx.tx.setHighLabel(n.id, label)
+    }
+
+    func setHighLabel(_ n: KayaNodeHandle, _ s: KayaSignal) {
+        tx.tx.bindHighLabel(n.id, s.id)
+    }
+
+    public func setHighLabel(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<String>) {
+        tx.tx.bindHighLabelElement(n.id, level: level, field: f.index)
+    }
+
     /// A stamped copy's HELP TEXT (KayaTx.setHelp). THE ROW'S OWN
     /// FIELD is the source that makes two copies explain themselves
     /// differently.
@@ -6684,6 +6799,73 @@ public final class KayaTpl {
         if let max { tx.tx.setMax(n.id, max) }
         if let step { tx.tx.setStep(n.id, step) }
         if let onCommit { tx.app.onValueCommitted(n, onCommit) }
+        return n
+    }
+
+    /// A range in the blueprint: its bounds are constant across the
+    /// copies, its two thumbs take sources (a row's own fields being the
+    /// point). A move does NOT write the row back.
+    @discardableResult
+    func range(
+        min: Double = 0.0, max: Double = 1.0, low: Double, high: Double,
+        step: Double? = nil, tickSpacing: Double? = nil, minGap: Double? = nil,
+        lowLabel: String? = nil, highLabel: String? = nil,
+        onChange: ((KayaAppTx, [KayaValue], Double, Double) throws -> Void)? = nil,
+        onCommit: ((KayaAppTx, [KayaValue], Double, Double) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = rangeOf(
+            min, max, step, tickSpacing, minGap, lowLabel, highLabel, onChange, onCommit)
+        tx.tx.setLow(n.id, low)
+        tx.tx.setHigh(n.id, high)
+        return n
+    }
+
+    @discardableResult
+    func range(
+        min: Double = 0.0, max: Double = 1.0, low: KayaSignal, high: KayaSignal,
+        step: Double? = nil, tickSpacing: Double? = nil, minGap: Double? = nil,
+        lowLabel: String? = nil, highLabel: String? = nil,
+        onChange: ((KayaAppTx, [KayaValue], Double, Double) throws -> Void)? = nil,
+        onCommit: ((KayaAppTx, [KayaValue], Double, Double) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = rangeOf(
+            min, max, step, tickSpacing, minGap, lowLabel, highLabel, onChange, onCommit)
+        tx.tx.bindLow(n.id, low.id)
+        tx.tx.bindHigh(n.id, high.id)
+        return n
+    }
+
+    @discardableResult
+    public func range(
+        min: Double = 0.0, max: Double = 1.0, low: KayaField<Double>, high: KayaField<Double>,
+        step: Double? = nil, tickSpacing: Double? = nil, minGap: Double? = nil,
+        lowLabel: String? = nil, highLabel: String? = nil,
+        onChange: ((KayaAppTx, [KayaValue], Double, Double) throws -> Void)? = nil,
+        onCommit: ((KayaAppTx, [KayaValue], Double, Double) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = rangeOf(
+            min, max, step, tickSpacing, minGap, lowLabel, highLabel, onChange, onCommit)
+        tx.tx.bindLowElement(n.id, level: 0, field: low.index)
+        tx.tx.bindHighElement(n.id, level: 0, field: high.index)
+        return n
+    }
+
+    private func rangeOf(
+        _ min: Double, _ max: Double, _ step: Double?, _ tickSpacing: Double?,
+        _ minGap: Double?, _ lowLabel: String?, _ highLabel: String?,
+        _ onChange: ((KayaAppTx, [KayaValue], Double, Double) throws -> Void)?,
+        _ onCommit: ((KayaAppTx, [KayaValue], Double, Double) throws -> Void)?
+    ) -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_RANGE))
+        tx.tx.setMin(n.id, min)
+        tx.tx.setMax(n.id, max)
+        if let step { tx.tx.setStep(n.id, step) }
+        if let tickSpacing { tx.tx.setTickSpacing(n.id, tickSpacing) }
+        if let minGap { tx.tx.setMinGap(n.id, minGap) }
+        if let lowLabel { tx.tx.setLowLabel(n.id, lowLabel) }
+        if let highLabel { tx.tx.setHighLabel(n.id, highLabel) }
+        if let onChange { tx.app.onRangeChanged(n, onChange) }
+        if let onCommit { tx.app.onRangeCommitted(n, onCommit) }
         return n
     }
 

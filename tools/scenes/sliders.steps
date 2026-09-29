@@ -37,3 +37,12 @@ expect label#3 "row b: 40"
 expect_value slider@level[b] "40"
 expect_value slider@level[a] "70"
 expect_ax slider#0 "slider/Level"
+# The vertical fader (docs/range-plan.md §5): the orientation read from the
+# control, the thumb's place measured from the BOTTOM.
+expect_axis slider#0 "horizontal"
+expect_axis slider#2 "vertical"
+expect_thumb slider#2 "0.25"
+set_value slider#2 0.75
+expect_value slider#2 "0.75"
+expect_thumb slider#2 "0.75"
+expect_ax slider#2 "slider/Fader"

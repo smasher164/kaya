@@ -8453,10 +8453,30 @@ private func kayaRunScript(_ script: String) {
                         kayaAwaitAnswer(answered)
                     }
                 #else
-                    // A phone has no arrow keys; its lane table cuts the `nudge`
-                    // lines (docs/range-plan.md §5, the number field's precedent).
-                    _ = (answered, isRange, up)
-                    failures.append("nudge: a phone's slider has no keyboard door")
+                    // THE PHONE'S STEPPING DOOR is the adjustable element's own
+                    // increment and decrement, what VoiceOver's swipe calls
+                    // (docs/range-plan.md §4.3 MEASURED 2026-09-29).
+                    let refusal = DispatchQueue.main.sync { () -> String? in
+                        let element: NSObject?
+                        if isRange {
+                            guard parts.count > 3, let node = kayaTarget(parts[1], "range", kayaScene.ranges)
+                            else { return "no such target \(parts[1])" }
+                            element = kayaRangeControls[node.id]?.thumb(parts[2] == "low")
+                        } else {
+                            guard let node = kayaTarget(parts[1], "slider", kayaScene.sliders) else {
+                                return "no such target \(parts[1])"
+                            }
+                            element = kayaSliderControls[node.id]
+                        }
+                        guard let element else { return "nudge \(parts[1]): the target has no control on screen" }
+                        if up { element.accessibilityIncrement() } else { element.accessibilityDecrement() }
+                        return nil
+                    }
+                    if let refusal {
+                        failures.append(refusal)
+                    } else {
+                        kayaAwaitAnswer(answered)
+                    }
                 #endif
             case "expect_thumb":
                 // The knob's centre along its travel, from the platform's own
@@ -12965,18 +12985,24 @@ func kayaRangeMoved(_ node: KayaNode, low: Bool, _ raw: Double, final: Bool, res
 
 /// Which thumb a press at `x` belongs to (§3 rule 4): the half of the track on
 /// its side of the midpoint between the thumbs, and at a tie the side of the
-/// shared centre the press lands on, decided at press-down.
-func kayaRangeLowTakes(_ x: CGFloat, lowCentre: CGFloat, highCentre: CGFloat) -> Bool {
-    if abs(highCentre - lowCentre) < 0.5 { return x < lowCentre }
-    return x < (lowCentre + highCentre) / 2
+/// shared centre the press lands on, decided at press-down. Both platforms'
+/// sliders mirror under right to left (§3 rule 5, measured §4.2), so the low
+/// half and the tie's minimum side follow `minAtLeft`.
+func kayaRangeLowTakes(_ x: CGFloat, lowCentre: CGFloat, highCentre: CGFloat, minAtLeft: Bool) -> Bool {
+    if abs(highCentre - lowCentre) < 0.5 { return minAtLeft ? x < lowCentre : x > lowCentre }
+    let mid = (lowCentre + highCentre) / 2
+    return lowCentre < highCentre ? x < mid : x > mid
 }
 
-/// A thumb's centre along its travel (§5's `expect_thumb`): the knob rests half
-/// its own length in from each end of the bar (measured §4.2).
-func kayaTravelFraction(centre: CGFloat, knob: CGFloat, start: CGFloat, length: CGFloat) -> Double {
-    let travel = length - knob
-    guard travel > 0 else { return 0 }
-    return Double((centre - start - knob / 2) / travel)
+/// A thumb's centre along its travel (§5's `expect_thumb`), from the knob's own
+/// centres at the minimum and the maximum: AppKit's compat design measures its
+/// travel from the view's bounds and the modern one from the bar (measured §4.2
+/// 2026-09-29), so no fixed inset serves both. `fromGreater` reads from the
+/// larger coordinate (the bottom of a flipped vertical slider).
+func kayaTravelFraction(centre: CGFloat, atMin: CGFloat, atMax: CGFloat, fromGreater: Bool = false) -> Double {
+    let span = abs(atMax - atMin)
+    guard span > 0 else { return 0 }
+    return Double(fromGreater ? (max(atMin, atMax) - centre) / span : (centre - min(atMin, atMax)) / span)
 }
 
 #if os(macOS)
@@ -13074,7 +13100,9 @@ func kayaTravelFraction(centre: CGFloat, knob: CGFloat, start: CGFloat, length: 
         override func hitTest(_ point: NSPoint) -> NSView? {
             let p = convert(point, from: superview)
             guard bounds.contains(p) else { return nil }
-            let lowTakes = kayaRangeLowTakes(p.x, lowCentre: centre(low).x, highCentre: centre(high).x)
+            let lowTakes = kayaRangeLowTakes(
+                p.x, lowCentre: centre(low).x, highCentre: centre(high).x,
+                minAtLeft: low.userInterfaceLayoutDirection == .leftToRight)
             return lowTakes ? low : high
         }
 
@@ -13082,19 +13110,17 @@ func kayaTravelFraction(centre: CGFloat, knob: CGFloat, start: CGFloat, length: 
             let bar = bar()
             NSColor.quaternaryLabelColor.setFill()
             NSBezierPath(roundedRect: bar, xRadius: bar.height / 2, yRadius: bar.height / 2).fill()
-            let from = centre(low).x
-            let to = centre(high).x
+            let from = min(centre(low).x, centre(high).x)
+            let to = max(centre(low).x, centre(high).x)
             NSColor.controlAccentColor.setFill()
-            NSBezierPath(rect: NSRect(x: from, y: bar.minY, width: max(0, to - from), height: bar.height))
+            NSBezierPath(rect: NSRect(x: from, y: bar.minY, width: to - from, height: bar.height))
                 .fill()
             guard let node, !tickValues.isEmpty, node.maxValue > node.minValue else { return }
-            let knob = low.knobRect.width
             NSColor.tertiaryLabelColor.setStroke()
             let ticks = NSBezierPath()
             ticks.lineWidth = 1
             for value in tickValues {
-                let f = (value - node.minValue) / (node.maxValue - node.minValue)
-                let x = (bar.minX + knob / 2 + CGFloat(f) * (bar.width - knob)).rounded() + 0.5
+                let x = convert(NSPoint(x: kayaKnobCentre(low, at: value), y: 0), from: low).x.rounded() + 0.5
                 ticks.move(to: NSPoint(x: x, y: low.frame.minY - 1))
                 ticks.line(to: NSPoint(x: x, y: low.frame.minY - 7))
             }
@@ -13169,27 +13195,31 @@ func kayaTravelFraction(centre: CGFloat, knob: CGFloat, start: CGFloat, length: 
         control.thumb(low).doubleValue
     }
 
-    /// `expect_thumb` on one range thumb, from the knob AppKit drew.
-    func kayaThumbFraction(_ control: KayaRangeView, low: Bool) -> Double {
-        let thumb = control.thumb(low)
-        let bar = (thumb.cell as! NSSliderCell).barRect(flipped: thumb.isFlipped)
-        let knob = thumb.knobRect
-        return kayaTravelFraction(centre: knob.midX, knob: knob.width, start: bar.minX, length: bar.width)
+    /// The knob's centre along the slider's axis at `value`, from a copy of the
+    /// cell so the control never moves (a copy needs its controlView back, or
+    /// every rect is zero).
+    func kayaKnobCentre(_ slider: NSSlider, at value: Double) -> CGFloat {
+        let cell = (slider.cell as! NSSliderCell).copy() as! NSSliderCell
+        cell.controlView = slider
+        cell.doubleValue = value
+        let knob = cell.knobRect(flipped: slider.isFlipped)
+        return slider.isVertical ? knob.midY : knob.midX
     }
 
-    /// `expect_thumb` on a slider: from the left, or from the BOTTOM when it
-    /// is vertical (the view is flipped, so the bottom is the bar's maxY).
-    func kayaThumbFraction(_ slider: KayaNSSlider) -> Double {
-        let cell = slider.cell as! NSSliderCell
-        let bar = cell.barRect(flipped: slider.isFlipped)
-        let knob = cell.knobRect(flipped: slider.isFlipped)
-        if slider.isVertical {
-            let fromTop = kayaTravelFraction(
-                centre: knob.midY, knob: knob.height, start: bar.minY, length: bar.height)
-            return slider.isFlipped ? 1 - fromTop : fromTop
-        }
-        return kayaTravelFraction(centre: knob.midX, knob: knob.width, start: bar.minX, length: bar.width)
+    /// `expect_thumb`: from the left, or from the BOTTOM when vertical.
+    func kayaKnobFraction(_ slider: NSSlider) -> Double {
+        kayaTravelFraction(
+            centre: kayaKnobCentre(slider, at: slider.doubleValue),
+            atMin: kayaKnobCentre(slider, at: slider.minValue),
+            atMax: kayaKnobCentre(slider, at: slider.maxValue),
+            fromGreater: slider.isVertical && slider.isFlipped)
     }
+
+    func kayaThumbFraction(_ control: KayaRangeView, low: Bool) -> Double {
+        kayaKnobFraction(control.thumb(low))
+    }
+
+    func kayaThumbFraction(_ slider: KayaNSSlider) -> Double { kayaKnobFraction(slider) }
 
     func kayaSliderIsVertical(_ slider: KayaNSSlider) -> Bool { slider.isVertical }
 
@@ -13217,7 +13247,7 @@ func kayaTravelFraction(centre: CGFloat, knob: CGFloat, start: CGFloat, length: 
 #else
     nonisolated(unsafe) var kayaRangeControls: [UInt64: KayaRangeTrack] = [:]
 
-    /// A range thumb on iOS: the platform's UISlider with its tracks emptied
+    /// A range thumb on iOS: the platform's UISlider with its tracks tinted clear
     /// (§3 rule 9), whose assistive adjust commits at once (§3 rule 3).
     final class KayaRangeThumbSlider: UISlider {
         weak var range: KayaRangeTrack?
@@ -13248,14 +13278,18 @@ func kayaTravelFraction(centre: CGFloat, knob: CGFloat, start: CGFloat, length: 
             for thumb in [low, high] {
                 thumb.range = self
                 thumb.isContinuous = true
-                thumb.setMinimumTrackImage(UIImage(), for: .normal)
-                thumb.setMaximumTrackImage(UIImage(), for: .normal)
+                thumb.minimumTrackTintColor = .clear
+                thumb.maximumTrackTintColor = .clear
                 thumb.addTarget(self, action: #selector(moved(_:)), for: .valueChanged)
                 thumb.addTarget(
                     self, action: #selector(released(_:)),
                     for: [.touchUpInside, .touchUpOutside, .touchCancel])
                 addSubview(thumb)
             }
+            // The group's two elements, low first whatever the direction (§3
+            // rules 4, 7): a bare UIView answers no element count, and the
+            // reader then saw `unknown/Trim` (measured §4.2 2026-09-29).
+            accessibilityElements = [low, high]
         }
         required init?(coder: NSCoder) { fatalError("kaya: not from a storyboard") }
 
@@ -13276,7 +13310,9 @@ func kayaTravelFraction(centre: CGFloat, knob: CGFloat, start: CGFloat, length: 
         /// The midpoint split (§3 rule 4), and at a tie the press side.
         override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
             guard self.point(inside: point, with: event) else { return nil }
-            let lowTakes = kayaRangeLowTakes(point.x, lowCentre: low.centreX, highCentre: high.centreX)
+            let lowTakes = kayaRangeLowTakes(
+                point.x, lowCentre: low.centreX, highCentre: high.centreX,
+                minAtLeft: low.effectiveUserInterfaceLayoutDirection == .leftToRight)
             return lowTakes ? low : high
         }
 
@@ -13289,12 +13325,12 @@ func kayaTravelFraction(centre: CGFloat, knob: CGFloat, start: CGFloat, length: 
             ctx.setFillColor(tintColor.cgColor)
             ctx.fill(
                 CGRect(
-                    x: low.centreX, y: track.minY, width: max(0, high.centreX - low.centreX),
-                    height: track.height))
+                    x: min(low.centreX, high.centreX), y: track.minY,
+                    width: abs(high.centreX - low.centreX), height: track.height))
             guard !tickValues.isEmpty else { return }
             ctx.setStrokeColor(UIColor.tertiaryLabel.cgColor)
             ctx.setLineWidth(1)
-            let top = low.frame.minY + track.maxY + 2
+            let top = track.maxY + 2
             for value in tickValues {
                 let thumb = low.thumbRect(
                     forBounds: low.bounds, trackRect: low.trackRect(forBounds: low.bounds),
@@ -13372,21 +13408,26 @@ func kayaTravelFraction(centre: CGFloat, knob: CGFloat, start: CGFloat, length: 
         Double(control.thumb(low).value)
     }
 
-    func kayaThumbFraction(_ control: KayaRangeTrack, low: Bool) -> Double {
-        let thumb = control.thumb(low)
-        let track = thumb.trackRect(forBounds: thumb.bounds)
-        let knob = thumb.thumbRect(forBounds: thumb.bounds, trackRect: track, value: thumb.value)
-        return kayaTravelFraction(centre: knob.midX, knob: knob.width, start: track.minX, length: track.width)
+    /// The thumb's centre in the slider's own coordinates at `value`.
+    func kayaThumbCentre(_ slider: UISlider, at value: Float) -> CGFloat {
+        let track = slider.trackRect(forBounds: slider.bounds)
+        return slider.thumbRect(forBounds: slider.bounds, trackRect: track, value: value).midX
     }
 
-    /// A slider's thumb along its own axis: the rotated fader's own left is its
-    /// bottom (§6), so one reading serves both.
-    func kayaThumbFraction(_ control: KayaTickedSlider) -> Double {
-        let slider = control.slider
-        let track = slider.trackRect(forBounds: slider.bounds)
-        let knob = slider.thumbRect(forBounds: slider.bounds, trackRect: track, value: slider.value)
-        return kayaTravelFraction(centre: knob.midX, knob: knob.width, start: track.minX, length: track.width)
+    /// `expect_thumb` from the left of the slider's own bounds: the rotated
+    /// fader's own left is its bottom (§6), so one reading serves both.
+    func kayaUIThumbFraction(_ slider: UISlider) -> Double {
+        kayaTravelFraction(
+            centre: kayaThumbCentre(slider, at: slider.value),
+            atMin: kayaThumbCentre(slider, at: slider.minimumValue),
+            atMax: kayaThumbCentre(slider, at: slider.maximumValue))
     }
+
+    func kayaThumbFraction(_ control: KayaRangeTrack, low: Bool) -> Double {
+        kayaUIThumbFraction(control.thumb(low))
+    }
+
+    func kayaThumbFraction(_ control: KayaTickedSlider) -> Double { kayaUIThumbFraction(control.slider) }
 
     func kayaSliderIsVertical(_ control: KayaTickedSlider) -> Bool { control.vertical }
 

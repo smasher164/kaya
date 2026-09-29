@@ -46,6 +46,10 @@ KayaApp.run { app in
                 min: 0.0, max: 1.0, value: 0.5, tickSpacing: 0.25,
                 onChange: { tx, v in tx.write(volumeText, .str("volume: \(spelled(v))")) })
             tx.setA11yLabel(volume, "Volume")
+            let fader = tx.slider(  // slider#2
+                min: 0.0, max: 1.0, value: 0.25, step: 0.25, axis: .vertical)
+            tx.setA11yLabel(fader, "Fader")
+            tx.setA11yId(fader, "fader")
             tx.button("reset") { tx in  // button#0
                 // Must NOT come back as a value or a commit occurrence.
                 tx.write(pos, .f64(25.0))

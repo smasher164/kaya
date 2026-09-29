@@ -78,7 +78,8 @@ use bindings::Microsoft::UI::Xaml::{
 // The styling pass's two resource types (docs/styling-plan.md D4): a role
 // lowers to a keyed Style or a keyed Brush, looked up out of the
 // framework's own dictionary.
-use bindings::Microsoft::UI::Xaml::Media::{Brush, SolidColorBrush};
+use bindings::Microsoft::UI::Xaml::Media::{Brush, RectangleGeometry, SolidColorBrush};
+use bindings::Microsoft::UI::Xaml::Controls::Orientation;
 // The brand typeface's one type (docs/styling-plan.md Slice 2b); its
 // bindgen filter entry is in tools/winui-bindgen.
 use bindings::Microsoft::UI::Xaml::Media::FontFamily;
@@ -179,6 +180,8 @@ enum NativeWidget {
     /// The colour picker (docs/color-picker-plan.md §6): a Button faced with
     /// a swatch, whose Flyout holds the inline ColorPicker.
     ColorPicker(ColorSwatch),
+    /// The range (docs/range-plan.md §6): two Sliders stacked over one track.
+    Range(RangePair),
 }
 
 impl NativeWidget {
@@ -224,6 +227,7 @@ impl NativeWidget {
             NativeWidget::Search { host, .. } => host.cast(),
             NativeWidget::NumberField(field) => field.cast(),
             NativeWidget::ColorPicker(swatch) => swatch.button.cast(),
+            NativeWidget::Range(pair) => pair.root.cast(),
         }
     }
 
@@ -540,6 +544,10 @@ struct CoreState {
     color_pickers: Vec<Button>,
     color_picker_ids: Vec<u64>,
     color_swatches: HashMap<u64, (ColorSwatch, std::sync::Arc<ColorCell>)>,
+    /// The ranges' roots in creation order, their ids, and each pair by id.
+    ranges: Vec<Grid>,
+    range_ids: Vec<u64>,
+    range_pairs: HashMap<u64, RangePair>,
     /// Grid layout state: ordered children + column count; both the adds and
     /// the columns prop re-flow the attach positions (docs/traps.md: Sugar
     /// construction order differs per language).
@@ -1721,6 +1729,7 @@ fn drain_transactions() {
         crate::fault::guard("draining a transaction", || {
             let mut failed = false;
             'drain: while let Ok(tx) = core.transactions.try_recv() {
+                drain_range_settled(core);
                 for op in core.scene.apply(tx) {
                     let what = op_head(&op);
                     if let Err(e) = apply(core, op) {
@@ -14584,7 +14593,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // platform's own — the TextBox template's `DeleteButton` —
                 // and AutoSuggestBox is refused, both measured
                 // (docs/measurements/search-winui-2026-09-06.md).
-                WidgetKind::Range => crate::depth_stub("range"),
+                WidgetKind::Range => {
+                    let pair = RangePair::new(
+                        tag.expect("ranges carry a tag").to_vec(),
+                        &core.apply_quiet,
+                        &core.occurrences,
+                    )?;
+                    winui_range_shape(&pair, &core.apply_quiet)?;
+                    core.ranges.push(pair.root.clone());
+                    core.range_ids.push(id.0);
+                    core.range_pairs.insert(id.0, pair.clone());
+                    NativeWidget::Range(pair)
+                }
                 WidgetKind::ColorPicker => {
                     let swatch = ColorSwatch::new()?;
                     let cell = std::sync::Arc::new(ColorCell::new(
@@ -15372,6 +15392,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             core.number_cells.remove(&id.0);
             drop_pair(&mut core.color_picker_ids, &mut core.color_pickers, id.0);
             core.color_swatches.remove(&id.0);
+            drop_pair(&mut core.range_ids, &mut core.ranges, id.0);
+            core.range_pairs.remove(&id.0);
             if let Some(tag) = core.widget_tags.get(&id.0) {
                 if let Some(i) = core.buttons.iter().position(|t| t == tag) {
                     core.buttons.remove(i);
@@ -16681,6 +16703,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                             &windows_core::HSTRING::from(label.as_str()),
                         )?;
                     }
+                    // A range's thumbs speak its label when they have none of
+                    // their own (docs/range-plan.md §8 ruling 2).
+                    if let NativeWidget::Range(pair) = &w {
+                        pair.cell.labels.lock().unwrap()[2] = label;
+                        pair.name_thumbs()?;
+                    }
                 }
                 // The HINT: UIA's HelpText. Empty means unset, like the
                 // name, and inside the arm for the name's reason.
@@ -16866,9 +16894,46 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.aligns.insert(id, mode);
                     core.child_order.mark(id);
                 }
-                // The vertical slider (docs/range-plan.md §6) is the range's
-                // breadth slice.
-                (NativeWidget::Slider(_), Prop::Axis, _) => crate::depth_stub("range"),
+                // THE VERTICAL SLIDER (docs/range-plan.md §6): the platform's
+                // own orientation, minimum at the bottom, taking the slider's
+                // stand-in length as its height.
+                (NativeWidget::Slider(slider), Prop::Axis, Value::I64(v)) => {
+                    let vertical = v == i64::from(crate::wire::AXIS_VERTICAL);
+                    slider.SetOrientation(if vertical {
+                        Orientation::Vertical
+                    } else {
+                        Orientation::Horizontal
+                    })?;
+                    slider.SetMinWidth(if vertical { 0.0 } else { 160.0 })?;
+                    slider.SetMinHeight(if vertical { 160.0 } else { 0.0 })?;
+                }
+                (NativeWidget::Range(pair), Prop::Min, Value::F64(v))
+                | (NativeWidget::Range(pair), Prop::Max, Value::F64(v))
+                | (NativeWidget::Range(pair), Prop::Step, Value::F64(v))
+                | (NativeWidget::Range(pair), Prop::TickSpacing, Value::F64(v))
+                | (NativeWidget::Range(pair), Prop::MinGap, Value::F64(v)) => {
+                    let cell = &pair.cell;
+                    SliderCell::set(
+                        match prop {
+                            Prop::Min => &cell.min,
+                            Prop::Max => &cell.max,
+                            Prop::Step => &cell.step,
+                            Prop::TickSpacing => &cell.tick_spacing,
+                            _ => &cell.gap,
+                        },
+                        v,
+                    );
+                    winui_range_shape(&pair, &core.apply_quiet)?;
+                }
+                (NativeWidget::Range(pair), Prop::Low, Value::F64(v))
+                | (NativeWidget::Range(pair), Prop::High, Value::F64(v)) => {
+                    winui_range_write(&pair, prop == Prop::Low, v, &core.apply_quiet)?;
+                }
+                (NativeWidget::Range(pair), Prop::LowLabel, Value::Str(label))
+                | (NativeWidget::Range(pair), Prop::HighLabel, Value::Str(label)) => {
+                    pair.cell.labels.lock().unwrap()[usize::from(prop == Prop::HighLabel)] = label;
+                    pair.name_thumbs()?;
+                }
                 // THE SLIDER'S FOUR SHAPE PROPS (docs/slider-plan.md S1, S5,
                 // S7, S9). Each moves its slot in the cell and re-applies the
                 // whole shape, since WinUI coerces a value against the range
@@ -19233,6 +19298,9 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             color_pickers: Vec::new(),
             color_picker_ids: Vec::new(),
             color_swatches: HashMap::new(),
+            ranges: Vec::new(),
+            range_ids: Vec::new(),
+            range_pairs: HashMap::new(),
             grid_children: HashMap::new(),
             stamps_rows: std::collections::HashSet::new(),
             fills: HashMap::new(),
@@ -19722,6 +19790,70 @@ impl WinUiStage {
         }
     }
 
+    /// ONE ARROW KEY to a slider (docs/range-plan.md §3 rule 4): keyboard
+    /// focus on the control, then Up or Down POSTED to the window that holds
+    /// this thread's keyboard focus (the content island's input site), never
+    /// put on the system input queue: range legs run pooled, and a key on the
+    /// shared queue went to whichever guest held the foreground (measured
+    /// 2026-09-29: one leg's nudge moved nothing, its neighbour moved twice).
+    /// The slider's own key handling moves it by its small change, and its
+    /// ValueChanged, with no button down, commits. Up and Down, never Left
+    /// and Right, which a right-to-left slider mirrors. Waits for the value
+    /// to move, since the posted key is handled after this returns.
+    fn arrow_step(
+        t: crate::harness::Target,
+        pick: impl Fn(&CoreState) -> Slider + Send + Clone + 'static,
+        up: bool,
+    ) {
+        unsafe extern "system" {
+            fn GetFocus() -> isize;
+        }
+        const VK_UP: usize = 0x26;
+        const VK_DOWN: usize = 0x28;
+        const WM_KEYDOWN: u32 = 0x0100;
+        const WM_KEYUP: u32 = 0x0101;
+        let key = if up { VK_UP } else { VK_DOWN };
+        let focus = pick.clone();
+        let told = Self::on_ui(move |core| {
+            let slider = focus(core);
+            if !slider.Focus(FocusState::Keyboard)? {
+                return Ok(Err("the slider refused keyboard focus".to_owned()));
+            }
+            // SAFETY: plain user32 calls on this thread's own focus window.
+            let site = unsafe { GetFocus() };
+            if site == 0 {
+                return Ok(Err("this thread holds no keyboard focus window to post the key to".to_owned()));
+            }
+            let scan: isize = if up { 0x48 } else { 0x50 };
+            let before = slider.Value()?;
+            unsafe {
+                PostMessageW(site, WM_KEYDOWN, key, 1 | (scan << 16) | (1 << 24));
+                PostMessageW(site, WM_KEYUP, key, 1 | (scan << 16) | (1 << 24) | (3 << 30));
+            }
+            Ok(Ok(before))
+        });
+        let before = match told {
+            Ok(before) => before,
+            Err(why) => panic!("kaya: nudge {t:?}: {why}"),
+        };
+        for _ in 0..400 {
+            let read = pick.clone();
+            if Self::on_ui_read(move |core| read(core).Value()).ok() != Some(before) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let read = pick.clone();
+        let focus_now = Self::on_ui_read(move |core| read(core).FocusState());
+        crate::vtrace::note(
+            "nudge",
+            format_args!(
+                "{t:?}: the value still reads {before} 2s after the arrow was posted to \
+                 the focus window (focus state {focus_now:?})"
+            ),
+        );
+    }
+
     fn foreground_guest(what: &str) {
         let hwnd = Self::on_ui(|core| {
             let native: IWindowNative = windows_core::Interface::cast(&core.window)?;
@@ -20097,7 +20229,7 @@ fn registry_widget_at(core: &CoreState, kind: crate::harness::TargetKind, i: usi
         K::Grid => id_of!(core.grids, NativeWidget::Grid2D(grid), grid),
         K::Textarea => core.textarea_ids.get(i).copied(),
         K::Search => core.search_ids.get(i).copied(),
-        K::Range => crate::depth_stub("range"),
+        K::Range => core.range_ids.get(i).copied(),
         K::ColorPicker => core.color_picker_ids.get(i).copied(),
         K::NumberField => core.number_field_ids.get(i).copied(),
         K::Canvas => core.canvas_ids.get(i).copied(),
@@ -20392,7 +20524,7 @@ fn target_element(
         // target answers — the text, the focus, the a11y peer — is the
         // TextBox's (docs/search-plan.md S7).
         K::Search => nth!(core.searches),
-        K::Range => crate::depth_stub("range"),
+        K::Range => nth!(core.ranges),
         K::ColorPicker => nth!(core.color_pickers),
         K::NumberField => nth!(core.number_fields),
         K::DatePicker => nth!(core.date_pickers),
@@ -20514,7 +20646,7 @@ fn registry_ids(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<u64> 
         K::Grid => ids!(core.grids, NativeWidget::Grid2D(grid), grid),
         K::Textarea => core.textarea_ids.clone(),
         K::Search => core.search_ids.clone(),
-        K::Range => crate::depth_stub("range"),
+        K::Range => core.range_ids.clone(),
         K::ColorPicker => core.color_picker_ids.clone(),
         K::NumberField => core.number_field_ids.clone(),
         K::Canvas => core.canvas_ids.clone(),
@@ -22336,20 +22468,70 @@ impl crate::harness::Stage for WinUiStage {
         });
     }
 
-    fn set_thumb(&self, _: crate::harness::Target, _: crate::harness::Thumb, _: f64) {
-        crate::depth_stub("range")
+    /// One thumb through its own slider, then the gesture's end: `set_value`'s
+    /// shape (docs/slider-plan.md S8) on the range's one commit path.
+    fn set_thumb(&self, t: crate::harness::Target, thumb: crate::harness::Thumb, value: f64) {
+        Self::on_ui(move |core| {
+            let pair = range_at(core, t);
+            let low = thumb == crate::harness::Thumb::Low;
+            pair.slider(low).SetValue(value)?;
+            winui_range_moved(pair.slider(low), &pair.cell, low, &core.apply_quiet, &core.occurrences, true)
+        });
     }
 
-    fn nudge_thumb(&self, _: crate::harness::Target, _: crate::harness::Thumb, _: bool) {
-        crate::depth_stub("range")
+    fn nudge_thumb(&self, t: crate::harness::Target, thumb: crate::harness::Thumb, up: bool) {
+        let low = thumb == crate::harness::Thumb::Low;
+        Self::arrow_step(t, move |core| range_at(core, t).slider(low).clone(), up);
     }
 
-    fn thumb_fraction(&self, _: crate::harness::Target, _: Option<crate::harness::Thumb>) -> String {
-        crate::depth_stub("range")
+    fn thumb_fraction(&self, t: crate::harness::Target, thumb: Option<crate::harness::Thumb>) -> String {
+        Self::on_ui_read(move |core| {
+            let slider = match thumb {
+                Some(thumb) => {
+                    let Some(i) = crate::harness::try_resolve(t.index, core.range_ids.len()) else {
+                        return Ok("<no such target>".to_owned());
+                    };
+                    core.range_pairs[&core.range_ids[i]]
+                        .slider(thumb == crate::harness::Thumb::Low)
+                        .clone()
+                }
+                None => {
+                    let Some(i) = crate::harness::try_resolve(t.index, core.sliders.len()) else {
+                        return Ok("<no such target>".to_owned());
+                    };
+                    core.sliders[i].clone()
+                }
+            };
+            slider.UpdateLayout()?;
+            Ok(match winui_thumb_fraction(&slider)? {
+                Some(f) => crate::harness::spelled_fraction(f),
+                None => "<the slider's template is not laid out>".to_owned(),
+            })
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
-    fn ax_thumb(&self, _: crate::harness::Target, _: crate::harness::Thumb) -> String {
-        crate::depth_stub("range")
+    fn ax_thumb(&self, t: crate::harness::Target, thumb: crate::harness::Thumb) -> String {
+        Self::on_ui_read(move |core| {
+            use bindings::Microsoft::UI::Xaml::Automation::Peers::{
+                AutomationHeadingLevel, FrameworkElementAutomationPeer,
+            };
+            let Some(i) = crate::harness::try_resolve(t.index, core.range_ids.len()) else {
+                return Ok("<no such target>".to_owned());
+            };
+            let slider = core.range_pairs[&core.range_ids[i]]
+                .slider(thumb == crate::harness::Thumb::Low)
+                .clone();
+            let peer = FrameworkElementAutomationPeer::CreatePeerForElement(&slider)?;
+            let role = ax_role(
+                peer.GetHeadingLevel()? != AutomationHeadingLevel::None,
+                false,
+                &peer.GetClassName()?.to_string(),
+                peer.GetAutomationControlType()?,
+            );
+            Ok(format!("{role}/{}", peer.GetName()?))
+        })
+        .unwrap_or_else(|_| "<accessibility read failed>".to_owned())
     }
 
     fn control_value(&self, t: crate::harness::Target) -> String {
@@ -22359,6 +22541,20 @@ impl crate::harness::Stage for WinUiStage {
                     return Ok("<no such target>".to_owned());
                 };
                 Ok(crate::harness::spelled_slider(core.number_fields[i].Value()?))
+            })
+            .unwrap_or_else(|e| format!("<unreadable: {e}>"));
+        }
+        if t.kind == crate::harness::TargetKind::Range {
+            return Self::on_ui_read(move |core| {
+                let Some(i) = crate::harness::try_resolve(t.index, core.range_ids.len()) else {
+                    return Ok("<no such target>".to_owned());
+                };
+                let pair = &core.range_pairs[&core.range_ids[i]];
+                Ok(format!(
+                    "{} {}",
+                    crate::harness::spelled_slider(pair.low.Value()?),
+                    crate::harness::spelled_slider(pair.high.Value()?)
+                ))
             })
             .unwrap_or_else(|e| format!("<unreadable: {e}>"));
         }
@@ -22413,6 +22609,14 @@ impl crate::harness::Stage for WinUiStage {
     /// its Click is NumberBox's step, which commits. A button the box has
     /// disabled at a bound is a door that does nothing, as for a user.
     fn nudge(&self, t: crate::harness::Target, up: bool) {
+        if t.kind == crate::harness::TargetKind::Slider {
+            Self::arrow_step(
+                t,
+                move |core| core.sliders[crate::harness::resolve(t.index, core.sliders.len())].clone(),
+                up,
+            );
+            return;
+        }
         let told = Self::on_ui(move |core| {
             use bindings::Microsoft::UI::Xaml::Automation::{
                 Peers::FrameworkElementAutomationPeer, Provider::IInvokeProvider,
@@ -23415,7 +23619,7 @@ impl crate::harness::Stage for WinUiStage {
                 K::Grid => find(core, K::Grid, &core.grids, &id),
                 K::Textarea => find(core, K::Textarea, &core.textareas, &id),
                 K::Search => find(core, K::Search, &core.searches, &id),
-                K::Range => crate::depth_stub("range"),
+                K::Range => find(core, K::Range, &core.ranges, &id),
                 K::ColorPicker => find(core, K::ColorPicker, &core.color_pickers, &id),
                 K::NumberField => find(core, K::NumberField, &core.number_fields, &id),
                 K::Canvas => find(core, K::Canvas, &core.canvases, &id),
@@ -23850,6 +24054,21 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     fn container_axis(&self, t: crate::harness::Target) -> String {
+        if t.kind == crate::harness::TargetKind::Slider {
+            // The CONTROL's own orientation (docs/range-plan.md §5).
+            return Self::on_ui_read(move |core| {
+                let Some(i) = crate::harness::try_resolve(t.index, core.sliders.len()) else {
+                    return Ok("<no such target>".to_owned());
+                };
+                Ok(if core.sliders[i].Orientation()? == Orientation::Vertical {
+                    "vertical"
+                } else {
+                    "horizontal"
+                }
+                .to_owned())
+            })
+            .unwrap_or_else(|e| format!("<winui read failed: {e:?}>"));
+        }
         Self::on_ui_read(move |core| {
             // The RENDERED axis, read out of the Grid's own definitions:
             // reindex builds tracks on exactly one side and clears the
@@ -26311,6 +26530,484 @@ fn winui_slider_committed(
     Ok(())
 }
 
+/// One range's declared shape and its mirrors (docs/range-plan.md §2, §3),
+/// `SliderCell`'s reason: the thumbs' handlers run on the UI thread INSIDE
+/// the apply borrow. Every number is an `f64` in its bits.
+struct RangeCell {
+    tag: Vec<u8>,
+    min: std::sync::atomic::AtomicU64,
+    max: std::sync::atomic::AtomicU64,
+    step: std::sync::atomic::AtomicU64,
+    tick_spacing: std::sync::atomic::AtomicU64,
+    gap: std::sync::atomic::AtomicU64,
+    low: std::sync::atomic::AtomicU64,
+    high: std::sync::atomic::AtomicU64,
+    committed_low: std::sync::atomic::AtomicU64,
+    committed_high: std::sync::atomic::AtomicU64,
+    /// low_label, high_label and the range's own a11y_label, which a thumb
+    /// with no label of its own speaks (§8 ruling 2).
+    labels: std::sync::Mutex<[String; 3]>,
+}
+
+impl RangeCell {
+    fn new(tag: Vec<u8>) -> Self {
+        let slot = |v: f64| std::sync::atomic::AtomicU64::new(v.to_bits());
+        Self {
+            tag,
+            min: slot(0.0),
+            max: slot(1.0),
+            step: slot(0.0),
+            tick_spacing: slot(0.0),
+            gap: slot(0.0),
+            low: slot(0.0),
+            high: slot(1.0),
+            committed_low: slot(0.0),
+            committed_high: slot(1.0),
+            labels: std::sync::Mutex::new(Default::default()),
+        }
+    }
+}
+
+/// The stacked pair (docs/range-plan.md §6's WinUI row): two of the
+/// platform's Sliders in one Grid cell, their own tracks hidden, over one
+/// track kaya draws. PRESSES ARE ROUTED BY GEOMETRY (§3 rule 4): each slider
+/// is CLIPPED to its half of the track, split at the midpoint between the
+/// thumbs' centres, so neither slider's stacking decides a press.
+#[derive(Clone)]
+struct RangePair {
+    root: Grid,
+    track: Grid,
+    fill: Grid,
+    ticks: Grid,
+    low: Slider,
+    high: Slider,
+    cell: std::sync::Arc<RangeCell>,
+}
+
+/// The part of the stack kaya draws, under both sliders and never hit: the
+/// track, the accent between the thumbs, and the ticks once.
+const RANGE_DECO_XAML: &str = "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\">\
+     <Grid IsHitTestVisible=\"False\">\
+     <Grid HorizontalAlignment=\"Left\" VerticalAlignment=\"Top\" \
+     Background=\"{ThemeResource SliderTrackFill}\" \
+     CornerRadius=\"{ThemeResource SliderTrackCornerRadius}\"/>\
+     <Grid HorizontalAlignment=\"Left\" VerticalAlignment=\"Top\" \
+     Background=\"{ThemeResource SliderTrackValueFill}\"/>\
+     <Grid/></Grid></Grid>";
+
+impl RangePair {
+    fn new(
+        tag: Vec<u8>,
+        quiet: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+        sink: &OccSink,
+    ) -> windows_core::Result<Self> {
+        let root: Grid = XamlReader::Load(&HSTRING::from(RANGE_DECO_XAML))?.cast()?;
+        let deco: Grid = root.Children()?.GetAt(0)?.cast()?;
+        let parts = deco.Children()?;
+        let pair = Self {
+            track: parts.GetAt(0)?.cast()?,
+            fill: parts.GetAt(1)?.cast()?,
+            ticks: parts.GetAt(2)?.cast()?,
+            low: Slider::new()?,
+            high: Slider::new()?,
+            cell: std::sync::Arc::new(RangeCell::new(tag)),
+            root,
+        };
+        for (thumb, low) in [(&pair.low, true), (&pair.high, false)] {
+            thumb.SetMinWidth(160.0)?;
+            thumb.SetTickPlacement(TickPlacement::None)?;
+            pair.root.Children()?.Append(thumb)?;
+            let (cell, moved_quiet, moved_sink) = (pair.cell.clone(), quiet.clone(), sink.clone());
+            thumb.ValueChanged(&RangeBaseValueChangedEventHandler::new(
+                move |sender, _: windows_core::Ref<'_, RangeBaseValueChangedEventArgs>| {
+                    if moved_quiet.load(std::sync::atomic::Ordering::Relaxed) {
+                        return Ok(());
+                    }
+                    if let Some(sender) = sender.as_ref() {
+                        let slider: Slider = windows_core::Interface::cast(sender)?;
+                        winui_range_moved(
+                            &slider,
+                            &cell,
+                            low,
+                            &moved_quiet,
+                            &moved_sink,
+                            !pointer_button_down(),
+                        )?;
+                    }
+                    Ok(())
+                },
+            ))?;
+            let (cell, released_quiet, released_sink) =
+                (pair.cell.clone(), quiet.clone(), sink.clone());
+            thumb.PointerCaptureLost(&PointerEventHandler::new(
+                move |sender, _: windows_core::Ref<'_, PointerRoutedEventArgs>| {
+                    if released_quiet.load(std::sync::atomic::Ordering::Relaxed) {
+                        return Ok(());
+                    }
+                    if let Some(sender) = sender.as_ref() {
+                        let slider: Slider = windows_core::Interface::cast(sender)?;
+                        winui_range_moved(
+                            &slider,
+                            &cell,
+                            low,
+                            &released_quiet,
+                            &released_sink,
+                            true,
+                        )?;
+                    }
+                    Ok(())
+                },
+            ))?;
+        }
+        let laid = pair.clone();
+        pair.root
+            .LayoutUpdated(&EventHandler::<windows_core::IInspectable>::new(move |_, _| {
+                winui_range_layout(&laid)
+            }))?;
+        Ok(pair)
+    }
+
+    fn slider(&self, low: bool) -> &Slider {
+        if low { &self.low } else { &self.high }
+    }
+
+    /// Each thumb speaks its own label, or the range's when it has none.
+    fn name_thumbs(&self) -> windows_core::Result<()> {
+        let labels = self.cell.labels.lock().unwrap().clone();
+        for (slider, own) in [(&self.low, &labels[0]), (&self.high, &labels[1])] {
+            let name = if own.is_empty() { &labels[2] } else { own };
+            bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(
+                slider,
+                &HSTRING::from(name.as_str()),
+            )?;
+        }
+        Ok(())
+    }
+}
+
+/// Both sliders shaped alike, then each thumb's value: `winui_slider_shape`'s
+/// order and reason (WinUI coerces a value against the range it holds), quiet
+/// throughout. The thumbs keep the slider's arrow and page steps; the snap and
+/// the gap are the core's clamp, on the move path.
+fn winui_range_shape(pair: &RangePair, quiet: &std::sync::atomic::AtomicBool) -> windows_core::Result<()> {
+    let cell = &pair.cell;
+    let (min, max) = (SliderCell::get(&cell.min), SliderCell::get(&cell.max));
+    let step = SliderCell::get(&cell.step);
+    let frequency = if step > 0.0 { step } else { (max - min) / 1000.0 };
+    let small = if step > 0.0 { step } else { (max - min) / 100.0 };
+    quiet.store(true, std::sync::atomic::Ordering::Relaxed);
+    let write = (|| -> windows_core::Result<()> {
+        for (slider, value) in [(&pair.low, &cell.low), (&pair.high, &cell.high)] {
+            slider.SetMinimum(min)?;
+            slider.SetMaximum(max)?;
+            if frequency > 0.0 {
+                slider.SetStepFrequency(frequency)?;
+            }
+            slider.SetSnapsTo(SliderSnapsTo::StepValues)?;
+            if small > 0.0 {
+                slider.SetSmallChange(small)?;
+                slider.SetLargeChange(small * 10.0)?;
+            }
+            slider.SetValue(SliderCell::get(value).clamp(min, max))?;
+        }
+        Ok(())
+    })();
+    quiet.store(false, std::sync::atomic::Ordering::Relaxed);
+    write?;
+    winui_range_layout(pair)
+}
+
+/// One thumb written by the app: the mirrors move with the control, committed
+/// included, and nothing echoes (docs/range-plan.md §2).
+fn winui_range_write(
+    pair: &RangePair,
+    low: bool,
+    value: f64,
+    quiet: &std::sync::atomic::AtomicBool,
+) -> windows_core::Result<()> {
+    let cell = &pair.cell;
+    let (held, committed) = if low {
+        (&cell.low, &cell.committed_low)
+    } else {
+        (&cell.high, &cell.committed_high)
+    };
+    SliderCell::set(held, value);
+    SliderCell::set(committed, value);
+    quiet.store(true, std::sync::atomic::Ordering::Relaxed);
+    let write = pair.slider(low).SetValue(value);
+    quiet.store(false, std::sync::atomic::Ordering::Relaxed);
+    write
+}
+
+thread_local! {
+    /// What the user settled while CORE was borrowed (a driven `set_value`
+    /// inside `on_ui`), for the core before the next transaction applies.
+    static RANGE_SETTLED: RefCell<Vec<(Vec<u8>, f64, f64)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// docs/range-plan.md §3 rule 11: the core's pair follows what the user
+/// settled, before the committed pair leaves, so the app's next write is
+/// judged against it.
+fn winui_user_range_committed(tag: &[u8], low: f64, high: f64) {
+    let told = CORE.with(|slot| match slot.try_borrow_mut() {
+        Ok(mut core) => match core.as_mut() {
+            Some(core) => {
+                core.scene.user_range_committed(tag, low, high);
+                true
+            }
+            None => false,
+        },
+        Err(_) => false,
+    });
+    if !told {
+        RANGE_SETTLED.with_borrow_mut(|queue| queue.push((tag.to_vec(), low, high)));
+    }
+}
+
+fn drain_range_settled(core: &mut CoreState) {
+    for (tag, low, high) in RANGE_SETTLED.with_borrow_mut(std::mem::take) {
+        core.scene.user_range_committed(&tag, low, high);
+    }
+}
+
+/// THE ONE COMMIT PATH of either thumb, whatever moved it — a drag, a click
+/// on the track, a key, UIA's RangeValue (§3 rule 8), a driven `set_value`:
+/// the core's clamp, written back into that thumb's slider, the live pair on
+/// every movement and the committed pair once per gesture, only when it
+/// differs from the last committed one. `winui_slider_committed`'s shape.
+fn winui_range_moved(
+    slider: &Slider,
+    cell: &RangeCell,
+    low: bool,
+    quiet: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+    sink: &OccSink,
+    final_: bool,
+) -> windows_core::Result<()> {
+    let raw = slider.Value()?;
+    let (lo, hi) = (SliderCell::get(&cell.low), SliderCell::get(&cell.high));
+    let v = crate::range::clamp_thumb(
+        SliderCell::get(&cell.min),
+        SliderCell::get(&cell.max),
+        SliderCell::get(&cell.step),
+        SliderCell::get(&cell.gap),
+        low,
+        if low { hi } else { lo },
+        raw,
+    );
+    let (nlo, nhi) = if low { (v, hi) } else { (lo, v) };
+    let moved = (nlo, nhi) != (lo, hi);
+    let settled = final_
+        && (nlo, nhi)
+            != (SliderCell::get(&cell.committed_low), SliderCell::get(&cell.committed_high));
+    SliderCell::set(&cell.low, nlo);
+    SliderCell::set(&cell.high, nhi);
+    if settled {
+        SliderCell::set(&cell.committed_low, nlo);
+        SliderCell::set(&cell.committed_high, nhi);
+    }
+    if v != raw {
+        quiet.store(true, std::sync::atomic::Ordering::Relaxed);
+        let write = slider.SetValue(v);
+        quiet.store(false, std::sync::atomic::Ordering::Relaxed);
+        write?;
+        winui_range_relay_thumb(slider, v, raw, quiet);
+    }
+    if moved {
+        sink.send_range_tag(&cell.tag, nlo, nhi, false);
+    }
+    if settled {
+        winui_user_range_committed(&cell.tag, nlo, nhi);
+        sink.send_range_tag(&cell.tag, nlo, nhi, true);
+    }
+    Ok(())
+}
+
+/// A WRITE-BACK INSIDE ValueChanged MOVES THE VALUE AND NOT THE THUMB: the
+/// Slider lays its thumb out for the raised value after the handler returns,
+/// so `set_value range#0 low 3.2` read 3 and drew the thumb at 3.2 (measured
+/// 2026-09-29, docs/traps.md). Once the raise is over, the value is set away
+/// and back, quiet, so the thumb is laid out where the value is; skipped when
+/// something has moved the value since.
+fn winui_range_relay_thumb(
+    slider: &Slider,
+    v: f64,
+    raw: f64,
+    quiet: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    let Some(dispatcher) = DISPATCHER.get() else { return };
+    let (slider, quiet) = (slider.clone(), quiet.clone());
+    let handler = DispatcherQueueHandler::new(move || {
+        if slider.Value()? != v {
+            return Ok(());
+        }
+        quiet.store(true, std::sync::atomic::Ordering::Relaxed);
+        let write = slider.SetValue(raw).and_then(|_| slider.SetValue(v));
+        quiet.store(false, std::sync::atomic::Ordering::Relaxed);
+        write
+    });
+    let _ = dispatcher.0.TryEnqueue(&handler);
+}
+
+/// A slider's own track parts and its thumb, by their template names.
+fn slider_parts(
+    slider: &Slider,
+) -> windows_core::Result<Option<(FrameworkElement, FrameworkElement, FrameworkElement)>> {
+    let vertical = slider.Orientation()? == Orientation::Vertical;
+    let names = if vertical {
+        ["VerticalTrackRect", "VerticalDecreaseRect", "VerticalThumb"]
+    } else {
+        ["HorizontalTrackRect", "HorizontalDecreaseRect", "HorizontalThumb"]
+    };
+    let root: UIElement = slider.cast()?;
+    let (Some(track), Some(decrease), Some(thumb)) = (
+        named_descendant(&root, names[0])?,
+        named_descendant(&root, names[1])?,
+        named_descendant(&root, names[2])?,
+    ) else {
+        return Ok(None);
+    };
+    Ok(Some((track, decrease, thumb)))
+}
+
+/// An element's box in `within`'s coordinates: x, y, width, height.
+fn box_in(element: &FrameworkElement, within: &UIElement) -> windows_core::Result<(f64, f64, f64, f64)> {
+    let at = element.TransformToVisual(within)?.TransformPoint(Point { X: 0.0, Y: 0.0 })?;
+    Ok((f64::from(at.X), f64::from(at.Y), element.ActualWidth()?, element.ActualHeight()?))
+}
+
+fn set_if_moved(element: &Grid, x: f64, y: f64, width: f64, height: f64) -> windows_core::Result<()> {
+    let margin = element.Margin()?;
+    if (margin.Left - x).abs() > 0.01
+        || (margin.Top - y).abs() > 0.01
+        || (element.Width()? - width).abs() > 0.01
+        || (element.Height()? - height).abs() > 0.01
+    {
+        element.SetMargin(Thickness { Left: x, Top: y, Right: 0.0, Bottom: 0.0 })?;
+        element.SetWidth(width)?;
+        element.SetHeight(height)?;
+    }
+    Ok(())
+}
+
+/// After every layout: the sliders' own tracks hidden (§3 rule 9, by template
+/// name — the thumb is untouched), kaya's track laid where theirs is, the
+/// accent from one thumb's centre to the other's, the ticks once, and each
+/// slider clipped to its half of the track (§3 rule 4): the midpoint between
+/// the centres, or at a tie the shared centre, so a press lands on the thumb
+/// whose side of it the pointer is on at press-down.
+fn winui_range_layout(pair: &RangePair) -> windows_core::Result<()> {
+    let (Some((track, decrease, low_thumb)), Some((high_track, high_decrease, high_thumb))) =
+        (slider_parts(&pair.low)?, slider_parts(&pair.high)?)
+    else {
+        return Ok(());
+    };
+    for part in [&track, &decrease, &high_track, &high_decrease] {
+        if part.Opacity()? != 0.0 {
+            part.SetOpacity(0.0)?;
+        }
+    }
+    let root: UIElement = pair.root.cast()?;
+    let (tx, ty, tw, th) = box_in(&track, &root)?;
+    if tw <= 0.0 {
+        return Ok(());
+    }
+    let (lx, _, lw, _) = box_in(&low_thumb, &root)?;
+    let (hx, _, hw, _) = box_in(&high_thumb, &root)?;
+    let (lc, hc) = (lx + lw / 2.0, hx + hw / 2.0);
+    set_if_moved(&pair.track, tx, ty, tw, th)?;
+    set_if_moved(&pair.fill, lc, ty, (hc - lc).max(0.0), th)?;
+
+    let cell = &pair.cell;
+    let (min, max) = (SliderCell::get(&cell.min), SliderCell::get(&cell.max));
+    let spacing = SliderCell::get(&cell.tick_spacing);
+    let ticks = pair.ticks.Children()?;
+    let count = if spacing > 0.0 && max > min {
+        ((max - min) / spacing).round() as u32 + 1
+    } else {
+        0
+    };
+    // The template's own Outside placement: a mark above and below, 4 DIP
+    // off the track (SliderOutsideTickBarThemeHeight).
+    const MARK: f64 = 4.0;
+    while ticks.Size()? < count * 2 {
+        let mark: Grid = XamlReader::Load(&HSTRING::from(
+            "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" \
+             HorizontalAlignment=\"Left\" VerticalAlignment=\"Top\" \
+             Background=\"{ThemeResource SliderTickBarFill}\"/>",
+        ))?
+        .cast()?;
+        ticks.Append(&mark)?;
+    }
+    while ticks.Size()? > count * 2 {
+        ticks.RemoveAtEnd()?;
+    }
+    for i in 0..count {
+        let f = (f64::from(i) * spacing / (max - min)).min(1.0);
+        let x = (tx + lw / 2.0 + f * (tw - lw)).round();
+        let above: Grid = ticks.GetAt(i * 2)?.cast()?;
+        let below: Grid = ticks.GetAt(i * 2 + 1)?.cast()?;
+        set_if_moved(&above, x, ty - MARK - MARK, 1.0, MARK)?;
+        set_if_moved(&below, x, ty + th + MARK, 1.0, MARK)?;
+    }
+
+    let within: UIElement = pair.low.cast()?;
+    let (lx, _, lw, _) = box_in(&low_thumb, &within)?;
+    let (hx, _, hw, _) = box_in(&high_thumb, &within)?;
+    let split = winui_range_split(lx + lw / 2.0, hx + hw / 2.0);
+    let (width, height) = (pair.low.ActualWidth()?, pair.low.ActualHeight()?);
+    for (slider, x, w) in [(&pair.low, 0.0, split), (&pair.high, split, width - split)] {
+        let clip = RectangleGeometry::new()?;
+        clip.SetRect(bindings::Windows::Foundation::Rect {
+            X: x as f32,
+            Y: 0.0,
+            Width: w.max(0.0) as f32,
+            Height: height as f32,
+        })?;
+        slider.SetClip(&clip)?;
+    }
+    Ok(())
+}
+
+/// Where the track divides between the thumbs (§3 rule 4): the midpoint of
+/// their centres, or at a tie the shared centre, so the side of it a press
+/// lands on picks — `kayaRangeLowTakes` one backend over.
+fn winui_range_split(low_centre: f64, high_centre: f64) -> f64 {
+    if (high_centre - low_centre).abs() < 0.5 {
+        low_centre
+    } else {
+        (low_centre + high_centre) / 2.0
+    }
+}
+
+/// The range a `range#index` (or keyed) target names.
+#[cfg(feature = "harness")]
+fn range_at(core: &CoreState, t: crate::harness::Target) -> RangePair {
+    core.range_pairs[&core.range_ids[crate::harness::resolve(t.index, core.range_ids.len())]].clone()
+}
+
+/// A thumb's centre as a fraction of its travel (docs/range-plan.md §5): from
+/// the left for a horizontal slider, mirrored when the slider flows right to
+/// left, and from the bottom for a vertical one, in the template's own boxes.
+fn winui_thumb_fraction(slider: &Slider) -> windows_core::Result<Option<f64>> {
+    let Some((track, _, thumb)) = slider_parts(slider)? else {
+        return Ok(None);
+    };
+    let within: UIElement = slider.cast()?;
+    let (tx, ty, tw, th) = box_in(&track, &within)?;
+    let (x, y, w, h) = box_in(&thumb, &within)?;
+    if slider.Orientation()? == Orientation::Vertical {
+        if th - h <= 0.0 {
+            return Ok(None);
+        }
+        return Ok(Some(1.0 - (y + h / 2.0 - ty - h / 2.0) / (th - h)));
+    }
+    if tw - w <= 0.0 {
+        return Ok(None);
+    }
+    let f = (x + w / 2.0 - tx - w / 2.0) / (tw - w);
+    Ok(Some(if slider.FlowDirection()? == FlowDirection::RightToLeft { 1.0 - f } else { f }))
+}
+
 /// One number field's declared numbers and its committed mirror, the
 /// slider cell's shape and reason: the box's handler and its formatter run
 /// on the UI thread inside the apply borrow. Every number is an `f64` in its
@@ -28083,6 +28780,15 @@ fn shell_open(url: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// docs/range-plan.md §3 rule 4: the clip boundary between the thumbs.
+    #[test]
+    fn a_range_press_splits_at_the_midpoint_and_a_tie_at_the_shared_centre() {
+        assert_eq!(winui_range_split(20.0, 60.0), 40.0);
+        assert_eq!(winui_range_split(37.0, 123.0), 80.0);
+        assert_eq!(winui_range_split(50.0, 50.2), 50.0);
+        assert_eq!(winui_range_split(50.0, 50.0), 50.0);
+    }
 
     #[test]
     fn a_colour_crosses_the_platform_byte_for_byte() {

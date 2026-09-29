@@ -327,6 +327,10 @@ public final class KayaApp {
     private final Map<Long, DateHandler> nodeDates = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, Color>> widgetColors = new HashMap<>();
     private final Map<Long, ColorHandler> nodeColors = new HashMap<>();
+    private final Map<Long, RangeChange> widgetRangeMoves = new HashMap<>();
+    private final Map<Long, RangeHandler> nodeRangeMoves = new HashMap<>();
+    private final Map<Long, RangeChange> widgetRangeCommits = new HashMap<>();
+    private final Map<Long, RangeHandler> nodeRangeCommits = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, LocalTime>> widgetTimes = new HashMap<>();
     private final Map<Long, TimeHandler> nodeTimes = new HashMap<>();
     // Window lifecycle: one handler each, receiving the window id.
@@ -478,6 +482,20 @@ public final class KayaApp {
     @FunctionalInterface
     public interface ColorHandler {
         void accept(Tx tx, List<Object> keys, Color color);
+    }
+
+    /** A live range's handler: both thumbs' values, never half a pair
+     * (docs/range-plan.md §2). */
+    @FunctionalInterface
+    public interface RangeChange {
+        void accept(Tx tx, double low, double high);
+    }
+
+    /** A template range's handler: the stamped copy's keys, then both
+     * values. */
+    @FunctionalInterface
+    public interface RangeHandler {
+        void accept(Tx tx, List<Object> keys, double low, double high);
     }
 
     /** A template time picker's pick handler: the copy's keys, then the
@@ -3738,6 +3756,41 @@ public final class KayaApp {
             return this;
         }
 
+        /** The least distance between a range's thumbs, in value units
+         * (docs/range-plan.md §2); a multiple of the step when one is
+         * declared. */
+        public Widget minGap(double gap) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: minGap on a widget outside its build transaction"
+                    + " — a range's gap is declared where the range is built");
+            }
+            tx.emit(KayaWire.txSetMinGap(id, gap));
+            return this;
+        }
+
+        /** What a range's low thumb speaks (docs/range-plan.md §8 ruling
+         * 2); unset, the range's a11yLabel. */
+        public Widget lowLabel(String label) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: lowLabel on a widget outside its build transaction"
+                    + " — a range's thumb labels are declared where the range is built");
+            }
+            tx.emit(KayaWire.txSetLowLabel(id, label));
+            return this;
+        }
+
+        public Widget highLabel(String label) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: highLabel on a widget outside its build transaction"
+                    + " — a range's thumb labels are declared where the range is built");
+            }
+            tx.emit(KayaWire.txSetHighLabel(id, label));
+            return this;
+        }
+
         /** A number field's upper bound; never set, 2^53. */
         public Widget max(double max) {
             if (tx == null || tx.closed) {
@@ -4380,6 +4433,19 @@ public final class KayaApp {
             return t.colorPicker(f);
         }
 
+        public Node range(double min, double max, double low, double high) {
+            return t.range(min, max, low, high);
+        }
+
+        public Node range(double min, double max, Signal<Double> low, Signal<Double> high) {
+            return t.range(min, max, low, high);
+        }
+
+        public Node range(double min, double max, KayaRecords.Field<Double> low,
+                KayaRecords.Field<Double> high) {
+            return t.range(min, max, low, high);
+        }
+
         public Node timePicker(LocalTime time) {
             return t.timePicker(time);
         }
@@ -4674,6 +4740,35 @@ public final class KayaApp {
         /** This row's copy of that colour picker's alpha (Tpl.setAlpha). */
         public void setAlpha(Node n, boolean on) {
             t.setAlpha(n, on);
+        }
+
+        /** This row's copy of that range's gap (Tpl.setMinGap). */
+        public void setMinGap(Node n, double gap) {
+            t.setMinGap(n, gap);
+        }
+
+        public void setLowLabel(Node n, String label) {
+            t.setLowLabel(n, label);
+        }
+
+        public void setLowLabel(Node n, Signal<String> s) {
+            t.setLowLabel(n, s);
+        }
+
+        public void setLowLabel(Node n, KayaRecords.Field<String> f) {
+            t.setLowLabel(n, f);
+        }
+
+        public void setHighLabel(Node n, String label) {
+            t.setHighLabel(n, label);
+        }
+
+        public void setHighLabel(Node n, Signal<String> s) {
+            t.setHighLabel(n, s);
+        }
+
+        public void setHighLabel(Node n, KayaRecords.Field<String> f) {
+            t.setHighLabel(n, f);
         }
 
         public void setMax(Node n, double max) {
@@ -5927,6 +6022,38 @@ public final class KayaApp {
             emit(KayaWire.txBindColor(w.id, color.id));
             if (onColor != null) {
                 KayaApp.this.onColor(w, onColor);
+            }
+            return w;
+        }
+
+        /** A range over min..max with its thumbs at low and high
+         * (docs/range-plan.md), its move handler co-located (null for
+         * none); each gesture's settled pair arrives through
+         * app.onRangeCommitted. */
+        public Widget range(double min, double max, double low, double high,
+                RangeChange onChange) {
+            Widget w = widget(KayaWire.KIND_RANGE);
+            emit(KayaWire.txSetMin(w.id, min));
+            emit(KayaWire.txSetMax(w.id, max));
+            emit(KayaWire.txSetLow(w.id, low));
+            emit(KayaWire.txSetHigh(w.id, high));
+            if (onChange != null) {
+                KayaApp.this.onRangeChanged(w, onChange);
+            }
+            return w;
+        }
+
+        /** A range whose thumbs bind two float signals; a write never
+         * echoes. */
+        public Widget range(double min, double max, Signal<Double> low, Signal<Double> high,
+                RangeChange onChange) {
+            Widget w = widget(KayaWire.KIND_RANGE);
+            emit(KayaWire.txSetMin(w.id, min));
+            emit(KayaWire.txSetMax(w.id, max));
+            emit(KayaWire.txBindLow(w.id, low.id));
+            emit(KayaWire.txBindHigh(w.id, high.id));
+            if (onChange != null) {
+                KayaApp.this.onRangeChanged(w, onChange);
             }
             return w;
         }
@@ -7237,6 +7364,38 @@ public final class KayaApp {
             tx.emit(KayaWire.txSetAlpha(n.id, on));
         }
 
+        /** A stamped range's least gap (docs/range-plan.md §2), constant
+         * across the copies. */
+        public void setMinGap(Node n, double gap) {
+            tx.emit(KayaWire.txSetMinGap(n.id, gap));
+        }
+
+        /** What a stamped range's thumbs speak (docs/range-plan.md §8
+         * ruling 2). */
+        public void setLowLabel(Node n, String label) {
+            tx.emit(KayaWire.txSetLowLabel(n.id, label));
+        }
+
+        public void setLowLabel(Node n, Signal<String> s) {
+            tx.emit(KayaWire.txBindLowLabel(n.id, s.id));
+        }
+
+        public void setLowLabel(Node n, KayaRecords.Field<String> f) {
+            tx.emit(KayaWire.txBindLowLabelElement(n.id, 0, f.index));
+        }
+
+        public void setHighLabel(Node n, String label) {
+            tx.emit(KayaWire.txSetHighLabel(n.id, label));
+        }
+
+        public void setHighLabel(Node n, Signal<String> s) {
+            tx.emit(KayaWire.txBindHighLabel(n.id, s.id));
+        }
+
+        public void setHighLabel(Node n, KayaRecords.Field<String> f) {
+            tx.emit(KayaWire.txBindHighLabelElement(n.id, 0, f.index));
+        }
+
         /**
          * What a stamped copy MEANS — semantic emphasis, never
          * appearance. A CONSTANT, not a source, for
@@ -7706,6 +7865,39 @@ public final class KayaApp {
         public Node colorPicker(KayaRecords.Field<Color> f) {
             Node n = widget(KayaWire.KIND_COLOR_PICKER);
             bindColorField(n, 0, f);
+            return n;
+        }
+
+        /** A stamped range, the slider's three sources for each thumb, a
+         * row's own fields being the point (a clip's trim in and out;
+         * docs/range-plan.md §2). Register its handlers with
+         * app.onRangeChanged / app.onRangeCommitted, keys first. */
+        public Node range(double min, double max, double low, double high) {
+            Node n = rangeOver(min, max);
+            tx.emit(KayaWire.txSetLow(n.id, low));
+            tx.emit(KayaWire.txSetHigh(n.id, high));
+            return n;
+        }
+
+        public Node range(double min, double max, Signal<Double> low, Signal<Double> high) {
+            Node n = rangeOver(min, max);
+            tx.emit(KayaWire.txBindLow(n.id, low.id));
+            tx.emit(KayaWire.txBindHigh(n.id, high.id));
+            return n;
+        }
+
+        public Node range(double min, double max, KayaRecords.Field<Double> low,
+                KayaRecords.Field<Double> high) {
+            Node n = rangeOver(min, max);
+            tx.emit(KayaWire.txBindLowElement(n.id, 0, low.index));
+            tx.emit(KayaWire.txBindHighElement(n.id, 0, high.index));
+            return n;
+        }
+
+        private Node rangeOver(double min, double max) {
+            Node n = widget(KayaWire.KIND_RANGE);
+            tx.emit(KayaWire.txSetMin(n.id, min));
+            tx.emit(KayaWire.txSetMax(n.id, max));
             return n;
         }
 
@@ -8866,6 +9058,28 @@ public final class KayaApp {
         nodeColors.put(n.id, handler);
     }
 
+    /** Register a live range's move handler: every movement of either
+     * thumb, both values (docs/range-plan.md §2). */
+    public void onRangeChanged(Widget w, RangeChange handler) {
+        widgetRangeMoves.put(w.id, handler);
+    }
+
+    /** A template range's move handler, keys first. */
+    public void onRangeChanged(Node n, RangeHandler handler) {
+        nodeRangeMoves.put(n.id, handler);
+    }
+
+    /** Register the pair a live range's gesture SETTLED ON, once per
+     * gesture (docs/range-plan.md §3 rule 3). */
+    public void onRangeCommitted(Widget w, RangeChange handler) {
+        widgetRangeCommits.put(w.id, handler);
+    }
+
+    /** A template range's settled pair, keys first. */
+    public void onRangeCommitted(Node n, RangeHandler handler) {
+        nodeRangeCommits.put(n.id, handler);
+    }
+
     /** Register a pick handler for a live time picker. */
     public void onTime(Widget w, BiConsumer<Tx, LocalTime> handler) {
         widgetTimes.put(w.id, handler);
@@ -9325,6 +9539,27 @@ public final class KayaApp {
                     dispatch(tx -> {
                         handler.accept(tx, occ.keys, KayaRecords.colorOf(occ.payload));
                     });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_RANGE_CHANGED
+                    || occ.kind == KayaWire.OCC_KIND_RANGE_COMMITTED) {
+                boolean moved = occ.kind == KayaWire.OCC_KIND_RANGE_CHANGED;
+                List<?> pair = (List<?>) occ.payload;
+                double low = (Double) pair.get(0);
+                double high = (Double) pair.get(1);
+                if (occ.keys.isEmpty()) {
+                    RangeChange handler = (moved ? widgetRangeMoves : widgetRangeCommits).get(occ.id);
+                    if (handler != null) {
+                        dispatch(tx -> {
+                            handler.accept(tx, low, high);
+                        });
+                    }
+                } else {
+                    RangeHandler handler = (moved ? nodeRangeMoves : nodeRangeCommits).get(occ.id);
+                    if (handler != null) {
+                        dispatch(tx -> {
+                            handler.accept(tx, occ.keys, low, high);
+                        });
+                    }
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_TIME_CHANGED && occ.keys.isEmpty()) {
                 BiConsumer<Tx, LocalTime> handler = widgetTimes.get(occ.id);

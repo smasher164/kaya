@@ -31,10 +31,22 @@ expect_thumb range#0 low "0.1"
 settle 700
 expect label#0 "live: 7 8"
 expect label#1 "commits: 2 at 7 8"
+# The core's pair follows the user (docs/range-plan.md §3 rule 11): the user
+# moves high to 4, then button#1 writes low 6 from the app's stale view (high
+# 8). It would cross the user's thumb, so the core clamps it at 4 - min_gap
+# and the app hears the settled pair once.
+set_value range#0 high 4
+expect_value range#0 "1 4"
+expect label#1 "commits: 3 at 1 4"
+click button#1
+expect_value range#0 "3 4"
+expect label#1 "commits: 4 at 3 4"
+settle 700
+expect label#1 "commits: 4 at 3 4"
 # The keyboard: a thumb's arrow moves it by the step and commits at once.
-nudge range#0 high down
-expect_value range#0 "1 7.5"
-expect label#1 "commits: 3 at 1 7.5"
+nudge range#0 high up
+expect_value range#0 "3 4.5"
+expect label#1 "commits: 5 at 3 4.5"
 # The vertical fader: the minimum at the bottom, Up raises it.
 expect_axis slider#0 "horizontal"
 expect_axis slider#1 "vertical"

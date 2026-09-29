@@ -79,6 +79,7 @@ main = kayaMain $ \app -> do
           labelBound rowText, -- label#3
           pure master,
           sliderOn 0.0 1.0 0.5 onVolume [TickSpacing 0.25, A11yLabel "Volume"], -- slider#1
+          sliderOn 0.0 1.0 0.25 (\_ -> return ()) [Step 0.25, Axis AxisVertical, A11yLabel "Fader", A11yId "fader"], -- slider#2
           buttonOn "reset" onReset, -- button#0
           pure trackList
         ]

@@ -384,7 +384,8 @@ watched("a Compose arm committing on every drag movement",
 # 10. COMPOSE: THE GESTURE HAS NO END.
 compose_no_end = gate.doctor(
     "the compose finished-callback removal", REAL[COMPOSE],
-    r"onValueChangeFinished = \{", "onValueChangeStarted = {")
+    r"onValueChangeFinished = \{ kayaSliderCommitted\(",
+    "onValueChangeStarted = { kayaSliderCommitted(")
 watched("a Compose slider with no onValueChangeFinished",
         {**REAL, COMPOSE: compose_no_end}, "no onValueChangeFinished at all")
 
@@ -805,14 +806,20 @@ def swiftui_range_findings(source):
         if piece not in thumb_ios:
             out.append(f"{SWIFTUI}: the iOS thumb lacks `{piece}` — VoiceOver's adjust "
                        f"would move the UISlider past the clamp and commit nothing (§3 rules 3, 8)")
-    # §3 rule 4: a press goes to a thumb by the midpoint split, never by
-    # which native slider is on top; no scene can see it, since set_value
-    # drives a thumb's control directly (measured only in the §4.2 probe).
-    for anchor in ("final class KayaRangeView: NSView", "final class KayaRangeTrack: UIView"):
-        hit = block_after(block_after(source, anchor), "override func hitTest(")
-        if "kayaRangeLowTakes(" not in hit:
-            out.append(f"{SWIFTUI}: {anchor}'s hitTest no longer routes by kayaRangeLowTakes — "
-                       f"a press would go to whichever slider is on top (§3 rule 4)")
+    # §3 rule 9, measured §4.2 2026-09-29: an empty track IMAGE turns UIKit's
+    # Liquid Glass thumb back into the legacy round knob, so the native track
+    # is hidden by a clear TINT and nothing in the arm sets an image or a
+    # thumb tint. No scene can see a knob's shape.
+    track_ios = "".join(block_after(source, a) for a in (
+        "final class KayaRangeTrack: UIView", "final class KayaRangeThumbSlider: UISlider"))
+    for piece in ("thumb.minimumTrackTintColor = .clear", "thumb.maximumTrackTintColor = .clear"):
+        if piece not in track_ios:
+            out.append(f"{SWIFTUI}: the iOS range no longer hides its thumbs' track with "
+                       f"`{piece}` — the native track would draw under kaya's (§3 rule 9)")
+    hit = re.search(r"set(?:Minimum|Maximum)TrackImage|setThumbImage|thumbTintColor", track_ios)
+    if hit:
+        out.append(f"{SWIFTUI}: the iOS range arm calls `{hit.group(0)}` — an image or thumb tint "
+                   f"restyles the platform's thumb (the legacy knob, measured §4.2)")
     doors = [changed, thumb_ios]
     for anchor in ("@objc func moved(_ sender: KayaRangeThumbSlider)",
                    "@objc func released(_ sender: KayaRangeThumbSlider)"):
@@ -885,12 +892,11 @@ range_watched("a mac thumb whose action is not the range's", gate.doctor(
     r"thumb\.action = #selector\(changed\(_:\)\)", "thumb.action = nil"),
     "the assistive set")
 
-# R8. THE PRESS ROUTED BY Z-ORDER.
-range_watched("a mac range whose hitTest is the stack's", gate.doctor(
-    "the midpoint split", SWIFT_SOURCE,
-    r"let lowTakes = kayaRangeLowTakes\(p\.x, lowCentre: centre\(low\)\.x, "
-    r"highCentre: centre\(high\)\.x\)",
-    "let lowTakes = false"), "no longer routes by kayaRangeLowTakes")
+# R9. THE iOS TRACK HIDDEN BY AN EMPTY IMAGE, the shipped depth shape.
+range_watched("an iOS range hiding its track with an empty image", gate.doctor(
+    "the clear minimum tint", SWIFT_SOURCE,
+    r"thumb\.minimumTrackTintColor = \.clear",
+    "thumb.setMinimumTrackImage(UIImage(), for: .normal)"), "restyles the platform's thumb")
 
 # R7. A MOVE OUTSIDE EVERY DOOR.
 range_watched("a range moved from the surface's apply", gate.doctor(
@@ -899,6 +905,777 @@ range_watched("a range moved from the surface's apply", gate.doctor(
     r"\1            kayaRangeMoved(node, low: true, node.low, final: true) { _ in }\n"),
     "sit in a door")
 
+# THE WINUI RANGE (docs/range-plan.md §3 rules 2, 3, 8, §6): both thumbs are
+# the slider arm's own door twice — ValueChanged, final only with no button
+# down, and PointerCaptureLost — into ONE path, winui_range_moved, which clamps
+# through the core, writes the answer back into the thumb's slider and sends
+# the pair. UIA's RangeValue.SetValue (Narrator) arrives as ValueChanged, so
+# the handler IS the assistive door; `set_value` drives one finished gesture,
+# so none of this is visible to tools/scenes/range.steps.
+def winui_range_findings(source):
+    out = []
+    moved = block_after(source, "fn winui_range_moved(")
+    if not moved:
+        return [f"{WINUI}: fn winui_range_moved is gone — the one commit path this "
+                f"clause holds both thumbs' doors to"]
+    if not re.search(r"let v = crate::range::clamp_thumb\(", moved) or not re.search(
+            r"if v != raw \{\s*quiet\.store\(true[^;]*;\s*let write = slider\.SetValue\(v\);",
+            moved):
+        out.append(f"{WINUI}: winui_range_moved no longer clamps through the core and "
+                   f"writes the answer back into the thumb's slider — a thumb could rest "
+                   f"past the other (§3 rules 2, 8)")
+    if not re.search(r"write\?;\s*winui_range_relay_thumb\(slider, v, raw, quiet\);", moved):
+        out.append(f"{WINUI}: winui_range_moved writes the clamp back without re-laying the "
+                   f"thumb — the Slider draws a write-back made inside ValueChanged at the "
+                   f"raised value (docs/traps.md, measured 2026-09-29)")
+    emits = len(re.findall(r"\.send_range_tag\(", source))
+    if emits != 2 or moved.count(".send_range_tag(") != 2:
+        out.append(f"{WINUI}: send_range_tag is called {emits} time(s); both calls belong "
+                   f"inside winui_range_moved, so no path publishes a pair past it")
+    if not re.search(r"let settled = final_\s*&& \(nlo, nhi\)\s*!= \(SliderCell::get\("
+                     r"&cell\.committed_low\), SliderCell::get\(&cell\.committed_high\)\);",
+                     moved):
+        out.append(f"{WINUI}: winui_range_moved commits a pair equal to the last committed "
+                   f"one, or commits without a finished gesture (§2)")
+    pair = block_after(source, "impl RangePair {")
+    changed = block_after(pair, "thumb.ValueChanged(&RangeBaseValueChangedEventHandler::new(")
+    released = block_after(pair, "thumb.PointerCaptureLost(&PointerEventHandler::new(")
+    for door, name, final in ((changed, "ValueChanged", "!pointer_button_down()"),
+                              (released, "PointerCaptureLost", "true")):
+        if not door:
+            out.append(f"{WINUI}: a range thumb registers no {name} handler — "
+                       f"{'every move, UIA included,' if final != 'true' else 'a drag'} "
+                       f"would never reach the clamp")
+            continue
+        if not re.match(r"\{\s*if \w+\.load\(std::sync::atomic::Ordering::Relaxed\) \{\s*"
+                        r"return Ok\(\(\)\);", door):
+            out.append(f"{WINUI}: the range's {name} handler does not open on the quiet "
+                       f"guard — the app's own write and the clamp's write-back would commit")
+        call = re.search(r"winui_range_moved\(\s*&slider,\s*&cell,\s*low,\s*&\w+,\s*&\w+,\s*"
+                         r"(.+?),?\s*\)\?;", door, re.S)
+        if call is None or call.group(1).strip() != final:
+            got = call.group(1).strip() if call else "no call at all"
+            out.append(f"{WINUI}: the range's {name} handler moves the thumb with `{got}` — "
+                       f"it must be `{final}`, or a drag commits on every movement or its "
+                       f"release commits nothing")
+    step = block_after(source, "fn arrow_step(")
+    if "PostMessageW(site, WM_KEYDOWN" not in step or "keybd_event" in step:
+        out.append(f"{WINUI}: the slider's arrow step does not post its key to the focus "
+                   f"window — a key on the system input queue goes to whichever pooled "
+                   f"guest holds the foreground (docs/traps.md, measured 2026-09-29)")
+    doors = [changed, released, block_after(source, "fn set_thumb(")]
+    calls = len(re.findall(r"(?<!fn )winui_range_moved\(", source))
+    inside = sum(len(re.findall(r"winui_range_moved\(", d)) for d in doors)
+    if calls != inside:
+        out.append(f"{WINUI}: winui_range_moved is called {calls} time(s) and {inside} of "
+                   f"them sit in a door (a thumb's ValueChanged, its PointerCaptureLost, "
+                   f"set_value's drive) — a move anywhere else is no user's")
+    return out
+
+
+gate.counted("winui range door calls read",
+             len(re.findall(r"(?<!fn )winui_range_moved\(", REAL[WINUI])), floor=3)
+
+
+def winui_range_watched(label, source, fragment):
+    if not gate.negative(label, lambda: winui_range_findings(source), want=fragment):
+        return
+    print(f"check-slider-commit: watched refusing: {label}")
+
+
+# W1. THE CLAMP'S ANSWER NOT WRITTEN BACK.
+winui_range_watched("a WinUI clamp whose answer stays out of the slider", gate.doctor(
+    "the winui range write-back", REAL[WINUI],
+    r"let write = slider\.SetValue\(v\);(?=[^}]*\}\s*if moved \{\s*sink\.send_range_tag)",
+    "let write = slider.SetValue(raw);"),
+    "writes the answer back")
+# W2. THE PAIR COMMITTED AGAIN.
+winui_range_watched("a WinUI range committing the settled pair again", gate.doctor(
+    "the winui settled-pair compare", REAL[WINUI],
+    r"(let settled = final_)\s*&& \(nlo, nhi\)\s*!= \(SliderCell::get\(&cell\.committed_low\), "
+    r"SliderCell::get\(&cell\.committed_high\)\);", r"\1;"),
+    "equal to the last committed")
+# W3. A DRAG'S EVERY MOVEMENT FINAL.
+winui_range_watched("a WinUI range thumb committing every drag event", gate.doctor(
+    "the winui range drag test", REAL[WINUI],
+    r"(&moved_sink,\s*)!pointer_button_down\(\),", r"\1true,"),
+    "ValueChanged handler moves the thumb with `true`")
+# W4. A MOVE FROM THE APP'S OWN WRITE.
+winui_range_watched("a WinUI range moved from the apply arm", gate.doctor(
+    "a move in winui_range_write", REAL[WINUI],
+    r"(    let write = pair\.slider\(low\)\.SetValue\(value\);\n)",
+    r"\1    winui_range_moved(pair.slider(low), &pair.cell, low, quiet, &sink, true)?;\n"),
+    "sit in a door")
+# W5. THE QUIET GUARD CUT from a thumb's ValueChanged.
+winui_range_watched("a WinUI range ValueChanged with no quiet guard", gate.doctor(
+    "the winui range quiet guard", REAL[WINUI],
+    r"(move \|sender, _: windows_core::Ref<'_, RangeBaseValueChangedEventArgs>\| \{\n)"
+    r"\s*if moved_quiet\.load\([^)]*\) \{\n"
+    r"\s*return Ok\(\(\)\);\n\s*\}\n", r"\1"),
+    "does not open on the quiet")
+# W7. THE THUMB LEFT WHERE THE RAISED VALUE WAS.
+winui_range_watched("a WinUI write-back with no thumb re-lay", gate.doctor(
+    "the winui range re-lay", REAL[WINUI],
+    r"\n\s*winui_range_relay_thumb\(slider, v, raw, quiet\);", ""),
+    "without re-laying the thumb")
+# W8. THE ARROW BACK ON THE SYSTEM QUEUE.
+winui_range_watched("a WinUI arrow step typed on the system input queue", gate.doctor(
+    "the winui range arrow route", REAL[WINUI],
+    r"PostMessageW\(site, WM_KEYDOWN, key, ([^;]*)\);",
+    r"keybd_event(key as u8, 0, 0, 0);"),
+    "does not post its key to the focus")
+# W6. A THIRD SEND.
+winui_range_watched("a WinUI range pair sent outside winui_range_moved", gate.doctor(
+    "a third winui range send", REAL[WINUI],
+    r"(    SliderCell::set\(held, value\);\n)",
+    r"\1    sink.send_range_tag(&cell.tag, value, value, true);\n"),
+    "is called 3 time(s)")
+
+# THE COMPOSE RANGE (docs/range-plan.md §3 rules 2, 3, 8, §6): Material's own
+# RangeSlider hands every value back through onValueChange, a drag's, a tap's
+# and an assistive setProgress's alike, and calls onValueChangeFinished at a
+# gesture's end and after setProgress (measured §4). So every onValueChange
+# goes through kayaRangeMoved, which clamps through the core's JNI and holds
+# the answer in the node the control draws from, and the ONE commit is
+# kayaRangeSettled behind onValueChangeFinished. The scene's set_value takes
+# the setProgress door, so a drag committing per movement passes it.
+def compose_range_findings(source):
+    out = []
+    moved = block_after(source, "internal fun kayaRangeMoved(")
+    settled = block_after(source, "internal fun kayaRangeSettled(")
+    changed = block_after(source, "internal fun kayaRangeChanged(")
+    surface = block_after(source, "private fun KayaRangeSurface(")
+    if not (moved and settled and changed and surface):
+        return [f"{COMPOSE}: kayaRangeMoved, kayaRangeSettled, kayaRangeChanged or "
+                f"KayaRangeSurface is gone — the one path this clause holds is not there"]
+    if not re.search(r"val v = KayaPresent\.rangeClamp\(", moved) or not re.search(
+            r"node\.low = lo\s+node\.high = hi", moved):
+        out.append(f"{COMPOSE}: kayaRangeMoved no longer clamps through the core and holds "
+                   f"the answer in the node — a thumb could rest past the other (§3 rule 2)")
+    if "value = node.low.toFloat()..node.high.toFloat()," not in surface:
+        out.append(f"{COMPOSE}: the RangeSlider no longer draws the clamped pair from the "
+                   f"node — the clamp's answer never reaches the control (the write-back)")
+    emits = re.findall(r"KayaPresent\.emitRange\(([^\n]*)\)", source)
+    live = [e for e in emits if e.endswith("false")]
+    final = [e for e in emits if e.endswith("true")]
+    if (len(emits) != 2 or len(live) != 1 or len(final) != 1
+            or "KayaPresent.emitRange(node.tag, lo, hi, false)" not in moved
+            or "KayaPresent.emitRange(node.tag, node.low, node.high, true)" not in settled):
+        out.append(f"{COMPOSE}: KayaPresent.emitRange is called {len(emits)} time(s); the live "
+                   f"one belongs in kayaRangeMoved and the committed one in kayaRangeSettled, "
+                   f"so no path publishes a pair past them")
+    if not re.search(r"if \(node\.low != node\.committedLow \|\| "
+                     r"node\.high != node\.committedHigh\)", settled):
+        out.append(f"{COMPOSE}: kayaRangeSettled commits a pair equal to the last settled "
+                   f"one (§2)")
+    for name, door, where in (
+            ("kayaRangeChanged", "onValueChange = { kayaRangeChanged(node, it) },",
+             "the RangeSlider's onValueChange"),
+            ("kayaRangeSettled", "onValueChangeFinished = { kayaRangeSettled(node) },",
+             "the RangeSlider's onValueChangeFinished")):
+        calls = len(re.findall(rf"(?<!fun ){name}\(", source))
+        if door not in surface or calls != 1:
+            out.append(f"{COMPOSE}: {name} is called {calls} time(s) and must be called once, "
+                       f"from {where} — anything else is a commit or a move no user made")
+    calls = len(re.findall(r"(?<!fun )kayaRangeMoved\(", source))
+    if calls != 2 or changed.count("kayaRangeMoved(") != 2:
+        out.append(f"{COMPOSE}: kayaRangeMoved is called {calls} time(s); both calls belong in "
+                   f"kayaRangeChanged, the onValueChange every value arrives through")
+    return out
+
+
+gate.counted("compose range door calls read",
+             len(re.findall(r"(?<!fun )kayaRange(?:Moved|Settled|Changed)\(", REAL[COMPOSE])),
+             floor=4)
+
+
+def compose_range_watched(label, source, fragment):
+    if not gate.negative(label, lambda: compose_range_findings(source), want=fragment):
+        return
+    print(f"check-slider-commit: watched refusing: {label}")
+
+
+# K1. THE PAIR COMMITTED AGAIN.
+compose_range_watched("a Compose range committing the settled pair again", gate.doctor(
+    "the compose settled-pair compare", REAL[COMPOSE],
+    r"if \(node\.low != node\.committedLow \|\| node\.high != node\.committedHigh\) \{",
+    "if (true) {"), "equal to the last settled")
+# K2. EVERY MOVEMENT COMMITTED.
+compose_range_watched("a Compose range committing on every movement", gate.doctor(
+    "a commit in kayaRangeMoved", REAL[COMPOSE],
+    r"(        KayaPresent\.emitRange\(node\.tag, lo, hi, false\)\n)",
+    r"\1        KayaPresent.emitRange(node.tag, lo, hi, true)\n"),
+    "emitRange is called 3 time(s)")
+# K3. THE CLAMP SKIPPED.
+compose_range_watched("a Compose range move skipping the core's clamp", gate.doctor(
+    "the compose clamp", REAL[COMPOSE],
+    r"val v = KayaPresent\.rangeClamp\(", "val v = raw; listOf("),
+    "no longer clamps through the core")
+# K4. THE CLAMP'S ANSWER NOT WHAT THE CONTROL DRAWS.
+compose_range_watched("a Compose RangeSlider drawing the committed pair", gate.doctor(
+    "the compose write-back", REAL[COMPOSE],
+    r"value = node\.low\.toFloat\(\)\.\.node\.high\.toFloat\(\),",
+    "value = node.committedLow.toFloat()..node.committedHigh.toFloat(),"),
+    "draws the clamped pair")
+# K5. A COMMIT FROM onValueChange.
+compose_range_watched("a Compose range committing from onValueChange", gate.doctor(
+    "a commit in onValueChange", REAL[COMPOSE],
+    r"onValueChange = \{ kayaRangeChanged\(node, it\) \},",
+    "onValueChange = { kayaRangeChanged(node, it); kayaRangeSettled(node) },"),
+    "kayaRangeSettled is called 2 time(s)")
+# K6. A VALUE PAST THE CLAMP.
+compose_range_watched("a Compose onValueChange writing the node itself", gate.doctor(
+    "onValueChange past the path", REAL[COMPOSE],
+    r"onValueChange = \{ kayaRangeChanged\(node, it\) \},",
+    "onValueChange = { node.low = it.start.toDouble() },"),
+    "kayaRangeChanged is called 0 time(s)")
+# K7. AN APP WRITE ECHOED.
+compose_range_watched("a Compose app write echoing as a move", gate.doctor(
+    "an echo in the low prop arm", REAL[COMPOSE],
+    r"(                            node\.committedLow = node\.low\n)",
+    r"\1                            kayaRangeMoved(node, low = true, raw = node.low)\n"),
+    "kayaRangeMoved is called 3 time(s)")
+
+# THE GTK RANGE (docs/range-plan.md §3 rules 2, 3, 8, §4 MEASURED): each
+# thumb's `value-changed` is the door every path reaches — a drag, a press on
+# the track, a key, an AT-SPI Value set (Orca's route, measured arriving
+# there) — and it moves the pair through ONE path, range_moved, settled only
+# while no pointer is down; the capture-phase release is the drag's commit,
+# the slider's door. set_value drives one finished gesture, so none of this
+# is visible to tools/scenes/range.steps.
+def gtk_range_findings(source):
+    out = []
+    moved = block_after(source, "fn range_moved(")
+    if not moved:
+        return [f"{GTK}: fn range_moved is gone — the one commit path this clause holds "
+                f"both thumbs' doors to"]
+    if not re.search(r"let v = crate::range::clamp_thumb\(", moved) or not re.search(
+            r"if v != raw \{\s*let was = quiet\.replace\(true\);\s*thumb\.set_value\(v\);"
+            r"\s*quiet\.set\(was\);", moved):
+        out.append(f"{GTK}: range_moved no longer clamps through the core and writes the "
+                   f"answer back into the thumb's scale under the quiet guard — a thumb "
+                   f"could rest past the other (§3 rules 2, 8)")
+    sends = len(re.findall(r"\.send_range_tag\(", source))
+    if sends != 2 or moved.count(".send_range_tag(") != 2:
+        out.append(f"{GTK}: send_range_tag is called {sends} time(s); both calls belong "
+                   f"inside range_moved, so no path publishes a pair past it")
+    settled = block_after(
+        moved, "if settled && (lo, hi) != (st.committed_low, st.committed_high)")
+    if not re.search(r"gtk_user_range_committed\(tag, lo, hi\);\s*"
+                     r"sink\.send_range_tag\(tag, lo, hi, true\);", settled):
+        out.append(f"{GTK}: range_moved commits a pair equal to the last committed one, "
+                   f"commits without a finished gesture, or sends it before the core's "
+                   f"pair follows the user (§2, §3 rule 11)")
+    arm = block_after(source, "WidgetKind::Range => {")
+    changed = block_after(arm, "thumb.connect_value_changed(")
+    released = block_after(arm, "pointer.connect_event(")
+    if not re.search(r"\{\s*pair\.group\.queue_allocate\(\);\s*if quiet\.get\(\) \{\s*"
+                     r"return;\s*\}", changed):
+        out.append(f"{GTK}: a range thumb's value-changed handler does not open on the "
+                   f"quiet guard — the app's own write and the clamp's write-back would "
+                   f"commit")
+    if not re.search(r"let settled = !pair\.state\.get\(\)\.dragging;\s*"
+                     r"range_moved\(&pair, low, &quiet, &sink, &tag, settled\);", changed):
+        out.append(f"{GTK}: a range thumb's value-changed no longer moves the pair settled "
+                   f"only while no pointer is down — a drag would commit on every movement")
+    if not re.search(r"gdk::EventType::ButtonRelease[^}]*state\.dragging = false;[^}]*"
+                     r"range_moved\(&pair, low, &quiet, &sink, &tag, true\);", released):
+        out.append(f"{GTK}: a range thumb's release no longer commits the pair — a drag "
+                   f"would never commit")
+    doors = [changed, released]
+    calls = len(re.findall(r"(?<!fn )range_moved\(", source))
+    inside = sum(len(re.findall(r"range_moved\(", d)) for d in doors)
+    if calls != inside:
+        out.append(f"{GTK}: range_moved is called {calls} time(s) and {inside} of them "
+                   f"sit in a door (a thumb's value-changed, its release) — a move "
+                   f"anywhere else is no user's")
+    drive = block_after(source, "fn set_thumb(&self")
+    if (not re.search(r"scale\.set_value\(value\);\s*scale\.emit_by_name::<\(\)>"
+                      r"\(\"value-changed\", &\[\]\);", drive) or "apply_quiet" in drive):
+        out.append(f"{GTK}: set_value on a range no longer moves the thumb's scale outside "
+                   f"the quiet guard — it must reach the door a user's move reaches (§5)")
+    write = block_after(source, "(NativeWidget::Range(pair), Prop::High, Value::F64(v)) =>")
+    if not re.search(r"let was = core\.apply_quiet\.replace\(true\);\s*"
+                     r"pair\.thumb\(low\)\.set_value\(v\);\s*core\.apply_quiet\.set\(was\);",
+                     write):
+        out.append(f"{GTK}: the app's low/high write does not move the thumb under the quiet "
+                   f"guard — it would echo as a user's move (§2)")
+    return out
+
+
+gate.counted("gtk range door calls read",
+             len(re.findall(r"(?<!fn )range_moved\(", REAL[GTK])), floor=2)
+
+
+def gtk_range_watched(label, source, fragment):
+    if not gate.negative(label, lambda: gtk_range_findings(source), want=fragment):
+        return
+    print(f"check-slider-commit: watched refusing: {label}")
+
+
+# T1. THE CLAMP'S ANSWER NOT WRITTEN BACK.
+gtk_range_watched("a GTK clamp whose answer stays out of the scale", gate.doctor(
+    "the gtk range write-back", REAL[GTK],
+    r"(if v != raw \{\s*let was = quiet\.replace\(true\);\s*)thumb\.set_value\(v\);",
+    r"\1thumb.set_value(raw);"),
+    "writes the answer back")
+# T2. THE PAIR COMMITTED AGAIN.
+gtk_range_watched("a GTK range committing the settled pair again", gate.doctor(
+    "the gtk settled-pair compare", REAL[GTK],
+    r"if settled && \(lo, hi\) != \(st\.committed_low, st\.committed_high\) \{",
+    "if settled {"),
+    "equal to the last committed")
+# T3. THE CORE'S PAIR LEFT BEHIND THE USER (§3 rule 11).
+gtk_range_watched("a GTK commit sent before the core's pair follows", gate.doctor(
+    "the gtk user_range_committed call", REAL[GTK],
+    r"        gtk_user_range_committed\(tag, lo, hi\);\n", ""),
+    "follows the user")
+# T4. A DRAG'S EVERY MOVEMENT FINAL.
+gtk_range_watched("a GTK range thumb committing every drag event", gate.doctor(
+    "the gtk range drag test", REAL[GTK],
+    r"let settled = !pair\.state\.get\(\)\.dragging;", "let settled = true;"),
+    "settled only while no pointer is down")
+# T5. THE QUIET GUARD CUT from a thumb's value-changed.
+gtk_range_watched("a GTK range value-changed with no quiet guard", gate.doctor(
+    "the gtk range quiet guard", REAL[GTK],
+    r"(pair\.group\.queue_allocate\(\);\n)\s*if quiet\.get\(\) \{\n\s*return;\n\s*\}\n"
+    r"(?=(?:\s*//[^\n]*\n)*\s*let settled = !pair)",
+    r"\1"),
+    "does not open on the quiet guard")
+# T6. THE RELEASE NO LONGER COMMITS.
+gtk_range_watched("a GTK range whose release commits nothing", gate.doctor(
+    "the gtk range release commit", REAL[GTK],
+    r"range_moved\(&pair, low, &quiet, &sink, &tag, true\);",
+    "let _ = (&pair, &quiet, &sink, &tag);"),
+    "release no longer commits")
+# T7. A MOVE FROM THE APP'S OWN WRITE.
+gtk_range_watched("a GTK range moved from the apply arm", gate.doctor(
+    "a move in the range's low/high arm", REAL[GTK],
+    r"(                    pair\.thumb\(low\)\.set_value\(v\);\n)",
+    r"\1                    range_moved(pair, low, &core.apply_quiet, &core.occurrences, "
+    r"&[], true);\n"),
+    "sit in a door")
+# T8. THE APP'S WRITE ECHOING.
+gtk_range_watched("a GTK range low/high write outside the quiet guard", gate.doctor(
+    "the gtk range apply guard", REAL[GTK],
+    r"let was = core\.apply_quiet\.replace\(true\);\n(\s*pair\.thumb\(low\)\.set_value\(v\);)"
+    r"\n\s*core\.apply_quiet\.set\(was\);", r"\1"),
+    "under the quiet guard")
+# T9. set_value WRITTEN QUIETLY, SO IT NEVER REACHES THE DOOR.
+gtk_range_watched("a GTK set_thumb under the quiet guard", gate.doctor(
+    "the gtk drive under the guard", REAL[GTK],
+    r"(let scale = core\.ranges\[i\]\.thumb\(thumb == crate::harness::Thumb::Low\)\.clone\(\);)"
+    r"(\s*)scale\.set_value\(value\);",
+    r"\1\2core.apply_quiet.set(true);\2scale.set_value(value);"),
+    "outside the quiet guard")
+
+# A PRESS GOES TO A THUMB BY GEOMETRY, NEVER BY Z-ORDER (docs/range-plan.md
+# §3 rule 4; the survey's most reported failure, docs/probes/
+# range-sliders-2026-09-29.md). No scene can see it: set_value drives a
+# thumb's control directly, so an arm routing by whichever slider is on top
+# passes tools/scenes/range.steps byte for byte. One row per STACKED backend
+# (two native sliders over one drawn track), each naming:
+#   split  — the anchor of the block that decides which thumb a press takes,
+#            and the regexes that block must hold: both thumbs' positions,
+#            their MIDPOINT, and the tie's own branch;
+#   press  — the anchor chain to the PRESS-DOWN site (the tie is decided
+#            there, when a native slider starts tracking, never on a move),
+#            and the regexes it must hold: the split called with both
+#            thumbs' positions read at that moment;
+#   arm    — the anchors of every block of the range arm, none of which may
+#            name one of `zorder`'s APIs (reordering the two sliders is the
+#            forbidden route, whatever the toolkit calls it).
+SWIFT_ZORDER = [r"bringSubviewToFront", r"sendSubviewToBack", r"exchangeSubview",
+                r"insertSubview\([^)]*\b(?:above|below|aboveSubview|belowSubview)\b",
+                r"addSubview\([^)]*positioned:", r"sortSubviews", r"zPosition",
+                r"\.zIndex\("]
+SWIFT_SPLIT = ("func kayaRangeLowTakes(",
+               [(r"lowCentre", "the low thumb's position"),
+                (r"highCentre", "the high thumb's position"),
+                (r"\(lowCentre \+ highCentre\) / 2", "their midpoint"),
+                (r"if abs\(highCentre - lowCentre\) < 0\.5 \{ return ", "the tie's branch"),
+                (r"lowCentre < highCentre \? x < mid : x > mid",
+                 "which side of the midpoint the low thumb is on (mirrored under RTL)")])
+ROUTING = {
+    "SwiftUI macOS": {
+        "path": SWIFTUI,
+        "split": SWIFT_SPLIT,
+        "press": (("final class KayaRangeView: NSView", "override func hitTest("),
+                  [(r"kayaRangeLowTakes\(", "the split"),
+                   (r"lowCentre: centre\(low\)\.x", "the low knob's centre"),
+                   (r"highCentre: centre\(high\)\.x", "the high knob's centre"),
+                   (r"minAtLeft: low\.userInterfaceLayoutDirection == \.leftToRight",
+                    "the slider's own direction")]),
+        "arm": ["final class KayaRangeView: NSView", "final class KayaRangeThumb: NSSlider",
+                "struct KayaRangeSurface: NSViewRepresentable"],
+        "zorder": SWIFT_ZORDER,
+    },
+    "SwiftUI iOS": {
+        "path": SWIFTUI,
+        "split": SWIFT_SPLIT,
+        "press": (("final class KayaRangeTrack: UIView", "override func hitTest("),
+                  [(r"kayaRangeLowTakes\(", "the split"),
+                   (r"lowCentre: low\.centreX", "the low thumb's centre"),
+                   (r"highCentre: high\.centreX", "the high thumb's centre"),
+                   (r"minAtLeft: low\.effectiveUserInterfaceLayoutDirection == \.leftToRight",
+                    "the slider's own direction")]),
+        "arm": ["final class KayaRangeTrack: UIView", "final class KayaRangeThumbSlider: UISlider",
+                "struct KayaRangeSurface: UIViewRepresentable"],
+        "zorder": SWIFT_ZORDER,
+    },
+    # WinUI routes by CLIPPING each slider to its half (measured 2026-09-29,
+    # docs/range-plan.md §4): hit testing honours UIElement.Clip, so the clip
+    # set after every layout IS the press-down decision. Its coordinates are
+    # the slider's own, which flow right to left with it (measured), so the
+    # split needs no direction of its own.
+    "WinUI": {
+        "path": WINUI,
+        "split": ("fn winui_range_split(",
+                  [(r"low_centre", "the low thumb's position"),
+                   (r"high_centre", "the high thumb's position"),
+                   (r"\(low_centre \+ high_centre\) / 2\.0", "their midpoint"),
+                   (r"if \(high_centre - low_centre\)\.abs\(\) < 0\.5 \{\s*low_centre",
+                    "the tie's branch")]),
+        "press": (("fn winui_range_layout(",),
+                  [(r"winui_range_split\(lx \+ lw / 2\.0, hx \+ hw / 2\.0\)", "the split"),
+                   (r"let within: UIElement = pair\.low\.cast\(\)\?;\s*"
+                    r"let \(lx, _, lw, _\) = box_in\(&low_thumb, &within\)\?;",
+                    "the low thumb's box in the slider's own space"),
+                   (r"let \(hx, _, hw, _\) = box_in\(&high_thumb, &within\)\?;\s*let split",
+                    "the high thumb's box in the slider's own space"),
+                   (r"\(&pair\.low, 0\.0, split\), \(&pair\.high, split, width - split\)",
+                    "each thumb's own side of the split"),
+                   (r"slider\.SetClip\(&clip\)\?;", "the clip that hit testing honours")]),
+        "arm": ["impl RangePair {", "fn winui_range_shape(", "fn winui_range_write(",
+                "fn winui_range_moved(", "fn winui_range_layout("],
+        "zorder": [r"ZIndex", r"\.Move\(", r"\.InsertAt\(", r"\.RemoveAt\(",
+                   r"\.IndexOf\("],
+    },
+    # GTK routes at the PICK (measured 2026-09-29, docs/range-plan.md §4): a
+    # thumb's `contains` answers its own half, which GTK asks only because the
+    # thumb's own parts are untargetable (gtk_range_parts_findings holds that
+    # half). A press's pick is at press-down, a mouse's through the last
+    # motion's pick at the same point, a touch's at TOUCH_BEGIN.
+    "GTK": {
+        "path": GTK,
+        "split": ("fn range_low_takes(",
+                  [(r"low_centre", "the low thumb's position"),
+                   (r"high_centre", "the high thumb's position"),
+                   (r"\(low_centre \+ high_centre\) / 2\.0", "their midpoint"),
+                   (r"if \(high_centre - low_centre\)\.abs\(\) < 0\.5 \{\s*return ",
+                    "the tie's branch"),
+                   (r"if low_centre < high_centre \{ x < mid \} else \{ x > mid \}",
+                    "which side of the midpoint the low thumb is on (mirrored under RTL)")]),
+        "press": (("impl WidgetImpl for KayaRangeThumbInner {", "fn contains("),
+                  [(r"range_low_takes\(x, low_centre, high_centre, min_at_left\) == low",
+                    "the split"),
+                   (r"knob_centre\(scale, within\)", "its own knob's centre"),
+                   (r"knob_centre\(&other, within\)", "the other knob's centre"),
+                   (r"let min_at_left = scale\.direction\(\) != gtk4::TextDirection::Rtl;",
+                    "the scale's own direction"),
+                   (r"if !self\.parent_contains\(x, y\) \{\s*return false;",
+                    "its own bounds, which GTK's pick trusts contains for")]),
+        "arm": ["mod range_view {", "WidgetKind::Range => {", "fn range_moved(",
+                "fn range_shape("],
+        "zorder": [r"\.insert_after\(", r"\.insert_before\(", r"reorder_child_after",
+                   r"reorder_overlay", r"\.snapshot_child\(", r"set_can_target\(true"],
+    },
+}
+
+
+def gtk_range_parts_findings(source):
+    """§4 MEASURED: GTK's pick asks children before `contains`, so without
+    this a thumb's own trough answers every press and the split is never
+    asked — every press went to the top scale in the probe."""
+    out = []
+    body = block_after(source, "fn thumb_parts_untargetable(")
+    if not re.search(r"c\.set_can_target\(false\);", body):
+        out.append("GTK: thumb_parts_untargetable no longer makes a thumb's own parts "
+                   "untargetable — its trough picks first and the midpoint split is "
+                   "never asked (§4 MEASURED)")
+    for anchor, what in (("pub fn build() -> (KayaRangeGroup", "each thumb built"),
+                         ("fn range_shape(", "the marks GtkScale adds")):
+        if "thumb_parts_untargetable(" not in block_after(source, anchor):
+            out.append(f"GTK: {what} is not made untargetable (`{anchor}`) — a part "
+                       f"answering a press bypasses the split")
+    return out
+
+
+def chain(source, anchors):
+    """The block reached by following `anchors` in turn, "" when any is absent."""
+    block = source
+    for a in anchors:
+        block = block_after(block, a)
+    return block
+
+
+def routing_findings(sources, rows=ROUTING):
+    out = []
+    for name, row in rows.items():
+        src = sources[row["path"]]
+        anchor, needs = row["split"]
+        split = block_after(src, anchor)
+        if not split:
+            out.append(f"{name}: {row['path']} has no `{anchor}` block — the press split "
+                       f"this row holds is gone (§3 rule 4)")
+        for pat, what in needs:
+            if split and not re.search(pat, split):
+                out.append(f"{name}: the press split `{anchor}` no longer reads {what} — a "
+                           f"press is no longer routed by the midpoint between the thumbs "
+                           f"(§3 rule 4)")
+        anchors, reads = row["press"]
+        press = chain(src, anchors)
+        if not press:
+            out.append(f"{name}: no press-down site at {' > '.join(anchors)} — the tie is "
+                       f"decided at press-down or not at all (§3 rule 4)")
+        for pat, what in reads:
+            if press and not re.search(pat, press):
+                out.append(f"{name}: the press-down site {' > '.join(anchors)} no longer "
+                           f"reads {what} — a press would go to whichever slider is on top")
+        arm = "".join(block_after(src, a) for a in row["arm"])
+        missing = [a for a in row["arm"] if not block_after(src, a)]
+        if missing:
+            out.append(f"{name}: the range arm's blocks {missing} are gone — the z-order "
+                       f"census would read nothing")
+        for pat in row["zorder"]:
+            hit = re.search(pat, arm)
+            if hit:
+                out.append(f"{name}: the range arm names the z-order API `{hit.group(0)}` — "
+                           f"reordering the two sliders is the forbidden route (§3 rule 4)")
+    return out
+
+
+ROUTING_SOURCES = {SWIFTUI: SWIFT_SOURCE, **REAL}
+gate.counted("stacked range rows read", len(ROUTING), floor=4)
+
+
+def routing_watched(label, sources, fragment):
+    if not gate.negative(label, lambda: routing_findings(sources), want=fragment):
+        return
+    print(f"check-slider-commit: watched refusing: {label}")
+
+
+# G1. THE MIDPOINT CUT out of the shared SwiftUI split: both rows refuse.
+no_mid = gate.doctor("the swiftui midpoint", SWIFT_SOURCE,
+                     r"let mid = \(lowCentre \+ highCentre\) / 2",
+                     "let mid = highCentre")
+routing_watched("a SwiftUI split with no midpoint (macOS row)",
+                {**ROUTING_SOURCES, SWIFTUI: no_mid}, "SwiftUI macOS: the press split")
+routing_watched("a SwiftUI split with no midpoint (iOS row)",
+                {**ROUTING_SOURCES, SWIFTUI: no_mid}, "SwiftUI iOS: the press split")
+# G2. THE TIE'S BRANCH CUT.
+routing_watched("a SwiftUI split with no tie branch", {**ROUTING_SOURCES, SWIFTUI: gate.doctor(
+    "the swiftui tie", SWIFT_SOURCE,
+    r"    if abs\(highCentre - lowCentre\) < 0\.5 \{ return [^\n]*\n", "")},
+    "reads the tie's branch")
+# G7. THE SPLIT BLIND TO A MIRRORED PAIR (right to left puts low at the right).
+routing_watched("a SwiftUI split that assumes low is at the left", {
+    **ROUTING_SOURCES, SWIFTUI: gate.doctor(
+        "the swiftui mirrored side", SWIFT_SOURCE,
+        r"return lowCentre < highCentre \? x < mid : x > mid", "return x < mid")},
+    "which side of the midpoint the low thumb is on")
+# G3. THE MAC PRESS READING ONE THUMB.
+routing_watched("a mac hitTest that stopped reading the high knob", {
+    **ROUTING_SOURCES, SWIFTUI: gate.doctor(
+        "the mac high centre", SWIFT_SOURCE,
+        r"highCentre: centre\(high\)\.x", "highCentre: bounds.maxX")},
+    "SwiftUI macOS: the press-down site")
+# G4. THE iOS PRESS READING ONE THUMB.
+routing_watched("an iOS hitTest that stopped reading the low thumb", {
+    **ROUTING_SOURCES, SWIFTUI: gate.doctor(
+        "the ios low centre", SWIFT_SOURCE,
+        r"lowCentre: low\.centreX", "lowCentre: 0")},
+    "SwiftUI iOS: the press-down site")
+# G5. A Z-ORDER SWAP PLANTED in the mac arm.
+routing_watched("a mac range reordering its sliders", {
+    **ROUTING_SOURCES, SWIFTUI: gate.doctor(
+        "a planted mac addSubview positioned", SWIFT_SOURCE,
+        r"(        @objc func changed\(_ sender: KayaRangeThumb\) \{\n)",
+        r"\1            addSubview(sender, positioned: .above, relativeTo: nil)\n")},
+    "SwiftUI macOS: the range arm names the z-order API")
+# G6. A Z-ORDER SWAP PLANTED in the iOS arm.
+routing_watched("an iOS range reordering its sliders", {
+    **ROUTING_SOURCES, SWIFTUI: gate.doctor(
+        "a planted ios bringSubviewToFront", SWIFT_SOURCE,
+        r"(        @objc func moved\(_ sender: KayaRangeThumbSlider\) \{\n)",
+        r"\1            bringSubviewToFront(sender)\n")},
+    "SwiftUI iOS: the range arm names the z-order API")
+
+# G8. WINUI: THE MIDPOINT CUT out of the split.
+routing_watched("a WinUI split with no midpoint", {**ROUTING_SOURCES, WINUI: gate.doctor(
+    "the winui midpoint", REAL[WINUI],
+    r"\(low_centre \+ high_centre\) / 2\.0", "high_centre")},
+    "WinUI: the press split")
+# G9. WINUI: THE TIE'S BRANCH CUT.
+routing_watched("a WinUI split with no tie branch", {**ROUTING_SOURCES, WINUI: gate.doctor(
+    "the winui tie", REAL[WINUI],
+    r"if \(high_centre - low_centre\)\.abs\(\) < 0\.5 \{\s*low_centre\s*\} else \{\s*"
+    r"(\(low_centre \+ high_centre\) / 2\.0)\s*\}", r"\1")},
+    "WinUI: the press split `fn winui_range_split(` no longer reads the tie's branch")
+# G10. WINUI: THE CLIP READING ONE THUMB.
+routing_watched("a WinUI clip that stopped reading the high thumb", {
+    **ROUTING_SOURCES, WINUI: gate.doctor(
+        "the winui high box", REAL[WINUI],
+        r"let \(hx, _, hw, _\) = box_in\(&high_thumb, &within\)\?;(\s*let split)",
+        r"let (hx, hw) = (width, 0.0);\1")},
+    "WinUI: the press-down site")
+# G11. WINUI: THE CLIP GONE — whichever slider is on top takes every press.
+routing_watched("a WinUI range whose sliders are not clipped", {
+    **ROUTING_SOURCES, WINUI: gate.doctor(
+        "the winui clip", REAL[WINUI], r"        slider\.SetClip\(&clip\)\?;\n", "")},
+    "the clip that hit testing honours")
+# G12. WINUI: A Z-ORDER SWAP PLANTED in the arm (the ledger's superseded
+# "z-order set on PointerMoved").
+routing_watched("a WinUI range raising the pressed slider", {
+    **ROUTING_SOURCES, WINUI: gate.doctor(
+        "a planted winui ZIndex", REAL[WINUI],
+        r"(    let raw = slider\.Value\(\)\?;\n    let \(lo, hi\))",
+        r"    Canvas::SetZIndex(slider, 1)?;\n\1")},
+    "WinUI: the range arm names the z-order API `ZIndex`")
+
+# G13. GTK: THE MIDPOINT CUT out of the split.
+routing_watched("a GTK split with no midpoint", {**ROUTING_SOURCES, GTK: gate.doctor(
+    "the gtk midpoint", REAL[GTK],
+    r"let mid = \(low_centre \+ high_centre\) / 2\.0;", "let mid = high_centre;")},
+    "GTK: the press split")
+# G14. GTK: THE TIE'S BRANCH CUT.
+routing_watched("a GTK split with no tie branch", {**ROUTING_SOURCES, GTK: gate.doctor(
+    "the gtk tie", REAL[GTK],
+    r"    if \(high_centre - low_centre\)\.abs\(\) < 0\.5 \{\n[^\n]*\n    \}\n", "")},
+    "GTK: the press split `fn range_low_takes(` no longer reads the tie's branch")
+# G15. GTK: THE PRESS READING ONE THUMB.
+routing_watched("a GTK contains that stopped reading the other knob", {
+    **ROUTING_SOURCES, GTK: gate.doctor(
+        "the gtk other knob", REAL[GTK],
+        r"super::super::knob_centre\(&other, within\),", "Some(0.0),")},
+    "GTK: the press-down site")
+# G16. GTK: THE SPLIT BLIND TO THE DIRECTION (a tie in Arabic went the wrong way
+# in the probe's first RTL run).
+routing_watched("a GTK contains that assumes left to right", {
+    **ROUTING_SOURCES, GTK: gate.doctor(
+        "the gtk direction", REAL[GTK],
+        r"let min_at_left = scale\.direction\(\) != gtk4::TextDirection::Rtl;",
+        "let min_at_left = true;")},
+    "the scale's own direction")
+# G17. GTK: A Z-ORDER SWAP PLANTED in the arm.
+routing_watched("a GTK range raising the pressed thumb", {
+    **ROUTING_SOURCES, GTK: gate.doctor(
+        "a planted gtk insert_after", REAL[GTK],
+        r"(    let raw = thumb\.value\(\);\n)",
+        r"    thumb.insert_after(&pair.group, Some(pair.thumb(!low)));\n\1")},
+    "GTK: the range arm names the z-order API")
+# G18. GTK: THE THUMB'S PARTS LEFT TARGETABLE.
+if gate.negative("a GTK thumb whose parts still answer presses",
+                 lambda: gtk_range_parts_findings(gate.doctor(
+                     "the gtk untargetable parts", REAL[GTK],
+                     r"c\.set_can_target\(false\);", "c.set_can_target(c.can_target());")),
+                 want="never asked"):
+    print("check-slider-commit: watched refusing: a GTK thumb whose parts still answer presses")
+# G19. GTK: THE MARKS' NEW CHILDREN LEFT TARGETABLE.
+if gate.negative("a GTK range whose marks answer presses",
+                 lambda: gtk_range_parts_findings(gate.doctor(
+                     "the gtk marks untargetable", REAL[GTK],
+                     r"(\s*)thumb_parts_untargetable\(thumb\.upcast_ref\(\)\);\n(\s*\}\n\s*quiet\.set)",
+                     r"\n\2")),
+                 want="the marks GtkScale adds"):
+    print("check-slider-commit: watched refusing: a GTK range whose marks answer presses")
+
+# THE CORE'S PAIR FOLLOWS THE USER (docs/range-plan.md §3 rule 11): every
+# committed range reaches `Scene::user_range_committed` before it is sent, or
+# the next app write is judged against a pair the user already moved and
+# lands crossed. The scene's own step clamps it; nothing on a lane can tell a
+# door that skipped the record, since set_value moves the control either way
+# and only a later app write shows it (tools/scenes/range.steps' `late`).
+# The widget backends record through a helper that queues when CORE is
+# borrowed, so every drain of the transaction channel must empty that queue
+# before it applies, or a queued commit is judged after the write it preceded.
+CAPI = "crates/kaya/src/capi.rs"
+RECORDERS = {GTK: "gtk_user_range_committed", WINUI: "winui_user_range_committed"}
+
+
+def fn_body(text, name):
+    m = re.search(r"\n(?:pub(?:\([a-z]+\))? )?(?:unsafe )?(?:extern \"C\" )?fn "
+                  + re.escape(name) + r"\b", text)
+    if not m:
+        return None
+    return block_after(text, text[m.start():m.start() + 1 + text[m.start() + 1:].index("{") + 1])
+
+
+def commit_record_findings(sources):
+    out = []
+    capi = fn_body(sources[CAPI], "kaya_emit_range")
+    if capi is None:
+        out.append("capi: kaya_emit_range is gone, so no interpreter's commit is recorded")
+    elif not re.search(r"user_range_committed\([^)]*\)[\s\S]*send_range_tag", capi):
+        out.append("capi: kaya_emit_range sends a committed pair without "
+                   "`scene.user_range_committed` first")
+    for path, helper in RECORDERS.items():
+        text = sources[path]
+        name = path.split("/")[-2] if path.endswith("mod.rs") else path.split("/")[-1]
+        body = fn_body(text, helper)
+        if body is None or "core.scene.user_range_committed(" not in body \
+                or "RANGE_SETTLED" not in body:
+            out.append(f"{name}: `{helper}` no longer records into the scene "
+                       "or queues into RANGE_SETTLED")
+        drain = fn_body(text, "drain_range_settled")
+        if drain is None or "core.scene.user_range_committed(" not in drain:
+            out.append(f"{name}: `drain_range_settled` no longer empties the queue into the scene")
+        sends = re.findall(r"send_range_tag\([^;]*?,\s*true\)", text)
+        recorded = re.findall(re.escape(helper) + r"\([^;]*\);\s*\n\s*"
+                              r"sink\.send_range_tag\([^;]*?,\s*true\)", text)
+        if not sends or len(recorded) != len(sends):
+            out.append(f"{name}: {len(sends)} committed range send(s), {len(recorded)} "
+                       f"right after `{helper}`")
+        if re.search(r"Occurrence::(?:Instance)?RangeCommitted", text):
+            out.append(f"{name}: builds a RangeCommitted occurrence itself, past the recorder")
+        applies = len(re.findall(r"core\.scene\.apply\(tx\)", text))
+        drained = len(re.findall(r"drain_range_settled\(core\);\s*\n\s*"
+                                 r"(?:for op in )?core\.scene\.apply\(tx\)", text))
+        if applies == 0 or drained != applies:
+            out.append(f"{name}: {applies} transaction apply site(s), {drained} "
+                       "draining RANGE_SETTLED first")
+    return out
+
+
+RECORD_SOURCES = {CAPI: gate.read(CAPI), GTK: REAL[GTK], WINUI: REAL[WINUI]}
+gate.counted("committed range sends read",
+             sum(len(re.findall(r"send_range_tag\([^;]*?,\s*true\)", RECORD_SOURCES[p]))
+                 for p in RECORDERS), floor=2)
+
+
+def record_watched(label, path, fragment, pattern, repl):
+    doctored = {**RECORD_SOURCES, path: gate.doctor(label, RECORD_SOURCES[path], pattern, repl)}
+    if gate.negative(label, lambda: commit_record_findings(doctored), want=fragment):
+        print(f"check-slider-commit: watched refusing: {label}")
+
+
+# U1. THE INTERPRETERS' DOOR SKIPPING THE RECORD.
+record_watched("a capi range commit never recorded", CAPI, "kaya_emit_range sends",
+               r"scene\.user_range_committed\(tag, low, high\);", "let _ = scene;")
+# U2/U3. A WIDGET BACKEND'S COMMIT SENT WITHOUT ITS RECORDER.
+record_watched("a GTK range commit never recorded", GTK, "right after `gtk_user_range_committed`",
+               r"gtk_user_range_committed\(tag, lo, hi\);\n", "")
+record_watched("a WinUI range commit never recorded", WINUI,
+               "right after `winui_user_range_committed`",
+               r"winui_user_range_committed\(&cell\.tag, nlo, nhi\);\n", "")
+# U4/U5. A DRAIN THAT APPLIES BEFORE THE QUEUED COMMITS (gtk's harness drain
+# was the second copy that missed it, found writing this clause).
+record_watched("a GTK harness drain skipping the queue", GTK, "draining RANGE_SETTLED first",
+               r"(\n *)drain_range_settled\(core\);"
+               r"(\n *for op in"
+               r" core\.scene\.apply\(tx\) \{\n *apply\(core, op\);\n *\}\n *for occ)",
+               r"\2")
+record_watched("a WinUI drain skipping the queue", WINUI, "draining RANGE_SETTLED first",
+               r"\n *drain_range_settled\(core\);(?=\n *for op in core\.scene\.apply)", "")
+
+for line in routing_findings(ROUTING_SOURCES):
+    gate.finding(line)
+for line in commit_record_findings(RECORD_SOURCES):
+    gate.finding(line)
+for line in gtk_range_parts_findings(REAL[GTK]):
+    gate.finding(line)
+for line in gtk_range_findings(REAL[GTK]):
+    gate.finding(line)
 for line in gtk_color_findings(REAL[GTK]):
     gate.finding(line)
 for line in census(REAL):
@@ -909,8 +1686,12 @@ for line in swiftui_color_findings(SWIFT_SOURCE):
     gate.finding(line)
 for line in swiftui_range_findings(SWIFT_SOURCE):
     gate.finding(line)
+for line in winui_range_findings(REAL[WINUI]):
+    gate.finding(line)
 for line in compose_color_findings(REAL[COMPOSE]):
     gate.finding(line)
+for line in compose_range_findings(REAL[COMPOSE]):
+    gate.finding(line)
 
-gate.verdict("the commit rule holds on every landed slider arm, every colour picker arm "
-             "and the SwiftUI range")
+gate.verdict("the commit rule holds on every landed slider arm, every colour picker arm, "
+             "every range arm and the core's record of the user's pair")

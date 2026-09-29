@@ -102,6 +102,19 @@ func (c Color) String() string { return fmt.Sprintf("%08X", c.Hex()) }
 
 func (c Color) packed() int64 { return PackColor(c.R, c.G, c.B, c.A) }
 
+// rangeOf reads a range occurrence's two values, low then high.
+func rangeOf(tail []any) (float64, float64) {
+	if len(tail) != 2 {
+		panic(fmt.Sprintf("kaya: a range occurrence carries %d values, want low and high", len(tail)))
+	}
+	low, lok := tail[0].(float64)
+	high, hok := tail[1].(float64)
+	if !lok || !hok {
+		panic(fmt.Sprintf("kaya: a range occurrence carries %T and %T, want two floats", tail[0], tail[1]))
+	}
+	return low, high
+}
+
 func colorOf(packed int64) Color {
 	if packed < 0 || packed > 0xFFFFFFFF {
 		panic(fmt.Sprintf("kaya: %d is not a packed colour (0xRRGGBBAA)", packed))
@@ -937,6 +950,58 @@ func (c RecordCollection[K, T]) Slider[S interface {
 	t.applyRecordValue[T](n, src)
 	c.onValueOf(t, n, onChange)
 	return n
+}
+
+// Range creates a range over min..max whose two THUMBS come from any
+// addressable source (a clip's trim in and out), with its move handler (nil
+// for none); the settled pair registers on the node (Node.OnRangeCommitted).
+func (c RecordCollection[K, T]) Range[S interface {
+	~float64 | Signal[float64] | func(*T) *float64 | Field[float64]
+}](t *Tpl, min, max float64, low, high S, onChange func(*Tx, K, float64, float64)) Node {
+	n := t.Widget(KindRange)
+	t.tx.emit(TxSetMin(n.id, min))
+	t.tx.emit(TxSetMax(n.id, max))
+	applyRecordThumb[T](t, n, low, TxSetLow, TxBindLow, TxBindLowElement)
+	applyRecordThumb[T](t, n, high, TxSetHigh, TxBindHigh, TxBindHighElement)
+	if onChange != nil {
+		n.OnRangeChanged(func(tx *Tx, keys []any, low, high float64) {
+			onChange(tx, keys[0].(K), low, high)
+		})
+	}
+	return n
+}
+
+func applyRecordThumb[T any, S interface {
+	~float64 | Signal[float64] | func(*T) *float64 | Field[float64]
+}](t *Tpl, n Node, src S,
+	set func(uint64, float64) []byte,
+	bindSignal func(uint64, uint64) []byte,
+	bindElement func(uint64, uint32, uint32) []byte,
+) {
+	switch v := any(src).(type) {
+	case Signal[float64]:
+		t.tx.emit(bindSignal(n.id, v.id))
+	case func(*T) *float64:
+		t.tx.emit(bindElement(n.id, 0, FieldBy(v).index))
+	case Field[float64]:
+		t.tx.emit(bindElement(n.id, 0, v.index))
+	default:
+		t.tx.emit(set(n.id, reflect.ValueOf(v).Float()))
+	}
+}
+
+// LowLabel and HighLabel speak each stamped range's thumbs from any
+// addressable source.
+func (c RecordCollection[K, T]) LowLabel[S interface {
+	~string | Signal[string] | func(*T) *string | Field[string]
+}](t *Tpl, n Node, src S) {
+	t.applyRecordStrProp[T](n, src, TxSetLowLabel, TxBindLowLabel, TxBindLowLabelElement)
+}
+
+func (c RecordCollection[K, T]) HighLabel[S interface {
+	~string | Signal[string] | func(*T) *string | Field[string]
+}](t *Tpl, n Node, src S) {
+	t.applyRecordStrProp[T](n, src, TxSetHighLabel, TxBindHighLabel, TxBindHighLabelElement)
 }
 
 // Select creates a dropdown over fixed options whose SELECTED INDEX

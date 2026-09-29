@@ -4282,7 +4282,7 @@ export function radio(options: readonly string[], opts: ChoiceOptions = {}): Wid
   return choice(wire.KIND_RADIO, options, opts);
 }
 
-export type SliderOptions = GrowOption & { value?: number | Signal<number> | FieldRef; min?: number; max?: number; step?: number; tickSpacing?: number; onChange?: Handler; onCommit?: Handler };
+export type SliderOptions = GrowOption & { value?: number | Signal<number> | FieldRef; min?: number; max?: number; step?: number; tickSpacing?: number; onChange?: Handler; onCommit?: Handler; axis?: AxisValue | AxisName };
 
 /** A slider over a numeric range. UNCONTROLLED: the widget owns its
  * position and reports each change to onChange and each settled gesture
@@ -4302,6 +4302,36 @@ export function slider(opts: SliderOptions = {}): Widget {
   }
   if (opts.onChange !== undefined) app()._register(handle, wire.OCC_VALUE_CHANGED, opts.onChange);
   if (opts.onCommit !== undefined) app()._register(handle, wire.OCC_VALUE_COMMITTED, opts.onCommit);
+  if (opts.axis !== undefined) records().push(wire.tx_set_axis(handle.id, axisValue(opts.axis)));
+  setGrow(handle, opts);
+  return handle;
+}
+
+export type RangeOptions = GrowOption & { low: number | Signal<number> | FieldRef; high: number | Signal<number> | FieldRef; min?: number; max?: number; step?: number; tickSpacing?: number; minGap?: number; lowLabel?: Bindable | string; highLabel?: Bindable | string; onChange?: Handler; onCommit?: Handler };
+
+function thumbSource(handle: Widget, value: unknown, what: string, set: (id: number, v: number) => Uint8Array, bind: (id: number, signal: number) => Uint8Array, element: (id: number, level: number, field: number) => Uint8Array): Uint8Array {
+  if (value instanceof Signal) return bind(handle.id, value.id);
+  if (value instanceof FieldRef) return element(handle.id, value._level(), value._index);
+  if (typeof value !== "number") throw new TypeError(`kaya: a range's ${what} is a number, a signal or a number field, not ${runtime.describe(value)}`);
+  return set(handle.id, value);
+}
+
+/** A range: two thumbs over min..max (docs/range-plan.md). Each move is one
+ * onChange and each settled gesture one onCommit, both handed (low, high),
+ * template copies getting the row first; an app write never echoes. */
+export function range(opts: RangeOptions): Widget {
+  const handle = widget(wire.KIND_RANGE);
+  if (opts.min !== undefined) records().push(wire.tx_set_min(handle.id, Number(opts.min)));
+  if (opts.max !== undefined) records().push(wire.tx_set_max(handle.id, Number(opts.max)));
+  if (opts.step !== undefined) records().push(wire.tx_set_step(handle.id, Number(opts.step)));
+  if (opts.tickSpacing !== undefined) records().push(wire.tx_set_tick_spacing(handle.id, Number(opts.tickSpacing)));
+  if (opts.minGap !== undefined) records().push(wire.tx_set_min_gap(handle.id, Number(opts.minGap)));
+  if (opts.lowLabel !== undefined) records().push(propSource("lowLabel", handle, opts.lowLabel, wire.tx_set_low_label, wire.tx_bind_low_label, wire.tx_bind_low_label_element));
+  if (opts.highLabel !== undefined) records().push(propSource("highLabel", handle, opts.highLabel, wire.tx_set_high_label, wire.tx_bind_high_label, wire.tx_bind_high_label_element));
+  records().push(thumbSource(handle, opts.low, "low", wire.tx_set_low, wire.tx_bind_low, wire.tx_bind_low_element));
+  records().push(thumbSource(handle, opts.high, "high", wire.tx_set_high, wire.tx_bind_high, wire.tx_bind_high_element));
+  if (opts.onChange !== undefined) app()._register(handle, wire.OCC_RANGE_CHANGED, opts.onChange);
+  if (opts.onCommit !== undefined) app()._register(handle, wire.OCC_RANGE_COMMITTED, opts.onCommit);
   setGrow(handle, opts);
   return handle;
 }
@@ -5474,6 +5504,7 @@ export class App {
     // a null operation is a cancelled or refused drag, not an error.
     else if (kind === wire.OCC_DROPPED) args.push(dropped(payload as wire.DroppedPayload));
     else if (kind === wire.OCC_DRAG_ENDED) args.push(operation(payload as number));
+    else if (kind === wire.OCC_RANGE_CHANGED || kind === wire.OCC_RANGE_COMMITTED) args.push(...(payload as unknown[]).map(Number));
     else if (payload !== null) args.push(payload);
     this._dispatch(handler, ...args);
   }

@@ -20,6 +20,7 @@ import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.ContentResolver
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.content.Intent
@@ -165,6 +166,7 @@ import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SelectableDates
+import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
@@ -245,6 +247,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.draganddrop.DragAndDropEvent
 import androidx.compose.ui.draganddrop.DragAndDropTarget
@@ -257,6 +260,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.layout.positionInWindow
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import androidx.compose.ui.node.RootForTest
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -297,6 +301,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.constrainHeight
+import androidx.compose.ui.unit.constrainWidth
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
@@ -544,6 +550,16 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     var step by mutableStateOf(0.0)
     var tickSpacing by mutableStateOf(0.0)
     var committed by mutableStateOf(0.0)
+
+    /** THE RANGE'S thumbs, the pair its last gesture settled on, its gap and
+     * its thumbs' words (docs/range-plan.md §2). */
+    var low by mutableStateOf(0.0)
+    var high by mutableStateOf(0.0)
+    var committedLow by mutableStateOf(0.0)
+    var committedHigh by mutableStateOf(0.0)
+    var minGap by mutableStateOf(0.0)
+    var lowLabel by mutableStateOf("")
+    var highLabel by mutableStateOf("")
 
     /**
      * THE PICKERS' SLOTS (docs/datetime-plan.md D2), packed decimal:
@@ -1399,17 +1415,20 @@ object KayaSceneModel {
     val searches = ArrayList<KayaNode>()
     val numberFields = ArrayList<KayaNode>()
     val colorPickers = ArrayList<KayaNode>()
+    val ranges = ArrayList<KayaNode>()
 
     // Every kind registry, so a destroyed node leaves all of them at once
     // (docs/traps.md 2026-09-14: a torn-down copy stayed addressable).
     private val registries = listOf(
         buttons, checkboxes, labels, entryWidgets, sliders, images, columns, rows, scrolls,
         progresses, selects, radios, grids, textareas, canvases, datePickers, timePickers,
-        labeleds, searches, numberFields, colorPickers,
+        labeleds, searches, numberFields, colorPickers, ranges,
     )
 
     fun forget(id: Long) {
         for (registry in registries) registry.removeAll { it.id == id }
+        kayaTravelCoords.remove(id)
+        kayaThumbCoords.keys.removeAll { it.first == id }
     }
     /**
      * The appearance the core last rastered with — written by the ONE
@@ -3250,7 +3269,7 @@ object KayaCompose {
                         KIND_LABELED -> KayaSceneModel.labeleds.add(node)
                         KIND_SEARCH -> KayaSceneModel.searches.add(node)
                         KIND_COLOR_PICKER -> KayaSceneModel.colorPickers.add(node)
-                        KIND_RANGE -> depthStub("range")
+                        KIND_RANGE -> KayaSceneModel.ranges.add(node)
                         KIND_NUMBER_FIELD -> {
                             // docs/number-field-plan.md §2: unset bounds are
                             // ±2^53, the step 1, and the field shows its
@@ -3296,12 +3315,8 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.spacing = readF64(b)
                         PROP_ALIGN ->
                             KayaSceneModel.nodes[id]!!.align = readI64(b)
-                        PROP_AXIS -> {
-                            // The vertical slider (docs/range-plan.md §6) is
-                            // the range's breadth slice.
-                            if (KayaSceneModel.nodes[id]!!.kind == KIND_SLIDER) depthStub("range")
+                        PROP_AXIS ->
                             KayaSceneModel.nodes[id]!!.axis = readI64(b)
-                        }
                         PROP_INDETERMINATE ->
                             KayaSceneModel.nodes[id]!!.indeterminate = readBool(b)
                         PROP_FILL ->
@@ -3333,8 +3348,19 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.maxHeight = readF64(b)
                         PROP_COLOR -> KayaSceneModel.nodes[id]!!.color = readI64(b)
                         PROP_ALPHA -> KayaSceneModel.nodes[id]!!.alpha = readBool(b)
-                        PROP_LOW, PROP_HIGH, PROP_MIN_GAP, PROP_LOW_LABEL, PROP_HIGH_LABEL ->
-                            depthStub("range")
+                        // An app write is also the settled pair and fires
+                        // nothing (docs/range-plan.md §2), the slider's rule.
+                        PROP_LOW -> KayaSceneModel.nodes[id]!!.let { node ->
+                            node.low = readF64(b)
+                            node.committedLow = node.low
+                        }
+                        PROP_HIGH -> KayaSceneModel.nodes[id]!!.let { node ->
+                            node.high = readF64(b)
+                            node.committedHigh = node.high
+                        }
+                        PROP_MIN_GAP -> KayaSceneModel.nodes[id]!!.minGap = readF64(b)
+                        PROP_LOW_LABEL -> KayaSceneModel.nodes[id]!!.lowLabel = readString(b)
+                        PROP_HIGH_LABEL -> KayaSceneModel.nodes[id]!!.highLabel = readString(b)
                         // docs/rich-text-plan.md §14: this platform's lever
                         // is `clearHistory()`, so taking ownership drops what
                         // the field had banked.
@@ -7049,7 +7075,7 @@ object KayaCompose {
             "search" -> KayaSceneModel.searches
             "number_field" -> KayaSceneModel.numberFields
             "color_picker" -> KayaSceneModel.colorPickers
-            "range" -> depthStub("range")
+            "range" -> KayaSceneModel.ranges
             "textarea" -> KayaSceneModel.textareas
             "date_picker" -> KayaSceneModel.datePickers
             "time_picker" -> KayaSceneModel.timePickers
@@ -7202,6 +7228,11 @@ object KayaCompose {
         val view = kayaComposeRoot(activity.window.decorView) ?: return null
         val owner = (view as RootForTest).semanticsOwner
         val node = kayaAxFind(owner.rootSemanticsNode, tag) ?: return null
+        return kayaAxOf(view, node)
+    }
+
+    /** [kayaAx]'s read of one semantics node, however it was found. */
+    private fun kayaAxOf(view: android.view.View, node: SemanticsNode): KayaAxRead {
         val info = view.accessibilityNodeProvider?.createAccessibilityNodeInfo(node.id)
         val role = node.config.getOrNull(SemanticsProperties.Role)
         val published = node.config.getOrNull(KayaAxKind)
@@ -7247,6 +7278,51 @@ object KayaCompose {
         val infoServed: Boolean,
         val fallback: String,
     )
+
+    /**
+     * A range's two thumbs in the MERGED semantics tree, low first — each is
+     * Material's own semantics node carrying SetProgress, found under the
+     * layout that carries the range's [KayaNodeId], so a stamped copy is
+     * found where its shared `a11y_id` names every row. Composition order is
+     * the start thumb first. MAIN THREAD ONLY.
+     */
+    private fun kayaRangeThumbs(activity: ComponentActivity, id: Long): List<SemanticsNode>? {
+        val view = kayaComposeRoot(activity.window.decorView) ?: return null
+        val owner = (view as RootForTest).semanticsOwner
+        fun find(node: SemanticsNode, depth: Int): SemanticsNode? {
+            if (depth > 64) return null
+            if (node.config.getOrNull(KayaNodeId) == id) return node
+            for (child in node.children) find(child, depth + 1)?.let { return it }
+            return null
+        }
+        val range = find(owner.rootSemanticsNode, 0) ?: return null
+        val thumbs = range.children.filter { it.config.contains(SemanticsActions.SetProgress) }
+        return thumbs.takeIf { it.size == 2 }
+    }
+
+    /** `set_value range… low|high v` through the thumb's SetProgress. */
+    private fun kayaRangeSetProgress(activity: ComponentActivity, parts: List<String>): String? {
+        val node = target(parts[1], "range", KayaSceneModel.ranges)
+            ?: return "no such target ${parts[1]}"
+        val want = parts.getOrNull(3)?.toFloatOrNull()
+            ?: return "set_value ${parts[1]} wants low|high and a number"
+        val thumbs = kayaRangeThumbs(activity, node.id)
+            ?: return "set_value ${parts[1]}: the range's two thumbs are not in the semantics tree"
+        val thumb = if (parts[2] == "low") thumbs[0] else thumbs[1]
+        val act = thumb.config.getOrNull(SemanticsActions.SetProgress)?.action
+            ?: return "set_value ${parts[1]}: the ${parts[2]} thumb publishes no SetProgress"
+        act(want)
+        return null
+    }
+
+    /** `expect_ax range… low|high`: the thumb as a service reads it. */
+    private fun kayaAxThumb(activity: ComponentActivity, spec: String, low: Boolean): String {
+        val node = target(spec, "range", KayaSceneModel.ranges) ?: return "<no such target>"
+        val view = kayaComposeRoot(activity.window.decorView) ?: return "<no Compose root>"
+        val thumbs = kayaRangeThumbs(activity, node.id) ?: return "<no thumbs in the semantics tree>"
+        val read = kayaAxOf(view, if (low) thumbs[0] else thumbs[1])
+        return if (read.infoServed) read.spec else "<the provider served no node info for the thumb>"
+    }
 
 
     /**
@@ -8235,22 +8311,58 @@ object KayaCompose {
                         if (!ok) failures.add("no such target ${parts[1]}")
                         else kayaAwaitAnswer(answered)
                     }
-                    "expect_thumb" -> depthStub("range")
-                    "set_value" -> {
-                        if (parts[1].startsWith("range")) depthStub("range")
-                        // THROUGH THE COMMIT PATH a user's gesture takes
-                        // (docs/slider-plan.md S8), as one finished
-                        // gesture: the step's snap, the range's clamp,
-                        // the live emit and the committed one all run.
-                        kayaAwaitQuiet()
-                        val answered = kayaBatches
-                        val ok = onUi(activity) {
-                            target(parts[1], "slider", KayaSceneModel.sliders)?.also { node ->
-                                kayaSliderCommitted(node, parts[2].toDouble(), final = true)
-                            } != null
+                    "expect_thumb" -> {
+                        // The thumb's centre along its travel, from the
+                        // laid-out control in the root's space
+                        // (docs/range-plan.md §5; harness.rs spelled_fraction).
+                        val isRange = parts[1].startsWith("range")
+                        val want = quoted(parts.drop(if (isRange) 3 else 2))
+                        val got = onUi(activity) {
+                            if (isRange) {
+                                target(parts[1], "range", KayaSceneModel.ranges)?.let {
+                                    kayaThumbTravel(it.id, if (parts[2] == "low") 1 else 2)
+                                }
+                            } else {
+                                target(parts[1], "slider", KayaSceneModel.sliders)?.let {
+                                    kayaThumbTravel(it.id, 0)
+                                }
+                            }
                         }
-                        if (!ok) failures.add("no such target ${parts[1]}")
-                        else kayaAwaitAnswer(answered)
+                        if (got == null) {
+                            failures.add("no thumb of ${parts[1]} is laid out on screen")
+                        } else {
+                            val spelled = kayaSpelledFraction(got)
+                            if (spelled == want) observed.add("thumb $spelled")
+                            else failures.add("thumb \"$spelled\", wanted \"$want\"")
+                        }
+                    }
+                    "set_value" -> {
+                        if (parts[1].startsWith("range")) {
+                            // THROUGH THE THUMB'S OWN ASSISTIVE DOOR
+                            // (docs/range-plan.md §3 rules 3, 8): the
+                            // SetProgress action TalkBack takes, which runs
+                            // Material's own coercion, then onValueChange and
+                            // onValueChangeFinished into the one commit path.
+                            kayaAwaitQuiet()
+                            val answered = kayaBatches
+                            val why = onUi(activity) { kayaRangeSetProgress(activity, parts) }
+                            if (why != null) failures.add(why)
+                            else kayaAwaitAnswer(answered)
+                        } else {
+                            // THROUGH THE COMMIT PATH a user's gesture takes
+                            // (docs/slider-plan.md S8), as one finished
+                            // gesture: the step's snap, the range's clamp,
+                            // the live emit and the committed one all run.
+                            kayaAwaitQuiet()
+                            val answered = kayaBatches
+                            val ok = onUi(activity) {
+                                target(parts[1], "slider", KayaSceneModel.sliders)?.also { node ->
+                                    kayaSliderCommitted(node, parts[2].toDouble(), final = true)
+                                } != null
+                            }
+                            if (!ok) failures.add("no such target ${parts[1]}")
+                            else kayaAwaitAnswer(answered)
+                        }
                     }
                     "set_color" -> {
                         // A user's settled choice through the sheet's own
@@ -8329,7 +8441,6 @@ object KayaCompose {
                         }
                     }
                     "expect_value" -> {
-                        if (parts[1].startsWith("range")) depthStub("range")
                         // The slider's value in the one fixed spelling
                         // (docs/slider-plan.md S8): the state the composable
                         // draws from IS the control's value here.
@@ -8341,6 +8452,15 @@ object KayaCompose {
                             if (parts[1].startsWith("number_field")) {
                                 target(parts[1], "number_field", KayaSceneModel.numberFields)
                                     ?.let { kayaSpelledSlider(it.value) }
+                            } else if (parts[1].startsWith("range")) {
+                                // Both values as the thumbs PUBLISH them, the
+                                // control's own semantics (docs/range-plan.md §5).
+                                target(parts[1], "range", KayaSceneModel.ranges)?.let { node ->
+                                    kayaRangeThumbs(activity, node.id)?.joinToString(" ") { thumb ->
+                                        thumb.config.getOrNull(SemanticsProperties.ProgressBarRangeInfo)
+                                            ?.let { kayaSpelledSlider(it.current.toDouble()) } ?: "?"
+                                    } ?: "no thumbs in the semantics tree"
+                                }
                             } else {
                                 target(parts[1], "slider", KayaSceneModel.sliders)?.let {
                                     kayaSpelledSlider(it.value)
@@ -8852,9 +8972,14 @@ object KayaCompose {
                     }
                     "nudge" -> {
                         failures.add(
-                            "nudge: a phone's number field has no stepping door " +
-                                "(docs/number-field-plan.md §3 rule 7); the phone " +
-                                "lanes cut the scene at the steps")
+                            if (parts[1].startsWith("number_field")) {
+                                "nudge: a phone's number field has no stepping door " +
+                                    "(docs/number-field-plan.md §3 rule 7); the phone " +
+                                    "lanes cut the scene at the steps"
+                            } else {
+                                "nudge ${parts[1]}: a phone's slider has no keyboard door " +
+                                    "(docs/range-plan.md §5); the phone lanes drop the nudge lines"
+                            })
                     }
                     "press" -> {
                         // The Return key as its own verb (docs/rich-text-plan.md
@@ -10468,8 +10593,25 @@ object KayaCompose {
                             failures.add("root hugs ($hug)")
                         }
                     }
-                    "expect_axis" -> {
-                        if (parts[1].startsWith("slider")) depthStub("range")
+                    "expect_axis" -> if (parts[1].startsWith("slider")) {
+                        // A slider's axis read off the laid-out control
+                        // (docs/range-plan.md §5): which way its travel runs
+                        // in the root's space, the rotation included.
+                        val want = quoted(parts.drop(2))
+                        val got = onUi(activity) {
+                            target(parts[1], "slider", KayaSceneModel.sliders)?.let {
+                                kayaTravelAxis(it.id) ?: "no slider layout recorded"
+                            }
+                        }
+                        when {
+                            got == null -> failures.add("no such target " + parts[1])
+                            got == want -> observed.add(parts[1] + " axis " + want)
+                            else ->
+                                failures.add(
+                                    parts[1] + " axis \"" + got + "\", wanted \"" + want + "\""
+                                )
+                        }
+                    } else {
                         // The axis the render actually used, recorded at
                         // layout time (kayaContainerAxis) — never the
                         // model's field: a backend that ignored the write
@@ -10853,8 +10995,16 @@ object KayaCompose {
                         if (got == want) observed.add("$want menus")
                         else failures.add("$got menus, wanted $want")
                     }
-                    "expect_ax" -> {
-                        if (parts[1].startsWith("range")) depthStub("range")
+                    "expect_ax" -> if (
+                        parts[1].startsWith("range") && parts.size > 3 && !parts[2].startsWith("\"")
+                    ) {
+                        // One thumb of a range (docs/range-plan.md §3 rule 7):
+                        // its own semantics node, read as a service reads it.
+                        val want = quoted(parts.drop(3))
+                        val got = onUi(activity) { kayaAxThumb(activity, parts[1], parts[2] == "low") }
+                        if (got == want) observed.add("ax \"$want\"")
+                        else failures.add("ax \"$got\", wanted \"$want\"")
+                    } else {
                         val template = kayaExpandTemplate(activity, quoted(parts.drop(2)))
                         val want = template.text
                         val node = kayaWidgetTarget(parts[1])
@@ -14625,7 +14775,7 @@ private fun KayaRenderCore(
             KayaTextField(node, a11y, boxFill, singleLine = true, search = true)
         KayaCompose.KIND_NUMBER_FIELD -> KayaNumberField(node, a11y, boxFill)
         KayaCompose.KIND_COLOR_PICKER -> KayaColorButton(node, a11y, boxFill)
-        KayaCompose.KIND_RANGE -> depthStub("range")
+        KayaCompose.KIND_RANGE -> KayaRangeSurface(node, boxFill, a11y)
         KayaCompose.KIND_LABELED -> {
             // THE LABELLED ROW (docs/forms-plan.md §3): Material's own
             // labelled row, the value trailing and a WIDE control folded
@@ -14920,7 +15070,7 @@ private fun KayaRenderCore(
                 Text(node.text)
             }
         }
-        KayaCompose.KIND_SLIDER -> KayaSliderSurface(node, boxFill.then(a11y))
+        KayaCompose.KIND_SLIDER -> KayaSliderSurface(node, boxFill, a11y)
         KayaCompose.KIND_IMAGE -> {
             // Fixed to the decoded bitmap's intrinsic size. The one kind
             // whose NAME does not ride the shared modifier: Image's own
@@ -18011,6 +18161,15 @@ internal fun kayaLiveNotifications(context: Context): List<Pair<Long, String>> {
     }
 }
 
+/** A fraction in two decimals, trailing zeros and point dropped
+ * (harness.rs spelled_fraction). */
+fun kayaSpelledFraction(value: Double): String {
+    val rounded = Math.round(value * 100.0) / 100.0
+    var s = String.format(java.util.Locale.ROOT, "%.2f", rounded).trimEnd('0').trimEnd('.')
+    if (s.isEmpty() || s == "-" || s == "-0") s = "0"
+    return s
+}
+
 /** THE ONE SPELLING every harness reads a slider back in (harness.rs
  * spelled_slider): six decimals, trailing zeros and point dropped. */
 fun kayaSpelledSlider(value: Double): String {
@@ -18097,6 +18256,65 @@ internal fun kayaSliderCommitted(node: KayaNode, raw: Double, final: Boolean) {
     }
 }
 
+/** A vertical slider (docs/range-plan.md §3 rule 6): its axis is 1. */
+internal fun kayaSliderVertical(node: KayaNode): Boolean =
+    node.kind == KayaCompose.KIND_SLIDER && node.axis == 1L
+
+/** The length a vertical slider takes as its height (docs/range-plan.md §6),
+ * the SwiftUI arm's stand-in. */
+internal val KAYA_FADER_LENGTH = 200.dp
+
+/**
+ * WHERE EACH SLIDER AND RANGE WAS LAID OUT, and each of its thumbs: the
+ * layout's own coordinates as its composables last placed them, keyed by the
+ * node's id and, for a thumb, 0 (a slider's), 1 (low) or 2 (high). The
+ * harness reads `expect_thumb` and a slider's `expect_axis` off these, in the
+ * root's space, so the rotation and the mirroring are the platform's answers.
+ * Main thread only.
+ */
+internal val kayaTravelCoords = HashMap<Long, LayoutCoordinates>()
+internal val kayaThumbCoords = HashMap<Pair<Long, Int>, LayoutCoordinates>()
+
+/**
+ * A thumb's centre along its travel, in the root's space: its centre at the
+ * minimum to its centre at the maximum (docs/range-plan.md §5), from the LEFT
+ * when the travel lies across and from the BOTTOM when it stands up. Material
+ * places a thumb's left edge at the track's width times the fraction, so the
+ * travel runs half a thumb in from each end of the layout (the 1.3.1
+ * measure policy). Null when either layout is not on screen.
+ */
+internal fun kayaThumbTravel(id: Long, slot: Int): Double? {
+    val travel = kayaTravelCoords[id]?.takeIf { it.isAttached } ?: return null
+    val thumb = kayaThumbCoords[id to slot]?.takeIf { it.isAttached } ?: return null
+    val half = thumb.size.width / 2f
+    val mid = travel.size.height / 2f
+    val a = travel.localToRoot(Offset(half, mid))
+    val b = travel.localToRoot(Offset(travel.size.width - half, mid))
+    val c = thumb.localToRoot(Offset(half, thumb.size.height / 2f))
+    return kayaTravelFraction(a, b, c)
+}
+
+/** A thumb centre [c] along the travel from [a] to [b] in the root's space:
+ * from the left when the travel lies across, from the BOTTOM when it stands
+ * up, whichever end is the minimum. */
+internal fun kayaTravelFraction(a: Offset, b: Offset, c: Offset): Double? =
+    if (abs(b.y - a.y) > abs(b.x - a.x)) {
+        val span = abs(b.y - a.y)
+        if (span <= 0f) null else ((maxOf(a.y, b.y) - c.y) / span).toDouble()
+    } else {
+        val span = abs(b.x - a.x)
+        if (span <= 0f) null else ((c.x - minOf(a.x, b.x)) / span).toDouble()
+    }
+
+/** Which way a slider's travel runs on screen: "vertical" when it stands
+ * up in the root's space, read off the laid-out control. */
+internal fun kayaTravelAxis(id: Long): String? {
+    val travel = kayaTravelCoords[id]?.takeIf { it.isAttached } ?: return null
+    val a = travel.localToRoot(Offset(0f, 0f))
+    val b = travel.localToRoot(Offset(travel.size.width.toFloat(), 0f))
+    return if (abs(b.y - a.y) > abs(b.x - a.x)) "vertical" else "horizontal"
+}
+
 /**
  * The platform's own slider, uncontrolled toward the app (the entry's
  * shape) over the commit path above: `steps` puts Material's stops on
@@ -18108,47 +18326,231 @@ internal fun kayaSliderCommitted(node: KayaNode, raw: Double, final: Boolean) {
  * (docs/slider-plan.md S5) — one painter for all four shapes, in the
  * Track's own draw scope, whose width is the span Material lerps its own
  * ticks across, so a kaya tick lands where a Material tick would.
+ *
+ * A VERTICAL SLIDER is this one turned −90° in a layer, its constraints
+ * swapped so the box stands tall and left to right forced inside
+ * (docs/range-plan.md §6, §4 MEASURED on the lane's emulators).
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-private fun KayaSliderSurface(node: KayaNode, modifier: Modifier) {
+private fun KayaSliderSurface(node: KayaNode, boxFill: Modifier, a11y: Modifier) {
     val colors = SliderDefaults.colors()
     val tickSize = SliderDefaults.TickSize
-    Slider(
-        modifier = modifier,
-        value = node.value.toFloat(),
-        onValueChange = { kayaSliderCommitted(node, it.toDouble(), final = false) },
-        // The end of the gesture carries no value: the last move already
-        // mirrored the settled one.
-        onValueChangeFinished = { kayaSliderCommitted(node, node.value, final = true) },
-        steps = kayaSliderSteps(node.minValue, node.maxValue, node.step),
-        valueRange = node.minValue.toFloat()..node.maxValue.toFloat(),
-        colors = colors,
-        track = { state ->
-            val fractions =
-                kayaSliderTickFractions(node.minValue, node.maxValue, node.tickSpacing)
-            SliderDefaults.Track(
-                sliderState = state,
-                colors = colors,
-                drawTick = { _, _ -> },
-                modifier = Modifier.drawWithContent {
-                    drawContent()
-                    val span = node.maxValue - node.minValue
-                    val reached =
-                        if (span > 0) ((node.value - node.minValue) / span).toFloat() else 0f
-                    for (fraction in fractions) {
-                        drawCircle(
-                            color = if (fraction <= reached) colors.activeTickColor
-                            else colors.inactiveTickColor,
-                            radius = tickSize.toPx() / 2f,
-                            center = Offset(size.width * fraction, size.height / 2f),
-                        )
-                    }
-                },
-            )
-        },
-    )
+    val source = remember { MutableInteractionSource() }
+    val slider = @Composable { modifier: Modifier ->
+        Slider(
+            modifier = modifier.onGloballyPositioned { kayaTravelCoords[node.id] = it },
+            value = node.value.toFloat(),
+            onValueChange = { kayaSliderCommitted(node, it.toDouble(), final = false) },
+            // The end of the gesture carries no value: the last move already
+            // mirrored the settled one.
+            onValueChangeFinished = { kayaSliderCommitted(node, node.value, final = true) },
+            steps = kayaSliderSteps(node.minValue, node.maxValue, node.step),
+            valueRange = node.minValue.toFloat()..node.maxValue.toFloat(),
+            colors = colors,
+            interactionSource = source,
+            thumb = {
+                SliderDefaults.Thumb(
+                    interactionSource = source,
+                    modifier = Modifier.onGloballyPositioned { kayaThumbCoords[node.id to 0] = it },
+                    colors = colors,
+                )
+            },
+            track = { state ->
+                val fractions =
+                    kayaSliderTickFractions(node.minValue, node.maxValue, node.tickSpacing)
+                SliderDefaults.Track(
+                    sliderState = state,
+                    colors = colors,
+                    drawTick = { _, _ -> },
+                    modifier = Modifier.drawWithContent {
+                        drawContent()
+                        val span = node.maxValue - node.minValue
+                        val reached =
+                            if (span > 0) ((node.value - node.minValue) / span).toFloat() else 0f
+                        for (fraction in fractions) {
+                            drawCircle(
+                                color = if (fraction <= reached) colors.activeTickColor
+                                else colors.inactiveTickColor,
+                                radius = tickSize.toPx() / 2f,
+                                center = Offset(size.width * fraction, size.height / 2f),
+                            )
+                        }
+                    },
+                )
+            },
+        )
+    }
+    if (!kayaSliderVertical(node)) {
+        slider(boxFill.then(a11y))
+        return
+    }
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        Layout(content = { slider(a11y) }, modifier = boxFill) { measurables, constraints ->
+            val length = KAYA_FADER_LENGTH.roundToPx().let {
+                if (constraints.hasBoundedHeight) it.coerceAtMost(constraints.maxHeight) else it
+            }
+            val placeable = measurables.first().measure(Constraints.fixedWidth(length))
+            val width = constraints.constrainWidth(placeable.height)
+            val height = constraints.constrainHeight(placeable.width)
+            layout(width, height) {
+                placeable.placeWithLayer(
+                    (width - placeable.width) / 2,
+                    (height - placeable.height) / 2,
+                ) { rotationZ = -90f }
+            }
+        }
+    }
 }
+
+// ---- the range (docs/range-plan.md) -----------------------------------------
+// Material's own RangeSlider (§1, §6), controlled from the node over ONE commit
+// path: every value it hands back, a drag's, a tap's or an assistive
+// setProgress's, goes through the core's clamp over JNI and the answer is what
+// the control draws next (the write-back).
+
+/**
+ * ONE PATH for every value Material hands back, a drag's, a tap's or an
+ * assistive setProgress's: the core's clamp, whose answer is what the control
+ * draws next, and the live pair when it moved.
+ */
+internal fun kayaRangeMoved(node: KayaNode, low: Boolean, raw: Double) {
+    val v = KayaPresent.rangeClamp(
+        node.minValue, node.maxValue, node.step, node.minGap, low,
+        if (low) node.high else node.low, raw,
+    )
+    val lo = if (low) v else node.low
+    val hi = if (low) node.high else v
+    if (lo != node.low || hi != node.high) {
+        node.low = lo
+        node.high = hi
+        KayaPresent.emitRange(node.tag, lo, hi, false)
+    }
+}
+
+/** The gesture's end, `onValueChangeFinished`, which Material also calls
+ * after an assistive setProgress (§4 MEASURED): the settled pair, once, only
+ * when it differs from the last settled one. */
+internal fun kayaRangeSettled(node: KayaNode) {
+    if (node.low != node.committedLow || node.high != node.committedHigh) {
+        node.committedLow = node.low
+        node.committedHigh = node.high
+        KayaPresent.emitRange(node.tag, node.low, node.high, true)
+    }
+}
+
+/** What Material handed back, as the thumb that moved: compared in its own
+ * Float, since the node's Double does not survive the round trip. */
+internal fun kayaRangeChanged(node: KayaNode, value: ClosedFloatingPointRange<Float>) {
+    if (value.start != node.low.toFloat()) {
+        kayaRangeMoved(node, low = true, raw = value.start.toDouble())
+    }
+    if (value.endInclusive != node.high.toFloat()) {
+        kayaRangeMoved(node, low = false, raw = value.endInclusive.toDouble())
+    }
+}
+
+/** Where kaya draws a range's reached ticks: between the thumbs. */
+internal fun kayaRangeTickReached(fraction: Float, lowFraction: Float, highFraction: Float): Boolean =
+    fraction >= lowFraction && fraction <= highFraction
+
+/**
+ * THE THUMBS' WORDS (docs/range-plan.md §8 ruling 2): Material names its
+ * thumbs from two compose-ui strings read through `LocalContext`'s
+ * resources, so the app's `low_label` and `high_label` (or, unset, the
+ * range's own `a11y_label`) are what those two ids answer inside the
+ * control. MEASURED replacing, not joining (§4).
+ */
+@Suppress("DEPRECATION")
+private class KayaThumbWords(base: Context, start: String, end: String) : ContextWrapper(base) {
+    private val words = object : android.content.res.Resources(
+        base.resources.assets, base.resources.displayMetrics, base.resources.configuration,
+    ) {
+        override fun getString(id: Int): String = when {
+            id == androidx.compose.ui.R.string.range_start && start.isNotEmpty() -> start
+            id == androidx.compose.ui.R.string.range_end && end.isNotEmpty() -> end
+            else -> base.resources.getString(id)
+        }
+    }
+
+    override fun getResources(): android.content.res.Resources = words
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun KayaRangeSurface(node: KayaNode, boxFill: Modifier, a11y: Modifier) {
+    val colors = SliderDefaults.colors()
+    val tickSize = SliderDefaults.TickSize
+    val startSource = remember { MutableInteractionSource() }
+    val endSource = remember { MutableInteractionSource() }
+    val base = LocalContext.current
+    val start = node.lowLabel.ifEmpty { node.a11yLabel }
+    val end = node.highLabel.ifEmpty { node.a11yLabel }
+    val words = remember(base, start, end) { KayaThumbWords(base, start, end) }
+    CompositionLocalProvider(LocalContext provides words) {
+        RangeSlider(
+            value = node.low.toFloat()..node.high.toFloat(),
+            onValueChange = { kayaRangeChanged(node, it) },
+            onValueChangeFinished = { kayaRangeSettled(node) },
+            modifier = boxFill.then(a11y)
+                .semantics { this[KayaNodeId] = node.id }
+                .onGloballyPositioned { kayaTravelCoords[node.id] = it },
+            valueRange = node.minValue.toFloat()..node.maxValue.toFloat(),
+            steps = kayaSliderSteps(node.minValue, node.maxValue, node.step),
+            colors = colors,
+            startInteractionSource = startSource,
+            endInteractionSource = endSource,
+            startThumb = {
+                CompositionLocalProvider(LocalContext provides base) {
+                    SliderDefaults.Thumb(
+                        interactionSource = startSource,
+                        modifier = Modifier.onGloballyPositioned { kayaThumbCoords[node.id to 1] = it },
+                        colors = colors,
+                    )
+                }
+            },
+            endThumb = {
+                CompositionLocalProvider(LocalContext provides base) {
+                    SliderDefaults.Thumb(
+                        interactionSource = endSource,
+                        modifier = Modifier.onGloballyPositioned { kayaThumbCoords[node.id to 2] = it },
+                        colors = colors,
+                    )
+                }
+            },
+            track = { state ->
+                val fractions =
+                    kayaSliderTickFractions(node.minValue, node.maxValue, node.tickSpacing)
+                SliderDefaults.Track(
+                    rangeSliderState = state,
+                    colors = colors,
+                    drawTick = { _, _ -> },
+                    modifier = Modifier.drawWithContent {
+                        drawContent()
+                        val span = node.maxValue - node.minValue
+                        val lo = if (span > 0) ((node.low - node.minValue) / span).toFloat() else 0f
+                        val hi = if (span > 0) ((node.high - node.minValue) / span).toFloat() else 0f
+                        val rtl = layoutDirection == LayoutDirection.Rtl
+                        for (fraction in fractions) {
+                            val x = if (rtl) 1f - fraction else fraction
+                            drawCircle(
+                                color = if (kayaRangeTickReached(fraction, lo, hi)) colors.activeTickColor
+                                else colors.inactiveTickColor,
+                                radius = tickSize.toPx() / 2f,
+                                center = Offset(size.width * x, size.height / 2f),
+                            )
+                        }
+                    },
+                )
+            },
+        )
+    }
+}
+
+/** A range's layout carries its node's id in the semantics tree, so the
+ * harness finds a stamped copy's thumbs where the shared `a11y_id` cannot
+ * tell the rows apart. Never published to a service. */
+val KayaNodeId = SemanticsPropertyKey<Long>("KayaNodeId")
 
 // ---- the number field (docs/number-field-plan.md) ---------------------------
 // The platform's text field over the arm's own text (§6): written and read by

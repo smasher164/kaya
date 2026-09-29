@@ -2403,11 +2403,11 @@ SCROLL_AXIS_SURFACES = [
         r"public func scroll<R>\([^)]*\b{0}: KayaAxis\? = nil",
         r"if let {0} \{{ setAxis\(w, {0}\) \}}"]),
     ("haskell", "bindings/haskell/KayaApp.hs", [
-        r"{0} :: Axis -> Attr 'BoxW",
+        r"{0} :: Axis -> Attr c$",
         r"applyAttr \({0} a\) w = setAxis w a"]),
     ("ocaml", "bindings/ocaml/kaya_app.ml", [
         r"^let scroll [^=]*\?{0} \?\(follows_end",
-        r"Option\.iter \(fun a -> set_axis w a\) {0};"]),
+        r"children \(\) =\n[^\n]*\n  Option\.iter \(fun a -> set_axis w a\) {0};"]),
     ("js", "bindings/js/kaya/index.ts", [
         r"type ScrollOptions = GrowOption & \{{[^}}]*\b{0}\?: AxisValue \| AxisName;",
         r"if \(opts\.{0} !== undefined\) handle\.axis\(opts\.{0}\)"]),
@@ -3138,6 +3138,176 @@ if cp_alpha_fake != 16 or cp_handler_fake != 17 or cp_type_fake != 36:
 print(f"check-sugar-surface: colour picker surface watched: alpha fake "
       f"{cp_alpha_fake}/16, handler fake {cp_handler_fake}/17, Color fake "
       f"{cp_type_fake}/36")
+
+# --- THE RANGE SURFACE, all nine (docs/range-plan.md §2, §7) ----------
+# The kind sweep holds the constructor in both zones; the slider clause
+# holds step and tick_spacing. Neither sees the range's own props, the
+# field source a stamped range's thumb labels take, its two handlers or a
+# slider's `axis`, so a binding could ship a range whose gap or labels are
+# unspellable in one zone with every other clause green. The placeholders
+# are the names, so the fake-name negative fires every row.
+def want_rg(lang, rel, what, pattern, findings):
+    want_slider(lang, rel, f"range {what}", pattern, findings)
+
+
+def check_range_prop(snake, pascal, camel, findings=None):
+    F = SLIDER_FILES
+
+    def want(lang, rel, pattern):
+        want_rg(lang, rel, snake, pattern, findings)
+
+    want("rust-live", F["rust"], rf"pub fn {snake}\(self, [a-z_]+: ")
+    want("rust-tpl", F["rust"],
+         rf"pub fn {snake}\(&mut self, node: TemplateNodeId, ")
+    want("python", F["python"], rf"def range\([^)]*\b{snake}[\s]*[:=]")
+    want("js", F["js"], rf"RangeOptions = .*\b{camel}\?:")
+    want("go-live", F["go"],
+         rf"func \(w Widget\) {pascal}\([a-z]+ (float64|string)\) Widget")
+    want("go-tpl", F["go"],
+         rf"func \(t \*Tpl\) Set{pascal}\(n Node, [a-z]+ (float64|string)\)")
+    want("csharp-live", F["csharp"], rf"public Widget Range\([^)]*\b{camel} = null")
+    want("csharp-tpl", F["csharp"], rf"public Node Range\([^)]*\b{camel} = null")
+    want("java-live", F["java"],
+         rf"public Widget {camel}\((double|String) [a-z]+\)")
+    want("java-tpl", F["java"],
+         rf"public void set{pascal}\(Node n, (double|String) [a-z]+\)")
+    # THE ZONE IS THE THUMBS' TYPE in Swift, as it is the slider's value's.
+    want("swift-live", F["swift"],
+         rf"func range\(\n *min: Double = 0\.0, max: Double = 1\.0, "
+         rf"low: Double = 0\.0, high: Double = 1\.0,[^)]*"
+         rf"\b{camel}: (Double|String)\? = nil")
+    want("swift-tpl", F["swift"],
+         rf"func range\(\n *min: Double = 0\.0, max: Double = 1\.0, "
+         rf"low: KayaField<Double>, high: KayaField<Double>,[^)]*"
+         rf"\b{camel}: (Double|String)\? = nil")
+    want("ocaml-live", F["ocaml"], rf"^let range [\s\S]{{0,400}}?\?{snake}\b")
+    want("ocaml-tpl", F["ocaml"], rf"^  let range [\s\S]{{0,700}}?\?{snake}\b")
+    want("haskell-live", F["haskell"],
+         rf"^  {pascal} :: (Double|Text) -> Attr 'LeafW")
+    want("haskell-tpl", F["haskell"],
+         rf"^  Tpl{pascal} :: (Double|Text) -> TplAttr")
+
+
+def check_range_label_field(snake, pascal, camel, findings=None):
+    F = SLIDER_FILES
+
+    def want(lang, rel, pattern):
+        want_rg(lang, rel, f"{snake} from a row field", pattern, findings)
+
+    want("rust", F["rust"],
+         rf"pub fn {snake}\(&mut self, node: TemplateNodeId, [a-z_]+: "
+         rf"impl Into<TplSource<StrKind>>\)")
+    want("python", F["python"], rf"^ *{snake}: TextSource \| None = None")
+    want("js", F["js"], rf"RangeOptions = .*\b{camel}\?: Bindable \| string")
+    want("go", F["go"], rf"func \(t \*Tpl\) Bind{pascal}\[")
+    want("csharp", F["csharp"],
+         rf"public void Set{pascal}\(Node n, Field<string> f")
+    want("java", F["java"],
+         rf"public void set{pascal}\(Node n, KayaRecords\.Field<String> [a-z]+\)")
+    want("swift", F["swift"],
+         rf"func set{pascal}\(_ n: KayaNodeHandle, level: UInt32 = 0, "
+         rf"_ f: KayaField<String>\)")
+    want("ocaml", F["ocaml"], rf"^  let range [\s\S]{{0,700}}?\?{snake}_field\b")
+    want("haskell", F["haskell"], rf"^  Tpl{pascal}Field :: KField Text -> TplAttr")
+
+
+def check_range_handler(rust, snake, pascal, camel, js, findings=None):
+    F = SLIDER_FILES
+
+    def want(lang, rel, pattern):
+        want_rg(lang, rel, snake, pattern, findings)
+
+    want("rust-live", F["rust"],
+         rf"pub fn {rust}\(&self, w: WidgetId, f: impl Fn\(f64, f64\)")
+    want("rust-tpl", F["rust"],
+         rf"pub fn {rust}_node\(&self, n: TemplateNodeId, "
+         rf"f: impl Fn\(Path, f64, f64\)")
+    want("python", F["python"], rf"def range\([^)]*\b{snake}: Handler")
+    want("js", F["js"], rf"RangeOptions = .*\b{js}\?: Handler")
+    want("go-live", F["go"],
+         rf"func \(w Widget\) {pascal}\(fn func\(\*Tx, float64, float64\)\) Widget")
+    want("go-tpl", F["go"],
+         rf"func \(n Node\) {pascal}\(fn func\(\*Tx, \[\]any, float64, "
+         rf"float64\)\) Node")
+    want("csharp-live", F["csharp"],
+         rf"public void {pascal}\(Widget w, Action<Tx, double, double> ")
+    want("csharp-tpl", F["csharp"],
+         rf"public void {pascal}\(Node n, Action<Tx, List<object>, double, "
+         rf"double> ")
+    want("java-live", F["java"], rf"public void {camel}\(Widget w, RangeChange ")
+    want("java-tpl", F["java"], rf"public void {camel}\(Node n, RangeHandler ")
+    want("swift-live", F["swift"],
+         rf"func {camel}\(\s*_ w: KayaWidget, _ handler: @escaping "
+         rf"\(KayaAppTx, Double, Double\)")
+    want("swift-tpl", F["swift"],
+         rf"func {camel}\(\s*_ n: KayaNodeHandle,\s*_ handler: @escaping "
+         rf"\(KayaAppTx, \[KayaValue\], Double, Double\)")
+    want("ocaml-live", F["ocaml"], rf"^let range [\s\S]{{0,400}}?\?{snake}\b")
+    want("ocaml-tpl", F["ocaml"], rf"^  let range [\s\S]{{0,700}}?\?{snake}\b")
+    want("haskell", F["haskell"],
+         rf"^  {camel} :: App -> e -> Keyed e \(Double -> Double -> IO \(\)\) "
+         rf"-> IO \(\)")
+
+
+# A slider's `axis`, where each binding's slider takes its options: the
+# scroll clause above holds the scroll's site, and three bindings reach both
+# through one generic Widget method, which this reads again by name.
+SLIDER_AXIS_SURFACES = [
+    ("rust", r"pub fn {0}\(self, axis: Axis\) -> Self"),
+    ("python", r"^def slider\([^)]*\b{0}: Axis \| str \| None = None"),
+    ("go", r"func \(w Widget\) {0}\(axis Axis\) Widget"),
+    ("csharp", r"public Widget Slider\([^)]*Axis\? {0} = null\)"),
+    ("java", r"public Widget {0}\(Axis axis\)"),
+    ("swift", r"bind: KayaSignal\? = nil, {0}: KayaAxis\? = nil"),
+    ("ocaml", r"^let slider [^\n]*\?{0}\b"),
+    ("haskell", r"^  {0} :: Axis -> Attr c$"),
+    ("js", r"SliderOptions = .*\b{0}\?: AxisValue \| AxisName"),
+]
+
+
+def check_slider_axis(fake=None, findings=None):
+    for lang, template in SLIDER_AXIS_SURFACES:
+        name = fake or SCROLL_AXIS_NAMES[lang]
+        want_rg(lang, SLIDER_FILES[lang], "slider axis",
+                template.format(name), findings)
+
+
+RANGE_PROPS = (("min_gap", "MinGap", "minGap"),
+               ("low_label", "LowLabel", "lowLabel"),
+               ("high_label", "HighLabel", "highLabel"))
+RANGE_HANDLERS = (("on_range", "on_change", "OnRangeChanged", "onRangeChanged",
+                   "onChange"),
+                  ("on_range_commit", "on_commit", "OnRangeCommitted",
+                   "onRangeCommitted", "onCommit"))
+for rg_prop in RANGE_PROPS:
+    check_range_prop(*rg_prop)
+for rg_prop in RANGE_PROPS[1:]:
+    check_range_label_field(*rg_prop)
+for rg_handler in RANGE_HANDLERS:
+    check_range_handler(*rg_handler)
+check_slider_axis()
+fake = []
+check_range_prop("kaya_fake_gap", "KayaFakeGap", "kayaFakeGap", findings=fake)
+rg_prop_fake = len(fake)
+fake = []
+check_range_label_field("kaya_fake_label", "KayaFakeLabel", "kayaFakeLabel",
+                        findings=fake)
+rg_label_fake = len(fake)
+fake = []
+check_range_handler("on_kaya_fake", "on_kaya_fake", "OnKayaFake", "onKayaFake",
+                    "onKayaFake", findings=fake)
+rg_handler_fake = len(fake)
+fake = []
+check_slider_axis(fake="kayaFakeSliderAxis", findings=fake)
+rg_axis_fake = len(fake)
+if (rg_prop_fake, rg_label_fake, rg_handler_fake, rg_axis_fake) != (16, 9, 15, 9):
+    selftest_exit(f"check-sugar-surface: self-test failed (range patterns "
+                  f"fired {rg_prop_fake}/16 for a prop, {rg_label_fake}/9 for "
+                  f"a label field, {rg_handler_fake}/15 for a handler and "
+                  f"{rg_axis_fake}/9 for a slider axis that exist nowhere)")
+print(f"check-sugar-surface: range surface watched: prop fake {rg_prop_fake}/16, "
+      f"label field fake {rg_label_fake}/9, handler fake {rg_handler_fake}/15, "
+      f"slider axis fake {rg_axis_fake}/9")
 
 # --- THE SHEET SURFACE, all nine (docs/sheet-plan.md §5) --------------
 # A sheet is a SURFACE, not a kind and not a window prop, so neither
@@ -5670,7 +5840,7 @@ discardable = tpl_discardable_probe()
 WANT_DISCARDABLE = """swift-row-member=applied:1 rc:1 named:True
 swift-arm-member=applied:1 rc:1 named:True
 swift-eliminator=applied:1 rc:1 named:True
-swift-census-floor=applied:15 rc:1 named:True"""
+swift-census-floor=applied:16 rc:1 named:True"""
 if discardable != WANT_DISCARDABLE:
     print("check-sugar-surface: SELF-TEST FAIL (the Swift generated-surface "
           "discard census did not catch its watched cuts). Wanted:",
@@ -6435,7 +6605,7 @@ def csharp_facade_probe():
     run("csharp-twin-reader",
         src.replace("sealed class TableItemRow\n",
                     "sealed class TableItemRowGone\n")
-        if n == 1 else src, n, "typed-row reader found only 13")
+        if n == 1 else src, n, "typed-row reader found only 14")
     return "\n".join(lines)
 
 

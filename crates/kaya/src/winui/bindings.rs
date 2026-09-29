@@ -10570,6 +10570,30 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn Clip(&self) -> windows_core::Result<Media::RectangleGeometry> {
+                    let this = &windows_core::Interface::cast::<IUIElement>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Clip)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                where
+                    P0: windows_core::Param<Media::RectangleGeometry>,
+                {
+                    let this = &windows_core::Interface::cast::<IUIElement>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetClip)(
+                            windows_core::Interface::as_raw(this),
+                            value.param().abi(),
+                        )
+                        .ok()
+                    }
+                }
                 pub fn RenderTransformOrigin(
                     &self,
                 ) -> windows_core::Result<super::super::super::Windows::Foundation::Point>
@@ -13282,8 +13306,14 @@ pub mod Microsoft {
                 ) -> windows_core::HRESULT,
                 pub SetOpacity:
                     unsafe extern "system" fn(*mut core::ffi::c_void, f64) -> windows_core::HRESULT,
-                Clip: usize,
-                SetClip: usize,
+                pub Clip: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub SetClip: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
                 RenderTransform: usize,
                 SetRenderTransform: usize,
                 Projection: usize,
@@ -15206,6 +15236,30 @@ pub mod Microsoft {
                         (windows_core::Interface::vtable(this).SetOpacity)(
                             windows_core::Interface::as_raw(this),
                             value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn Clip(&self) -> windows_core::Result<Media::RectangleGeometry> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Clip)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                where
+                    P0: windows_core::Param<Media::RectangleGeometry>,
+                {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetClip)(
+                            windows_core::Interface::as_raw(this),
+                            value.param().abi(),
                         )
                         .ok()
                     }
@@ -30142,6 +30196,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RenderTransformOrigin(
                         &self,
                     ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
@@ -34048,6 +34126,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RenderTransformOrigin(
                         &self,
                     ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
@@ -37830,6 +37932,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetOpacity)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -41930,6 +42056,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RenderTransformOrigin(
                         &self,
                     ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
@@ -45899,6 +46049,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetOpacity)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -50009,6 +50183,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetOpacity)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -54812,6 +55010,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RenderTransformOrigin(
                         &self,
                     ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
@@ -58516,6 +58738,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetOpacity)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -62501,6 +62747,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RenderTransformOrigin(
                         &self,
                     ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
@@ -66184,6 +66454,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetOpacity)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -70310,6 +70604,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RenderTransformOrigin(
                         &self,
                     ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
@@ -74037,6 +74355,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RenderTransformOrigin(
                         &self,
                     ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
@@ -77616,6 +77958,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RenderTransformOrigin(
                         &self,
                     ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
@@ -80791,6 +81157,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetOpacity)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -84572,6 +84962,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetOpacity)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -96605,6 +97019,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RenderTransformOrigin(
                         &self,
                     ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
@@ -99686,6 +100124,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetOpacity)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -103496,6 +103958,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetOpacity)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -107736,6 +108222,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RenderTransformOrigin(
                         &self,
                     ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
@@ -111378,6 +111888,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetOpacity)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -115044,6 +115578,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetOpacity)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -119268,6 +119826,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RenderTransformOrigin(
                         &self,
                     ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
@@ -122889,6 +123471,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RenderTransformOrigin(
                         &self,
                     ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
@@ -126495,6 +127101,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetOpacity)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -130182,6 +130812,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetOpacity)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -134769,6 +135423,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RenderTransformOrigin(
                         &self,
                     ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
@@ -138781,6 +139459,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RenderTransformOrigin(
                         &self,
                     ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
@@ -142501,6 +143203,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetOpacity)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -146635,6 +147361,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RenderTransformOrigin(
                         &self,
                     ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
@@ -149670,6 +150420,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetOpacity)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -153541,6 +154315,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RenderTransformOrigin(
                         &self,
                     ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
@@ -157362,6 +158160,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetOpacity)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -161197,6 +162019,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetOpacity)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -165511,6 +166357,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetOpacity)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -170945,6 +171815,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RenderTransformOrigin(
                         &self,
                     ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
@@ -175193,6 +176087,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RenderTransformOrigin(
                         &self,
                     ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
@@ -178993,6 +179911,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RenderTransformOrigin(
                         &self,
                     ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
@@ -182778,6 +183720,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RenderTransformOrigin(
                         &self,
                     ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
@@ -186296,6 +187262,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetOpacity)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -190762,6 +191752,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RenderTransformOrigin(
                         &self,
                     ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
@@ -195021,6 +196035,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RenderTransformOrigin(
                         &self,
                     ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
@@ -199058,6 +200096,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RenderTransformOrigin(
                         &self,
                     ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
@@ -202843,6 +203905,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetOpacity)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -206663,6 +207749,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetOpacity)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -210510,6 +211620,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetOpacity)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -214494,6 +215628,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetOpacity)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Clip(&self) -> windows_core::Result<super::Media::RectangleGeometry> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Clip)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::RectangleGeometry>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetClip)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -219048,6 +220206,35 @@ pub mod Microsoft {
                                 (windows_core::Interface::vtable(this).SetOpacity)(
                                     windows_core::Interface::as_raw(this),
                                     value,
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn Clip(
+                            &self,
+                        ) -> windows_core::Result<super::super::Media::RectangleGeometry>
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).Clip)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
+                        pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Media::RectangleGeometry>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetClip)(
+                                    windows_core::Interface::as_raw(this),
+                                    value.param().abi(),
                                 )
                                 .ok()
                             }
@@ -224140,6 +225327,35 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn Clip(
+                            &self,
+                        ) -> windows_core::Result<super::super::Media::RectangleGeometry>
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).Clip)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
+                        pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Media::RectangleGeometry>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetClip)(
+                                    windows_core::Interface::as_raw(this),
+                                    value.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
                         pub fn RenderTransformOrigin(
                             &self,
                         ) -> windows_core::Result<
@@ -228307,6 +229523,35 @@ pub mod Microsoft {
                                 (windows_core::Interface::vtable(this).SetOpacity)(
                                     windows_core::Interface::as_raw(this),
                                     value,
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn Clip(
+                            &self,
+                        ) -> windows_core::Result<super::super::Media::RectangleGeometry>
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).Clip)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
+                        pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Media::RectangleGeometry>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetClip)(
+                                    windows_core::Interface::as_raw(this),
+                                    value.param().abi(),
                                 )
                                 .ok()
                             }
@@ -233020,6 +234265,35 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn Clip(
+                            &self,
+                        ) -> windows_core::Result<super::super::Media::RectangleGeometry>
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).Clip)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
+                        pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Media::RectangleGeometry>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetClip)(
+                                    windows_core::Interface::as_raw(this),
+                                    value.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
                         pub fn RenderTransformOrigin(
                             &self,
                         ) -> windows_core::Result<
@@ -237077,6 +238351,35 @@ pub mod Microsoft {
                                 (windows_core::Interface::vtable(this).SetOpacity)(
                                     windows_core::Interface::as_raw(this),
                                     value,
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn Clip(
+                            &self,
+                        ) -> windows_core::Result<super::super::Media::RectangleGeometry>
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).Clip)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
+                        pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Media::RectangleGeometry>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetClip)(
+                                    windows_core::Interface::as_raw(this),
+                                    value.param().abi(),
                                 )
                                 .ok()
                             }
@@ -241381,6 +242684,35 @@ pub mod Microsoft {
                                 (windows_core::Interface::vtable(this).SetOpacity)(
                                     windows_core::Interface::as_raw(this),
                                     value,
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn Clip(
+                            &self,
+                        ) -> windows_core::Result<super::super::Media::RectangleGeometry>
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).Clip)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
+                        pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Media::RectangleGeometry>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetClip)(
+                                    windows_core::Interface::as_raw(this),
+                                    value.param().abi(),
                                 )
                                 .ok()
                             }
@@ -250949,6 +252281,89 @@ pub mod Microsoft {
                 }
                 unsafe impl Send for GeneralTransform {}
                 unsafe impl Sync for GeneralTransform {}
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct Geometry(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    Geometry,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                windows_core::imp::required_hierarchy!(Geometry, super::DependencyObject);
+                impl Geometry {
+                    pub fn DispatcherQueue(
+                        &self,
+                    ) -> windows_core::Result<super::super::Dispatching::DispatcherQueue>
+                    {
+                        let this =
+                            &windows_core::Interface::cast::<super::IDependencyObject>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).DispatcherQueue)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn Bounds(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Rect>
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Bounds)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn Empty() -> windows_core::Result<Geometry> {
+                        Self::IGeometryStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Empty)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        })
+                    }
+                    pub fn StandardFlatteningTolerance() -> windows_core::Result<f64> {
+                        Self::IGeometryStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).StandardFlatteningTolerance)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        })
+                    }
+                    fn IGeometryStatics<
+                        R,
+                        F: FnOnce(&IGeometryStatics) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<Geometry, IGeometryStatics> =
+                            windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                }
+                impl windows_core::RuntimeType for Geometry {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<Self, IGeometry>();
+                }
+                unsafe impl windows_core::Interface for Geometry {
+                    type Vtable = <IGeometry as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID = <IGeometry as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for Geometry {
+                    const NAME: &'static str = "Microsoft.UI.Xaml.Media.Geometry";
+                }
+                unsafe impl Send for Geometry {}
+                unsafe impl Sync for Geometry {}
                 windows_core::imp::define_interface!(
                     IBrush,
                     IBrush_Vtbl,
@@ -251239,6 +252654,66 @@ pub mod Microsoft {
                         -> windows_core::HRESULT,
                 }
                 windows_core::imp::define_interface!(
+                    IGeometry,
+                    IGeometry_Vtbl,
+                    0xdc102dcc_3be2_5414_8599_94b6e76ef39b
+                );
+                impl windows_core::RuntimeType for IGeometry {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IGeometry_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    Transform: usize,
+                    SetTransform: usize,
+                    pub Bounds: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut super::super::super::super::Windows::Foundation::Rect,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    IGeometryFactory,
+                    IGeometryFactory_Vtbl,
+                    0x4edcd536_7949_548a_a9b1_6ff03b951cf3
+                );
+                impl windows_core::RuntimeType for IGeometryFactory {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IGeometryFactory_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                }
+                windows_core::imp::define_interface!(
+                    IGeometryStatics,
+                    IGeometryStatics_Vtbl,
+                    0x349f78d0_4978_5742_b7d2_b34ea2c95600
+                );
+                impl windows_core::RuntimeType for IGeometryStatics {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IGeometryStatics_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub Empty: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub StandardFlatteningTolerance:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut f64,
+                        ) -> windows_core::HRESULT,
+                    TransformProperty: usize,
+                }
+                windows_core::imp::define_interface!(
                     IImageSource,
                     IImageSource_Vtbl,
                     0x6c2038f6_d6d5_55e9_9b9e_082f12dbff60
@@ -251265,6 +252740,45 @@ pub mod Microsoft {
                 #[doc(hidden)]
                 pub struct IImageSourceFactory_Vtbl {
                     pub base__: windows_core::IInspectable_Vtbl,
+                }
+                windows_core::imp::define_interface!(
+                    IRectangleGeometry,
+                    IRectangleGeometry_Vtbl,
+                    0xb6143890_a5f5_54e0_ab42_d88bab451f04
+                );
+                impl windows_core::RuntimeType for IRectangleGeometry {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IRectangleGeometry_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub Rect: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut super::super::super::super::Windows::Foundation::Rect,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetRect: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        super::super::super::super::Windows::Foundation::Rect,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    IRectangleGeometryStatics,
+                    IRectangleGeometryStatics_Vtbl,
+                    0x1ae7ac26_8a8b_55a5_b035_586e2b642919
+                );
+                impl windows_core::RuntimeType for IRectangleGeometryStatics {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IRectangleGeometryStatics_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    RectProperty: usize,
                 }
                 windows_core::imp::define_interface!(
                     IRenderingEventArgs,
@@ -251477,6 +252991,118 @@ pub mod Microsoft {
                 }
                 unsafe impl Send for ImageSource {}
                 unsafe impl Sync for ImageSource {}
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct RectangleGeometry(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    RectangleGeometry,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                windows_core::imp::required_hierarchy!(
+                    RectangleGeometry,
+                    Geometry,
+                    super::DependencyObject
+                );
+                impl RectangleGeometry {
+                    pub fn new() -> windows_core::Result<Self> {
+                        Self::IActivationFactory(|f| f.ActivateInstance::<Self>())
+                    }
+                    fn IActivationFactory<
+                        R,
+                        F: FnOnce(&windows_core::imp::IGenericFactory) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            RectangleGeometry,
+                            windows_core::imp::IGenericFactory,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                    pub fn DispatcherQueue(
+                        &self,
+                    ) -> windows_core::Result<super::super::Dispatching::DispatcherQueue>
+                    {
+                        let this =
+                            &windows_core::Interface::cast::<super::IDependencyObject>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).DispatcherQueue)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn Bounds(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Rect>
+                    {
+                        let this = &windows_core::Interface::cast::<IGeometry>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Bounds)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn Rect(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Rect>
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Rect)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRect(
+                        &self,
+                        value: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRect)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    fn IRectangleGeometryStatics<
+                        R,
+                        F: FnOnce(&IRectangleGeometryStatics) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            RectangleGeometry,
+                            IRectangleGeometryStatics,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                }
+                impl windows_core::RuntimeType for RectangleGeometry {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<Self, IRectangleGeometry>();
+                }
+                unsafe impl windows_core::Interface for RectangleGeometry {
+                    type Vtable = <IRectangleGeometry as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID =
+                        <IRectangleGeometry as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for RectangleGeometry {
+                    const NAME: &'static str = "Microsoft.UI.Xaml.Media.RectangleGeometry";
+                }
+                unsafe impl Send for RectangleGeometry {}
+                unsafe impl Sync for RectangleGeometry {}
                 #[repr(transparent)]
                 #[derive(Clone, Debug, Eq, PartialEq)]
                 pub struct RenderingEventArgs(windows_core::IUnknown);

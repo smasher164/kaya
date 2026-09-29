@@ -2949,6 +2949,110 @@ check("a stamped value_committed passes the copy's row first",
       and slider_row_commits[0][0].key == "b"
       and slider_row_commits[0][1] == 40.0)
 
+# --- THE RANGE AND THE VERTICAL SLIDER (docs/range-plan.md §2) --------
+# The kind and its props pack as the generated setters do, two signals
+# bind both thumbs, range_changed and range_committed reach on_change and
+# on_commit with BOTH values, a stamped copy passes its row first, a
+# thumb that is not a number is refused, and a slider takes `axis`.
+app_rng = kaya.App()
+rng_moves = []
+rng_commits = []
+rng_row_commits = []
+
+
+@dataclass
+class RngClip:
+    name: str
+    trim_in: float
+    trim_out: float
+
+
+rng_bar = None
+rng_bound = None
+rng_node = None
+rng_fader = None
+rng_records = []
+with app_rng.window():
+    with kaya.column():
+        before_rng = len(kaya._tx)
+        rng_bar = kaya.range(
+            2.0, 8.0, min=0.0, max=10.0, step=0.5, tick_spacing=1.0,
+            min_gap=1.0, low_label="In", high_label="Out",
+            on_change=lambda lo, hi: rng_moves.append((lo, hi)),
+            on_commit=lambda lo, hi: rng_commits.append((lo, hi)))
+        rng_lo = kaya.signal(2.0)
+        rng_hi = kaya.signal(8.0)
+        rng_bound = kaya.range(rng_lo, rng_hi)
+        rng_fader = kaya.slider(0.25, axis=kaya.Axis.VERTICAL)
+        rng_records = kaya._tx[before_rng:]
+        rng_clips = kaya.collection(RngClip)
+        for rng_clip in rng_clips:
+            rng_node = kaya.range(
+                rng_clip.trim_in, rng_clip.trim_out, min=0.0, max=10.0,
+                low_label=rng_clip.name,
+                on_commit=lambda *args: rng_row_commits.append(args))
+            rng_label_rec = kaya.wire.tx_bind_low_label_element(
+                rng_node.id, rng_clip.name._level(), rng_clip.name._index)
+            rng_label_seen = rng_label_rec in kaya._tx
+        rng_refused = ""
+        try:
+            kaya.range("2", 8.0)
+        except kaya.KayaTypeError as e:
+            rng_refused = str(e)
+
+check("a range is the range kind",
+      kaya.wire.tx_create_widget(rng_bar.id, kaya.wire.KIND_RANGE)
+      in rng_records)
+check("a range's min, max, step, tick_spacing, min_gap, labels and thumbs "
+      "pack as the generated setters do",
+      all(r in rng_records for r in (
+          kaya.wire.tx_set_min(rng_bar.id, 0.0),
+          kaya.wire.tx_set_max(rng_bar.id, 10.0),
+          kaya.wire.tx_set_step(rng_bar.id, 0.5),
+          kaya.wire.tx_set_tick_spacing(rng_bar.id, 1.0),
+          kaya.wire.tx_set_min_gap(rng_bar.id, 1.0),
+          kaya.wire.tx_set_low_label(rng_bar.id, "In"),
+          kaya.wire.tx_set_high_label(rng_bar.id, "Out"),
+          kaya.wire.tx_set_low(rng_bar.id, 2.0),
+          kaya.wire.tx_set_high(rng_bar.id, 8.0))))
+check("two signals bind a range's thumbs",
+      kaya.wire.tx_bind_low(rng_bound.id, rng_lo.id) in rng_records
+      and kaya.wire.tx_bind_high(rng_bound.id, rng_hi.id) in rng_records)
+check("a slider's axis packs as the generated setter does",
+      kaya.wire.tx_set_axis(rng_fader.id, kaya.wire.AXIS_VERTICAL)
+      in rng_records)
+check("a range's thumb refuses a string", "range's low" in rng_refused)
+check("a stamped range's low_label binds the row's own field",
+      rng_label_seen)
+check("a range registers under range_changed and range_committed",
+      (kaya.wire.OCC_RANGE_CHANGED, rng_bar.id) in app_rng._widget_handlers
+      and (kaya.wire.OCC_RANGE_COMMITTED, rng_bar.id)
+      in app_rng._widget_handlers
+      and (kaya.wire.OCC_RANGE_COMMITTED, rng_node.id)
+      in app_rng._node_handlers)
+
+rng_occs = [
+    (kaya.wire.OCC_RANGE_COMMITTED, rng_bar.id, [], [3.0, 8.0]),
+    (kaya.wire.OCC_RANGE_CHANGED, rng_bar.id, [], [3.5, 8.0]),
+    (kaya.wire.OCC_RANGE_COMMITTED, rng_node.id, ["b"], [3.0, 9.0]),
+]
+real_next_rng = kaya.runtime.next_occurrence
+kaya.runtime.next_occurrence = (
+    lambda: rng_occs.pop(0) if rng_occs else None)
+try:
+    app_rng._dispatch_loop()
+finally:
+    kaya.runtime.next_occurrence = real_next_rng
+
+check("range_committed reaches on_commit with both values, and "
+      "range_changed on_change",
+      rng_commits == [(3.0, 8.0)] and rng_moves == [(3.5, 8.0)])
+check("a stamped range_committed passes the copy's row, then both values",
+      len(rng_row_commits) == 1
+      and isinstance(rng_row_commits[0][0], kaya.Row)
+      and rng_row_commits[0][0].key == "b"
+      and rng_row_commits[0][1:] == (3.0, 9.0))
+
 # --- THE NUMBER FIELD (docs/number-field-plan.md §2) -----------------
 # The kind, its bounds and step pack as the generated setters do, a bound
 # signal packs a bind and no set, and value_committed reaches `on_commit`,

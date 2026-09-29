@@ -590,7 +590,11 @@ in docs/deferred.md.
    `color_picker` in both zones with `alpha`, `on_color` where each binding
    spells the date picker's handler, and each binding's own `Color` value
    with its hex constructor and hex reading, all nine; fake-name negatives
-   firing every row, counts printed),
+   firing every row, counts printed.
+   AND THE RANGE SINCE 2026-09-29 (docs/range-plan.md §7): `range` in both
+   zones with its props, thumb labels bound from a row field, `on_change` and
+   `on_commit` where each binding spells the slider's, and `axis` on a slider
+   in all nine; fake-name negatives firing every row, counts printed),
    `tools/check-universal-props.py` (the lowering-side sibling: every
    backend applies the universal a11y props to every kind — Compose
    per-arm, SwiftUI's one wrapper unbypassed, GTK/WinUI's apply arm
@@ -661,7 +665,16 @@ in docs/deferred.md.
    hex field's onValueChange), and on every arm but AppKit's the opaque
    picker's alpha forced to FF by the arm, since GTK, WinUI, Compose and
    UIKit each hold a translucent colour on an opaque control (measured,
-   plan §4). Twenty-one more watched negatives, counts printed),
+   plan §4). Twenty-one more watched negatives, counts printed.
+   AND THE RANGE SINCE 2026-09-29 (docs/range-plan.md §3): every value path
+   of both thumbs through the core's one clamp with its write-back and
+   `range_committed` once per gesture, on all five arms; the STACKED arms
+   (SwiftUI on both platforms, GTK, WinUI) route a press by GEOMETRY, the
+   midpoint split and a tie by press side, and name no z-order API in the
+   arm, since z-order swapping was the most reported failure in the survey;
+   and every committed pair reaches `Scene::user_range_committed` before it
+   is sent, every drain emptying the queued ones first (rule 11: the core's
+   pair follows the user). Counts printed, each clause's negatives watched),
    `tools/check-submit.py` (SUBMITTED PUBLISHES THROUGH THE GESTURE'S DOOR
    ALONE (docs/submit-plan.md S1-S4, S6): an entry's or search field's
    Return and a submitting textarea's Return or Send key, and no scene can

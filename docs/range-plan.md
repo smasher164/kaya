@@ -1,8 +1,10 @@
 # The range and the vertical slider: the design pass
 
-Status: DESIGNED 2026-09-29; the DEPTH slice built the same day (the core,
-the Rust binding, the SwiftUI arm on macOS and iOS, tools/scenes/range.steps
-green on the mac; §4.2's mac rows MEASURED; breadth in docs/deferred.md). The video editor's trim control
+Status: DESIGNED 2026-09-29; the DEPTH and BREADTH slices built the same
+day: all five backends and nine bindings, §4 MEASURED on every platform,
+range, rangertl and the sliders fader on every lane, and rule 11 RULED and
+built; what is left is docs/deferred.md's "WATCH — the range's tie and its
+readers' names". The video editor's trim control
 and its volume fader (docs/video-editor-plan.md §4, ruling 6, RULED
 2026-09-28: a separate `range` kind, horizontal, two thumbs for trim in and
 out; the vertical fader is the `axis` a row, column and scroll take, now
@@ -148,6 +150,21 @@ at the root, per ruling 6, until an app asks for a vertical range.
     thumb gives on a long clip; the pattern every editor surveyed uses is
     number fields beside the range (the number field, and the timecode
     formatter at video-editor time), which the editor's inspector will do.
+11. **An app write is judged against the pair as it really stands.**
+    RULED 2026-09-29 (the maintainer, option a). The core's record of the
+    pair follows the user: every `range_committed` the user makes moves it
+    (`Scene::user_range_committed`, called at every arm's commit door; the
+    fullscreen and section mirrors are the precedent). A transaction that
+    writes ONE thumb of a range the backend already holds, past the other
+    thumb as it now stands (the user moved it and the app had not heard),
+    is CLAMPED there through the one clamp, never refused; two thumbs
+    written in one transaction are still read against each other and
+    refused as rule 1 says. When the clamp changed the write, the app hears
+    the settled pair in one `range_committed`: a correction, not an echo,
+    since a write that lands as written fires nothing. The core reads the
+    writes off the batch's ops (`settle_range_writes`), so a live range and
+    a stamped copy's row field are one path; the app's own signal keeps what
+    it wrote, as it already does after a user move.
 
 ## §4. What is measured first
 
@@ -158,8 +175,8 @@ at the root, per ruling 6, until an app asks for a vertical range.
 2. **The stacked pair (§6), four platforms**: that a press lands on the
    nearer thumb's slider (a container `hitTest` on AppKit and UIKit, a
    subclassed `GtkScale` answering `contains`, WinUI's z-order set on
-   `PointerMoved` before the press), that each slider's track hides (a
-   cell whose `drawBar` draws nothing, UIKit's empty track images, a CSS
+   `PointerMoved` before the press, superseded by a clip per slider, below), that each slider's track hides (a
+   cell whose `drawBar` draws nothing, UIKit's clear track tints (empty track images restyle the thumb, measured below), a CSS
    class on the `trough`, WinUI's template parts by name), that kaya's
    track meets the thumbs' centres, and that the reader sees two sliders.
 3. **Vertical**: the bottom minimum and the Up key on all five; on the
@@ -200,6 +217,180 @@ at the root, per ruling 6, until an app asks for a vertical range.
      reads the hardware), and its tracking loop takes one posted drag per
      gesture; the harness drives through `set_value`, never a drag.
 
+   MEASURED 2026-09-29, GTK 4.18.6 with libadwaita (the kaya-linux image
+   under Xvfb, a real XTEST pointer and keyboard from xdotool, the reader
+   an AT-SPI client in a second process;
+   docs/probes/range-stack-gtk-2026-09-29.py, run LTR and under RTL):
+   - GTK's pick tries a widget's CHILDREN before its own `contains`
+     (gtkwidget.c `gtk_widget_do_pick`), so a subclassed `GtkScale`
+     answering `contains` on its half routes nothing: its own full-width
+     trough picks first, and every press went to the top scale, exactly as
+     with no routing at all (7 of 7). AMENDED (§6): the scale's own
+     children are made untargetable as well, so the pick reaches the
+     scale's `contains`; then all 7 presses went to the right thumb, in
+     both directions. The pick also trusts `contains` for the bounds, so
+     it answers the widget's own rect AND the half.
+   - A tie (gap 0) resolves by the side of the shared centre the press
+     lands on, at the pick, which is press-down: 3px left moved low, 3px
+     right moved high; under RTL the reverse, so the side is read from the
+     widget's direction, never from the knobs' order.
+   - The clamp in `value-changed` stops a dragged thumb at the gap and
+     writes it back (low dragged past high rested at 7). An AT-SPI
+     `Value.SetCurrentValue(9.5)` on the low slider, Orca's route, arrives
+     as `value-changed` and was clamped to 7 and read back as 7.
+   - The reader sees a `grouping` (the range's label) holding two `slider`s,
+     each named by its own label, each with the whole range as bounds;
+     kaya's track widgets, marked `Presentation`, do not appear.
+   - libadwaita styles the knob's hover and press on the SCALE's state
+     (`scale:hover > trough > slider`) and the focus ring on the focused
+     scale's knob, so the untargetable knob keeps its look. The native
+     trough and highlight hide by a CSS class that changes no size; kaya's
+     trough, a `scale > trough > highlight` node tree placed at the native
+     trough's bounds, matched it to the pixel, the fill running between the
+     two knobs' centres. Ticks: marks on both scales so the troughs
+     coincide, the high scale's at opacity 0.
+   - The travel is GtkRange's own (`gtk_range_compute_slider_position`):
+     the trough less the slider's measured size; low 2 and high 8 read
+     0.2 and 0.8, and 0.8 and 0.2 under RTL.
+   - `Orientation::Vertical` with `inverted(true)`: 0.25 from the bottom at
+     0.25, the Up key raised it to 0.5, and RTL changed nothing.
+   - What the routing costs: a press on a knob but off its centre warps the
+     knob's centre to the pointer, since GtkRange sees no slider under the
+     press (at most half a knob, usually inside one step), and GtkRange's
+     shift-click fine-tune never starts.
+
+   MEASURED 2026-09-29, WinUI 3 (Windows App SDK 2.2, the lane's Windows 11
+   arm64 VM, 96 DPI; real `mouse_event` and `keybd_event` input on the
+   system queue, the reader a UIA client in a separate PowerShell process;
+   docs/probes/range-stack-winui-2026-09-29.py driving
+   docs/probes/range-stack-winui-2026-09-29.ps1, run LTR and under
+   `KAYA_LOCALE=ar-EG`, with the gap forced to 0 for that run so a tie
+   could be pressed). AMENDED (§6): WinUI routes by CLIPPING, not by
+   z-order. Each Slider's `UIElement.Clip` is its half of the track, split
+   at the midpoint of the two thumbs' centres (the shared centre at a tie).
+   XAML hit testing honours the clip, and the Slider marks its own
+   PointerPressed handled, so the clip is the only routing surface
+   available (slider-plan §6):
+   - A click on the track in the low half moved low to the click (3.5), and
+     in the high half moved high (6.5). A drag of low toward the far end
+     stopped at the other thumb, with one commit for the whole drag.
+   - At a tie, a press 3px left of the shared centre dragged low and 3px
+     right dragged high. A press on one side dragged toward the other left
+     both where they were and committed nothing. Under RTL the two sides
+     swap, so the range mirrors: the slider's local coordinates flow right
+     to left with it (low's centre read 37 on a 160 DIP slider at value 2),
+     and the clip is set in them.
+   - UIA's `RangeValue.SetValue(9.5)` on the low thumb (Narrator's route)
+     arrives as `ValueChanged` and was clamped and written back: UIA read
+     the clamped value. `SetValue(1)` on high left the pair unchanged.
+   - The reader sees a `Group` named by the range's label holding two
+     `Slider`s, each named by its own label. Each thumb's
+     BoundingRectangle is its CLIPPED half: UIA reports the bounds after the
+     clip, so a reader's highlight draws around the half a press would take.
+   - The native `HorizontalTrackRect` and `HorizontalDecreaseRect` hide at
+     opacity 0 by template name, which keeps the layout. The template's
+     visual states animate only their Fill, never their Opacity. kaya's
+     track, fill and ticks are drawn with `SliderTrackFill`,
+     `SliderTrackValueFill`, `SliderTrackCornerRadius` and
+     `SliderTickBarFill`, laid at the native track's box, and the fill runs
+     from one thumb's centre to the other's (picture viewed). The keyboard
+     focus rectangle is clipped with its slider, so it outlines the focused
+     thumb's half. At a tie the two clipped thumbs draw as ONE knob made of
+     two halves, with a faint seam and neither on top, so no outline is
+     drawn (rule 4's outline marks the thumb on top, and there is none).
+   - The travel is the template's own: an 18 DIP thumb whose centre runs
+     from 9 DIP in at each end. Low 2 and high 8 read 0.2 and 0.8, and 0.8
+     and 0.2 under RTL.
+   - `Orientation::Vertical`: a press near the bottom read 0 and one near
+     the top read 1, Up raised 0.25 to 0.5, and RTL flipped neither. It
+     does flip the horizontal arrow keys on a vertical slider (Right
+     lowered it under ar-EG), which is WinUI's own key mapping. The
+     harness's nudge sends Up and Down only.
+   - Probe mechanics only: a drag needs MOVE|ABSOLUTE input. A bare
+     `SetCursorPos` raises no pointer update, and the thumb never moved.
+
+   MEASURED 2026-09-29, iOS 26.5 simulator (iPhone, 375x812pt; the arm's
+   mechanics in docs/probes/range-stack-ios-2026-09-29.swift, real touches
+   from the lane's XCUITest driver, and the range legs themselves):
+   - An empty track IMAGE restyles the thumb: UIKit drops the Liquid
+     Glass capsule for the legacy round knob (the guest photographed beside
+     its own playhead slider), and the thumb's `trackRect` becomes ZERO
+     high. A CLEAR TRACK TINT (`minimumTrackTintColor` and
+     `maximumTrackTintColor` `.clear`) keeps the platform's own thumb and a
+     4pt `trackRect` centred on it, which is where kaya draws (§3 rule 9;
+     tools/check-slider-commit.py holds it).
+   - The knob's centre travels from the view's BOUNDS (31pt knob on a 300pt
+     slider: 35.5 to 284.5), not from `trackRect`, so `expect_thumb` reads
+     the knob's own centres at the minimum and the maximum. AppKit's compat
+     design (a host with an SDK stamp below 26, the JVM) does the same while
+     the modern one runs from the bar, measured headless the same day, so
+     the mac arm reads its cell's knob at both ends too.
+   - Routing: a drag from the high knob was routed to high and moved it;
+     a TAP on the track right of the midpoint was routed to high, and
+     `UISlider` does not begin tracking off its knob, so nothing moved (a
+     click on the track warps only on macOS). At a tie (gap 0), a press 3pt
+     left of the shared centre moved low and one 4pt right moved high,
+     decided in `hitTest`, before `beginTracking`.
+   - Right to left MIRRORS both platforms' sliders (a `UISlider` puts its
+     minimum at the right; an `NSSlider` under `userInterfaceLayoutDirection`
+     too, value 2 of 10 at 154 of 200pt), so the split reads which side of
+     the midpoint the low thumb is on and the tie's minimum side from the
+     slider's direction; the depth's split sent every ar-EG press to the
+     other thumb and its fill drew nothing.
+   - The reader sees a group of two `Slider`s 'In' and 'Out', each with its
+     own value, each framed as the whole control; kaya's reader needs the
+     container to answer its element count, so the arm declares
+     `accessibilityElements = [low, high]`, low first in either direction.
+     VoiceOver adjusts only by increment and decrement on iOS (no value
+     set), and `UISlider`'s own increment did nothing here, so the arm's
+     override through the clamp is the whole door; `nudge` drives it on the
+     iOS legs (§5).
+   - The fader: the rotated slider's minimum is at the bottom (window y 529
+     at 0, 360 at 1), a real drag up the tall axis from the knob raised it
+     0.25 to 0.73, the accessibility frame is the tall wrapper (34x200,
+     where it is drawn), and increment raised the value and the knob. Under
+     ar-EG the range mirrors (`rangertl` reads low at 0.8) and the fader's
+     0.25 does not move.
+
+   MEASURED 2026-09-29, Android (the lane's API 35 emulator, 360x800dp at
+   density 160, material3 1.3.1 over compose-ui 1.7.5; the range guest driven
+   by `adb input` between dumps of the thumbs' node info, and the provider's
+   own `performAction`, the call TalkBack makes):
+   - A drag of the low thumb past the high one stopped at `high - min_gap`
+     (7 of 8), one commit. Material stops a drag at the other thumb; the
+     arm's clamp adds the gap, and the control draws the answer.
+   - A tap on the track moves the nearer thumb there (low 7, high 8: a tap
+     at 2 moved low, one at 9.5 moved high), one commit each.
+   - `ACTION_SET_PROGRESS` on the low thumb asked 9.5 came back 8.5 (high
+     9.5, gap 1) and committed once: `onValueChangeFinished` runs after an
+     assistive set. Asked below the other thumb, the high one stays and
+     nothing commits. `set_value` on a range takes this door on the lane.
+   - A tie (gap 0) is decided by the DRAG'S DIRECTION, never the press's
+     side: pressed right of the shared centre and dragged left, low moved;
+     pressed left and dragged right, high moved (rule 4's recorded
+     divergence). Under ar-EG a drag toward the minimum moved low and one
+     toward the maximum moved NEITHER thumb. While the thumbs coincide the
+     low thumb has no node info at all (compose-ui drops a node another
+     covers), so a service reaches only the high one.
+   - Right to left mirrors the range: low at 2 sits at the right.
+   - The thumbs' words: Material reads "range start" and "range end" through
+     `LocalContext`'s resources, so the arm answers those two ids with
+     `low_label` and `high_label` (the range's `a11y_label` when unset) and
+     the merged semantics names the thumbs "In" and "Out", replacing
+     Material's words rather than joining them. BUT compose-ui 1.7.5 puts
+     NO content description on any Material slider's node info (these two
+     thumbs, the fader, the plain slider): the node merges its children and
+     the thumb's `background(shape)` gives it one, and
+     `populateAccessibilityNodeInfoProperties` then skips the description.
+     `uiautomator dump` reads `content-desc=""` on every SeekBar and "Trim"
+     on the group. Open (docs/deferred.md's range entry).
+   - The fader (the Material slider in a −90° layer, constraints swapped,
+     left to right inside): a 48x200dp box whose node info frame is tall
+     (44x218); a drag of the thumb upward set 1.0 and a tap near the
+     travel's bottom set 0 (hit testing goes through the rotation);
+     `ACTION_SCROLL_FORWARD` raised 0 to 0.25 and the thumb moved up.
+     Under ar-EG it does not flip.
+
 ## §5. How a leg sees it
 
 A new shared scene, `range.steps`, one guest per language: a range 0..10
@@ -214,8 +405,12 @@ handlers write. And `sliders.steps` gains a vertical fader.
   reads `"7 8"`.
 - a button writes `low(1)`: the control moves, no label moves (the echo).
 - `nudge range#0 high down`, `nudge slider#1 up`: the keyboard's path, on
-  the three desktops; the phones' lane tables drop the lines (the number
-  field's precedent).
+  the three desktops; Android's lane table drops the lines (the number
+  field's precedent). AMENDED 2026-09-29 (the iOS breadth): on iOS `nudge`
+  calls the adjustable element's own `accessibilityIncrement` /
+  `accessibilityDecrement`, what VoiceOver's swipe calls and the phone's
+  only stepping door, so the iOS legs run the lines and the assistive path
+  through the clamp is observed on a lane.
 - `expect_axis slider#1 "vertical"` and `expect_thumb slider#1 "0.25"`: the
   orientation read from the control, and the thumb's centre as a fraction
   of its travel (its centre at the minimum to its centre at the maximum,
@@ -239,9 +434,9 @@ value.
 | backend | range | vertical slider |
 |---|---|---|
 | SwiftUI macOS | the stacked pair: two `KayaNSSlider`s in one container view, cells drawing knobs only, one bar drawn by kaya with the accent fill between | `isVertical = true` on the hosted `NSSlider` |
-| SwiftUI iOS | the stacked pair: two `UISlider`s with empty track images over one track view kaya draws, `hitTest` to the nearer `thumbRect` | the `KayaTickedSlider` wrapper rotated −90°, its intrinsic size swapped, left to right forced |
-| GTK | the stacked pair: two subclassed `GtkScale`s answering `contains` near their knob, troughs hidden by a CSS class, one trough drawn in Adwaita's `scale trough highlight` nodes | `Orientation::Vertical` with `inverted(true)` |
-| WinUI | the stacked pair: two `Slider`s in one Grid cell, track parts hidden by name, z-order to the nearer thumb | `Orientation::Vertical` |
+| SwiftUI iOS | the stacked pair: two `UISlider`s with clear track tints over one track view kaya draws, `hitTest` to the nearer `thumbRect` | the `KayaTickedSlider` wrapper rotated −90°, its intrinsic size swapped, left to right forced |
+| GTK | the stacked pair: two subclassed `GtkScale`s answering `contains` on their half of the midpoint split, with their own children untargetable (§4 MEASURED), troughs hidden by a CSS class, one trough drawn in Adwaita's `scale trough highlight` nodes | `Orientation::Vertical` with `inverted(true)` |
+| WinUI | the stacked pair: two `Slider`s in one Grid cell, track parts hidden by name, each Slider CLIPPED to its half of the track at the midpoint between the thumbs (AMENDED 2026-09-29, §4) | `Orientation::Vertical` |
 | Compose | material3 `RangeSlider`, uncontrolled toward the app over the one commit path, kaya's tick painter as on the slider | the Material `Slider` in a −90° `graphicsLayer` with swapped constraints, `LocalLayoutDirection` Ltr inside |
 
 **The stacked pair** is the web's answer to the same absence (two range

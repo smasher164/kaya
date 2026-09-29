@@ -656,6 +656,12 @@ type app = {
      (docs/slider-plan.md S2). *)
   widget_commits : (int64, float -> unit) Hashtbl.t;
   node_commits : (int64, Kaya_wire.value list -> float -> unit) Hashtbl.t;
+  (* A range's pair, live and settled, live and stamped
+     (docs/range-plan.md §2). *)
+  widget_ranges : (int64, float -> float -> unit) Hashtbl.t;
+  node_ranges : (int64, Kaya_wire.value list -> float -> float -> unit) Hashtbl.t;
+  widget_range_commits : (int64, float -> float -> unit) Hashtbl.t;
+  node_range_commits : (int64, Kaya_wire.value list -> float -> float -> unit) Hashtbl.t;
   model : (int64, instance list) Hashtbl.t;
   (* The minter's counters, keyed by path the way [model] is. Kept on the
      app and NOT in the transaction's rollback journal, on purpose: the
@@ -820,6 +826,10 @@ let create () =
     node_values = Hashtbl.create 8;
     widget_commits = Hashtbl.create 8;
     node_commits = Hashtbl.create 8;
+    widget_ranges = Hashtbl.create 4;
+    node_ranges = Hashtbl.create 4;
+    widget_range_commits = Hashtbl.create 4;
+    node_range_commits = Hashtbl.create 4;
     model = Hashtbl.create 8;
     fresh = Hashtbl.create 8;
     children = Hashtbl.create 8;
@@ -2043,12 +2053,13 @@ let progress ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?he
 (* A slider over min..max at value. Uncontrolled, like the entry: the bar
    owns its position and reports each change to [on_change] (the new value
    as a float). *)
-let slider ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?(min = 0.0) ?(max = 1.0) ?(value = 0.0) ?step ?tick_spacing ?bind
+let slider ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?(min = 0.0) ?(max = 1.0) ?(value = 0.0) ?step ?tick_spacing ?axis ?bind
     ?on_change ?on_commit () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_slider in
   Option.iter (fun g -> set_grow w g) grow;
   Option.iter (fun v -> set_fill w v) fill;
+  Option.iter (fun a -> set_axis w a) axis;
   set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
   let (Widget id) = w in
   emit tx (Kaya_wire.tx_set_min id min);
@@ -2064,6 +2075,35 @@ let slider ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help
   (match on_commit with
   | Some handler -> Hashtbl.replace tx.app.widget_commits id handler
   | None -> ());
+  w
+
+(* A range over min..max with two thumbs (docs/range-plan.md): each
+   movement's pair reaches [~on_change], each gesture's settled pair
+   [~on_commit], both values every time. *)
+let range ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind
+    ?(min = 0.0) ?(max = 1.0) ?low ?high ?low_bind ?high_bind ?step ?tick_spacing ?min_gap
+    ?low_label ?high_label ?on_change ?on_commit () =
+  let tx = the_tx () in
+  let w = widget Kaya_wire.kind_range in
+  Option.iter (fun g -> set_grow w g) grow;
+  Option.iter (fun v -> set_fill w v) fill;
+  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
+  let (Widget id) = w in
+  emit tx (Kaya_wire.tx_set_min id min);
+  emit tx (Kaya_wire.tx_set_max id max);
+  Option.iter (fun v -> emit tx (Kaya_wire.tx_set_step id v)) step;
+  Option.iter (fun v -> emit tx (Kaya_wire.tx_set_tick_spacing id v)) tick_spacing;
+  Option.iter (fun v -> emit tx (Kaya_wire.tx_set_min_gap id v)) min_gap;
+  Option.iter (fun v -> emit tx (Kaya_wire.tx_set_low_label id v)) low_label;
+  Option.iter (fun v -> emit tx (Kaya_wire.tx_set_high_label id v)) high_label;
+  (match ((low_bind : float signal option), low) with
+  | Some s, _ -> emit tx (Kaya_wire.tx_bind_low id s.sig_id)
+  | None, v -> emit tx (Kaya_wire.tx_set_low id (Option.value v ~default:min)));
+  (match ((high_bind : float signal option), high) with
+  | Some s, _ -> emit tx (Kaya_wire.tx_bind_high id s.sig_id)
+  | None, v -> emit tx (Kaya_wire.tx_set_high id (Option.value v ~default:max)));
+  Option.iter (fun h -> Hashtbl.replace tx.app.widget_ranges id h) on_change;
+  Option.iter (fun h -> Hashtbl.replace tx.app.widget_range_commits id h) on_commit;
   w
 
 (* A number field at value (docs/number-field-plan.md): typed text
@@ -4118,6 +4158,18 @@ module Tpl = struct
     let bind_value_field ?(level = 0) (Node id) (fd : (_, float) field) =
       emit (the_tx ()) (Kaya_wire.tx_bind_value_element ~level ~field:fd.fd_index id)
 
+    let bind_low_field ?(level = 0) (Node id) (fd : (_, float) field) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_low_element ~level ~field:fd.fd_index id)
+
+    let bind_high_field ?(level = 0) (Node id) (fd : (_, float) field) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_high_element ~level ~field:fd.fd_index id)
+
+    let bind_low_label_field ?(level = 0) (Node id) (fd : (_, string) field) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_low_label_element ~level ~field:fd.fd_index id)
+
+    let bind_high_label_field ?(level = 0) (Node id) (fd : (_, string) field) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_high_label_element ~level ~field:fd.fd_index id)
+
     (* Bind a date picker's value to one field of the element; a
        (_, date) field only (docs/datetime-plan.md D10). *)
     let bind_date_field ?(level = 0) (Node id) (fd : (_, date) field) =
@@ -4519,6 +4571,55 @@ module Tpl = struct
         Hashtbl.replace (the_tx ()).app.node_commits id (fun keys v ->
             handler (List.map key_of_wire keys) v)
     | None -> ());
+    n
+
+  (* A range per stamped copy (docs/range-plan.md §2): each thumb from any
+     of the three sources, a row's own fields being the point; pairs carry
+     the copy's keys first. *)
+  let range ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?(min = 0.0) ?(max = 1.0)
+      ?low ?low_bind ?low_field ?high ?high_bind ?high_field ?step ?tick_spacing ?min_gap
+      ?low_label ?low_label_bind ?low_label_field ?high_label ?high_label_bind
+      ?high_label_field ?(level = 0) ?(a11y_level = level)
+      ?on_change ?on_commit () =
+    let n = Floor.widget Kaya_wire.kind_range in
+    Option.iter (fun g -> Floor.set_grow n g) grow;
+    Option.iter (fun v -> Floor.set_fill n v) fill;
+    Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~a11y_level n;
+    Floor.set_min n min;
+    Floor.set_max n max;
+    Option.iter (fun v -> Floor.set_step n v) step;
+    Option.iter (fun v -> Floor.set_tick_spacing n v) tick_spacing;
+    let (Node id) = n in
+    let tx = the_tx () in
+    Option.iter (fun v -> emit tx (Kaya_wire.tx_set_min_gap id v)) min_gap;
+    Option.iter (fun v -> emit tx (Kaya_wire.tx_set_low_label id v)) low_label;
+    Option.iter
+      (fun (s : string signal) -> emit tx (Kaya_wire.tx_bind_low_label id s.sig_id))
+      low_label_bind;
+    Option.iter (fun fd -> Floor.bind_low_label_field ~level n fd) low_label_field;
+    Option.iter (fun v -> emit tx (Kaya_wire.tx_set_high_label id v)) high_label;
+    Option.iter
+      (fun (s : string signal) -> emit tx (Kaya_wire.tx_bind_high_label id s.sig_id))
+      high_label_bind;
+    Option.iter (fun fd -> Floor.bind_high_label_field ~level n fd) high_label_field;
+    Option.iter (fun v -> emit tx (Kaya_wire.tx_set_low id v)) low;
+    Option.iter (fun (s : float signal) -> emit tx (Kaya_wire.tx_bind_low id s.sig_id)) low_bind;
+    Option.iter (fun fd -> Floor.bind_low_field ~level n fd) low_field;
+    Option.iter (fun v -> emit tx (Kaya_wire.tx_set_high id v)) high;
+    Option.iter (fun (s : float signal) -> emit tx (Kaya_wire.tx_bind_high id s.sig_id)) high_bind;
+    Option.iter (fun fd -> Floor.bind_high_field ~level n fd) high_field;
+    Option.iter
+      (fun handler ->
+        Hashtbl.replace tx.app.node_ranges id (fun keys lo hi ->
+            handler (List.map key_of_wire keys) lo hi))
+      on_change;
+    Option.iter
+      (fun handler ->
+        Hashtbl.replace tx.app.node_range_commits id (fun keys lo hi ->
+            handler (List.map key_of_wire keys) lo hi))
+      on_commit;
     n
 
   (* A number field per stamped copy, its value from any of the three
@@ -5205,6 +5306,31 @@ let dispatch_loop app =
                    Hashtbl.replace tx.app.canvas_viewboxes id box;
                    emit tx
                      (drawing_record id [] box (fun d -> handler d box time)))
+           | _ -> ())
+         else if
+           kind = Kaya_wire.occ_kind_range_changed
+           || kind = Kaya_wire.occ_kind_range_committed
+         then
+           (* Both values ride as the record's bare trailing pair
+              (docs/range-plan.md §2). *)
+           (let live = kind = Kaya_wire.occ_kind_range_changed in
+            match (tail, keys) with
+           | Kaya_wire.F64 lo :: Kaya_wire.F64 hi :: _, [] ->
+               (match
+                  Hashtbl.find_opt
+                    (if live then app.widget_ranges else app.widget_range_commits)
+                    id
+                with
+               | Some handler -> dispatch app (fun () -> handler lo hi)
+               | None -> ())
+           | Kaya_wire.F64 lo :: Kaya_wire.F64 hi :: _, keys ->
+               (match
+                  Hashtbl.find_opt
+                    (if live then app.node_ranges else app.node_range_commits)
+                    id
+                with
+               | Some handler -> dispatch app (fun () -> handler keys lo hi)
+               | None -> ())
            | _ -> ())
          else if kind = Kaya_wire.occ_kind_sort_requested then
            (match (payload, keys) with

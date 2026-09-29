@@ -95,6 +95,21 @@ struct TrackRow {
     }
 
     @discardableResult
+    func range(
+        min: Double = 0.0, max: Double = 1.0,
+        low: KayaField<Double>, high: KayaField<Double>,
+        step: Double? = nil, tickSpacing: Double? = nil, minGap: Double? = nil,
+        lowLabel: String? = nil, highLabel: String? = nil,
+        onChange: ((KayaAppTx, [KayaValue], Double, Double) -> Void)? = nil,
+        onCommit: ((KayaAppTx, [KayaValue], Double, Double) -> Void)? = nil
+    ) -> KayaNodeHandle {
+        t.range(
+            min: min, max: max, low: low, high: high, step: step,
+            tickSpacing: tickSpacing, minGap: minGap, lowLabel: lowLabel,
+            highLabel: highLabel, onChange: onChange, onCommit: onCommit)
+    }
+
+    @discardableResult
     func numberField(
         value f: KayaField<Double>, min: Double? = nil, max: Double? = nil,
         step: Double? = nil,

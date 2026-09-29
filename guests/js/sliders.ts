@@ -53,6 +53,7 @@ const { levelText, commitText, volumeText, rowText, pos } = app.window({}, () =>
       .a11yId("master")
       .a11yLabel("Level"); // slider#0
     kaya.slider({ value: 0.5, min: 0, max: 1, tickSpacing: 0.25, onChange: onVolume }).a11yLabel("Volume"); // slider#1
+    kaya.slider({ value: 0.25, min: 0, max: 1, step: 0.25, axis: kaya.Axis.VERTICAL }).a11yId("fader").a11yLabel("Fader"); // slider#2
     kaya.button("reset", { onClick: onReset }); // button#0
     for (const track of tracks) {
       kaya.label({ bind: track.name });

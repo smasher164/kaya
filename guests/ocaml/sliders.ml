@@ -46,6 +46,8 @@ let () =
               ~min:0.0 ~max:1.0 ~value:0.5 ~tick_spacing:0.25
               ~on_change:(fun v ->
                 write volume_text (("volume: " ^ spelled v)));
+            slider ~a11y_id:"fader" ~a11y_label:"Fader"       (* slider#2 *)
+              ~min:0.0 ~max:1.0 ~value:0.25 ~step:0.25 ~axis:Vertical;
             button ~text:"reset"                              (* button#0 *)
               ~on_click:(fun () ->
                 (* Must NOT come back as a value or a commit occurrence. *)

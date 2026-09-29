@@ -76,6 +76,9 @@ LEGS = {
         "numberfield-compose", "numberfieldde-compose",
         # The colour picker's synthesized sheet (docs/color-picker-plan.md §6).
         "colorpicker-compose",
+        # The range and the rotated fader, and under ar-EG (docs/range-plan.md
+        # §5); MODS drops the keyboard's lines.
+        "range-compose", "rangertl-compose",
         # Immersive mode (docs/fullscreen-plan.md §3): MODS cuts the user half.
         "fullscreen-compose",
         "sizepolicy-compose", "adaptive-compose", "feed-compose",
@@ -160,6 +163,7 @@ LEGS = {
         "sheet-jvm",
         "format-jvm", "formatde-jvm", "formatar-jvm",
         "numberfield-jvm", "numberfieldde-jvm", "colorpicker-jvm",
+        "range-jvm", "rangertl-jvm",
     ],
     "go": [
         "go", "a11y-go", "a11yrows-go",
@@ -179,6 +183,7 @@ LEGS = {
         "sheet-go",
         "format-go", "formatde-go", "formatar-go",
         "numberfield-go", "numberfieldde-go", "colorpicker-go",
+        "range-go", "rangertl-go",
     ],
     "python": [
         "varied-python", "portfolio-python",
@@ -189,7 +194,7 @@ LEGS = {
 # extra (docs/compliance-plan.md §4); the reads ask the platform, never
 # this.
 SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG",
-                "scrollrtl": "ar-EG", "numberfieldde": "de-DE"}
+                "scrollrtl": "ar-EG", "numberfieldde": "de-DE", "rangertl": "ar-EG"}
 
 # The text-scale knob a scene carries (docs/compliance-plan.md §2.1): the
 # forced Configuration's fontScale and the Density every sp reads.
@@ -322,6 +327,17 @@ MODS = {
     # §3 rule 7): the scene steps last, so the cut takes the steps alone.
     "numberfield": {"cut": ("nudge", "expect_focused expect_ax", "")},
     "numberfieldde": {"cut": ("nudge", "expect_focused expect_ax", "")},
+    # A PHONE'S SLIDER HAS NO KEYBOARD DOOR (docs/range-plan.md §5, the
+    # number field's precedent): each arrow and what it feeds.
+    "range": {"drop": (
+        (("nudge range#0", 'expect_value range#0 "3 4.5"',
+          'expect label#1 "commits: 5'),
+         "expect_thumb expect_ax", "a phone's slider has no keyboard door"),
+        (("nudge slider#1", 'expect_value slider#1 "0.5"',
+          'expect label#2 "volume: 0.5"', 'expect_thumb slider#1 "0.5"'),
+         "expect_thumb=range#0 expect_axis expect_ax",
+         "a phone's slider has no keyboard door"),
+    )},
     "identity": {"drop": ((("expect_title window#1",), "expect_app_icon",
                            "no auxiliary windows"),)},
     # A phone app is handed no FOREIGN drag source (docs/dnd-plan.md D9),

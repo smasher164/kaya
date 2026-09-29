@@ -1,0 +1,15 @@
+# The range guest under KAYA_LOCALE=ar-EG (docs/range-plan.md §3 rules 5 and
+# 6, §5): the range mirrors as the slider does, so the low thumb sits at the
+# right and its place, read from the LEFT, is the mirror of range.steps'; the
+# vertical fader does not flip.
+expect_value range#0 "2 8"
+expect_thumb range#0 low "0.8"
+expect_thumb range#0 high "0.2"
+set_value range#0 low 3.2
+expect_value range#0 "3 8"
+expect label#1 "commits: 1 at 3 8"
+expect_thumb range#0 low "0.7"
+expect_thumb slider#1 "0.25"
+expect_ax range#0 "group/Trim"
+expect_ax range#0 low "slider/In"
+expect_ax range#0 high "slider/Out"

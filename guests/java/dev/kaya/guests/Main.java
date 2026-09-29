@@ -182,6 +182,10 @@ public final class Main {
             case "colorpicker":
                 app = ColorPicker::app;
                 break;
+            case "range":
+            case "rangertl":
+                app = Range::app;
+                break;
             case "tooltips":
                 app = Tooltips::app;
                 break;

@@ -734,6 +734,18 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 sig: "()[J".into(),
                 fn_ptr: present_color_palette as *mut _,
             },
+            // The range (docs/range-plan.md §3 rule 2): the core's one clamp
+            // and the pair's two occurrences.
+            NativeMethod {
+                name: "rangeClamp".into(),
+                sig: "(DDDDZDD)D".into(),
+                fn_ptr: present_range_clamp as *mut _,
+            },
+            NativeMethod {
+                name: "emitRange".into(),
+                sig: "([BDDZ)V".into(),
+                fn_ptr: present_emit_range as *mut _,
+            },
             NativeMethod {
                 name: "emitSortRequested".into(),
                 sig: "([BI)V".into(),
@@ -2133,6 +2145,35 @@ extern "system" fn present_color_quantize(
     a: jni::sys::jdouble,
 ) -> jlong {
     crate::capi::kaya_color_quantize(r, g, b, a) as jlong
+}
+
+#[allow(clippy::too_many_arguments)]
+extern "system" fn present_range_clamp(
+    _env: JNIEnv,
+    _class: JClass,
+    min: jni::sys::jdouble,
+    max: jni::sys::jdouble,
+    step: jni::sys::jdouble,
+    gap: jni::sys::jdouble,
+    low: jni::sys::jboolean,
+    other: jni::sys::jdouble,
+    raw: jni::sys::jdouble,
+) -> jni::sys::jdouble {
+    crate::capi::kaya_range_clamp(min, max, step, gap, low, other, raw)
+}
+
+extern "system" fn present_emit_range(
+    env: JNIEnv,
+    _class: JClass,
+    tag: JByteArray,
+    low: jni::sys::jdouble,
+    high: jni::sys::jdouble,
+    committed: jni::sys::jboolean,
+) {
+    let bytes = env
+        .convert_byte_array(&tag)
+        .expect("kaya: reading the range tag failed");
+    unsafe { crate::capi::kaya_emit_range(bytes.as_ptr(), bytes.len(), low, high, committed) };
 }
 
 extern "system" fn present_color_palette(env: JNIEnv, _class: JClass) -> jni::sys::jlongArray {

@@ -4165,6 +4165,11 @@ pub unsafe extern "C" fn kaya_emit_range(
     if !stamped_tag_is_live(tag, "a range move") {
         return;
     }
+    if committed != 0 {
+        if let Some(scene) = PRESENTATION_SCENE.lock().unwrap().as_mut() {
+            scene.user_range_committed(tag, low, high);
+        }
+    }
     if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
         sink.send_range_tag(tag, low, high, committed != 0);
         return;
@@ -4996,7 +5001,13 @@ fn send_occurrences(occurrences: Vec<crate::protocol::Occurrence>) {
                 ring::REC_TICK,
                 &crate::wire::draw_body(id.0, &[], size, Some(time)),
             ),
-            other => unreachable!("send_occurrences carries only the canvas asks: {other:?}"),
+            // A range correction (docs/range-plan.md §3 rule 11) is packed
+            // where every other occurrence is.
+            other @ (crate::protocol::Occurrence::RangeCommitted { .. }
+            | crate::protocol::Occurrence::InstanceRangeCommitted { .. }) => {
+                crate::protocol::OccSink::Ring(state.ring.clone()).send(other)
+            }
+            other => unreachable!("send_occurrences carries only the canvas asks and range corrections: {other:?}"),
         }
     }
 }

@@ -834,6 +834,11 @@ sealed record TimeChanged(ulong Id, List<object> Keys, TimeOnly Time) : Occurren
 
 sealed record ColorChanged(ulong Id, List<object> Keys, Color Color) : Occurrence(Id, Keys);
 
+sealed record RangeChanged(ulong Id, List<object> Keys, double Low, double High) : Occurrence(Id, Keys);
+
+sealed record RangeCommitted(ulong Id, List<object> Keys, double Low, double High)
+    : Occurrence(Id, Keys);
+
 sealed record TextEdited(ulong Id, List<object> Keys, Edit Act) : Occurrence(Id, Keys);
 
 sealed record TextFormatted(ulong Id, List<object> Keys, Format Act) : Occurrence(Id, Keys);
@@ -1363,6 +1368,10 @@ sealed class KayaApp
     readonly Dictionary<ulong, Action<Tx, List<object>, TimeOnly>> nodeTimes = new();
     readonly Dictionary<ulong, Action<Tx, Color>> widgetColors = new();
     readonly Dictionary<ulong, Action<Tx, List<object>, Color>> nodeColors = new();
+    readonly Dictionary<ulong, Action<Tx, double, double>> widgetRanges = new();
+    readonly Dictionary<ulong, Action<Tx, List<object>, double, double>> nodeRanges = new();
+    readonly Dictionary<ulong, Action<Tx, double, double>> widgetRangeCommits = new();
+    readonly Dictionary<ulong, Action<Tx, List<object>, double, double>> nodeRangeCommits = new();
     // Window lifecycle: one handler each, receiving the window id.
     internal readonly Dictionary<ulong, Action<Tx>> closeRequested = new();
     internal readonly Dictionary<ulong, Action<Tx>> entryPopped = new();
@@ -2117,6 +2126,22 @@ sealed class KayaApp
     public void OnColor(Node n, Action<Tx, List<object>, Color> handler) =>
         nodeColors[n.Id] = handler;
 
+    /// A live range's moves, both thumbs (docs/range-plan.md §2).
+    public void OnRangeChanged(Widget w, Action<Tx, double, double> handler) =>
+        widgetRanges[w.Id] = handler;
+
+    /// A template range's moves, keys first.
+    public void OnRangeChanged(Node n, Action<Tx, List<object>, double, double> handler) =>
+        nodeRanges[n.Id] = handler;
+
+    /// The pair a live range's gesture SETTLED ON, once per gesture.
+    public void OnRangeCommitted(Widget w, Action<Tx, double, double> handler) =>
+        widgetRangeCommits[w.Id] = handler;
+
+    /// A template range's settled pair, keys first.
+    public void OnRangeCommitted(Node n, Action<Tx, List<object>, double, double> handler) =>
+        nodeRangeCommits[n.Id] = handler;
+
     /// The open transaction, reached ambiently by the chained canvas
     /// declarations (Widget.Fixed, OnDraw, OnTick) — Signal.Derive's route
     /// and for the same reason: the handle is an id alone.
@@ -2319,6 +2344,16 @@ sealed class KayaApp
                 return new TimeChanged(id, keys, KayaRecords.TimeOf(payload));
             case KayaWire.OccKindColorChanged:
                 return new ColorChanged(id, keys, Color.Of(payload));
+            case KayaWire.OccKindRangeChanged:
+            case KayaWire.OccKindRangeCommitted:
+            {
+                var span = payload as List<object>;
+                double low = span is { Count: 2 } && span[0] is double l ? l : 0.0;
+                double high = span is { Count: 2 } && span[1] is double h ? h : 0.0;
+                return kind == KayaWire.OccKindRangeChanged
+                    ? new RangeChanged(id, keys, low, high)
+                    : new RangeCommitted(id, keys, low, high);
+            }
             case KayaWire.OccKindTextEdited:
                 return new TextEdited(id, keys, EditOf(payload as List<object>));
             case KayaWire.OccKindTextFormatted:
@@ -2509,6 +2544,22 @@ sealed class KayaApp
                     break;
                 case ColorChanged colorRow when nodeColors.TryGetValue(colorRow.Id, out var onColorRow):
                     Dispatch(tx => onColorRow(tx, colorRow.Keys, colorRow.Color));
+                    break;
+                case RangeChanged { Live: true } rangeLive
+                    when widgetRanges.TryGetValue(rangeLive.Id, out var onRange):
+                    Dispatch(tx => onRange(tx, rangeLive.Low, rangeLive.High));
+                    break;
+                case RangeChanged rangeRow when nodeRanges.TryGetValue(rangeRow.Id, out var onRangeRow):
+                    Dispatch(tx => onRangeRow(tx, rangeRow.Keys, rangeRow.Low, rangeRow.High));
+                    break;
+                case RangeCommitted { Live: true } rangeCommitLive
+                    when widgetRangeCommits.TryGetValue(rangeCommitLive.Id, out var onRangeCommit):
+                    Dispatch(tx => onRangeCommit(tx, rangeCommitLive.Low, rangeCommitLive.High));
+                    break;
+                case RangeCommitted rangeCommitRow
+                    when nodeRangeCommits.TryGetValue(rangeCommitRow.Id, out var onRangeCommitRow):
+                    Dispatch(tx => onRangeCommitRow(tx, rangeCommitRow.Keys, rangeCommitRow.Low,
+                        rangeCommitRow.High));
                     break;
                 case CloseRequested close when closeRequested.TryGetValue(close.Id, out var onClose):
                     Dispatch(tx => onClose(tx));
@@ -3441,7 +3492,7 @@ sealed class Tx : IDisposable
     public Widget Slider(double min = 0.0, double max = 1.0, double value = 0.0,
         double? step = null, double? tickSpacing = null,
         Action<Tx, double>? onChange = null, Action<Tx, double>? onCommit = null,
-        double? grow = null, Signal? bind = null)
+        double? grow = null, Signal? bind = null, Axis? axis = null)
     {
         var w = Widget(KayaWire.KindSlider);
         Records.Add(KayaWire.TxSetMin(w.Id, min));
@@ -3450,8 +3501,38 @@ sealed class Tx : IDisposable
         if (tickSpacing is double ts) Records.Add(KayaWire.TxSetTickSpacing(w.Id, ts));
         if (bind is Signal s) Records.Add(KayaWire.TxBindValue(w.Id, s.Id));
         else Records.Add(KayaWire.TxSetValue(w.Id, value));
+        if (axis is Axis a) SetAxis(w, a);
         if (onChange != null) App.OnValueChanged(w, onChange);
         if (onCommit != null) App.OnValueCommitted(w, onCommit);
+        if (grow is double g) SetGrow(w, g);
+        return w;
+    }
+
+    /// A range over min..max with its thumbs at low and high
+    /// (docs/range-plan.md): moves go to onChange, each gesture's settled
+    /// pair to onCommit, both values each time. `bindLow`/`bindHigh` take
+    /// float Signals for the thumbs instead of constants; writes never echo.
+    public Widget Range(double min = 0.0, double max = 1.0, double low = 0.0,
+        double high = 1.0, double? step = null, double? tickSpacing = null,
+        double? minGap = null, string? lowLabel = null, string? highLabel = null,
+        Action<Tx, double, double>? onChange = null,
+        Action<Tx, double, double>? onCommit = null,
+        double? grow = null, Signal? bindLow = null, Signal? bindHigh = null)
+    {
+        var w = Widget(KayaWire.KindRange);
+        Records.Add(KayaWire.TxSetMin(w.Id, min));
+        Records.Add(KayaWire.TxSetMax(w.Id, max));
+        if (step is double st) Records.Add(KayaWire.TxSetStep(w.Id, st));
+        if (tickSpacing is double ts) Records.Add(KayaWire.TxSetTickSpacing(w.Id, ts));
+        if (minGap is double gap) Records.Add(KayaWire.TxSetMinGap(w.Id, gap));
+        if (lowLabel is string ll) Records.Add(KayaWire.TxSetLowLabel(w.Id, ll));
+        if (highLabel is string hl) Records.Add(KayaWire.TxSetHighLabel(w.Id, hl));
+        if (bindLow is Signal sl) Records.Add(KayaWire.TxBindLow(w.Id, sl.Id));
+        else Records.Add(KayaWire.TxSetLow(w.Id, low));
+        if (bindHigh is Signal sh) Records.Add(KayaWire.TxBindHigh(w.Id, sh.Id));
+        else Records.Add(KayaWire.TxSetHigh(w.Id, high));
+        if (onChange != null) App.OnRangeChanged(w, onChange);
+        if (onCommit != null) App.OnRangeCommitted(w, onCommit);
         if (grow is double g) SetGrow(w, g);
         return w;
     }
@@ -5025,6 +5106,26 @@ sealed class Tpl
     public void SetA11yLabel(Node n, Field<string> f, uint level = 0) =>
         tx.Records.Add(KayaWire.TxBindA11yLabelElement(n.Id, level, f.Index));
 
+    /// What a stamped range's low thumb speaks (docs/range-plan.md §8 ruling 2).
+    public void SetLowLabel(Node n, string label) =>
+        tx.Records.Add(KayaWire.TxSetLowLabel(n.Id, label));
+
+    public void SetLowLabel(Node n, Signal s) =>
+        tx.Records.Add(KayaWire.TxBindLowLabel(n.Id, s.Id));
+
+    public void SetLowLabel(Node n, Field<string> f, uint level = 0) =>
+        tx.Records.Add(KayaWire.TxBindLowLabelElement(n.Id, level, f.Index));
+
+    /// What a stamped range's high thumb speaks (docs/range-plan.md §8 ruling 2).
+    public void SetHighLabel(Node n, string label) =>
+        tx.Records.Add(KayaWire.TxSetHighLabel(n.Id, label));
+
+    public void SetHighLabel(Node n, Signal s) =>
+        tx.Records.Add(KayaWire.TxBindHighLabel(n.Id, s.Id));
+
+    public void SetHighLabel(Node n, Field<string> f, uint level = 0) =>
+        tx.Records.Add(KayaWire.TxBindHighLabelElement(n.Id, level, f.Index));
+
     /// A stamped copy's HELP TEXT (Tx.SetHelp). THE FIELD ARM IS THE
     /// CASE THIS ZONE EXISTS FOR: one sentence per copy, sourced from the
     /// row's own field.
@@ -5588,6 +5689,66 @@ sealed class Tpl
         if (max is double hi) tx.Records.Add(KayaWire.TxSetMax(n.Id, hi));
         if (step is double st) tx.Records.Add(KayaWire.TxSetStep(n.Id, st));
         if (onCommit != null) tx.App.OnValueCommitted(n, onCommit);
+        return n;
+    }
+
+    /// A range in the blueprint (docs/range-plan.md §2), its two thumbs
+    /// from any addressable source (a row's trim in and out being the
+    /// point); min, max, the step and the gap are constant across copies.
+    public Node Range(double min, double max, double low, double high,
+        double? step = null, double? tickSpacing = null, double? minGap = null,
+        string? lowLabel = null, string? highLabel = null,
+        Action<Tx, List<object>, double, double>? onChange = null,
+        Action<Tx, List<object>, double, double>? onCommit = null)
+    {
+        var n = RangeOf(min, max, step, tickSpacing, minGap, lowLabel, highLabel, onChange,
+            onCommit);
+        tx.Records.Add(KayaWire.TxSetLow(n.Id, low));
+        tx.Records.Add(KayaWire.TxSetHigh(n.Id, high));
+        return n;
+    }
+
+    public Node Range(double min, double max, Signal low, Signal high,
+        double? step = null, double? tickSpacing = null, double? minGap = null,
+        string? lowLabel = null, string? highLabel = null,
+        Action<Tx, List<object>, double, double>? onChange = null,
+        Action<Tx, List<object>, double, double>? onCommit = null)
+    {
+        var n = RangeOf(min, max, step, tickSpacing, minGap, lowLabel, highLabel, onChange,
+            onCommit);
+        tx.Records.Add(KayaWire.TxBindLow(n.Id, low.Id));
+        tx.Records.Add(KayaWire.TxBindHigh(n.Id, high.Id));
+        return n;
+    }
+
+    public Node Range(double min, double max, Field<double> low, Field<double> high,
+        double? step = null, double? tickSpacing = null, double? minGap = null,
+        string? lowLabel = null, string? highLabel = null,
+        Action<Tx, List<object>, double, double>? onChange = null,
+        Action<Tx, List<object>, double, double>? onCommit = null)
+    {
+        var n = RangeOf(min, max, step, tickSpacing, minGap, lowLabel, highLabel, onChange,
+            onCommit);
+        tx.Records.Add(KayaWire.TxBindLowElement(n.Id, 0, low.Index));
+        tx.Records.Add(KayaWire.TxBindHighElement(n.Id, 0, high.Index));
+        return n;
+    }
+
+    Node RangeOf(double min, double max, double? step, double? tickSpacing, double? minGap,
+        string? lowLabel, string? highLabel,
+        Action<Tx, List<object>, double, double>? onChange,
+        Action<Tx, List<object>, double, double>? onCommit)
+    {
+        var n = Widget(KayaWire.KindRange);
+        tx.Records.Add(KayaWire.TxSetMin(n.Id, min));
+        tx.Records.Add(KayaWire.TxSetMax(n.Id, max));
+        if (step is double st) tx.Records.Add(KayaWire.TxSetStep(n.Id, st));
+        if (tickSpacing is double ts) tx.Records.Add(KayaWire.TxSetTickSpacing(n.Id, ts));
+        if (minGap is double gap) tx.Records.Add(KayaWire.TxSetMinGap(n.Id, gap));
+        if (lowLabel is string ll) tx.Records.Add(KayaWire.TxSetLowLabel(n.Id, ll));
+        if (highLabel is string hl) tx.Records.Add(KayaWire.TxSetHighLabel(n.Id, hl));
+        if (onChange != null) tx.App.OnRangeChanged(n, onChange);
+        if (onCommit != null) tx.App.OnRangeCommitted(n, onCommit);
         return n;
     }
 

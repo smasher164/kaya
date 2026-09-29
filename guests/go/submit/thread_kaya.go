@@ -74,6 +74,10 @@ func (r threadRow) DatePicker(f kaya.Field[kaya.Date], onDate func(*kaya.Tx, str
 	return r.c.DatePicker(r.t, f, onDate)
 }
 
+func (r threadRow) Range(min, max float64, low, high kaya.Field[float64], onChange func(*kaya.Tx, string, float64, float64)) kaya.Node {
+	return r.c.Range(r.t, min, max, low, high, onChange)
+}
+
 func (r threadRow) ColorPicker(f kaya.Field[kaya.Color], onColor func(*kaya.Tx, string, kaya.Color)) kaya.Node {
 	return r.c.ColorPicker(r.t, f, onColor)
 }
@@ -104,6 +108,12 @@ func (r threadRow) SetMin(n kaya.Node, min float64) { r.t.SetMin(n, min) }
 func (r threadRow) SetMax(n kaya.Node, max float64) { r.t.SetMax(n, max) }
 
 func (r threadRow) SetAlpha(n kaya.Node, on bool) { r.t.SetAlpha(n, on) }
+
+func (r threadRow) SetMinGap(n kaya.Node, gap float64)          { r.t.SetMinGap(n, gap) }
+func (r threadRow) SetLowLabel(n kaya.Node, label string)       { r.t.SetLowLabel(n, label) }
+func (r threadRow) LowLabel(n kaya.Node, f kaya.Field[string])  { r.c.LowLabel(r.t, n, f) }
+func (r threadRow) SetHighLabel(n kaya.Node, label string)      { r.t.SetHighLabel(n, label) }
+func (r threadRow) HighLabel(n kaya.Node, f kaya.Field[string]) { r.c.HighLabel(r.t, n, f) }
 
 func (r threadRow) SetA11yID(n kaya.Node, id string)                { r.t.SetA11yID(n, id) }
 func (r threadRow) ContextMenu(n kaya.Node, c *kaya.ContextCatalog) { r.t.ContextMenu(n, c) }

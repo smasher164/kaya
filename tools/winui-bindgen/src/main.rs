@@ -256,6 +256,11 @@ fn main() {
         "Microsoft.UI.Xaml.Controls.Slider".to_string(),
         "Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventHandler".to_string(),
         "Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs".to_string(),
+        // THE RANGE'S PRESS ROUTING (docs/range-plan.md §3 rule 4, §4): each
+        // stacked slider is clipped to its half of the track, and
+        // UIElement.SetClip takes a RectangleGeometry, a pad until named.
+        "Microsoft.UI.Xaml.Media.Geometry".to_string(),
+        "Microsoft.UI.Xaml.Media.RectangleGeometry".to_string(),
         // THE SLIDER'S STEP AND TICKS (docs/slider-plan.md S1, S5, S9): the
         // two enums `SetSnapsTo`/`SetTickPlacement` take. Without them those
         // four members are `usize` vtable pads while `SetStepFrequency` and

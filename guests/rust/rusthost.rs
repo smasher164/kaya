@@ -144,6 +144,9 @@ mod numberfield;
 #[path = "colorpicker.rs"]
 mod colorpicker;
 
+#[path = "range.rs"]
+mod range;
+
 #[path = "sheet.rs"]
 mod sheet;
 #[path = "format.rs"]
@@ -229,6 +232,7 @@ fn app(ctx: kaya::AppCtx) {
         // One guest under two locales, format's shape.
         Ok("numberfield") | Ok("numberfieldde") => numberfield::app(ctx),
         Ok("colorpicker") => colorpicker::app(ctx),
+        Ok("range") | Ok("rangertl") => range::app(ctx),
         Ok("sheet") => sheet::app(ctx),
         // One guest under three locales (tools/lib/lanes/android.py's
         // SCENE_LOCALE): a scene selects a SCRIPT, never an app.

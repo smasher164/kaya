@@ -50,6 +50,9 @@ public final class Sliders {
                 tx.slider(0.0, 1.0, 0.5,
                                 (t, v) -> t.write(volumeText, "volume: " + spelled(v)))
                         .tickSpacing(0.25).a11yLabel("Volume"); // slider#1
+                tx.slider(0.0, 1.0, 0.25, null)
+                        .step(0.25).axis(KayaApp.Axis.VERTICAL)
+                        .a11yId("fader").a11yLabel("Fader"); // slider#2
                 // A programmatic write must NOT echo a value or a commit.
                 tx.button("reset", t -> t.write(pos, 25.0)); // button#0
                 for (var row : TrackKaya.rows(tx, tracks)) {

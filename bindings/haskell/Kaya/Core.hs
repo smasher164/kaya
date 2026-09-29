@@ -424,6 +424,7 @@ data Pending
   | PTimeNode !Word64 ([Key] -> TimeOfDay -> IO ())
   | PColor !Word64 (Color -> IO ())
   | PColorNode !Word64 ([Key] -> Color -> IO ())
+  | PRange !Word64 (Double -> Double -> IO ())
   | PMenuActivated !Word64 (IO ())
   | PMenuActivatedNode !Word64 ([Key] -> IO ())
   | PMenuToggled !Word64 (Bool -> IO ())
@@ -1651,6 +1652,11 @@ data App = App
     appNodeTimes :: IORef (Map.Map Word64 ([Key] -> TimeOfDay -> IO ())),
     appWidgetColors :: IORef (Map.Map Word64 (Color -> IO ())),
     appNodeColors :: IORef (Map.Map Word64 ([Key] -> Color -> IO ())),
+    -- A range's pair, live and settled (docs/range-plan.md §2).
+    appWidgetRanges :: IORef (Map.Map Word64 (Double -> Double -> IO ())),
+    appNodeRanges :: IORef (Map.Map Word64 ([Key] -> Double -> Double -> IO ())),
+    appWidgetRangeCommits :: IORef (Map.Map Word64 (Double -> Double -> IO ())),
+    appNodeRangeCommits :: IORef (Map.Map Word64 ([Key] -> Double -> Double -> IO ())),
     -- Per-window lifecycle handlers, keyed by window id — handlers
     -- scope to the thing that creates them.
     appCloseRequested :: IORef (Map.Map Word64 (IO ())),

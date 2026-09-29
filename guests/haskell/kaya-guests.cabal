@@ -315,6 +315,11 @@ executable colorpicker
   main-is: colorpicker.hs
   build-depends: kaya-guests
 
+executable range
+  import: shared
+  main-is: range.hs
+  build-depends: kaya-guests
+
 executable tooltips
   import: shared
   main-is: tooltips.hs

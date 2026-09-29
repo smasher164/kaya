@@ -87,6 +87,20 @@ object KayaPresent {
     @JvmStatic external fun colorQuantize(r: Double, g: Double, b: Double, a: Double): Long
     @JvmStatic external fun colorPalette(): LongArray
 
+    /** The range (docs/range-plan.md §3 rule 2, §2): where a moved thumb may
+     * rest, the core's one clamp, and the pair live or once per gesture.
+     * kaya_range_clamp / kaya_emit_range. */
+    @JvmStatic external fun rangeClamp(
+        min: Double,
+        max: Double,
+        step: Double,
+        gap: Double,
+        low: Boolean,
+        other: Double,
+        raw: Double,
+    ): Double
+    @JvmStatic external fun emitRange(tag: ByteArray, low: Double, high: Double, committed: Boolean)
+
     /** Emit a column-header click: [tag] is the sort tag delivered
      * with the container's SET_COLUMN_HEADERS record, verbatim;
      * [column] the 0-based index. A REQUEST — the guest sorts

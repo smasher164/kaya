@@ -269,6 +269,10 @@ type App struct {
 	nodeDates      map[uint64]func(*Tx, []any, Date)
 	widgetColors   map[uint64]func(*Tx, Color)
 	nodeColors     map[uint64]func(*Tx, []any, Color)
+	widgetRanges   map[uint64]func(*Tx, float64, float64)
+	nodeRanges     map[uint64]func(*Tx, []any, float64, float64)
+	widgetSettles  map[uint64]func(*Tx, float64, float64)
+	nodeSettles    map[uint64]func(*Tx, []any, float64, float64)
 	widgetTimes    map[uint64]func(*Tx, Time)
 	nodeTimes      map[uint64]func(*Tx, []any, Time)
 	// Window lifecycle: one handler each, receiving the window id.
@@ -410,6 +414,10 @@ func NewApp() *App {
 		nodeDates:      make(map[uint64]func(*Tx, []any, Date)),
 		widgetColors:   make(map[uint64]func(*Tx, Color)),
 		nodeColors:     make(map[uint64]func(*Tx, []any, Color)),
+		widgetRanges:   make(map[uint64]func(*Tx, float64, float64)),
+		nodeRanges:     make(map[uint64]func(*Tx, []any, float64, float64)),
+		widgetSettles:  make(map[uint64]func(*Tx, float64, float64)),
+		nodeSettles:    make(map[uint64]func(*Tx, []any, float64, float64)),
 		widgetTimes:    make(map[uint64]func(*Tx, Time)),
 		nodeTimes:      make(map[uint64]func(*Tx, []any, Time)),
 		menuActivated:     make(map[uint64]func(*Tx)),
@@ -1016,8 +1024,9 @@ func (w Widget) FollowsEnd() Widget {
 	return w
 }
 
-// Axis sets this container's arrangement axis, or the direction this scroll
-// scrolls (vertical unless set; docs/hscroll-plan.md), at construction. Same
+// Axis sets this container's arrangement axis, the direction this scroll
+// scrolls (vertical unless set; docs/hscroll-plan.md), or this slider's
+// orientation (horizontal unless set; docs/range-plan.md), at construction. Same
 // transaction discipline as Grow.
 func (w Widget) Axis(axis Axis) Widget {
 	if w.tx == nil || w.tx.closed {
@@ -2382,6 +2391,54 @@ func (tx *Tx) SliderBound(min, max float64, value Signal[float64], onChange func
 	if onChange != nil {
 		w.OnValueChanged(onChange)
 	}
+	return w
+}
+
+// Range creates a range over min..max with its thumbs at low and high
+// (docs/range-plan.md), with its move handler co-located (nil for none);
+// each gesture's settled pair reaches OnRangeCommitted.
+func (tx *Tx) Range(min, max, low, high float64, onChange func(*Tx, float64, float64)) Widget {
+	w := tx.Widget(KindRange)
+	tx.emit(TxSetMin(w.id, min))
+	tx.emit(TxSetMax(w.id, max))
+	tx.emit(TxSetLow(w.id, low))
+	tx.emit(TxSetHigh(w.id, high))
+	if onChange != nil {
+		w.OnRangeChanged(onChange)
+	}
+	return w
+}
+
+// RangeBound creates a range whose thumbs bind two float signals.
+// Property writes never echo.
+func (tx *Tx) RangeBound(min, max float64, low, high Signal[float64], onChange func(*Tx, float64, float64)) Widget {
+	w := tx.Widget(KindRange)
+	tx.emit(TxSetMin(w.id, min))
+	tx.emit(TxSetMax(w.id, max))
+	tx.emit(TxBindLow(w.id, low.id))
+	tx.emit(TxBindHigh(w.id, high.id))
+	if onChange != nil {
+		w.OnRangeChanged(onChange)
+	}
+	return w
+}
+
+// MinGap is the least distance between a range's thumbs, in value units
+// (docs/range-plan.md §2).
+func (w Widget) MinGap(gap float64) Widget {
+	w.tx.emit(TxSetMinGap(w.id, gap))
+	return w
+}
+
+// LowLabel and HighLabel are what a range's thumbs speak
+// (docs/range-plan.md §8 ruling 2).
+func (w Widget) LowLabel(label string) Widget {
+	w.tx.emit(TxSetLowLabel(w.id, label))
+	return w
+}
+
+func (w Widget) HighLabel(label string) Widget {
+	w.tx.emit(TxSetHighLabel(w.id, label))
 	return w
 }
 
@@ -4801,6 +4858,33 @@ func (t *Tpl) SetStep(n Node, step float64) {
 	t.tx.emit(TxSetStep(n.id, step))
 }
 
+// SetMinGap is a stamped range's least gap, constant across the copies.
+func (t *Tpl) SetMinGap(n Node, gap float64) {
+	t.tx.emit(TxSetMinGap(n.id, gap))
+}
+
+// SetLowLabel and SetHighLabel speak every stamped range's thumbs the same;
+// BindLowLabel and BindHighLabel source them per copy.
+func (t *Tpl) SetLowLabel(n Node, label string) {
+	t.tx.emit(TxSetLowLabel(n.id, label))
+}
+
+func (t *Tpl) BindLowLabel[S interface {
+	Signal[string] | Field[string]
+}](n Node, src S) {
+	t.applyStrProp(n, src, TxBindLowLabel, TxBindLowLabelElement)
+}
+
+func (t *Tpl) SetHighLabel(n Node, label string) {
+	t.tx.emit(TxSetHighLabel(n.id, label))
+}
+
+func (t *Tpl) BindHighLabel[S interface {
+	Signal[string] | Field[string]
+}](n Node, src S) {
+	t.applyStrProp(n, src, TxBindHighLabel, TxBindHighLabelElement)
+}
+
 // SetAlpha lets every stamped copy of a colour picker choose translucency.
 func (t *Tpl) SetAlpha(n Node, on bool) {
 	t.tx.emit(TxSetAlpha(n.id, on))
@@ -5426,6 +5510,43 @@ func (t *Tpl) SliderBound[S interface {
 	t.tx.emit(TxSetMax(n.id, max))
 	t.applyValue(n, src)
 	return n
+}
+
+// Range creates a range over min..max with constant thumbs in the
+// blueprint; RangeBound reads each thumb from a signal or the row's own
+// field. Moves register against the node (Node.OnRangeChanged).
+func (t *Tpl) Range(min, max, low, high float64) Node {
+	n := t.Widget(KindRange)
+	t.tx.emit(TxSetMin(n.id, min))
+	t.tx.emit(TxSetMax(n.id, max))
+	t.tx.emit(TxSetLow(n.id, low))
+	t.tx.emit(TxSetHigh(n.id, high))
+	return n
+}
+
+func (t *Tpl) RangeBound[S interface {
+	Signal[float64] | Field[float64]
+}](min, max float64, low, high S) Node {
+	n := t.Widget(KindRange)
+	t.tx.emit(TxSetMin(n.id, min))
+	t.tx.emit(TxSetMax(n.id, max))
+	t.applyThumb(n, low, TxBindLow, TxBindLowElement)
+	t.applyThumb(n, high, TxBindHigh, TxBindHighElement)
+	return n
+}
+
+func (t *Tpl) applyThumb[S interface {
+	Signal[float64] | Field[float64]
+}](n Node, src S,
+	bindSignal func(uint64, uint64) []byte,
+	bindElement func(uint64, uint32, uint32) []byte,
+) {
+	switch v := any(src).(type) {
+	case Signal[float64]:
+		t.tx.emit(bindSignal(n.id, v.id))
+	case Field[float64]:
+		t.tx.emit(bindElement(n.id, 0, v.index))
+	}
 }
 
 // NumberField creates a number field at a constant value in the
@@ -6291,6 +6412,34 @@ func (n Node) OnColor(fn func(*Tx, []any, Color)) Node {
 	return n
 }
 
+// OnRangeChanged registers a handler for a live range's moves, both
+// thumbs' values (docs/range-plan.md §2).
+func (w Widget) OnRangeChanged(fn func(*Tx, float64, float64)) Widget {
+	w.tx.app.widgetRanges[w.id] = fn
+	return w
+}
+
+// OnRangeChanged registers a move handler for a template range; the
+// handler also receives the stamped copy's keys, outermost first.
+func (n Node) OnRangeChanged(fn func(*Tx, []any, float64, float64)) Node {
+	n.tx.app.nodeRanges[n.id] = fn
+	return n
+}
+
+// OnRangeCommitted registers a handler for the pair a live range's gesture
+// SETTLED ON, once per gesture (docs/range-plan.md §3 rule 3).
+func (w Widget) OnRangeCommitted(fn func(*Tx, float64, float64)) Widget {
+	w.tx.app.widgetSettles[w.id] = fn
+	return w
+}
+
+// OnRangeCommitted registers a settled-pair handler for a template range,
+// keys first.
+func (n Node) OnRangeCommitted(fn func(*Tx, []any, float64, float64)) Node {
+	n.tx.app.nodeSettles[n.id] = fn
+	return n
+}
+
 // OnTime registers a handler for a live time picker's committed picks.
 func (w Widget) OnTime(fn func(*Tx, Time)) Widget {
 	w.tx.app.widgetTimes[w.id] = fn
@@ -6512,6 +6661,26 @@ func (a *App) Serve() {
 		case kind == occColorChanged:
 			if fn := a.nodeColors[id]; fn != nil {
 				a.dispatch(func(tx *Tx) { fn(tx, keys, colorOf(packed)) })
+			}
+		case kind == occRangeChanged && len(keys) == 0:
+			if fn := a.widgetRanges[id]; fn != nil {
+				low, high := rangeOf(tail)
+				a.dispatch(func(tx *Tx) { fn(tx, low, high) })
+			}
+		case kind == occRangeChanged:
+			if fn := a.nodeRanges[id]; fn != nil {
+				low, high := rangeOf(tail)
+				a.dispatch(func(tx *Tx) { fn(tx, keys, low, high) })
+			}
+		case kind == occRangeCommitted && len(keys) == 0:
+			if fn := a.widgetSettles[id]; fn != nil {
+				low, high := rangeOf(tail)
+				a.dispatch(func(tx *Tx) { fn(tx, low, high) })
+			}
+		case kind == occRangeCommitted:
+			if fn := a.nodeSettles[id]; fn != nil {
+				low, high := rangeOf(tail)
+				a.dispatch(func(tx *Tx) { fn(tx, keys, low, high) })
 			}
 		case kind == occTimeChanged && len(keys) == 0:
 			if fn := a.widgetTimes[id]; fn != nil {

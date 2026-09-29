@@ -45,13 +45,13 @@ SCENES = [
     "dirty", "ranges", "save", "styling", "toolbar", "identity",
     "assets", "sizepolicy", "adaptive", "pickers", "sliders",
     "tooltips", "search", "richtext", "ownundo", "richlabel", "sheet",
-    "submit", "numberfield", "colorpicker",
+    "submit", "numberfield", "colorpicker", "range",
 ]
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed — built and run rust-only until their guests arrive,
 # when they move into SCENES.
 DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows",
-                "format", "flexshrink", "listrow", "tints", "badge", "emoji", "range"]
+                "format", "flexshrink", "listrow", "tints", "badge", "emoji"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -74,13 +74,13 @@ LANGS = ("rust", "python", "go", "csharp", "ocaml", "haskell", "swift",
 GUEST_STEM = {"listdetail": "split", "taskspersist": "tasks",
               "links": "tasks", "formatde": "format", "formatar": "format",
               "tasksrtl": "tasks", "clock24": "format", "scrollrtl": "scroll",
-              "numberfieldde": "numberfield"}
+              "numberfieldde": "numberfield", "rangertl": "range"}
 
 # THE LOCALE A SCENE RUNS UNDER (docs/compliance-plan.md §4): the knob the
 # leg carries, so the same guest is read under German and Arabic; the
 # platform installs it and the reads ask the platform, never this table.
 SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG",
-                "scrollrtl": "ar-EG", "numberfieldde": "de-DE"}
+                "scrollrtl": "ar-EG", "numberfieldde": "de-DE", "rangertl": "ar-EG"}
 
 # The scenes this lane DECLARES OFF, each with its reason, read by
 # tools/check-steps.py beside the phones' declarations: macOS has no text
@@ -126,7 +126,9 @@ HAND_QUEUED = {"editor": "go", "chat": "go", "portfolio": "python", "varied": "p
                # The format guest under the 24-hour clock (SCENE_CLOCK).
                "clock24": "rust",
                # The number field guest under de-DE (SCENE_LOCALE).
-               "numberfieldde": "rust"}
+               "numberfieldde": "rust",
+               # The range guest in Arabic (SCENE_LOCALE).
+               "rangertl": "rust"}
 
 # The queue, in run order. Entries:
 #   (scene, (lang, ...))    a group: script export + one leg per lang
@@ -242,10 +244,11 @@ ORDER = [
     ("badge", ("rust",)),
     # The emoji button (docs/emoji-picker-plan.md): the character palette.
     ("emoji", ("rust",)),
-    # The range and the vertical slider (docs/range-plan.md §5): RUST ALONE
-    # while the eight bindings' sugar is the breadth slice. set_value drives
-    # the thumbs' own controls and nudge an in-process key, so it pools.
-    ("range", ("rust",)),
+    # The range and the vertical slider (docs/range-plan.md §5), and the same
+    # guest under ar-EG (SCENE_LOCALE). set_value drives the thumbs' own
+    # controls and nudge an in-process key, so it pools.
+    ("range", LANGS),
+    ("rangertl", LANGS),
     ("richtext", ("rust", "python", "js", "go", "csharp", "java", "swift",
                   "ocaml", "haskell")),
     ("ownundo", ("rust", "python", "js", "go", "csharp", "java", "swift",

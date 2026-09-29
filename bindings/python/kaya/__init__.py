@@ -10,6 +10,7 @@ import enum
 import io
 import operator
 import pathlib
+import builtins
 import sys
 import threading
 import traceback
@@ -233,7 +234,7 @@ def _text_range(what: str, span: object) -> tuple[int, int]:
     ARE REFUSED BY NAME, because `str.find` answers -1 and kaya has no
     end-relative offset. Every other malformed range is the core's.
     """
-    if isinstance(span, range):
+    if isinstance(span, builtins.range):
         if span.step != 1:
             raise KayaValueError(
                 f"kaya: {what} takes a contiguous range — {span!r} counts in "
@@ -1341,7 +1342,7 @@ FlagSource = bool | Source
 NumberSource = float | Source
 
 #: One text range, in UTF-8 BYTE offsets: `range(start, stop)` or the pair.
-Span = range | tuple[int, int]
+Span = builtins.range | tuple[int, int]
 
 #: A handler registered on a widget OR on a template node: a stamped copy's
 #: `Row` arrives FIRST (DESIGN.md, Binding conventions), so the arity is the
@@ -2744,7 +2745,7 @@ def _representation(payload: tuple[int, list[Any]]) -> Clip | None:
         # The picker's own three-per-file grouping.
         return Representation.Files([
             PickedFile(values[i], values[i + 1], values[i + 2])
-            for i in range(0, len(values), 3)])
+            for i in builtins.range(0, len(values), 3)])
     return None
 
 
@@ -2927,14 +2928,14 @@ def _flag_wire(on: bool) -> str:
     return FLAG_VALUE if on else "false"
 
 
-def _decoded_span(what: str, start: int, stop: int) -> range:
+def _decoded_span(what: str, start: int, stop: int) -> builtins.range:
     """A span the CORE sent, refused BY NAME if its ends are out of
     order. No scene reaches it — the core always sends ordered spans —
     and a reversed one means the mirror and the core disagree."""
     if start > stop:
         raise KayaValueError(
             f"kaya: a {what} carries {start}..{stop}, a reversed span")
-    return range(start, stop)
+    return builtins.range(start, stop)
 
 
 class Run:
@@ -2948,7 +2949,7 @@ class Run:
 
     def __init__(self, start: int, end: int, name: object,
                  value: object) -> None:
-        self.range: range = range(int(start), int(end))
+        self.range: builtins.range = builtins.range(int(start), int(end))
         self.name: str = str(name)
         self.value: str = str(value)
 
@@ -3064,14 +3065,14 @@ def _decode_document_field(data: object) -> Document:
             f"{type(data).__name__}")
     count = int.from_bytes(data[0:4], "little")
     values, at = [], 8
-    for _ in range(count):
+    for _ in builtins.range(count):
         value, at = wire.parse_value(data, at)
         values.append(value)
     if not values or not isinstance(values[0], str):
         raise KayaValueError(
             "kaya: a document blob starts with its text; this one holds "
             f"{len(values)} value(s)")
-    runs = [Run(*values[i:i + 4]) for i in range(1, len(values), 4)]
+    runs = [Run(*values[i:i + 4]) for i in builtins.range(1, len(values), 4)]
     return Document(values[0], runs)
 
 
@@ -3123,7 +3124,7 @@ class Edit:
 
     def __init__(self, start: int, end: int, inserted: str = "",
                  runs: Sequence[Run] | None = None) -> None:
-        self.range: range = range(int(start), int(end))
+        self.range: builtins.range = builtins.range(int(start), int(end))
         self.inserted: str = _text_value("Edit text", inserted)
         self.runs: list[Run] = list(runs) if runs else []
         self.source: str | None = None
@@ -3171,7 +3172,7 @@ class Format:
 
     def __init__(self, start: int, end: int, name: object,
                  value: object) -> None:
-        self.range: range = range(int(start), int(end))
+        self.range: builtins.range = builtins.range(int(start), int(end))
         self.name: str = str(name)
         self.value: str | None = None if value is None else str(value)
 
@@ -3215,7 +3216,7 @@ def _normalize_runs(runs: Sequence[Run]) -> list[Run]:
         for run in painted:
             if merged and merged[-1].range.stop == run.range.start \
                     and merged[-1].value == run.value:
-                merged[-1].range = range(merged[-1].range.start,
+                merged[-1].range = builtins.range(merged[-1].range.start,
                                          run.range.stop)
             else:
                 merged.append(Run(run.range.start, run.range.stop, run.name, run.value))
@@ -3228,7 +3229,7 @@ def _runs_from(flat: Sequence[Any]) -> list[Run]:
     """The decoder's flat run tail, read in FOURS. A reversed span is
     refused naming the record (`_decoded_span`)."""
     out = []
-    for i in range(0, len(flat), 4):
+    for i in builtins.range(0, len(flat), 4):
         _decoded_span("run", int(flat[i]), int(flat[i + 1]))
         out.append(Run(flat[i], flat[i + 1], flat[i + 2], flat[i + 3]))
     return out
@@ -4926,6 +4927,7 @@ def slider(value: NumberSource | None = None, *, min: float | None = None,
            max: float | None = None, step: float | None = None,
            tick_spacing: float | None = None,
            on_change: Handler | None = None, on_commit: Handler | None = None,
+           axis: Axis | str | None = None,
            grow: float | None = None) -> Widget:
     """A slider over a numeric range. UNCONTROLLED: the widget owns its
     position and reports each change to `on_change` and each settled
@@ -4959,6 +4961,70 @@ def slider(value: NumberSource | None = None, *, min: float | None = None,
         _app._register(handle, wire.OCC_VALUE_CHANGED, on_change)
     if on_commit is not None:
         _app._register(handle, wire.OCC_VALUE_COMMITTED, on_commit)
+    if axis is not None:
+        _records().append(wire.tx_set_axis(handle.id, _axis_value(axis)))
+    _set_grow(handle, grow)
+    return handle
+
+
+def _thumb_source(handle: Widget, value: NumberSource, what: str,
+                  set_: Callable[[int, float], bytes],
+                  bind: Callable[[int, int], bytes],
+                  bind_element: Callable[[int, int, int], bytes]) -> bytes:
+    if isinstance(value, Signal):
+        return bind(handle.id, value.id)
+    if isinstance(value, FieldRef):
+        return bind_element(handle.id, value._level(), value._index)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise KayaTypeError(
+            f"kaya: a range's {what} is a number, a signal or a float "
+            f"field, not {type(value).__name__}")
+    return set_(handle.id, float(value))
+
+
+def range(low: NumberSource, high: NumberSource, *,
+          min: float | None = None, max: float | None = None,
+          step: float | None = None, tick_spacing: float | None = None,
+          min_gap: float | None = None,
+          low_label: TextSource | None = None,
+          high_label: TextSource | None = None,
+          on_change: Handler | None = None, on_commit: Handler | None = None,
+          grow: float | None = None) -> Widget:
+    """A range: two thumbs over min..max (docs/range-plan.md). Each move
+    is one call to `on_change` and each settled gesture one to
+    `on_commit`, both handed (low, high), template copies getting their
+    `Row` first; an app write never echoes. `min`/`max` default to 0..1,
+    and `step` and `tick_spacing` are the slider's."""
+    handle = _widget(wire.KIND_RANGE)
+    if min is not None:
+        _records().append(wire.tx_set_min(handle.id, float(min)))
+    if max is not None:
+        _records().append(wire.tx_set_max(handle.id, float(max)))
+    if step is not None:
+        _records().append(wire.tx_set_step(handle.id, float(step)))
+    if tick_spacing is not None:
+        _records().append(
+            wire.tx_set_tick_spacing(handle.id, float(tick_spacing)))
+    if min_gap is not None:
+        _records().append(wire.tx_set_min_gap(handle.id, float(min_gap)))
+    if low_label is not None:
+        _records().append(_prop_source(
+            "low_label", handle, low_label, wire.tx_set_low_label,
+            wire.tx_bind_low_label, wire.tx_bind_low_label_element))
+    if high_label is not None:
+        _records().append(_prop_source(
+            "high_label", handle, high_label, wire.tx_set_high_label,
+            wire.tx_bind_high_label, wire.tx_bind_high_label_element))
+    _records().append(_thumb_source(handle, low, "low", wire.tx_set_low,
+                                    wire.tx_bind_low,
+                                    wire.tx_bind_low_element))
+    _records().append(_thumb_source(handle, high, "high", wire.tx_set_high,
+                                    wire.tx_bind_high,
+                                    wire.tx_bind_high_element))
+    if on_change is not None:
+        _app._register(handle, wire.OCC_RANGE_CHANGED, on_change)
+    if on_commit is not None:
+        _app._register(handle, wire.OCC_RANGE_COMMITTED, on_commit)
     _set_grow(handle, grow)
     return handle
 
@@ -6652,6 +6718,8 @@ class App:
             elif kind == wire.OCC_DRAG_ENDED:
                 # None is a cancelled or refused drag, not an error.
                 args.append(_operation(payload))
+            elif kind in (wire.OCC_RANGE_CHANGED, wire.OCC_RANGE_COMMITTED):
+                args.extend(float(v) for v in payload)
             elif payload is not None:
                 args.append(payload)
             self._dispatch(handler, *args)

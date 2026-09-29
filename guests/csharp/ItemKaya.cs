@@ -214,6 +214,18 @@ sealed class ItemRow
         System.Action<Tx, System.Collections.Generic.List<object>, double>? onCommit = null) =>
         t.Slider(min, max, value, step, tickSpacing, onChange, onCommit);
 
+    public Node Range(double min, double max, double low, double high, double? step = null, double? tickSpacing = null, double? minGap = null, string? lowLabel = null, string? highLabel = null, System.Action<Tx, System.Collections.Generic.List<object>, double, double>? onChange = null,
+        System.Action<Tx, System.Collections.Generic.List<object>, double, double>? onCommit = null) =>
+        t.Range(min, max, low, high, step, tickSpacing, minGap, lowLabel, highLabel, onChange, onCommit);
+
+    public Node Range(double min, double max, Signal low, Signal high, double? step = null, double? tickSpacing = null, double? minGap = null, string? lowLabel = null, string? highLabel = null, System.Action<Tx, System.Collections.Generic.List<object>, double, double>? onChange = null,
+        System.Action<Tx, System.Collections.Generic.List<object>, double, double>? onCommit = null) =>
+        t.Range(min, max, low, high, step, tickSpacing, minGap, lowLabel, highLabel, onChange, onCommit);
+
+    public Node Range(double min, double max, Field<double> low, Field<double> high, double? step = null, double? tickSpacing = null, double? minGap = null, string? lowLabel = null, string? highLabel = null, System.Action<Tx, System.Collections.Generic.List<object>, double, double>? onChange = null,
+        System.Action<Tx, System.Collections.Generic.List<object>, double, double>? onCommit = null) =>
+        t.Range(min, max, low, high, step, tickSpacing, minGap, lowLabel, highLabel, onChange, onCommit);
+
     public Node NumberField(double value, double? min = null, double? max = null, double? step = null,
         System.Action<Tx, System.Collections.Generic.List<object>, double>? onCommit = null) =>
         t.NumberField(value, min, max, step, onCommit);
@@ -294,6 +306,20 @@ sealed class ItemRow
 
     public void SetA11yLabel(Node n, Field<string> f, uint level = 0) =>
         t.SetA11yLabel(n, f, level);
+
+    public void SetLowLabel(Node n, string label) => t.SetLowLabel(n, label);
+
+    public void SetLowLabel(Node n, Signal s) => t.SetLowLabel(n, s);
+
+    public void SetLowLabel(Node n, Field<string> f, uint level = 0) =>
+        t.SetLowLabel(n, f, level);
+
+    public void SetHighLabel(Node n, string label) => t.SetHighLabel(n, label);
+
+    public void SetHighLabel(Node n, Signal s) => t.SetHighLabel(n, s);
+
+    public void SetHighLabel(Node n, Field<string> f, uint level = 0) =>
+        t.SetHighLabel(n, f, level);
 
     public void SetA11yHint(Node n, string hint) => t.SetA11yHint(n, hint);
 

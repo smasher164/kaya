@@ -3152,6 +3152,516 @@ fn slider_increments(slider: &GtkSlider) {
     slider.scale.set_increments(small, page);
 }
 
+/// A range's declared shape, the pair the app last heard or wrote, and the
+/// pair the last gesture settled on (docs/range-plan.md §2, §3).
+#[derive(Clone, Copy, Default)]
+struct RangeState {
+    min: f64,
+    max: f64,
+    step: f64,
+    tick_spacing: f64,
+    gap: f64,
+    low: f64,
+    high: f64,
+    committed_low: f64,
+    committed_high: f64,
+    /// A pointer button is down on either thumb: the slider's `dragging`.
+    dragging: bool,
+}
+
+/// docs/range-plan.md §6 and §4 MEASURED: two of GTK's scales stacked in one
+/// group over the trough kaya draws in Adwaita's `scale > trough > highlight`.
+#[derive(Clone)]
+struct GtkRangePair {
+    group: range_view::KayaRangeGroup,
+    low: range_view::KayaRangeThumb,
+    high: range_view::KayaRangeThumb,
+    state: Rc<std::cell::Cell<RangeState>>,
+    /// low_label, high_label, and the group's label each thumb falls back to.
+    labels: Rc<RefCell<[String; 3]>>,
+}
+
+impl GtkRangePair {
+    fn thumb(&self, low: bool) -> &range_view::KayaRangeThumb {
+        if low { &self.low } else { &self.high }
+    }
+}
+
+/// Which thumb a press at `x` belongs to (docs/range-plan.md §3 rule 4): the
+/// half of the track on its side of the midpoint between the thumbs, and at a
+/// tie the side of the shared centre the press lands on. A horizontal
+/// GtkRange mirrors under RTL, so the low side follows `min_at_left`.
+fn range_low_takes(x: f64, low_centre: f64, high_centre: f64, min_at_left: bool) -> bool {
+    if (high_centre - low_centre).abs() < 0.5 {
+        return if min_at_left { x < low_centre } else { x > low_centre };
+    }
+    let mid = (low_centre + high_centre) / 2.0;
+    if low_centre < high_centre { x < mid } else { x > mid }
+}
+
+/// A scale's `trough` and its `slider` (the knob), GtkRange's own gizmos.
+fn scale_parts(scale: &gtk4::Scale) -> Option<(gtk4::Widget, gtk4::Widget)> {
+    let named = |parent: &gtk4::Widget, name: &str| {
+        let mut child = parent.first_child();
+        while let Some(c) = child {
+            if c.css_name().as_str() == name {
+                return Some(c);
+            }
+            child = c.next_sibling();
+        }
+        None
+    };
+    let trough = named(scale.upcast_ref(), "trough")?;
+    let knob = named(&trough, "slider")?;
+    Some((trough, knob))
+}
+
+fn knob_centre(scale: &gtk4::Scale, within: &gtk4::Widget) -> Option<f64> {
+    let (_, knob) = scale_parts(scale)?;
+    let b = knob.compute_bounds(within)?;
+    Some(f64::from(b.x()) + f64::from(b.width()) / 2.0)
+}
+
+#[cfg(any(test, feature = "harness"))]
+fn travel_fraction(centre: f64, knob: f64, length: f64) -> f64 {
+    let travel = length - knob;
+    if travel <= 0.0 {
+        return 0.0;
+    }
+    (centre - knob / 2.0) / travel
+}
+
+/// The knob's centre along its travel in GtkRange's own geometry
+/// (`gtk_range_compute_slider_position`, docs/range-plan.md §4 MEASURED): the
+/// trough less the knob's MEASURED size, which carries Adwaita's negative
+/// margins; from the left, or from the bottom when vertical.
+#[cfg(feature = "harness")]
+fn scale_travel(scale: &gtk4::Scale) -> Option<f64> {
+    let (trough, knob) = scale_parts(scale)?;
+    let b = knob.compute_bounds(&trough)?;
+    if scale.orientation() == gtk4::Orientation::Vertical {
+        let size = f64::from(knob.measure(gtk4::Orientation::Vertical, -1).0);
+        let length = f64::from(trough.height());
+        let centre = f64::from(b.y()) + f64::from(b.height()) / 2.0;
+        return Some(travel_fraction(length - centre, size, length));
+    }
+    let size = f64::from(knob.measure(gtk4::Orientation::Horizontal, -1).0);
+    let centre = f64::from(b.x()) + f64::from(b.width()) / 2.0;
+    Some(travel_fraction(centre, size, f64::from(trough.width())))
+}
+
+/// docs/range-plan.md §4 MEASURED: GTK's pick asks a widget's children before
+/// its own `contains`, so a thumb's parts answering a press would bypass the
+/// midpoint split. GtkScale adds children with its marks, so this reruns then.
+fn thumb_parts_untargetable(scale: &gtk4::Scale) {
+    let mut child = scale.first_child();
+    while let Some(c) = child {
+        c.set_can_target(false);
+        child = c.next_sibling();
+    }
+}
+
+/// Every declared number onto both thumbs from the state, since the props
+/// arrive in any order and an adjustment clamps a value against the bounds
+/// it holds at the time. Under the quiet guard.
+fn range_shape(pair: &GtkRangePair, quiet: &Rc<std::cell::Cell<bool>>) {
+    let st = pair.state.get();
+    let (small, page) = slider_increment_pair(st.min, st.max, st.step);
+    let was = quiet.replace(true);
+    for (thumb, value) in [(&pair.low, st.low), (&pair.high, st.high)] {
+        thumb.adjustment().configure(value, st.min, st.max.max(st.min), small, page, 0.0);
+        thumb.clear_marks();
+        for mark in slider_mark_values(st.min, st.max, st.tick_spacing) {
+            thumb.add_mark(mark, gtk4::PositionType::Bottom, None);
+        }
+        thumb_parts_untargetable(thumb.upcast_ref());
+    }
+    quiet.set(was);
+    pair.group.queue_allocate();
+}
+
+/// A thumb's name, or the group's when the app named none (docs/range-plan.md
+/// §8 ruling 2).
+fn range_labels(pair: &GtkRangePair) {
+    let labels = pair.labels.borrow();
+    for (thumb, own) in [(&pair.low, &labels[0]), (&pair.high, &labels[1])] {
+        let name = if own.is_empty() { &labels[2] } else { own };
+        if name.is_empty() {
+            thumb.reset_property(gtk4::AccessibleProperty::Label);
+        } else {
+            thumb.update_property(&[gtk4::accessible::Property::Label(name.as_str())]);
+        }
+    }
+}
+
+thread_local! {
+    /// What the user settled while CORE was borrowed (a driven `set_value`
+    /// inside `on_main`), for the core before the next transaction applies.
+    static RANGE_SETTLED: RefCell<Vec<(Vec<u8>, f64, f64)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// docs/range-plan.md §3 rule 11: the core's pair follows what the user
+/// settled before the committed pair leaves.
+fn gtk_user_range_committed(tag: &[u8], low: f64, high: f64) {
+    let told = CORE.with(|slot| match slot.try_borrow_mut() {
+        Ok(mut core) => match core.as_mut() {
+            Some(core) => {
+                core.scene.user_range_committed(tag, low, high);
+                true
+            }
+            None => false,
+        },
+        Err(_) => false,
+    });
+    if !told {
+        RANGE_SETTLED.with_borrow_mut(|queue| queue.push((tag.to_vec(), low, high)));
+    }
+}
+
+fn drain_range_settled(core: &mut CoreState) {
+    for (tag, low, high) in RANGE_SETTLED.with_borrow_mut(std::mem::take) {
+        core.scene.user_range_committed(&tag, low, high);
+    }
+}
+
+/// THE ONE COMMIT PATH of either thumb, whatever moved it: a drag, a press on
+/// the track, a key, an AT-SPI Value set (docs/range-plan.md §3 rule 8, §4
+/// MEASURED), a driven `set_value`. The core's clamp written back into that
+/// thumb, the live pair on every movement, the committed pair once per
+/// gesture and only when it differs from the last one.
+fn range_moved(
+    pair: &GtkRangePair,
+    low: bool,
+    quiet: &Rc<std::cell::Cell<bool>>,
+    sink: &OccSink,
+    tag: &[u8],
+    settled: bool,
+) {
+    let mut st = pair.state.get();
+    let thumb = pair.thumb(low);
+    let raw = thumb.value();
+    let other = pair.thumb(!low).value();
+    let v = crate::range::clamp_thumb(st.min, st.max, st.step, st.gap, low, other, raw);
+    if v != raw {
+        let was = quiet.replace(true);
+        thumb.set_value(v);
+        quiet.set(was);
+    }
+    let (lo, hi) = if low { (v, other) } else { (other, v) };
+    if (lo, hi) != (st.low, st.high) {
+        st.low = lo;
+        st.high = hi;
+        pair.state.set(st);
+        sink.send_range_tag(tag, lo, hi, false);
+    }
+    if settled && (lo, hi) != (st.committed_low, st.committed_high) {
+        st.committed_low = lo;
+        st.committed_high = hi;
+        pair.state.set(st);
+        gtk_user_range_committed(tag, lo, hi);
+        sink.send_range_tag(tag, lo, hi, true);
+    }
+}
+
+const RANGE_CSS: &str = "\
+scale.kaya-range { padding: 0; min-height: 0; min-width: 0; }
+scale.kaya-range:disabled { filter: none; }
+scale.kaya-range-thumb > trough { background: none; border-color: transparent; box-shadow: none; }
+scale.kaya-range-thumb > trough > highlight { background: none; border-color: transparent; \
+box-shadow: none; }
+scale.kaya-range-thumb > trough > fill { background: none; }
+scale.kaya-range-high > marks { opacity: 0; }
+.kaya-range-tie { border: 1.5px solid @window_bg_color; border-radius: 9999px; }
+";
+
+/// The stacked pair's widgets (docs/range-plan.md §6, §4 MEASURED).
+mod range_view {
+    use gtk4::glib;
+    use gtk4::prelude::*;
+    use gtk4::subclass::prelude::*;
+
+    mod thumb {
+        use gtk4::glib;
+        use gtk4::prelude::*;
+        use gtk4::subclass::prelude::*;
+
+        #[derive(Default)]
+        pub struct KayaRangeThumbInner {
+            pub(super) is_low: std::cell::Cell<bool>,
+            pub(super) other: glib::WeakRef<gtk4::Scale>,
+        }
+
+        #[glib::object_subclass]
+        impl ObjectSubclass for KayaRangeThumbInner {
+            const NAME: &'static str = "KayaRangeThumb";
+            type Type = super::KayaRangeThumb;
+            type ParentType = gtk4::Scale;
+        }
+
+        impl ObjectImpl for KayaRangeThumbInner {}
+
+        impl WidgetImpl for KayaRangeThumbInner {
+            /// The press split, at the pick, which is press-down: GTK's pick
+            /// trusts `contains` for the bounds too, so the widget's own rect
+            /// comes first (docs/range-plan.md §4 MEASURED).
+            fn contains(&self, x: f64, y: f64) -> bool {
+                if !self.parent_contains(x, y) {
+                    return false;
+                }
+                let me = self.obj();
+                let scale: &gtk4::Scale = me.upcast_ref();
+                let Some(other) = self.other.upgrade() else { return true };
+                let within: &gtk4::Widget = scale.upcast_ref();
+                let (Some(mine), Some(theirs)) = (
+                    super::super::knob_centre(scale, within),
+                    super::super::knob_centre(&other, within),
+                ) else {
+                    return true;
+                };
+                let low = self.is_low.get();
+                let (low_centre, high_centre) = if low { (mine, theirs) } else { (theirs, mine) };
+                let min_at_left = scale.direction() != gtk4::TextDirection::Rtl;
+                super::super::range_low_takes(x, low_centre, high_centre, min_at_left) == low
+            }
+        }
+
+        impl RangeImpl for KayaRangeThumbInner {}
+        impl ScaleImpl for KayaRangeThumbInner {}
+    }
+
+    glib::wrapper! {
+        pub struct KayaRangeThumb(ObjectSubclass<thumb::KayaRangeThumbInner>)
+            @extends gtk4::Scale, gtk4::Range, gtk4::Widget,
+            @implements gtk4::Accessible, gtk4::Buildable, gtk4::ConstraintTarget, gtk4::Orientable;
+    }
+
+    mod trough {
+        use gtk4::glib;
+        use gtk4::prelude::*;
+        use gtk4::subclass::prelude::*;
+
+        /// kaya's one trough, its `highlight` child spanning the thumbs'
+        /// centres (`span`: x and width in the trough).
+        #[derive(Default)]
+        pub struct KayaRangeTroughInner {
+            pub(super) fill: std::cell::RefCell<Option<gtk4::Widget>>,
+            pub(super) span: std::cell::Cell<(f64, f64)>,
+        }
+
+        #[glib::object_subclass]
+        impl ObjectSubclass for KayaRangeTroughInner {
+            const NAME: &'static str = "KayaRangeTrough";
+            type Type = super::KayaRangeTrough;
+            type ParentType = gtk4::Widget;
+
+            fn class_init(klass: &mut Self::Class) {
+                klass.set_css_name("trough");
+                klass.set_accessible_role(gtk4::AccessibleRole::Presentation);
+            }
+        }
+
+        impl ObjectImpl for KayaRangeTroughInner {
+            fn dispose(&self) {
+                if let Some(fill) = self.fill.take() {
+                    fill.unparent();
+                }
+            }
+        }
+
+        impl WidgetImpl for KayaRangeTroughInner {
+            fn measure(&self, _: gtk4::Orientation, _: i32) -> (i32, i32, i32, i32) {
+                (0, 0, -1, -1)
+            }
+
+            fn size_allocate(&self, _width: i32, height: i32, _baseline: i32) {
+                if let Some(fill) = self.fill.borrow().as_ref() {
+                    let (x, w) = self.span.get();
+                    fill.allocate(
+                        w.round().max(0.0) as i32,
+                        height,
+                        -1,
+                        Some(gtk4::gsk::Transform::new().translate(&gtk4::graphene::Point::new(
+                            x.round() as f32,
+                            0.0,
+                        ))),
+                    );
+                }
+            }
+        }
+    }
+
+    glib::wrapper! {
+        pub struct KayaRangeTrough(ObjectSubclass<trough::KayaRangeTroughInner>)
+            @extends gtk4::Widget,
+            @implements gtk4::Accessible, gtk4::Buildable, gtk4::ConstraintTarget;
+    }
+
+    mod group {
+        use gtk4::glib;
+        use gtk4::prelude::*;
+        use gtk4::subclass::prelude::*;
+
+        /// Named `scale` so Adwaita's `scale > trough > highlight` rules, and
+        /// its `scale:hover`/`:active` ones, draw kaya's trough.
+        #[derive(Default)]
+        pub struct KayaRangeGroupInner {
+            pub(super) trough: std::cell::RefCell<Option<super::KayaRangeTrough>>,
+            pub(super) low: std::cell::RefCell<Option<super::KayaRangeThumb>>,
+            pub(super) high: std::cell::RefCell<Option<super::KayaRangeThumb>>,
+            pub(super) tie: std::cell::RefCell<Option<gtk4::Widget>>,
+        }
+
+        #[glib::object_subclass]
+        impl ObjectSubclass for KayaRangeGroupInner {
+            const NAME: &'static str = "KayaRangeGroup";
+            type Type = super::KayaRangeGroup;
+            type ParentType = gtk4::Widget;
+
+            fn class_init(klass: &mut Self::Class) {
+                klass.set_css_name("scale");
+                klass.set_accessible_role(gtk4::AccessibleRole::Group);
+            }
+        }
+
+        impl ObjectImpl for KayaRangeGroupInner {
+            fn dispose(&self) {
+                if let Some(w) = self.trough.take() {
+                    w.unparent();
+                }
+                if let Some(w) = self.low.take() {
+                    w.unparent();
+                }
+                if let Some(w) = self.high.take() {
+                    w.unparent();
+                }
+                if let Some(w) = self.tie.take() {
+                    w.unparent();
+                }
+            }
+        }
+
+        impl WidgetImpl for KayaRangeGroupInner {
+            fn measure(&self, orientation: gtk4::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
+                let mut out = (0, 0, -1, -1);
+                for thumb in [self.low.borrow().clone(), self.high.borrow().clone()].into_iter().flatten() {
+                    let (min, nat, _, _) = thumb.measure(orientation, for_size);
+                    out.0 = out.0.max(min);
+                    out.1 = out.1.max(nat);
+                }
+                out
+            }
+
+            /// Both thumbs over the whole box, then kaya's trough at the
+            /// native one's bounds with the fill between the knobs' centres,
+            /// and at a tie the ring on the thumb drawn on top (§3 rule 4).
+            fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
+                let (Some(low), Some(high), Some(trough), Some(tie)) = (
+                    self.low.borrow().clone(),
+                    self.high.borrow().clone(),
+                    self.trough.borrow().clone(),
+                    self.tie.borrow().clone(),
+                ) else {
+                    return;
+                };
+                low.allocate(width, height, baseline, None);
+                high.allocate(width, height, baseline, None);
+                let obj = self.obj();
+                let group: &gtk4::Widget = obj.upcast_ref();
+                let place = |w: &gtk4::Widget, r: &gtk4::graphene::Rect| {
+                    w.allocate(
+                        r.width().round() as i32,
+                        r.height().round() as i32,
+                        -1,
+                        Some(gtk4::gsk::Transform::new().translate(&gtk4::graphene::Point::new(
+                            r.x().round(),
+                            r.y().round(),
+                        ))),
+                    );
+                };
+                let parts = super::super::scale_parts(low.upcast_ref())
+                    .zip(super::super::scale_parts(high.upcast_ref()));
+                let Some(((native, _), (_, high_knob))) = parts else { return };
+                let (Some(rect), Some(lc), Some(hc), Some(knob)) = (
+                    native.compute_bounds(group),
+                    super::super::knob_centre(low.upcast_ref(), group),
+                    super::super::knob_centre(high.upcast_ref(), group),
+                    high_knob.compute_bounds(group),
+                ) else {
+                    return;
+                };
+                let from = lc.min(hc);
+                trough.imp().span.set((from - f64::from(rect.x()), lc.max(hc) - from));
+                place(trough.upcast_ref(), &rect);
+                let tied = (hc - lc).abs() < 0.5;
+                if tie.is_child_visible() != tied {
+                    tie.set_child_visible(tied);
+                }
+                if tied {
+                    place(&tie, &gtk4::graphene::Rect::new(
+                        knob.x() - 1.0,
+                        knob.y() - 1.0,
+                        knob.width() + 2.0,
+                        knob.height() + 2.0,
+                    ));
+                }
+            }
+        }
+    }
+
+    glib::wrapper! {
+        pub struct KayaRangeGroup(ObjectSubclass<group::KayaRangeGroupInner>)
+            @extends gtk4::Widget,
+            @implements gtk4::Accessible, gtk4::Buildable, gtk4::ConstraintTarget;
+    }
+
+    /// The group, its two thumbs over its trough, and the tie ring on top.
+    pub fn build() -> (KayaRangeGroup, KayaRangeThumb, KayaRangeThumb) {
+        let group: KayaRangeGroup = glib::Object::new();
+        group.add_css_class("kaya-range");
+        let trough: KayaRangeTrough = glib::Object::new();
+        let fill: gtk4::Widget = glib::Object::builder::<gtk4::Box>()
+            .property("css-name", "highlight")
+            .property("accessible-role", gtk4::AccessibleRole::Presentation)
+            .property("can-target", false)
+            .build()
+            .upcast();
+        fill.set_parent(&trough);
+        trough.imp().fill.replace(Some(fill));
+        trough.set_can_target(false);
+        trough.set_parent(&group);
+        let mut thumbs = Vec::new();
+        for low in [true, false] {
+            let thumb: KayaRangeThumb = glib::Object::builder()
+                .property("orientation", gtk4::Orientation::Horizontal)
+                .build();
+            thumb.imp().is_low.set(low);
+            thumb.add_css_class("kaya-range-thumb");
+            thumb.add_css_class(if low { "kaya-range-low" } else { "kaya-range-high" });
+            thumb.set_size_request(160, -1);
+            super::thumb_parts_untargetable(thumb.upcast_ref());
+            thumb.set_parent(&group);
+            thumbs.push(thumb);
+        }
+        let (low, high) = (thumbs[0].clone(), thumbs[1].clone());
+        low.imp().other.set(Some(high.upcast_ref::<gtk4::Scale>()));
+        high.imp().other.set(Some(low.upcast_ref::<gtk4::Scale>()));
+        let tie: gtk4::Widget = gtk4::Box::builder()
+            .accessible_role(gtk4::AccessibleRole::Presentation)
+            .can_target(false)
+            .css_classes(["kaya-range-tie"])
+            .build()
+            .upcast();
+        tie.set_parent(&group);
+        tie.set_child_visible(false);
+        let imp = group.imp();
+        imp.trough.replace(Some(trough));
+        imp.low.replace(Some(low.clone()));
+        imp.high.replace(Some(high.clone()));
+        imp.tie.replace(Some(tie));
+        (group, low, high)
+    }
+}
+
 enum NativeWidget {
     Column(gtk4::Box),
     Button(gtk4::Button),
@@ -3177,6 +3687,7 @@ enum NativeWidget {
     /// writes and reads through the formatter door.
     NumberField(GtkNumberField),
     ColorPicker(GtkColorField),
+    Range(GtkRangePair),
     Image(gtk4::Picture),
     Scroll(gtk4::ScrolledWindow),
     Progress(gtk4::ProgressBar),
@@ -3218,6 +3729,7 @@ impl NativeWidget {
             NativeWidget::Slider(w) => w.scale.clone().upcast(),
             NativeWidget::NumberField(f) => f.spin.clone().upcast(),
             NativeWidget::ColorPicker(f) => f.button.clone().upcast(),
+            NativeWidget::Range(pair) => pair.group.clone().upcast(),
             NativeWidget::Image(w) => w.clone().upcast(),
             NativeWidget::Scroll(w) => w.clone().upcast(),
             NativeWidget::Progress(w) => w.clone().upcast(),
@@ -3906,7 +4418,7 @@ fn kind_registry(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<gtk4
         K::Slider => core.sliders.iter().map(|w| w.scale.clone().upcast()).collect(),
         K::Entry => core.entries.iter().map(|w| w.clone().upcast()).collect(),
         K::Search => core.searches.iter().map(|w| w.clone().upcast()).collect(),
-        K::Range => crate::depth_stub("range"),
+        K::Range => core.ranges.iter().map(|p| p.group.clone().upcast()).collect(),
         K::ColorPicker => core.color_pickers.iter().map(|f| f.button.clone().upcast()).collect(),
         K::NumberField => core.number_fields.iter().map(|f| f.spin.clone().upcast()).collect(),
         K::Label => core.labels.clone(),
@@ -4864,6 +5376,7 @@ struct CoreState {
     sliders: Vec<GtkSlider>,
     number_fields: Vec<GtkNumberField>,
     color_pickers: Vec<GtkColorField>,
+    ranges: Vec<GtkRangePair>,
     /// The composed pickers, in creation order like every other registry;
     /// each entry carries the parts `set_date`/`set_time` drive and
     /// `expect_picker` reads (docs/datetime-plan.md D8).
@@ -5223,6 +5736,7 @@ fn drain_transactions() {
         // rather than reddening the leg (crates/kaya/src/fault.rs).
         crate::fault::guard("draining a transaction", || {
             while let Ok(tx) = core.transactions.try_recv() {
+                drain_range_settled(core);
                 for op in core.scene.apply(tx) {
                     apply(core, op);
                 }
@@ -8897,7 +9411,7 @@ fn context_anchor_id(core: &CoreState, t: crate::harness::Target) -> u64 {
         K::Canvas => core.canvases[resolve(t.index, core.canvases.len())].clone().upcast(),
         // The harness rejects editable text before the stage sees it
         // (their native context menus are dress).
-        K::Range => crate::depth_stub("range"),
+        K::Range => core.ranges[resolve(t.index, core.ranges.len())].group.clone().upcast(),
         K::ColorPicker => core.color_pickers[resolve(t.index, core.color_pickers.len())]
             .button
             .clone()
@@ -11570,7 +12084,70 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.grids.push(grid.clone());
                     NativeWidget::Grid(grid)
                 }
-                WidgetKind::Range => crate::depth_stub("range"),
+                WidgetKind::Range => {
+                    let (group, low, high) = range_view::build();
+                    let pair = GtkRangePair {
+                        group,
+                        low,
+                        high,
+                        state: Rc::new(std::cell::Cell::new(RangeState::default())),
+                        labels: Rc::new(RefCell::new(Default::default())),
+                    };
+                    let sink = core.occurrences.clone();
+                    let tag: Rc<[u8]> = tag.expect("ranges carry a tag").into();
+                    let quiet = core.apply_quiet.clone();
+                    for low in [true, false] {
+                        let thumb = pair.thumb(low).clone();
+                        {
+                            let pair = pair.clone();
+                            let quiet = quiet.clone();
+                            let sink = sink.clone();
+                            let tag = tag.clone();
+                            thumb.connect_value_changed(move |_| {
+                                pair.group.queue_allocate();
+                                if quiet.get() {
+                                    return;
+                                }
+                                // The slider's rule (docs/slider-plan.md S7,
+                                // S8): a move with no pointer down is a
+                                // finished gesture.
+                                let settled = !pair.state.get().dragging;
+                                range_moved(&pair, low, &quiet, &sink, &tag, settled);
+                            });
+                        }
+                        // THE RELEASE IS THE COMMIT, the slider's door
+                        // (docs/traps.md, "A GestureClick on a GtkScale never
+                        // sees its release").
+                        let pointer = gtk4::EventControllerLegacy::new();
+                        pointer.set_propagation_phase(gtk4::PropagationPhase::Capture);
+                        {
+                            let pair = pair.clone();
+                            let quiet = quiet.clone();
+                            let sink = sink.clone();
+                            let tag = tag.clone();
+                            pointer.connect_event(move |_, event| {
+                                let mut state = pair.state.get();
+                                match event.event_type() {
+                                    gdk::EventType::ButtonPress | gdk::EventType::TouchBegin => {
+                                        state.dragging = true;
+                                        pair.state.set(state);
+                                    }
+                                    gdk::EventType::ButtonRelease | gdk::EventType::TouchEnd
+                                    | gdk::EventType::TouchCancel => {
+                                        state.dragging = false;
+                                        pair.state.set(state);
+                                        range_moved(&pair, low, &quiet, &sink, &tag, true);
+                                    }
+                                    _ => {}
+                                }
+                                glib::Propagation::Proceed
+                            });
+                        }
+                        thumb.add_controller(pointer);
+                    }
+                    core.ranges.push(pair.clone());
+                    NativeWidget::Range(pair)
+                }
                 WidgetKind::ColorPicker => {
                     let dialog = gtk4::ColorDialog::new();
                     dialog.set_with_alpha(false);
@@ -12167,6 +12744,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 core.sliders.retain(|s| !gone(s.scale.upcast_ref()));
                 core.number_fields.retain(|f| !gone(f.spin.upcast_ref()));
                 core.color_pickers.retain(|f| !gone(f.button.upcast_ref()));
+                core.ranges.retain(|p| !gone(p.group.upcast_ref()));
                 core.date_pickers.retain(|d| !gone(d.button.upcast_ref()));
                 core.time_pickers.retain(|t| !gone(t.button.upcast_ref()));
                 core.images.retain(|p| !gone(p.upcast_ref()));
@@ -13864,6 +14442,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         widget.update_property(&[gtk4::accessible::Property::Label(
                             label.as_str(),
                         )]);
+                        if let NativeWidget::Range(pair) = w {
+                            pair.labels.borrow_mut()[2] = label.clone();
+                            range_labels(pair);
+                        }
                     }
                 }
                 // (The IDENTIFIER has no GTK setter and no reader below
@@ -14162,9 +14744,62 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 // numbers, so each of the four re-derives both: the props
                 // arrive in no guaranteed order (the core checks their
                 // relations at the END of the transaction).
-                // The vertical slider (docs/range-plan.md §6: `inverted` for a
-                // bottom minimum) is the range's breadth slice.
-                (NativeWidget::Slider(_), Prop::Axis, _) => crate::depth_stub("range"),
+                // A VERTICAL GtkScale HAS ITS MINIMUM AT THE TOP unless
+                // inverted (docs/range-plan.md §3 rule 6, §4 MEASURED); the
+                // stand-in length becomes the height.
+                (NativeWidget::Slider(slider), Prop::Axis, Value::I64(mode)) => {
+                    let vertical = mode == i64::from(crate::wire::AXIS_VERTICAL);
+                    slider.scale.set_orientation(if vertical {
+                        gtk4::Orientation::Vertical
+                    } else {
+                        gtk4::Orientation::Horizontal
+                    });
+                    slider.scale.set_inverted(vertical);
+                    if vertical {
+                        slider.scale.set_size_request(-1, 160);
+                    } else {
+                        slider.scale.set_size_request(160, -1);
+                    }
+                }
+                (NativeWidget::Range(pair), Prop::Min, Value::F64(v))
+                | (NativeWidget::Range(pair), Prop::Max, Value::F64(v))
+                | (NativeWidget::Range(pair), Prop::Step, Value::F64(v))
+                | (NativeWidget::Range(pair), Prop::TickSpacing, Value::F64(v))
+                | (NativeWidget::Range(pair), Prop::MinGap, Value::F64(v)) => {
+                    let mut state = pair.state.get();
+                    match prop {
+                        Prop::Min => state.min = v,
+                        Prop::Max => state.max = v,
+                        Prop::Step => state.step = v,
+                        Prop::TickSpacing => state.tick_spacing = v,
+                        _ => state.gap = v,
+                    }
+                    pair.state.set(state);
+                    range_shape(pair, &core.apply_quiet);
+                }
+                // An app write RE-BASES both mirrors, as the slider's does
+                // (docs/slider-plan.md S2), and never echoes.
+                (NativeWidget::Range(pair), Prop::Low, Value::F64(v))
+                | (NativeWidget::Range(pair), Prop::High, Value::F64(v)) => {
+                    let low = prop == Prop::Low;
+                    let mut state = pair.state.get();
+                    if low {
+                        state.low = v;
+                        state.committed_low = v;
+                    } else {
+                        state.high = v;
+                        state.committed_high = v;
+                    }
+                    pair.state.set(state);
+                    let was = core.apply_quiet.replace(true);
+                    pair.thumb(low).set_value(v);
+                    core.apply_quiet.set(was);
+                }
+                (NativeWidget::Range(pair), Prop::LowLabel, Value::Str(label))
+                | (NativeWidget::Range(pair), Prop::HighLabel, Value::Str(label)) => {
+                    pair.labels.borrow_mut()[usize::from(prop == Prop::HighLabel)] = label;
+                    range_labels(pair);
+                }
                 (NativeWidget::Slider(slider), Prop::Min, Value::F64(v)) => {
                     slider.scale.adjustment().set_lower(v);
                     slider_marks(slider);
@@ -16049,6 +16684,31 @@ mod frame_tests {
 }
 
 #[cfg(test)]
+mod range_tests {
+    use super::{range_low_takes, travel_fraction};
+
+    /// docs/range-plan.md §3 rule 4 and §4 MEASURED: the midpoint split, the
+    /// tie by press side, and both mirrored under RTL.
+    #[test]
+    fn gtk_range_press_split_and_travel() {
+        assert!(range_low_takes(100.0, 176.0, 665.0, true));
+        assert!(range_low_takes(419.0, 176.0, 665.0, true));
+        assert!(!range_low_takes(422.0, 176.0, 665.0, true));
+        assert!(!range_low_takes(689.0, 176.0, 665.0, true));
+        assert!(range_low_takes(700.0, 666.0, 177.0, false));
+        assert!(!range_low_takes(400.0, 666.0, 177.0, false));
+        assert!(range_low_takes(417.0, 420.0, 420.0, true));
+        assert!(!range_low_takes(423.0, 420.0, 420.0, true));
+        assert!(!range_low_takes(417.0, 420.0, 420.0, false));
+        assert!(range_low_takes(423.0, 420.0, 420.0, false));
+        assert_eq!(travel_fraction(2.0, 4.0, 404.0), 0.0);
+        assert_eq!(travel_fraction(402.0, 4.0, 404.0), 1.0);
+        assert_eq!(travel_fraction(82.0, 4.0, 404.0), 0.2);
+        assert_eq!(travel_fraction(5.0, 10.0, 10.0), 0.0);
+    }
+}
+
+#[cfg(test)]
 mod color_tests {
     use super::{color_of, rgba_of};
 
@@ -16274,6 +16934,9 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         let composer_css = gtk4::CssProvider::new();
         watch_css_errors(&composer_css, &css_error);
         load_kaya_css(&composer_css, "composer", COMPOSER_CSS, &css_error);
+        let range_css = gtk4::CssProvider::new();
+        watch_css_errors(&range_css, &css_error);
+        load_kaya_css(&range_css, "range", RANGE_CSS, &css_error);
         // The label weights, at the WISH until a brand font says otherwise
         // (weight_css_for). Kept in CoreState, not handed to the display and
         // forgotten, because a SetTypeface with font bytes rewrites it.
@@ -16350,6 +17013,11 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             gtk4::style_context_add_provider_for_display(
                 &display,
                 &composer_css,
+                gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
+            gtk4::style_context_add_provider_for_display(
+                &display,
+                &range_css,
                 gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
             );
             gtk4::style_context_add_provider_for_display(
@@ -16581,6 +17249,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 sliders: Vec::new(),
                 number_fields: Vec::new(),
                 color_pickers: Vec::new(),
+                ranges: Vec::new(),
                 date_pickers: Vec::new(),
                 time_pickers: Vec::new(),
                 images: Vec::new(),
@@ -17137,6 +17806,24 @@ impl GtkStage {
 
     /// `unfocus` and `nudge` refuse a field that does not hold focus
     /// (docs/number-field-plan.md §5), the SwiftUI runner's sentence.
+    /// The keyboard's path (docs/range-plan.md §3 rule 4, §5): focus the
+    /// scale, then Up or Down through the platform's own injector. A
+    /// horizontal GtkScale takes Up as an increase in either direction and a
+    /// vertical inverted one takes Up toward its maximum (gtkrange.c
+    /// `should_invert_move`, §4 MEASURED).
+    fn scale_key(
+        t: crate::harness::Target,
+        up: bool,
+        find: impl Fn(&CoreState) -> Option<gtk4::Widget> + Copy + Send + 'static,
+    ) {
+        let found = Self::on_main(move |core| find(core).map(|scale| scale.grab_focus()).is_some());
+        assert!(found, "kaya: nudge: no such target {t:?}");
+        Self::await_frames(2);
+        let holds = Self::on_main(move |core| find(core).is_some_and(|w| widget_focused(&w)));
+        assert!(holds, "kaya: nudge {t:?}: the scale did not take focus");
+        send_platform_key(if up { "Up" } else { "Down" }, "nudge", None);
+    }
+
     fn number_field_holds_focus(t: crate::harness::Target, verb: &str) {
         let holds = Self::on_main(move |core| {
             crate::harness::try_resolve(t.index, core.number_fields.len())
@@ -18376,23 +19063,79 @@ impl crate::harness::Stage for GtkStage {
 
     /// The CONTROL's value in the one fixed spelling, never the mirror
     /// beside it (docs/slider-plan.md S8).
-    fn set_thumb(&self, _: crate::harness::Target, _: crate::harness::Thumb, _: f64) {
-        crate::depth_stub("range")
+    /// THROUGH the thumb's own scale as one finished gesture, set_value's
+    /// shape: its `value-changed` runs the range's one commit path.
+    fn set_thumb(&self, t: crate::harness::Target, thumb: crate::harness::Thumb, value: f64) {
+        Self::on_main(move |core| {
+            let i = crate::harness::resolve(t.index, core.ranges.len());
+            let scale = core.ranges[i].thumb(thumb == crate::harness::Thumb::Low).clone();
+            scale.set_value(value);
+            scale.emit_by_name::<()>("value-changed", &[]);
+        });
     }
 
-    fn nudge_thumb(&self, _: crate::harness::Target, _: crate::harness::Thumb, _: bool) {
-        crate::depth_stub("range")
+    fn nudge_thumb(&self, t: crate::harness::Target, thumb: crate::harness::Thumb, up: bool) {
+        let low = thumb == crate::harness::Thumb::Low;
+        Self::scale_key(t, up, move |core| {
+            let i = crate::harness::try_resolve(t.index, core.ranges.len())?;
+            Some(core.ranges[i].thumb(low).clone().upcast())
+        });
     }
 
-    fn thumb_fraction(&self, _: crate::harness::Target, _: Option<crate::harness::Thumb>) -> String {
-        crate::depth_stub("range")
+    fn thumb_fraction(&self, t: crate::harness::Target, thumb: Option<crate::harness::Thumb>) -> String {
+        Self::on_main(move |core| {
+            let scale: gtk4::Scale = match thumb {
+                None => match crate::harness::try_resolve(t.index, core.sliders.len()) {
+                    Some(i) => core.sliders[i].scale.clone(),
+                    None => return "<no such target>".to_owned(),
+                },
+                Some(thumb) => match crate::harness::try_resolve(t.index, core.ranges.len()) {
+                    Some(i) => core.ranges[i]
+                        .thumb(thumb == crate::harness::Thumb::Low)
+                        .clone()
+                        .upcast(),
+                    None => return "<no such target>".to_owned(),
+                },
+            };
+            match scale_travel(&scale) {
+                Some(f) => crate::harness::spelled_fraction(f),
+                None => "<the scale has no knob laid out>".to_owned(),
+            }
+        })
     }
 
-    fn ax_thumb(&self, _: crate::harness::Target, _: crate::harness::Thumb) -> String {
-        crate::depth_stub("range")
+    /// One thumb's own element on the bus, by `ax`'s ordinal rule.
+    fn ax_thumb(&self, t: crate::harness::Target, thumb: crate::harness::Thumb) -> String {
+        let low = thumb == crate::harness::Thumb::Low;
+        let Some((want, index)) = Self::on_main(move |core| {
+            let i = crate::harness::try_resolve(t.index, core.ranges.len())?;
+            let widget: gtk4::Widget = core.ranges[i].thumb(low).clone().upcast();
+            let want = atspi_role_of(&widget)?;
+            atspi_rank(&core.window, &widget).map(|rank| (want, rank))
+        }) else {
+            return "<not in the accessibility tree>".to_owned();
+        };
+        let role = if want == atspi::Role::Slider { "slider" } else { "unknown" };
+        match atspi_collect(want, index, false) {
+            Some(name) => format!("{role}/{name}"),
+            None => atspi_miss("<not in the accessibility tree>"),
+        }
     }
 
     fn control_value(&self, t: crate::harness::Target) -> String {
+        if t.kind == crate::harness::TargetKind::Range {
+            return Self::on_main(move |core| {
+                let Some(i) = crate::harness::try_resolve(t.index, core.ranges.len()) else {
+                    return "<no such target>".to_owned();
+                };
+                let pair = &core.ranges[i];
+                format!(
+                    "{} {}",
+                    crate::harness::spelled_slider(pair.low.value()),
+                    crate::harness::spelled_slider(pair.high.value())
+                )
+            });
+        }
         if t.kind == crate::harness::TargetKind::NumberField {
             return Self::on_main(move |core| {
                 let Some(i) = crate::harness::try_resolve(t.index, core.number_fields.len()) else {
@@ -18421,6 +19164,13 @@ impl crate::harness::Stage for GtkStage {
     /// the press runs gtk_spin_button_update and one step, and the release
     /// comes inside the 200ms before GTK's autorepeat would step again.
     fn nudge(&self, t: crate::harness::Target, up: bool) {
+        if t.kind == crate::harness::TargetKind::Slider {
+            Self::scale_key(t, up, move |core| {
+                let i = crate::harness::try_resolve(t.index, core.sliders.len())?;
+                Some(core.sliders[i].scale.clone().upcast())
+            });
+            return;
+        }
         Self::number_field_holds_focus(t, "nudge");
         let driver = std::env::var(DRAG_DRIVER_VAR).unwrap_or_else(|_| {
             panic!(
@@ -18523,6 +19273,7 @@ impl crate::harness::Stage for GtkStage {
                 crate::fault::guard("draining a transaction", || {
                     let mut n = 0usize;
                     while let Ok(tx) = core.transactions.try_recv() {
+                        drain_range_settled(core);
                         for op in core.scene.apply(tx) {
                             apply(core, op);
                         }
@@ -19996,6 +20747,15 @@ impl crate::harness::Stage for GtkStage {
             // Addressed by CREATION KIND (docs/adaptive-layout-plan.md D1);
             // the answer is the toolkit's own orientation read back, never
             // the model — a backend that ignored the write must fail.
+            if t.kind == crate::harness::TargetKind::Slider {
+                let Some(i) = crate::harness::try_resolve(t.index, core.sliders.len()) else {
+                    return "<no such target>".to_string();
+                };
+                return match core.sliders[i].scale.orientation() {
+                    gtk4::Orientation::Vertical => "vertical".to_owned(),
+                    _ => "horizontal".to_owned(),
+                };
+            }
             let from_columns = matches!(t.kind, crate::harness::TargetKind::Column);
             let registry = if from_columns { &core.columns } else { &core.rows };
             let Some(i) = crate::harness::try_resolve(t.index, registry.len()) else {
@@ -22009,7 +22769,8 @@ fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk
         K::Label => try_resolve(target.index, core.labels.len()).map(|i| core.labels[i].clone()),
         K::Entry => nth!(core.entries),
         K::Search => nth!(core.searches),
-        K::Range => crate::depth_stub("range"),
+        K::Range => try_resolve(target.index, core.ranges.len())
+            .map(|i| core.ranges[i].group.clone().upcast()),
         K::ColorPicker => try_resolve(target.index, core.color_pickers.len())
             .map(|i| core.color_pickers[i].swatch.clone().upcast()),
         K::NumberField => try_resolve(target.index, core.number_fields.len())

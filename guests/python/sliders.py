@@ -65,6 +65,10 @@ with app.window():
             value=0.5, min=0.0, max=1.0, tick_spacing=0.25,
             on_change=on_volume,
         ).a11y_label("Volume")
+        kaya.slider(                                            # slider#2
+            value=0.25, min=0.0, max=1.0, step=0.25,
+            axis=kaya.Axis.VERTICAL,
+        ).a11y_id("fader").a11y_label("Fader")
         kaya.button("reset", on_click=on_reset)                 # button#0
         for track in tracks:
             kaya.label(bind=track.name)

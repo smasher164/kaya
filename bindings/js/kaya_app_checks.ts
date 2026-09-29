@@ -983,6 +983,81 @@ if (isMainThread) {
   check("a value_committed occurrence reaches onCommit and NOT onChange", JSON.stringify(sliderCommits) === "[35]" && JSON.stringify(sliderMoves) === "[40]");
   check("a stamped value_committed hands the row over first", JSON.stringify(sliderRowCommits) === JSON.stringify([["b", 40]]));
 
+  // ------------------------------------ the range and the vertical slider
+  // (docs/range-plan.md §2.) The kind and its props pack as the generated
+  // setters do, two signals bind both thumbs, range_changed and
+  // range_committed reach onChange and onCommit with BOTH values (the row
+  // first when stamped), a thumb that is not a number is refused, and a
+  // slider takes `axis`.
+  const RngClip = kaya.record({ name: String, trimIn: Number, trimOut: Number }, "RngClip");
+  let rngClips!: K.Collection<K.Fields<typeof RngClip.schema>, K.Row<typeof RngClip.schema>>;
+  let rngBar!: K.Widget;
+  let rngBound!: K.Widget;
+  let rngFader!: K.Widget;
+  let rngStamped!: K.Widget;
+  let rngLo!: K.Signal<number>;
+  let rngHi!: K.Signal<number>;
+  let rngLabelRec!: Uint8Array;
+  const rngMoves: [number, number][] = [];
+  const rngCommits: [number, number][] = [];
+  const rngRowCommits: [K.Key, number, number][] = [];
+  shipped.length = 0;
+  app.window(() => {
+    rngClips = kaya.collection(RngClip);
+    rngLo = kaya.signal(2);
+    rngHi = kaya.signal(8);
+    kaya.column(() => {
+      rngBar = kaya.range({
+        low: 2, high: 8, min: 0, max: 10, step: 0.5, tickSpacing: 1, minGap: 1, lowLabel: "In", highLabel: "Out",
+        onChange: (lo: number, hi: number) => rngMoves.push([lo, hi]),
+        onCommit: (lo: number, hi: number) => rngCommits.push([lo, hi]),
+      });
+      rngBound = kaya.range({ low: rngLo, high: rngHi });
+      rngFader = kaya.slider({ value: 0.25, axis: kaya.Axis.VERTICAL });
+      check("a range's thumb that is not a number is refused by name", throws(() => kaya.range({ low: "2" as unknown as number, high: 8 }), /a range's low is a number/));
+      for (const clip of rngClips) {
+        rngStamped = kaya.range({
+          low: clip.trimIn, high: clip.trimOut, min: 0, max: 10, lowLabel: clip.name,
+          onCommit: (row: K.RowHandle<K.Fields<typeof RngClip.schema>>, lo: number, hi: number) => rngRowCommits.push([row.key, lo, hi]),
+        });
+        rngLabelRec = wire.tx_bind_low_label_element(rngStamped.id, clip.name._level(), clip.name._index);
+      }
+    });
+  });
+  const rngRecords = shipped[0]!.map((r) => JSON.stringify([...r]));
+  const rngHas = (r: Uint8Array): boolean => rngRecords.includes(JSON.stringify([...r]));
+  check("a range is the range kind", rngHas(wire.tx_create_widget(rngBar.id, wire.KIND_RANGE)));
+  check("a range's min, max, step, tickSpacing, minGap, labels and thumbs pack as the generated setters do",
+    [wire.tx_set_min(rngBar.id, 0), wire.tx_set_max(rngBar.id, 10), wire.tx_set_step(rngBar.id, 0.5),
+      wire.tx_set_tick_spacing(rngBar.id, 1), wire.tx_set_min_gap(rngBar.id, 1), wire.tx_set_low_label(rngBar.id, "In"),
+      wire.tx_set_high_label(rngBar.id, "Out"), wire.tx_set_low(rngBar.id, 2), wire.tx_set_high(rngBar.id, 8)].every(rngHas));
+  check("two signals bind a range's thumbs", rngHas(wire.tx_bind_low(rngBound.id, rngLo.id)) && rngHas(wire.tx_bind_high(rngBound.id, rngHi.id)));
+  check("a slider's axis packs as the generated setter does", rngHas(wire.tx_set_axis(rngFader.id, wire.AXIS_VERTICAL)));
+  check("a stamped range's lowLabel binds the row's own field", rngHas(rngLabelRec));
+  const packPair = (kind: number, ident: number, keys: K.Key[], lo: number, hi: number): Uint8Array => {
+    const parts: Uint8Array[] = [...keys.map((k) => valueBytes(keyOf(k))), valueBytes(lo), valueBytes(hi)];
+    const body = parts.reduce((n, b) => n + b.length, 0);
+    const out = new Uint8Array(24 + body + ((8 - ((24 + body) % 8)) % 8));
+    const ov = new DataView(out.buffer);
+    ov.setUint32(0, out.length, true);
+    ov.setUint16(4, kind, true);
+    ov.setBigUint64(8, BigInt(ident), true);
+    ov.setUint32(16, keys.length, true);
+    let at = 24;
+    for (const b of parts) {
+      out.set(b, at);
+      at += b.length;
+    }
+    return out;
+  };
+  app.build(() => { rngClips.insert("b", RngClip({ name: "b", trimIn: 3, trimOut: 7 })); });
+  fire(wire.parse_occurrence(packPair(wire.OCC_RANGE_COMMITTED, rngBar.id, [], 3, 8)));
+  fire(wire.parse_occurrence(packPair(wire.OCC_RANGE_CHANGED, rngBar.id, [], 3.5, 8)));
+  fire(wire.parse_occurrence(packPair(wire.OCC_RANGE_COMMITTED, rngStamped.id, ["b"], 3, 9)));
+  check("range_committed reaches onCommit with both values, and range_changed onChange",
+    JSON.stringify(rngCommits) === "[[3,8]]" && JSON.stringify(rngMoves) === "[[3.5,8]]");
+  check("a stamped range_committed hands the row over first, then both values", JSON.stringify(rngRowCommits) === JSON.stringify([["b", 3, 9]]));
+
   // ------------------------------------------------- the number field
   // (docs/number-field-plan.md §2.) The kind, its bounds and step pack
   // as the generated setters do, and value_committed reaches onCommit,

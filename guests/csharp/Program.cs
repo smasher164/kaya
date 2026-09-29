@@ -79,6 +79,7 @@ static class Program
             case "sliders": SlidersScene.Run(); break;
             case "numberfield": case "numberfieldde": NumberFieldScene.Run(); break;
             case "colorpicker": ColorPickerScene.Run(); break;
+            case "range": case "rangertl": RangeScene.Run(); break;
             case "adaptive": AdaptiveScene.Run(); break;
             case "encodebench": EncodeBench.Run(); break;
             default: Milestone2Scene.Run(); break;

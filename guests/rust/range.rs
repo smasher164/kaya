@@ -19,6 +19,7 @@ enum Msg {
     Volume(f64),
     ClipTrim(kaya::Path, f64, f64),
     Reset,
+    Late,
 }
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
@@ -62,6 +63,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 msgs.on_value(volume, Msg::Volume);
                 let reset = tx.button("reset").id(); // button#0
                 msgs.on_click(reset, Msg::Reset);
+                let late = tx.button("late").id(); // button#1
+                msgs.on_click(late, Msg::Late);
                 for mut row in clips.rows(tx) {
                     row.label(Clip::name());
                     let trim = row.range(0.0, 10.0, Clip::trim_in(), Clip::trim_out());
@@ -100,6 +103,10 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             Msg::Reset => ctx.apply(|tx| {
                 // Must NOT come back as a move or a commit.
                 tx.write(low_sig, 1.0);
+            }),
+            Msg::Late => ctx.apply(|tx| {
+                // Crosses a high thumb the user moved; the core clamps it (docs/range-plan.md §3).
+                tx.write(low_sig, 6.0);
             }),
         }
     }

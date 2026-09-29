@@ -30,7 +30,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) the foreign suites load;
 # --example alone would build only the rlib it depends on.
-SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen numberfield colorpicker"
+SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen numberfield colorpicker range"
 # Depth-slice scenes, rust only. `windowed` and `canvas` are rust BY
 # DESIGN rather than by depth — the compiled conformance scenes every
 # lane runs (docs/virtualization-plan.md §6.3, docs/canvas-plan.md
@@ -1683,6 +1683,40 @@ for proto in x11 wayland; do
     run "$proto" colorpicker-haskell env KAYA_SELFTEST=colorpicker \
         tools/linux/a11y-leg.sh "$(hs_bin colorpicker)"
     run "$proto" colorpicker-java env KAYA_SELFTEST=colorpicker KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    # THE RANGE (docs/range-plan.md §5), through a11y-leg.sh for its
+    # `expect_ax`; the Arabic leg runs the same guest in every language.
+    run "$proto" range-rust env KAYA_SELFTEST=range \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/range"
+    run "$proto" range-python env KAYA_SELFTEST=range KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/range.py
+    run "$proto" range-js env KAYA_SELFTEST=range KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/range.ts
+    run "$proto" range-go env KAYA_SELFTEST=range \
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" range-csharp env KAYA_SELFTEST=range KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" range-ocaml env KAYA_SELFTEST=range KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/range.exe
+    run "$proto" range-haskell env KAYA_SELFTEST=range \
+        tools/linux/a11y-leg.sh "$(hs_bin range)"
+    run "$proto" range-java env KAYA_SELFTEST=range KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    run "$proto" rangertl-rust env KAYA_LOCALE=ar-EG KAYA_SELFTEST=rangertl \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/range"
+    run "$proto" rangertl-python env KAYA_LOCALE=ar-EG KAYA_SELFTEST=rangertl KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/range.py
+    run "$proto" rangertl-js env KAYA_LOCALE=ar-EG KAYA_SELFTEST=rangertl KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/range.ts
+    run "$proto" rangertl-go env KAYA_LOCALE=ar-EG KAYA_SELFTEST=rangertl \
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" rangertl-csharp env KAYA_LOCALE=ar-EG KAYA_SELFTEST=rangertl KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" rangertl-ocaml env KAYA_LOCALE=ar-EG KAYA_SELFTEST=rangertl KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/range.exe
+    run "$proto" rangertl-haskell env KAYA_LOCALE=ar-EG KAYA_SELFTEST=rangertl \
+        tools/linux/a11y-leg.sh "$(hs_bin range)"
+    run "$proto" rangertl-java env KAYA_LOCALE=ar-EG KAYA_SELFTEST=rangertl KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" scroll-rust env KAYA_SELFTEST=scroll "$CARGO_TARGET_DIR/debug/examples/scroll"
     # The sideways strip in Arabic (docs/hscroll-plan.md §4).

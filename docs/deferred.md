@@ -9,8 +9,8 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
-## BUILD — the range and the vertical slider (docs/range-plan.md), depth on the mac (2026-09-29); the GTK, WinUI and Compose arms, the iOS legs, rangertl, the sliders scene's fader and the other eight bindings are the breadth slice
-KEY: range, KIND_RANGE, range_changed, range_committed, min_gap, low_label, high_label, on_range, on_range_commit, kaya_range_clamp, clamp_thumb, expect_thumb, set_thumb, nudge_thumb, ax_thumb, vertical slider, slider axis, rangertl, DEPTH STUB range
+## ~~BUILD — the range and the vertical slider (docs/range-plan.md), depth on the mac (2026-09-29); the GTK, WinUI and Compose arms, the iOS legs, rangertl, the sliders scene's fader and the other eight bindings are the breadth slice~~ COMPLETE 2026-09-29: every item below LANDED, the last one by the maintainer's ruling (plan §3 rule 11); range, rangertl and the sliders fader on all five lanes, validation in the breadth commit; what the breadth found and left is in "WATCH — the range's tie and its readers' names"
+KEY: range, KIND_RANGE, range_changed, range_committed, min_gap, low_label, high_label, on_range, on_range_commit, kaya_range_clamp, clamp_thumb, expect_thumb, set_thumb, nudge_thumb, ax_thumb, vertical slider, slider axis, rangertl, DEPTH STUB range, user_range_committed, settle_range_writes, RANGE_SETTLED
 
 The depth slice: kind 22 with `low`, `high`, `min_gap`, `low_label` and
 `high_label`, the slider's `min`/`max`/`step`/`tick_spacing`, the
@@ -19,28 +19,90 @@ refusals on the complete declaration and at the signal barrier, the one clamp
 (`range::clamp_thumb`, `kaya_range_clamp`), the slider taking `axis`, the Rust
 sugar in both zones, the SwiftUI arm (the stacked pair measured in plan §4 on
 the mac, and built unmeasured on iOS with the rotated fader), and
-tools/scenes/range.steps green on the mac lane. What breadth owes:
-  - **DEPTH STUB: range on gtk** — two subclassed GtkScales answering
-    `contains` near their knob over a drawn trough, and the vertical slider's
-    `inverted`, measured per plan §4.2/§4.3 first.
-  - **DEPTH STUB: range on winui** — two Sliders in one Grid cell with the
-    track parts hidden and z-order set on PointerMoved, and
-    `Orientation::Vertical`, measured per plan §4.2/§4.3 first.
-  - **DEPTH STUB: range on compose** — material3's RangeSlider (plan §4.1's
-    five measurements first) and the rotated fader.
-  - The iOS legs: tools/lib/lanes/ios.py's UNWIRED_SCENES holds `range` until
-    the two UISliders' hit routing, the rotated fader's hit box, accessibility
-    frame and adjust direction are measured (plan §4.2, §4.3).
-  - `rangertl.steps` (plan §5, rule 6's wall) and the vertical fader in
-    `sliders.steps`; the depth scene carries the fader for now.
-  - The other eight bindings' `range`, its props and two handlers in both
-    zones, and `axis` on a slider (check-sugar-surface is red on them by
-    design until then).
-  - An app write crossing a thumb the USER moved: the root checks the app's
-    declared pair, which does not follow user moves, so a write of `low`
-    above a user-lowered `high` passes the root and reaches the control
-    crossed. Measure what each arm shows and decide whether the arm holds the
-    pair or the root reads the committed values.
+tools/scenes/range.steps green on the mac lane. What breadth owed:
+  - ~~**DEPTH STUB: range on gtk**~~ — LANDED 2026-09-29: two GtkScales over a
+    trough kaya draws in real `scale > trough > highlight` nodes. MEASURED
+    (docs/probes/range-stack-gtk-2026-09-29.py, plan §4 and §6 amended): a
+    subclassed scale answering `contains` routes nothing, since GTK's pick
+    asks the full-width trough first; the thumbs' own parts are made
+    untargetable and `contains` answers the midpoint half inside the scale's
+    own bounds, the tie by press side read from the scale's direction. AT-SPI
+    SetCurrentValue is clamped and written back; the vertical slider is
+    `inverted`. One commit path, `range_moved`. Legs in eight languages on
+    x11 and wayland. GUARD: check-slider-commit's GTK range clause, its GTK
+    routing row and the untargetable-parts clause; gtk::range_tests by
+    check-gtk.
+  - ~~**DEPTH STUB: range on winui**~~ — LANDED 2026-09-29, NOT with the
+    z-order this line used to name (plan §3 rule 4 routes by geometry): each
+    Slider's `UIElement.Clip` is its half of the track split at the midpoint,
+    the shared centre at a tie. MEASURED on the lane's VM with real input
+    (docs/probes/range-stack-winui-2026-09-29.py and .ps1): presses routed,
+    tie by press side, UIA RangeValue.SetValue clamped and written back, a
+    Group of two Sliders, ar-EG mirroring by itself, the vertical minimum at
+    the bottom. A write-back inside ValueChanged is re-laid next dispatcher
+    turn, and `nudge` posts to the focus window (both docs/traps.md). Legs in
+    six languages plus rangertl_rust. GUARD: check-slider-commit's WinUI range
+    clause and routing row (ZIndex and child reordering refused);
+    winui::tests on the guest.
+  - ~~**DEPTH STUB: range on compose**~~ — LANDED 2026-09-29: material3's
+    RangeSlider, every value through `kaya_range_clamp` over JNI and out
+    through `kaya_emit_range`; the thumbs' descriptions replaced through
+    LocalContext; the fader the Material slider in a −90° graphicsLayer with
+    swapped constraints. MEASURED (plan §4): a tie is picked by drag direction
+    at the 1.3.1 pin, and while the thumbs coincide the low thumb is absent
+    from the accessibility tree. Legs compose, jvm and go; the phone table
+    drops the nudge blocks. GUARD: check-slider-commit's Compose range row,
+    check-verbs' range clause in both interpreters, KayaRangeTest.
+  - ~~The iOS legs~~ — LANDED 2026-09-29 (plan §4, docs/probes/range-stack-ios-2026-09-29.swift):
+    real touches route by the midpoint split, a tie by press side, the fader
+    drags along its tall axis with a tall accessibility frame. The simulator
+    found three depth defects, fixed: both platforms' sliders mirror under
+    RTL (the split now reads direction, a shared mac fix), empty track images
+    restyled iOS 26's thumb and zeroed the track (clear tints now), and the
+    reader saw no group (`accessibilityElements`). `nudge` drives the thumb's
+    accessibilityIncrement, so iOS keeps the nudge blocks. Legs swift, go and
+    rust-swiftui. GUARD: check-slider-commit's routing clause (SwiftUI rows)
+    and R9.
+  - ~~`rangertl.steps` and the vertical fader in `sliders.steps`~~ — LANDED
+    2026-09-29 on all five lanes (windows runs rangertl for Rust, as
+    tasksrtl). `expect_thumb` reads the knob's own centres at the minimum and
+    maximum, which the mac's compat design measures from the view's bounds
+    (docs/traps.md).
+  - ~~The other eight bindings~~ — LANDED 2026-09-29: `range` in both zones
+    with its props, row-field thumb labels and two handlers, and `axis` on a
+    slider, in all nine; a guest each. GUARD: check-sugar-surface's range
+    clause with fake-name negatives, tpl-surfaces' floors.
+  - ~~An app write crossing a thumb the USER moved~~ — RULED 2026-09-29 (the
+    maintainer, option a; plan §3 rule 11) and LANDED: the core's pair follows
+    every user commit (`Scene::user_range_committed`, called at every arm's
+    commit door, queued in RANGE_SETTLED on GTK and WinUI when the core is
+    borrowed), a single-thumb app write past the moved thumb is clamped by
+    `settle_range_writes` through the one clamp, and one range_committed
+    correction fires only when the clamp changed the write. GUARD: three core
+    unit tests watched failing on five cuts; tools/scenes/range.steps' `late`
+    button on every lane; check-slider-commit's record clause (every committed
+    send recorded, every drain emptying the queue first).
+
+## WATCH — the range's tie and its readers' names (docs/range-plan.md), found by the breadth slice 2026-09-29
+KEY: tie ring, tie outline, min_gap 0, content-desc, accessibility frame, per-thumb frame, Material slider name
+
+Three things the range breadth measured and no lane asserts, each for the
+maintainer's review before it is built:
+  - The tie. No scene declares `min_gap 0`, so the outline rule 4 puts on the
+    top thumb is built on the mac, iOS and GTK and never photographed or
+    asserted; on WinUI the two clipped thumbs draw as ONE knob of two halves
+    with a faint seam and neither on top, so the outline has no thumb to sit
+    on. A tie scene with a capture per lane decides whether that picture is
+    acceptable.
+  - Android names no slider. compose-ui 1.7.5 leaves `content-desc` empty on
+    every Material slider node, the plain slider's included (the thumb's
+    background gives the node a child, and the description is then skipped);
+    `uiautomator dump` shows it, while `expect_ax` reads Compose's merged
+    semantics name and passes. Measured on the node; TalkBack was not heard.
+    The verb reading a name no service sees is the recorder half of it.
+  - Each thumb's accessibility frame is the whole control on iOS and the mac,
+    so a VoiceOver focus ring does not show which thumb has focus. Rule 7
+    permits it; per-thumb frames are a small follow-up if wanted.
 
 ## ~~BUILD — the colour picker (docs/color-picker-plan.md), depth on the mac (2026-09-28); the GTK, WinUI and Compose arms, the iOS legs, pick_color and the other eight bindings are the breadth slice~~ COMPLETE 2026-09-28: every item below LANDED except `pick_color`, which moved to its own entry ("BUILD — the colour picker's panel scene"); colorpicker legs on all five lanes, validation in the breadth commit
 KEY: colour picker, color_picker, color picker, KIND_COLOR_PICKER, colorpicker, colorpanel, color_changed, on_color, PropKind::Color, set_color, expect_color, pick_color, kaya_color_quantize, Color type, DEPTH STUB colorpicker

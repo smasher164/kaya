@@ -2228,6 +2228,8 @@ print(f"check-steps: the second act: {len(_relaunch)} scene(s) with a "
 # gate quietly stops covering the scenes that use it.
 AX_VERB = {
     "ax": "expect_ax",
+    # A range's thumb: `expect_ax range#0 low "slider/In"` (docs/range-plan.md §5).
+    "ax_thumb": "expect_ax",
     "ax_hint": "expect_ax_hint",
     "highlights": "expect_highlights",
     "selection": "expect_selection",

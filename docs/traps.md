@@ -13006,3 +13006,53 @@ that is the value the app's handler heard (`volume: 0.30000000000000004` on
 the range scene's first run, the mac lane). A scene that reads a handler's
 spelling of a fractional step needs a step that is exact in binary (0.25,
 0.5), and an app that shows such a value formats it itself.
+
+## A WinUI Slider value written back inside ValueChanged leaves its thumb behind (measured 2026-09-29)
+
+WinUI raises a Slider's `ValueChanged` before it lays out the thumb for the
+new value, and the layout uses the value that was raised. A handler that
+writes a different value back (the range's clamp, `set_value range#0 low 3.2`
+snapping to 3) sets the Value property. The thumb is then still laid out at
+the raised value, and it stays there: the value read 3, the thumb read 0.32 of
+its travel for 15 seconds, and the rangertl leg went red on
+`expect_thumb range#0 low "0.7"` (0.68 under ar-EG). `winui_range_relay_thumb`
+sets the value away and back, quietly, on the next dispatcher turn, which
+moves the thumb. check-slider-commit's WinUI range clause holds that call.
+The slider arm's own write-back (`winui_slider_committed`) has the same
+shape. Its snap rarely differs from the value WinUI already snapped, and no
+scene reads a slider's thumb after a snap, so nothing has measured it there.
+
+## An empty track image turns a UISlider's thumb back into the legacy knob (measured 2026-09-29)
+On the iOS 26 simulator, `setMinimumTrackImage(UIImage(), for: .normal)` and
+its maximum twin hide the track, and UIKit then draws the pre-26 round knob
+instead of the Liquid Glass capsule a plain `UISlider` beside it wears. The
+thumb's `trackRect` also becomes zero high. A clear tint
+(`minimumTrackTintColor`, `maximumTrackTintColor` `.clear`) hides the track
+and keeps the capsule and a 4pt `trackRect`. Seen only in a picture of the
+range guest beside its own playhead slider: every value, thumb and ax read
+was green with either spelling. check-slider-commit holds the tint
+(docs/range-plan.md §4).
+
+## A thumb's travel is not the bar's (measured 2026-09-29)
+A knob's centre does not run from half a knob in from each end of the drawn
+bar. A `UISlider` runs it from the view's bounds (31pt knob on 300pt: 35.5 to
+284.5, while `trackRect` spans 3 to 297), and AppKit's `NSSlider` does the
+same under the compat design (an SDK stamp below 26, the JVM host: 12 to 268
+on 280pt) but from the bar under the modern one (10 to 270). A fixed inset
+read 0.19 for 0.2 on both. `expect_thumb` reads the knob's own centre at the
+minimum and the maximum instead. On AppKit that needs a COPY of the cell with
+`controlView` set back: a copied `NSSliderCell` answers zero rects without it.
+
+## A WinUI arrow key on the system input queue goes to the pooled neighbour (measured 2026-09-29)
+
+The windows lane runs a pool of guests at once. An arrow sent with
+`keybd_event` after `SetForegroundWindow` lands on whichever guest holds the
+foreground at that moment. With the six range legs pooled, `range_csharp`'s
+`nudge range#0 high up` moved nothing, and `range_java` moved two steps
+(`3 5` where `3 4.5` was wanted), its own key and its neighbour's. The same
+key POSTED (`WM_KEYDOWN`/`WM_KEYUP`) to the window that `GetFocus()` names on
+the UI thread, after `Focus(FocusState::Keyboard)` on the slider, is handled
+by the Slider's own key handling, even with the guest in the background. All
+six legs were green pooled. `arrow_step` in crates/kaya/src/winui/mod.rs is
+that route, and check-slider-commit's WinUI range clause refuses a
+`keybd_event` in it.

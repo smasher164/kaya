@@ -52,6 +52,13 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     .a11y_label("Volume")
                     .id();
                 msgs.on_value(volume, Msg::Volume);
+                let fader = tx
+                    .slider(0.0, 1.0, 0.25) // slider#2
+                    .step(0.25)
+                    .axis(kaya::Axis::Vertical)
+                    .a11y_label("Fader")
+                    .id();
+                tx.a11y_id(fader, "fader");
                 let reset = tx.button("reset").id(); // button#0
                 msgs.on_click(reset, Msg::Reset);
                 for mut row in tracks.rows(tx) {

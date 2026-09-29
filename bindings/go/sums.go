@@ -342,6 +342,18 @@ func (sc SumCase[K, V]) Slider(min, max float64, sel func(*V) *float64, onChange
 	return n
 }
 
+// Range over min..max whose two thumbs are the fields the selectors name
+// (Tpl.RangeBound), with its move handler (nil for none).
+func (sc SumCase[K, V]) Range(min, max float64, low, high func(*V) *float64, onChange func(*Tx, K, float64, float64)) Node {
+	n := sc.t.RangeBound(min, max, FieldBy(low), FieldBy(high))
+	if onChange != nil {
+		n.OnRangeChanged(func(tx *Tx, keys []any, low, high float64) {
+			onChange(tx, keys[0].(K), low, high)
+		})
+	}
+	return n
+}
+
 // NumberField whose value is the field the selector names, with its
 // commit handler (nil for none).
 func (sc SumCase[K, V]) NumberField(sel func(*V) *float64, onCommit func(*Tx, K, float64)) Node {
@@ -400,6 +412,23 @@ func (sc SumCase[K, V]) SetStep(n Node, step float64) { sc.t.SetStep(n, step) }
 func (sc SumCase[K, V]) SetMin(n Node, min float64) { sc.t.SetMin(n, min) }
 
 func (sc SumCase[K, V]) SetMax(n Node, max float64) { sc.t.SetMax(n, max) }
+
+// SetMinGap, SetLowLabel and SetHighLabel are a range this arm stamps
+// (Tpl.SetMinGap); BindLowLabel and BindHighLabel speak the fields the
+// selectors name.
+func (sc SumCase[K, V]) SetMinGap(n Node, gap float64) { sc.t.SetMinGap(n, gap) }
+
+func (sc SumCase[K, V]) SetLowLabel(n Node, label string) { sc.t.SetLowLabel(n, label) }
+
+func (sc SumCase[K, V]) BindLowLabel(n Node, sel func(*V) *string) {
+	sc.t.BindLowLabel(n, FieldBy(sel))
+}
+
+func (sc SumCase[K, V]) SetHighLabel(n Node, label string) { sc.t.SetHighLabel(n, label) }
+
+func (sc SumCase[K, V]) BindHighLabel(n Node, sel func(*V) *string) {
+	sc.t.BindHighLabel(n, FieldBy(sel))
+}
 
 // SetAlpha lets a colour picker this arm stamps choose translucency
 // (Tpl.SetAlpha).

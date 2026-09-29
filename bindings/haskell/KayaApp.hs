@@ -282,6 +282,8 @@ module KayaApp
     colorPickerBoundOn,
     sliderOn,
     sliderBoundOn,
+    rangeOn,
+    rangeBoundOn,
     numberFieldOn,
     numberFieldBoundOn,
     selectOn,
@@ -343,6 +345,7 @@ module KayaApp
     searchBound,
     progressBound,
     slider,
+    range,
     numberField,
     select,
     radio,
@@ -2746,7 +2749,7 @@ data Attr (c :: WClass) where
   -- | This container's arrangement axis, or the direction this scroll
   -- scrolls (vertical unless set; docs\/hscroll-plan.md) — 'setAxis' at
   -- construction.
-  Axis :: Axis -> Attr 'BoxW
+  Axis :: Axis -> Attr c
   -- | Stack this row's children vertically while the window's size
   -- class is the named one. Containers only, and LIVE ZONE ONLY —
   -- 'TplAttr' has no counterpart.
@@ -2811,6 +2814,15 @@ data Attr (c :: WClass) where
   -- (docs\/slider-plan.md S5): divides the range evenly, a multiple of the
   -- step when one is declared; 0 draws none.
   TickSpacing :: Double -> Attr 'LeafW
+  -- | A range's least distance between its thumbs, in value units
+  -- (docs\/range-plan.md §2).
+  MinGap :: Double -> Attr 'LeafW
+  -- | What a range's low and high thumbs speak (docs\/range-plan.md §8
+  -- ruling 2); unset, the range's 'A11yLabel'.
+  LowLabel :: Text -> Attr 'LeafW
+  LowLabelBound :: Signal Text -> Attr 'LeafW
+  HighLabel :: Text -> Attr 'LeafW
+  HighLabelBound :: Signal Text -> Attr 'LeafW
   -- | A number field's bounds (docs\/number-field-plan.md §2); never set,
   -- -2^53 and 2^53.
   Min :: Double -> Attr 'LeafW
@@ -2874,6 +2886,11 @@ applyAttr (MinuteStep minutes) (Widget n) =
   emitB (W.txSetMinuteStep n (fromIntegral minutes))
 applyAttr (Step step) (Widget n) = emitB (W.txSetStep n step)
 applyAttr (TickSpacing spacing) (Widget n) = emitB (W.txSetTickSpacing n spacing)
+applyAttr (MinGap gap) (Widget n) = emitB (W.txSetMinGap n gap)
+applyAttr (LowLabel l) (Widget n) = emitB (W.txSetLowLabel n (T.unpack l))
+applyAttr (LowLabelBound (Signal s)) (Widget n) = emitB (W.txBindLowLabel n s)
+applyAttr (HighLabel l) (Widget n) = emitB (W.txSetHighLabel n (T.unpack l))
+applyAttr (HighLabelBound (Signal s)) (Widget n) = emitB (W.txBindHighLabel n s)
 applyAttr (Min v) (Widget n) = emitB (W.txSetMin n v)
 applyAttr (Max v) (Widget n) = emitB (W.txSetMax n v)
 applyAttr (Role r) w = setRole w r
@@ -3172,6 +3189,31 @@ sliderBoundOn lo hi sig handler = leafish $ do
   emitB (W.txSetMax n hi)
   bindValue w sig
   pendB (PValue n handler)
+  return w
+
+-- | A range over min..max with its thumbs at low and high
+-- (docs\/range-plan.md), with its move handler co-located: each movement's
+-- pair, both values; the settled pair arrives through 'onRangeCommitted'.
+rangeOn :: (LeafArgs r) => Double -> Double -> Double -> Double -> (Double -> Double -> IO ()) -> r
+rangeOn lo hi low high handler = leafish $ do
+  w@(Widget n) <- widget W.kindRange
+  emitB (W.txSetMin n lo)
+  emitB (W.txSetMax n hi)
+  emitB (W.txSetLow n low)
+  emitB (W.txSetHigh n high)
+  pendB (PRange n handler)
+  return w
+
+-- | A range whose thumbs follow two float signals, with its move handler
+-- co-located; a write never echoes.
+rangeBoundOn :: (LeafArgs r) => Double -> Double -> Signal Double -> Signal Double -> (Double -> Double -> IO ()) -> r
+rangeBoundOn lo hi (Signal low) (Signal high) handler = leafish $ do
+  w@(Widget n) <- widget W.kindRange
+  emitB (W.txSetMin n lo)
+  emitB (W.txSetMax n hi)
+  emitB (W.txBindLow n low)
+  emitB (W.txBindHigh n high)
+  pendB (PRange n handler)
   return w
 
 -- | A number field at value (docs\/number-field-plan.md), with its commit
@@ -3476,6 +3518,10 @@ helpProp = StrProp W.txSetHelp W.txBindHelp W.txBindHelpElement
 placeholderProp = StrProp W.txSetPlaceholder W.txBindPlaceholder W.txBindPlaceholderElement
 hrefProp = StrProp W.txSetHref W.txBindHref W.txBindHrefElement
 
+lowLabelProp, highLabelProp :: StrProp
+lowLabelProp = StrProp W.txSetLowLabel W.txBindLowLabel W.txBindLowLabelElement
+highLabelProp = StrProp W.txSetHighLabel W.txBindHighLabel W.txBindHighLabelElement
+
 -- | What a template Str prop can bind to: a constant, a signal, or the
 -- ROW'S OWN field. Named for the prop's VALUE TYPE, the wire's
 -- @ValueType::Str@.
@@ -3587,15 +3633,31 @@ instance TplImageSource (KField BS.ByteString) where
 -- constraint set is standard.
 class TplNumberSource s where
   bindValueSource :: Node -> s -> Tpl ()
+  bindF64Source :: F64Prop -> Node -> s -> Tpl ()
 
 instance TplNumberSource Double where
   bindValueSource (Node n) x = emitT (W.txSetValue n x)
+  bindF64Source p (Node n) x = emitT (p.f64Const n x)
 
 instance TplNumberSource (Signal Double) where
   bindValueSource (Node n) (Signal s) = emitT (W.txBindValue n s)
+  bindF64Source p (Node n) (Signal s) = emitT (p.f64Signal n s)
 
 instance TplNumberSource (KField Double) where
   bindValueSource n fd = bindValueField n 0 fd
+  bindF64Source p (Node n) (KField i) = emitT (p.f64Element n 0 i)
+
+-- One F64 prop's three generated emitters, 'StrProp''s shape: a range's
+-- two thumbs bind through it.
+data F64Prop = F64Prop
+  { f64Const :: Word64 -> Double -> Builder,
+    f64Signal :: Word64 -> Word64 -> Builder,
+    f64Element :: Word64 -> Word32 -> Word32 -> Builder
+  }
+
+lowProp, highProp :: F64Prop
+lowProp = F64Prop W.txSetLow W.txBindLow W.txBindLowElement
+highProp = F64Prop W.txSetHigh W.txBindHigh W.txBindHighElement
 
 -- | Props on a TEMPLATE node — the live 'Attr' one zone down, attached by
 -- 'withTplAttrs'. WHERE 'Attr' TAKES A VALUE, THIS TAKES A SOURCE, because
@@ -3673,6 +3735,16 @@ data TplAttr where
   -- | A stamped slider's tick spacing (docs\/slider-plan.md S5), constant
   -- for 'TplStep''s reason.
   TplTickSpacing :: Double -> TplAttr
+  -- | A stamped range's least gap (docs\/range-plan.md §2), constant for
+  -- 'TplStep''s reason.
+  TplMinGap :: Double -> TplAttr
+  -- | What a stamped range's thumbs speak, the 'TplA11yLabel' triple.
+  TplLowLabel :: Text -> TplAttr
+  TplLowLabelBound :: Signal Text -> TplAttr
+  TplLowLabelField :: KField Text -> TplAttr
+  TplHighLabel :: Text -> TplAttr
+  TplHighLabelBound :: Signal Text -> TplAttr
+  TplHighLabelField :: KField Text -> TplAttr
   -- | A stamped number field's bounds (docs\/number-field-plan.md §2),
   -- constant across the copies.
   TplMin :: Double -> TplAttr
@@ -3729,6 +3801,13 @@ applyTplAttr (TplHrefField src) n = bindStrSource hrefProp n src
 applyTplAttr (TplRole r) n = setNodeRole n r
 applyTplAttr (TplSubmits on) n = setNodeSubmits n on
 applyTplAttr (TplStep step) (Node n) = emitT (W.txSetStep n step)
+applyTplAttr (TplMinGap gap) (Node n) = emitT (W.txSetMinGap n gap)
+applyTplAttr (TplLowLabel v) n = bindStrSource lowLabelProp n v
+applyTplAttr (TplLowLabelBound src) n = bindStrSource lowLabelProp n src
+applyTplAttr (TplLowLabelField src) n = bindStrSource lowLabelProp n src
+applyTplAttr (TplHighLabel v) n = bindStrSource highLabelProp n v
+applyTplAttr (TplHighLabelBound src) n = bindStrSource highLabelProp n src
+applyTplAttr (TplHighLabelField src) n = bindStrSource highLabelProp n src
 applyTplAttr (TplMaxWidth points) (Node n) = emitT (W.txSetMaxWidth n points)
 applyTplAttr (TplMaxHeight points) (Node n) = emitT (W.txSetMaxHeight n points)
 applyTplAttr (TplTickSpacing spacing) (Node n) = emitT (W.txSetTickSpacing n spacing)
@@ -3946,6 +4025,18 @@ slider lo hi src = do
   emitT (W.txSetMin i lo)
   emitT (W.txSetMax i hi)
   bindValueSource n src
+  return n
+
+-- | A stamped range over @lo@..@hi@ whose two thumbs come from sources, a
+-- row's own fields being the point (docs\/range-plan.md §2); its pairs
+-- register against the node ('onRangeChanged', 'onRangeCommitted').
+range :: (TplNumberSource s, TplNumberSource t) => Double -> Double -> s -> t -> Tpl Node
+range lo hi low high = do
+  n@(Node i) <- widget W.kindRange
+  emitT (W.txSetMin i lo)
+  emitT (W.txSetMax i hi)
+  bindF64Source lowProp n low
+  bindF64Source highProp n high
   return n
 
 -- | A stamped number field whose value comes from a source
@@ -4166,6 +4257,7 @@ register app pending = case pending of
   PTimeNode n handler -> modifyIORef' (app.appNodeTimes) (Map.insert n handler)
   PColor n handler -> modifyIORef' (app.appWidgetColors) (Map.insert n handler)
   PColorNode n handler -> modifyIORef' (app.appNodeColors) (Map.insert n handler)
+  PRange n handler -> modifyIORef' (app.appWidgetRanges) (Map.insert n handler)
   PMenuActivated n handler -> modifyIORef' (app.appMenuActivated) (Map.insert n handler)
   PMenuActivatedNode n handler -> modifyIORef' (app.appMenuActivatedNode) (Map.insert n handler)
   PMenuToggled n handler -> modifyIORef' (app.appMenuToggled) (Map.insert n handler)
@@ -4263,6 +4355,12 @@ class HandlerTarget e where
   -- (docs\/slider-plan.md S2).
   onValueCommitted :: App -> e -> Keyed e (Double -> IO ()) -> IO ()
 
+  -- | A range's thumbs moving, BOTH values (docs\/range-plan.md §2).
+  onRangeChanged :: App -> e -> Keyed e (Double -> Double -> IO ()) -> IO ()
+
+  -- | The pair a range gesture SETTLED ON, once per gesture.
+  onRangeCommitted :: App -> e -> Keyed e (Double -> Double -> IO ()) -> IO ()
+
   -- | Take pasted content. COSTS NOTHING ON ANY PLATFORM, unlike
   -- 'readClipboard': a paste is a user gesture, so it is its own
   -- authorisation.
@@ -4299,6 +4397,10 @@ instance HandlerTarget Widget where
     modifyIORef' (app.appWidgetValues) (Map.insert n handler)
   onValueCommitted app (Widget n) handler =
     modifyIORef' (app.appWidgetCommits) (Map.insert n handler)
+  onRangeChanged app (Widget n) handler =
+    modifyIORef' (app.appWidgetRanges) (Map.insert n handler)
+  onRangeCommitted app (Widget n) handler =
+    modifyIORef' (app.appWidgetRangeCommits) (Map.insert n handler)
   onPaste app (Widget n) handler =
     modifyIORef' (app.appWidgetPastes) (Map.insert n handler)
   onSort app (Widget n) handler =
@@ -4322,6 +4424,10 @@ instance HandlerTarget Node where
     modifyIORef' (app.appNodeValues) (Map.insert n handler)
   onValueCommitted app (Node n) handler =
     modifyIORef' (app.appNodeCommits) (Map.insert n handler)
+  onRangeChanged app (Node n) handler =
+    modifyIORef' (app.appNodeRanges) (Map.insert n handler)
+  onRangeCommitted app (Node n) handler =
+    modifyIORef' (app.appNodeRangeCommits) (Map.insert n handler)
   onPaste app (Node n) handler =
     modifyIORef' (app.appNodePastes) (Map.insert n handler)
   onSort app (Node n) handler =
@@ -4397,6 +4503,10 @@ newApp =
     <*> newIORef Map.empty -- appNodeTimes
     <*> newIORef Map.empty -- appWidgetColors
     <*> newIORef Map.empty -- appNodeColors
+    <*> newIORef Map.empty -- appWidgetRanges
+    <*> newIORef Map.empty -- appNodeRanges
+    <*> newIORef Map.empty -- appWidgetRangeCommits
+    <*> newIORef Map.empty -- appNodeRangeCommits
     <*> newIORef Map.empty -- appCloseRequested
     <*> newIORef Map.empty -- appWindowClosed
     <*> newIORef Map.empty -- appFullscreenChanged
@@ -4505,6 +4615,18 @@ dispatchLoop app = do
               dispatch $ do
                 let (box, time) = askSize askTail
                 submitTx app (emitB (drawingRecord ident [] box (f box time)))
+          dispatchLoop app
+      | kind == W.occKindRangeChanged || kind == W.occKindRangeCommitted -> do
+          let live = kind == W.occKindRangeChanged
+          case askTail of
+            W.VF64 low : W.VF64 high : _ -> case keys of
+              [] -> do
+                handlers <- readIORef (if live then app.appWidgetRanges else app.appWidgetRangeCommits)
+                dispatch (mapM_ (\h -> h low high) (Map.lookup ident handlers))
+              _ -> do
+                handlers <- readIORef (if live then app.appNodeRanges else app.appNodeRangeCommits)
+                dispatch (mapM_ (\h -> h (keyPath keys) low high) (Map.lookup ident handlers))
+            _ -> return ()
           dispatchLoop app
       | kind == W.occKindSortRequested -> do
           let column = case payload of Just (W.VI64 n) -> fromIntegral n; _ -> 0

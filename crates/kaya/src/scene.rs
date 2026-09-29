@@ -955,6 +955,10 @@ pub(crate) struct Scene {
     /// docs/range-plan.md §3 rule 1, the same shape again.
     range_decls: HashMap<(bool, u64), RangeDecl>,
     range_dirty: Vec<(bool, u64)>,
+    /// Every range the backend holds, live or a stamped copy, as it really
+    /// stands: read off the batch's ops and moved by the user's commits
+    /// (docs/range-plan.md §3 rule 11).
+    range_pairs: HashMap<WidgetId, RangePair>,
     /// Live labelled rows touched this transaction, checked for shape at
     /// its end (docs/forms-plan.md §2) once every child has arrived.
     labeled_dirty: Vec<WidgetId>,
@@ -2077,11 +2081,43 @@ struct RangeDecl {
     low: Option<f64>,
     high: Option<f64>,
     min_gap: f64,
+    /// Which thumbs this batch wrote.
+    wrote: (bool, bool),
 }
 
 impl Default for RangeDecl {
     fn default() -> Self {
-        RangeDecl { slider: SliderRange::default(), low: None, high: None, min_gap: 0.0 }
+        RangeDecl {
+            slider: SliderRange::default(),
+            low: None,
+            high: None,
+            min_gap: 0.0,
+            wrote: (false, false),
+        }
+    }
+}
+
+/// A range as the backend holds it (docs/range-plan.md §3 rule 11).
+#[derive(Clone, Copy, Debug)]
+struct RangePair {
+    min: f64,
+    max: f64,
+    step: f64,
+    gap: f64,
+    low: Option<f64>,
+    high: Option<f64>,
+}
+
+impl Default for RangePair {
+    fn default() -> Self {
+        let s = SliderRange::default();
+        RangePair { min: s.min, max: s.max, step: 0.0, gap: 0.0, low: None, high: None }
+    }
+}
+
+impl RangePair {
+    fn thumbs(&self) -> (f64, f64) {
+        (self.low.unwrap_or(self.min), self.high.unwrap_or(self.max))
     }
 }
 
@@ -2093,24 +2129,36 @@ impl RangeDecl {
             Prop::Max => self.slider.max = *x,
             Prop::Step => self.slider.step = *x,
             Prop::TickSpacing => self.slider.tick_spacing = *x,
-            Prop::Low => self.low = Some(*x),
-            Prop::High => self.high = Some(*x),
+            Prop::Low => {
+                self.low = Some(*x);
+                self.wrote.0 = true;
+            }
+            Prop::High => {
+                self.high = Some(*x);
+                self.wrote.1 = true;
+            }
             Prop::MinGap => self.min_gap = *x,
             _ => return false,
         }
         true
     }
 
-    fn refusal(&self, who: &str) -> Option<String> {
+    /// `held`: the backend already holds this range. A batch writing ONE of
+    /// its thumbs is judged against the other as it really stands, after
+    /// the fan-out (`settle_range_writes`, §3 rule 11), so only the bounds
+    /// are read here; two thumbs written together are read against each
+    /// other.
+    fn refusal(&self, who: &str, held: bool) -> Option<String> {
         let RangeDecl { slider: s, min_gap, .. } = *self;
+        let alone = held && self.wrote.0 != self.wrote.1;
         let (low, high) = (self.low.unwrap_or(s.min), self.high.unwrap_or(s.max));
         let why = if !(min_gap.is_finite() && min_gap >= 0.0) {
             format!("min_gap {min_gap} must be finite and not below 0")
         } else if !(s.min <= low && high <= s.max) {
             format!("low {low} and high {high} must lie inside its range {}..{}", s.min, s.max)
-        } else if low > high {
+        } else if !alone && low > high {
             format!("low {low} is above high {high}")
-        } else if high - low < min_gap - 1e-9 * min_gap.max(1.0) {
+        } else if !alone && short_of_gap(low, high, min_gap) {
             format!("high {high} - low {low} is less than its min_gap {min_gap}")
         } else if s.step > 0.0 && min_gap > 0.0 && !divides_evenly(min_gap, s.step) {
             format!("min_gap {min_gap} is not a multiple of its step {}", s.step)
@@ -2119,6 +2167,11 @@ impl RangeDecl {
         };
         Some(format!("kaya: range {who}: {why} (docs/range-plan.md §3 rule 1)"))
     }
+}
+
+/// Are two thumbs closer than the gap, within the root's tolerance.
+fn short_of_gap(low: f64, high: f64, gap: f64) -> bool {
+    high - low < gap - 1e-9 * gap.max(1.0)
 }
 
 /// Does `unit` fit `span` a whole number of times (at least once)? Read
@@ -4575,11 +4628,13 @@ impl Scene {
             }
         }
         for key in std::mem::take(&mut self.range_dirty) {
-            if let Some(decl) = self.range_decls.get(&key) {
+            if let Some(decl) = self.range_decls.get_mut(&key) {
                 let who = if key.0 { format!("template node {}", key.1) } else { key.1.to_string() };
-                if let Some(msg) = decl.refusal(&who) {
+                let held = !key.0 && !created.contains(&WidgetId(key.1));
+                if let Some(msg) = decl.refusal(&who, held) {
                     panic!("{msg}");
                 }
+                decl.wrote = (false, false);
             }
         }
         // The labelled row's SHAPE, on the complete declaration
@@ -4690,12 +4745,13 @@ impl Scene {
             let mut decl = self.range_decls[&(false, widget.0)];
             for (sid, bound) in &self.bindings {
                 for (w, prop) in bound {
-                    if *w == widget {
+                    if *w == widget && dirty.contains(sid) {
                         decl.note(*prop, &self.signals[sid]);
                     }
                 }
             }
-            if let Some(msg) = decl.refusal(&widget.0.to_string()) {
+            let held = !created.contains(&widget);
+            if let Some(msg) = decl.refusal(&widget.0.to_string(), held) {
                 match group.take() {
                     Some(cap) => self.rollback_group(&cap, &rollback),
                     None => {
@@ -4706,6 +4762,7 @@ impl Scene {
                 }
                 panic!("{msg}");
             }
+            decl.wrote = (false, false);
             self.range_decls.insert((false, widget.0), decl);
         }
 
@@ -4756,6 +4813,7 @@ impl Scene {
         }
 
         self.fan_out_signals(&dirty, &mut out);
+        self.settle_range_writes(&mut out);
 
         // Barrier: no grow along a scroll's own axis (ruled REFUSE
         // 2026-09-02; docs/deferred.md, "`grow` INSIDE A SCROLL IS
@@ -6182,6 +6240,123 @@ impl Scene {
             "kaya: user fullscreen change on unknown window {window:?}"
         );
         self.fullscreen.insert(window, on);
+    }
+
+    /// The user settled a range (docs/range-plan.md §3 rule 11): the core's
+    /// pair follows, so the next app write is judged against it. Every arm's
+    /// commit door calls this with the CREATE tag it emits under
+    /// (tools/check-slider-commit.py).
+    pub(crate) fn user_range_committed(&mut self, tag: &[u8], low: f64, high: f64) {
+        let widget = match crate::wire::decode_range_tag(tag, low, high, true) {
+            Occurrence::RangeCommitted { id, .. } => Some(id),
+            Occurrence::InstanceRangeCommitted { node, path, .. } => {
+                self.instance_widget(node.0, &path)
+            }
+            _ => None,
+        };
+        let Some(widget) = widget else { return };
+        if let Some(pair) = self.range_pairs.get_mut(&widget) {
+            pair.low = Some(low);
+            pair.high = Some(high);
+        }
+        if let Some(decl) = self.range_decls.get_mut(&(false, widget.0)) {
+            if widget.0 & INTERNAL_BIT == 0 {
+                decl.low = Some(low);
+                decl.high = Some(high);
+            }
+        }
+    }
+
+    /// EVERY RANGE WRITE this batch produced, read off the ops (the
+    /// `absorb_text_writes` stance): a batch moving ONE thumb of a range the
+    /// backend already holds that would cross the other as it stands is
+    /// clamped there through the one clamp, and when that changed the write
+    /// the app hears the settled pair once (docs/range-plan.md §3 rule 11).
+    fn settle_range_writes(&mut self, out: &mut [ApplyOp]) {
+        let mut fresh: Vec<WidgetId> = Vec::new();
+        let mut thumbs: Vec<(WidgetId, Prop, f64)> = Vec::new();
+        for op in out.iter() {
+            match op {
+                ApplyOp::Create { id, kind: WidgetKind::Range, .. } => {
+                    self.range_pairs.insert(*id, RangePair::default());
+                    fresh.push(*id);
+                }
+                ApplyOp::Destroy { id } => {
+                    self.range_pairs.remove(id);
+                }
+                ApplyOp::SetProp { id, prop, value: Value::F64(x) } => {
+                    let Some(pair) = self.range_pairs.get_mut(id) else { continue };
+                    match prop {
+                        Prop::Min => pair.min = *x,
+                        Prop::Max => pair.max = *x,
+                        Prop::Step => pair.step = *x,
+                        Prop::MinGap => pair.gap = *x,
+                        Prop::Low | Prop::High => {
+                            thumbs.retain(|(w, p, _)| !(w == id && p == prop));
+                            thumbs.push((*id, *prop, *x));
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut ids: Vec<WidgetId> = thumbs.iter().map(|(w, ..)| *w).collect();
+        ids.dedup();
+        for id in ids {
+            let written: Vec<(Prop, f64)> =
+                thumbs.iter().filter(|(w, ..)| *w == id).map(|(_, p, x)| (*p, *x)).collect();
+            let mut pair = self.range_pairs[&id];
+            if let [(prop, raw)] = written[..] {
+                if !fresh.contains(&id) {
+                    let low = prop == Prop::Low;
+                    let (l, h) = pair.thumbs();
+                    let crosses = if low { short_of_gap(raw, h, pair.gap) } else { short_of_gap(l, raw, pair.gap) };
+                    if crosses {
+                        let other = if low { h } else { l };
+                        let settled = crate::range::clamp_thumb(
+                            pair.min, pair.max, pair.step, pair.gap, low, other, raw,
+                        );
+                        for op in out.iter_mut() {
+                            if let ApplyOp::SetProp { id: w, prop: p, value } = op {
+                                if *w == id && *p == prop {
+                                    *value = Value::F64(settled);
+                                }
+                            }
+                        }
+                        if low { pair.low = Some(settled) } else { pair.high = Some(settled) }
+                        self.range_pairs.insert(id, pair);
+                        if let Some(decl) = self.range_decls.get_mut(&(false, id.0)) {
+                            if id.0 & INTERNAL_BIT == 0 {
+                                decl.low = pair.low;
+                                decl.high = pair.high;
+                            }
+                        }
+                        if settled != raw {
+                            let (low, high) = pair.thumbs();
+                            let correction = if id.0 & INTERNAL_BIT == 0 {
+                                Some(Occurrence::RangeCommitted { id, low, high })
+                            } else {
+                                self.field_identity(id).map(|(node, path)| {
+                                    Occurrence::InstanceRangeCommitted {
+                                        node: crate::protocol::TemplateNodeId(node),
+                                        path,
+                                        low,
+                                        high,
+                                    }
+                                })
+                            };
+                            self.asks.extend(correction);
+                        }
+                        continue;
+                    }
+                }
+            }
+            for (prop, x) in written {
+                if prop == Prop::Low { pair.low = Some(x) } else { pair.high = Some(x) }
+            }
+            self.range_pairs.insert(id, pair);
+        }
     }
 
     pub(crate) fn user_popped(&mut self, entry: WindowId) {
@@ -12905,11 +13080,8 @@ mod tests {
         ]);
     }
 
-    /// A LATER pair of signal writes is read together at the barrier: one
-    /// moving both thumbs passes in either order, one crossing them is
-    /// refused and the signals put back.
-    #[test]
-    fn a_bound_ranges_signal_writes_are_checked_together_and_rolled_back() {
+    /// A trim bound to signals 1 (low) and 2 (high), declared at 2 and 8.
+    fn bound_trim() -> Scene {
         let mut ops = vec![
             TxOp::CreateSignal { id: SignalId(1), initial: Value::F64(2.0) },
             TxOp::CreateSignal { id: SignalId(2), initial: Value::F64(8.0) },
@@ -12926,17 +13098,84 @@ mod tests {
         }
         let mut scene = Scene::new();
         scene.apply(ops);
+        scene
+    }
+
+    fn thumb_writes(ops: &[ApplyOp]) -> Vec<(Prop, f64)> {
+        ops.iter()
+            .filter_map(|op| match op {
+                ApplyOp::SetProp { id: WidgetId(1), prop: p @ (Prop::Low | Prop::High), value: Value::F64(x) } => {
+                    Some((*p, *x))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A LATER pair of signal writes is read together at the barrier: one
+    /// moving both thumbs passes in either order, one crossing them is
+    /// refused and the signals put back.
+    #[test]
+    fn a_bound_ranges_signal_writes_are_checked_together_and_rolled_back() {
+        let mut scene = bound_trim();
         scene.apply(vec![
             TxOp::WriteSignal { id: SignalId(1), value: Value::F64(8.5) },
             TxOp::WriteSignal { id: SignalId(2), value: Value::F64(9.5) },
         ]);
         let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            scene.apply(vec![TxOp::WriteSignal { id: SignalId(1), value: Value::F64(9.0) }]);
+            scene.apply(vec![
+                TxOp::WriteSignal { id: SignalId(2), value: Value::F64(9.0) },
+                TxOp::WriteSignal { id: SignalId(1), value: Value::F64(9.5) },
+            ]);
         }));
-        let why = refused.expect_err("a crossing write reached the range");
+        let why = refused.expect_err("a crossing pair reached the range");
         let why = why.downcast_ref::<String>().cloned().unwrap_or_default();
-        assert!(why.contains("range 1: high 9.5 - low 9 is less than its min_gap 1"), "{why}");
+        assert!(why.contains("range 1: low 9.5 is above high 9"), "{why}");
         assert_eq!(scene.signals[&SignalId(1)], Value::F64(8.5));
+        assert_eq!(scene.signals[&SignalId(2)], Value::F64(9.5));
+    }
+
+    /// docs/range-plan.md §3 rule 11 (1): the core's pair follows the user's
+    /// commit, a live range's and a stamped copy's alike.
+    #[test]
+    fn a_user_commit_moves_the_cores_pair() {
+        let mut scene = bound_trim();
+        scene.user_range_committed(&crate::wire::click_tag(1, &[]), 2.0, 4.0);
+        assert_eq!(scene.range_pairs[&WidgetId(1)].thumbs(), (2.0, 4.0));
+        assert_eq!(scene.range_decls[&(false, 1)].high, Some(4.0));
+    }
+
+    /// Rule 11 (2): an app write of ONE thumb past the other as the USER left
+    /// it is clamped there through the one clamp, never refused; the backend
+    /// is handed the settled value.
+    #[test]
+    fn a_stale_app_write_is_clamped_at_the_thumb_the_user_moved() {
+        let mut scene = bound_trim();
+        scene.user_range_committed(&crate::wire::click_tag(1, &[]), 2.0, 4.0);
+        let ops = scene.apply(vec![TxOp::WriteSignal { id: SignalId(1), value: Value::F64(6.0) }]);
+        assert_eq!(thumb_writes(&ops), vec![(Prop::Low, 3.0)]);
+        assert_eq!(scene.range_pairs[&WidgetId(1)].thumbs(), (3.0, 4.0));
+        let ops = scene.apply(vec![TxOp::WriteSignal { id: SignalId(2), value: Value::F64(1.0) }]);
+        assert_eq!(thumb_writes(&ops), vec![(Prop::High, 4.0)]);
+    }
+
+    /// Rule 11 (3): the app hears the settled pair ONCE, and only when the
+    /// clamp changed its write; a write that lands as written, off the step
+    /// included, fires nothing.
+    #[test]
+    fn a_correction_fires_only_when_the_clamp_changed_the_write() {
+        let mut scene = bound_trim();
+        let ops = scene.apply(vec![TxOp::WriteSignal { id: SignalId(1), value: Value::F64(6.3) }]);
+        assert_eq!(thumb_writes(&ops), vec![(Prop::Low, 6.3)]);
+        assert!(scene.take_asks().is_empty(), "a write that landed as written");
+        scene.user_range_committed(&crate::wire::click_tag(1, &[]), 2.0, 4.0);
+        scene.apply(vec![TxOp::WriteSignal { id: SignalId(1), value: Value::F64(2.3) }]);
+        assert!(scene.take_asks().is_empty(), "a write short of the moved thumb");
+        scene.apply(vec![TxOp::WriteSignal { id: SignalId(1), value: Value::F64(6.0) }]);
+        assert_eq!(
+            scene.take_asks(),
+            vec![Occurrence::RangeCommitted { id: WidgetId(1), low: 3.0, high: 4.0 }]
+        );
     }
 
     #[test]

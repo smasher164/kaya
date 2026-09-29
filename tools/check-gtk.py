@@ -455,6 +455,7 @@ PY
         && run_exact_test \\
             gtk::frame_tests::gtk_frame_memory_skips_a_fullscreen_frame \\
         && run_exact_test gtk::color_tests::gtk_color_round_trips_every_byte \\
+        && run_exact_test gtk::range_tests::gtk_range_press_split_and_travel \\
         && run_exact_test \\
             gtk::notify_tests::gtk_notification_timer_parameter_parses_as_the_action_declares \\
         && run_exact_test \\

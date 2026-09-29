@@ -288,6 +288,7 @@ static class Program
         var onDate = $"System.Action<Tx, {keys}, System.DateOnly>?";
         var onTime = $"System.Action<Tx, {keys}, System.TimeOnly>?";
         var onColor = $"System.Action<Tx, {keys}, Color>?";
+        var onRange = $"System.Action<Tx, {keys}, double, double>?";
         var onSelect = $"System.Action<Tx, {keys}, int>?";
 
         // One forwarder, wrapped the way the hand-written Tpl wraps: a
@@ -413,6 +414,15 @@ static class Program
              "double? tickSpacing = null", $"{onValue} onChange = null",
              $"{onValue} onCommit = null"],
             "min, max, value, step, tickSpacing, onChange, onCommit");
+        foreach (var (lowT, highT) in new[] { ("double", "double"), ("Signal", "Signal"),
+                     ("Field<double>", "Field<double>") })
+            Fwd("Range",
+                ["double min", "double max", $"{lowT} low", $"{highT} high",
+                 "double? step = null", "double? tickSpacing = null", "double? minGap = null",
+                 "string? lowLabel = null", "string? highLabel = null",
+                 $"{onRange} onChange = null", $"{onRange} onCommit = null"],
+                "min, max, low, high, step, tickSpacing, minGap, lowLabel, highLabel, onChange, "
+                + "onCommit");
         Fwd("NumberField",
             ["double value", "double? min = null", "double? max = null",
              "double? step = null", $"{onValue} onCommit = null"],
@@ -468,6 +478,12 @@ static class Program
         Set("SetA11yLabel", ["Node n", "string label"], "n, label");
         Set("SetA11yLabel", ["Node n", "Signal s"], "n, s");
         Set("SetA11yLabel", ["Node n", "Field<string> f", "uint level = 0"], "n, f, level");
+        Set("SetLowLabel", ["Node n", "string label"], "n, label");
+        Set("SetLowLabel", ["Node n", "Signal s"], "n, s");
+        Set("SetLowLabel", ["Node n", "Field<string> f", "uint level = 0"], "n, f, level");
+        Set("SetHighLabel", ["Node n", "string label"], "n, label");
+        Set("SetHighLabel", ["Node n", "Signal s"], "n, s");
+        Set("SetHighLabel", ["Node n", "Field<string> f", "uint level = 0"], "n, f, level");
         Set("SetA11yHint", ["Node n", "string hint"], "n, hint");
         Set("SetA11yHint", ["Node n", "Signal s"], "n, s");
         Set("SetA11yHint", ["Node n", "Field<string> f", "uint level = 0"], "n, f, level");

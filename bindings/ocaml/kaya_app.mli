@@ -747,9 +747,37 @@ val slider :
   ?value:float ->
   ?step:float ->
   ?tick_spacing:float ->
+  ?axis:axis ->
   ?bind:float signal ->
   ?on_change:(float -> unit) ->
   ?on_commit:(float -> unit) -> unit -> widget
+
+(* A range over min..max with two thumbs (docs/range-plan.md): each
+   movement's pair reaches [~on_change], each gesture's settled pair
+   [~on_commit], both values every time. A thumb left unstated rests at
+   its end of the range. *)
+val range :
+  ?grow:float ->
+  ?fill:bool ->
+  ?a11y_id:string ->
+  ?a11y_id_bind:string signal ->
+  ?a11y_label:string ->
+  ?a11y_label_bind:string signal ->
+  ?help:string ->
+  ?help_bind:string signal ->
+  ?min:float ->
+  ?max:float ->
+  ?low:float ->
+  ?high:float ->
+  ?low_bind:float signal ->
+  ?high_bind:float signal ->
+  ?step:float ->
+  ?tick_spacing:float ->
+  ?min_gap:float ->
+  ?low_label:string ->
+  ?high_label:string ->
+  ?on_change:(float -> float -> unit) ->
+  ?on_commit:(float -> float -> unit) -> unit -> widget
 
 (* A number field at value (docs/number-field-plan.md): one [on_commit]
    per commit (Return, focus loss, a step), never per keystroke. *)
@@ -1687,6 +1715,43 @@ module Tpl : sig
     ?a11y_level:int ->
     ?on_change:(key list -> float -> unit) ->
     ?on_commit:(key list -> float -> unit) -> unit -> node
+
+  (* A range per stamped copy: each thumb from any of the three sources,
+     a row's own fields being the point; pairs carry the copy's keys
+     first. *)
+  val range :
+    ?grow:float ->
+    ?fill:bool ->
+    ?a11y_id:string ->
+    ?a11y_id_bind:string signal ->
+    ?a11y_id_field:('a, string) field ->
+    ?a11y_label:string ->
+    ?a11y_label_bind:string signal ->
+    ?a11y_label_field:('b, string) field ->
+    ?help:string ->
+    ?help_bind:string signal ->
+    ?help_field:('c, string) field ->
+    ?min:float ->
+    ?max:float ->
+    ?low:float ->
+    ?low_bind:float signal ->
+    ?low_field:('d, float) field ->
+    ?high:float ->
+    ?high_bind:float signal ->
+    ?high_field:('e, float) field ->
+    ?step:float ->
+    ?tick_spacing:float ->
+    ?min_gap:float ->
+    ?low_label:string ->
+    ?low_label_bind:string signal ->
+    ?low_label_field:('f, string) field ->
+    ?high_label:string ->
+    ?high_label_bind:string signal ->
+    ?high_label_field:('g, string) field ->
+    ?level:int ->
+    ?a11y_level:int ->
+    ?on_change:(key list -> float -> float -> unit) ->
+    ?on_commit:(key list -> float -> float -> unit) -> unit -> node
 
   (* A number field per stamped copy, its value from any of the three
      sources. *)
