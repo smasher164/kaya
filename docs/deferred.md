@@ -94,12 +94,17 @@ maintainer's review before it is built:
     with a faint seam and neither on top, so the outline has no thumb to sit
     on. A tie scene with a capture per lane decides whether that picture is
     acceptable.
-  - Android names no slider. compose-ui 1.7.5 leaves `content-desc` empty on
-    every Material slider node, the plain slider's included (the thumb's
-    background gives the node a child, and the description is then skipped);
-    `uiautomator dump` shows it, while `expect_ax` reads Compose's merged
-    semantics name and passes. Measured on the node; TalkBack was not heard.
-    The verb reading a name no service sees is the recorder half of it.
+  - ~~Android names no slider.~~ FIXED 2026-09-29: the shipped stack is
+    compose-ui and foundation 1.11.4 (not 1.7.5), where the thumb's
+    `background` is a semantics node, so compose-ui kept each slider's
+    description off the SeekBar's node info. TalkBack 15 was HEARD saying
+    "50 percent., Slider" with no name; with kaya's semantics-free thumb it
+    says "50 percent., Level, Slider", and "Fader", "Out", "Playhead",
+    "Volume" and "Range start" likewise. `expect_ax` now reads a SeekBar's
+    name from its node info and went red on sliders and range with the thumb
+    cut. The colour picker's panel sliders took their labels as names in the
+    same change. docs/traps.md, "A Material slider's thumb takes its name";
+    guard in tools/check-universal-props.py.
   - Each thumb's accessibility frame is the whole control on iOS and the mac,
     so a VoiceOver focus ring does not show which thumb has focus. Rule 7
     permits it; per-thumb frames are a small follow-up if wanted.

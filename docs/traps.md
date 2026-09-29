@@ -4,6 +4,29 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## A Material slider's thumb takes its name off the node TalkBack focuses (2026-09-29)
+
+With foundation 1.11.4 (the rich-text pin, which also moves compose-ui to
+1.11.4; material3 stays 1.3.1) every Material `Slider` and `RangeSlider` thumb
+reached TalkBack with NO name. `SliderDefaults.Thumb` paints through
+`Modifier.background`, and foundation 1.11.4's `BackgroundNode` is a
+`SemanticsModifierNode` (it publishes `shape`; 1.7.5's was not). The thumb is
+then a semantics child of the slider's merging node, and compose-ui's
+`populateAccessibilityNodeInfoProperties` sets a node's own content
+description only when it does not merge or has no children; the description
+moves to a fake non-focusable child instead. `uiautomator dump` showed
+`SeekBar desc=''` with a child `desc='Level'`, and TalkBack 15 (heard through
+its verbose log, `pref_log_level=2`, driven by TAB on the lane's emulator)
+spoke "50 percent., Slider": it reads nothing from a SeekBar's children.
+`expect_ax` passed throughout because it read Compose's merged semantics name.
+kaya's thumb (`KayaSliderThumb`, the same 4x44dp pill with no semantics
+modifier) puts the name back on the SeekBar ("50 percent., Level, Slider"),
+and `expect_ax` reads a SeekBar's name from its node info. Guard:
+tools/check-universal-props.py's slider-name clause (seven watched negatives,
+the first the shipped state); the sliders and range scenes' `expect_ax` lines
+went red on Android with the thumb cut. Notes and the heard utterances:
+docs/deferred.md's range WATCH entry.
+
 ## An iOS recording's pixels lag its transcript by a constant 275 ms (2026-09-21)
 
 A step-named still is the film's covering frame at the transcript's time, and

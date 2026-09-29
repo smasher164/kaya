@@ -466,6 +466,86 @@ def census(files):
     bad += filled_edges(read(compose), read(gtk))
     bad += composers(read(swiftui), read(compose), read(gtk), read(winui))
     bad += swipes(read(compose), read(winui))
+    bad += compose_slider_names(read(compose))
+    return bad
+
+
+# A SLIDER'S NAME REACHES THE NODE TALKBACK FOCUSES (docs/traps.md, "a
+# Material slider's thumb takes its name"): Material's own thumb paints through
+# `background`, whose semantics node makes the slider's merging node a parent,
+# and compose-ui then keeps the description off that node's info. Every
+# Slider and RangeSlider in the file takes kaya's thumb in every thumb slot,
+# the thumb paints with no semantics modifier, and each arm hands its name to
+# the control's own modifier. `expect_ax` reads the node info's description
+# for a SeekBar, so the scenes see the name go too; this is the wall that
+# names the cause.
+SLIDER_CALLS = [0]
+
+
+def compose_slider_names(compose_text):
+    bad = []
+    code = "\n".join(re.sub(r"//.*", "", line) for line in compose_text.splitlines())
+
+    def args(at):
+        depth, i = 0, code.index("(", at)
+        for j in range(i, len(code)):
+            depth += {"(": 1, ")": -1}.get(code[j], 0)
+            if depth == 0:
+                return code[i:j + 1]
+        return code[i:]
+
+    def block(head):
+        at = code.find(head)
+        if at < 0:
+            return None
+        end = code.find("\n}\n", at)
+        return code[at:end if end > 0 else len(code)]
+
+    calls = [(m.group(1), args(m.start()))
+             for m in re.finditer(r"(?<![\w.])(Slider|RangeSlider)\(", code)]
+    SLIDER_CALLS[0] = len(calls)
+    if len(calls) < 3:
+        bad.append(f"{COMPOSE}: read {len(calls)} Slider/RangeSlider calls, under the floor of 3 "
+                   "(the reader lost them)")
+    for kind, call in calls:
+        slots = ("thumb",) if kind == "Slider" else ("startThumb", "endThumb")
+        for slot in slots:
+            if not re.search(rf"\b{slot} = \{{", call):
+                bad.append(f"{COMPOSE}: a {kind} leaves its {slot} slot to Material's own thumb, "
+                           "whose semantics node takes the name off the node TalkBack focuses")
+        if call.count("KayaSliderThumb(") < len(slots):
+            bad.append(f"{COMPOSE}: a {kind} draws {len(slots) - call.count('KayaSliderThumb(')} "
+                       "thumb(s) with something other than KayaSliderThumb")
+    if "SliderDefaults.Thumb(" in code:
+        bad.append(f"{COMPOSE}: SliderDefaults.Thumb is called; its `background` puts a semantics "
+                   "node under the slider and TalkBack hears no name")
+    thumb = block("private fun KayaSliderThumb(")
+    if thumb is None:
+        bad.append(f"{COMPOSE}: no KayaSliderThumb — the semantics-free thumb moved")
+    elif re.search(r"\.(background|semantics|clearAndSetSemantics|border|clickable|toggleable)\(",
+                   thumb):
+        bad.append(f"{COMPOSE}: KayaSliderThumb carries a modifier with semantics, so the slider's "
+                   "node has a child again and its name leaves the node info")
+    for head, needles in (
+        ("private fun KayaSliderSurface(", ("slider(boxFill.then(a11y))", "slider(a11y)")),
+        ("private fun KayaRangeSurface(",
+         ("modifier = boxFill.then(a11y)",
+          "CompositionLocalProvider(LocalContext provides words)")),
+        ("private fun KayaColorSlider(",
+         ("modifier = Modifier.semantics { contentDescription = label }",)),
+    ):
+        body = block(head)
+        if body is None:
+            bad.append(f"{COMPOSE}: no {head.split('fun ')[1]} — the arm moved")
+            continue
+        for needle in needles:
+            if needle not in body:
+                bad.append(f"{COMPOSE}: {head.split('fun ')[1]} lost {needle!r}, the name the "
+                           "control's own node carries")
+    reader = block("    private fun kayaAxOf(")
+    if reader is None or '"/" + kayaAxServiceName(info, node)' not in reader:
+        bad.append(f"{COMPOSE}: expect_ax's spec no longer names the node info's description for a "
+                   "SeekBar, so it reads Compose's semantics name where TalkBack hears none")
     return bad
 
 
@@ -775,7 +855,7 @@ def drag_waits(winui_text):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 91
+DECLARED = 98
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -1102,6 +1182,35 @@ for label, path, pattern, repl in (
     print(f"check-universal-props: {label}: {findings[0]}")
     RAN += 1
 
+# THE SLIDER'S NAME's seven, the first the shipped state: a Material thumb
+# back in each slot, the thumb painted through `background`, each arm's name
+# dropped, and the reader back on Compose's semantics name.
+for label, pattern, repl in (
+    ("the plain slider's thumb back on Material's (the shipped state)",
+     r"KayaSliderThumb\(\n(\s+)source,\n\s+colors,\n(\s+)(Modifier\.onGloballyPositioned "
+     r"\{ kayaThumbCoords\[node\.id to 0\] = it \}),\n",
+     r"SliderDefaults.Thumb(\n\1interactionSource = source,\n\2modifier = \3,\n"
+     r"\1colors = colors,\n"),
+    ("the range's high thumb back on Material's",
+     r"KayaSliderThumb\(\n(\s+)endSource,", r"SliderDefaults.Thumb(\n\1endSource,"),
+    ("kaya's thumb painted through background",
+     r"\.hoverable\(source\)\.drawBehind \{", ".hoverable(source).background(color).drawBehind {"),
+    ("the plain slider's a11y dropped", r"slider\(boxFill\.then\(a11y\)\)", "slider(boxFill)"),
+    ("the range's thumb words dropped",
+     r"CompositionLocalProvider\(LocalContext provides words\) \{\n        RangeSlider",
+     "run {\n        RangeSlider"),
+    ("the colour picker's slider unnamed",
+     r"            modifier = Modifier\.semantics \{ contentDescription = label \},\n", ""),
+    ("expect_ax reading Compose's semantics name for a slider",
+     r'"/" \+ kayaAxServiceName\(info, node\)', '"/" + kayaAxName(node)'),
+):
+    doctored = g.doctor(label, real[COMPOSE], pattern, repl, want=1)
+    findings = census(load({COMPOSE: doctored}))
+    if not findings:
+        raise SystemExit(f"check-universal-props: self-test failed: {label} still passed")
+    print(f"check-universal-props: {label}: {findings[0]}")
+    RAN += 1
+
 print(f"check-universal-props: {RAN} watched negative(s) ran")
 if RAN != DECLARED:
     print(f"check-universal-props: REFUSAL — {RAN} watched negative(s) ran, "
@@ -1110,6 +1219,7 @@ if RAN != DECLARED:
     raise SystemExit(1)
 
 offenders = census(real)
+print(f"check-universal-props: {SLIDER_CALLS[0]} Material slider call(s) read in {COMPOSE}")
 if offenders:
     print("\n".join(offenders))
     print("check-universal-props: FAIL")

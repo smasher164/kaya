@@ -377,13 +377,15 @@ at the root, per ruling 6, until an app asks for a vertical range.
      `LocalContext`'s resources, so the arm answers those two ids with
      `low_label` and `high_label` (the range's `a11y_label` when unset) and
      the merged semantics names the thumbs "In" and "Out", replacing
-     Material's words rather than joining them. BUT compose-ui 1.7.5 puts
-     NO content description on any Material slider's node info (these two
-     thumbs, the fader, the plain slider): the node merges its children and
-     the thumb's `background(shape)` gives it one, and
+     Material's words rather than joining them. BUT compose-ui 1.11.4 (the
+     version the foundation pin ships, not 1.7.5) put NO content description
+     on any Material slider's node info (these two thumbs, the fader, the
+     plain slider): the node merges its children and the thumb's
+     `background(shape)` gives it one, and
      `populateAccessibilityNodeInfoProperties` then skips the description.
-     `uiautomator dump` reads `content-desc=""` on every SeekBar and "Trim"
-     on the group. Open (docs/deferred.md's range entry).
+     `uiautomator dump` read `content-desc=""` on every SeekBar and "Trim"
+     on the group. FIXED 2026-09-29 with kaya's own thumb (docs/traps.md,
+     "A Material slider's thumb takes its name").
    - The fader (the Material slider in a −90° layer, constraints swapped,
      left to right inside): a 48x200dp box whose node info frame is tall
      (44x218); a drag of the thumb upward set 1.0 and a tap near the

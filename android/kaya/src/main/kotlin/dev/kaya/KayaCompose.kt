@@ -67,6 +67,9 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.DragInteraction
+import androidx.compose.foundation.interaction.Interaction
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
 // The entry/textarea path (docs/undo-plan.md §1.4). `undoState` and its
@@ -168,6 +171,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderColors
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -229,6 +233,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
@@ -305,6 +310,7 @@ import androidx.compose.ui.unit.constrainHeight
 import androidx.compose.ui.unit.constrainWidth
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -7260,10 +7266,38 @@ object KayaCompose {
             ?: if (cfg.getOrNull(SemanticsProperties.Text) != null) "android.widget.TextView" else null
         return KayaAxRead(
             kayaAxRole(role, className, node.children.size, kayaAxHeading(info), published) +
-                "/" + kayaAxName(node),
+                "/" + kayaAxServiceName(info, node),
             infoServed = info != null,
             fallback = fallbackRole + "/" + kayaAxName(node),
+            semanticsName = kayaAxName(node),
         )
+    }
+
+    /**
+     * The name a service reads off a SLIDER is the node info's own content
+     * description: TalkBack speaks a SeekBar's percent and role and nothing
+     * from its children (docs/traps.md, "a Material slider's thumb takes its
+     * name"), so Compose's semantics name is not what it hears there.
+     */
+    private fun kayaAxServiceName(
+        info: android.view.accessibility.AccessibilityNodeInfo?,
+        node: SemanticsNode,
+    ): String =
+        if (info != null && info.className == KAYA_AX_SEEKBAR) info.contentDescription?.toString() ?: ""
+        else kayaAxName(node)
+
+    /** What a slider's name missed by: the node info's own fields beside
+     * Compose's semantics name, all read, never inferred. */
+    private fun kayaAxSliderWhy(read: KayaAxRead, info: android.view.accessibility.AccessibilityNodeInfo?): String {
+        if (info == null || info.className != KAYA_AX_SEEKBAR) return ""
+        val range = info.rangeInfo
+        val state = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) info.stateDescription else null
+        return " (the SeekBar's node info carries content description " +
+            (info.contentDescription?.let { "\"$it\"" } ?: "none") +
+            ", state description " + (state?.let { "\"$it\"" } ?: "none") +
+            ", range " + (range?.let { "${it.min}..${it.max} at ${it.current}" } ?: "none") +
+            " and " + info.childCount + " child node(s); Compose's semantics names it \"" +
+            read.semanticsName + "\")"
     }
 
     /**
@@ -7277,6 +7311,7 @@ object KayaCompose {
         val spec: String,
         val infoServed: Boolean,
         val fallback: String,
+        val semanticsName: String,
     )
 
     /**
@@ -7320,8 +7355,18 @@ object KayaCompose {
         val node = target(spec, "range", KayaSceneModel.ranges) ?: return "<no such target>"
         val view = kayaComposeRoot(activity.window.decorView) ?: return "<no Compose root>"
         val thumbs = kayaRangeThumbs(activity, node.id) ?: return "<no thumbs in the semantics tree>"
-        val read = kayaAxOf(view, if (low) thumbs[0] else thumbs[1])
+        val thumb = if (low) thumbs[0] else thumbs[1]
+        val read = kayaAxOf(view, thumb)
         return if (read.infoServed) read.spec else "<the provider served no node info for the thumb>"
+    }
+
+    /** [kayaAxSliderWhy] for one thumb of a range. */
+    private fun kayaAxThumbWhy(activity: ComponentActivity, spec: String, low: Boolean): String {
+        val node = target(spec, "range", KayaSceneModel.ranges) ?: return ""
+        val view = kayaComposeRoot(activity.window.decorView) ?: return ""
+        val thumb = kayaRangeThumbs(activity, node.id)?.let { if (low) it[0] else it[1] } ?: return ""
+        val info = view.accessibilityNodeProvider?.createAccessibilityNodeInfo(thumb.id)
+        return kayaAxSliderWhy(kayaAxOf(view, thumb), info)
     }
 
 
@@ -7806,7 +7851,8 @@ object KayaCompose {
         val info = view.accessibilityNodeProvider?.createAccessibilityNodeInfo(node.id)
         return " (role=" + node.config.getOrNull(SemanticsProperties.Role) +
             " class=" + info?.className + " kids=" + node.children.size +
-            " heading=" + kayaAxHeading(info) + ")"
+            " heading=" + kayaAxHeading(info) + ")" +
+            kayaAxSliderWhy(kayaAxOf(view, node), info)
     }
 
     private fun quoted(parts: List<String>): String {
@@ -11003,7 +11049,10 @@ object KayaCompose {
                         val want = quoted(parts.drop(3))
                         val got = onUi(activity) { kayaAxThumb(activity, parts[1], parts[2] == "low") }
                         if (got == want) observed.add("ax \"$want\"")
-                        else failures.add("ax \"$got\", wanted \"$want\"")
+                        else failures.add(
+                            "ax \"$got\", wanted \"$want\"" +
+                                onUi(activity) { kayaAxThumbWhy(activity, parts[1], parts[2] == "low") }
+                        )
                     } else {
                         val template = kayaExpandTemplate(activity, quoted(parts.drop(2)))
                         val want = template.text
@@ -18316,6 +18365,39 @@ internal fun kayaTravelAxis(id: Long): String? {
 }
 
 /**
+ * Material's slider thumb as SliderDefaults.Thumb draws it at material3
+ * 1.3.1 (the 4x44dp handle, CornerFull, half as wide while pressed or
+ * dragged), painted without `background`, whose semantics node would take
+ * the slider's name off the node TalkBack focuses (docs/traps.md, "a
+ * Material slider's thumb takes its name"; tools/check-universal-props.py).
+ */
+@Composable
+private fun KayaSliderThumb(source: MutableInteractionSource, colors: SliderColors, modifier: Modifier) {
+    val held = remember { mutableStateListOf<Interaction>() }
+    LaunchedEffect(source) {
+        source.interactions.collect {
+            when (it) {
+                is PressInteraction.Press -> held.add(it)
+                is PressInteraction.Release -> held.remove(it.press)
+                is PressInteraction.Cancel -> held.remove(it.press)
+                is DragInteraction.Start -> held.add(it)
+                is DragInteraction.Stop -> held.remove(it.start)
+                is DragInteraction.Cancel -> held.remove(it.start)
+            }
+        }
+    }
+    val size = if (held.isEmpty()) KAYA_THUMB_SIZE else KAYA_THUMB_SIZE.copy(width = KAYA_THUMB_SIZE.width / 2)
+    val color = colors.thumbColor
+    Spacer(
+        modifier.size(size).hoverable(source).drawBehind {
+            drawRoundRect(color, cornerRadius = CornerRadius(this.size.minDimension / 2f))
+        },
+    )
+}
+
+private val KAYA_THUMB_SIZE = DpSize(4.dp, 44.dp)
+
+/**
  * The platform's own slider, uncontrolled toward the app (the entry's
  * shape) over the commit path above: `steps` puts Material's stops on
  * the declared step, the drag emits live and the lift commits.
@@ -18350,10 +18432,10 @@ private fun KayaSliderSurface(node: KayaNode, boxFill: Modifier, a11y: Modifier)
             colors = colors,
             interactionSource = source,
             thumb = {
-                SliderDefaults.Thumb(
-                    interactionSource = source,
-                    modifier = Modifier.onGloballyPositioned { kayaThumbCoords[node.id to 0] = it },
-                    colors = colors,
+                KayaSliderThumb(
+                    source,
+                    colors,
+                    Modifier.onGloballyPositioned { kayaThumbCoords[node.id to 0] = it },
                 )
             },
             track = { state ->
@@ -18502,19 +18584,19 @@ private fun KayaRangeSurface(node: KayaNode, boxFill: Modifier, a11y: Modifier) 
             endInteractionSource = endSource,
             startThumb = {
                 CompositionLocalProvider(LocalContext provides base) {
-                    SliderDefaults.Thumb(
-                        interactionSource = startSource,
-                        modifier = Modifier.onGloballyPositioned { kayaThumbCoords[node.id to 1] = it },
-                        colors = colors,
+                    KayaSliderThumb(
+                        startSource,
+                        colors,
+                        Modifier.onGloballyPositioned { kayaThumbCoords[node.id to 1] = it },
                     )
                 }
             },
             endThumb = {
                 CompositionLocalProvider(LocalContext provides base) {
-                    SliderDefaults.Thumb(
-                        interactionSource = endSource,
-                        modifier = Modifier.onGloballyPositioned { kayaThumbCoords[node.id to 2] = it },
-                        colors = colors,
+                    KayaSliderThumb(
+                        endSource,
+                        colors,
+                        Modifier.onGloballyPositioned { kayaThumbCoords[node.id to 2] = it },
                     )
                 }
             },
@@ -18671,6 +18753,8 @@ private fun KayaNumberField(node: KayaNode, a11y: Modifier, fill: Modifier) {
  * — a text link lowers to an overlaid clickable with no Role at all).
  */
 val KayaAxKind = SemanticsPropertyKey<String>("KayaAxKind")
+
+private const val KAYA_AX_SEEKBAR = "android.widget.SeekBar"
 
 // ---- the pickers (docs/datetime-plan.md) ------------------------------------
 // The wire packs a date as YYYYMMDD and a time as HHMM (D2). Compose's
@@ -18990,6 +19074,7 @@ private fun KayaColorButton(node: KayaNode, a11y: Modifier, fill: Modifier) {
     }
 }
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun KayaColorSlider(
     label: String,
@@ -18999,7 +19084,17 @@ private fun KayaColorSlider(
 ) {
     Column {
         Text(label, style = MaterialTheme.typography.labelLarge)
-        Slider(value = value.toFloat(), onValueChange = { moved(it.toDouble()) }, valueRange = range)
+        val source = remember { MutableInteractionSource() }
+        val colors = SliderDefaults.colors()
+        Slider(
+            value = value.toFloat(),
+            onValueChange = { moved(it.toDouble()) },
+            modifier = Modifier.semantics { contentDescription = label },
+            valueRange = range,
+            colors = colors,
+            interactionSource = source,
+            thumb = { KayaSliderThumb(source, colors, Modifier) },
+        )
     }
 }
 
