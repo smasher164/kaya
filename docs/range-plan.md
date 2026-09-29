@@ -109,9 +109,17 @@ at the root, per ruling 6, until an app asks for a vertical range.
    adjust, a driven `set_value`), and a gesture on one thumb commits the
    pair.
 4. **Keyboard: two focus stops, low first.** Arrows move the focused thumb
-   by the slider's nudge and commit at once. A press on the track takes
-   the nearest thumb; when they meet, the drag's direction picks
-   (Material's `captureThumb`).
+   by the slider's nudge and commit at once. A press is routed by
+   GEOMETRY, never by which native slider is on top: the track splits at
+   the midpoint between the thumbs and each half belongs to its thumb
+   (Material Web's fix; wrong-thumb presses are the most reported defect
+   in the survey, docs/probes/range-sliders-2026-09-29.md). When the
+   thumbs coincide, the side of the thumb the press lands on picks, decided
+   at press-down, when a native slider starts tracking (androidx's rule
+   since 2025-07; material3 1.3.1, kaya's pin, still picks by drag
+   direction, so Android differs on a tie until the BOM moves). The thumb
+   drawn on top at a tie carries an outline, as Flutter, Compose and
+   Material Web draw it.
 5. **Right to left mirrors the range as it mirrors the slider**
    (docs/slider-plan.md S10): in Arabic the low thumb sits at the right and
    is still the first focus stop.
@@ -119,9 +127,25 @@ at the root, per ruling 6, until an app asks for a vertical range.
    Up raises it, and right to left has no effect on it.** GTK's scale
    needs `inverted` for that; the rest are native or rotated.
 7. **The accessible shape is a group of two sliders.** Each thumb is its
-   own adjustable element with the range's min and max and its own value;
+   own adjustable element with the range's min and max and its own value
+   (a stacked native slider reports the whole range, not the other
+   thumb's value; overriding that per platform is deferred, and the value
+   still stops at the other thumb);
    `expect_ax` reads `group/<label>` on the range and `slider/<name>` on
    each thumb, on every platform.
+8. **Every path clamps, the assistive one included.** The one core clamp
+   runs on each native slider's value-changed path, whatever moved it (a
+   pointer, a key, VoiceOver, TalkBack, Narrator, Orca), and writes the
+   clamped value back into that slider; libraries that guarded only the
+   touch path let a screen reader cross the thumbs.
+9. **Only the native tracks are hidden.** A stacked slider's own track and
+   tick marks are turned off and kaya draws one track and the ticks once;
+   a native thumb is never resized or restyled (Material Web broke iOS
+   dragging that way).
+10. **Precision beside the control.** A trim needs finer steps than a
+    thumb gives on a long clip; the pattern every editor surveyed uses is
+    number fields beside the range (the number field, and the timecode
+    formatter at video-editor time), which the editor's inspector will do.
 
 ## §4. What is measured first
 
@@ -219,6 +243,15 @@ Guards:
 - tools/scenes/a11y.steps asserts the group and its two sliders;
   `rangertl.steps` is rule 6's wall, so it needs no static clause.
 
+## §8.5. What this widget is not
+
+A Photos- or iMovie-style trim bar (bracket handles over a filmstrip) is
+not this kind: stacking gives the platform's slider thumbs on a plain
+track, and kaya has no layering of a control over other content. Trimming
+a clip's edge on the editor's timeline is a drag on the canvas timeline,
+as in every editor surveyed. If the editor wants a filmstrip trim bar, it
+is its own piece, drawn by kaya with one accessible element per handle.
+
 ## §8. The three rulings
 
 1. **On the four platforms with no two-thumb control, stack two of the
@@ -228,6 +261,12 @@ Guards:
    means two real sliders with hidden tracks, hit routing being the one
    hard part (§4.2). RECOMMEND stacking; a platform where §4.2 fails draws,
    and the plan comes back with the measurement.
+   RULED 2026-09-29 (the maintainer), stacking, after the survey of about
+   thirty-five toolkits (docs/probes/range-sliders-2026-09-29.md): almost
+   none stack, but most that draw ship no per-thumb accessibility, and the
+   web moved to a native input per thumb for that reason; kaya owns press
+   routing by geometry (§3 rule 4). Rulings 2 and 3 are built as
+   recommended, pending the maintainer's word.
 2. **Who names the two thumbs?** Only Compose has words for them
    ("range start", "range end", in Material's languages); kaya carries no
    strings of its own. RECOMMEND `low_label` and `high_label`, written by
