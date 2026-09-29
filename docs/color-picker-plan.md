@@ -311,13 +311,14 @@ cannot reach a panel's hex field say so in their lane table.
 | SwiftUI macOS | `ColorPicker` (or a hosted `NSColorWell`, §4.1) | `NSColorPanel`, shared | the gesture's end in the panel | `supportsOpacity` |
 | SwiftUI iOS | `ColorPicker` (or a swatch presenting the controller, §4.2) | `UIColorPickerViewController` | the noncontinuous select | `supportsAlpha` |
 | GTK | `GtkColorDialogButton` | `GtkColorDialog` | `notify::rgba` outside the quiet guard: `choose_rgba` finishing with a colour, or a colour dropped on the swatch (§4.3) | `with-alpha` |
-| WinUI | a `Button` faced with a swatch | a `Flyout` holding `ColorPicker`, hex input shown, `IsMoreButtonVisible` false so the channel boxes show without a toggle | `Flyout.Closed` | `IsAlphaEnabled` |
+| WinUI | a `Button` faced with a swatch | a `Flyout` holding `ColorPicker`, hex input shown, `IsMoreButtonVisible` false so the channel boxes show without a toggle, and `ShouldConstrainToRootBounds` false so a short window does not clip it (docs/deferred.md, the Flyout entry) | `Flyout.Closed` | `IsAlphaEnabled` |
 | Compose | a Material `FilledTonalButton` faced with a swatch | a `ModalBottomSheet` (the emoji picker's Material sheet, docs/emoji-picker-plan.md) holding the synthesized picker | the sheet's dismissal or its Done | an opacity slider row |
 
 **The synthesized picker on Android**, the minimum that reaches every
 colour and reads as a Material component: a grid of preset swatches (one
 fixed palette in the core, so the grid is the same everywhere it is
-drawn), three Material `Slider`s for hue, saturation and brightness with
+drawn, the entry equal to the draft marked with Material's check as GTK's
+dialog ticks it), three Material `Slider`s for hue, saturation and brightness with
 a preview swatch, a hex `TextField` (RRGGBB, or RRGGBBAA with alpha)
 through the IME's own keyboard, and an opacity slider when `alpha` is on.
 No custom drawing beyond the swatches and the sliders' track gradients.

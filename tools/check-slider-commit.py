@@ -466,6 +466,14 @@ def compose_color_findings(source):
         out.append(f"{COMPOSE}: kayaColorCommitted commits a colour equal to the "
                    f"held one — a choice that changes nothing emits nothing (§2)")
     sheet = block_after(source, "fun KayaColorSheet()")
+    grid = block_after(sheet, "for (shade in 0 until 5)")
+    if not (re.search(r"val current = kayaColorDraftPacked\(draft\)", sheet)
+            and re.search(r"val chosen = \(entry or 0xFFL\) == \(current or 0xFFL\)", grid)
+            and re.search(r"selectable\(selected = chosen\b", grid)
+            and re.search(r"if \(chosen\) \{\s*Icon\(\s*Icons\.Filled\.Check,", grid)):
+        out.append(f"{COMPOSE}: the sheet's palette does not mark the entry equal to the "
+                   f"quantized draft with a selected Check (docs/deferred.md, the "
+                   f"colour picker flyout entry)")
     tiers = (
         ("kayaColorCommitted", [block_after(source, "internal fun kayaColorSheetClosed(")],
          "the sheet's door, kayaColorSheetClosed"),
@@ -532,6 +540,12 @@ compose_color_watched("a Compose colour emitted outside kayaColorCommitted", gat
     r"\1                KayaPresent.emitColorChanged(node.tag, node.color)\n"),
     "is called 2 time(s)")
 
+# 22b. COMPOSE: THE PALETTE MARKS NOTHING.
+compose_color_watched("a Compose palette that never reads the current colour", gate.doctor(
+    "the palette's current compare", REAL[COMPOSE],
+    r"val chosen = \(entry or 0xFFL\) == \(current or 0xFFL\)", "val chosen = false"),
+    "does not mark the entry")
+
 # 22. COMPOSE: THE SAME COLOUR COMMITS AGAIN.
 compose_color_watched("a Compose commit of the held colour", gate.doctor(
     "the compose same-value return", REAL[COMPOSE],
@@ -559,6 +573,11 @@ def winui_color_findings(source):
                      commit):
         out.append(f"{WINUI}: winui_color_commit no longer lands a translucent choice "
                    f"opaque on an opaque picker (§5 AMENDED)")
+    swatch = block_after(source, "impl ColorSwatch {")
+    if "flyout.SetShouldConstrainToRootBounds(false)?;" not in swatch:
+        out.append(f"{WINUI}: the colour flyout is constrained to the window, so the "
+                   f"picker's channel boxes fall off a short window's edge "
+                   f"(docs/deferred.md, the colour picker flyout entry)")
     arm = block_after(source, "WidgetKind::ColorPicker => {")
     if "swatch.flyout.Closed(&closed)" not in arm:
         out.append(f"{WINUI}: the colour picker's door is not the flyout's Closed — "
@@ -636,6 +655,12 @@ winui_color_watched("a WinUI opaque picker committing a translucent choice", gat
     "the winui opaque landing", REAL[WINUI],
     r"(&& color\.a != 0xFF \{\n)(\s*)color\.a = 0xFF;\n", r"\1"),
     "lands a translucent choice")
+
+# 29. WINUI: THE FLYOUT STOPS AT THE WINDOW'S EDGE.
+winui_color_watched("a WinUI colour flyout constrained to the window", gate.doctor(
+    "the flyout's bounds line", REAL[WINUI],
+    r"        flyout\.SetShouldConstrainToRootBounds\(false\)\?;\n", ""),
+    "constrained to the window")
 
 def gtk_color_findings(source):
     """GTK's colour button (docs/color-picker-plan.md §4.3): the dialog's

@@ -105,6 +105,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
@@ -18602,18 +18603,33 @@ fun KayaColorSheet() {
                 .padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            val current = kayaColorDraftPacked(draft)
             for (shade in 0 until 5) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     for (hue in 0 until 9) {
                         val entry = palette[hue * 5 + shade]
-                        KayaColorSwatch(
-                            entry,
-                            Modifier.size(30.dp).clickable {
+                        val chosen = (entry or 0xFFL) == (current or 0xFFL)
+                        Box(
+                            Modifier.size(30.dp).selectable(selected = chosen, role = Role.RadioButton) {
                                 draft.takeRgb(entry)
                                 kayaColorDraftMoved(draft)
                             },
-                            CircleShape,
-                        )
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            KayaColorSwatch(entry, Modifier.matchParentSize(), CircleShape)
+                            if (chosen) {
+                                Icon(
+                                    Icons.Filled.Check,
+                                    contentDescription = null,
+                                    tint = if (Color(entry.ushr(8).toInt() or (0xFF shl 24)).luminance() > 0.5f) {
+                                        Color.Black
+                                    } else {
+                                        Color.White
+                                    },
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -18621,7 +18637,7 @@ fun KayaColorSheet() {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                KayaColorSwatch(kayaColorDraftPacked(draft), Modifier.size(56.dp))
+                KayaColorSwatch(current, Modifier.size(56.dp))
                 OutlinedTextField(
                     value = draft.hex,
                     onValueChange = { draft.typed(it) },

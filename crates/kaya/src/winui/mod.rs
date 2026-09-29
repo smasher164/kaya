@@ -26520,6 +26520,7 @@ impl ColorSwatch {
         picker.SetIsMoreButtonVisible(false)?;
         picker.SetIsAlphaEnabled(false)?;
         let flyout = Flyout::new()?;
+        flyout.SetShouldConstrainToRootBounds(false)?;
         flyout.SetContent(&picker)?;
         let button = Button::new()?;
         button.SetContent(&face)?;
