@@ -9696,7 +9696,7 @@ is red on its first run, with a diff nobody reads as a formatting
 question.
 
 THE RULE THE GUESTS TAKE, and it is the harness's own so the label and
-`expect_slider` cannot disagree: `spelled_slider`
+`expect_value` (then `expect_slider`) cannot disagree: `spelled_slider`
 (crates/kaya/src/harness.rs) — six decimals, trailing zeros dropped, then
 a trailing point dropped. Every sliders guest carries that in one
 `spelled()` helper with a pointer to harness.rs; it agrees with Rust's
@@ -9705,7 +9705,7 @@ by printing an integer percent instead
 (`volume: {round(value * 100)}%`), which is the other way out when a
 scene can choose its own text.
 
-## UISlider stores a Float, so a driven 0.37 comes back to the app as 0.3700000047683716 — and `expect_slider` cannot see it (measured 2026-09-04, the iOS sliders leg)
+## UISlider stores a Float, so a driven 0.37 comes back to the app as 0.3700000047683716 — and `expect_value` (then `expect_slider`) cannot see it (measured 2026-09-04, the iOS sliders leg)
 
 The mac's NSSlider is Double-backed: `set_value slider#1 0.37` sets
 `doubleValue = 0.37`, the read-back is 0.37, and the app's handler writes
@@ -9715,7 +9715,7 @@ commit path, so the occurrence carried 0.37000000476837158 and the guest's
 label read `volume: 0.3700000047683716` — a DIFFERENT VALUE handed to the
 app on one of the two Apple platforms (invariant 1).
 
-`expect_slider` IS BLIND TO IT: `spelled_slider`
+`expect_value` (then `expect_slider`) IS BLIND TO IT: `spelled_slider`
 (crates/kaya/src/harness.rs) rounds to six decimals, so the CONTROL read
 spells `0.37` either way. Only the guest's own label — the app's copy of
 what it was told — showed the divergence, and only because

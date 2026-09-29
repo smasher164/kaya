@@ -793,6 +793,8 @@
 
 #define KAYA_KIND_SEARCH 19
 
+#define KAYA_KIND_NUMBER_FIELD 20
+
 /**
  * Property keys.
  */
@@ -1824,6 +1826,15 @@ typedef struct KayaHostApi {
    * docs/fullscreen-plan.md: the user's own door, never kaya's write.
    */
   void (*emit_fullscreen_changed)(uint64_t, uint8_t);
+  /**
+   * THE NUMBER FIELD'S RULES (docs/number-field-plan.md §3), one copy in
+   * the core: a value's text at a step, and what a commit or a step
+   * makes of the committed value — 0 revert, 1 unchanged, 2 moved with
+   * the new value written through the pointer.
+   */
+  uintptr_t (*number_text)(double, double, uint8_t*, uintptr_t);
+  uint32_t (*number_commit)(const uint8_t*, uintptr_t, double, double, double, double, double*);
+  uint32_t (*number_step)(double, int32_t, double, double, double, double*);
 } KayaHostApi;
 
 

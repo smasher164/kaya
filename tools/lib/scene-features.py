@@ -117,6 +117,10 @@ VERB_FEATURE = {
     # those legs off too.
     "clear_search": "search",
     "expect_placeholder": "search",
+    # docs/number-field-plan.md §5, the same reasoning: the German leg is
+    # the number field's scene under another name.
+    "unfocus": "numberfield",
+    "nudge": "numberfield",
     # docs/sheet-plan.md §4. The verbs, not the scene name: the task
     # manager's quick-add will open a sheet without being called after
     # it, and a backend still declaring depth_stub("sheet") has to hold

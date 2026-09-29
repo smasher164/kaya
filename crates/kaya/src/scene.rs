@@ -946,6 +946,9 @@ pub(crate) struct Scene {
     /// (docs/slider-plan.md S1, S5).
     slider_ranges: HashMap<(bool, u64), SliderRange>,
     slider_dirty: Vec<(bool, u64)>,
+    /// The number field's twin of the two above (docs/number-field-plan.md §2).
+    number_ranges: HashMap<(bool, u64), crate::number_field::NumberRange>,
+    number_dirty: Vec<(bool, u64)>,
     /// Live labelled rows touched this transaction, checked for shape at
     /// its end (docs/forms-plan.md §2) once every child has arrived.
     labeled_dirty: Vec<WidgetId>,
@@ -1020,9 +1023,10 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         ),
         // The prompt an empty field shows: the text kinds alone
         // (docs/search-plan.md S3).
-        Prop::Placeholder => {
-            matches!(kind, WidgetKind::Entry | WidgetKind::Textarea | WidgetKind::Search)
-        }
+        Prop::Placeholder => matches!(
+            kind,
+            WidgetKind::Entry | WidgetKind::Textarea | WidgetKind::Search | WidgetKind::NumberField
+        ),
         // A link's destination: the label alone (docs/tasks-s2-plan.md T3).
         Prop::Href => matches!(kind, WidgetKind::Label),
         // The textarea (docs/rich-text-plan.md R1) and, read-only with the
@@ -1040,11 +1044,15 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // AND the select's 0-based index (per-kind domains, checked
         // below); min/max stay slider-only.
         Prop::Value => {
-            matches!(kind, WidgetKind::Slider | WidgetKind::Progress) || is_choice(kind)
+            matches!(kind, WidgetKind::Slider | WidgetKind::Progress | WidgetKind::NumberField)
+                || is_choice(kind)
         }
-        Prop::Min | Prop::Max => matches!(kind, WidgetKind::Slider),
-        // The slider's granularity and its drawn ticks (docs/slider-plan.md S1, S5).
-        Prop::Step | Prop::TickSpacing => matches!(kind, WidgetKind::Slider),
+        // docs/number-field-plan.md §2: the number field takes the slider's
+        // range and step, never its ticks.
+        Prop::Min | Prop::Max | Prop::Step => {
+            matches!(kind, WidgetKind::Slider | WidgetKind::NumberField)
+        }
+        Prop::TickSpacing => matches!(kind, WidgetKind::Slider),
         // The pickers' own slots (docs/datetime-plan.md §3): a date and its
         // inclusive range on the date picker, a time and its minute step on
         // the time picker. A time has no range (D4).
@@ -1150,6 +1158,7 @@ fn check_command(kind: WidgetKind, command: CommandKind) {
                 | WidgetKind::DatePicker
                 | WidgetKind::TimePicker
                 | WidgetKind::Search
+                | WidgetKind::NumberField
         ),
     };
     assert!(ok, "kaya: command {command:?} does not apply to {kind:?}");
@@ -2282,6 +2291,15 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
             "kaya: a slider's {prop:?} must be finite and non-negative (0 = none), got {x}"
         );
     }
+    // A number field has no continuous mode (docs/number-field-plan.md §2).
+    if let (WidgetKind::NumberField, Prop::Step, Value::F64(x)) = (kind, prop, value) {
+        assert!(*x > 0.0, "kaya: a number field's step must be above 0, got {x}");
+    }
+    if let (WidgetKind::NumberField, Prop::Value | Prop::Min | Prop::Max, Value::F64(x)) =
+        (kind, prop, value)
+    {
+        assert!(x.is_finite(), "kaya: a number field's {prop:?} must be finite, got {x}");
+    }
     // A progress fraction outside 0..=1 has no reading — nonsense
     // dies at the root, the grow discipline (the slider keeps its own
     // min/max range; this arm is progress-only).
@@ -2602,6 +2620,21 @@ impl Scene {
         }
     }
 
+    fn note_number_prop(&mut self, key: (bool, u64), prop: Prop, value: &Value) {
+        let Value::F64(x) = value else { return };
+        let range = self.number_ranges.entry(key).or_default();
+        match prop {
+            Prop::Min => range.min = *x,
+            Prop::Max => range.max = *x,
+            Prop::Step => range.step = *x,
+            Prop::Value => range.value = Some(*x),
+            _ => return,
+        }
+        if !self.number_dirty.contains(&key) {
+            self.number_dirty.push(key);
+        }
+    }
+
     fn note_slider_prop(&mut self, key: (bool, u64), prop: Prop, value: &Value) {
         let Value::F64(x) = value else { return };
         let range = self.slider_ranges.entry(key).or_default();
@@ -2765,6 +2798,9 @@ impl Scene {
                             if kind == WidgetKind::Slider {
                                 self.note_slider_prop((false, widget.0), prop, &v);
                             }
+                            if kind == WidgetKind::NumberField {
+                                self.note_number_prop((false, widget.0), prop, &v);
+                            }
                             // The select index's upper bound is scene
                             // state: options added SO FAR in op order, so
                             // "add options, then select" is the required
@@ -2877,6 +2913,9 @@ impl Scene {
                             // (check_type guards every write), so the
                             // current value speaks for the binding.
                             check_prop_value(kind, prop, &current);
+                            if kind == WidgetKind::NumberField {
+                                self.note_number_prop((false, widget.0), prop, &current);
+                            }
                             // Same stance for the select index's upper
                             // bound: checked here against the current
                             // value; later writes only type-check
@@ -3669,7 +3708,10 @@ impl Scene {
                     assert!(
                         !matches!(
                             wkind,
-                            WidgetKind::Entry | WidgetKind::Textarea | WidgetKind::Search
+                            WidgetKind::Entry
+                                | WidgetKind::Textarea
+                                | WidgetKind::Search
+                                | WidgetKind::NumberField
                         ),
                         "kaya: context_attach rejected on {wkind:?} — the editable text \
                          controls keep their native edit menus (dress)"
@@ -4359,6 +4401,12 @@ impl Scene {
         for key in std::mem::take(&mut self.slider_dirty) {
             if let Some(range) = self.slider_ranges.get(&key) {
                 range.check(key.1);
+            }
+        }
+        for key in std::mem::take(&mut self.number_dirty) {
+            if let Some(range) = self.number_ranges.get(&key) {
+                let who = if key.0 { format!("template node {}", key.1) } else { key.1.to_string() };
+                range.check(&who);
             }
         }
         // The labelled row's SHAPE, on the complete declaration
@@ -6360,12 +6408,19 @@ impl Scene {
                         if node_kind == WidgetKind::Slider {
                             self.note_slider_prop((true, widget.0), prop, v);
                         }
+                        if node_kind == WidgetKind::NumberField {
+                            self.note_number_prop((true, widget.0), prop, v);
+                        }
                     }
                     PropValue::Signal(id) => {
                         let current = self.signals.get(id).unwrap_or_else(|| {
                             panic!("kaya: binding to unknown signal {id:?}")
                         });
                         check_prop_value(node_kind, prop, current);
+                        if node_kind == WidgetKind::NumberField {
+                            let current = current.clone();
+                            self.note_number_prop((true, widget.0), prop, &current);
+                        }
                     }
                     PropValue::Element { level, field } => {
                         let depth = scopes
@@ -6633,7 +6688,10 @@ impl Scene {
                 assert!(
                     !matches!(
                         node_kind,
-                        WidgetKind::Entry | WidgetKind::Textarea | WidgetKind::Search
+                        WidgetKind::Entry
+                            | WidgetKind::Textarea
+                            | WidgetKind::Search
+                            | WidgetKind::NumberField
                     ),
                     "kaya: context_attach_node rejected on {node_kind:?} — the editable \
                      text controls keep their native edit menus (dress)"
@@ -12322,6 +12380,68 @@ mod tests {
                      if *id == WidgetId(1))
         });
         assert!(tagged, "a select carries its identity tag");
+    }
+
+    fn number_field(props: &[(Prop, f64)]) -> Vec<TxOp> {
+        let mut ops = vec![TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::NumberField }];
+        for (prop, x) in props {
+            ops.push(TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: *prop,
+                value: PropValue::Const(Value::F64(*x)),
+            });
+        }
+        ops.push(TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) });
+        ops
+    }
+
+    /// docs/number-field-plan.md §2: the relations are read on the complete
+    /// declaration, so a value written before its bounds is admitted, and
+    /// the field carries its identity tag.
+    #[test]
+    fn a_number_field_takes_the_sliders_numbers_in_any_order() {
+        let mut scene = Scene::new();
+        let ops = scene.apply(number_field(&[
+            (Prop::Value, 40.0),
+            (Prop::Step, 0.5),
+            (Prop::Min, 0.0),
+            (Prop::Max, 100.0),
+        ]));
+        assert!(ops.iter().any(|op| matches!(op, ApplyOp::Create { id, tag, .. }
+            if *id == WidgetId(1) && tag.is_some())));
+        let mut unbounded = Scene::new();
+        unbounded.apply(number_field(&[(Prop::Value, -9_007_199_254_740_992.0)]));
+    }
+
+    #[test]
+    #[should_panic(expected = "is outside its range")]
+    fn a_number_fields_value_outside_its_range_is_refused() {
+        Scene::new().apply(number_field(&[(Prop::Min, 0.0), (Prop::Max, 100.0), (Prop::Value, 250.0)]));
+    }
+
+    #[test]
+    #[should_panic(expected = "is outside its range")]
+    fn a_number_fields_bound_value_is_checked_at_bind() {
+        let mut ops = vec![TxOp::CreateSignal { id: SignalId(1), initial: Value::F64(-1.0) }];
+        ops.extend(number_field(&[(Prop::Min, 0.0)]));
+        ops.insert(ops.len() - 1, TxOp::SetProperty {
+            widget: WidgetId(1),
+            prop: Prop::Value,
+            value: PropValue::Signal(SignalId(1)),
+        });
+        Scene::new().apply(ops);
+    }
+
+    #[test]
+    #[should_panic(expected = "step must be above 0")]
+    fn a_number_field_refuses_a_zero_step() {
+        Scene::new().apply(number_field(&[(Prop::Step, 0.0)]));
+    }
+
+    #[test]
+    #[should_panic(expected = "has no property TickSpacing")]
+    fn a_number_field_has_no_ticks() {
+        Scene::new().apply(number_field(&[(Prop::TickSpacing, 1.0)]));
     }
 
     /// A select's children are its options: labels only. Anything else

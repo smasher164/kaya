@@ -3785,6 +3785,7 @@ fn kind_registry(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<gtk4
         K::Slider => core.sliders.iter().map(|w| w.scale.clone().upcast()).collect(),
         K::Entry => core.entries.iter().map(|w| w.clone().upcast()).collect(),
         K::Search => core.searches.iter().map(|w| w.clone().upcast()).collect(),
+        K::NumberField => crate::depth_stub("numberfield"),
         K::Label => core.labels.clone(),
         K::Column => core.columns.iter().map(|w| w.clone().upcast()).collect(),
         K::Row => core.rows.iter().map(|w| w.clone().upcast()).collect(),
@@ -8771,7 +8772,7 @@ fn context_anchor_id(core: &CoreState, t: crate::harness::Target) -> u64 {
         K::Canvas => core.canvases[resolve(t.index, core.canvases.len())].clone().upcast(),
         // The harness rejects editable text before the stage sees it
         // (their native context menus are dress).
-        K::Entry | K::Textarea | K::Search => {
+        K::Entry | K::Textarea | K::Search | K::NumberField => {
             panic!("kaya: editable text is not a context anchor (v1)")
         }
         K::DatePicker => core.date_pickers[resolve(t.index, core.date_pickers.len())]
@@ -11431,6 +11432,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.grids.push(grid.clone());
                     NativeWidget::Grid(grid)
                 }
+                WidgetKind::NumberField => crate::depth_stub("numberfield"),
                 WidgetKind::Search => {
 // The entry's contract on GTK's own search widget (docs/search-plan.md
 // S2/S6). `changed` AND NOT `search-changed`: GtkSearchEntry's
@@ -17983,13 +17985,24 @@ impl crate::harness::Stage for GtkStage {
 
     /// The CONTROL's value in the one fixed spelling, never the mirror
     /// beside it (docs/slider-plan.md S8).
-    fn slider_value(&self, t: crate::harness::Target) -> String {
+    fn control_value(&self, t: crate::harness::Target) -> String {
+        if t.kind == crate::harness::TargetKind::NumberField {
+            crate::depth_stub("numberfield")
+        }
         Self::on_main(move |core| {
             let Some(i) = crate::harness::try_resolve(t.index, core.sliders.len()) else {
                 return "<no such target>".to_owned();
             };
             crate::harness::spelled_slider(core.sliders[i].scale.value())
         })
+    }
+
+    fn unfocus(&self, _: crate::harness::Target) {
+        crate::depth_stub("numberfield")
+    }
+
+    fn nudge(&self, _: crate::harness::Target, _: bool) {
+        crate::depth_stub("numberfield")
     }
 
     /// The real-keystroke typing verb (docs/undo-plan.md A8), to harness.rs's
@@ -21481,6 +21494,7 @@ fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk
         K::Label => try_resolve(target.index, core.labels.len()).map(|i| core.labels[i].clone()),
         K::Entry => nth!(core.entries),
         K::Search => nth!(core.searches),
+        K::NumberField => crate::depth_stub("numberfield"),
         K::Textarea => nth!(core.textareas),
         K::DatePicker => try_resolve(target.index, core.date_pickers.len())
             .map(|i| core.date_pickers[i].button.clone().upcast()),

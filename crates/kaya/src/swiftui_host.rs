@@ -326,6 +326,61 @@ pub struct KayaHostApi {
         unsafe extern "C" fn(*const u8, usize, *const u8, usize, *mut u8, usize, *mut u8) -> usize,
     /// docs/fullscreen-plan.md: the user's own door, never kaya's write.
     pub emit_fullscreen_changed: extern "C" fn(u64, u8),
+    /// THE NUMBER FIELD'S RULES (docs/number-field-plan.md §3), one copy in
+    /// the core: a value's text at a step, and what a commit or a step
+    /// makes of the committed value — 0 revert, 1 unchanged, 2 moved with
+    /// the new value written through the pointer.
+    pub number_text: unsafe extern "C" fn(f64, f64, *mut u8, usize) -> usize,
+    pub number_commit: unsafe extern "C" fn(*const u8, usize, f64, f64, f64, f64, *mut f64) -> u32,
+    pub number_step: unsafe extern "C" fn(f64, i32, f64, f64, f64, *mut f64) -> u32,
+}
+
+/// # Safety
+/// `out` must be null or valid for `cap` bytes.
+unsafe extern "C" fn number_text(value: f64, step: f64, out: *mut u8, cap: usize) -> usize {
+    let text = crate::number_field::text(value, step);
+    let bytes = text.as_bytes();
+    if !out.is_null() && cap > 0 {
+        let n = bytes.len().min(cap);
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, n) };
+    }
+    bytes.len()
+}
+
+fn number_answer(commit: crate::number_field::Commit, out: *mut f64) -> u32 {
+    use crate::number_field::Commit;
+    match commit {
+        Commit::Revert => 0,
+        Commit::Unchanged => 1,
+        Commit::Moved(value) => {
+            if !out.is_null() {
+                unsafe { *out = value };
+            }
+            2
+        }
+    }
+}
+
+/// # Safety
+/// `text` must be valid for `len` bytes; `out` must be null or valid.
+unsafe extern "C" fn number_commit(
+    text: *const u8,
+    len: usize,
+    committed: f64,
+    min: f64,
+    max: f64,
+    step: f64,
+    out: *mut f64,
+) -> u32 {
+    let bytes = if text.is_null() || len == 0 { &[][..] } else { unsafe { std::slice::from_raw_parts(text, len) } };
+    let text = String::from_utf8_lossy(bytes);
+    number_answer(crate::number_field::commit(&text, committed, min, max, step), out)
+}
+
+/// # Safety
+/// `out` must be null or valid.
+unsafe extern "C" fn number_step(committed: f64, steps: i32, min: f64, max: f64, step: f64, out: *mut f64) -> u32 {
+    number_answer(crate::number_field::stepped(committed, steps, min, max, step), out)
 }
 
 /// # Safety
@@ -511,6 +566,9 @@ pub(crate) fn run() -> i32 {
         text_last_edit: crate::capi::kaya_text_last_edit,
         copy_asset: crate::capi::kaya_harness_copy_asset,
         emit_fullscreen_changed: crate::capi::kaya_emit_fullscreen_changed,
+        number_text,
+        number_commit,
+        number_step,
     };
     // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the declares-windowing
     // entry), and the declaration has to beat the first transaction rather

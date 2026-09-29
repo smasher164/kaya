@@ -1040,6 +1040,10 @@ pub enum WidgetKind {
     /// platform's own search chrome, clear affordance and keyboard. Escape
     /// on a desktop clears it like the affordance does; no submit.
     Search,
+    /// A NUMBER FIELD (docs/number-field-plan.md): a typed number over the
+    /// slider's value, min, max and step, committing once per Return, focus
+    /// loss or step as value_committed; kaya formats and parses its text.
+    NumberField,
 }
 
 /// A civil calendar date, the value a date picker holds
@@ -1198,7 +1202,7 @@ impl WidgetKind {
     /// export `WidgetKind` into the public header as an opaque handle no C
     /// caller can use. `cfg(test)` because the sweeps that walk it are tests.
     #[cfg(test)]
-    pub(crate) const ALL: [WidgetKind; 19] = [
+    pub(crate) const ALL: [WidgetKind; 20] = [
         WidgetKind::Column,
         WidgetKind::Button,
         WidgetKind::Label,
@@ -1218,6 +1222,7 @@ impl WidgetKind {
         WidgetKind::TimePicker,
         WidgetKind::Labeled,
         WidgetKind::Search,
+        WidgetKind::NumberField,
     ];
 
     /// Whether a widget of this kind carries an identity tag — the
@@ -1238,7 +1243,8 @@ impl WidgetKind {
             | WidgetKind::Radio
             | WidgetKind::DatePicker
             | WidgetKind::TimePicker
-            | WidgetKind::Search => true,
+            | WidgetKind::Search
+            | WidgetKind::NumberField => true,
             // Exhaustive on purpose — no wildcard. A kind added to the
             // spec lands here as a compile error, which is the moment to
             // decide whether it reports.

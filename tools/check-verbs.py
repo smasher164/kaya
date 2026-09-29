@@ -2132,6 +2132,9 @@ ACTION_VERBS = (
     # with dismiss_requested or the dismissal lands and it hears
     # sheet_dismissed.
     "dismiss_sheet",
+    # The number field's two user doors (docs/number-field-plan.md §5):
+    # focus leaving it and a step each commit, value_committed the answer.
+    "unfocus", "nudge",
 )
 
 # A VERB THE GUEST IS NEVER ASKED ABOUT HAS NO ANSWER TO WAIT FOR.
@@ -2170,6 +2173,8 @@ REFUSALS = {
     # No foreign source reaches a phone's app (docs/dnd-plan.md D9), so
     # the arm refuses rather than fake a drop.
     (KOTLIN, "drag_file"): "drag_file is a depth slice on android",
+    (KOTLIN, "unfocus"): 'depthStub("numberfield")',
+    (KOTLIN, "nudge"): 'depthStub("numberfield")',
 }
 # A DEPTH STUB on an action verb is a refusal too, for as long as it stands:
 # its row here reads `(KOTLIN, "<verb>"): 'depthStub("<scene>")'` and the

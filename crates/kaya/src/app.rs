@@ -1939,6 +1939,19 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// A number field's lower bound (docs/number-field-plan.md §2); never
+    /// set, -2^53.
+    pub fn min(self, min: f64) -> Self {
+        self.tx.set(self.id, Prop::Min, min);
+        self
+    }
+
+    /// A number field's upper bound; never set, 2^53.
+    pub fn max(self, max: f64) -> Self {
+        self.tx.set(self.id, Prop::Max, max);
+        self
+    }
+
     /// The distance between a slider's drawn ticks, in value units
     /// (docs/slider-plan.md S5): divides the range evenly, a multiple of
     /// the step when one is declared; 0 draws none, the default.
@@ -3240,6 +3253,22 @@ impl<'a> Tx<'a> {
         Widget { id: w, out: (), tx: self }
     }
 
+    /// A number field holding `value` (docs/number-field-plan.md): typed,
+    /// committed on Return, focus loss or a step, each commit one
+    /// [`Messages::on_commit`]. `.min()`, `.max()` and `.step()` chain.
+    pub fn number_field(&mut self, value: f64) -> Widget<'_, 'a> {
+        let w = self.widget(WidgetKind::NumberField);
+        self.set(w, Prop::Value, value);
+        Widget { id: w, out: (), tx: self }
+    }
+
+    /// A number field whose value binds a float signal; a write never echoes.
+    pub fn number_field_bound(&mut self, value: SignalId) -> Widget<'_, 'a> {
+        let w = self.widget(WidgetKind::NumberField);
+        self.bind(w, Prop::Value, value);
+        Widget { id: w, out: (), tx: self }
+    }
+
     /// A labeled checkbox; toggles arrive in the occurrence loop.
     pub fn checkbox(&mut self, text: &str) -> Widget<'_, 'a> {
         let w = self.widget(WidgetKind::Checkbox);
@@ -4447,6 +4476,10 @@ impl<'b> Row<'_, 'b> {
         self.tpl().search()
     }
 
+    pub fn number_field(&mut self, src: impl Into<TplSource<F64Kind>>) -> TemplateNodeId {
+        self.tpl().number_field(src)
+    }
+
     pub fn search_bound(&mut self, src: impl Into<TplSource<StrKind>>) -> TemplateNodeId {
         self.tpl().search_bound(src)
     }
@@ -4494,6 +4527,14 @@ impl<'b> Row<'_, 'b> {
 
     pub fn step(&mut self, node: TemplateNodeId, step: f64) {
         self.tpl().step(node, step)
+    }
+
+    pub fn min(&mut self, node: TemplateNodeId, min: f64) {
+        self.tpl().min(node, min)
+    }
+
+    pub fn max(&mut self, node: TemplateNodeId, max: f64) {
+        self.tpl().max(node, max)
     }
 
     pub fn tick_spacing(&mut self, node: TemplateNodeId, spacing: f64) {
@@ -7695,6 +7736,15 @@ impl<'b> Tpl<'_, 'b> {
         self.widget(WidgetKind::Search)
     }
 
+    /// A number field per stamped copy, its value from a source
+    /// (docs/number-field-plan.md); commits arrive as
+    /// `InstanceValueCommitted` naming this node and the copy's key path.
+    pub fn number_field(&mut self, src: impl Into<TplSource<F64Kind>>) -> TemplateNodeId {
+        let n = self.widget(WidgetKind::NumberField);
+        self.apply_source(n, Prop::Value, src.into().inner);
+        n
+    }
+
     /// A search field seeded from any addressable source;
     /// [`Self::entry_bound`]'s reasoning, one kind over.
     pub fn search_bound(&mut self, src: impl Into<TplSource<StrKind>>) -> TemplateNodeId {
@@ -7901,6 +7951,16 @@ impl<'b> Tpl<'_, 'b> {
     /// across the copies, like the range.
     pub fn step(&mut self, node: TemplateNodeId, step: f64) {
         self.set(node, Prop::Step, step);
+    }
+
+    /// A stamped number field's bounds (docs/number-field-plan.md §2),
+    /// constant across the copies.
+    pub fn min(&mut self, node: TemplateNodeId, min: f64) {
+        self.set(node, Prop::Min, min);
+    }
+
+    pub fn max(&mut self, node: TemplateNodeId, max: f64) {
+        self.set(node, Prop::Max, max);
     }
 
     /// A stamped slider's tick spacing (docs/slider-plan.md S5).

@@ -231,6 +231,7 @@ pub(crate) const KIND_DATE_PICKER: u32 = 16;
 pub(crate) const KIND_TIME_PICKER: u32 = 17;
 pub(crate) const KIND_LABELED: u32 = 18;
 pub(crate) const KIND_SEARCH: u32 = 19;
+pub(crate) const KIND_NUMBER_FIELD: u32 = 20;
 
 // Draw opcodes (docs/canvas-plan.md §3.3). The op stream is a flat run
 // of tagged values: one of these as an i64, then its operands.
@@ -911,6 +912,7 @@ fn widget_kind(raw: u32) -> WidgetKind {
         KIND_TIME_PICKER => WidgetKind::TimePicker,
         KIND_LABELED => WidgetKind::Labeled,
         KIND_SEARCH => WidgetKind::Search,
+        KIND_NUMBER_FIELD => WidgetKind::NumberField,
         other => panic!("kaya: unknown widget kind {other}"),
     }
 }
@@ -4138,6 +4140,7 @@ fn kind_raw(kind: WidgetKind) -> u32 {
         WidgetKind::TimePicker => KIND_TIME_PICKER,
         WidgetKind::Labeled => KIND_LABELED,
         WidgetKind::Search => KIND_SEARCH,
+        WidgetKind::NumberField => KIND_NUMBER_FIELD,
     }
 }
 

@@ -1965,6 +1965,22 @@ internal fun kayaPlatformFormatted(context: android.content.Context, kind: Strin
             val t = parseTime(halves[1]) ?: return ""
             byJavaText(dateSkeleton(length) + hourSkeleton(length)).format(at(d[0], d[1], d[2], t[0], t[1]))
         }
+        "field" -> {
+            // A number field's text (docs/number-field-plan.md §3 rule 5):
+            // the step's fraction digits, capped at six, grouping off; the
+            // third word is the step.
+            val v = value.toDoubleOrNull() ?: return ""
+            val step = length.toDoubleOrNull()?.takeIf { it > 0 } ?: return ""
+            val digits = (0..6).firstOrNull { d ->
+                val scaled = step * Math.pow(10.0, d.toDouble())
+                Math.abs(scaled - Math.rint(scaled)) < 1e-9 * maxOf(1.0, Math.abs(scaled))
+            } ?: 6
+            val n = java.text.NumberFormat.getInstance(locale)
+            n.isGroupingUsed = false
+            n.minimumFractionDigits = digits
+            n.maximumFractionDigits = digits
+            n.format(v)
+        }
         "number", "percent" -> {
             val v = value.toDoubleOrNull() ?: return ""
             val n = if (kind == "percent") java.text.NumberFormat.getPercentInstance(locale)
@@ -2030,7 +2046,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0xd05fc1ba6f1042b2uL
+    private const val SPEC_HASH: ULong = 0x82d49a79abf3ca9auL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -2261,6 +2277,7 @@ object KayaCompose {
     const val KIND_TIME_PICKER = 17
     const val KIND_LABELED = 18
     const val KIND_SEARCH = 19
+    const val KIND_NUMBER_FIELD = 20
     private const val PROP_TEXT = 1
     private const val PROP_CHECKED = 2
     private const val PROP_VALUE = 3
@@ -3197,6 +3214,7 @@ object KayaCompose {
                         KIND_TIME_PICKER -> KayaSceneModel.timePickers.add(node)
                         KIND_LABELED -> KayaSceneModel.labeleds.add(node)
                         KIND_SEARCH -> KayaSceneModel.searches.add(node)
+                        KIND_NUMBER_FIELD -> depthStub("numberfield")
                     }
                 }
                 APPLY_SET_PROP -> {
@@ -6918,6 +6936,7 @@ object KayaCompose {
             "radio" -> KayaSceneModel.radios
             "grid" -> KayaSceneModel.grids
             "search" -> KayaSceneModel.searches
+            "number_field" -> depthStub("numberfield")
             "textarea" -> KayaSceneModel.textareas
             "date_picker" -> KayaSceneModel.datePickers
             "time_picker" -> KayaSceneModel.timePickers
@@ -8151,10 +8170,11 @@ object KayaCompose {
                             else kayaAwaitAnswer(answered)
                         }
                     }
-                    "expect_slider" -> {
+                    "expect_value" -> {
                         // The slider's value in the one fixed spelling
                         // (docs/slider-plan.md S8): the state the composable
                         // draws from IS the control's value here.
+                        if (parts[1].startsWith("number_field")) depthStub("numberfield")
                         val want = quoted(parts.drop(2))
                         val got = onUi(activity) {
                             target(parts[1], "slider", KayaSceneModel.sliders)?.let {
@@ -8640,12 +8660,21 @@ object KayaCompose {
                     "type" -> {
                         // The driver blocks until the keys have landed IN
                         // THE FIELD, which is not the app having answered
-                        // the text_changed they raised.
-                        kayaAwaitQuiet()
-                        val answered = kayaBatches
-                        val why = kayaTypeAtFocus(activity, quoted(parts.drop(1)))
-                        if (why != null) failures.add(why)
-                        else kayaAwaitAnswer(answered)
+                        // the text_changed they raised. `{fmt:…}` types what
+                        // this platform writes (docs/number-field-plan.md §5).
+                        val typed = kayaExpandTemplate(activity, quoted(parts.drop(1)))
+                        if (typed.refused != null) {
+                            failures.add(typed.refused)
+                        } else {
+                            kayaAwaitQuiet()
+                            val answered = kayaBatches
+                            val why = kayaTypeAtFocus(activity, typed.text)
+                            if (why != null) failures.add(why)
+                            else kayaAwaitAnswer(answered)
+                        }
+                    }
+                    "unfocus", "nudge" -> {
+                        depthStub("numberfield")
                     }
                     "press" -> {
                         // The Return key as its own verb (docs/rich-text-plan.md
@@ -14396,6 +14425,7 @@ private fun KayaRenderCore(
         }
         KayaCompose.KIND_SEARCH ->
             KayaTextField(node, a11y, boxFill, singleLine = true, search = true)
+        KayaCompose.KIND_NUMBER_FIELD -> depthStub("numberfield")
         KayaCompose.KIND_LABELED -> {
             // THE LABELLED ROW (docs/forms-plan.md §3): Material's own
             // labelled row, the value trailing and a WIDE control folded

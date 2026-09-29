@@ -1,6 +1,7 @@
 # The number field: the design pass
 
-Status: DESIGNED 2026-09-28, nothing built. The roadmap's third piece for the
+Status: DESIGNED 2026-09-28; the DEPTH SLICE is built on the mac (§9), the
+breadth slice is held open by docs/deferred.md's number field entry. The roadmap's third piece for the
 video editor (its inspector: a clip's speed, volume in dB, a crop inset, a
 frame count) and a table stake the needs survey ranks with the stepper
 (docs/probes/roadmap-app-needs-2026-09-05.md, "number/formatted field" and
@@ -18,7 +19,7 @@ before an arm relies on it.
 
 | | the control | commits | text that does not parse | stepping | locale |
 |---|---|---|---|---|---|
-| macOS | SwiftUI `TextField(value:format:)` (AppKit: `NSTextField` with an `NSNumberFormatter`); `Stepper(value:in:step:)` beside it | Apple's page says editing updates the binding while the text parses; practice reports the binding moving only on Return or focus loss (§4.1) | "If the user stops editing the text in an invalid state, the text field updates the field's text to the last known valid value" | the HIG: "a stepper sits next to a field that displays its current value", with Shift-click for ten steps on the mac | the format style's locale |
+| macOS | SwiftUI `TextField(value:format:)` (AppKit: `NSTextField` with an `NSNumberFormatter`); `Stepper(value:in:step:)` beside it | Apple's page says editing updates the binding while the text parses, and that is what §4.1 measured (practice reports of Return or focus loss only do not hold on this OS) | "If the user stops editing the text in an invalid state, the text field updates the field's text to the last known valid value" | the HIG: "a stepper sits next to a field that displays its current value", with Shift-click for ten steps on the mac | the format style's locale |
 | iOS | the same `TextField`, `keyboardType` `.numberPad` ("for PIN entry") or `.decimalPad` ("numbers and a decimal point") | as macOS | as macOS | `Stepper` exists; forms rarely pair it with a field | as macOS |
 | GTK 4 | `GtkSpinButton`: a `GtkAdjustment` (value, lower, upper, step and page increments), `digits`, `climb-rate`, `numeric`, `update-policy` (`ALWAYS` or `IF_VALID`), `snap-to-ticks`, `wrap` | the value is read from the text on focus-out, on `activate` and on `gtk_spin_button_update()`; `value-changed` fires then, and for every button step | an `input` handler answering `GTK_INPUT_ERROR` leaves the value; `IF_VALID` displays "only if it is valid within the bounds" | `+`/`-` buttons always drawn; arrows, PageUp/PageDown | the `input`/`output` signals replace the parse and the display |
 | WinUI 3 | `NumberBox`: `Value` (double), `Minimum`, `Maximum`, `SmallChange`, `LargeChange`, `SpinButtonPlacementMode` (`Hidden`, `Compact`, `Inline`), `ValidationMode`, `NumberFormatter`, `AcceptsExpression` | "evaluation is triggered on loss of focus or a press of the Enter key"; `ValueChanged` then | `InvalidInputOverwritten` puts back "the last valid value"; a cleared box sets `Value` to NaN | `SmallChange` on arrows and the wheel, `LargeChange` on PageUp/PageDown; buttons only when placement is not `Hidden` | `NumberFormatter` is an `INumberFormatter2` and `INumberParser` (a `DecimalFormatter`) |
@@ -45,7 +46,11 @@ reuses the slider's props, with one semantics each:
   `step` (24): the increment an arrow key or a stepper button moves by, 1
   when never set; 0 or a negative step is refused at the root, since a field
   has no continuous mode.
-- The root refuses `value` outside `min..max`, as it does on the slider.
+- The root refuses `value` outside `min..max` (and `min` above `max`),
+  read on the complete declaration at the end of the transaction. AMENDED
+  2026-09-28: the slider does NOT do this today, whatever
+  docs/slider-plan.md says; the number field's check is the shape a
+  slider's would take (docs/deferred.md's number field entry).
 - `placeholder` (30) is legal, as on the three text kinds.
 
 **One occurrence, `value_committed` (26), spelled `on_commit` as on the
@@ -101,6 +106,17 @@ unit beside the field), and an empty state (§8, ruling 2).
 1. **SwiftUI's commit.** Whether `TextField(value:format:)` moves its binding
    per keystroke (Apple's text) or on Return and focus loss (the reports).
    The arm binds a String and commits itself, so neither answer moves it.
+   MEASURED 2026-09-28 on the mac (Darwin 25.6; a probe with keys through
+   `NSApp.sendEvent`, the harness's route): PER KEYSTROKE while the text
+   parses (typing `12` after `5` set 51, then 512); unparsable text leaves
+   the binding at the last parsable value and the text goes back to it on
+   Return or focus loss; an emptied field reverts on Return and `onSubmit`
+   still fires. Tab moves `FocusState` to the next text field and wraps, and
+   WITH ONE TEXT FIELD IN THE WINDOW Tab keeps the focus on it (buttons are
+   not in the key loop), so `unfocus` needs a second field for the focus to
+   leave to and the scene carries one. `onKeyPress(.upArrow/.downArrow)` on
+   a focused `TextField(text:)` sees the arrows before the field editor, so
+   the mac's stepping door is the arrow key.
 2. **The phones' keyboards.** iOS `.decimalPad` has no minus and no Return
    key, so the arm picks `.numberPad` for integral steps with `min >= 0`,
    `.decimalPad` for fractional ones, and `.numbersAndPunctuation` when
@@ -122,13 +138,23 @@ A new shared scene, `numberfield.steps`, one guest per language, a field with
 `min 0`, `max 100`, `step 0.5`, and a label its `on_commit` writes:
 
 - type `12.5`, `press return`: `expect_value number_field#0 "12.5"`,
-  `expect number_field#0 "{fmt:field 12.5 0.5}"`, the label moved once.
+  `expect number_field#0 "{fmt:field 12.5 0.5}"`, the label moved once, and
+  not before the Return.
 - type `abc`, `unfocus`: the text reverts, the label did not move.
 - type `250`, `press return`: clamps to `100`.
-- `step number_field#0 up`: `100` stays (clamped, no commit), then `down`
+- `nudge number_field#0 up`: `100` stays (clamped, no commit), then `down`
   reads `99.5`.
 - a button writes `value(40)`: the field reads `{fmt:field 40 0.5}`, the
   label did not move (the echo check).
+- a stamped field per row commits with its row's key (the template zone).
+
+AS BUILT (2026-09-28): `type` APPENDS (the typing contract's point 3), so
+the scene empties the field with `set_text number_field@amount ""` before
+typing a new number; `set_text` on a number field writes its text and
+emits nothing, since the text is not a value until it commits. `type`
+expands `{fmt:…}`, so the German leg types `12,5`. The field and the
+button are addressed by `a11y_id` (`number_field@amount`), and an entry
+beside them is where Tab moves the focus (§4.1).
 
 A `numberfieldde` leg runs the same guest under de-DE, which is where a
 separator a backend reads for itself goes red.
@@ -142,9 +168,13 @@ same slice since it reads the same kind of thing; `unfocus <target>`, moving
 focus off the field the way the platform's user does (Tab on the desktops,
 the keyboard's dismissal on the phones); `step <target> up|down`, driving the
 platform's stepping door (a stepper button on GTK and WinUI, the arrow key
-on macOS if §4 finds the field takes one). A lane with no stepping door drops
-the `step` lines through its lane table, as the phones drop
-`user_fullscreen`.
+on macOS, which §4.1 found the field takes). A lane with no stepping door
+drops the `nudge` lines through its lane table, as the phones drop
+`user_fullscreen`. AMENDED 2026-09-28: the verb is `nudge <target>
+up|down`, not `step`, so it cannot be read as a scene step or as the `step`
+prop; `unfocus` and `nudge` both refuse a field that does not hold focus
+(the scene clicks it first), and on the mac both are real key events (Tab,
+the arrow) through the platform's key path.
 
 ## §6. The lowerings
 
@@ -197,3 +227,26 @@ Guards:
    the others leave it to the app. RECOMMEND no empty state: empty text
    reverts like any unreadable text, so `value` is always a number and no
    binding needs an optional; a later `optional` prop can add one.
+
+## §9. As built, the depth slice (2026-09-28)
+
+The rules live once, in crates/kaya/src/number_field.rs (the root's range
+check, the digits from the step capped at six, the rounding, the text
+through `fmt::number` at those digits with grouping off, a commit's
+reading of the text and a step), and `fmt::parse_number` reads the WHOLE
+text as one number in the process locale or refuses it. It is not guest
+surface: the arms are its callers. The Apple arm is CoreFoundation's
+parse over the full range with grouping off; the glibc arm is written
+(the separator `localeconv` names, ASCII digits, an optional minus); the
+Windows and Android arms refuse by name until their backends' arms land.
+The SwiftUI arm reaches the rules through three vtable slots
+(`number_text`, `number_commit`, `number_step`), so its commit and its
+text are the core's and not a Swift copy. The harness asks the platform
+independently for `{fmt:field …}` (Foundation's `NumberFormatter` here),
+which is what lets the German leg catch a separator either side wrote
+for itself. `expect_slider` is renamed `expect_value` in all three
+harnesses.
+Both §8 recommendations are what is built: no timecode format on the
+kind, and empty text reverts like any other unreadable text
+(`a_commit_reads_the_text_through_the_door`), so `value` is always a
+number.

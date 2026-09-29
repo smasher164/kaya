@@ -1,0 +1,54 @@
+# The number field (docs/number-field-plan.md §5): typed text commits on
+# Return or focus loss and never per keystroke, unreadable text reverts, out
+# of range clamps, a step moves by the step, and an app write never echoes.
+# The text is the platform's number at the step's digits ({fmt:field}).
+expect number_field@amount "{fmt:field 0 0.5}"
+expect_value number_field@amount "0"
+expect label@commits "commits: 0"
+click number_field@amount
+expect_focused number_field@amount
+set_text number_field@amount ""
+type "{fmt:field 12.5 0.5}"
+expect label@commits "commits: 0"
+press return
+expect_value number_field@amount "12.5"
+expect number_field@amount "{fmt:field 12.5 0.5}"
+expect label@commits "commits: 1"
+# Unreadable text goes back to the committed value's and nothing fires.
+type "abc"
+unfocus number_field@amount
+expect number_field@amount "{fmt:field 12.5 0.5}"
+expect_value number_field@amount "12.5"
+settle 500
+expect label@commits "commits: 1"
+# Out of range clamps and commits the bound.
+click number_field@amount
+set_text number_field@amount ""
+type "250"
+press return
+expect_value number_field@amount "100"
+expect number_field@amount "{fmt:field 100 0.5}"
+expect label@commits "commits: 2"
+# A step past the bound stays and fires nothing; the other way moves.
+nudge number_field@amount up
+expect_value number_field@amount "100"
+nudge number_field@amount down
+expect_value number_field@amount "99.5"
+expect number_field@amount "{fmt:field 99.5 0.5}"
+expect label@commits "commits: 3"
+# The echo negative: button@forty writes the field's signal to 40
+# PROGRAMMATICALLY. The text shows it; nothing may fire.
+click button@forty
+expect number_field@amount "{fmt:field 40 0.5}"
+expect_value number_field@amount "40"
+settle 700
+expect label@commits "commits: 3"
+# The template zone: a stamped field stepping by 1 commits with its row.
+click number_field@qty[b]
+set_text number_field@qty[b] ""
+type "7"
+press return
+expect label@row "row b: 7"
+expect_value number_field@qty[b] "7"
+expect_value number_field@qty[a] "1"
+expect_ax number_field@amount "field/Amount"

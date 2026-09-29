@@ -19,6 +19,14 @@ dev_shell_or_die()
 # or a Shift arm cut out passes tools/scenes/submit.steps byte for byte:
 # the scene never types Shift+Return, never writes the field from the app
 # while it is focused, and reads no keyboard's label.
+#
+# AND THE NUMBER FIELD'S COMMIT, one rule over (docs/number-field-plan.md §3
+# rules 1 and 6, §7): value_committed rides Return, focus loss and a step
+# and never a keystroke. tools/scenes/numberfield.steps reads the label
+# before and after a Return, so it catches a per-keystroke emit only while
+# its one "commits: 0" line stands; the doors are held here instead. The
+# table grows by itself, check-slider-commit's shape: a backend whose
+# depth_stub("numberfield") goes must take a row.
 
 import re
 
@@ -261,10 +269,76 @@ ROWS = {SWIFT: swift_findings, GTK: gtk_findings, WINUI: winui_findings,
         COMPOSE: compose_findings}
 
 
+def calls_only_inside(rel, source, call, blocks, where):
+    """Every `call` in `source` other than its own definition sits inside
+    one of `blocks`; `where` names the doors for the sentence."""
+    total = source.count(call) - source.count("func " + call)
+    inside = sum(b.count(call) for b in blocks)
+    if total == 0:
+        return [f"{rel}: nothing calls {call} — the number field's {where} is not wired"]
+    if total > inside:
+        return [f"{rel}: {call} is called {total} time(s) and only {inside} sit inside "
+                f"{where} — a commit from any other path is a keystroke or an apply "
+                f"committing (docs/number-field-plan.md §3)"]
+    return []
+
+
+def swift_number_findings(source):
+    out = []
+    src = strip_c(source)
+    field = block_after(src, "struct KayaNumberField: View {")
+    if not field:
+        return [f"{SWIFT}: no KayaNumberField — the arm this clause holds is gone"]
+    commit = block_after(src, "func kayaNumberCommit(_ node: KayaNode) {")
+    step = block_after(src, "func kayaNumberStep(_ node: KayaNode, _ steps: Int32) {")
+    settle = block_after(src, "func kayaNumberSettle(")
+    setter = block_after(field, "set: { newValue in")
+    for bad in ("kayaNumberCommit(", "kayaNumberStep(", "KayaHost.emit"):
+        if bad in setter:
+            out.append(f"{SWIFT}: the number field's text binding calls {bad} — a keystroke "
+                       f"commits (§3 rule 1)")
+    submit = block_after(field, ".onSubmit {")
+    if "kayaNumberCommit(node)" not in submit:
+        out.append(f"{SWIFT}: the number field's `.onSubmit` does not commit — Return commits "
+                   f"nothing (§3 rule 1)")
+    lost = block_after(field, "if wasFocused && !newValue {")
+    if "kayaNumberCommit(node)" not in lost:
+        out.append(f"{SWIFT}: the number field's focus loss does not commit (§3 rule 1)")
+    keys = blocks_after(field, ".onKeyPress(")
+    stepping = sum(k.count("kayaNumberStep(node, ") for k in keys)
+    if stepping != 4:
+        out.append(f"{SWIFT}: the number field steps from {stepping} "
+                   f"key arm(s), not the four (arrows by one, page keys by ten; §3 rule 6)")
+    out.extend(calls_only_inside(SWIFT, src, "kayaNumberCommit(", [submit, lost],
+                                 "its Return and focus-loss doors"))
+    out.extend(calls_only_inside(SWIFT, src, "kayaNumberStep(", keys, "its key doors"))
+    out.extend(calls_only_inside(SWIFT, src, "kayaNumberSettle(", [commit, step],
+                                 "the commit and step paths"))
+    moved = block_after(settle, "if answer == 2 {")
+    if settle.count("KayaHost.emit") != 1 or "KayaHost.emitValueCommitted(" not in moved:
+        out.append(f"{SWIFT}: kayaNumberSettle must emit value_committed once, and only when "
+                   f"the core answers a moved value — an unchanged commit fires nothing (§2)")
+    for name, body in (("KayaNumberField", field), ("kayaNumberCommit", commit),
+                       ("kayaNumberStep", step)):
+        if "KayaHost.emit" in body:
+            out.append(f"{SWIFT}: {name} emits for itself — the one emit is kayaNumberSettle's")
+    return out
+
+
+STUB_ROWS = ((GTK, 'depth_stub("numberfield")'), (WINUI, 'depth_stub("numberfield")'),
+             (COMPOSE, 'depthStub("numberfield")'))
+
+
 def census(texts):
     out = []
     for rel, row in ROWS.items():
         out.extend(row(texts[rel]))
+    out.extend(swift_number_findings(texts[SWIFT]))
+    for rel, stub in STUB_ROWS:
+        if stub not in texts[rel]:
+            out.append(f"{rel}: the number field's arm has landed (no {stub} left) and this "
+                       f"gate has no row for its commit doors — add one naming the backend's "
+                       f"own Return, focus-loss and step events (docs/number-field-plan.md §6)")
     return out
 
 
@@ -411,9 +485,43 @@ n21 = gate.doctor("an emit planted on the apply arm", REAL[COMPOSE],
 watched("a Compose apply echoing as a submit", {**REAL, COMPOSE: n21},
         "outside a gesture door")
 
-gate.negatives_ran(23)
+# THE NUMBER FIELD
+n24 = gate.doctor("a commit planted on the number field's text binding", REAL[SWIFT],
+                  r"(set: \{ newValue in\n\s*if newValue == node\.text \{ return \}\n)",
+                  r"\1                    kayaNumberCommit(node)\n")
+watched("a SwiftUI number field committing per keystroke", {**REAL, SWIFT: n24},
+        "a keystroke commits")
+n25 = gate.doctor("the number field's onSubmit cut out", REAL[SWIFT],
+                  r"\n\s*\.onSubmit \{ kayaNumberCommit\(node\) \}", "")
+watched("a SwiftUI number field whose Return commits nothing", {**REAL, SWIFT: n25},
+        "Return commits nothing")
+n26 = gate.doctor("the number field's focus-loss commit cut", REAL[SWIFT],
+                  r"if wasFocused && !newValue \{\n\s*kayaNumberCommit\(node\)\n",
+                  "if wasFocused && !newValue {\n")
+watched("a SwiftUI number field whose focus loss commits nothing", {**REAL, SWIFT: n26},
+        "focus loss does not commit")
+n27 = gate.doctor("settle emitting whether or not the value moved", REAL[SWIFT],
+                  r"(\n\s*kayaUserWrite \{ node\.text = "
+                  r"kayaNumberText\(node\.value, node\.step\) \})",
+                  r"\n    KayaHost.emitValueCommitted(node.tag, node.value)\1")
+watched("a SwiftUI number field firing on an unchanged commit", {**REAL, SWIFT: n27},
+        "an unchanged commit fires nothing")
+n28 = gate.doctor("the harness's unfocus committing past the door", REAL[SWIFT],
+                  r'(case "unfocus", "nudge":\n)',
+                  r"\1                DispatchQueue.main.sync { "
+                  r"kayaNumberCommit(kayaScene.numberFields[0]) }\n")
+watched("a verb that commits without the user's door", {**REAL, SWIFT: n28},
+        "kayaNumberCommit( is called")
+n29 = gate.doctor("every gtk number field stub gone", REAL[GTK],
+                  r'crate::depth_stub\("numberfield"\)', "todo!()",
+                  want=REAL[GTK].count('depth_stub("numberfield")'))
+watched("a GTK number field arm with no row in this gate", {**REAL, GTK: n29},
+        "has no row for its commit doors")
+
+gate.negatives_ran(29)
 
 for line in census(REAL):
     gate.finding(line)
 
-gate.verdict("submitted publishes through the gesture's door alone on every backend")
+gate.verdict("submitted publishes through the gesture's door alone on every backend, "
+             "and a number field commits through its own")

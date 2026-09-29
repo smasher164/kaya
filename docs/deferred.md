@@ -9,6 +9,44 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
+## BUILD — the number field (docs/number-field-plan.md), depth on the mac (2026-09-28); the GTK, WinUI and Compose arms, the iOS legs and the other eight bindings are the breadth slice
+KEY: number field, number_field, KIND_NUMBER_FIELD, numberfield, numberfieldde, parse_number, number_text, number_commit, number_step, expect_value, unfocus, nudge, fmt:field, DEPTH STUB numberfield
+
+The depth slice: kind 20 over the slider's value, min, max and step, the
+core's rules (crates/kaya/src/number_field.rs) and `fmt::parse_number` on
+the Apple arm, the Rust binding in both zones, the SwiftUI arm on macOS and
+iOS, and tools/scenes/numberfield.steps with its de-DE twin green on the
+mac lane. `expect_slider` is `expect_value` now, on sliders and number
+fields alike. What breadth owes:
+  - **DEPTH STUB: numberfield on gtk** — `GtkSpinButton` over an adjustment
+    of min, max, step and ten steps, `input`/`output` through the door
+    (plan §6); `fmt::parse_number`'s glibc arm is written and held by
+    `the_glibc_arm_composes_in_the_locales_order` in check-gtk's container,
+    and plan §4.3 (ar-EG digits through the handlers) is measured first.
+  - **DEPTH STUB: numberfield on winui** — `NumberBox` with
+    `InvalidInputOverwritten`, `SmallChange` the step, a `DecimalFormatter`
+    from the door's language list, `Inline` steppers; the Windows arm of
+    `fmt::parse_number` (`DecimalFormatter.ParseDouble`, refusing by name
+    until then) with it, plan §4.4 measured first.
+  - **DEPTH STUB: numberfield on compose** — a `TextField` with
+    `KeyboardType.Number`/`Decimal`, `ImeAction.Done`, the commit on
+    `onDone` and on focus loss, the door both ways over JNI (a `parse` in
+    KayaFormat.kt for the Android arm of `fmt::parse_number`, refusing by
+    name until then); plan §4.2's
+    minus key on the lane's IME measured first.
+  - The iOS legs: the arm (keyboard by §4.2, a keyboard-toolbar Done that
+    drops the focus) is built and type-checked, the two scenes are
+    UNWIRED_SCENES in tools/lib/lanes/ios.py until §4.2's Done route and the
+    driver reaching it are measured; the phones cut `nudge`.
+  - `number_field` with `min`, `max`, `step` and `on_commit` in both zones of
+    the other eight bindings (check-sugar-surface and tpl-surfaces are red by
+    design until then), the C floor packing the props, and a guest per
+    language.
+  - The slider does NOT refuse a `value` outside its range at the root,
+    though docs/slider-plan.md's "What the core polices" says it does; the
+    number field's check (NumberRange in number_field.rs) is the shape a
+    slider's would take.
+
 ## ~~DEFECT — the chat app's C0 captures: Android's pushed thread, iOS's missing title, Windows' unbounded list pane (found 2026-09-25, https://claude.ai/artifact/AJnJYozbyhRN7jvHzEcua3)~~ FIXED 2026-09-25: all three, below (49d64ec6, b59326e0 and the Windows content layer), each held by check-universal-props
 KEY: chat app, pushed thread, status bar inset, keyboard opens by itself, IME inset, thread title, list pane boundary, chat.steps
 

@@ -14511,6 +14511,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // platform's own — the TextBox template's `DeleteButton` —
                 // and AutoSuggestBox is refused, both measured
                 // (docs/measurements/search-winui-2026-09-06.md).
+                WidgetKind::NumberField => crate::depth_stub("numberfield"),
                 WidgetKind::Search => {
                     let field = TextBox::new()?;
                     // 30 on the left because the glyph sits INSIDE the box:
@@ -19920,6 +19921,7 @@ fn registry_widget_at(core: &CoreState, kind: crate::harness::TargetKind, i: usi
         K::Grid => id_of!(core.grids, NativeWidget::Grid2D(grid), grid),
         K::Textarea => core.textarea_ids.get(i).copied(),
         K::Search => core.search_ids.get(i).copied(),
+        K::NumberField => crate::depth_stub("numberfield"),
         K::Canvas => core.canvas_ids.get(i).copied(),
         K::DatePicker => core.date_picker_ids.get(i).copied(),
         K::TimePicker => core.time_picker_ids.get(i).copied(),
@@ -20212,6 +20214,7 @@ fn target_element(
         // target answers — the text, the focus, the a11y peer — is the
         // TextBox's (docs/search-plan.md S7).
         K::Search => nth!(core.searches),
+        K::NumberField => crate::depth_stub("numberfield"),
         K::DatePicker => nth!(core.date_pickers),
         K::TimePicker => nth!(core.time_pickers),
         K::Label => match swapped_element(core, target)? {
@@ -20331,6 +20334,7 @@ fn registry_ids(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<u64> 
         K::Grid => ids!(core.grids, NativeWidget::Grid2D(grid), grid),
         K::Textarea => core.textarea_ids.clone(),
         K::Search => core.search_ids.clone(),
+        K::NumberField => crate::depth_stub("numberfield"),
         K::Canvas => core.canvas_ids.clone(),
         K::DatePicker => core.date_picker_ids.clone(),
         K::TimePicker => core.time_picker_ids.clone(),
@@ -22118,7 +22122,10 @@ impl crate::harness::Stage for WinUiStage {
         });
     }
 
-    fn slider_value(&self, t: crate::harness::Target) -> String {
+    fn control_value(&self, t: crate::harness::Target) -> String {
+        if t.kind == crate::harness::TargetKind::NumberField {
+            crate::depth_stub("numberfield")
+        }
         Self::on_ui_read(move |core| {
             let Some(i) = crate::harness::try_resolve(t.index, core.sliders.len()) else {
                 return Ok("<no such target>".to_owned());
@@ -22126,6 +22133,14 @@ impl crate::harness::Stage for WinUiStage {
             Ok(crate::harness::spelled_slider(core.sliders[i].Value()?))
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
+    fn unfocus(&self, _: crate::harness::Target) {
+        crate::depth_stub("numberfield")
+    }
+
+    fn nudge(&self, _: crate::harness::Target, _: bool) {
+        crate::depth_stub("numberfield")
     }
 
     /// The real-keystroke typing verb (docs/undo-plan.md A8), to the contract's
@@ -23009,6 +23024,7 @@ impl crate::harness::Stage for WinUiStage {
                 K::Grid => find(core, K::Grid, &core.grids, &id),
                 K::Textarea => find(core, K::Textarea, &core.textareas, &id),
                 K::Search => find(core, K::Search, &core.searches, &id),
+                K::NumberField => crate::depth_stub("numberfield"),
                 K::Canvas => find(core, K::Canvas, &core.canvases, &id),
                 K::DatePicker => find(core, K::DatePicker, &core.date_pickers, &id),
                 K::TimePicker => find(core, K::TimePicker, &core.time_pickers, &id),

@@ -658,8 +658,13 @@ in docs/deferred.md.
    on the textarea; WinUI's one `submit_on_enter` KeyDown door, gated on
    the textarea's own id and ungated on the two single-line arms; Compose's
    keyboard action with Send and the `onPreviewKeyEvent` Enter arm), and
-   every emit call in the file must sit inside one of them. 23 watched
-   negatives, counts printed),
+   every emit call in the file must sit inside one of them. AND THE NUMBER
+   FIELD'S COMMIT SINCE 2026-09-28 (docs/number-field-plan.md §7): its
+   value_committed rides Return, focus loss and a step alone — the SwiftUI
+   arm's commit and step paths called only from those doors, never from the
+   text binding or a harness verb, one emit and only on a moved value — and
+   a backend whose depth_stub("numberfield") goes must take a row. 29
+   watched negatives, counts printed),
    `tools/check-scroll-to.py` (THE APP'S SCROLL LANDS INSTANTLY, HOLDS
    UNTIL LAYOUT AND SHARES THE TIERS' PARK (docs/scroll-to-plan.md S4, S6,
    §3): tools/scenes/scrollto.steps asserts where a row lands and its

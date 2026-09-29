@@ -83,6 +83,10 @@ pub enum TargetKind {
     /// The search field (docs/search-plan.md): the entry's verbs, plus
     /// clear_search and expect_placeholder.
     Search,
+    /// The number field (docs/number-field-plan.md §5): typed, committed on
+    /// Return or `unfocus`, stepped by `nudge`, read by `expect` (its text)
+    /// and `expect_value` (its committed value).
+    NumberField,
     /// Grids are targetable under the container convention: only index
     /// 0, only in a scene that keeps exactly one grid
     /// (tools/check-steps.py).
@@ -166,8 +170,16 @@ pub enum Step {
     /// (a programmatic write, GTK's out-of-range snap) where occurrences
     /// and labels can only measure an absence.
     ExpectPicker(Target, String),
-    /// The CONTROL's slider value in the fixed spelling (docs/slider-plan.md S8).
-    ExpectSlider(Target, String),
+    /// The CONTROL's value in the fixed spelling (docs/slider-plan.md S8): a
+    /// slider's position or a number field's committed value
+    /// (docs/number-field-plan.md §5).
+    ExpectValue(Target, String),
+    /// Move focus off a number field the way its platform's user does
+    /// (docs/number-field-plan.md §5): the commit rides it.
+    Unfocus(Target),
+    /// One step of a number field through the platform's stepping door,
+    /// `true` up (docs/number-field-plan.md §3 rule 6).
+    Nudge(Target, bool),
     SetText(Target, String),
     /// The search field's clear affordance (docs/search-plan.md S5).
     ClearSearch(Target),
@@ -710,6 +722,8 @@ impl Step {
             | Step::ExpectAtStart(t)
             | Step::ExpectScrolledTo(t, _)
             | Step::ClearSearch(t)
+            | Step::Unfocus(t)
+            | Step::Nudge(t, _)
             | Step::ContextOpen(t)
             | Step::ExpectHeightFits(t)
             | Step::ExpectFill(t, _) => vec![t],
@@ -719,7 +733,7 @@ impl Step {
             | Step::SetDate(t, _)
             | Step::SetTime(t, _)
             | Step::ExpectPicker(t, _)
-            | Step::ExpectSlider(t, _)
+            | Step::ExpectValue(t, _)
             | Step::SetText(t, _)
             | Step::Expect(t, _)
             | Step::ExpectImageSize(t, _)
@@ -857,7 +871,9 @@ impl Step {
             Step::SetDate { .. } => false,
             Step::SetTime { .. } => false,
             Step::ExpectPicker { .. } => true,
-            Step::ExpectSlider { .. } => true,
+            Step::ExpectValue { .. } => true,
+            Step::Unfocus { .. } => false,
+            Step::Nudge { .. } => false,
             Step::SetText { .. } => false,
             Step::ClearSearch { .. } => false,
             Step::ExpectPlaceholder { .. } => true,
@@ -1021,9 +1037,17 @@ pub trait Stage: Send + 'static {
     /// never kaya's model of it, which would make the scene agree with
     /// itself.
     fn picker_value(&self, target: Target) -> String;
-    /// The slider CONTROL's value, spelled by [`spelled_slider`] — read from
-    /// the toolkit, never kaya's model (docs/slider-plan.md S8).
-    fn slider_value(&self, target: Target) -> String;
+    /// The CONTROL's value, spelled by [`spelled_slider`] — a slider's
+    /// position or a number field's committed value, read from the toolkit,
+    /// never kaya's model (docs/slider-plan.md S8, docs/number-field-plan.md §5).
+    fn control_value(&self, target: Target) -> String;
+    /// Move keyboard focus off the number field as its platform's user does
+    /// (Tab on a desktop, the keyboard's dismissal on a phone). An action:
+    /// the commit it causes is the observable.
+    fn unfocus(&self, target: Target);
+    /// One step through the number field's own stepping door (a stepper
+    /// button where the platform draws one, the arrow key where it does not).
+    fn nudge(&self, target: Target, up: bool);
     fn set_text(&self, target: Target, text: &str);
     /// Deliver `text` to the FOCUSED widget as real platform keystrokes.
     /// THE CONTRACT, since every backend implements it separately:
@@ -1731,19 +1755,45 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     time.trim().parse().map_err(|why| format!("set_time: {why} in {line:?}"))?,
                 )
             }
-            "expect_slider" => {
+            "expect_value" => {
                 let (target, text) = rest
                     .split_once(char::is_whitespace)
-                    .ok_or_else(|| format!("expect_slider wants a target and a string: {line:?}"))?;
+                    .ok_or_else(|| format!("expect_value wants a target and a string: {line:?}"))?;
                 let want = parse_string(text)?;
                 let canonical = want.parse::<f64>().ok().map(spelled_slider);
                 if canonical.as_deref() != Some(want.as_str()) {
                     return Err(format!(
-                        "expect_slider wants a number in its fixed spelling (up to six \
+                        "expect_value wants a number in its fixed spelling (up to six \
                          decimals, no trailing zeros: 0.75, 40), got {want:?} in {line:?}"
                     ));
                 }
-                Step::ExpectSlider(parse_target(target)?, want)
+                let target = parse_target(target)?;
+                if !matches!(target.kind, TargetKind::Slider | TargetKind::NumberField) {
+                    return Err(format!("expect_value reads a slider or a number field, not {target:?}"));
+                }
+                Step::ExpectValue(target, want)
+            }
+            "unfocus" => {
+                let target = parse_target(rest.trim())?;
+                if target.kind != TargetKind::NumberField {
+                    return Err(format!("unfocus drives a number field, not {target:?}"));
+                }
+                Step::Unfocus(target)
+            }
+            "nudge" => {
+                let (target, way) = rest
+                    .split_once(char::is_whitespace)
+                    .ok_or_else(|| format!("nudge wants a target and up or down: {line:?}"))?;
+                let target = parse_target(target)?;
+                if target.kind != TargetKind::NumberField {
+                    return Err(format!("nudge steps a number field, not {target:?}"));
+                }
+                let up = match way.trim() {
+                    "up" => true,
+                    "down" => false,
+                    other => return Err(format!("nudge goes up or down, not {other:?}: {line:?}")),
+                };
+                Step::Nudge(target, up)
             }
             "expect_picker" => {
                 let (target, text) = rest
@@ -2892,6 +2942,7 @@ fn parse_target_kind(kind: &str, spec: &str) -> Result<TargetKind, String> {
         "time_picker" => TargetKind::TimePicker,
         "labeled" => TargetKind::Labeled,
         "search" => TargetKind::Search,
+        "number_field" => TargetKind::NumberField,
         other => return Err(format!("unknown target kind {other:?} in {spec:?}")),
     })
 }
@@ -3778,17 +3829,31 @@ fn run_with_log(
                 await_answer(answered);
                 None
             }
-            Step::ExpectSlider(t, want) => Some(match t.kind {
-                TargetKind::Slider => poll(|| {
-                    let got = stage.slider_value(*t);
+            Step::ExpectValue(t, want) => Some(match t.kind {
+                TargetKind::Slider | TargetKind::NumberField => poll(|| {
+                    let got = stage.control_value(*t);
                     if got == *want {
                         Ok(got)
                     } else {
                         Err(format!("{t:?} holds {got:?}, wanted {want:?}"))
                     }
                 }),
-                other => Err(format!("expect_slider reads sliders — not {other:?}")),
+                other => Err(format!("expect_value reads sliders and number fields — not {other:?}")),
             }),
+            Step::Unfocus(t) => {
+                await_quiet();
+                let answered = crate::scene::answers();
+                stage.unfocus(*t);
+                await_answer(answered);
+                None
+            }
+            Step::Nudge(t, up) => {
+                await_quiet();
+                let answered = crate::scene::answers();
+                stage.nudge(*t, *up);
+                await_answer(answered);
+                None
+            }
             Step::ExpectPicker(t, want) => Some(match t.kind {
                 TargetKind::DatePicker | TargetKind::TimePicker => poll(|| {
                     let got = stage.picker_value(*t);
@@ -3831,19 +3896,27 @@ fn run_with_log(
                 }
             })),
             Step::Type(s) => {
-                // POINT 4 IS NOT THIS RULE: it blocks until the keys have
-                // landed IN THE CONTROL, which is a different thing from
-                // the app having answered the `text_changed` they raised.
-                // gtk.rs's arm carries a private copy of the quiet-wait
-                // for its own reason (grab_focus selects the contents),
-                // and this is the runner's, on every backend.
-                await_quiet();
-                let answered = crate::scene::answers();
-                vtrace::note("type", format_args!("-> stage.type_text {s:?}"));
-                stage.type_text(s);
-                vtrace::note("type", format_args!("<- stage.type_text {s:?}"));
-                await_answer(answered);
-                None
+                // `{fmt:…}` types what this platform writes, so a locale's
+                // own separator reaches the field (docs/number-field-plan.md §5).
+                match expand_template(&stage, s) {
+                    Err(why) => Some(Err(why)),
+                    Ok(s) => {
+                        // POINT 4 IS NOT THIS RULE: it blocks until the keys
+                        // have landed IN THE CONTROL, which is a different
+                        // thing from the app having answered the
+                        // `text_changed` they raised. gtk.rs's arm carries a
+                        // private copy of the quiet-wait for its own reason
+                        // (grab_focus selects the contents), and this is the
+                        // runner's, on every backend.
+                        await_quiet();
+                        let answered = crate::scene::answers();
+                        vtrace::note("type", format_args!("-> stage.type_text {s:?}"));
+                        stage.type_text(&s);
+                        vtrace::note("type", format_args!("<- stage.type_text {s:?}"));
+                        await_answer(answered);
+                        None
+                    }
+                }
             }
             Step::SelectSection(i) => {
                 await_quiet();
@@ -4380,15 +4453,17 @@ fn run_with_log(
                 TargetKind::Entry
                 | TargetKind::Textarea
                 | TargetKind::Search
+                | TargetKind::NumberField
                 | TargetKind::Image
                 | TargetKind::Label
                 | TargetKind::Progress
                 | TargetKind::Select
                 | TargetKind::Radio => poll(|| {
                     let got = match t.kind {
-                        TargetKind::Entry | TargetKind::Textarea | TargetKind::Search => {
-                            stage.read_text(*t)
-                        }
+                        TargetKind::Entry
+                        | TargetKind::Textarea
+                        | TargetKind::Search
+                        | TargetKind::NumberField => stage.read_text(*t),
                         TargetKind::Image => stage.image_size(*t),
                         TargetKind::Label => stage.read_label(*t),
                         TargetKind::Progress => stage.progress_state(*t),
@@ -5175,7 +5250,10 @@ fn run_with_log(
                 // menus are dress — scene.rs refuses the attach), so
                 // driving the gesture there would probe a menu that cannot
                 // exist.
-                if matches!(t.kind, TargetKind::Entry | TargetKind::Textarea | TargetKind::Search) {
+                if matches!(
+                    t.kind,
+                    TargetKind::Entry | TargetKind::Textarea | TargetKind::Search | TargetKind::NumberField
+                ) {
                     Some(Err(format!(
                         "{t:?} is editable text — its context menu is dress, not a context_open target"
                     )))
@@ -5548,6 +5626,7 @@ fn target_spec(t: &Target) -> String {
         TargetKind::TimePicker => "time_picker",
         TargetKind::Labeled => "labeled",
         TargetKind::Search => "search",
+        TargetKind::NumberField => "number_field",
     };
     if let Some(id) = t.id {
         t.keys.map_or_else(
@@ -5942,7 +6021,9 @@ mod expand_tests {
 /// `{fmt:date 2026-09-07 medium}`, `{fmt:time 08:30 short}`,
 /// `{fmt:date_time 2026-09-07T08:30 medium}`, `{fmt:number 1234567.891 medium}`,
 /// `{fmt:percent 0.256 medium}`, `{fmt:currency 1234567.89:USD medium}`,
-/// `{fmt:date_weekday 2026-09-07}`. A placeholder the platform cannot
+/// `{fmt:date_weekday 2026-09-07}`, and `{fmt:field 12.5 0.5}`, a number
+/// field's text for that value at that step (docs/number-field-plan.md §3
+/// rule 5). A placeholder the platform cannot
 /// answer is a refusal naming it, never an empty expectation.
 pub(crate) fn expand_template<S: Stage + ?Sized>(stage: &S, want: &str) -> Result<String, String> {
     let mut out = String::new();
@@ -5959,10 +6040,14 @@ pub(crate) fn expand_template<S: Stage + ?Sized>(stage: &S, want: &str) -> Resul
             [kind, value, length] => (*kind, *value, *length),
             _ => return Err(format!("{{fmt:{}}} wants a kind, a value and a length", after[..end].trim())),
         };
-        if !["date", "time", "date_time", "number", "percent", "currency", "date_weekday"].contains(&kind) {
-            return Err(format!("{{fmt:{kind} …}}: the kinds are date, time, date_time, number, percent, currency, date_weekday"));
+        if !["date", "time", "date_time", "number", "percent", "currency", "date_weekday", "field"].contains(&kind) {
+            return Err(format!("{{fmt:{kind} …}}: the kinds are date, time, date_time, number, percent, currency, date_weekday, field"));
         }
-        if !["short", "medium", "long"].contains(&length) {
+        if kind == "field" {
+            if !length.parse::<f64>().is_ok_and(|step| step > 0.0) {
+                return Err(format!("{{fmt:field {value} {length}}}: the third word is the field's step, a number above 0"));
+            }
+        } else if !["short", "medium", "long"].contains(&length) {
             return Err(format!("{{fmt:{kind} {value} {length}}}: the lengths are short, medium, long"));
         }
         let answer = stage.formatted(kind, value, length);
@@ -6455,6 +6540,34 @@ mod tests {
         assert!(parse("type \"kaya 1.0 (x)\"").is_ok());
     }
 
+    /// The number field's verbs (docs/number-field-plan.md §5): the value
+    /// read in the slider's fixed spelling on both kinds, and the two doors
+    /// on the number field alone.
+    #[test]
+    fn the_number_fields_verbs_parse_and_refuse() {
+        let field = Target { kind: TargetKind::NumberField, index: 0, id: None, keys: None };
+        assert_eq!(parse("expect_value number_field#0 \"12.5\"").unwrap()[0], Step::ExpectValue(field, "12.5".into()));
+        assert!(parse("expect_value slider#0 \"0.75\"").is_ok());
+        assert!(parse("expect_value number_field#0 \"12.50\"").is_err());
+        assert!(parse("expect_value label#0 \"1\"").is_err());
+        assert!(parse("expect_slider slider#0 \"0.75\"").is_err());
+        assert_eq!(parse("unfocus number_field#0").unwrap()[0], Step::Unfocus(field));
+        assert!(parse("unfocus entry#0").is_err());
+        assert_eq!(parse("nudge number_field#0 up").unwrap()[0], Step::Nudge(field, true));
+        assert_eq!(parse("nudge number_field#0 down").unwrap()[0], Step::Nudge(field, false));
+        assert!(parse("nudge number_field#0 left").is_err());
+        assert!(parse("nudge slider#0 up").is_err());
+        assert!(!Step::Unfocus(field).is_assertion() && !Step::Nudge(field, true).is_assertion());
+        let stage = MockStage {
+            seen: Box::leak(Box::new(Mutex::new(Vec::new()))),
+            verdict: std::sync::mpsc::channel().0,
+        };
+        let why = expand_template(&stage, "{fmt:field 12.5 0}").unwrap_err();
+        assert!(why.contains("the field's step"), "{why}");
+        let why = expand_template(&stage, "{fmt:field 12.5 0.5}").unwrap_err();
+        assert!(why.contains("answered nothing for {fmt:field 12.5 0.5}"), "{why}");
+    }
+
     /// TYPING IS AN ACTION: a script that only types proves nothing,
     /// and the exhaustive is_assertion match is what keeps a new verb
     /// from shipping without landing on one side of that line.
@@ -6566,9 +6679,11 @@ mod tests {
         fn picker_value(&self, _: Target) -> String {
             "2026-09-04".to_string()
         }
-        fn slider_value(&self, _: Target) -> String {
+        fn control_value(&self, _: Target) -> String {
             "0.75".to_string()
         }
+        fn unfocus(&self, _: Target) {}
+        fn nudge(&self, _: Target, _: bool) {}
         fn set_text(&self, _: Target, _: &str) {}
         fn type_text(&self, text: &str) {
             self.seen.lock().unwrap().push(format!("type {text}"));
@@ -7555,9 +7670,11 @@ mod tests {
             fn picker_value(&self, _: Target) -> String {
                 String::new()
             }
-            fn slider_value(&self, _: Target) -> String {
+            fn control_value(&self, _: Target) -> String {
                 String::new()
             }
+            fn unfocus(&self, _: Target) {}
+            fn nudge(&self, _: Target, _: bool) {}
             fn set_text(&self, _: Target, _: &str) {}
             fn type_text(&self, _: &str) {}
             fn read_label(&self, _: Target) -> String {
@@ -7902,9 +8019,11 @@ mod tests {
             fn picker_value(&self, _: Target) -> String {
                 String::new()
             }
-            fn slider_value(&self, _: Target) -> String {
+            fn control_value(&self, _: Target) -> String {
                 String::new()
             }
+            fn unfocus(&self, _: Target) {}
+            fn nudge(&self, _: Target, _: bool) {}
             fn set_text(&self, _: Target, _: &str) {}
             fn type_text(&self, _: &str) {}
             fn read_label(&self, _: Target) -> String {

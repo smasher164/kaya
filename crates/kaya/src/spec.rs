@@ -2991,7 +2991,11 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   or a keyboard change lands (docs/slider-plan.md S2). \
                   value_changed carries every movement inside the gesture; \
                   this carries the value the user settled on. A programmatic \
-                  write never echoes; same ownership stance.",
+                  write never echoes; same ownership stance. On a number \
+                  field it is the ONLY value occurrence: once per commit \
+                  (Return, focus loss, one step), never per keystroke, and \
+                  not when the committed value is unchanged \
+                  (docs/number-field-plan.md §2).",
         },
         Record {
             kind: 27,
@@ -3196,6 +3200,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("time_picker", 17),
                 ("labeled", 18),
                 ("search", 19),
+                ("number_field", 20),
             ],
         },
         EnumSpec {
@@ -4071,6 +4076,7 @@ mod tests {
                     ("kind", "time_picker") => wire::KIND_TIME_PICKER,
                     ("kind", "labeled") => wire::KIND_LABELED,
                     ("kind", "search") => wire::KIND_SEARCH,
+                    ("kind", "number_field") => wire::KIND_NUMBER_FIELD,
                     ("draw_op", _) => canvas_pin(wire::DRAW_OPS, name),
                     ("paint", _) => canvas_pin(wire::PAINTS, name),
                     ("fill_rule", _) => canvas_pin(wire::FILL_RULES, name),

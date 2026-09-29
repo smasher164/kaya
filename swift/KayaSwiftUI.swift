@@ -14,7 +14,7 @@ import UserNotifications
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xd05fc1ba6f1042b2
+let kayaSpecHash: UInt64 = 0x82d49a79abf3ca9a
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -182,6 +182,7 @@ private let kindDatePicker: UInt32 = 16
 private let kindTimePicker: UInt32 = 17
 private let kindLabeled: UInt32 = 18
 private let kindSearch: UInt32 = 19
+private let kindNumberField: UInt32 = 20
 private let propText: UInt32 = 1
 private let propChecked: UInt32 = 2
 private let propColumns: UInt32 = 11
@@ -1116,12 +1117,13 @@ final class KayaSceneModel {
     var textareas: [KayaNode] = []
     var labeleds: [KayaNode] = []
     var searches: [KayaNode] = []
+    var numberFields: [KayaNode] = []
 
     /// Every kind registry, so a destroyed node leaves all of them at once.
     static let registries: [ReferenceWritableKeyPath<KayaSceneModel, [KayaNode]>] = [
         \.buttons, \.checkboxes, \.labels, \.entryWidgets, \.sliders, \.datePickers,
         \.timePickers, \.images, \.canvases, \.columns, \.rows, \.scrolls, \.progresses,
-        \.selects, \.radios, \.grids, \.textareas, \.labeleds, \.searches,
+        \.selects, \.radios, \.grids, \.textareas, \.labeleds, \.searches, \.numberFields,
     ]
 
     func forget(_ id: UInt64) {
@@ -5479,6 +5481,14 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case kindTextarea: kayaScene.textareas.append(node)
                 case kindLabeled: kayaScene.labeleds.append(node)
                 case kindSearch: kayaScene.searches.append(node)
+                case kindNumberField:
+                    // docs/number-field-plan.md §2: unset bounds are ±2^53, the
+                    // step 1, and the field shows its value from the start.
+                    node.minValue = -kayaNumberUnbounded
+                    node.maxValue = kayaNumberUnbounded
+                    node.step = 1
+                    node.text = kayaNumberText(0, 1)
+                    kayaScene.numberFields.append(node)
                 default: break
                 }
             case applySetWindowProp:
@@ -6073,9 +6083,18 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaScene.nodes[id]!.value =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
                     kayaScene.nodes[id]!.committed = kayaScene.nodes[id]!.value
+                    // An app write shows the new value (docs/number-field-plan.md §2).
+                    if kayaScene.nodes[id]!.kind == kindNumberField {
+                        kayaScene.nodes[id]!.text =
+                            kayaNumberText(kayaScene.nodes[id]!.value, kayaScene.nodes[id]!.step)
+                    }
                 case (propStep, valueF64):
                     kayaScene.nodes[id]!.step =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
+                    if kayaScene.nodes[id]!.kind == kindNumberField {
+                        kayaScene.nodes[id]!.text =
+                            kayaNumberText(kayaScene.nodes[id]!.value, kayaScene.nodes[id]!.step)
+                    }
                 case (propTickSpacing, valueF64):
                     kayaScene.nodes[id]!.tickSpacing =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
@@ -7839,6 +7858,7 @@ private func kayaAnyTarget(_ spec: Substring) -> KayaNode? {
     case "textarea": return kayaTarget(spec, "textarea", kayaScene.textareas)
     case "labeled": return kayaTarget(spec, "labeled", kayaScene.labeleds)
     case "search": return kayaTarget(spec, "search", kayaScene.searches)
+    case "number_field": return kayaTarget(spec, "number_field", kayaScene.numberFields)
     default: return nil
     }
 }
@@ -7907,6 +7927,9 @@ private func kayaTextTarget(_ spec: Substring) -> KayaNode? {
     if spec.hasPrefix("textarea") { return kayaTarget(spec, "textarea", kayaScene.textareas) }
     if spec.hasPrefix("label") { return kayaTarget(spec, "label", kayaScene.labels) }
     if spec.hasPrefix("search") { return kayaTarget(spec, "search", kayaScene.searches) }
+    if spec.hasPrefix("number_field") {
+        return kayaTarget(spec, "number_field", kayaScene.numberFields)
+    }
     return kayaTarget(spec, "entry", kayaScene.entryWidgets)
 }
 
@@ -8200,6 +8223,7 @@ private func kayaRunScript(_ script: String) {
                     if let node = kayaTarget(parts[1], "entry", kayaScene.entryWidgets)
                         ?? kayaTarget(parts[1], "textarea", kayaScene.textareas)
                         ?? kayaTarget(parts[1], "search", kayaScene.searches)
+                        ?? kayaTarget(parts[1], "number_field", kayaScene.numberFields)
                     {
                         kayaScene.focusedId = node.id
                         return true
@@ -8256,11 +8280,17 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("no such target \(parts[1])")
                 }
-            case "expect_slider":
+            case "expect_value":
                 // The CONTROL's value in the fixed spelling, never the node's
-                // (docs/slider-plan.md S8).
+                // (docs/slider-plan.md S8). A number field's control holds
+                // text, so its committed value is what its commit path wrote
+                // (docs/number-field-plan.md §5).
                 let want = kayaQuoted(Array(parts[2...]))
                 let got = DispatchQueue.main.sync { () -> String? in
+                    if parts[1].hasPrefix("number_field") {
+                        return kayaTarget(parts[1], "number_field", kayaScene.numberFields)
+                            .map { kayaSpelledSlider($0.value) }
+                    }
                     guard let node = kayaTarget(parts[1], "slider", kayaScene.sliders),
                         let control = kayaSliderControls[node.id]
                     else { return nil }
@@ -8273,6 +8303,51 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("no such target \(parts[1])")
                 }
+            case "unfocus", "nudge":
+                // The number field's two user doors (docs/number-field-plan.md
+                // §5): Tab moves the focus off it and the commit rides that; an
+                // arrow key steps it. Both go through the platform's key path to
+                // a field that holds focus, which the scene gives it by `click`.
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
+                let holds = DispatchQueue.main.sync { () -> Bool? in
+                    kayaTarget(parts[1], "number_field", kayaScene.numberFields)
+                        .map { kayaScene.focusedId == $0.id }
+                }
+                guard let holds else {
+                    failures.append("no such target \(parts[1])")
+                    break
+                }
+                guard holds else {
+                    failures.append("\(parts[0]) \(parts[1]): the field does not hold focus — click it first")
+                    break
+                }
+                // nudge names a direction and unfocus does not.
+                let stepping = parts.count > 2
+                let up = stepping && parts[2] == "up"
+                #if os(macOS)
+                    let sent =
+                        !stepping
+                        ? kayaKeyAtFocus("\t", code: 48, flags: [])
+                        : kayaKeyAtFocus(
+                            String(UnicodeScalar(up ? 0xF700 : 0xF701)!), code: up ? 126 : 125,
+                            flags: [.numericPad, .function])
+                    if sent {
+                        kayaAwaitAnswer(answered)
+                    } else {
+                        failures.append("\(parts[0]) \(parts[1]) reached no window — no key was sent")
+                    }
+                #else
+                    // The phone's door is the keyboard's dismissal; it has no
+                    // stepping door, and its lane table drops the `nudge` lines.
+                    if !stepping {
+                        DispatchQueue.main.sync { kayaScene.focusedId = nil }
+                        kayaAwaitAnswer(answered)
+                    } else {
+                        _ = up
+                        failures.append("nudge: a phone's number field has no stepping door")
+                    }
+                #endif
             case "set_date", "set_time":
                 // THROUGH the control (docs/datetime-plan.md D8): its value
                 // moves and its own action fires, the path a user's pick
@@ -8411,7 +8486,11 @@ private func kayaRunScript(_ script: String) {
                         return false
                     }
                     kayaUserWrite { node.text = kayaLF(kayaQuoted(Array(parts[2...]))) }
-                    KayaHost.emitText(node, node.text)
+                    // A number field's text is a draft until it commits
+                    // (docs/number-field-plan.md §2): no text_changed.
+                    if node.kind != kindNumberField {
+                        KayaHost.emitText(node, node.text)
+                    }
                     return true
                 }
                 if ok {
@@ -8427,9 +8506,15 @@ private func kayaRunScript(_ script: String) {
                 // Point 4 blocks until the keys have landed IN THE CONTROL,
                 // which is not the app having answered the text_changed they
                 // raised — so the rule applies here as everywhere.
+                // `{fmt:…}` types what this platform writes, so a locale's own
+                // separator reaches the field (docs/number-field-plan.md §5).
+                let typedSpec = kayaQuoted(Array(parts[1...]))
+                guard case .success(let typed) = kayaExpandTemplate(typedSpec) else {
+                    if case .failure(let refusal) = kayaExpandTemplate(typedSpec) { failures.append(refusal.why) }
+                    break
+                }
                 kayaAwaitQuiet()
                 let answered = kayaAnswers()
-                let typed = kayaQuoted(Array(parts[1...]))
                 #if os(macOS)
                     if kayaTypeAtFocus(typed) {
                         kayaAwaitAnswer(answered)
@@ -8486,6 +8571,8 @@ private func kayaRunScript(_ script: String) {
                         ? kayaTarget(parts[1], "textarea", kayaScene.textareas)?.text
                         : parts[1].hasPrefix("search")
                         ? kayaTarget(parts[1], "search", kayaScene.searches)?.text
+                        : parts[1].hasPrefix("number_field")
+                        ? kayaTarget(parts[1], "number_field", kayaScene.numberFields)?.text
                         : parts[1].hasPrefix("entry")
                         ? kayaTarget(parts[1], "entry", kayaScene.entryWidgets)?.text
                         : parts[1].hasPrefix("image")
@@ -11687,7 +11774,7 @@ private func kayaRunScript(_ script: String) {
                 kayaAwaitQuiet()
                 let failure = DispatchQueue.main.sync { () -> String? in
                     if parts[1].hasPrefix("entry") || parts[1].hasPrefix("textarea")
-                        || parts[1].hasPrefix("search")
+                        || parts[1].hasPrefix("search") || parts[1].hasPrefix("number_field")
                     {
                         return
                             "\(parts[1]) is editable text — its context menu is dress, not a context_open target"
@@ -12308,7 +12395,7 @@ func kayaSliderNudge(_ node: KayaNode) -> Double {
 
 #if os(macOS)
     /// The hosted controls by node id: what `set_value` drives and
-    /// `expect_slider` reads.
+    /// `expect_value` reads.
     nonisolated(unsafe) var kayaSliderControls: [UInt64: KayaNSSlider] = [:]
 
     func kayaControlSliderValue(_ control: KayaNSSlider) -> Double { control.doubleValue }
@@ -17270,6 +17357,23 @@ func kayaPlatformFormatted(kind: String, value: String, length: String) -> Strin
         guard let d = Calendar.current.date(from: c) else { return "" }
         f.dateStyle = dateStyle(length); f.timeStyle = dateStyle(length)
         return f.string(from: d)
+    case "field":
+        // A number field's text (docs/number-field-plan.md §3 rule 5): the
+        // step's fraction digits, capped at six, grouping off. `length` is the
+        // step here.
+        guard let v = Double(value), let step = Double(length), step > 0 else { return "" }
+        var digits = 0
+        while digits < 6 {
+            let scaled = step * pow(10, Double(digits))
+            if abs(scaled - scaled.rounded()) < 1e-9 * max(1, abs(scaled)) { break }
+            digits += 1
+        }
+        let n = NumberFormatter()
+        n.numberStyle = .decimal
+        n.usesGroupingSeparator = false
+        n.minimumFractionDigits = digits
+        n.maximumFractionDigits = digits
+        return n.string(from: NSNumber(value: v)) ?? ""
     case "number", "percent":
         guard let v = Double(value) else { return "" }
         let n = NumberFormatter()
@@ -18085,6 +18189,8 @@ struct KayaRender: View {
             KayaEntry(node: node, flexVertical: flexVertical)
         case kindSearch:
             KayaSearch(node: node, flexVertical: flexVertical)
+        case kindNumberField:
+            KayaNumberField(node: node, flexVertical: flexVertical)
         case kindTextarea:
             KayaTextarea(node: node, flexVertical: flexVertical, flexStretch: flexStretch)
         case kindSelect:
@@ -18567,6 +18673,7 @@ func kayaRoleEnabled(_ role: String) -> Bool {
             return kayaScene.entryWidgets.contains(where: { $0.id == id })
                 || kayaScene.textareas.contains(where: { $0.id == id })
                 || kayaScene.searches.contains(where: { $0.id == id })
+                || kayaScene.numberFields.contains(where: { $0.id == id })
         case "paste":
             guard let id = kayaScene.focusedId,
                 let node = kayaScene.nodes[id]
@@ -18609,6 +18716,7 @@ func kayaRoleEnabled(_ role: String) -> Bool {
             return kayaScene.entryWidgets.contains(where: { $0.id == id })
                 || kayaScene.textareas.contains(where: { $0.id == id })
                 || kayaScene.searches.contains(where: { $0.id == id })
+                || kayaScene.numberFields.contains(where: { $0.id == id })
         case "paste":
             guard let id = kayaScene.focusedId,
                 let node = kayaScene.nodes[id]
@@ -18797,6 +18905,29 @@ func kayaUndoInertNote(_ item: KayaMenuItemModel, verb: String) {
         }
         kayaSettleTypedText(from: before)
         return true
+    }
+
+    /// One named key, keyDown then keyUp, at the window whose first responder
+    /// is editing text — kayaTypeAtFocus's route without the caret move or
+    /// the text settle, for the keys that commit or step rather than type.
+    func kayaKeyAtFocus(_ key: String, code: UInt16, flags: NSEvent.ModifierFlags) -> Bool {
+        guard let window = kayaAwaitTextWindow() else { return false }
+        let sent = DispatchQueue.main.sync { () -> Bool in
+            for kind in [NSEvent.EventType.keyDown, .keyUp] {
+                guard
+                    let event = NSEvent.keyEvent(
+                        with: kind, location: .zero, modifierFlags: flags,
+                        timestamp: ProcessInfo.processInfo.systemUptime,
+                        windowNumber: window.windowNumber, context: nil,
+                        characters: key, charactersIgnoringModifiers: key,
+                        isARepeat: false, keyCode: code)
+                else { return false }
+                NSApp.sendEvent(event)
+            }
+            return true
+        }
+        DispatchQueue.main.sync {}
+        return sent
     }
 
     /// Contract point 4: block until the typed text has LANDED, since an action
@@ -22232,6 +22363,128 @@ struct KayaSearch: View {
         }
     }
 }
+
+// ---- the number field (docs/number-field-plan.md) ---------------------------
+// The platform's TextField over a String the arm commits itself (§6): the text
+// is written and read by the core's rules through the host (§3 rule 5), and
+// value_committed rides ONE commit path and ONE step path, never a keystroke.
+
+/// An unset bound (§2), the core's `number_field::UNBOUNDED`.
+let kayaNumberUnbounded = 9_007_199_254_740_992.0
+
+/// A value's text at a step, written by the core's door.
+func kayaNumberText(_ value: Double, _ step: Double) -> String {
+    let needed = Int(KayaHost.api.number_text(value, step, UnsafeMutablePointer<UInt8>(nil), 0))
+    var buf = [UInt8](repeating: 0, count: needed)
+    let written = buf.withUnsafeMutableBufferPointer { p in
+        Int(KayaHost.api.number_text(value, step, p.baseAddress, UInt(needed)))
+    }
+    return String(decoding: buf.prefix(min(written, needed)), as: UTF8.self)
+}
+
+/// THE COMMIT PATH (§3 rules 1-3): Return, focus loss and the phone
+/// keyboard's Done come here. Unreadable text shows the committed value again
+/// and fires nothing; a readable one is clamped and rounded by the core.
+func kayaNumberCommit(_ node: KayaNode) {
+    var moved = node.value
+    let bytes = Array(node.text.utf8)
+    let answer = bytes.withUnsafeBufferPointer { p in
+        KayaHost.api.number_commit(
+            p.baseAddress, UInt(p.count), node.value, node.minValue, node.maxValue, node.step, &moved)
+    }
+    kayaNumberSettle(node, answer, moved)
+}
+
+/// THE STEP PATH (§3 rule 6): `steps` steps from the committed value.
+func kayaNumberStep(_ node: KayaNode, _ steps: Int32) {
+    var moved = node.value
+    let answer = KayaHost.api.number_step(
+        node.value, steps, node.minValue, node.maxValue, node.step, &moved)
+    kayaNumberSettle(node, answer, moved)
+}
+
+/// The core's answer: 2 is a new committed value, the one emit.
+private func kayaNumberSettle(_ node: KayaNode, _ answer: UInt32, _ moved: Double) {
+    if answer == 2 {
+        kayaUserWrite { node.value = moved }
+        KayaHost.emitValueCommitted(node.tag, moved)
+    }
+    kayaUserWrite { node.text = kayaNumberText(node.value, node.step) }
+}
+
+struct KayaNumberField: View {
+    let node: KayaNode
+    var flexVertical: Bool? = nil
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextField(
+            node.placeholder,
+            text: Binding(
+                get: { node.text },
+                set: { newValue in
+                    if newValue == node.text { return }
+                    kayaUserWrite { node.text = newValue }
+                })
+        )
+        .textFieldStyle(.roundedBorder)
+        .frame(
+            maxWidth: (node.grow > 0 || (flexVertical == true && node.fill != false))
+                ? .infinity : 120)
+        .focused($focused)
+        .onSubmit { kayaNumberCommit(node) }
+        .onKeyPress(.upArrow) {
+            kayaNumberStep(node, 1)
+            return .handled
+        }
+        .onKeyPress(.downArrow) {
+            kayaNumberStep(node, -1)
+            return .handled
+        }
+        .onKeyPress(.pageUp) {
+            kayaNumberStep(node, 10)
+            return .handled
+        }
+        .onKeyPress(.pageDown) {
+            kayaNumberStep(node, -10)
+            return .handled
+        }
+        #if os(iOS)
+            .keyboardType(kayaNumberKeyboard(node))
+            .toolbar {
+                if focused {
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        Button("Done") { focused = false }
+                    }
+                }
+            }
+        #endif
+        .onAppear { focused = kayaScene.focusedId == node.id }
+        .onChange(of: kayaScene.focusedId) { _, newValue in
+            focused = newValue == node.id
+        }
+        .onChange(of: focused) { wasFocused, newValue in
+            if newValue {
+                kayaScene.focusedId = node.id
+            } else if kayaScene.focusedId == node.id {
+                kayaScene.focusedId = nil
+            }
+            if wasFocused && !newValue {
+                kayaNumberCommit(node)
+            }
+        }
+    }
+}
+
+#if os(iOS)
+    /// §4.2: `.decimalPad` has no minus and no Return, so a field that can go
+    /// below zero takes the punctuation keyboard; the toolbar's Done commits.
+    func kayaNumberKeyboard(_ node: KayaNode) -> UIKeyboardType {
+        if node.minValue < 0 { return .numbersAndPunctuation }
+        return node.step.rounded() == node.step ? .numberPad : .decimalPad
+    }
+#endif
 
 /// The search field's universal props land on its TEXT FIELD (see kayaA11y),
 /// with the platform's search trait beside them.

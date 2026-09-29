@@ -46,6 +46,10 @@ mod prefs_keyfile;
 // matcher, and the door every platform arm hands a URL to. Ungated —
 // every target has a door.
 mod links;
+// docs/number-field-plan.md; the SwiftUI arm is its caller until the
+// breadth slice's arms land.
+#[cfg_attr(not(any(target_os = "macos", target_os = "ios")), allow(dead_code))]
+mod number_field;
 mod protocol;
 mod ring;
 // The row-windowing band machine (docs/virtualization-plan.md §1-§2).
