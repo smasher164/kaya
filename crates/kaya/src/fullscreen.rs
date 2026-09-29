@@ -35,6 +35,38 @@ pub(crate) fn dress_key_free<'a>(shortcuts: impl IntoIterator<Item = &'a str>) -
     !shortcuts.into_iter().any(|s| s == DRESS_KEY)
 }
 
+/// The fullscreen header bar on GTK (docs/fullscreen-plan.md §9), GNOME Web's
+/// rule; WinUI's fullscreen presenter draws no title bar at all.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(crate) mod bar {
+    /// The pointer within this many pixels of the top edge reveals the bar.
+    pub(crate) const REVEAL_EDGE_PX: f64 = 5.0;
+    /// A window entering fullscreen hides the bar this long after.
+    pub(crate) const HIDE_DELAY_MS: u64 = 300;
+
+    /// What the bar does after one input.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub(crate) enum Bar {
+        Show,
+        Hide,
+        HideLater,
+    }
+
+    /// `pointer_y` is the last pointer position in the window, None when the
+    /// last input was a touch; `held` is the focus inside the bar, which an
+    /// open popover or menu from it holds. `now` hides at once (an input),
+    /// else after the delay (the entry into fullscreen).
+    pub(crate) fn after(pointer_y: Option<f64>, bar_height: f64, held: bool, now: bool) -> Bar {
+        if pointer_y.is_some_and(|y| y <= bar_height.max(REVEAL_EDGE_PX)) || held {
+            Bar::Show
+        } else if now {
+            Bar::Hide
+        } else {
+            Bar::HideLater
+        }
+    }
+}
+
 impl Door {
     /// The app wrote the prop while the toolkit reads `now`. A write during a
     /// transition is held: the user's is overridden when it settles, kaya's
@@ -95,7 +127,26 @@ impl Door {
 
 #[cfg(test)]
 mod tests {
+    use super::bar::{Bar, after as bar_after};
     use super::{Door, Flight, Settled, dress_key_free};
+
+    #[test]
+    fn the_bar_follows_the_top_edge_and_the_focus() {
+        // Hidden (height 0): the edge's own 5px reveal it, the sixth does not.
+        assert_eq!(bar_after(Some(0.0), 0.0, false, true), Bar::Show);
+        assert_eq!(bar_after(Some(5.0), 0.0, false, true), Bar::Show);
+        assert_eq!(bar_after(Some(6.0), 0.0, false, true), Bar::Hide);
+        // Revealed (47px): anywhere over the bar keeps it, below hides at once.
+        assert_eq!(bar_after(Some(40.0), 47.0, false, true), Bar::Show);
+        assert_eq!(bar_after(Some(48.0), 47.0, false, true), Bar::Hide);
+        // Focus inside the bar (an open menu) keeps it wherever the pointer is.
+        assert_eq!(bar_after(Some(500.0), 47.0, true, true), Bar::Show);
+        // A touch never reveals by position.
+        assert_eq!(bar_after(None, 47.0, false, true), Bar::Hide);
+        // Entering fullscreen waits before hiding.
+        assert_eq!(bar_after(Some(500.0), 47.0, false, false), Bar::HideLater);
+        assert_eq!(bar_after(None, 47.0, false, false), Bar::HideLater);
+    }
 
     fn settled(report: Option<bool>, request: Option<bool>) -> Settled {
         Settled { report, request }

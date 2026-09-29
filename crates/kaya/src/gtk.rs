@@ -6802,6 +6802,7 @@ fn install_nav_chrome(window: &gtk4::Window, id: u64) -> WindowChrome {
         // would be writing down a decision it does not make.
         view.add_top_bar(&header);
     }
+    autohide_bar(window, &view, &header);
     let hosted = tight::host(&view);
     if let Some(primary) = window.downcast_ref::<adw::ApplicationWindow>() {
         primary.set_content(Some(&hosted));
@@ -6816,6 +6817,120 @@ fn install_nav_chrome(window: &gtk4::Window, id: u64) -> WindowChrome {
         );
     }
     WindowChrome { view, header, promoted, back, marker }
+}
+
+/// The fullscreen header bar (docs/fullscreen-plan.md §9): hidden over the
+/// content and revealed at the top edge, GNOME Web's rule in
+/// crate::fullscreen::bar. Its own state, never CORE, since its handlers run
+/// inside event dispatch.
+struct AutohideBar {
+    view: glib::WeakRef<adw::ToolbarView>,
+    header: glib::WeakRef<adw::HeaderBar>,
+    window: glib::WeakRef<gtk4::Window>,
+    pointer_y: std::cell::Cell<Option<f64>>,
+    timeout: RefCell<Option<glib::SourceId>>,
+}
+
+impl AutohideBar {
+    fn reveal(&self, on: bool) {
+        if let Some(id) = self.timeout.borrow_mut().take() {
+            id.remove();
+        }
+        if let Some(view) = self.view.upgrade() {
+            view.set_reveal_top_bars(on);
+        }
+    }
+
+    fn after_input(self: &Rc<Self>, now: bool) {
+        use crate::fullscreen::bar::{Bar, after};
+        let (Some(view), Some(header), Some(window)) =
+            (self.view.upgrade(), self.header.upgrade(), self.window.upgrade())
+        else {
+            return;
+        };
+        if !window.is_fullscreen() {
+            return;
+        }
+        let held = gtk4::prelude::GtkWindowExt::focus(&window)
+            .is_some_and(|focus| focus.is_ancestor(&header) || focus == *header.upcast_ref::<gtk4::Widget>());
+        match after(self.pointer_y.get(), f64::from(view.top_bar_height()), held, now) {
+            Bar::Show => self.reveal(true),
+            Bar::Hide => self.reveal(false),
+            Bar::HideLater => {
+                if !view.reveals_top_bars() || self.timeout.borrow().is_some() {
+                    return;
+                }
+                let bar = Rc::downgrade(self);
+                let id = glib::timeout_add_local_once(
+                    std::time::Duration::from_millis(crate::fullscreen::bar::HIDE_DELAY_MS),
+                    move || {
+                        if let Some(bar) = bar.upgrade() {
+                            bar.timeout.borrow_mut().take();
+                            bar.reveal(false);
+                        }
+                    },
+                );
+                *self.timeout.borrow_mut() = Some(id);
+            }
+        }
+    }
+}
+
+fn autohide_bar(window: &gtk4::Window, view: &adw::ToolbarView, header: &adw::HeaderBar) {
+    let bar = Rc::new(AutohideBar {
+        view: view.downgrade(),
+        header: header.downgrade(),
+        window: window.downgrade(),
+        pointer_y: std::cell::Cell::new(None),
+        timeout: RefCell::new(None),
+    });
+    window.connect_fullscreened_notify({
+        let bar = bar.clone();
+        move |window| {
+            let on = window.is_fullscreen();
+            if let Some(view) = bar.view.upgrade() {
+                view.set_extend_content_to_top_edge(on);
+                view.set_top_bar_style(if on {
+                    adw::ToolbarStyle::RaisedBorder
+                } else {
+                    adw::ToolbarStyle::Flat
+                });
+            }
+            if on {
+                bar.after_input(false);
+            } else {
+                bar.reveal(true);
+            }
+        }
+    });
+    window.connect_focus_widget_notify({
+        let bar = bar.clone();
+        move |_| bar.after_input(true)
+    });
+    let motion = gtk4::EventControllerMotion::new();
+    motion.set_propagation_phase(gtk4::PropagationPhase::Capture);
+    let moved = {
+        let bar = bar.clone();
+        move |_: &gtk4::EventControllerMotion, _: f64, y: f64| {
+            bar.pointer_y.set(Some(y));
+            bar.after_input(true);
+        }
+    };
+    motion.connect_enter(moved.clone());
+    motion.connect_motion(moved);
+    view.add_controller(motion);
+    let touch = gtk4::GestureClick::new();
+    touch.set_propagation_phase(gtk4::PropagationPhase::Capture);
+    touch.set_touch_only(true);
+    touch.connect_pressed(move |gesture, _, _, y| {
+        gesture.set_state(gtk4::EventSequenceState::Denied);
+        bar.pointer_y.set(None);
+        let height = bar.view.upgrade().map_or(0, |view| view.top_bar_height());
+        if y > f64::from(height).max(crate::fullscreen::bar::REVEAL_EDGE_PX) {
+            bar.after_input(true);
+        }
+    });
+    view.add_controller(touch);
 }
 
 /// One window's shell, handed back by [`install_nav_chrome`] so the caller
@@ -21140,6 +21255,99 @@ impl crate::harness::Stage for GtkStage {
             );
             std::thread::sleep(Duration::from_millis(20));
         }
+    }
+
+    /// The top bar's height in the AdwToolbarView and where the content starts
+    /// under it, which is what the user sees: an unmapped header is hidden, and
+    /// a content starting above the bar's bottom is overlaid by it.
+    fn window_titlebar(&self, window: u64) -> Option<crate::harness::Titlebar> {
+        use crate::harness::Titlebar;
+        let read = Self::on_main(move |core| {
+            let (Some(view), Some(header)) =
+                (core.toolbar_views.get(&window), core.header_bars.get(&window))
+            else {
+                return Err(live_windows(core));
+            };
+            let content_top = view
+                .content()
+                .and_then(|content| content.compute_bounds(view))
+                .map(|bounds| bounds.y());
+            Ok((view.top_bar_height(), header.height(), header.is_mapped(), content_top))
+        });
+        let (bar, header, mapped, content_top) = read.unwrap_or_else(|live| {
+            panic!(
+                "kaya: expect_titlebar read window#{window}, which this process does not \
+                 hold (live windows: {live})"
+            )
+        });
+        crate::vtrace::note(
+            "expect_titlebar",
+            format_args!(
+                "window#{window} top bar {bar}px, header {header}px mapped={mapped}, \
+                 content top {content_top:?}"
+            ),
+        );
+        if bar == 0 && !mapped {
+            return Some(Titlebar::Hidden);
+        }
+        if !mapped || bar < header {
+            return None;
+        }
+        let top = content_top?;
+        Some(if top < bar as f32 { Titlebar::Overlay } else { Titlebar::Shown })
+    }
+
+    /// tools/linux/dragdrive.py's `move`, nudge's route with no button.
+    fn move_pointer(&self, window: u64, spot: crate::harness::PointerSpot) {
+        let driver = std::env::var(DRAG_DRIVER_VAR).unwrap_or_else(|_| {
+            panic!(
+                "kaya: move_pointer: {DRAG_DRIVER_VAR} is unset, so this lane has no pointer: \
+                 export it naming tools/linux/dragdrive.py (tools/linux/run-suites.sh does)"
+            )
+        });
+        Self::await_frames(2);
+        let point = Self::on_main(move |core| {
+            let view = core.toolbar_views.get(&window)?;
+            let target = gtk_window_read(core, window)?;
+            let b = view.compute_bounds(&target)?;
+            let x = f64::from(b.x()) + f64::from(b.width()) / 2.0;
+            let y = match spot {
+                crate::harness::PointerSpot::Top => f64::from(b.y()) + 1.0,
+                crate::harness::PointerSpot::Center => f64::from(b.y()) + f64::from(b.height()) / 2.0,
+            };
+            Some((x, y, gtk4::prelude::NativeExt::surface_transform(&target)))
+        });
+        let Some((x, y, transform)) = point else {
+            panic!("kaya: move_pointer {spot:?}: window#{window} has no laid-out shell in this process")
+        };
+        let proto = if linux_wayland_session() { "wayland" } else { "x11" };
+        let out = std::process::Command::new("python3")
+            .arg(&driver)
+            .args(["move", proto])
+            .arg(std::process::id().to_string())
+            .args(
+                [transform.0, transform.1, x, y]
+                    .iter()
+                    .map(|v| (v.round() as i64).to_string()),
+            )
+            .output()
+            .unwrap_or_else(|e| panic!("kaya: move_pointer: {driver} could not be run: {e}"));
+        crate::vtrace::note(
+            "move_pointer",
+            format_args!(
+                "{spot:?} at ({x}, {y}) -> exit {:?} {}{}",
+                out.status.code(),
+                String::from_utf8_lossy(&out.stdout).trim(),
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+        );
+        assert!(
+            out.status.success(),
+            "kaya: move_pointer: the pointer move failed ({}): {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+        Self::await_frames(2);
     }
 
     fn close_window(&self, window: u64) {

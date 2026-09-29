@@ -29,6 +29,8 @@ dev_shell_or_die()
 #      it, cut and compiled with tools/checks/swiftui-fullscreen.swift over a
 #      window double that never reaches the window server — the app's write
 #      wins over a user change it overrode (docs/fullscreen-plan.md §1).
+#   E  STATIC, any host: GTK's fullscreen header bar (docs/fullscreen-plan.md
+#      §9), the half the linux lane's appended steps cannot see.
 #   D  STATIC, any host: the fullscreen rule on the two Rust backends
 #      (docs/fullscreen-plan.md §2, §3), whose decisions are
 #      crates/kaya/src/fullscreen.rs's unit tests. No scene reads either
@@ -371,6 +373,90 @@ negatives += 5
 gate.counted("lines of the two Rust backends read for clause D",
              len(real_gtk.splitlines()) + len(real_winui.splitlines()), floor=20000)
 
+# --- Clause E: GTK's fullscreen header bar (docs/fullscreen-plan.md §9). --
+# The linux lane's appended steps see the hide, the reveal and the overlay;
+# they cannot see GNOME Web's two numbers (a longer delay or a wider edge
+# still passes a poll) or the focus that keeps the bar under an open menu,
+# since no scene opens one from the header in fullscreen.
+RULE = "crates/kaya/src/fullscreen.rs"
+
+
+def gtk_bar(gtk, rule):
+    bad = []
+    code = strip(rule)
+    if not re.search(r"const REVEAL_EDGE_PX: f64 = 5\.0;", code):
+        bad.append(f"{RULE}: the reveal edge is not GNOME Web's 5px "
+                   f"(SHOW_HEADERBAR_DISTANCE_PX)")
+    if not re.search(r"const HIDE_DELAY_MS: u64 = 300;", code):
+        bad.append(f"{RULE}: the hide delay is not GNOME Web's 300ms "
+                   f"(FULLSCREEN_HIDE_DELAY)")
+    after = rust_fn(gtk, "after_input")
+    if after is None or not re.search(r"focus\.is_ancestor\(&header\)", after) \
+            or not re.search(r"after\(self\.pointer_y\.get\(\), [^,]+, held, now\)", after):
+        bad.append(f"{GTK}: after_input no longer hands the focus inside the header "
+                   f"to the rule, so an open menu from the bar no longer keeps it")
+    if after is None or "HIDE_DELAY_MS" not in after:
+        bad.append(f"{GTK}: after_input's timer no longer waits HIDE_DELAY_MS")
+    install = rust_fn(gtk, "autohide_bar")
+    if install is None or "connect_focus_widget_notify" not in install:
+        bad.append(f"{GTK}: autohide_bar no longer follows the window's focus widget")
+    if install is None or not re.search(
+            r"motion\.set_propagation_phase\(gtk4::PropagationPhase::Capture\)", install):
+        bad.append(f"{GTK}: the bar's motion controller no longer rides the CAPTURE "
+                   f"phase, so a child that claims the motion hides it from the rule")
+    if install is None or not re.search(
+            r"if on \{\s*adw::ToolbarStyle::RaisedBorder\s*\} else \{\s*adw::ToolbarStyle::Flat",
+            install):
+        bad.append(f"{GTK}: a fullscreen bar no longer wears RAISED_BORDER, so the "
+                   f"revealed bar lies over the content with no ground of its own")
+    chrome = rust_fn(gtk, "install_nav_chrome")
+    if chrome is None or "autohide_bar(window, &view, &header)" not in chrome:
+        bad.append(f"{GTK}: install_nav_chrome no longer installs the autohide bar")
+    return bad
+
+
+real_rule = gate.read(RULE)
+for line in gtk_bar(real_gtk, real_rule):
+    gate.finding(line)
+
+
+def refuses_bar(label, gtk, rule, want):
+    gate.negative(label, lambda: gtk_bar(gtk, rule), want=want)
+
+
+refuses_bar("a wider reveal edge",
+            real_gtk, gate.doctor("the edge perturbation", real_rule,
+                                  r"const REVEAL_EDGE_PX: f64 = 5\.0;",
+                                  "const REVEAL_EDGE_PX: f64 = 12.0;"),
+            want="not GNOME Web's 5px")
+refuses_bar("a longer hide delay",
+            real_gtk, gate.doctor("the delay perturbation", real_rule,
+                                  r"const HIDE_DELAY_MS: u64 = 300;",
+                                  "const HIDE_DELAY_MS: u64 = 3000;"),
+            want="not GNOME Web's 300ms")
+refuses_bar("a bar the focus no longer holds",
+            gate.doctor("the held perturbation", real_gtk,
+                        r"focus\.is_ancestor\(&header\)", "false"),
+            real_rule, want="an open menu from the bar")
+refuses_bar("a bar that stopped following the focus",
+            gate.doctor("the focus-notify perturbation", real_gtk,
+                        r"window\.connect_focus_widget_notify\(", "window.connect_title_notify("),
+            real_rule, want="follows the window's focus widget")
+refuses_bar("a bubble-phase motion controller",
+            gate.doctor("the motion phase perturbation", real_gtk,
+                        r"motion\.set_propagation_phase\(gtk4::PropagationPhase::Capture\)",
+                        "motion.set_propagation_phase(gtk4::PropagationPhase::Bubble)"),
+            real_rule, want="CAPTURE phase")
+refuses_bar("a chrome with no autohide bar",
+            gate.doctor("the install perturbation", real_gtk,
+                        r"\n    autohide_bar\(window, &view, &header\);", ""),
+            real_rule, want="no longer installs the autohide bar")
+refuses_bar("a flat bar over the content",
+            gate.doctor("the raised-style perturbation", real_gtk,
+                        r"adw::ToolbarStyle::RaisedBorder", "adw::ToolbarStyle::Flat"),
+            real_rule, want="RAISED_BORDER")
+negatives += 7
+
 # --- Clause B: the rule, driven, where the toolchain exists. ----------
 if platform.system() != "Darwin":
     print("check-window-memory: clause B (the six by-value cases, the "
@@ -582,4 +668,4 @@ gate.negatives_ran(negatives)
 gate.verdict("6 by-value cases, 2 frame spellings, 6 malformed lines, the "
              "clamp, the coalesced save and the opt-out; the fullscreen "
              "block's app-write-wins rule; the Rust backends' fullscreen "
-             "save skip and F11 dress")
+             "save skip and F11 dress; GTK's fullscreen header bar")

@@ -3,7 +3,8 @@
 Status: DESIGNED 2026-09-28; DEPTH BUILT 2026-09-28 (the spec, the core, the
 Rust binding, the SwiftUI arm on macOS and iOS, the scene green on the mac
 lane); BREADTH BUILT 2026-09-28 (GTK, WinUI and Compose, all nine bindings,
-the scene on five lanes; docs/deferred.md, "BUILD — fullscreen"). The roadmap's second piece for the
+the scene on five lanes; docs/deferred.md, "BUILD — fullscreen"); GTK's
+fullscreen header bar RULED AND BUILT 2026-09-29 (§9). The roadmap's second piece for the
 video editor (its program monitor) and a piece of the media player and
 photo gallery archetypes. Every choice below is RECOMMENDED; §8 names the
 two a maintainer may want to overturn, and neither blocks the build.
@@ -173,3 +174,53 @@ window-level registrar), in all nine; the C floor reads the occurrence.
    window with no title bar.
 2. **Immersive mode on the phones.** The alternative is an inert prop on
    the phones, which leaves a media player there unable to hide the bars.
+
+## §9 — GTK's header bar in fullscreen
+
+RULED 2026-09-29 (the maintainer, on the fullscreen review page): on Linux a
+fullscreen window hides its header bar and reveals it when the pointer goes
+near the top of the screen, as GNOME's own apps do. The other platforms
+already follow their own fullscreen chrome.
+
+GNOME has two models (read 2026-09-29): the media viewers, Loupe and
+Showtime, show their chrome on ANY pointer motion and hide it after 3 s and
+2 s of stillness, because their chrome carries playback and zoom controls;
+GNOME Web hides the header bar and reveals it at the top edge
+(src/ephy-fullscreen-box.c), on the same AdwToolbarView kaya's GTK arm
+already uses. The ruling names the top edge, so kaya takes Web's rule and
+numbers (crate::fullscreen::bar):
+
+- Entering fullscreen sets `extend-content-to-top-edge`, so a revealed bar
+  OVERLAYS the content and never resizes it, and hides the bar 300 ms later.
+  The bar wears `top-bar-style` RAISED_BORDER while fullscreen, as Web's
+  does, since a flat bar over the content has no ground of its own (the
+  first capture showed the title lying on the content); leaving puts FLAT,
+  the windowed default, back.
+- A capture-phase pointer motion within 5 px of the top edge, or anywhere
+  over the revealed bar (`max(top-bar-height, 5)`), reveals it; a motion
+  below the bar hides it at once.
+- The window's focus widget inside the header keeps it shown, which covers
+  an open popover or menu from it (their widgets are the menu button's
+  descendants). A touch press below the bar hides it; a touch never reveals.
+- Leaving fullscreen puts the content back under the bar and reveals it.
+
+kaya does not copy Web's `grab_focus` on the toolbar view when it hides: that
+hide is only reached with the focus already outside the bar, and a grab
+there would take the focus from the app's content.
+
+The linux lane appends the reading to the shared scene (tools/lib/lanes/
+linux.py's MODS): `expect_titlebar hidden|shown|overlay` reads the toolbar
+view's own layout (`top-bar-height`, the header mapped, the content's top),
+and `move_pointer top|center` moves the lane's virtual pointer through
+tools/linux/dragdrive.py's `move`. No other backend has a bar to read, so
+the other harnesses refuse both verbs by name. The numbers the scene cannot
+see (the 300 ms, the 5 px) and the focus that holds the bar under an open
+menu are held by tools/check-window-memory.py's clause E.
+
+MEASURED 2026-09-29 on the wayland slots (the fullscreen-rust leg's verb
+trace): the header is 46 px; the bar starts to slide 320 ms after
+`notify::fullscreened` and is unmapped about 230 ms later (GtkRevealer's
+250 ms); revealed in fullscreen the content's top stays at 0 while the top
+bar reads 46 px. The virtual pointer (tools/linux/wlpointer) leaves the seat
+when its process exits, and that removal sends the bar no motion: a bar the
+pointer revealed stays revealed until the next motion, as GNOME Web's does.

@@ -10,11 +10,13 @@ runs it.
 
     dragdrive.py (wayland|x11) PID TX TY X0 Y0 X1 Y1 [INJECTOR]
     dragdrive.py click (wayland|x11) PID TX TY X Y [INJECTOR]
+    dragdrive.py move (wayland|x11) PID TX TY X Y [INJECTOR]
 
 The second form is ONE CLICK at one widget point, the number field's
 `nudge` (docs/number-field-plan.md §5): press and release inside
 CLICK_HOLD_MS, since GTK's spin button starts stepping again 200ms into a
-held press.
+held press. The third moves the pointer there and presses nothing, the
+harness's `move_pointer` (docs/fullscreen-plan.md §9).
 
 X0..Y1 are in the toplevel WIDGET's own coordinates and TX TY is that
 widget's origin inside its GdkSurface (GTK's `gtk_native_get_surface_transform`,
@@ -181,14 +183,16 @@ def injector_argv(proto, injector, start, end, phase="all", begin_flag=None,
 CLICK_HOLD_MS = 50
 
 
-def click_argv(proto, injector, at):
-    """Move to `at`, then press and release the left button once."""
+def click_argv(proto, injector, at, press=True):
+    """Move to `at`, then press and release the left button once, or not."""
     x, y = at
     if proto == "wayland":
-        return [injector, "set", str(x), str(y), "sleep", "150", "press", "left",
-                "sleep", str(CLICK_HOLD_MS), "release", "left", "sleep", "100"]
-    return [injector, "mousemove", str(x), str(y), "sleep", "0.15", "mousedown", "1",
-            "sleep", str(CLICK_HOLD_MS / 1000), "mouseup", "1"]
+        argv = [injector, "set", str(x), str(y), "sleep", "150"]
+        return argv + (["press", "left", "sleep", str(CLICK_HOLD_MS), "release", "left",
+                        "sleep", "100"] if press else [])
+    argv = [injector, "mousemove", str(x), str(y), "sleep", "0.15"]
+    return argv + (["mousedown", "1", "sleep", str(CLICK_HOLD_MS / 1000), "mouseup", "1"]
+                   if press else [])
 
 
 def screen_origin(proto, pid, transform):
@@ -206,23 +210,25 @@ def screen_origin(proto, pid, transform):
     return origin
 
 
-def click(proto, pid, transform, at_in_window, injector=None):
-    """One click at a widget point; the screen point comes back."""
+def click(proto, pid, transform, at_in_window, injector=None, press=True):
+    """One click (or one move) at a widget point; the screen point comes back."""
     injector = injector or default_injector(proto)
     origin = screen_origin(proto, pid, transform)
     at = (int(origin[0] + at_in_window[0]), int(origin[1] + at_in_window[1]))
-    out = subprocess.run(click_argv(proto, injector, at), capture_output=True,
+    out = subprocess.run(click_argv(proto, injector, at, press), capture_output=True,
                          text=True, encoding="utf-8", check=False)
     if out.returncode != 0:
         raise DragDriveError(
-            f"{injector} exited {out.returncode} clicking {at}: "
+            f"{injector} exited {out.returncode} "
+            f"{'clicking' if press else 'moving to'} {at}: "
             + (out.stderr.strip() or "no stderr"))
     return origin, at
 
 
-def click_main(argv):
+def click_main(argv, press=True):
+    verb = "click" if press else "move"
     if len(argv) not in (7, 8) or argv[1] not in ("wayland", "x11"):
-        print("usage: dragdrive.py click (wayland|x11) PID TX TY X Y [INJECTOR]",
+        print(f"usage: dragdrive.py {verb} (wayland|x11) PID TX TY X Y [INJECTOR]",
               file=sys.stderr)
         return 2
     proto = argv[1]
@@ -230,12 +236,12 @@ def click_main(argv):
     tx, ty, x, y = (int(v) for v in argv[3:7])
     injector = argv[7] if len(argv) == 8 else None
     try:
-        origin, at = click(proto, pid, (tx, ty), (x, y), injector)
+        origin, at = click(proto, pid, (tx, ty), (x, y), injector, press)
     except DragDriveError as e:
         print(f"dragdrive: {e}", file=sys.stderr)
         return 1
     print(f"dragdrive: {proto} content at {origin} (surface transform "
-          f"{(tx, ty)}); clicked {at}", flush=True)
+          f"{(tx, ty)}); {'clicked' if press else 'moved to'} {at}", flush=True)
     return 0
 
 
@@ -268,6 +274,8 @@ def main():
     argv = list(sys.argv)
     if len(argv) >= 2 and argv[1] == "click":
         return click_main(argv[1:])
+    if len(argv) >= 2 and argv[1] == "move":
+        return click_main(argv[1:], press=False)
     phase = "all"
     if len(argv) >= 3 and argv[-2] == "--phase":
         phase = argv[-1]

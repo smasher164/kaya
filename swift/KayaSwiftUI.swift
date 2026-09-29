@@ -9537,6 +9537,11 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("\(prefix)fullscreen \(got), wanted \(want)")
                 }
+            case "expect_titlebar", "move_pointer":
+                failures.append(
+                    "\(parts[0]): GTK's verb, which only the linux lane appends "
+                        + "(docs/fullscreen-plan.md §9); macOS reveals its own "
+                        + "fullscreen title bar")
             case "user_fullscreen":
                 // The platform's OWN door: the green button, whose click on
                 // a window with `.fullScreenPrimary` is the fullscreen

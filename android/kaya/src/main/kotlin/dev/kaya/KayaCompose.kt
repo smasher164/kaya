@@ -9586,6 +9586,11 @@ object KayaCompose {
                                 "fullscreen (docs/fullscreen-plan.md §2); the phone " +
                                 "lanes drop the user half of the scene")
                     }
+                    "expect_titlebar", "move_pointer" -> {
+                        failures.add(
+                            "${parts[0]}: GTK's verb, which only the linux lane appends " +
+                                "(docs/fullscreen-plan.md §9); Android draws no title bar")
+                    }
                     "expect_dirty" -> {
                         // THE UNSAVED-WORK MARK (docs/dirty-plan.md D5).
                         // Every other backend reads its CHROME; HERE THE

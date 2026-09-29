@@ -443,6 +443,13 @@ pub enum Step {
     /// button on macOS, F11 on GTK and WinUI) — emits fullscreen_changed
     /// like a user's act. The phones have no door and refuse it.
     UserFullscreen(Option<u64>, bool),
+    /// Where the window's title bar is, read from the layout: `hidden`,
+    /// `shown` above the content, or `overlay` over it (docs/fullscreen-plan.md
+    /// §9). GTK's; the linux lane appends it (tools/lib/lanes/linux.py).
+    ExpectTitlebar(Option<u64>, Titlebar),
+    /// Move the REAL pointer through the platform's input path to a spot in
+    /// the window, pressing nothing. GTK's, for the fullscreen bar.
+    MovePointer(Option<u64>, PointerSpot),
     /// Drive the window's REAL chrome close (performClose, WM_CLOSE,
     /// gtk close) — the veto grammar's trigger.
     CloseWindow(u64),
@@ -859,6 +866,8 @@ impl Step {
             | Step::ExpectDirty(..)
             | Step::ExpectFullscreen(..)
             | Step::UserFullscreen(..)
+            | Step::ExpectTitlebar(..)
+            | Step::MovePointer(..)
             | Step::CloseWindow(..)
             | Step::ExpectWindows(..)
             | Step::ExpectAlert(..)
@@ -987,6 +996,8 @@ impl Step {
             Step::ExpectDirty { .. } => true,
             Step::ExpectFullscreen { .. } => true,
             Step::UserFullscreen { .. } => false,
+            Step::ExpectTitlebar { .. } => true,
+            Step::MovePointer { .. } => false,
             Step::CloseWindow { .. } => false,
             Step::ExpectWindows { .. } => true,
             Step::ExpectAlert { .. } => true,
@@ -1393,6 +1404,11 @@ pub trait Stage: Send + 'static {
     /// Drive the platform's own fullscreen door toward `on`, as the user
     /// would; it emits fullscreen_changed.
     fn user_fullscreen(&self, window: u64, on: bool);
+    /// Where the window's title bar is, from the layout (docs/fullscreen-plan.md
+    /// §9); None while it is still moving.
+    fn window_titlebar(&self, window: u64) -> Option<Titlebar>;
+    /// Move the real pointer to `spot` in the window, pressing nothing.
+    fn move_pointer(&self, window: u64, spot: PointerSpot);
     /// Drive the surface's REAL chrome close (performClose, WM_CLOSE,
     /// gtk close) — a veto_close window emits close_requested and
     /// stays; a non-veto auxiliary closes and reports window_closed.
@@ -1769,6 +1785,48 @@ fn split_statements(line: &str) -> Vec<&str> {
     }
     out.push(&line[start..]);
     out
+}
+
+/// Where a title bar is (`expect_titlebar`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Titlebar {
+    Hidden,
+    Shown,
+    Overlay,
+}
+
+impl Titlebar {
+    const WORDS: [(Self, &'static str); 3] =
+        [(Self::Hidden, "hidden"), (Self::Shown, "shown"), (Self::Overlay, "overlay")];
+
+    pub fn word(self) -> &'static str {
+        Self::WORDS.iter().find(|(t, _)| *t == self).map_or("", |(_, w)| w)
+    }
+
+    fn parse(rest: &str) -> Result<Self, String> {
+        let rest = rest.trim();
+        Self::WORDS.iter().find(|(_, w)| *w == rest).map(|(t, _)| *t).ok_or_else(|| {
+            format!("expect_titlebar wants hidden|shown|overlay, got {rest:?}")
+        })
+    }
+}
+
+/// A spot for the pointer (`move_pointer`): the top edge's middle, or the
+/// window's centre.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PointerSpot {
+    Top,
+    Center,
+}
+
+impl PointerSpot {
+    fn parse(rest: &str) -> Result<Self, String> {
+        match rest.trim() {
+            "top" => Ok(Self::Top),
+            "center" => Ok(Self::Center),
+            other => Err(format!("move_pointer wants top|center, got {other:?}")),
+        }
+    }
 }
 
 /// `relaunch`'s one optional argument: the PLAIN door
@@ -2296,6 +2354,14 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
             "user_fullscreen" => {
                 let (window, rest) = parse_window_target(rest);
                 Step::UserFullscreen(window, parse_on_off(op, rest)?)
+            }
+            "expect_titlebar" => {
+                let (window, rest) = parse_window_target(rest);
+                Step::ExpectTitlebar(window, Titlebar::parse(rest)?)
+            }
+            "move_pointer" => {
+                let (window, rest) = parse_window_target(rest);
+                Step::MovePointer(window, PointerSpot::parse(rest)?)
             }
             "close_window" => {
                 let (window, rest) = parse_window_target(rest);
@@ -4224,6 +4290,23 @@ fn run_with_log(
                 stage.user_fullscreen(window.unwrap_or(0), *on);
                 await_answer(answered);
                 None
+            }
+            Step::MovePointer(window, spot) => {
+                await_quiet();
+                stage.move_pointer(window.unwrap_or(0), *spot);
+                None
+            }
+            Step::ExpectTitlebar(window, want) => {
+                let id = window.unwrap_or(0);
+                let prefix = match window {
+                    Some(n) => format!("window#{n} "),
+                    None => String::new(),
+                };
+                Some(poll(|| match stage.window_titlebar(id) {
+                    Some(got) if got == *want => Ok(format!("{prefix}titlebar {}", want.word())),
+                    Some(got) => Err(format!("{prefix}titlebar {}, wanted {}", got.word(), want.word())),
+                    None => Err(format!("{prefix}titlebar moving, wanted {}", want.word())),
+                }))
             }
             Step::CloseWindow(window) => {
                 // An action, silent like click: the veto grammar's
@@ -6931,6 +7014,18 @@ mod tests {
         assert_eq!(parse("user_fullscreen off").unwrap()[0], Step::UserFullscreen(None, false));
         assert!(parse("expect_fullscreen true").is_err());
         assert!(parse("user_fullscreen").is_err());
+        assert_eq!(
+            parse("expect_titlebar overlay").unwrap()[0],
+            Step::ExpectTitlebar(None, Titlebar::Overlay)
+        );
+        assert_eq!(
+            parse("expect_titlebar window#1 hidden").unwrap()[0],
+            Step::ExpectTitlebar(Some(1), Titlebar::Hidden)
+        );
+        assert_eq!(parse("move_pointer top").unwrap()[0], Step::MovePointer(None, PointerSpot::Top));
+        assert_eq!(parse("move_pointer center").unwrap()[0], Step::MovePointer(None, PointerSpot::Center));
+        assert!(parse("expect_titlebar on").is_err());
+        assert!(parse("move_pointer bottom").is_err());
         assert!(parse("expect_dirty yes").is_err());
         assert!(parse("expect_dirty \"*notes\"").is_err());
     }
@@ -7116,6 +7211,10 @@ mod tests {
             window == 1
         }
         fn user_fullscreen(&self, _: u64, _: bool) {}
+        fn window_titlebar(&self, _: u64) -> Option<Titlebar> {
+            None
+        }
+        fn move_pointer(&self, _: u64, _: PointerSpot) {}
         fn close_window(&self, _: u64) {}
         fn entry_count(&self, _: u64) -> usize {
             0
@@ -8091,6 +8190,10 @@ mod tests {
             false
         }
         fn user_fullscreen(&self, _: u64, _: bool) {}
+        fn window_titlebar(&self, _: u64) -> Option<Titlebar> {
+            None
+        }
+        fn move_pointer(&self, _: u64, _: PointerSpot) {}
         fn close_window(&self, _: u64) {}
         fn entry_count(&self, _: u64) -> usize {
             0
@@ -8455,6 +8558,10 @@ mod tests {
             false
         }
         fn user_fullscreen(&self, _: u64, _: bool) {}
+        fn window_titlebar(&self, _: u64) -> Option<Titlebar> {
+            None
+        }
+        fn move_pointer(&self, _: u64, _: PointerSpot) {}
         fn close_window(&self, _: u64) {}
         fn entry_count(&self, _: u64) -> usize {
             0

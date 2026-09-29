@@ -24427,6 +24427,21 @@ impl crate::harness::Stage for WinUiStage {
             })
     }
 
+    fn window_titlebar(&self, window: u64) -> Option<crate::harness::Titlebar> {
+        panic!(
+            "kaya: expect_titlebar window#{window}: GTK's verb, which only the linux lane \
+             appends (docs/fullscreen-plan.md §9); the full-screen presenter draws no \
+             title bar to reveal"
+        )
+    }
+
+    fn move_pointer(&self, window: u64, spot: crate::harness::PointerSpot) {
+        panic!(
+            "kaya: move_pointer {spot:?} window#{window}: GTK's verb, which only the linux \
+             lane appends (docs/fullscreen-plan.md §9)"
+        )
+    }
+
     /// The dress key on the system input queue, as `shortcut` delivers a
     /// chord (docs/fullscreen-plan.md §2, §5); returns once the presenter
     /// reads `on` with no transition in flight.

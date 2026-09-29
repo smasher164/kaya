@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Print a scene's script as the Linux lane runs it: tools/scenes/<scene>.steps
-with this lane's MODS drops taken out (tools/lib/lanes/linux.py), one step
-per line, for the leg's KAYA_SELFTEST_SCRIPT. Every dropped step is named on
+with this lane's MODS drops taken out and its appends added
+(tools/lib/lanes/linux.py), one step per line, for the leg's KAYA_SELFTEST_SCRIPT. Every dropped step is named on
 stderr; a refused drop exits 1 with the shared grammar's sentence.
 
     tools/linux/scene-mods.py <scene>
@@ -49,6 +49,11 @@ def main(argv):
     for why, gone in taken:
         for line in gone:
             print(f"scene-mods: NOT RUN on this host ({why}): {line}", file=sys.stderr)
+    appended = [" ".join(step.split()) for step in
+                lane.MODS.get(scene, {}).get("append", "").split(";") if step.strip()]
+    for line in appended:
+        print(f"scene-mods: appended on this lane: {line}", file=sys.stderr)
+    lines += appended
     print("\n".join(lines))
     return 0
 

@@ -1616,19 +1616,23 @@ for proto in x11 wayland; do
     run "$proto" scrollto-java env KAYA_SELFTEST=scrollto KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.guests.Main
     # FULLSCREEN (docs/fullscreen-plan.md §5), on the protocols the lane
-    # table admits.
+    # table admits, with this lane's header-bar steps appended (§9).
     if scene_runs_on fullscreen "$proto"; then
-        run "$proto" fullscreen-rust env KAYA_SELFTEST=fullscreen "$CARGO_TARGET_DIR/debug/examples/fullscreen"
-        run "$proto" fullscreen-python env KAYA_SELFTEST=fullscreen KAYA_LIB="$LIB" \
+        if ! fullscreen_script="$(python3 tools/linux/scene-mods.py fullscreen)"; then
+            echo "run-suites: the fullscreen scene's Linux append was refused (above)" >&2
+            exit 1
+        fi
+        run "$proto" fullscreen-rust env KAYA_SELFTEST=fullscreen KAYA_SELFTEST_SCRIPT="$fullscreen_script" "$CARGO_TARGET_DIR/debug/examples/fullscreen"
+        run "$proto" fullscreen-python env KAYA_SELFTEST=fullscreen KAYA_SELFTEST_SCRIPT="$fullscreen_script" KAYA_LIB="$LIB" \
             python3 guests/python/fullscreen.py
-        run "$proto" fullscreen-js env KAYA_SELFTEST=fullscreen KAYA_LIB="$LIB" \
+        run "$proto" fullscreen-js env KAYA_SELFTEST=fullscreen KAYA_SELFTEST_SCRIPT="$fullscreen_script" KAYA_LIB="$LIB" \
             node guests/js/fullscreen.ts
-        run "$proto" fullscreen-go env KAYA_SELFTEST=fullscreen /tmp/go-guests/kaya-go
-        run "$proto" fullscreen-csharp env KAYA_SELFTEST=fullscreen KAYA_LIB="$LIB" \
+        run "$proto" fullscreen-go env KAYA_SELFTEST=fullscreen KAYA_SELFTEST_SCRIPT="$fullscreen_script" /tmp/go-guests/kaya-go
+        run "$proto" fullscreen-csharp env KAYA_SELFTEST=fullscreen KAYA_SELFTEST_SCRIPT="$fullscreen_script" KAYA_LIB="$LIB" \
             dotnet exec "$CS_GUEST"
-        run "$proto" fullscreen-ocaml env KAYA_SELFTEST=fullscreen KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/fullscreen.exe
-        run "$proto" fullscreen-haskell env KAYA_SELFTEST=fullscreen "$(hs_bin fullscreen)"
-        run "$proto" fullscreen-java env KAYA_SELFTEST=fullscreen KAYA_LIB="$LIB" \
+        run "$proto" fullscreen-ocaml env KAYA_SELFTEST=fullscreen KAYA_SELFTEST_SCRIPT="$fullscreen_script" KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/fullscreen.exe
+        run "$proto" fullscreen-haskell env KAYA_SELFTEST=fullscreen KAYA_SELFTEST_SCRIPT="$fullscreen_script" "$(hs_bin fullscreen)"
+        run "$proto" fullscreen-java env KAYA_SELFTEST=fullscreen KAYA_SELFTEST_SCRIPT="$fullscreen_script" KAYA_LIB="$LIB" \
             java -cp /tmp/java-guests dev.kaya.guests.Main
     fi
     # THE NUMBER FIELD (docs/number-field-plan.md §5), through a11y-leg.sh
