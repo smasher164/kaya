@@ -67,3 +67,13 @@ expect_ax range#0 "group/Trim"
 expect_ax range#0 low "slider/In"
 expect_ax range#0 high "slider/Out"
 expect_ax slider#1 "slider/Volume"
+# The tie (docs/range-plan.md §3 rule 4): range#1 declares min_gap 0, so its
+# thumbs may coincide. At a tie a press is taken by the thumb on its side of
+# the shared centre, read from the platform's own hit test at press-down.
+set_value range#1 high 5
+set_value range#1 low 5
+expect_value range#1 "5 5"
+expect_thumb range#1 low "0.5"
+expect_thumb range#1 high "0.5"
+expect_press_takes range#1 4.9 "low"
+expect_press_takes range#1 5.1 "high"

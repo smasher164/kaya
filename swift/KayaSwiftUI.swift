@@ -8505,6 +8505,22 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("no such target \(parts[1])")
                 }
+            case "expect_press_takes":
+                // The thumb the platform's own hit test gives a press where the
+                // value sits on the track (docs/range-plan.md §3 rule 4).
+                let wantThumb = kayaQuoted(Array(parts[3...]))
+                let at = Double(parts[2]) ?? .nan
+                let took = DispatchQueue.main.sync { () -> String in
+                    guard let node = kayaTarget(parts[1], "range", kayaScene.ranges),
+                        let control = kayaRangeControls[node.id]
+                    else { return "<no such target>" }
+                    return kayaPressTakes(control, at: at)
+                }
+                if took == wantThumb {
+                    observed.append("press \(took)")
+                } else {
+                    failures.append("press at \(parts[2]) took \"\(took)\", wanted \"\(wantThumb)\"")
+                }
             case "unfocus", "nudge":
                 // The number field's two user doors (docs/number-field-plan.md
                 // §5): Tab moves the focus off it and the commit rides that; an
@@ -13035,7 +13051,7 @@ func kayaTravelFraction(centre: CGFloat, atMin: CGFloat, atMax: CGFloat, fromGre
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
         override func draw(_ dirtyRect: NSRect) {
             guard let ring else { return }
-            NSColor.windowBackgroundColor.setStroke()
+            NSColor.separatorColor.setStroke()
             let path = NSBezierPath(
                 roundedRect: ring.insetBy(dx: -0.5, dy: -0.5), xRadius: ring.height / 2,
                 yRadius: ring.height / 2)
@@ -13219,6 +13235,24 @@ func kayaTravelFraction(centre: CGFloat, atMin: CGFloat, atMax: CGFloat, fromGre
         kayaKnobFraction(control.thumb(low))
     }
 
+    /// The thumb AppKit's own hit test answers for a press where `value` sits
+    /// on the track, on the knobs' centre line: NSWindow sends a mouse-down to
+    /// what its frame view's `hitTest` returns (docs/range-plan.md §3 rule 4).
+    func kayaPressTakes(_ control: KayaRangeView, at value: Double) -> String {
+        guard let window = control.window, let content = window.contentView else { return "<not in a window>" }
+        let frame = content.superview ?? content
+        let point = control.low.convert(
+            NSPoint(x: kayaKnobCentre(control.low, at: value), y: control.low.knobRect.midY), to: nil)
+        let first = frame.hitTest(point)
+        var hit = first
+        while let view = hit {
+            if view === control.low { return "low" }
+            if view === control.high { return "high" }
+            hit = view.superview
+        }
+        return first.map { "<\(type(of: $0))>" } ?? "<nothing>"
+    }
+
     func kayaThumbFraction(_ slider: KayaNSSlider) -> Double { kayaKnobFraction(slider) }
 
     func kayaSliderIsVertical(_ slider: KayaNSSlider) -> Bool { slider.isVertical }
@@ -13260,9 +13294,32 @@ func kayaTravelFraction(centre: CGFloat, atMin: CGFloat, atMax: CGFloat, fromGre
         }
     }
 
+    /// The outline the top thumb wears at a tie (§3 rule 4), above both sliders
+    /// and never hit.
+    final class KayaRangeTieRing: UIView {
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            isOpaque = false
+            backgroundColor = .clear
+            isUserInteractionEnabled = false
+            isAccessibilityElement = false
+            contentMode = .redraw
+        }
+        required init?(coder: NSCoder) { fatalError("kaya: not from a storyboard") }
+
+        override func draw(_ rect: CGRect) {
+            UIColor.separator.setStroke()
+            let ring = bounds.insetBy(dx: 0.75, dy: 0.75)
+            let path = UIBezierPath(roundedRect: ring, cornerRadius: ring.height / 2)
+            path.lineWidth = 1.5
+            path.stroke()
+        }
+    }
+
     final class KayaRangeTrack: UIView {
         let low = KayaRangeThumbSlider()
         let high = KayaRangeThumbSlider()
+        let tie = KayaRangeTieRing()
         var node: KayaNode?
         var tickValues: [Double] = [] {
             didSet { setNeedsDisplay(); invalidateIntrinsicContentSize() }
@@ -13286,6 +13343,8 @@ func kayaTravelFraction(centre: CGFloat, atMin: CGFloat, atMax: CGFloat, fromGre
                     for: [.touchUpInside, .touchUpOutside, .touchCancel])
                 addSubview(thumb)
             }
+            tie.isHidden = true
+            addSubview(tie)
             // The group's two elements, low first whatever the direction (§3
             // rules 4, 7): a bare UIView answers no element count, and the
             // reader then saw `unknown/Trim` (measured §4.2 2026-09-29).
@@ -13304,6 +13363,20 @@ func kayaTravelFraction(centre: CGFloat, atMin: CGFloat, atMax: CGFloat, fromGre
             for thumb in [low, high] {
                 thumb.frame = CGRect(x: 0, y: 0, width: bounds.width, height: height)
             }
+            refreshTie()
+        }
+
+        /// At a tie the ring sits one point outside the top thumb's knob.
+        func refreshTie() {
+            let tied = abs(high.centreX - low.centreX) < 0.5
+            if tied {
+                let knob = high.thumbRect(
+                    forBounds: high.bounds, trackRect: high.trackRect(forBounds: high.bounds),
+                    value: high.value)
+                tie.frame = convert(knob, from: high).insetBy(dx: -1, dy: -1)
+                tie.setNeedsDisplay()
+            }
+            tie.isHidden = !tied
             setNeedsDisplay()
         }
 
@@ -13347,7 +13420,7 @@ func kayaTravelFraction(centre: CGFloat, atMin: CGFloat, atMax: CGFloat, fromGre
             kayaRangeMoved(node, low: sender.isLow, Double(sender.value), final: false) {
                 sender.setValue(Float($0), animated: false)
             }
-            setNeedsDisplay()
+            refreshTie()
         }
 
         @objc func released(_ sender: KayaRangeThumbSlider) {
@@ -13355,7 +13428,7 @@ func kayaTravelFraction(centre: CGFloat, atMin: CGFloat, atMax: CGFloat, fromGre
             kayaRangeMoved(node, low: sender.isLow, Double(sender.value), final: true) {
                 sender.setValue(Float($0), animated: false)
             }
-            setNeedsDisplay()
+            refreshTie()
         }
 
         func nudge(_ thumb: KayaRangeThumbSlider, by direction: Double) {
@@ -13364,7 +13437,7 @@ func kayaTravelFraction(centre: CGFloat, atMin: CGFloat, atMax: CGFloat, fromGre
             kayaRangeMoved(node, low: thumb.isLow, want, final: true) {
                 thumb.setValue(Float($0), animated: false)
             }
-            setNeedsDisplay()
+            refreshTie()
         }
 
         func thumb(_ low: Bool) -> KayaRangeThumbSlider { low ? self.low : high }
@@ -13391,7 +13464,7 @@ func kayaTravelFraction(centre: CGFloat, atMin: CGFloat, atMax: CGFloat, fromGre
             } else {
                 tickValues = []
             }
-            setNeedsDisplay()
+            refreshTie()
         }
     }
 
@@ -13401,7 +13474,7 @@ func kayaTravelFraction(centre: CGFloat, atMin: CGFloat, atMax: CGFloat, fromGre
         let thumb = control.thumb(low)
         thumb.setValue(Float(value), animated: false)
         kayaRangeMoved(node, low: low, value, final: true) { thumb.setValue(Float($0), animated: false) }
-        control.setNeedsDisplay()
+        control.refreshTie()
     }
 
     func kayaControlThumbValue(_ control: KayaRangeTrack, low: Bool) -> Double {
@@ -13425,6 +13498,23 @@ func kayaTravelFraction(centre: CGFloat, atMin: CGFloat, atMax: CGFloat, fromGre
 
     func kayaThumbFraction(_ control: KayaRangeTrack, low: Bool) -> Double {
         kayaUIThumbFraction(control.thumb(low))
+    }
+
+    /// The thumb UIKit's own hit test answers for a touch where `value` sits on
+    /// the track, on the knobs' centre line: a touch goes to what the window's
+    /// `hitTest` returns (docs/range-plan.md §3 rule 4).
+    func kayaPressTakes(_ control: KayaRangeTrack, at value: Double) -> String {
+        guard let window = control.window else { return "<not in a window>" }
+        let point = control.low.convert(
+            CGPoint(x: kayaThumbCentre(control.low, at: Float(value)), y: control.low.bounds.midY), to: window)
+        let first = window.hitTest(point, with: nil)
+        var hit = first
+        while let view = hit {
+            if view === control.low { return "low" }
+            if view === control.high { return "high" }
+            hit = view.superview
+        }
+        return first.map { "<\(type(of: $0))>" } ?? "<nothing>"
     }
 
     func kayaThumbFraction(_ control: KayaTickedSlider) -> Double { kayaUIThumbFraction(control.slider) }

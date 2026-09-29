@@ -13079,3 +13079,24 @@ by the Slider's own key handling, even with the guest in the background. All
 six legs were green pooled. `arrow_step` in crates/kaya/src/winui/mod.rs is
 that route, and check-slider-commit's WinUI range clause refuses a
 `keybd_event` in it.
+
+## A GTK child allocated the same box skips its own size_allocate (measured 2026-09-29)
+The range's trough places its fill in its own `size_allocate`, from a span the
+group writes before it allocates the trough. When the thumbs move and the
+trough's box does not, GTK skips the trough's `size_allocate`, so the fill
+stays where the thumbs were. The tie capture showed it: the fill from 4 to 6
+still drawn beside two thumbs tied at 5, and range#0's fill running to 8 with
+its high thumb at 4.5. Every value, thumb and hit-test read was green. The
+group now calls `queue_allocate` on the trough when the span changes, and
+check-slider-commit's tie clause holds that call.
+
+## WinUI's hit test takes host coordinates, and a right-to-left root's are mirrored (measured 2026-09-29)
+`VisualTreeHelper::FindElementsInHostCoordinates` takes a point in the HOST's
+coordinates. Under `KAYA_LOCALE=ar-EG` the window content flows right to left
+and its own coordinate space is mirrored, so a point from
+`TransformToVisual(&content)` missed both range sliders: at (94.6, 180), inside
+both slider boxes in the content's space, the only hit was a Grid. The same
+point from `TransformToVisual(None)` hit the slider the clip gives it. The
+hit test does honour `UIElement.Clip`: the left-to-right range legs answered
+the clipped thumb on the first run. `press_takes` in crates/kaya/src/winui/mod.rs
+uses the host point.

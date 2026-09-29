@@ -48,8 +48,8 @@ tools/scenes/range.steps green on the mac lane. What breadth owed:
     RangeSlider, every value through `kaya_range_clamp` over JNI and out
     through `kaya_emit_range`; the thumbs' descriptions replaced through
     LocalContext; the fader the Material slider in a −90° graphicsLayer with
-    swapped constraints. MEASURED (plan §4): a tie is picked by drag direction
-    at the 1.3.1 pin, and while the thumbs coincide the low thumb is absent
+    swapped constraints. MEASURED (plan §4): a drag from a tie is picked by its
+    direction at the 1.3.1 pin (a tap by its side: the tie entry below), and while the thumbs coincide the low thumb is absent
     from the accessibility tree. Legs compose, jvm and go; the phone table
     drops the nudge blocks. GUARD: check-slider-commit's Compose range row,
     check-verbs' range clause in both interpreters, KayaRangeTest.
@@ -88,12 +88,19 @@ KEY: tie ring, tie outline, min_gap 0, content-desc, accessibility frame, per-th
 
 Three things the range breadth measured and no lane asserts, each for the
 maintainer's review before it is built:
-  - The tie. No scene declares `min_gap 0`, so the outline rule 4 puts on the
-    top thumb is built on the mac, iOS and GTK and never photographed or
-    asserted; on WinUI the two clipped thumbs draw as ONE knob of two halves
-    with a faint seam and neither on top, so the outline has no thumb to sit
-    on. A tie scene with a capture per lane decides whether that picture is
-    acceptable.
+  - ~~The tie.~~ RESOLVED 2026-09-29: every range guest declares range#1
+    with `min_gap 0`; range.steps and rangertl.steps drive it to `5 5`, read
+    both thumbs at `0.5`, and read which thumb a press takes on each side of
+    the shared centre (`expect_press_takes`: the platform's own hit test on
+    the desktops and iOS, a real tap on Android, where material3 1.3.1 takes
+    a press by its side and re-decides only on a drag). The outline is kaya's,
+    over the high thumb, in each platform's outline token (iOS had none, and
+    the mac's and GTK's were window-background halos, invisible on a white
+    knob); on WinUI the low slider stays whole under the high one's half at a
+    tie, so the seam is gone. Photographed on all five lanes. GUARD: the tie
+    lines, watched red with each arm's tie handling cut; check-slider-commit's
+    tie clause. Found beside it and fixed: GTK's fill stayed where the thumbs
+    had been (docs/traps.md).
   - ~~Android names no slider.~~ FIXED 2026-09-29: the shipped stack is
     compose-ui and foundation 1.11.4 (not 1.7.5), where the thumb's
     `background` is a semantics node, so compose-ui kept each slider's

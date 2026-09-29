@@ -48,6 +48,7 @@ func App() *kaya.App {
 					commits++
 					tx.Write(commitText, fmt.Sprintf("commits: %d at %s %s", commits, spelled(low), spelled(high)))
 				})
+			tx.Range(0.0, 10.0, 4.0, 6.0, nil).Step(0.5).TickSpacing(1).MinGap(0).A11yLabel("Tie") // range#1
 			tx.Slider(0.0, 10.0, 5.0, nil).A11yLabel("Playhead") // slider#0
 			tx.Slider(0.0, 1.0, 0.25, func(tx *kaya.Tx, v float64) {
 				tx.Write(volumeText, fmt.Sprintf("volume: %s", spelled(v)))

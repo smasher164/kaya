@@ -87,6 +87,8 @@ main = kayaMain $ \app -> do
           labelBound volumeText, -- label#2
           labelBound clipText, -- label#3
           pure trim,
+          rangeOn 0.0 10.0 4.0 6.0 (\_ _ -> return ()) -- range#1
+            [Step 0.5, TickSpacing 1.0, MinGap 0.0, A11yLabel "Tie"],
           sliderOn 0.0 10.0 5.0 (\_ -> return ()) [A11yLabel "Playhead"], -- slider#0
           sliderOn -- slider#1
             0.0

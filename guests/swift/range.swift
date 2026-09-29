@@ -48,6 +48,9 @@ KayaApp.run { app in
                 })
             tx.setA11yLabel(trim, "Trim")
             tx.setA11yId(trim, "trim")
+            let tie = tx.range(  // range#1
+                min: 0.0, max: 10.0, low: 4.0, high: 6.0, step: 0.5, tickSpacing: 1.0, minGap: 0.0)
+            tx.setA11yLabel(tie, "Tie")
             let playhead = tx.slider(min: 0.0, max: 10.0, value: 5.0)  // slider#0
             tx.setA11yLabel(playhead, "Playhead")
             let volume = tx.slider(  // slider#1

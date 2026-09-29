@@ -47,6 +47,10 @@ static class RangeScene
                     bindLow: lowSig, bindHigh: highSig);
                 tx.SetA11yLabel(trim, "Trim");
                 tx.SetA11yId(trim, "trim");
+                var tie = tx.Range(                                // range#1
+                    min: 0.0, max: 10.0, low: 4.0, high: 6.0, step: 0.5, tickSpacing: 1.0,
+                    minGap: 0.0);
+                tx.SetA11yLabel(tie, "Tie");
                 var playhead = tx.Slider(min: 0.0, max: 10.0, value: 5.0); // slider#0
                 tx.SetA11yLabel(playhead, "Playhead");
                 var volume = tx.Slider(                            // slider#1

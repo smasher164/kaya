@@ -61,6 +61,7 @@ const { liveText, commitText, volumeText, clipText, lowSig } = app.window({}, ()
       })
       .a11yId("trim")
       .a11yLabel("Trim"); // range#0
+    kaya.range({ low: 4, high: 6, min: 0, max: 10, step: 0.5, tickSpacing: 1, minGap: 0 }).a11yLabel("Tie"); // range#1
     kaya.slider({ value: 5, min: 0, max: 10 }).a11yLabel("Playhead"); // slider#0
     kaya
       .slider({ value: 0.25, min: 0, max: 1, step: 0.25, axis: kaya.Axis.VERTICAL, onChange: onVolume })

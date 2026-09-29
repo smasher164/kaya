@@ -13,3 +13,11 @@ expect_thumb slider#1 "0.25"
 expect_ax range#0 "group/Trim"
 expect_ax range#0 low "slider/In"
 expect_ax range#0 high "slider/Out"
+# The tie mirrors (range.steps): the low side of the shared centre is its right.
+set_value range#1 high 5
+set_value range#1 low 5
+expect_value range#1 "5 5"
+expect_thumb range#1 low "0.5"
+expect_thumb range#1 high "0.5"
+expect_press_takes range#1 4.9 "low"
+expect_press_takes range#1 5.1 "high"

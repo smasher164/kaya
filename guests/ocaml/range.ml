@@ -47,6 +47,8 @@ let () =
                 write commit_text
                   (Printf.sprintf "commits: %d at %s %s" !commits
                      (spelled low) (spelled high)));
+            range ~a11y_label:"Tie" ~min:0.0 ~max:10.0        (* range#1 *)
+              ~low:4.0 ~high:6.0 ~step:0.5 ~tick_spacing:1.0 ~min_gap:0.0;
             slider ~a11y_label:"Playhead"                     (* slider#0 *)
               ~min:0.0 ~max:10.0 ~value:5.0;
             slider ~a11y_id:"volume" ~a11y_label:"Volume"     (* slider#1 *)

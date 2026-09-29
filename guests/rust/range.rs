@@ -52,6 +52,11 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 tx.a11y_id(trim, "trim");
                 msgs.on_range(trim, Msg::Moved);
                 msgs.on_range_commit(trim, Msg::Committed);
+                tx.range(0.0, 10.0, 4.0, 6.0) // range#1
+                    .step(0.5)
+                    .tick_spacing(1.0)
+                    .min_gap(0.0)
+                    .a11y_label("Tie");
                 tx.slider(0.0, 10.0, 5.0).a11y_label("Playhead"); // slider#0
                 let volume = tx
                     .slider(0.0, 1.0, 0.25) // slider#1

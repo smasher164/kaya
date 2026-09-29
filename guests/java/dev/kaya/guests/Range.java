@@ -49,6 +49,8 @@ public final class Range {
                     commits[0]++;
                     t.write(commitText, "commits: " + commits[0] + " at " + spelled(l) + " " + spelled(h));
                 });
+                tx.range(0.0, 10.0, 4.0, 6.0, null)
+                        .step(0.5).tickSpacing(1.0).minGap(0.0).a11yLabel("Tie"); // range#1
                 tx.slider(0.0, 10.0, 5.0, null).a11yLabel("Playhead"); // slider#0
                 tx.slider(0.0, 1.0, 0.25,
                                 (t, v) -> t.write(volumeText, "volume: " + spelled(v)))

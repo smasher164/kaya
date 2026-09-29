@@ -1343,8 +1343,10 @@ ROUTING = {
                     "the low thumb's box in the slider's own space"),
                    (r"let \(hx, _, hw, _\) = box_in\(&high_thumb, &within\)\?;\s*let split",
                     "the high thumb's box in the slider's own space"),
-                   (r"\(&pair\.low, 0\.0, split\), \(&pair\.high, split, width - split\)",
-                    "each thumb's own side of the split"),
+                   (r"let low_width = if tied \{ width \} else \{ split \};\s*"
+                    r"for \(slider, x, w\) in \[\(&pair\.low, 0\.0, low_width\), "
+                    r"\(&pair\.high, split, width - split\)\]",
+                    "each thumb's own side of the split (low whole under high's half at a tie)"),
                    (r"slider\.SetClip\(&clip\)\?;", "the clip that hit testing honours")]),
         "arm": ["impl RangePair {", "fn winui_range_shape(", "fn winui_range_write(",
                 "fn winui_range_moved(", "fn winui_range_layout("],
@@ -1668,7 +1670,181 @@ record_watched("a GTK harness drain skipping the queue", GTK, "draining RANGE_SE
 record_watched("a WinUI drain skipping the queue", WINUI, "draining RANGE_SETTLED first",
                r"\n *drain_range_settled\(core\);(?=\n *for op in core\.scene\.apply)", "")
 
+# THE THUMB ON TOP WEARS AN OUTLINE AT A TIE (docs/range-plan.md §3 rule 4),
+# in the platform's own outline token. No scene can see it: the tie lines read
+# values, fractions and the hit test, all identical with the outline gone, and
+# a literal colour draws the same picture in the appearance it was picked in.
+# One row per arm, each naming the block that draws the outline and the token
+# it strokes with, the tie test that shows it on the HIGH thumb (the one drawn
+# on top), and the order that puts it above both thumbs.
+LITERAL_COLOURS = [r"#[0-9A-Fa-f]{3,8}\b", r"\brgba?\(", r"NSColor\((?:red|srgbRed|calibratedRed|"
+                   r"deviceRed|white|calibratedWhite)", r"UIColor\((?:red|white)",
+                   r"NSColor\.(?:black|white|gray|lightGray|darkGray)\b",
+                   r"UIColor\.(?:black|white|gray|lightGray|darkGray)\b", r"Color\(0x",
+                   r"Colors\.", r"Color\.(?:Black|White|Gray)\b"]
+TIE_OUTLINE = {
+    "SwiftUI macOS": {
+        "path": SWIFTUI,
+        "draws": ("final class KayaRangeTieRing: NSView", [
+            (r"NSColor\.separatorColor\.setStroke\(\)", "the separator token")]),
+        "shown": ("final class KayaRangeView: NSView", [
+            (r"let tied = abs\(centre\(high\)\.x - centre\(low\)\.x\) < 0\.5",
+             "the tie test"),
+            (r"tie\.ring = tied \? convert\(high\.knobRect, from: high\) : nil",
+             "the high knob, the one drawn on top"),
+            (r"addSubview\(thumb\)\n\s*\}\n\s*addSubview\(tie\)",
+             "the ring added after both thumbs")]),
+    },
+    "SwiftUI iOS": {
+        "path": SWIFTUI,
+        "draws": ("final class KayaRangeTieRing: UIView", [
+            (r"UIColor\.separator\.setStroke\(\)", "the separator token"),
+            (r"isUserInteractionEnabled = false", "a ring no touch reaches")]),
+        "shown": ("final class KayaRangeTrack: UIView", [
+            (r"let tied = abs\(high\.centreX - low\.centreX\) < 0\.5", "the tie test"),
+            (r"let knob = high\.thumbRect\(", "the high knob, the one drawn on top"),
+            (r"tie\.isHidden = !tied", "the ring hidden off a tie"),
+            (r"addSubview\(thumb\)\n\s*\}\n\s*tie\.isHidden = true\n\s*addSubview\(tie\)",
+             "the ring added after both thumbs")]),
+    },
+    "GTK": {
+        "path": GTK,
+        "draws": ("const RANGE_CSS: &str", [
+            (r"\.kaya-range-tie \{ border: [0-9.]+px solid @borders;", "Adwaita's border token")]),
+        "shown": ("impl WidgetImpl for KayaRangeGroupInner {", [
+            (r"let tied = \(hc - lc\)\.abs\(\) < 0\.5;", "the tie test"),
+            (r"high_knob\.compute_bounds\(group\)", "the high knob, the one drawn on top"),
+            (r"tie\.set_child_visible\(tied\)", "the ring hidden off a tie"),
+            (r"if trough\.imp\(\)\.span\.replace\(span\) != span \{\s*trough\.queue_allocate\(\);",
+             "the fill re-laid when the thumbs move (a stale fill showed beside a tie)")]),
+        "order": ("pub fn build() -> (KayaRangeGroup", r"thumb\.set_parent\(&group\);[\s\S]*"
+                  r"tie\.set_parent\(&group\);", "the ring parented after both thumbs"),
+    },
+    "WinUI": {
+        "path": WINUI,
+        "draws": ("const RANGE_RING_XAML: &str", [
+            (r'Stroke=\\"\{ThemeResource ControlStrongStrokeColorDefaultBrush\}\\"',
+             "the strong-stroke token"),
+            (r'IsHitTestVisible=\\"False\\"', "a ring no press reaches")]),
+        "shown": ("fn winui_range_layout(", [
+            (r"let tied = \(hc - lc\)\.abs\(\) < 0\.5;", "the tie test"),
+            (r"place_if_moved\(&pair\.ring, hx - 1\.0, hy - 1\.0, hw \+ 2\.0, hh \+ 2\.0\)",
+             "the high thumb's box, the one drawn on top"),
+            (r"if tied \{ Visibility::Visible \} else \{ Visibility::Collapsed \}",
+             "the ring hidden off a tie")]),
+        "order": ("impl RangePair {", r"pair\.root\.Children\(\)\?\.Append\(thumb\)\?;[\s\S]*"
+                  r"pair\.root\.Children\(\)\?\.Append\(&pair\.ring\)\?;",
+                  "the ring appended after both sliders"),
+    },
+    # Material's RangeSlider places the track, the start thumb and then the end
+    # thumb (javap of material3 1.3.1's RangeSliderImpl), so the END is on top.
+    "Compose": {
+        "path": COMPOSE,
+        "draws": ("private fun KayaSliderThumb(", [
+            (r"drawRoundRect\(\s*outline,[\s\S]*style = Stroke\(", "the outline stroked")]),
+        "shown": ("endThumb = {", [
+            (r"outline = if \(node\.low == node\.high\) "
+             r"MaterialTheme\.colorScheme\.outline else null",
+             "Material's outline token on the end thumb, at a tie only")]),
+        "not": ("startThumb = {", r"outline =", "the start thumb, drawn underneath"),
+    },
+}
+
+
+def tie_outline_findings(sources, rows=TIE_OUTLINE):
+    out = []
+    for name, row in rows.items():
+        src = sources[row["path"]]
+        for key in ("draws", "shown"):
+            anchor, needs = row[key]
+            if key == "draws" and anchor.startswith("const "):
+                at = src.find(anchor)
+                block = src[at:src.find("\n\n", at)] if at >= 0 else ""
+            else:
+                block = block_after(src, anchor)
+            if not block:
+                out.append(f"{name}: no `{anchor}` block — the tie's outline this row holds is "
+                           f"gone (§3 rule 4)")
+                continue
+            for pat, what in needs:
+                if not re.search(pat, block):
+                    out.append(f"{name}: `{anchor}` no longer holds {what} — the thumb on top "
+                               f"at a tie loses its outline or takes a colour no token names "
+                               f"(§3 rule 4)")
+            if key == "draws":
+                for pat in LITERAL_COLOURS:
+                    hit = re.search(pat, block)
+                    if hit:
+                        out.append(f"{name}: the tie's outline names the literal colour "
+                                   f"`{hit.group(0)}` — it takes the platform's token (§3 rule 4)")
+        if "order" in row:
+            anchor, pat, what = row["order"]
+            if not re.search(pat, block_after(src, anchor)):
+                out.append(f"{name}: `{anchor}` no longer has {what} — the outline would draw "
+                           f"under a thumb")
+        if "not" in row:
+            anchor, pat, what = row["not"]
+            block = block_after(src, anchor)
+            if not block or re.search(pat, block):
+                out.append(f"{name}: {what} wears the tie's outline, or its block is gone")
+    return out
+
+
+TIE_SOURCES = {SWIFTUI: SWIFT_SOURCE, **REAL}
+gate.counted("tie outline rows read", len(TIE_OUTLINE), floor=5)
+
+
+def tie_watched(label, path, pattern, repl, fragment):
+    doctored = {**TIE_SOURCES, path: gate.doctor(label, TIE_SOURCES[path], pattern, repl)}
+    if gate.negative(label, lambda: tie_outline_findings(doctored), want=fragment):
+        print(f"check-slider-commit: watched refusing: {label}")
+
+
+# O1-O5. EACH ARM'S TOKEN SWAPPED FOR A LITERAL.
+tie_watched("a mac tie ring stroked in a literal", SWIFTUI,
+            r"NSColor\.separatorColor\.setStroke\(\)",
+            "NSColor(white: 0.5, alpha: 1).setStroke()", "SwiftUI macOS: the tie's outline names")
+tie_watched("an iOS tie ring stroked in a literal", SWIFTUI,
+            r"UIColor\.separator\.setStroke\(\)", "UIColor.gray.setStroke()",
+            "SwiftUI iOS: the tie's outline names")
+tie_watched("a GTK tie ring bordered in a literal", GTK,
+            r"(\.kaya-range-tie \{ border: 1\.5px solid )@borders;", r"\1#808080;",
+            "GTK: the tie's outline names")
+tie_watched("a WinUI tie ring stroked in a literal", WINUI,
+            r"\{ThemeResource ControlStrongStrokeColorDefaultBrush\}", "#FF808080",
+            "WinUI: the tie's outline names")
+tie_watched("a Compose tie outline in a literal", COMPOSE,
+            r"MaterialTheme\.colorScheme\.outline else null", "Color(0xFF808080) else null",
+            "Compose: `endThumb = {` no longer holds")
+# O6-O10. EACH ARM'S RING PUT ON THE LOW THUMB, UNDERNEATH, OR NEVER SHOWN.
+tie_watched("a mac ring on the low knob", SWIFTUI,
+            r"tied \? convert\(high\.knobRect, from: high\)",
+            "tied ? convert(low.knobRect, from: low)",
+            "SwiftUI macOS: `final class KayaRangeView: NSView` no longer holds the high knob")
+tie_watched("an iOS ring never hidden", SWIFTUI, r"tie\.isHidden = !tied", "tie.isHidden = false",
+            "SwiftUI iOS: `final class KayaRangeTrack: UIView` no longer holds the ring hidden")
+tie_watched("a GTK ring parented under the thumbs", GTK,
+            r"(        let mut thumbs = Vec::new\(\);\n)([\s\S]*?)"
+            r"        tie\.set_parent\(&group\);\n",
+            r"        tie.set_parent(&group);\n\1\2",
+            "GTK: `pub fn build() -> (KayaRangeGroup` no longer has the ring parented")
+tie_watched("a GTK fill left where the thumbs were", GTK,
+            r"(if trough\.imp\(\)\.span\.replace\(span\) != span \{\n)"
+            r"\s*trough\.queue_allocate\(\);\n",
+            r"\1", "no longer holds the fill re-laid")
+tie_watched("a WinUI ring on the low thumb", WINUI,
+            r"place_if_moved\(&pair\.ring, hx - 1\.0, hy - 1\.0, hw \+ 2\.0, hh \+ 2\.0\)",
+            "place_if_moved(&pair.ring, lx - 1.0, hy - 1.0, lw + 2.0, hh + 2.0)",
+            "WinUI: `fn winui_range_layout(` no longer holds the high thumb's box")
+tie_watched("a Compose outline on the start thumb", COMPOSE,
+            r"(startThumb = \{\n(?:.*\n){4}\s*Modifier\.onGloballyPositioned "
+            r"\{ kayaThumbCoords\[node\.id to 1\] = it \},\n)",
+            r"\1                        outline = MaterialTheme.colorScheme.outline,\n",
+            "Compose: the start thumb, drawn underneath wears the tie's outline")
+
 for line in routing_findings(ROUTING_SOURCES):
+    gate.finding(line)
+for line in tie_outline_findings(TIE_SOURCES):
     gate.finding(line)
 for line in commit_record_findings(RECORD_SOURCES):
     gate.finding(line)
@@ -1694,4 +1870,5 @@ for line in compose_range_findings(REAL[COMPOSE]):
     gate.finding(line)
 
 gate.verdict("the commit rule holds on every landed slider arm, every colour picker arm, "
-             "every range arm and the core's record of the user's pair")
+             "every range arm and the core's record of the user's pair; every range arm "
+             "outlines the thumb on top at a tie in its platform's token")

@@ -3,8 +3,9 @@
 Status: DESIGNED 2026-09-29; the DEPTH and BREADTH slices built the same
 day: all five backends and nine bindings, §4 MEASURED on every platform,
 range, rangertl and the sliders fader on every lane, and rule 11 RULED and
-built; what is left is docs/deferred.md's "WATCH — the range's tie and its
-readers' names". The video editor's trim control
+built; the tie (rule 4's outline and press side) built and read on every lane
+the same day; what is left is docs/deferred.md's "WATCH — the range's tie and
+its readers' names", its per-thumb frames. The video editor's trim control
 and its volume fader (docs/video-editor-plan.md §4, ruling 6, RULED
 2026-09-28: a separate `range` kind, horizontal, two thumbs for trim in and
 out; the vertical fader is the `axis` a row, column and scroll take, now
@@ -120,10 +121,20 @@ at the root, per ruling 6, until an app asks for a vertical range.
    in the survey, docs/probes/range-sliders-2026-09-29.md). When the
    thumbs coincide, the side of the thumb the press lands on picks, decided
    at press-down, when a native slider starts tracking (androidx's rule
-   since 2025-07; material3 1.3.1, kaya's pin, still picks by drag
-   direction, so Android differs on a tie until the BOM moves). The thumb
+   since 2025-07; material3 1.3.1, kaya's pin, takes a press by its side
+   too but re-decides by the drag's direction when the pointer moves while
+   within slop of both thumbs, so Android differs only on a drag that starts
+   on a tie, until the BOM moves). The thumb
    drawn on top at a tie carries an outline, as Flutter, Compose and
-   Material Web draw it.
+   Material Web draw it. BUILT 2026-09-29: kaya draws it over both thumbs,
+   never on the native thumb (rule 9), stroked in the platform's outline
+   token: AppKit's `separatorColor`, UIKit's `separator`, Adwaita's
+   `@borders`, WinUI's `ControlStrongStrokeColorDefaultBrush` (an `Ellipse`
+   no press reaches), and Material's `outline` role on the END thumb, which
+   RangeSlider places last. On WinUI the low slider is left whole under the
+   high one's half at a tie, so the knob they share draws as one (two clips
+   meeting at the shared centre drew a seam; §4). range.steps and
+   rangertl.steps read the tie on every lane (§5).
 5. **Right to left mirrors the range as it mirrors the slider**
    (docs/slider-plan.md S10): in Arabic the low thumb sits at the right and
    is still the first focus stop.
@@ -295,9 +306,14 @@ at the root, per ruling 6, until an app asks for a vertical range.
      `SliderTickBarFill`, laid at the native track's box, and the fill runs
      from one thumb's centre to the other's (picture viewed). The keyboard
      focus rectangle is clipped with its slider, so it outlines the focused
-     thumb's half. At a tie the two clipped thumbs draw as ONE knob made of
-     two halves, with a faint seam and neither on top, so no outline is
-     drawn (rule 4's outline marks the thumb on top, and there is none).
+     thumb's half. At a tie the two clipped thumbs drew as ONE knob made of
+     two halves, with a faint seam and neither on top. AMENDED 2026-09-29
+     (the tie slice): at a tie the low slider is left whole under the high
+     one's right-half clip, the knob draws as one with no seam, a press left
+     of the shared centre still falls through the high clip to the low
+     slider, and kaya's ring outlines the knob (rule 4). The hit test
+     `expect_press_takes` reads is `FindElementsInHostCoordinates`, which
+     honours the clip and takes HOST coordinates (docs/traps.md).
    - The travel is the template's own: an 18 DIP thumb whose centre runs
      from 9 DIP in at each end. Low 2 and high 8 read 0.2 and 0.8, and 0.8
      and 0.2 under RTL.
@@ -365,10 +381,16 @@ at the root, per ruling 6, until an app asks for a vertical range.
      9.5, gap 1) and committed once: `onValueChangeFinished` runs after an
      assistive set. Asked below the other thumb, the high one stays and
      nothing commits. `set_value` on a range takes this door on the lane.
-   - A tie (gap 0) is decided by the DRAG'S DIRECTION, never the press's
-     side: pressed right of the shared centre and dragged left, low moved;
-     pressed left and dragged right, high moved (rule 4's recorded
-     divergence). Under ar-EG a drag toward the minimum moved low and one
+   - A tie (gap 0) dragged is decided by the DRAG'S DIRECTION: pressed
+     right of the shared centre and dragged left, low moved; pressed left
+     and dragged right, high moved (rule 4's recorded divergence). AMENDED
+     2026-09-29 from the 1.3.1 bytecode (javap of
+     `rangeSliderPressDragModifier`): at press-down a tie is taken by the
+     press's SIDE (`compareOffsets` answers 0, then `rawOffsetStart >
+     posX`), and only a move past slop while within slop of both thumbs
+     re-decides by direction; a tap on each side captured the thumb on that
+     side on the lane (`expect_press_takes`, §5). RangeSlider places the
+     end thumb last, so it is the one on top. Under ar-EG a drag toward the minimum moved low and one
      toward the maximum moved NEITHER thumb. While the thumbs coincide the
      low thumb has no node info at all (compose-ui drops a node another
      covers), so a service reaches only the high one.
@@ -421,6 +443,15 @@ handlers write. And `sliders.steps` gains a vertical fader.
   (vertical) in the platform's own geometry, two decimals; `expect_thumb range#0 low
   "0.2"` reads one thumb.
 - `expect_ax range#0 "group/Trim"`, `expect_ax range#0 low "slider/In"`.
+- ADDED 2026-09-29, the tie: range#1 (0..10, low 4, high 6, `min_gap 0`,
+  labelled "Tie") is driven to `5 5` by two `set_value`s, both thumbs read
+  `0.5`, and `expect_press_takes range#1 4.9 "low"` and `5.1 "high"` read the
+  thumb a press at that point on the track takes: the platform's own hit test
+  on the desktops and iOS (the frame view's `hitTest`, `UIWindow.hitTest`,
+  `gtk_widget_pick`, `FindElementsInHostCoordinates`), and on Android a real
+  in-process tap and the thumb whose interaction source Material started a
+  drag on. rangertl.steps runs the same lines, where 4.9 lies right of the
+  centre.
 - a stamped range per row commits with its row's key.
 
 `rangertl.steps` runs the same guest under ar-EG: the low thumb reads
@@ -474,6 +505,12 @@ Guards:
 - tools/check-verbs.py: `expect_thumb`, the thumb word, the kind and the
   two occurrences in both interpreters.
 - tools/check-stubs.py: `depth_stub("range")` until each arm exists.
+- tools/check-slider-commit.py's tie clause: each arm strokes the outline in
+  its token (no literal colour), on the high thumb, shown only at a tie and
+  above both thumbs, plus GTK's fill re-laid when the thumbs move; eleven
+  watched negatives. The scene's tie lines went red on the mac, iOS, GTK and
+  WinUI with each arm's tie handling cut, and on Android with the tap point
+  left unmirrored under ar-EG.
 - tools/scenes/a11y.steps asserts the group and its two sliders;
   `rangertl.steps` is rule 6's wall, so it needs no static clause.
 

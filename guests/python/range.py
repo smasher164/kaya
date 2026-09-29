@@ -68,6 +68,8 @@ with app.window():
             tick_spacing=1.0, min_gap=1.0, low_label="In", high_label="Out",
             on_change=on_moved, on_commit=on_committed,
         ).a11y_id("trim").a11y_label("Trim")
+        kaya.range(4.0, 6.0, min=0.0, max=10.0, step=0.5,       # range#1
+                   tick_spacing=1.0, min_gap=0.0).a11y_label("Tie")
         kaya.slider(5.0, min=0.0, max=10.0).a11y_label("Playhead")  # slider#0
         kaya.slider(                                            # slider#1
             0.25, min=0.0, max=1.0, step=0.25, axis=kaya.Axis.VERTICAL,

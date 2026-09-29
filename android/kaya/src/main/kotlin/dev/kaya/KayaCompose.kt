@@ -235,11 +235,13 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.colorspace.ColorSpaces
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.toArgb
@@ -8380,6 +8382,37 @@ object KayaCompose {
                             val spelled = kayaSpelledFraction(got)
                             if (spelled == want) observed.add("thumb $spelled")
                             else failures.add("thumb \"$spelled\", wanted \"$want\"")
+                        }
+                    }
+                    "expect_press_takes" -> {
+                        // RangeSlider picks its thumb inside its own pointer
+                        // handler, which no hit test reads: a real tap, and the
+                        // thumb Material captured for it (docs/range-plan.md §4).
+                        val want = quoted(parts.drop(3))
+                        val at = parts[2].toDoubleOrNull() ?: Double.NaN
+                        val point = onUi(activity) {
+                            target(parts[1], "range", KayaSceneModel.ranges)?.let {
+                                kayaThumbCaptured.remove(it.id)
+                                kayaTravelPoint(it, at)?.let { p -> it.id to p }
+                            }
+                        }
+                        if (point == null) {
+                            failures.add("no thumb of ${parts[1]} is laid out on screen")
+                        } else {
+                            kayaTouchTap(activity, point.second.x, point.second.y)
+                            var took: Int? = null
+                            val until = android.os.SystemClock.uptimeMillis() + 2000
+                            while (took == null && android.os.SystemClock.uptimeMillis() < until) {
+                                Thread.sleep(16)
+                                took = onUi(activity) { kayaThumbCaptured[point.first] }
+                            }
+                            val name = when (took) {
+                                1 -> "low"
+                                2 -> "high"
+                                else -> "<no thumb captured>"
+                            }
+                            if (name == want) observed.add("press $name")
+                            else failures.add("press at ${parts[2]} took \"$name\", wanted \"$want\"")
                         }
                     }
                     "set_value" -> {
@@ -17412,6 +17445,25 @@ fun kayaMenuEffectivelyEnabled(item: KayaMenuItem): Boolean {
  * gesture reaches Compose's pointer input rather than any model state.
  * Called off the main thread; each event is dispatched on it.
  */
+fun kayaTouchTap(activity: android.app.Activity, x: Float, y: Float) {
+    val down = android.os.SystemClock.uptimeMillis()
+    for ((action, at) in listOf(
+        android.view.MotionEvent.ACTION_DOWN to down,
+        android.view.MotionEvent.ACTION_UP to down + 16L,
+    )) {
+        val latch = java.util.concurrent.CountDownLatch(1)
+        activity.runOnUiThread {
+            val event = android.view.MotionEvent.obtain(down, at, action, x, y, 0)
+            event.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+            activity.window.decorView.dispatchTouchEvent(event)
+            event.recycle()
+            latch.countDown()
+        }
+        latch.await(2, java.util.concurrent.TimeUnit.SECONDS)
+        Thread.sleep(16)
+    }
+}
+
 fun kayaTouchSwipe(activity: android.app.Activity, startX: Float, endX: Float, y: Float) {
     val down = android.os.SystemClock.uptimeMillis()
     val steps = 12
@@ -18324,6 +18376,33 @@ internal val KAYA_FADER_LENGTH = 200.dp
 internal val kayaTravelCoords = HashMap<Long, LayoutCoordinates>()
 internal val kayaThumbCoords = HashMap<Pair<Long, Int>, LayoutCoordinates>()
 
+/** The thumb (1 low, 2 high) Material last captured for a gesture on a range,
+ * read off the thumbs' own interaction sources. Main thread only. */
+internal val kayaThumbCaptured = HashMap<Long, Int>()
+
+/** Whether each range lays out right to left: the composition's own
+ * direction, which the locale knob sets without touching the activity's
+ * configuration. Main thread only. */
+internal val kayaTravelRtl = HashMap<Long, Boolean>()
+
+/**
+ * Where [value] sits on a range's travel, on the thumbs' centre line, in the
+ * decor view's coordinates (the ones a touch is dispatched in): the travel
+ * [kayaThumbTravel] reads, mirrored when the layout is right to left.
+ */
+internal fun kayaTravelPoint(node: KayaNode, value: Double): Offset? {
+    val travel = kayaTravelCoords[node.id]?.takeIf { it.isAttached } ?: return null
+    val thumb = kayaThumbCoords[node.id to 1]?.takeIf { it.isAttached } ?: return null
+    val span = node.maxValue - node.minValue
+    if (span <= 0) return null
+    val half = thumb.size.width / 2f
+    val f = ((value - node.minValue) / span).toFloat()
+    val rtl = kayaTravelRtl[node.id] ?: return null
+    val along = half + (if (rtl) 1f - f else f) * (travel.size.width - 2 * half)
+    val centre = thumb.localToWindow(Offset(half, thumb.size.height / 2f))
+    return Offset(travel.localToWindow(Offset(along, 0f)).x, centre.y)
+}
+
 /**
  * A thumb's centre along its travel, in the root's space: its centre at the
  * minimum to its centre at the maximum (docs/range-plan.md §5), from the LEFT
@@ -18372,7 +18451,12 @@ internal fun kayaTravelAxis(id: Long): String? {
  * Material slider's thumb takes its name"; tools/check-universal-props.py).
  */
 @Composable
-private fun KayaSliderThumb(source: MutableInteractionSource, colors: SliderColors, modifier: Modifier) {
+private fun KayaSliderThumb(
+    source: MutableInteractionSource,
+    colors: SliderColors,
+    modifier: Modifier,
+    outline: Color? = null,
+) {
     val held = remember { mutableStateListOf<Interaction>() }
     LaunchedEffect(source) {
         source.interactions.collect {
@@ -18391,6 +18475,16 @@ private fun KayaSliderThumb(source: MutableInteractionSource, colors: SliderColo
     Spacer(
         modifier.size(size).hoverable(source).drawBehind {
             drawRoundRect(color, cornerRadius = CornerRadius(this.size.minDimension / 2f))
+            if (outline != null) {
+                val out = 1.dp.toPx()
+                drawRoundRect(
+                    outline,
+                    topLeft = Offset(-out, -out),
+                    size = Size(this.size.width + 2 * out, this.size.height + 2 * out),
+                    cornerRadius = CornerRadius(this.size.minDimension / 2f + out),
+                    style = Stroke(width = 1.5.dp.toPx()),
+                )
+            }
         },
     )
 }
@@ -18569,6 +18663,14 @@ private fun KayaRangeSurface(node: KayaNode, boxFill: Modifier, a11y: Modifier) 
     val start = node.lowLabel.ifEmpty { node.a11yLabel }
     val end = node.highLabel.ifEmpty { node.a11yLabel }
     val words = remember(base, start, end) { KayaThumbWords(base, start, end) }
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    SideEffect { kayaTravelRtl[node.id] = rtl }
+    LaunchedEffect(node.id, startSource, endSource) {
+        launch {
+            startSource.interactions.collect { if (it is DragInteraction.Start) kayaThumbCaptured[node.id] = 1 }
+        }
+        endSource.interactions.collect { if (it is DragInteraction.Start) kayaThumbCaptured[node.id] = 2 }
+    }
     CompositionLocalProvider(LocalContext provides words) {
         RangeSlider(
             value = node.low.toFloat()..node.high.toFloat(),
@@ -18593,10 +18695,13 @@ private fun KayaRangeSurface(node: KayaNode, boxFill: Modifier, a11y: Modifier) 
             },
             endThumb = {
                 CompositionLocalProvider(LocalContext provides base) {
+                    // Drawn over the start thumb, so it wears the tie's outline
+                    // (docs/range-plan.md §3 rule 4).
                     KayaSliderThumb(
                         endSource,
                         colors,
                         Modifier.onGloballyPositioned { kayaThumbCoords[node.id to 2] = it },
+                        outline = if (node.low == node.high) MaterialTheme.colorScheme.outline else null,
                     )
                 }
             },

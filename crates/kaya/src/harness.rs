@@ -222,6 +222,10 @@ pub enum Step {
     ExpectThumb(Target, Option<Thumb>, String),
     /// One thumb's accessible element, `slider/<label>`.
     ExpectAxThumb(Target, Thumb, String),
+    /// Which thumb the platform's own hit test gives a press at the point on
+    /// a range's track where the value sits, on the knobs' centre line
+    /// (docs/range-plan.md §3 rule 4: at a tie, the side of the shared centre).
+    ExpectPressTakes(Target, f64, String),
     SetText(Target, String),
     /// The search field's clear affordance (docs/search-plan.md S5).
     ClearSearch(Target),
@@ -770,6 +774,7 @@ impl Step {
             | Step::NudgeThumb(t, _, _)
             | Step::ExpectThumb(t, _, _)
             | Step::ExpectAxThumb(t, _, _)
+            | Step::ExpectPressTakes(t, _, _)
             | Step::ContextOpen(t)
             | Step::ExpectHeightFits(t)
             | Step::ExpectFill(t, _) => vec![t],
@@ -928,6 +933,7 @@ impl Step {
             Step::NudgeThumb { .. } => false,
             Step::ExpectThumb { .. } => true,
             Step::ExpectAxThumb { .. } => true,
+            Step::ExpectPressTakes { .. } => true,
             Step::SetText { .. } => false,
             Step::ClearSearch { .. } => false,
             Step::ExpectPlaceholder { .. } => true,
@@ -1130,6 +1136,10 @@ pub trait Stage: Send + 'static {
     fn thumb_fraction(&self, target: Target, thumb: Option<Thumb>) -> String;
     /// One range thumb's accessible element as `role/label`.
     fn ax_thumb(&self, target: Target, thumb: Thumb) -> String;
+    /// `low` or `high`: the thumb the platform's own hit test answers for a
+    /// press where `at` sits on the range's track (docs/range-plan.md §3
+    /// rule 4), or what it hit instead.
+    fn press_takes(&self, target: Target, at: f64) -> String;
     fn set_text(&self, target: Target, text: &str);
     /// Deliver `text` to the FOCUSED widget as real platform keystrokes.
     /// THE CONTRACT, since every backend implements it separately:
@@ -1847,6 +1857,24 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     ));
                 }
                 Step::ExpectThumb(target, thumb, want)
+            }
+            "expect_press_takes" => {
+                let mut words = rest.splitn(3, char::is_whitespace);
+                let (Some(target), Some(at), Some(want)) = (words.next(), words.next(), words.next()) else {
+                    return Err(format!(
+                        "expect_press_takes wants a range, a value on its track and a thumb: {line:?}"
+                    ));
+                };
+                let target = parse_target(target)?;
+                if target.kind != TargetKind::Range {
+                    return Err(format!("expect_press_takes reads a range, not {target:?}"));
+                }
+                let at = at
+                    .parse::<f64>()
+                    .map_err(|_| format!("expect_press_takes wants a number after the range: {line:?}"))?;
+                let want = parse_string(want)?;
+                Thumb::parse(&want, line)?;
+                Step::ExpectPressTakes(target, at, want)
             }
             "set_date" => {
                 let (target, date) = rest
@@ -4064,6 +4092,14 @@ fn run_with_log(
                     Ok(format!("thumb {got}"))
                 } else {
                     Err(format!("thumb {got:?}, wanted {want:?}"))
+                }
+            })),
+            Step::ExpectPressTakes(t, at, want) => Some(poll(|| {
+                let took = stage.press_takes(*t, *at);
+                if took == *want {
+                    Ok(format!("press {took}"))
+                } else {
+                    Err(format!("press at {at} took {took:?}, wanted {want:?}"))
                 }
             })),
             Step::ExpectAxThumb(t, thumb, want) => Some(poll(|| {
@@ -6817,6 +6853,14 @@ mod tests {
             Step::ExpectAxThumb(range, Thumb::Low, "slider/In".into())
         );
         assert_eq!(parse("expect_ax range#0 \"group/Trim\"").unwrap()[0], Step::ExpectAx(range, "group/Trim".into()));
+        assert_eq!(
+            parse("expect_press_takes range#0 4.9 \"low\"").unwrap()[0],
+            Step::ExpectPressTakes(range, 4.9, "low".into())
+        );
+        assert!(parse("expect_press_takes range#0 4.9 \"middle\"").is_err());
+        assert!(parse("expect_press_takes slider#1 4.9 \"low\"").is_err());
+        assert!(parse("expect_press_takes range#0 \"low\"").is_err());
+        assert!(Step::ExpectPressTakes(range, 5.1, "high".into()).is_assertion());
         assert!(Step::ExpectThumb(slider, None, "1".into()).is_assertion());
         assert!(!Step::SetThumb(range, Thumb::High, 1.0).is_assertion());
         assert_eq!(spelled_fraction(0.25), "0.25");
@@ -6981,6 +7025,9 @@ mod tests {
             String::new()
         }
         fn ax_thumb(&self, _: Target, _: Thumb) -> String {
+            String::new()
+        }
+        fn press_takes(&self, _: Target, _: f64) -> String {
             String::new()
         }
         fn set_text(&self, _: Target, _: &str) {}
@@ -7986,6 +8033,9 @@ mod tests {
             fn ax_thumb(&self, _: Target, _: Thumb) -> String {
                 String::new()
             }
+            fn press_takes(&self, _: Target, _: f64) -> String {
+                String::new()
+            }
             fn set_text(&self, _: Target, _: &str) {}
             fn type_text(&self, _: &str) {}
             fn read_label(&self, _: Target) -> String {
@@ -8345,6 +8395,9 @@ mod tests {
                 String::new()
             }
             fn ax_thumb(&self, _: Target, _: Thumb) -> String {
+                String::new()
+            }
+            fn press_takes(&self, _: Target, _: f64) -> String {
                 String::new()
             }
             fn set_text(&self, _: Target, _: &str) {}

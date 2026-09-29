@@ -3371,7 +3371,7 @@ scale.kaya-range-thumb > trough > highlight { background: none; border-color: tr
 box-shadow: none; }
 scale.kaya-range-thumb > trough > fill { background: none; }
 scale.kaya-range-high > marks { opacity: 0; }
-.kaya-range-tie { border: 1.5px solid @window_bg_color; border-radius: 9999px; }
+.kaya-range-tie { border: 1.5px solid @borders; border-radius: 9999px; }
 ";
 
 /// The stacked pair's widgets (docs/range-plan.md §6, §4 MEASURED).
@@ -3590,7 +3590,12 @@ mod range_view {
                     return;
                 };
                 let from = lc.min(hc);
-                trough.imp().span.set((from - f64::from(rect.x()), lc.max(hc) - from));
+                let span = (from - f64::from(rect.x()), lc.max(hc) - from);
+                // An unchanged allocation skips the trough's own size_allocate,
+                // which leaves the fill where the thumbs were (docs/traps.md).
+                if trough.imp().span.replace(span) != span {
+                    trough.queue_allocate();
+                }
                 place(trough.upcast_ref(), &rect);
                 let tied = (hc - lc).abs() < 0.5;
                 if tie.is_child_visible() != tied {
@@ -19120,6 +19125,49 @@ impl crate::harness::Stage for GtkStage {
             Some(name) => format!("{role}/{name}"),
             None => atspi_miss("<not in the accessibility tree>"),
         }
+    }
+
+    /// GTK's own pick at the point, the one a press is delivered by.
+    fn press_takes(&self, t: crate::harness::Target, at: f64) -> String {
+        Self::on_main(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.ranges.len()) else {
+                return "<no such target>".to_owned();
+            };
+            let pair = &core.ranges[i];
+            let low: &gtk4::Scale = pair.low.upcast_ref();
+            let Some((trough, knob)) = scale_parts(low) else {
+                return "<the scale has no knob laid out>".to_owned();
+            };
+            let Some(b) = knob.compute_bounds(&trough) else {
+                return "<the knob has no bounds>".to_owned();
+            };
+            let adjustment = low.adjustment();
+            let span = adjustment.upper() - adjustment.lower();
+            let size = f64::from(knob.measure(gtk4::Orientation::Horizontal, -1).0);
+            let length = f64::from(trough.width());
+            if span <= 0.0 || length <= size {
+                return "<the scale has no travel>".to_owned();
+            }
+            let f = (at - adjustment.lower()) / span;
+            let mirrored = (low.direction() == gtk4::TextDirection::Rtl) != low.is_inverted();
+            let along = size / 2.0 + if mirrored { 1.0 - f } else { f } * (length - size);
+            let across = f64::from(b.y()) + f64::from(b.height()) / 2.0;
+            let Some(p) =
+                trough.compute_point(&core.window, &gtk4::graphene::Point::new(along as f32, across as f32))
+            else {
+                return "<the trough is not in the window>".to_owned();
+            };
+            let Some(hit) = core.window.pick(f64::from(p.x()), f64::from(p.y()), gtk4::PickFlags::DEFAULT) else {
+                return "<nothing>".to_owned();
+            };
+            if hit.is_ancestor(&pair.low) || hit == *pair.low.upcast_ref::<gtk4::Widget>() {
+                "low".to_owned()
+            } else if hit.is_ancestor(&pair.high) || hit == *pair.high.upcast_ref::<gtk4::Widget>() {
+                "high".to_owned()
+            } else {
+                format!("<{}>", hit.type_().name())
+            }
+        })
     }
 
     fn control_value(&self, t: crate::harness::Target) -> String {

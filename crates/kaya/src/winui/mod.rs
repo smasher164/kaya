@@ -22534,6 +22534,68 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|_| "<accessibility read failed>".to_owned())
     }
 
+    /// XAML's own hit test at the point, topmost first: the clip each slider
+    /// wears is what routes a press (docs/range-plan.md §4 MEASURED).
+    fn press_takes(&self, t: crate::harness::Target, at: f64) -> String {
+        Self::on_ui_read(move |core| {
+            use bindings::Microsoft::UI::Xaml::DependencyObject;
+            use bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper;
+            let Some(i) = crate::harness::try_resolve(t.index, core.range_ids.len()) else {
+                return Ok("<no such target>".to_owned());
+            };
+            let pair = core.range_pairs[&core.range_ids[i]].clone();
+            pair.low.UpdateLayout()?;
+            let Some((track, _, thumb)) = slider_parts(&pair.low)? else {
+                return Ok("<the slider's template is not laid out>".to_owned());
+            };
+            let within: UIElement = pair.low.cast()?;
+            let (tx, _, tw, _) = box_in(&track, &within)?;
+            let (_, y, w, h) = box_in(&thumb, &within)?;
+            let (min, max) = (pair.low.Minimum()?, pair.low.Maximum()?);
+            if max <= min || tw <= w {
+                return Ok("<the slider has no travel>".to_owned());
+            }
+            let f = (at - min) / (max - min);
+            let root = core.window.Content()?;
+            // HOST coordinates: the root's own space is mirrored under right
+            // to left (docs/traps.md).
+            let point = within.TransformToVisual(None::<&UIElement>)?.TransformPoint(Point {
+                X: (tx + w / 2.0 + f * (tw - w)) as f32,
+                Y: (y + h / 2.0) as f32,
+            })?;
+            let (low, high): (DependencyObject, DependencyObject) = (pair.low.cast()?, pair.high.cast()?);
+            let mut first = None;
+            for hit in VisualTreeHelper::FindElementsInHostCoordinatesPoint(point, &root)? {
+                let mut up: Option<DependencyObject> = Some(hit.cast()?);
+                while let Some(node) = up {
+                    if node == low {
+                        return Ok("low".to_owned());
+                    }
+                    if node == high {
+                        return Ok("high".to_owned());
+                    }
+                    up = VisualTreeHelper::GetParent(&node).ok();
+                }
+                if first.is_none() {
+                    first = Some(hit.cast::<windows_core::IInspectable>()?.GetRuntimeClassName()?.to_string());
+                }
+            }
+            let boxes = |s: &Slider| -> windows_core::Result<String> {
+                let at = s.TransformToVisual(None::<&UIElement>)?.TransformPoint(Point { X: 0.0, Y: 0.0 })?;
+                Ok(format!("({:.1}, {:.1}, {:.1}x{:.1})", at.X, at.Y, s.ActualWidth()?, s.ActualHeight()?))
+            };
+            Ok(format!(
+                "<{} at ({:.1}, {:.1}); low {}, high {}>",
+                first.as_deref().unwrap_or("nothing"),
+                point.X,
+                point.Y,
+                boxes(&pair.low)?,
+                boxes(&pair.high)?
+            ))
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
     fn control_value(&self, t: crate::harness::Target) -> String {
         if t.kind == crate::harness::TargetKind::NumberField {
             return Self::on_ui_read(move |core| {
@@ -26581,6 +26643,9 @@ struct RangePair {
     ticks: Grid,
     low: Slider,
     high: Slider,
+    /// The outline the top thumb wears at a tie (§3 rule 4), above both
+    /// sliders and never hit.
+    ring: FrameworkElement,
     cell: std::sync::Arc<RangeCell>,
 }
 
@@ -26594,6 +26659,11 @@ const RANGE_DECO_XAML: &str = "<Grid xmlns=\"http://schemas.microsoft.com/winfx/
      <Grid HorizontalAlignment=\"Left\" VerticalAlignment=\"Top\" \
      Background=\"{ThemeResource SliderTrackValueFill}\"/>\
      <Grid/></Grid></Grid>";
+
+const RANGE_RING_XAML: &str = "<Ellipse xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" \
+     HorizontalAlignment=\"Left\" VerticalAlignment=\"Top\" IsHitTestVisible=\"False\" \
+     Visibility=\"Collapsed\" StrokeThickness=\"1.5\" \
+     Stroke=\"{ThemeResource ControlStrongStrokeColorDefaultBrush}\"/>";
 
 impl RangePair {
     fn new(
@@ -26610,6 +26680,7 @@ impl RangePair {
             ticks: parts.GetAt(2)?.cast()?,
             low: Slider::new()?,
             high: Slider::new()?,
+            ring: XamlReader::Load(&HSTRING::from(RANGE_RING_XAML))?.cast()?,
             cell: std::sync::Arc::new(RangeCell::new(tag)),
             root,
         };
@@ -26659,6 +26730,7 @@ impl RangePair {
                 },
             ))?;
         }
+        pair.root.Children()?.Append(&pair.ring)?;
         let laid = pair.clone();
         pair.root
             .LayoutUpdated(&EventHandler::<windows_core::IInspectable>::new(move |_, _| {
@@ -26875,6 +26947,20 @@ fn box_in(element: &FrameworkElement, within: &UIElement) -> windows_core::Resul
     Ok((f64::from(at.X), f64::from(at.Y), element.ActualWidth()?, element.ActualHeight()?))
 }
 
+fn place_if_moved(element: &FrameworkElement, x: f64, y: f64, width: f64, height: f64) -> windows_core::Result<()> {
+    let margin = element.Margin()?;
+    if (margin.Left - x).abs() > 0.01
+        || (margin.Top - y).abs() > 0.01
+        || (element.Width()? - width).abs() > 0.01
+        || (element.Height()? - height).abs() > 0.01
+    {
+        element.SetMargin(Thickness { Left: x, Top: y, Right: 0.0, Bottom: 0.0 })?;
+        element.SetWidth(width)?;
+        element.SetHeight(height)?;
+    }
+    Ok(())
+}
+
 fn set_if_moved(element: &Grid, x: f64, y: f64, width: f64, height: f64) -> windows_core::Result<()> {
     let margin = element.Margin()?;
     if (margin.Left - x).abs() > 0.01
@@ -26912,10 +26998,18 @@ fn winui_range_layout(pair: &RangePair) -> windows_core::Result<()> {
         return Ok(());
     }
     let (lx, _, lw, _) = box_in(&low_thumb, &root)?;
-    let (hx, _, hw, _) = box_in(&high_thumb, &root)?;
+    let (hx, hy, hw, hh) = box_in(&high_thumb, &root)?;
     let (lc, hc) = (lx + lw / 2.0, hx + hw / 2.0);
     set_if_moved(&pair.track, tx, ty, tw, th)?;
     set_if_moved(&pair.fill, lc, ty, (hc - lc).max(0.0), th)?;
+    let tied = (hc - lc).abs() < 0.5;
+    if tied {
+        place_if_moved(&pair.ring, hx - 1.0, hy - 1.0, hw + 2.0, hh + 2.0)?;
+    }
+    let shown = if tied { Visibility::Visible } else { Visibility::Collapsed };
+    if pair.ring.Visibility()? != shown {
+        pair.ring.SetVisibility(shown)?;
+    }
 
     let cell = &pair.cell;
     let (min, max) = (SliderCell::get(&cell.min), SliderCell::get(&cell.max));
@@ -26955,7 +27049,10 @@ fn winui_range_layout(pair: &RangePair) -> windows_core::Result<()> {
     let (hx, _, hw, _) = box_in(&high_thumb, &within)?;
     let split = winui_range_split(lx + lw / 2.0, hx + hw / 2.0);
     let (width, height) = (pair.low.ActualWidth()?, pair.low.ActualHeight()?);
-    for (slider, x, w) in [(&pair.low, 0.0, split), (&pair.high, split, width - split)] {
+    // At a tie the low slider stays whole under the high one's half: where two
+    // clips met, the shared knob drew a seam (docs/range-plan.md §4 MEASURED).
+    let low_width = if tied { width } else { split };
+    for (slider, x, w) in [(&pair.low, 0.0, low_width), (&pair.high, split, width - split)] {
         let clip = RectangleGeometry::new()?;
         clip.SetRect(bindings::Windows::Foundation::Rect {
             X: x as f32,
