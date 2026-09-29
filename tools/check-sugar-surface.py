@@ -2945,6 +2945,200 @@ if nf_prop_fake != 16 or nf_commit_fake != 13:
 print(f"check-sugar-surface: number field surface watched: prop fake "
       f"{nf_prop_fake}/16, commit fake {nf_commit_fake}/13")
 
+# --- THE COLOUR PICKER SURFACE, all nine (docs/color-picker-plan.md §2, §7)
+# The kind sweep holds the constructor in both zones and nothing else: a
+# binding could ship a picker whose `alpha` or `on_color` is unspellable,
+# or a Color value with no hex constructor, no hex reading or a string form
+# that is not the scenes' byte-compared RRGGBBAA, with every other clause
+# green. Read out of each binding's own file; the placeholders are the
+# names, so the fake-name negative fires every row.
+def want_cp(lang, rel, what, pattern, findings):
+    want_slider(lang, rel, f"color_picker {what}", pattern, findings)
+
+
+def check_color_alpha(snake, pascal, camel, findings=None):
+    F = SLIDER_FILES
+
+    def want(lang, rel, pattern):
+        want_cp(lang, rel, snake, pattern, findings)
+
+    want("rust-live", F["rust"],
+         rf"pub fn {snake}\(self, [a-z_]+: bool\) -> Self")
+    want("rust-tpl", F["rust"],
+         rf"pub fn {snake}\(&mut self, node: TemplateNodeId, [a-z_]+: bool\)")
+    want("python", F["python"],
+         rf"def color_picker\([^)]*\b{snake}[\s]*[:=]")
+    want("go-live", F["go"],
+         rf"func \(w Widget\) {pascal}\([a-z]+ bool\) Widget")
+    want("go-tpl", F["go"],
+         rf"func \(t \*Tpl\) Set{pascal}\(n Node, [a-z]+ bool\)")
+    want("csharp-live", F["csharp"],
+         rf"public Widget ColorPicker\([^)]*\bbool {camel} = false")
+    want("csharp-tpl", F["csharp"],
+         rf"public Node ColorPicker\([^)]*\bbool {camel} = false")
+    want("java-live", F["java"],
+         rf"public Widget {camel}\(boolean [a-z]+\)")
+    want("java-tpl", F["java"],
+         rf"public void set{pascal}\(Node n, boolean [a-z]+\)")
+    want("swift-live", F["swift"],
+         rf"func colorPicker\(\n *_ value: KayaColor\? = nil,[^)]*"
+         rf"\b{camel}: Bool\? = nil")
+    want("swift-tpl", F["swift"],
+         rf"func colorPicker\(\n *_ f: KayaField<KayaColor>,[^)]*"
+         rf"\b{camel}: Bool\? = nil")
+    want("ocaml-live", F["ocaml"],
+         rf"^let color_picker [\s\S]{{0,400}}?\?{snake}\b")
+    want("ocaml-tpl", F["ocaml"],
+         rf"^  let color_picker [\s\S]{{0,400}}?\?{snake}\b")
+    want("haskell-live", F["haskell"],
+         rf"^  {pascal} :: Bool -> Attr 'LeafW")
+    want("haskell-tpl", F["haskell"],
+         rf"^  Tpl{pascal} :: Bool -> TplAttr")
+    want("js", F["js"], rf"ColorPickerOptions = .*\b{camel}\?:")
+
+
+def check_color_handler(snake, pascal, camel, hs, findings=None):
+    F = SLIDER_FILES
+
+    def want(lang, rel, pattern):
+        want_cp(lang, rel, snake, pattern, findings)
+
+    want("rust-live", F["rust"],
+         rf"pub fn {snake}\(&self, w: WidgetId, f: impl Fn\(crate::Color\)")
+    want("rust-tpl", F["rust"],
+         rf"pub fn {snake}_node\(&self, n: TemplateNodeId, "
+         rf"f: impl Fn\(Path, crate::Color\)")
+    want("python", F["python"],
+         rf"def color_picker\([^)]*\b{snake}[\s]*[:=]")
+    want("js", F["js"], rf"ColorPickerOptions = .*\b{camel}\?:")
+    want("go-live", F["go"],
+         rf"func \(tx \*Tx\) ColorPicker[A-Za-z]*\([^)]*"
+         rf"\b{camel} func\(\*Tx, Color\)")
+    want("go-widget", F["go"],
+         rf"func \(w Widget\) {pascal}\(fn func\(\*Tx, Color\)\)")
+    want("go-node", F["go"],
+         rf"func \(n Node\) {pascal}\(fn func\(\*Tx, \[\]any, Color\)\)")
+    want("go-rec", "bindings/go/records.go",
+         rf"func \(c RecordCollection\[K, T\]\) ColorPicker\["
+         rf"[\s\S]{{0,200}}?\b{camel} func\(\*Tx, K, Color\)")
+    want("csharp-live", F["csharp"],
+         rf"public Widget ColorPicker\([^)]*"
+         rf"Action<Tx, Color>\? {camel} = null")
+    want("csharp-tpl", F["csharp"],
+         rf"public Node ColorPicker\([^)]*"
+         rf"Action<Tx, List<object>, Color>\? {camel} = null")
+    want("java-live", F["java"],
+         rf"public Widget colorPicker\([^)]*BiConsumer<Tx, Color> {camel}\)")
+    want("java-node", F["java"],
+         rf"public void {camel}\(Node n, ColorHandler handler\)")
+    want("swift-live", F["swift"],
+         rf"func colorPicker\(\n *_ value: KayaColor\? = nil,[^)]*"
+         rf"\b{camel}: \(\(KayaAppTx, KayaColor\)")
+    want("swift-tpl", F["swift"],
+         rf"func colorPicker\(\n *_ f: KayaField<KayaColor>,[^)]*"
+         rf"\b{camel}: \(\(KayaAppTx, \[KayaValue\], KayaColor\)")
+    want("ocaml-live", F["ocaml"],
+         rf"^let color_picker [\s\S]{{0,400}}?\?{snake}\b")
+    want("ocaml-tpl", F["ocaml"],
+         rf"^  let color_picker [\s\S]{{0,400}}?\?{snake}\b")
+    want("haskell", F["haskell"],
+         rf"^colorPicker{hs} :: \(LeafArgs r\) => Color -> "
+         rf"\(Color -> IO \(\)\) -> r")
+
+
+# The Color value: the type, its hex constructor, its hex reading and the
+# RRGGBBAA string form, per binding under that binding's own names.
+COLOR_TYPE_ROWS = [
+    ("rust", "crates/kaya/src/protocol.rs", "Color", "from_hex", "hex", [
+        r"pub struct @T@ \{",
+        r"pub const fn @FH@\(rgba: u32\) -> @T@",
+        r"pub const fn @H@\(self\) -> u32",
+        r"impl std::fmt::Display for @T@ \{[\s\S]{0,300}?"
+        r"write!\(f, \"\{:08X\}\", self\.@H@\(\)\)"]),
+    ("python", "bindings/python/kaya/__init__.py", "Color", "from_hex", "hex", [
+        r"^class @T@:",
+        r"def @FH@\(cls, rgba: int\) -> @T@:",
+        r"def @H@\(self\) -> int:",
+        r"def __str__\(self\) -> str:\n +return f\"\{self\.@H@\(\):08X\}\""]),
+    ("go", "bindings/go/records.go", "Color", "ColorHex", "Hex", [
+        r"^type @T@ struct \{",
+        r"^func @FH@\(rgba uint32\) @T@ \{",
+        r"^func \(c @T@\) @H@\(\) uint32",
+        r"^func \(c @T@\) String\(\) string \{ return "
+        r"fmt\.Sprintf\(\"%08X\", c\.@H@\(\)\) \}"]),
+    ("csharp", "bindings/csharp/Kaya.cs", "Color", "FromHex", "Hex", [
+        r"public readonly record struct @T@\(",
+        r"public static @T@ @FH@\(uint rgba\)",
+        r"public uint @H@ =>",
+        r"public override string ToString\(\) => @H@\.ToString\(\"X8\"\)"]),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", "Color", "fromHex", "hex", [
+        r"public record @T@\(int r, int g, int b, int a\)",
+        r"public static @T@ @FH@\(int rgba\)",
+        r"public int @H@\(\) \{",
+        r"public String toString\(\) \{\n +return "
+        r"String\.format\(\"%08X\", @H@\(\)\);"]),
+    ("swift", "bindings/swift/KayaRecords.swift", "KayaColor", "hex", "hex", [
+        r"public struct @T@: Hashable, Sendable, CustomStringConvertible",
+        r"public init\(@FH@: UInt32\)",
+        r"public var @H@: UInt32 \{",
+        r"public var description: String \{ "
+        r"String\(format: \"%08X\", @H@\) \}"]),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", "Color", "of_hex", "hex", [
+        r"^module @T@ = struct",
+        r"^  let @FH@ n =",
+        r"^  let @H@ c =",
+        r"^  let to_string c = Printf\.sprintf \"%08X\" \(@H@ c\)"]),
+    ("haskell", "bindings/haskell/Kaya/Core.hs", "Color", "colorFromHex",
+     "colorHex", [
+        r"^data @T@ = @T@ \{",
+        r"^@FH@ :: Word32 -> @T@$",
+        r"^@H@ :: @T@ -> Word32$",
+        r"^colorText :: @T@ -> Text\ncolorText c = T\.pack "
+        r"\[digits !! fromIntegral \(\(@H@ c[\s\S]{0,120}?"
+        r"digits = \"0123456789ABCDEF\""]),
+    ("js", "bindings/js/kaya/index.ts", "Color", "fromHex", "hex", [
+        r"^export class @T@ \{",
+        r"static @FH@\(rgba: number\): @T@ \{",
+        r"^  @H@\(\): number \{",
+        r"toString\(\): string \{\n +return this\.@H@\(\)\.toString\(16\)"
+        r"\.toUpperCase\(\)\.padStart\(8, \"0\"\);"]),
+]
+COLOR_TYPE_PARTS = ("type", "hex constructor", "hex reading", "RRGGBBAA string")
+
+
+def check_color_type(fake=False, findings=None):
+    for lang, rel, t, fh, h, patterns in COLOR_TYPE_ROWS:
+        if fake:
+            t, fh, h = t + "KayaFake", fh + "KayaFake", h + "KayaFake"
+        for part, pattern in zip(COLOR_TYPE_PARTS, patterns):
+            want_cp(lang, rel, f"Color {part}",
+                    pattern.replace("@T@", t).replace("@FH@", fh)
+                    .replace("@H@", h), findings)
+
+
+check_color_alpha("alpha", "Alpha", "alpha")
+check_color_handler("on_color", "OnColor", "onColor", "On")
+check_color_type()
+fake = []
+check_color_alpha("kaya_fake_tint", "KayaFakeTint", "kayaFakeTint",
+                  findings=fake)
+cp_alpha_fake = len(fake)
+fake = []
+check_color_handler("on_kaya_fake", "OnKayaFake", "onKayaFake", "OnKayaFake",
+                    findings=fake)
+cp_handler_fake = len(fake)
+fake = []
+check_color_type(fake=True, findings=fake)
+cp_type_fake = len(fake)
+if cp_alpha_fake != 16 or cp_handler_fake != 17 or cp_type_fake != 36:
+    selftest_exit(f"check-sugar-surface: self-test failed (colour picker "
+                  f"patterns fired {cp_alpha_fake}/16 for a prop, "
+                  f"{cp_handler_fake}/17 for a handler and {cp_type_fake}/36 "
+                  f"for a Color that exist nowhere)")
+print(f"check-sugar-surface: colour picker surface watched: alpha fake "
+      f"{cp_alpha_fake}/16, handler fake {cp_handler_fake}/17, Color fake "
+      f"{cp_type_fake}/36")
+
 # --- THE SHEET SURFACE, all nine (docs/sheet-plan.md §5) --------------
 # A sheet is a SURFACE, not a kind and not a window prop, so neither
 # sweep above sees it while tx 58-60 and occurrences 31/32 reach every
@@ -5463,7 +5657,7 @@ discardable = tpl_discardable_probe()
 WANT_DISCARDABLE = """swift-row-member=applied:1 rc:1 named:True
 swift-arm-member=applied:1 rc:1 named:True
 swift-eliminator=applied:1 rc:1 named:True
-swift-census-floor=applied:14 rc:1 named:True"""
+swift-census-floor=applied:15 rc:1 named:True"""
 if discardable != WANT_DISCARDABLE:
     print("check-sugar-surface: SELF-TEST FAIL (the Swift generated-surface "
           "discard census did not catch its watched cuts). Wanted:",
@@ -6228,7 +6422,7 @@ def csharp_facade_probe():
     run("csharp-twin-reader",
         src.replace("sealed class TableItemRow\n",
                     "sealed class TableItemRowGone\n")
-        if n == 1 else src, n, "typed-row reader found only 12")
+        if n == 1 else src, n, "typed-row reader found only 13")
     return "\n".join(lines)
 
 

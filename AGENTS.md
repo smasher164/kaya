@@ -585,7 +585,12 @@ in docs/deferred.md.
    direction a scroll runs, spelled where each binding's scroll options
    live in all nine, the one word everywhere (Haskell's paint roles are
    prefixed, `PaintAxis`, to free it); fake-name and rename-in-a-copy
-   negatives, counts printed),
+   negatives, counts printed.
+   AND THE COLOUR PICKER SINCE 2026-09-28 (docs/color-picker-plan.md §7):
+   `color_picker` in both zones with `alpha`, `on_color` where each binding
+   spells the date picker's handler, and each binding's own `Color` value
+   with its hex constructor and hex reading, all nine; fake-name negatives
+   firing every row, counts printed),
    `tools/check-universal-props.py` (the lowering-side sibling: every
    backend applies the universal a11y props to every kind — Compose
    per-arm, SwiftUI's one wrapper unbypassed, GTK/WinUI's apply arm
@@ -649,7 +654,14 @@ in docs/deferred.md.
    (docs/color-picker-plan.md §4.1): `set_color` is one settled choice, so
    the SwiftUI arm's every commit is held inside a door, the mac panel's
    gesture closed by a `.default`-mode perform, iOS's noncontinuous select,
-   and one emit behind the held-colour check; six more watched negatives),
+   and one emit behind the held-colour check; six more watched negatives.
+   THE OTHER FOUR ARMS JOINED AT THE BREADTH MERGE the same day, each read
+   out of its own file: GTK's notify::rgba outside the quiet guard, WinUI's
+   Flyout.Closed, Compose's sheet dismissal or Done (never a slider's or the
+   hex field's onValueChange), and on every arm but AppKit's the opaque
+   picker's alpha forced to FF by the arm, since GTK, WinUI, Compose and
+   UIKit each hold a translucent colour on an opaque control (measured,
+   plan §4). Twenty-one more watched negatives, counts printed),
    `tools/check-submit.py` (SUBMITTED PUBLISHES THROUGH THE GESTURE'S DOOR
    ALONE (docs/submit-plan.md S1-S4, S6): an entry's or search field's
    Return and a submitting textarea's Return or Send key, and no scene can

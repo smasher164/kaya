@@ -68,6 +68,30 @@ public struct KayaTime: Hashable, Sendable, CustomStringConvertible {
     public var description: String { String(format: "%02d:%02d", hour, minute) }
 }
 
+/// An sRGB colour, 8 bits a channel, straight alpha (docs/color-picker-plan.md §2).
+public struct KayaColor: Hashable, Sendable, CustomStringConvertible {
+    public var r: UInt8
+    public var g: UInt8
+    public var b: UInt8
+    public var a: UInt8
+
+    public init(r: UInt8, g: UInt8, b: UInt8, a: UInt8 = 0xFF) {
+        self.r = r
+        self.g = g
+        self.b = b
+        self.a = a
+    }
+
+    public init(hex: UInt32) {
+        let c = kayaUnpackColor(Int64(hex))
+        self.init(r: c.r, g: c.g, b: c.b, a: c.a)
+    }
+
+    public var hex: UInt32 { UInt32(truncatingIfNeeded: kayaPackColor(r, g, b, a)) }
+
+    public var description: String { String(format: "%08X", hex) }
+}
+
 /// A date's packed wire value. The components are non-optional by
 /// construction now; what is left is the calendar's own arithmetic.
 func kayaPackedDate(_ what: String, _ d: KayaDate) -> Int64 {
@@ -101,6 +125,11 @@ public func kayaDate(packed: Int64) -> KayaDate {
     return KayaDate(year: parts.year, month: parts.month, day: parts.day)
 }
 
+public func kayaColor(packed: Int64) -> KayaColor {
+    let c = kayaUnpackColor(packed)
+    return KayaColor(r: c.r, g: c.g, b: c.b, a: c.a)
+}
+
 func kayaTime(packed: Int64) -> KayaTime {
     let parts = kayaUnpackTime(packed)
     return KayaTime(hour: parts.hour, minute: parts.minute)
@@ -112,6 +141,9 @@ extension KayaValue {
 
     /// A civil time on the wire.
     public static func time(_ t: KayaTime) -> KayaValue { .i64(kayaPackedTime("a time", t)) }
+
+    /// An sRGB colour on the wire, packed 0xRRGGBBAA.
+    public static func color(_ c: KayaColor) -> KayaValue { .i64(Int64(c.hex)) }
 }
 
 /// A typed projection: one field of a record type, by wire position.
@@ -135,6 +167,7 @@ func wireValue(_ any: Any) -> KayaValue? {
     // TYPE says which now (docs/datetime-plan.md D2).
     case let d as KayaDate: return .i64(kayaPackedDate("a Date field", d))
     case let t as KayaTime: return .i64(kayaPackedTime("a Time field", t))
+    case let c as KayaColor: return .i64(Int64(c.hex))
     case let s as String: return .str(s)
     case let b as Bool: return .bool(b)
     case let n as Int64: return .i64(n)

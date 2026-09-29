@@ -401,6 +401,10 @@ func (sc SumCase[K, V]) SetMin(n Node, min float64) { sc.t.SetMin(n, min) }
 
 func (sc SumCase[K, V]) SetMax(n Node, max float64) { sc.t.SetMax(n, max) }
 
+// SetAlpha lets a colour picker this arm stamps choose translucency
+// (Tpl.SetAlpha).
+func (sc SumCase[K, V]) SetAlpha(n Node, on bool) { sc.t.SetAlpha(n, on) }
+
 // SetTickSpacing is the distance between that slider's drawn ticks
 // (Tpl.SetTickSpacing).
 func (sc SumCase[K, V]) SetTickSpacing(n Node, spacing float64) {

@@ -325,6 +325,8 @@ public final class KayaApp {
     private final Map<Long, ValueHandler> nodeCommits = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, LocalDate>> widgetDates = new HashMap<>();
     private final Map<Long, DateHandler> nodeDates = new HashMap<>();
+    private final Map<Long, BiConsumer<Tx, Color>> widgetColors = new HashMap<>();
+    private final Map<Long, ColorHandler> nodeColors = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, LocalTime>> widgetTimes = new HashMap<>();
     private final Map<Long, TimeHandler> nodeTimes = new HashMap<>();
     // Window lifecycle: one handler each, receiving the window id.
@@ -469,6 +471,13 @@ public final class KayaApp {
     @FunctionalInterface
     public interface DateHandler {
         void accept(Tx tx, List<Object> keys, LocalDate date);
+    }
+
+    /** A template colour picker's handler: the copy's keys, then the
+     * settled colour (docs/color-picker-plan.md §2). */
+    @FunctionalInterface
+    public interface ColorHandler {
+        void accept(Tx tx, List<Object> keys, Color color);
     }
 
     /** A template time picker's pick handler: the copy's keys, then the
@@ -1389,6 +1398,41 @@ public final class KayaApp {
      * cycle (12 or 24), the first weekday (1 Monday … 7 Sunday), the calendar
      * and the numbering system. */
     public record LocaleInfo(String tag, int hourCycle, int firstWeekday, String calendar, String numbering) {}
+
+    /** An sRGB colour, 8 bits a channel, straight alpha: a colour
+     * picker's value (docs/color-picker-plan.md §2). */
+    public record Color(int r, int g, int b, int a) {
+        public Color {
+            if ((r | g | b | a) >>> 8 != 0) {
+                throw new IllegalArgumentException("kaya: (" + r + ", " + g + ", " + b + ", " + a
+                        + ") is not a colour — each channel is 0..255");
+            }
+        }
+
+        public static Color rgb(int r, int g, int b) {
+            return new Color(r, g, b, 0xFF);
+        }
+
+        /** {@code Color.fromHex(0x336699FF)}: the 32 bits RRGGBBAA. */
+        public static Color fromHex(int rgba) {
+            return new Color(rgba >>> 24, rgba >>> 16 & 0xFF, rgba >>> 8 & 0xFF, rgba & 0xFF);
+        }
+
+        /** The 32 bits RRGGBBAA, fromHex's inverse. */
+        public int hex() {
+            return r << 24 | g << 16 | b << 8 | a;
+        }
+
+        public boolean isOpaque() {
+            return a == 0xFF;
+        }
+
+        /** The fixed spelling every scene reads: {@code 336699FF}. */
+        @Override
+        public String toString() {
+            return String.format("%08X", hex());
+        }
+    }
 
     /** Which way the layout runs, decided by the locale's script. */
     public enum Direction {
@@ -3682,6 +3726,18 @@ public final class KayaApp {
             return this;
         }
 
+        /** Let a colour picker's user choose translucency (off by
+         * default: docs/color-picker-plan.md §3 rule 3). */
+        public Widget alpha(boolean on) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: alpha on a widget outside its build transaction"
+                    + " — a colour picker's alpha is declared where the picker is built");
+            }
+            tx.emit(KayaWire.txSetAlpha(id, on));
+            return this;
+        }
+
         /** A number field's upper bound; never set, 2^53. */
         public Widget max(double max) {
             if (tx == null || tx.closed) {
@@ -4312,6 +4368,18 @@ public final class KayaApp {
             return t.datePicker(f);
         }
 
+        public Node colorPicker(Color color) {
+            return t.colorPicker(color);
+        }
+
+        public Node colorPicker(Signal<Color> s) {
+            return t.colorPicker(s);
+        }
+
+        public Node colorPicker(KayaRecords.Field<Color> f) {
+            return t.colorPicker(f);
+        }
+
         public Node timePicker(LocalTime time) {
             return t.timePicker(time);
         }
@@ -4511,6 +4579,10 @@ public final class KayaApp {
             t.bindDateField(n, level, f);
         }
 
+        public void bindColorField(Node n, int level, KayaRecords.Field<Color> f) {
+            t.bindColorField(n, level, f);
+        }
+
         public void bindTimeField(Node n, int level, KayaRecords.Field<LocalTime> f) {
             t.bindTimeField(n, level, f);
         }
@@ -4597,6 +4669,11 @@ public final class KayaApp {
         /** This row's copy of that number field's bounds (Tpl.setMin). */
         public void setMin(Node n, double min) {
             t.setMin(n, min);
+        }
+
+        /** This row's copy of that colour picker's alpha (Tpl.setAlpha). */
+        public void setAlpha(Node n, boolean on) {
+            t.setAlpha(n, on);
         }
 
         public void setMax(Node n, double max) {
@@ -5827,6 +5904,29 @@ public final class KayaApp {
             emit(KayaWire.txBindDate(w.id, date.id));
             if (onDate != null) {
                 KayaApp.this.onDate(w, onDate);
+            }
+            return w;
+        }
+
+        /** A colour picker holding color (docs/color-picker-plan.md), its
+         * handler co-located (null for none): the platform's swatch,
+         * opening its colour surface; each settled choice arrives once. */
+        public Widget colorPicker(Color color, BiConsumer<Tx, Color> onColor) {
+            Widget w = widget(KayaWire.KIND_COLOR_PICKER);
+            emit(KayaWire.txSetColor(w.id, color.r(), color.g(), color.b(), color.a()));
+            if (onColor != null) {
+                KayaApp.this.onColor(w, onColor);
+            }
+            return w;
+        }
+
+        /** A colour picker whose value binds a signal; a write never
+         * echoes. */
+        public Widget colorPicker(Signal<Color> color, BiConsumer<Tx, Color> onColor) {
+            Widget w = widget(KayaWire.KIND_COLOR_PICKER);
+            emit(KayaWire.txBindColor(w.id, color.id));
+            if (onColor != null) {
+                KayaApp.this.onColor(w, onColor);
             }
             return w;
         }
@@ -7132,6 +7232,11 @@ public final class KayaApp {
             tx.emit(KayaWire.txSetMax(n.id, max));
         }
 
+        /** A stamped colour picker's alpha, constant across the copies. */
+        public void setAlpha(Node n, boolean on) {
+            tx.emit(KayaWire.txSetAlpha(n.id, on));
+        }
+
         /**
          * What a stamped copy MEANS — semantic emphasis, never
          * appearance. A CONSTANT, not a source, for
@@ -7550,6 +7655,11 @@ public final class KayaApp {
             KayaApp.this.onDate(n, handler);
         }
 
+        /** Register a colour handler on a template colour picker. */
+        public void onColorNode(Node n, ColorHandler handler) {
+            KayaApp.this.onColor(n, handler);
+        }
+
         /** Register a pick handler on a template time picker. */
         public void onTimeNode(Node n, TimeHandler handler) {
             KayaApp.this.onTime(n, handler);
@@ -7576,6 +7686,26 @@ public final class KayaApp {
         public Node datePicker(KayaRecords.Field<LocalDate> f) {
             Node n = widget(KayaWire.KIND_DATE_PICKER);
             bindDateField(n, 0, f);
+            return n;
+        }
+
+        /** A colour picker in the blueprint: the date picker's three
+         * sources (docs/color-picker-plan.md §2). */
+        public Node colorPicker(Color color) {
+            Node n = widget(KayaWire.KIND_COLOR_PICKER);
+            tx.emit(KayaWire.txSetColor(n.id, color.r(), color.g(), color.b(), color.a()));
+            return n;
+        }
+
+        public Node colorPicker(Signal<Color> s) {
+            Node n = widget(KayaWire.KIND_COLOR_PICKER);
+            tx.emit(KayaWire.txBindColor(n.id, s.id));
+            return n;
+        }
+
+        public Node colorPicker(KayaRecords.Field<Color> f) {
+            Node n = widget(KayaWire.KIND_COLOR_PICKER);
+            bindColorField(n, 0, f);
             return n;
         }
 
@@ -7618,6 +7748,11 @@ public final class KayaApp {
          * field it shares a wire tag with. */
         public void bindDateField(Node n, int level, KayaRecords.Field<LocalDate> f) {
             tx.emit(KayaWire.txBindDateElement(n.id, level, f.index()));
+        }
+
+        /** Binds a colour picker's value to one field of the element. */
+        public void bindColorField(Node n, int level, KayaRecords.Field<Color> f) {
+            tx.emit(KayaWire.txBindColorElement(n.id, level, f.index()));
         }
 
         /** Binds a time picker's value to one field of the element. */
@@ -8719,6 +8854,18 @@ public final class KayaApp {
         nodeDates.put(n.id, handler);
     }
 
+    /** Register a colour picker's handler: each SETTLED choice, never a
+     * drag's intermediate; an app write never echoes
+     * (docs/color-picker-plan.md §3). */
+    public void onColor(Widget w, BiConsumer<Tx, Color> handler) {
+        widgetColors.put(w.id, handler);
+    }
+
+    /** A template colour picker's handler, keys first. */
+    public void onColor(Node n, ColorHandler handler) {
+        nodeColors.put(n.id, handler);
+    }
+
     /** Register a pick handler for a live time picker. */
     public void onTime(Widget w, BiConsumer<Tx, LocalTime> handler) {
         widgetTimes.put(w.id, handler);
@@ -9163,6 +9310,20 @@ public final class KayaApp {
                 if (handler != null) {
                     dispatch(tx -> {
                         handler.accept(tx, occ.keys, KayaRecords.dateOf(occ.payload));
+                    });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_COLOR_CHANGED && occ.keys.isEmpty()) {
+                BiConsumer<Tx, Color> handler = widgetColors.get(occ.id);
+                if (handler != null) {
+                    dispatch(tx -> {
+                        handler.accept(tx, KayaRecords.colorOf(occ.payload));
+                    });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_COLOR_CHANGED) {
+                ColorHandler handler = nodeColors.get(occ.id);
+                if (handler != null) {
+                    dispatch(tx -> {
+                        handler.accept(tx, occ.keys, KayaRecords.colorOf(occ.payload));
                     });
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_TIME_CHANGED && occ.keys.isEmpty()) {

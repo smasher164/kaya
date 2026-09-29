@@ -13038,6 +13038,8 @@ func kayaColorCommitted(_ node: KayaNode, _ packed: Int64) {
     /// tracking loop, in NSEventTrackingRunLoopMode, has returned.
     func kayaColorDoorInstall() {
         guard kayaColorDoor == nil else { return }
+        // docs/traps.md, the NSColorWell under a pre-14 SDK stamp.
+        (NSColor.self as AnyObject).setValue(false, forKey: "ignoresAlpha")
         kayaColorDoor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { event in
             if !kayaColorGesture, NSColorPanel.sharedColorPanelExists,
                 event.window === NSColorPanel.shared

@@ -702,8 +702,9 @@ ELEVATE = (
      "box-shadow: 0 2px 6px rgba(0,0,0,0.3); outline: 1px solid @borders;",
      "box-shadow"),
     ("winui card markup", WINUI,
-     'BorderThickness=\\"1\\" ',
-     'BorderThickness=\\"1\\" Shadow=\\"{ThemeResource CardShadow}\\" ',
+     'BorderThickness=\\"1\\" CornerRadius=\\"{ThemeResource OverlayCornerRadius}',
+     'BorderThickness=\\"1\\" Shadow=\\"{ThemeResource CardShadow}\\" '
+     'CornerRadius=\\"{ThemeResource OverlayCornerRadius}',
      "Shadow"),
     ("compose segment fill", COMPOSE,
      "Box(Modifier.background(MaterialTheme.colorScheme.surfaceContainer, shape))",

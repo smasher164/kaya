@@ -32,14 +32,60 @@ export const CivilDate: unique symbol = Symbol("kaya.CivilDate");
 export const CivilTime: unique symbol = Symbol("kaya.CivilTime");
 export type CivilDateToken = typeof CivilDate;
 export type CivilTimeToken = typeof CivilTime;
+/** An sRGB colour, 8 bits a channel, straight alpha: what a colour picker
+ * holds and a `kaya.Color` field carries, one packed I64 on the wire
+ * (docs/color-picker-plan.md §2). `String(c)` is the scenes' fixed
+ * spelling, `336699FF`. */
+export class Color {
+  readonly r: number;
+  readonly g: number;
+  readonly b: number;
+  readonly a: number;
+
+  constructor(r: number, g: number, b: number, a = 0xff) {
+    for (const [name, v] of [["r", r], ["g", g], ["b", b], ["a", a]] as const) {
+      if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > 0xff) {
+        throw new TypeError(`kaya: Color.${name} is an integer 0..255, not ${runtime.describe(v)}`);
+      }
+    }
+    this.r = r;
+    this.g = g;
+    this.b = b;
+    this.a = a;
+    Object.freeze(this);
+  }
+
+  /** `Color.fromHex(0x336699FF)`, the canvas palette's spelling. */
+  static fromHex(rgba: number): Color {
+    if (typeof rgba !== "number" || !Number.isInteger(rgba) || rgba < 0 || rgba > 0xffffffff) {
+      throw new RangeError(`kaya: ${runtime.describe(rgba)} is not a packed colour (0xRRGGBBAA)`);
+    }
+    return new Color(...wire.unpack_color(rgba));
+  }
+
+  hex(): number {
+    return wire.pack_color(this.r, this.g, this.b, this.a);
+  }
+
+  equals(other: unknown): boolean {
+    return other instanceof Color && other.hex() === this.hex();
+  }
+
+  toString(): string {
+    return this.hex().toString(16).toUpperCase().padStart(8, "0");
+  }
+}
+export type ColorToken = typeof Color;
 /** A stamped copy's document is a FIELD of its row: a Blob carrying the
  * document's own value list (docs/rich-text-plan.md §19). */
 export type DocumentToken = typeof Document;
-export type Token = StringConstructor | BooleanConstructor | NumberConstructor | Uint8ArrayConstructor | IntToken | CivilDateToken | CivilTimeToken | DocumentToken;
+export type Token = StringConstructor | BooleanConstructor | NumberConstructor | Uint8ArrayConstructor | IntToken | CivilDateToken | CivilTimeToken | DocumentToken | ColorToken;
 export type Schema = { readonly [name: string]: Token };
 type FieldOf<T> = T extends DocumentToken
   ? Document
-  : T extends StringConstructor
+  : T extends ColorToken
+    ? Color
+    : T extends StringConstructor
     ? string
     : T extends BooleanConstructor
       ? boolean
@@ -77,10 +123,10 @@ function wireTag(token: Token, name: string): number {
   if (token === Number) return wire.VALUE_F64;
   if (token === Uint8Array) return wire.VALUE_BLOB;
   if (token === Int) return wire.VALUE_I64;
-  if (token === CivilDate || token === CivilTime) return wire.VALUE_I64;
+  if (token === CivilDate || token === CivilTime || token === Color) return wire.VALUE_I64;
   if (token === Document) return wire.VALUE_BLOB;
   throw new TypeError(
-    `kaya: field ${JSON.stringify(name)} has no wire type — a schema names String, Boolean, Number, kaya.Int, kaya.CivilDate, kaya.CivilTime, kaya.Document or Uint8Array per field`,
+    `kaya: field ${JSON.stringify(name)} has no wire type — a schema names String, Boolean, Number, kaya.Int, kaya.CivilDate, kaya.CivilTime, kaya.Color, kaya.Document or Uint8Array per field`,
   );
 }
 
@@ -397,9 +443,10 @@ function keyPath(path: readonly unknown[]): wire.WireValue[] {
  * I64, and every integer derivation is computed here (docs/js-plan.md §4). */
 function signalValue(what: string, v: unknown): wire.WireValue {
   if (typeof v === "number" || typeof v === "string" || typeof v === "boolean") return v;
+  if (v instanceof Color) return new wire.I64(v.hex());
   if (typeof v === "object" && v !== null && "year" in v) return new wire.I64(wire.pack_date(...dateParts(what, v)));
   if (typeof v === "object" && v !== null && "hour" in v) return new wire.I64(wire.pack_time(...timeParts(what, v)));
-  throw new TypeError(`kaya: ${what} takes a string, a number, a boolean, a civil date or a civil time, not ${runtime.describe(v)}`);
+  throw new TypeError(`kaya: ${what} takes a string, a number, a boolean, a civil date, a civil time or a kaya.Color, not ${runtime.describe(v)}`);
 }
 
 /** A co-located handler. The parameters are open because the arity
@@ -1355,6 +1402,7 @@ class Variant {
 function fieldDecoder(token: Token): (v: wire.Decoded | Uint8Array) => unknown {
   if (token === CivilDate) return (v) => civilDate(v as number);
   if (token === CivilTime) return (v) => civilTime(v as number);
+  if (token === Color) return (v) => Color.fromHex(v as number);
   if (token === Document) return (v) => documentOfBytes(v as Uint8Array);
   return (v) => v;
 }
@@ -1365,6 +1413,7 @@ function fieldEncoder(token: Token, tag: number, type: string): (v: unknown, nam
   };
   if (token === CivilDate) return (v, name) => new wire.I64(wire.pack_date(...dateParts(`${type}.${name}`, v)));
   if (token === CivilTime) return (v, name) => new wire.I64(wire.pack_time(...timeParts(`${type}.${name}`, v)));
+  if (token === Color) return (v, name) => (v instanceof Color ? new wire.I64(v.hex()) : refuse(v, name, "kaya.Color"));
   // A Document field IS a Blob field carrying `documentBytes`' list (§19).
   if (token === Document) return (v, name) => (v instanceof Document ? new BlobHandle(runtime.registerBlob(documentBytes(v))) : refuse(v, name, "kaya.Document"));
   switch (tag) {
@@ -3722,7 +3771,7 @@ export function tr(key: string, args: Record<string, TrArg> = {}): string {
 
 /** Declare a signal: a render pipe with no read. A number is an F64 on
  * the wire (docs/js-plan.md §4). */
-export function signal<T extends string | number | boolean | CivilDate | CivilTime>(initial: T): Signal<Widen<T>> {
+export function signal<T extends string | number | boolean | CivilDate | CivilTime | Color>(initial: T): Signal<Widen<T>> {
   const handle = new Signal<Widen<T>>(app()._next("signal"), initial as Widen<T>);
   app()._signals.set(handle.id, handle as Signal<unknown>);
   records().push(wire.tx_create_signal(handle.id, signalValue("a signal", initial)));
@@ -4302,6 +4351,32 @@ export function datePicker(opts: DatePickerOptions = {}): Widget {
   const onChange = opts.onChange;
   if (onChange !== undefined) {
     app()._register(handle, wire.OCC_DATE_CHANGED, (...args: unknown[]) => onChange(...args.slice(0, -1), civilDate(args[args.length - 1] as number)));
+  }
+  setGrow(handle, opts);
+  return handle;
+}
+
+export type ColorPickerOptions = GrowOption & { color?: Color | Signal<Color> | FieldRef; alpha?: boolean; onColor?: Handler };
+
+/** A colour picker (docs/color-picker-plan.md): the platform's swatch,
+ * opening its own colour surface. Each SETTLED choice is one onColor,
+ * template copies getting the row first; an app write never echoes.
+ * `alpha: true` lets the user choose translucency. */
+export function colorPicker(opts: ColorPickerOptions = {}): Widget {
+  const handle = widget(wire.KIND_COLOR_PICKER);
+  if (opts.alpha !== undefined) records().push(wire.tx_set_alpha(handle.id, Boolean(opts.alpha)));
+  const color = opts.color;
+  if (color !== undefined) {
+    if (color instanceof Signal) records().push(wire.tx_bind_color(handle.id, color.id));
+    else if (color instanceof FieldRef) {
+      pickerField("a colour picker", color, Color, "kaya.Color");
+      records().push(wire.tx_bind_color_element(handle.id, color._level(), color._index));
+    } else if (color instanceof Color) records().push(wire.tx_set_color(handle.id, color.r, color.g, color.b, color.a));
+    else throw new TypeError(`kaya: a colour picker's color is a kaya.Color, a signal or a Color field, not ${runtime.describe(color)}`);
+  }
+  const onColor = opts.onColor;
+  if (onColor !== undefined) {
+    app()._register(handle, wire.OCC_COLOR_CHANGED, (...args: unknown[]) => onColor(...args.slice(0, -1), Color.fromHex(args[args.length - 1] as number)));
   }
   setGrow(handle, opts);
   return handle;

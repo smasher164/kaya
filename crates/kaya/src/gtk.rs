@@ -2820,6 +2820,56 @@ fn number_reconfigure(field: &GtkNumberField) {
     field.state.set(state);
 }
 
+/// docs/color-picker-plan.md §6: GTK's own swatch button over its dialog.
+/// `swatch` is its inner GtkButton, the bus's `button` node, which takes its
+/// NAME from the colour button (§4.3); `held` is the last committed or
+/// written colour.
+#[derive(Clone)]
+struct GtkColorField {
+    button: gtk4::ColorDialogButton,
+    swatch: gtk4::Button,
+    dialog: gtk4::ColorDialog,
+    held: Rc<std::cell::Cell<crate::Color>>,
+}
+
+fn rgba_of(c: crate::Color) -> gtk4::gdk::RGBA {
+    let f = |v: u8| f32::from(v) / 255.0;
+    gtk4::gdk::RGBA::new(f(c.r), f(c.g), f(c.b), f(c.a))
+}
+
+fn color_of(rgba: &gtk4::gdk::RGBA) -> crate::Color {
+    crate::Color::quantize(
+        f64::from(rgba.red()),
+        f64::from(rgba.green()),
+        f64::from(rgba.blue()),
+        f64::from(rgba.alpha()),
+    )
+}
+
+/// THE ONE COMMIT PATH for a colour (docs/color-picker-plan.md §4.3):
+/// `notify::rgba` outside the quiet guard, which the dialog's Select and a
+/// colour dropped on the swatch both reach. The button knows nothing of
+/// `with-alpha`, so an opaque picker is held opaque here.
+fn color_committed(
+    field: &GtkColorField,
+    quiet: &Rc<std::cell::Cell<bool>>,
+    sink: &OccSink,
+    tag: &[u8],
+) {
+    let mut picked = color_of(&field.button.rgba());
+    if !field.dialog.is_with_alpha() {
+        picked.a = 0xFF;
+    }
+    let was = quiet.replace(true);
+    field.button.set_rgba(&rgba_of(picked));
+    quiet.set(was);
+    if picked == field.held.get() {
+        return;
+    }
+    field.held.set(picked);
+    sink.send_color_tag(tag, picked.packed());
+}
+
 /// The date the CALENDAR is showing, packed — never a model copy.
 fn calendar_packed(calendar: &gtk4::Calendar) -> i64 {
     // `year`/`month`/`day` are 4.14 getters and this build pins v4_12;
@@ -3126,6 +3176,7 @@ enum NativeWidget {
     /// docs/number-field-plan.md §6: a `GtkSpinButton` whose text kaya
     /// writes and reads through the formatter door.
     NumberField(GtkNumberField),
+    ColorPicker(GtkColorField),
     Image(gtk4::Picture),
     Scroll(gtk4::ScrolledWindow),
     Progress(gtk4::ProgressBar),
@@ -3166,6 +3217,7 @@ impl NativeWidget {
             NativeWidget::Switch(w) => w.clone().upcast(),
             NativeWidget::Slider(w) => w.scale.clone().upcast(),
             NativeWidget::NumberField(f) => f.spin.clone().upcast(),
+            NativeWidget::ColorPicker(f) => f.button.clone().upcast(),
             NativeWidget::Image(w) => w.clone().upcast(),
             NativeWidget::Scroll(w) => w.clone().upcast(),
             NativeWidget::Progress(w) => w.clone().upcast(),
@@ -3854,7 +3906,7 @@ fn kind_registry(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<gtk4
         K::Slider => core.sliders.iter().map(|w| w.scale.clone().upcast()).collect(),
         K::Entry => core.entries.iter().map(|w| w.clone().upcast()).collect(),
         K::Search => core.searches.iter().map(|w| w.clone().upcast()).collect(),
-        K::ColorPicker => crate::depth_stub("colorpicker"),
+        K::ColorPicker => core.color_pickers.iter().map(|f| f.button.clone().upcast()).collect(),
         K::NumberField => core.number_fields.iter().map(|f| f.spin.clone().upcast()).collect(),
         K::Label => core.labels.clone(),
         K::Column => core.columns.iter().map(|w| w.clone().upcast()).collect(),
@@ -4810,6 +4862,7 @@ struct CoreState {
     searches: Vec<gtk4::SearchEntry>,
     sliders: Vec<GtkSlider>,
     number_fields: Vec<GtkNumberField>,
+    color_pickers: Vec<GtkColorField>,
     /// The composed pickers, in creation order like every other registry;
     /// each entry carries the parts `set_date`/`set_time` drive and
     /// `expect_picker` reads (docs/datetime-plan.md D8).
@@ -8843,7 +8896,10 @@ fn context_anchor_id(core: &CoreState, t: crate::harness::Target) -> u64 {
         K::Canvas => core.canvases[resolve(t.index, core.canvases.len())].clone().upcast(),
         // The harness rejects editable text before the stage sees it
         // (their native context menus are dress).
-        K::ColorPicker => crate::depth_stub("colorpicker"),
+        K::ColorPicker => core.color_pickers[resolve(t.index, core.color_pickers.len())]
+            .button
+            .clone()
+            .upcast(),
         K::Entry | K::Textarea | K::Search | K::NumberField => {
             panic!("kaya: editable text is not a context anchor (v1)")
         }
@@ -11512,7 +11568,37 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.grids.push(grid.clone());
                     NativeWidget::Grid(grid)
                 }
-                WidgetKind::ColorPicker => crate::depth_stub("colorpicker"),
+                WidgetKind::ColorPicker => {
+                    let dialog = gtk4::ColorDialog::new();
+                    dialog.set_with_alpha(false);
+                    let button = gtk4::ColorDialogButton::new(Some(dialog.clone()));
+                    let swatch = button
+                        .first_child()
+                        .and_downcast::<gtk4::Button>()
+                        .expect("GtkColorDialogButton parents one GtkButton");
+                    let black = crate::Color::rgb(0, 0, 0);
+                    let field = GtkColorField {
+                        button: button.clone(),
+                        swatch,
+                        dialog,
+                        held: Rc::new(std::cell::Cell::new(black)),
+                    };
+                    let sink = core.occurrences.clone();
+                    let tag = tag.expect("color pickers carry a tag");
+                    let quiet = core.apply_quiet.clone();
+                    let was = quiet.replace(true);
+                    button.set_rgba(&rgba_of(black));
+                    quiet.set(was);
+                    let committed = field.clone();
+                    button.connect_rgba_notify(move |_| {
+                        if quiet.get() {
+                            return;
+                        }
+                        color_committed(&committed, &quiet, &sink, &tag);
+                    });
+                    core.color_pickers.push(field.clone());
+                    NativeWidget::ColorPicker(field)
+                }
                 WidgetKind::NumberField => {
                     // docs/number-field-plan.md §6. ALWAYS, and the input
                     // handler answers the committed value for text the door
@@ -12077,6 +12163,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 core.searches.retain(|s| !gone(s.upcast_ref()));
                 core.sliders.retain(|s| !gone(s.scale.upcast_ref()));
                 core.number_fields.retain(|f| !gone(f.spin.upcast_ref()));
+                core.color_pickers.retain(|f| !gone(f.button.upcast_ref()));
                 core.date_pickers.retain(|d| !gone(d.button.upcast_ref()));
                 core.time_pickers.retain(|t| !gone(t.button.upcast_ref()));
                 core.images.retain(|p| !gone(p.upcast_ref()));
@@ -13693,6 +13780,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     field.state.set(state);
                     show_date(field, &core.apply_quiet, packed);
                     field.button.set_label(&date_button_label(packed));
+                }
+                (NativeWidget::ColorPicker(field), Prop::Color, Value::I64(packed)) => {
+                    if let Ok(color) = crate::Color::from_packed(packed) {
+                        field.held.set(color);
+                        let was = core.apply_quiet.replace(true);
+                        field.button.set_rgba(&rgba_of(color));
+                        core.apply_quiet.set(was);
+                    }
+                }
+                (NativeWidget::ColorPicker(field), Prop::Alpha, Value::Bool(on)) => {
+                    field.dialog.set_with_alpha(on);
                 }
                 (NativeWidget::DatePicker(field), Prop::MinDate, Value::I64(packed)) => {
                     let mut state = field.state.get();
@@ -15945,6 +16043,27 @@ mod frame_tests {
 }
 
 #[cfg(test)]
+mod color_tests {
+    use super::{color_of, rgba_of};
+
+    #[test]
+    fn gtk_color_round_trips_every_byte() {
+        for v in 0..=255u8 {
+            for c in [
+                crate::Color::rgba(v, 0, 0, 0xFF),
+                crate::Color::rgba(0, v, 0, 0xFF),
+                crate::Color::rgba(0, 0, v, 0xFF),
+                crate::Color::rgba(0x33, 0x66, 0x99, v),
+            ] {
+                assert_eq!(color_of(&rgba_of(c)), c);
+            }
+        }
+        let wide = gtk4::gdk::RGBA::new(1.2, -0.1, 0.5, 1.0);
+        assert_eq!(color_of(&wide), crate::Color::rgba(0xFF, 0x00, 0x80, 0xFF));
+    }
+}
+
+#[cfg(test)]
 mod notify_tests {
     use super::{notification_id_of, notification_target, scheduled_command, shell_line};
     use gtk4::glib;
@@ -16455,6 +16574,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 searches: Vec::new(),
                 sliders: Vec::new(),
                 number_fields: Vec::new(),
+                color_pickers: Vec::new(),
                 date_pickers: Vec::new(),
                 time_pickers: Vec::new(),
                 images: Vec::new(),
@@ -17514,7 +17634,6 @@ impl crate::harness::Stage for GtkStage {
                         }
                     }
                 }
-                K::ColorPicker => crate::depth_stub("colorpicker"),
                 K::NumberField => {
                     match crate::harness::try_resolve(target.index, core.number_fields.len()) {
                         None => "<no such target>".to_owned(),
@@ -18198,12 +18317,25 @@ impl crate::harness::Stage for GtkStage {
 
     /// The CONTROL's value in fixed digits, read off the calendar and the
     /// spins — never the mirrored state beside them.
-    fn set_color(&self, _: crate::harness::Target, _: crate::Color) {
-        crate::depth_stub("colorpicker")
+    /// A settled choice without the dialog (docs/color-picker-plan.md §5):
+    /// the button's rgba moves OUTSIDE the quiet guard, so its `notify` runs
+    /// the commit path a Select or a drop runs.
+    fn set_color(&self, t: crate::harness::Target, color: crate::Color) {
+        Self::on_main(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.color_pickers.len()) else {
+                return;
+            };
+            core.color_pickers[i].button.set_rgba(&rgba_of(color));
+        });
     }
 
-    fn color_value(&self, _: crate::harness::Target) -> String {
-        crate::depth_stub("colorpicker")
+    fn color_value(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.color_pickers.len()) else {
+                return "<no such target>".to_owned();
+            };
+            color_of(&core.color_pickers[i].button.rgba()).to_string()
+        })
     }
 
     fn picker_value(&self, t: crate::harness::Target) -> String {
@@ -21321,9 +21453,6 @@ impl crate::harness::Stage for GtkStage {
     /// Every angle-bracketed answer says what it MEASURED (invariant 3),
     /// never a guess about which layer lost the picture.
     fn canvas_ink(&self, target: crate::harness::Target, points: &str) -> String {
-        if target.kind == crate::harness::TargetKind::ColorPicker {
-            crate::depth_stub("colorpicker")
-        }
         let points = points.to_owned();
         Self::on_main(move |core| {
             use gtk4::prelude::{NativeExt, PaintableExt, WidgetExt};
@@ -21334,25 +21463,40 @@ impl crate::harness::Stage for GtkStage {
             // READING the presentation report sends, so the report and
             // the answer cannot disagree.
             let mode = if adw::StyleManager::default().is_dark() { "dark" } else { "light" };
-            let wanted = crate::harness::probe_points(&points);
-            if wanted.is_empty() {
-                return format!("<no probe points in {points:?}>");
-            }
-            let Some(i) = crate::harness::try_resolve(target.index, core.canvases.len()) else {
-                return format!("<this window holds {} canvases>", core.canvases.len());
-            };
-            let picture = core.canvases[i].clone();
+            // A colour picker is sampled at its SWATCH's centre, the drawing
+            // inside the button (docs/color-picker-plan.md §5).
+            let (picture, wanted): (gtk4::Widget, Vec<(f64, f64)>) =
+                if target.kind == crate::harness::TargetKind::ColorPicker {
+                    let Some(i) = crate::harness::try_resolve(target.index, core.color_pickers.len())
+                    else {
+                        return format!("<this window holds {} colour pickers>", core.color_pickers.len());
+                    };
+                    let Some(swatch) = core.color_pickers[i].swatch.child() else {
+                        return "<the colour button holds no swatch>".to_owned();
+                    };
+                    (swatch, vec![(50.0, 50.0)])
+                } else {
+                    let wanted = crate::harness::probe_points(&points);
+                    if wanted.is_empty() {
+                        return format!("<no probe points in {points:?}>");
+                    }
+                    let Some(i) = crate::harness::try_resolve(target.index, core.canvases.len()) else {
+                        return format!("<this window holds {} canvases>", core.canvases.len());
+                    };
+                    (core.canvases[i].clone().upcast(), wanted)
+                };
             while glib::MainContext::default().iteration(false) {}
             let Some(native) = picture.native() else {
-                return "<the canvas is in no toplevel: nothing has been mounted>".to_owned();
+                return format!("<the {:?} is in no toplevel: nothing has been mounted>", target.kind);
             };
             let root = native.clone().upcast::<gtk4::Widget>();
             let Some(bounds) = picture.compute_bounds(&root) else {
-                return "<the canvas has no bounds inside its toplevel>".to_owned();
+                return format!("<the {:?} has no bounds inside its toplevel>", target.kind);
             };
             if bounds.width() < 1.0 || bounds.height() < 1.0 {
                 return format!(
-                    "<the canvas laid out at {}x{} inside its toplevel>",
+                    "<the {:?} laid out at {}x{} inside its toplevel>",
+                    target.kind,
                     bounds.width(),
                     bounds.height()
                 );
@@ -21843,7 +21987,8 @@ fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk
         K::Label => try_resolve(target.index, core.labels.len()).map(|i| core.labels[i].clone()),
         K::Entry => nth!(core.entries),
         K::Search => nth!(core.searches),
-        K::ColorPicker => crate::depth_stub("colorpicker"),
+        K::ColorPicker => try_resolve(target.index, core.color_pickers.len())
+            .map(|i| core.color_pickers[i].swatch.clone().upcast()),
         K::NumberField => try_resolve(target.index, core.number_fields.len())
             .map(|i| core.number_fields[i].spin.clone().upcast()),
         K::Textarea => nth!(core.textareas),
@@ -21971,6 +22116,12 @@ fn atspi_role_of(w: &gtk4::Widget) -> Option<atspi::Role> {
     // "<not in the accessibility tree>" (docs/traps.md, "A canvas sized by
     // its own blit NEVER STARTS", last paragraph).
     if w.is::<KayaCanvas>() {
+        return Some(atspi::Role::Image);
+    }
+    // A colour button's swatch (GtkColorSwatch, private to GTK) is an IMG
+    // named "Red %, Green %, Blue %" on the bus, measured 2026-09-28
+    // (docs/color-picker-plan.md §4.3).
+    if w.type_().name() == "GtkColorSwatch" {
         return Some(atspi::Role::Image);
     }
     if w.is::<gtk4::ProgressBar>() {
@@ -22654,6 +22805,16 @@ fn atspi_collect(want: atspi::Role, index: usize, want_description: bool) -> Opt
                 found
                     .iter()
                     .map(|(r, n, _)| format!("{r:?}/{n}"))
+                    .collect::<Vec<_>>()
+            );
+        } else if nth.is_some_and(|(_, name, _)| name.is_empty()) {
+            // An unnamed node and a wrong ordinal read alike in the verdict.
+            eprintln!(
+                "KAYA_AX_TRACE: {want:?}#{index} on the bus has no name; its {want:?} family: {:?}",
+                found
+                    .iter()
+                    .filter(|(r, _, _)| *r == want)
+                    .map(|(_, n, _)| n.as_str())
                     .collect::<Vec<_>>()
             );
         }

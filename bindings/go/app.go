@@ -16,7 +16,7 @@ import (
 
 // Scalar is the signal-value constraint: the wire's value types.
 type Scalar interface {
-	~string | ~bool | ~int64 | ~float64 | ~[]byte | Date | Time
+	~string | ~bool | ~int64 | ~float64 | ~[]byte | Date | Time | Color
 }
 
 // Signal carries its value type: writes are checked at compile time,
@@ -267,6 +267,8 @@ type App struct {
 	nodeCommits    map[uint64]func(*Tx, []any, float64)
 	widgetDates    map[uint64]func(*Tx, Date)
 	nodeDates      map[uint64]func(*Tx, []any, Date)
+	widgetColors   map[uint64]func(*Tx, Color)
+	nodeColors     map[uint64]func(*Tx, []any, Color)
 	widgetTimes    map[uint64]func(*Tx, Time)
 	nodeTimes      map[uint64]func(*Tx, []any, Time)
 	// Window lifecycle: one handler each, receiving the window id.
@@ -406,6 +408,8 @@ func NewApp() *App {
 		nodeToggles:    make(map[uint64]func(*Tx, []any, bool)),
 		widgetDates:    make(map[uint64]func(*Tx, Date)),
 		nodeDates:      make(map[uint64]func(*Tx, []any, Date)),
+		widgetColors:   make(map[uint64]func(*Tx, Color)),
+		nodeColors:     make(map[uint64]func(*Tx, []any, Color)),
 		widgetTimes:    make(map[uint64]func(*Tx, Time)),
 		nodeTimes:      make(map[uint64]func(*Tx, []any, Time)),
 		menuActivated:     make(map[uint64]func(*Tx)),
@@ -2091,6 +2095,36 @@ func (tx *Tx) DatePickerBound(date Signal[Date], onDate func(*Tx, Date)) Widget 
 	if onDate != nil {
 		w.OnDate(onDate)
 	}
+	return w
+}
+
+// ColorPicker creates a colour picker holding color
+// (docs/color-picker-plan.md): the platform's swatch, opening its colour
+// surface. Settled choices reach OnColor; Alpha allows translucency.
+func (tx *Tx) ColorPicker(color Color, onColor func(*Tx, Color)) Widget {
+	w := tx.Widget(KindColorPicker)
+	tx.emit(TxSetColor(w.id, color.R, color.G, color.B, color.A))
+	if onColor != nil {
+		w.OnColor(onColor)
+	}
+	return w
+}
+
+// ColorPickerBound creates a colour picker whose value binds a Color
+// signal. Property writes never echo.
+func (tx *Tx) ColorPickerBound(color Signal[Color], onColor func(*Tx, Color)) Widget {
+	w := tx.Widget(KindColorPicker)
+	tx.emit(TxBindColor(w.id, color.id))
+	if onColor != nil {
+		w.OnColor(onColor)
+	}
+	return w
+}
+
+// Alpha lets a colour picker's user choose translucency (off by default:
+// docs/color-picker-plan.md §3 rule 3).
+func (w Widget) Alpha(on bool) Widget {
+	w.tx.emit(TxSetAlpha(w.id, on))
 	return w
 }
 
@@ -4767,6 +4801,11 @@ func (t *Tpl) SetStep(n Node, step float64) {
 	t.tx.emit(TxSetStep(n.id, step))
 }
 
+// SetAlpha lets every stamped copy of a colour picker choose translucency.
+func (t *Tpl) SetAlpha(n Node, on bool) {
+	t.tx.emit(TxSetAlpha(n.id, on))
+}
+
 // SetMin and SetMax are a stamped number field's bounds
 // (docs/number-field-plan.md §2), constant across the copies.
 func (t *Tpl) SetMin(n Node, min float64) {
@@ -5291,6 +5330,28 @@ func (t *Tpl) DatePickerBound[S interface {
 }](src S) Node {
 	n := t.Widget(KindDatePicker)
 	t.applyDate(n, src)
+	return n
+}
+
+// ColorPicker creates a colour picker at a constant colour in the
+// blueprint; ColorPickerBound reads a signal or the row's own Color field.
+// Choices register against the node (Node.OnColor).
+func (t *Tpl) ColorPicker(color Color) Node {
+	n := t.Widget(KindColorPicker)
+	t.tx.emit(TxSetColor(n.id, color.R, color.G, color.B, color.A))
+	return n
+}
+
+func (t *Tpl) ColorPickerBound[S interface {
+	Signal[Color] | Field[Color]
+}](src S) Node {
+	n := t.Widget(KindColorPicker)
+	switch v := any(src).(type) {
+	case Signal[Color]:
+		t.tx.emit(TxBindColor(n.id, v.id))
+	case Field[Color]:
+		t.BindColorField(n, 0, v)
+	}
 	return n
 }
 
@@ -6216,6 +6277,20 @@ func (n Node) OnDate(fn func(*Tx, []any, Date)) Node {
 	return n
 }
 
+// OnColor registers a handler for a live colour picker's settled choices
+// (docs/color-picker-plan.md §3 rule 2); a programmatic write never echoes.
+func (w Widget) OnColor(fn func(*Tx, Color)) Widget {
+	w.tx.app.widgetColors[w.id] = fn
+	return w
+}
+
+// OnColor registers a handler for a template colour picker; the handler
+// also receives the stamped copy's keys, outermost first.
+func (n Node) OnColor(fn func(*Tx, []any, Color)) Node {
+	n.tx.app.nodeColors[n.id] = fn
+	return n
+}
+
 // OnTime registers a handler for a live time picker's committed picks.
 func (w Widget) OnTime(fn func(*Tx, Time)) Widget {
 	w.tx.app.widgetTimes[w.id] = fn
@@ -6429,6 +6504,14 @@ func (a *App) Serve() {
 		case kind == occDateChanged:
 			if fn := a.nodeDates[id]; fn != nil {
 				a.dispatch(func(tx *Tx) { fn(tx, keys, dateOf(packed)) })
+			}
+		case kind == occColorChanged && len(keys) == 0:
+			if fn := a.widgetColors[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, colorOf(packed)) })
+			}
+		case kind == occColorChanged:
+			if fn := a.nodeColors[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, keys, colorOf(packed)) })
 			}
 		case kind == occTimeChanged && len(keys) == 0:
 			if fn := a.widgetTimes[id]; fn != nil {

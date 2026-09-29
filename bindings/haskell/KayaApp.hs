@@ -278,6 +278,8 @@ module KayaApp
     datePickerBoundOn,
     timePickerOn,
     timePickerBoundOn,
+    colorPickerOn,
+    colorPickerBoundOn,
     sliderOn,
     sliderBoundOn,
     numberFieldOn,
@@ -313,6 +315,7 @@ module KayaApp
     TplBoolSource (..),
     TplDateSource (..),
     TplTimeSource (..),
+    TplColorSource (..),
     TplNumberSource (..),
     TplImageSource (..),
     TplAttr (..),
@@ -323,8 +326,10 @@ module KayaApp
     checkbox,
     datePicker,
     timePicker,
+    colorPicker,
     bindDateField,
     bindTimeField,
+    bindColorField,
     image,
     rowOf,
     columnOf,
@@ -2796,6 +2801,9 @@ data Attr (c :: WClass) where
   MaxDate :: Day -> Attr 'LeafW
   -- | A time picker's minute granularity: 1, 5, 10, 15 or 30 (D3).
   MinuteStep :: Int -> Attr 'LeafW
+  -- | Whether a colour picker's user may choose translucency
+  -- (docs\/color-picker-plan.md §3 rule 3); off by default.
+  Alpha :: Bool -> Attr 'LeafW
   -- | The granularity a slider's thumb rests on: min + k * step
   -- (docs\/slider-plan.md S1). Divides the range evenly; 0 is continuous.
   Step :: Double -> Attr 'LeafW
@@ -2861,6 +2869,7 @@ applyAttr (MinDate d) (Widget n) =
 applyAttr (MaxDate d) (Widget n) =
   let (y, m, dd) = toGregorian d
    in emitB (W.txSetMaxDate n (fromIntegral y) m dd)
+applyAttr (Alpha on) (Widget n) = emitB (W.txSetAlpha n on)
 applyAttr (MinuteStep minutes) (Widget n) =
   emitB (W.txSetMinuteStep n (fromIntegral minutes))
 applyAttr (Step step) (Widget n) = emitB (W.txSetStep n step)
@@ -3087,6 +3096,24 @@ datePickerBoundOn (Signal s) handler = leafish $ do
   w@(Widget n) <- widget W.kindDatePicker
   emitB (W.txBindDate n s)
   pendB (PDate n handler)
+  return w
+
+-- | A colour picker holding @color@, with its choice handler co-located
+-- (docs\/color-picker-plan.md): the platform's swatch, opening its colour
+-- surface. Each SETTLED choice arrives; 'Alpha' allows translucency.
+colorPickerOn :: (LeafArgs r) => Color -> (Color -> IO ()) -> r
+colorPickerOn color handler = leafish $ do
+  w@(Widget n) <- widget W.kindColorPicker
+  emitB (W.txSetColor n (fromIntegral color.r) (fromIntegral color.g) (fromIntegral color.b) (fromIntegral color.a))
+  pendB (PColor n handler)
+  return w
+
+-- | A colour picker whose VALUE follows a signal; property writes never echo.
+colorPickerBoundOn :: (LeafArgs r) => Signal Color -> (Color -> IO ()) -> r
+colorPickerBoundOn (Signal s) handler = leafish $ do
+  w@(Widget n) <- widget W.kindColorPicker
+  emitB (W.txBindColor n s)
+  pendB (PColor n handler)
   return w
 
 -- | A time picker over civil times: hours and minutes, no seconds.
@@ -3509,6 +3536,21 @@ instance TplDateSource (Signal Day) where
 instance TplDateSource (KField Day) where
   bindDateSource n fd = bindDateField n 0 fd
 
+-- | What a template colour picker's value can bind to: a constant, a
+-- signal, or the row's own Color field (docs\/color-picker-plan.md §2).
+class TplColorSource s where
+  bindColorSource :: Node -> s -> Tpl ()
+
+instance TplColorSource Color where
+  bindColorSource (Node n) c =
+    emitT (W.txSetColor n (fromIntegral c.r) (fromIntegral c.g) (fromIntegral c.b) (fromIntegral c.a))
+
+instance TplColorSource (Signal Color) where
+  bindColorSource (Node n) (Signal s) = emitT (W.txBindColor n s)
+
+instance TplColorSource (KField Color) where
+  bindColorSource n fd = bindColorField n 0 fd
+
 -- | The time picker's three sources.
 class TplTimeSource s where
   bindTimeSource :: Node -> s -> Tpl ()
@@ -3635,6 +3677,8 @@ data TplAttr where
   -- constant across the copies.
   TplMin :: Double -> TplAttr
   TplMax :: Double -> TplAttr
+  -- | A stamped colour picker's translucency switch, constant across the copies.
+  TplAlpha :: Bool -> TplAttr
   -- | What this stamped copy takes from a paste — the closed kinds by
   -- name plus any custom format ids. A CONSTANT LIST AND NOT A SOURCE.
   -- Every backend gates the paste occurrence on the focused widget's
@@ -3690,6 +3734,7 @@ applyTplAttr (TplMaxHeight points) (Node n) = emitT (W.txSetMaxHeight n points)
 applyTplAttr (TplTickSpacing spacing) (Node n) = emitT (W.txSetTickSpacing n spacing)
 applyTplAttr (TplMin v) (Node n) = emitT (W.txSetMin n v)
 applyTplAttr (TplMax v) (Node n) = emitT (W.txSetMax n v)
+applyTplAttr (TplAlpha on) (Node n) = emitT (W.txSetAlpha n on)
 applyTplAttr (TplAccepts kinds) n = setNodeAccepts n kinds
 applyTplAttr (TplDraggable clip ops) n = setNodeDragSource n clip ops
 applyTplAttr (TplDropTarget ops) n = setNodeDropTarget n ops
@@ -3768,6 +3813,15 @@ datePicker src handler = do
   n@(Node i) <- widget W.kindDatePicker
   bindDateSource n src
   pendT (PDateNode i handler)
+  return n
+
+-- | A stamped colour picker over an addressable source, with its choice
+-- handler co-located; the handler receives the copy's keys first.
+colorPicker :: TplColorSource s => s -> ([Key] -> Color -> IO ()) -> Tpl Node
+colorPicker src handler = do
+  n@(Node i) <- widget W.kindColorPicker
+  bindColorSource n src
+  pendT (PColorNode i handler)
   return n
 
 -- | A stamped time picker; the date picker's contract, hours and minutes.
@@ -3971,6 +4025,10 @@ bindTextField (Node n) level (KField i) = emitT (W.txBindTextElement n level i)
 bindDateField :: Node -> Word32 -> KField Day -> Tpl ()
 bindDateField (Node n) level (KField i) = emitT (W.txBindDateElement n level i)
 
+-- | Bind a colour picker's value to one field of the element; KField Color only.
+bindColorField :: Node -> Word32 -> KField Color -> Tpl ()
+bindColorField (Node n) level (KField i) = emitT (W.txBindColorElement n level i)
+
 -- | Bind a time picker's value to one field of the element.
 bindTimeField :: Node -> Word32 -> KField TimeOfDay -> Tpl ()
 bindTimeField (Node n) level (KField i) = emitT (W.txBindTimeElement n level i)
@@ -4106,6 +4164,8 @@ register app pending = case pending of
   PTime n handler -> modifyIORef' (app.appWidgetTimes) (Map.insert n handler)
   PDateNode n handler -> modifyIORef' (app.appNodeDates) (Map.insert n handler)
   PTimeNode n handler -> modifyIORef' (app.appNodeTimes) (Map.insert n handler)
+  PColor n handler -> modifyIORef' (app.appWidgetColors) (Map.insert n handler)
+  PColorNode n handler -> modifyIORef' (app.appNodeColors) (Map.insert n handler)
   PMenuActivated n handler -> modifyIORef' (app.appMenuActivated) (Map.insert n handler)
   PMenuActivatedNode n handler -> modifyIORef' (app.appMenuActivatedNode) (Map.insert n handler)
   PMenuToggled n handler -> modifyIORef' (app.appMenuToggled) (Map.insert n handler)
@@ -4335,6 +4395,8 @@ newApp =
     <*> newIORef Map.empty -- appNodeDates
     <*> newIORef Map.empty -- appWidgetTimes
     <*> newIORef Map.empty -- appNodeTimes
+    <*> newIORef Map.empty -- appWidgetColors
+    <*> newIORef Map.empty -- appNodeColors
     <*> newIORef Map.empty -- appCloseRequested
     <*> newIORef Map.empty -- appWindowClosed
     <*> newIORef Map.empty -- appFullscreenChanged
@@ -4559,6 +4621,16 @@ dispatchLoop app = do
             _ -> do
               handlers <- readIORef (app.appNodeDates)
               dispatch (mapM_ (\h -> h (keyPath keys) (dayOfPacked packed)) (Map.lookup ident handlers))
+          dispatchLoop app
+      | kind == W.occKindColorChanged -> do
+          let packed = case payload of Just (W.VI64 n) -> n; _ -> 0
+          case keys of
+            [] -> do
+              handlers <- readIORef (app.appWidgetColors)
+              dispatch (mapM_ ($ colorOfPacked packed) (Map.lookup ident handlers))
+            _ -> do
+              handlers <- readIORef (app.appNodeColors)
+              dispatch (mapM_ (\h -> h (keyPath keys) (colorOfPacked packed)) (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindTimeChanged -> do
           let packed = case payload of Just (W.VI64 n) -> n; _ -> 0

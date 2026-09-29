@@ -2,9 +2,11 @@
 
 Status: DESIGNED 2026-09-28; the DEPTH SLICE BUILT 2026-09-28 (the spec, the
 core, the generators, the harness, the SwiftUI arm, the Rust binding and
-tools/scenes/colorpicker.steps on the mac lane; docs/deferred.md holds the
-breadth). §4.1 and §4.5 are MEASURED and AMEND §5 in two places, marked
-below. The roadmap's fourth piece for the
+tools/scenes/colorpicker.steps on the mac lane); the BREADTH BUILT 2026-09-28
+(the GTK, WinUI and Compose arms, the iOS legs and the other eight bindings;
+colorpicker on all five lanes). §4 is MEASURED on every platform and AMENDS
+§5, marked below. `pick_color` and its panel scene are docs/deferred.md's
+"BUILD — the colour picker's panel scene". The roadmap's fourth piece for the
 video editor ("a new kind, native on four lanes and synthesized on
 Android"; docs/deferred.md's forcing-app entry names the colour picker
 among the editor's triggers), where the inspector sets a title's colour,
@@ -157,14 +159,83 @@ Nothing here lets an app paint a widget.
 2. **The iOS commit.** Whether SwiftUI's binding exposes the continuous
    flag; if not, the arm presents `UIColorPickerViewController` itself
    behind a swatch so the delegate's noncontinuous select is the door.
+
+   MEASURED 2026-09-28 (iOS 26.5 simulator; a throwaway probe app driven by
+   the lane's XCUITest driver, real taps and drags):
+   - The arm presents `UIColorPickerViewController` itself (`.popover`,
+     adapted to a sheet on a phone). Its content is a REMOTE scene, readable
+     through XCUITest only (the Grid, Spectrum and Sliders tabs, `close`, every
+     grid swatch by name).
+   - The delegate behaves as documented: a tap on a swatch sends one
+     continuous select and then one noncontinuous one with the same colour; a
+     drag across the grid sent 30 continuous selects and ONE noncontinuous at
+     the release. `guard !continuously` commits once per gesture. Closing
+     sends `colorPickerViewControllerDidFinish`.
+   - UNLIKE APPKIT, `supportsAlpha = false` does not hold a colour opaque: a
+     `UIColorWell` and the controller alike keep a programmatic `26A26980`.
+     The surface draws no opacity control when it is off (the Sliders tab
+     shows an Opacity row only with `alpha` on), and the arm strips alpha
+     itself (`kayaColorOf(_:opaque:)`), on the delegate's door and on
+     `set_color`'s drive, so §5's opaque landing holds on iOS too.
+   - The Sliders tab's hex field (no identifier, beside the `sRGB Hex Color #`
+     menu button, sRGB by default) takes the driver's existing `tap` and
+     `type_b64`, and the controller sends a NONCONTINUOUS select for every
+     parseable intermediate: typing `E01B24` over `96D35F` committed `9966DD`
+     (the three digits left, read as shorthand), `EE0011` and `E01B24`. A
+     `pick_color` on iOS replaces the whole text in one edit or owns the
+     intermediates.
 3. **GTK's result.** That `choose_rgba`'s Select is the only route to a
    new `rgba` on the lane image's GTK, and whether its colour editor's
    pick button appears under the lane's portal (it should not; the leg
    does not need it).
+
+   MEASURED 2026-09-28, a source read of GTK 4.18.6 (the lane image's
+   `libgtk-4-1 4.18.6+ds-2`), AMENDING the question above:
+   - Select is NOT the only route. `GtkColorDialogButton` changes `rgba` on
+     three paths: its own `choose_rgba` callback (Select; Cancel, Esc and close
+     finish with `GTK_DIALOG_ERROR_DISMISSED` and no colour), a `GdkRGBA`
+     DROPPED on the swatch (the button is a drop target and a drag source), and
+     the app's `set_rgba`. Both user routes end in `set_rgba`, whose
+     `notify::rgba` is the one door that sees both, so the arm commits there,
+     outside the quiet guard the app's write sits under. `set_rgba` of an
+     equal colour (an exact float compare) notifies nothing.
+   - `with-alpha` false forces alpha 1 on the DIALOG's answer only. The button
+     never reads it and its swatch keeps drawing translucency (a checkerboard
+     under the colour), so a translucent drop or `set_color` on an opaque
+     picker would be held translucent: the arm forces FF itself (§5 AMENDED).
+   - No pick button on the lane: the editor shows it only when a RUNNING
+     portal answers Screenshot version 2 (asked with NO_AUTO_START), or GNOME
+     Shell's or KWin's screenshot service does; the image's one portal
+     backend, gtk.portal, lists no Screenshot interface.
+   - The inner `GtkButton` is the bus's `button` node, and GTK names it from
+     its PARENT (`gtk_at_context_is_nested_button` lists a button inside a
+     `GtkColorDialogButton`), so the app's label goes on the colour button and
+     `expect_ax` reads the inner button (measured red first: a label set on the
+     inner button published an empty name).
 4. **WinUI's flyout.** That `Flyout.Closed` fires for a light dismiss,
    Esc and a programmatic `Hide` alike, and reading `ColorPicker.Color`
    there is the commit. `ColorPicker` and `Flyout` join the bindgen
    filter (tools/winui-bindgen); the metadata carries both.
+
+   MEASURED 2026-09-28 on the windows lane's VM (aarch64 Windows, WinAppSDK
+   2.2), a temporary probe in the arm driving picker#0 of the scene's guest:
+   - `Flyout.Closed` fires once each for a programmatic `Hide`, an Esc on the
+     system input queue and a light-dismiss click elsewhere in the window, so
+     it is the one door; reading `ColorPicker.Color` there is the commit.
+   - `ColorChanged` fires for a programmatic `SetColor` (and for the hex box's
+     text, below): an app write would echo through it. The arm registers no
+     ColorChanged handler at all; check-slider-commit refuses one that does
+     not open on the quiet guard.
+   - `IsAlphaEnabled` false does NOT refuse a translucent `SetColor`: the
+     control holds `26A26980` while its template is unapplied and while the
+     flyout opens, and coerces to `26A269FF` only later, once its template
+     runs. So the commit forces FF itself and writes the opaque colour back,
+     which is §5's AMENDED rule.
+   - The template's text boxes, by name: `RedTextBox`, `GreenTextBox`,
+     `BlueTextBox`, `HueTextBox`, `SaturationTextBox`, `ValueTextBox`,
+     `AlphaTextBox` (`50%`) and `HexTextBox` (`#26A269`, sRGB, no alpha).
+     `SetText("E01B24")` on `HexTextBox` moved `Color` to `E01B24FF` at once, before any Return; a `Hide` then committed it. That
+     is `pick_color`'s route here: open the flyout, write the hex box, hide.
 5. **The quantizing round trip** on all five: an app write of
    `0x336699FF` reads back `336699FF` from the control; a P3 colour
    outside sRGB comes back clamped, the same bytes on the two Apple arms.
@@ -172,7 +243,12 @@ Nothing here lets an app paint a widget.
    MEASURED on the mac 2026-09-28: `336699FF` round-trips exactly; Display P3
    (1, 0, 0) reads back through `usingColorSpace(.sRGB)` as exactly (1, 0, 0),
    AppKit clamping before the quantizer does, so `FF0000FF`. The iOS half is
-   the breadth slice's. THE SWATCH'S PIXELS: the well's own cache is 8-bit in
+   the breadth slice's. MEASURED on iOS 2026-09-28: `336699FF` round-trips
+   exactly through a `UIColorWell`; Display P3 (1, 0, 0), extended sRGB
+   (1.093, -0.227, -0.150), converts to the `sRGB` colour space clamped to
+   (1, 0, 0), so `FF0000FF`, the mac's bytes; the well's centre draws every
+   colour above, 1C71D8 included, byte-exact (`drawHierarchy`, no display
+   profile). THE SWATCH'S PIXELS on the mac: the well's own cache is 8-bit in
    the DISPLAY profile, and through it 336699, E01B24, 3584E4, 26A269, 808080,
    F6D32D, 000000 and FFFFFF read back exactly while 1C71D8 reads 1E71D8, two
    off in red and outside the ruled ±1; the scene samples 3584E4 (§5).
@@ -194,6 +270,7 @@ writes in fixed hex.
   the verb naming `alpha`": rule 3 promises an opaque picker's value is
   always FF, and AppKit's own well holds any colour opaque by either route
   (§4.1), so the verb that stands for a user's choice gets what a user gets.
+  UIKit's well does not hold it (§4.2), so the iOS arm strips alpha itself.
   The ROOT still refuses an app write (§3 rule 3). Every backend owes the
   same answer.
 - a button writes `color(0x3584E4FF)`: `expect_color` moves, the label does
@@ -233,7 +310,7 @@ cannot reach a panel's hex field say so in their lane table.
 |---|---|---|---|---|
 | SwiftUI macOS | `ColorPicker` (or a hosted `NSColorWell`, §4.1) | `NSColorPanel`, shared | the gesture's end in the panel | `supportsOpacity` |
 | SwiftUI iOS | `ColorPicker` (or a swatch presenting the controller, §4.2) | `UIColorPickerViewController` | the noncontinuous select | `supportsAlpha` |
-| GTK | `GtkColorDialogButton` | `GtkColorDialog` | `choose_rgba` finishing with a colour | `with-alpha` |
+| GTK | `GtkColorDialogButton` | `GtkColorDialog` | `notify::rgba` outside the quiet guard: `choose_rgba` finishing with a colour, or a colour dropped on the swatch (§4.3) | `with-alpha` |
 | WinUI | a `Button` faced with a swatch | a `Flyout` holding `ColorPicker`, hex input shown, `IsMoreButtonVisible` false so the channel boxes show without a toggle | `Flyout.Closed` | `IsAlphaEnabled` |
 | Compose | a Material `FilledTonalButton` faced with a swatch | a `ModalBottomSheet` (the emoji picker's Material sheet, docs/emoji-picker-plan.md) holding the synthesized picker | the sheet's dismissal or its Done | an opacity slider row |
 

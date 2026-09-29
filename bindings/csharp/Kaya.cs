@@ -23,6 +23,28 @@ public readonly record struct PickedFile(ulong Handle, string Name, string? Loca
         => Kaya.OpenPicked(Handle, access);
 }
 
+/// An sRGB colour, 8 bits a channel, straight alpha: a colour picker's
+/// value (docs/color-picker-plan.md §2), 0xRRGGBBAA on the wire.
+public readonly record struct Color(byte R, byte G, byte B, byte A = 0xFF)
+{
+    public static Color FromHex(uint rgba) =>
+        new((byte)(rgba >> 24), (byte)(rgba >> 16), (byte)(rgba >> 8), (byte)rgba);
+
+    public uint Hex => (uint)R << 24 | (uint)G << 16 | (uint)B << 8 | A;
+
+    public bool IsOpaque => A == 0xFF;
+
+    public override string ToString() => Hex.ToString("X8");
+
+    internal long Packed => KayaWire.PackColor(R, G, B, A);
+
+    internal static Color Of(object? packed)
+    {
+        var (r, g, b, a) = KayaWire.UnpackColor(packed is long l ? l : 0L);
+        return new Color(r, g, b, a);
+    }
+}
+
 /// One open asset: the bytes of a file the app's own BUILD shipped, held
 /// by the core and named the same way on five platforms
 /// (docs/assets-plan.md). Tx.Asset opens one. Dispose releases the core's

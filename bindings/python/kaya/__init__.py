@@ -60,6 +60,54 @@ class KayaKeyError(KayaError, KeyError):
     """A missing record field or collection key."""
 
 
+class Color:
+    """An sRGB colour, 8 bits a channel, straight alpha: what a colour
+    picker holds (docs/color-picker-plan.md §2). `str()` is the scenes'
+    fixed spelling, `336699FF`."""
+
+    __slots__ = ("r", "g", "b", "a")
+    r: int
+    g: int
+    b: int
+    a: int
+
+    def __init__(self, r: int, g: int, b: int, a: int = 0xFF) -> None:
+        for name, v in (("r", r), ("g", g), ("b", b), ("a", a)):
+            if isinstance(v, bool) or not isinstance(v, int) or not 0 <= v <= 0xFF:
+                raise KayaTypeError(
+                    f"kaya: Color.{name} is an int 0..255, not {v!r}")
+        object.__setattr__(self, "r", r)
+        object.__setattr__(self, "g", g)
+        object.__setattr__(self, "b", b)
+        object.__setattr__(self, "a", a)
+
+    @classmethod
+    def from_hex(cls, rgba: int) -> Color:
+        """`Color.from_hex(0x336699FF)`, the canvas palette's spelling."""
+        if isinstance(rgba, bool) or not isinstance(rgba, int) or not 0 <= rgba <= 0xFFFFFFFF:
+            raise KayaValueError(
+                f"kaya: {rgba!r} is not a packed colour (0xRRGGBBAA)")
+        return cls(*wire.unpack_color(rgba))
+
+    def hex(self) -> int:
+        return wire.pack_color(self.r, self.g, self.b, self.a)
+
+    def __setattr__(self, name: str, value: object) -> NoReturn:
+        raise KayaStateError("kaya: a Color is a value; make a new one")
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, Color) and self.hex() == other.hex()
+
+    def __hash__(self) -> int:
+        return hash(("kaya.Color", self.hex()))
+
+    def __str__(self) -> str:
+        return f"{self.hex():08X}"
+
+    def __repr__(self) -> str:
+        return f"kaya.Color.from_hex(0x{self.hex():08X})"
+
+
 # The wire-representable field types; any other field type is guest-only.
 # bool before int — bool IS an int in Python. A date and a time ride the
 # I64 tag in packed decimal (docs/datetime-plan.md D2/D10).
@@ -67,7 +115,7 @@ _WIRE_TYPES: list[tuple[type, int]] = [
                (bool, wire.VALUE_BOOL), (int, wire.VALUE_I64),
                (float, wire.VALUE_F64), (str, wire.VALUE_STR),
                (bytes, wire.VALUE_BLOB), (datetime.date, wire.VALUE_I64),
-               (datetime.time, wire.VALUE_I64)]
+               (datetime.time, wire.VALUE_I64), (Color, wire.VALUE_I64)]
 
 
 def _wire_tag(py_type: object) -> int | None:
@@ -114,6 +162,17 @@ def _encode_time_field(value: datetime.time) -> int:
     return wire.pack_time(*_time_parts("a Time field", value))
 
 
+def _encode_color_field(value: Color) -> int:
+    if not isinstance(value, Color):
+        raise KayaTypeError(
+            f"kaya: a Color field holds a kaya.Color, not {type(value).__name__}")
+    return value.hex()
+
+
+def _decode_color_field(packed: int) -> Color:
+    return Color.from_hex(packed)
+
+
 def _decode_date_field(packed: int) -> datetime.date:
     return datetime.date(*wire.unpack_date(packed))
 
@@ -130,10 +189,10 @@ def _identity(value: Any) -> Any:
 # int one (both are I64 on the wire).
 _FIELD_ENCODERS: dict[Any, Callable[[Any], Any]] = {
     bytes: _encode_blob_field, datetime.date: _encode_date_field,
-    datetime.time: _encode_time_field}
+    datetime.time: _encode_time_field, Color: _encode_color_field}
 _FIELD_DECODERS: dict[Any, Callable[[Any], Any]] = {
     datetime.date: _decode_date_field,
-    datetime.time: _decode_time_field}
+    datetime.time: _decode_time_field, Color: _decode_color_field}
 
 
 def _wire_scalar(value: Any) -> Any:
@@ -149,6 +208,8 @@ def _wire_scalar(value: Any) -> Any:
         return wire.pack_date(value.year, value.month, value.day)
     if isinstance(value, datetime.time):
         return wire.pack_time(value.hour, value.minute)
+    if isinstance(value, Color):
+        return value.hex()
     return value
 
 
@@ -4980,6 +5041,42 @@ def date_picker(value: datetime.date | Source | None = None, *,
         _app._register(
             handle, wire.OCC_DATE_CHANGED,
             lambda *args: on_change(*args[:-1], _decode_date_field(args[-1])))
+    _set_grow(handle, grow)
+    return handle
+
+
+def color_picker(color: Color | Source | None = None, *,
+                 alpha: bool | None = None,
+                 on_color: Handler | None = None,
+                 grow: float | None = None) -> Widget:
+    """A colour picker (docs/color-picker-plan.md): the platform's swatch,
+    opening its own colour surface. Each SETTLED choice is one call to
+    `on_color`, template copies getting their `Row` first; an app write
+    never echoes. `alpha=True` lets the user choose translucency."""
+    handle = _widget(wire.KIND_COLOR_PICKER)
+    if alpha is not None:
+        _records().append(wire.tx_set_alpha(handle.id, bool(alpha)))
+    if color is not None:
+        if isinstance(color, Signal):
+            _records().append(wire.tx_bind_color(handle.id, color.id))
+        elif isinstance(color, FieldRef):
+            _picker_field("a colour picker", color, Color)
+            _records().append(
+                wire.tx_bind_color_element(handle.id, color._level(),
+                                           color._index)
+            )
+        elif isinstance(color, Color):
+            _records().append(
+                wire.tx_set_color(handle.id, color.r, color.g, color.b,
+                                  color.a))
+        else:
+            raise KayaTypeError(
+                "kaya: a colour picker's value is a kaya.Color, a signal or "
+                f"a Color field, not {type(color).__name__}")
+    if on_color is not None:
+        _app._register(
+            handle, wire.OCC_COLOR_CHANGED,
+            lambda *args: on_color(*args[:-1], _decode_color_field(args[-1])))
     _set_grow(handle, grow)
     return handle
 

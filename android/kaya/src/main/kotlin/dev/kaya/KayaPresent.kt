@@ -79,6 +79,14 @@ object KayaPresent {
     @JvmStatic external fun emitDateChanged(tag: ByteArray, packed: Long)
     @JvmStatic external fun emitTimeChanged(tag: ByteArray, packed: Long)
 
+    /** The colour picker (docs/color-picker-plan.md §3 rule 1, §6): a
+     * SETTLED colour, packed 0xRRGGBBAA; the core's one quantizer over sRGB
+     * components; and the core's one preset palette, packed alike.
+     * kaya_emit_color_changed / kaya_color_quantize / Color::PALETTE. */
+    @JvmStatic external fun emitColorChanged(tag: ByteArray, packed: Long)
+    @JvmStatic external fun colorQuantize(r: Double, g: Double, b: Double, a: Double): Long
+    @JvmStatic external fun colorPalette(): LongArray
+
     /** Emit a column-header click: [tag] is the sort tag delivered
      * with the container's SET_COLUMN_HEADERS record, verbatim;
      * [column] the 0-based index. A REQUEST — the guest sorts

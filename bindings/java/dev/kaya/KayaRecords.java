@@ -64,6 +64,7 @@ public final class KayaRecords {
             // The picker types ride the I64 tag in packed decimal
             // (docs/datetime-plan.md D10).
             if (t == LocalDate.class || t == LocalTime.class) return KayaWire.VALUE_I64;
+            if (t == KayaApp.Color.class) return KayaWire.VALUE_I64;
             return null;
         }
 
@@ -165,7 +166,8 @@ public final class KayaRecords {
          * carrying a blob field re-registers.
          */
         Object encodeField(int wireIndex, Object value) {
-            if (value instanceof LocalDate || value instanceof LocalTime) {
+            if (value instanceof LocalDate || value instanceof LocalTime
+                    || value instanceof KayaApp.Color) {
                 return scalarWire(value);
             }
             if (schema[wireIndex] == KayaWire.VALUE_BLOB) {
@@ -210,6 +212,8 @@ public final class KayaRecords {
                     args[at] = dateOf(fields.get(wire));
                 } else if (want == LocalTime.class) {
                     args[at] = timeOf(fields.get(wire));
+                } else if (want == KayaApp.Color.class) {
+                    args[at] = colorOf(fields.get(wire));
                 } else if (want == KayaApp.Document.class) {
                     // A restored Document field is the blob's BYTES,
                     // redeemed by KayaWire.parseValue
@@ -417,6 +421,13 @@ public final class KayaRecords {
             void accept(KayaApp.Tx tx, K key, LocalDate date);
         }
 
+        /** A template colour picker's typed handler: the copy's key,
+         * then the settled colour. */
+        @FunctionalInterface
+        public interface ColorHandler<K> {
+            void accept(KayaApp.Tx tx, K key, KayaApp.Color color);
+        }
+
         /** A template time picker's typed pick handler. */
         @FunctionalInterface
         public interface TimeHandler<K> {
@@ -428,6 +439,23 @@ public final class KayaRecords {
         public KayaApp.Node datePicker(KayaApp.Tpl t,
                 java.util.function.Function<T, LocalDate> selector, DateHandler<K> onDate) {
             return datePicker(t, this.<LocalDate>resolve(selector), onDate);
+        }
+
+        /** A colour picker bound to the field the selector reads. */
+        public KayaApp.Node colorPicker(KayaApp.Tpl t,
+                java.util.function.Function<T, KayaApp.Color> selector, ColorHandler<K> onColor) {
+            return colorPicker(t, this.<KayaApp.Color>resolve(selector), onColor);
+        }
+
+        @SuppressWarnings("unchecked")
+        public KayaApp.Node colorPicker(KayaApp.Tpl t, Field<KayaApp.Color> f,
+                ColorHandler<K> onColor) {
+            KayaApp.Node n = t.colorPicker(f);
+            if (onColor != null) {
+                t.onColorNode(n, (tx, keys, color) ->
+                        onColor.accept(tx, (K) keys.get(0), color));
+            }
+            return n;
         }
 
         /** A time picker bound to the field the selector reads. */
@@ -666,6 +694,8 @@ public final class KayaRecords {
     private static final LocalDate SENTINEL_DATE = LocalDate.of(2345, 6, 7);
     private static final LocalTime DEFAULT_TIME = LocalTime.of(0, 0);
     private static final LocalTime SENTINEL_TIME = LocalTime.of(23, 45);
+    private static final KayaApp.Color DEFAULT_COLOR = KayaApp.Color.fromHex(0x000000FF);
+    private static final KayaApp.Color SENTINEL_COLOR = KayaApp.Color.fromHex(0x5EED5EED);
 
     /** A scalar's wire value: a civil date or time packs, everything
      * else travels as itself (docs/datetime-plan.md D2). */
@@ -676,12 +706,20 @@ public final class KayaRecords {
         if (v instanceof LocalTime t) {
             return KayaWire.packTime(t.getHour(), t.getMinute());
         }
+        if (v instanceof KayaApp.Color c) {
+            return KayaWire.packColor(c.r(), c.g(), c.b(), c.a());
+        }
         return v;
     }
 
     static LocalDate dateOf(Object packed) {
         KayaWire.CivilDate d = KayaWire.unpackDate(packed instanceof Long l ? l : 0L);
         return LocalDate.of(d.year(), d.month(), d.day());
+    }
+
+    static KayaApp.Color colorOf(Object packed) {
+        KayaWire.ColorChannels c = KayaWire.unpackColor(packed instanceof Long l ? l : 0L);
+        return new KayaApp.Color(c.r(), c.g(), c.b(), c.a());
     }
 
     static LocalTime timeOf(Object packed) {
@@ -697,6 +735,7 @@ public final class KayaRecords {
         if (t == byte[].class) return DEFAULT_BLOB;
         if (t == LocalDate.class) return DEFAULT_DATE;
         if (t == LocalTime.class) return DEFAULT_TIME;
+        if (t == KayaApp.Color.class) return DEFAULT_COLOR;
         if (t == int.class) return 0;
         return null; // guest-only reference fields
     }
@@ -709,6 +748,7 @@ public final class KayaRecords {
         if (t == byte[].class) return SENTINEL_BLOB;
         if (t == LocalDate.class) return SENTINEL_DATE;
         if (t == LocalTime.class) return SENTINEL_TIME;
+        if (t == KayaApp.Color.class) return SENTINEL_COLOR;
         throw new IllegalStateException("kaya: no sentinel for " + t.getName());
     }
 

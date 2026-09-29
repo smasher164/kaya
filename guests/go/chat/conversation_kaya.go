@@ -88,6 +88,10 @@ func (r conversationRow) DatePicker(f kaya.Field[kaya.Date], onDate func(*kaya.T
 	return r.c.DatePicker(r.t, f, onDate)
 }
 
+func (r conversationRow) ColorPicker(f kaya.Field[kaya.Color], onColor func(*kaya.Tx, string, kaya.Color)) kaya.Node {
+	return r.c.ColorPicker(r.t, f, onColor)
+}
+
 func (r conversationRow) TimePicker(f kaya.Field[kaya.Time], onTime func(*kaya.Tx, string, kaya.Time)) kaya.Node {
 	return r.c.TimePicker(r.t, f, onTime)
 }
@@ -112,6 +116,8 @@ func (r conversationRow) SetTickSpacing(n kaya.Node, spacing float64) { r.t.SetT
 func (r conversationRow) SetMin(n kaya.Node, min float64) { r.t.SetMin(n, min) }
 
 func (r conversationRow) SetMax(n kaya.Node, max float64) { r.t.SetMax(n, max) }
+
+func (r conversationRow) SetAlpha(n kaya.Node, on bool) { r.t.SetAlpha(n, on) }
 
 func (r conversationRow) SetA11yID(n kaya.Node, id string)                { r.t.SetA11yID(n, id) }
 func (r conversationRow) ContextMenu(n kaya.Node, c *kaya.ContextCatalog) { r.t.ContextMenu(n, c) }

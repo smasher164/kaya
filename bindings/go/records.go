@@ -78,6 +78,38 @@ type Time struct {
 	Minute int
 }
 
+// Color is an sRGB colour, 8 bits a channel, straight alpha: what a colour
+// picker holds and a Color record field carries (docs/color-picker-plan.md
+// §2); one I64 on the wire, 0xRRGGBBAA.
+type Color struct {
+	R, G, B, A uint8
+}
+
+// ColorHex is Rust's Color::from_hex: ColorHex(0x336699FF).
+func ColorHex(rgba uint32) Color {
+	return Color{R: uint8(rgba >> 24), G: uint8(rgba >> 16), B: uint8(rgba >> 8), A: uint8(rgba)}
+}
+
+// ColorRGB is an opaque colour.
+func ColorRGB(r, g, b uint8) Color { return Color{R: r, G: g, B: b, A: 0xFF} }
+
+func (c Color) Hex() uint32 {
+	return uint32(c.R)<<24 | uint32(c.G)<<16 | uint32(c.B)<<8 | uint32(c.A)
+}
+
+// String is the fixed spelling every scene reads, Rust's Display: 336699FF.
+func (c Color) String() string { return fmt.Sprintf("%08X", c.Hex()) }
+
+func (c Color) packed() int64 { return PackColor(c.R, c.G, c.B, c.A) }
+
+func colorOf(packed int64) Color {
+	if packed < 0 || packed > 0xFFFFFFFF {
+		panic(fmt.Sprintf("kaya: %d is not a packed colour (0xRRGGBBAA)", packed))
+	}
+	r, g, b, a := UnpackColor(packed)
+	return Color{R: r, G: g, B: b, A: a}
+}
+
 func (d Date) String() string { return fmt.Sprintf("%04d-%02d-%02d", d.Year, d.Month, d.Day) }
 
 func (t Time) String() string { return fmt.Sprintf("%02d:%02d", t.Hour, t.Minute) }
@@ -130,12 +162,13 @@ func timeOf(packed int64) Time {
 
 var dateType = reflect.TypeFor[Date]()
 var timeType = reflect.TypeFor[Time]()
+var colorType = reflect.TypeFor[Color]()
 var documentType = reflect.TypeFor[Document]()
 
 func wireTag(t reflect.Type) (uint32, bool) {
 	// The two picker types ride the I64 tag in packed decimal; every
 	// other struct field is guest-only.
-	if t == dateType || t == timeType {
+	if t == dateType || t == timeType || t == colorType {
 		return ValueI64, true
 	}
 	// A Document field IS a Blob field carrying documentBlob's value
@@ -233,6 +266,8 @@ func scalarWire(v any) any {
 	case Date:
 		return d.packed()
 	case Time:
+		return d.packed()
+	case Color:
 		return d.packed()
 	}
 	if rv := reflect.ValueOf(v); rv.Kind() == reflect.Slice && rv.Type().Elem().Kind() == reflect.Uint8 {
@@ -356,7 +391,7 @@ func restoreRecord(t reflect.Type, info *recordInfo, fields []any) any {
 			field.Set(reflect.ValueOf(documentOf(raw)))
 			continue
 		}
-		if field.Type() == dateType || field.Type() == timeType {
+		if field.Type() == dateType || field.Type() == timeType || field.Type() == colorType {
 			// A packed I64 comes back as the picker type it was written
 			// from, never as the integer it travelled as.
 			packed, ok := fields[wire].(int64)
@@ -366,6 +401,8 @@ func restoreRecord(t reflect.Type, info *recordInfo, fields []any) any {
 			}
 			if field.Type() == dateType {
 				field.Set(reflect.ValueOf(dateOf(packed)))
+			} else if field.Type() == colorType {
+				field.Set(reflect.ValueOf(colorOf(packed)))
 			} else {
 				field.Set(reflect.ValueOf(timeOf(packed)))
 			}
@@ -418,6 +455,8 @@ func (info *recordInfo) encode(field uint32, v any) any {
 	case Date:
 		return d.packed()
 	case Time:
+		return d.packed()
+	case Color:
 		return d.packed()
 	}
 	return v
@@ -613,6 +652,12 @@ func (t *Tpl) BindDateField(n Node, level uint32, f Field[Date]) {
 	t.tx.emit(TxBindDateElement(n.id, level, f.index))
 }
 
+// BindColorField binds a colour picker's value to one field of the
+// element; Field[Color] only.
+func (t *Tpl) BindColorField(n Node, level uint32, f Field[Color]) {
+	t.tx.emit(TxBindColorElement(n.id, level, f.index))
+}
+
 // BindTimeField binds a time picker's value to one field of the element;
 // Field[Time] only.
 func (t *Tpl) BindTimeField(n Node, level uint32, f Field[Time]) {
@@ -684,6 +729,21 @@ func (t *Tpl) applyRecordDate[T any, S interface {
 	case Date:
 		v.check()
 		t.tx.emit(TxSetDate(n.id, v.Year, v.Month, v.Day))
+	}
+}
+
+func (t *Tpl) applyRecordColor[T any, S interface {
+	Color | Signal[Color] | func(*T) *Color | Field[Color]
+}](n Node, src S) {
+	switch v := any(src).(type) {
+	case Signal[Color]:
+		t.tx.emit(TxBindColor(n.id, v.id))
+	case func(*T) *Color:
+		t.BindColorField(n, 0, FieldBy(v))
+	case Field[Color]:
+		t.BindColorField(n, 0, v)
+	case Color:
+		t.tx.emit(TxSetColor(n.id, v.R, v.G, v.B, v.A))
 	}
 }
 
@@ -968,6 +1028,22 @@ func (c RecordCollection[K, T]) DatePicker[S interface {
 	if onDate != nil {
 		n.OnDate(func(tx *Tx, keys []any, d Date) {
 			onDate(tx, keys[0].(K), d)
+		})
+	}
+	return n
+}
+
+// ColorPicker creates a colour picker whose VALUE comes from any
+// addressable source — a constant per copy, a signal, or the row's own
+// Color field — with its commit handler (nil for none).
+func (c RecordCollection[K, T]) ColorPicker[S interface {
+	Color | Signal[Color] | func(*T) *Color | Field[Color]
+}](t *Tpl, src S, onColor func(*Tx, K, Color)) Node {
+	n := t.Widget(KindColorPicker)
+	t.applyRecordColor[T](n, src)
+	if onColor != nil {
+		n.OnColor(func(tx *Tx, keys []any, c Color) {
+			onColor(tx, keys[0].(K), c)
 		})
 	}
 	return n

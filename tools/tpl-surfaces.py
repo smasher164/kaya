@@ -1817,6 +1817,7 @@ SOURCE_ZONES = [
 # floor, and the generated sugar's bridge.
 NOT_FORWARDED_JAVA = {
     "widget", "addChild", "onToggleNode", "onDateNode", "onTimeNode",
+    "onColorNode",
 }
 
 # C#'s façade documents its own exclusions in its generated header
@@ -1827,6 +1828,7 @@ NOT_FORWARDED_CSHARP = {
     "Widget", "AddChild", "When", "ContextMenu",
     "BindTextElement", "BindTextField", "BindCheckedField", "BindValueField",
     "BindSourceField", "BindDateField", "BindTimeField",
+    "BindColorField",
 }
 
 
@@ -1968,10 +1970,10 @@ def facade_csharp():
 # first leaves a nested typed For's body holding the raw Tpl
 # (docs/deferred.md, closed 2026-08-24). The floor is the census
 # discipline; sum surfaces have no `<Rec>Row`.
-CSHARP_TWIN_FLOOR = 13
+CSHARP_TWIN_FLOOR = 14
 
 
-JAVA_TWIN_FLOOR = 14
+JAVA_TWIN_FLOOR = 15
 
 
 def twins_java():

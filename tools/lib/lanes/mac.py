@@ -45,13 +45,13 @@ SCENES = [
     "dirty", "ranges", "save", "styling", "toolbar", "identity",
     "assets", "sizepolicy", "adaptive", "pickers", "sliders",
     "tooltips", "search", "richtext", "ownundo", "richlabel", "sheet",
-    "submit", "numberfield",
+    "submit", "numberfield", "colorpicker",
 ]
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed — built and run rust-only until their guests arrive,
 # when they move into SCENES.
 DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows",
-                "format", "flexshrink", "listrow", "tints", "badge", "emoji", "colorpicker"]
+                "format", "flexshrink", "listrow", "tints", "badge", "emoji"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -144,10 +144,9 @@ ORDER = [
     # (docs/number-field-plan.md §5).
     ("numberfield", LANGS),
     ("numberfieldde", LANGS),
-    # RUST ALONE while the eight bindings' sugar is the breadth slice
-    # (docs/color-picker-plan.md §7). set_color never opens the shared panel,
-    # so the everyday scene pools.
-    ("colorpicker", ("rust",)),
+    # set_color never opens the shared panel, so the everyday scene pools
+    # (docs/color-picker-plan.md §5).
+    ("colorpicker", LANGS),
     # The submit gesture on the three text kinds (docs/submit-plan.md §5).
     ("submit", LANGS),
     ("gallery", LANGS),

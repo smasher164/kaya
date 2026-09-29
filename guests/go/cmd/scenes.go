@@ -32,6 +32,7 @@ import (
 	"dev.kaya/guests/go/menus"
 	"dev.kaya/guests/go/milestone2"
 	"dev.kaya/guests/go/nav"
+	"dev.kaya/guests/go/colorpicker"
 	"dev.kaya/guests/go/numberfield"
 	"dev.kaya/guests/go/ownundo"
 	"dev.kaya/guests/go/panels"
@@ -99,6 +100,7 @@ var scenes = map[string]func() *kaya.App{
 	"menus":      menus.App,
 	"nav":        nav.App,
 	"numberfield": numberfield.App,
+	"colorpicker": colorpicker.App,
 	"numberfieldde": numberfield.App,
 	"sheet":      sheet.App,
 	"format":     format.App,

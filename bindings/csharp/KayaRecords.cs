@@ -41,6 +41,7 @@ sealed class RecordInfo
         // (docs/datetime-plan.md D10).
         : t == typeof(DateOnly) ? KayaWire.ValueI64
         : t == typeof(TimeOnly) ? KayaWire.ValueI64
+        : t == typeof(Color) ? KayaWire.ValueI64
         : (uint?)null;
 
     // One reflection walk per record type, ever: FieldOf runs per event
@@ -99,7 +100,7 @@ sealed class RecordInfo
     internal object EncodeField(uint wireIndex, object value)
     {
         string name = Ctor.GetParameters()[WireToCtor[wireIndex]].Name!;
-        if (value is DateOnly or TimeOnly) return KayaRecords.ScalarWire(value);
+        if (value is DateOnly or TimeOnly or Color) return KayaRecords.ScalarWire(value);
         if (Schema[wireIndex] == KayaWire.ValueBlob)
         {
             if (value is Document document)
@@ -144,6 +145,8 @@ sealed class RecordInfo
                 ? KayaRecords.DateOf(fields[wire])
                 : want == typeof(TimeOnly)
                     ? KayaRecords.TimeOf(fields[wire])
+                    : want == typeof(Color)
+                        ? Color.Of(fields[wire])
                     : want == typeof(Document)
                         ? KayaApp.DocumentOfBlob(fields[wire])
                         : fields[wire];
@@ -257,6 +260,11 @@ sealed class RecordCollection<T>
         Action<Tx, List<object>, DateOnly>? onDate = null) =>
         t.DatePicker(KayaRecords.FieldOf(selector), onDate);
 
+    /// A colour picker bound to the Color field the selector names.
+    public Node ColorPicker(Tpl t, Expression<Func<T, Color>> selector,
+        bool alpha = false, Action<Tx, List<object>, Color>? onColor = null) =>
+        t.ColorPicker(KayaRecords.FieldOf(selector), alpha, onColor);
+
     /// A time picker bound to the TimeOnly field the selector names.
     public Node TimePicker(Tpl t, Expression<Func<T, TimeOnly>> selector,
         Action<Tx, List<object>, TimeOnly>? onTime = null) =>
@@ -365,6 +373,7 @@ static class KayaRecords
     {
         DateOnly d => (long)KayaWire.PackDate(d.Year, d.Month, d.Day),
         TimeOnly t => (long)KayaWire.PackTime(t.Hour, t.Minute),
+        Color c => c.Packed,
         _ => v,
     };
 

@@ -45,6 +45,7 @@ object GuestStart : KayaGuestStart {
             "formatar" -> Format::app
             "numberfield" -> NumberField::app
             "numberfieldde" -> NumberField::app
+            "colorpicker" -> ColorPicker::app
             // One app behind both list-detail scripts. `split` itself
             // is desktop-only (it drives resize_window, which this host
             // rejects), so only `listdetail` is wired.

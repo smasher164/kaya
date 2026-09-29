@@ -82,6 +82,13 @@ final class UndoTodoKaya {
             return c.datePicker(tpl(), f, onDate);
         }
 
+        /** A colour picker on this field with its handler
+         * co-located. */
+        KayaApp.Node colorPicker(KayaRecords.Field<KayaApp.Color> f,
+                KayaRecords.Collection.ColorHandler<Long> onColor) {
+            return c.colorPicker(tpl(), f, onColor);
+        }
+
         /** A time picker on this field with its pick handler
          * co-located. */
         KayaApp.Node timePicker(KayaRecords.Field<java.time.LocalTime> f,

@@ -9,7 +9,7 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
-## BUILD — the colour picker (docs/color-picker-plan.md), depth on the mac (2026-09-28); the GTK, WinUI and Compose arms, the iOS legs, pick_color and the other eight bindings are the breadth slice
+## ~~BUILD — the colour picker (docs/color-picker-plan.md), depth on the mac (2026-09-28); the GTK, WinUI and Compose arms, the iOS legs, pick_color and the other eight bindings are the breadth slice~~ COMPLETE 2026-09-28: every item below LANDED except `pick_color`, which moved to its own entry ("BUILD — the colour picker's panel scene"); colorpicker legs on all five lanes, validation in the breadth commit
 KEY: colour picker, color_picker, color picker, KIND_COLOR_PICKER, colorpicker, colorpanel, color_changed, on_color, PropKind::Color, set_color, expect_color, pick_color, kaya_color_quantize, Color type, DEPTH STUB colorpicker
 
 The depth slice: kind 21 with `color` (PropKind::Color, packed 0xRRGGBBAA
@@ -22,29 +22,75 @@ the Rust sugar in both zones, the SwiftUI arm (a hosted NSColorWell with the
 measured gesture door on the mac; a UIColorWell swatch presenting
 UIColorPickerViewController on iOS), and tools/scenes/colorpicker.steps green
 on the mac lane. What breadth owes:
-  - **DEPTH STUB: colorpicker on gtk** — GtkColorDialogButton, the commit
-    being `choose_rgba` finishing with a colour, `notify::rgba` behind the
-    quiet guard (plan §4.3, §6).
-  - **DEPTH STUB: colorpicker on winui** — a swatch Button opening a Flyout
-    with ColorPicker; `Flyout.Closed` is the commit (plan §4.4); ColorPicker
-    and Flyout join tools/winui-bindgen's filter.
-  - **DEPTH STUB: colorpicker on compose** — the synthesized Material sheet
-    (plan §6, §8 ruling 2 as recommended), committing on dismissal.
-  - The iOS legs — the arm is built and compiles; UNWIRED in
-    tools/lib/lanes/ios.py until §4.2 and the ink read (drawHierarchy of the
-    UIColorWell) are measured on the simulator.
-  - `pick_color` and a `colorpanel` scene — the real surfaces typed into;
-    the mac leg joins HOST_UI_SCENES (plan §5). Reachable on the mac in
-    process (the depth measured it), but the panel's hex field is in the
-    panel's selected colour space, so `E01B24` typed there committed
-    `E9332FFF` (plan §4.1): the verb must pick sRGB first.
-  - `color_picker`, `alpha`, `on_color` and a `Color` type in the other
-    eight bindings, both zones, and `Color` as a record field type in their
-    record generators; check-sugar-surface is red by design until then.
-  - The mac's `set_color` alpha answer differs from the plan's first draft:
-    a translucent choice on an opaque picker LANDS OPAQUE (AppKit's own
-    well does this by either route, measured), and every backend owes the
-    same answer (plan §5, amended).
+  - ~~**DEPTH STUB: colorpicker on gtk**~~ — LANDED 2026-09-28:
+    GtkColorDialogButton over a GtkColorDialog (with-alpha from `alpha`);
+    color_changed from notify::rgba outside the quiet guard (the dialog's
+    Select and a dropped colour both reach it, plan §4.3 AMENDED), through
+    Color::quantize, an opaque picker held opaque by the arm; the a11y props on
+    the colour button, which names its inner button. Legs in eight languages
+    on x11 and wayland. GUARD: check-slider-commit's GTK colour clause (seven
+    negatives), gtk::color_tests run by check-gtk.
+  - ~~**DEPTH STUB: colorpicker on winui**~~ — LANDED 2026-09-28: a Button
+    faced with a swatch whose Flyout holds ColorPicker (hex shown, More
+    hidden, IsAlphaEnabled from `alpha`); the one commit is Flyout.Closed
+    (Hide, Esc and light dismiss all raise it, measured) and set_color's drive,
+    through Color::quantize, forcing FF on an opaque picker; no ColorChanged
+    handler, so an app write cannot echo. ColorPicker, ColorChangedEventArgs
+    and Flyout joined the bindgen filter. Legs in six languages. GUARD:
+    check-slider-commit's WinUI colour clause (six negatives),
+    winui::tests::a_colour_crosses_the_platform_byte_for_byte on the guest.
+  - ~~**DEPTH STUB: colorpicker on compose**~~ — LANDED 2026-09-28: a
+    FilledTonalButton faced with a swatch opening a ModalBottomSheet built from
+    Material parts only: the core's Color::PALETTE (GTK 4's own 45-colour
+    default, over JNI), hue, saturation and brightness sliders over a preview, a
+    hex field, opacity only with `alpha`, and Done; the dismissal or Done
+    commits once through the core's quantizer. Legs compose, jvm and go.
+    GUARD: check-slider-commit's Compose colour clause (six negatives),
+    KayaColorPickerTest, the core palette test. The sheet's words are English
+    literals, as the date dialog's OK and Cancel are.
+  - ~~The iOS legs~~ — LANDED 2026-09-28: plan §4.2 and §4.5 measured on the
+    simulator (one noncontinuous select per gesture; UIKit does NOT hold an
+    opaque picker opaque, so the arm's own strip is the rule; P3 red reads
+    FF0000FF as on the mac; the swatch centre byte-exact). Legs swift, go and
+    rust-swiftui. GUARD: check-slider-commit's iOS alpha-strip clause.
+  - ~~`pick_color` and a `colorpanel` scene~~ — MOVED 2026-09-28 to its own
+    entry, "BUILD — the colour picker's panel scene", with each lane's measured
+    route to its hex field.
+  - ~~`color_picker`, `alpha`, `on_color` and a `Color` type in the other
+    eight bindings~~ — LANDED 2026-09-28: both zones, each binding's own Color
+    value (hex constructor, hex reading, the uppercase RRGGBBAA spelling), a
+    record field type in every record generator, a colorpicker guest in each;
+    Rust gained the template zone's `alpha`. The mac lane runs all nine; the
+    JVM host needed `NSColor.ignoresAlpha` off (docs/traps.md, the pre-14 SDK
+    stamp). No C guest, as there is no C pickers guest. GUARD:
+    check-sugar-surface's COLOUR PICKER clause (fake-name negatives on every
+    run) and the Python and JS checks-file cases.
+  - ~~The mac's `set_color` alpha answer differs from the plan's first draft~~
+    — LANDED 2026-09-28 on every backend: a translucent choice on an opaque
+    picker lands opaque. Only AppKit's well does it by itself; GTK, WinUI,
+    Compose and UIKit each do it in the arm (plan §4, measured per platform).
+
+## BUILD — the colour picker's panel scene: `pick_color` and a `colorpanel` scene (docs/color-picker-plan.md §5)
+KEY: pick_color, colorpanel, HexTextBox, show-editor, HOST_UI_SCENES colour panel, colour panel hex field
+
+`set_color` drives every backend's commit door without opening a surface; no
+leg yet opens the real one and types a hex value into it. Each lane's route,
+measured 2026-09-28 and not built:
+  - mac: the shared NSColorPanel, in process, but its hex field reads the
+    panel's selected colour space (`E01B24` committed `E9332FFF`), so the verb
+    must select sRGB first; the leg joins HOST_UI_SCENES with the idle wait.
+  - iOS: UIColorPickerViewController's Sliders tab has an sRGB hex field the
+    XCUITest driver reaches with `tap` and `type_b64`; every parseable prefix
+    commits (E01B24 typed over 96D35F committed 9966DD, EE0011, E01B24), so the
+    scene asserts the last commit only.
+  - GTK: GtkColorDialog runs in the guest's process; its editor (`show-editor`)
+    holds a GtkEntry that applies on activate or focus-out, reads sRGB hex, and
+    the dialog's Select commits.
+  - WinUI: the ColorPicker template's `HexTextBox`; SetText moves the colour
+    while the flyout is open and a Hide commits.
+  - Compose: the sheet's hex field through the IME (a testTag and the entry
+    verbs' typing driver; not coordinates, since the sheet moves ~50px when the
+    keyboard opens), then Done.
 
 ## ~~BUILD — the number field (docs/number-field-plan.md), depth on the mac (2026-09-28); the GTK, WinUI and Compose arms, the iOS legs and the other eight bindings are the breadth slice~~ COMPLETE 2026-09-28: every item below LANDED; validate-all --only numberfield ALL PASS (76 legs, five lanes) and the full matrix green on four lanes, the mac's only non-green legs the two fullscreen display legs NOT RUN on a busy host and passed by hand after
 KEY: number field, number_field, KIND_NUMBER_FIELD, numberfield, numberfieldde, parse_number, number_text, number_commit, number_step, expect_value, unfocus, nudge, fmt:field, DEPTH STUB numberfield

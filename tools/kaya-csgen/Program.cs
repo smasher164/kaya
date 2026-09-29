@@ -98,7 +98,7 @@ static class Program
     // runtime schema.
     static readonly System.Collections.Generic.HashSet<string> Wire =
         new() { "string", "bool", "long", "double", "byte[]", "Document",
-            "System.DateOnly", "System.TimeOnly" };
+            "System.DateOnly", "System.TimeOnly", "Color" };
 
     // The generated files carry no usings of their own — every type
     // Program.cs emits is spelled fully, the two picker types included,
@@ -287,6 +287,7 @@ static class Program
         var onValue = $"System.Action<Tx, {keys}, double>?";
         var onDate = $"System.Action<Tx, {keys}, System.DateOnly>?";
         var onTime = $"System.Action<Tx, {keys}, System.TimeOnly>?";
+        var onColor = $"System.Action<Tx, {keys}, Color>?";
         var onSelect = $"System.Action<Tx, {keys}, int>?";
 
         // One forwarder, wrapped the way the hand-written Tpl wraps: a
@@ -357,6 +358,12 @@ static class Program
         Fwd("DatePicker", ["Signal value", $"{onDate} onDate = null"], "value, onDate");
         Fwd("DatePicker", ["Field<System.DateOnly> f", $"{onDate} onDate = null"], "f, onDate");
         Fwd("TimePicker", ["System.TimeOnly value", $"{onTime} onTime = null"], "value, onTime");
+        Fwd("ColorPicker", ["Color value", "bool alpha = false", $"{onColor} onColor = null"],
+            "value, alpha, onColor");
+        Fwd("ColorPicker", ["Signal value", "bool alpha = false", $"{onColor} onColor = null"],
+            "value, alpha, onColor");
+        Fwd("ColorPicker", ["Field<Color> f", "bool alpha = false", $"{onColor} onColor = null"],
+            "f, alpha, onColor");
         Fwd("TimePicker", ["Signal value", $"{onTime} onTime = null"], "value, onTime");
         Fwd("TimePicker", ["Field<System.TimeOnly> f", $"{onTime} onTime = null"], "f, onTime");
         Fwd("Entry", [$"{onText} onChange = null", $"{onText} onSubmit = null"],

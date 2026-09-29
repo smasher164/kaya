@@ -276,6 +276,11 @@ def swiftui_color_findings(source):
     if "guard !continuously" not in select:
         out.append(f"{SWIFTUI}: the iOS picker's select commits a continuous "
                    f"selection — only the noncontinuous one ends the gesture (§4.2)")
+    ios_drive = block_after(source, "func kayaDriveColor(_ node: KayaNode, _ well: UIColorWell")
+    for where, block in (("the iOS picker's select", select), ("set_color's iOS drive", ios_drive)):
+        if "opaque: !node.alpha" not in block:
+            out.append(f"{SWIFTUI}: {where} does not strip alpha on an opaque picker — "
+                       f"UIKit holds no colour opaque, so the arm must (§4.2)")
     doors = [changed, block_after(source, "func kayaColorGestureEnded()"), select]
     at = 0
     while True:
@@ -430,9 +435,323 @@ color_watched("a commit of the held colour", gate.doctor(
     r"    if packed == node\.color \{ return \}\n", ""),
     "equal to the held one")
 
+# 16a. iOS: THE SELECT KEEPS A TRANSLUCENT CHOICE ON AN OPAQUE PICKER.
+color_watched("an iOS select keeping alpha", gate.doctor(
+    "the select's alpha strip", SWIFT_SOURCE,
+    r"kayaColorOf\(color, opaque: !node\.alpha\)", "kayaColorOf(color, opaque: false)"),
+    "the iOS picker's select does not strip alpha")
+
+# 16b. iOS: set_color's DRIVE KEEPS IT.
+color_watched("an iOS drive keeping alpha", gate.doctor(
+    "the drive's alpha strip", SWIFT_SOURCE,
+    r"kayaColorOf\(kayaUIColor\(packed\), opaque: !node\.alpha\)",
+    "kayaColorOf(kayaUIColor(packed), opaque: false)"),
+    "set_color's iOS drive does not strip alpha")
+
+def compose_color_findings(source):
+    """Compose's synthesized sheet (docs/color-picker-plan.md §6): the one
+    emit is in kayaColorCommitted, which only the sheet's door calls, and the
+    door opens only on the sheet's dismissal, its Done and set_color — never
+    in a slider's onValueChange or the hex field's."""
+    out = []
+    commit = block_after(source, "internal fun kayaColorCommitted(")
+    if not commit:
+        return [f"{COMPOSE}: internal fun kayaColorCommitted is gone — the one "
+                f"commit path this clause holds every door to"]
+    emits = len(re.findall(r"KayaPresent\.emitColorChanged\(", source))
+    if emits != 1 or "KayaPresent.emitColorChanged(" not in commit:
+        out.append(f"{COMPOSE}: KayaPresent.emitColorChanged is called {emits} "
+                   f"time(s); the one call belongs inside kayaColorCommitted")
+    if "if (packed == node.color) return" not in commit:
+        out.append(f"{COMPOSE}: kayaColorCommitted commits a colour equal to the "
+                   f"held one — a choice that changes nothing emits nothing (§2)")
+    sheet = block_after(source, "fun KayaColorSheet()")
+    tiers = (
+        ("kayaColorCommitted", [block_after(source, "internal fun kayaColorSheetClosed(")],
+         "the sheet's door, kayaColorSheetClosed"),
+        ("kayaColorSheetClosed", [block_after(source, "internal fun kayaColorSheetDismissed("),
+                                  block_after(source, '"set_color" -> {')],
+         "the shown sheet's dismissal and set_color's drive"),
+        ("kayaColorSheetDismissed", [block_after(sheet, "onDismissRequest = "),
+                                     block_after(sheet, ".invokeOnCompletion")],
+         "the sheet's onDismissRequest and Done's hide completion"),
+    )
+    for name, doors, where in tiers:
+        calls = len(re.findall(rf"(?<!fun ){name}\(", source))
+        inside = sum(len(re.findall(rf"{name}\(", d)) for d in doors)
+        if calls != inside or any(name + "(" not in d for d in doors):
+            out.append(f"{COMPOSE}: {name} is called {calls} time(s) and {inside} "
+                       f"of them sit in a door ({where}) — a commit from a "
+                       f"slider's or the hex field's onValueChange is a drag's")
+    return out
+
+
+gate.counted("compose colour door calls read",
+             len(re.findall(r"(?<!fun )kayaColorSheet(?:Closed|Dismissed)\(", REAL[COMPOSE])),
+             floor=4)
+
+
+def compose_color_watched(label, source, fragment):
+    if not gate.negative(label, lambda: compose_color_findings(source), want=fragment):
+        return
+    print(f"check-slider-commit: watched refusing: {label}")
+
+
+# 17. COMPOSE: A SLIDER'S MOVEMENT COMMITS.
+compose_color_watched("a Compose hue slider committing", gate.doctor(
+    "a commit in the hue slider", REAL[COMPOSE],
+    r"(                draft\.hue = it\n)",
+    r"\1                kayaColorCommitted(node, kayaColorDraftPacked(draft))\n"),
+    "kayaColorCommitted is called")
+
+# 18. COMPOSE: THE HEX FIELD'S TYPING COMMITS.
+compose_color_watched("a Compose hex field committing per keystroke", gate.doctor(
+    "a door in the hex field", REAL[COMPOSE],
+    r"onValueChange = \{ draft\.typed\(it\) \}",
+    "onValueChange = { draft.typed(it); kayaColorSheetClosed(node, draft) }"),
+    "kayaColorSheetClosed is called")
+
+# 19. COMPOSE: A SLIDER CLOSES THE SHEET.
+compose_color_watched("a Compose brightness slider dismissing", gate.doctor(
+    "a dismissal in the brightness slider", REAL[COMPOSE],
+    r"(                draft\.brightness = it\n)",
+    r"\1                kayaColorSheetDismissed(node, draft)\n"),
+    "kayaColorSheetDismissed is called")
+
+# 20. COMPOSE: DONE HIDES WITHOUT THE DOOR.
+compose_color_watched("a Compose Done that commits nothing", gate.doctor(
+    "Done's door removed", REAL[COMPOSE],
+    r"\.invokeOnCompletion \{\n(\s*)kayaColorSheetDismissed\(node, draft\)\n",
+    r".invokeOnCompletion {\n\1KayaSceneModel.colorSheetFor = null\n"),
+    "kayaColorSheetDismissed is called")
+
+# 21. COMPOSE: A SECOND EMIT.
+compose_color_watched("a Compose colour emitted outside kayaColorCommitted", gate.doctor(
+    "a second compose emit", REAL[COMPOSE],
+    r"(                draft\.saturation = it\n)",
+    r"\1                KayaPresent.emitColorChanged(node.tag, node.color)\n"),
+    "is called 2 time(s)")
+
+# 22. COMPOSE: THE SAME COLOUR COMMITS AGAIN.
+compose_color_watched("a Compose commit of the held colour", gate.doctor(
+    "the compose same-value return", REAL[COMPOSE],
+    r"    if \(packed == node\.color\) return\n", ""),
+    "equal to the held one")
+
+def winui_color_findings(source):
+    """WinUI's flyout (docs/color-picker-plan.md §4.4, §6): the one emit is in
+    winui_color_commit, which only the flyout's Closed and set_color call; a
+    ColorChanged registration fires for an app's own write (measured), so it
+    exists only behind the quiet guard."""
+    out = []
+    commit = block_after(source, "fn winui_color_commit(")
+    if not commit:
+        return [f"{WINUI}: fn winui_color_commit is gone — the one commit path "
+                f"this clause holds every door to"]
+    emits = len(re.findall(r"\.send_color_tag\(", source))
+    if emits != 1 or ".send_color_tag(" not in commit:
+        out.append(f"{WINUI}: send_color_tag is called {emits} time(s); the one "
+                   f"call belongs inside winui_color_commit")
+    if not re.search(r"if cell\.held\.swap\(packed, [^)]*\) != packed \{", commit):
+        out.append(f"{WINUI}: winui_color_commit commits a colour equal to the held "
+                   f"one — a choice that changes nothing emits nothing (§5)")
+    if not re.search(r"!cell\.alpha\.load\([^)]*\) && color\.a != 0xFF \{\s*color\.a = 0xFF;",
+                     commit):
+        out.append(f"{WINUI}: winui_color_commit no longer lands a translucent choice "
+                   f"opaque on an opaque picker (§5 AMENDED)")
+    arm = block_after(source, "WidgetKind::ColorPicker => {")
+    if "swatch.flyout.Closed(&closed)" not in arm:
+        out.append(f"{WINUI}: the colour picker's door is not the flyout's Closed — "
+                   f"the dismissal is the settled choice (§4.4)")
+    doors = [block_after(arm, "EventHandler::<windows_core::IInspectable>::new("),
+             block_after(source, "fn set_color(")]
+    calls = len(re.findall(r"(?<!fn )winui_color_commit\(", source))
+    inside = sum(len(re.findall(r"winui_color_commit\(", d)) for d in doors)
+    if calls != inside or any("winui_color_commit(" not in d for d in doors):
+        out.append(f"{WINUI}: winui_color_commit is called {calls} time(s) and "
+                   f"{inside} of them sit in a door (the flyout's Closed, set_color's "
+                   f"drive) — a commit anywhere else is a drag's or an echo")
+    at = 0
+    while True:
+        at = source.find(".ColorChanged(", at)
+        if at < 0:
+            break
+        handler = block_after(source[at:], "::new(")
+        if not re.match(r"\{\s*if quiet\.load\(", handler):
+            out.append(f"{WINUI}: a ColorChanged handler does not open on the quiet "
+                       f"guard — the event fires for the app's own write (§4.4)")
+        at += 1
+    return out
+
+
+gate.counted("winui colour door calls read",
+             len(re.findall(r"(?<!fn )winui_color_commit\(", REAL[WINUI])), floor=2)
+
+
+def winui_color_watched(label, source, fragment):
+    if not gate.negative(label, lambda: winui_color_findings(source), want=fragment):
+        return
+    print(f"check-slider-commit: watched refusing: {label}")
+
+
+# 23. WINUI: A SECOND EMIT.
+winui_color_watched("a WinUI colour emitted outside winui_color_commit", gate.doctor(
+    "a second winui emit", REAL[WINUI],
+    r"(            swatch\.picker\.SetColor\(winui_ui_color\(color\)\)\?;\n"
+    r"            winui_color_commit)",
+    r"            core.occurrences.send_color_tag(&cell.tag, 0);\n\1"),
+    "is called 2 time(s)")
+
+# 24. WINUI: A COMMIT FROM THE APPLY ARM.
+winui_color_watched("a WinUI colour committed from the apply arm", gate.doctor(
+    "a commit in the alpha arm", REAL[WINUI],
+    r"(                    swatch\.picker\.SetIsAlphaEnabled\(on\)\?;\n)",
+    r"\1                    winui_color_commit(swatch, cell, &core.occurrences)?;\n"),
+    "sit in a door")
+
+# 25. WINUI: THE SAME COLOUR COMMITS AGAIN.
+winui_color_watched("a WinUI commit of the held colour", gate.doctor(
+    "the winui held compare", REAL[WINUI],
+    r"if cell\.held\.swap\(packed, std::sync::atomic::Ordering::Relaxed\) != packed \{",
+    "if { cell.held.store(packed, std::sync::atomic::Ordering::Relaxed); true } {"),
+    "equal to the held one")
+
+# 26. WINUI: THE DOOR IS THE FLYOUT'S OPENING.
+winui_color_watched("a WinUI picker committing when its flyout opens", gate.doctor(
+    "the winui door event", REAL[WINUI],
+    r"swatch\.flyout\.Closed\(&closed\)", "swatch.flyout.Opened(&closed)"),
+    "not the flyout's Closed")
+
+# 27. WINUI: AN UNGUARDED ColorChanged.
+winui_color_watched("a WinUI ColorChanged handler with no quiet guard", gate.doctor(
+    "an unguarded ColorChanged", REAL[WINUI],
+    r"(                    swatch\.flyout\.Closed\(&closed\)\?;\n)",
+    r"\1                    swatch.picker.ColorChanged(&TypedEventHandler::<ColorPicker, "
+    r"ColorChangedEventArgs>::new(move |_, _| {\n                        Ok(())\n"
+    r"                    }))?;\n"),
+    "does not open on the quiet")
+
+# 28. WINUI: A TRANSLUCENT CHOICE ON AN OPAQUE PICKER STAYS TRANSLUCENT.
+winui_color_watched("a WinUI opaque picker committing a translucent choice", gate.doctor(
+    "the winui opaque landing", REAL[WINUI],
+    r"(&& color\.a != 0xFF \{\n)(\s*)color\.a = 0xFF;\n", r"\1"),
+    "lands a translucent choice")
+
+def gtk_color_findings(source):
+    """GTK's colour button (docs/color-picker-plan.md §4.3): the dialog's
+    Select and a colour dropped on the swatch both end in the button's own
+    set_rgba, so `notify::rgba` outside the quiet guard is the one door, and
+    every programmatic set_rgba sits under the guard — the harness's
+    set_color alone, which stands for the user."""
+    out = []
+    commit = block_after(source, "fn color_committed(")
+    if not commit:
+        return [f"{GTK}: fn color_committed is gone — the one commit path this "
+                f"clause holds every door to"]
+    emits = len(re.findall(r"\.send_color_tag\(", source))
+    if emits != 1 or ".send_color_tag(" not in commit:
+        out.append(f"{GTK}: send_color_tag is called {emits} time(s); the one call "
+                   f"belongs inside color_committed")
+    if not re.search(r"if picked == field\.held\.get\(\) \{\s*return;", commit):
+        out.append(f"{GTK}: color_committed commits a colour equal to the held one — "
+                   f"a choice that changes nothing emits nothing (§2)")
+    if not re.search(r"if !field\.dialog\.is_with_alpha\(\) \{\s*picked\.a = 0xFF;", commit):
+        out.append(f"{GTK}: color_committed no longer holds an opaque picker opaque — "
+                   f"the button never reads with-alpha, so a translucent drop or "
+                   f"set_color stays translucent (§4.3, §5 AMENDED)")
+    arm = block_after(source, "WidgetKind::ColorPicker => {")
+    door = block_after(arm, "connect_rgba_notify(")
+    if not re.match(r"\{\s*if quiet\.get\(\) \{\s*return;\s*\}\s*color_committed\(", door):
+        out.append(f"{GTK}: the colour button's notify::rgba handler does not open on "
+                   f"the quiet guard — the notify fires for the app's own set_rgba (§4.3)")
+    calls = len(re.findall(r"(?<!fn )color_committed\(", source))
+    inside = len(re.findall(r"color_committed\(", door))
+    if calls != 1 or inside != 1:
+        out.append(f"{GTK}: color_committed is called {calls} time(s) and {inside} of "
+                   f"them sit in the notify::rgba door — a commit anywhere else is "
+                   f"an echo")
+    drive = block_after(source, "fn set_color(&self")
+    if ".set_rgba(" not in drive or "apply_quiet" in drive:
+        out.append(f"{GTK}: set_color does not move the button's rgba outside the quiet "
+                   f"guard — it must reach the notify door a Select reaches (§5)")
+    lines = source.split("\n")
+    for i, line in enumerate(lines):
+        if ".set_rgba(" not in line or "core.color_pickers[i].button.set_rgba(" in line:
+            continue
+        before = "\n".join(lines[max(0, i - 2):i])
+        if "replace(true)" not in before or ".set(was)" not in lines[i + 1]:
+            out.append(f"{GTK}:{i + 1}: a set_rgba not under the quiet guard — the app's "
+                       f"write would echo as a color_changed (§2)")
+    return out
+
+
+gate.counted("gtk colour set_rgba sites read",
+             len(re.findall(r"\.set_rgba\(", REAL[GTK])), floor=4)
+
+
+def gtk_color_watched(label, source, fragment):
+    if not gate.negative(label, lambda: gtk_color_findings(source), want=fragment):
+        return
+    print(f"check-slider-commit: watched refusing: {label}")
+
+
+# G1. GTK: A SECOND EMIT.
+gtk_color_watched("a GTK colour emitted outside color_committed", gate.doctor(
+    "a second gtk emit", REAL[GTK],
+    r"(                    field\.dialog\.set_with_alpha\(on\);\n)",
+    r"\1                    core.occurrences.send_color_tag(&[], 0);\n"),
+    "is called 2 time(s)")
+
+# G2. GTK: THE APP'S WRITE WITHOUT THE QUIET GUARD.
+gtk_color_watched("a GTK colour write with the quiet guard cut", gate.doctor(
+    "the apply arm's guard", REAL[GTK],
+    r"(                        field\.held\.set\(color\);\n)"
+    r"\s*let was = core\.apply_quiet\.replace\(true\);\n",
+    r"\1"),
+    "a set_rgba not under the quiet guard")
+
+# G3. GTK: THE NOTIFY DOOR WITHOUT ITS GUARD.
+gtk_color_watched("a GTK notify::rgba handler with no quiet check", gate.doctor(
+    "the notify door's guard", REAL[GTK],
+    r"(connect_rgba_notify\(move \|_\| \{\n)\s*if quiet\.get\(\) \{\n\s*return;\n\s*\}\n",
+    r"\1"),
+    "does not open on the quiet guard")
+
+# G4. GTK: A COMMIT FROM THE APPLY ARM.
+gtk_color_watched("a GTK colour committed from the alpha arm", gate.doctor(
+    "a commit in the alpha arm", REAL[GTK],
+    r"(                    field\.dialog\.set_with_alpha\(on\);\n)",
+    r"\1                    color_committed(field, &core.apply_quiet, &core.occurrences, &[]);\n"),
+    "sit in the notify::rgba door")
+
+# G5. GTK: THE SAME COLOUR COMMITS AGAIN.
+gtk_color_watched("a GTK commit of the held colour", gate.doctor(
+    "the gtk held compare", REAL[GTK],
+    r"if picked == field\.held\.get\(\) \{", "if false {"),
+    "equal to the held one")
+
+# G6. GTK: AN OPAQUE PICKER KEEPS A TRANSLUCENT CHOICE.
+gtk_color_watched("a GTK opaque picker committing a translucent choice", gate.doctor(
+    "the gtk opaque landing", REAL[GTK],
+    r"(if !field\.dialog\.is_with_alpha\(\) \{\n)(\s*)picked\.a = 0xFF;\n", r"\1"),
+    "no longer holds an opaque picker opaque")
+
+# G7. GTK: set_color UNDER THE GUARD, SO IT NEVER REACHES THE DOOR.
+gtk_color_watched("a GTK set_color written quietly", gate.doctor(
+    "the drive under the guard", REAL[GTK],
+    r"(\s*)core\.color_pickers\[i\]\.button\.set_rgba\(&rgba_of\(color\)\);",
+    r"\1core.apply_quiet.set(true);\1core.color_pickers[i].button.set_rgba(&rgba_of(color));"),
+    "set_color does not move")
+
+for line in gtk_color_findings(REAL[GTK]):
+    gate.finding(line)
 for line in census(REAL):
+    gate.finding(line)
+for line in winui_color_findings(REAL[WINUI]):
     gate.finding(line)
 for line in swiftui_color_findings(SWIFT_SOURCE):
     gate.finding(line)
+for line in compose_color_findings(REAL[COMPOSE]):
+    gate.finding(line)
 
-gate.verdict("the commit rule holds on every landed slider arm and the SwiftUI colour picker")
+gate.verdict("the commit rule holds on every landed slider arm and every colour picker arm")

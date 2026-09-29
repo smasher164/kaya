@@ -601,6 +601,8 @@ type app = {
   widget_times : (int64, int64 -> unit) Hashtbl.t;
   node_dates : (int64, Kaya_wire.value list -> int64 -> unit) Hashtbl.t;
   node_times : (int64, Kaya_wire.value list -> int64 -> unit) Hashtbl.t;
+  widget_colors : (int64, int64 -> unit) Hashtbl.t;
+  node_colors : (int64, Kaya_wire.value list -> int64 -> unit) Hashtbl.t;
   (* Window lifecycle: one handler each, receiving the window id. *)
   close_requested : (int64, unit -> unit) Hashtbl.t;
   entry_popped : (int64, unit -> unit) Hashtbl.t;
@@ -785,6 +787,8 @@ let create () =
     widget_times = Hashtbl.create 8;
     node_dates = Hashtbl.create 8;
     node_times = Hashtbl.create 8;
+    widget_colors = Hashtbl.create 8;
+    node_colors = Hashtbl.create 8;
     close_requested = Hashtbl.create 8;
     entry_popped = Hashtbl.create 8;
     back_requested = Hashtbl.create 8;
@@ -1052,6 +1056,45 @@ let pack_time t =
     invalid_arg (Printf.sprintf "kaya: %d is not a minute (0..59)" t.minute);
   Kaya_wire.pack_time t.hour t.minute
 
+(* An sRGB colour, 8 bits a channel, straight alpha (docs/color-picker-plan.md
+   §2): a colour picker's value and a Color record field. *)
+module Color = struct
+  type t = { r : int; g : int; b : int; a : int }
+
+  let channel what v =
+    if v < 0 || v > 255 then
+      invalid_arg
+        (Printf.sprintf "kaya: a %s channel of %d is not a byte (0..255) — that is not a colour"
+           what v);
+    v
+
+  let rgba r g b a =
+    { r = channel "red" r; g = channel "green" g; b = channel "blue" b; a = channel "alpha" a }
+
+  let rgb r g b = rgba r g b 255
+
+  let of_hex n =
+    if n < 0 || n > 0xFFFFFFFF then
+      invalid_arg (Printf.sprintf "kaya: %d is not a packed colour (0xRRGGBBAA)" n);
+    { r = (n lsr 24) land 0xFF; g = (n lsr 16) land 0xFF; b = (n lsr 8) land 0xFF; a = n land 0xFF }
+
+  let hex c =
+    (channel "red" c.r lsl 24) lor (channel "green" c.g lsl 16)
+    lor (channel "blue" c.b lsl 8) lor channel "alpha" c.a
+
+  let is_opaque c = c.a = 255
+  let to_string c = Printf.sprintf "%08X" (hex c)
+end
+
+type color = Color.t
+
+let string_of_color = Color.to_string
+let pack_color c = Int64.of_int (Color.hex c)
+
+let color_of_packed packed =
+  let r, g, b, a = Kaya_wire.unpack_color packed in
+  { Color.r; g; b; a }
+
 (* The formatter door and the catalog (docs/compliance-plan.md §1.4, the
    OCaml row): pure calls over the core, any thread, no transaction. A
    fault at the floor is raised here by name, never an empty string. *)
@@ -1171,6 +1214,7 @@ module Scalar = struct
     | F64 : float t
     | Date : date t
     | Time : time t
+    | Color : color t
 end
 
 let signal : type a. a Scalar.t -> a -> a signal =
@@ -1182,6 +1226,7 @@ let signal : type a. a Scalar.t -> a -> a signal =
   | Scalar.F64 -> signal_of (fun x -> Kaya_wire.F64 x) initial
   | Scalar.Date -> signal_of (fun d -> Kaya_wire.I64 (pack_date d)) initial
   | Scalar.Time -> signal_of (fun t -> Kaya_wire.I64 (pack_time t)) initial
+  | Scalar.Color -> signal_of (fun c -> Kaya_wire.I64 (pack_color c)) initial
 
 let write (s : 'a signal) (v : 'a) : unit =
   emit (the_tx ()) (Kaya_wire.tx_write_signal s.sig_id (s.sig_enc v))
@@ -2148,6 +2193,33 @@ let date_picker ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind
   | None -> ());
   w
 
+(* A colour picker (docs/color-picker-plan.md): the platform's swatch,
+   opening its colour surface. UNCONTROLLED like the date picker; each
+   SETTLED choice reaches [~on_color], never a drag's intermediate.
+   [~alpha] lets the user choose translucency (off by default). *)
+let color_picker ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind
+    ?help ?help_bind ?a11y_hint ?value ?bind ?alpha ?on_color () =
+  let tx = the_tx () in
+  let w = widget Kaya_wire.kind_color_picker in
+  Option.iter (fun g -> set_grow w g) grow;
+  Option.iter (fun v -> set_fill w v) fill;
+  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
+  Option.iter (fun v -> set_a11y_hint w v) a11y_hint;
+  let (Widget id) = w in
+  Option.iter (fun on -> emit tx (Kaya_wire.tx_set_alpha id on)) alpha;
+  Option.iter
+    (fun (c : color) ->
+      ignore (Color.hex c);
+      emit tx (Kaya_wire.tx_set_color id c.Color.r c.Color.g c.Color.b c.Color.a))
+    value;
+  Option.iter (fun (s : color signal) -> emit tx (Kaya_wire.tx_bind_color id s.sig_id)) bind;
+  (match on_color with
+  | Some handler ->
+      Hashtbl.replace tx.app.widget_colors id (fun packed ->
+          handler (color_of_packed packed))
+  | None -> ());
+  w
+
 (* A time picker over civil times: hours and minutes, no seconds.
    [~step] is the minute granularity (1, 5, 10, 15 or 30) and a pick
    snaps to it. *)
@@ -2590,6 +2662,9 @@ let f64_field index : ('a, float) field =
    off the int64 field it shares a tag with. *)
 let date_field index : ('a, date) field =
   { fd_index = index; fd_to_value = (fun d -> Kaya_wire.I64 (pack_date d)) }
+
+let color_field index : ('a, color) field =
+  { fd_index = index; fd_to_value = (fun c -> Kaya_wire.I64 (pack_color c)) }
 
 let time_field index : ('a, time) field =
   { fd_index = index; fd_to_value = (fun t -> Kaya_wire.I64 (pack_time t)) }
@@ -4048,6 +4123,9 @@ module Tpl = struct
     let bind_date_field ?(level = 0) (Node id) (fd : (_, date) field) =
       emit (the_tx ()) (Kaya_wire.tx_bind_date_element ~level ~field:fd.fd_index id)
 
+    let bind_color_field ?(level = 0) (Node id) (fd : (_, color) field) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_color_element ~level ~field:fd.fd_index id)
+
     (* Bind a time picker's value to one field of the element. *)
     let bind_time_field ?(level = 0) (Node id) (fd : (_, time) field) =
       emit (the_tx ()) (Kaya_wire.tx_bind_time_element ~level ~field:fd.fd_index id)
@@ -4586,6 +4664,37 @@ module Tpl = struct
     | Some handler ->
         Hashtbl.replace (the_tx ()).app.node_dates id (fun keys packed ->
             handler (List.map key_of_wire keys) (date_of_packed packed))
+    | None -> ());
+    n
+
+  (* A colour picker per stamped copy: the date picker's three sources,
+     [~bind_field] the row's own (_, color) field. Choices carry the
+     copy's keys first. *)
+  let color_picker ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_hint ?value ?bind ?bind_field
+      ?alpha ?(level = 0) ?(a11y_level = level) ?on_color () =
+    let n = Floor.widget Kaya_wire.kind_color_picker in
+    Option.iter (fun g -> Floor.set_grow n g) grow;
+    Option.iter (fun v -> Floor.set_fill n v) fill;
+    Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~a11y_level n;
+    Option.iter (fun v -> Floor.set_a11y_hint n v) a11y_hint;
+    let (Node id) = n in
+    Option.iter (fun on -> emit (the_tx ()) (Kaya_wire.tx_set_alpha id on)) alpha;
+    Option.iter
+      (fun (c : color) ->
+        ignore (Color.hex c);
+        emit (the_tx ())
+          (Kaya_wire.tx_set_color id c.Color.r c.Color.g c.Color.b c.Color.a))
+      value;
+    Option.iter
+      (fun (s : color signal) -> emit (the_tx ()) (Kaya_wire.tx_bind_color id s.sig_id))
+      bind;
+    Option.iter (fun fd -> Floor.bind_color_field ~level n fd) bind_field;
+    (match on_color with
+    | Some handler ->
+        Hashtbl.replace (the_tx ()).app.node_colors id (fun keys packed ->
+            handler (List.map key_of_wire keys) (color_of_packed packed))
     | None -> ());
     n
 
@@ -5233,6 +5342,17 @@ let dispatch_loop app =
                | None -> ())
            | Some (Kaya_wire.I64 packed), keys ->
                (match Hashtbl.find_opt app.node_dates id with
+               | Some handler -> dispatch app (fun () -> handler keys packed)
+               | None -> ())
+           | _ -> ()
+         else if kind = Kaya_wire.occ_kind_color_changed then
+           match (payload, keys) with
+           | Some (Kaya_wire.I64 packed), [] ->
+               (match Hashtbl.find_opt app.widget_colors id with
+               | Some handler -> dispatch app (fun () -> handler packed)
+               | None -> ())
+           | Some (Kaya_wire.I64 packed), keys ->
+               (match Hashtbl.find_opt app.node_colors id with
                | Some handler -> dispatch app (fun () -> handler keys packed)
                | None -> ())
            | _ -> ()

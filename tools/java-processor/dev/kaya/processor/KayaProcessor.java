@@ -230,6 +230,8 @@ public final class KayaProcessor extends AbstractProcessor {
             // The picker types (docs/datetime-plan.md D10).
             case "java.time.LocalDate" -> "java.time.LocalDate";
             case "java.time.LocalTime" -> "java.time.LocalTime";
+            // docs/color-picker-plan.md §2.
+            case "dev.kaya.KayaApp.Color" -> "dev.kaya.KayaApp.Color";
             default -> null;
         };
     }
@@ -354,6 +356,13 @@ public final class KayaProcessor extends AbstractProcessor {
         w(b, "        KayaApp.Node datePicker(KayaRecords.Field<java.time.LocalDate> f,");
         w(b, "                KayaRecords.Collection.DateHandler<%s> onDate) {", key);
         w(b, "            return c.datePicker(tpl(), f, onDate);");
+        w(b, "        }");
+        w(b, "");
+        w(b, "        /** A colour picker on this field with its handler");
+        w(b, "         * co-located. */");
+        w(b, "        KayaApp.Node colorPicker(KayaRecords.Field<KayaApp.Color> f,");
+        w(b, "                KayaRecords.Collection.ColorHandler<%s> onColor) {", key);
+        w(b, "            return c.colorPicker(tpl(), f, onColor);");
         w(b, "        }");
         w(b, "");
         w(b, "        /** A time picker on this field with its pick handler");

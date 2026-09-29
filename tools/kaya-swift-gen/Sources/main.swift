@@ -50,6 +50,8 @@ let wire: [String: (valueCase: String, zero: String)] = [
     // a Date field from a Time one.
     "KayaDate": ("i64", "KayaDate(year: 1970, month: 1, day: 1)"),
     "KayaTime": ("i64", "KayaTime(hour: 0, minute: 0)"),
+    // docs/color-picker-plan.md §2.
+    "KayaColor": ("i64", "KayaColor(hex: 0x000000FF)"),
 ]
 
 /// The READ direction — `init(values:)`, the shape an undo's restored
@@ -65,6 +67,7 @@ let readWire: [String: (valueCase: String, lift: (String) -> String)] = [
     "KayaDocument": ("bytes", { "kayaDocumentOfBlob(Data(\($0)))" }),
     "KayaDate": ("i64", { "kayaDate(packed: \($0))" }),
     "KayaTime": ("i64", { "kayaTime(packed: \($0))" }),
+    "KayaColor": ("i64", { "kayaColor(packed: \($0))" }),
 ]
 
 func conformsToKayaGen(_ clause: InheritanceClauseSyntax?) -> Bool {
@@ -394,6 +397,14 @@ func generateRecord(_ name: String, _ fields: [Field]) -> String {
     line("        onTime: ((KayaAppTx, [KayaValue], KayaTime) -> Void)? = nil")
     line("    ) -> KayaNodeHandle {")
     line("        t.timePicker(f, onTime: onTime)")
+    line("    }")
+    line("")
+    line("    @discardableResult")
+    line("    func colorPicker(")
+    line("        _ f: KayaField<KayaColor>, alpha: Bool? = nil,")
+    line("        onColor: ((KayaAppTx, [KayaValue], KayaColor) -> Void)? = nil")
+    line("    ) -> KayaNodeHandle {")
+    line("        t.colorPicker(f, alpha: alpha, onColor: onColor)")
     line("    }")
     line("")
     line("    @discardableResult")

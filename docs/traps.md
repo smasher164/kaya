@@ -12983,3 +12983,17 @@ state borrowed; winui/mod.rs's `watch_fullscreen` queues the settle on the
 dispatcher. The WinUI chord hook was also installed only by a menubar build,
 so a window with no catalog never saw F11: `setup` installs it now
 (docs/fullscreen-plan.md §4.3).
+
+## An NSColorWell under a pre-14 SDK stamp ignores `supportsAlpha` (measured 2026-09-28)
+
+`NSColorWell.supportsAlpha` is macOS 14 API, and a host process whose main
+executable is stamped with an older SDK (the zulu JVM, `sdk 13.3`) gets
+AppKit's compat path, where the process-wide `NSColor.ignoresAlpha`
+(default on) decides: the alpha picker held every colour opaque and the
+colorpicker-java leg read `E01B24FF` for `E01B2480`, three runs, while python3
+and dotnet (`sdk 14.4`) were green. The mac arm turns `ignoresAlpha` off once
+when it installs the colour door, through KVC because the setter is
+deprecated and the macOS pass builds with -warnings-as-errors; an opaque well
+still holds colours opaque under both stamps (the same leg's `26A269FF`
+lines). The guard is that leg on the mac lane: red in three runs without
+the line, green with it.

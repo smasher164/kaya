@@ -25,7 +25,7 @@ SCENES = [
     "reorder", "feed", "grow", "layout", "align", "window", "panels",
     "confirm", "nav", "split", "panes", "table", "scroll",
     "progress", "select", "radio", "grid", "textarea", "search", "submit", "scrollto", "fullscreen",
-    "numberfield",
+    "numberfield", "colorpicker",
     "sections",
     "menus", "commands", "a11y", "a11yrows", "filedialog",
     "clipboard", "undo", "dirty", "ranges", "save", "styling",
@@ -273,6 +273,11 @@ ORDER = [
      # ships the exe and no .py or .ts; the other five legs join this line
      # with their guests.
      "pickers_rust", "pickers_python", "pickers_js", "pickers_go", "pickers_csharp", "pickers_java",
+     # The colour pickers pool for the pickers' reason: `set_color` writes
+     # the ColorPicker's own property and runs the flyout's close path with
+     # the flyout never shown (docs/color-picker-plan.md §5).
+     "colorpicker_rust", "colorpicker_python", "colorpicker_js", "colorpicker_go",
+     "colorpicker_csharp", "colorpicker_java",
      # The sliders pool for the pickers' reason: `set_value` drives the
      # CONTROL's own property, no real mouse and no OS-global chrome. RUST
      # ALONE while the eight bindings' sugar is the parallel worktree

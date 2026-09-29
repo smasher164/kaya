@@ -1017,6 +1017,68 @@ if (isMainThread) {
   check("a number field's value_committed reaches onCommit", JSON.stringify(nfCommits) === "[40]");
   check("a stamped number field's commit hands the row over first", JSON.stringify(nfRowCommits) === JSON.stringify([["b", 7]]));
 
+  // ------------------------------------------------ the colour picker
+  // (docs/color-picker-plan.md §2, §7.)
+  check("a Color packs 0xRRGGBBAA and spells it in capitals",
+    kaya.Color.fromHex(0xe01b2480).hex() === 0xe01b2480
+      && kaya.Color.fromHex(0xe01b2480).r === 0xe0 && kaya.Color.fromHex(0xe01b2480).a === 0x80
+      && String(kaya.Color.fromHex(0x0a0b0cff)) === "0A0B0CFF"
+      && new kaya.Color(0x33, 0x66, 0x99).equals(kaya.Color.fromHex(0x336699ff))
+      && kaya.Color.fromHex(0xffffffff).hex() === wire.pack_color(255, 255, 255, 255));
+  for (const [what, call] of [
+    ["a channel of 256", () => new kaya.Color(256, 0, 0)],
+    ["a packed value past 32 bits", () => kaya.Color.fromHex(0x1_0000_0000)],
+    ["a negative packed value", () => kaya.Color.fromHex(-1)],
+  ] as const) {
+    let refused = false;
+    try {
+      call();
+    } catch {
+      refused = true;
+    }
+    check(`a Color refuses ${what}`, refused);
+  }
+  const CpSwatch = kaya.record({ name: String, fill: kaya.Color }, "CpSwatch");
+  let cpSwatches!: K.Collection<K.Fields<typeof CpSwatch.schema>, K.Row<typeof CpSwatch.schema>>;
+  let cpLive!: K.Widget;
+  let cpGlaze!: K.Widget;
+  let cpStamped!: K.Widget;
+  const cpCommits: string[] = [];
+  const cpRowCommits: [K.Key, string][] = [];
+  shipped.length = 0;
+  app.window(() => {
+    cpSwatches = kaya.collection(CpSwatch);
+    kaya.column(() => {
+      cpLive = kaya.colorPicker({ color: kaya.Color.fromHex(0x336699ff), onColor: (c: K.Color) => cpCommits.push(String(c)) });
+      cpGlaze = kaya.colorPicker({ color: kaya.Color.fromHex(0x26a269ff), alpha: true });
+      for (const swatch of cpSwatches) {
+        cpStamped = kaya.colorPicker({
+          color: swatch.fill,
+          onColor: (row: K.RowHandle<K.Fields<typeof CpSwatch.schema>>, c: K.Color) => cpRowCommits.push([row.key, String(c)]),
+        });
+      }
+    });
+  });
+  const cpRecords = shipped[0]!.map((r) => JSON.stringify([...r]));
+  check("a colour picker is the color_picker kind", cpRecords.includes(JSON.stringify([...wire.tx_create_widget(cpLive.id, wire.KIND_COLOR_PICKER)])));
+  check("a colour picker's value packs as the generated setter does",
+    cpRecords.includes(JSON.stringify([...wire.tx_set_color(cpLive.id, 0x33, 0x66, 0x99, 0xff)])));
+  check("alpha packs as the generated setter does, and only when asked",
+    cpRecords.includes(JSON.stringify([...wire.tx_set_alpha(cpGlaze.id, true)]))
+      && !cpRecords.includes(JSON.stringify([...wire.tx_set_alpha(cpLive.id, false)]))
+      && !cpRecords.includes(JSON.stringify([...wire.tx_set_alpha(cpLive.id, true)])));
+  const cpHandlers = (app as unknown as { _widgetHandlers: Map<string, unknown> })._widgetHandlers;
+  check("a colour picker registers onColor under color_changed alone",
+    cpHandlers.has(`${wire.OCC_COLOR_CHANGED}:${cpLive.id}`)
+      && [...cpHandlers.keys()].filter((k) => k.endsWith(`:${cpLive.id}`)).length === 1);
+  app.build(() => { cpSwatches.insert("b", CpSwatch({ name: "b", fill: kaya.Color.fromHex(0xf6d32dff) })); });
+  check("a Color field rides the I64 slot as the packed colour",
+    shipped.some((batch) => batch.some((r) => `,${[...r].join(",")},`.includes(`,${[...new Uint8Array(new BigUint64Array([0xf6d32dffn]).buffer)].join(",")},`))));
+  fire(wire.parse_occurrence(packStamped(wire.OCC_COLOR_CHANGED, cpLive.id, [], new wire.I64(0xe01b24ff))));
+  fire(wire.parse_occurrence(packStamped(wire.OCC_COLOR_CHANGED, cpStamped.id, ["b"], new wire.I64(0x813d9cff))));
+  check("a colour picker's color_changed reaches onColor as a Color", JSON.stringify(cpCommits) === JSON.stringify(["E01B24FF"]));
+  check("a stamped colour picker's commit hands the row over first", JSON.stringify(cpRowCommits) === JSON.stringify([["b", "813D9CFF"]]));
+
   // ------------------- S2: the switch role, href, the section badge
   // (docs/tasks-s2-plan.md T1, T2, T3.) Three surfaces the generator
   // hands every binding as NUMBERS and each binding names by hand: a

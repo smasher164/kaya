@@ -124,6 +124,18 @@ sealed class TableItemRow
         System.Action<Tx, System.Collections.Generic.List<object>, System.TimeOnly>? onTime = null) =>
         t.TimePicker(value, onTime);
 
+    public Node ColorPicker(Color value, bool alpha = false,
+        System.Action<Tx, System.Collections.Generic.List<object>, Color>? onColor = null) =>
+        t.ColorPicker(value, alpha, onColor);
+
+    public Node ColorPicker(Signal value, bool alpha = false,
+        System.Action<Tx, System.Collections.Generic.List<object>, Color>? onColor = null) =>
+        t.ColorPicker(value, alpha, onColor);
+
+    public Node ColorPicker(Field<Color> f, bool alpha = false,
+        System.Action<Tx, System.Collections.Generic.List<object>, Color>? onColor = null) =>
+        t.ColorPicker(f, alpha, onColor);
+
     public Node TimePicker(Signal value,
         System.Action<Tx, System.Collections.Generic.List<object>, System.TimeOnly>? onTime = null) =>
         t.TimePicker(value, onTime);

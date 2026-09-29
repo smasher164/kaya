@@ -1095,6 +1095,31 @@ impl Color {
             .map_err(|_| format!("{packed} is not a packed colour (0xRRGGBBAA)"))
     }
 
+    /// THE ONE PRESET PALETTE a synthesized picker draws (docs/color-picker-plan.md
+    /// §6): GTK 4's own colour chooser default, the GNOME palette, nine hues
+    /// of five shades each, hue-major, so Android's grid is the one GTK's
+    /// dialog shows.
+    pub const PALETTE: [Color; 45] = {
+        const HEX: [u32; 45] = [
+            0x99C1F1, 0x62A0EA, 0x3584E4, 0x1C71D8, 0x1A5FB4, // blue
+            0x8FF0A4, 0x57E389, 0x33D17A, 0x2EC27E, 0x26A269, // green
+            0xF9F06B, 0xF8E45C, 0xF6D32D, 0xF5C211, 0xE5A50A, // yellow
+            0xFFBE6F, 0xFFA348, 0xFF7800, 0xE66100, 0xC64600, // orange
+            0xF66151, 0xED333B, 0xE01B24, 0xC01C28, 0xA51D2D, // red
+            0xDC8ADD, 0xC061CB, 0x9141AC, 0x813D9C, 0x613583, // purple
+            0xCDAB8F, 0xB5835A, 0x986A44, 0x865E3C, 0x63452C, // brown
+            0xFFFFFF, 0xF6F5F4, 0xDEDDDA, 0xC0BFBC, 0x9A9996, // light
+            0x77767B, 0x5E5C64, 0x3D3846, 0x241F31, 0x000000, // dark
+        ];
+        let mut out = [Color::rgb(0, 0, 0); 45];
+        let mut i = 0;
+        while i < 45 {
+            out[i] = Color::from_hex(HEX[i] << 8 | 0xFF);
+            i += 1;
+        }
+        out
+    };
+
     /// THE ONE QUANTIZER (docs/color-picker-plan.md §3 rule 1): every
     /// backend hands the sRGB components its platform converted to here,
     /// so they all clamp and round alike. NaN reads as 0.
@@ -2894,6 +2919,19 @@ mod tests {
         assert_eq!(Color::quantize(1.09, -0.23, -0.15, 1.0), Color::rgb(0xFF, 0, 0));
         assert_eq!(Color::quantize(f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.5), Color::rgba(0, 0xFF, 0, 0x80));
         assert_eq!(Color::quantize(51.4 / 255.0, 51.6 / 255.0, 0.4 / 255.0, 1.0), Color::rgb(51, 52, 0));
+    }
+
+    #[test]
+    fn the_palette_is_gtks_forty_five_opaque_distinct_colours() {
+        let p = Color::PALETTE;
+        assert_eq!(p.len(), 45);
+        assert!(p.iter().all(|c| c.is_opaque()), "a translucent palette entry");
+        let distinct: std::collections::HashSet<u32> = p.iter().map(|c| c.hex()).collect();
+        assert_eq!(distinct.len(), 45, "a duplicated palette entry");
+        assert_eq!((p[0].hex(), p[2].hex(), p[44].hex()), (0x99C1F1FF, 0x3584E4FF, 0x000000FF));
+        for scene in [0xE01B24FF, 0x26A269FF, 0x3584E4FF, 0xF6D32DFF, 0xE66100FF, 0x813D9CFF] {
+            assert!(distinct.contains(&scene), "{scene:08X} left the palette");
+        }
     }
 
     #[test]

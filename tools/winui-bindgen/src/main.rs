@@ -647,6 +647,12 @@ fn main() {
         "Microsoft.UI.Xaml.Controls.NumberBoxValidationMode".to_string(),
         "Windows.Globalization.NumberFormatting.INumberFormatter2".to_string(),
         "Windows.Globalization.NumberFormatting.INumberParser".to_string(),
+        // THE COLOUR PICKER (docs/color-picker-plan.md §6): the inline
+        // ColorPicker and its event args, and the Flyout a swatch button
+        // opens it in; FlyoutBase above carries Closed and Hide.
+        "Microsoft.UI.Xaml.Controls.ColorPicker".to_string(),
+        "Microsoft.UI.Xaml.Controls.ColorChangedEventArgs".to_string(),
+        "Microsoft.UI.Xaml.Controls.Flyout".to_string(),
     ];
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     // The returned Warnings are windows-bindgen's own notes about the metadata,

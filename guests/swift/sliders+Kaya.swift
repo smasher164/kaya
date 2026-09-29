@@ -75,6 +75,14 @@ struct TrackRow {
     }
 
     @discardableResult
+    func colorPicker(
+        _ f: KayaField<KayaColor>, alpha: Bool? = nil,
+        onColor: ((KayaAppTx, [KayaValue], KayaColor) -> Void)? = nil
+    ) -> KayaNodeHandle {
+        t.colorPicker(f, alpha: alpha, onColor: onColor)
+    }
+
+    @discardableResult
     func slider(
         min: Double = 0.0, max: Double = 1.0, value f: KayaField<Double>,
         step: Double? = nil, tickSpacing: Double? = nil,

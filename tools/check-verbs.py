@@ -2179,7 +2179,6 @@ REFUSALS = {
     # A phone's number field has no stepping door (docs/number-field-plan.md
     # §3 rule 7), so the phone lanes cut the scene at the steps.
     (KOTLIN, "nudge"): "nudge: a phone's number field has no stepping door",
-    (KOTLIN, "set_color"): 'depthStub("colorpicker")',
 }
 # A DEPTH STUB on an action verb is a refusal too, for as long as it stands:
 # its row here reads `(KOTLIN, "<verb>"): 'depthStub("<scene>")'` and the

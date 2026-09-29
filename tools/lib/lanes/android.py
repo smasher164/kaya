@@ -74,6 +74,8 @@ LEGS = {
         # The number field in the everyday locale and in German
         # (docs/number-field-plan.md §5); MODS cuts the steps.
         "numberfield-compose", "numberfieldde-compose",
+        # The colour picker's synthesized sheet (docs/color-picker-plan.md §6).
+        "colorpicker-compose",
         # Immersive mode (docs/fullscreen-plan.md §3): MODS cuts the user half.
         "fullscreen-compose",
         "sizepolicy-compose", "adaptive-compose", "feed-compose",
@@ -157,7 +159,7 @@ LEGS = {
         "assets-jvm", "dnd-jvm", "pickers-jvm", "sliders-jvm", "tooltips-jvm",
         "sheet-jvm",
         "format-jvm", "formatde-jvm", "formatar-jvm",
-        "numberfield-jvm", "numberfieldde-jvm",
+        "numberfield-jvm", "numberfieldde-jvm", "colorpicker-jvm",
     ],
     "go": [
         "go", "a11y-go", "a11yrows-go",
@@ -176,7 +178,7 @@ LEGS = {
         "dnd-go", "pickers-go", "sliders-go", "tooltips-go",
         "sheet-go",
         "format-go", "formatde-go", "formatar-go",
-        "numberfield-go", "numberfieldde-go",
+        "numberfield-go", "numberfieldde-go", "colorpicker-go",
     ],
     "python": [
         "varied-python", "portfolio-python",

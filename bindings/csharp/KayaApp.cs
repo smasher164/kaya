@@ -832,6 +832,8 @@ sealed record DateChanged(ulong Id, List<object> Keys, DateOnly Date) : Occurren
 
 sealed record TimeChanged(ulong Id, List<object> Keys, TimeOnly Time) : Occurrence(Id, Keys);
 
+sealed record ColorChanged(ulong Id, List<object> Keys, Color Color) : Occurrence(Id, Keys);
+
 sealed record TextEdited(ulong Id, List<object> Keys, Edit Act) : Occurrence(Id, Keys);
 
 sealed record TextFormatted(ulong Id, List<object> Keys, Format Act) : Occurrence(Id, Keys);
@@ -1359,6 +1361,8 @@ sealed class KayaApp
     readonly Dictionary<ulong, Action<Tx, List<object>, DateOnly>> nodeDates = new();
     readonly Dictionary<ulong, Action<Tx, TimeOnly>> widgetTimes = new();
     readonly Dictionary<ulong, Action<Tx, List<object>, TimeOnly>> nodeTimes = new();
+    readonly Dictionary<ulong, Action<Tx, Color>> widgetColors = new();
+    readonly Dictionary<ulong, Action<Tx, List<object>, Color>> nodeColors = new();
     // Window lifecycle: one handler each, receiving the window id.
     internal readonly Dictionary<ulong, Action<Tx>> closeRequested = new();
     internal readonly Dictionary<ulong, Action<Tx>> entryPopped = new();
@@ -2106,6 +2110,13 @@ sealed class KayaApp
     public void OnTime(Node n, Action<Tx, List<object>, TimeOnly> handler) =>
         nodeTimes[n.Id] = handler;
 
+    /// A live colour picker's settled choices (docs/color-picker-plan.md §3).
+    public void OnColor(Widget w, Action<Tx, Color> handler) => widgetColors[w.Id] = handler;
+
+    /// A template colour picker's settled choices, keys first.
+    public void OnColor(Node n, Action<Tx, List<object>, Color> handler) =>
+        nodeColors[n.Id] = handler;
+
     /// The open transaction, reached ambiently by the chained canvas
     /// declarations (Widget.Fixed, OnDraw, OnTick) — Signal.Derive's route
     /// and for the same reason: the handle is an id alone.
@@ -2306,6 +2317,8 @@ sealed class KayaApp
                 return new DateChanged(id, keys, KayaRecords.DateOf(payload));
             case KayaWire.OccKindTimeChanged:
                 return new TimeChanged(id, keys, KayaRecords.TimeOf(payload));
+            case KayaWire.OccKindColorChanged:
+                return new ColorChanged(id, keys, Color.Of(payload));
             case KayaWire.OccKindTextEdited:
                 return new TextEdited(id, keys, EditOf(payload as List<object>));
             case KayaWire.OccKindTextFormatted:
@@ -2489,6 +2502,13 @@ sealed class KayaApp
                     break;
                 case TimeChanged timeRow when nodeTimes.TryGetValue(timeRow.Id, out var onTimeRow):
                     Dispatch(tx => onTimeRow(tx, timeRow.Keys, timeRow.Time));
+                    break;
+                case ColorChanged { Live: true } colorLive
+                    when widgetColors.TryGetValue(colorLive.Id, out var onColor):
+                    Dispatch(tx => onColor(tx, colorLive.Color));
+                    break;
+                case ColorChanged colorRow when nodeColors.TryGetValue(colorRow.Id, out var onColorRow):
+                    Dispatch(tx => onColorRow(tx, colorRow.Keys, colorRow.Color));
                     break;
                 case CloseRequested close when closeRequested.TryGetValue(close.Id, out var onClose):
                     Dispatch(tx => onClose(tx));
@@ -3538,6 +3558,22 @@ sealed class Tx : IDisposable
         if (bind is Signal s) Records.Add(KayaWire.TxBindTime(w.Id, s.Id));
         else Records.Add(KayaWire.TxSetTime(w.Id, value.Hour, value.Minute));
         if (onTime != null) App.OnTime(w, onTime);
+        if (grow is double g) SetGrow(w, g);
+        return w;
+    }
+
+    /// A colour picker (docs/color-picker-plan.md): the platform's swatch,
+    /// opening its colour surface. UNCONTROLLED: each settled choice goes
+    /// to onColor, and an app write never echoes. `alpha` lets the user
+    /// choose translucency; `bind` takes a Signal for the value.
+    public Widget ColorPicker(Color value = default, bool alpha = false,
+        Action<Tx, Color>? onColor = null, double? grow = null, Signal? bind = null)
+    {
+        var w = Widget(KayaWire.KindColorPicker);
+        if (bind is Signal s) Records.Add(KayaWire.TxBindColor(w.Id, s.Id));
+        else Records.Add(KayaWire.TxSetColor(w.Id, value.R, value.G, value.B, value.A));
+        if (alpha) Records.Add(KayaWire.TxSetAlpha(w.Id, true));
+        if (onColor != null) App.OnColor(w, onColor);
         if (grow is double g) SetGrow(w, g);
         return w;
     }
@@ -4945,6 +4981,11 @@ sealed class Tpl
     public void BindTimeField(Node n, uint level, Field<TimeOnly> f) =>
         tx.Records.Add(KayaWire.TxBindTimeElement(n.Id, level, f.Index));
 
+    /// Binds a colour picker's value to one field of the element;
+    /// Field&lt;Color&gt; only.
+    public void BindColorField(Node n, uint level, Field<Color> f) =>
+        tx.Records.Add(KayaWire.TxBindColorElement(n.Id, level, f.Index));
+
     public void BindValueField(Node n, uint level, Field<double> f) =>
         tx.Records.Add(KayaWire.TxBindValueElement(n.Id, level, f.Index));
 
@@ -5250,6 +5291,40 @@ sealed class Tpl
         var n = Widget(KayaWire.KindDatePicker);
         BindDateField(n, 0, f);
         if (onDate != null) tx.App.OnDate(n, onDate);
+        return n;
+    }
+
+    /// A colour picker in the blueprint: the date picker's three sources,
+    /// the row's own Color field included. Choices carry the keys first.
+    public Node ColorPicker(Color value, bool alpha = false,
+        Action<Tx, List<object>, Color>? onColor = null)
+    {
+        var n = ColorPickerOf(alpha, onColor);
+        tx.Records.Add(KayaWire.TxSetColor(n.Id, value.R, value.G, value.B, value.A));
+        return n;
+    }
+
+    public Node ColorPicker(Signal value, bool alpha = false,
+        Action<Tx, List<object>, Color>? onColor = null)
+    {
+        var n = ColorPickerOf(alpha, onColor);
+        tx.Records.Add(KayaWire.TxBindColor(n.Id, value.Id));
+        return n;
+    }
+
+    public Node ColorPicker(Field<Color> f, bool alpha = false,
+        Action<Tx, List<object>, Color>? onColor = null)
+    {
+        var n = ColorPickerOf(alpha, onColor);
+        BindColorField(n, 0, f);
+        return n;
+    }
+
+    Node ColorPickerOf(bool alpha, Action<Tx, List<object>, Color>? onColor)
+    {
+        var n = Widget(KayaWire.KindColorPicker);
+        if (alpha) tx.Records.Add(KayaWire.TxSetAlpha(n.Id, true));
+        if (onColor != null) tx.App.OnColor(n, onColor);
         return n;
     }
 

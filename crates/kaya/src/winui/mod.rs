@@ -32,11 +32,11 @@ use bindings::Microsoft::UI::Windowing::{
 use bindings::Windows::Graphics::{PointInt32, RectInt32, SizeInt32};
 use bindings::Microsoft::UI::Xaml::Controls::{
     AppBarButton, Button, CalendarDatePicker, CalendarDatePickerDateChangedEventArgs,
-    CheckBox, ColumnDefinition, ColumnDefinitionCollection, ComboBox,
+    CheckBox, ColorPicker, ColumnDefinition, ColumnDefinitionCollection, ComboBox,
     ComboBoxItem, CommandBar,
     ContentDialog,
     ContentDialogButton, ContentDialogResult, DisabledFormattingAccelerators, FontIcon, Grid,
-    HyperlinkButton, ICommandBarElement, IconElement, Image, InfoBadge, MenuBar,
+    Flyout, HyperlinkButton, ICommandBarElement, IconElement, Image, InfoBadge, MenuBar,
     MenuBarItem, MenuFlyout,
     MenuFlyoutItem, MenuFlyoutItemBase, MenuFlyoutSeparator, MenuFlyoutSubItem, NavigationView,
     NavigationViewItem, NavigationViewPaneDisplayMode, NumberBox, NumberBoxSpinButtonPlacementMode,
@@ -176,6 +176,9 @@ enum NativeWidget {
     /// The number field (docs/number-field-plan.md §6): a NumberBox whose
     /// NumberFormatter is kaya's own, so its text is the door's both ways.
     NumberField(NumberBox),
+    /// The colour picker (docs/color-picker-plan.md §6): a Button faced with
+    /// a swatch, whose Flyout holds the inline ColorPicker.
+    ColorPicker(ColorSwatch),
 }
 
 impl NativeWidget {
@@ -220,6 +223,7 @@ impl NativeWidget {
             // what carries the identity — see `identity_element`.
             NativeWidget::Search { host, .. } => host.cast(),
             NativeWidget::NumberField(field) => field.cast(),
+            NativeWidget::ColorPicker(swatch) => swatch.button.cast(),
         }
     }
 
@@ -531,6 +535,11 @@ struct CoreState {
     number_fields: Vec<NumberBox>,
     number_field_ids: Vec<u64>,
     number_cells: HashMap<u64, std::sync::Arc<NumberCell>>,
+    /// The colour pickers' buttons in creation order, their ids, and each
+    /// one's parts and cell by id.
+    color_pickers: Vec<Button>,
+    color_picker_ids: Vec<u64>,
+    color_swatches: HashMap<u64, (ColorSwatch, std::sync::Arc<ColorCell>)>,
     /// Grid layout state: ordered children + column count; both the adds and
     /// the columns prop re-flow the attach positions (docs/traps.md: Sugar
     /// construction order differs per language).
@@ -14575,7 +14584,22 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // platform's own — the TextBox template's `DeleteButton` —
                 // and AutoSuggestBox is refused, both measured
                 // (docs/measurements/search-winui-2026-09-06.md).
-                WidgetKind::ColorPicker => crate::depth_stub("colorpicker"),
+                WidgetKind::ColorPicker => {
+                    let swatch = ColorSwatch::new()?;
+                    let cell = std::sync::Arc::new(ColorCell::new(
+                        tag.expect("color pickers carry a tag").to_vec(),
+                    ));
+                    let sink = core.occurrences.clone();
+                    let (door, door_cell) = (swatch.clone(), cell.clone());
+                    let closed = EventHandler::<windows_core::IInspectable>::new(move |_, _| {
+                        winui_color_commit(&door, &door_cell, &sink)
+                    });
+                    swatch.flyout.Closed(&closed)?;
+                    core.color_pickers.push(swatch.button.clone());
+                    core.color_picker_ids.push(id.0);
+                    core.color_swatches.insert(id.0, (swatch.clone(), cell));
+                    NativeWidget::ColorPicker(swatch)
+                }
                 WidgetKind::NumberField => {
                     // The box parses and formats through kaya's own formatter
                     // (`KayaNumberText`), clamps natively and raises ValueChanged
@@ -15345,6 +15369,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             drop_pair(&mut core.search_ids, &mut core.searches, id.0);
             drop_pair(&mut core.number_field_ids, &mut core.number_fields, id.0);
             core.number_cells.remove(&id.0);
+            drop_pair(&mut core.color_picker_ids, &mut core.color_pickers, id.0);
+            core.color_swatches.remove(&id.0);
             if let Some(tag) = core.widget_tags.get(&id.0) {
                 if let Some(i) = core.buttons.iter().position(|t| t == tag) {
                     core.buttons.remove(i);
@@ -16575,6 +16601,23 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.apply_quiet
                         .store(false, std::sync::atomic::Ordering::Relaxed);
                     write?;
+                }
+                // An app write never echoes (docs/color-picker-plan.md §3): the
+                // mirror moves with the control, and nothing but the flyout's
+                // close commits.
+                (NativeWidget::ColorPicker(swatch), Prop::Color, Value::I64(packed)) => {
+                    let color = crate::Color::from_hex(packed as u32);
+                    if let Some((_, cell)) = core.color_swatches.get(&id.0) {
+                        cell.held.store(packed, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    swatch.picker.SetColor(winui_ui_color(color))?;
+                    swatch.paint(color)?;
+                }
+                (NativeWidget::ColorPicker(swatch), Prop::Alpha, Value::Bool(on)) => {
+                    if let Some((_, cell)) = core.color_swatches.get(&id.0) {
+                        cell.alpha.store(on, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    swatch.picker.SetIsAlphaEnabled(on)?;
                 }
                 // An app write never echoes (docs/number-field-plan.md §2):
                 // the mirror moves and the box is written quiet.
@@ -19183,6 +19226,9 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             number_fields: Vec::new(),
             number_field_ids: Vec::new(),
             number_cells: HashMap::new(),
+            color_pickers: Vec::new(),
+            color_picker_ids: Vec::new(),
+            color_swatches: HashMap::new(),
             grid_children: HashMap::new(),
             stamps_rows: std::collections::HashSet::new(),
             fills: HashMap::new(),
@@ -20047,7 +20093,7 @@ fn registry_widget_at(core: &CoreState, kind: crate::harness::TargetKind, i: usi
         K::Grid => id_of!(core.grids, NativeWidget::Grid2D(grid), grid),
         K::Textarea => core.textarea_ids.get(i).copied(),
         K::Search => core.search_ids.get(i).copied(),
-        K::ColorPicker => crate::depth_stub("colorpicker"),
+        K::ColorPicker => core.color_picker_ids.get(i).copied(),
         K::NumberField => core.number_field_ids.get(i).copied(),
         K::Canvas => core.canvas_ids.get(i).copied(),
         K::DatePicker => core.date_picker_ids.get(i).copied(),
@@ -20341,7 +20387,7 @@ fn target_element(
         // target answers — the text, the focus, the a11y peer — is the
         // TextBox's (docs/search-plan.md S7).
         K::Search => nth!(core.searches),
-        K::ColorPicker => crate::depth_stub("colorpicker"),
+        K::ColorPicker => nth!(core.color_pickers),
         K::NumberField => nth!(core.number_fields),
         K::DatePicker => nth!(core.date_pickers),
         K::TimePicker => nth!(core.time_pickers),
@@ -20462,7 +20508,7 @@ fn registry_ids(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<u64> 
         K::Grid => ids!(core.grids, NativeWidget::Grid2D(grid), grid),
         K::Textarea => core.textarea_ids.clone(),
         K::Search => core.search_ids.clone(),
-        K::ColorPicker => crate::depth_stub("colorpicker"),
+        K::ColorPicker => core.color_picker_ids.clone(),
         K::NumberField => core.number_field_ids.clone(),
         K::Canvas => core.canvas_ids.clone(),
         K::DatePicker => core.date_picker_ids.clone(),
@@ -22238,12 +22284,27 @@ impl crate::harness::Stage for WinUiStage {
             Ok(())
         });
     }
-    fn set_color(&self, _: crate::harness::Target, _: crate::Color) {
-        crate::depth_stub("colorpicker")
+    /// The picker's colour, then the flyout's close path with the flyout
+    /// never shown (docs/color-picker-plan.md §5): the commit a user's
+    /// dismissal runs.
+    fn set_color(&self, t: crate::harness::Target, color: crate::Color) {
+        Self::on_ui(move |core| {
+            let i = crate::harness::resolve(t.index, core.color_picker_ids.len());
+            let (swatch, cell) = &core.color_swatches[&core.color_picker_ids[i]];
+            swatch.picker.SetColor(winui_ui_color(color))?;
+            winui_color_commit(swatch, cell, &core.occurrences)
+        });
     }
 
-    fn color_value(&self, _: crate::harness::Target) -> String {
-        crate::depth_stub("colorpicker")
+    fn color_value(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.color_picker_ids.len()) else {
+                return Ok("<no such target>".to_owned());
+            };
+            let (swatch, _) = &core.color_swatches[&core.color_picker_ids[i]];
+            Ok(winui_color_of(swatch.picker.Color()?).to_string())
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
     fn picker_value(&self, t: crate::harness::Target) -> String {
@@ -23331,7 +23392,7 @@ impl crate::harness::Stage for WinUiStage {
                 K::Grid => find(core, K::Grid, &core.grids, &id),
                 K::Textarea => find(core, K::Textarea, &core.textareas, &id),
                 K::Search => find(core, K::Search, &core.searches, &id),
-                K::ColorPicker => crate::depth_stub("colorpicker"),
+                K::ColorPicker => find(core, K::ColorPicker, &core.color_pickers, &id),
                 K::NumberField => find(core, K::NumberField, &core.number_fields, &id),
                 K::Canvas => find(core, K::Canvas, &core.canvases, &id),
                 K::DatePicker => find(core, K::DatePicker, &core.date_pickers, &id),
@@ -25302,7 +25363,35 @@ impl crate::harness::Stage for WinUiStage {
     /// angle-bracketed answer says what it MEASURED (invariant 3).
     fn canvas_ink(&self, target: crate::harness::Target, points: &str) -> String {
         if target.kind == crate::harness::TargetKind::ColorPicker {
-            crate::depth_stub("colorpicker")
+            return Self::on_ui_read(move |core| {
+                let Some(i) = crate::harness::try_resolve(target.index, core.color_picker_ids.len())
+                else {
+                    return Ok(format!("<this window holds {} colour pickers>", core.color_picker_ids.len()));
+                };
+                let dark = core
+                    .window
+                    .Content()
+                    .ok()
+                    .and_then(|root| windows_core::Interface::cast::<FrameworkElement>(&root).ok())
+                    .and_then(|element| element.ActualTheme().ok())
+                    .is_some_and(|theme| theme == ElementTheme::Dark);
+                let mode = if dark { "dark" } else { "light" };
+                let (swatch, _) = &core.color_swatches[&core.color_picker_ids[i]];
+                let fill: FrameworkElement = windows_core::Interface::cast(&swatch.fill)?;
+                let (w, h) = (fill.ActualWidth()?, fill.ActualHeight()?);
+                if w < 1.0 || h < 1.0 {
+                    return Ok(format!("<the swatch laid out at {w}x{h}>"));
+                }
+                let at = element_placement(core, &fill)?;
+                match grab_canvas(&at) {
+                    Ok(grab) => Ok(format!("{mode} {}", sample_grab(&grab, &[(50.0, 50.0)]))),
+                    Err(why) => Ok(format!(
+                        "<the {}x{} swatch at {},{} inside a {}x{} window could not be printed: {why}>",
+                        at.w, at.h, at.ox, at.oy, at.win_w, at.win_h
+                    )),
+                }
+            })
+            .unwrap_or_else(|e| format!("<unreadable: {e}>"));
         }
         let points = points.to_owned();
         Self::on_ui_read(move |core| {
@@ -26348,6 +26437,136 @@ fn winui_number_settle(
     if let Commit::Moved(v) = answer {
         SliderCell::set(&cell.committed, v);
         sink.send_value_committed_tag(&cell.tag, v);
+    }
+    Ok(())
+}
+
+/// One colour picker's commit state, outside `CoreState` for `PickerCell`'s
+/// reason: the flyout's Closed runs on the UI thread and may be raised inside
+/// the apply borrow.
+struct ColorCell {
+    tag: Vec<u8>,
+    /// The packed RRGGBBAA the app last heard or was told: a commit landing
+    /// on it emits nothing (docs/color-picker-plan.md §5).
+    held: std::sync::atomic::AtomicI64,
+    alpha: std::sync::atomic::AtomicBool,
+}
+
+impl ColorCell {
+    fn new(tag: Vec<u8>) -> Self {
+        Self {
+            tag,
+            held: std::sync::atomic::AtomicI64::new(0),
+            alpha: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+}
+
+/// The swatch's face (docs/color-picker-plan.md §3 rule 5): the fill at the
+/// control corner radius over a checkerboard shown only for a translucent
+/// value. The board is ODD by ODD cells with the light tone at every corner,
+/// so the rounded ground clips the corners and no cell needs a radius.
+const COLOR_FACE_COLS: u32 = 7;
+const COLOR_FACE_ROWS: u32 = 5;
+const COLOR_FACE_CELL: u32 = 4;
+
+fn color_face_xaml() -> String {
+    let mut cells = String::new();
+    for row in 0..COLOR_FACE_ROWS {
+        for col in 0..COLOR_FACE_COLS {
+            if (row + col) % 2 == 1 {
+                cells.push_str(&format!(
+                    "<Grid Width=\"{c}\" Height=\"{c}\" Margin=\"{x},{y},0,0\" \
+                     HorizontalAlignment=\"Left\" VerticalAlignment=\"Top\" Background=\"#FFCCCCCC\"/>",
+                    c = COLOR_FACE_CELL,
+                    x = col * COLOR_FACE_CELL,
+                    y = row * COLOR_FACE_CELL,
+                ));
+            }
+        }
+    }
+    format!(
+        "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" \
+         Width=\"{w}\" Height=\"{h}\">\
+         <Grid Background=\"#FFFFFFFF\" CornerRadius=\"{{ThemeResource ControlCornerRadius}}\">{cells}</Grid>\
+         <Grid CornerRadius=\"{{ThemeResource ControlCornerRadius}}\" BorderThickness=\"1\" \
+         BorderBrush=\"{{ThemeResource ControlStrokeColorDefaultBrush}}\"/></Grid>",
+        w = COLOR_FACE_COLS * COLOR_FACE_CELL,
+        h = COLOR_FACE_ROWS * COLOR_FACE_CELL,
+    )
+}
+
+/// The swatch button and what it opens (docs/color-picker-plan.md §6's WinUI
+/// row): a Button faced with the value, whose Flyout holds the inline
+/// ColorPicker with its hex box shown and its channel boxes out from under
+/// the More toggle.
+#[derive(Clone)]
+struct ColorSwatch {
+    button: Button,
+    flyout: Flyout,
+    picker: ColorPicker,
+    checker: Grid,
+    fill: Grid,
+}
+
+impl ColorSwatch {
+    fn new() -> windows_core::Result<Self> {
+        let face: Grid = XamlReader::Load(&HSTRING::from(color_face_xaml()))?.cast()?;
+        let parts = face.Children()?;
+        let checker: Grid = parts.GetAt(0)?.cast()?;
+        let fill: Grid = parts.GetAt(1)?.cast()?;
+        let picker = ColorPicker::new()?;
+        picker.SetIsHexInputVisible(true)?;
+        picker.SetIsMoreButtonVisible(false)?;
+        picker.SetIsAlphaEnabled(false)?;
+        let flyout = Flyout::new()?;
+        flyout.SetContent(&picker)?;
+        let button = Button::new()?;
+        button.SetContent(&face)?;
+        button.SetFlyout(&flyout)?;
+        Ok(Self { button, flyout, picker, checker, fill })
+    }
+
+    fn paint(&self, color: crate::Color) -> windows_core::Result<()> {
+        self.fill
+            .SetBackground(&SolidColorBrush::CreateInstanceWithColor(winui_ui_color(color))?)?;
+        self.checker.SetVisibility(if color.a == 0xFF {
+            Visibility::Collapsed
+        } else {
+            Visibility::Visible
+        })
+    }
+}
+
+/// kaya's colour as the platform's 8-bit ARGB.
+fn winui_ui_color(color: crate::Color) -> bindings::Windows::UI::Color {
+    bindings::Windows::UI::Color { A: color.a, R: color.r, G: color.g, B: color.b }
+}
+
+/// The platform's colour through the core's one quantizer (§3 rule 1).
+fn winui_color_of(color: bindings::Windows::UI::Color) -> crate::Color {
+    let unit = |v: u8| f64::from(v) / 255.0;
+    crate::Color::quantize(unit(color.R), unit(color.G), unit(color.B), unit(color.A))
+}
+
+/// THE ONE COMMIT PATH (docs/color-picker-plan.md §3 rule 2), reached from
+/// the flyout's Closed and from `set_color`: the picker's colour, held opaque
+/// when the picker is (§5 AMENDED), becomes the face and, when it differs
+/// from what the app holds, the one color_changed.
+fn winui_color_commit(
+    swatch: &ColorSwatch,
+    cell: &ColorCell,
+    sink: &OccSink,
+) -> windows_core::Result<()> {
+    let mut color = winui_color_of(swatch.picker.Color()?);
+    if !cell.alpha.load(std::sync::atomic::Ordering::Relaxed) && color.a != 0xFF {
+        color.a = 0xFF;
+        swatch.picker.SetColor(winui_ui_color(color))?;
+    }
+    swatch.paint(color)?;
+    let packed = color.packed();
+    if cell.held.swap(packed, std::sync::atomic::Ordering::Relaxed) != packed {
+        sink.send_color_tag(&cell.tag, packed);
     }
     Ok(())
 }
@@ -27839,6 +28058,22 @@ fn shell_open(url: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_colour_crosses_the_platform_byte_for_byte() {
+        for v in 0..=255u8 {
+            for c in [
+                crate::Color::rgba(v, 0, 0, 0xFF),
+                crate::Color::rgba(0, v, 0, 0x80),
+                crate::Color::rgba(0, 0, v, v),
+                crate::Color::rgba(v, 255 - v, v, 0),
+            ] {
+                assert_eq!(winui_color_of(winui_ui_color(c)), c);
+            }
+        }
+        let ui = winui_ui_color(crate::Color::from_hex(0x1122_3344));
+        assert_eq!((ui.A, ui.R, ui.G, ui.B), (0x44, 0x11, 0x22, 0x33));
+    }
 
     #[test]
     fn table_tracks_do_not_repeat_the_four_half_pixel_roundups() {

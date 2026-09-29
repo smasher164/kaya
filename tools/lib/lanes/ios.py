@@ -35,6 +35,7 @@ SWIFT_ENTRIES = [
     # (docs/compliance-plan.md §6): one app, three scripts (SCENE_LOCALE).
     "format", "formatde:format", "formatar:format",
     "numberfield", "numberfieldde:numberfield",
+    "colorpicker",
 ]
 
 # The go suite: the swift roster entry for entry minus the two
@@ -51,6 +52,7 @@ GO_SCENES = [
     "table", "dnd", "pickers", "sliders", "tooltips", "sheet",
     "format", "formatde", "formatar",
     "numberfield", "numberfieldde",
+    "colorpicker",
 ]
 
 # CPython embedded in ONE bundle carrying every python scene
@@ -122,6 +124,8 @@ RUST_SCENES = [
     "richrows",
     # The number field (docs/number-field-plan.md §4.2), and under de-DE.
     "numberfield", "numberfieldde",
+    # The colour picker (docs/color-picker-plan.md §4.2).
+    "colorpicker",
 ]
 
 # The iPad legs, queued right after their phone sibling: the phone pool is
@@ -150,10 +154,7 @@ DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes"]
 # tooltips with its own (docs/tooltip-plan.md §5) — the iOS arm is the
 # shared interpreter's `.help`, which lands on the accessibility hint,
 # and expect_help reads it there.
-# The colour picker's iOS arm (a UIColorWell swatch presenting
-# UIColorPickerViewController) is built and its legs are the breadth slice's
-# to measure (docs/color-picker-plan.md §4.2).
-UNWIRED_SCENES = ["colorpicker"]
+UNWIRED_SCENES = []
 
 # The fullscreen scene's app-only way back after the cut, the same steps as
 # tools/lib/lanes/android.py's FULLSCREEN_APP_TAIL: no user change arrives.

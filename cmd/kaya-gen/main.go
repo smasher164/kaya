@@ -33,7 +33,7 @@ var wireTypes = map[string]bool{
 	"[]byte": true,
 	// The picker types (docs/datetime-plan.md D10): a Date field is an
 	// I64 on the wire and a kaya.Date everywhere the record is touched.
-	"kaya.Date": true, "kaya.Time": true,
+	"kaya.Date": true, "kaya.Time": true, "kaya.Color": true,
 	// A stamped copy's document is a FIELD of its row
 	// (docs/rich-text-plan.md §19): VALUE_BLOB in the schema, a
 	// kaya.Document everywhere the record is touched.
@@ -401,6 +401,10 @@ func generateRecord(w func(string, ...any), strct *ast.StructType, name, key str
 	w("\treturn r.c.DatePicker(r.t, f, onDate)")
 	w("}")
 	w("")
+	w("func (r %sRow) ColorPicker(f kaya.Field[kaya.Color], onColor func(*kaya.Tx, %s, kaya.Color)) kaya.Node {", lowerFirst(name), key)
+	w("\treturn r.c.ColorPicker(r.t, f, onColor)")
+	w("}")
+	w("")
 	w("func (r %sRow) TimePicker(f kaya.Field[kaya.Time], onTime func(*kaya.Tx, %s, kaya.Time)) kaya.Node {", lowerFirst(name), key)
 	w("\treturn r.c.TimePicker(r.t, f, onTime)")
 	w("}")
@@ -432,6 +436,8 @@ func generateRecord(w func(string, ...any), strct *ast.StructType, name, key str
 	w("func (r %sRow) SetMin(n kaya.Node, min float64) { r.t.SetMin(n, min) }", lowerFirst(name))
 	w("")
 	w("func (r %sRow) SetMax(n kaya.Node, max float64) { r.t.SetMax(n, max) }", lowerFirst(name))
+	w("")
+	w("func (r %sRow) SetAlpha(n kaya.Node, on bool) { r.t.SetAlpha(n, on) }", lowerFirst(name))
 	w("")
 	w("func (r %sRow) SetA11yID(n kaya.Node, id string) { r.t.SetA11yID(n, id) }", lowerFirst(name))
 	w("func (r %sRow) ContextMenu(n kaya.Node, c *kaya.ContextCatalog) { r.t.ContextMenu(n, c) }", lowerFirst(name))

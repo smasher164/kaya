@@ -368,6 +368,7 @@ var notForwarded = map[string]string{
 	"SourceField":  "Tpl.BindSourceField, the floor under Image",
 	"DateField":    "Tpl.BindDateField, the floor under DatePicker",
 	"TimeField":    "Tpl.BindTimeField, the floor under TimePicker",
+	"ColorField":   "Tpl.BindColorField, the floor under ColorPicker",
 }
 
 // props reads the prop writes a surface declares: a method whose FIRST

@@ -3022,6 +3022,106 @@ check("a stamped number field's commit passes the copy's row first",
       and nf_row_commits[0][0].key == "b"
       and nf_row_commits[0][1] == 7.0)
 
+# --- THE COLOUR PICKER (docs/color-picker-plan.md §2, §7) -------------
+app_cp = kaya.App()
+cp_commits = []
+cp_row_commits = []
+
+
+@dataclass
+class CpSwatch:
+    name: str
+    fill: kaya.Color
+
+
+check("a Color packs 0xRRGGBBAA and spells it in capitals",
+      kaya.Color.from_hex(0x336699FF).hex() == 0x336699FF
+      and (kaya.Color.from_hex(0xE01B2480).r, kaya.Color.from_hex(0xE01B2480).a)
+      == (0xE0, 0x80)
+      and str(kaya.Color.from_hex(0x0a0b0cff)) == "0A0B0CFF"
+      and kaya.Color(0x33, 0x66, 0x99) == kaya.Color.from_hex(0x336699FF)
+      and kaya.Color.from_hex(0xE01B2480).hex()
+      == kaya.wire.pack_color(0xE0, 0x1B, 0x24, 0x80))
+for what, call in (("a channel of 256", lambda: kaya.Color(256, 0, 0)),
+                   ("a packed value past 32 bits",
+                    lambda: kaya.Color.from_hex(0x1_0000_0000)),
+                   ("a negative packed value",
+                    lambda: kaya.Color.from_hex(-1))):
+    try:
+        call()
+        ok = False
+    except (TypeError, ValueError):
+        ok = True
+    check(f"a Color refuses {what}", ok)
+
+cp_live = None
+cp_glaze = None
+cp_bound = None
+cp_node = None
+cp_records = []
+with app_cp.window():
+    with kaya.column():
+        before_cp = len(kaya._tx)
+        cp_live = kaya.color_picker(
+            kaya.Color.from_hex(0x336699FF),
+            on_color=lambda c: cp_commits.append(c))
+        cp_glaze = kaya.color_picker(kaya.Color.from_hex(0x26A269FF),
+                                     alpha=True)
+        cp_sig = kaya.signal(kaya.Color.from_hex(0x3584E4FF))
+        cp_bound = kaya.color_picker(cp_sig)
+        cp_records = kaya._tx[before_cp:]
+        cp_swatches = kaya.collection(CpSwatch)
+        for cp_swatch in cp_swatches:
+            cp_node = kaya.color_picker(
+                cp_swatch.fill,
+                on_color=lambda *args: cp_row_commits.append(args))
+    cp_spec = cp_swatches._variants[0]
+
+check("a colour picker is the color_picker kind",
+      kaya.wire.tx_create_widget(cp_live.id, kaya.wire.KIND_COLOR_PICKER)
+      in cp_records)
+check("a colour picker's value packs as the generated setter does",
+      kaya.wire.tx_set_color(cp_live.id, 0x33, 0x66, 0x99, 0xFF)
+      in cp_records)
+check("alpha packs as the generated setter does, and only when asked",
+      kaya.wire.tx_set_alpha(cp_glaze.id, True) in cp_records
+      and not any(r == kaya.wire.tx_set_alpha(cp_live.id, False)
+                  or r == kaya.wire.tx_set_alpha(cp_live.id, True)
+                  for r in cp_records))
+check("a signal-bound colour picker binds its colour, the signal packed",
+      kaya.wire.tx_bind_color(cp_bound.id, cp_sig.id) in cp_records
+      and kaya.wire.tx_create_signal(cp_sig.id, 0x3584E4FF) in cp_records)
+check("a Color field takes the I64 slot and packs through the generated "
+      "helper",
+      cp_spec.schema == [kaya.wire.VALUE_STR, kaya.wire.VALUE_I64]
+      and cp_spec.encoders[1](kaya.Color.from_hex(0xE66100FF)) == 0xE66100FF
+      and cp_spec.decoders[1](0xF6D32DFF) == kaya.Color.from_hex(0xF6D32DFF))
+check("a colour picker registers on_color under color_changed alone",
+      (kaya.wire.OCC_COLOR_CHANGED, cp_live.id) in app_cp._widget_handlers
+      and not any(k == cp_live.id and o != kaya.wire.OCC_COLOR_CHANGED
+                  for (o, k) in app_cp._widget_handlers))
+
+cp_occs = [
+    (kaya.wire.OCC_COLOR_CHANGED, cp_live.id, [], 0xE01B24FF),
+    (kaya.wire.OCC_COLOR_CHANGED, cp_node.id, ["b"], 0x813D9CFF),
+]
+real_next_cp = kaya.runtime.next_occurrence
+kaya.runtime.next_occurrence = (
+    lambda: cp_occs.pop(0) if cp_occs else None)
+try:
+    app_cp._dispatch_loop()
+finally:
+    kaya.runtime.next_occurrence = real_next_cp
+
+check("a colour picker's color_changed reaches on_color as a Color",
+      cp_commits == [kaya.Color.from_hex(0xE01B24FF)]
+      and str(cp_commits[0]) == "E01B24FF")
+check("a stamped colour picker's commit passes the copy's row first",
+      len(cp_row_commits) == 1
+      and isinstance(cp_row_commits[0][0], kaya.Row)
+      and cp_row_commits[0][0].key == "b"
+      and cp_row_commits[0][1] == kaya.Color.from_hex(0x813D9CFF))
+
 # --- S2: THE SWITCH ROLE, THE LINK'S href, THE SECTION BADGE ---------
 # (docs/tasks-s2-plan.md T1, T2, T3.) Three surfaces the generator hands
 # every binding as NUMBERS and each binding names by hand: a role name

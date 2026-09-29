@@ -1,5 +1,12 @@
 package dev.kaya
 
+import androidx.compose.runtime.mutableDoubleStateOf
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.draw.clip
 import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
@@ -550,6 +557,11 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     var time by mutableLongStateOf(0L)
     var minuteStep by mutableIntStateOf(1)
 
+    /** THE COLOUR PICKER'S value, packed 0xRRGGBBAA, and whether its user
+     * may choose translucency (docs/color-picker-plan.md §2). */
+    var color by mutableLongStateOf(0xFFL)
+    var alpha by mutableStateOf(false)
+
     /**
      * WHAT THE PICKER FIELD ACTUALLY PRESENTED, in fixed digits, stamped
      * by the composable that formatted it — `expect_picker`'s reading
@@ -559,6 +571,10 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
      * Volatile: written at composition, read by the harness thread.
      */
     @Volatile var pickerPresented = ""
+
+    /** What the colour picker's swatch DREW, RRGGBBAA, stamped by its
+     * composable: `expect_color`'s reading, [pickerPresented]'s rule. */
+    @Volatile var colorPresented = ""
     // The image slot: the decoded bitmap (null is the placeholder
     // class) and its size as the harness's "WxH" observation string
     // ("0x0" before a source lands or after a failed decode).
@@ -696,6 +712,7 @@ val kayaTextBoxes = HashMap<Long, android.graphics.Rect>()
  * coordinates, and `kayaPhotograph` is the one place that crosses.
  */
 val kayaCanvasBoxes = HashMap<Long, android.graphics.Rect>()
+val kayaSwatchBoxes = HashMap<Long, android.graphics.Rect>()
 
 /** A filled container's box in window space, expect_fill's crop. */
 val kayaFillBoxes = HashMap<Long, android.graphics.Rect>()
@@ -1188,6 +1205,11 @@ object KayaSceneModel {
     /** The text field the emoji panel serves, null while it is closed
      * (docs/emoji-picker-plan.md R1). */
     var emojiPickerFor by mutableStateOf<KayaNode?>(null)
+
+    /** The colour picker whose sheet is open, and the sheet's working
+     * colour (docs/color-picker-plan.md §6); null while none is. */
+    var colorSheetFor by mutableStateOf<KayaNode?>(null)
+    var colorDraft by mutableStateOf<KayaColorDraft?>(null)
     /** The field the COMPOSITION has focused, written only by a field's own
      * gain and loss — never by the focus command, which writes [focusedId]
      * before Compose has moved (docs/deferred.md, the android `type` race,
@@ -1375,13 +1397,14 @@ object KayaSceneModel {
     val labeleds = ArrayList<KayaNode>()
     val searches = ArrayList<KayaNode>()
     val numberFields = ArrayList<KayaNode>()
+    val colorPickers = ArrayList<KayaNode>()
 
     // Every kind registry, so a destroyed node leaves all of them at once
     // (docs/traps.md 2026-09-14: a torn-down copy stayed addressable).
     private val registries = listOf(
         buttons, checkboxes, labels, entryWidgets, sliders, images, columns, rows, scrolls,
         progresses, selects, radios, grids, textareas, canvases, datePickers, timePickers,
-        labeleds, searches, numberFields,
+        labeleds, searches, numberFields, colorPickers,
     )
 
     fun forget(id: Long) {
@@ -3219,7 +3242,7 @@ object KayaCompose {
                         KIND_TIME_PICKER -> KayaSceneModel.timePickers.add(node)
                         KIND_LABELED -> KayaSceneModel.labeleds.add(node)
                         KIND_SEARCH -> KayaSceneModel.searches.add(node)
-                        KIND_COLOR_PICKER -> depthStub("colorpicker")
+                        KIND_COLOR_PICKER -> KayaSceneModel.colorPickers.add(node)
                         KIND_NUMBER_FIELD -> {
                             // docs/number-field-plan.md §2: unset bounds are
                             // ±2^53, the step 1, and the field shows its
@@ -3296,7 +3319,8 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.maxWidth = readF64(b)
                         PROP_MAX_HEIGHT ->
                             KayaSceneModel.nodes[id]!!.maxHeight = readF64(b)
-                        PROP_COLOR, PROP_ALPHA -> depthStub("colorpicker")
+                        PROP_COLOR -> KayaSceneModel.nodes[id]!!.color = readI64(b)
+                        PROP_ALPHA -> KayaSceneModel.nodes[id]!!.alpha = readBool(b)
                         // docs/rich-text-plan.md §14: this platform's lever
                         // is `clearHistory()`, so taking ownership drops what
                         // the field had banked.
@@ -6650,7 +6674,8 @@ object KayaCompose {
         points: String,
     ): String {
         val mode = if (KayaSceneModel.presentationDark) "dark" else "light"
-        val wanted = points.split(" ").mapNotNull { pair ->
+        val swatch = spec.startsWith("color_picker")
+        val wanted = if (points == "center") listOf(Pair(50.0, 50.0)) else points.split(" ").mapNotNull { pair ->
             val xy = pair.split(",")
             val x = xy.getOrNull(0)?.trim()?.toDoubleOrNull()
             val y = xy.getOrNull(1)?.trim()?.toDoubleOrNull()
@@ -6658,12 +6683,14 @@ object KayaCompose {
         }
         if (wanted.isEmpty()) return "<no probe points in $points>"
         val gathered = onUi(activity) {
-            val node = kayaCanvasTarget(spec)
+            val node =
+                if (swatch) target(spec, "color_picker", KayaSceneModel.colorPickers)
+                else kayaCanvasTarget(spec)
             val decor = activity.window.decorView
             val loc = IntArray(2)
             decor.getLocationInWindow(loc)
             Triple(
-                node?.let { kayaCanvasBoxes[it.id] },
+                node?.let { if (swatch) kayaSwatchBoxes[it.id] else kayaCanvasBoxes[it.id] },
                 android.graphics.Point(loc[0], loc[1]),
                 android.graphics.Point(decor.width, decor.height),
             )
@@ -7007,7 +7034,7 @@ object KayaCompose {
             "grid" -> KayaSceneModel.grids
             "search" -> KayaSceneModel.searches
             "number_field" -> KayaSceneModel.numberFields
-            "color_picker" -> depthStub("colorpicker")
+            "color_picker" -> KayaSceneModel.colorPickers
             "textarea" -> KayaSceneModel.textareas
             "date_picker" -> KayaSceneModel.datePickers
             "time_picker" -> KayaSceneModel.timePickers
@@ -8209,10 +8236,46 @@ object KayaCompose {
                         else kayaAwaitAnswer(answered)
                     }
                     "set_color" -> {
-                        depthStub("colorpicker")
+                        // A user's settled choice through the sheet's own
+                        // door, the sheet never shown
+                        // (docs/color-picker-plan.md §5).
+                        kayaAwaitQuiet()
+                        val answered = kayaBatches
+                        val spelled = parts.getOrNull(2) ?: "nothing"
+                        val packed =
+                            if (spelled.length == 8) kayaParseColorHex(spelled, alpha = true) else null
+                        if (packed == null) {
+                            failures.add("set_color wants RRGGBBAA, got $spelled")
+                        } else {
+                            val ok = onUi(activity) {
+                                target(parts[1], "color_picker", KayaSceneModel.colorPickers)
+                                    ?.also { node ->
+                                        val draft = KayaColorDraft(node.color, node.alpha)
+                                        draft.take(packed)
+                                        kayaColorSheetClosed(node, draft)
+                                    } != null
+                            }
+                            if (!ok) failures.add("no such target ${parts[1]}")
+                            else kayaAwaitAnswer(answered)
+                        }
                     }
                     "expect_color" -> {
-                        depthStub("colorpicker")
+                        // What the swatch DREW, stamped by its composable,
+                        // never the model (expect_picker's rule).
+                        val want = quoted(parts.drop(2))
+                        val node = onUi(activity) {
+                            target(parts[1], "color_picker", KayaSceneModel.colorPickers)
+                        }
+                        val got = node?.colorPresented
+                        when {
+                            node == null -> failures.add("no such target ${parts[1]}")
+                            got.isNullOrEmpty() -> failures.add(
+                                "${parts[1]} has drawn no swatch yet, so nothing " +
+                                    "has a colour to read"
+                            )
+                            got == want -> observed.add(got)
+                            else -> failures.add("${parts[1]} holds \"$got\", wanted \"$want\"")
+                        }
                     }
                     "set_date", "set_time" -> {
                         // THROUGH THE COMMIT PATH a user's confirm takes
@@ -10272,7 +10335,6 @@ object KayaCompose {
                     // it does not depend on the host's appearance
                     // (kayaInkForMode).
                     "expect_ink" -> {
-                        if (parts[1].startsWith("color_picker")) depthStub("colorpicker")
                         val spec = quoted(parts.drop(2))
                         val halves = spec.split(" = ")
                         val points = halves.firstOrNull() ?: ""
@@ -14542,7 +14604,7 @@ private fun KayaRenderCore(
         KayaCompose.KIND_SEARCH ->
             KayaTextField(node, a11y, boxFill, singleLine = true, search = true)
         KayaCompose.KIND_NUMBER_FIELD -> KayaNumberField(node, a11y, boxFill)
-        KayaCompose.KIND_COLOR_PICKER -> depthStub("colorpicker")
+        KayaCompose.KIND_COLOR_PICKER -> KayaColorButton(node, a11y, boxFill)
         KayaCompose.KIND_LABELED -> {
             // THE LABELLED ROW (docs/forms-plan.md §3): Material's own
             // labelled row, the value trailing and a WIDE control folded
@@ -16475,6 +16537,7 @@ fun KayaRoot() {
     // inside its parent sheet's content (docs/sheet-plan.md).
     KayaSheetHost(null)
     KayaEmojiPanel()
+    KayaColorSheet()
 
     KayaSceneModel.alertId?.let { alert ->
         // The platform's REAL modal dialog: M3 AlertDialog. Every
@@ -18292,6 +18355,313 @@ internal fun kayaPickerCommitted(node: KayaNode, isTime: Boolean, raw: Long) {
         if (packed == node.date) return
         node.date = packed
         KayaPresent.emitDateChanged(node.tag, packed)
+    }
+}
+
+// ---- the colour picker (docs/color-picker-plan.md) --------------------------
+
+internal fun kayaSpelledColor(packed: Long): String =
+    String.format(java.util.Locale.ROOT, "%08X", packed)
+
+/** What the sheet's hex field shows: RRGGBBAA with alpha, RRGGBB without. */
+internal fun kayaDraftHex(packed: Long, alpha: Boolean): String =
+    if (alpha) kayaSpelledColor(packed)
+    else String.format(java.util.Locale.ROOT, "%06X", packed shr 8)
+
+/** RRGGBB (opaque) or, where [alpha] allows, RRGGBBAA, an optional `#`
+ * first; null for anything else. */
+internal fun kayaParseColorHex(text: String, alpha: Boolean): Long? {
+    val digits = text.trim().removePrefix("#")
+    if (digits.isEmpty() || !digits.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) {
+        return null
+    }
+    return when {
+        digits.length == 6 -> (digits.toLong(16) shl 8) or 0xFFL
+        digits.length == 8 && alpha -> digits.toLong(16)
+        else -> null
+    }
+}
+
+/** Hue in degrees, saturation and brightness in 0..1, to sRGB in 0..1. */
+internal fun kayaHsvToRgb(hue: Double, saturation: Double, brightness: Double): DoubleArray {
+    val h = ((hue % 360.0) + 360.0) % 360.0 / 60.0
+    val sector = kotlin.math.floor(h).toInt()
+    val f = h - sector
+    val v = brightness
+    val p = v * (1 - saturation)
+    val q = v * (1 - saturation * f)
+    val t = v * (1 - saturation * (1 - f))
+    return when (sector) {
+        0 -> doubleArrayOf(v, t, p)
+        1 -> doubleArrayOf(q, v, p)
+        2 -> doubleArrayOf(p, v, t)
+        3 -> doubleArrayOf(p, q, v)
+        4 -> doubleArrayOf(t, p, v)
+        else -> doubleArrayOf(v, p, q)
+    }
+}
+
+internal fun kayaRgbToHsv(r: Double, g: Double, b: Double): DoubleArray {
+    val max = maxOf(r, g, b)
+    val delta = max - minOf(r, g, b)
+    val hue = when {
+        delta == 0.0 -> 0.0
+        max == r -> 60 * ((((g - b) / delta) % 6 + 6) % 6)
+        max == g -> 60 * ((b - r) / delta + 2)
+        else -> 60 * ((r - g) / delta + 4)
+    }
+    return doubleArrayOf(hue, if (max == 0.0) 0.0 else delta / max, max)
+}
+
+/**
+ * THE SHEET'S WORKING COLOUR (docs/color-picker-plan.md §6, §3 rule 2):
+ * what the palette, the sliders and the hex field move, previewed in the
+ * sheet and never committed. Without [alpha] the opacity stays 1, so a
+ * translucent choice lands opaque (§5 AMENDED).
+ */
+class KayaColorDraft(start: Long, val alpha: Boolean) {
+    var hue by mutableDoubleStateOf(0.0)
+    var saturation by mutableDoubleStateOf(0.0)
+    var brightness by mutableDoubleStateOf(0.0)
+    var opacity by mutableDoubleStateOf(1.0)
+    var hex by mutableStateOf("")
+    var hexValid by mutableStateOf(true)
+
+    init {
+        take(start)
+    }
+
+    fun take(packed: Long) {
+        takeRgb(packed)
+        opacity = if (alpha) (packed and 0xFF) / 255.0 else 1.0
+        hex = kayaDraftHex(packed, alpha)
+        hexValid = true
+    }
+
+    /** A palette entry: its hue, saturation and brightness, the opacity kept. */
+    fun takeRgb(packed: Long) {
+        val hsv = kayaRgbToHsv(
+            ((packed shr 24) and 0xFF) / 255.0,
+            ((packed shr 16) and 0xFF) / 255.0,
+            ((packed shr 8) and 0xFF) / 255.0,
+        )
+        hue = hsv[0]
+        saturation = hsv[1]
+        brightness = hsv[2]
+    }
+
+    /** The hex field's text: kept as typed, taken when it spells a colour. */
+    fun typed(text: String) {
+        hex = text
+        val packed = kayaParseColorHex(text, alpha)
+        hexValid = packed != null
+        if (packed != null) {
+            val spelled = hex
+            take(packed)
+            hex = spelled
+        }
+    }
+
+    /** sRGB red, green, blue and opacity, for the core's quantizer. */
+    fun components(): DoubleArray {
+        val rgb = kayaHsvToRgb(hue, saturation, brightness)
+        return doubleArrayOf(rgb[0], rgb[1], rgb[2], opacity)
+    }
+}
+
+/** The draft through the core's one quantizer (§3 rule 1). */
+internal fun kayaColorDraftPacked(draft: KayaColorDraft): Long {
+    val c = draft.components()
+    return KayaPresent.colorQuantize(c[0], c[1], c[2], c[3])
+}
+
+/** A slider or palette move: the hex field follows the preview. */
+internal fun kayaColorDraftMoved(draft: KayaColorDraft) {
+    draft.hex = kayaDraftHex(kayaColorDraftPacked(draft), draft.alpha)
+    draft.hexValid = true
+}
+
+/** THE ONE COMMIT PATH (§3 rule 2): a settled colour mirrors the node and
+ * emits; one equal to the held colour emits nothing. */
+internal fun kayaColorCommitted(node: KayaNode, packed: Long) {
+    if (packed == node.color) return
+    node.color = packed
+    KayaPresent.emitColorChanged(node.tag, packed)
+}
+
+/** THE SHEET'S DOOR: its dismissal, its Done, and set_color's drive. */
+internal fun kayaColorSheetClosed(node: KayaNode, draft: KayaColorDraft) {
+    kayaColorCommitted(node, kayaColorDraftPacked(draft))
+}
+
+/** The shown sheet went away, by Done or by the user's dismissal: once. */
+internal fun kayaColorSheetDismissed(node: KayaNode, draft: KayaColorDraft) {
+    if (KayaSceneModel.colorDraft !== draft) return
+    KayaSceneModel.colorSheetFor = null
+    KayaSceneModel.colorDraft = null
+    kayaColorSheetClosed(node, draft)
+}
+
+/** The value drawn at the control corner radius, over a checkerboard when
+ * translucent (§3 rule 5). */
+@Composable
+private fun KayaColorSwatch(
+    packed: Long,
+    modifier: Modifier,
+    shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(4.dp),
+) {
+    val fill = Color(
+        ((packed shr 24) and 0xFF).toInt(),
+        ((packed shr 16) and 0xFF).toInt(),
+        ((packed shr 8) and 0xFF).toInt(),
+        (packed and 0xFF).toInt(),
+    )
+    val translucent = (packed and 0xFF) != 0xFFL
+    Box(
+        modifier
+            .clip(shape)
+            .drawBehind {
+                if (translucent) {
+                    val cell = 6.dp.toPx()
+                    drawRect(Color.White)
+                    var y = 0
+                    while (y * cell < size.height) {
+                        var x = y % 2
+                        while (x * cell < size.width) {
+                            drawRect(
+                                Color(0xFFCCCCCC),
+                                topLeft = androidx.compose.ui.geometry.Offset(x * cell, y * cell),
+                                size = androidx.compose.ui.geometry.Size(cell, cell),
+                            )
+                            x += 2
+                        }
+                        y += 1
+                    }
+                }
+                drawRect(fill)
+            }
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape),
+    )
+}
+
+/** The swatch button (§6): Material's tonal button faced with the value. */
+@Composable
+private fun KayaColorButton(node: KayaNode, a11y: Modifier, fill: Modifier) {
+    val packed = node.color
+    SideEffect { node.colorPresented = kayaSpelledColor(packed) }
+    FilledTonalButton(
+        onClick = {
+            KayaSceneModel.colorDraft = KayaColorDraft(node.color, node.alpha)
+            KayaSceneModel.colorSheetFor = node
+        },
+        modifier = fill.then(a11y),
+    ) {
+        KayaColorSwatch(
+            packed,
+            Modifier.size(width = 40.dp, height = 24.dp).onGloballyPositioned {
+                val r = it.boundsInWindow()
+                kayaSwatchBoxes[node.id] = android.graphics.Rect(
+                    r.left.toInt(), r.top.toInt(), r.right.toInt(), r.bottom.toInt())
+            },
+        )
+    }
+}
+
+@Composable
+private fun KayaColorSlider(
+    label: String,
+    value: Double,
+    range: ClosedFloatingPointRange<Float>,
+    moved: (Double) -> Unit,
+) {
+    Column {
+        Text(label, style = MaterialTheme.typography.labelLarge)
+        Slider(value = value.toFloat(), onValueChange = { moved(it.toDouble()) }, valueRange = range)
+    }
+}
+
+/**
+ * THE SYNTHESIZED PICKER (docs/color-picker-plan.md §6, §8 ruling 2): the
+ * core's palette, hue, saturation and brightness sliders over a preview, the
+ * hex field on the IME's keyboard, opacity when asked, and Done, in the
+ * emoji panel's Material sheet. Nothing here commits but the sheet's door.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun KayaColorSheet() {
+    val node = KayaSceneModel.colorSheetFor ?: return
+    val draft = KayaSceneModel.colorDraft ?: return
+    val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+    val palette = remember { KayaPresent.colorPalette() }
+    ModalBottomSheet(onDismissRequest = { kayaColorSheetDismissed(node, draft) }, sheetState = state) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            for (shade in 0 until 5) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    for (hue in 0 until 9) {
+                        val entry = palette[hue * 5 + shade]
+                        KayaColorSwatch(
+                            entry,
+                            Modifier.size(30.dp).clickable {
+                                draft.takeRgb(entry)
+                                kayaColorDraftMoved(draft)
+                            },
+                            CircleShape,
+                        )
+                    }
+                }
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                KayaColorSwatch(kayaColorDraftPacked(draft), Modifier.size(56.dp))
+                OutlinedTextField(
+                    value = draft.hex,
+                    onValueChange = { draft.typed(it) },
+                    label = { Text("Hex") },
+                    singleLine = true,
+                    isError = !draft.hexValid,
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Characters,
+                        keyboardType = KeyboardType.Ascii,
+                        imeAction = ImeAction.Done,
+                    ),
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            KayaColorSlider("Hue", draft.hue, 0f..360f) {
+                draft.hue = it
+                kayaColorDraftMoved(draft)
+            }
+            KayaColorSlider("Saturation", draft.saturation, 0f..1f) {
+                draft.saturation = it
+                kayaColorDraftMoved(draft)
+            }
+            KayaColorSlider("Brightness", draft.brightness, 0f..1f) {
+                draft.brightness = it
+                kayaColorDraftMoved(draft)
+            }
+            if (draft.alpha) {
+                KayaColorSlider("Opacity", draft.opacity, 0f..1f) {
+                    draft.opacity = it
+                    kayaColorDraftMoved(draft)
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = {
+                    scope.launch { state.hide() }.invokeOnCompletion {
+                        kayaColorSheetDismissed(node, draft)
+                    }
+                }) { Text("Done") }
+            }
+        }
     }
 }
 

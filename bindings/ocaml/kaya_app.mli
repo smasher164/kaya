@@ -380,6 +380,29 @@ val pack_date : date -> int64
 val pack_time : time -> int64
 val date_of_packed : int64 -> date
 
+(* An sRGB colour, 8 bits a channel, straight alpha: a colour picker's
+   value and a Color record field (docs/color-picker-plan.md §2). *)
+module Color : sig
+  type t = { r : int; g : int; b : int; a : int }
+
+  val rgb : int -> int -> int -> t
+  val rgba : int -> int -> int -> int -> t
+
+  (* [Color.of_hex 0x336699FF]: 0xRRGGBBAA. *)
+  val of_hex : int -> t
+  val hex : t -> int
+  val is_opaque : t -> bool
+
+  (* The fixed spelling every scene reads: [336699FF]. *)
+  val to_string : t -> string
+end
+
+type color = Color.t
+
+val string_of_color : color -> string
+val pack_color : color -> int64
+val color_of_packed : int64 -> color
+
 (* The formatter door (docs/compliance-plan.md §1.4, the OCaml row): a
    value in, the platform's own string out, in the process locale; pure,
    any thread, no transaction. An unstated digit count is the platform's
@@ -445,6 +468,7 @@ module Scalar : sig
     | F64 : float t
     | Date : date t
     | Time : time t
+    | Color : color t
 end
 
 (* A signal of the witnessed type — the phantom carries the wire
@@ -801,6 +825,23 @@ val date_picker :
   ?bind:date signal ->
   ?min:date -> ?max:date -> ?on_change:(date -> unit) -> unit -> widget
 
+(* A colour picker: the platform's swatch, opening its colour surface.
+   Each SETTLED choice reaches [~on_color]; [~alpha] allows translucency
+   (off by default). *)
+val color_picker :
+  ?grow:float ->
+  ?fill:bool ->
+  ?a11y_id:string ->
+  ?a11y_id_bind:string signal ->
+  ?a11y_label:string ->
+  ?a11y_label_bind:string signal ->
+  ?help:string ->
+  ?help_bind:string signal ->
+  ?a11y_hint:string ->
+  ?value:color ->
+  ?bind:color signal ->
+  ?alpha:bool -> ?on_color:(color -> unit) -> unit -> widget
+
 (* A time picker over civil times: hours and minutes, no seconds.
    [~step] is the minute granularity and a pick snaps to it. *)
 val time_picker :
@@ -991,6 +1032,7 @@ val f64_field : int -> ('a, float) field
    wire. *)
 val date_field : int -> ('a, date) field
 val time_field : int -> ('a, time) field
+val color_field : int -> ('a, color) field
 
 (* A blob field's MODEL value carries the guest's own bytes. *)
 val blob_field : int -> ('a, bytes) field
@@ -1760,6 +1802,28 @@ module Tpl : sig
     ?bind_field:('d, date) field ->
     ?level:int ->
     ?a11y_level:int -> ?on_change:(key list -> date -> unit) -> unit -> node
+
+  (* A colour picker per stamped copy: [~bind_field] the row's own
+     (_, color) field. Choices carry the copy's keys first. *)
+  val color_picker :
+    ?grow:float ->
+    ?fill:bool ->
+    ?a11y_id:string ->
+    ?a11y_id_bind:string signal ->
+    ?a11y_id_field:('a, string) field ->
+    ?a11y_label:string ->
+    ?a11y_label_bind:string signal ->
+    ?a11y_label_field:('b, string) field ->
+    ?help:string ->
+    ?help_bind:string signal ->
+    ?help_field:('c, string) field ->
+    ?a11y_hint:string ->
+    ?value:color ->
+    ?bind:color signal ->
+    ?bind_field:('d, color) field ->
+    ?alpha:bool ->
+    ?level:int ->
+    ?a11y_level:int -> ?on_color:(key list -> color -> unit) -> unit -> node
 
   (* A time picker per stamped copy — the date picker's three sources,
      hours and minutes. *)

@@ -2462,6 +2462,8 @@ public final class KayaApp {
     private var nodeCommits: [UInt64: (KayaAppTx, [KayaValue], Double) throws -> Void] = [:]
     private var widgetDates: [UInt64: (KayaAppTx, KayaDate) throws -> Void] = [:]
     private var nodeDates: [UInt64: (KayaAppTx, [KayaValue], KayaDate) throws -> Void] = [:]
+    private var widgetColors: [UInt64: (KayaAppTx, KayaColor) throws -> Void] = [:]
+    private var nodeColors: [UInt64: (KayaAppTx, [KayaValue], KayaColor) throws -> Void] = [:]
     private var widgetTimes: [UInt64: (KayaAppTx, KayaTime) throws -> Void] = [:]
     private var nodeTimes: [UInt64: (KayaAppTx, [KayaValue], KayaTime) throws -> Void] = [:]
     // Window lifecycle: one handler each, receiving the window id.
@@ -3078,6 +3080,18 @@ public final class KayaApp {
         nodeDates[n.id] = handler
     }
 
+    /// Register a colour picker's settled choices (docs/color-picker-plan.md §3).
+    func onColor(_ w: KayaWidget, _ handler: @escaping (KayaAppTx, KayaColor) throws -> Void) {
+        widgetColors[w.id] = handler
+    }
+
+    /// A template colour picker's settled choices, the copy's keys first.
+    func onColor(
+        _ n: KayaNodeHandle, _ handler: @escaping (KayaAppTx, [KayaValue], KayaColor) throws -> Void
+    ) {
+        nodeColors[n.id] = handler
+    }
+
     /// Register a pick handler for a live time picker.
     func onTime(_ w: KayaWidget, _ handler: @escaping (KayaAppTx, KayaTime) throws -> Void) {
         widgetTimes[w.id] = handler
@@ -3623,6 +3637,16 @@ public final class KayaApp {
                 if let handler = nodeDates[id] {
                     dispatch {
                         try build { tx in try handler(tx, keys, kayaDate(packed: packed)) }
+                    }
+                }
+            case (UInt16(KAYA_OCCURRENCE_COLOR_CHANGED), true):
+                if let handler = widgetColors[id] {
+                    dispatch { try build { tx in try handler(tx, kayaColor(packed: packed)) } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_COLOR_CHANGED), false):
+                if let handler = nodeColors[id] {
+                    dispatch {
+                        try build { tx in try handler(tx, keys, kayaColor(packed: packed)) }
                     }
                 }
             case (UInt16(KAYA_OCCURRENCE_TIME_CHANGED), true):
@@ -4752,6 +4776,24 @@ public final class KayaAppTx {
             tx.setDate(w.id, value.year, value.month, value.day)
         }
         if let onDate { app.onDate(w, onDate) }
+        if let grow { setGrow(w, grow) }
+        return w
+    }
+
+    /// A colour picker (docs/color-picker-plan.md): a swatch opening the
+    /// platform's colour surface; settled choices arrive at onColor.
+    /// `alpha` lets the user choose translucency (off by default).
+    @discardableResult
+    public func colorPicker(
+        _ value: KayaColor? = nil, alpha: Bool? = nil, bind: KayaSignal? = nil,
+        onColor: ((KayaAppTx, KayaColor) throws -> Void)? = nil,
+        grow: Double? = nil
+    ) -> KayaWidget {
+        let w = widget(UInt32(KAYA_KIND_COLOR_PICKER))
+        if let alpha { tx.setAlpha(w.id, alpha) }
+        if let bind { tx.bindColor(w.id, bind.id) }
+        if let value { tx.setColor(w.id, value.r, value.g, value.b, value.a) }
+        if let onColor { app.onColor(w, onColor) }
         if let grow { setGrow(w, grow) }
         return w
     }
@@ -6113,6 +6155,11 @@ public final class KayaTpl {
         tx.tx.bindDateElement(n.id, level: level, field: f.index)
     }
 
+    /// Bind a colour picker's value to one field of the element.
+    func bindColorField(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<KayaColor>) {
+        tx.tx.bindColorElement(n.id, level: level, field: f.index)
+    }
+
     /// Bind a time picker's value to one field of the element.
     func bindTimeField(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<KayaTime>) {
         tx.tx.bindTimeElement(n.id, level: level, field: f.index)
@@ -6270,6 +6317,46 @@ public final class KayaTpl {
         let n = widget(UInt32(KAYA_KIND_DATE_PICKER))
         tx.tx.bindDate(n.id, s.id)
         if let onDate { tx.app.onDate(n, onDate) }
+        return n
+    }
+
+    /// A colour picker bound to the row's own Color field
+    /// (docs/color-picker-plan.md §2); choices carry the copy's keys first.
+    @discardableResult
+    public func colorPicker(
+        _ f: KayaField<KayaColor>, alpha: Bool? = nil,
+        onColor: ((KayaAppTx, [KayaValue], KayaColor) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_COLOR_PICKER))
+        if let alpha { tx.tx.setAlpha(n.id, alpha) }
+        bindColorField(n, f)
+        if let onColor { tx.app.onColor(n, onColor) }
+        return n
+    }
+
+    /// A colour picker at a constant colour, the same in every stamped copy.
+    @discardableResult
+    public func colorPicker(
+        _ value: KayaColor, alpha: Bool? = nil,
+        onColor: ((KayaAppTx, [KayaValue], KayaColor) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_COLOR_PICKER))
+        if let alpha { tx.tx.setAlpha(n.id, alpha) }
+        tx.tx.setColor(n.id, value.r, value.g, value.b, value.a)
+        if let onColor { tx.app.onColor(n, onColor) }
+        return n
+    }
+
+    /// A colour picker whose value binds a signal.
+    @discardableResult
+    public func colorPicker(
+        _ s: KayaSignal, alpha: Bool? = nil,
+        onColor: ((KayaAppTx, [KayaValue], KayaColor) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_COLOR_PICKER))
+        if let alpha { tx.tx.setAlpha(n.id, alpha) }
+        tx.tx.bindColor(n.id, s.id)
+        if let onColor { tx.app.onColor(n, onColor) }
         return n
     }
 

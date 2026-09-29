@@ -141,6 +141,7 @@ module Kaya.Core
     signalDouble,
     signalDate,
     signalTime,
+    signalColor,
     signalImage,
     writeSignal,
     tshow,
@@ -182,6 +183,14 @@ module Kaya.Core
     packTimeOfDay,
     dayOfPacked,
     timeOfDayOfPacked,
+    Color (..),
+    colorRgb,
+    colorFromHex,
+    colorHex,
+    colorText,
+    colorIsOpaque,
+    packColorValue,
+    colorOfPacked,
     recordHandle,
     insertRecord,
     insertFresh,
@@ -413,6 +422,8 @@ data Pending
   | PTime !Word64 (TimeOfDay -> IO ())
   | PDateNode !Word64 ([Key] -> Day -> IO ())
   | PTimeNode !Word64 ([Key] -> TimeOfDay -> IO ())
+  | PColor !Word64 (Color -> IO ())
+  | PColorNode !Word64 ([Key] -> Color -> IO ())
   | PMenuActivated !Word64 (IO ())
   | PMenuActivatedNode !Word64 ([Key] -> IO ())
   | PMenuToggled !Word64 (Bool -> IO ())
@@ -759,6 +770,10 @@ instance KayaValue Day where
   toWire = W.VI64 . packDay
   fromWire v = case v of W.VI64 n -> dayOfPacked n; _ -> error "kaya: value is not a Date"
 
+instance KayaValue Color where
+  toWire = W.VI64 . packColorValue
+  fromWire v = case v of W.VI64 n -> colorOfPacked n; _ -> error "kaya: value is not a Color"
+
 instance KayaValue TimeOfDay where
   toWire = W.VI64 . packTimeOfDay
   fromWire v = case v of W.VI64 n -> timeOfDayOfPacked n; _ -> error "kaya: value is not a Time"
@@ -814,6 +829,10 @@ signalDate = newSignal
 -- | A civil-time signal, for a bound time picker.
 signalTime :: TimeOfDay -> Build (Signal TimeOfDay)
 signalTime = newSignal
+
+-- | A colour signal, for a bound colour picker (docs\/color-picker-plan.md §2).
+signalColor :: Color -> Build (Signal Color)
+signalColor = newSignal
 
 -- | An image signal: the bytes register with the core at the
 -- transaction boundary, as a record's Blob field does.
@@ -1310,6 +1329,11 @@ instance KayaFieldType Day where
   toFieldValue = W.VI64 . packDay
   fromFieldValue v = case v of W.VI64 n -> dayOfPacked n; _ -> error "kaya: field is not a Date"
 
+instance KayaFieldType Color where
+  fieldTag _ = W.valueI64
+  toFieldValue = W.VI64 . packColorValue
+  fromFieldValue v = case v of W.VI64 n -> colorOfPacked n; _ -> error "kaya: field is not a Color"
+
 instance KayaFieldType TimeOfDay where
   fieldTag _ = W.valueI64
   toFieldValue = W.VI64 . packTimeOfDay
@@ -1402,6 +1426,43 @@ packDay d = let (y, m, dd) = toGregorian d in W.packDate (fromIntegral y) m dd
 -- | A civil time as the wire's I64; seconds are not a picker value (D3).
 packTimeOfDay :: TimeOfDay -> Int64
 packTimeOfDay t = W.packTime (todHour t) (todMin t)
+
+-- | An sRGB colour, 8 bits a channel, straight alpha: a colour picker's
+-- value and a Color record field (docs\/color-picker-plan.md §2).
+data Color = Color {r :: !Word8, g :: !Word8, b :: !Word8, a :: !Word8}
+  deriving stock (Eq, Ord)
+
+instance Show Color where
+  show c = "colorFromHex 0x" <> T.unpack (colorText c)
+
+colorRgb :: Word8 -> Word8 -> Word8 -> Color
+colorRgb red green blue = Color red green blue 0xFF
+
+-- | @colorFromHex 0x336699FF@: 0xRRGGBBAA.
+colorFromHex :: Word32 -> Color
+colorFromHex n =
+  Color (fromIntegral (n `div` 16777216)) (fromIntegral (n `div` 65536)) (fromIntegral (n `div` 256)) (fromIntegral n)
+
+colorHex :: Color -> Word32
+colorHex (Color red green blue alpha) =
+  ((fromIntegral red * 256 + fromIntegral green) * 256 + fromIntegral blue) * 256 + fromIntegral alpha
+
+colorIsOpaque :: Color -> Bool
+colorIsOpaque c = c.a == 0xFF
+
+-- | The fixed spelling every scene reads: @336699FF@.
+colorText :: Color -> Text
+colorText c = T.pack [digits !! fromIntegral ((colorHex c `div` (16 ^ place)) `mod` 16) | place <- [7, 6 .. 0 :: Int]]
+  where
+    digits = "0123456789ABCDEF"
+
+packColorValue :: Color -> Int64
+packColorValue = fromIntegral . colorHex
+
+colorOfPacked :: Int64 -> Color
+colorOfPacked packed =
+  let (red, green, blue, alpha) = W.unpackColor packed
+   in Color (fromIntegral red) (fromIntegral green) (fromIntegral blue) (fromIntegral alpha)
 
 dayOfPacked :: Int64 -> Day
 dayOfPacked packed =
@@ -1588,6 +1649,8 @@ data App = App
     appNodeDates :: IORef (Map.Map Word64 ([Key] -> Day -> IO ())),
     appWidgetTimes :: IORef (Map.Map Word64 (TimeOfDay -> IO ())),
     appNodeTimes :: IORef (Map.Map Word64 ([Key] -> TimeOfDay -> IO ())),
+    appWidgetColors :: IORef (Map.Map Word64 (Color -> IO ())),
+    appNodeColors :: IORef (Map.Map Word64 ([Key] -> Color -> IO ())),
     -- Per-window lifecycle handlers, keyed by window id — handlers
     -- scope to the thing that creates them.
     appCloseRequested :: IORef (Map.Map Word64 (IO ())),

@@ -30,7 +30,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) the foreign suites load;
 # --example alone would build only the rlib it depends on.
-SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen numberfield"
+SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen numberfield colorpicker"
 # Depth-slice scenes, rust only. `windowed` and `canvas` are rust BY
 # DESIGN rather than by depth — the compiled conformance scenes every
 # lane runs (docs/virtualization-plan.md §6.3, docs/canvas-plan.md
@@ -1665,6 +1665,24 @@ for proto in x11 wayland; do
     run "$proto" numberfieldde-haskell env KAYA_LOCALE=de-DE KAYA_SELFTEST=numberfieldde \
         tools/linux/a11y-leg.sh "$(hs_bin numberfield)"
     run "$proto" numberfieldde-java env KAYA_LOCALE=de-DE KAYA_SELFTEST=numberfieldde KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    # THE COLOUR PICKER (docs/color-picker-plan.md §5), through a11y-leg.sh
+    # for its `expect_ax`; set_color never opens the dialog.
+    run "$proto" colorpicker-rust env KAYA_SELFTEST=colorpicker \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/colorpicker"
+    run "$proto" colorpicker-python env KAYA_SELFTEST=colorpicker KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/colorpicker.py
+    run "$proto" colorpicker-js env KAYA_SELFTEST=colorpicker KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/colorpicker.ts
+    run "$proto" colorpicker-go env KAYA_SELFTEST=colorpicker \
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" colorpicker-csharp env KAYA_SELFTEST=colorpicker KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" colorpicker-ocaml env KAYA_SELFTEST=colorpicker KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/colorpicker.exe
+    run "$proto" colorpicker-haskell env KAYA_SELFTEST=colorpicker \
+        tools/linux/a11y-leg.sh "$(hs_bin colorpicker)"
+    run "$proto" colorpicker-java env KAYA_SELFTEST=colorpicker KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" scroll-rust env KAYA_SELFTEST=scroll "$CARGO_TARGET_DIR/debug/examples/scroll"
     # The sideways strip in Arabic (docs/hscroll-plan.md §4).

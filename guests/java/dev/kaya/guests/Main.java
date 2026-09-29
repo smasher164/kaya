@@ -179,6 +179,9 @@ public final class Main {
             case "numberfieldde":
                 app = NumberField::app;
                 break;
+            case "colorpicker":
+                app = ColorPicker::app;
+                break;
             case "tooltips":
                 app = Tooltips::app;
                 break;

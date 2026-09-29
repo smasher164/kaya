@@ -4588,6 +4588,10 @@ impl<'b> Row<'_, 'b> {
         self.tpl().max(node, max)
     }
 
+    pub fn alpha(&mut self, node: TemplateNodeId, on: bool) {
+        self.tpl().alpha(node, on)
+    }
+
     pub fn tick_spacing(&mut self, node: TemplateNodeId, spacing: f64) {
         self.tpl().tick_spacing(node, spacing)
     }
@@ -8042,6 +8046,12 @@ impl<'b> Tpl<'_, 'b> {
 
     pub fn max(&mut self, node: TemplateNodeId, max: f64) {
         self.set(node, Prop::Max, max);
+    }
+
+    /// A stamped colour picker's translucency (docs/color-picker-plan.md §3
+    /// rule 3), constant across the copies.
+    pub fn alpha(&mut self, node: TemplateNodeId, on: bool) {
+        self.set(node, Prop::Alpha, on);
     }
 
     /// A stamped slider's tick spacing (docs/slider-plan.md S5).

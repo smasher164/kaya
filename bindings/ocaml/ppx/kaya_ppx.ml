@@ -7,7 +7,7 @@
 
 open Ppxlib
 
-type wire = Str | Bool | I64 | F64 | Blob | Doc | Date | Time
+type wire = Str | Bool | I64 | F64 | Blob | Doc | Date | Time | Color
 
 let wire_of_core_type (ct : core_type) =
   match ct with
@@ -28,12 +28,16 @@ let wire_of_core_type (ct : core_type) =
   | [%type: Kaya_app.date] -> Some Date
   | [%type: time] -> Some Time
   | [%type: Kaya_app.time] -> Some Time
+  | [%type: color] -> Some Color
+  | [%type: Kaya_app.color] -> Some Color
+  | [%type: Color.t] -> Some Color
+  | [%type: Kaya_app.Color.t] -> Some Color
   | _ -> None
 
 let tag_expr ~loc = function
   | Str -> [%expr Kaya_wire.value_str]
   | Bool -> [%expr Kaya_wire.value_bool]
-  | I64 | Date | Time -> [%expr Kaya_wire.value_i64]
+  | I64 | Date | Time | Color -> [%expr Kaya_wire.value_i64]
   | F64 -> [%expr Kaya_wire.value_f64]
   | Blob | Doc -> [%expr Kaya_wire.value_blob]
 
@@ -43,7 +47,7 @@ let tag_expr ~loc = function
 let value_ctor = function
   | Str -> "Str"
   | Bool -> "Bool"
-  | I64 | Date | Time -> "I64"
+  | I64 | Date | Time | Color -> "I64"
   | F64 -> "F64"
   | Blob | Doc -> "Str"
 
@@ -54,6 +58,7 @@ let to_model_expr ~loc w e =
   | Doc -> [%expr Kaya_app.document_blob [%e e]]
   | Date -> [%expr Kaya_app.pack_date [%e e]]
   | Time -> [%expr Kaya_app.pack_time [%e e]]
+  | Color -> [%expr Kaya_app.pack_color [%e e]]
   | _ -> e
 
 (* Wrap a model value's bound variable back to the record field. *)
@@ -63,6 +68,7 @@ let of_model_expr ~loc w e =
   | Doc -> [%expr Kaya_app.document_of_blob [%e e]]
   | Date -> [%expr Kaya_app.date_of_packed [%e e]]
   | Time -> [%expr Kaya_app.time_of_packed [%e e]]
+  | Color -> [%expr Kaya_app.color_of_packed [%e e]]
   | _ -> e
 
 let field_ctor = function
@@ -74,6 +80,7 @@ let field_ctor = function
   | Doc -> "document_field"
   | Date -> "date_field"
   | Time -> "time_field"
+  | Color -> "color_field"
 
 let generate ~ctxt (_rec_flag, type_decls) =
   let loc = Expansion_context.Deriver.derived_item_loc ctxt in
@@ -88,7 +95,7 @@ let generate ~ctxt (_rec_flag, type_decls) =
             | None ->
                 Location.raise_errorf ~loc:ld.pld_loc
                   "kaya: field %s is not wire-typed (string, bool, int64, \
-                   float, bytes, document, date, or time)"
+                   float, bytes, document, date, time, or color)"
                   ld.pld_name.txt)
           labels
       in

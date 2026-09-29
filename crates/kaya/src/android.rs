@@ -717,6 +717,23 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 sig: "([BJ)V".into(),
                 fn_ptr: present_emit_time_changed as *mut _,
             },
+            // The colour picker (docs/color-picker-plan.md §3 rule 1, §6): the
+            // settled colour, the core's one quantizer and its one palette.
+            NativeMethod {
+                name: "emitColorChanged".into(),
+                sig: "([BJ)V".into(),
+                fn_ptr: present_emit_color_changed as *mut _,
+            },
+            NativeMethod {
+                name: "colorQuantize".into(),
+                sig: "(DDDD)J".into(),
+                fn_ptr: present_color_quantize as *mut _,
+            },
+            NativeMethod {
+                name: "colorPalette".into(),
+                sig: "()[J".into(),
+                fn_ptr: present_color_palette as *mut _,
+            },
             NativeMethod {
                 name: "emitSortRequested".into(),
                 sig: "([BI)V".into(),
@@ -2093,6 +2110,39 @@ extern "system" fn present_emit_toggled(
         .convert_byte_array(&tag)
         .expect("kaya: reading the checkbox tag failed");
     unsafe { crate::capi::kaya_emit_toggled(bytes.as_ptr(), bytes.len(), checked) };
+}
+
+extern "system" fn present_emit_color_changed(
+    env: JNIEnv,
+    _class: JClass,
+    tag: JByteArray,
+    packed: jlong,
+) {
+    let bytes = env
+        .convert_byte_array(&tag)
+        .expect("kaya: reading the colour picker tag failed");
+    unsafe { crate::capi::kaya_emit_color_changed(bytes.as_ptr(), bytes.len(), packed) };
+}
+
+extern "system" fn present_color_quantize(
+    _env: JNIEnv,
+    _class: JClass,
+    r: jni::sys::jdouble,
+    g: jni::sys::jdouble,
+    b: jni::sys::jdouble,
+    a: jni::sys::jdouble,
+) -> jlong {
+    crate::capi::kaya_color_quantize(r, g, b, a) as jlong
+}
+
+extern "system" fn present_color_palette(env: JNIEnv, _class: JClass) -> jni::sys::jlongArray {
+    let packed: Vec<jlong> = crate::protocol::Color::PALETTE.iter().map(|c| c.packed()).collect();
+    let out = env
+        .new_long_array(packed.len() as jint)
+        .expect("kaya: allocating the colour palette for the JVM failed");
+    env.set_long_array_region(&out, 0, &packed)
+        .expect("kaya: writing the colour palette for the JVM failed");
+    out.into_raw()
 }
 
 extern "system" fn present_emit_date_changed(
