@@ -458,7 +458,8 @@ if MODE == "parallel":
         if phases:
             print(f"{name}: phases " + ", ".join(
                 f"{p} {s}" for p, s in phases if p != "matrix"))
-        keep_lane_log(name, LANES_KEEP_DIR)
+        if verdict != "SKIP":
+            keep_lane_log(name, LANES_KEEP_DIR)
         budget = BUDGETS.get(name, 0)
         # THE TOKEN'S WAITS ARE NETTED OUT before the ceiling is read: a
         # lane that waited for another lane's exclusive block did no work
