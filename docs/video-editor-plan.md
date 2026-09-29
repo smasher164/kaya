@@ -241,7 +241,10 @@ scripts shared verbatim. The matrix before anything is called landed.
    observable instead on Android (recommended, after probe 1), or
    geometry and state only everywhere.
 6. The range slider: a separate `range` kind (recommended) or a mode of
-   `slider`.
+   `slider`. RULED 2026-09-28 (the maintainer): a separate `range` kind,
+   horizontal, two thumbs for trim in and out. The vertical fader is a
+   different need, spelled as the `axis` a row, column and scroll take,
+   now legal on a slider (recommended, no ruling asked).
 7. Filmstrips: a row of `image` widgets (works today) or a new canvas
    `draw_image` op.
 8. Thumbnail and waveform extraction: in the app's language per
