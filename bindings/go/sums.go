@@ -342,6 +342,19 @@ func (sc SumCase[K, V]) Slider(min, max float64, sel func(*V) *float64, onChange
 	return n
 }
 
+// NumberField whose value is the field the selector names, with its
+// commit handler (nil for none).
+func (sc SumCase[K, V]) NumberField(sel func(*V) *float64, onCommit func(*Tx, K, float64)) Node {
+	n := sc.t.Widget(KindNumberField)
+	sc.t.BindValueField(n, 0, FieldBy(sel))
+	if onCommit != nil {
+		n.OnValueCommitted(func(tx *Tx, keys []any, v float64) {
+			onCommit(tx, keys[0].(K), v)
+		})
+	}
+	return n
+}
+
 // Select over fixed options whose 0-based index is the field the
 // selector names. The option list stays constant (Tpl.Select) and the
 // index field is float64 (Tpl.BindValueField).
@@ -381,6 +394,12 @@ func (sc SumCase[K, V]) SetGrow(n Node, weight float64) { sc.t.SetGrow(n, weight
 // SetStep is the granularity a slider this arm stamps rests on; const
 // only, like the range (Tpl.SetStep).
 func (sc SumCase[K, V]) SetStep(n Node, step float64) { sc.t.SetStep(n, step) }
+
+// SetMin and SetMax are a number field's bounds this arm stamps
+// (Tpl.SetMin).
+func (sc SumCase[K, V]) SetMin(n Node, min float64) { sc.t.SetMin(n, min) }
+
+func (sc SumCase[K, V]) SetMax(n Node, max float64) { sc.t.SetMax(n, max) }
 
 // SetTickSpacing is the distance between that slider's drawn ticks
 // (Tpl.SetTickSpacing).

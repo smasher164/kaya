@@ -202,6 +202,18 @@ sealed class DndItemRow
         System.Action<Tx, System.Collections.Generic.List<object>, double>? onCommit = null) =>
         t.Slider(min, max, value, step, tickSpacing, onChange, onCommit);
 
+    public Node NumberField(double value, double? min = null, double? max = null, double? step = null,
+        System.Action<Tx, System.Collections.Generic.List<object>, double>? onCommit = null) =>
+        t.NumberField(value, min, max, step, onCommit);
+
+    public Node NumberField(Signal value, double? min = null, double? max = null, double? step = null,
+        System.Action<Tx, System.Collections.Generic.List<object>, double>? onCommit = null) =>
+        t.NumberField(value, min, max, step, onCommit);
+
+    public Node NumberField(Field<double> value, double? min = null, double? max = null, double? step = null,
+        System.Action<Tx, System.Collections.Generic.List<object>, double>? onCommit = null) =>
+        t.NumberField(value, min, max, step, onCommit);
+
     public Node Select(string[] options, int selected,
         System.Action<Tx, System.Collections.Generic.List<object>, int>? onSelect = null) =>
         t.Select(options, selected, onSelect);

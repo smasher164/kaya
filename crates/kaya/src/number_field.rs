@@ -96,7 +96,10 @@ pub(crate) fn stepped(committed: f64, steps: i32, min: f64, max: f64, step: f64)
     settle(committed + f64::from(steps) * step, committed, min, max, step)
 }
 
-fn settle(read: f64, committed: f64, min: f64, max: f64, step: f64) -> Commit {
+/// A value a control already read, settled as `commit` settles text: GTK's
+/// spin button moves its adjustment before `value-changed` reports it, and
+/// the WinUI arm's NumberBox reads through kaya's formatter itself.
+pub(crate) fn settle(read: f64, committed: f64, min: f64, max: f64, step: f64) -> Commit {
     let value = rounded(read.clamp(min, max), step);
     if value == committed {
         Commit::Unchanged

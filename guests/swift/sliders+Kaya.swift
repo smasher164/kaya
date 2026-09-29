@@ -87,6 +87,15 @@ struct TrackRow {
     }
 
     @discardableResult
+    func numberField(
+        value f: KayaField<Double>, min: Double? = nil, max: Double? = nil,
+        step: Double? = nil,
+        onCommit: ((KayaAppTx, [KayaValue], Double) -> Void)? = nil
+    ) -> KayaNodeHandle {
+        t.numberField(value: f, min: min, max: max, step: step, onCommit: onCommit)
+    }
+
+    @discardableResult
     func row(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {
         t.row(children)
     }

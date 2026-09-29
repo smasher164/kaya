@@ -2351,6 +2351,42 @@ func (tx *Tx) SliderBound(min, max float64, value Signal[float64], onChange func
 	return w
 }
 
+// NumberField creates a number field at value (docs/number-field-plan.md),
+// with its commit handler co-located (nil for none): one call per commit
+// (Return, focus loss, a step), never per keystroke.
+func (tx *Tx) NumberField(value float64, onCommit func(*Tx, float64)) Widget {
+	w := tx.Widget(KindNumberField)
+	tx.emit(TxSetValue(w.id, value))
+	if onCommit != nil {
+		w.OnValueCommitted(onCommit)
+	}
+	return w
+}
+
+// NumberFieldBound creates a number field whose value binds a float
+// signal; a write never echoes.
+func (tx *Tx) NumberFieldBound(value Signal[float64], onCommit func(*Tx, float64)) Widget {
+	w := tx.Widget(KindNumberField)
+	tx.emit(TxBindValue(w.id, value.id))
+	if onCommit != nil {
+		w.OnValueCommitted(onCommit)
+	}
+	return w
+}
+
+// Min is a number field's lower bound (docs/number-field-plan.md §2);
+// never set, -2^53.
+func (w Widget) Min(min float64) Widget {
+	w.tx.emit(TxSetMin(w.id, min))
+	return w
+}
+
+// Max is a number field's upper bound; never set, 2^53.
+func (w Widget) Max(max float64) Widget {
+	w.tx.emit(TxSetMax(w.id, max))
+	return w
+}
+
 // Select creates a dropdown over fixed options — each becomes a label
 // child — at selected, the initial 0-based index (domain-checked at the
 // root), with its pick handler co-located. onSelect receives each USER
@@ -4731,6 +4767,16 @@ func (t *Tpl) SetStep(n Node, step float64) {
 	t.tx.emit(TxSetStep(n.id, step))
 }
 
+// SetMin and SetMax are a stamped number field's bounds
+// (docs/number-field-plan.md §2), constant across the copies.
+func (t *Tpl) SetMin(n Node, min float64) {
+	t.tx.emit(TxSetMin(n.id, min))
+}
+
+func (t *Tpl) SetMax(n Node, max float64) {
+	t.tx.emit(TxSetMax(n.id, max))
+}
+
 // SetTickSpacing is a stamped slider's tick spacing
 // (docs/slider-plan.md S5), constant for SetStep's reason.
 func (t *Tpl) SetTickSpacing(n Node, spacing float64) {
@@ -5317,6 +5363,25 @@ func (t *Tpl) SliderBound[S interface {
 	n := t.Widget(KindSlider)
 	t.tx.emit(TxSetMin(n.id, min))
 	t.tx.emit(TxSetMax(n.id, max))
+	t.applyValue(n, src)
+	return n
+}
+
+// NumberField creates a number field at a constant value in the
+// blueprint (docs/number-field-plan.md); commits register against the
+// node (Node.OnValueCommitted).
+func (t *Tpl) NumberField(value float64) Node {
+	n := t.Widget(KindNumberField)
+	t.tx.emit(TxSetValue(n.id, value))
+	return n
+}
+
+// NumberFieldBound creates a number field whose value comes from a
+// varying source.
+func (t *Tpl) NumberFieldBound[S interface {
+	Signal[float64] | Field[float64]
+}](src S) Node {
+	n := t.Widget(KindNumberField)
 	t.applyValue(n, src)
 	return n
 }

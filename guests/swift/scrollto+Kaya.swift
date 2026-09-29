@@ -85,6 +85,15 @@ struct MessageRow {
     }
 
     @discardableResult
+    func numberField(
+        value f: KayaField<Double>, min: Double? = nil, max: Double? = nil,
+        step: Double? = nil,
+        onCommit: ((KayaAppTx, [KayaValue], Double) -> Void)? = nil
+    ) -> KayaNodeHandle {
+        t.numberField(value: f, min: min, max: max, step: step, onCommit: onCommit)
+    }
+
+    @discardableResult
     func row(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {
         t.row(children)
     }
@@ -193,6 +202,15 @@ struct FrameRow {
         t.slider(
             min: min, max: max, value: f, step: step, tickSpacing: tickSpacing,
             onChange: onChange, onCommit: onCommit)
+    }
+
+    @discardableResult
+    func numberField(
+        value f: KayaField<Double>, min: Double? = nil, max: Double? = nil,
+        step: Double? = nil,
+        onCommit: ((KayaAppTx, [KayaValue], Double) -> Void)? = nil
+    ) -> KayaNodeHandle {
+        t.numberField(value: f, min: min, max: max, step: step, onCommit: onCommit)
     }
 
     @discardableResult

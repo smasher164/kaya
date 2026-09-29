@@ -45,14 +45,13 @@ SCENES = [
     "dirty", "ranges", "save", "styling", "toolbar", "identity",
     "assets", "sizepolicy", "adaptive", "pickers", "sliders",
     "tooltips", "search", "richtext", "ownundo", "richlabel", "sheet",
-    "submit",
+    "submit", "numberfield",
 ]
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed — built and run rust-only until their guests arrive,
 # when they move into SCENES.
 DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows",
-                "format", "flexshrink", "listrow", "tints", "badge", "emoji",
-                "numberfield"]
+                "format", "flexshrink", "listrow", "tints", "badge", "emoji"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -141,10 +140,10 @@ ORDER = [
     ("milestone2", LANGS),
     ("entry", LANGS),
     ("search", LANGS),
-    # RUST ALONE while the eight bindings' sugar is the breadth slice
-    # (docs/number-field-plan.md §7), in the everyday locale and in German.
-    ("numberfield", ("rust",)),
-    ("numberfieldde", ("rust",)),
+    # The number field in the everyday locale and in German
+    # (docs/number-field-plan.md §5).
+    ("numberfield", LANGS),
+    ("numberfieldde", LANGS),
     # The submit gesture on the three text kinds (docs/submit-plan.md §5).
     ("submit", LANGS),
     ("gallery", LANGS),

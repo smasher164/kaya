@@ -2831,6 +2831,120 @@ if slider_commit_fake != 15:
 print(f"check-sugar-surface: slider surface watched: prop fake "
       f"{slider_fake}/16, commit fake {slider_commit_fake}/15")
 
+# --- THE NUMBER FIELD SURFACE, all nine (docs/number-field-plan.md §2, §7)
+# The kind sweep holds the constructor in both zones and the slider clause
+# holds `step` and the commit REGISTRARS; neither sees the field's BOUNDS
+# (`min`/`max`, which the slider takes positionally and the field takes as
+# optional props) or the commit handler CO-LOCATED on the field's own
+# constructor, so a binding could ship a number field whose range or
+# commit is unspellable in its idiom with every other clause green. Read
+# out of each binding's own number-field signature wherever the props ride
+# the constructor, and off the widget/node setters where they chain.
+def want_nf(lang, rel, what, pattern, findings):
+    want_slider(lang, rel, f"number_field {what}", pattern, findings)
+
+
+def check_number_field_prop(snake, pascal, camel, findings=None):
+    F = SLIDER_FILES
+
+    def want(lang, rel, pattern):
+        want_nf(lang, rel, snake, pattern, findings)
+
+    want("rust-live", F["rust"],
+         rf"pub fn {snake}\(self, [a-z_]+: f64\) -> Self")
+    want("rust-tpl", F["rust"],
+         rf"pub fn {snake}\(&mut self, node: TemplateNodeId, [a-z_]+: f64\)")
+    want("python", F["python"],
+         rf"def number_field\([^)]*\b{snake}[\s]*[:=]")
+    want("go-live", F["go"],
+         rf"func \(w Widget\) {pascal}\([a-z]+ float64\) Widget")
+    want("go-tpl", F["go"],
+         rf"func \(t \*Tpl\) Set{pascal}\(n Node, [a-z]+ float64\)")
+    want("csharp-live", F["csharp"],
+         rf"public Widget NumberField\([^)]*\b{camel} = null")
+    want("csharp-tpl", F["csharp"],
+         rf"public Node NumberField\([^)]*\b{camel} = null")
+    want("java-live", F["java"],
+         rf"public Widget {camel}\(double [a-z]+\)")
+    want("java-tpl", F["java"],
+         rf"public void set{pascal}\(Node n, double [a-z]+\)")
+    want("swift-live", F["swift"],
+         rf"func numberField\(\n *value: Double = 0\.0,[^)]*"
+         rf"\b{camel}: Double\? = nil")
+    want("swift-tpl", F["swift"],
+         rf"func numberField\(\n *value f: KayaField<Double>,[^)]*"
+         rf"\b{camel}: Double\? = nil")
+    want("ocaml-live", F["ocaml"],
+         rf"^let number_field [\s\S]{{0,400}}?\?{snake}\b")
+    want("ocaml-tpl", F["ocaml"],
+         rf"^  let number_field [\s\S]{{0,400}}?\?{snake}\b")
+    want("haskell-live", F["haskell"],
+         rf"^  {pascal} :: Double -> Attr 'LeafW")
+    want("haskell-tpl", F["haskell"],
+         rf"^  Tpl{pascal} :: Double -> TplAttr")
+    want("js", F["js"], rf"NumberFieldOptions = .*\b{camel}\?:")
+
+
+def check_number_field_commit(snake, camel, hs, findings=None):
+    F = SLIDER_FILES
+
+    def want(lang, rel, pattern):
+        want_nf(lang, rel, snake, pattern, findings)
+
+    want("python", F["python"],
+         rf"def number_field\([^)]*\b{snake}[\s]*[:=]")
+    want("js", F["js"], rf"NumberFieldOptions = .*\b{camel}\?:")
+    want("go-live", F["go"],
+         rf"func \(tx \*Tx\) NumberField[A-Za-z]*\([^)]*"
+         rf"\b{camel} func\(\*Tx, float64\)")
+    want("go-rec", "bindings/go/records.go",
+         rf"func \(c RecordCollection\[K, T\]\) NumberField\["
+         rf"[\s\S]{{0,200}}?\b{camel} func\(\*Tx, K, float64\)")
+    want("go-sum", "bindings/go/sums.go",
+         rf"func \(sc SumCase\[K, V\]\) NumberField\([^\n]*"
+         rf"\b{camel} func\(\*Tx, K, float64\)")
+    want("csharp-live", F["csharp"],
+         rf"public Widget NumberField\([^)]*"
+         rf"Action<Tx, double>\? {camel} = null")
+    want("csharp-tpl", F["csharp"],
+         rf"public Node NumberField\([^)]*"
+         rf"Action<Tx, List<object>, double>\? {camel} = null")
+    want("java-live", F["java"],
+         rf"public Widget numberField\([^)]*BiConsumer<Tx, Double> {camel}\)")
+    want("swift-live", F["swift"],
+         rf"func numberField\(\n *value: Double = 0\.0,[^)]*"
+         rf"\b{camel}: \(\(KayaAppTx, Double\)")
+    want("swift-tpl", F["swift"],
+         rf"func numberField\(\n *value f: KayaField<Double>,[^)]*"
+         rf"\b{camel}: \(\(KayaAppTx, \[KayaValue\], Double\)")
+    want("ocaml-live", F["ocaml"],
+         rf"^let number_field [\s\S]{{0,400}}?\?{snake}\b")
+    want("ocaml-tpl", F["ocaml"],
+         rf"^  let number_field [\s\S]{{0,400}}?\?{snake}\b")
+    want("haskell", F["haskell"],
+         rf"^numberField{hs} :: \(LeafArgs r\) => Double -> "
+         rf"\(Double -> IO \(\)\) -> r")
+
+
+for nf_prop in (("min", "Min", "min"), ("max", "Max", "max"),
+                ("step", "Step", "step")):
+    check_number_field_prop(*nf_prop)
+check_number_field_commit("on_commit", "onCommit", "On")
+fake = []
+check_number_field_prop("kaya_fake_bound", "KayaFakeBound", "kayaFakeBound",
+                        findings=fake)
+nf_prop_fake = len(fake)
+fake = []
+check_number_field_commit("on_kaya_fake", "onKayaFake", "OnKayaFake",
+                          findings=fake)
+nf_commit_fake = len(fake)
+if nf_prop_fake != 16 or nf_commit_fake != 13:
+    selftest_exit(f"check-sugar-surface: self-test failed (number field "
+                  f"patterns fired {nf_prop_fake}/16 for a prop and "
+                  f"{nf_commit_fake}/13 for a handler that exist nowhere)")
+print(f"check-sugar-surface: number field surface watched: prop fake "
+      f"{nf_prop_fake}/16, commit fake {nf_commit_fake}/13")
+
 # --- THE SHEET SURFACE, all nine (docs/sheet-plan.md §5) --------------
 # A sheet is a SURFACE, not a kind and not a window prop, so neither
 # sweep above sees it while tx 58-60 and occurrences 31/32 reach every
@@ -5349,7 +5463,7 @@ discardable = tpl_discardable_probe()
 WANT_DISCARDABLE = """swift-row-member=applied:1 rc:1 named:True
 swift-arm-member=applied:1 rc:1 named:True
 swift-eliminator=applied:1 rc:1 named:True
-swift-census-floor=applied:13 rc:1 named:True"""
+swift-census-floor=applied:14 rc:1 named:True"""
 if discardable != WANT_DISCARDABLE:
     print("check-sugar-surface: SELF-TEST FAIL (the Swift generated-surface "
           "discard census did not catch its watched cuts). Wanted:",
@@ -6114,7 +6228,7 @@ def csharp_facade_probe():
     run("csharp-twin-reader",
         src.replace("sealed class TableItemRow\n",
                     "sealed class TableItemRowGone\n")
-        if n == 1 else src, n, "typed-row reader found only 11")
+        if n == 1 else src, n, "typed-row reader found only 12")
     return "\n".join(lines)
 
 

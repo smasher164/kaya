@@ -325,17 +325,182 @@ def swift_number_findings(source):
     return out
 
 
-STUB_ROWS = ((GTK, 'depth_stub("numberfield")'), (WINUI, 'depth_stub("numberfield")'),
-             (COMPOSE, 'depthStub("numberfield")'))
+def gtk_number_findings(source):
+    """GTK's spin button reads its text on activate, on focus-out and before
+    every step (gtk_spin_button_update), and reports each through ONE
+    `value-changed`; kaya's one emit sits behind that signal, outside the
+    quiet guard, and only for a value the core's rule moved."""
+    out = []
+    src = strip_c(source)
+    arm = block_after(src, "WidgetKind::NumberField => {")
+    if not arm:
+        return [f"{GTK}: no WidgetKind::NumberField create arm — the arm this clause holds "
+                f"is gone"]
+    committed = block_after(src, "fn number_committed(")
+    door = block_after(arm, "spin.connect_value_changed(move |sb| {")
+    keystroke = block_after(arm, "EditableExt::connect_changed(&spin, move |_| {")
+    reads = block_after(arm, "spin.connect_input(move |sb| {")
+    if "SpinButtonUpdatePolicy::Always" not in arm:
+        out.append(f"{GTK}: the spin button's update policy is not ALWAYS — out-of-range text "
+                   f"reverts instead of clamping (§3 rule 3)")
+    if not re.match(r"\{\s*if quiet\.get\(\) \{\s*return;\s*\}", door):
+        out.append(f"{GTK}: the number field's value-changed door does not open on the quiet "
+                   f"guard — an app write echoes as a commit (§2)")
+    for bad in ("number_committed(", "send_value_committed_tag(", ".update("):
+        if bad in keystroke:
+            out.append(f"{GTK}: the number field's `changed` handler calls {bad} — a "
+                       f"keystroke commits (§3 rule 1)")
+    if "spin.remove_controller(controller);" not in arm:
+        out.append(f"{GTK}: GTK's own focus-out door is left on the spin button — it commits "
+                   f"whenever the WINDOW loses the keyboard, which a wayland virtual keyboard "
+                   f"does on every keystroke burst (§4.5)")
+    leave = block_after(arm, "focus_door.connect_leave(move |_| {")
+    if "if !inside {" not in leave or "spin.update();" not in block_after(leave, "if !inside {"):
+        out.append(f"{GTK}: the number field's focus door does not commit once the window's "
+                   f"focus sits elsewhere — Tab away commits nothing (§3 rule 1)")
+    if "crate::number_field::commit(" not in reads:
+        out.append(f"{GTK}: the spin button's `input` handler does not read the text through "
+                   f"number_field::commit — the platform's parse decides the value (§3 rule 5)")
+    if "send_value_committed_tag(" in arm:
+        out.append(f"{GTK}: the number field's create arm emits for itself — the one emit is "
+                   f"number_committed's")
+    calls = src.count("number_committed(") - src.count("fn number_committed(")
+    inside = door.count("number_committed(")
+    if calls == 0:
+        out.append(f"{GTK}: nothing calls number_committed — the number field's value-changed "
+                   f"door is not wired")
+    elif calls > inside:
+        out.append(f"{GTK}: number_committed is called {calls} time(s) and only {inside} sit "
+                   f"inside the spin button's value-changed door — a commit from any other "
+                   f"path is a keystroke or an apply committing (docs/number-field-plan.md §3)")
+    moved = block_after(committed, "if let Commit::Moved(")
+    if committed.count("send_value_committed_tag(") != 1 or \
+            "send_value_committed_tag(" not in moved:
+        out.append(f"{GTK}: number_committed must emit value_committed once, and only when the "
+                   f"core's rule moved the value — an unchanged commit fires nothing (§2)")
+    return out
 
 
-def census(texts):
+def compose_number_findings(source):
+    """Compose has no number control: a text field whose commit doors are
+    the keyboard's action (Done), a hardware Return in the preview key arm
+    and the focus leaving it; ONE settle emits, and only for a value the
+    core's rule moved."""
+    out = []
+    src = strip_c(source)
+    field = block_after(src, "\nprivate fun KayaNumberField(")
+    if not field:
+        return [f"{COMPOSE}: no KayaNumberField — the arm this clause holds is gone"]
+    commit = block_after(src, "\ninternal fun kayaNumberCommit(")
+    settle = block_after(src, "\nprivate fun kayaNumberSettle(")
+    action = block_after(field, "onKeyboardAction = {")
+    preview = ""
+    for cand in blocks_after(field, ".onPreviewKeyEvent { event ->"):
+        if "Key.Enter" in cand:
+            preview = cand
+    lost = block_after(field, "if (wasFocused && !state.isFocused) {")
+    keystroke = block_after(field, ".collect {")
+    for bad in ("kayaNumberCommit(", "kayaNumberSettle(", "KayaPresent.emit"):
+        if bad in keystroke:
+            out.append(f"{COMPOSE}: the number field's text collector calls {bad} — a "
+                       f"keystroke commits (§3 rule 1)")
+    if "kayaNumberCommit(node)" not in action:
+        out.append(f"{COMPOSE}: the number field's keyboard action does not commit — the "
+                   f"phone's Done commits nothing (§3 rule 1)")
+    if "kayaNumberCommit(node)" not in preview:
+        out.append(f"{COMPOSE}: the number field's hardware Return does not commit — a key "
+                   f"event never reaches onKeyboardAction (§3 rule 1)")
+    if "kayaNumberCommit(node)" not in lost:
+        out.append(f"{COMPOSE}: the number field's focus loss does not commit (§3 rule 1)")
+    calls = src.count("kayaNumberCommit(") - src.count("fun kayaNumberCommit(")
+    inside = sum(b.count("kayaNumberCommit(") for b in (action, preview, lost))
+    if calls > inside:
+        out.append(f"{COMPOSE}: kayaNumberCommit( is called {calls} time(s) and only {inside} "
+                   f"sit inside its Done, Return and focus-loss doors — a commit from any "
+                   f"other path is a keystroke or an apply committing "
+                   f"(docs/number-field-plan.md §3)")
+    settles = src.count("kayaNumberSettle(") - src.count("fun kayaNumberSettle(")
+    if settles != commit.count("kayaNumberSettle("):
+        out.append(f"{COMPOSE}: kayaNumberSettle is reached from outside the commit path")
+    moved = block_after(settle, "if (answer == 2) {")
+    if settle.count("KayaPresent.emit") != 1 or \
+            "KayaPresent.emitValueCommitted(" not in moved:
+        out.append(f"{COMPOSE}: kayaNumberSettle must emit value_committed once, and only when "
+                   f"the core answers a moved value — an unchanged commit fires nothing (§2)")
+    for name, body in (("KayaNumberField", field), ("kayaNumberCommit", commit)):
+        if "KayaPresent.emit" in body:
+            out.append(f"{COMPOSE}: {name} emits for itself — the one emit is "
+                       f"kayaNumberSettle's")
+    return out
+
+
+def winui_number_findings(source):
+    """NumberBox reads its text at Enter, focus loss and before every step,
+    through the NumberFormatter it is given, and reports each through ONE
+    ValueChanged; kaya's formatter is that reader, and kaya's one emit sits
+    behind that event, outside the quiet guard, only for a value the core's
+    rule moved."""
+    out = []
+    src = strip_c(source)
+    arm = block_after(src, "WidgetKind::NumberField => {")
+    if not arm:
+        return [f"{WINUI}: no WidgetKind::NumberField create arm — the arm this clause holds "
+                f"is gone"]
+    door = block_after(arm, "move |sender, args| {")
+    shape = block_after(src, "fn winui_number_shape(")
+    settle = block_after(src, "fn winui_number_settle(")
+    reader = block_after(src, "fn read(text: &HSTRING) -> Option<f64> {")
+    if "NumberBoxValidationMode::InvalidInputOverwritten" not in arm:
+        out.append(f"{WINUI}: the NumberBox does not overwrite invalid input — unreadable text "
+                   f"stays in the box (§3 rule 2)")
+    if "field.ValueChanged(&handler)" not in arm or not door:
+        out.append(f"{WINUI}: the NumberBox's ValueChanged is not the number field's door — "
+                   f"Return, focus loss and a step commit nothing (§3 rules 1, 6)")
+    if not re.match(r"\{\s*if quiet\.load\([^)]*\) \{\s*return Ok\(\(\)\);\s*\}", door):
+        out.append(f"{WINUI}: the number field's ValueChanged door does not open on the quiet "
+                   f"guard — an app write echoes as a commit (§2)")
+    if "SetNumberFormatter(" not in shape or "KayaNumberText {" not in shape:
+        out.append(f"{WINUI}: the NumberBox is not given kaya's own formatter — its text is the "
+                   f"platform's parse and display (§3 rule 5)")
+    if "crate::fmt::parse_number(" not in reader:
+        out.append(f"{WINUI}: KayaNumberText reads the text for itself, not through "
+                   f"fmt::parse_number — the platform's parse decides the value (§3 rule 5)")
+    if "send_value_committed_tag(" in arm:
+        out.append(f"{WINUI}: the number field's create arm emits for itself — the one emit is "
+                   f"winui_number_settle's")
+    calls = src.count("winui_number_settle(") - src.count("fn winui_number_settle(")
+    inside = door.count("winui_number_settle(")
+    if calls == 0:
+        out.append(f"{WINUI}: nothing calls winui_number_settle — the number field's "
+                   f"ValueChanged door is not wired")
+    elif calls > inside:
+        out.append(f"{WINUI}: winui_number_settle is called {calls} time(s) and only {inside} "
+                   f"sit inside the NumberBox's ValueChanged door — a commit from any other "
+                   f"path is a keystroke or an apply committing (docs/number-field-plan.md §3)")
+    moved = block_after(settle, "if let Commit::Moved(v) = answer {")
+    if settle.count("send_value_committed_tag(") != 1 or \
+            "send_value_committed_tag(" not in moved:
+        out.append(f"{WINUI}: winui_number_settle must emit value_committed once, and only when "
+                   f"the core's rule moved the value — an unchanged commit fires nothing (§2)")
+    return out
+
+
+# The number field's rows; a backend with no row must still stub the kind.
+NUMBER_ROWS = {SWIFT: swift_number_findings, GTK: gtk_number_findings,
+               WINUI: winui_number_findings, COMPOSE: compose_number_findings}
+STUBS = {GTK: 'depth_stub("numberfield")', WINUI: 'depth_stub("numberfield")',
+         COMPOSE: 'depthStub("numberfield")'}
+
+
+def census(texts, number_rows=None):
+    number_rows = NUMBER_ROWS if number_rows is None else number_rows
     out = []
     for rel, row in ROWS.items():
         out.extend(row(texts[rel]))
-    out.extend(swift_number_findings(texts[SWIFT]))
-    for rel, stub in STUB_ROWS:
-        if stub not in texts[rel]:
+    for rel, row in number_rows.items():
+        out.extend(row(texts[rel]))
+    for rel, stub in STUBS.items():
+        if rel not in number_rows and stub not in texts[rel]:
             out.append(f"{rel}: the number field's arm has landed (no {stub} left) and this "
                        f"gate has no row for its commit doors — add one naming the backend's "
                        f"own Return, focus-loss and step events (docs/number-field-plan.md §6)")
@@ -512,13 +677,119 @@ n28 = gate.doctor("the harness's unfocus committing past the door", REAL[SWIFT],
                   r"kayaNumberCommit(kayaScene.numberFields[0]) }\n")
 watched("a verb that commits without the user's door", {**REAL, SWIFT: n28},
         "kayaNumberCommit( is called")
-n29 = gate.doctor("every gtk number field stub gone", REAL[GTK],
-                  r'crate::depth_stub\("numberfield"\)', "todo!()",
-                  want=REAL[GTK].count('depth_stub("numberfield")'))
-watched("a GTK number field arm with no row in this gate", {**REAL, GTK: n29},
-        "has no row for its commit doors")
+withheld = {rel: row for rel, row in NUMBER_ROWS.items() if rel != GTK}
+print(f"check-submit: self-test the GTK number row withheld, "
+      f"{len(NUMBER_ROWS) - len(withheld)} row(s) out of the table")
+gate.negative("a GTK number field arm with no row in this gate",
+              lambda: census(REAL, withheld), want="has no row for its commit doors")
+n30 = gate.doctor("a commit planted on the spin button's changed handler", REAL[GTK],
+                  r"(EditableExt::connect_changed\(&spin, move \|_\| \{\n)",
+                  r"\1number_committed(&field, &quiet, &sink, &tag, 0.0);\n")
+watched("a GTK number field committing per keystroke", {**REAL, GTK: n30},
+        "a keystroke commits")
+n31 = gate.doctor("the value-changed door's quiet guard cut", REAL[GTK],
+                  r"(spin\.connect_value_changed\(move \|sb\| \{\n)\s*if quiet\.get\(\) \{\n"
+                  r"\s*return;\n\s*\}\n",
+                  r"\1")
+watched("a GTK number field whose app write echoes", {**REAL, GTK: n31},
+        "an app write echoes")
+n32 = gate.doctor("number_committed emitting whether or not the value moved", REAL[GTK],
+                  r"(\n\s*if let Commit::Moved\(moved\) = settled \{)",
+                  r"\n    sink.send_value_committed_tag(tag, shown);\1")
+watched("a GTK number field firing on an unchanged commit", {**REAL, GTK: n32},
+        "an unchanged commit fires nothing")
+n33 = gate.doctor("the input handler reading the text for itself", REAL[GTK],
+                  r"Some\(Ok\(match crate::number_field::commit\(",
+                  "Some(Ok(match own_parse(")
+watched("a GTK number field whose parse is the platform's", {**REAL, GTK: n33},
+        "the platform's parse decides")
+n34 = gate.doctor("the value-changed door cut", REAL[GTK],
+                  r"number_committed\(&committed, &quiet, &sink, &tag, sb\.value\(\)\);",
+                  "let _ = sb;")
+watched("a GTK number field whose steps and Return commit nothing", {**REAL, GTK: n34},
+        "nothing calls number_committed")
 
-gate.negatives_ran(29)
+# COMPOSE
+n35 = gate.doctor("a commit planted in the number field's text collector", REAL[COMPOSE],
+                  r"(snapshotFlow \{ node\.textState\.text\.toString\(\) \}\.collect \{ )"
+                  r"node\.text = it \}",
+                  r"\1node.text = it; kayaNumberCommit(node) }")
+watched("a Compose number field committing per keystroke", {**REAL, COMPOSE: n35},
+        "a keystroke commits")
+n36 = gate.doctor("the number field's keyboard-action commit cut", REAL[COMPOSE],
+                  r"(onKeyboardAction = \{ performDefaultAction ->\n)\s*kayaNumberCommit\(node\)\n",
+                  r"\1")
+watched("a Compose number field whose Done commits nothing", {**REAL, COMPOSE: n36},
+        "Done commits nothing")
+n37 = gate.doctor("the number field's hardware Return commit cut", REAL[COMPOSE],
+                  r"(\(event\.key == Key\.Enter \|\| event\.key == Key\.NumPadEnter\)\n"
+                  r"\s*\) \{\n)\s*kayaNumberCommit\(node\)\n",
+                  r"\1")
+watched("a Compose number field whose hardware Return commits nothing",
+        {**REAL, COMPOSE: n37}, "hardware Return does not commit")
+n38 = gate.doctor("the number field's focus-loss commit cut", REAL[COMPOSE],
+                  r"(if \(wasFocused && !state\.isFocused\) \{\n\s*wasFocused = false\n)"
+                  r"\s*kayaNumberCommit\(node\)\n",
+                  r"\1")
+watched("a Compose number field whose focus loss commits nothing", {**REAL, COMPOSE: n38},
+        "focus loss does not commit")
+n39 = gate.doctor("kayaNumberSettle emitting whether or not the value moved", REAL[COMPOSE],
+                  r"(\n\s*kayaWriteText\(node, KayaPresent\.numberText\(node\.value, "
+                  r"node\.step\)\)\n\})",
+                  r"\n    KayaPresent.emitValueCommitted(node.tag, node.value)\1")
+watched("a Compose number field firing on an unchanged commit", {**REAL, COMPOSE: n39},
+        "an unchanged commit fires nothing")
+n40 = gate.doctor("the harness's unfocus committing past the door", REAL[COMPOSE],
+                  r'(\n\s*"unfocus" -> \{\n)',
+                  r"\1                        onUi(activity) { "
+                  r"kayaNumberCommit(KayaSceneModel.numberFields[0]) }\n")
+watched("a Compose verb that commits without the user's door", {**REAL, COMPOSE: n40},
+        "kayaNumberCommit( is called")
+
+n_gtk_focus = gate.doctor("GTK's own focus-out controller left in place", REAL[GTK],
+                          r"\n\s*spin\.remove_controller\(controller\);", "")
+watched("a GTK number field committing when its window loses the keyboard",
+        {**REAL, GTK: n_gtk_focus}, "GTK's own focus-out door is left")
+n_gtk_tab = gate.doctor("the focus door's commit cut", REAL[GTK],
+                        r"if !inside \{\n\s*spin\.update\(\);\n", "if !inside {\n")
+watched("a GTK number field whose Tab away commits nothing", {**REAL, GTK: n_gtk_tab},
+        "Tab away commits nothing")
+
+# WINUI's number field
+withheld_winui = {rel: row for rel, row in NUMBER_ROWS.items() if rel != WINUI}
+print(f"check-submit: self-test the WinUI number row withheld, "
+      f"{len(NUMBER_ROWS) - len(withheld_winui)} row(s) out of the table")
+gate.negative("a WinUI number field arm with no row in this gate",
+              lambda: census(REAL, withheld_winui), want="has no row for its commit doors")
+n_win_quiet = gate.doctor("the ValueChanged door's quiet guard cut", REAL[WINUI],
+                          r"(move \|sender, args\| \{\n)\s*if quiet\.load\("
+                          r"std::sync::atomic::Ordering::Relaxed\) \{\n\s*return Ok\(\(\)\);\n"
+                          r"\s*\}\n",
+                          r"\1")
+watched("a WinUI number field whose app write echoes", {**REAL, WINUI: n_win_quiet},
+        "an app write echoes")
+n_win_moved = gate.doctor("winui_number_settle emitting whether or not the value moved",
+                          REAL[WINUI], r"(\n\s*if let Commit::Moved\(v\) = answer \{)",
+                          r"\n    sink.send_value_committed_tag(&cell.tag, shown);\1")
+watched("a WinUI number field firing on an unchanged commit", {**REAL, WINUI: n_win_moved},
+        "an unchanged commit fires nothing")
+n_win_parse = gate.doctor("KayaNumberText reading the text for itself", REAL[WINUI],
+                          r"crate::fmt::parse_number\(text\.to_string\(\)\.trim\(\)\)",
+                          "text.to_string().trim().parse().ok()")
+watched("a WinUI number field whose parse is its own", {**REAL, WINUI: n_win_parse},
+        "reads the text for itself")
+n_win_text = gate.doctor("the NumberBox left with the platform's formatter", REAL[WINUI],
+                         r"KayaNumberText \{ cell: cell\.clone\(\) \}\.into\(\)",
+                         "DecimalFormatter::new()?.cast()?")
+watched("a WinUI number field whose text is the platform's", {**REAL, WINUI: n_win_text},
+        "not given kaya's own formatter")
+n_win_verb = gate.doctor("the harness's nudge committing past the door", REAL[WINUI],
+                         r"(\n(\s*)FrameworkElementAutomationPeer::CreatePeerForElement\(&button\)\?)",
+                         r"\n\2winui_number_settle(&field, todo!(), todo!(), 0.0)?;\1")
+watched("a WinUI verb that commits without the user's door", {**REAL, WINUI: n_win_verb},
+        "winui_number_settle is called")
+
+gate.negatives_ran(48)
 
 for line in census(REAL):
     gate.finding(line)

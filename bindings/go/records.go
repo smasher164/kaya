@@ -910,6 +910,21 @@ func (c RecordCollection[K, T]) choice[S interface {
 	return n
 }
 
+// NumberField creates a number field whose value comes from any
+// addressable source, with its commit handler (nil for none).
+func (c RecordCollection[K, T]) NumberField[S interface {
+	~float64 | Signal[float64] | func(*T) *float64 | Field[float64]
+}](t *Tpl, src S, onCommit func(*Tx, K, float64)) Node {
+	n := t.Widget(KindNumberField)
+	t.applyRecordValue[T](n, src)
+	if onCommit != nil {
+		n.OnValueCommitted(func(tx *Tx, keys []any, v float64) {
+			onCommit(tx, keys[0].(K), v)
+		})
+	}
+	return n
+}
+
 // onValueOf is the value-change registration the slider and the two
 // choice constructors share, with the depth-1 key cast to K.
 func (c RecordCollection[K, T]) onValueOf(t *Tpl, n Node, onChange func(*Tx, K, float64)) {

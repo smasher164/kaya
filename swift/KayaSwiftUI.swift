@@ -8338,11 +8338,17 @@ private func kayaRunScript(_ script: String) {
                         failures.append("\(parts[0]) \(parts[1]) reached no window — no key was sent")
                     }
                 #else
-                    // The phone's door is the keyboard's dismissal; it has no
-                    // stepping door, and its lane table drops the `nudge` lines.
+                    // The phone's door is the keyboard toolbar's Done, tapped by
+                    // the lane's driver; it has no stepping door, and its lane
+                    // table cuts the `nudge` lines.
                     if !stepping {
-                        DispatchQueue.main.sync { kayaScene.focusedId = nil }
-                        kayaAwaitAnswer(answered)
+                        let (ok, lines) = KayaSimdrive.ask("keyboard_done", timeout: 30)
+                        if ok {
+                            kayaAwaitAnswer(answered)
+                        } else {
+                            failures.append(
+                                "unfocus \(parts[1]): \(lines.first ?? "the driver refused the Done tap without saying why")")
+                        }
                     } else {
                         _ = up
                         failures.append("nudge: a phone's number field has no stepping door")

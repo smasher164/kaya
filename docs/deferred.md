@@ -9,7 +9,7 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
-## BUILD — the number field (docs/number-field-plan.md), depth on the mac (2026-09-28); the GTK, WinUI and Compose arms, the iOS legs and the other eight bindings are the breadth slice
+## ~~BUILD — the number field (docs/number-field-plan.md), depth on the mac (2026-09-28); the GTK, WinUI and Compose arms, the iOS legs and the other eight bindings are the breadth slice~~ COMPLETE 2026-09-28: every item below LANDED; validate-all --only numberfield ALL PASS (76 legs, five lanes) and the full matrix green on four lanes, the mac's only non-green legs the two fullscreen display legs NOT RUN on a busy host and passed by hand after
 KEY: number field, number_field, KIND_NUMBER_FIELD, numberfield, numberfieldde, parse_number, number_text, number_commit, number_step, expect_value, unfocus, nudge, fmt:field, DEPTH STUB numberfield
 
 The depth slice: kind 20 over the slider's value, min, max and step, the
@@ -18,34 +18,81 @@ the Apple arm, the Rust binding in both zones, the SwiftUI arm on macOS and
 iOS, and tools/scenes/numberfield.steps with its de-DE twin green on the
 mac lane. `expect_slider` is `expect_value` now, on sliders and number
 fields alike. What breadth owes:
-  - **DEPTH STUB: numberfield on gtk** — `GtkSpinButton` over an adjustment
-    of min, max, step and ten steps, `input`/`output` through the door
-    (plan §6); `fmt::parse_number`'s glibc arm is written and held by
-    `the_glibc_arm_composes_in_the_locales_order` in check-gtk's container,
-    and plan §4.3 (ar-EG digits through the handlers) is measured first.
-  - **DEPTH STUB: numberfield on winui** — `NumberBox` with
-    `InvalidInputOverwritten`, `SmallChange` the step, a `DecimalFormatter`
-    from the door's language list, `Inline` steppers; the Windows arm of
-    `fmt::parse_number` (`DecimalFormatter.ParseDouble`, refusing by name
-    until then) with it, plan §4.4 measured first.
-  - **DEPTH STUB: numberfield on compose** — a `TextField` with
-    `KeyboardType.Number`/`Decimal`, `ImeAction.Done`, the commit on
-    `onDone` and on focus loss, the door both ways over JNI (a `parse` in
-    KayaFormat.kt for the Android arm of `fmt::parse_number`, refusing by
-    name until then); plan §4.2's
-    minus key on the lane's IME measured first.
-  - The iOS legs: the arm (keyboard by §4.2, a keyboard-toolbar Done that
-    drops the focus) is built and type-checked, the two scenes are
-    UNWIRED_SCENES in tools/lib/lanes/ios.py until §4.2's Done route and the
-    driver reaching it are measured; the phones cut `nudge`.
-  - `number_field` with `min`, `max`, `step` and `on_commit` in both zones of
-    the other eight bindings (check-sugar-surface and tpl-surfaces are red by
-    design until then), the C floor packing the props, and a guest per
-    language.
-  - The slider does NOT refuse a `value` outside its range at the root,
-    though docs/slider-plan.md's "What the core polices" says it does; the
-    number field's check (NumberRange in number_field.rs) is the shape a
-    slider's would take.
+  - ~~**DEPTH STUB: numberfield on gtk**~~ — LANDED 2026-09-28: a
+    `GtkSpinButton` over an adjustment of min, max, step and ten steps,
+    `output` writing `number_field::text` and `input` reading through the
+    door, update policy ALWAYS, value_committed from `value-changed` outside
+    the quiet guard through the core's settle; `unfocus` is Tab and `nudge` a
+    real click on the stepper. Plan §4.3 AMENDED: under ALWAYS an `input`
+    answering GTK_INPUT_ERROR leaves GTK's value uninitialized, so the
+    handler answers the committed value for refused text; plan §4.5
+    AMENDED: on wayland the window loses the keyboard on every typing burst,
+    so the arm commits on focus loss only when the focus moved to another
+    widget. Held by check-submit's GTK number row and the 32 linux legs.
+  - ~~**DEPTH STUB: numberfield on winui**~~ — LANDED 2026-09-28: a
+    `NumberBox` (InvalidInputOverwritten, Inline, SmallChange the step,
+    LargeChange ten) whose NumberFormatter is kaya's own
+    INumberFormatter2 + INumberParser over `number_field::text` and
+    `fmt::parse_number`; ValueChanged settles through the core, a cleared
+    box's NaN reverting inside the handler. The Windows arm of
+    `fmt::parse_number` is `DecimalFormatter.ParseDouble` over the door's
+    languages plus a character whitelist, since ParseDouble reads
+    `1,234.5` whatever IsGrouped says (plan §4.4, measured on the VM).
+    Held by fmt::win_tests on the guest's unit phase, check-submit's WinUI
+    number row and the 12 windows legs. The quiet guard on ValueChanged is
+    visible to no scene (the committed mirror is written before the quiet
+    write, so an unguarded write settles as unchanged); the static row
+    holds it.
+  - ~~**DEPTH STUB: numberfield on compose**~~ — LANDED 2026-09-28:
+    KayaNumberField, a BasicTextField over the arm's own text with
+    KeyboardType.Number/Decimal and ImeAction.Done, committing on the
+    keyboard action, a hardware Return and focus loss through
+    KayaPresent.numberCommit (`number_field::commit` over JNI), one
+    value_committed; the Android arm of `fmt::parse_number` is
+    KayaFormat.parseNumber (ICU, grouping off, the whole text). Plan §4.2
+    measured: Gboard draws one pad with a minus for both keyboard types;
+    `unfocus` is Tab (§4.5); the phones cut the scene at `nudge`. Held by
+    check-submit's Compose number row, check-verbs' Compose kind-arms
+    clause, KayaFormatParseTest and the 6 android legs.
+  - ~~The iOS legs~~ — WIRED 2026-09-28: plan §4.2 and §4.5 measured on the
+    simulator; `unfocus` taps the keyboard toolbar's Done through the
+    XCUITest driver's `keyboard_done`, `press return` commits once and ends
+    editing (so the scene clicks the field again before typing), and the
+    scene's nudge block is its tail, which the phones cut. Numberfield and
+    numberfieldde green on swift, go and rust-swiftui.
+  - ~~`number_field` in the other eight bindings~~ — LANDED 2026-09-28:
+    both zones with `min`, `max`, `step` and `on_commit` where each binding
+    spells the slider's, a numberfield guest per language, every language's
+    two legs on the mac lane. The C floor packs the props through the
+    generic setters and carries no guest, as it carries no sliders guest.
+    Held by check-sugar-surface's number field clause and the Python and JS
+    checks-file cases.
+  - ~~The slider does NOT refuse a `value` outside its range at the root~~ —
+    FIXED 2026-09-28: `SliderRange::check` in scene.rs refuses it on the
+    complete declaration, const and signal-bound, live and stamped; four
+    scene tests, three of them watched failing with the rule cut.
+
+## DIVERGENCE — the glibc arm of the formatter door reads and writes ASCII digits under ar-EG, so a GTK number field refuses Arabic-Indic digits (found 2026-09-28, the number field's breadth)
+KEY: glibc arm, Arabic-Indic digits, ar-EG, parse_number, number_field ar-EG, formatar
+
+`fmt::number` on Linux writes ASCII digits under ar-EG while the Apple,
+Android and Windows arms write Arabic-Indic ones (٣٫٥), and the glibc
+`parse_number` reads what its own arm writes, so a user typing Arabic-Indic
+digits into a GTK number field sees the text revert. Nothing a scene runs
+types them. The number field only exposes it: the formatar legs freeze the
+glibc spelling today. Fixing it is the door's question (which digits the
+Linux arm writes), then the parse folds them.
+
+## RULING — a C# or Java guest host asked for a scene it does not carry runs milestone2 (found 2026-09-28, the number field's breadth)
+KEY: default arm, unknown scene, KAYA_SELFTEST, Program.cs, Main.java, milestone2 fallback
+
+When KAYA_SELFTEST names a scene the C# or Java host has no row for, the
+default arm runs milestone2, so the leg times out after 120s with an
+unresolved-target diagnostic; the Go host stops at launch and names the
+scene. Measured on numberfieldde-csharp and -java before their rows existed.
+A default arm refusing an unknown non-empty name puts the wall at launch,
+but the default arm also serves a bare interactive run, so the shape needs
+the maintainer.
 
 ## ~~DEFECT — the chat app's C0 captures: Android's pushed thread, iOS's missing title, Windows' unbounded list pane (found 2026-09-25, https://claude.ai/artifact/AJnJYozbyhRN7jvHzEcua3)~~ FIXED 2026-09-25: all three, below (49d64ec6, b59326e0 and the Windows content layer), each held by check-universal-props
 KEY: chat app, pushed thread, status bar inset, keyboard opens by itself, IME inset, thread title, list pane boundary, chat.steps

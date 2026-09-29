@@ -3669,6 +3669,31 @@ public final class KayaApp {
         }
 
         /**
+         * A number field's lower bound (docs/number-field-plan.md §2);
+         * never set, -2^53.
+         */
+        public Widget min(double min) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: min on a widget outside its build transaction"
+                    + " — a number field's bounds are declared where the field is built");
+            }
+            tx.emit(KayaWire.txSetMin(id, min));
+            return this;
+        }
+
+        /** A number field's upper bound; never set, 2^53. */
+        public Widget max(double max) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: max on a widget outside its build transaction"
+                    + " — a number field's bounds are declared where the field is built");
+            }
+            tx.emit(KayaWire.txSetMax(id, max));
+            return this;
+        }
+
+        /**
          * The distance between this slider's drawn ticks, in value units
          * (docs/slider-plan.md S5): it divides the range evenly and is a
          * multiple of the step when one is declared; 0 draws none.
@@ -4427,6 +4452,18 @@ public final class KayaApp {
             return t.slider(min, max, value);
         }
 
+        public Node numberField(double value) {
+            return t.numberField(value);
+        }
+
+        public Node numberField(Signal<Double> value) {
+            return t.numberField(value);
+        }
+
+        public Node numberField(KayaRecords.Field<Double> value) {
+            return t.numberField(value);
+        }
+
         public Node select(String[] options, int selected) {
             return t.select(options, selected);
         }
@@ -4555,6 +4592,15 @@ public final class KayaApp {
          * (Tpl.setTickSpacing). */
         public void setTickSpacing(Node n, double spacing) {
             t.setTickSpacing(n, spacing);
+        }
+
+        /** This row's copy of that number field's bounds (Tpl.setMin). */
+        public void setMin(Node n, double min) {
+            t.setMin(n, min);
+        }
+
+        public void setMax(Node n, double max) {
+            t.setMax(n, max);
         }
 
         /** What this row's copy of that node MEANS — semantic emphasis,
@@ -5728,6 +5774,29 @@ public final class KayaApp {
             emit(KayaWire.txSetValue(w.id, value));
             if (onChange != null) {
                 KayaApp.this.onValueChanged(w, onChange);
+            }
+            return w;
+        }
+
+        /** A number field at value (docs/number-field-plan.md), its commit
+         * handler co-located (null for none): one call per commit
+         * (Return, focus loss, a step), never per keystroke. */
+        public Widget numberField(double value, BiConsumer<Tx, Double> onCommit) {
+            Widget w = widget(KayaWire.KIND_NUMBER_FIELD);
+            emit(KayaWire.txSetValue(w.id, value));
+            if (onCommit != null) {
+                KayaApp.this.onValueCommitted(w, onCommit);
+            }
+            return w;
+        }
+
+        /** A number field whose value binds a float signal; a write
+         * never echoes. */
+        public Widget numberField(Signal<Double> value, BiConsumer<Tx, Double> onCommit) {
+            Widget w = widget(KayaWire.KIND_NUMBER_FIELD);
+            emit(KayaWire.txBindValue(w.id, value.id));
+            if (onCommit != null) {
+                KayaApp.this.onValueCommitted(w, onCommit);
             }
             return w;
         }
@@ -7053,6 +7122,16 @@ public final class KayaApp {
             tx.emit(KayaWire.txSetTickSpacing(n.id, spacing));
         }
 
+        /** A stamped number field's bounds (docs/number-field-plan.md §2),
+         * constant across the copies. */
+        public void setMin(Node n, double min) {
+            tx.emit(KayaWire.txSetMin(n.id, min));
+        }
+
+        public void setMax(Node n, double max) {
+            tx.emit(KayaWire.txSetMax(n.id, max));
+        }
+
         /**
          * What a stamped copy MEANS — semantic emphasis, never
          * appearance. A CONSTANT, not a source, for
@@ -7737,6 +7816,27 @@ public final class KayaApp {
             Node n = widget(KayaWire.KIND_SLIDER);
             tx.emit(KayaWire.txSetMin(n.id, min));
             tx.emit(KayaWire.txSetMax(n.id, max));
+            return n;
+        }
+
+        /** A number field per stamped copy (docs/number-field-plan.md);
+         * commits register against the node. */
+        public Node numberField(double value) {
+            Node n = widget(KayaWire.KIND_NUMBER_FIELD);
+            tx.emit(KayaWire.txSetValue(n.id, value));
+            return n;
+        }
+
+        public Node numberField(Signal<Double> value) {
+            Node n = widget(KayaWire.KIND_NUMBER_FIELD);
+            tx.emit(KayaWire.txBindValue(n.id, value.id));
+            return n;
+        }
+
+        /** A number field holding the row's own field. */
+        public Node numberField(KayaRecords.Field<Double> value) {
+            Node n = widget(KayaWire.KIND_NUMBER_FIELD);
+            bindValueField(n, 0, value);
             return n;
         }
 

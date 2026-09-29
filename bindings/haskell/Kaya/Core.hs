@@ -401,6 +401,7 @@ data Pending
   | PChange !Word64 (Text -> IO ())
   | PToggle !Word64 (Bool -> IO ())
   | PValue !Word64 (Double -> IO ())
+  | PCommit !Word64 (Double -> IO ())
   | PToggleNode !Word64 ([Key] -> Bool -> IO ())
   -- The template node's document bind, recorded at the transaction
   -- boundary because the collection is BuildState's and the table is

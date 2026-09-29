@@ -34,6 +34,7 @@ SWIFT_ENTRIES = [
     # The formatter door and the catalog under three locales
     # (docs/compliance-plan.md §6): one app, three scripts (SCENE_LOCALE).
     "format", "formatde:format", "formatar:format",
+    "numberfield", "numberfieldde:numberfield",
 ]
 
 # The go suite: the swift roster entry for entry minus the two
@@ -49,6 +50,7 @@ GO_SCENES = [
     "save", "styling", "toolbar", "identity", "assets",
     "table", "dnd", "pickers", "sliders", "tooltips", "sheet",
     "format", "formatde", "formatar",
+    "numberfield", "numberfieldde",
 ]
 
 # CPython embedded in ONE bundle carrying every python scene
@@ -118,6 +120,8 @@ RUST_SCENES = [
     # THE RICH ROWS (docs/rich-text-plan.md §19): rust-only for richtext's
     # reason; the copy's act is the harness's format verb, no keyboard.
     "richrows",
+    # The number field (docs/number-field-plan.md §4.2), and under de-DE.
+    "numberfield", "numberfieldde",
 ]
 
 # The iPad legs, queued right after their phone sibling: the phone pool is
@@ -146,9 +150,7 @@ DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes"]
 # tooltips with its own (docs/tooltip-plan.md §5) — the iOS arm is the
 # shared interpreter's `.help`, which lands on the accessibility hint,
 # and expect_help reads it there.
-# The number field's iOS arm (keyboard and Done toolbar) is built and its
-# legs are the breadth slice's to measure (docs/number-field-plan.md §4.2).
-UNWIRED_SCENES = ["numberfield", "numberfieldde"]
+UNWIRED_SCENES = []
 
 # The fullscreen scene's app-only way back after the cut, the same steps as
 # tools/lib/lanes/android.py's FULLSCREEN_APP_TAIL: no user change arrives.
@@ -156,6 +158,10 @@ FULLSCREEN_APP_TAIL = ('click button#0; expect label#0 "asked for a window"; '
                        'expect_fullscreen off; click button#1; '
                        'expect label#2 "pings 2"; '
                        'expect label#1 "no change from the user"')
+
+# A PHONE'S NUMBER FIELD HAS NO STEPPING DOOR (docs/number-field-plan.md
+# §5): the scene steps last, so the cut takes the steps alone.
+NUMBER_FIELD_CUT = {"cut": "nudge", "keep": "expect_focused expect_ax"}
 
 # Per-leg modifiers, keyed (suite, scene). `cut` names the verb this host
 # cannot express (everything from it on is dropped, printed); `drop` names
@@ -250,6 +256,12 @@ MODS = {
                            "extra": FULLSCREEN_APP_TAIL},
     ("rust-swiftui", "fullscreen"): {"cut": "user_fullscreen", "keep": "expect_fullscreen",
                                      "extra": FULLSCREEN_APP_TAIL},
+    ("swift", "numberfield"): NUMBER_FIELD_CUT,
+    ("swift", "numberfieldde"): NUMBER_FIELD_CUT,
+    ("go", "numberfield"): NUMBER_FIELD_CUT,
+    ("go", "numberfieldde"): NUMBER_FIELD_CUT,
+    ("rust-swiftui", "numberfield"): NUMBER_FIELD_CUT,
+    ("rust-swiftui", "numberfieldde"): NUMBER_FIELD_CUT,
     ("rust-swiftui", "adaptive"): {
         "extra": 'expect_axis row@narrow "vertical"; expect_grid_columns grid@sheet 1; '
                  'expect_grid_columns grid@fit 1',
@@ -298,12 +310,13 @@ def swift_scene(entry):
 RUST_EXAMPLE = {"listdetail": "split", "taskspersist": "tasks",
                 "links": "tasks", "formatde": "format", "formatar": "format",
                 "tasksrtl": "tasks", "tasksbig": "tasks", "formatbig": "format",
-                "clock24": "format", "scrollrtl": "scroll"}
+                "clock24": "format", "scrollrtl": "scroll",
+                "numberfieldde": "numberfield"}
 
 # The locale a scene runs under, the knob the leg carries
 # (docs/compliance-plan.md §4); the reads ask the platform, never this.
 SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG",
-                "scrollrtl": "ar-EG"}
+                "scrollrtl": "ar-EG", "numberfieldde": "de-DE"}
 
 # The text-scale knob a scene carries (docs/compliance-plan.md §2.1): the
 # window's content size category nearest the factor.

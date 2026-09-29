@@ -138,6 +138,9 @@ mod pickers;
 #[path = "sliders.rs"]
 mod sliders;
 
+#[path = "numberfield.rs"]
+mod numberfield;
+
 #[path = "sheet.rs"]
 mod sheet;
 #[path = "format.rs"]
@@ -220,6 +223,8 @@ fn app(ctx: kaya::AppCtx) {
         Ok("dnd") => dnd::app(ctx),
         Ok("pickers") => pickers::app(ctx),
         Ok("sliders") => sliders::app(ctx),
+        // One guest under two locales, format's shape.
+        Ok("numberfield") | Ok("numberfieldde") => numberfield::app(ctx),
         Ok("sheet") => sheet::app(ctx),
         // One guest under three locales (tools/lib/lanes/android.py's
         // SCENE_LOCALE): a scene selects a SCRIPT, never an app.

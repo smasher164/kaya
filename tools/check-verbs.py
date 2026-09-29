@@ -2173,8 +2173,9 @@ REFUSALS = {
     # No foreign source reaches a phone's app (docs/dnd-plan.md D9), so
     # the arm refuses rather than fake a drop.
     (KOTLIN, "drag_file"): "drag_file is a depth slice on android",
-    (KOTLIN, "unfocus"): 'depthStub("numberfield")',
-    (KOTLIN, "nudge"): 'depthStub("numberfield")',
+    # A phone's number field has no stepping door (docs/number-field-plan.md
+    # §3 rule 7), so the phone lanes cut the scene at the steps.
+    (KOTLIN, "nudge"): "nudge: a phone's number field has no stepping door",
 }
 # A DEPTH STUB on an action verb is a refusal too, for as long as it stands:
 # its row here reads `(KOTLIN, "<verb>"): 'depthStub("<scene>")'` and the
@@ -2976,6 +2977,53 @@ print(f"check-verbs: the wayland clipboard seat is asked for by the seed AND "
       f"sentences, {len(SEAT_NEGATIVES)} watched negatives refused",
       file=sys.stderr)
 
+# EVERY COMPOSE KIND HAS ITS CREATE AND RENDER ARMS (CLAUDE.md, "Interpreter
+# backends are the historic miss layer"): the constant census above holds
+# the number, and a kind whose number arrives with no registry arm or no
+# render arm draws nothing and answers no target. A depth stub counts as an
+# arm; check-stubs holds those open.
+def compose_kind_arms(kotlin_src=None):
+    text = kotlin_src if kotlin_src is not None else real(KOTLIN)
+    kinds = re.findall(r"const val (KIND_[A-Z_]+) = \d+", text)
+    at = text.find("APPLY_CREATE -> {")
+    create = text[at:text.find("APPLY_SET_PROP ->", at)] if at >= 0 else ""
+    at = text.find("private fun KayaRenderCore(")
+    render = text[at:] if at >= 0 else ""
+    bad = []
+    if not create or not render:
+        bad.append("KayaCompose.kt: the create arm or KayaRenderCore is gone — "
+                   "the kind census reads nothing")
+    for kind in kinds:
+        if f"{kind} ->" not in create:
+            bad.append(f"KayaCompose.kt: {kind} has no arm in APPLY_CREATE — a "
+                       f"node of that kind joins no registry and no verb finds it")
+        if not re.search(rf"KayaCompose\.{kind}\b[^\n]*->", render):
+            bad.append(f"KayaCompose.kt: {kind} has no arm in KayaRenderCore — "
+                       f"a node of that kind draws nothing")
+    return bad, len(kinds)
+
+
+kind_out, kind_count = compose_kind_arms()
+g.counted("Compose kinds read for their create and render arms", kind_count,
+          floor=20)
+kind_status = 1 if kind_out else 0
+for line in kind_out:
+    print(f"check-verbs: {line}", file=sys.stderr)
+for label, pattern, finding in (
+    ("the number field's render arm cut",
+     r"\n        KayaCompose\.KIND_NUMBER_FIELD -> KayaNumberField\([^\n]*",
+     "KIND_NUMBER_FIELD has no arm in KayaRenderCore"),
+    ("the number field's create arm cut",
+     r"\n                        KIND_NUMBER_FIELD -> \{",
+     "KIND_NUMBER_FIELD has no arm in APPLY_CREATE"),
+):
+    cut = g.doctor(f"compose kind arms: {label}", real(KOTLIN), pattern,
+                   "\n                        if (false) {")
+    found, _ = compose_kind_arms(cut)
+    if not [line for line in found if finding in line]:
+        fail(f"check-verbs SELF-TEST: the Compose kind census passed with "
+             f"{label}")
+
 # clip_mirrors() ran first and printed its own findings; its verdict
 # is read here so there is exactly ONE verdict line.
 if (clip_status or window_status or ink_status or ax_status
@@ -2983,7 +3031,7 @@ if (clip_status or window_status or ink_status or ax_status
         or metrics_status or keyed_status or drop_line_status
         or vtrace_status or norm_status or ind_status
         or answer_status or seed_focus_status or notify_auth_status
-        or pump_status or immersive_status):
+        or pump_status or immersive_status or kind_status):
     raise SystemExit(1)
 g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"({len(canvas_rows)} of them the canvas vocabularies) + "
@@ -3002,4 +3050,5 @@ g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"+ notification authorization asked only while undecided "
           f"+ the interpreter's pump started without a window "
           f"+ the Compose immersive arm read from the insets "
+          f"+ every Compose kind's create and render arms "
           f"+ spec hash against 2 interpreters")

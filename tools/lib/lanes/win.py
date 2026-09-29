@@ -25,6 +25,7 @@ SCENES = [
     "reorder", "feed", "grow", "layout", "align", "window", "panels",
     "confirm", "nav", "split", "panes", "table", "scroll",
     "progress", "select", "radio", "grid", "textarea", "search", "submit", "scrollto", "fullscreen",
+    "numberfield",
     "sections",
     "menus", "commands", "a11y", "a11yrows", "filedialog",
     "clipboard", "undo", "dirty", "ranges", "save", "styling",
@@ -497,6 +498,46 @@ ORDER = [
     [
      "submit_java",
     ],
+    # EACH numberfield LEG ALONE, submit's reason: `type`, `press return`
+    # and `unfocus` are real keystrokes on the system queue
+    # (docs/number-field-plan.md §5). The German legs are the same guests
+    # under KAYA_LOCALE=de-DE (their launchers).
+    [
+     "numberfield_rust",
+    ],
+    [
+     "numberfield_python",
+    ],
+    [
+     "numberfield_js",
+    ],
+    [
+     "numberfield_go",
+    ],
+    [
+     "numberfield_csharp",
+    ],
+    [
+     "numberfield_java",
+    ],
+    [
+     "numberfieldde_rust",
+    ],
+    [
+     "numberfieldde_python",
+    ],
+    [
+     "numberfieldde_js",
+    ],
+    [
+     "numberfieldde_go",
+    ],
+    [
+     "numberfieldde_csharp",
+    ],
+    [
+     "numberfieldde_java",
+    ],
     [
      "scrollto_rust", "scrollto_python", "scrollto_js",
      "scrollto_go", "scrollto_csharp", "scrollto_java",
@@ -695,7 +736,7 @@ def launcher(leg):
 GUEST_STEM = {"listdetail": "split", "formatde": "format", "formatar": "format",
               "taskspersist": "tasks", "links": "tasks", "tasksrtl": "tasks",
               "tasksbig": "tasks", "formatbig": "format", "clock24": "format",
-              "scrollrtl": "scroll"}
+              "scrollrtl": "scroll", "numberfieldde": "numberfield"}
 
 
 def guest_stem(scene):

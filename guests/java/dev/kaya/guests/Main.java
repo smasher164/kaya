@@ -175,6 +175,10 @@ public final class Main {
             case "sliders":
                 app = Sliders::app;
                 break;
+            case "numberfield":
+            case "numberfieldde":
+                app = NumberField::app;
+                break;
             case "tooltips":
                 app = Tooltips::app;
                 break;

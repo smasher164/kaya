@@ -30,7 +30,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) the foreign suites load;
 # --example alone would build only the rlib it depends on.
-SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen"
+SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen numberfield"
 # Depth-slice scenes, rust only. `windowed` and `canvas` are rust BY
 # DESIGN rather than by depth — the compiled conformance scenes every
 # lane runs (docs/virtualization-plan.md §6.3, docs/canvas-plan.md
@@ -1631,6 +1631,41 @@ for proto in x11 wayland; do
         run "$proto" fullscreen-java env KAYA_SELFTEST=fullscreen KAYA_LIB="$LIB" \
             java -cp /tmp/java-guests dev.kaya.guests.Main
     fi
+    # THE NUMBER FIELD (docs/number-field-plan.md §5), through a11y-leg.sh
+    # for its `expect_ax`; the German leg runs the same guest in every
+    # language.
+    run "$proto" numberfield-rust env KAYA_SELFTEST=numberfield \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/numberfield"
+    run "$proto" numberfieldde-rust env KAYA_LOCALE=de-DE KAYA_SELFTEST=numberfieldde \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/numberfield"
+    run "$proto" numberfield-python env KAYA_SELFTEST=numberfield KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/numberfield.py
+    run "$proto" numberfield-js env KAYA_SELFTEST=numberfield KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/numberfield.ts
+    run "$proto" numberfield-go env KAYA_SELFTEST=numberfield \
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" numberfield-csharp env KAYA_SELFTEST=numberfield KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" numberfield-ocaml env KAYA_SELFTEST=numberfield KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/numberfield.exe
+    run "$proto" numberfield-haskell env KAYA_SELFTEST=numberfield \
+        tools/linux/a11y-leg.sh "$(hs_bin numberfield)"
+    run "$proto" numberfield-java env KAYA_SELFTEST=numberfield KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    run "$proto" numberfieldde-python env KAYA_LOCALE=de-DE KAYA_SELFTEST=numberfieldde KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/numberfield.py
+    run "$proto" numberfieldde-js env KAYA_LOCALE=de-DE KAYA_SELFTEST=numberfieldde KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/numberfield.ts
+    run "$proto" numberfieldde-go env KAYA_LOCALE=de-DE KAYA_SELFTEST=numberfieldde \
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" numberfieldde-csharp env KAYA_LOCALE=de-DE KAYA_SELFTEST=numberfieldde KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" numberfieldde-ocaml env KAYA_LOCALE=de-DE KAYA_SELFTEST=numberfieldde KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/numberfield.exe
+    run "$proto" numberfieldde-haskell env KAYA_LOCALE=de-DE KAYA_SELFTEST=numberfieldde \
+        tools/linux/a11y-leg.sh "$(hs_bin numberfield)"
+    run "$proto" numberfieldde-java env KAYA_LOCALE=de-DE KAYA_SELFTEST=numberfieldde KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" scroll-rust env KAYA_SELFTEST=scroll "$CARGO_TARGET_DIR/debug/examples/scroll"
     # The sideways strip in Arabic (docs/hscroll-plan.md §4).
     run "$proto" scrollrtl-rust env KAYA_LOCALE=ar-EG KAYA_SELFTEST=scrollrtl \

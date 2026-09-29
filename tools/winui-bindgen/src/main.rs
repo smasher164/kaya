@@ -637,6 +637,16 @@ fn main() {
         "Windows.ApplicationModel.Activation.ActivationKind".to_string(),
         "Windows.ApplicationModel.Activation.ApplicationExecutionState".to_string(),
         "Windows.ApplicationModel.Activation.ILaunchActivatedEventArgs".to_string(),
+        // THE NUMBER FIELD (docs/number-field-plan.md §6): NumberBox, its
+        // event args and its two enums, and the two interfaces its
+        // NumberFormatter slot takes, which kaya implements so the box's text
+        // is the door's both ways.
+        "Microsoft.UI.Xaml.Controls.NumberBox".to_string(),
+        "Microsoft.UI.Xaml.Controls.NumberBoxValueChangedEventArgs".to_string(),
+        "Microsoft.UI.Xaml.Controls.NumberBoxSpinButtonPlacementMode".to_string(),
+        "Microsoft.UI.Xaml.Controls.NumberBoxValidationMode".to_string(),
+        "Windows.Globalization.NumberFormatting.INumberFormatter2".to_string(),
+        "Windows.Globalization.NumberFormatting.INumberParser".to_string(),
     ];
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     // The returned Warnings are windows-bindgen's own notes about the metadata,

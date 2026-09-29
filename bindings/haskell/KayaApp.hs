@@ -280,6 +280,8 @@ module KayaApp
     timePickerBoundOn,
     sliderOn,
     sliderBoundOn,
+    numberFieldOn,
+    numberFieldBoundOn,
     selectOn,
     radioOn,
     spacer,
@@ -336,6 +338,7 @@ module KayaApp
     searchBound,
     progressBound,
     slider,
+    numberField,
     select,
     radio,
     MScope (..),
@@ -2800,6 +2803,10 @@ data Attr (c :: WClass) where
   -- (docs\/slider-plan.md S5): divides the range evenly, a multiple of the
   -- step when one is declared; 0 draws none.
   TickSpacing :: Double -> Attr 'LeafW
+  -- | A number field's bounds (docs\/number-field-plan.md §2); never set,
+  -- -2^53 and 2^53.
+  Min :: Double -> Attr 'LeafW
+  Max :: Double -> Attr 'LeafW
   -- | What this widget MEANS (docs/styling-plan.md D4) — semantic emphasis,
   -- never appearance. Any class: 'Composer' is a row's, the rest a leaf's,
   -- and the root refuses a role on a kind it does not fit.
@@ -2858,6 +2865,8 @@ applyAttr (MinuteStep minutes) (Widget n) =
   emitB (W.txSetMinuteStep n (fromIntegral minutes))
 applyAttr (Step step) (Widget n) = emitB (W.txSetStep n step)
 applyAttr (TickSpacing spacing) (Widget n) = emitB (W.txSetTickSpacing n spacing)
+applyAttr (Min v) (Widget n) = emitB (W.txSetMin n v)
+applyAttr (Max v) (Widget n) = emitB (W.txSetMax n v)
 applyAttr (Role r) w = setRole w r
 applyAttr (Symbol s) w = setSymbol w s
 applyAttr (MaxWidth points) (Widget w) = emitB (W.txSetMaxWidth w points)
@@ -3138,8 +3147,25 @@ sliderBoundOn lo hi sig handler = leafish $ do
   pendB (PValue n handler)
   return w
 
--- | A dropdown select over fixed options — each option becomes a label
--- child (labels only, scene-checked) — at the given initial 0-based
+-- | A number field at value (docs\/number-field-plan.md), with its commit
+-- handler co-located: one call per commit (Return, focus loss, a step),
+-- never per keystroke. 'Min', 'Max' and 'Step' are its attributes.
+numberFieldOn :: (LeafArgs r) => Double -> (Double -> IO ()) -> r
+numberFieldOn value handler = leafish $ do
+  w@(Widget n) <- widget W.kindNumberField
+  emitB (W.txSetValue n value)
+  pendB (PCommit n handler)
+  return w
+
+-- | A number field whose value follows a float signal, with its commit
+-- handler co-located; a write never echoes.
+numberFieldBoundOn :: (LeafArgs r) => Signal Double -> (Double -> IO ()) -> r
+numberFieldBoundOn sig handler = leafish $ do
+  w@(Widget n) <- widget W.kindNumberField
+  bindValue w sig
+  pendB (PCommit n handler)
+  return w
+
 -- index (domain-checked at the root), with its pick handler co-located:
 -- the handler receives each USER pick's new index (programmatic writes
 -- never echo).
@@ -3605,6 +3631,10 @@ data TplAttr where
   -- | A stamped slider's tick spacing (docs\/slider-plan.md S5), constant
   -- for 'TplStep''s reason.
   TplTickSpacing :: Double -> TplAttr
+  -- | A stamped number field's bounds (docs\/number-field-plan.md §2),
+  -- constant across the copies.
+  TplMin :: Double -> TplAttr
+  TplMax :: Double -> TplAttr
   -- | What this stamped copy takes from a paste — the closed kinds by
   -- name plus any custom format ids. A CONSTANT LIST AND NOT A SOURCE.
   -- Every backend gates the paste occurrence on the focused widget's
@@ -3658,6 +3688,8 @@ applyTplAttr (TplStep step) (Node n) = emitT (W.txSetStep n step)
 applyTplAttr (TplMaxWidth points) (Node n) = emitT (W.txSetMaxWidth n points)
 applyTplAttr (TplMaxHeight points) (Node n) = emitT (W.txSetMaxHeight n points)
 applyTplAttr (TplTickSpacing spacing) (Node n) = emitT (W.txSetTickSpacing n spacing)
+applyTplAttr (TplMin v) (Node n) = emitT (W.txSetMin n v)
+applyTplAttr (TplMax v) (Node n) = emitT (W.txSetMax n v)
 applyTplAttr (TplAccepts kinds) n = setNodeAccepts n kinds
 applyTplAttr (TplDraggable clip ops) n = setNodeDragSource n clip ops
 applyTplAttr (TplDropTarget ops) n = setNodeDropTarget n ops
@@ -3862,7 +3894,15 @@ slider lo hi src = do
   bindValueSource n src
   return n
 
--- | A stamped dropdown over fixed options — each option becomes a label child
+-- | A stamped number field whose value comes from a source
+-- (docs\/number-field-plan.md); commits register against the node
+-- ('onValueCommitted').
+numberField :: TplNumberSource s => s -> Tpl Node
+numberField src = do
+  n <- widget W.kindNumberField
+  bindValueSource n src
+  return n
+
 -- — with the SELECTED 0-based index from a source.
 select :: TplNumberSource s => [Text] -> s -> Tpl Node
 select = choiceWith W.kindSelect
@@ -4056,6 +4096,7 @@ register app pending = case pending of
   PChange n handler -> modifyIORef' (app.appWidgetChanges) (Map.insert n handler)
   PToggle n handler -> modifyIORef' (app.appWidgetToggles) (Map.insert n handler)
   PValue n handler -> modifyIORef' (app.appWidgetValues) (Map.insert n handler)
+  PCommit n handler -> modifyIORef' (app.appWidgetCommits) (Map.insert n handler)
   PToggleNode n handler -> modifyIORef' (app.appNodeToggles) (Map.insert n handler)
   PDocumentBind n cid i level ->
     modifyIORef' (app.appDocumentBinds) (Map.insert n (cid, i, level))

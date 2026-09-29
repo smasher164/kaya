@@ -406,6 +406,18 @@ static class Program
              "double? tickSpacing = null", $"{onValue} onChange = null",
              $"{onValue} onCommit = null"],
             "min, max, value, step, tickSpacing, onChange, onCommit");
+        Fwd("NumberField",
+            ["double value", "double? min = null", "double? max = null",
+             "double? step = null", $"{onValue} onCommit = null"],
+            "value, min, max, step, onCommit");
+        Fwd("NumberField",
+            ["Signal value", "double? min = null", "double? max = null",
+             "double? step = null", $"{onValue} onCommit = null"],
+            "value, min, max, step, onCommit");
+        Fwd("NumberField",
+            ["Field<double> value", "double? min = null", "double? max = null",
+             "double? step = null", $"{onValue} onCommit = null"],
+            "value, min, max, step, onCommit");
         Fwd("Select", ["string[] options", "int selected", $"{onSelect} onSelect = null"],
             "options, selected, onSelect");
         Fwd("Select", ["string[] options", "Signal selected", $"{onSelect} onSelect = null"],

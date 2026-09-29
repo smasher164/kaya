@@ -1079,10 +1079,14 @@ mod platform {
         )
     }
 
-    /// The number field's breadth slice writes this arm (docs/deferred.md's
-    /// number field entry); nothing calls it before the backend's arm does.
-    pub(super) fn parse_number(_: &str) -> Option<f64> {
-        panic!("kaya: the number field's parse has no arm on this platform yet (docs/number-field-plan.md §3 rule 5)")
+    /// KayaFormat.parseNumber: ICU's reading over the whole text, grouping
+    /// off, answering Java's spelling of the value or "" for none.
+    pub(super) fn parse_number(text: &str) -> Option<f64> {
+        if text.is_empty() {
+            return None;
+        }
+        let read = format_call("parseNumber", &format!("({STRING}){STRING}"), false, &[], Some(text));
+        read.parse().ok()
     }
 
     pub(super) fn percent(value: f64, options: NumberOptions) -> String {
@@ -1274,19 +1278,53 @@ mod platform {
         set.unwrap_or_else(|e| fail("a number", e)).to_string()
     }
 
-    pub(super) fn number(value: f64, o: NumberOptions) -> String {
-        let f = match languages() {
+    fn decimal_in(langs: Option<IIterable<HSTRING>>) -> DecimalFormatter {
+        match langs {
             Some(langs) => DecimalFormatter::CreateDecimalFormatter(&langs, &HSTRING::from("ZZ")),
             None => DecimalFormatter::new(),
         }
-        .unwrap_or_else(|e| fail("a decimal formatter", e));
-        write_number(&f, o, Some((0, 3)), 1.0, value)
+        .unwrap_or_else(|e| fail("a decimal formatter", e))
     }
 
-    /// The number field's breadth slice writes this arm (docs/deferred.md's
-    /// number field entry); nothing calls it before the backend's arm does.
-    pub(super) fn parse_number(_: &str) -> Option<f64> {
-        panic!("kaya: the number field's parse has no arm on this platform yet (docs/number-field-plan.md §3 rule 5)")
+    pub(super) fn number(value: f64, o: NumberOptions) -> String {
+        write_number(&decimal_in(languages()), o, Some((0, 3)), 1.0, value)
+    }
+
+    /// ParseDouble reads a grouping separator whatever IsGrouped says
+    /// (`1,234.5` under en-US, measured on the lane's VM 2026-09-28), so a
+    /// text may hold digits and only the characters this formatter writes
+    /// in an ungrouped negative decimal.
+    fn parse_in(langs: Option<IIterable<HSTRING>>, text: &str) -> Option<f64> {
+        if text.is_empty() {
+            return None;
+        }
+        let one = NumberOptions { min_fraction_digits: Some(1), max_fraction_digits: Some(1), grouping: false };
+        let spelled = write_number(&decimal_in(langs.clone()), one, None, 1.0, -1.5);
+        if text.chars().any(|c| !c.is_numeric() && !spelled.contains(c)) {
+            return None;
+        }
+        let f = decimal_in(langs);
+        f.SetIsGrouped(false).unwrap_or_else(|e| fail("an ungrouped parser", e));
+        f.ParseDouble(&HSTRING::from(text)).and_then(|v| v.Value()).ok()
+    }
+
+    pub(super) fn parse_number(text: &str) -> Option<f64> {
+        parse_in(languages(), text)
+    }
+
+    #[cfg(test)]
+    fn langs_of(tag: &str) -> Option<IIterable<HSTRING>> {
+        Some(IIterable::<HSTRING>::from(vec![HSTRING::from(tag)]))
+    }
+
+    #[cfg(test)]
+    pub(super) fn number_for(tag: &str, value: f64, o: NumberOptions) -> String {
+        write_number(&decimal_in(langs_of(tag)), o, Some((0, 3)), 1.0, value)
+    }
+
+    #[cfg(test)]
+    pub(super) fn parse_for(tag: &str, text: &str) -> Option<f64> {
+        parse_in(langs_of(tag), text)
     }
 
     pub(super) fn percent(value: f64, o: NumberOptions) -> String {
@@ -1430,6 +1468,33 @@ mod win_tests {
         let two = NumberOptions { min_fraction_digits: Some(2), max_fraction_digits: Some(2), grouping: false };
         assert_eq!(number(3.0, two), "3.00");
     }
+
+    /// `parse_number` per language list (docs/number-field-plan.md §7), the
+    /// Apple arm's test on this arm's own formatter.
+    #[test]
+    fn the_windows_arm_reads_what_it_writes() {
+        use super::platform::{number_for, parse_for};
+        let at = |d: u8| NumberOptions { min_fraction_digits: Some(d), max_fraction_digits: Some(d), grouping: false };
+        for (tag, value, d, want) in [
+            ("en-US", 12.5, 1, "12.5"),
+            ("de-DE", 12.5, 1, "12,5"),
+            ("de-DE", 1234.25, 2, "1234,25"),
+            ("en-US", -40.0, 0, "-40"),
+            ("ar-EG", 3.5, 1, "٣٫٥"),
+        ] {
+            let written = number_for(tag, value, at(d));
+            assert_eq!(written, want, "{tag}");
+            let read = parse_for(tag, &written);
+            assert_eq!(read, Some(value), "{tag} {written:?}");
+            assert_eq!(number_for(tag, read.unwrap(), at(d)), written, "{tag}");
+        }
+        assert_eq!(parse_for("de-DE", "12.5"), None);
+        assert_eq!(parse_for("en-US", "abc"), None);
+        assert_eq!(parse_for("en-US", "12.5abc"), None);
+        assert_eq!(parse_for("en-US", ""), None);
+        assert_eq!(parse_for("en-US", "1,234.5"), None);
+        assert_eq!(parse_for("de-DE", "1.234,5"), None);
+    }
 }
 
 #[cfg(test)]
@@ -1508,6 +1573,10 @@ mod tests {
         assert_eq!(currency(1234567.89, "EUR"), "1.234.567,89 €");
         assert_eq!(locale().first_weekday, 1);
         set("ar_EG.UTF-8");
+        // glibc's ar_EG writes ASCII digits and a full stop, and the arm
+        // reads that back (docs/number-field-plan.md §4.3, measured).
+        assert_eq!(crate::number_field::text(3.5, 0.5), "3.5");
+        assert_eq!(parse_number(&number(3.5, at(1))), Some(3.5));
         assert_eq!(date(d, Length::Short), "07 سبت, 2026");
         assert_eq!(date(d, Length::Medium), "7 سبت 2026");
         assert_eq!(date(d, Length::Long), "7 سبتمبر 2026");

@@ -727,6 +727,24 @@ val slider :
   ?on_change:(float -> unit) ->
   ?on_commit:(float -> unit) -> unit -> widget
 
+(* A number field at value (docs/number-field-plan.md): one [on_commit]
+   per commit (Return, focus loss, a step), never per keystroke. *)
+val number_field :
+  ?grow:float ->
+  ?fill:bool ->
+  ?a11y_id:string ->
+  ?a11y_id_bind:string signal ->
+  ?a11y_label:string ->
+  ?a11y_label_bind:string signal ->
+  ?help:string ->
+  ?help_bind:string signal ->
+  ?min:float ->
+  ?max:float ->
+  ?value:float ->
+  ?step:float ->
+  ?bind:float signal ->
+  ?on_commit:(float -> unit) -> unit -> widget
+
 val select :
   ?grow:float ->
   ?fill:bool ->
@@ -1626,6 +1644,30 @@ module Tpl : sig
     ?level:int ->
     ?a11y_level:int ->
     ?on_change:(key list -> float -> unit) ->
+    ?on_commit:(key list -> float -> unit) -> unit -> node
+
+  (* A number field per stamped copy, its value from any of the three
+     sources. *)
+  val number_field :
+    ?grow:float ->
+    ?fill:bool ->
+    ?a11y_id:string ->
+    ?a11y_id_bind:string signal ->
+    ?a11y_id_field:('a, string) field ->
+    ?a11y_label:string ->
+    ?a11y_label_bind:string signal ->
+    ?a11y_label_field:('b, string) field ->
+    ?help:string ->
+    ?help_bind:string signal ->
+    ?help_field:('c, string) field ->
+    ?min:float ->
+    ?max:float ->
+    ?value:float ->
+    ?step:float ->
+    ?bind:float signal ->
+    ?bind_field:('d, float) field ->
+    ?level:int ->
+    ?a11y_level:int ->
     ?on_commit:(key list -> float -> unit) -> unit -> node
 
   (* A dropdown select per stamped copy, over fixed options — each

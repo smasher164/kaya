@@ -39,7 +39,8 @@ use bindings::Microsoft::UI::Xaml::Controls::{
     HyperlinkButton, ICommandBarElement, IconElement, Image, InfoBadge, MenuBar,
     MenuBarItem, MenuFlyout,
     MenuFlyoutItem, MenuFlyoutItemBase, MenuFlyoutSeparator, MenuFlyoutSubItem, NavigationView,
-    NavigationViewItem, NavigationViewPaneDisplayMode, ProgressBar, RadioMenuFlyoutItem,
+    NavigationViewItem, NavigationViewPaneDisplayMode, NumberBox, NumberBoxSpinButtonPlacementMode,
+    NumberBoxValidationMode, NumberBoxValueChangedEventArgs, ProgressBar, RadioMenuFlyoutItem,
     RichEditBox, RichEditClipboardFormat, RowDefinition,
     RadioButtons, ScrollBarVisibility, ScrollMode, ScrollViewer, SelectionChangedEventHandler,
     SymbolIcon,
@@ -172,6 +173,9 @@ enum NativeWidget {
     /// needs `field`, and it swallows Escape from the only handler a WinRT
     /// delegate can register.
     Search { host: Grid, field: TextBox },
+    /// The number field (docs/number-field-plan.md §6): a NumberBox whose
+    /// NumberFormatter is kaya's own, so its text is the door's both ways.
+    NumberField(NumberBox),
 }
 
 impl NativeWidget {
@@ -215,6 +219,7 @@ impl NativeWidget {
             // THE HOST, because this is what a parent lays out. The FIELD is
             // what carries the identity — see `identity_element`.
             NativeWidget::Search { host, .. } => host.cast(),
+            NativeWidget::NumberField(field) => field.cast(),
         }
     }
 
@@ -520,6 +525,12 @@ struct CoreState {
     /// glyph sits over, so every entry-shaped read serves it unchanged.
     searches: Vec<TextBox>,
     search_ids: Vec<u64>,
+    /// The number fields, their ids, and one `NumberCell` per widget: the
+    /// declared numbers and the committed mirror its ValueChanged compares
+    /// against (docs/number-field-plan.md §6).
+    number_fields: Vec<NumberBox>,
+    number_field_ids: Vec<u64>,
+    number_cells: HashMap<u64, std::sync::Arc<NumberCell>>,
     /// Grid layout state: ordered children + column count; both the adds and
     /// the columns prop re-flow the attach positions (docs/traps.md: Sugar
     /// construction order differs per language).
@@ -3015,6 +3026,7 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
                     NativeWidget::Entry(_)
                         | NativeWidget::Textarea(_)
                         | NativeWidget::Search { .. }
+                        | NativeWidget::NumberField(_)
                 ));
         // An auto grid is width-driven, so it takes its column's width
         // (docs/layout-knobs-plan.md §3).
@@ -10964,6 +10976,58 @@ fn search_delete_button(field: &TextBox) -> windows_core::Result<Option<Button>>
     walk(&field.cast()?, 0)
 }
 
+/// A NumberBox template part by name: `InputBox` is the text box every
+/// read, write, keystroke and focus of the harness goes to, and
+/// `UpSpinButton`/`DownSpinButton` are the Inline stepper, the platform's
+/// stepping door (docs/number-field-plan.md §5).
+#[cfg(feature = "harness")]
+fn number_part<T: windows_core::Interface>(
+    field: &NumberBox,
+    part: &str,
+) -> windows_core::Result<Option<T>> {
+    use bindings::Microsoft::UI::Xaml::{DependencyObject, Media::VisualTreeHelper};
+    fn walk<T: windows_core::Interface>(
+        node: &DependencyObject,
+        part: &str,
+        depth: u32,
+    ) -> windows_core::Result<Option<T>> {
+        if depth > 12 {
+            return Ok(None);
+        }
+        for i in 0..VisualTreeHelper::GetChildrenCount(node)? {
+            let child = VisualTreeHelper::GetChild(node, i)?;
+            if let Ok(frame) = child.cast::<FrameworkElement>() {
+                if frame.Name()? == HSTRING::from(part) {
+                    if let Ok(hit) = child.cast::<T>() {
+                        return Ok(Some(hit));
+                    }
+                }
+            }
+            if let Some(hit) = walk(&child, part, depth + 1)? {
+                return Ok(Some(hit));
+            }
+        }
+        Ok(None)
+    }
+    walk(&field.cast()?, part, 0)
+}
+
+/// The number field's text box, or a sentence saying what was measured when
+/// the template has published none.
+#[cfg(feature = "harness")]
+fn number_input(field: &NumberBox) -> windows_core::Result<Result<TextBox, String>> {
+    Ok(match number_part::<TextBox>(field, "InputBox")? {
+        Some(input) => Ok(input),
+        None => Err(format!(
+            "the NumberBox template published no InputBox (loaded {}, children {})",
+            field.IsLoaded()?,
+            bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper::GetChildrenCount(
+                &field.cast::<bindings::Microsoft::UI::Xaml::DependencyObject>()?
+            )?,
+        )),
+    })
+}
+
 /// ONE CLEAR PATH for the search field (docs/search-plan.md S5): the clear
 /// button, Escape and the harness's clear_search all come here, so the app
 /// sees the same text_changed("") for each and the focus stays. Answers
@@ -14511,7 +14575,37 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // platform's own — the TextBox template's `DeleteButton` —
                 // and AutoSuggestBox is refused, both measured
                 // (docs/measurements/search-winui-2026-09-06.md).
-                WidgetKind::NumberField => crate::depth_stub("numberfield"),
+                WidgetKind::NumberField => {
+                    // The box parses and formats through kaya's own formatter
+                    // (`KayaNumberText`), clamps natively and raises ValueChanged
+                    // on its three commit doors — Enter, focus loss and a step —
+                    // and on property writes, which apply_quiet silences.
+                    let field = NumberBox::new()?;
+                    let cell = std::sync::Arc::new(NumberCell::new(
+                        tag.expect("number fields carry a tag").to_vec(),
+                    ));
+                    core.number_cells.insert(id.0, cell.clone());
+                    field.SetValidationMode(NumberBoxValidationMode::InvalidInputOverwritten)?;
+                    field.SetSpinButtonPlacementMode(NumberBoxSpinButtonPlacementMode::Inline)?;
+                    winui_number_shape(&field, &cell, &core.apply_quiet)?;
+                    let sink = core.occurrences.clone();
+                    let quiet = core.apply_quiet.clone();
+                    let handler = TypedEventHandler::<NumberBox, NumberBoxValueChangedEventArgs>::new(
+                        move |sender, args| {
+                            if quiet.load(std::sync::atomic::Ordering::Relaxed) {
+                                return Ok(());
+                            }
+                            if let (Some(sender), Some(args)) = (sender.as_ref(), args.as_ref()) {
+                                winui_number_settle(sender, &cell, &sink, args.NewValue()?)?;
+                            }
+                            Ok(())
+                        },
+                    );
+                    field.ValueChanged(&handler)?;
+                    core.number_fields.push(field.clone());
+                    core.number_field_ids.push(id.0);
+                    NativeWidget::NumberField(field)
+                }
                 WidgetKind::Search => {
                     let field = TextBox::new()?;
                     // 30 on the left because the glyph sits INSIDE the box:
@@ -15248,6 +15342,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             drop_pair(&mut core.time_picker_ids, &mut core.time_pickers, id.0);
             drop_pair(&mut core.canvas_ids, &mut core.canvases, id.0);
             drop_pair(&mut core.search_ids, &mut core.searches, id.0);
+            drop_pair(&mut core.number_field_ids, &mut core.number_fields, id.0);
+            core.number_cells.remove(&id.0);
             if let Some(tag) = core.widget_tags.get(&id.0) {
                 if let Some(i) = core.buttons.iter().position(|t| t == tag) {
                     core.buttons.remove(i);
@@ -16478,6 +16574,32 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.apply_quiet
                         .store(false, std::sync::atomic::Ordering::Relaxed);
                     write?;
+                }
+                // An app write never echoes (docs/number-field-plan.md §2):
+                // the mirror moves and the box is written quiet.
+                (NativeWidget::NumberField(field), Prop::Value, Value::F64(v)) => {
+                    if let Some(cell) = core.number_cells.get(&id.0) {
+                        SliderCell::set(&cell.committed, v);
+                        winui_number_shape(field, cell, &core.apply_quiet)?;
+                    }
+                }
+                (NativeWidget::NumberField(field), Prop::Min, Value::F64(v))
+                | (NativeWidget::NumberField(field), Prop::Max, Value::F64(v))
+                | (NativeWidget::NumberField(field), Prop::Step, Value::F64(v)) => {
+                    if let Some(cell) = core.number_cells.get(&id.0) {
+                        SliderCell::set(
+                            match prop {
+                                Prop::Min => &cell.min,
+                                Prop::Max => &cell.max,
+                                _ => &cell.step,
+                            },
+                            v,
+                        );
+                        winui_number_shape(field, cell, &core.apply_quiet)?;
+                    }
+                }
+                (NativeWidget::NumberField(field), Prop::Placeholder, Value::Str(s)) => {
+                    field.SetPlaceholderText(&HSTRING::from(&s))?;
                 }
                 (NativeWidget::Select(combo), Prop::Value, Value::F64(v)) => {
                     // A programmatic write is quiet: only the user path
@@ -19057,6 +19179,9 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             textarea_ids: Vec::new(),
             searches: Vec::new(),
             search_ids: Vec::new(),
+            number_fields: Vec::new(),
+            number_field_ids: Vec::new(),
+            number_cells: HashMap::new(),
             grid_children: HashMap::new(),
             stamps_rows: std::collections::HashSet::new(),
             fills: HashMap::new(),
@@ -19921,7 +20046,7 @@ fn registry_widget_at(core: &CoreState, kind: crate::harness::TargetKind, i: usi
         K::Grid => id_of!(core.grids, NativeWidget::Grid2D(grid), grid),
         K::Textarea => core.textarea_ids.get(i).copied(),
         K::Search => core.search_ids.get(i).copied(),
-        K::NumberField => crate::depth_stub("numberfield"),
+        K::NumberField => core.number_field_ids.get(i).copied(),
         K::Canvas => core.canvas_ids.get(i).copied(),
         K::DatePicker => core.date_picker_ids.get(i).copied(),
         K::TimePicker => core.time_picker_ids.get(i).copied(),
@@ -20214,7 +20339,7 @@ fn target_element(
         // target answers — the text, the focus, the a11y peer — is the
         // TextBox's (docs/search-plan.md S7).
         K::Search => nth!(core.searches),
-        K::NumberField => crate::depth_stub("numberfield"),
+        K::NumberField => nth!(core.number_fields),
         K::DatePicker => nth!(core.date_pickers),
         K::TimePicker => nth!(core.time_pickers),
         K::Label => match swapped_element(core, target)? {
@@ -20334,7 +20459,7 @@ fn registry_ids(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<u64> 
         K::Grid => ids!(core.grids, NativeWidget::Grid2D(grid), grid),
         K::Textarea => core.textarea_ids.clone(),
         K::Search => core.search_ids.clone(),
-        K::NumberField => crate::depth_stub("numberfield"),
+        K::NumberField => core.number_field_ids.clone(),
         K::Canvas => core.canvas_ids.clone(),
         K::DatePicker => core.date_picker_ids.clone(),
         K::TimePicker => core.time_picker_ids.clone(),
@@ -21132,7 +21257,7 @@ impl crate::harness::Stage for WinUiStage {
                 // The role the platform published is one kaya has no name for
                 // — the finding this verb exists to surface, and the next
                 // question is always WHICH one.
-                eprintln!("KAYA_AX_TRACE: unmapped UIA control type {kind:?} for {target:?}");
+                eprintln!("KAYA_AX_TRACE: unmapped UIA control type {kind:?} (class {class:?}) for {target:?}");
             }
             let name = peer.GetName()?.to_string();
             // A text field with no authored label publishes an EMPTY UIA Name;
@@ -22041,6 +22166,15 @@ impl crate::harness::Stage for WinUiStage {
                     let i = crate::harness::resolve(t.index, core.searches.len());
                     focus_told(core, "search", i, &core.searches[i])?;
                 }
+                // THE BOX'S TEXT BOX, where a user's click lands; before the
+                // template is applied, the box itself, which forwards it.
+                crate::harness::TargetKind::NumberField => {
+                    let i = crate::harness::resolve(t.index, core.number_fields.len());
+                    match number_input(&core.number_fields[i])? {
+                        Ok(input) => focus_told(core, "number_field", i, &input)?,
+                        Err(_) => focus_told(core, "number_field", i, &core.number_fields[i])?,
+                    }
+                }
                 _ => {
                     let i = crate::harness::resolve(t.index, core.buttons.len());
                     core.occurrences.send_click_tag(&core.buttons[i]);
@@ -22124,7 +22258,13 @@ impl crate::harness::Stage for WinUiStage {
 
     fn control_value(&self, t: crate::harness::Target) -> String {
         if t.kind == crate::harness::TargetKind::NumberField {
-            crate::depth_stub("numberfield")
+            return Self::on_ui_read(move |core| {
+                let Some(i) = crate::harness::try_resolve(t.index, core.number_fields.len()) else {
+                    return Ok("<no such target>".to_owned());
+                };
+                Ok(crate::harness::spelled_slider(core.number_fields[i].Value()?))
+            })
+            .unwrap_or_else(|e| format!("<unreadable: {e}>"));
         }
         Self::on_ui_read(move |core| {
             let Some(i) = crate::harness::try_resolve(t.index, core.sliders.len()) else {
@@ -22135,12 +22275,84 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
-    fn unfocus(&self, _: crate::harness::Target) {
-        crate::depth_stub("numberfield")
+    /// Tab on the system input queue, the desktop user's way off a field;
+    /// the box's LostFocus is its commit door.
+    fn unfocus(&self, t: crate::harness::Target) {
+        let focused = move || {
+            Self::on_ui_read(move |core| {
+                let i = crate::harness::resolve(t.index, core.number_fields.len());
+                Ok(match number_input(&core.number_fields[i])? {
+                    Ok(input) => Ok(input.FocusState()? != FocusState::Unfocused),
+                    Err(why) => Err(why),
+                })
+            })
+            .unwrap_or_else(|e| Err(format!("the focus read failed: {e}")))
+        };
+        match focused() {
+            Ok(true) => {}
+            Ok(false) => panic!("kaya: unfocus {t:?}: the field does not hold focus — click it first"),
+            Err(why) => panic!("kaya: unfocus {t:?}: {why}"),
+        }
+        Self::foreground_guest("unfocus");
+        const VK_TAB: u8 = 0x09;
+        const KEYEVENTF_KEYUP: u32 = 0x2;
+        unsafe {
+            keybd_event(VK_TAB, 0, 0, 0);
+            keybd_event(VK_TAB, 0, KEYEVENTF_KEYUP, 0);
+        }
+        for _ in 0..400 {
+            if focused() == Ok(false) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        eprintln!(
+            "kaya: unfocus {t:?}: the field still reads {:?} for focus 2s after Tab went \
+             on the system input queue",
+            focused()
+        );
     }
 
-    fn nudge(&self, _: crate::harness::Target, _: bool) {
-        crate::depth_stub("numberfield")
+    /// The Inline stepper's button, pressed through its own automation peer:
+    /// its Click is NumberBox's step, which commits. A button the box has
+    /// disabled at a bound is a door that does nothing, as for a user.
+    fn nudge(&self, t: crate::harness::Target, up: bool) {
+        let told = Self::on_ui(move |core| {
+            use bindings::Microsoft::UI::Xaml::Automation::{
+                Peers::FrameworkElementAutomationPeer, Provider::IInvokeProvider,
+            };
+            let i = crate::harness::resolve(t.index, core.number_fields.len());
+            let field = core.number_fields[i].clone();
+            let input = match number_input(&field)? {
+                Ok(input) => input,
+                Err(why) => return Ok(Err(why)),
+            };
+            if input.FocusState()? == FocusState::Unfocused {
+                return Ok(Err("the field does not hold focus — click it first".to_owned()));
+            }
+            let part = if up { "UpSpinButton" } else { "DownSpinButton" };
+            let Some(button) = number_part::<bindings::Microsoft::UI::Xaml::Controls::Control>(
+                &field, part,
+            )?
+            else {
+                return Ok(Err(format!(
+                    "the NumberBox template published no {part} (placement {:?})",
+                    field.SpinButtonPlacementMode()?
+                )));
+            };
+            if !button.IsEnabled()? {
+                return Ok(Ok(format!("{part} is disabled at {}", field.Value()?)));
+            }
+            FrameworkElementAutomationPeer::CreatePeerForElement(&button)?
+                .cast::<IInvokeProvider>()?
+                .Invoke()?;
+            Ok(Ok(String::new()))
+        });
+        match told {
+            Ok(note) if note.is_empty() => {}
+            Ok(note) => crate::vtrace::note("nudge", format_args!("{t:?}: {note}")),
+            Err(why) => panic!("kaya: nudge {t:?}: {why}"),
+        }
     }
 
     /// The real-keystroke typing verb (docs/undo-plan.md A8), to the contract's
@@ -22201,6 +22413,25 @@ impl crate::harness::Stage for WinUiStage {
             }
             Ok(Some((id, now)))
         });
+        // A NUMBER FIELD IS NO EDITABLE the ledger banks: its text box takes
+        // the keys, the caret goes to the end the same way, and the landing
+        // is read off the box itself below.
+        let number_before = if before.is_none() {
+            Self::on_ui(|core| {
+                for (i, field) in core.number_fields.iter().enumerate() {
+                    if let Ok(input) = number_input(field)? {
+                        if input.FocusState()? != FocusState::Unfocused {
+                            let now = input.Text()?.to_string();
+                            Editable::Entry(input).set_caret(now.encode_utf16().count() as i32)?;
+                            return Ok(Some((i, now)));
+                        }
+                    }
+                }
+                Ok(None)
+            })
+        } else {
+            None
+        };
         Self::foreground_guest("type");
         const KEYEVENTF_KEYUP: u32 = 0x2;
         for ch in text.chars() {
@@ -22246,6 +22477,35 @@ impl crate::harness::Stage for WinUiStage {
         // precedes is `menu_activate "Edit>Undo"`, whose routing asks the
         // LEDGER, so the condition is `banked_text`. Nothing focused is
         // legitimate under the contract, so a following assertion reports it.
+        if let Some((i, was)) = number_before {
+            // Return commits and rewrites the box, so only typed text is
+            // waited for; the commit is the next step's observable.
+            if text.contains('\n') {
+                return;
+            }
+            let want = format!("{was}{text}");
+            let shown = move || {
+                Self::on_ui_read(move |core| {
+                    Ok(match number_input(&core.number_fields[i])? {
+                        Ok(input) => Some(input.Text()?.to_string()),
+                        Err(_) => None,
+                    })
+                })
+                .unwrap_or(None)
+            };
+            for _ in 0..400 {
+                if shown().as_deref() == Some(want.as_str()) {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            eprintln!(
+                "kaya: type {text:?}: number_field#{i} never showed {want:?} within 2s of \
+                 injection (it shows {:?})",
+                shown()
+            );
+            return;
+        }
         let Some((id, before)) = before else { return };
         let want = format!("{before}{text}");
         for _ in 0..400 {
@@ -22280,6 +22540,21 @@ impl crate::harness::Stage for WinUiStage {
         // (the harness's \r escape stands in for a paste) must reach
         // guests as LF like every other path.
         let text = lf(text.to_owned());
+        // A number field's text is not a value until it commits
+        // (docs/number-field-plan.md §5): written into the box, nothing emitted.
+        if t.kind == crate::harness::TargetKind::NumberField {
+            let refused = Self::on_ui(move |core| {
+                let i = crate::harness::resolve(t.index, core.number_fields.len());
+                Ok(match number_input(&core.number_fields[i])? {
+                    Ok(input) => input.SetText(&HSTRING::from(&text)).map(|_| None)?,
+                    Err(why) => Some(why),
+                })
+            });
+            if let Some(why) = refused {
+                panic!("kaya: set_text {t:?}: {why}");
+            }
+            return;
+        }
         // on_ui_MUT, because this verb reaches the undo ledger: it
         // stands in for a user edit and the ledger is core state.
         Self::on_ui_mut(move |core| {
@@ -22379,6 +22654,16 @@ impl crate::harness::Stage for WinUiStage {
                 };
                 return Ok(lf(core.searches[i].Text()?.to_string()));
             }
+            if t.kind == crate::harness::TargetKind::NumberField {
+                let Some(i) = crate::harness::try_resolve(t.index, core.number_fields.len())
+                else {
+                    return Ok("<no such target>".to_string());
+                };
+                return Ok(match number_input(&core.number_fields[i])? {
+                    Ok(input) => input.Text()?.to_string(),
+                    Err(why) => format!("<{why}>"),
+                });
+            }
             let Some(i) = crate::harness::try_resolve(t.index, core.entries.len()) else {
                 return Ok("<no such target>".to_string());
             };
@@ -22449,6 +22734,16 @@ impl crate::harness::Stage for WinUiStage {
                         return Ok(false);
                     };
                     Ok(core.searches[i].FocusState()? != FocusState::Unfocused)
+                }
+                crate::harness::TargetKind::NumberField => {
+                    let Some(i) = crate::harness::try_resolve(t.index, core.number_fields.len())
+                    else {
+                        return Ok(false);
+                    };
+                    Ok(match number_input(&core.number_fields[i])? {
+                        Ok(input) => input.FocusState()? != FocusState::Unfocused,
+                        Err(_) => false,
+                    })
                 }
                 other => panic!("kaya: is_focused not wired for {other:?} on winui"),
             }
@@ -23024,7 +23319,7 @@ impl crate::harness::Stage for WinUiStage {
                 K::Grid => find(core, K::Grid, &core.grids, &id),
                 K::Textarea => find(core, K::Textarea, &core.textareas, &id),
                 K::Search => find(core, K::Search, &core.searches, &id),
-                K::NumberField => crate::depth_stub("numberfield"),
+                K::NumberField => find(core, K::NumberField, &core.number_fields, &id),
                 K::Canvas => find(core, K::Canvas, &core.canvases, &id),
                 K::DatePicker => find(core, K::DatePicker, &core.date_pickers, &id),
                 K::TimePicker => find(core, K::TimePicker, &core.time_pickers, &id),
@@ -25546,6 +25841,12 @@ fn ax_role(
         // with the display language. iOS classifies its compact UIDatePicker
         // the same way, for the same reason.
         "datetime"
+    } else if class == "Microsoft.UI.Xaml.Controls.NumberBox" {
+        // THE NUMBER FIELD, by class for the pickers' reason: NumberBox's
+        // peer publishes `Spinner` under its full class name (measured on the
+        // guest 2026-09-28) while the shared verdict is `field`, the search
+        // field's precedent (docs/number-field-plan.md §6).
+        "field"
     } else if kind == AutomationControlType::Button && toggles {
         // THE SWITCH (docs/tasks-s2-plan.md T1), and its evidence is UIA's
         // own: a ToggleSwitch publishes `Button` with the TOGGLE PATTERN,
@@ -25876,6 +26177,160 @@ fn winui_slider_committed(
         sink.send_value_tag(&cell.tag, v);
     }
     if settled {
+        sink.send_value_committed_tag(&cell.tag, v);
+    }
+    Ok(())
+}
+
+/// One number field's declared numbers and its committed mirror, the
+/// slider cell's shape and reason: the box's handler and its formatter run
+/// on the UI thread inside the apply borrow. Every number is an `f64` in its
+/// bits (docs/number-field-plan.md §2).
+struct NumberCell {
+    tag: Vec<u8>,
+    min: std::sync::atomic::AtomicU64,
+    max: std::sync::atomic::AtomicU64,
+    step: std::sync::atomic::AtomicU64,
+    committed: std::sync::atomic::AtomicU64,
+}
+
+impl NumberCell {
+    fn new(tag: Vec<u8>) -> Self {
+        let bits = |v: f64| std::sync::atomic::AtomicU64::new(v.to_bits());
+        Self {
+            tag,
+            min: bits(-crate::number_field::UNBOUNDED),
+            max: bits(crate::number_field::UNBOUNDED),
+            step: bits(1.0),
+            committed: bits(0.0),
+        }
+    }
+
+    fn numbers(&self) -> (f64, f64, f64) {
+        (SliderCell::get(&self.min), SliderCell::get(&self.max), SliderCell::get(&self.step))
+    }
+}
+
+/// THE BOX'S TEXT IS KAYA'S (docs/number-field-plan.md §3 rule 5): NumberBox
+/// formats through its NumberFormatter and parses through the same object
+/// cast to INumberParser, so this is the only reader and writer of the text
+/// it shows — `number_field::text` out, `fmt::parse_number` in.
+#[windows_core::implement(
+    bindings::Windows::Globalization::NumberFormatting::INumberFormatter2,
+    bindings::Windows::Globalization::NumberFormatting::INumberParser
+)]
+struct KayaNumberText {
+    cell: std::sync::Arc<NumberCell>,
+}
+
+impl KayaNumberText_Impl {
+    fn write(&self, value: f64) -> HSTRING {
+        if value.is_nan() {
+            return HSTRING::new();
+        }
+        HSTRING::from(crate::number_field::text(value, SliderCell::get(&self.cell.step)))
+    }
+
+    fn read(text: &HSTRING) -> Option<f64> {
+        crate::fmt::parse_number(text.to_string().trim())
+    }
+}
+
+impl bindings::Windows::Globalization::NumberFormatting::INumberFormatter2_Impl for KayaNumberText_Impl {
+    fn FormatInt(&self, value: i64) -> windows_core::Result<HSTRING> {
+        Ok(self.write(value as f64))
+    }
+    fn FormatUInt(&self, value: u64) -> windows_core::Result<HSTRING> {
+        Ok(self.write(value as f64))
+    }
+    fn FormatDouble(&self, value: f64) -> windows_core::Result<HSTRING> {
+        Ok(self.write(value))
+    }
+}
+
+/// An unreadable text answers null, which windows-core spells as an empty
+/// error (S_OK with no object); NumberBox asks ParseDouble alone.
+impl bindings::Windows::Globalization::NumberFormatting::INumberParser_Impl for KayaNumberText_Impl {
+    fn ParseInt(&self, text: &HSTRING) -> windows_core::Result<IReference<i64>> {
+        match Self::read(text).filter(|v| v.fract() == 0.0) {
+            Some(v) => PropertyValue::CreateInt64(v as i64)?.cast(),
+            None => Err(windows_core::Error::empty()),
+        }
+    }
+    fn ParseUInt(&self, text: &HSTRING) -> windows_core::Result<IReference<u64>> {
+        match Self::read(text).filter(|v| v.fract() == 0.0 && *v >= 0.0) {
+            Some(v) => PropertyValue::CreateUInt64(v as u64)?.cast(),
+            None => Err(windows_core::Error::empty()),
+        }
+    }
+    fn ParseDouble(&self, text: &HSTRING) -> windows_core::Result<IReference<f64>> {
+        match Self::read(text) {
+            Some(v) => PropertyValue::CreateDouble(v)?.cast(),
+            None => Err(windows_core::Error::empty()),
+        }
+    }
+}
+
+/// The box's declared shape, re-applied whole whenever a number arrives, the
+/// slider's reason: the props land one write at a time and NumberBox coerces
+/// its value against the range it holds at the time. A fresh formatter last,
+/// since the digits come from the step and NumberBox re-renders its text only
+/// when its value or its formatter moves. Quiet throughout.
+fn winui_number_shape(
+    field: &NumberBox,
+    cell: &std::sync::Arc<NumberCell>,
+    quiet: &std::sync::atomic::AtomicBool,
+) -> windows_core::Result<()> {
+    let (min, max, step) = cell.numbers();
+    quiet.store(true, std::sync::atomic::Ordering::Relaxed);
+    let write = (|| {
+        field.SetMinimum(min)?;
+        field.SetMaximum(max)?;
+        field.SetSmallChange(step)?;
+        field.SetLargeChange(step * 10.0)?;
+        field.SetValue(SliderCell::get(&cell.committed).clamp(min, max))?;
+        let text: bindings::Windows::Globalization::NumberFormatting::INumberFormatter2 =
+            KayaNumberText { cell: cell.clone() }.into();
+        field.SetNumberFormatter(&text)
+    })();
+    quiet.store(false, std::sync::atomic::Ordering::Relaxed);
+    write
+}
+
+/// THE ONE COMMIT PATH (docs/number-field-plan.md §3), reached only from the
+/// box's ValueChanged: Enter and focus loss (the box read the text through
+/// `KayaNumberText`), and a step. The core settles the value — clamped,
+/// rounded to the step's digits, compared with the committed one — and a
+/// cleared box (NaN) reverts. NumberBox ignores a write made inside its own
+/// ValueChanged and renders the text from the value this leaves, so the box
+/// shows what the core settled on.
+fn winui_number_settle(
+    field: &NumberBox,
+    cell: &NumberCell,
+    sink: &OccSink,
+    read: f64,
+) -> windows_core::Result<()> {
+    use crate::number_field::Commit;
+    let (min, max, step) = cell.numbers();
+    let committed = SliderCell::get(&cell.committed);
+    let answer = if read.is_nan() {
+        Commit::Revert
+    } else {
+        crate::number_field::settle(read, committed, min, max, step)
+    };
+    let shown = match answer {
+        Commit::Moved(v) => v,
+        Commit::Revert | Commit::Unchanged => committed,
+    };
+    #[cfg(feature = "harness")]
+    crate::vtrace::note("number.settle", format_args!(
+        "read={read} committed={committed} answer={answer:?}"
+    ));
+    if shown.to_bits() != read.to_bits() {
+        field.SetValue(shown)?;
+    }
+    if let Commit::Moved(v) = answer {
+        SliderCell::set(&cell.committed, v);
         sink.send_value_committed_tag(&cell.tag, v);
     }
     Ok(())
@@ -28657,6 +29112,7 @@ mod tests {
             "datetime"
         );
         assert_eq!(ax_role(false, false, "Button", AutomationControlType::Button), "button");
+        assert_eq!(ax_role(false, false, "Microsoft.UI.Xaml.Controls.NumberBox", AutomationControlType::Spinner), "field");
         assert_eq!(
             ax_role(false, false, "TimePicker", AutomationControlType::Group),
             "datetime"

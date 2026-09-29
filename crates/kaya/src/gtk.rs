@@ -2755,6 +2755,71 @@ struct GtkSlider {
     state: Rc<std::cell::Cell<SliderState>>,
 }
 
+/// A number field's step, the value the app last wrote and the value the
+/// last commit settled on (docs/number-field-plan.md §3): `value-changed`
+/// fires after the adjustment has moved, so the old value lives here.
+#[derive(Clone, Copy)]
+struct NumberState {
+    step: f64,
+    declared: f64,
+    committed: f64,
+}
+
+#[derive(Clone)]
+struct GtkNumberField {
+    spin: gtk4::SpinButton,
+    state: Rc<std::cell::Cell<NumberState>>,
+}
+
+/// THE ONE COMMIT PATH for a number field (docs/number-field-plan.md §3):
+/// Return, focus loss and a step all reach it through the spin button's
+/// `value-changed`, and the core's rule settles what the control now holds.
+fn number_committed(
+    field: &GtkNumberField,
+    quiet: &Rc<std::cell::Cell<bool>>,
+    sink: &OccSink,
+    tag: &[u8],
+    raw: f64,
+) {
+    use crate::number_field::Commit;
+    let mut state = field.state.get();
+    let adjustment = field.spin.adjustment();
+    let settled = crate::number_field::settle(
+        raw,
+        state.committed,
+        adjustment.lower(),
+        adjustment.upper(),
+        state.step,
+    );
+    let shown = match settled {
+        Commit::Moved(value) => value,
+        Commit::Unchanged | Commit::Revert => state.committed,
+    };
+    if shown != raw {
+        let was = quiet.replace(true);
+        field.spin.set_value(shown);
+        quiet.set(was);
+    }
+    if let Commit::Moved(moved) = settled {
+        state.committed = moved;
+        state.declared = moved;
+        field.state.set(state);
+        sink.send_value_committed_tag(tag, moved);
+    }
+}
+
+/// The step's increments and digits, then the declared value again, since
+/// a bound or a step can clamp it (the props arrive in no guaranteed order).
+/// Under the caller's quiet guard: this is the app's write.
+fn number_reconfigure(field: &GtkNumberField) {
+    let mut state = field.state.get();
+    field.spin.set_increments(state.step, state.step * 10.0);
+    field.spin.set_digits(crate::number_field::digits(state.step) as u32);
+    field.spin.set_value(state.declared);
+    state.committed = field.spin.value();
+    field.state.set(state);
+}
+
 /// The date the CALENDAR is showing, packed — never a model copy.
 fn calendar_packed(calendar: &gtk4::Calendar) -> i64 {
     // `year`/`month`/`day` are 4.14 getters and this build pins v4_12;
@@ -3058,6 +3123,9 @@ enum NativeWidget {
     /// the role swaps the control (`swap_control`).
     Switch(gtk4::Switch),
     Slider(GtkSlider),
+    /// docs/number-field-plan.md §6: a `GtkSpinButton` whose text kaya
+    /// writes and reads through the formatter door.
+    NumberField(GtkNumberField),
     Image(gtk4::Picture),
     Scroll(gtk4::ScrolledWindow),
     Progress(gtk4::ProgressBar),
@@ -3097,6 +3165,7 @@ impl NativeWidget {
             NativeWidget::Checkbox(w) => w.clone().upcast(),
             NativeWidget::Switch(w) => w.clone().upcast(),
             NativeWidget::Slider(w) => w.scale.clone().upcast(),
+            NativeWidget::NumberField(f) => f.spin.clone().upcast(),
             NativeWidget::Image(w) => w.clone().upcast(),
             NativeWidget::Scroll(w) => w.clone().upcast(),
             NativeWidget::Progress(w) => w.clone().upcast(),
@@ -3785,7 +3854,7 @@ fn kind_registry(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<gtk4
         K::Slider => core.sliders.iter().map(|w| w.scale.clone().upcast()).collect(),
         K::Entry => core.entries.iter().map(|w| w.clone().upcast()).collect(),
         K::Search => core.searches.iter().map(|w| w.clone().upcast()).collect(),
-        K::NumberField => crate::depth_stub("numberfield"),
+        K::NumberField => core.number_fields.iter().map(|f| f.spin.clone().upcast()).collect(),
         K::Label => core.labels.clone(),
         K::Column => core.columns.iter().map(|w| w.clone().upcast()).collect(),
         K::Row => core.rows.iter().map(|w| w.clone().upcast()).collect(),
@@ -4739,6 +4808,7 @@ struct CoreState {
     entries: Vec<gtk4::Entry>,
     searches: Vec<gtk4::SearchEntry>,
     sliders: Vec<GtkSlider>,
+    number_fields: Vec<GtkNumberField>,
     /// The composed pickers, in creation order like every other registry;
     /// each entry carries the parts `set_date`/`set_time` drive and
     /// `expect_picker` reads (docs/datetime-plan.md D8).
@@ -9161,7 +9231,7 @@ impl CoreState {
     fn native_undo_filled(&self, id: WidgetId) -> bool {
         match self.widgets.get(&id) {
             Some(NativeWidget::Textarea(_, view)) => view.buffer().can_undo(),
-            Some(NativeWidget::Entry(_) | NativeWidget::Search(_)) => {
+            Some(NativeWidget::Entry(_) | NativeWidget::Search(_) | NativeWidget::NumberField(_)) => {
                 self.native_dirty.borrow().contains(&id.0)
             }
             _ => false,
@@ -9252,6 +9322,11 @@ impl CoreState {
                 search.set_enable_undo(false);
                 search.set_enable_undo(true);
             }
+            Some(NativeWidget::NumberField(field)) => {
+                use gtk4::prelude::EditableExt;
+                field.spin.set_enable_undo(false);
+                field.spin.set_enable_undo(true);
+            }
             Some(NativeWidget::Textarea(_, view)) => {
                 let buffer = view.buffer();
                 buffer.begin_irreversible_action();
@@ -9271,6 +9346,9 @@ impl CoreState {
             Some(NativeWidget::Entry(entry)) => Some(lf(entry.text().to_string())),
             Some(NativeWidget::Search(search)) => {
                 Some(lf(gtk4::prelude::EditableExt::text(search).to_string()))
+            }
+            Some(NativeWidget::NumberField(field)) => {
+                Some(gtk4::prelude::EditableExt::text(&field.spin).to_string())
             }
             Some(NativeWidget::Textarea(_, view)) => {
                 let b = view.buffer();
@@ -11432,7 +11510,114 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.grids.push(grid.clone());
                     NativeWidget::Grid(grid)
                 }
-                WidgetKind::NumberField => crate::depth_stub("numberfield"),
+                WidgetKind::NumberField => {
+                    // docs/number-field-plan.md §6. ALWAYS, and the input
+                    // handler answers the committed value for text the door
+                    // refuses rather than GTK_INPUT_ERROR, which under ALWAYS
+                    // leaves gtk_spin_button_update's value uninitialized
+                    // (§4.3, AMENDED 2026-09-28).
+                    let unbounded = crate::number_field::UNBOUNDED;
+                    let adjustment =
+                        gtk4::Adjustment::new(0.0, -unbounded, unbounded, 1.0, 10.0, 0.0);
+                    let spin = gtk4::SpinButton::new(Some(&adjustment), 0.0, 0);
+                    spin.set_update_policy(gtk4::SpinButtonUpdatePolicy::Always);
+                    spin.set_numeric(false);
+                    // FOCUS LOSS IS A FOCUS MOVE INSIDE THE WINDOW (§4.5,
+                    // AMENDED 2026-09-29). GTK's own focus-out door also fires
+                    // when the window loses the keyboard (GTK_CROSSING_ACTIVE),
+                    // which a wayland virtual keyboard's arrival and exit
+                    // cause, so it is replaced by one that commits only once
+                    // the window's focus sits elsewhere — read on the next
+                    // turn, since GTK emits `leave` before it moves the focus.
+                    let theirs: Vec<gtk4::EventControllerFocus> = {
+                        use gtk4::gio::prelude::ListModelExt;
+                        let list = spin.observe_controllers();
+                        (0..list.n_items())
+                            .filter_map(|i| list.item(i).and_then(|o| o.downcast().ok()))
+                            .collect()
+                    };
+                    for controller in &theirs {
+                        spin.remove_controller(controller);
+                    }
+                    let focus_door = gtk4::EventControllerFocus::new();
+                    {
+                        let weak = spin.downgrade();
+                        focus_door.connect_leave(move |_| {
+                            let weak = weak.clone();
+                            glib::idle_add_local_once(move || {
+                                let Some(spin) = weak.upgrade() else { return };
+                                let inside = spin
+                                    .root()
+                                    .and_then(|root| gtk4::prelude::RootExt::focus(&root))
+                                    .is_some_and(|f| f == *spin.upcast_ref::<gtk4::Widget>() || f.is_ancestor(&spin));
+                                if !inside {
+                                    spin.update();
+                                }
+                            });
+                        });
+                    }
+                    spin.add_controller(focus_door);
+                    let field = GtkNumberField {
+                        spin: spin.clone(),
+                        state: Rc::new(std::cell::Cell::new(NumberState {
+                            step: 1.0,
+                            declared: 0.0,
+                            committed: 0.0,
+                        })),
+                    };
+                    {
+                        let state = field.state.clone();
+                        spin.connect_output(move |sb| {
+                            let text = crate::number_field::text(sb.value(), state.get().step);
+                            gtk4::prelude::EditableExt::set_text(sb, &text);
+                            glib::Propagation::Stop
+                        });
+                    }
+                    {
+                        let state = field.state.clone();
+                        spin.connect_input(move |sb| {
+                            use crate::number_field::Commit;
+                            let state = state.get();
+                            let adjustment = sb.adjustment();
+                            let text = gtk4::prelude::EditableExt::text(sb);
+                            Some(Ok(match crate::number_field::commit(
+                                &text,
+                                state.committed,
+                                adjustment.lower(),
+                                adjustment.upper(),
+                                state.step,
+                            ) {
+                                Commit::Moved(value) => value,
+                                Commit::Unchanged | Commit::Revert => state.committed,
+                            }))
+                        });
+                    }
+                    number_reconfigure(&field);
+                    let sink = core.occurrences.clone();
+                    let tag = tag.expect("number fields carry a tag");
+                    let quiet = core.apply_quiet.clone();
+                    {
+                        let committed = field.clone();
+                        let quiet = quiet.clone();
+                        spin.connect_value_changed(move |sb| {
+                            if quiet.get() {
+                                return;
+                            }
+                            number_committed(&committed, &quiet, &sink, &tag, sb.value());
+                        });
+                    }
+                    // The typing verb's proof that the keys travelled the
+                    // input path (native_undo_filled), the entry's marker.
+                    let dirty = core.native_dirty.clone();
+                    let wid = id.0;
+                    gtk4::prelude::EditableExt::connect_changed(&spin, move |_| {
+                        if !quiet.get() {
+                            dirty.borrow_mut().insert(wid);
+                        }
+                    });
+                    core.number_fields.push(field.clone());
+                    NativeWidget::NumberField(field)
+                }
                 WidgetKind::Search => {
 // The entry's contract on GTK's own search widget (docs/search-plan.md
 // S2/S6). `changed` AND NOT `search-changed`: GtkSearchEntry's
@@ -11888,6 +12073,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 core.entries.retain(|e| !gone(e.upcast_ref()));
                 core.searches.retain(|s| !gone(s.upcast_ref()));
                 core.sliders.retain(|s| !gone(s.scale.upcast_ref()));
+                core.number_fields.retain(|f| !gone(f.spin.upcast_ref()));
                 core.date_pickers.retain(|d| !gone(d.button.upcast_ref()));
                 core.time_pickers.retain(|t| !gone(t.button.upcast_ref()));
                 core.images.retain(|p| !gone(p.upcast_ref()));
@@ -13841,6 +14027,30 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     } else {
                         armed.remove(&key);
                         bar.set_fraction(bar.fraction());
+                    }
+                }
+                // THE NUMBER FIELD'S FOUR SLOTS (docs/number-field-plan.md §2),
+                // each the app's write under the echo guard: the step, the
+                // bounds and the declared value re-derive together, since the
+                // props arrive in no guaranteed order.
+                (NativeWidget::NumberField(field), prop @ (Prop::Value | Prop::Min | Prop::Max | Prop::Step), Value::F64(v)) => {
+                    let mut state = field.state.get();
+                    match prop {
+                        Prop::Value => state.declared = v,
+                        Prop::Step => state.step = v,
+                        Prop::Min => field.spin.adjustment().set_lower(v),
+                        _ => field.spin.adjustment().set_upper(v),
+                    }
+                    field.state.set(state);
+                    let was = core.apply_quiet.replace(true);
+                    number_reconfigure(field);
+                    core.apply_quiet.set(was);
+                }
+                (NativeWidget::NumberField(field), Prop::Placeholder, Value::Str(s)) => {
+                    if let Some(text) = gtk4::prelude::EditableExt::delegate(&field.spin)
+                        .and_then(|d| d.downcast::<gtk4::Text>().ok())
+                    {
+                        text.set_placeholder_text((!s.is_empty()).then_some(s.as_str()));
                     }
                 }
                 // THE FOUR SLIDER SLOTS. The ticks and the keyboard's
@@ -16241,6 +16451,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 entries: Vec::new(),
                 searches: Vec::new(),
                 sliders: Vec::new(),
+                number_fields: Vec::new(),
                 date_pickers: Vec::new(),
                 time_pickers: Vec::new(),
                 images: Vec::new(),
@@ -16794,6 +17005,22 @@ impl GtkStage {
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
     }
+
+    /// `unfocus` and `nudge` refuse a field that does not hold focus
+    /// (docs/number-field-plan.md §5), the SwiftUI runner's sentence.
+    fn number_field_holds_focus(t: crate::harness::Target, verb: &str) {
+        let holds = Self::on_main(move |core| {
+            crate::harness::try_resolve(t.index, core.number_fields.len())
+                .map(|i| widget_focused(&core.number_fields[i].spin))
+        });
+        match holds {
+            None => panic!("kaya: {verb}: no such target {t:?}"),
+            Some(false) => {
+                panic!("kaya: {verb} {t:?}: the field does not hold focus — click it first")
+            }
+            Some(true) => {}
+        }
+    }
 }
 
 /// The For CONTAINER a window verb names: `None` for a target that
@@ -16988,7 +17215,7 @@ impl crate::harness::Stage for GtkStage {
                     // Both text controls fold to the closed set's one name
                     // (docs/search-plan.md S7): UIA and Compose have no search
                     // identity, so `search` cannot join it without lying.
-                    atspi::Role::Text | atspi::Role::Entry => "field",
+                    atspi::Role::Text | atspi::Role::Entry | atspi::Role::SpinButton => "field",
                     atspi::Role::Label => "label",
                     // The heading role, spelled the way every other backend
                     // spells it: `heading/<the label's text>`.
@@ -17282,6 +17509,16 @@ impl crate::harness::Stage for GtkStage {
                                 Some(label) => label.text().to_string(),
                             }
                         }
+                    }
+                }
+                K::NumberField => {
+                    match crate::harness::try_resolve(target.index, core.number_fields.len()) {
+                        None => "<no such target>".to_owned(),
+                        Some(i) => gtk4::prelude::EditableExt::delegate(&core.number_fields[i].spin)
+                            .and_then(|d| d.downcast::<gtk4::Text>().ok())
+                            .and_then(|text| text.placeholder_text())
+                            .map(|s| s.to_string())
+                            .unwrap_or_default(),
                     }
                 }
                 other => panic!("kaya: placeholder_text not wired for {other:?} on gtk"),
@@ -17905,6 +18142,10 @@ impl crate::harness::Stage for GtkStage {
                     let i = crate::harness::resolve(t.index, core.searches.len());
                     core.searches[i].grab_focus();
                 }
+                crate::harness::TargetKind::NumberField => {
+                    let i = crate::harness::resolve(t.index, core.number_fields.len());
+                    core.number_fields[i].spin.grab_focus();
+                }
                 _ => {
                     let i = crate::harness::resolve(t.index, core.buttons.len());
                     core.buttons[i].emit_clicked();
@@ -17987,7 +18228,12 @@ impl crate::harness::Stage for GtkStage {
     /// beside it (docs/slider-plan.md S8).
     fn control_value(&self, t: crate::harness::Target) -> String {
         if t.kind == crate::harness::TargetKind::NumberField {
-            crate::depth_stub("numberfield")
+            return Self::on_main(move |core| {
+                let Some(i) = crate::harness::try_resolve(t.index, core.number_fields.len()) else {
+                    return "<no such target>".to_owned();
+                };
+                crate::harness::spelled_slider(core.number_fields[i].spin.value())
+            });
         }
         Self::on_main(move |core| {
             let Some(i) = crate::harness::try_resolve(t.index, core.sliders.len()) else {
@@ -17997,12 +18243,77 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
-    fn unfocus(&self, _: crate::harness::Target) {
-        crate::depth_stub("numberfield")
+    /// Tab through the platform's own key path (docs/number-field-plan.md
+    /// §5); the spin button's focus-out runs the commit.
+    fn unfocus(&self, t: crate::harness::Target) {
+        Self::number_field_holds_focus(t, "unfocus");
+        send_platform_key("Tab", "unfocus", None);
     }
 
-    fn nudge(&self, _: crate::harness::Target, _: bool) {
-        crate::depth_stub("numberfield")
+    /// A real pointer click on the spin button's own stepper
+    /// (docs/number-field-plan.md §5), tools/linux/dragdrive.py's `click`:
+    /// the press runs gtk_spin_button_update and one step, and the release
+    /// comes inside the 200ms before GTK's autorepeat would step again.
+    fn nudge(&self, t: crate::harness::Target, up: bool) {
+        Self::number_field_holds_focus(t, "nudge");
+        let driver = std::env::var(DRAG_DRIVER_VAR).unwrap_or_else(|_| {
+            panic!(
+                "kaya: nudge: {DRAG_DRIVER_VAR} is unset, so this lane has no pointer: export \
+                 it naming tools/linux/dragdrive.py (tools/linux/run-suites.sh does)"
+            )
+        });
+        Self::await_frames(2);
+        let point = Self::on_main(move |core| {
+            use gtk4::prelude::WidgetExt;
+            let i = crate::harness::resolve(t.index, core.number_fields.len());
+            let class = if up { "up" } else { "down" };
+            let mut child = core.number_fields[i].spin.first_child();
+            while let Some(w) = child {
+                if w.has_css_class(class) && w.is::<gtk4::Button>() {
+                    let b = w.compute_bounds(&core.window)?;
+                    return Some((
+                        f64::from(b.x()) + f64::from(b.width()) / 2.0,
+                        f64::from(b.y()) + f64::from(b.height()) / 2.0,
+                        w.is_sensitive(),
+                    ));
+                }
+                child = w.next_sibling();
+            }
+            None
+        });
+        let Some((x, y, sensitive)) = point else {
+            panic!("kaya: nudge {t:?}: the spin button has no laid-out {} stepper", if up { "up" } else { "down" })
+        };
+        let proto = if linux_wayland_session() { "wayland" } else { "x11" };
+        let transform =
+            Self::on_main(|core| gtk4::prelude::NativeExt::surface_transform(&core.window));
+        let out = std::process::Command::new("python3")
+            .arg(&driver)
+            .args(["click", proto])
+            .arg(std::process::id().to_string())
+            .args(
+                [transform.0, transform.1, x, y]
+                    .iter()
+                    .map(|v| (v.round() as i64).to_string()),
+            )
+            .output()
+            .unwrap_or_else(|e| panic!("kaya: nudge: {driver} could not be run: {e}"));
+        crate::vtrace::note(
+            "nudge",
+            format_args!(
+                "{} stepper at ({x}, {y}) sensitive={sensitive} -> exit {:?} {}{}",
+                if up { "up" } else { "down" },
+                out.status.code(),
+                String::from_utf8_lossy(&out.stdout).trim(),
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+        );
+        assert!(
+            out.status.success(),
+            "kaya: nudge: the pointer click failed ({}): {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
     }
 
     /// The real-keystroke typing verb (docs/undo-plan.md A8), to harness.rs's
@@ -18078,6 +18389,10 @@ impl crate::harness::Stage for GtkStage {
                 }
                 Some(NativeWidget::Search(search)) => {
                     gtk4::prelude::EditableExt::set_position(search, -1);
+                    true
+                }
+                Some(NativeWidget::NumberField(field)) => {
+                    gtk4::prelude::EditableExt::set_position(&field.spin, -1);
                     true
                 }
                 Some(NativeWidget::Textarea(_, view)) => {
@@ -18311,6 +18626,12 @@ impl crate::harness::Stage for GtkStage {
                 let i = crate::harness::resolve(t.index, core.searches.len());
                 gtk4::prelude::EditableExt::set_text(&core.searches[i], &text);
                 core.searches[i].clone().upcast::<gtk4::Widget>()
+            } else if t.kind == crate::harness::TargetKind::NumberField {
+                // The text only: nothing reads it until a commit door does
+                // (docs/number-field-plan.md §5).
+                let i = crate::harness::resolve(t.index, core.number_fields.len());
+                gtk4::prelude::EditableExt::set_text(&core.number_fields[i].spin, &text);
+                core.number_fields[i].spin.clone().upcast::<gtk4::Widget>()
             } else {
                 let i = crate::harness::resolve(t.index, core.entries.len());
                 core.entries[i].set_text(&text);
@@ -18351,6 +18672,12 @@ impl crate::harness::Stage for GtkStage {
                     return "<no such target>".to_string();
                 };
                 return lf(gtk4::prelude::EditableExt::text(&core.searches[i]).to_string());
+            }
+            if t.kind == crate::harness::TargetKind::NumberField {
+                let Some(i) = crate::harness::try_resolve(t.index, core.number_fields.len()) else {
+                    return "<no such target>".to_string();
+                };
+                return gtk4::prelude::EditableExt::text(&core.number_fields[i].spin).to_string();
             }
             let Some(i) = crate::harness::try_resolve(t.index, core.entries.len()) else {
                 return "<no such target>".to_string();
@@ -18410,6 +18737,13 @@ impl crate::harness::Stage for GtkStage {
                         return false;
                     };
                     widget_focused(&core.searches[i])
+                }
+                crate::harness::TargetKind::NumberField => {
+                    let Some(i) = crate::harness::try_resolve(t.index, core.number_fields.len())
+                    else {
+                        return false;
+                    };
+                    widget_focused(&core.number_fields[i].spin)
                 }
                 other => panic!("kaya: is_focused not wired for {other:?} on gtk"),
             }
@@ -21494,7 +21828,8 @@ fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk
         K::Label => try_resolve(target.index, core.labels.len()).map(|i| core.labels[i].clone()),
         K::Entry => nth!(core.entries),
         K::Search => nth!(core.searches),
-        K::NumberField => crate::depth_stub("numberfield"),
+        K::NumberField => try_resolve(target.index, core.number_fields.len())
+            .map(|i| core.number_fields[i].spin.clone().upcast()),
         K::Textarea => nth!(core.textareas),
         K::DatePicker => try_resolve(target.index, core.date_pickers.len())
             .map(|i| core.date_pickers[i].button.clone().upcast()),
@@ -21604,6 +21939,11 @@ fn atspi_role_of(w: &gtk4::Widget) -> Option<atspi::Role> {
     }
     if w.is::<gtk4::Scale>() {
         return Some(atspi::Role::Slider);
+    }
+    // GTK_ACCESSIBLE_ROLE_SPIN_BUTTON, kept; the shared verdict is `field`
+    // (docs/number-field-plan.md §6).
+    if w.is::<gtk4::SpinButton>() {
+        return Some(atspi::Role::SpinButton);
     }
     if w.is::<gtk4::Picture>() {
         return Some(atspi::Role::Image);

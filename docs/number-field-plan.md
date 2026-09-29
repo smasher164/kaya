@@ -1,12 +1,12 @@
 # The number field: the design pass
 
-Status: DESIGNED 2026-09-28; the DEPTH SLICE is built on the mac (§9), the
-breadth slice is held open by docs/deferred.md's number field entry. The roadmap's third piece for the
+Status: DESIGNED 2026-09-28; BUILT on all five platforms and in all nine
+bindings the same day (§9: the depth slice on the mac, then the breadth). The roadmap's third piece for the
 video editor (its inspector: a clip's speed, volume in dB, a crop inset, a
 frame count) and a table stake the needs survey ranks with the stepper
 (docs/probes/roadmap-app-needs-2026-09-05.md, "number/formatted field" and
 "stepper": quantity and timecode entry). Every choice in §1 to §7 is
-RECOMMENDED and needs no ruling; §8 asks two.
+RECOMMENDED and needs no ruling; §8's two are RULED (2026-09-28).
 
 The roadmap names Apple's "digit entry view"; that is a tvOS-only PIN pad
 (`TVDigitEntryViewController`, "Not supported in iOS, iPadOS, macOS"), so the
@@ -47,10 +47,10 @@ reuses the slider's props, with one semantics each:
   when never set; 0 or a negative step is refused at the root, since a field
   has no continuous mode.
 - The root refuses `value` outside `min..max` (and `min` above `max`),
-  read on the complete declaration at the end of the transaction. AMENDED
-  2026-09-28: the slider does NOT do this today, whatever
-  docs/slider-plan.md says; the number field's check is the shape a
-  slider's would take (docs/deferred.md's number field entry).
+  read on the complete declaration at the end of the transaction. The
+  slider did not do this until the breadth slice, whatever
+  docs/slider-plan.md said; it does now, the same shape (scene.rs's
+  `SliderRange::check`, `a_sliders_value_outside_its_range_is_refused`).
 - `placeholder` (30) is legal, as on the three text kinds.
 
 **One occurrence, `value_committed` (26), spelled `on_commit` as on the
@@ -122,15 +122,86 @@ unit beside the field), and an empty state (§8, ruling 2).
    `.decimalPad` for fractional ones, and `.numbersAndPunctuation` when
    `min < 0`, and puts a Done button on the keyboard's toolbar as the commit
    (dress). Measure the Done route and the harness driver reaching it.
+   MEASURED 2026-09-28 on the iOS lane's simulators (the kaya-sim pool,
+   the XCUITest driver): the toolbar's Done is a real `UIToolbar` button
+   (`app.toolbars.buttons["Done"]`), and its tap drops the FocusState,
+   whose focus-loss commit reverts `12.5abc` to `12.5` (with the tap
+   withheld the field keeps `12.5abc`, watched red). The harness's
+   `press return` is the driver's Return (XCUITest `typeText("\n")`, a
+   hardware keyboard's key, real on an iPad's): on a `.decimalPad` or
+   `.numberPad` field it commits ONCE and ENDS EDITING, the submit
+   scene's finding (docs/submit-plan.md S3): `onSubmit` and the resign's
+   focus-loss commit both reach the commit path, and whichever runs second
+   finds the value unmoved and fires nothing (which one ran first was not
+   told apart). So the scene
+   clicks the field again before typing into it. The driver types letters
+   into a `.decimalPad` field, since XCTest synthesizes the events rather
+   than tapping the keys drawn.
    Android: whether `KeyboardType.Decimal` shows a minus on the lane's IME.
+   MEASURED 2026-09-28 on the android lane's emulator (API 35, Gboard,
+   `show_ime_with_hard_keyboard` 1): `KeyboardType.Number` (inputType 0x2)
+   and `KeyboardType.Decimal` (0x2002) draw the SAME pad, digits with a
+   minus, a space, a comma, a point and Done, so either carries a minus
+   here. The Compose arm keeps the iOS rule's shape (Number for an
+   integral step with `min >= 0`, Decimal otherwise, since Decimal is the
+   type that promises a separator and carries the minus on this IME), and
+   `ImeAction.Done` shows the check key, whose tap commits and keeps the
+   focus (the keyboard hides).
 3. **GTK's display.** That the `output` and `input` handlers through the
    door hold under ar-EG's Arabic-Indic digits, which glibc's printf, the
    spin button's own output, would not write.
+   MEASURED 2026-09-29 in the lane's image (Debian trixie glibc): ar_EG's
+   LC_NUMERIC is a full stop and a comma, so the glibc arm writes `3.5`,
+   ASCII, and reads it back (fmt's glibc test holds both); no backend on
+   this lane writes Arabic-Indic digits, and text typed in them is refused
+   and reverts. AMENDED 2026-09-29 (§6): the `input` handler does NOT
+   answer `GTK_INPUT_ERROR`. Under `ALWAYS`, `gtk_spin_button_update`
+   leaves its value uninitialized on that answer and then sets it (GTK
+   4.20's gtkspinbutton.c), so the handler answers the committed value for
+   text the door refuses, which GTK turns into a redisplay and no
+   `value-changed`. `IF_VALID` would revert out-of-range text instead of
+   clamping it (rule 3). The stepper buttons and the arrow keys run
+   `gtk_spin_button_update` before they step, so typed text commits first.
 4. **WinUI's formatter.** That a `DecimalFormatter` built with the door's
    own language list parses the user's separator, and whether a NumberBox
    left `Value` NaN by a clear can be put back before `ValueChanged` fires.
+   MEASURED 2026-09-28 on the windows lane's VM: the door's language list
+   parses the user's separator (de-DE `12,5`, en-US `12.5`, ar-EG `٣٫٥`,
+   each refusing the other's), BUT `ParseDouble` reads a grouping separator
+   whatever `IsGrouped` says (`1,234.5` under en-US), so the arm admits only
+   digits and the characters the same formatter writes for an ungrouped
+   `-1.5`. A cleared box raises `ValueChanged(old, NaN)` and cannot be put
+   back before it; a value written INSIDE the handler is taken (NumberBox
+   ignores the nested change and renders its text from that value), so the
+   revert happens there and nothing fires. The NumberBox's `NumberFormatter`
+   is kaya's own object over `number_field::text` and `fmt::parse_number`,
+   so the box's parse IS the door; its Inline up button is disabled at the
+   maximum, and its peer publishes `Spinner` (class
+   `Microsoft.UI.Xaml.Controls.NumberBox`), which the `ax` read maps to
+   `field`.
 5. **Focus loss on each lane**: which user act moves focus off a field
    (§5's `unfocus`) and that the commit rides it on all five.
+   MEASURED 2026-09-28, Compose: Tab through the activity's own key path
+   (`dispatchKeyEvent`, a hardware keyboard's key) moves the focus to the
+   next field, the scene's entry, and the focus-loss commit rides it; the
+   check key's tap hid the keyboard and left the caret in the field, so a
+   keyboard's dismissal is not a focus loss on Android and not the door.
+   MEASURED 2026-09-28, iOS: the phone user's dismissal is the keyboard
+   toolbar's Done, and `unfocus` taps it through the lane's driver
+   (`keyboard_done`); the focus-loss commit rides it. The iOS field has no
+   stepping door, so the phones' lane tables cut the scene at `nudge`,
+   which the scene puts last for that reason.
+   MEASURED 2026-09-29, GTK: Tab (`wtype`, `xdotool`) moves the focus to
+   the entry and the commit rides it. AMENDED: focus loss means a focus
+   move INSIDE the window. GTK's own focus-out door also fires when the
+   window loses the keyboard (GTK_CROSSING_ACTIVE, gtkwindow.c), and on
+   the wayland slots every `wtype` run's virtual keyboard arriving and
+   leaving does that: the field committed `12.5` mid-type and clamped a
+   typed `250` to `100` before Return (the numberfield-rust-wayland leg,
+   red, 2026-09-29). The arm replaces GTK's controller with one that
+   commits on the next turn only if the window's focus sits elsewhere; an
+   app switch commits nothing, as on the other backends.
+   check-submit holds both halves.
 
 ## §5. How a leg sees it
 
@@ -223,10 +294,27 @@ Guards:
    the platforms disagree on, and a timecode format joins it as its own
    slice if the editor shows the entry is not enough (the entry has no
    focus-loss commit, which is the likely gap).
+   RULED 2026-09-28 (the maintainer): the `format` option, built at
+   video-editor time and not in this slice. The field gains a `format` prop
+   that names one of the FORMATTER DOOR's formatters
+   (docs/compliance-plan.md §1.4) rather than a vocabulary of its own:
+   `number` by default; `percent` and `currency` later, since the door
+   already formats them and needs only its parse half; and `timecode(rate)`
+   joining the door as a formatter of its own (the value in whole frames,
+   the step one frame, kaya formatting and parsing `HH:MM:SS:FF`), so the
+   editor's playhead label and its timecode field share one formatter.
+   Timecode is one case of a general "custom display and step" need; the
+   general version, an app-supplied format and parse callback, is out,
+   because it would put guest code on the UI thread's synchronous path,
+   which kaya's wire never does. A closed set in the door, grown one
+   formatter at a time, is the shape.
 2. **Can the field be empty?** NumberBox reports a cleared box as NaN;
    the others leave it to the app. RECOMMEND no empty state: empty text
    reverts like any unreadable text, so `value` is always a number and no
    binding needs an optional; a later `optional` prop can add one.
+   RULED 2026-09-28 as recommended: no empty state. A "may be blank" state
+   for form fields in general is on the ledger (docs/deferred.md, 'A "may
+   be blank" state for form fields').
 
 ## §9. As built, the depth slice (2026-09-28)
 
@@ -238,7 +326,9 @@ text as one number in the process locale or refuses it. It is not guest
 surface: the arms are its callers. The Apple arm is CoreFoundation's
 parse over the full range with grouping off; the glibc arm is written
 (the separator `localeconv` names, ASCII digits, an optional minus); the
-Windows and Android arms refuse by name until their backends' arms land.
+Windows and Android arms refused by name until the breadth slice wrote
+them (§4.4 for Windows; ICU's `NumberFormat.parse` in KayaFormat.kt for
+Android).
 The SwiftUI arm reaches the rules through three vtable slots
 (`number_text`, `number_commit`, `number_step`), so its commit and its
 text are the core's and not a Swift copy. The harness asks the platform

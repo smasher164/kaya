@@ -133,6 +133,7 @@ def generate(tmp):
                        "guests/swift/table.swift",
                        "guests/swift/pickers.swift",
                        "guests/swift/sliders.swift",
+                       "guests/swift/numberfield.swift",
                        "guests/swift/tooltips.swift",
                        "guests/swift/richrows.swift"],
                       env=env, check=False).returncode != 0:

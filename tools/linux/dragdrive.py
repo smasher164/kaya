@@ -9,6 +9,12 @@ is a second contract, so both read this file — dragprobe imports it, the verb
 runs it.
 
     dragdrive.py (wayland|x11) PID TX TY X0 Y0 X1 Y1 [INJECTOR]
+    dragdrive.py click (wayland|x11) PID TX TY X Y [INJECTOR]
+
+The second form is ONE CLICK at one widget point, the number field's
+`nudge` (docs/number-field-plan.md §5): press and release inside
+CLICK_HOLD_MS, since GTK's spin button starts stepping again 200ms into a
+held press.
 
 X0..Y1 are in the toplevel WIDGET's own coordinates and TX TY is that
 widget's origin inside its GdkSurface (GTK's `gtk_native_get_surface_transform`,
@@ -170,12 +176,24 @@ def injector_argv(proto, injector, start, end, phase="all", begin_flag=None,
     return argv
 
 
-def drive(proto, pid, transform, start_in_window, end_in_window, injector=None,
-          phase="all"):
-    """Press at one widget point, walk to another, release. The screen
-    coordinates actually used come back; a failure raises with what it
-    measured."""
-    injector = injector or default_injector(proto)
+# Inside GTK's TIMEOUT_INITIAL (200ms, gtkspinbutton.c), so a stepper press
+# is one step.
+CLICK_HOLD_MS = 50
+
+
+def click_argv(proto, injector, at):
+    """Move to `at`, then press and release the left button once."""
+    x, y = at
+    if proto == "wayland":
+        return [injector, "set", str(x), str(y), "sleep", "150", "press", "left",
+                "sleep", str(CLICK_HOLD_MS), "release", "left", "sleep", "100"]
+    return [injector, "mousemove", str(x), str(y), "sleep", "0.15", "mousedown", "1",
+            "sleep", str(CLICK_HOLD_MS / 1000), "mouseup", "1"]
+
+
+def screen_origin(proto, pid, transform):
+    """content_origin, waited for: a window the server has not shown yet has
+    no screen point."""
     deadline = time.monotonic() + ORIGIN_DEADLINE_S
     origin = content_origin(proto, pid, transform)
     while origin is None and time.monotonic() < deadline:
@@ -185,6 +203,49 @@ def drive(proto, pid, transform, start_in_window, end_in_window, injector=None,
         raise DragDriveError(
             f"the {proto} server showed no window for pid {pid} within "
             f"{ORIGIN_DEADLINE_S:.0f}s, so there is no screen point to press")
+    return origin
+
+
+def click(proto, pid, transform, at_in_window, injector=None):
+    """One click at a widget point; the screen point comes back."""
+    injector = injector or default_injector(proto)
+    origin = screen_origin(proto, pid, transform)
+    at = (int(origin[0] + at_in_window[0]), int(origin[1] + at_in_window[1]))
+    out = subprocess.run(click_argv(proto, injector, at), capture_output=True,
+                         text=True, encoding="utf-8", check=False)
+    if out.returncode != 0:
+        raise DragDriveError(
+            f"{injector} exited {out.returncode} clicking {at}: "
+            + (out.stderr.strip() or "no stderr"))
+    return origin, at
+
+
+def click_main(argv):
+    if len(argv) not in (7, 8) or argv[1] not in ("wayland", "x11"):
+        print("usage: dragdrive.py click (wayland|x11) PID TX TY X Y [INJECTOR]",
+              file=sys.stderr)
+        return 2
+    proto = argv[1]
+    pid = int(argv[2])
+    tx, ty, x, y = (int(v) for v in argv[3:7])
+    injector = argv[7] if len(argv) == 8 else None
+    try:
+        origin, at = click(proto, pid, (tx, ty), (x, y), injector)
+    except DragDriveError as e:
+        print(f"dragdrive: {e}", file=sys.stderr)
+        return 1
+    print(f"dragdrive: {proto} content at {origin} (surface transform "
+          f"{(tx, ty)}); clicked {at}", flush=True)
+    return 0
+
+
+def drive(proto, pid, transform, start_in_window, end_in_window, injector=None,
+          phase="all"):
+    """Press at one widget point, walk to another, release. The screen
+    coordinates actually used come back; a failure raises with what it
+    measured."""
+    injector = injector or default_injector(proto)
+    origin = screen_origin(proto, pid, transform)
     start = (int(origin[0] + start_in_window[0]), int(origin[1] + start_in_window[1]))
     end = (int(origin[0] + end_in_window[0]), int(origin[1] + end_in_window[1]))
     out = subprocess.run(injector_argv(proto, injector, start, end, phase,
@@ -205,6 +266,8 @@ def drive(proto, pid, transform, start_in_window, end_in_window, injector=None,
 
 def main():
     argv = list(sys.argv)
+    if len(argv) >= 2 and argv[1] == "click":
+        return click_main(argv[1:])
     phase = "all"
     if len(argv) >= 3 and argv[-2] == "--phase":
         phase = argv[-1]

@@ -3436,6 +3436,26 @@ sealed class Tx : IDisposable
         return w;
     }
 
+    /// A number field at value (docs/number-field-plan.md), its commit
+    /// handler co-located: one call per commit (Return, focus loss, a
+    /// step), never per keystroke. `bind` takes a float Signal instead of
+    /// a constant; a write never echoes. `min`/`max` unset are ±2^53.
+    public Widget NumberField(double value = 0.0, double? min = null,
+        double? max = null, double? step = null,
+        Action<Tx, double>? onCommit = null, double? grow = null,
+        Signal? bind = null)
+    {
+        var w = Widget(KayaWire.KindNumberField);
+        if (min is double lo) Records.Add(KayaWire.TxSetMin(w.Id, lo));
+        if (max is double hi) Records.Add(KayaWire.TxSetMax(w.Id, hi));
+        if (step is double st) Records.Add(KayaWire.TxSetStep(w.Id, st));
+        if (bind is Signal s) Records.Add(KayaWire.TxBindValue(w.Id, s.Id));
+        else Records.Add(KayaWire.TxSetValue(w.Id, value));
+        if (onCommit != null) App.OnValueCommitted(w, onCommit);
+        if (grow is double g) SetGrow(w, g);
+        return w;
+    }
+
     /// A dropdown select over fixed options — each becomes a label child
     /// — at `selected`, the initial 0-based index (checked at the root
     /// against the option count). onSelect receives each USER pick's new
@@ -5452,6 +5472,47 @@ sealed class Tpl
     {
         var n = SliderOf(min, max, step, tickSpacing, onChange, onCommit);
         BindValueField(n, 0, value);
+        return n;
+    }
+
+    /// A number field in the blueprint, its value from any addressable
+    /// source and its commit handler co-located; the bounds and the step
+    /// are constant across the copies.
+    public Node NumberField(double value, double? min = null,
+        double? max = null, double? step = null,
+        Action<Tx, List<object>, double>? onCommit = null)
+    {
+        var n = NumberFieldOf(min, max, step, onCommit);
+        tx.Records.Add(KayaWire.TxSetValue(n.Id, value));
+        return n;
+    }
+
+    public Node NumberField(Signal value, double? min = null,
+        double? max = null, double? step = null,
+        Action<Tx, List<object>, double>? onCommit = null)
+    {
+        var n = NumberFieldOf(min, max, step, onCommit);
+        tx.Records.Add(KayaWire.TxBindValue(n.Id, value.Id));
+        return n;
+    }
+
+    public Node NumberField(Field<double> value, double? min = null,
+        double? max = null, double? step = null,
+        Action<Tx, List<object>, double>? onCommit = null)
+    {
+        var n = NumberFieldOf(min, max, step, onCommit);
+        BindValueField(n, 0, value);
+        return n;
+    }
+
+    Node NumberFieldOf(double? min, double? max, double? step,
+        Action<Tx, List<object>, double>? onCommit)
+    {
+        var n = Widget(KayaWire.KindNumberField);
+        if (min is double lo) tx.Records.Add(KayaWire.TxSetMin(n.Id, lo));
+        if (max is double hi) tx.Records.Add(KayaWire.TxSetMax(n.Id, hi));
+        if (step is double st) tx.Records.Add(KayaWire.TxSetStep(n.Id, st));
+        if (onCommit != null) tx.App.OnValueCommitted(n, onCommit);
         return n;
     }
 

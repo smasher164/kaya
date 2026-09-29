@@ -4636,6 +4636,31 @@ public final class KayaAppTx {
         return w
     }
 
+    /// A number field at value (docs/number-field-plan.md), its commit
+    /// handler co-located: one call per commit (Return, focus loss, a
+    /// step), never per keystroke. `bind` takes a float signal instead of
+    /// a constant; a write never echoes. `min`/`max` unset are ±2^53.
+    @discardableResult
+    public func numberField(
+        value: Double = 0.0, min: Double? = nil, max: Double? = nil,
+        step: Double? = nil, bind: KayaSignal? = nil,
+        onCommit: ((KayaAppTx, Double) throws -> Void)? = nil,
+        grow: Double? = nil
+    ) -> KayaWidget {
+        let w = widget(UInt32(KAYA_KIND_NUMBER_FIELD))
+        if let min { tx.setMin(w.id, min) }
+        if let max { tx.setMax(w.id, max) }
+        if let step { tx.setStep(w.id, step) }
+        if let bind {
+            tx.bindValue(w.id, bind.id)
+        } else {
+            tx.setValue(w.id, value)
+        }
+        if let onCommit { app.onValueCommitted(w, onCommit) }
+        if let grow { setGrow(w, grow) }
+        return w
+    }
+
     /// A dropdown select over fixed options — each option becomes a label
     /// child — at `selected`, the initial 0-based index. `onSelect`
     /// receives each USER pick's new index; programmatic writes never
@@ -6524,6 +6549,54 @@ public final class KayaTpl {
     ) -> KayaNodeHandle {
         let n = sliderOf(min, max, step, tickSpacing, onChange, onCommit)
         bindValueField(n, f)
+        return n
+    }
+
+    /// A number field in the blueprint, its value from a source and its
+    /// commit handler co-located; the bounds and the step are constant
+    /// across the copies.
+    @discardableResult
+    func numberField(
+        value: Double, min: Double? = nil, max: Double? = nil,
+        step: Double? = nil,
+        onCommit: ((KayaAppTx, [KayaValue], Double) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = numberFieldOf(min, max, step, onCommit)
+        tx.tx.setValue(n.id, value)
+        return n
+    }
+
+    @discardableResult
+    func numberField(
+        value s: KayaSignal, min: Double? = nil, max: Double? = nil,
+        step: Double? = nil,
+        onCommit: ((KayaAppTx, [KayaValue], Double) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = numberFieldOf(min, max, step, onCommit)
+        tx.tx.bindValue(n.id, s.id)
+        return n
+    }
+
+    @discardableResult
+    public func numberField(
+        value f: KayaField<Double>, min: Double? = nil, max: Double? = nil,
+        step: Double? = nil,
+        onCommit: ((KayaAppTx, [KayaValue], Double) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = numberFieldOf(min, max, step, onCommit)
+        bindValueField(n, f)
+        return n
+    }
+
+    private func numberFieldOf(
+        _ min: Double?, _ max: Double?, _ step: Double?,
+        _ onCommit: ((KayaAppTx, [KayaValue], Double) throws -> Void)?
+    ) -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_NUMBER_FIELD))
+        if let min { tx.tx.setMin(n.id, min) }
+        if let max { tx.tx.setMax(n.id, max) }
+        if let step { tx.tx.setStep(n.id, step) }
+        if let onCommit { tx.app.onValueCommitted(n, onCommit) }
         return n
     }
 

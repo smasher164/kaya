@@ -983,6 +983,40 @@ if (isMainThread) {
   check("a value_committed occurrence reaches onCommit and NOT onChange", JSON.stringify(sliderCommits) === "[35]" && JSON.stringify(sliderMoves) === "[40]");
   check("a stamped value_committed hands the row over first", JSON.stringify(sliderRowCommits) === JSON.stringify([["b", 40]]));
 
+  // ------------------------------------------------- the number field
+  // (docs/number-field-plan.md §2.) The kind, its bounds and step pack
+  // as the generated setters do, and value_committed reaches onCommit,
+  // live and stamped with the row first.
+  const NfLine = kaya.record({ name: String, qty: Number }, "NfLine");
+  let nfLines!: K.Collection<K.Fields<typeof NfLine.schema>, K.Row<typeof NfLine.schema>>;
+  let nfField!: K.Widget;
+  let nfStamped!: K.Widget;
+  const nfCommits: number[] = [];
+  const nfRowCommits: [K.Key, number][] = [];
+  shipped.length = 0;
+  app.window(() => {
+    nfLines = kaya.collection(NfLine);
+    kaya.column(() => {
+      nfField = kaya.numberField({ value: 12.5, min: 0, max: 100, step: 0.5, onCommit: (v: number) => nfCommits.push(v) });
+      for (const line of nfLines) {
+        nfStamped = kaya.numberField({
+          value: line.qty, min: 0,
+          onCommit: (row: K.RowHandle<K.Fields<typeof NfLine.schema>>, v: number) => nfRowCommits.push([row.key, v]),
+        });
+      }
+    });
+  });
+  const nfRecords = shipped[0]!.map((r) => JSON.stringify([...r]));
+  check("a number field is the number_field kind", nfRecords.includes(JSON.stringify([...wire.tx_create_widget(nfField.id, wire.KIND_NUMBER_FIELD)])));
+  check("a number field's min, max, step and value pack as the generated setters do",
+    [wire.tx_set_min(nfField.id, 0), wire.tx_set_max(nfField.id, 100), wire.tx_set_step(nfField.id, 0.5), wire.tx_set_value(nfField.id, 12.5), wire.tx_set_min(nfStamped.id, 0)]
+      .every((r) => nfRecords.includes(JSON.stringify([...r]))));
+  app.build(() => { nfLines.insert("b", NfLine({ name: "b", qty: 2 })); });
+  fire(wire.parse_occurrence(packStamped(wire.OCC_VALUE_COMMITTED, nfField.id, [], 40)));
+  fire(wire.parse_occurrence(packStamped(wire.OCC_VALUE_COMMITTED, nfStamped.id, ["b"], 7)));
+  check("a number field's value_committed reaches onCommit", JSON.stringify(nfCommits) === "[40]");
+  check("a stamped number field's commit hands the row over first", JSON.stringify(nfRowCommits) === JSON.stringify([["b", 7]]));
+
   // ------------------- S2: the switch role, href, the section badge
   // (docs/tasks-s2-plan.md T1, T2, T3.) Three surfaces the generator
   // hands every binding as NUMBERS and each binding names by hand: a

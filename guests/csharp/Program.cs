@@ -77,6 +77,7 @@ static class Program
             case "assets": AssetsScene.Run(); break;
             case "sizepolicy": SizepolicyScene.Run(); break;
             case "sliders": SlidersScene.Run(); break;
+            case "numberfield": case "numberfieldde": NumberFieldScene.Run(); break;
             case "adaptive": AdaptiveScene.Run(); break;
             case "encodebench": EncodeBench.Run(); break;
             default: Milestone2Scene.Run(); break;

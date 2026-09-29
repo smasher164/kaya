@@ -4902,6 +4902,39 @@ def slider(value: NumberSource | None = None, *, min: float | None = None,
     return handle
 
 
+def number_field(value: NumberSource | None = None, *,
+                 min: float | None = None, max: float | None = None,
+                 step: float | None = None,
+                 on_commit: Handler | None = None,
+                 grow: float | None = None) -> Widget:
+    """A number field (docs/number-field-plan.md): typed text committed on
+    Return, focus loss or a step, each commit one call to `on_commit`,
+    template copies getting their `Row` first. An app write never
+    echoes."""
+    handle = _widget(wire.KIND_NUMBER_FIELD)
+    if min is not None:
+        _records().append(wire.tx_set_min(handle.id, float(min)))
+    if max is not None:
+        _records().append(wire.tx_set_max(handle.id, float(max)))
+    if step is not None:
+        _records().append(wire.tx_set_step(handle.id, float(step)))
+    if value is not None:
+        if isinstance(value, Signal):
+            _records().append(wire.tx_bind_value(handle.id, value.id))
+        elif isinstance(value, FieldRef):
+            _records().append(
+                wire.tx_bind_value_element(handle.id, value._level(),
+                                           value._index)
+            )
+        else:
+            _records().append(
+                wire.tx_set_value(handle.id, cast("float", value)))
+    if on_commit is not None:
+        _app._register(handle, wire.OCC_VALUE_COMMITTED, on_commit)
+    _set_grow(handle, grow)
+    return handle
+
+
 def _picker_field(what: str, value: FieldRef[Any], want: type) -> None:
     """A picker's template source, held to the field TYPE — a Date field
     and an int one share the I64 tag, so nothing below this can tell them

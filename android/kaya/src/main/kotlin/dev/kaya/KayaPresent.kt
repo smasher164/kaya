@@ -59,6 +59,19 @@ object KayaPresent {
      * kaya_emit_value_committed's JNI spelling. */
     @JvmStatic external fun emitValueCommitted(tag: ByteArray, value: Double)
 
+    /** A number field's text at its step, and what a commit makes of typed
+     * text: 0 revert, 1 unchanged, 2 moved with the value in [out]`[0]` —
+     * the core's rules (crates/kaya/src/number_field.rs). */
+    @JvmStatic external fun numberText(value: Double, step: Double): String
+    @JvmStatic external fun numberCommit(
+        text: String,
+        committed: Double,
+        min: Double,
+        max: Double,
+        step: Double,
+        out: DoubleArray,
+    ): Int
+
     /** The picker's COMMITTED value (docs/datetime-plan.md D7), packed
      * decimal — YYYYMMDD for a date, HHMM for a time. A value that is
      * not one panics at the backend, never in the app.

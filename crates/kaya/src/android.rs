@@ -860,6 +860,18 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 sig: "(JJ[D)V".into(),
                 fn_ptr: present_rows_measured as *mut _,
             },
+            // The number field's rules (docs/number-field-plan.md §3), the
+            // core's one copy: the text at a step, and a commit's answer.
+            NativeMethod {
+                name: "numberText".into(),
+                sig: "(DD)Ljava/lang/String;".into(),
+                fn_ptr: present_number_text as *mut _,
+            },
+            NativeMethod {
+                name: "numberCommit".into(),
+                sig: "(Ljava/lang/String;DDDD[D)I".into(),
+                fn_ptr: present_number_commit as *mut _,
+            },
             NativeMethod {
                 name: "scrollToRow".into(),
                 sig: "(JLjava/lang/String;)J".into(),
@@ -1407,6 +1419,45 @@ extern "system" fn present_scroll_to_row(
     };
     let key: String = key.into();
     unsafe { crate::capi::kaya_scroll_to_row_str(container as u64, key.as_ptr(), key.len()) as jlong }
+}
+
+/// KayaPresent.numberText: `number_field::text`, the field's text.
+extern "system" fn present_number_text<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass,
+    value: jni::sys::jdouble,
+    step: jni::sys::jdouble,
+) -> jni::sys::jstring {
+    env.new_string(crate::number_field::text(value, step))
+        .expect("kaya: handing a number field's text back to the JVM failed")
+        .into_raw()
+}
+
+/// KayaPresent.numberCommit: `number_field::commit` — 0 revert, 1
+/// unchanged, 2 moved with the new value in `out[0]`.
+extern "system" fn present_number_commit(
+    mut env: JNIEnv,
+    _class: JClass,
+    text: JString,
+    committed: jni::sys::jdouble,
+    min: jni::sys::jdouble,
+    max: jni::sys::jdouble,
+    step: jni::sys::jdouble,
+    out: jni::objects::JDoubleArray,
+) -> jint {
+    let text: String = env
+        .get_string(&text)
+        .map(Into::into)
+        .expect("kaya: reading a number field's text failed");
+    match crate::number_field::commit(&text, committed, min, max, step) {
+        crate::number_field::Commit::Revert => 0,
+        crate::number_field::Commit::Unchanged => 1,
+        crate::number_field::Commit::Moved(value) => {
+            env.set_double_array_region(&out, 0, &[value])
+                .expect("kaya: writing a number field's committed value back failed");
+            2
+        }
+    }
 }
 
 /// KayaPresent.windowGeometry: the record's fields written into the

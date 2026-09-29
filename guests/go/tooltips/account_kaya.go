@@ -89,6 +89,10 @@ func (r accountRow) Slider(min, max float64, f kaya.Field[float64], onChange fun
 	return r.c.Slider(r.t, min, max, f, onChange)
 }
 
+func (r accountRow) NumberField(f kaya.Field[float64], onCommit func(*kaya.Tx, string, float64)) kaya.Node {
+	return r.c.NumberField(r.t, f, onCommit)
+}
+
 // The template props: the const flavors write through the recorder,
 // the sourced ones through the typed collection, as the constructors
 // above do.
@@ -97,6 +101,10 @@ func (r accountRow) SetGrow(n kaya.Node, weight float64) { r.t.SetGrow(n, weight
 func (r accountRow) SetStep(n kaya.Node, step float64) { r.t.SetStep(n, step) }
 
 func (r accountRow) SetTickSpacing(n kaya.Node, spacing float64) { r.t.SetTickSpacing(n, spacing) }
+
+func (r accountRow) SetMin(n kaya.Node, min float64) { r.t.SetMin(n, min) }
+
+func (r accountRow) SetMax(n kaya.Node, max float64) { r.t.SetMax(n, max) }
 
 func (r accountRow) SetA11yID(n kaya.Node, id string)                { r.t.SetA11yID(n, id) }
 func (r accountRow) ContextMenu(n kaya.Node, c *kaya.ContextCatalog) { r.t.ContextMenu(n, c) }

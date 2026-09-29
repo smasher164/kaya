@@ -2021,6 +2021,29 @@ let slider ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help
   | None -> ());
   w
 
+(* A number field at value (docs/number-field-plan.md): typed text
+   committed on Return, focus loss or a step, each commit one call to
+   [on_commit]. [?min]/[?max] unset are -2^53..2^53; a write through
+   [~bind] never echoes. *)
+let number_field ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?min ?max ?(value = 0.0) ?step ?bind
+    ?on_commit () =
+  let tx = the_tx () in
+  let w = widget Kaya_wire.kind_number_field in
+  Option.iter (fun g -> set_grow w g) grow;
+  Option.iter (fun v -> set_fill w v) fill;
+  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
+  let (Widget id) = w in
+  Option.iter (fun v -> emit tx (Kaya_wire.tx_set_min id v)) min;
+  Option.iter (fun v -> emit tx (Kaya_wire.tx_set_max id v)) max;
+  Option.iter (fun v -> emit tx (Kaya_wire.tx_set_step id v)) step;
+  (match (bind : float signal option) with
+  | Some s -> emit tx (Kaya_wire.tx_bind_value id s.sig_id)
+  | None -> emit tx (Kaya_wire.tx_set_value id value));
+  (match on_commit with
+  | Some handler -> Hashtbl.replace tx.app.widget_commits id handler
+  | None -> ());
+  w
+
 (* A dropdown select over fixed [options] — each option becomes a label
    child (labels only, scene-checked) — at [~selected], the initial
    0-based index (domain-checked at the root). [~on_select] receives each
@@ -4412,6 +4435,31 @@ module Tpl = struct
         Hashtbl.replace (the_tx ()).app.node_values id (fun keys v ->
             handler (List.map key_of_wire keys) v)
     | None -> ());
+    (match on_commit with
+    | Some handler ->
+        let (Node id) = n in
+        Hashtbl.replace (the_tx ()).app.node_commits id (fun keys v ->
+            handler (List.map key_of_wire keys) v)
+    | None -> ());
+    n
+
+  (* A number field per stamped copy, its value from any of the three
+     sources; the bounds and the step are constant across the copies. *)
+  let number_field ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?min ?max ?value ?step
+      ?bind ?bind_field ?(level = 0) ?(a11y_level = level)
+      ?on_commit () =
+    let n = Floor.widget Kaya_wire.kind_number_field in
+    Option.iter (fun g -> Floor.set_grow n g) grow;
+    Option.iter (fun v -> Floor.set_fill n v) fill;
+    Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~a11y_level n;
+    Option.iter (fun v -> Floor.set_min n v) min;
+    Option.iter (fun v -> Floor.set_max n v) max;
+    Option.iter (fun v -> Floor.set_step n v) step;
+    Option.iter (fun v -> Floor.set_value n v) value;
+    Option.iter (fun s -> Floor.bind_value n s) bind;
+    Option.iter (fun fd -> Floor.bind_value_field ~level n fd) bind_field;
     (match on_commit with
     | Some handler ->
         let (Node id) = n in

@@ -285,6 +285,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.createFontFamilyResolver
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Constraints
@@ -1373,13 +1374,14 @@ object KayaSceneModel {
     val timePickers = ArrayList<KayaNode>()
     val labeleds = ArrayList<KayaNode>()
     val searches = ArrayList<KayaNode>()
+    val numberFields = ArrayList<KayaNode>()
 
     // Every kind registry, so a destroyed node leaves all of them at once
     // (docs/traps.md 2026-09-14: a torn-down copy stayed addressable).
     private val registries = listOf(
         buttons, checkboxes, labels, entryWidgets, sliders, images, columns, rows, scrolls,
         progresses, selects, radios, grids, textareas, canvases, datePickers, timePickers,
-        labeleds, searches,
+        labeleds, searches, numberFields,
     )
 
     fun forget(id: Long) {
@@ -3214,7 +3216,16 @@ object KayaCompose {
                         KIND_TIME_PICKER -> KayaSceneModel.timePickers.add(node)
                         KIND_LABELED -> KayaSceneModel.labeleds.add(node)
                         KIND_SEARCH -> KayaSceneModel.searches.add(node)
-                        KIND_NUMBER_FIELD -> depthStub("numberfield")
+                        KIND_NUMBER_FIELD -> {
+                            // docs/number-field-plan.md §2: unset bounds are
+                            // ±2^53, the step 1, and the field shows its
+                            // value from the start.
+                            node.minValue = -KAYA_NUMBER_UNBOUNDED
+                            node.maxValue = KAYA_NUMBER_UNBOUNDED
+                            node.step = 1.0
+                            kayaWriteText(node, KayaPresent.numberText(0.0, 1.0))
+                            KayaSceneModel.numberFields.add(node)
+                        }
                     }
                 }
                 APPLY_SET_PROP -> {
@@ -3237,6 +3248,11 @@ object KayaCompose {
                             val node = KayaSceneModel.nodes[id]!!
                             node.value = readF64(b)
                             node.committed = node.value
+                            // An app write shows the new value
+                            // (docs/number-field-plan.md §2) and fires nothing.
+                            if (node.kind == KIND_NUMBER_FIELD) {
+                                kayaWriteText(node, KayaPresent.numberText(node.value, node.step))
+                            }
                         }
                         PROP_MIN -> KayaSceneModel.nodes[id]!!.minValue = readF64(b)
                         PROP_MAX -> KayaSceneModel.nodes[id]!!.maxValue = readF64(b)
@@ -3328,7 +3344,13 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.minuteStep = readF64(b).toInt()
                         PROP_HELP ->
                             KayaSceneModel.nodes[id]!!.help = readString(b)
-                        PROP_STEP -> KayaSceneModel.nodes[id]!!.step = readF64(b)
+                        PROP_STEP -> {
+                            val node = KayaSceneModel.nodes[id]!!
+                            node.step = readF64(b)
+                            if (node.kind == KIND_NUMBER_FIELD) {
+                                kayaWriteText(node, KayaPresent.numberText(node.value, node.step))
+                            }
+                        }
                         PROP_TICK_SPACING ->
                             KayaSceneModel.nodes[id]!!.tickSpacing = readF64(b)
                         PROP_SOURCE -> {
@@ -4583,7 +4605,7 @@ object KayaCompose {
         // Skipped when the caret is already there, or an unconditional
         // edit spends a state commit per `type` to change nothing.
         onUi(activity) {
-            kayaFocusedTextNode()?.let { node ->
+            kayaFocusedTypingNode()?.let { node ->
                 val end = node.textState.text.length
                 val at = node.textState.selection
                 if (at.start != end || at.end != end) {
@@ -4619,9 +4641,9 @@ object KayaCompose {
         }
         // The text before the first key, so the settle below can tell
         // "landed" from "has not started yet".
-        val before = onUi(activity) { kayaFocusedTextNode()?.text }
+        val before = onUi(activity) { kayaFocusedTypingNode()?.text }
         val submitsOnReturn = onUi(activity) {
-            kayaFocusedTextNode()?.let { it.kind != KIND_TEXTAREA || it.submits }
+            kayaFocusedTypingNode()?.let { it.kind != KIND_TEXTAREA || it.submits }
         } ?: false
         val map = android.view.KeyCharacterMap.load(
             android.view.KeyCharacterMap.VIRTUAL_KEYBOARD)
@@ -4637,7 +4659,7 @@ object KayaCompose {
             // text by exactly one.
             var tries = 0
             while (true) {
-                val was = onUi(activity) { kayaFocusedTextNode()?.textState?.text?.length }
+                val was = onUi(activity) { kayaFocusedTypingNode()?.textState?.text?.length }
                 // ONE UI-THREAD HOP PER CHARACTER, so a runloop turn
                 // passes between them exactly as it does between a
                 // user's keystrokes.
@@ -4679,12 +4701,48 @@ object KayaCompose {
         return null
     }
 
+    /**
+     * `unfocus`: Tab at a number field that holds focus, then the wait for
+     * the composition's focus to leave it. Answers the refusal, or null.
+     */
+    private fun kayaUnfocus(activity: ComponentActivity, spec: String): String? {
+        val node = onUi(activity) {
+            target(spec, "number_field", KayaSceneModel.numberFields)
+        } ?: return "no such target $spec"
+        val holds = onUi(activity) {
+            KayaSceneModel.focusedId == node.id && KayaSceneModel.composeFocusedId == node.id
+        } == true
+        if (!holds) return "unfocus $spec: the field does not hold focus — click it first"
+        onUi(activity) {
+            val now = android.os.SystemClock.uptimeMillis()
+            for (action in intArrayOf(KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP)) {
+                activity.dispatchKeyEvent(
+                    KeyEvent(
+                        now, now, action, KeyEvent.KEYCODE_TAB, 0, 0,
+                        android.view.KeyCharacterMap.VIRTUAL_KEYBOARD, 0, 0,
+                        android.view.InputDevice.SOURCE_KEYBOARD,
+                    ),
+                )
+            }
+        }
+        repeat(200) {
+            val composed = onUi(activity) { KayaSceneModel.composeFocusedId }
+            if (composed != node.id) return null
+            Thread.sleep(5)
+        }
+        val (model, composed) = onUi(activity) {
+            Pair(KayaSceneModel.focusedId, KayaSceneModel.composeFocusedId)
+        } ?: Pair(null, null)
+        return "unfocus $spec: Tab was dispatched and the composition's focus is still " +
+            "node $composed after 1s (the model's is $model)"
+    }
+
     /** Did the last dispatched key reach the focused field? Bounded, and
      * free in the common case: the field applies a key on the turn it is
      * dispatched, so the first sample already differs. */
     private fun kayaKeyLanded(activity: ComponentActivity, was: Int): Boolean {
         repeat(20) {
-            val now = onUi(activity) { kayaFocusedTextNode()?.textState?.text?.length }
+            val now = onUi(activity) { kayaFocusedTypingNode()?.textState?.text?.length }
             if (now != was) return true
             Thread.sleep(5)
         }
@@ -4704,7 +4762,7 @@ object KayaCompose {
         var moved = false
         repeat(200) {
             val now = onUi(activity) {
-                val node = kayaFocusedTextNode() ?: return@onUi null
+                val node = kayaFocusedTypingNode() ?: return@onUi null
                 if (node.text != kayaLf(node.textState.text.toString())) return@onUi null
                 node.text
             }
@@ -5886,7 +5944,8 @@ object KayaCompose {
                 val id = KayaSceneModel.focusedId ?: return false
                 return KayaSceneModel.entryWidgets.any { it.id == id } ||
                     KayaSceneModel.textareas.any { it.id == id } ||
-                    KayaSceneModel.searches.any { it.id == id }
+                    KayaSceneModel.searches.any { it.id == id } ||
+                    KayaSceneModel.numberFields.any { it.id == id }
             }
             "paste" -> {
                 val id = KayaSceneModel.focusedId ?: return false
@@ -5951,8 +6010,12 @@ object KayaCompose {
                         KayaPresent.textEditSource(
                             node.id, KayaCompose.EDIT_SOURCE_PASTE.toInt())
                     }
-                    KayaPresent.emitTextChanged(
-                        node.tag, node.text, KayaSceneModel.focusedId == node.id, false)
+                    // A number field's text is a draft until it commits
+                    // (docs/number-field-plan.md §2).
+                    if (node.kind != KIND_NUMBER_FIELD) {
+                        KayaPresent.emitTextChanged(
+                            node.tag, node.text, KayaSceneModel.focusedId == node.id, false)
+                    }
                     return true
                 }
                 // The privileged read's walk, deliberately the same
@@ -6651,6 +6714,8 @@ object KayaCompose {
         // (docs/rich-text-plan.md §15), so the rich reads resolve one.
         else if (spec.startsWith("label")) target(spec, "label", KayaSceneModel.labels)
         else if (spec.startsWith("search")) target(spec, "search", KayaSceneModel.searches)
+        else if (spec.startsWith("number_field"))
+            target(spec, "number_field", KayaSceneModel.numberFields)
         else target(spec, "entry", KayaSceneModel.entryWidgets)
 
     /** The merged semantics node carrying this test tag — [kayaAxFind]'s
@@ -6936,7 +7001,7 @@ object KayaCompose {
             "radio" -> KayaSceneModel.radios
             "grid" -> KayaSceneModel.grids
             "search" -> KayaSceneModel.searches
-            "number_field" -> depthStub("numberfield")
+            "number_field" -> KayaSceneModel.numberFields
             "textarea" -> KayaSceneModel.textareas
             "date_picker" -> KayaSceneModel.datePickers
             "time_picker" -> KayaSceneModel.timePickers
@@ -8074,6 +8139,7 @@ object KayaCompose {
                             val text = target(parts[1], "entry", KayaSceneModel.entryWidgets)
                                 ?: target(parts[1], "textarea", KayaSceneModel.textareas)
                                 ?: target(parts[1], "search", KayaSceneModel.searches)
+                                ?: target(parts[1], "number_field", KayaSceneModel.numberFields)
                             if (text != null) {
                                 KayaDiag.note(
                                     "click ${parts[1]} -> focus node=${text.id} " +
@@ -8174,11 +8240,18 @@ object KayaCompose {
                         // The slider's value in the one fixed spelling
                         // (docs/slider-plan.md S8): the state the composable
                         // draws from IS the control's value here.
-                        if (parts[1].startsWith("number_field")) depthStub("numberfield")
+                        // A number field's control holds text, so its
+                        // committed value is what its commit path wrote
+                        // (docs/number-field-plan.md §5).
                         val want = quoted(parts.drop(2))
                         val got = onUi(activity) {
-                            target(parts[1], "slider", KayaSceneModel.sliders)?.let {
-                                kayaSpelledSlider(it.value)
+                            if (parts[1].startsWith("number_field")) {
+                                target(parts[1], "number_field", KayaSceneModel.numberFields)
+                                    ?.let { kayaSpelledSlider(it.value) }
+                            } else {
+                                target(parts[1], "slider", KayaSceneModel.sliders)?.let {
+                                    kayaSpelledSlider(it.value)
+                                }
                             }
                         }
                         when {
@@ -8673,8 +8746,22 @@ object KayaCompose {
                             else kayaAwaitAnswer(answered)
                         }
                     }
-                    "unfocus", "nudge" -> {
-                        depthStub("numberfield")
+                    "unfocus" -> {
+                        // The focus leaving the field as a user's does
+                        // (docs/number-field-plan.md §4.5): the Tab key
+                        // through the activity's own key path, which moves
+                        // it to the next field; the commit rides the loss.
+                        kayaAwaitQuiet()
+                        val answered = kayaBatches
+                        val why = kayaUnfocus(activity, parts[1])
+                        if (why != null) failures.add(why)
+                        else kayaAwaitAnswer(answered)
+                    }
+                    "nudge" -> {
+                        failures.add(
+                            "nudge: a phone's number field has no stepping door " +
+                                "(docs/number-field-plan.md §3 rule 7); the phone " +
+                                "lanes cut the scene at the steps")
                     }
                     "press" -> {
                         // The Return key as its own verb (docs/rich-text-plan.md
@@ -8697,8 +8784,12 @@ object KayaCompose {
                                 // programmatic write, so it carries D7
                                 // with it.
                                 kayaWriteText(it, kayaLf(quoted(parts.drop(2))))
-                                KayaPresent.emitTextChanged(
-                                    it.tag, it.text, KayaSceneModel.focusedId == it.id, false)
+                                // A number field's text is a draft until it
+                                // commits (docs/number-field-plan.md §2).
+                                if (it.kind != KIND_NUMBER_FIELD) {
+                                    KayaPresent.emitTextChanged(
+                                        it.tag, it.text, KayaSceneModel.focusedId == it.id, false)
+                                }
                             } != null
                         }
                         if (!ok) failures.add("no such target ${parts[1]}")
@@ -8718,7 +8809,8 @@ object KayaCompose {
                         val got = onUi(activity) {
                             if (parts[1].startsWith("textarea") ||
                                 parts[1].startsWith("entry") ||
-                                parts[1].startsWith("search")
+                                parts[1].startsWith("search") ||
+                                parts[1].startsWith("number_field")
                             )
                                 kayaTextTarget(parts[1])?.let {
                                     kayaLf(it.textState.text.toString())
@@ -11462,7 +11554,7 @@ internal fun kayaWriteText(node: KayaNode, next: String) {
  * model mirror alone (a LABEL's, docs/rich-text-plan.md §15). */
 internal fun kayaIsTextField(node: KayaNode): Boolean =
     node.kind == KayaCompose.KIND_ENTRY || node.kind == KayaCompose.KIND_TEXTAREA ||
-        node.kind == KayaCompose.KIND_SEARCH
+        node.kind == KayaCompose.KIND_SEARCH || node.kind == KayaCompose.KIND_NUMBER_FIELD
 
 /** The arm's run table and its pending attributes, dropped together; the
  * display is remembered on [KayaNode.richSeq]. */
@@ -12279,6 +12371,16 @@ internal fun kayaFocusedTextNode(): KayaNode? {
         null
     }
 }
+
+/**
+ * The focused widget the harness's keys go to: the text tier's, and a
+ * number field, whose keys are typed text until it commits
+ * (docs/number-field-plan.md §3). Not the undo tier's.
+ */
+internal fun kayaFocusedTypingNode(): KayaNode? =
+    kayaFocusedTextNode() ?: KayaSceneModel.focusedId
+        ?.let { KayaSceneModel.nodes[it] }
+        ?.takeIf { it.kind == KayaCompose.KIND_NUMBER_FIELD }
 
 /**
  * A4's ONE named query — "can the focused widget undo?" — answered in
@@ -13929,6 +14031,7 @@ private fun KayaRenderCore(
         val textFills = flexVertical &&
             (node.kind == KayaCompose.KIND_ENTRY || node.kind == KayaCompose.KIND_TEXTAREA ||
                 node.kind == KayaCompose.KIND_SEARCH ||
+                node.kind == KayaCompose.KIND_NUMBER_FIELD ||
                 node.kind == KayaCompose.KIND_DATE_PICKER ||
                 node.kind == KayaCompose.KIND_TIME_PICKER ||
                 node.kind == KayaCompose.KIND_SELECT)
@@ -14425,7 +14528,7 @@ private fun KayaRenderCore(
         }
         KayaCompose.KIND_SEARCH ->
             KayaTextField(node, a11y, boxFill, singleLine = true, search = true)
-        KayaCompose.KIND_NUMBER_FIELD -> depthStub("numberfield")
+        KayaCompose.KIND_NUMBER_FIELD -> KayaNumberField(node, a11y, boxFill)
         KayaCompose.KIND_LABELED -> {
             // THE LABELLED ROW (docs/forms-plan.md §3): Material's own
             // labelled row, the value trailing and a WIDE control folded
@@ -17947,6 +18050,116 @@ private fun KayaSliderSurface(node: KayaNode, modifier: Modifier) {
             )
         },
     )
+}
+
+// ---- the number field (docs/number-field-plan.md) ---------------------------
+// The platform's text field over the arm's own text (§6): written and read by
+// the core's rules over JNI (§3 rule 5), and value_committed rides ONE commit
+// path, never a keystroke. A phone has no stepping door (§3 rule 7).
+
+/** An unset bound (§2), the core's `number_field::UNBOUNDED`. */
+internal const val KAYA_NUMBER_UNBOUNDED = 9_007_199_254_740_992.0
+
+/** THE COMMIT PATH (§3 rules 1-3): the keyboard's Done, a hardware Return
+ * and focus loss come here, and the core answers what the text means. */
+internal fun kayaNumberCommit(node: KayaNode) {
+    val out = DoubleArray(1)
+    val answer = KayaPresent.numberCommit(
+        node.textState.text.toString(), node.value, node.minValue, node.maxValue, node.step, out)
+    kayaNumberSettle(node, answer, out[0])
+}
+
+/** The core's answer: 2 is a new committed value, the one emit. */
+private fun kayaNumberSettle(node: KayaNode, answer: Int, moved: Double) {
+    if (answer == 2) {
+        node.value = moved
+        node.committed = moved
+        KayaPresent.emitValueCommitted(node.tag, moved)
+    }
+    kayaWriteText(node, KayaPresent.numberText(node.value, node.step))
+}
+
+/** §4.2, measured on the lane's Gboard (docs/number-field-plan.md). */
+internal fun kayaNumberKeyboard(min: Double, step: Double): KeyboardType =
+    when {
+        min < 0 -> KeyboardType.Decimal
+        step == Math.rint(step) -> KeyboardType.Number
+        else -> KeyboardType.Decimal
+    }
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun KayaNumberField(node: KayaNode, a11y: Modifier, fill: Modifier) {
+    val focusRequester = remember { FocusRequester() }
+    val interaction = remember { MutableInteractionSource() }
+    var wasFocused by remember(node) { mutableStateOf(false) }
+    // The model follows the widget so the typing driver can see its keys
+    // land; the text is a draft, and nothing is emitted from here.
+    LaunchedEffect(node) {
+        snapshotFlow { node.textState.text.toString() }.collect { node.text = it }
+    }
+    BasicTextField(
+        state = node.textState,
+        lineLimits = TextFieldLineLimits.SingleLine,
+        keyboardOptions = KeyboardOptions(
+            keyboardType = kayaNumberKeyboard(node.minValue, node.step),
+            imeAction = ImeAction.Done,
+        ),
+        onKeyboardAction = { performDefaultAction ->
+            kayaNumberCommit(node)
+            performDefaultAction()
+        },
+        interactionSource = interaction,
+        textStyle = LocalTextStyle.current.copy(color = LocalContentColor.current),
+        modifier = a11y
+            .then(fill)
+            .focusRequester(focusRequester)
+            // A hardware Return never reaches onKeyboardAction (the entry's
+            // §7.3 finding, docs/submit-plan.md).
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown &&
+                    (event.key == Key.Enter || event.key == Key.NumPadEnter)
+                ) {
+                    kayaNumberCommit(node)
+                    true
+                } else {
+                    false
+                }
+            }
+            .onFocusChanged { state ->
+                if (state.isFocused) {
+                    wasFocused = true
+                    KayaSceneModel.focusedId = node.id
+                    KayaSceneModel.composeFocusedId = node.id
+                } else {
+                    if (KayaSceneModel.composeFocusedId == node.id) {
+                        KayaSceneModel.composeFocusedId = null
+                    }
+                    if (wasFocused && !state.isFocused) {
+                        wasFocused = false
+                        kayaNumberCommit(node)
+                    }
+                }
+            },
+        decorator = { inner ->
+            val prompt: (@Composable () -> Unit)? =
+                if (node.placeholder.isEmpty()) null else { { Text(node.placeholder) } }
+            TextFieldDefaults.DecorationBox(
+                value = node.textState.text.toString(),
+                innerTextField = inner,
+                enabled = true,
+                singleLine = true,
+                visualTransformation = VisualTransformation.None,
+                interactionSource = interaction,
+                placeholder = prompt,
+                contentPadding = TextFieldDefaults.contentPaddingWithoutLabel(),
+                colors = TextFieldDefaults.colors(),
+            )
+        },
+    )
+    LaunchedEffect(KayaSceneModel.focusedId) {
+        if (KayaSceneModel.focusedId == node.id) focusRequester.requestFocus()
+    }
 }
 
 /**

@@ -2949,6 +2949,79 @@ check("a stamped value_committed passes the copy's row first",
       and slider_row_commits[0][0].key == "b"
       and slider_row_commits[0][1] == 40.0)
 
+# --- THE NUMBER FIELD (docs/number-field-plan.md §2) -----------------
+# The kind, its bounds and step pack as the generated setters do, a bound
+# signal packs a bind and no set, and value_committed reaches `on_commit`,
+# live and stamped with the copy's row first.
+app_nf = kaya.App()
+nf_commits = []
+nf_row_commits = []
+
+
+@dataclass
+class NfLine:
+    name: str
+    qty: float
+
+
+nf_field = None
+nf_bound = None
+nf_node = None
+nf_records = []
+with app_nf.window():
+    with kaya.column():
+        before_nf = len(kaya._tx)
+        nf_field = kaya.number_field(
+            value=12.5, min=0.0, max=100.0, step=0.5,
+            on_commit=lambda v: nf_commits.append(v))
+        nf_sig = kaya.signal(3.0)
+        nf_bound = kaya.number_field(value=nf_sig)
+        nf_records = kaya._tx[before_nf:]
+        nf_lines = kaya.collection(NfLine)
+        for nf_line in nf_lines:
+            nf_node = kaya.number_field(
+                value=nf_line.qty, min=0.0,
+                on_commit=lambda *args: nf_row_commits.append(args))
+
+check("a number field is the number_field kind",
+      kaya.wire.tx_create_widget(nf_field.id, kaya.wire.KIND_NUMBER_FIELD)
+      in nf_records)
+check("a number field's min, max, step and value pack as the generated "
+      "setters do",
+      kaya.wire.tx_set_min(nf_field.id, 0.0) in nf_records
+      and kaya.wire.tx_set_max(nf_field.id, 100.0) in nf_records
+      and kaya.wire.tx_set_step(nf_field.id, 0.5) in nf_records
+      and kaya.wire.tx_set_value(nf_field.id, 12.5) in nf_records)
+check("a signal-bound number field binds its value and sets none",
+      kaya.wire.tx_bind_value(nf_bound.id, nf_sig.id) in nf_records
+      and not any(r == kaya.wire.tx_set_value(nf_bound.id, 3.0)
+                  for r in nf_records))
+check("a number field registers on_commit under value_committed alone",
+      (kaya.wire.OCC_VALUE_COMMITTED, nf_field.id)
+      in app_nf._widget_handlers
+      and (kaya.wire.OCC_VALUE_CHANGED, nf_field.id)
+      not in app_nf._widget_handlers)
+
+nf_occs = [
+    (kaya.wire.OCC_VALUE_COMMITTED, nf_field.id, [], 40.0),
+    (kaya.wire.OCC_VALUE_COMMITTED, nf_node.id, ["b"], 7.0),
+]
+real_next_nf = kaya.runtime.next_occurrence
+kaya.runtime.next_occurrence = (
+    lambda: nf_occs.pop(0) if nf_occs else None)
+try:
+    app_nf._dispatch_loop()
+finally:
+    kaya.runtime.next_occurrence = real_next_nf
+
+check("a number field's value_committed reaches on_commit",
+      nf_commits == [40.0])
+check("a stamped number field's commit passes the copy's row first",
+      len(nf_row_commits) == 1
+      and isinstance(nf_row_commits[0][0], kaya.Row)
+      and nf_row_commits[0][0].key == "b"
+      and nf_row_commits[0][1] == 7.0)
+
 # --- S2: THE SWITCH ROLE, THE LINK'S href, THE SECTION BADGE ---------
 # (docs/tasks-s2-plan.md T1, T2, T3.) Three surfaces the generator hands
 # every binding as NUMBERS and each binding names by hand: a role name

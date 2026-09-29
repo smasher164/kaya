@@ -577,6 +577,10 @@ in docs/deferred.md.
    spelled `` `Text `` because `` `Str `` is the wire's own constructor and
    the boundary clause above refused it. Twenty-seven fake-stem negatives,
    counts printed.
+   AND THE NUMBER FIELD SINCE 2026-09-28 (docs/number-field-plan.md §7):
+   `number_field` in both zones with `min`, `max`, `step` and `on_commit`
+   where each binding spells the slider's, all nine; fake-name negatives,
+   counts printed.
    AND `axis` ON A SCROLL SINCE 2026-09-28 (docs/hscroll-plan.md §1): the
    direction a scroll runs, spelled where each binding's scroll options
    live in all nine, the one word everywhere (Haskell's paint roles are
@@ -662,9 +666,11 @@ in docs/deferred.md.
    FIELD'S COMMIT SINCE 2026-09-28 (docs/number-field-plan.md §7): its
    value_committed rides Return, focus loss and a step alone — the SwiftUI
    arm's commit and step paths called only from those doors, never from the
-   text binding or a harness verb, one emit and only on a moved value — and
-   a backend whose depth_stub("numberfield") goes must take a row. 29
-   watched negatives, counts printed),
+   text binding or a harness verb, one emit and only on a moved value — on
+   all four backends since the breadth (GTK's activate, focus leaving for
+   another widget and the stepper around value-changed; WinUI's
+   ValueChanged door; Compose's keyboard action, hardware Return and focus
+   loss). 48 watched negatives, counts printed),
    `tools/check-scroll-to.py` (THE APP'S SCROLL LANDS INSTANTLY, HOLDS
    UNTIL LAYOUT AND SHARES THE TIERS' PARK (docs/scroll-to-plan.md S4, S6,
    §3): tools/scenes/scrollto.steps asserts where a row lands and its

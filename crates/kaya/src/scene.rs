@@ -2014,11 +2014,12 @@ struct SliderRange {
     max: f64,
     step: f64,
     tick_spacing: f64,
+    value: Option<f64>,
 }
 
 impl Default for SliderRange {
     fn default() -> Self {
-        SliderRange { min: 0.0, max: 1.0, step: 0.0, tick_spacing: 0.0 }
+        SliderRange { min: 0.0, max: 1.0, step: 0.0, tick_spacing: 0.0, value: None }
     }
 }
 
@@ -2071,6 +2072,14 @@ fn divides_evenly(span: f64, unit: f64) -> bool {
 
 impl SliderRange {
     fn check(&self, id: u64) {
+        if let Some(value) = self.value {
+            assert!(
+                (self.min..=self.max).contains(&value),
+                "kaya: slider {id}: value {value} is outside its range {}..{} (docs/slider-plan.md, \
+                 What the core polices)",
+                self.min, self.max
+            );
+        }
         let span = self.max - self.min;
         if self.step > 0.0 {
             assert!(
@@ -2643,6 +2652,7 @@ impl Scene {
             Prop::Max => range.max = *x,
             Prop::Step => range.step = *x,
             Prop::TickSpacing => range.tick_spacing = *x,
+            Prop::Value => range.value = Some(*x),
             _ => return,
         }
         if !self.slider_dirty.contains(&key) {
@@ -2913,6 +2923,9 @@ impl Scene {
                             // (check_type guards every write), so the
                             // current value speaks for the binding.
                             check_prop_value(kind, prop, &current);
+                            if kind == WidgetKind::Slider {
+                                self.note_slider_prop((false, widget.0), prop, &current);
+                            }
                             if kind == WidgetKind::NumberField {
                                 self.note_number_prop((false, widget.0), prop, &current);
                             }
@@ -6417,8 +6430,11 @@ impl Scene {
                             panic!("kaya: binding to unknown signal {id:?}")
                         });
                         check_prop_value(node_kind, prop, current);
+                        let current = current.clone();
+                        if node_kind == WidgetKind::Slider {
+                            self.note_slider_prop((true, widget.0), prop, &current);
+                        }
                         if node_kind == WidgetKind::NumberField {
-                            let current = current.clone();
                             self.note_number_prop((true, widget.0), prop, &current);
                         }
                     }
@@ -12424,6 +12440,45 @@ mod tests {
     fn a_number_fields_bound_value_is_checked_at_bind() {
         let mut ops = vec![TxOp::CreateSignal { id: SignalId(1), initial: Value::F64(-1.0) }];
         ops.extend(number_field(&[(Prop::Min, 0.0)]));
+        ops.insert(ops.len() - 1, TxOp::SetProperty {
+            widget: WidgetId(1),
+            prop: Prop::Value,
+            value: PropValue::Signal(SignalId(1)),
+        });
+        Scene::new().apply(ops);
+    }
+
+    fn slider(props: &[(Prop, f64)]) -> Vec<TxOp> {
+        let mut ops = number_field(props);
+        ops[0] = TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Slider };
+        ops
+    }
+
+    /// docs/slider-plan.md, "What the core polices": a slider's value outside
+    /// its range dies at the root, read on the complete declaration.
+    #[test]
+    fn a_sliders_value_before_its_bounds_is_admitted() {
+        Scene::new().apply(slider(&[(Prop::Value, 50.0), (Prop::Min, 0.0), (Prop::Max, 100.0)]));
+        Scene::new().apply(slider(&[(Prop::Value, 0.5)]));
+    }
+
+    #[test]
+    #[should_panic(expected = "slider 1: value 140 is outside its range 0..100")]
+    fn a_sliders_value_outside_its_range_is_refused() {
+        Scene::new().apply(slider(&[(Prop::Min, 0.0), (Prop::Max, 100.0), (Prop::Value, 140.0)]));
+    }
+
+    #[test]
+    #[should_panic(expected = "slider 1: value 2 is outside its range 0..1")]
+    fn a_sliders_value_outside_the_default_range_is_refused() {
+        Scene::new().apply(slider(&[(Prop::Value, 2.0)]));
+    }
+
+    #[test]
+    #[should_panic(expected = "slider 1: value -1 is outside its range 0..1")]
+    fn a_sliders_bound_value_is_checked_at_bind() {
+        let mut ops = vec![TxOp::CreateSignal { id: SignalId(1), initial: Value::F64(-1.0) }];
+        ops.extend(slider(&[]));
         ops.insert(ops.len() - 1, TxOp::SetProperty {
             widget: WidgetId(1),
             prop: Prop::Value,

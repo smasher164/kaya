@@ -584,6 +584,19 @@ final class KayaDrive: XCTestCase {
             if let why = typingRefusal(a, "the app") { return (false, why) }
             a.typeText(text)
             return (true, "typed \(text.count) character(s)")
+        case "keyboard_done":
+            // The number field's Done on the keyboard's toolbar
+            // (docs/number-field-plan.md §4.2), a real tap on the toolbar's
+            // own button so no other "Done" in the app can answer.
+            let done = a.toolbars.buttons["Done"].firstMatch
+            guard done.waitForExistence(timeout: min(5, budgetNow())) else {
+                return (false, "no Done on a toolbar (keyboards=\(a.keyboards.count), "
+                    + "toolbars=\(a.toolbars.count))")
+            }
+            guard tapSafely(a, done, "the keyboard toolbar's Done") else {
+                return (false, "the keyboard toolbar's Done went away between the read and the tap")
+            }
+            return (true, "tapped the keyboard toolbar's Done")
         case "tap":
             guard let p = coordinate(a, words, 1) else { return (false, "tap X Y") }
             p.tap()

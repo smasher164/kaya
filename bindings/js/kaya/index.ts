@@ -4257,6 +4257,26 @@ export function slider(opts: SliderOptions = {}): Widget {
   return handle;
 }
 
+export type NumberFieldOptions = GrowOption & { value?: number | Signal<number> | FieldRef; min?: number; max?: number; step?: number; onCommit?: Handler };
+
+/** A number field (docs/number-field-plan.md): typed text committed on
+ * Return, focus loss or a step, each commit one onCommit, template copies
+ * getting the row first. An app write never echoes. */
+export function numberField(opts: NumberFieldOptions = {}): Widget {
+  const handle = widget(wire.KIND_NUMBER_FIELD);
+  if (opts.min !== undefined) records().push(wire.tx_set_min(handle.id, Number(opts.min)));
+  if (opts.max !== undefined) records().push(wire.tx_set_max(handle.id, Number(opts.max)));
+  if (opts.step !== undefined) records().push(wire.tx_set_step(handle.id, Number(opts.step)));
+  if (opts.value !== undefined) {
+    if (opts.value instanceof Signal) records().push(wire.tx_bind_value(handle.id, opts.value.id));
+    else if (opts.value instanceof FieldRef) records().push(wire.tx_bind_value_element(handle.id, opts.value._level(), opts.value._index));
+    else records().push(wire.tx_set_value(handle.id, Number(opts.value)));
+  }
+  if (opts.onCommit !== undefined) app()._register(handle, wire.OCC_VALUE_COMMITTED, opts.onCommit);
+  setGrow(handle, opts);
+  return handle;
+}
+
 export type DatePickerOptions = GrowOption & { value?: CivilDate | Signal<CivilDate> | FieldRef; min?: CivilDate; max?: CivilDate; onChange?: Handler };
 
 function pickerField(what: string, ref: FieldRef, want: Token, wanted: string): void {

@@ -71,6 +71,9 @@ LEGS = {
         "tints-compose",
         "tintsdark-compose",
         "scrollto-compose",
+        # The number field in the everyday locale and in German
+        # (docs/number-field-plan.md §5); MODS cuts the steps.
+        "numberfield-compose", "numberfieldde-compose",
         # Immersive mode (docs/fullscreen-plan.md §3): MODS cuts the user half.
         "fullscreen-compose",
         "sizepolicy-compose", "adaptive-compose", "feed-compose",
@@ -154,6 +157,7 @@ LEGS = {
         "assets-jvm", "dnd-jvm", "pickers-jvm", "sliders-jvm", "tooltips-jvm",
         "sheet-jvm",
         "format-jvm", "formatde-jvm", "formatar-jvm",
+        "numberfield-jvm", "numberfieldde-jvm",
     ],
     "go": [
         "go", "a11y-go", "a11yrows-go",
@@ -172,6 +176,7 @@ LEGS = {
         "dnd-go", "pickers-go", "sliders-go", "tooltips-go",
         "sheet-go",
         "format-go", "formatde-go", "formatar-go",
+        "numberfield-go", "numberfieldde-go",
     ],
     "python": [
         "varied-python", "portfolio-python",
@@ -182,7 +187,7 @@ LEGS = {
 # extra (docs/compliance-plan.md §4); the reads ask the platform, never
 # this.
 SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG",
-                "scrollrtl": "ar-EG"}
+                "scrollrtl": "ar-EG", "numberfieldde": "de-DE"}
 
 # The text-scale knob a scene carries (docs/compliance-plan.md §2.1): the
 # forced Configuration's fontScale and the Density every sp reads.
@@ -311,6 +316,10 @@ MODS = {
     # the append runs the app's own way back, which reads the insets again.
     "fullscreen": {"cut": ("user_fullscreen", "expect_fullscreen", ""),
                    "append": FULLSCREEN_APP_TAIL},
+    # A PHONE'S NUMBER FIELD HAS NO STEPPING DOOR (docs/number-field-plan.md
+    # §3 rule 7): the scene steps last, so the cut takes the steps alone.
+    "numberfield": {"cut": ("nudge", "expect_focused expect_ax", "")},
+    "numberfieldde": {"cut": ("nudge", "expect_focused expect_ax", "")},
     "identity": {"drop": ((("expect_title window#1",), "expect_app_icon",
                            "no auxiliary windows"),)},
     # A phone app is handed no FOREIGN drag source (docs/dnd-plan.md D9),
