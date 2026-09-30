@@ -7,14 +7,14 @@ docs/canvas-plan.md §16.
 
 Sources are cited inline. "MEASURED" marks a claim read off a probe run on
 this Mac (Darwin 25.6.0, macOS 26), probe source in
-scratchpad/video-native/probe/.
+scratchpad/video-native/probe/ (gone).
 
 Status: complete for the questions asked; the unsettled points are listed
 at the end.
 
 ## MEASURED: the macOS probe (run 2026-09-29, macOS 26 / Darwin 25.6.0, 2x display)
 
-Probe: scratchpad/video-native/probe/main.swift, compiled with the repo's
+Probe: scratchpad/video-native/probe/main.swift (gone), compiled with the repo's
 `kaya_swiftc` (tools/lib/swift-toolchain.sh). It writes a 2 s 320x240 H.264
 MP4 of one flat asymmetric colour (sRGB C83C1E) with AVAssetWriter, opens ONE
 non-activated window (`.accessory` policy, `orderFrontRegardless`) holding
@@ -64,7 +64,7 @@ What this settles on macOS:
 Two smaller probes, same rules (one non-activated window, own pid only,
 `pgrep` empty afterwards):
 
-- probe2 (scratchpad/video-native/probe2/main.swift):
+- probe2 (scratchpad/video-native/probe2/main.swift (gone)):
   `AVPictureInPictureController.isPictureInPictureSupported()` = true on this
   Mac, and a controller built with `init(playerLayer:)` over a PLAIN
   `AVPlayerLayer` (no AVKit view) reports `isPictureInPicturePossible = true`
@@ -80,7 +80,7 @@ Two smaller probes, same rules (one non-activated window, own pid only,
   was published for a silent clip" read the same. Settling it needs the
   system's view of Now Playing (the menu-bar module), which means driving
   the host UI; not done.
-- probe3 (scratchpad/video-native/probe3/main.swift): the accessibility tree
+- probe3 (scratchpad/video-native/probe3/main.swift (gone)): the accessibility tree
   of a window holding an `AVPlayerView(controlsStyle: .none)`, an
   `AVPlayerView(controlsStyle: .inline)` and a bare `AVPlayerLayer`, read from
   a second process through AXUIElement (`AXIsProcessTrusted = true`). The

@@ -2551,7 +2551,10 @@ unpicked.
     different action's label.
     - **Video widget**: designed 2026-09-03 in docs/video-editor-plan.md
     (the `video` kind, each platform's headless player decoding while
-    kaya presents the frames; §7's nine rulings), unbuilt. As filed:
+    kaya presents the frames; §7's nine rulings), unbuilt; REDESIGNED
+    2026-09-29 in docs/media-plan.md (a media player object, the
+    platform's own video view, a surface widget and a media session,
+    which the wrap-native bet below anticipated). As filed:
     unexamined — DESIGN has the surface-handle
     transport (~~the Canvas zero-copy arm~~ the pixel-handoff arm; the
     canvas widget stopped being that on 2026-08-26, docs/canvas-plan.md
@@ -14716,3 +14719,8 @@ KEY: net against the ceiling, exclusive token wait, iOS lane ceiling, DURATION A
 
 The Flyout holding ColorPicker stops at the window's bottom edge (the lane's window is 536px tall), so the channel boxes below the hex field cannot be reached; a full-screen grab of the VM confirmed nothing is drawn below the window. WinUI 3 constrains a popup to its root's bounds unless `ShouldConstrainToRootBounds` is false, which lets it draw as its own window. No scene sees it, because `set_color` never opens the flyout. Beside it, a smaller visual gap on Android: the synthesized sheet's palette does not mark the current colour, where GTK's dialog ticks it. Review page: https://claude.ai/artifact/79MLwMNtCeF251RFGmuikh.
 KEY: ShouldConstrainToRootBounds, colour picker flyout clipped, WinUI Flyout ColorPicker, palette current colour mark
+
+## RESEARCH: the app as a surface's producer (the maintainer, 2026-09-29; docs/media-plan.md §4)
+
+The surface widget takes GPU textures from a producer, zero-copy, on the display's clock. A player in frames mode is the first producer and is designed in full; the APP's own renderer (Metal, Direct3D, Vulkan or GL, wgpu from Rust) is the second, designed through the same contract and deliberately not built, because handing GPU handles to nine languages safely is unresearched. The pass must answer: who frees a texture and when a producer may reuse it, and how a garbage-collected binding is kept from holding a handle past its release; the per-platform completion fence (`MTLSharedEvent`, a DXGI keyed mutex or fence, a dmabuf `sync_file`, an `AHardwareBuffer` fence descriptor); keeping producer and compositor on one adapter and surviving device loss; how a frame-due callback on the display clock fits the app-thread transaction rules every binding enforces; format and colour space negotiation; the C floor's spelling and each binding's handle type; and wgpu's hal-level texture import and export for a Rust app. Trigger: the surface in frames mode built, and an app that needs its own renderer.
+KEY: app as producer, surface producer, GPU texture handle, frame due, IOSurface, DXGI, dmabuf, AHardwareBuffer, wgpu interop, media-plan §4

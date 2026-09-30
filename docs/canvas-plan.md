@@ -2305,3 +2305,13 @@ canvas widget does not use it, will not grow it, and nothing in §15's
 lever list changes that: a GPU DISPLAY path (lever v) is the core
 choosing how to put its OWN raster on screen, which is a different
 question from an app handing kaya frames it produced.
+
+**Amended 2026-09-29 (docs/media-plan.md §4).** The split stands, and the
+widget on the second side is now the SURFACE, not the image: the image
+widget stays the byte-copy arm (the blob channel), and the zero-copy,
+high-rate arm is a `surface` widget whose producer hands it GPU textures
+on the display's clock. Video is no longer that arm's first producer by
+default, since a player is shown through the platform's own video view;
+a player feeds the surface only in frames mode, and a camera and the
+app's own renderer are the producers after it. canvas-gpu-plan's G6
+("dmabuf stays the Image widget's") reads "the surface's".

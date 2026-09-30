@@ -1,0 +1,319 @@
+# Media: the player, the video view, the surface and the session (design pass, 2026-09-29)
+
+Status: DESIGNED 2026-09-29, unbuilt. It replaces the headless design of
+docs/video-editor-plan.md §2 and §3, and it answers that plan's rulings 2
+and 3 and the roadmap's audio-playback question. The five pieces of shape
+in §0 are RULED by the maintainer; §8 holds the rulings still open, each
+with a recommendation. The research behind every platform claim is
+docs/probes/video-native-2026-09-29/ (apple.md, android-linux.md,
+windows-survey.md); "measured" below means measured there, on this
+tree's hosts and lanes.
+
+The reference shape is the web's: `HTMLMediaElement` plays, a `<video>`
+box shows it in ordinary layout, `navigator.mediaSession` talks to the
+operating system, and a WebGPU `<canvas>` takes a page's own renderer.
+kaya splits playing from showing, keeps the session separate, and makes
+an app's renderer a producer for the surface widget.
+
+## §0. The rulings of 2026-09-29
+
+1. RULED 2026-09-29 (the maintainer): the video editor is written in
+   Rust (docs/video-editor-plan.md ruling 1).
+2. RULED 2026-09-29: a MEDIA PLAYER OBJECT, not a widget (§2). An
+   audio-only player is the same object with no picture, which answers
+   the audio-playback question: a player object, not a kind.
+3. RULED 2026-09-29: THE VIDEO VIEW is the default way to show a player,
+   on every platform, through the platform's own DRM-capable view with
+   its built-in controls off (§3).
+4. RULED 2026-09-29: THE SURFACE WIDGET, a rectangle whose pixels come
+   from a producer as GPU textures, fully composited (§4). "Frames mode"
+   is the surface with a player as its producer. The app as a producer is
+   designed here and not built.
+5. RULED 2026-09-29: THE MEDIA SESSION, one per app, shaped like the
+   web's Media Session API and shared by video and audio players (§5).
+   Keep-awake belongs to the player (§2, rule 5), as the ruling's own
+   recommendation says.
+
+## §1. What the research found
+
+The headless design had the platform's player hand frames to kaya's image
+widget, because a native player view was taken to be "a hole in kaya's
+surface". Measured on 2026-09-29, it is not a hole on four of the five
+platforms, and the native view brings services the frames route loses:
+
+| | native view | composites with kaya's widgets | captions in the user's style | DRM | PiP | HDR | test read of the picture |
+|---|---|---|---|---|---|---|---|
+| macOS, iOS | bare `AVPlayerLayer` | yes: rounded clip, scroll, overlay, measured on macOS; iOS by the same Core Animation model, unmeasured | yes, drawn by the layer from MediaAccessibility | FairPlay | `AVPictureInPictureController(playerLayer:)`, measured possible | EDR, automatic | not in `cacheDisplay` or `CALayer.render`; yes in a window-server capture by window id, colour-managed (sRGB C83C1E read as P3 BE4E2F) |
+| GTK 4 | `GtkPicture` over a media stream or `gtk4paintablesink`'s paintable | yes, and it is the same object the headless design used | no system caption style exists; playbin draws subtitles | none on the desktop | none | no | yes, through GTK's own renderer (2B374D for 2C3B4F) |
+| WinUI 3 | `MediaPlayerElement`, transport controls off | a leaf visual in the XAML tree: scrolls, moves, rectangular clip, drawn over; nothing behind it, no see-through, no acrylic sampling; a rounded ancestor clip unsettled | yes, `CueStyler` reads the system caption settings | PlayReady | window-level only (CompactOverlay) | yes | unsettled: whether `PrintWindow(PW_RENDERFULLCONTENT)` includes the swap chain |
+| Android | media3 `PlayerSurface`, SurfaceView type | a hole punched by SurfaceFlinger that still follows scroll, move and a rectangular clip (from API 24), a rounded clip only over an opaque ground (measured), views on top | no: `SubtitleView` is View-only; kaya draws cues | Widevine L1 (SurfaceView only) | whole-activity | yes, overlay plane | no: kaya's window `PixelCopy` reads the hole (000000) |
+
+The frames route gives up captions in the user's style, DRM, PiP and
+HDR on Apple and Windows (Windows' frame-server mode is reported broken
+for subtitles, HDR and fit, microsoft-ui-xaml#6610). Flutter, whose
+texture route was kaya's old design, added an `AVPlayerLayer` platform
+view in 2025 (flutter/packages#8237) for these reasons. Media keys and
+Now Playing do not depend on the view on any platform (§5).
+
+## §2. The media player
+
+A player is an app-held object with an id, created and released in a
+transaction like any other scene entity, with no place in the layout. It
+decodes on the platform, in hardware where the platform does, plays the
+audio and keeps audio and video in sync.
+
+| backend | player | notes |
+|---|---|---|
+| macOS, iOS | `AVPlayer` over an `AVPlayerItem` | rate, volume relative to the system volume |
+| GTK 4 | `GstPlay` / `playbin3` driven by kaya with `gtk4paintablesink` as its video sink | `GtkMediaFile` has no rate, tracks or subtitles, so it is not used |
+| WinUI 3 | `Windows.Media.Playback.MediaPlayer` | the app must close a player it set on an element; kaya does |
+| Android | media3 `ExoPlayer` 1.10.1 | the highest media3 kaya's Kotlin 2.0.21 / compileSdk 36 pins take; resolved and built against them |
+
+**Props** (the app writes): `source` (an asset name or a picked-file
+handle; a path, never a stream, since AVFoundation has no in-memory
+initializer), `speed`, `volume` (0..1, relative to the system volume everywhere),
+`muted`, `loop`.
+
+**Commands:** `play`, `pause`, `seek(ms)`.
+
+**Readings** (mirrors the app reads): `position` (ms), `duration` (ms),
+`state` (`idle`, `loading`, `ready`, `playing`, `paused`, `ended`,
+`failed`), `media_width`, `media_height` (0 for audio).
+
+**Occurrences:** `ended`, `failed(reason)`, `seek_completed`, and
+`position` ticking at a fixed rate kaya states (a playhead slider binds
+to it).
+
+**Rules.**
+
+1. One state machine, whatever the platform reports: GStreamer's clean
+   EOS after a missing-codec warning is `failed` with the platform's
+   sentence (docs/traps.md, "A GStreamer pipeline missing its codec
+   reaches EOS with status 0").
+2. The player never draws. A player with no view is audio only; a player
+   shown by a video view or feeding a surface has a picture.
+3. The app owns play state. Nothing outside the app moves the player
+   except through occurrences the app hears or the session's default
+   handlers the app left in place (§5).
+4. Several players may exist and play at once (the editor's program and
+   clip monitors). Only the one attached to the session speaks to the
+   operating system (§5).
+5. **Keep-awake is the player's.** While a player is playing and a video
+   view or surface on screen shows it, kaya keeps the display awake:
+   `AVPlayer.preventsDisplaySleepDuringVideoPlayback` (default true on
+   iOS, false on macOS, so kaya sets it on both), `keepScreenOn` on the
+   Android view (neither `PlayerView` nor `PlayerSurface` sets it),
+   `GtkApplication.inhibit(IDLE)` as GNOME's Showtime does, and the
+   player's display type set to video on Windows ("preventing the screen
+   saver from activating during playback"). An audio-only player keeps
+   nothing awake. This is each platform's own behaviour for a video
+   player, so no prop is needed.
+6. On iOS a playing player activates the `.playback` audio category,
+   which keeps sound on with the Silent switch on and interrupts other
+   apps' audio (MAUI's MediaElement sets it unconditionally). Android's audio
+   focus and becoming-noisy handling are the two ExoPlayer builder calls,
+   both on; what the other platforms do on a headphone unplug is measured
+   before a rule is written for it.
+
+Every lane asserts a player's state, position within a tolerance,
+duration, media size and occurrences; what else a scene may assert is
+open ruling 2 (§8).
+
+## §3. The video view
+
+A widget kind, `video`, showing one player. It lays out, scrolls and
+hit-tests as any kaya widget, carries kaya's accessibility props (no
+platform view contributes anything to a screen reader: measured on macOS
+and Android, and WinUI's peer names only the control type), and takes
+`fit` (`contain`, `cover`, `fill`, the image widget's words).
+
+| backend | lowering | `fit` | first-frame signal |
+|---|---|---|---|
+| macOS, iOS | a representable backed by a bare `AVPlayerLayer`; never `AVPlayerView` (it keeps Space, arrows and J/K/L at every controls style), `AVPlayerViewController` (child view controller parenting, its own Now Playing session) or SwiftUI `VideoPlayer` (no way to hide its controls; dims a paused picture) | `videoGravity` | `isReadyForDisplay` |
+| GTK 4 | `GtkPicture` holding the sink's paintable; never `GtkVideo`, which has no property to turn its controls off | `content-fit` | the paintable's size leaving 0x0 |
+| WinUI 3 | `MediaPlayerElement` with `AreTransportControlsEnabled` false and the player set by `SetMediaPlayer` | `Stretch` | measured first |
+| Android | media3 `PlayerSurface` with `SURFACE_TYPE_SURFACE_VIEW` | the containing frame's resize mode | `onRenderedFirstFrame` |
+
+**What each platform cannot do, stated once.** On Apple and GTK the video
+view is an ordinary composited widget: see-through, rounded over anything,
+animated, drawn over. On WinUI it is "external content": kaya can draw
+over it, scroll, move and clip it to a rectangle, but nothing of kaya's
+can show behind or through it, acrylic over it samples transparent black,
+and whether a rounded ancestor clip applies is unsettled. On Android the
+SurfaceView is a hole: no see-through before API 34 (kaya's minSdk is
+26), a rounded clip only over a solid colour, no interleaving between
+kaya layers (the video is behind the whole window or above all of it),
+no post-layout transforms of views over it, and no test read-back. An
+app that needs any of these asks for the surface (§4).
+
+**Captions.** On Apple and WinUI the platform draws the selected caption
+track in the user's system style with no kaya code. On Android kaya draws
+cues from the player's text track (`Player.Listener.onCues`), styled from
+`CaptioningManager`'s user style and font scale; the track is already
+chosen from the system preference by media3. On GTK kaya draws cues from
+playbin's text track, scaled with the GTK text-scale setting as Showtime
+does, since GNOME has no system caption style. A shared scene asserts
+which caption track is selected and what cue text is current, never how
+the caption looks.
+
+**Picture in Picture** is a later follow-on: direct on the Apple layer,
+a window feature on Android and WinUI, absent on GTK.
+
+## §4. The surface widget
+
+A widget kind, `surface`: a rectangle in kaya's layout whose pixels
+arrive from a PRODUCER as GPU textures, zero-copy, and are composited
+like kaya's own content: see-through, rounded over anything, animated,
+layered between widgets and readable by a test.
+
+**The contract.** The surface tells its producer its size in pixels, its
+pixel scale, its colour space, and when a frame is due, in step with the
+display (`CADisplayLink` / the view's display link, `GdkFrameClock`,
+`Choreographer`, `CompositionTarget.Rendering`). The producer answers
+with a texture of that size, or with nothing, and the surface keeps its
+last frame.
+
+| backend | the texture | how the backend composites it |
+|---|---|---|
+| macOS, iOS | an `IOSurface` (a `CVPixelBuffer` or a Metal texture's backing) | a layer's `contents`, inside the SwiftUI tree |
+| GTK 4 | a dmabuf, or a GL texture in GDK's context | `GdkDmabufTexture` or `GdkGLTexture` in a `GtkPicture` |
+| WinUI 3 | a Direct3D 11 texture (DXGI) | a `CompositionDrawingSurface` from the compositor's graphics device: internal content, so clipping, effects and read-back work (a `SwapChainPanel` is external content and is not used) |
+| Android | an `AHardwareBuffer`, or a `Surface` over a `SurfaceTexture` | drawn by HWUI inside Compose; the 2026-09-03 probe read a clip's own bytes off this route through kaya's window `PixelCopy` |
+
+**Frames mode** is the surface with a player as its producer:
+`AVPlayerItemVideoOutput` (additive: the player keeps its clock), the
+GStreamer sink's buffers, `MediaPlayer` in frame-server mode, ExoPlayer
+rendering into the surface's own `Surface`. It gives up DRM (protected
+frames never reach an app texture on any platform), and captions and PiP
+become kaya's to provide: kaya draws cues as in §3 on every platform, and
+PiP is not offered. Frames mode is SDR; HDR through it is a later
+measurement (Windows' frame-server HDR is reported broken, and Apple's
+needs an EDR-opted layer).
+
+**The app as a producer** (designed, NOT built). The same contract, with
+the app's own renderer (Metal, Direct3D, Vulkan or GL, wgpu from Rust)
+answering each frame-due with a texture. Handing GPU handles to nine
+languages safely needs its own research pass, which must answer: who
+frees a texture and when the producer may reuse it, and how a
+garbage-collected binding is kept from holding a handle past its
+release; the fence that says a frame is finished (`MTLSharedEvent`, a
+DXGI keyed mutex or fence, a dmabuf `sync_file`, an `AHardwareBuffer`
+fence descriptor); keeping producer and compositor on one adapter (the
+LUID on Windows, the registry id on the mac) and surviving device loss;
+how a frame-due on the display clock fits the app-thread transaction
+rules every binding enforces; format and colour space negotiation; the
+C floor's spelling and each binding's handle type; and wgpu's hal-level
+import and export for a Rust app.
+
+The ledger entry is docs/deferred.md's "RESEARCH: the app as a
+surface's producer".
+
+**Canvas ruling 16, restated.** Ruling 16 said the zero-copy arm is the
+IMAGE widget's high-rate path, with video as its first producer. The
+split it made stands (the canvas is pixels kaya rasterized, the other
+widget is pixels someone else produced), and the widget on the second
+side is now the surface: the image widget stays the byte-copy arm (the
+blob channel), and the high-rate zero-copy arm is the surface. Video's
+default route is the video view, so the surface's first producer is a
+player in frames mode, then a camera, then the app. canvas-gpu-plan's G6
+("dmabuf stays the Image widget's") now reads "the surface's"; G4's one
+device owner in the core is unchanged, and the surface names texture
+handles only, never a renderer type.
+
+## §5. The media session
+
+One per app, separate from every player, shaped like the web's Media
+Session API:
+
+- `metadata`: title, artist, album, artwork (an asset name);
+- `playback_state`: `none`, `playing`, `paused`;
+- `position_state`: duration, rate, position, taken from the attached
+  player when one is attached;
+- action handlers, each an occurrence the app hears: `play`, `pause`,
+  `stop`, `seek_to(ms)`, `seek_forward`, `seek_backward`, `next`,
+  `previous`. An action with no handler is not offered to the system.
+
+**The attach rule (recommended in the ruling, taken).** The app attaches
+one player to the session explicitly; a player never takes it by itself.
+When a player is attached and the app registers no `play`, `pause` or
+`seek_to` handler, the session applies those to the attached player,
+which is the web's RECOMMENDED default and Windows' own default command
+manager. Detaching, or attaching none, withdraws the app from the
+system's controls.
+
+| platform | mapping |
+|---|---|
+| macOS, iOS | `MPNowPlayingInfoCenter` published by hand (nothing auto-publishes for a bare layer on macOS), re-set on seek, rate and item change; `MPRemoteCommandCenter` handlers, disabled when the app has none. macOS: `playbackState` set on every start and stop, or the media keys do not route. iOS: the `.playback` category and the `audio` background mode, declared by the packaging manifest when an app uses a session. |
+| WinUI 3 | the attached player's own `MediaPlayer.SystemMediaTransportControls`; every unattached player has its command manager off, since Windows shows a tab per active `MediaPlayer`. A session with no player uses `ISystemMediaTransportControlsInterop::GetForWindow` on kaya's top-level window (`GetForCurrentView` throws in WinUI 3). |
+| GTK 4 | MPRIS2 on the session bus through the `mpris-server` crate: `org.mpris.MediaPlayer2.<app id>`, `DesktopEntry` from the declared identity (GNOME Shell names the card from it), `CanPlay` true while a player is attached, since the Shell shows only players with `CanPlay`. |
+| Android | media3 `MediaSession` over the attached player; `MediaSessionService` as a `mediaPlayback` foreground service for background play and the `MediaStyle` notification, with `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PLAYBACK` and, from Android 13, `POST_NOTIFICATIONS`. |
+
+**Stated limits.** On Android the media keys reach only an app playing
+audio: a session over a clip with no audio track was measured never
+chosen as the media button session, so a silent preview receives no
+keys. Volume keys change the system volume on every platform (Android's
+media stream once audio plays); a player's `volume` is relative to it and
+no platform routes the keys to the app.
+
+## §6. What is measured first
+
+1. WinUI: whether a rounded ancestor clip applies to `MediaPlayerElement`,
+   whether `PrintWindow(PW_RENDERFULLCONTENT)` includes its picture, and
+   what name the Windows media flyout shows for an unpackaged process.
+2. iOS simulator: the bare `AVPlayerLayer`'s clip, scroll and overlay,
+   and whether `displayedPixelBuffer()` answers while paused.
+3. Android: the chosen clip decoding on the emulator pool (open ruling
+   5), and the `MediaStyle` notification on the pool.
+4. Linux: `mpris-server` on the lane's session bus, read back with
+   `busctl`, since the lane image has no GNOME Shell.
+5. Each platform's first-frame signal and headphone-unplug behaviour.
+
+## §7. Sequencing and bindings
+
+Depth on the mac: the player, the video view and the session in the
+core, SwiftUI and Rust, with one scene; then the breadth to GTK, WinUI and
+Compose, the iOS legs and the other eight bindings (the player is an
+object handle, the session one per app; every binding does, the C floor
+spells it through kaya.h); then the surface in frames mode, depth then
+breadth; then the editor. The app as a producer waits for its research.
+
+Not promised here: kaya decoding video or FFmpeg in the core; DRM
+licence acquisition (FairPlay, Widevine and PlayReady key servers are
+the app's); composition and export (docs/video-editor-plan.md §8);
+Picture in Picture in the first slices.
+
+## §8. Rulings still open
+
+1. **The codec floor.** RECOMMENDED: state H.264 video with AAC audio in
+   MP4 as the floor every platform plays with no extra install, and ship
+   a capability query (`can_play(mime, codecs)`, the web's
+   `canPlayType`) so an app can offer more where the platform has it
+   (Apple plays no VP9 or WebM; Windows lacks HEVC without a Store
+   extension).
+2. **What a video scene may assert per mode.** RECOMMENDED: geometry,
+   state and timing everywhere; on the video view a pixel check by window
+   capture where the picture is readable (Apple by window id, compared in
+   a stated colour space with a tolerance wider than ±1; GTK through its
+   own renderer; WinUI only if §6.1 says `PrintWindow` sees it); on
+   Android's video view a frames-arriving signal instead; on the surface
+   the pixels exactly, as a canvas.
+3. **Filmstrips.** RECOMMENDED: a canvas `draw_image` op, so a timeline
+   draws its filmstrip, waveform and playhead in one canvas; a row of
+   image widgets remains the fallback that works today.
+4. **Thumbnail and waveform extraction.** RECOMMENDED: a short research
+   pass before ruling, pricing the platform APIs per backend
+   (`AVAssetImageGenerator`, media3's frame extraction, a GStreamer
+   `appsink`, `MediaComposition.GetThumbnailsAsync`, and the audio
+   decode each needs for peaks) against FFmpeg, whose licence depends on
+   the build: LGPL 2.1 without `--enable-gpl`, GPL with it, not
+   redistributable with `--enable-nonfree`, and on iOS the LGPL's
+   relinking clause is hard to meet (docs/probes/video-playback-2026-09-02-decoders.md §B6).
+5. **The one test clip.** RECOMMENDED: one short H.264/AAC MP4, a flat
+   asymmetric colour with an audio track (Android's media keys need one),
+   shared by all five lanes under guests/assets, after checking the
+   emulator pool plays it with the audio track present.
+6. **The name of the choice between the view and the surface.**
+   RECOMMENDED: no setting on `video` at all; the kind is the choice, so
+   an app writes `video(player)` for the view and `surface(player)` for
+   frames mode, and the surface's other producers read the same way. If a
+   prop on `video` is preferred instead, `frames` (a boolean).

@@ -26,115 +26,30 @@ What each part of it forces out of kaya:
 |---|---|
 | dragging a clip along a track, between tracks, from the bin, from Finder/Files | docs/dnd-plan.md's arms on five backends, with drop position, auto-scroll during a drag, and touch on the phones |
 | trim handles, playhead, zoom, volume | the slider contract that does not exist yet (§4) |
-| the clip monitor and the program monitor | the `video` kind (§2) over the image widget's high-rate path (§3) |
+| the clip monitor and the program monitor | a media player shown by a video view (docs/media-plan.md) |
 | the filmstrip and waveform under each clip | offline extraction at import, drawn with the canvas (§5) |
 | importing a clip | the file dialogs and picked-file reads that exist |
 | the bin and the track list | collections, records and tables that exist |
 
-The app's language: one that runs on all five lanes today — Rust, Go or
-Python (the portfolio is Python; kaya's text editor is Go). RULING 1 in §7.
+The app's language: Rust (RULING 1 in §7, RULED 2026-09-29).
 
-## §2 The `video` kind: the platform decodes, kaya presents
+## §2 and §3 Video: replaced by docs/media-plan.md (2026-09-29)
 
-RULED SHAPE (from the maintainer's "owning the rendering" clarification):
-kaya does NOT host a platform player VIEW, and kaya does NOT decode video
-in the core. Each platform's player runs HEADLESS — it owns decode, audio,
-the clock and A/V sync — and hands its frames to kaya as a platform
-surface, which kaya presents through the image widget's high-rate path.
-Video is then an ordinary kaya widget: it clips, scrolls, rounds, and can
-be drawn over, and every observable kaya has about a widget's geometry
-holds for it.
-
-Why not the other two routes the research priced:
-
-- A hosted player VIEW (MAUI's MediaElement shape) is a hole in kaya's
-  surface on Android and a rectangle kaya may not draw on anywhere; the
-  research's D8 called it a carve-out from "kaya rasterizes, backends
-  blit". The maintainer did not mean it.
-- kaya decoding in the core (four platform decoders behind a trait, or
-  FFmpeg) drags in the audio milestone through the A/V clock, has a real
-  licensing problem for FFmpeg on iOS, and is the design Qt built over four
-  native backends and retreated from. It is not this milestone.
-
-The headless player per backend, and the surface it hands over:
-
-| backend | headless player | frames arrive as |
-|---|---|---|
-| macOS, iOS (SwiftUI) | `AVPlayer` + `AVPlayerItemVideoOutput` (additive: the player keeps its clock while frames are pulled) | `CVPixelBuffer` / `IOSurface` |
-| Android (Compose) | media3 `ExoPlayer` rendering to a `Surface` kaya owns (`SurfaceTexture` / `AHardwareBuffer`) | the external texture |
-| Linux (GTK4) | `gstreamer-rs` driving `playbin3` (rate, accurate seek, EOS/error on the bus; a rate-2.0 FLUSH\|ACCURATE seek measured accepted) | `gtk4paintablesink`'s `gdk::Paintable` (Debian trixie packages it as `gstreamer1.0-gtk4`; its rank is none, so `video-sink` is set explicitly) |
-| Windows (WinUI 3) | `MediaPlayer` in frame-server mode (`IsVideoFrameServerEnabled`: exclusive by design — the player renders nothing itself, which is what we want) | `IDirect3DSurface` |
-
-The wire contract (one semantics, four spellings; RULING 2 fixes it):
-
-- props: `source` (an asset name or a picked-file handle — a PATH, never
-  a stream: AVFoundation has no in-memory or descriptor initializer),
-  `autoplay`, `loop`, `muted`, `volume` (0..1), `speed`, `fit`
-  (`contain`|`cover`|`fill`, the image widget's own vocabulary).
-- commands: `play`, `pause`, `seek(ms)`, `stop`.
-- mirrors (signals the app reads): `position` (ms), `duration` (ms),
-  `state` (`idle`|`loading`|`playing`|`paused`|`ended`|`failed`),
-  `media_width`, `media_height`.
-- occurrences: `ended`, `failed(reason)`, `seek_completed`, and
-  `position` ticking at a rate the platform chooses (the app's playhead
-  slider is bound to it; §4).
-- NO platform transport chrome, ever: the editor draws its own scrubber.
-- NO "give me the frame playing now" call in v1: Apple's output is
-  additive and Windows' frame server is exclusive, so the uniform answer is
-  offline extraction against a FILE (§5).
-- Chrome ownership drags system integration with it: keep-awake during
-  playback and Now Playing metadata become explicit props or are silently
-  lost (the research's D2). RULING 3.
-
-The codec floor: the intersection of what every target decodes with no
-extra install is H.264 in MP4 with AAC. Apple plays no VP9 or WebM;
-Windows lacks HEVC (what an iPhone records by default) without a paid
-Store extension kaya cannot buy for the user; Android and GStreamer differ
-again. The kind states the floor AND ships a capability query, the way
-`aux_windows` does. RULING 4.
-
-## §3 The image widget's high-rate path (canvas ruling 16, built)
-
-docs/canvas-plan.md §16: "the zero-copy arm was never a second canvas. It
-is the IMAGE widget learning a high-rate update path for content KAYA DID
-NOT DRAW … platform surface handles — IOSurface, DXGI shared handles,
-dmabuf — is the zero-copy arm and is still deferred." This milestone
-builds it, with video as its first producer and a camera as the obvious
-second.
-
-The mechanism, in plain words: today an image widget's pixels arrive on
-the wire as bytes (the blob channel) and the backend uploads them. On the
-high-rate path the pixels never cross the wire at all: a producer on the
-platform (the headless player) writes frames into a surface the platform
-compositor can present directly, and the image widget is told "present
-this surface" once; every later frame is the producer's business, on the
-producer's clock, with no kaya code running per frame. That is Flutter's
-`Texture` widget, named by the ruling as the precedent.
-
-What it needs per backend: a way to hand an image widget a surface
-handle instead of bytes, and the widget's own layout, clipping and hit
-testing unchanged around it. What it gives up, stated once: kaya cannot
-read those pixels back the way it reads the canvas (`expect_ink` samples
-a raster kaya produced), so a video scene asserts geometry, state and
-timing, plus ONE flat-colour ink read per lane against a synthetic clip
-to prove frames reached the screen — and on Android that read is the
-probe in §6 before it is a promise. RULING 5.
-
-The harness rule this keeps: the image widget's high-rate path is a
-producer-owned surface INSIDE kaya's layout, not a hole beside it, so no
-backend may take the video out of kaya's clip. On Android that means a
-`SurfaceTexture`-backed external texture (composited by Compose), NOT a
-`SurfaceView` (a hole punched by SurfaceFlinger); the research's §1.0d
-disagreement about reading a SurfaceView's pixels becomes moot by
-construction. The probe in §6 confirmed both halves on 2026-09-03: the
-window `PixelCopy` reads the clip's own bytes off a Compose-composited
-external texture (2D3B50 against a host decode of 2C3B4F, inside the ink
-tolerance) and reads a transparent hole (000000, alpha 0, 159 of 159
-samples) off a SurfaceView while a SurfaceFlinger screencap shows the clip
-— but under the emulator pool's software GPU a frame was actually up in 5
-of 318 samples (~1.7 presented frames per second, `HWUI: Unknown
-dataspace 0`), so a per-run ink assertion on that lane would be a flake by
-construction. RULING 5 is amended accordingly.
+These two sections designed the `video` kind as a headless platform
+player handing its frames to the image widget's high-rate path, on the
+belief that a native player view is a hole kaya cannot draw on. The
+research of 2026-09-29 (docs/probes/video-native-2026-09-29/) measured
+otherwise: the platform's own view composites with kaya's widgets on
+four of five platforms (a bare `AVPlayerLayer` on Apple, a `GtkPicture`
+on GTK, `MediaPlayerElement` on WinUI with stated limits; only Android's
+SurfaceView is a hole), and it brings captions in the user's style, DRM,
+Picture in Picture and HDR for free, all of which the frames route would
+have lost. Flutter added an `AVPlayerLayer` platform view to its texture
+player in 2025 for the same reasons. The maintainer ruled the new shape
+the same day: a media player object, the platform's video view as the
+default, a surface widget for composited frames, and a media session.
+docs/media-plan.md is the design; the Android and Linux probes of §6
+remain its evidence.
 
 ## §4 Sliders: the contract that does not exist yet
 
@@ -172,12 +87,12 @@ data — nothing decodes while the user drags.
 The one gap on kaya's side: the canvas has no image op, so a filmstrip is
 either a row of `image` widgets (works today) or a new `draw_image` op
 (a spec change through eight bindings and three interpreter copies).
-RULING 7.
+Now docs/media-plan.md §8, open ruling 3.
 
 Extraction itself is per-platform code in the APP's language, not in
 kaya's core — it is an editor feature, not a GUI feature — unless the
 maintainer wants `kaya.thumbnail(path, at_ms)` on the asset floor.
-RULING 8.
+Now docs/media-plan.md §8, open ruling 4.
 
 ## §6 Sequencing: the probes, then depth, then breadth
 
@@ -217,9 +132,8 @@ amended for the §3 shape):
    plays. And the frame-arrival observable that needs no pixel read: the
    sink's paintable goes 0x0 -> 320x240 on the first frame.
 
-Then the ladder this tree always walks: the image widget's high-rate
-path and the `video` kind on macOS (SwiftUI) with the Rust binding and
-one scene, green on the mac lane; then the sliders' contract the same
+Then the ladder this tree always walks: docs/media-plan.md §7's order for
+the player, the video view and the session; then the sliders' contract the same
 way; then the fan-out to the four other backends and eight other
 bindings; then drag and drop on the timeline (docs/dnd-plan.md's own
 sequence); then the app itself, one screen at a time, with its scene
@@ -227,32 +141,26 @@ scripts shared verbatim. The matrix before anything is called landed.
 
 ## §7 Rulings for the maintainer
 
-1. The app's language: Rust, Go or Python. (Python keeps the portfolio's
-   shape; Go keeps the editor's; Rust is the depth binding.)
-2. The `video` kind's surface as §2 spells it — props, commands,
-   mirrors, occurrences — or changes to it.
-3. Keep-awake and Now Playing metadata: explicit props (`keep_awake`,
-   `title`/`artist`) in v1, or dropped from v1 and recorded as a gap.
-4. The codec floor: state H.264/MP4/AAC as the floor AND ship a
-   capability query, or the floor alone.
-5. What a video scene may assert: geometry, state and timing on every
-   lane, plus one flat-colour ink read on the lanes whose host presents
-   frames reliably (mac, iOS, linux, windows) and a frame-arrival
-   observable instead on Android (recommended, after probe 1), or
-   geometry and state only everywhere.
+1. The app's language: Rust, Go or Python. RULED 2026-09-29 (the
+   maintainer): Rust.
+2. The `video` kind's surface. RESOLVED 2026-09-29 by docs/media-plan.md
+   §0 rulings 2 and 3: a media player object shown by a video view,
+   replacing the headless kind.
+3. Keep-awake and Now Playing metadata. RESOLVED 2026-09-29 by
+   docs/media-plan.md: keep-awake belongs to the player (§2 rule 5), Now
+   Playing to the media session (§5).
+4. The codec floor. MOVED to docs/media-plan.md §8, open ruling 1.
+5. What a video scene may assert. MOVED to docs/media-plan.md §8, open
+   ruling 2.
 6. The range slider: a separate `range` kind (recommended) or a mode of
    `slider`. RULED 2026-09-28 (the maintainer): a separate `range` kind,
    horizontal, two thumbs for trim in and out. The vertical fader is a
    different need, spelled as the `axis` a row, column and scroll take,
    now legal on a slider (recommended, no ruling asked).
-7. Filmstrips: a row of `image` widgets (works today) or a new canvas
-   `draw_image` op.
-8. Thumbnail and waveform extraction: in the app's language per
-   platform (recommended for this milestone), or a `kaya.thumbnail` on
-   the asset floor.
-9. The test asset: one H.264/MP4 clip shared by all five lanes (the
-   floor) — requires verifying the Android emulator's H.264 path first —
-   or two assets with each lane picking.
+7. Filmstrips. MOVED to docs/media-plan.md §8, open ruling 3.
+8. Thumbnail and waveform extraction. MOVED to docs/media-plan.md §8,
+   open ruling 4.
+9. The test asset. MOVED to docs/media-plan.md §8, open ruling 5.
 
 ## §8 What this milestone does not promise, on the record
 
@@ -262,11 +170,12 @@ scripts shared verbatim. The matrix before anything is called landed.
   FFmpeg, Descript and Clipchamp from their own WebCodecs compositors), and
   the four platform composition APIs disagree on frame exactness and seek
   behaviour too much to hide behind one semantics. The program monitor
-  cuts between two headless players at the playhead; that is the editor's
+  cuts between two players at the playhead; that is the editor's
   honest v1.
 - Export. A media-engine job, and the same non-promise.
 - kaya decoding video, or FFmpeg in the core. Recorded as declined with
   the research's reasons, not deferred.
 - JavaScript anywhere in this app, or on the phones (docs/js-plan.md §5).
-- A `SurfaceView` on Android, or any route that takes the video out of
-  kaya's clip.
+- (Withdrawn 2026-09-29: the Android video view is a `SurfaceView`,
+  with its limits stated in docs/media-plan.md §3; an app that needs the
+  video inside kaya's composition uses the surface.)
