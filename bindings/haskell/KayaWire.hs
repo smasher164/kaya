@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xfd32bf7c75c54fbb
+specHash = 0x1d479d566df30301
 
 valueBool :: Word32
 valueBool = 1
@@ -250,6 +250,8 @@ propHighLabel :: Word32
 propHighLabel = 50
 propFit :: Word32
 propFit = 51
+propPlayer :: Word32
+propPlayer = 52
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -550,6 +552,8 @@ mediaFailureNetwork :: Word32
 mediaFailureNetwork = 4
 mediaFailureDecodeError :: Word32
 mediaFailureDecodeError = 5
+mediaFailureResources :: Word32
+mediaFailureResources = 6
 playerCommandPlay :: Word32
 playerCommandPlay = 1
 playerCommandPause :: Word32
@@ -584,6 +588,10 @@ fitCover :: Word32
 fitCover = 1
 fitFill :: Word32
 fitFill = 2
+trackKindAudio :: Word32
+trackKindAudio = 0
+trackKindCaption :: Word32
+trackKindCaption = 1
 ppropSource :: Word32
 ppropSource = 1
 ppropSpeed :: Word32
@@ -594,6 +602,10 @@ ppropMuted :: Word32
 ppropMuted = 4
 ppropLoop :: Word32
 ppropLoop = 5
+ppropCaptions :: Word32
+ppropCaptions = 6
+ppropCaptionsLanguage :: Word32
+ppropCaptionsLanguage = 7
 commandClear :: Word32
 commandClear = 1
 commandFocus :: Word32
@@ -732,8 +744,8 @@ txKindPlayerCommand :: Word16
 txKindPlayerCommand = 65
 txKindReleasePlayer :: Word16
 txKindReleasePlayer = 66
-txKindSetVideoPlayer :: Word16
-txKindSetVideoPlayer = 67
+txKindSelectTrack :: Word16
+txKindSelectTrack = 67
 txKindSetSession :: Word16
 txKindSetSession = 68
 applyKindCreate :: Word16
@@ -844,6 +856,10 @@ applyKindSetVideoPlayer :: Word16
 applyKindSetVideoPlayer = 55
 applyKindSetSession :: Word16
 applyKindSetSession = 56
+applyKindSelectTrack :: Word16
+applyKindSelectTrack = 57
+applyKindCaptionTimes :: Word16
+applyKindCaptionTimes = 58
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
@@ -928,6 +944,12 @@ occKindSeekCompleted :: Word16
 occKindSeekCompleted = 41
 occKindSessionAction :: Word16
 occKindSessionAction = 42
+occKindPlayerTracks :: Word16
+occKindPlayerTracks = 43
+occKindCaptionCue :: Word16
+occKindCaptionCue = 44
+occKindVideoVisibility :: Word16
+occKindVideoVisibility = 45
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -1224,9 +1246,9 @@ txPlayerCommand player command atMs = wireRecord txKindPlayerCommand (word64LE p
 txReleasePlayer :: Word64 -> Builder
 txReleasePlayer player = wireRecord txKindReleasePlayer (word64LE player)
 
--- Show `player` in the video view `widget_id` (docs/media-plan.md §3); 0 shows none. A live video view only: the player is an object, not collection data.
-txSetVideoPlayer :: Word64 -> Word64 -> Builder
-txSetVideoPlayer widgetId player = wireRecord txKindSetVideoPlayer (word64LE widgetId <> word64LE player)
+-- Select one of the player's tracks (docs/media-plan.md §3): `kind` is TRACK_KIND and `index` counts from 1 in the player_tracks listing, 0 selecting no caption track. A sidecar file's caption track is in the listing like the platform's own. An index past the listing, or 0 for audio, is a scene error.
+txSelectTrack :: Word64 -> Word32 -> Word32 -> Builder
+txSelectTrack player kind index = wireRecord txKindSelectTrack (word64LE player <> word32LE kind <> word32LE index)
 
 -- Declare the app's ONE media session (docs/media-plan.md §5), replacing the last declaration: the attached `player` (0 attaches none and withdraws the app from the system's controls), `actions` a mask of 1 << SESSION_ACTION for the actions the app handles itself, `playback_state` the PLAYBACK_STATE the app states while no player is attached, and the metadata as Str values, `artwork` an asset name or empty. With a player attached, play, pause and seek_to the app does not handle apply to that player.
 txSetSession :: Word64 -> Word32 -> Word32 -> Value -> Value -> Value -> Value -> Builder
@@ -2231,6 +2253,25 @@ txBindFitElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propFit <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
+-- set_property with a constant player value.
+txSetPlayer :: Word64 -> Int64 -> Builder
+txSetPlayer widgetId player = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propPlayer <> word32LE sourceConst
+    <> encodeValue (VI64 player))
+
+-- set_property with a signal-bound player value.
+txBindPlayer :: Word64 -> Word64 -> Builder
+txBindPlayer widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propPlayer <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindPlayerElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindPlayerElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propPlayer <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
 -- set_window_prop with a constant title value (window 0, the primary surface).
 txSetWindowTitle :: Word64 -> String -> Builder
 txSetWindowTitle window title = wireRecord txKindSetWindowProp
@@ -2707,7 +2748,7 @@ parseOccurrence ::
   IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues, Maybe DropValues, [Value]))
 parseOccurrence redeem rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted && kind /= occKindSheetDismissed && kind /= occKindDismissRequested && kind /= occKindSubmitted && kind /= occKindNotificationReplied && kind /= occKindFullscreenChanged && kind /= occKindColorChanged && kind /= occKindRangeChanged && kind /= occKindRangeCommitted && kind /= occKindPlayerChanged && kind /= occKindPlayerPosition && kind /= occKindSeekCompleted && kind /= occKindSessionAction
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted && kind /= occKindSheetDismissed && kind /= occKindDismissRequested && kind /= occKindSubmitted && kind /= occKindNotificationReplied && kind /= occKindFullscreenChanged && kind /= occKindColorChanged && kind /= occKindRangeChanged && kind /= occKindRangeCommitted && kind /= occKindPlayerChanged && kind /= occKindPlayerPosition && kind /= occKindSeekCompleted && kind /= occKindSessionAction && kind /= occKindPlayerTracks && kind /= occKindCaptionCue && kind /= occKindVideoVisibility
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64
@@ -2727,6 +2768,11 @@ parseOccurrence redeem rec = do
           (value, _) <- parseValue rec 16
           return (Just (kind, ident, [], Just value, Nothing, Nothing, []))
       else if kind == occKindFullscreenChanged
+        then do
+          -- An answer carrying one value: id + the Value.
+          (value, _) <- parseValue rec 16
+          return (Just (kind, ident, [], Just value, Nothing, Nothing, []))
+      else if kind == occKindCaptionCue
         then do
           -- An answer carrying one value: id + the Value.
           (value, _) <- parseValue rec 16
@@ -2785,7 +2831,7 @@ parseOccurrence redeem rec = do
                 op <- peekByteOff rec at' :: IO Word32
                 return (Just (VI64 (fromIntegral op)))
               else
-            if kind == occKindTextChanged || kind == occKindToggled || kind == occKindValueChanged || kind == occKindMenuToggled || kind == occKindMenuValueChanged || kind == occKindDateChanged || kind == occKindTimeChanged || kind == occKindValueCommitted || kind == occKindSubmitted || kind == occKindColorChanged
+            if kind == occKindTextChanged || kind == occKindToggled || kind == occKindValueChanged || kind == occKindMenuToggled || kind == occKindMenuValueChanged || kind == occKindDateChanged || kind == occKindTimeChanged || kind == occKindValueCommitted || kind == occKindSubmitted || kind == occKindColorChanged || kind == occKindVideoVisibility
               then do
                 (v, _) <- parseValue rec at'
                 return (Just v)

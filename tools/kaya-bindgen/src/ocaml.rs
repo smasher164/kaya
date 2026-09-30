@@ -168,7 +168,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::Bool => (prop.to_string(), format!("Bool {prop}")),
             crate::PropKind::F64 => (prop.to_string(), format!("F64 {prop}")),
             crate::PropKind::Blob => ("handle".to_string(), "Blob handle".to_string()),
-            crate::PropKind::Enum(_) => (prop.to_string(), format!("I64 {prop}")),
+            crate::PropKind::Enum(_) | crate::PropKind::Player => (prop.to_string(), format!("I64 {prop}")),
             crate::PropKind::Date => (
                 "year month day".to_string(),
                 "I64 (pack_date year month day)".to_string(),
@@ -406,7 +406,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::Bool => (format!("Bool {prop}"), *prop),
             crate::PropKind::F64 => (format!("F64 {prop}"), *prop),
             crate::PropKind::Blob => ("Blob handle".to_string(), "handle"),
-            crate::PropKind::Enum(_) => (format!("I64 {prop}"), *prop),
+            crate::PropKind::Enum(_) | crate::PropKind::Player => (format!("I64 {prop}"), *prop),
             crate::PropKind::Date | crate::PropKind::Time | crate::PropKind::Color => {
                 unreachable!("no menu prop is a date, a time or a colour")
             }

@@ -273,6 +273,17 @@ pub(crate) fn declared_id() -> Option<String> {
 /// A copy's key path, in hashable form (wire paths are Vec<Value>).
 type PathKey = Vec<Key>;
 
+fn visibility_occurrence(id: WidgetId, addr: Option<(u64, PathKey)>, shown: f64) -> Occurrence {
+    match addr {
+        Some((node, path)) => Occurrence::InstanceVideoVisibility {
+            node: crate::protocol::TemplateNodeId(node),
+            path: path_values(&path),
+            shown,
+        },
+        None => Occurrence::VideoVisibility { id, shown },
+    }
+}
+
 /// One collection entry, fully named: (collection, instance path, key).
 type EntryRef = (CollectionId, PathKey, Key);
 
@@ -654,7 +665,7 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         TxOp::SetPlayerProp { .. } => UndoVerdict::Refused("set_player_prop"),
         TxOp::PlayerCommand { .. } => UndoVerdict::Refused("player_command"),
         TxOp::ReleasePlayer { .. } => UndoVerdict::Refused("release_player"),
-        TxOp::SetVideoPlayer { .. } => UndoVerdict::Refused("set_video_player"),
+        TxOp::SelectTrack { .. } => UndoVerdict::Refused("select_track"),
         TxOp::SetSession(_) => UndoVerdict::Refused("set_session"),
         TxOp::DeclareLinkRoute { .. } => UndoVerdict::Refused("declare_link_route"),
         TxOp::ShowFileDialog(_) => UndoVerdict::Refused("show_file_dialog"),
@@ -924,6 +935,14 @@ pub(crate) struct Scene {
     /// Every player and the one session (docs/media-plan.md): their
     /// occurrences leave through `asks`, the core's own outbox.
     media: crate::media::Media,
+    /// docs/media-plan.md §7b: every video view the backend holds, the player
+    /// each shows (at most one view per player), the core's coalescing of
+    /// their visibility, and how the app names each (a stamped copy by its
+    /// node and keys).
+    videos: HashSet<WidgetId>,
+    video_shows: HashMap<WidgetId, crate::protocol::PlayerId>,
+    visibility: crate::media::Visibility,
+    video_addr: HashMap<WidgetId, Option<(u64, PathKey)>>,
     when_sites: HashMap<u64, WhenSite>,
     when_by_signal: HashMap<SignalId, Vec<u64>>,
     /// Every live surface that has a mounted root, and WHICH widget
@@ -1086,7 +1105,7 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // docs/color-picker-plan.md §2.
         Prop::Color | Prop::Alpha => matches!(kind, WidgetKind::ColorPicker),
         // docs/media-plan.md §3.
-        Prop::Fit => matches!(kind, WidgetKind::Video),
+        Prop::Fit | Prop::Player => matches!(kind, WidgetKind::Video),
         Prop::Indeterminate => matches!(kind, WidgetKind::Progress),
         Prop::Source => matches!(kind, WidgetKind::Image),
         // Layout weight is kind-agnostic: any child of a row/column may
@@ -1679,7 +1698,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::MaxLines => ValueType::F64,
         Prop::MaxWidth | Prop::MaxHeight => ValueType::F64,
         Prop::Axis => ValueType::I64,
-        Prop::Fit => ValueType::I64,
+        Prop::Fit | Prop::Player => ValueType::I64,
         Prop::Role => ValueType::I64,
         Prop::Symbol => ValueType::I64,
         Prop::Indeterminate | Prop::Fill | Prop::Wrap | Prop::Rich | Prop::Submits => ValueType::Bool,
@@ -2461,6 +2480,9 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
             "kaya: filled takes a tint (accent=1, success=2, warning=3, critical=4, neutral=5), got {tint}"
         );
     }
+    if let (Prop::Player, Value::I64(player)) = (prop, value) {
+        assert!(*player >= 0, "kaya: a video view's player is a player id, 0 for none, got {player}");
+    }
     if let (Prop::Fit, Value::I64(fit)) = (prop, value) {
         assert!(
             crate::wire::vocab_name(crate::wire::FITS, *fit).is_some(),
@@ -2731,6 +2753,10 @@ impl Scene {
     /// it takes the live set_rich_text path — the mirror keyed by the copy's
     /// own id, and the arm's one apply op — and no arm knows the prop.
     fn push_bound_prop(&mut self, id: WidgetId, prop: Prop, value: Value, out: &mut Vec<ApplyOp>) {
+        if prop == Prop::Player {
+            out.push(self.video_op(id, &value));
+            return;
+        }
         if prop != Prop::Document {
             if prop == Prop::Rich {
                 if let Value::Bool(true) = value {
@@ -3116,13 +3142,22 @@ impl Scene {
                                 }
                                 self.layout_dirty = true;
                             }
-                            out.push(ApplyOp::SetProp {
-                                id: widget,
-                                prop,
-                                value: v,
-                            })
+                            if prop == Prop::Player {
+                                out.push(self.video_op(widget, &v));
+                            } else {
+                                out.push(ApplyOp::SetProp {
+                                    id: widget,
+                                    prop,
+                                    value: v,
+                                })
+                            }
                         }
                         PropValue::Signal(id) => {
+                            assert!(
+                                prop != Prop::Player,
+                                "kaya: a video view's player is a constant or a row's player field, \
+                                 never a signal (docs/media-plan.md §7b)"
+                            );
                             let current = self
                                 .signals
                                 .get(&id)
@@ -3357,23 +3392,8 @@ impl Scene {
                 }
                 TxOp::PlayerCommand { player, command } => self.media.command(player, command, &mut out),
                 TxOp::ReleasePlayer { player } => self.media.release(player, &mut out),
-                TxOp::SetVideoPlayer { widget, player } => {
-                    let kind = self.widgets.get(&widget).copied();
-                    assert!(
-                        kind == Some(WidgetKind::Video),
-                        "kaya: set_video_player names widget {} ({kind:?}), which is not a live \
-                         video view — a player is shown by a video view (docs/media-plan.md §3)",
-                        widget.0
-                    );
-                    if let Some(player) = player {
-                        assert!(
-                            self.media.is_live(player),
-                            "kaya: set_video_player shows player {}, which is not live — \
-                             create_player first",
-                            player.0
-                        );
-                    }
-                    out.push(ApplyOp::SetVideoPlayer { widget, player });
+                TxOp::SelectTrack { player, kind, index } => {
+                    self.media.select(player, kind, index, &mut out, &mut self.asks)
                 }
                 TxOp::SetSession(spec) => self.media.set_session(spec, &mut out),
                 TxOp::DeclareLinkRoute { route, pattern } => {
@@ -4859,6 +4879,7 @@ impl Scene {
 
         self.fan_out_signals(&dirty, &mut out);
         self.settle_range_writes(&mut out);
+        self.settle_video_views(&out);
 
         // Barrier: no grow along a scroll's own axis (ruled REFUSE
         // 2026-09-02; docs/deferred.md, "`grow` INSIDE A SCROLL IS
@@ -6312,6 +6333,110 @@ impl Scene {
         }
     }
 
+    /// The player prop's lowering (docs/media-plan.md §7b): 0 shows none, a
+    /// released player shows none (a row may still name it while the app
+    /// replaces it), and an id never created is refused.
+    fn video_op(&self, widget: WidgetId, value: &Value) -> ApplyOp {
+        let Value::I64(raw) = value else {
+            panic!("kaya: a video view's player is an I64 player id, got {value:?}");
+        };
+        let player = match *raw {
+            0 => None,
+            n => {
+                let p = crate::protocol::PlayerId(n as u64);
+                if self.media.is_live(p) {
+                    Some(p)
+                } else {
+                    assert!(
+                        self.media.was_released(p),
+                        "kaya: {} shows player {n}, which was never created — create_player first",
+                        self.video_noun(widget)
+                    );
+                    None
+                }
+            }
+        };
+        ApplyOp::SetVideoPlayer { widget, player }
+    }
+
+    /// How the app names a video view: a live one by its id, a stamped copy
+    /// by its template node and keys.
+    fn video_noun(&self, widget: WidgetId) -> String {
+        match self.node_instances.iter().find(|(_, w)| **w == widget) {
+            Some(((node, path), _)) => {
+                format!("the video view stamped from template node {node} at keys {:?}", path_values(path))
+            }
+            None => format!("video view {}", widget.0),
+        }
+    }
+
+    /// ONE VIEW PER PLAYER (docs/media-plan.md §7b), held on the batch's end
+    /// state, so a transaction that moves a player from one row to another
+    /// in either order is one move; and the views the backend holds, whose
+    /// leaving the app hears.
+    fn settle_video_views(&mut self, out: &[ApplyOp]) {
+        for op in out {
+            match op {
+                ApplyOp::Create { id, kind: WidgetKind::Video, .. } => {
+                    self.videos.insert(*id);
+                }
+                ApplyOp::Destroy { id } => {
+                    self.videos.remove(id);
+                    self.video_shows.remove(id);
+                    let addr = self.video_addr.remove(id);
+                    if self.visibility.gone(*id) {
+                        self.asks.push(visibility_occurrence(*id, addr.flatten(), 0.0));
+                    }
+                }
+                ApplyOp::SetVideoPlayer { widget, player } => match player {
+                    Some(p) => {
+                        self.video_shows.insert(*widget, *p);
+                    }
+                    None => {
+                        self.video_shows.remove(widget);
+                    }
+                },
+                ApplyOp::ReleasePlayer(p) => self.video_shows.retain(|_, shown| shown != p),
+                _ => {}
+            }
+        }
+        let mut by_player: HashMap<crate::protocol::PlayerId, WidgetId> = HashMap::new();
+        let mut shows: Vec<(&WidgetId, &crate::protocol::PlayerId)> = self.video_shows.iter().collect();
+        shows.sort_by_key(|(w, _)| w.0);
+        for (widget, player) in shows {
+            if let Some(first) = by_player.insert(*player, *widget) {
+                panic!(
+                    "kaya: player {} is shown by {} and by {} — a player is shown by one video view \
+                     at a time; give each row its own player (docs/media-plan.md §7b)",
+                    player.0,
+                    self.video_noun(first),
+                    self.video_noun(*widget)
+                );
+            }
+        }
+    }
+
+    /// A backend's report of how much of a video view shows (0 to 1),
+    /// coalesced (crate::media::Visibility): what the app hears, if anything.
+    pub(crate) fn video_visible(&mut self, widget: WidgetId, shown: f64) -> Vec<Occurrence> {
+        if !self.videos.contains(&widget) {
+            return Vec::new();
+        }
+        let Some(shown) = self.visibility.report(widget, shown) else {
+            return Vec::new();
+        };
+        if !self.video_addr.contains_key(&widget) {
+            let addr = self.node_instances.iter().find(|(_, w)| **w == widget).map(|(k, _)| k.clone());
+            self.video_addr.insert(widget, addr);
+        }
+        vec![visibility_occurrence(widget, self.video_addr[&widget].clone(), shown)]
+    }
+
+    /// The sidecar cue at a backend's clock time (crate::media).
+    pub(crate) fn caption_at(&mut self, player: crate::protocol::PlayerId, t_ms: u64) -> (String, Vec<Occurrence>) {
+        self.media.caption_at(player, t_ms)
+    }
+
     /// EVERY RANGE WRITE this batch produced, read off the ops (the
     /// `absorb_text_writes` stance): a batch moving ONE thumb of a range the
     /// backend already holds that would cross the other as it stands is
@@ -6873,6 +6998,11 @@ impl Scene {
                         }
                     }
                     PropValue::Signal(id) => {
+                        assert!(
+                            prop != Prop::Player,
+                            "kaya: a video view's player is a constant or a row's player field, \
+                             never a signal (docs/media-plan.md §7b)"
+                        );
                         let current = self.signals.get(id).unwrap_or_else(|| {
                             panic!("kaya: binding to unknown signal {id:?}")
                         });

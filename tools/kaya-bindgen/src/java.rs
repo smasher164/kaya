@@ -267,7 +267,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 "long handle".to_string(),
                 "encodeValue(b, new BlobHandle(handle));".to_string(),
             ),
-            crate::PropKind::Enum(_) => (
+            crate::PropKind::Enum(_) | crate::PropKind::Player => (
                 format!("long {}", camel(prop)),
                 format!("encodeValue(b, {});", camel(prop)),
             ),
@@ -532,7 +532,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 "long",
                 "encodeValue(b, new BlobHandle(handle));".to_string(),
             ),
-            crate::PropKind::Enum(_) => (
+            crate::PropKind::Enum(_) | crate::PropKind::Player => (
                 camel(prop),
                 "long",
                 format!("encodeValue(b, {});", camel(prop)),

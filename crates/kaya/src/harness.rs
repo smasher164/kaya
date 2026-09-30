@@ -480,6 +480,11 @@ pub enum Step {
     /// channel (docs/media-plan.md §8 ruling 2): a player's picture is in
     /// no process snapshot.
     ExpectVideoInk(Target, String),
+    /// `expect_caption video#0 "first cue"`: the caption text the video view
+    /// shows now, "" for none — kaya's caption renderer's where kaya draws,
+    /// the platform's own cue where it does (docs/media-plan.md §3); never
+    /// how it looks.
+    ExpectCaption(Target, String),
     /// `ax_action video#0 "Play"`: run the target's named accessibility
     /// action the way an assistive client does.
     AxAction(Target, String),
@@ -819,6 +824,7 @@ impl Step {
             | Step::Expect(t, _)
             | Step::ExpectImageSize(t, _)
             | Step::ExpectVideoInk(t, _)
+            | Step::ExpectCaption(t, _)
             | Step::AxAction(t, _)
             | Step::SwipeAction(t, _)
             | Step::ExpectSwipeActions(t, _)
@@ -1044,6 +1050,7 @@ impl Step {
             Step::ExpectNoNotification { .. } => true,
             Step::ExpectBadge { .. } => true,
             Step::ExpectVideoInk(..) => true,
+            Step::ExpectCaption(..) => true,
             Step::AxAction(..) => false,
             Step::SessionSend(..) => false,
             Step::ExpectNowPlaying(..) => true,
@@ -1491,6 +1498,9 @@ pub trait Stage: Send + 'static {
     /// window, converted to sRGB, as `RRGGBB`; `<…>` saying what was
     /// measured when there is no picture to read (docs/media-plan.md §3).
     fn video_ink(&self, target: Target) -> String;
+    /// The caption text the video view shows now, "" for none: what kaya's
+    /// caption renderer drew, or the platform's own cue where it draws.
+    fn caption(&self, target: Target) -> String;
     /// Run the target's accessibility action named `name`; Err naming the
     /// actions it does carry.
     fn ax_action(&self, target: Target, name: &str) -> Result<(), String>;
@@ -1505,6 +1515,9 @@ pub trait Stage: Send + 'static {
     /// This platform's lane table (docs/media-plan.md §7a): the reason it is
     /// expected to refuse `item`, None where it plays it.
     fn media_refusal(&self, item: &str) -> Option<String>;
+    /// This platform's table of items whose EMBEDDED captions it does not
+    /// expose (docs/media-plan.md §7a, settled: MP4 text tracks on Windows).
+    fn captions_absent(&self, item: &str) -> bool;
     /// Choose `emoji` in the emoji picker the app's command opened, through
     /// the picker's own route; Err naming what it found when none is open.
     fn pick_emoji(&self, emoji: &str) -> Result<(), String>;
@@ -2569,6 +2582,16 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     return Err(format!("expect_video_ink wants six uppercase hex digits, got {want:?}"));
                 }
                 Step::ExpectVideoInk(target, want)
+            }
+            "expect_caption" => {
+                let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_caption wants a video and the caption's text: {line:?}")
+                })?;
+                let target = parse_target(target)?;
+                if target.kind != TargetKind::Video {
+                    return Err(format!("expect_caption reads a video view, not {target:?}"));
+                }
+                Step::ExpectCaption(target, parse_string(text)?)
             }
             "ax_action" => {
                 let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
@@ -4777,6 +4800,14 @@ fn run_with_log(
                     Err(format!("video ink {got}, wanted {want} within {VIDEO_INK_TOLERANCE} per channel"))
                 }
             })),
+            Step::ExpectCaption(t, want) => Some(poll(|| {
+                let got = stage.caption(*t);
+                if got == *want {
+                    Ok(format!("caption {want:?}"))
+                } else {
+                    Err(format!("caption {got:?}, wanted {want:?}"))
+                }
+            })),
             Step::AxAction(t, name) => {
                 await_quiet();
                 let answered = crate::scene::answers();
@@ -6587,6 +6618,29 @@ pub(crate) fn expand_media<S: Stage + ?Sized>(stage: &S, want: &str) -> Result<S
         rest = &after[end + 1..];
     }
     out.push_str(rest);
+    expand_captions(stage, &out)
+}
+
+/// `{captions:<item>|<the listing where it is exposed>}` (docs/media-plan.md
+/// §7a, settled 2026-09-30): `captions none` where this platform's table says
+/// the item's embedded caption track is not exposed, the scene's own text
+/// everywhere else.
+pub(crate) fn expand_captions<S: Stage + ?Sized>(stage: &S, want: &str) -> Result<String, String> {
+    let mut out = String::new();
+    let mut rest = want;
+    while let Some(start) = rest.find("{captions:") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 10..];
+        let Some(end) = after.find('}') else {
+            return Err(format!("unterminated {{captions:…}} in {want:?}"));
+        };
+        let Some((item, listed)) = after[..end].split_once('|') else {
+            return Err(format!("{{captions:{}}} wants <item>|<text>", &after[..end]));
+        };
+        out.push_str(if stage.captions_absent(item) { "captions none" } else { listed });
+        rest = &after[end + 1..];
+    }
+    out.push_str(rest);
     Ok(out)
 }
 
@@ -7110,6 +7164,15 @@ mod tests {
         assert!(parse("expect_video_ink video#0 \"c83c1e\"").is_err());
         assert!(parse("expect_video_ink video#0 \"C83C1\"").is_err());
         assert!(matches!(
+            parse("expect_caption video#0 \"first cue\"").unwrap().as_slice(),
+            [Step::ExpectCaption(t, w)] if *t == video && w == "first cue"
+        ));
+        assert!(matches!(
+            parse("expect_caption video#0 \"\"").unwrap().as_slice(),
+            [Step::ExpectCaption(_, w)] if w.is_empty()
+        ));
+        assert!(parse("expect_caption label#0 \"first cue\"").is_err());
+        assert!(matches!(
             parse("ax_action video#0 \"Pause\"").unwrap().as_slice(),
             [Step::AxAction(t, n)] if *t == video && n == "Pause"
         ));
@@ -7515,6 +7578,9 @@ mod tests {
         fn video_ink(&self, _target: Target) -> String {
             String::new()
         }
+        fn caption(&self, _target: Target) -> String {
+            String::new()
+        }
         fn ax_action(&self, _target: Target, _name: &str) -> Result<(), String> {
             Ok(())
         }
@@ -7529,6 +7595,9 @@ mod tests {
         }
         fn media_refusal(&self, _item: &str) -> Option<String> {
             None
+        }
+        fn captions_absent(&self, _item: &str) -> bool {
+            false
         }
         fn pick_emoji(&self, _emoji: &str) -> Result<(), String> {
             Ok(())
@@ -8576,6 +8645,9 @@ mod tests {
         fn video_ink(&self, _target: Target) -> String {
             String::new()
         }
+        fn caption(&self, _target: Target) -> String {
+            String::new()
+        }
         fn ax_action(&self, _target: Target, _name: &str) -> Result<(), String> {
             Ok(())
         }
@@ -8590,6 +8662,9 @@ mod tests {
         }
         fn media_refusal(&self, _item: &str) -> Option<String> {
             None
+        }
+        fn captions_absent(&self, _item: &str) -> bool {
+            false
         }
         fn pick_emoji(&self, _emoji: &str) -> Result<(), String> {
             Ok(())
@@ -8962,6 +9037,9 @@ mod tests {
         fn video_ink(&self, _target: Target) -> String {
             String::new()
         }
+        fn caption(&self, _target: Target) -> String {
+            String::new()
+        }
         fn ax_action(&self, _target: Target, _name: &str) -> Result<(), String> {
             Ok(())
         }
@@ -8976,6 +9054,9 @@ mod tests {
         }
         fn media_refusal(&self, _item: &str) -> Option<String> {
             None
+        }
+        fn captions_absent(&self, _item: &str) -> bool {
+            false
         }
         fn pick_emoji(&self, _emoji: &str) -> Result<(), String> {
             Ok(())

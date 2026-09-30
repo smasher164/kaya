@@ -3,6 +3,7 @@
 
 import AVFoundation
 import CoreText
+import MediaAccessibility
 import MediaPlayer
 import OSLog
 import SwiftUI
@@ -21,7 +22,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xfd32bf7c75c54fbb
+let kayaSpecHash: UInt64 = 0x1d479d566df30301
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -83,6 +84,8 @@ private let applyPlayerCommand: UInt16 = 53
 private let applyReleasePlayer: UInt16 = 54
 private let applySetVideoPlayer: UInt16 = 55
 private let applySetSession: UInt16 = 56
+private let applySelectTrack: UInt16 = 57
+private let applyCaptionTimes: UInt16 = 58
 /// What a drop settles on (the wire's drag_op).
 let kayaDragOpNone: UInt32 = 0
 let kayaDragOpCopy: UInt32 = 1
@@ -298,6 +301,7 @@ private let propMinGap: UInt32 = 48
 private let propLowLabel: UInt32 = 49
 private let propHighLabel: UInt32 = 50
 private let propFit: UInt32 = 51
+private let propPlayer: UInt32 = 52
 private let fileContentImages: UInt32 = 1
 private let tintAccent: Int64 = 1
 private let tintSuccess: Int64 = 2
@@ -6219,6 +6223,8 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaScene.nodes[id]!.highLabel = String(decoding: bytes, as: UTF8.self)
                 case (propFit, valueI64):
                     kayaScene.nodes[id]!.fit = raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
+                case (propPlayer, _):
+                    fatalError("kaya: a video view's player arrives as set_video_player; the core never forwards the player prop")
                 case (propGrow, valueF64):
                     kayaScene.nodes[id]!.grow =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
@@ -6741,6 +6747,21 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 session.album = kayaReadStrValue(raw, &sat)
                 session.artwork = kayaReadStrValue(raw, &sat)
                 kayaApplySession(session)
+            case applySelectTrack:
+                // { u64 player; u32 track_kind; u32 index }, from 1 in the
+                // listing this arm reported, 0 captions off.
+                kayaPlayers[raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)]?.select(
+                    kind: raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self),
+                    index: Int(raw.loadUnaligned(fromByteOffset: body + 12, as: UInt32.self)))
+            case applyCaptionTimes:
+                // { u64 player; Values: I64 ms }: the sidecar's boundaries,
+                // kaya's to draw (docs/media-plan.md §3).
+                let pid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let count = Int(raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self))
+                var at = body + 16
+                var times: [UInt64] = []
+                for _ in 0..<count { times.append(UInt64(max(0, kayaReadI64Value(raw, &at)))) }
+                kayaPlayers[pid]?.setCaptionTimes(times)
             case applyScrollToRow:
                 // { u64 container; u64 copy (0 = unrealized); u32 index; u32 pad }.
                 // A REQUEST held on the container until its tier can scroll
@@ -10358,6 +10379,17 @@ private func kayaRunScript(_ script: String) {
                     _ = want
                     kayaDepthStub("media_formats", on: "ios")
                 #endif
+            case "expect_caption":
+                // docs/media-plan.md §3: the text the view shows, never its look.
+                let want = kayaQuoted(Array(parts[2...]))
+                let got = DispatchQueue.main.sync { () -> String? in
+                    kayaTarget(parts[1], "video", kayaScene.videos).map(kayaVideoCaption)
+                }
+                if let got, got == want {
+                    observed.append("caption \(want.debugDescription)")
+                } else {
+                    failures.append("caption \((got ?? "<no such target>").debugDescription), wanted \(want.debugDescription)")
+                }
             case "ax_action":
                 // docs/media-plan.md §3: the element must be in the platform's
                 // tree, and the action runs its own closure, the one the
@@ -18696,6 +18728,25 @@ func kayaExpandMedia(_ want: String) -> Result<String, KayaTemplateRefusal> {
         rest = after[after.index(after: end)...]
     }
     out += rest
+    return kayaExpandCaptions(out)
+}
+
+/// `{captions:<item>|<the listing where it is exposed>}` (docs/media-plan.md
+/// §7a): `captions none` where this platform's table says the item's embedded
+/// caption track is not exposed, the scene's own text everywhere else.
+func kayaExpandCaptions(_ want: String) -> Result<String, KayaTemplateRefusal> {
+    var out = ""
+    var rest = Substring(want)
+    while let start = rest.range(of: "{captions:") {
+        out += rest[..<start.lowerBound]
+        let after = rest[start.upperBound...]
+        guard let end = after.firstIndex(of: "}"), let bar = after[..<end].firstIndex(of: "|") else {
+            return .failure(KayaTemplateRefusal(why: "{captions:…} wants <item>|<text> and a closing brace in \(want.debugDescription)"))
+        }
+        out += kayaCaptionsAbsent(String(after[..<bar])) ? "captions none" : String(after[after.index(after: bar)..<end])
+        rest = after[after.index(after: end)...]
+    }
+    out += rest
     return .success(out)
 }
 
@@ -19603,9 +19654,11 @@ struct KayaRender: View {
             let natural = kayaVideoNatural(node)
             let actions = kayaVideoActions(node)
             KayaVideoSurface(node: node)
+                .overlay { KayaCaptionOverlay(node: node) }
                 .frame(
                     idealWidth: natural.width, maxWidth: node.grow > 0 ? .infinity : natural.width,
                     idealHeight: natural.height, maxHeight: natural.height)
+                .background(KayaVideoVisibility(node: node))
                 .accessibilityElement(children: .ignore)
                 .accessibilityAddTraits(.isImage)
                 .accessibilityAction(named: actions[0].0, actions[0].1)
@@ -26113,6 +26166,17 @@ final class KayaPlayer {
     /// Bumped per source, so a late callback from the last item says nothing.
     var generation = 0
     var mediaSize = CGSize.zero
+    /// docs/media-plan.md §3: the text kaya's caption renderer draws (a
+    /// sidecar's cue, timed by the core), the platform's own current cue,
+    /// the sidecar's boundaries, and the selection groups the listing came
+    /// from.
+    var kayaCaption = ""
+    var platformCue = ""
+    private var captionTimes: [UInt64] = []
+    private var boundaryObserver: Any?
+    private var audible: AVMediaSelectionGroup?
+    private var legible: AVMediaSelectionGroup?
+    private var legibleDelegate: KayaLegibleDelegate?
     private var itemObservers: [NSKeyValueObservation] = []
     private var rateObserver: NSKeyValueObservation?
     private var tokens: [NSObjectProtocol] = []
@@ -26143,6 +26207,8 @@ final class KayaPlayer {
 
     func release() {
         player.pause()
+        if let boundaryObserver { player.removeTimeObserver(boundaryObserver) }
+        boundaryObserver = nil
         detach()
         player.replaceCurrentItem(with: nil)
         if let timeObserver { player.removeTimeObserver(timeObserver) }
@@ -26161,6 +26227,9 @@ final class KayaPlayer {
         let gen = generation
         detach()
         mediaSize = .zero
+        audible = nil
+        legible = nil
+        platformCue = ""
         kayaVideoSizeChanged(id)
         guard !locator.isEmpty, let url = URL(string: locator) else {
             player.replaceCurrentItem(with: nil)
@@ -26191,6 +26260,19 @@ final class KayaPlayer {
                 kayaPlayerReport(self.id) { KayaHost.api.player_ended(self.id) }
             }
         })
+        tokens.append(NotificationCenter.default.addObserver(
+            forName: AVPlayerItem.mediaSelectionDidChangeNotification, object: item, queue: .main
+        ) { [weak self] _ in
+            guard let self, self.generation == gen else { return }
+            self.reportTracks(item)
+        })
+        // The platform's own cues, for the reading; the layer still draws
+        // them (suppressesPlayerRendering stays false).
+        let delegate = KayaLegibleDelegate(id: id, generation: gen)
+        let legibleOut = AVPlayerItemLegibleOutput()
+        legibleOut.setDelegate(delegate, queue: .main)
+        item.add(legibleOut)
+        legibleDelegate = delegate
         tokens.append(NotificationCenter.default.addObserver(
             forName: AVPlayerItem.failedToPlayToEndTimeNotification, object: item, queue: .main
         ) { [weak self] note in
@@ -26246,6 +26328,125 @@ final class KayaPlayer {
                         UInt32(size.height.rounded()), why.isEmpty ? 0 : 1, $0.baseAddress, UInt($0.count))
                 }
             }
+            if why.isEmpty {
+                self.audible = try? await asset.loadMediaSelectionGroup(for: .audible)
+                self.legible = try? await asset.loadMediaSelectionGroup(for: .legible)
+                var languages: [String] = []
+                for track in (try? await asset.loadTracks(withMediaType: .audio)) ?? [] {
+                    let (tag, code) = (try? await track.load(.extendedLanguageTag, .languageCode)) ?? (nil, nil)
+                    languages.append(kayaLanguageTag(tag ?? code))
+                }
+                self.audioLanguages = languages
+                guard self.generation == gen else { return }
+                self.reportTracks(item)
+                self.askCaption()
+            }
+        }
+    }
+
+    /// Whether kaya's caption renderer draws this player's captions (a
+    /// sidecar is selected) rather than the platform.
+    var drawsCaptions: Bool { !captionTimes.isEmpty }
+
+    /// The asset's audio tracks, for an item with one and no selection group.
+    private var audioLanguages: [String] = []
+
+    /// THE LISTING (docs/media-plan.md §3): each selection group's options as
+    /// BCP 47 tags in the platform's order, and what the item selected.
+    func reportTracks(_ item: AVPlayerItem) {
+        let selection = item.currentMediaSelection
+        func picked(_ group: AVMediaSelectionGroup?) -> UInt32 {
+            guard let group, let option = selection.selectedMediaOption(in: group),
+                let at = kayaTrackOptions(group).firstIndex(of: option)
+            else { return 0 }
+            return UInt32(at + 1)
+        }
+        var audio = audible.map(kayaTrackOptions)?.map { kayaLanguageTag($0.extendedLanguageTag ?? $0.locale?.identifier) } ?? []
+        var audioSelected = picked(audible)
+        if audible == nil, !audioLanguages.isEmpty {
+            audio = audioLanguages
+            audioSelected = 1
+        }
+        let captions = legible.map(kayaTrackOptions)?.map { kayaLanguageTag($0.extendedLanguageTag ?? $0.locale?.identifier) } ?? []
+        let captionSelected = picked(legible)
+        if captionSelected == 0 && !platformCue.isEmpty { platformCueArrived("") }
+        let a = Array(audio.joined(separator: "\n").utf8)
+        let c = Array(captions.joined(separator: "\n").utf8)
+        kayaDiag("tracks player=\(id) audio=\(audio) [\(audioSelected)] captions=\(captions) [\(captionSelected)]")
+        kayaPlayerReport(id) {
+            a.withUnsafeBufferPointer { ap in
+                c.withUnsafeBufferPointer { cp in
+                    KayaHost.api.player_tracks(
+                        id, ap.baseAddress, UInt(ap.count), cp.baseAddress, UInt(cp.count), audioSelected,
+                        captionSelected)
+                }
+            }
+        }
+    }
+
+    /// select_track: the platform's own track, from 1; 0 turns captions off.
+    func select(kind: UInt32, index: Int) {
+        guard let item = player.currentItem,
+            let group = Int32(kind) == KAYA_TRACK_KIND_AUDIO ? audible : legible
+        else { return }
+        let options = kayaTrackOptions(group)
+        if index == 0 {
+            item.select(nil, in: group)
+        } else if index <= options.count {
+            item.select(options[index - 1], in: group)
+        }
+        reportTracks(item)
+    }
+
+    func platformCueArrived(_ text: String) {
+        guard text != platformCue else { return }
+        platformCue = text
+        let t = Array(text.utf8)
+        kayaPlayerReport(id) {
+            t.withUnsafeBufferPointer { KayaHost.api.player_cue(id, $0.baseAddress, UInt($0.count)) }
+        }
+        kayaVideoSizeChanged(id)
+    }
+
+    /// kaya's caption renderer (docs/media-plan.md §3): the core sent the
+    /// sidecar's boundaries; at each, on this player's own clock, and after
+    /// every seek and load, the core is asked what to draw.
+    func setCaptionTimes(_ times: [UInt64]) {
+        if let boundaryObserver { player.removeTimeObserver(boundaryObserver) }
+        boundaryObserver = nil
+        captionTimes = times
+        if !times.isEmpty {
+            let at = times.map { NSValue(time: CMTime(value: CMTimeValue($0), timescale: 1000)) }
+            boundaryObserver = player.addBoundaryTimeObserver(forTimes: at, queue: .main) { [weak self] in
+                guard let self else { return }
+                let now = self.player.currentTime()
+                kayaDiag("caption boundary player=\(self.id) clock=\(now.isNumeric ? now.seconds * 1000 : -1) ms")
+                self.askCaption()
+            }
+        }
+        askCaption()
+    }
+
+    func askCaption() {
+        var text = ""
+        if !captionTimes.isEmpty {
+            let now = player.currentTime()
+            let ms = UInt64(max(0, now.isNumeric ? (now.seconds * 1000).rounded() : 0))
+            var buffer = [UInt8](repeating: 0, count: 256)
+            var n = buffer.withUnsafeMutableBufferPointer {
+                KayaHost.api.caption_at(id, ms, $0.baseAddress, UInt($0.count))
+            }
+            if Int(n) > buffer.count {
+                buffer = [UInt8](repeating: 0, count: Int(n))
+                n = buffer.withUnsafeMutableBufferPointer {
+                    KayaHost.api.caption_at(id, ms, $0.baseAddress, UInt($0.count))
+                }
+            }
+            text = String(decoding: buffer.prefix(Int(n)), as: UTF8.self)
+        }
+        if text != kayaCaption {
+            kayaCaption = text
+            kayaVideoSizeChanged(id)
         }
     }
 
@@ -26263,9 +26464,11 @@ final class KayaPlayer {
     func seek(_ ms: UInt64, report: Bool) {
         let to = CMTime(value: CMTimeValue(ms), timescale: 1000)
         player.seek(to: to, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
-            guard finished, report else { return }
+            guard finished else { return }
             DispatchQueue.main.async {
                 guard let self else { return }
+                self.askCaption()
+                guard report else { return }
                 let now = UInt64(max(0, (self.player.currentTime().seconds * 1000).rounded()))
                 kayaPlayerReport(self.id) { KayaHost.api.player_seeked(self.id, now) }
             }
@@ -26274,6 +26477,40 @@ final class KayaPlayer {
 }
 
 nonisolated(unsafe) var kayaPlayers: [UInt64: KayaPlayer] = [:]
+
+/// The platform's own caption cues for one item (docs/media-plan.md §3).
+final class KayaLegibleDelegate: NSObject, AVPlayerItemLegibleOutputPushDelegate {
+    let id: UInt64
+    let generation: Int
+
+    init(id: UInt64, generation: Int) {
+        self.id = id
+        self.generation = generation
+    }
+
+    func legibleOutput(
+        _ output: AVPlayerItemLegibleOutput, didOutputAttributedStrings strings: [NSAttributedString],
+        nativeSampleBuffers nativeSamples: [Any], forItemTime itemTime: CMTime
+    ) {
+        guard let p = kayaPlayers[id], p.generation == generation else { return }
+        p.platformCueArrived(strings.map(\.string).joined(separator: "\n"))
+    }
+}
+
+/// A group's options as tracks: AVFoundation also lists a FORCED-ONLY
+/// companion for a subtitle track (it shows only the cues marked forced, and
+/// is what it selects by default), which is display policy and not a track
+/// a user chooses (measured on h264_tx3g.mp4, docs/probes/media-mac-2026-09-30.md).
+func kayaTrackOptions(_ group: AVMediaSelectionGroup) -> [AVMediaSelectionOption] {
+    group.options.filter { !$0.hasMediaCharacteristic(.containsOnlyForcedSubtitles) }
+}
+
+/// A language as BCP 47, through the platform's own canonicalizer ("eng"
+/// reads "en"); "und" when the track names none.
+func kayaLanguageTag(_ raw: String?) -> String {
+    guard let raw, !raw.isEmpty else { return "und" }
+    return Locale.canonicalLanguageIdentifier(from: raw)
+}
 
 func kayaFourCC(_ code: FourCharCode) -> String {
     let bytes = [24, 16, 8, 0].map { UInt8((code >> $0) & 0xFF) }
@@ -26564,6 +26801,123 @@ func kayaVideoGravity(_ fit: Int64) -> AVLayerVideoGravity {
     }
 #endif
 
+// MARK: kaya's caption renderer, the drawing half (docs/media-plan.md §3)
+
+/// The caption text each video view last drew, by node: expect_caption's read.
+nonisolated(unsafe) var kayaCaptionShown: [UInt64: String] = [:]
+nonisolated(unsafe) var kayaCaptionStyleWatched = false
+
+/// The user's system caption style (MediaAccessibility): font, sizes,
+/// colours and opacities, as the platform's own player draws captions.
+struct KayaCaptionStyle {
+    let font: CTFont
+    let foreground: Color
+    let background: Color
+    let shadow: Bool
+
+    static func user(height: CGFloat) -> KayaCaptionStyle {
+        let descriptor = MACaptionAppearanceCopyFontDescriptorForStyle(.user, nil, .default).takeRetainedValue()
+        let relative = MACaptionAppearanceGetRelativeCharacterSize(.user, nil)
+        let size = max(11, height * 0.06 * (relative > 0 ? relative : 1))
+        let fg = MACaptionAppearanceCopyForegroundColor(.user, nil).takeRetainedValue()
+        let bg = MACaptionAppearanceCopyBackgroundColor(.user, nil).takeRetainedValue()
+        let edge = MACaptionAppearanceGetTextEdgeStyle(.user, nil)
+        return KayaCaptionStyle(
+            font: CTFontCreateWithFontDescriptor(descriptor, size, nil),
+            foreground: Color(cgColor: fg).opacity(Double(MACaptionAppearanceGetForegroundOpacity(.user, nil))),
+            background: Color(cgColor: bg).opacity(Double(MACaptionAppearanceGetBackgroundOpacity(.user, nil))),
+            shadow: edge == .dropShadow)
+    }
+}
+
+/// The cue kaya times (a sidecar's), drawn over the picture in the user's
+/// caption style; nothing while the platform draws its own track.
+struct KayaCaptionOverlay: View {
+    let node: KayaNode
+
+    var body: some View {
+        let _ = node.videoSeq
+        let text = kayaPlayers[node.videoPlayer]?.kayaCaption ?? ""
+        GeometryReader { g in
+            if !text.isEmpty {
+                let style = KayaCaptionStyle.user(height: g.size.height)
+                Text(text)
+                    .font(Font(style.font))
+                    .foregroundStyle(style.foreground)
+                    .shadow(color: style.shadow ? .black : .clear, radius: 1)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(style.background)
+                    .frame(width: g.size.width, height: g.size.height * 0.95, alignment: .bottom)
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .onAppear {
+            kayaCaptionShown[node.id] = text
+            kayaWatchCaptionStyle()
+        }
+        .onChange(of: text) { _, now in kayaCaptionShown[node.id] = now }
+        .onDisappear { kayaCaptionShown.removeValue(forKey: node.id) }
+    }
+}
+
+/// A change to the user's caption style redraws every video view's caption.
+func kayaWatchCaptionStyle() {
+    guard !kayaCaptionStyleWatched else { return }
+    kayaCaptionStyleWatched = true
+    NotificationCenter.default.addObserver(
+        forName: NSNotification.Name(kMACaptionAppearanceSettingsChangedNotification as String), object: nil,
+        queue: .main
+    ) { _ in
+        for node in kayaScene.videos { node.videoSeq += 1 }
+    }
+}
+
+/// expect_caption's read: what kaya's renderer drew where kaya draws, and
+/// the platform's own current cue where the layer draws its track.
+func kayaVideoCaption(_ node: KayaNode) -> String {
+    guard let p = kayaPlayers[node.videoPlayer] else { return "" }
+    return p.drawsCaptions ? kayaCaptionShown[node.id] ?? "" : p.platformCue
+}
+
+// MARK: The video view's visibility (docs/media-plan.md §7b)
+
+/// How much of the view shows inside every scroll it sits in: its frame
+/// against each ancestor scroll's viewport, in window coordinates, reported
+/// on every move and coalesced by the core.
+struct KayaVideoVisibility: View {
+    let node: KayaNode
+
+    var body: some View {
+        GeometryReader { g in
+            Color.clear
+                .onAppear { kayaReportVisible(node, g.frame(in: .global)) }
+                .onChange(of: g.frame(in: .global)) { _, frame in kayaReportVisible(node, frame) }
+                .onDisappear { KayaHost.api.video_visible(node.id, 0) }
+        }
+    }
+}
+
+func kayaReportVisible(_ node: KayaNode, _ frame: CGRect) {
+    KayaHost.api.video_visible(node.id, kayaShownFraction(node, frame))
+}
+
+func kayaShownFraction(_ node: KayaNode, _ frame: CGRect) -> Double {
+    guard frame.width > 0, frame.height > 0 else { return 0 }
+    var clip = frame
+    var current = node.id
+    while let parent = kayaScene.parents[current] {
+        if let ancestor = kayaScene.nodes[parent], ancestor.kind == kindScroll {
+            clip = clip.intersection(ancestor.scrollViewportGlobal)
+        }
+        current = parent
+    }
+    guard !clip.isNull, !clip.isEmpty else { return 0 }
+    return Double(clip.width * clip.height / (frame.width * frame.height))
+}
+
 /// The video view's natural size: its picture's, 320x180 until one is known.
 func kayaVideoNatural(_ node: KayaNode) -> CGSize {
     _ = node.videoSeq
@@ -26599,6 +26953,13 @@ public func kayaSwiftUICanPlay(_ mime: UnsafePointer<CChar>, _ codecs: UnsafePoi
 /// THIS PLATFORM'S TABLE (docs/media-plan.md §7a, the lane tables): the
 /// items it is expected to refuse, with the reason; `{media:item|text}` in a
 /// scene expands to the refusal line here, to the scene's own text elsewhere.
+/// Items whose EMBEDDED captions this platform does not expose (docs/media-
+/// plan.md §7a, settled): none on Apple, which lists tx3g.
+func kayaCaptionsAbsent(_ item: String) -> Bool {
+    _ = item
+    return false
+}
+
 func kayaMediaRefusal(_ item: String) -> String? {
     let name = item.lowercased()
     if name.hasSuffix(".webm") || name.hasSuffix(".mpd") { return "unsupported_container" }

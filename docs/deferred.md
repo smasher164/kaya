@@ -9,7 +9,7 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
-## ~~RULING — which player a stamped video view shows (found 2026-09-30, the media depth slice)~~ CLOSED 2026-09-30, ruled by the maintainer: option (a), a row binds a player through a player-valued field; a player is shown by at most ONE video view at a time on every platform (the root refuses a second, naming both views), so the platforms that render one surface per player hold by the rule rather than by accident; the video view gains a visibility occurrence (entering and leaving view, and how much of it shows) so an app keeps players only for rows on screen and plays the most visible one; and running out of hardware decoders is a failure with its own reason, `resources`. Built by the media breadth slice; `video` leaves tools/tpl-surfaces.py's LIVE_ONLY then
+## ~~RULING — which player a stamped video view shows (found 2026-09-30, the media depth slice)~~ CLOSED 2026-09-30, ruled by the maintainer: option (a), a row binds a player through a player-valued field; a player is shown by at most ONE video view at a time on every platform (the root refuses a second, naming both views), so the platforms that render one surface per player hold by the rule rather than by accident; the video view gains a visibility occurrence (entering and leaving view, and how much of it shows) so an app keeps players only for rows on screen and plays the most visible one; and running out of hardware decoders is a failure with its own reason, `resources`. BUILT at depth on the mac 2026-09-30 (the player prop and the Rust player field, the one-view rule, the visibility occurrence, `resources`; docs/media-plan.md §7b); tools/tpl-surfaces.py's LIVE_ONLY is gone and `video` is held in both zones like every kind
 KEY: video, template zone, Tpl video, LIVE_ONLY, tpl-surfaces, set_video_player
 
 Every kind has a template-zone constructor in every binding
@@ -26,7 +26,7 @@ tools/tpl-surfaces.py's LIVE_ONLY, held to this heading, and the core refuses
 set_video_player on anything but a live video view.
 
 ## BUILD — media: the player, the video view and the session (docs/media-plan.md), depth on the mac (2026-09-30); the GTK, WinUI and Compose arms, the iOS legs, the tracks and captions and the other eight bindings are the breadth slice
-KEY: media, player, PlayerId, create_player, set_player_prop, player_command, release_player, set_video_player, set_session, player_changed, player_position, seek_completed, session_action, KIND_VIDEO, PROP_FIT, media_formats, media_delivery, media_session, media_tracks, expect_video_ink, session_send, expect_now_playing, expect_display_awake, ax_action, kaya_can_play, DEPTH STUB media_formats, gen-media, media-server
+KEY: media, player, PlayerId, create_player, set_player_prop, player_command, release_player, set_video_player, set_session, player_changed, player_position, seek_completed, session_action, KIND_VIDEO, PROP_FIT, PROP_PLAYER, PlayerKind, select_track, caption_times, player_tracks, caption_cue, video_visibility, kaya_caption_at, kaya_video_visible, captions.rs, media_formats, media_delivery, media_session, media_tracks, media_feed, expect_video_ink, expect_caption, {captions:, session_send, expect_now_playing, expect_display_awake, ax_action, kaya_can_play, DEPTH STUB media_formats, gen-media, media-server, resources
 
 The depth slice: the spec's six transaction, six apply and four occurrence
 records, the core's one state machine, failure table, source check and
@@ -49,12 +49,20 @@ breadth owes:
     (the layer view, the .playback category on play); the legs, the
     simulator's AV1 case, a window read of the picture and a remote command
     sent the way the system would are unmeasured there.
-  - The tracks and captions: track readings and selection, the
-    media_tracks scene, the caption renderer kaya draws for a sidecar
-    WebVTT on Apple, Android and GTK (plan §3), and the current cue as a
-    reading. Not built at depth.
-  - The other eight bindings (check-sugar-surface red by design on `video`
-    until they take it) and the C floor through kaya.h.
+  - The tracks and captions on GTK, WinUI and Compose (built at depth on
+    the mac 2026-09-30, plan §3): each backend's track listing and
+    selection through kaya_player_tracks and select_track, its own cue
+    through kaya_player_cue, and kaya's caption renderer's drawing half
+    (caption_times, kaya_caption_at) on Android and GTK in their users'
+    caption styles; the Windows lane table's `{captions:}` answer for the
+    tx3g item (the Stage's captions_absent, a depth stub today).
+  - The video view's visibility on GTK, WinUI, Compose and iOS
+    (kaya_video_visible from each backend's own geometry; plan §7b), and
+    `resources` in each backend's rows of the failure table, measured.
+  - The other eight bindings: `video` in both zones, a row's player field,
+    the visibility handlers, the track and cue surface
+    (check-sugar-surface red by design on `video`; its media-row table is
+    Rust's alone until they join it) and the C floor through kaya.h.
   - The packaging manifest's UIBackgroundModes `audio` for an app that
     declares a session on iOS (plan §5).
   - The loading ceiling's reason (crates/kaya/src/media.rs,

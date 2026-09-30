@@ -111,6 +111,10 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             | Occurrence::PlayerPosition { .. }
             | Occurrence::SeekCompleted { .. }
             | Occurrence::SessionAction { .. }
+            | Occurrence::PlayerTracks { .. }
+            | Occurrence::CaptionCue { .. }
+            | Occurrence::VideoVisibility { .. }
+            | Occurrence::InstanceVideoVisibility { .. }
             | Occurrence::Pasted { .. }
             | Occurrence::InstancePasted { .. }
             | Occurrence::Dropped { .. }

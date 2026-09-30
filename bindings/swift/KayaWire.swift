@@ -24,7 +24,7 @@ public enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0xfd32bf7c75c54fbb
+let kayaSpecHash: UInt64 = 0x1d479d566df30301
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
 func kayaPackDate(_ year: Int, _ month: Int, _ day: Int) -> Int64 {
@@ -734,11 +734,12 @@ struct KayaTx {
         self.end(kayaAt)
     }
 
-    /// Show `player` in the video view `widget_id` (docs/media-plan.md §3); 0 shows none. A live video view only: the player is an object, not collection data.
-    mutating func setVideoPlayer(_ widgetId: UInt64, _ player: UInt64) {
-        let kayaAt = self.begin(UInt16(KAYA_TX_SET_VIDEO_PLAYER))
-        self.u64(widgetId)
+    /// Select one of the player's tracks (docs/media-plan.md §3): `kind` is TRACK_KIND and `index` counts from 1 in the player_tracks listing, 0 selecting no caption track. A sidecar file's caption track is in the listing like the platform's own. An index past the listing, or 0 for audio, is a scene error.
+    mutating func selectTrack(_ player: UInt64, _ kind: UInt32, _ index: UInt32) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SELECT_TRACK))
         self.u64(player)
+        self.u32(kind)
+        self.u32(index)
         self.end(kayaAt)
     }
 
@@ -2387,6 +2388,38 @@ struct KayaTx {
         self.end(kayaAt)
     }
 
+    /// set_property with a constant player value.
+    mutating func setPlayer(_ widgetId: UInt64, _ player: Int64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_PLAYER))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.i64(player))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound player value.
+    mutating func bindPlayer(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_PLAYER))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindPlayerElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_PLAYER))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
     /// set_window_prop with a constant title value (window 0, the primary surface).
     mutating func setWindowTitle(_ window: UInt64, _ title: String) {
         let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
@@ -3122,6 +3155,9 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             || kind == UInt16(KAYA_OCCURRENCE_PLAYER_POSITION)
             || kind == UInt16(KAYA_OCCURRENCE_SEEK_COMPLETED)
             || kind == UInt16(KAYA_OCCURRENCE_SESSION_ACTION)
+            || kind == UInt16(KAYA_OCCURRENCE_PLAYER_TRACKS)
+            || kind == UInt16(KAYA_OCCURRENCE_CAPTION_CUE)
+            || kind == UInt16(KAYA_OCCURRENCE_VIDEO_VISIBILITY)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {
@@ -3152,6 +3188,23 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             return (kind, id, [], value, [], nil, nil, [])
         }
         if kind == UInt16(KAYA_OCCURRENCE_FULLSCREEN_CHANGED) {
+            // An answer carrying one value: id + the Value.
+            let vtype = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)
+            let valueLen = Int(raw.loadUnaligned(fromByteOffset: 20, as: UInt32.self))
+            let value: KayaValue
+            switch vtype {
+            case UInt32(KAYA_VALUE_BOOL):
+                value = .bool(raw[24] != 0)
+            case UInt32(KAYA_VALUE_I64):
+                value = .i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: 24, as: UInt64.self)))
+            case UInt32(KAYA_VALUE_F64):
+                value = .f64(Double(bitPattern: raw.loadUnaligned(fromByteOffset: 24, as: UInt64.self)))
+            default:
+                value = .str(String(decoding: raw[24..<(24 + valueLen)], as: UTF8.self))
+            }
+            return (kind, id, [], value, [], nil, nil, [])
+        }
+        if kind == UInt16(KAYA_OCCURRENCE_CAPTION_CUE) {
             // An answer carrying one value: id + the Value.
             let vtype = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)
             let valueLen = Int(raw.loadUnaligned(fromByteOffset: 20, as: UInt32.self))
@@ -3264,6 +3317,7 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             || kind == UInt16(KAYA_OCCURRENCE_VALUE_COMMITTED)
             || kind == UInt16(KAYA_OCCURRENCE_SUBMITTED)
             || kind == UInt16(KAYA_OCCURRENCE_COLOR_CHANGED)
+            || kind == UInt16(KAYA_OCCURRENCE_VIDEO_VISIBILITY)
         {
             let ptype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)
             let plen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))

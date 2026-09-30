@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0xfd32bf7c75c54fbbULL
+#define KAYA_SPEC_HASH 0x1d479d566df30301ULL
 
 
 /* Create a signal holding `initial`. */
@@ -802,11 +802,12 @@ static inline void kaya_tx_release_player(KayaTx *tx, uint64_t player) {
     kaya_wire_end(tx, kaya_at);
 }
 
-/* Show `player` in the video view `widget_id` (docs/media-plan.md §3); 0 shows none. A live video view only: the player is an object, not collection data. */
-static inline void kaya_tx_set_video_player(KayaTx *tx, uint64_t widget_id, uint64_t player) {
-    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_VIDEO_PLAYER);
-    kaya_wire_u64(tx, widget_id);
+/* Select one of the player's tracks (docs/media-plan.md §3): `kind` is TRACK_KIND and `index` counts from 1 in the player_tracks listing, 0 selecting no caption track. A sidecar file's caption track is in the listing like the platform's own. An index past the listing, or 0 for audio, is a scene error. */
+static inline void kaya_tx_select_track(KayaTx *tx, uint64_t player, uint32_t kind, uint32_t index) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SELECT_TRACK);
     kaya_wire_u64(tx, player);
+    kaya_wire_u32(tx, kind);
+    kaya_wire_u32(tx, index);
     kaya_wire_end(tx, kaya_at);
 }
 
@@ -2493,6 +2494,38 @@ static inline void kaya_tx_bind_fit_element(KayaTx *tx, uint64_t widget_id, uint
     kaya_wire_end(tx, kaya_at);
 }
 
+/* set_property with a constant player value. */
+static inline void kaya_tx_set_player(KayaTx *tx, uint64_t widget_id, int64_t player) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_PLAYER);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_i64(player));
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a signal-bound player value. */
+static inline void kaya_tx_bind_player(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_PLAYER);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_player_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_PLAYER);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, kaya_at);
+}
+
 /* set_menu_prop with a constant label value. */
 static inline void kaya_tx_set_menu_label(KayaTx *tx, uint64_t item, const char *label) {
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
@@ -2892,6 +2925,24 @@ static inline int kaya_parse_color_changed(const uint8_t *rec, uint64_t *id,
                                             uint32_t *n_keys, KayaVal *payload) {
     const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
     if (r->header.kind != KAYA_OCCURRENCE_COLOR_CHANGED)
+        return 0;
+    *id = r->id;
+    *n_keys = r->path_len;
+    size_t at = sizeof(KayaRecordButtonClicked);
+    for (uint32_t k = 0; k < r->path_len && k < max_keys; k++)
+        at = kaya_parse_value(rec, at, &keys[k]);
+    kaya_parse_value(rec, at, payload);
+    return 1;
+}
+
+/* Decode a video_visibility occurrence: same identity head as a click, then
+ * its payload as one F64 value (strings point into rec). Returns 1
+ * and fills the outputs, or 0 for other kinds. */
+static inline int kaya_parse_video_visibility(const uint8_t *rec, uint64_t *id,
+                                               KayaVal *keys, uint32_t max_keys,
+                                               uint32_t *n_keys, KayaVal *payload) {
+    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
+    if (r->header.kind != KAYA_OCCURRENCE_VIDEO_VISIBILITY)
         return 0;
     *id = r->id;
     *n_keys = r->path_len;

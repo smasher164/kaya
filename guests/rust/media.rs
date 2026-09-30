@@ -1,9 +1,12 @@
 //! The media suite (docs/media-plan.md §7a): one player shown by one video
 //! view. `media_formats` and `media_delivery` walk a list of items, each
 //! loaded, played to its end and summed up in label#0; `media_session`
-//! attaches the player to the app's session and answers `next` itself.
+//! attaches the player to the app's session and answers `next` itself;
+//! `media_tracks` lists and selects each item's audio and caption tracks
+//! and reads the current cue; `media_feed` stamps a video view per row,
+//! each showing its row's own player, and reads their visibility (§7b).
 
-use kaya::{MediaFailure, MediaSource, PlayerState, SessionAction, SessionActionKind};
+use kaya::{MediaFailure, MediaSource, PathKey, PlayerId, PlayerState, PlayerTracks, SessionAction, SessionActionKind};
 
 #[derive(Clone)]
 enum Msg {
@@ -82,6 +85,11 @@ fn delivery() -> Vec<Item> {
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let scene = std::env::var("KAYA_SELFTEST").unwrap_or_default();
+    match scene.as_str() {
+        "media_tracks" => return tracks_app(ctx),
+        "media_feed" => return feed_app(ctx),
+        _ => {}
+    }
     let session = scene == "media_session";
     let items = match scene.as_str() {
         "media_delivery" => delivery(),
@@ -180,6 +188,225 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 ctx.apply(|tx| tx.write(name, format!("next {nexts}")));
             }
             Msg::Session(_) => {}
+        }
+    }
+}
+
+fn media_url() -> String {
+    std::env::var("KAYA_MEDIA_URL").unwrap_or_else(|_| {
+        panic!(
+            "kaya: the media scenes that stream read KAYA_MEDIA_URL, the local server the lane \
+             starts (tools/lib/media_server.py); a hand run goes through tools/run-leg.py"
+        )
+    })
+}
+
+#[derive(Clone)]
+enum TrackMsg {
+    Next,
+    SecondAudio,
+    Captions,
+    CaptionsOff,
+    At(u64),
+    PlayFromStart,
+    State(PlayerState),
+    Failed(MediaFailure),
+    Tracks(PlayerTracks),
+    Cue(String),
+}
+
+/// One track list as a line: `audio en, fr [2]`, the selection counting
+/// from 1, `-` for none; `audio none` for an empty list.
+fn track_line(what: &str, tags: &[String], selected: Option<usize>) -> String {
+    if tags.is_empty() {
+        return format!("{what} none");
+    }
+    let pick = selected.map_or("-".to_owned(), |i| (i + 1).to_string());
+    format!("{what} {} [{pick}]", tags.join(", "))
+}
+
+/// media_tracks (docs/media-plan.md §3, §7a): each item's audio and caption
+/// listing, a second audio track selected, the last caption track selected,
+/// and the cue read at 0.5 s and 1.5 s with the player paused there. The
+/// sidecar item is the suite's floor file with captions.vtt, which kaya
+/// parses, times and draws.
+fn tracks_app(ctx: kaya::AppCtx) {
+    let base = media_url();
+    let sidecar = MediaSource::asset("media/captions.vtt");
+    let items: Vec<(Item, bool)> = vec![
+        (local("h264_2audio.mp4", "video/mp4", H264), false),
+        (local("vp9_2audio.webm", "video/webm", "vp09.00.10.08, opus"), false),
+        (served(&base, "hls_fmp4.m3u8", "application/vnd.apple.mpegurl", ""), false),
+        (served(&base, "hls_mpegts.m3u8", "application/vnd.apple.mpegurl", ""), false),
+        (local("h264_tx3g.mp4", "video/mp4", H264), false),
+        (Item { name: "h264_aac.mp4 + captions.vtt".to_owned(), ..local("h264_aac.mp4", "video/mp4", H264) }, true),
+    ];
+    let msgs = kaya::Messages::<TrackMsg>::new();
+    let (summary, name, audio, captions, cue, player) = ctx.apply(|tx| {
+        tx.window(kaya::DEFAULT_WINDOW).title("media tracks");
+        let summary = tx.signal("idle");
+        let name = tx.signal("none");
+        let audio = tx.signal("audio none");
+        let captions = tx.signal("captions none");
+        let cue = tx.signal("");
+        let player = tx.player().muted(true).id();
+        let root = tx
+            .column(|tx| {
+                tx.label(summary); // label#0
+                tx.label(name); // label#1
+                tx.label(audio); // label#2
+                tx.label(captions); // label#3
+                tx.label(cue); // label#4
+                tx.video(player).a11y_id("clip").a11y_label("Clip"); // video#0
+                for (caption, msg) in [
+                    ("next", TrackMsg::Next),                // button#0
+                    ("audio 2", TrackMsg::SecondAudio),      // button#1
+                    ("captions", TrackMsg::Captions),        // button#2
+                    ("at 0.5s", TrackMsg::At(500)),          // button#3
+                    ("at 1.5s", TrackMsg::At(1500)),         // button#4
+                    ("captions off", TrackMsg::CaptionsOff), // button#5
+                    ("play", TrackMsg::PlayFromStart),       // button#6
+                ] {
+                    let b = tx.button(caption).id();
+                    msgs.on_click(b, msg);
+                }
+            })
+            .id();
+        tx.mount(root);
+        (summary, name, audio, captions, cue, player)
+    });
+    msgs.on_player_state(player, TrackMsg::State);
+    msgs.on_failed(player, |why, _| TrackMsg::Failed(why));
+    msgs.on_tracks(player, |t| TrackMsg::Tracks(t.clone()));
+    msgs.on_cue(player, |text| TrackMsg::Cue(text.to_owned()));
+
+    let mut at = 0usize;
+    let mut can = false;
+    while let Some(msg) = msgs.next(&ctx) {
+        match msg {
+            TrackMsg::Next => {
+                let Some((item, with_sidecar)) = items.get(at) else { continue };
+                at += 1;
+                can = kaya::can_play(item.mime, item.codecs);
+                ctx.apply(|tx| {
+                    if *with_sidecar {
+                        tx.player_captions(player, &sidecar, "en");
+                    } else {
+                        tx.clear_captions(player);
+                    }
+                    tx.player_source(player, &item.source);
+                    tx.write(name, item.name.clone());
+                    tx.write(summary, "loading");
+                    tx.write(cue, "");
+                });
+            }
+            TrackMsg::SecondAudio => ctx.apply(|tx| tx.select_audio(player, 1)),
+            TrackMsg::Captions => {
+                let listed = ctx.tracks(player).captions.len();
+                ctx.apply(|tx| {
+                    if listed == 0 {
+                        tx.write(cue, "captions none");
+                    } else {
+                        tx.select_captions(player, Some(listed - 1));
+                    }
+                });
+            }
+            TrackMsg::CaptionsOff => ctx.apply(|tx| tx.select_captions(player, None)),
+            TrackMsg::At(ms) => ctx.apply(|tx| {
+                tx.pause(player);
+                tx.seek(player, ms);
+            }),
+            TrackMsg::PlayFromStart => ctx.apply(|tx| {
+                tx.seek(player, 0);
+                tx.play(player);
+            }),
+            TrackMsg::State(PlayerState::Ready) => ctx.apply(|tx| {
+                tx.write(summary, format!("ready, can_play {}", if can { "yes" } else { "no" }));
+            }),
+            TrackMsg::State(_) => {}
+            TrackMsg::Failed(why) => ctx.apply(|tx| {
+                let line = format!("failed {}, can_play {}", why.name(), if can { "yes" } else { "no" });
+                tx.write(summary, line.clone());
+                tx.write(audio, line);
+            }),
+            TrackMsg::Tracks(t) => ctx.apply(|tx| {
+                tx.write(audio, track_line("audio", &t.audio, t.audio_selected));
+                tx.write(captions, track_line("captions", &t.captions, t.caption_selected));
+            }),
+            TrackMsg::Cue(text) => ctx.apply(|tx| tx.write(cue, text)),
+        }
+    }
+}
+
+#[derive(kaya::KayaGen, Clone, Debug, PartialEq)]
+struct Clip {
+    name: String,
+    player: PlayerId,
+}
+
+#[derive(Clone)]
+enum FeedMsg {
+    Shown(kaya::Path, f64),
+}
+
+const FEED_ROWS: usize = 10;
+
+/// media_feed (docs/media-plan.md §7b): a scroll of rows, each a video view
+/// showing its row's own player, paused on its first frame; the first and
+/// last rows' visibility in label#0 and label#1, as the feed app reads it to
+/// keep players only for the rows on screen.
+fn feed_app(ctx: kaya::AppCtx) {
+    let msgs = kaya::Messages::<FeedMsg>::new();
+    let (first, last) = ctx.apply(|tx| {
+        tx.window(kaya::DEFAULT_WINDOW).title("media feed").size(420.0, 480.0);
+        let first = tx.signal("r0 out");
+        let last = tx.signal(format!("r{} out", FEED_ROWS - 1));
+        let clips = tx.collection::<Clip>();
+        let mut video_node = None;
+        let root = tx
+            .column(|tx| {
+                tx.label(first); // label#0
+                tx.label(last); // label#1
+                tx.scroll(|tx| {
+                    tx.column(|tx| {
+                        for mut row in clips.rows(tx) {
+                            row.label(Clip::name());
+                            video_node = Some(row.video(Clip::player()));
+                        }
+                    });
+                })
+                .grow(1.0);
+            })
+            .id();
+        tx.mount(root);
+        for i in 0..FEED_ROWS {
+            let player = tx.player().muted(true).source(&MediaSource::asset("media/h264_aac.mp4")).id();
+            tx.insert(&clips, i as i64, Clip { name: format!("r{i}"), player });
+        }
+        msgs.on_visibility_node(video_node.expect("the feed's template declared a video view"), FeedMsg::Shown);
+        (first, last)
+    });
+
+    while let Some(msg) = msgs.next(&ctx) {
+        match msg {
+            FeedMsg::Shown(path, shown) => {
+                let row = path.key::<i64>(0) as usize;
+                let word = if shown >= 0.999 {
+                    "whole"
+                } else if shown > 0.0 {
+                    "in"
+                } else {
+                    "out"
+                };
+                ctx.apply(|tx| {
+                    if row == 0 {
+                        tx.write(first, format!("r0 {word}"));
+                    }
+                    if row == FEED_ROWS - 1 {
+                        tx.write(last, format!("r{row} {word}"));
+                    }
+                });
+            }
         }
     }
 }

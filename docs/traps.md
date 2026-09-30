@@ -4,6 +4,29 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## AVFoundation lists a forced-only twin of every subtitle track, and selects it (measured 2026-09-30)
+
+An MP4 with one `mov_text` track (guests/assets/media/h264_tx3g.mp4) has TWO
+legible options on macOS: the track, and a synthesized "English Forced"
+option (`containsOnlyForcedSubtitles`, `default = YES`) that AVFoundation
+selects on its own and that shows only cues marked forced, so the item plays
+with a caption track "selected" and no caption ever drawn. A listing that
+reads `group.options` shows two tracks of one language and a selection the
+user never made. kaya lists tracks without forced-only options
+(`kayaTrackOptions` in swift/KayaSwiftUI.swift); the media_tracks leg reads
+the tx3g listing as one track, unselected
+(docs/probes/media-mac-2026-09-30.md).
+
+## Running out of hardware decoders is -11839 on the mac, and only AV1 gets there (measured 2026-09-30)
+
+A headless probe playing N muted AVPlayers over one clip on an M5 Pro: H.264
+and HEVC opened 1024 with no error; AV1 failed from the 257th on with
+`AVFoundationErrorDomain -11839` ("The decoder required for this media is
+busy."), underlying `NSOSStatusErrorDomain -12913`. Both map to the
+`resources` reason (crates/kaya/src/media.rs's failure table, held by its
+unit rows); a leg that provokes it would load a lane host with 257
+decoders, so none does.
+
 ## A MediaPlayer run over ssh fails video that plays on the desktop (measured 2026-09-30)
 
 An ssh login on the Windows VM runs in session 0, whose window station has

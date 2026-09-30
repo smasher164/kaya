@@ -54,7 +54,7 @@ pub(crate) const TX_CREATE_PLAYER: u16 = 63;
 pub(crate) const TX_SET_PLAYER_PROP: u16 = 64;
 pub(crate) const TX_PLAYER_COMMAND: u16 = 65;
 pub(crate) const TX_RELEASE_PLAYER: u16 = 66;
-pub(crate) const TX_SET_VIDEO_PLAYER: u16 = 67;
+pub(crate) const TX_SELECT_TRACK: u16 = 67;
 pub(crate) const TX_SET_SESSION: u16 = 68;
 pub(crate) const TX_ADD_SECTION: u16 = 25;
 pub(crate) const TX_SELECT_SECTION: u16 = 26;
@@ -160,6 +160,8 @@ pub(crate) const APPLY_PLAYER_COMMAND: u16 = 53;
 pub(crate) const APPLY_RELEASE_PLAYER: u16 = 54;
 pub(crate) const APPLY_SET_VIDEO_PLAYER: u16 = 55;
 pub(crate) const APPLY_SET_SESSION: u16 = 56;
+pub(crate) const APPLY_SELECT_TRACK: u16 = 57;
+pub(crate) const APPLY_CAPTION_TIMES: u16 = 58;
 pub(crate) const APPLY_ADD_SECTION: u16 = 15;
 pub(crate) const APPLY_SELECT_SECTION: u16 = 16;
 pub(crate) const APPLY_SET_SECTION_PROP: u16 = 17;
@@ -341,6 +343,7 @@ pub(crate) const MEDIA_FAILURES: &[(i64, &str)] = &[
     (3, "not_found"),
     (4, "network"),
     (5, "decode_error"),
+    (6, "resources"),
 ];
 
 pub(crate) const PLAYER_COMMANDS: &[(i64, &str)] = &[(1, "play"), (2, "pause"), (3, "seek")];
@@ -366,7 +369,26 @@ pub(crate) const PPROPS: &[(i64, &str)] = &[
     (3, "volume"),
     (4, "muted"),
     (5, "loop"),
+    (6, "captions"),
+    (7, "captions_language"),
 ];
+
+pub(crate) const TRACK_KINDS: &[(i64, &str)] = &[(0, "audio"), (1, "caption")];
+
+pub(crate) fn track_kind_raw(kind: crate::protocol::TrackKind) -> u32 {
+    match kind {
+        crate::protocol::TrackKind::Audio => 0,
+        crate::protocol::TrackKind::Caption => 1,
+    }
+}
+
+fn track_kind(raw: u32) -> crate::protocol::TrackKind {
+    match raw {
+        0 => crate::protocol::TrackKind::Audio,
+        1 => crate::protocol::TrackKind::Caption,
+        other => panic!("kaya: select_track's kind {other} is not a track_kind (audio=0, caption=1)"),
+    }
+}
 
 pub(crate) fn player_state_raw(state: crate::protocol::PlayerState) -> u32 {
     use crate::protocol::PlayerState as S;
@@ -390,6 +412,7 @@ pub(crate) fn media_failure_raw(failure: Option<crate::protocol::MediaFailure>) 
         Some(F::NotFound) => 3,
         Some(F::Network) => 4,
         Some(F::DecodeError) => 5,
+        Some(F::Resources) => 6,
     }
 }
 
@@ -401,6 +424,7 @@ pub(crate) fn media_failure_from(raw: u32) -> Option<crate::protocol::MediaFailu
         3 => Some(F::NotFound),
         4 => Some(F::Network),
         5 => Some(F::DecodeError),
+        6 => Some(F::Resources),
         _ => None,
     }
 }
@@ -413,6 +437,8 @@ fn player_prop(raw: u32) -> crate::protocol::PlayerProp {
         3 => P::Volume,
         4 => P::Muted,
         5 => P::Loop,
+        6 => P::Captions,
+        7 => P::CaptionsLanguage,
         other => panic!("kaya: unknown player property {other}"),
     }
 }
@@ -425,6 +451,8 @@ pub(crate) fn player_prop_raw(prop: crate::protocol::PlayerProp) -> u32 {
         P::Volume => 3,
         P::Muted => 4,
         P::Loop => 5,
+        P::Captions => 6,
+        P::CaptionsLanguage => 7,
     }
 }
 
@@ -534,6 +562,37 @@ pub(crate) fn player_ms_body(player: crate::protocol::PlayerId, ms: u64) -> [u8;
     let mut b = [0u8; 16];
     b[..8].copy_from_slice(&player.0.to_le_bytes());
     b[8..].copy_from_slice(&ms.to_le_bytes());
+    b
+}
+
+/// PLAYER_TRACKS { u64 player; u32 audio_selected; u32 caption_selected;
+/// Values audio; Values captions }, selections counting from 1, 0 none.
+pub(crate) fn player_tracks_body(player: crate::protocol::PlayerId, tracks: &crate::protocol::PlayerTracks) -> Vec<u8> {
+    let mut b = Vec::new();
+    let mut blobs = Vec::new();
+    let one = |s: Option<usize>| s.map_or(0u32, |i| i as u32 + 1);
+    b.extend_from_slice(&player.0.to_le_bytes());
+    b.extend_from_slice(&one(tracks.audio_selected).to_le_bytes());
+    b.extend_from_slice(&one(tracks.caption_selected).to_le_bytes());
+    for list in [&tracks.audio, &tracks.captions] {
+        let values: Vec<Value> = list.iter().map(|s| Value::Str(s.clone())).collect();
+        write_values(&mut b, &values, &mut blobs);
+    }
+    b
+}
+
+/// CAPTION_CUE { u64 player; Str text }.
+pub(crate) fn caption_cue_body(player: crate::protocol::PlayerId, text: &str) -> Vec<u8> {
+    let mut b = Vec::new();
+    b.extend_from_slice(&player.0.to_le_bytes());
+    write_value(&mut b, &Value::Str(text.to_owned()), &mut Vec::new());
+    b
+}
+
+/// VIDEO_VISIBILITY: the copy's click tag, then the fraction shown as F64.
+pub(crate) fn video_visibility_body(id: u64, path: &[Value], shown: f64) -> Vec<u8> {
+    let mut b = click_tag(id, path);
+    write_value(&mut b, &Value::F64(shown), &mut Vec::new());
     b
 }
 
@@ -676,6 +735,7 @@ pub(crate) const PROP_MIN_GAP: u32 = 48;
 pub(crate) const PROP_LOW_LABEL: u32 = 49;
 pub(crate) const PROP_HIGH_LABEL: u32 = 50;
 pub(crate) const PROP_FIT: u32 = 51;
+pub(crate) const PROP_PLAYER: u32 = 52;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
@@ -1222,6 +1282,7 @@ fn prop(raw: u32) -> Prop {
         PROP_LOW_LABEL => Prop::LowLabel,
         PROP_HIGH_LABEL => Prop::HighLabel,
         PROP_FIT => Prop::Fit,
+        PROP_PLAYER => Prop::Player,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -1628,13 +1689,10 @@ pub fn decode_transaction_with_blobs(
                 TxOp::PlayerCommand { player, command: player_command(raw, at_ms) }
             }
             TX_RELEASE_PLAYER => TxOp::ReleasePlayer { player: crate::protocol::PlayerId(r.u64()) },
-            TX_SET_VIDEO_PLAYER => {
-                let widget = WidgetId(r.u64());
-                let player = r.u64();
-                TxOp::SetVideoPlayer {
-                    widget,
-                    player: (player != 0).then_some(crate::protocol::PlayerId(player)),
-                }
+            TX_SELECT_TRACK => {
+                let player = crate::protocol::PlayerId(r.u64());
+                let kind = track_kind(r.u32());
+                TxOp::SelectTrack { player, kind, index: r.u32() }
             }
             TX_SET_SESSION => {
                 let player = r.u64();
@@ -3723,6 +3781,16 @@ impl Writer {
                 b.extend_from_slice(&widget.0.to_le_bytes());
                 b.extend_from_slice(&player.map_or(0, |p| p.0).to_le_bytes());
             }),
+            ApplyOp::SelectTrack { player, kind, index } => self.record(APPLY_SELECT_TRACK, |b, _| {
+                b.extend_from_slice(&player.0.to_le_bytes());
+                b.extend_from_slice(&track_kind_raw(*kind).to_le_bytes());
+                b.extend_from_slice(&index.to_le_bytes());
+            }),
+            ApplyOp::CaptionTimes { player, times } => self.record(APPLY_CAPTION_TIMES, |b, blobs| {
+                b.extend_from_slice(&player.0.to_le_bytes());
+                let values: Vec<Value> = times.iter().map(|t| Value::I64(*t as i64)).collect();
+                write_values(b, &values, blobs);
+            }),
             ApplyOp::SetSession { player, offered, playback_state, title, artist, album, artwork } => {
                 self.record(APPLY_SET_SESSION, |b, blobs| {
                     b.extend_from_slice(&player.map_or(0, |p| p.0).to_le_bytes());
@@ -4330,9 +4398,10 @@ impl Writer {
             TxOp::ReleasePlayer { player } => self.record(TX_RELEASE_PLAYER, |b, _| {
                 b.extend_from_slice(&player.0.to_le_bytes());
             }),
-            TxOp::SetVideoPlayer { widget, player } => self.record(TX_SET_VIDEO_PLAYER, |b, _| {
-                b.extend_from_slice(&widget.0.to_le_bytes());
-                b.extend_from_slice(&player.map_or(0, |p| p.0).to_le_bytes());
+            TxOp::SelectTrack { player, kind, index } => self.record(TX_SELECT_TRACK, |b, _| {
+                b.extend_from_slice(&player.0.to_le_bytes());
+                b.extend_from_slice(&track_kind_raw(*kind).to_le_bytes());
+                b.extend_from_slice(&index.to_le_bytes());
             }),
             TxOp::SetSession(spec) => self.record(TX_SET_SESSION, |b, blobs| {
                 b.extend_from_slice(&spec.player.map_or(0, |p| p.0).to_le_bytes());
@@ -4833,6 +4902,7 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::LowLabel => PROP_LOW_LABEL,
         Prop::HighLabel => PROP_HIGH_LABEL,
         Prop::Fit => PROP_FIT,
+        Prop::Player => PROP_PLAYER,
     }
 }
 

@@ -30,14 +30,6 @@ DEFAULT_KINDS = (
     "date_picker time_picker labeled search number_field color_picker range video"
 ).split()
 
-# Kinds with no template zone YET, each on the record with the open ledger
-# heading that decides it; the heading must still be open in
-# docs/deferred.md, so an exemption outlives no ruling.
-LIVE_ONLY = {
-    "video": "RULING — which player a stamped video view shows",
-}
-
-
 def wire_kinds(root):
     """The generated wire's kind list, lowercased, sorted."""
     wire = pathlib.Path(root, "bindings/python/kaya/wire.py").read_text(encoding="utf-8")
@@ -2155,37 +2147,6 @@ def main():
         )
         return 1
     print(f"tpl-surfaces: DEFAULT_KINDS holds the wire's {len(spec)} kinds (a one-short list watched refused)")
-    # A staged partial copy (check-sugar-surface's probes) carries no ledger;
-    # the repo's own is the one the exemption answers to.
-    ledger_path = pathlib.Path(ROOT, "docs/deferred.md")
-    if not ledger_path.is_file():
-        ledger_path = pathlib.Path(__file__).resolve().parent.parent / "docs/deferred.md"
-    ledger = ledger_path.read_text(encoding="utf-8")
-
-    def live_only_findings(text):
-        found = []
-        for kind, heading in LIVE_ONLY.items():
-            if kind not in spec:
-                found.append(f"LIVE_ONLY names {kind!r}, which is not a wire kind")
-            if not re.search(r"^## " + re.escape(heading), text, re.M):
-                found.append(
-                    f"LIVE_ONLY exempts {kind!r} on {heading!r}, which is not an open "
-                    f"heading in docs/deferred.md — the ruling landed or the entry moved; "
-                    f"build the template zone or re-point the exemption")
-        return found
-
-    for finding in live_only_findings(ledger):
-        print(f"tpl-surfaces: {finding}")
-        status = 1
-    for kind, heading in LIVE_ONLY.items():
-        struck, n = re.subn(r"^## " + re.escape(heading), "## ~~" + heading, ledger, flags=re.M)
-        if n != 1 or not live_only_findings(struck):
-            print(f"tpl-surfaces: SELF-TEST FAILED — {kind}'s ruling struck ({n} substitution(s)) "
-                  f"still exempted it")
-            return 1
-        print(f"tpl-surfaces: {kind} is live-only on the record ({heading}); its ruling "
-              f"struck in a copy is refused ({n} substitution)")
-    kinds = [k for k in kinds if k not in LIVE_ONLY]
     for lang, reader, where, minimum, spelling in ZONES:
         try:
             names = reader(None)

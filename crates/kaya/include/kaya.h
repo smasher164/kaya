@@ -187,6 +187,18 @@
 #define KAYA_OCCURRENCE_SESSION_ACTION 42
 
 /**
+ * PLAYER_TRACKS { u64 player; u32 audio_selected; u32 caption_selected;
+ * Values audio; Values captions } (Str BCP 47 tags, selections from 1, 0
+ * none); CAPTION_CUE { u64 player; Str text }; VIDEO_VISIBILITY { the
+ * copy's tag; F64 shown } (docs/media-plan.md §3, §7b).
+ */
+#define KAYA_OCCURRENCE_PLAYER_TRACKS 43
+
+#define KAYA_OCCURRENCE_CAPTION_CUE 44
+
+#define KAYA_OCCURRENCE_VIDEO_VISIBILITY 45
+
+/**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
  *   CREATE_SIGNAL:     u64 signal_id, value
@@ -304,8 +316,8 @@
  * The media records (docs/media-plan.md): CREATE_PLAYER and RELEASE_PLAYER
  * u64 player; SET_PLAYER_PROP u64 player, u32 pprop, u32 reserved, value
  * (written once, never bound); PLAYER_COMMAND u64 player, u32
- * player_command, u32 reserved, u64 at_ms; SET_VIDEO_PLAYER u64 widget,
- * u64 player (0 none); SET_SESSION u64 player, u32 actions mask, u32
+ * player_command, u32 reserved, u64 at_ms; SELECT_TRACK u64 player, u32
+ * track_kind, u32 index (from 1, 0 none); SET_SESSION u64 player, u32 actions mask, u32
  * playback_state, then title, artist, album and artwork as Str values.
  */
 #define KAYA_TX_CREATE_PLAYER 63
@@ -316,7 +328,7 @@
 
 #define KAYA_TX_RELEASE_PLAYER 66
 
-#define KAYA_TX_SET_VIDEO_PLAYER 67
+#define KAYA_TX_SELECT_TRACK 67
 
 #define KAYA_TX_SET_SESSION 68
 
@@ -673,6 +685,15 @@
 #define KAYA_APPLY_SET_VIDEO_PLAYER 55
 
 #define KAYA_APPLY_SET_SESSION 56
+
+/**
+ * SELECT_TRACK u64 player, u32 track_kind, u32 index (from 1 in the
+ * platform's own listing, 0 captions off); CAPTION_TIMES u64 player, then
+ * the kaya-drawn cues' boundaries as I64 ms values.
+ */
+#define KAYA_APPLY_SELECT_TRACK 57
+
+#define KAYA_APPLY_CAPTION_TIMES 58
 
 #define KAYA_APPLY_ADD_SECTION 15
 
@@ -1036,6 +1057,11 @@
  * A video view's fit, a KAYA_FIT_* (docs/media-plan.md §3).
  */
 #define KAYA_PROP_FIT 51
+
+/**
+ * A video view's player (docs/media-plan.md §7b): an I64 id, 0 none.
+ */
+#define KAYA_PROP_PLAYER 52
 
 /**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
@@ -1446,6 +1472,14 @@
 
 #define KAYA_PPROP_LOOP 5
 
+#define KAYA_PPROP_CAPTIONS 6
+
+#define KAYA_PPROP_CAPTIONS_LANGUAGE 7
+
+#define KAYA_TRACK_KIND_AUDIO 0
+
+#define KAYA_TRACK_KIND_CAPTION 1
+
 #define KAYA_PLAYER_STATE_IDLE 0
 
 #define KAYA_PLAYER_STATE_LOADING 1
@@ -1471,6 +1505,8 @@
 #define KAYA_MEDIA_FAILURE_NETWORK 4
 
 #define KAYA_MEDIA_FAILURE_DECODE_ERROR 5
+
+#define KAYA_MEDIA_FAILURE_RESOURCES 6
 
 #define KAYA_PLAYER_COMMAND_PLAY 1
 
@@ -1787,6 +1823,20 @@ typedef struct KayaHostApi {
   uint32_t (*player_position)(uint64_t, uint64_t);
   uint32_t (*player_seeked)(uint64_t, uint64_t);
   uint32_t (*player_overdue)(uint64_t);
+  /**
+   * docs/media-plan.md §3, §7b: the platform's tracks and cue, kaya's
+   * caption renderer's question, and a video view's visibility.
+   */
+  uint32_t (*player_tracks)(uint64_t,
+                            const uint8_t*,
+                            uintptr_t,
+                            const uint8_t*,
+                            uintptr_t,
+                            uint32_t,
+                            uint32_t);
+  uint32_t (*player_cue)(uint64_t, const uint8_t*, uintptr_t);
+  uintptr_t (*caption_at)(uint64_t, uint64_t, uint8_t*, uintptr_t);
+  void (*video_visible)(uint64_t, double);
   /**
    * docs/media-plan.md §5: the core's route for a remote action, and the
    * system playback state to publish after every report.
@@ -2905,6 +2955,51 @@ uint32_t kaya_player_seeked(uint64_t player, uint64_t position_ms);
  * backend was handed the player's source.
  */
 uint32_t kaya_player_overdue(uint64_t player);
+
+/**
+ * Presentation side: the platform's own tracks (docs/media-plan.md §3):
+ * each list's BCP 47 tags joined by '\n' ("" for none), in the platform's
+ * order, and which of each it has selected, counting from 1, 0 none.
+ *
+ * # Safety
+ * `audio` and `captions` must each describe readable UTF-8 bytes of their
+ * lengths, or be NULL with length 0.
+ */
+uint32_t kaya_player_tracks(uint64_t player,
+                            const uint8_t *audio,
+                            uintptr_t audio_len,
+                            const uint8_t *captions,
+                            uintptr_t captions_len,
+                            uint32_t audio_selected,
+                            uint32_t caption_selected);
+
+/**
+ * Presentation side: the text the platform shows now for its own selected
+ * caption track, "" for none.
+ *
+ * # Safety
+ * `text` must describe `text_len` readable UTF-8 bytes, or be NULL.
+ */
+uint32_t kaya_player_cue(uint64_t player, const uint8_t *text, uintptr_t text_len);
+
+/**
+ * Presentation side: KAYA'S CAPTION RENDERER asks what to draw (docs/media-
+ * plan.md §3). The core times the sidecar's cues: this answers the text
+ * current at `t_ms` on the backend's clock, "" for none, and publishes it
+ * when it changed. Writes at most `cap` bytes to `out` and answers the
+ * text's whole length; ask again with a larger buffer when it exceeds `cap`.
+ *
+ * # Safety
+ * `out` must be writable for `cap` bytes, or NULL with `cap` 0.
+ */
+uintptr_t kaya_caption_at(uint64_t player, uint64_t t_ms, uint8_t *out, uintptr_t cap);
+
+/**
+ * Presentation side: how much of video view `widget` shows in its viewport,
+ * 0 to 1, reported as often as its geometry moves; the core coalesces
+ * (docs/media-plan.md §7b).
+ */
+void kaya_video_visible(uint64_t widget, double shown);
 
 /**
  * Presentation side: the system's media controls sent a SESSION_ACTION

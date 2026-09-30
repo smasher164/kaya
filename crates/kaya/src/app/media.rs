@@ -4,8 +4,9 @@
 
 use super::{Messages, Tx, Widget};
 use crate::protocol::{
-    Fit, MediaFailure, Occurrence, PlaybackState, PlayerCommand, PlayerId, PlayerProp, PlayerState,
-    SessionAction, SessionActionKind, SessionSpec, TxOp, Value, WidgetId,
+    Fit, MediaFailure, Occurrence, Path, PlaybackState, PlayerCommand, PlayerId, PlayerProp, PlayerState,
+    PlayerTracks, SessionAction, SessionActionKind, SessionSpec, TemplateNodeId, TrackKind, TxOp, Value,
+    WidgetId,
 };
 
 /// Where a player reads its media from: an asset under the app's asset
@@ -74,7 +75,29 @@ impl super::AppCtx {
         self.players.borrow().get(&player.0).copied().unwrap_or_default()
     }
 
+    /// A player's tracks (docs/media-plan.md §3): language tags in the
+    /// platform's order, a sidecar caption track last, and the selections.
+    pub fn tracks(&self, player: PlayerId) -> PlayerTracks {
+        self.player_tracks.borrow().get(&player.0).map(|(t, _)| t.clone()).unwrap_or_default()
+    }
+
+    /// The caption cue current on the player's clock, "" for none.
+    pub fn cue(&self, player: PlayerId) -> String {
+        self.player_tracks.borrow().get(&player.0).map(|(_, c)| c.clone()).unwrap_or_default()
+    }
+
     pub(super) fn absorb_player(&self, occ: &Occurrence) {
+        match occ {
+            Occurrence::PlayerTracks { player, tracks } => {
+                self.player_tracks.borrow_mut().entry(player.0).or_default().0 = tracks.clone();
+                return;
+            }
+            Occurrence::CaptionCue { player, text } => {
+                self.player_tracks.borrow_mut().entry(player.0).or_default().1 = text.clone();
+                return;
+            }
+            _ => {}
+        }
         let mut players = self.players.borrow_mut();
         match occ {
             Occurrence::PlayerChanged { player, state, failure, duration_ms, width, height, .. } => {
@@ -156,9 +179,35 @@ impl<'a> Tx<'a> {
         self.ops.push(TxOp::ReleasePlayer { player });
     }
 
-    /// Show another player in a video view, or none.
+    /// Show another player in a video view, or none. A player is shown by
+    /// one video view at a time (docs/media-plan.md §7b).
     pub fn show_player(&mut self, video: WidgetId, player: Option<PlayerId>) {
-        self.ops.push(TxOp::SetVideoPlayer { widget: video, player });
+        self.set(video, crate::protocol::Prop::Player, Value::I64(player.map_or(0, |p| p.0 as i64)));
+    }
+
+    /// Select audio track `index` (0-based in [`super::AppCtx::tracks`]).
+    pub fn select_audio(&mut self, player: PlayerId, index: usize) {
+        self.ops.push(TxOp::SelectTrack { player, kind: TrackKind::Audio, index: index as u32 + 1 });
+    }
+
+    /// Select a caption track (0-based in [`super::AppCtx::tracks`]), or
+    /// none; a sidecar file's track is selected the same way.
+    pub fn select_captions(&mut self, player: PlayerId, index: Option<usize>) {
+        let index = index.map_or(0, |i| i as u32 + 1);
+        self.ops.push(TxOp::SelectTrack { player, kind: TrackKind::Caption, index });
+    }
+
+    /// A sidecar WebVTT file for the player (an asset name, or a picked
+    /// file), `language` its BCP 47 tag: kaya parses it and draws its cues,
+    /// listed as the last caption track (docs/media-plan.md §3).
+    pub fn player_captions(&mut self, player: PlayerId, source: &MediaSource, language: &str) {
+        self.player_prop(player, PlayerProp::CaptionsLanguage, Value::Str(language.to_owned()));
+        self.player_prop(player, PlayerProp::Captions, Value::Str(source.0.clone()));
+    }
+
+    /// No sidecar captions.
+    pub fn clear_captions(&mut self, player: PlayerId) {
+        self.player_prop(player, PlayerProp::Captions, Value::Str(String::new()));
     }
 
     /// Declare the app's one media session, replacing the last
@@ -210,6 +259,11 @@ impl PlayerRef<'_, '_> {
 
     pub fn looping(self, on: bool) -> Self {
         self.tx.player_loop(self.player, on);
+        self
+    }
+
+    pub fn captions(self, source: &MediaSource, language: &str) -> Self {
+        self.tx.player_captions(self.player, source, language);
         self
     }
 
@@ -321,6 +375,39 @@ impl<M> Messages<M> {
         });
     }
 
+    /// The player's track listing or a selection moved.
+    pub fn on_tracks(&self, player: PlayerId, f: impl Fn(&PlayerTracks) -> M + 'static) {
+        self.on_player_occ(player, move |occ| match occ {
+            Occurrence::PlayerTracks { tracks, .. } => Some(f(tracks)),
+            _ => None,
+        });
+    }
+
+    /// The current caption cue changed ("" between cues), whoever draws it.
+    pub fn on_cue(&self, player: PlayerId, f: impl Fn(&str) -> M + 'static) {
+        self.on_player_occ(player, move |occ| match occ {
+            Occurrence::CaptionCue { text, .. } => Some(f(text)),
+            _ => None,
+        });
+    }
+
+    /// How much of the video view shows, 0 to 1, as it enters, leaves,
+    /// moves by a tenth and shows whole (docs/media-plan.md §7b).
+    pub fn on_visibility(&self, video: WidgetId, f: impl Fn(f64) -> M + 'static) {
+        self.widgets.borrow_mut().entry(video.0).or_default().push(Box::new(move |occ| match occ {
+            Occurrence::VideoVisibility { shown, .. } => Some(f(*shown)),
+            _ => None,
+        }));
+    }
+
+    /// A stamped video view's visibility, the copy's keys first.
+    pub fn on_visibility_node(&self, n: TemplateNodeId, f: impl Fn(Path, f64) -> M + 'static) {
+        self.nodes.borrow_mut().entry(n.0).or_default().push(Box::new(move |occ| match occ {
+            Occurrence::InstanceVideoVisibility { path, shown, .. } => Some(f(path.clone(), *shown)),
+            _ => None,
+        }));
+    }
+
     /// The actions the declared session handles, from the system's media
     /// controls (docs/media-plan.md §5).
     pub fn on_session(&self, f: impl Fn(SessionAction) -> M + 'static) {
@@ -331,7 +418,9 @@ impl<M> Messages<M> {
         match occ {
             Occurrence::PlayerChanged { player, .. }
             | Occurrence::PlayerPosition { player, .. }
-            | Occurrence::SeekCompleted { player, .. } => self
+            | Occurrence::SeekCompleted { player, .. }
+            | Occurrence::PlayerTracks { player, .. }
+            | Occurrence::CaptionCue { player, .. } => self
                 .players
                 .borrow()
                 .get(&player.0)

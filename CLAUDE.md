@@ -586,6 +586,13 @@ in docs/deferred.md.
    live in all nine, the one word everywhere (Haskell's paint roles are
    prefixed, `PaintAxis`, to free it); fake-name and rename-in-a-copy
    negatives, counts printed.
+   AND THE MEDIA ROW SINCE 2026-09-30 (docs/media-plan.md §3, §7b): a
+   row's player field, the template video in both of Rust's template
+   surfaces, visibility in both zones, and the track, caption and cue
+   surface, read out of Rust's own files; RUST ALONE until the breadth adds
+   the other eight, whose `video` the kind census and tools/tpl-surfaces.py
+   already hold red in both zones. Thirteen fake-name and thirteen
+   rename-in-a-copy negatives, counts printed.
    AND THE COLOUR PICKER SINCE 2026-09-28 (docs/color-picker-plan.md §7):
    `color_picker` in both zones with `alpha`, `on_color` where each binding
    spells the date picker's handler, and each binding's own `Color` value

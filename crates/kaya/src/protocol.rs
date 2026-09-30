@@ -65,6 +65,28 @@ pub enum PlayerProp {
     Volume,
     Muted,
     Loop,
+    /// A sidecar WebVTT file: an asset name or a picked file's path (Str).
+    Captions,
+    /// The sidecar's BCP 47 language (Str).
+    CaptionsLanguage,
+}
+
+/// Which of a player's track lists (spec enum "track_kind").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TrackKind {
+    Audio,
+    Caption,
+}
+
+/// A player's tracks as the core last published them (docs/media-plan.md
+/// §3): BCP 47 language tags in the platform's order, a sidecar caption
+/// track last, and which of each list is selected.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PlayerTracks {
+    pub audio: Vec<String>,
+    pub captions: Vec<String>,
+    pub audio_selected: Option<usize>,
+    pub caption_selected: Option<usize>,
 }
 
 /// What a player reads (spec enum "player_state").
@@ -88,6 +110,8 @@ pub enum MediaFailure {
     NotFound,
     Network,
     DecodeError,
+    /// The platform ran out of decoders (docs/media-plan.md §7b).
+    Resources,
 }
 
 impl MediaFailure {
@@ -99,6 +123,7 @@ impl MediaFailure {
             MediaFailure::NotFound => "not_found",
             MediaFailure::Network => "network",
             MediaFailure::DecodeError => "decode_error",
+            MediaFailure::Resources => "resources",
         }
     }
 }
@@ -883,6 +908,14 @@ pub enum Occurrence {
     /// The system's media controls sent an action the app handles
     /// (docs/media-plan.md §5).
     SessionAction { action: SessionAction },
+    /// The player's tracks moved (docs/media-plan.md §3).
+    PlayerTracks { player: PlayerId, tracks: PlayerTracks },
+    /// The current caption cue's text changed, "" for none.
+    CaptionCue { player: PlayerId, text: String },
+    /// How much of a video view shows, 0 to 1, coalesced by the core
+    /// (docs/media-plan.md §7b).
+    VideoVisibility { id: WidgetId, shown: f64 },
+    InstanceVideoVisibility { node: TemplateNodeId, path: Path, shown: f64 },
     /// A menu action fired — clicked OR invoked through its shortcut:
     /// ONE occurrence, one dispatch path (DESIGN.md, Menus).
     MenuActivated { item: MenuItemId },
@@ -1134,6 +1167,12 @@ impl From<f64> for Value {
         Value::F64(v)
     }
 }
+impl From<PlayerId> for Value {
+    fn from(p: PlayerId) -> Self {
+        Value::I64(p.0 as i64)
+    }
+}
+
 impl From<Blob> for Value {
     fn from(b: Blob) -> Self {
         Value::Blob(b)
@@ -1795,6 +1834,9 @@ pub enum Prop {
     HighLabel,
     /// A video view's fit (spec enum "fit", I64 on the wire).
     Fit,
+    /// The player a video view shows (PropKind::Player, an I64 id, 0 none;
+    /// docs/media-plan.md §7b). The core lowers it to SetVideoPlayer.
+    Player,
     /// The app owns a rich textarea's undo (Bool-valued; docs/rich-text-plan.md
     /// R6, §14): the native stack is off, the ledger never banks it, and
     /// Edit>Undo/Redo reach the app through the role item's own activation.
@@ -2173,8 +2215,8 @@ pub enum TxOp {
     SetPlayerProp { player: PlayerId, prop: PlayerProp, value: Value },
     PlayerCommand { player: PlayerId, command: PlayerCommand },
     ReleasePlayer { player: PlayerId },
-    /// docs/media-plan.md §3: the player a video view shows.
-    SetVideoPlayer { widget: WidgetId, player: Option<PlayerId> },
+    /// docs/media-plan.md §3: a track, counting from 1, 0 for no captions.
+    SelectTrack { player: PlayerId, kind: TrackKind, index: u32 },
     /// docs/media-plan.md §5: the app's one session, replaced whole.
     SetSession(SessionSpec),
     /// Declare one app-link route (docs/app-links-plan.md §4). The core
@@ -2461,6 +2503,11 @@ pub enum ApplyOp {
     PlayerCommand { player: PlayerId, command: PlayerCommand },
     ReleasePlayer(PlayerId),
     SetVideoPlayer { widget: WidgetId, player: Option<PlayerId> },
+    /// The PLATFORM's track, counting from 1 in its own listing; 0 turns
+    /// its captions off.
+    SelectTrack { player: PlayerId, kind: TrackKind, index: u32 },
+    /// The kaya-drawn cues' boundaries in ms, ascending; empty for none.
+    CaptionTimes { player: PlayerId, times: Vec<u64> },
     /// The session as the system sees it (docs/media-plan.md §5): the core
     /// decided `offered`, and `artwork` is a file:// URL or empty.
     SetSession {
@@ -2885,6 +2932,27 @@ impl OccSink {
                     ring.push_record(
                         crate::ring::REC_SESSION_ACTION,
                         &crate::wire::session_action_body(action),
+                    );
+                }
+                Occurrence::PlayerTracks { player, tracks } => {
+                    ring.push_record(
+                        crate::ring::REC_PLAYER_TRACKS,
+                        &crate::wire::player_tracks_body(player, &tracks),
+                    );
+                }
+                Occurrence::CaptionCue { player, text } => {
+                    ring.push_record(crate::ring::REC_CAPTION_CUE, &crate::wire::caption_cue_body(player, &text));
+                }
+                Occurrence::VideoVisibility { id, shown } => {
+                    ring.push_record(
+                        crate::ring::REC_VIDEO_VISIBILITY,
+                        &crate::wire::video_visibility_body(id.0, &[], shown),
+                    );
+                }
+                Occurrence::InstanceVideoVisibility { node, path, shown } => {
+                    ring.push_record(
+                        crate::ring::REC_VIDEO_VISIBILITY,
+                        &crate::wire::video_visibility_body(node.0, &path, shown),
                     );
                 }
                 Occurrence::FullscreenChanged { window, on } => {

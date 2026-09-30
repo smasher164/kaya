@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xfd32bf7c75c54fbb
+	SpecHash uint64 = 0x1d479d566df30301
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -128,6 +128,7 @@ const (
 	PropLowLabel = 49
 	PropHighLabel = 50
 	PropFit = 51
+	PropPlayer = 52
 	WpropTitle = 1
 	WpropWidth = 2
 	WpropHeight = 3
@@ -278,6 +279,7 @@ const (
 	MediaFailureNotFound = 3
 	MediaFailureNetwork = 4
 	MediaFailureDecodeError = 5
+	MediaFailureResources = 6
 	PlayerCommandPlay = 1
 	PlayerCommandPause = 2
 	PlayerCommandSeek = 3
@@ -295,11 +297,15 @@ const (
 	FitContain = 0
 	FitCover = 1
 	FitFill = 2
+	TrackKindAudio = 0
+	TrackKindCaption = 1
 	PpropSource = 1
 	PpropSpeed = 2
 	PpropVolume = 3
 	PpropMuted = 4
 	PpropLoop = 5
+	PpropCaptions = 6
+	PpropCaptionsLanguage = 7
 	CommandClear = 1
 	CommandFocus = 2
 	CommandEmojiPicker = 3
@@ -369,7 +375,7 @@ const (
 	txSetPlayerProp = 64
 	txPlayerCommand = 65
 	txReleasePlayer = 66
-	txSetVideoPlayer = 67
+	txSelectTrack = 67
 	txSetSession = 68
 	applyCreate = 1
 	applySetProp = 2
@@ -425,6 +431,8 @@ const (
 	applyReleasePlayer = 54
 	applySetVideoPlayer = 55
 	applySetSession = 56
+	applySelectTrack = 57
+	applyCaptionTimes = 58
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3
@@ -467,6 +475,9 @@ const (
 	occPlayerPosition = 40
 	occSeekCompleted = 41
 	occSessionAction = 42
+	occPlayerTracks = 43
+	occCaptionCue = 44
+	occVideoVisibility = 45
 )
 
 func (d Detent) String() string {
@@ -1347,11 +1358,12 @@ func TxReleasePlayer(player uint64) []byte {
 	return endRecord(b)
 }
 
-// TxSetVideoPlayer: Show `player` in the video view `widget_id` (docs/media-plan.md §3); 0 shows none. A live video view only: the player is an object, not collection data.
-func TxSetVideoPlayer(widgetId uint64, player uint64) []byte {
-	b := beginRecord(txSetVideoPlayer)
-	b = binary.LittleEndian.AppendUint64(b, widgetId)
+// TxSelectTrack: Select one of the player's tracks (docs/media-plan.md §3): `kind` is TRACK_KIND and `index` counts from 1 in the player_tracks listing, 0 selecting no caption track. A sidecar file's caption track is in the listing like the platform's own. An index past the listing, or 0 for audio, is a scene error.
+func TxSelectTrack(player uint64, kind uint32, index uint32) []byte {
+	b := beginRecord(txSelectTrack)
 	b = binary.LittleEndian.AppendUint64(b, player)
+	b = binary.LittleEndian.AppendUint32(b, kind)
+	b = binary.LittleEndian.AppendUint32(b, index)
 	return endRecord(b)
 }
 
@@ -3030,6 +3042,38 @@ func TxBindFitElement(widgetID uint64, level uint32, field uint32) []byte {
 	return endRecord(b)
 }
 
+// TxSetPlayer: set_property with a constant player value.
+func TxSetPlayer(widgetID uint64, player int64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropPlayer)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, player)
+	return endRecord(b)
+}
+
+// TxBindPlayer: set_property with a signal-bound player value.
+func TxBindPlayer(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropPlayer)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindPlayerElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindPlayerElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropPlayer)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
 // TxSetWindowTitle: set_window_prop with a constant title value (window 0, the primary surface).
 func TxSetWindowTitle(window uint64, title string) []byte {
 	b := beginRecord(txSetWindowProp)
@@ -3716,7 +3760,7 @@ func parseValue(rec []byte, at int) (any, int) {
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted && kind != occSheetDismissed && kind != occDismissRequested && kind != occSubmitted && kind != occNotificationReplied && kind != occFullscreenChanged && kind != occColorChanged && kind != occRangeChanged && kind != occRangeCommitted && kind != occPlayerChanged && kind != occPlayerPosition && kind != occSeekCompleted && kind != occSessionAction {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted && kind != occSheetDismissed && kind != occDismissRequested && kind != occSubmitted && kind != occNotificationReplied && kind != occFullscreenChanged && kind != occColorChanged && kind != occRangeChanged && kind != occRangeCommitted && kind != occPlayerChanged && kind != occPlayerPosition && kind != occSeekCompleted && kind != occSessionAction && kind != occPlayerTracks && kind != occCaptionCue && kind != occVideoVisibility {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])
@@ -3734,6 +3778,11 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 		return kind, id, nil, value, true
 	}
 	if kind == occFullscreenChanged {
+		// An answer carrying one value: id + the Value.
+		value, _ := parseValue(rec, 16)
+		return kind, id, nil, value, true
+	}
+	if kind == occCaptionCue {
 		// An answer carrying one value: id + the Value.
 		value, _ := parseValue(rec, 16)
 		return kind, id, nil, value, true
@@ -3900,7 +3949,7 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 	if kind == occSortRequested {
 		payload = binary.LittleEndian.Uint32(rec[20:])
 	}
-	if kind == occTextChanged || kind == occToggled || kind == occValueChanged || kind == occMenuToggled || kind == occMenuValueChanged || kind == occDateChanged || kind == occTimeChanged || kind == occValueCommitted || kind == occSubmitted || kind == occColorChanged {
+	if kind == occTextChanged || kind == occToggled || kind == occValueChanged || kind == occMenuToggled || kind == occMenuValueChanged || kind == occDateChanged || kind == occTimeChanged || kind == occValueCommitted || kind == occSubmitted || kind == occColorChanged || kind == occVideoVisibility {
 		vtype := binary.LittleEndian.Uint32(rec[at:])
 		vlen := int(binary.LittleEndian.Uint32(rec[at+4:]))
 		switch vtype {

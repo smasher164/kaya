@@ -156,6 +156,12 @@ pub struct KayaHostApi {
     pub player_position: extern "C" fn(u64, u64) -> u32,
     pub player_seeked: extern "C" fn(u64, u64) -> u32,
     pub player_overdue: extern "C" fn(u64) -> u32,
+    /// docs/media-plan.md §3, §7b: the platform's tracks and cue, kaya's
+    /// caption renderer's question, and a video view's visibility.
+    pub player_tracks: unsafe extern "C" fn(u64, *const u8, usize, *const u8, usize, u32, u32) -> u32,
+    pub player_cue: unsafe extern "C" fn(u64, *const u8, usize) -> u32,
+    pub caption_at: unsafe extern "C" fn(u64, u64, *mut u8, usize) -> usize,
+    pub video_visible: extern "C" fn(u64, f64),
     /// docs/media-plan.md §5: the core's route for a remote action, and the
     /// system playback state to publish after every report.
     pub session_action: extern "C" fn(u32, u64) -> u32,
@@ -555,6 +561,10 @@ pub(crate) fn run() -> i32 {
         player_position: crate::capi::kaya_player_position,
         player_seeked: crate::capi::kaya_player_seeked,
         player_overdue: crate::capi::kaya_player_overdue,
+        player_tracks: crate::capi::kaya_player_tracks,
+        player_cue: crate::capi::kaya_player_cue,
+        caption_at: crate::capi::kaya_caption_at,
+        video_visible: crate::capi::kaya_video_visible,
         session_action: crate::capi::kaya_session_action,
         session_state: crate::capi::kaya_session_state,
         blob_data: kaya_blob_data,

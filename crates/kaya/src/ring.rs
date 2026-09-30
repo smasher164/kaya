@@ -80,6 +80,10 @@ pub(crate) const REC_PLAYER_CHANGED: u16 = 39;
 pub(crate) const REC_PLAYER_POSITION: u16 = 40;
 pub(crate) const REC_SEEK_COMPLETED: u16 = 41;
 pub(crate) const REC_SESSION_ACTION: u16 = 42;
+/// docs/media-plan.md §3, §7b.
+pub(crate) const REC_PLAYER_TRACKS: u16 = 43;
+pub(crate) const REC_CAPTION_CUE: u16 = 44;
+pub(crate) const REC_VIDEO_VISIBILITY: u16 = 45;
 
 /// Wire framing of every record, exported through the C header so direct
 /// consumers cast a pointer instead of bit-twiddling. Little-endian;

@@ -132,6 +132,7 @@ VERB_FEATURE = {
     "session_send": "media_formats",
     "expect_now_playing": "media_formats",
     "expect_display_awake": "media_formats",
+    "expect_caption": "media_formats",
     # docs/range-plan.md §5, the same reasoning.
     "expect_thumb": "range",
     "expect_press_takes": "range",

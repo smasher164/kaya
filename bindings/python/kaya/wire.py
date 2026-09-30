@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0xfd32bf7c75c54fbb
+SPEC_HASH = 0x1d479d566df30301
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -128,6 +128,7 @@ PROP_MIN_GAP = 48
 PROP_LOW_LABEL = 49
 PROP_HIGH_LABEL = 50
 PROP_FIT = 51
+PROP_PLAYER = 52
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -278,6 +279,7 @@ MEDIA_FAILURE_UNSUPPORTED_CONTAINER = 2
 MEDIA_FAILURE_NOT_FOUND = 3
 MEDIA_FAILURE_NETWORK = 4
 MEDIA_FAILURE_DECODE_ERROR = 5
+MEDIA_FAILURE_RESOURCES = 6
 PLAYER_COMMAND_PLAY = 1
 PLAYER_COMMAND_PAUSE = 2
 PLAYER_COMMAND_SEEK = 3
@@ -295,11 +297,15 @@ PLAYBACK_STATE_PAUSED = 2
 FIT_CONTAIN = 0
 FIT_COVER = 1
 FIT_FILL = 2
+TRACK_KIND_AUDIO = 0
+TRACK_KIND_CAPTION = 1
 PPROP_SOURCE = 1
 PPROP_SPEED = 2
 PPROP_VOLUME = 3
 PPROP_MUTED = 4
 PPROP_LOOP = 5
+PPROP_CAPTIONS = 6
+PPROP_CAPTIONS_LANGUAGE = 7
 COMMAND_CLEAR = 1
 COMMAND_FOCUS = 2
 COMMAND_EMOJI_PICKER = 3
@@ -370,7 +376,7 @@ TX_CREATE_PLAYER = 63
 TX_SET_PLAYER_PROP = 64
 TX_PLAYER_COMMAND = 65
 TX_RELEASE_PLAYER = 66
-TX_SET_VIDEO_PLAYER = 67
+TX_SELECT_TRACK = 67
 TX_SET_SESSION = 68
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
@@ -426,6 +432,8 @@ APPLY_PLAYER_COMMAND = 53
 APPLY_RELEASE_PLAYER = 54
 APPLY_SET_VIDEO_PLAYER = 55
 APPLY_SET_SESSION = 56
+APPLY_SELECT_TRACK = 57
+APPLY_CAPTION_TIMES = 58
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
@@ -468,6 +476,9 @@ OCC_PLAYER_CHANGED = 39
 OCC_PLAYER_POSITION = 40
 OCC_SEEK_COMPLETED = 41
 OCC_SESSION_ACTION = 42
+OCC_PLAYER_TRACKS = 43
+OCC_CAPTION_CUE = 44
+OCC_VIDEO_VISIBILITY = 45
 
 
 def _pad(b: bytes) -> bytes:
@@ -815,9 +826,9 @@ def tx_release_player(player: int) -> bytes:
     """Stop and forget a player. A video view showing it goes blank, the session detaches it, and no occurrence of its follows. An unknown id is a scene error."""
     return record(TX_RELEASE_PLAYER, struct.pack("<Q", player))
 
-def tx_set_video_player(widget_id: int, player: int) -> bytes:
-    """Show `player` in the video view `widget_id` (docs/media-plan.md §3); 0 shows none. A live video view only: the player is an object, not collection data."""
-    return record(TX_SET_VIDEO_PLAYER, struct.pack("<Q", widget_id) + struct.pack("<Q", player))
+def tx_select_track(player: int, kind: int, index: int) -> bytes:
+    """Select one of the player's tracks (docs/media-plan.md §3): `kind` is TRACK_KIND and `index` counts from 1 in the player_tracks listing, 0 selecting no caption track. A sidecar file's caption track is in the listing like the platform's own. An index past the listing, or 0 for audio, is a scene error."""
+    return record(TX_SELECT_TRACK, struct.pack("<Q", player) + struct.pack("<I", kind) + struct.pack("<I", index))
 
 def tx_set_session(player: int, actions: int, playback_state: int, title: Value, artist: Value, album: Value, artwork: Value) -> bytes:
     """Declare the app's ONE media session (docs/media-plan.md §5), replacing the last declaration: the attached `player` (0 attaches none and withdraws the app from the system's controls), `actions` a mask of 1 << SESSION_ACTION for the actions the app handles itself, `playback_state` the PLAYBACK_STATE the app states while no player is attached, and the metadata as Str values, `artwork` an asset name or empty. With a player attached, play, pause and seek_to the app does not handle apply to that player."""
@@ -1589,6 +1600,21 @@ def tx_bind_fit_element(widget_id: int, level: int = 0, field: int = 0) -> bytes
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_FIT, SOURCE_ELEMENT, level, field))
 
 
+def tx_set_player(widget_id: int, player: int) -> bytes:
+    """set_property with a constant player value (int)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_PLAYER, SOURCE_CONST) + _enc.value(int(player)))
+
+
+def tx_bind_player(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound player value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_PLAYER, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_player_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_PLAYER, SOURCE_ELEMENT, level, field))
+
+
 def tx_set_window_title(window: int, title: str) -> bytes:
     """set_window_prop with a constant title value (str); window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_TITLE, SOURCE_CONST) + _enc.value(title))
@@ -1959,7 +1985,7 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
     value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY):
         return kind, None, [], None
     if kind == OCC_ALERT_RESULT:
         # A request's one answer: id + the u32 code.
@@ -1975,6 +2001,11 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
         value, _ = parse_value(buf, 16)
         return kind, request, [], value
     if kind == OCC_FULLSCREEN_CHANGED:
+        # An answer carrying one value: id + the Value.
+        request = struct.unpack_from("<Q", buf, 8)[0]
+        value, _ = parse_value(buf, 16)
+        return kind, request, [], value
+    if kind == OCC_CAPTION_CUE:
         # An answer carrying one value: id + the Value.
         request = struct.unpack_from("<Q", buf, 8)[0]
         value, _ = parse_value(buf, 16)
@@ -2070,7 +2101,7 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
     payload = None
     if kind in (OCC_SORT_REQUESTED,):
         (payload,) = struct.unpack_from("<I", buf, 20)
-    if kind in (OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_SUBMITTED, OCC_COLOR_CHANGED,):
+    if kind in (OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_SUBMITTED, OCC_COLOR_CHANGED, OCC_VIDEO_VISIBILITY,):
         payload, at = parse_value(buf, at)
     if kind in (OCC_PASTED,):
         clip, values, at = parse_clip(buf, at)

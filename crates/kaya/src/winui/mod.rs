@@ -16232,6 +16232,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
         | ApplyOp::PlayerCommand { .. }
         | ApplyOp::ReleasePlayer(_)
         | ApplyOp::SetVideoPlayer { .. }
+        | ApplyOp::SelectTrack { .. }
+        | ApplyOp::CaptionTimes { .. }
         | ApplyOp::SetSession { .. } => crate::depth_stub("media_formats"),
         ApplyOp::SetBadge { count } => {
             if let Err(e) = set_badge(core, count) {
@@ -24614,6 +24616,14 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     fn media_refusal(&self, _: &str) -> Option<String> {
+        crate::depth_stub("media_formats")
+    }
+
+    fn captions_absent(&self, _: &str) -> bool {
+        crate::depth_stub("media_formats")
+    }
+
+    fn caption(&self, _: crate::harness::Target) -> String {
         crate::depth_stub("media_formats")
     }
 

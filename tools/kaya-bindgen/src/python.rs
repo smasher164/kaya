@@ -201,7 +201,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             PropKind::Str => (format!("{prop}: str"), "str", format!("_enc.value({prop})")),
             PropKind::Bool => (format!("{prop}: bool"), "bool", format!("_enc.value({prop})")),
             PropKind::F64 => (format!("{prop}: float"), "float", format!("_enc.value({prop})")),
-            PropKind::Enum(_) => (format!("{prop}: int"), "int", format!("_enc.value(int({prop}))")),
+            PropKind::Enum(_) | PropKind::Player => (format!("{prop}: int"), "int", format!("_enc.value(int({prop}))")),
             PropKind::Blob => (
                 "handle: int".to_string(),
                 "a kaya_blob_register handle, consumed by the next submit",
@@ -405,7 +405,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 "a kaya_blob_register handle, consumed by the next submit",
                 "_enc.value(BlobHandle(handle))".to_string(),
             ),
-            PropKind::Enum(_) => (format!("{prop}: int"), "int", format!("_enc.value(int({prop}))")),
+            PropKind::Enum(_) | PropKind::Player => (format!("{prop}: int"), "int", format!("_enc.value(int({prop}))")),
             PropKind::Date | PropKind::Time | PropKind::Color => {
                 unreachable!("no menu prop is a date, a time or a colour")
             }

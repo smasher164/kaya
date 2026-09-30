@@ -2479,6 +2479,93 @@ for _lang, _rel, _templates in SCROLL_AXIS_SURFACES:
 print(f"check-sugar-surface: scroll-axis cuts watched red {_axis_cuts}/{_axis_want}")
 
 
+# --- THE MEDIA ROW, TRACKS AND VISIBILITY (docs/media-plan.md §3, §7b) --
+# Neither a KIND nor a WINDOW PROP: a row's PLAYER FIELD (the type a stamped
+# video view binds), the visibility handlers in both zones, the track
+# selections and readings, and the sidecar captions. No scene sees a
+# binding that ships a template video with no player field to bind, so each
+# part is read out of the binding's own file. RUST ONLY until the breadth
+# slice: the other eight join this table with their `video`, which the kind
+# census and tools/tpl-surfaces.py already hold red in both zones.
+MEDIA_SURFACES = [
+    ("rust", "crates/kaya/src/app.rs", "player field", "PlayerId",
+     r"impl KayaField for crate::protocol::{0} \{{"),
+    ("rust", "crates/kaya/src/app.rs", "optional player field", "PlayerId",
+     r"impl KayaField for Option<crate::protocol::{0}> \{{"),
+    ("rust", "crates/kaya/src/app.rs", "template video", "video",
+     r"pub fn {0}\(&mut self, src: impl Into<TplSource<PlayerKind>>\) -> TemplateNodeId \{{"
+     r"\n\s*let n = self\.widget\(WidgetKind::Video\);"),
+    ("rust", "crates/kaya/src/app.rs", "row video", "video",
+     r"pub fn {0}\(&mut self, src: impl Into<TplSource<PlayerKind>>\) -> TemplateNodeId \{{"
+     r"\n\s*self\.tpl\(\)\.{0}\(src\)"),
+    ("rust", "crates/kaya/src/app/media.rs", "visibility", "on_visibility",
+     r"pub fn {0}\(&self, video: WidgetId, f: impl Fn\(f64\) -> M"),
+    ("rust", "crates/kaya/src/app/media.rs", "stamped visibility", "on_visibility_node",
+     r"pub fn {0}\(&self, n: TemplateNodeId, f: impl Fn\(Path, f64\) -> M"),
+    ("rust", "crates/kaya/src/app/media.rs", "audio selection", "select_audio",
+     r"pub fn {0}\(&mut self, player: PlayerId, index: usize\)"),
+    ("rust", "crates/kaya/src/app/media.rs", "caption selection", "select_captions",
+     r"pub fn {0}\(&mut self, player: PlayerId, index: Option<usize>\)"),
+    ("rust", "crates/kaya/src/app/media.rs", "sidecar captions", "player_captions",
+     r"pub fn {0}\(&mut self, player: PlayerId, source: &MediaSource, language: &str\)"),
+    ("rust", "crates/kaya/src/app/media.rs", "track reading", "tracks",
+     r"pub fn {0}\(&self, player: PlayerId\) -> PlayerTracks"),
+    ("rust", "crates/kaya/src/app/media.rs", "cue reading", "cue",
+     r"pub fn {0}\(&self, player: PlayerId\) -> String"),
+    ("rust", "crates/kaya/src/app/media.rs", "track handler", "on_tracks",
+     r"pub fn {0}\(&self, player: PlayerId, f: impl Fn\(&PlayerTracks\) -> M"),
+    ("rust", "crates/kaya/src/app/media.rs", "cue handler", "on_cue",
+     r"pub fn {0}\(&self, player: PlayerId, f: impl Fn\(&str\) -> M"),
+]
+
+
+def check_media_surface(fake_name=None, findings=None, text_for=None):
+    global status
+    for lang, rel, part, name, template in MEDIA_SURFACES:
+        pat = template.format(fake_name or name)
+        text = text_for(lang, rel) if text_for else read_rel(rel)
+        if re.search(pat, text, re.M) is None:
+            msg = (f"check-sugar-surface: {lang} has no {part} (wanted /{pat}/ in {rel}; "
+                   f"docs/media-plan.md §3, §7b)")
+            if findings is None:
+                print(msg)
+                status = 1
+            else:
+                findings.append(msg)
+
+
+check_media_surface()
+fake = []
+check_media_surface("kayaFakeMedia", findings=fake)
+print(f"check-sugar-surface: fake media spellings fired {len(fake)}/{len(MEDIA_SURFACES)}")
+if len(fake) != len(MEDIA_SURFACES):
+    selftest_exit(f"check-sugar-surface: self-test failed ({len(fake)}/{len(MEDIA_SURFACES)} "
+                  f"media patterns fired for a name that exists nowhere)")
+_media_cuts = 0
+for _lang, _rel, _part, _name, _template in MEDIA_SURFACES:
+    _real = read_rel(_rel)
+    _m = re.search(_template.format(_name), _real, re.M)
+    if _m is None:
+        selftest_exit(f"check-sugar-surface: media cut found no {_part} to cut in {_rel}")
+    _mangled, _n = sub_count(rf"\b{re.escape(_name)}\b", "kayaCutMedia", _m.group(0))
+    print(f"check-sugar-surface: media cut {_lang} {_part}: {_n} substitution(s)")
+    if _n == 0:
+        selftest_exit(f"check-sugar-surface: self-test failed (the {_part} cut applied nothing)")
+    _copy = _real[:_m.start()] + _mangled + _real[_m.end():]
+    _found = []
+    check_media_surface(
+        findings=_found,
+        text_for=lambda lang, rel, _c=_copy, _r=_rel: _c if rel == _r else read_rel(rel))
+    if len(_found) != 1 or _part not in _found[0]:
+        selftest_exit(f"check-sugar-surface: self-test failed (the {_part} cut gave "
+                      f"{len(_found)} finding(s), wanted exactly one naming it)")
+    if read_rel(_rel) != (ROOT / _rel).read_text(encoding="utf-8"):
+        selftest_exit(f"check-sugar-surface: self-test failed ({_rel} changed on disk "
+                      f"under the media cut)")
+    _media_cuts += 1
+print(f"check-sugar-surface: media cuts watched red {_media_cuts}/{len(MEDIA_SURFACES)}")
+
+
 # --- THE SIZE-POLICY SURFACE, in all nine ---------------------------
 # WHAT A CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX
 # (docs/canvas-plan.md §3.2.1), invisible to every sweep above for the

@@ -1924,7 +1924,7 @@ internal class KayaExpanded(val text: String, val refused: String?)
  */
 internal fun kayaExpandTemplate(context: android.content.Context, want: String): KayaExpanded {
     // docs/media-plan.md §7a: this lane's table of refused items.
-    if (want.contains("{media:")) depthStub("media_formats")
+    if (want.contains("{media:") || want.contains("{captions:")) depthStub("media_formats")
     if (!want.contains("{fmt:")) return KayaExpanded(want, null)
     val out = StringBuilder()
     var rest = want
@@ -2106,7 +2106,7 @@ object KayaCompose {
     @Suppress("UNUSED_PARAMETER")
     fun canPlay(mime: String, codecs: String): Boolean = depthStub("media_formats")
 
-    private const val SPEC_HASH: ULong = 0xfd32bf7c75c54fbbuL
+    private const val SPEC_HASH: ULong = 0x1d479d566df30301uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -2171,6 +2171,8 @@ object KayaCompose {
     private const val APPLY_RELEASE_PLAYER = 54
     private const val APPLY_SET_VIDEO_PLAYER = 55
     private const val APPLY_SET_SESSION = 56
+    private const val APPLY_SELECT_TRACK = 57
+    private const val APPLY_CAPTION_TIMES = 58
     /** The rich-text pair (docs/rich-text-plan.md §4); the arm is a depth slice. */
     private const val APPLY_SET_RICH_TEXT = 43
     private const val APPLY_APPLY_EDIT = 44
@@ -2388,6 +2390,7 @@ object KayaCompose {
     private const val PROP_LOW_LABEL = 49
     private const val PROP_HIGH_LABEL = 50
     private const val PROP_FIT = 51
+    private const val PROP_PLAYER = 52
     private const val FILE_CONTENT_IMAGES = 1
     private const val PROP_COLUMNS = 11
     // The accessibility identifier (never spoken) and label (spoken).
@@ -3387,6 +3390,7 @@ object KayaCompose {
                         PROP_LOW_LABEL -> KayaSceneModel.nodes[id]!!.lowLabel = readString(b)
                         PROP_HIGH_LABEL -> KayaSceneModel.nodes[id]!!.highLabel = readString(b)
                         PROP_FIT -> depthStub("media_formats")
+                        PROP_PLAYER -> error("kaya: a video view's player arrives as set_video_player; the core never forwards the player prop")
                         // docs/rich-text-plan.md §14: this platform's lever
                         // is `clearHistory()`, so taking ownership drops what
                         // the field had banked.
@@ -3729,7 +3733,8 @@ object KayaCompose {
                 }
                 APPLY_CANCEL_NOTIFICATION -> kayaCancelNotification(b.long)
                 APPLY_CREATE_PLAYER, APPLY_SET_PLAYER_PROP, APPLY_PLAYER_COMMAND,
-                APPLY_RELEASE_PLAYER, APPLY_SET_VIDEO_PLAYER, APPLY_SET_SESSION -> depthStub("media_formats")
+                APPLY_RELEASE_PLAYER, APPLY_SET_VIDEO_PLAYER, APPLY_SET_SESSION, APPLY_SELECT_TRACK,
+                APPLY_CAPTION_TIMES -> depthStub("media_formats")
                 APPLY_SET_BADGE -> {
                     // { u32 count; u32 reserved } (docs/app-badge-plan.md §3).
                     val count = b.int
@@ -8734,7 +8739,7 @@ object KayaCompose {
                         if (answer.startsWith("ok\n")) observed.add(sentence) else failures.add(sentence)
                     }
                     "expect_video_ink", "ax_action", "session_send", "expect_now_playing",
-                    "expect_display_awake" -> depthStub("media_formats")
+                    "expect_display_awake", "expect_caption" -> depthStub("media_formats")
                     "expect_badge" -> {
                         // docs/app-badge-plan.md §4: the number the platform
                         // holds on the app's showing notifications, which is

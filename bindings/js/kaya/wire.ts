@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0xfd32bf7c75c54fbbn;
+export const SPEC_HASH = 0x1d479d566df30301n;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -121,6 +121,7 @@ export const PROP_MIN_GAP = 48;
 export const PROP_LOW_LABEL = 49;
 export const PROP_HIGH_LABEL = 50;
 export const PROP_FIT = 51;
+export const PROP_PLAYER = 52;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -271,6 +272,7 @@ export const MEDIA_FAILURE_UNSUPPORTED_CONTAINER = 2;
 export const MEDIA_FAILURE_NOT_FOUND = 3;
 export const MEDIA_FAILURE_NETWORK = 4;
 export const MEDIA_FAILURE_DECODE_ERROR = 5;
+export const MEDIA_FAILURE_RESOURCES = 6;
 export const PLAYER_COMMAND_PLAY = 1;
 export const PLAYER_COMMAND_PAUSE = 2;
 export const PLAYER_COMMAND_SEEK = 3;
@@ -288,11 +290,15 @@ export const PLAYBACK_STATE_PAUSED = 2;
 export const FIT_CONTAIN = 0;
 export const FIT_COVER = 1;
 export const FIT_FILL = 2;
+export const TRACK_KIND_AUDIO = 0;
+export const TRACK_KIND_CAPTION = 1;
 export const PPROP_SOURCE = 1;
 export const PPROP_SPEED = 2;
 export const PPROP_VOLUME = 3;
 export const PPROP_MUTED = 4;
 export const PPROP_LOOP = 5;
+export const PPROP_CAPTIONS = 6;
+export const PPROP_CAPTIONS_LANGUAGE = 7;
 export const COMMAND_CLEAR = 1;
 export const COMMAND_FOCUS = 2;
 export const COMMAND_EMOJI_PICKER = 3;
@@ -363,7 +369,7 @@ export const TX_CREATE_PLAYER = 63;
 export const TX_SET_PLAYER_PROP = 64;
 export const TX_PLAYER_COMMAND = 65;
 export const TX_RELEASE_PLAYER = 66;
-export const TX_SET_VIDEO_PLAYER = 67;
+export const TX_SELECT_TRACK = 67;
 export const TX_SET_SESSION = 68;
 export const APPLY_CREATE = 1;
 export const APPLY_SET_PROP = 2;
@@ -419,6 +425,8 @@ export const APPLY_PLAYER_COMMAND = 53;
 export const APPLY_RELEASE_PLAYER = 54;
 export const APPLY_SET_VIDEO_PLAYER = 55;
 export const APPLY_SET_SESSION = 56;
+export const APPLY_SELECT_TRACK = 57;
+export const APPLY_CAPTION_TIMES = 58;
 export const OCC_BUTTON_CLICKED = 1;
 export const OCC_TEXT_CHANGED = 2;
 export const OCC_TOGGLED = 3;
@@ -461,6 +469,9 @@ export const OCC_PLAYER_CHANGED = 39;
 export const OCC_PLAYER_POSITION = 40;
 export const OCC_SEEK_COMPLETED = 41;
 export const OCC_SESSION_ACTION = 42;
+export const OCC_PLAYER_TRACKS = 43;
+export const OCC_CAPTION_CUE = 44;
+export const OCC_VIDEO_VISIBILITY = 45;
 
 const text_encoder = new TextEncoder();
 const text_decoder = new TextDecoder("utf-8", { fatal: true });
@@ -1189,12 +1200,13 @@ export function tx_release_player(player: number): Uint8Array {
   return enc.end(TX_RELEASE_PLAYER);
 }
 
-/** Show `player` in the video view `widget_id` (docs/media-plan.md §3); 0 shows none. A live video view only: the player is an object, not collection data. */
-export function tx_set_video_player(widget_id: number, player: number): Uint8Array {
+/** Select one of the player's tracks (docs/media-plan.md §3): `kind` is TRACK_KIND and `index` counts from 1 in the player_tracks listing, 0 selecting no caption track. A sidecar file's caption track is in the listing like the platform's own. An index past the listing, or 0 for audio, is a scene error. */
+export function tx_select_track(player: number, kind: number, index: number): Uint8Array {
   enc.begin();
-  enc.u64(widget_id);
   enc.u64(player);
-  return enc.end(TX_SET_VIDEO_PLAYER);
+  enc.u32(kind);
+  enc.u32(index);
+  return enc.end(TX_SELECT_TRACK);
 }
 
 /** Declare the app's ONE media session (docs/media-plan.md §5), replacing the last declaration: the attached `player` (0 attaches none and withdraws the app from the system's controls), `actions` a mask of 1 << SESSION_ACTION for the actions the app handles itself, `playback_state` the PLAYBACK_STATE the app states while no player is attached, and the metadata as Str values, `artwork` an asset name or empty. With a player attached, play, pause and seek_to the app does not handle apply to that player. */
@@ -2158,6 +2170,24 @@ export function tx_bind_fit_element(widget_id: number, level = 0, field = 0): Ui
   return enc.end(TX_SET_PROPERTY);
 }
 
+/** set_property with a constant player value. */
+export function tx_set_player(widget_id: number, player: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_PLAYER); enc.u32(SOURCE_CONST); enc.value(new I64(player));
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound player value. */
+export function tx_bind_player(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_PLAYER); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_player_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_PLAYER); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
 /** set_window_prop with a constant title value; window 0, the primary surface. */
 export function tx_set_window_title(window: number, title: string): Uint8Array {
   enc.begin(); enc.u64(window); enc.u32(WPROP_TITLE); enc.u32(SOURCE_CONST); enc.value(title);
@@ -2604,7 +2634,7 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const size = view.getUint32(0, true);
   const kind = view.getUint16(4, true);
-  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION].includes(kind)) return { kind, id: null, keys: [], payload: null };
+  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY].includes(kind)) return { kind, id: null, keys: [], payload: null };
   if (kind === OCC_ALERT_RESULT) {
     // A request's one answer: id + the u32 code.
     return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };
@@ -2619,6 +2649,11 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
     return { kind, id: read_u64(buf, 8), keys: [], payload: value };
   }
   if (kind === OCC_FULLSCREEN_CHANGED) {
+    // An answer carrying one value: id + the Value.
+    const [value] = parse_value(buf, 16);
+    return { kind, id: read_u64(buf, 8), keys: [], payload: value };
+  }
+  if (kind === OCC_CAPTION_CUE) {
     // An answer carrying one value: id + the Value.
     const [value] = parse_value(buf, 16);
     return { kind, id: read_u64(buf, 8), keys: [], payload: value };
@@ -2742,7 +2777,7 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
   // The u32 slot the tag family calls `reserved` is a real value on
   // these (sort_requested's column) — read before the generic tail.
   if ([OCC_SORT_REQUESTED].includes(kind)) payload = read_u32(buf, 20);
-  if ([OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_SUBMITTED, OCC_COLOR_CHANGED].includes(kind)) [payload, at] = parse_value(buf, at);
+  if ([OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_SUBMITTED, OCC_COLOR_CHANGED, OCC_VIDEO_VISIBILITY].includes(kind)) [payload, at] = parse_value(buf, at);
   // A paste rides a click tag VERBATIM, so the key path above is already
   // read and the clip sits after it.
   if ([OCC_PASTED].includes(kind)) [payload, at] = parse_clip(buf, at);

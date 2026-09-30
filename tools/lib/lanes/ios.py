@@ -162,7 +162,7 @@ DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes"]
 # and expect_help reads it there.
 # The media suite's iOS arm (the layer view, the .playback category) is
 # built; its legs are the breadth slice's to measure (docs/media-plan.md §7).
-UNWIRED_SCENES = ["media_formats", "media_delivery", "media_session"]
+UNWIRED_SCENES = ["media_formats", "media_delivery", "media_session", "media_tracks", "media_feed"]
 
 # The fullscreen scene's app-only way back after the cut, the same steps as
 # tools/lib/lanes/android.py's FULLSCREEN_APP_TAIL: no user change arrives.

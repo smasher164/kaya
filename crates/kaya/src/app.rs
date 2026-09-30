@@ -73,6 +73,11 @@ pub struct ColorKind;
 impl ValueKind for ColorKind {
     const TYPE: ValueType = ValueType::I64;
 }
+/// docs/media-plan.md §7b: a player, its id as an I64 on the wire, 0 none.
+pub struct PlayerKind;
+impl ValueKind for PlayerKind {
+    const TYPE: ValueType = ValueType::I64;
+}
 
 /// A first-class typed projection: one field of a record type, by
 /// position, for the two sites with no record instance in hand — binding a
@@ -161,6 +166,14 @@ impl From<crate::Color> for TplSource<ColorKind> {
 impl<T: Into<crate::protocol::Blob>> From<T> for TplSource<BlobKind> {
     fn from(bytes: T) -> Self {
         TplSource { inner: SourceInner::Const(Value::Blob(bytes.into())), _kind: PhantomData }
+    }
+}
+
+/// Every stamped copy showing one player is refused by the one-view rule
+/// (docs/media-plan.md §7b); a row's own player field is the usual source.
+impl From<crate::protocol::PlayerId> for TplSource<PlayerKind> {
+    fn from(p: crate::protocol::PlayerId) -> Self {
+        TplSource { inner: SourceInner::Const(Value::from(p)), _kind: PhantomData }
     }
 }
 
@@ -390,6 +403,35 @@ impl KayaField for crate::Color {
             Value::I64(n) => crate::Color::from_packed(*n)
                 .unwrap_or_else(|why| panic!("kaya: a Color field holds {n}, which is not one: {why}")),
             other => panic!("kaya: expected a Color field (I64 on the wire), model holds {other:?}"),
+        }
+    }
+}
+
+/// A row's player (docs/media-plan.md §7b): the field a stamped video view
+/// shows. `Option<PlayerId>` spells a row showing none.
+impl KayaField for crate::protocol::PlayerId {
+    type Kind = PlayerKind;
+    fn to_value(&self) -> Value {
+        Value::I64(self.0 as i64)
+    }
+    fn from_value(v: &Value) -> Self {
+        match v {
+            Value::I64(n) if *n > 0 => crate::protocol::PlayerId(*n as u64),
+            other => panic!("kaya: expected a player field (a nonzero I64 on the wire), model holds {other:?}"),
+        }
+    }
+}
+
+impl KayaField for Option<crate::protocol::PlayerId> {
+    type Kind = PlayerKind;
+    fn to_value(&self) -> Value {
+        Value::I64(self.map_or(0, |p| p.0 as i64))
+    }
+    fn from_value(v: &Value) -> Self {
+        match v {
+            Value::I64(0) => None,
+            Value::I64(n) if *n > 0 => Some(crate::protocol::PlayerId(*n as u64)),
+            other => panic!("kaya: expected a player field (an I64 on the wire), model holds {other:?}"),
         }
     }
 }
@@ -1099,6 +1141,8 @@ pub struct AppCtx {
     /// binding's mirror of each one's readings.
     next_player: Cell<u64>,
     players: RefCell<HashMap<u64, PlayerReading>>,
+    /// Each player's tracks and current cue (docs/media-plan.md §3).
+    player_tracks: RefCell<HashMap<u64, (crate::protocol::PlayerTracks, String)>>,
 }
 
 impl AppCtx {
@@ -1132,6 +1176,7 @@ impl AppCtx {
             document_binds: RefCell::new(HashMap::new()),
             next_player: Cell::new(1),
             players: RefCell::new(HashMap::new()),
+            player_tracks: RefCell::new(HashMap::new()),
         }
     }
 
@@ -1199,7 +1244,9 @@ impl AppCtx {
                         }
                         Occurrence::PlayerChanged { .. }
                         | Occurrence::PlayerPosition { .. }
-                        | Occurrence::SeekCompleted { .. } => self.absorb_player(&occ),
+                        | Occurrence::SeekCompleted { .. }
+                        | Occurrence::PlayerTracks { .. }
+                        | Occurrence::CaptionCue { .. } => self.absorb_player(&occ),
                         _ => {}
                     }
                     return occ;
@@ -3499,12 +3546,11 @@ impl<'a> Tx<'a> {
     }
 
     /// A video view showing `player` (docs/media-plan.md §3): the
-    /// platform's own view with its controls off. `.fit()` chains. The live
-    /// zone only: which player a stamped copy shows awaits a ruling
-    /// (docs/deferred.md).
+    /// platform's own view with its controls off. `.fit()` chains. A player
+    /// is shown by one video view at a time (§7b).
     pub fn video(&mut self, player: crate::protocol::PlayerId) -> Widget<'_, 'a> {
         let w = self.widget(WidgetKind::Video);
-        self.ops.push(TxOp::SetVideoPlayer { widget: w, player: Some(player) });
+        self.set(w, Prop::Player, player);
         Widget { id: w, out: (), tx: self }
     }
 
@@ -4545,6 +4591,10 @@ impl<'b> Row<'_, 'b> {
 
     pub fn color_picker(&mut self, src: impl Into<TplSource<ColorKind>>) -> TemplateNodeId {
         self.tpl().color_picker(src)
+    }
+
+    pub fn video(&mut self, src: impl Into<TplSource<PlayerKind>>) -> TemplateNodeId {
+        self.tpl().video(src)
     }
 
     pub fn button(&mut self, src: impl Into<TplSource<StrKind>>) -> TemplateNodeId {
@@ -5801,7 +5851,8 @@ impl<M> Messages<M> {
                 | Occurrence::TimeChanged { id, .. }
                 | Occurrence::ColorChanged { id, .. }
                 | Occurrence::RangeChanged { id, .. }
-                | Occurrence::RangeCommitted { id, .. } => self
+                | Occurrence::RangeCommitted { id, .. }
+                | Occurrence::VideoVisibility { id, .. } => self
                     .widgets
                     .borrow()
                     .get(&id.0)
@@ -5822,7 +5873,8 @@ impl<M> Messages<M> {
                 | Occurrence::InstanceTimeChanged { node, .. }
                 | Occurrence::InstanceColorChanged { node, .. }
                 | Occurrence::InstanceRangeChanged { node, .. }
-                | Occurrence::InstanceRangeCommitted { node, .. } => self
+                | Occurrence::InstanceRangeCommitted { node, .. }
+                | Occurrence::InstanceVideoVisibility { node, .. } => self
                     .nodes
                     .borrow()
                     .get(&node.0)
@@ -5917,6 +5969,8 @@ impl<M> Messages<M> {
                 Occurrence::PlayerChanged { .. }
                 | Occurrence::PlayerPosition { .. }
                 | Occurrence::SeekCompleted { .. }
+                | Occurrence::PlayerTracks { .. }
+                | Occurrence::CaptionCue { .. }
                 | Occurrence::SessionAction { .. } => self.dispatch_media(&occ),
                 // Menu occurrences key the menu-item table — their own id
                 // space. Direct and node-anchored variants share it: an
@@ -7887,6 +7941,16 @@ impl<'b> Tpl<'_, 'b> {
         n
     }
 
+    /// A video view per stamped copy, showing the row's own player field
+    /// (docs/media-plan.md §7b): a player is shown by one view at a time,
+    /// and a row whose player is released shows nothing. Its visibility
+    /// arrives through `on_visibility_node`.
+    pub fn video(&mut self, src: impl Into<TplSource<PlayerKind>>) -> TemplateNodeId {
+        let n = self.widget(WidgetKind::Video);
+        self.apply_source(n, Prop::Player, src.into().inner);
+        n
+    }
+
     /// A button whose caption comes from any addressable source — a
     /// constant per stamped copy, a signal, or the element's own field.
     /// Clicks on a stamped copy arrive as `InstanceButtonClicked`,
@@ -9484,6 +9548,10 @@ mod tests {
                     | Occurrence::PlayerChanged { .. }
                     | Occurrence::PlayerPosition { .. }
                     | Occurrence::SeekCompleted { .. }
+                    | Occurrence::PlayerTracks { .. }
+                    | Occurrence::CaptionCue { .. }
+                    | Occurrence::VideoVisibility { .. }
+                    | Occurrence::InstanceVideoVisibility { .. }
                     | Occurrence::SessionAction { .. } => {}
                     Occurrence::LinkOpened { .. } => {}
                     Occurrence::Shutdown => break,

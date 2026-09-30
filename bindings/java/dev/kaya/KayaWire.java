@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0xfd32bf7c75c54fbbL;
+    public static final long SPEC_HASH = 0x1d479d566df30301L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -127,6 +127,7 @@ public final class KayaWire {
     public static final int PROP_LOW_LABEL = 49;
     public static final int PROP_HIGH_LABEL = 50;
     public static final int PROP_FIT = 51;
+    public static final int PROP_PLAYER = 52;
     public static final int WPROP_TITLE = 1;
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
@@ -277,6 +278,7 @@ public final class KayaWire {
     public static final int MEDIA_FAILURE_NOT_FOUND = 3;
     public static final int MEDIA_FAILURE_NETWORK = 4;
     public static final int MEDIA_FAILURE_DECODE_ERROR = 5;
+    public static final int MEDIA_FAILURE_RESOURCES = 6;
     public static final int PLAYER_COMMAND_PLAY = 1;
     public static final int PLAYER_COMMAND_PAUSE = 2;
     public static final int PLAYER_COMMAND_SEEK = 3;
@@ -294,11 +296,15 @@ public final class KayaWire {
     public static final int FIT_CONTAIN = 0;
     public static final int FIT_COVER = 1;
     public static final int FIT_FILL = 2;
+    public static final int TRACK_KIND_AUDIO = 0;
+    public static final int TRACK_KIND_CAPTION = 1;
     public static final int PPROP_SOURCE = 1;
     public static final int PPROP_SPEED = 2;
     public static final int PPROP_VOLUME = 3;
     public static final int PPROP_MUTED = 4;
     public static final int PPROP_LOOP = 5;
+    public static final int PPROP_CAPTIONS = 6;
+    public static final int PPROP_CAPTIONS_LANGUAGE = 7;
     public static final int COMMAND_CLEAR = 1;
     public static final int COMMAND_FOCUS = 2;
     public static final int COMMAND_EMOJI_PICKER = 3;
@@ -368,7 +374,7 @@ public final class KayaWire {
     public static final short TX_KIND_SET_PLAYER_PROP = 64;
     public static final short TX_KIND_PLAYER_COMMAND = 65;
     public static final short TX_KIND_RELEASE_PLAYER = 66;
-    public static final short TX_KIND_SET_VIDEO_PLAYER = 67;
+    public static final short TX_KIND_SELECT_TRACK = 67;
     public static final short TX_KIND_SET_SESSION = 68;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
@@ -424,6 +430,8 @@ public final class KayaWire {
     public static final short APPLY_KIND_RELEASE_PLAYER = 54;
     public static final short APPLY_KIND_SET_VIDEO_PLAYER = 55;
     public static final short APPLY_KIND_SET_SESSION = 56;
+    public static final short APPLY_KIND_SELECT_TRACK = 57;
+    public static final short APPLY_KIND_CAPTION_TIMES = 58;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
@@ -466,6 +474,9 @@ public final class KayaWire {
     public static final short OCC_KIND_PLAYER_POSITION = 40;
     public static final short OCC_KIND_SEEK_COMPLETED = 41;
     public static final short OCC_KIND_SESSION_ACTION = 42;
+    public static final short OCC_KIND_PLAYER_TRACKS = 43;
+    public static final short OCC_KIND_CAPTION_CUE = 44;
+    public static final short OCC_KIND_VIDEO_VISIBILITY = 45;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -1169,11 +1180,12 @@ public final class KayaWire {
         return finish(b);
     }
 
-    /** Show `player` in the video view `widget_id` (docs/media-plan.md §3); 0 shows none. A live video view only: the player is an object, not collection data. */
-    public static byte[] txSetVideoPlayer(long widgetId, long player) {
-        Enc b = begin(TX_KIND_SET_VIDEO_PLAYER);
-        b.putLong(widgetId);
+    /** Select one of the player's tracks (docs/media-plan.md §3): `kind` is TRACK_KIND and `index` counts from 1 in the player_tracks listing, 0 selecting no caption track. A sidecar file's caption track is in the listing like the platform's own. An index past the listing, or 0 for audio, is a scene error. */
+    public static byte[] txSelectTrack(long player, int kind, int index) {
+        Enc b = begin(TX_KIND_SELECT_TRACK);
         b.putLong(player);
+        b.putInt(kind);
+        b.putInt(index);
         return finish(b);
     }
 
@@ -2404,6 +2416,29 @@ public final class KayaWire {
         return finish(b);
     }
 
+    /** set_property with a constant player value. */
+    public static byte[] txSetPlayer(long widgetId, long player) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_PLAYER).putInt(SOURCE_CONST);
+        encodeValue(b, player);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound player value. */
+    public static byte[] txBindPlayer(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_PLAYER).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindPlayerElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_PLAYER).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
     /** set_window_prop with a constant title value (window 0, the primary surface). */
     public static byte[] txSetWindowTitle(long window, String title) {
         Enc b = begin(TX_KIND_SET_WINDOW_PROP);
@@ -3073,7 +3108,7 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED && kind != OCC_KIND_FULLSCREEN_CHANGED && kind != OCC_KIND_COLOR_CHANGED && kind != OCC_KIND_RANGE_CHANGED && kind != OCC_KIND_RANGE_COMMITTED && kind != OCC_KIND_PLAYER_CHANGED && kind != OCC_KIND_PLAYER_POSITION && kind != OCC_KIND_SEEK_COMPLETED && kind != OCC_KIND_SESSION_ACTION) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED && kind != OCC_KIND_FULLSCREEN_CHANGED && kind != OCC_KIND_COLOR_CHANGED && kind != OCC_KIND_RANGE_CHANGED && kind != OCC_KIND_RANGE_COMMITTED && kind != OCC_KIND_PLAYER_CHANGED && kind != OCC_KIND_PLAYER_POSITION && kind != OCC_KIND_SEEK_COMPLETED && kind != OCC_KIND_SESSION_ACTION && kind != OCC_KIND_PLAYER_TRACKS && kind != OCC_KIND_CAPTION_CUE && kind != OCC_KIND_VIDEO_VISIBILITY) {
             return null;
         }
         long id = b.getLong(8);
@@ -3092,6 +3127,10 @@ public final class KayaWire {
             return new Occ(kind, id, java.util.List.of(), parseValue(rec, b, new int[] {16}));
         }
         if (kind == OCC_KIND_FULLSCREEN_CHANGED) {
+            // An answer carrying one value: id + the Value.
+            return new Occ(kind, id, java.util.List.of(), parseValue(rec, b, new int[] {16}));
+        }
+        if (kind == OCC_KIND_CAPTION_CUE) {
             // An answer carrying one value: id + the Value.
             return new Occ(kind, id, java.util.List.of(), parseValue(rec, b, new int[] {16}));
         }
@@ -3232,7 +3271,7 @@ public final class KayaWire {
         if (kind == OCC_KIND_SORT_REQUESTED) {
             payload = b.getInt(20);
         }
-        if (kind == OCC_KIND_TEXT_CHANGED || kind == OCC_KIND_TOGGLED || kind == OCC_KIND_VALUE_CHANGED || kind == OCC_KIND_MENU_TOGGLED || kind == OCC_KIND_MENU_VALUE_CHANGED || kind == OCC_KIND_DATE_CHANGED || kind == OCC_KIND_TIME_CHANGED || kind == OCC_KIND_VALUE_COMMITTED || kind == OCC_KIND_SUBMITTED || kind == OCC_KIND_COLOR_CHANGED) {
+        if (kind == OCC_KIND_TEXT_CHANGED || kind == OCC_KIND_TOGGLED || kind == OCC_KIND_VALUE_CHANGED || kind == OCC_KIND_MENU_TOGGLED || kind == OCC_KIND_MENU_VALUE_CHANGED || kind == OCC_KIND_DATE_CHANGED || kind == OCC_KIND_TIME_CHANGED || kind == OCC_KIND_VALUE_COMMITTED || kind == OCC_KIND_SUBMITTED || kind == OCC_KIND_COLOR_CHANGED || kind == OCC_KIND_VIDEO_VISIBILITY) {
             int ptype = b.getInt(at);
             int plen = b.getInt(at + 4);
             switch (ptype) {

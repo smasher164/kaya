@@ -1,10 +1,11 @@
 # Media: the player, the video view, the surface and the session (design pass, 2026-09-29)
 
 Status: DESIGNED 2026-09-29; the DEPTH slice BUILT 2026-09-30 on the mac
-(the player, the video view, the session, the capability query and the
-media_formats, media_delivery and media_session scenes; what breadth owes is
-docs/deferred.md's "BUILD — media" entry, and the one open design question
-its "RULING — which player a stamped video view shows"). It replaces the headless design of
+(the player, the video view, the session, the capability query, the tracks
+and captions with kaya's caption renderer, a video view in a collection row
+with its visibility, the `resources` reason, and the media_formats,
+media_delivery, media_session, media_tracks and media_feed scenes; what
+breadth owes is docs/deferred.md's "BUILD — media" entry). It replaces the headless design of
 docs/video-editor-plan.md §2 and §3, and it answers that plan's rulings 2
 and 3 and the roadmap's audio-playback question. The five pieces of shape
 in §0 are RULED by the maintainer, and so are §8's six (2026-09-29), the
@@ -164,6 +165,27 @@ same caption renderer it builds for Android and GTK; sidecar captions
 work on all five platforms. A shared scene asserts
 which caption track is selected and what cue text is current, never how
 the caption looks.
+
+**Built at depth (2026-09-30).** A player lists its tracks as BCP 47 tags
+(the platform's own canonicalizer, `und` for a track that names none) in
+the platform's order, audio and captions apart, with which of each is
+selected; the app selects by position, and captions off. A sidecar file is
+a player prop (`captions`, a local source, with `captions_language`), listed
+as the last caption track and selected like any other; a stream carries its
+captions inside it. THE CAPTION RENDERER IS SPLIT at the core: the core
+parses the WebVTT (crates/kaya/src/captions.rs), holds the cue timing and
+hands the backend every boundary time (`caption_times`); the backend
+watches its own clock for those times, asks the core what is current
+(`kaya_caption_at`) at each and after every seek and load, and draws the
+answer over each video view showing the player. On the mac the drawing is
+a text overlay in the user's MediaAccessibility style (font, relative
+size, colours, opacities, the drop-shadow edge), redrawn when that style
+changes. The current cue reaches the app as one occurrence whoever draws
+it: the core's timing for a sidecar, the platform's legible output for its
+own track. AVFoundation's forced-only companion options (it synthesizes one
+per subtitle track and selects it by default; it shows only cues marked
+forced) are not listed, being display policy rather than a track
+(docs/probes/media-mac-2026-09-30.md).
 
 **Picture in Picture** is a later follow-on: direct on the Apple layer,
 a window feature on Android and WinUI, absent on GTK.
@@ -367,7 +389,7 @@ CEA-608 is left out: FFmpeg has no encoder for it.
 **Failure semantics, one in nine bindings.** A player that cannot play
 publishes `failed(reason)` and reads `state` `failed`. `reason` is closed:
 `unsupported_codec`, `unsupported_container`, `not_found`, `network`,
-`decode_error`; each binding spells it as its own enum, and the platform's
+`decode_error`, `resources` (§7b); each binding spells it as its own enum, and the platform's
 sentence rides beside it as `detail`, which no scene compares. Rule: a track
 the platform cannot decode is `failed(unsupported_codec)` even when the
 rest plays, and a missing element is `failed` even when the pipeline only
@@ -381,6 +403,7 @@ AVFoundation reports a missing file as -17913, which names nothing.
 | `not_found` | NSURLErrorDomain -1100, HTTP 404/410 | `SourceNotSupported` with 0xC00D001A (`NS_E_FILE_NOT_FOUND`), HTTP 404 | `RESOURCE_ERROR_NOT_FOUND` | 2005; 2004 with 404 or 410 |
 | `network` | other NSURLErrorDomain; -11850 | `SourceNotSupported` with 0xC00D0035 (`NS_E_SERVER_NOT_FOUND`), refused or unresolvable; `NetworkError` | a `STREAM_ERROR_FAILED` or resource error from the HTTP source element (refused, unresolvable and unroutable are stream errors) | 2001, 2002, other 2004 |
 | `decode_error` | -11821 | `MediaPlayerError.DecodingError` | `STREAM_ERROR_DECODE` | 4001, 4003, 3001, 3002 |
+| `resources` | -11839 ("The decoder required for this media is busy."), underlying -12913 (`kVTVideoDecoderNotAvailableNowErr`); measured at the 257th AV1 player on an M5 Pro, where H.264 and HEVC opened 1024 | measured at breadth | measured at breadth | measured at breadth |
 
 Measured 2026-09-30: WinUI's `MediaPlayerError` is `SourceNotSupported` for a
 refused port, an unresolvable host, a 404 and an unknown container alike, so
@@ -445,7 +468,15 @@ host's application firewall is off, so no prompt appears.
 - `media_tracks`: the two-track files and HLS expect audio `en, fr`,
   select `fr` and read it back; the tx3g, sidecar and HLS subtitle items
   select the caption track and expect cue text "first cue" at 500 ms and
-  "second cue" at 1500 ms, never the look (§3).
+  "second cue" at 1500 ms, never the look (§3). Built: the player paused at
+  each time (the platform's own cues arrive after a paused seek, measured),
+  the sidecar also played through, and `expect_caption` reading what kaya's
+  renderer drew; `{captions:<item>|<line>}` expands to `captions none` where
+  a lane's table says the item's embedded track is not exposed (the tx3g
+  item on Windows).
+- `media_feed` (§7b): a scroll of stamped rows, each a video view bound to
+  its row's player, its first and last rows' visibility read as the app
+  hears it, and the picture read in the first and last rows.
 
 Per mode, following ruling 2 (§8): on the video view, the colour by window
 capture where the picture is readable (Apple, GTK; WinUI after §6.1), and
@@ -513,6 +544,19 @@ only for the rows on screen and plays the most visible one, the feed-app
 pattern; kaya chooses nothing for the app. Running out of hardware decoders,
 which phones reach at a handful of players, fails with the reason
 `resources` rather than a black view.
+
+**Built at depth (2026-09-30).** The player is a video view's `player`
+prop (PropKind::Player, an id, 0 for none) in both zones: a constant, or a
+row's player field (in Rust a `PlayerId` or `Option<PlayerId>` field). The
+core lowers it to the backend's `set_video_player` and holds the one-view
+rule on each transaction's END state, so rows trading players in one
+transaction is one move; the refusal names both views, a stamped one by its
+template node and keys. A row still naming a released player shows nothing
+(the app replaces it when the row comes back into view); an id never created
+is refused. Visibility is reported by the backend as often as the view's
+geometry moves (on SwiftUI its frame against every scroll viewport it sits
+in) and coalesced by the core into bands: entering, each tenth shown,
+shown whole, leaving; a copy torn down while shown is heard leaving.
 
 ## §8. The follow-on rulings
 

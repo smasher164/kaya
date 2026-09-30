@@ -126,6 +126,13 @@ pub const KAYA_OCCURRENCE_PLAYER_CHANGED: u16 = 39;
 pub const KAYA_OCCURRENCE_PLAYER_POSITION: u16 = 40;
 pub const KAYA_OCCURRENCE_SEEK_COMPLETED: u16 = 41;
 pub const KAYA_OCCURRENCE_SESSION_ACTION: u16 = 42;
+/// PLAYER_TRACKS { u64 player; u32 audio_selected; u32 caption_selected;
+/// Values audio; Values captions } (Str BCP 47 tags, selections from 1, 0
+/// none); CAPTION_CUE { u64 player; Str text }; VIDEO_VISIBILITY { the
+/// copy's tag; F64 shown } (docs/media-plan.md §3, §7b).
+pub const KAYA_OCCURRENCE_PLAYER_TRACKS: u16 = 43;
+pub const KAYA_OCCURRENCE_CAPTION_CUE: u16 = 44;
+pub const KAYA_OCCURRENCE_VIDEO_VISIBILITY: u16 = 45;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -149,6 +156,9 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_PLAYER_POSITION == ring::REC_PLAYER_POSITION
         && KAYA_OCCURRENCE_SEEK_COMPLETED == ring::REC_SEEK_COMPLETED
         && KAYA_OCCURRENCE_SESSION_ACTION == ring::REC_SESSION_ACTION
+        && KAYA_OCCURRENCE_PLAYER_TRACKS == ring::REC_PLAYER_TRACKS
+        && KAYA_OCCURRENCE_CAPTION_CUE == ring::REC_CAPTION_CUE
+        && KAYA_OCCURRENCE_VIDEO_VISIBILITY == ring::REC_VIDEO_VISIBILITY
         && KAYA_OCCURRENCE_SECTION_SELECTED == ring::REC_SECTION_SELECTED
         && KAYA_OCCURRENCE_MENU_ACTIVATED == ring::REC_MENU_ACTIVATED
         && KAYA_OCCURRENCE_MENU_TOGGLED == ring::REC_MENU_TOGGLED
@@ -248,14 +258,14 @@ pub const KAYA_TX_SET_BADGE: u16 = 62;
 /// The media records (docs/media-plan.md): CREATE_PLAYER and RELEASE_PLAYER
 /// u64 player; SET_PLAYER_PROP u64 player, u32 pprop, u32 reserved, value
 /// (written once, never bound); PLAYER_COMMAND u64 player, u32
-/// player_command, u32 reserved, u64 at_ms; SET_VIDEO_PLAYER u64 widget,
-/// u64 player (0 none); SET_SESSION u64 player, u32 actions mask, u32
+/// player_command, u32 reserved, u64 at_ms; SELECT_TRACK u64 player, u32
+/// track_kind, u32 index (from 1, 0 none); SET_SESSION u64 player, u32 actions mask, u32
 /// playback_state, then title, artist, album and artwork as Str values.
 pub const KAYA_TX_CREATE_PLAYER: u16 = 63;
 pub const KAYA_TX_SET_PLAYER_PROP: u16 = 64;
 pub const KAYA_TX_PLAYER_COMMAND: u16 = 65;
 pub const KAYA_TX_RELEASE_PLAYER: u16 = 66;
-pub const KAYA_TX_SET_VIDEO_PLAYER: u16 = 67;
+pub const KAYA_TX_SELECT_TRACK: u16 = 67;
 pub const KAYA_TX_SET_SESSION: u16 = 68;
 pub const KAYA_TX_ADD_SECTION: u16 = 25;
 pub const KAYA_TX_SELECT_SECTION: u16 = 26;
@@ -566,7 +576,7 @@ const _: () = assert!(
         && KAYA_TX_SET_PLAYER_PROP == wire::TX_SET_PLAYER_PROP
         && KAYA_TX_PLAYER_COMMAND == wire::TX_PLAYER_COMMAND
         && KAYA_TX_RELEASE_PLAYER == wire::TX_RELEASE_PLAYER
-        && KAYA_TX_SET_VIDEO_PLAYER == wire::TX_SET_VIDEO_PLAYER
+        && KAYA_TX_SELECT_TRACK == wire::TX_SELECT_TRACK
         && KAYA_TX_SET_SESSION == wire::TX_SET_SESSION
         && KAYA_TX_ADD_SECTION == wire::TX_ADD_SECTION
         && KAYA_TX_SELECT_SECTION == wire::TX_SELECT_SECTION
@@ -641,6 +651,11 @@ pub const KAYA_APPLY_PLAYER_COMMAND: u16 = 53;
 pub const KAYA_APPLY_RELEASE_PLAYER: u16 = 54;
 pub const KAYA_APPLY_SET_VIDEO_PLAYER: u16 = 55;
 pub const KAYA_APPLY_SET_SESSION: u16 = 56;
+/// SELECT_TRACK u64 player, u32 track_kind, u32 index (from 1 in the
+/// platform's own listing, 0 captions off); CAPTION_TIMES u64 player, then
+/// the kaya-drawn cues' boundaries as I64 ms values.
+pub const KAYA_APPLY_SELECT_TRACK: u16 = 57;
+pub const KAYA_APPLY_CAPTION_TIMES: u16 = 58;
 pub const KAYA_APPLY_ADD_SECTION: u16 = 15;
 pub const KAYA_APPLY_SELECT_SECTION: u16 = 16;
 pub const KAYA_APPLY_SET_SECTION_PROP: u16 = 17;
@@ -769,6 +784,8 @@ const _: () = assert!(
         && KAYA_APPLY_RELEASE_PLAYER == wire::APPLY_RELEASE_PLAYER
         && KAYA_APPLY_SET_VIDEO_PLAYER == wire::APPLY_SET_VIDEO_PLAYER
         && KAYA_APPLY_SET_SESSION == wire::APPLY_SET_SESSION
+        && KAYA_APPLY_SELECT_TRACK == wire::APPLY_SELECT_TRACK
+        && KAYA_APPLY_CAPTION_TIMES == wire::APPLY_CAPTION_TIMES
         && KAYA_APPLY_ADD_SECTION == wire::APPLY_ADD_SECTION
         && KAYA_APPLY_SELECT_SECTION == wire::APPLY_SELECT_SECTION
         && KAYA_APPLY_SET_SECTION_PROP == wire::APPLY_SET_SECTION_PROP
@@ -973,6 +990,8 @@ pub const KAYA_PROP_LOW_LABEL: u32 = 49;
 pub const KAYA_PROP_HIGH_LABEL: u32 = 50;
 /// A video view's fit, a KAYA_FIT_* (docs/media-plan.md §3).
 pub const KAYA_PROP_FIT: u32 = 51;
+/// A video view's player (docs/media-plan.md §7b): an I64 id, 0 none.
+pub const KAYA_PROP_PLAYER: u32 = 52;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -1138,7 +1157,7 @@ const _: () = assert!(
 // Completeness for the occurrence exports (docs/traps.md): a new spec
 // occurrence trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 42,
+    crate::spec::SPEC.occurrence.len() == 45,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -1220,6 +1239,7 @@ const _: () = assert!(
         && KAYA_PROP_LOW_LABEL == wire::PROP_LOW_LABEL
         && KAYA_PROP_HIGH_LABEL == wire::PROP_HIGH_LABEL
         && KAYA_PROP_FIT == wire::PROP_FIT
+        && KAYA_PROP_PLAYER == wire::PROP_PLAYER
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -1501,6 +1521,10 @@ pub const KAYA_PPROP_SPEED: u32 = 2;
 pub const KAYA_PPROP_VOLUME: u32 = 3;
 pub const KAYA_PPROP_MUTED: u32 = 4;
 pub const KAYA_PPROP_LOOP: u32 = 5;
+pub const KAYA_PPROP_CAPTIONS: u32 = 6;
+pub const KAYA_PPROP_CAPTIONS_LANGUAGE: u32 = 7;
+pub const KAYA_TRACK_KIND_AUDIO: u32 = 0;
+pub const KAYA_TRACK_KIND_CAPTION: u32 = 1;
 pub const KAYA_PLAYER_STATE_IDLE: u32 = 0;
 pub const KAYA_PLAYER_STATE_LOADING: u32 = 1;
 pub const KAYA_PLAYER_STATE_READY: u32 = 2;
@@ -1514,6 +1538,7 @@ pub const KAYA_MEDIA_FAILURE_UNSUPPORTED_CONTAINER: u32 = 2;
 pub const KAYA_MEDIA_FAILURE_NOT_FOUND: u32 = 3;
 pub const KAYA_MEDIA_FAILURE_NETWORK: u32 = 4;
 pub const KAYA_MEDIA_FAILURE_DECODE_ERROR: u32 = 5;
+pub const KAYA_MEDIA_FAILURE_RESOURCES: u32 = 6;
 pub const KAYA_PLAYER_COMMAND_PLAY: u32 = 1;
 pub const KAYA_PLAYER_COMMAND_PAUSE: u32 = 2;
 pub const KAYA_PLAYER_COMMAND_SEEK: u32 = 3;
@@ -1555,6 +1580,10 @@ const _: () = assert!(
         && vocab_is(wire::PPROPS, "volume", KAYA_PPROP_VOLUME)
         && vocab_is(wire::PPROPS, "muted", KAYA_PPROP_MUTED)
         && vocab_is(wire::PPROPS, "loop", KAYA_PPROP_LOOP)
+        && vocab_is(wire::PPROPS, "captions", KAYA_PPROP_CAPTIONS)
+        && vocab_is(wire::PPROPS, "captions_language", KAYA_PPROP_CAPTIONS_LANGUAGE)
+        && vocab_is(wire::TRACK_KINDS, "audio", KAYA_TRACK_KIND_AUDIO)
+        && vocab_is(wire::TRACK_KINDS, "caption", KAYA_TRACK_KIND_CAPTION)
         && vocab_is(wire::PLAYER_STATES, "idle", KAYA_PLAYER_STATE_IDLE)
         && vocab_is(wire::PLAYER_STATES, "loading", KAYA_PLAYER_STATE_LOADING)
         && vocab_is(wire::PLAYER_STATES, "ready", KAYA_PLAYER_STATE_READY)
@@ -1568,6 +1597,7 @@ const _: () = assert!(
         && vocab_is(wire::MEDIA_FAILURES, "not_found", KAYA_MEDIA_FAILURE_NOT_FOUND)
         && vocab_is(wire::MEDIA_FAILURES, "network", KAYA_MEDIA_FAILURE_NETWORK)
         && vocab_is(wire::MEDIA_FAILURES, "decode_error", KAYA_MEDIA_FAILURE_DECODE_ERROR)
+        && vocab_is(wire::MEDIA_FAILURES, "resources", KAYA_MEDIA_FAILURE_RESOURCES)
         && vocab_is(wire::PLAYER_COMMANDS, "play", KAYA_PLAYER_COMMAND_PLAY)
         && vocab_is(wire::PLAYER_COMMANDS, "pause", KAYA_PLAYER_COMMAND_PAUSE)
         && vocab_is(wire::PLAYER_COMMANDS, "seek", KAYA_PLAYER_COMMAND_SEEK)
@@ -1587,13 +1617,14 @@ const _: () = assert!(
         && vocab_is(wire::FITS, "fill", KAYA_FIT_FILL)
 );
 const _: () = {
-    assert!(spec_enum_variants("pprop") == 5, "the spec pprop enum grew: export KAYA_PPROP_*");
+    assert!(spec_enum_variants("pprop") == 7, "the spec pprop enum grew: export KAYA_PPROP_*");
+    assert!(spec_enum_variants("track_kind") == 2, "the spec track_kind enum grew: export KAYA_TRACK_KIND_*");
     assert!(
         spec_enum_variants("player_state") == 7,
         "the spec player_state enum grew: export KAYA_PLAYER_STATE_*"
     );
     assert!(
-        spec_enum_variants("media_failure") == 6,
+        spec_enum_variants("media_failure") == 7,
         "the spec media_failure enum grew: export KAYA_MEDIA_FAILURE_*"
     );
     assert!(
@@ -1613,7 +1644,7 @@ const _: () = {
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 51,
+    crate::spec::PROPS.len() == 52,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(
@@ -4448,6 +4479,85 @@ pub extern "C" fn kaya_player_overdue(player: u64) -> u32 {
     player_report(player, crate::media::Report::Overdue)
 }
 
+/// Presentation side: the platform's own tracks (docs/media-plan.md §3):
+/// each list's BCP 47 tags joined by '\n' ("" for none), in the platform's
+/// order, and which of each it has selected, counting from 1, 0 none.
+///
+/// # Safety
+/// `audio` and `captions` must each describe readable UTF-8 bytes of their
+/// lengths, or be NULL with length 0.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_player_tracks(
+    player: u64,
+    audio: *const u8,
+    audio_len: usize,
+    captions: *const u8,
+    captions_len: usize,
+    audio_selected: u32,
+    caption_selected: u32,
+) -> u32 {
+    let list = |s: String| -> Vec<String> {
+        if s.is_empty() { Vec::new() } else { s.split('\n').map(str::to_owned).collect() }
+    };
+    let audio = list(unsafe { lossy(audio, audio_len) });
+    let captions = list(unsafe { lossy(captions, captions_len) });
+    let pick = |n: u32| (n != 0).then(|| n as usize - 1);
+    player_report(
+        player,
+        crate::media::Report::Tracks {
+            audio,
+            captions,
+            audio_selected: pick(audio_selected),
+            caption_selected: pick(caption_selected),
+        },
+    )
+}
+
+/// Presentation side: the text the platform shows now for its own selected
+/// caption track, "" for none.
+///
+/// # Safety
+/// `text` must describe `text_len` readable UTF-8 bytes, or be NULL.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_player_cue(player: u64, text: *const u8, text_len: usize) -> u32 {
+    let text = unsafe { lossy(text, text_len) };
+    player_report(player, crate::media::Report::Cue(text))
+}
+
+/// Presentation side: KAYA'S CAPTION RENDERER asks what to draw (docs/media-
+/// plan.md §3). The core times the sidecar's cues: this answers the text
+/// current at `t_ms` on the backend's clock, "" for none, and publishes it
+/// when it changed. Writes at most `cap` bytes to `out` and answers the
+/// text's whole length; ask again with a larger buffer when it exceeds `cap`.
+///
+/// # Safety
+/// `out` must be writable for `cap` bytes, or NULL with `cap` 0.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_caption_at(player: u64, t_ms: u64, out: *mut u8, cap: usize) -> usize {
+    let mut scene_slot = PRESENTATION_SCENE.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(scene) = scene_slot.as_mut() else { return 0 };
+    let (text, published) = scene.caption_at(crate::protocol::PlayerId(player), t_ms);
+    drop(scene_slot);
+    send_occurrences(published);
+    let n = text.len().min(cap);
+    if n > 0 && !out.is_null() {
+        unsafe { std::ptr::copy_nonoverlapping(text.as_ptr(), out, n) };
+    }
+    text.len()
+}
+
+/// Presentation side: how much of video view `widget` shows in its viewport,
+/// 0 to 1, reported as often as its geometry moves; the core coalesces
+/// (docs/media-plan.md §7b).
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_video_visible(widget: u64, shown: f64) {
+    let mut scene_slot = PRESENTATION_SCENE.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(scene) = scene_slot.as_mut() else { return };
+    let published = scene.video_visible(crate::protocol::WidgetId(widget), shown);
+    drop(scene_slot);
+    send_occurrences(published);
+}
+
 /// Presentation side: the system's media controls sent a SESSION_ACTION
 /// (`at_ms` for seek_to). THE CORE ROUTES IT (docs/media-plan.md §5): 0
 /// the app handles it and has been told, 1 play, 2 pause and 3 seek to
@@ -5330,6 +5440,10 @@ fn send_occurrences(occurrences: Vec<crate::protocol::Occurrence>) {
             | crate::protocol::Occurrence::PlayerChanged { .. }
             | crate::protocol::Occurrence::PlayerPosition { .. }
             | crate::protocol::Occurrence::SeekCompleted { .. }
+            | crate::protocol::Occurrence::PlayerTracks { .. }
+            | crate::protocol::Occurrence::CaptionCue { .. }
+            | crate::protocol::Occurrence::VideoVisibility { .. }
+            | crate::protocol::Occurrence::InstanceVideoVisibility { .. }
             | crate::protocol::Occurrence::SessionAction { .. }) => {
                 crate::protocol::OccSink::Ring(state.ring.clone()).send(other)
             }
@@ -5956,7 +6070,7 @@ mod tests {
             ("set_player_prop", KAYA_TX_SET_PLAYER_PROP),
             ("player_command", KAYA_TX_PLAYER_COMMAND),
             ("release_player", KAYA_TX_RELEASE_PLAYER),
-            ("set_video_player", KAYA_TX_SET_VIDEO_PLAYER),
+            ("select_track", KAYA_TX_SELECT_TRACK),
             ("set_session", KAYA_TX_SET_SESSION),
         ];
         let apply = [
@@ -6014,6 +6128,8 @@ mod tests {
             ("release_player", KAYA_APPLY_RELEASE_PLAYER),
             ("set_video_player", KAYA_APPLY_SET_VIDEO_PLAYER),
             ("set_session", KAYA_APPLY_SET_SESSION),
+            ("select_track", KAYA_APPLY_SELECT_TRACK),
+            ("caption_times", KAYA_APPLY_CAPTION_TIMES),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

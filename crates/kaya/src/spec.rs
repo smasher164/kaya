@@ -104,6 +104,11 @@ pub enum PropKind {
     /// precedent, a label the generators turn into a component-taking
     /// setter and decoder in every binding.
     Color,
+    /// A media player's id (docs/media-plan.md §7b), riding the wire as
+    /// an I64, 0 for none: the Date precedent, the label a generator turns
+    /// into a setter taking the binding's player handle, and the type a
+    /// collection row's player field has.
+    Player,
 }
 
 /// Properties with their wire ids and value kinds; kept in lockstep
@@ -256,6 +261,9 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     ("high_label", 50, PropKind::Str),
     // docs/media-plan.md §3: how a video view fits its picture.
     ("fit", 51, PropKind::Enum("fit")),
+    // docs/media-plan.md §7b: the player a video view shows, a constant or
+    // a row's player field; a player is shown by one view at a time.
+    ("player", 52, PropKind::Player),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -370,6 +378,11 @@ pub const PLAYER_PROPS: &[(&'static str, u32, PropKind)] = &[
     ("volume", 3, PropKind::F64),
     ("muted", 4, PropKind::Bool),
     ("loop", 5, PropKind::Bool),
+    // docs/media-plan.md §3: a sidecar WebVTT file (a local source: an asset
+    // name or a picked file's path, "" for none) and its BCP 47 language.
+    // kaya parses it and draws its cues on every platform.
+    ("captions", 6, PropKind::Str),
+    ("captions_language", 7, PropKind::Str),
 ];
 
 /// The variable tail of SET_PROPERTY, after `source`. The one record
@@ -1783,12 +1796,19 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
         },
         Record {
             kind: 67,
-            name: "set_video_player",
-            fields: &[f("widget_id", FieldTy::U64), f("player", FieldTy::U64)],
+            name: "select_track",
+            fields: &[
+                f("player", FieldTy::U64),
+                f("kind", FieldTy::U32),
+                f("index", FieldTy::U32),
+            ],
             payload: None,
-            doc: "Show `player` in the video view `widget_id` \
-                  (docs/media-plan.md §3); 0 shows none. A live video view \
-                  only: the player is an object, not collection data.",
+            doc: "Select one of the player's tracks (docs/media-plan.md §3): \
+                  `kind` is TRACK_KIND and `index` counts from 1 in the \
+                  player_tracks listing, 0 selecting no caption track. A \
+                  sidecar file's caption track is in the listing like the \
+                  platform's own. An index past the listing, or 0 for audio, \
+                  is a scene error.",
         },
         Record {
             kind: 68,
@@ -2659,6 +2679,33 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   it and follows the attached player's state \
                   (docs/media-plan.md §5).",
         },
+        Record {
+            kind: 57,
+            name: "select_track",
+            fields: &[
+                f("player", FieldTy::U64),
+                f("kind", FieldTy::U32),
+                f("index", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "Select the platform's own track: `index` counts from 1 in \
+                  the listing the backend last reported through \
+                  kaya_player_tracks, 0 turning its captions off. A sidecar \
+                  caption track is the core's and never arrives here; \
+                  selecting it arrives as caption 0 and a caption_times.",
+        },
+        Record {
+            kind: 58,
+            name: "caption_times",
+            fields: &[f("player", FieldTy::U64), f("times", FieldTy::Values)],
+            payload: None,
+            doc: "The player's kaya-drawn captions (a sidecar file's, \
+                  docs/media-plan.md §3): every cue's start and end in ms as \
+                  I64 values, ascending, empty for none. The backend asks \
+                  kaya_caption_at at each of these times on its own clock, \
+                  and after every seek and load, and draws the text it is \
+                  answered over each video view showing the player.",
+        },
     ],
     occurrence: &[
         Record {
@@ -3430,6 +3477,48 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   attached, play, pause and seek_to apply to it, and the rest \
                   are not offered (docs/media-plan.md §5).",
         },
+        Record {
+            kind: 43,
+            name: "player_tracks",
+            fields: &[
+                f("player", FieldTy::U64),
+                f("audio_selected", FieldTy::U32),
+                f("caption_selected", FieldTy::U32),
+                f("audio", FieldTy::Values),
+                f("captions", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "The player's tracks (docs/media-plan.md §3): each list's \
+                  BCP 47 language tags as Str values in the platform's order, \
+                  a sidecar caption track last, and the selections counting \
+                  from 1, 0 for none. Sent when the listing or a selection \
+                  moves.",
+        },
+        Record {
+            kind: 44,
+            name: "caption_cue",
+            fields: &[f("player", FieldTy::U64), f("text", FieldTy::Value)],
+            payload: None,
+            doc: "The text of the caption cue current on the player's clock, \
+                  a Str, \"\" between cues or with no caption track selected; \
+                  sent only when it changes, whoever draws it.",
+        },
+        Record {
+            kind: 45,
+            name: "video_visibility",
+            fields: &[
+                f("id", FieldTy::U64),
+                f("path_len", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: Some(PropKind::F64),
+            doc: "path_len key values follow, then how much of the video \
+                  view shows in its viewport as one F64, 0 to 1 \
+                  (docs/media-plan.md §7b). Coalesced by the core: sent when \
+                  the view enters or leaves, when the tenth it shows moves, \
+                  and when it shows whole; a copy torn down while shown \
+                  sends 0.",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -3601,6 +3690,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("low_label", 49),
                 ("high_label", 50),
                 ("fit", 51),
+                ("player", 52),
             ],
         },
         EnumSpec {
@@ -3894,6 +3984,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("not_found", 3),
                 ("network", 4),
                 ("decode_error", 5),
+                ("resources", 6),
             ],
         },
         EnumSpec {
@@ -3925,6 +4016,11 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             variants: &[("contain", 0), ("cover", 1), ("fill", 2)],
         },
         EnumSpec {
+            // docs/media-plan.md §3: which of a player's track lists.
+            name: "track_kind",
+            variants: &[("audio", 0), ("caption", 1)],
+        },
+        EnumSpec {
             name: "pprop",
             variants: &[
                 ("source", 1),
@@ -3932,6 +4028,8 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("volume", 3),
                 ("muted", 4),
                 ("loop", 5),
+                ("captions", 6),
+                ("captions_language", 7),
             ],
         },
         EnumSpec {
@@ -4116,7 +4214,7 @@ mod tests {
             ("set_player_prop", wire::TX_SET_PLAYER_PROP),
             ("player_command", wire::TX_PLAYER_COMMAND),
             ("release_player", wire::TX_RELEASE_PLAYER),
-            ("set_video_player", wire::TX_SET_VIDEO_PLAYER),
+            ("select_track", wire::TX_SELECT_TRACK),
             ("set_session", wire::TX_SET_SESSION),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
@@ -4185,6 +4283,8 @@ mod tests {
                 ("release_player", wire::APPLY_RELEASE_PLAYER),
                 ("set_video_player", wire::APPLY_SET_VIDEO_PLAYER),
                 ("set_session", wire::APPLY_SET_SESSION),
+                ("select_track", wire::APPLY_SELECT_TRACK),
+                ("caption_times", wire::APPLY_CAPTION_TIMES),
             ]
         );
         // The WHOLE list, not indexed asserts: an indexed pin says
@@ -4236,6 +4336,9 @@ mod tests {
                 ("player_position", crate::ring::REC_PLAYER_POSITION),
                 ("seek_completed", crate::ring::REC_SEEK_COMPLETED),
                 ("session_action", crate::ring::REC_SESSION_ACTION),
+                ("player_tracks", crate::ring::REC_PLAYER_TRACKS),
+                ("caption_cue", crate::ring::REC_CAPTION_CUE),
+                ("video_visibility", crate::ring::REC_VIDEO_VISIBILITY),
             ]
         );
     }
@@ -4475,6 +4578,7 @@ mod tests {
                     ("playback_state", _) => canvas_pin(wire::PLAYBACK_STATES, name),
                     ("fit", _) => canvas_pin(wire::FITS, name),
                     ("pprop", _) => canvas_pin(wire::PPROPS, name),
+                    ("track_kind", _) => canvas_pin(wire::TRACK_KINDS, name),
                     ("draw_op", _) => canvas_pin(wire::DRAW_OPS, name),
                     ("paint", _) => canvas_pin(wire::PAINTS, name),
                     ("fill_rule", _) => canvas_pin(wire::FILL_RULES, name),
@@ -4535,6 +4639,7 @@ mod tests {
                     ("prop", "low_label") => wire::PROP_LOW_LABEL,
                     ("prop", "high_label") => wire::PROP_HIGH_LABEL,
                     ("prop", "fit") => wire::PROP_FIT,
+                    ("prop", "player") => wire::PROP_PLAYER,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,
@@ -4709,6 +4814,7 @@ mod tests {
             ("playback_state", wire::PLAYBACK_STATES),
             ("fit", wire::FITS),
             ("pprop", wire::PPROPS),
+            ("track_kind", wire::TRACK_KINDS),
         ];
         for (enum_name, table) in pairs {
             let e = SPEC
@@ -4745,7 +4851,7 @@ mod tests {
     /// the spec is what the core reads, and the core's own encoder agrees.
     #[test]
     fn media_records_round_trip_through_wire() {
-        use crate::protocol::{PlaybackState, PlayerCommand, PlayerId, PlayerProp, SessionSpec};
+        use crate::protocol::{PlaybackState, PlayerCommand, PlayerId, PlayerProp, SessionSpec, TrackKind};
         let mut w = GenericWriter { buf: Vec::new(), blobs: Vec::new() };
         let s = |t: &str| Arg::Value(Value::from(t));
         w.record(tx_record("create_player"), &[Arg::U64(4)]);
@@ -4755,7 +4861,8 @@ mod tests {
             &[Arg::U64(4), Arg::U32(3), Arg::U32(0), Arg::Value(Value::F64(0.5))],
         );
         w.record(tx_record("player_command"), &[Arg::U64(4), Arg::U32(3), Arg::U32(0), Arg::U64(1500)]);
-        w.record(tx_record("set_video_player"), &[Arg::U64(9), Arg::U64(4)]);
+        w.record(tx_record("select_track"), &[Arg::U64(4), Arg::U32(1), Arg::U32(2)]);
+        w.record(tx_record("set_player_prop"), &[Arg::U64(4), Arg::U32(6), Arg::U32(0), s("media/captions.vtt")]);
         w.record(
             tx_record("set_session"),
             &[Arg::U64(4), Arg::U32(1 << 7), Arg::U32(2), s("T"), s("A"), s("B"), s("")],
@@ -4766,7 +4873,12 @@ mod tests {
             TxOp::SetPlayerProp { player: PlayerId(4), prop: PlayerProp::Source, value: Value::from("media/a.mp4") },
             TxOp::SetPlayerProp { player: PlayerId(4), prop: PlayerProp::Volume, value: Value::F64(0.5) },
             TxOp::PlayerCommand { player: PlayerId(4), command: PlayerCommand::Seek(1500) },
-            TxOp::SetVideoPlayer { widget: WidgetId(9), player: Some(PlayerId(4)) },
+            TxOp::SelectTrack { player: PlayerId(4), kind: TrackKind::Caption, index: 2 },
+            TxOp::SetPlayerProp {
+                player: PlayerId(4),
+                prop: PlayerProp::Captions,
+                value: Value::from("media/captions.vtt"),
+            },
             TxOp::SetSession(SessionSpec {
                 player: Some(PlayerId(4)),
                 actions: 1 << 7,

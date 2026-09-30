@@ -5,9 +5,10 @@
 
 use std::collections::HashMap;
 
+use crate::captions::Captions;
 use crate::protocol::{
     ApplyOp, MediaFailure, Occurrence, PlaybackState, PlayerCommand, PlayerId, PlayerProp, PlayerState,
-    SessionAction, SessionSpec, Value,
+    PlayerTracks, SessionAction, SessionSpec, TrackKind, Value, WidgetId,
 };
 
 /// How often `player_position` ticks while a player plays.
@@ -32,6 +33,11 @@ pub(crate) enum Report {
     Seeked(u64),
     /// LOADING_CEILING_MS passed since the source was handed over.
     Overdue,
+    /// The platform's own tracks: language tags in its order, and which of
+    /// each list it has selected.
+    Tracks { audio: Vec<String>, captions: Vec<String>, audio_selected: Option<usize>, caption_selected: Option<usize> },
+    /// The text the platform shows for its own selected caption track now.
+    Cue(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -48,6 +54,15 @@ struct Player {
     /// Seeks the APP asked for and the platform has not yet landed; a seek
     /// the core issued itself (a replay after `ended`) is not the app's.
     seeks: u32,
+    /// The platform's own tracks, as it last reported them.
+    platform: PlayerTracks,
+    /// A sidecar WebVTT file, kaya's to draw, and whether it is selected.
+    sidecar: Option<Captions>,
+    sidecar_language: String,
+    sidecar_selected: bool,
+    /// What the app last heard: the listing, and the current cue.
+    published_tracks: PlayerTracks,
+    cue: String,
 }
 
 impl Player {
@@ -62,7 +77,51 @@ impl Player {
             remote: false,
             early_rate: false,
             seeks: 0,
+            platform: PlayerTracks::default(),
+            sidecar: None,
+            sidecar_language: "und".to_owned(),
+            sidecar_selected: false,
+            published_tracks: PlayerTracks::default(),
+            cue: String::new(),
         }
+    }
+
+    /// The listing the app reads: the platform's tracks, a sidecar's
+    /// caption track last.
+    fn tracks(&self) -> PlayerTracks {
+        let mut t = self.platform.clone();
+        if self.sidecar.is_some() {
+            t.captions.push(self.sidecar_language.clone());
+            if self.sidecar_selected {
+                t.caption_selected = Some(t.captions.len() - 1);
+            }
+        }
+        t
+    }
+
+    /// The listing, published when it moved.
+    fn publish_tracks(&mut self, player: PlayerId, out: &mut Vec<Occurrence>) {
+        let now = self.tracks();
+        if self.published_tracks != now {
+            self.published_tracks = now.clone();
+            out.push(Occurrence::PlayerTracks { player, tracks: now });
+        }
+    }
+
+    /// The current cue, published when its text changed.
+    fn publish_cue(&mut self, player: PlayerId, text: String, out: &mut Vec<Occurrence>) {
+        if self.cue != text {
+            self.cue = text.clone();
+            out.push(Occurrence::CaptionCue { player, text });
+        }
+    }
+
+    fn caption_times(&self, player: PlayerId) -> ApplyOp {
+        let times = match (&self.sidecar, self.sidecar_selected) {
+            (Some(c), true) => c.boundaries(),
+            _ => Vec::new(),
+        };
+        ApplyOp::CaptionTimes { player, times }
     }
 }
 
@@ -116,6 +175,9 @@ fn default_bits() -> u32 {
 #[derive(Default)]
 pub(crate) struct Media {
     players: HashMap<PlayerId, Player>,
+    /// Released ids: a row still naming one shows nothing (docs/media-plan.md
+    /// §7b), where an id never created is a scene error.
+    released: std::collections::HashSet<PlayerId>,
     session: SessionSpec,
 }
 
@@ -130,6 +192,7 @@ impl Media {
 
     pub(crate) fn create(&mut self, player: PlayerId) -> ApplyOp {
         assert!(player.0 != 0, "kaya: player id 0 is reserved for \"no player\"");
+        self.released.remove(&player);
         let clash = self.players.insert(player, Player::new()).is_some();
         assert!(!clash, "kaya: player {} already exists — release it first", player.0);
         ApplyOp::CreatePlayer(player)
@@ -163,6 +226,7 @@ impl Media {
                 p.size = (0, 0);
                 p.early_rate = false;
                 p.seeks = 0;
+                p.platform = PlayerTracks::default();
                 match resolved {
                     Resolved::None => p.state = PlayerState::Idle,
                     Resolved::Url { remote, .. } => {
@@ -176,7 +240,29 @@ impl Media {
                     }
                 }
                 published.push(changed(player, p));
+                p.publish_tracks(player, published);
+                if !p.sidecar_selected {
+                    p.publish_cue(player, String::new(), published);
+                }
                 out.push(ApplyOp::SetPlayerProp { player, prop, value: Value::Str(url) });
+            }
+            (PlayerProp::Captions, Value::Str(source)) => {
+                p.sidecar = if source.is_empty() { None } else { Some(read_sidecar(player, &source)) };
+                if p.sidecar.is_none() && p.sidecar_selected {
+                    p.sidecar_selected = false;
+                    p.publish_cue(player, String::new(), published);
+                }
+                p.publish_tracks(player, published);
+                out.push(p.caption_times(player));
+            }
+            (PlayerProp::CaptionsLanguage, Value::Str(tag)) => {
+                assert!(
+                    !tag.trim().is_empty(),
+                    "kaya: player {} captions_language is a BCP 47 tag (\"en\", \"pt-BR\"), got an empty one",
+                    player.0
+                );
+                p.sidecar_language = tag;
+                p.publish_tracks(player, published);
             }
             (PlayerProp::Speed, Value::F64(x)) => {
                 assert!(
@@ -202,8 +288,8 @@ impl Media {
                 out.push(ApplyOp::SetPlayerProp { player, prop, value: Value::Bool(on) });
             }
             (prop, value) => panic!(
-                "kaya: player {} {prop:?} got {value:?} — source is a Str, speed and volume \
-                 F64, muted and loop Bool (spec::PLAYER_PROPS)",
+                "kaya: player {} {prop:?} got {value:?} — source, captions and captions_language \
+                 are Str, speed and volume F64, muted and loop Bool (spec::PLAYER_PROPS)",
                 player.0
             ),
         }
@@ -221,12 +307,79 @@ impl Media {
         out.push(ApplyOp::PlayerCommand { player, command });
     }
 
+    /// select_track (docs/media-plan.md §3): a platform track goes to the
+    /// platform, a sidecar's caption track is the core's own, and selecting
+    /// either caption source turns the other off.
+    pub(crate) fn select(
+        &mut self,
+        player: PlayerId,
+        kind: TrackKind,
+        index: u32,
+        out: &mut Vec<ApplyOp>,
+        published: &mut Vec<Occurrence>,
+    ) {
+        let p = self.live_mut(player, "select_track");
+        let listing = p.tracks();
+        match kind {
+            TrackKind::Audio => {
+                assert!(
+                    index >= 1 && index as usize <= listing.audio.len(),
+                    "kaya: select_track asks audio track {index} of player {}, whose audio tracks \
+                     are {:?} (counting from 1)",
+                    player.0,
+                    listing.audio
+                );
+                out.push(ApplyOp::SelectTrack { player, kind, index });
+            }
+            TrackKind::Caption => {
+                assert!(
+                    index as usize <= listing.captions.len(),
+                    "kaya: select_track asks caption track {index} of player {}, whose caption \
+                     tracks are {:?} (counting from 1, 0 for none)",
+                    player.0,
+                    listing.captions
+                );
+                let sidecar = p.sidecar.is_some() && index as usize == listing.captions.len();
+                let was = p.sidecar_selected;
+                p.sidecar_selected = sidecar;
+                out.push(ApplyOp::SelectTrack { player, kind, index: if sidecar { 0 } else { index } });
+                if sidecar != was {
+                    out.push(p.caption_times(player));
+                }
+                if was && !sidecar {
+                    p.publish_cue(player, String::new(), published);
+                }
+                p.publish_tracks(player, published);
+            }
+        }
+    }
+
+    /// The sidecar's cue at the backend's clock time, published when it
+    /// changed; "" when no sidecar track is selected.
+    pub(crate) fn caption_at(&mut self, player: PlayerId, t_ms: u64) -> (String, Vec<Occurrence>) {
+        let mut out = Vec::new();
+        let Some(p) = self.players.get_mut(&player) else {
+            return (String::new(), out);
+        };
+        let text = match (&p.sidecar, p.sidecar_selected) {
+            (Some(c), true) => c.text_at(t_ms),
+            _ => return (String::new(), out),
+        };
+        p.publish_cue(player, text.clone(), &mut out);
+        (text, out)
+    }
+
+    pub(crate) fn was_released(&self, player: PlayerId) -> bool {
+        self.released.contains(&player)
+    }
+
     pub(crate) fn release(&mut self, player: PlayerId, out: &mut Vec<ApplyOp>) {
         assert!(
             self.players.remove(&player).is_some(),
             "kaya: release_player names player {}, which is not live",
             player.0
         );
+        self.released.insert(player);
         out.push(ApplyOp::ReleasePlayer(player));
         if self.session.player == Some(player) {
             self.session.player = None;
@@ -373,6 +526,11 @@ impl Media {
             (S::Ready | S::Playing | S::Paused | S::Ended, Report::Position(ms)) => {
                 out.push(Occurrence::PlayerPosition { player, position_ms: ms });
             }
+            (_, Report::Tracks { audio, captions, audio_selected, caption_selected }) => {
+                p.platform = PlayerTracks { audio, captions, audio_selected, caption_selected };
+                p.publish_tracks(player, &mut out);
+            }
+            (_, Report::Cue(text)) if !p.sidecar_selected => p.publish_cue(player, text, &mut out),
             (S::Ready | S::Playing | S::Paused | S::Ended, Report::Seeked(ms)) if p.seeks > 0 => {
                 p.seeks -= 1;
                 if p.state == S::Ended {
@@ -411,6 +569,8 @@ pub(crate) fn failure_reason(domain: &str, code: i64, underlying: i64) -> MediaF
         ("AVFoundationErrorDomain", -11828, _) => F::UnsupportedContainer,
         ("AVFoundationErrorDomain", _, -12847) => F::UnsupportedContainer,
         ("AVFoundationErrorDomain", -11821, _) => F::DecodeError,
+        ("AVFoundationErrorDomain", -11839, _) => F::Resources,
+        ("AVFoundationErrorDomain", _, -12913) => F::Resources,
         ("AVFoundationErrorDomain", -11850, _) => F::Network,
         ("AVFoundationErrorDomain", _, -17913) => F::NotFound,
         ("NSURLErrorDomain", -1100, _) => F::NotFound,
@@ -450,6 +610,73 @@ pub(crate) fn resolve_source(source: &str) -> Resolved {
     match crate::assets::media_locator(source) {
         Ok(url) => Resolved::Url { url, remote: false },
         Err(why) => Resolved::Refused(MediaFailure::NotFound, why),
+    }
+}
+
+/// A sidecar WebVTT file, read and parsed by the core (docs/media-plan.md
+/// §3): an asset name or a picked file's absolute path. kaya has no HTTP
+/// client, so a stream's captions ride inside the stream (HLS) instead.
+fn read_sidecar(player: PlayerId, source: &str) -> Captions {
+    let lower = source.to_ascii_lowercase();
+    assert!(
+        !(lower.starts_with("http://") || lower.starts_with("https://")),
+        "kaya: player {} captions {source:?} — a sidecar caption file is a local source, an asset \
+         name or a picked file's path; a stream carries its captions inside it (docs/media-plan.md §3)",
+        player.0
+    );
+    let bytes = if source.starts_with('/') {
+        std::fs::read(source).map_err(|e| format!("kaya: no caption file at {source}: {e}"))
+    } else {
+        crate::assets::read(source)
+    }
+    .unwrap_or_else(|why| panic!("kaya: player {} captions: {why}", player.0));
+    let text = String::from_utf8(bytes)
+        .unwrap_or_else(|_| panic!("kaya: player {} captions {source:?} is not UTF-8, which WebVTT is", player.0));
+    Captions::parse(&text).unwrap_or_else(|why| panic!("kaya: player {} captions {source:?}: {why}", player.0))
+}
+
+/// Which band of visibility a fraction falls in: 0 not shown, 1 to 10 the
+/// tenth it shows (anything above 0 is at least 1), 11 shown whole.
+fn visibility_band(shown: f64) -> u8 {
+    if shown <= 0.0 {
+        0
+    } else if shown >= 1.0 - 1e-3 {
+        11
+    } else {
+        1 + (shown * 10.0).floor().min(9.0) as u8
+    }
+}
+
+/// THE VISIBILITY COALESCING (docs/media-plan.md §7b): a backend reports a
+/// video view's shown fraction as often as its geometry moves, every frame
+/// of a scroll; the app hears it only when the view enters or leaves, when
+/// the tenth it shows moves, and when it shows whole.
+#[derive(Default)]
+pub(crate) struct Visibility {
+    bands: HashMap<WidgetId, u8>,
+}
+
+impl Visibility {
+    /// Some(fraction) when this report is news to the app.
+    pub(crate) fn report(&mut self, id: WidgetId, shown: f64) -> Option<f64> {
+        let shown = if shown.is_finite() { shown.clamp(0.0, 1.0) } else { 0.0 };
+        let band = visibility_band(shown);
+        let last = self.bands.get(&id).copied().unwrap_or(0);
+        if band == last {
+            return None;
+        }
+        if band == 0 {
+            self.bands.remove(&id);
+        } else {
+            self.bands.insert(id, band);
+        }
+        Some(shown)
+    }
+
+    /// The view went away: true when the app last heard it shown, so it
+    /// hears it leave.
+    pub(crate) fn gone(&mut self, id: WidgetId) -> bool {
+        self.bands.remove(&id).is_some()
     }
 }
 
@@ -695,6 +922,10 @@ mod tests {
             ("AVFoundationErrorDomain", -11828, -12847, F::UnsupportedContainer),
             ("AVFoundationErrorDomain", -11800, -12847, F::UnsupportedContainer),
             ("AVFoundationErrorDomain", -11821, 0, F::DecodeError),
+            ("AVFoundationErrorDomain", -11839, 0, F::Resources),
+            ("AVFoundationErrorDomain", -11839, -12913, F::Resources),
+            ("AVFoundationErrorDomain", -11800, -12913, F::Resources),
+            ("kaya", 6, 0, F::Resources),
             ("AVFoundationErrorDomain", -11850, -12939, F::Network),
             ("AVFoundationErrorDomain", -11800, -17913, F::NotFound),
             ("NSURLErrorDomain", -1100, 0, F::NotFound),
@@ -795,31 +1026,291 @@ mod tests {
         assert_eq!(m.route(SessionAction::Play), Route::Replay(P));
     }
 
-    fn scene_with_video(kind: crate::protocol::WidgetKind) -> (crate::scene::Scene, Vec<ApplyOp>) {
-        use crate::protocol::{TxOp, WidgetId};
+    use crate::protocol::{
+        CollectionId, PropValue, TemplateNodeId, TxOp, ValueType, WidgetId, WidgetKind, DEFAULT_WINDOW,
+    };
+
+    fn show(widget: u64, player: u64) -> TxOp {
+        TxOp::SetProperty {
+            widget: WidgetId(widget),
+            prop: crate::protocol::Prop::Player,
+            value: PropValue::Const(Value::I64(player as i64)),
+        }
+    }
+
+    fn scene_with_video(kind: WidgetKind) -> (crate::scene::Scene, Vec<ApplyOp>) {
         let mut scene = crate::scene::Scene::new();
         let ops = scene.apply(vec![
             TxOp::CreateWidget { id: WidgetId(1), kind },
             TxOp::CreatePlayer { player: P },
-            TxOp::SetVideoPlayer { widget: WidgetId(1), player: Some(P) },
-            TxOp::Mount { window: crate::protocol::DEFAULT_WINDOW, root: WidgetId(1) },
+            show(1, P.0),
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
         ]);
         (scene, ops)
     }
 
     #[test]
     fn a_video_view_shows_a_live_player() {
-        let (_, ops) = scene_with_video(crate::protocol::WidgetKind::Video);
-        assert!(ops.contains(&ApplyOp::SetVideoPlayer {
-            widget: crate::protocol::WidgetId(1),
-            player: Some(P),
-        }));
+        let (_, ops) = scene_with_video(WidgetKind::Video);
+        assert!(ops.contains(&ApplyOp::SetVideoPlayer { widget: WidgetId(1), player: Some(P) }));
     }
 
     #[test]
-    #[should_panic(expected = "not a live video view")]
+    #[should_panic(expected = "Player")]
     fn only_a_video_view_shows_a_player() {
-        scene_with_video(crate::protocol::WidgetKind::Label);
+        scene_with_video(WidgetKind::Label);
+    }
+
+    /// A column of rows, each a video view bound to the row's player field
+    /// (docs/media-plan.md §7b).
+    fn feed(players: &[u64]) -> (crate::scene::Scene, Vec<ApplyOp>) {
+        let mut scene = crate::scene::Scene::new();
+        let mut tx = vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::I64]] },
+            TxOp::CreateFor { id: 2, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Video },
+            TxOp::SetProperty {
+                widget: WidgetId(10),
+                prop: crate::protocol::Prop::Player,
+                value: PropValue::Element { level: 0, field: 0 },
+            },
+            TxOp::TemplateEnd,
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ];
+        let mut made = std::collections::HashSet::new();
+        for p in players {
+            if *p != 0 && made.insert(*p) {
+                tx.push(TxOp::CreatePlayer { player: PlayerId(*p) });
+            }
+        }
+        for (i, p) in players.iter().enumerate() {
+            tx.push(row(i as i64, *p, false));
+        }
+        let ops = scene.apply(tx);
+        (scene, ops)
+    }
+
+    fn row(key: i64, player: u64, update: bool) -> TxOp {
+        let (id, path, key, variant, record) =
+            (CollectionId(1), vec![], Value::I64(key), 0, vec![Value::I64(player as i64)]);
+        if update {
+            TxOp::CollectionUpdate { id, path, key, variant, record }
+        } else {
+            TxOp::CollectionInsert { id, path, key, variant, record }
+        }
+    }
+
+    fn shown(ops: &[ApplyOp]) -> Vec<Option<PlayerId>> {
+        ops.iter()
+            .filter_map(|op| match op {
+                ApplyOp::SetVideoPlayer { player, .. } => Some(*player),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn each_row_shows_its_own_player() {
+        let (_, ops) = feed(&[3, 4, 0]);
+        assert_eq!(shown(&ops), [Some(PlayerId(3)), Some(PlayerId(4)), None]);
+    }
+
+    #[test]
+    #[should_panic(expected = "player 3 is shown by the video view stamped from template node 10 at keys [I64(0)] and by the video view stamped from template node 10 at keys [I64(1)]")]
+    fn two_rows_showing_one_player_are_refused_naming_both() {
+        feed(&[3, 3]);
+    }
+
+    #[test]
+    #[should_panic(expected = "player 7 is shown by video view 1 and by video view 2")]
+    fn two_live_views_showing_one_player_are_refused_naming_both() {
+        let mut scene = crate::scene::Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(3), kind: WidgetKind::Column },
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Video },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Video },
+            TxOp::AddChild { parent: WidgetId(3), child: WidgetId(1) },
+            TxOp::AddChild { parent: WidgetId(3), child: WidgetId(2) },
+            TxOp::CreatePlayer { player: P },
+            show(1, P.0),
+            show(2, P.0),
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(3) },
+        ]);
+    }
+
+    /// The rule holds on the batch's END state: two rows trading players in
+    /// one transaction is one move, whichever row is written first.
+    #[test]
+    fn rows_trading_players_in_one_transaction_is_not_a_second_view() {
+        let (mut scene, _) = feed(&[3, 4]);
+        let ops = scene.apply(vec![row(0, 4, true), row(1, 3, true)]);
+        assert_eq!(shown(&ops), [Some(PlayerId(4)), Some(PlayerId(3))]);
+        // A view that went away frees its player for another.
+        let ops = scene.apply(vec![
+            TxOp::CollectionRemove { id: CollectionId(1), path: vec![], key: Value::I64(0) },
+            row(1, 4, true),
+        ]);
+        assert_eq!(shown(&ops), [Some(PlayerId(4))]);
+    }
+
+    #[test]
+    fn a_row_naming_a_released_player_shows_none() {
+        let (mut scene, _) = feed(&[3]);
+        scene.apply(vec![TxOp::ReleasePlayer { player: PlayerId(3) }]);
+        let ops = scene.apply(vec![row(0, 3, true)]);
+        assert_eq!(shown(&ops), [None]);
+    }
+
+    #[test]
+    #[should_panic(expected = "shows player 9, which was never created")]
+    fn a_row_naming_a_player_never_created_is_refused() {
+        let (mut scene, _) = feed(&[3]);
+        scene.apply(vec![row(0, 9, true)]);
+    }
+
+    #[test]
+    fn visibility_is_coalesced_to_entering_leaving_tenths_and_whole() {
+        let mut v = Visibility::default();
+        let w = WidgetId(5);
+        assert_eq!(v.report(w, 0.0), None, "never shown: leaving is not news");
+        assert_eq!(v.report(w, 0.01), Some(0.01), "entering");
+        assert_eq!(v.report(w, 0.05), None, "the same tenth, a frame of a scroll later");
+        assert_eq!(v.report(w, 0.09), None);
+        assert_eq!(v.report(w, 0.12), Some(0.12));
+        assert_eq!(v.report(w, 0.55), Some(0.55));
+        assert_eq!(v.report(w, 0.991), Some(0.991));
+        assert_eq!(v.report(w, 0.9995), Some(0.9995), "whole");
+        assert_eq!(v.report(w, 1.0), None);
+        assert_eq!(v.report(w, 0.0), Some(0.0), "leaving");
+        assert_eq!(v.report(w, f64::NAN), None, "an unmeasurable report reads as not shown");
+        assert!(!v.gone(w), "a view not shown leaves nothing to say");
+        v.report(w, 0.3);
+        assert!(v.gone(w));
+    }
+
+    /// A scroll's sixty frames reach the app as the handful of bands they
+    /// crossed, addressed to the copy by its keys.
+    #[test]
+    fn a_scroll_through_a_stamped_view_is_heard_by_its_keys_a_few_times() {
+        let (mut scene, ops) = feed(&[3]);
+        let copy = ops
+            .iter()
+            .find_map(|op| match op {
+                ApplyOp::SetVideoPlayer { widget, .. } => Some(*widget),
+                _ => None,
+            })
+            .unwrap();
+        let mut heard = Vec::new();
+        for frame in 0..=60 {
+            heard.extend(scene.video_visible(copy, frame as f64 / 60.0));
+        }
+        assert_eq!(heard.len(), 11, "entering, nine tenths and whole: {heard:?}");
+        assert!(heard.iter().all(|o| matches!(o,
+            Occurrence::InstanceVideoVisibility { node: TemplateNodeId(10), path, .. } if path == &[Value::I64(0)])));
+        // The copy torn down while shown: the app hears it leave.
+        scene.apply(vec![TxOp::CollectionRemove { id: CollectionId(1), path: vec![], key: Value::I64(0) }]);
+        assert!(matches!(
+            scene.take_asks().as_slice(),
+            [Occurrence::InstanceVideoVisibility { shown, .. }] if *shown == 0.0
+        ));
+        assert!(scene.video_visible(copy, 1.0).is_empty(), "a torn-down copy reports nothing");
+    }
+
+    #[test]
+    fn a_sidecar_is_the_last_caption_track_and_the_core_times_its_cues() {
+        let (mut m, _, _) = with_source("media/h264_aac.mp4");
+        let mut out = Vec::new();
+        let mut heard = Vec::new();
+        m.set_prop(P, PlayerProp::CaptionsLanguage, Value::Str("en".into()), &mut out, &mut heard);
+        m.set_prop(P, PlayerProp::Captions, Value::Str("media/captions.vtt".into()), &mut out, &mut heard);
+        heard.clear();
+        heard.extend(m.report(
+            P,
+            Report::Tracks {
+                audio: vec!["en".into(), "fr".into()],
+                captions: vec!["fr".into()],
+                audio_selected: Some(0),
+                caption_selected: None,
+            },
+        ));
+        let tracks = |occs: &[Occurrence]| {
+            occs.iter()
+                .filter_map(|o| match o {
+                    Occurrence::PlayerTracks { tracks, .. } => Some(tracks.clone()),
+                    _ => None,
+                })
+                .last()
+        };
+        let listing = tracks(&heard).unwrap();
+        assert_eq!(listing.captions, ["fr", "en"]);
+        assert_eq!((listing.audio_selected, listing.caption_selected), (Some(0), None));
+        // Nothing selected: kaya times nothing.
+        assert_eq!(m.caption_at(P, 500).0, "");
+        out.clear();
+        heard.clear();
+        m.select(P, TrackKind::Caption, 2, &mut out, &mut heard);
+        assert_eq!(
+            out,
+            [
+                ApplyOp::SelectTrack { player: P, kind: TrackKind::Caption, index: 0 },
+                ApplyOp::CaptionTimes { player: P, times: vec![0, 1000, 2000] },
+            ]
+        );
+        assert_eq!(tracks(&heard).unwrap().caption_selected, Some(1));
+        let (text, occs) = m.caption_at(P, 500);
+        assert_eq!(text, "first cue");
+        assert_eq!(occs, [Occurrence::CaptionCue { player: P, text: "first cue".into() }]);
+        assert!(m.caption_at(P, 700).1.is_empty(), "the same cue is not news");
+        assert_eq!(m.caption_at(P, 1500).1, [Occurrence::CaptionCue { player: P, text: "second cue".into() }]);
+        // While kaya draws, the platform's own cue is not the app's news.
+        assert!(m.report(P, Report::Cue("platform".into())).is_empty());
+        // The platform's track instead: kaya stops timing, and says so.
+        out.clear();
+        heard.clear();
+        m.select(P, TrackKind::Caption, 1, &mut out, &mut heard);
+        assert_eq!(
+            out,
+            [
+                ApplyOp::SelectTrack { player: P, kind: TrackKind::Caption, index: 1 },
+                ApplyOp::CaptionTimes { player: P, times: vec![] },
+            ]
+        );
+        assert!(heard.contains(&Occurrence::CaptionCue { player: P, text: String::new() }));
+        assert_eq!(m.report(P, Report::Cue("first cue".into())), [Occurrence::CaptionCue {
+            player: P,
+            text: "first cue".into()
+        }]);
+    }
+
+    #[test]
+    #[should_panic(expected = "caption track 3 of player 7, whose caption tracks are []")]
+    fn a_caption_track_past_the_listing_is_refused() {
+        let (mut m, _, _) = with_source("media/h264_aac.mp4");
+        m.select(P, TrackKind::Caption, 3, &mut Vec::new(), &mut Vec::new());
+    }
+
+    #[test]
+    #[should_panic(expected = "a sidecar caption file is a local source")]
+    fn a_streamed_sidecar_is_refused() {
+        let (mut m, mut out, mut heard) = with_source("media/h264_aac.mp4");
+        m.set_prop(P, PlayerProp::Captions, Value::Str("http://127.0.0.1/c.vtt".into()), &mut out, &mut heard);
+    }
+
+    #[test]
+    fn running_out_of_decoders_is_resources() {
+        let (mut m, _, _) = with_source("media/h264_aac.mp4");
+        let occs = m.report(
+            P,
+            Report::Failed {
+                domain: "AVFoundationErrorDomain".into(),
+                code: -11839,
+                underlying: 0,
+                detail: "The decoder required for this media is busy.".into(),
+            },
+        );
+        assert!(matches!(occs.as_slice(), [Occurrence::PlayerChanged { failure: Some(MediaFailure::Resources), .. }]));
     }
 
     #[test]
