@@ -449,7 +449,7 @@ reason, and there the leg asserts that `failed(reason)` and a false
 - Windows: none. The runner reads the installed Store packages and refuses
   naming a missing extension, so a rebuilt VM is not read as a kaya bug
   (without them the video items play their audio alone, silently). The
-  tx3g item's captions are unsettled (below).
+  tx3g item's caption track is expected absent (settled below).
 - Linux: none once the image adds `gstreamer1.0-plugins-bad`,
   `gstreamer1.0-libav` (`avdec_h264` and `avdec_h265` over openh264 and
   libde265) and `gstreamer1.0-gtk4` for the sink; `-ugly` adds nothing.
@@ -458,16 +458,16 @@ reason, and there the leg asserts that `failed(reason)` and a false
   `failed`, the watched red for the audio-only and stall cases.
 - Android: none.
 
-**Unsettled.** Two, both measured 2026-09-30. tx3g on WinUI: Media
-Foundation's MP4 source exposes no text track for tx3g (nor for 3GP, nor a
-QuickTime `text` track in MOV), while a sidecar WebVTT or SRT through
-`TimedTextSource` and SRT in Matroska deliver cues; so either kaya reads the
-tx3g samples and draws them with its caption renderer, or the Windows table
-expects the tx3g item's caption track absent. The refused-port step: WinUI
-fails it past the 15 s expect window; the scene's step needs a longer wait
-than an ordinary expect, or the network case uses an unresolvable `.invalid`
-host, which fails inside 3.3 s on every platform but needs a resolver that
-answers. Public streams (docs/probes/media-suite-2026-09-29.md) add one
+**Settled 2026-09-30.** tx3g, RULED by the maintainer (option a): captions
+embedded in an MP4 (tx3g, a 3GP or QuickTime text track) are NOT in the
+guaranteed set. Media Foundation's MP4 source exposes no text track for them,
+while a sidecar WebVTT or SRT through `TimedTextSource` delivers cues; so the
+capability query answers no for MP4-embedded captions on Windows, the Windows
+table expects the tx3g item's caption track absent, and an app wanting
+captions everywhere ships them as a sidecar file or inside HLS. kaya does not
+parse MP4 text samples itself. The refused-port step waits longer than an
+ordinary expect (WinUI takes about 16.5 s, past the 15 s window), rather than
+depending on a resolver answering for an `.invalid` host. Public streams (docs/probes/media-suite-2026-09-29.md) add one
 Windows caution beyond the suite: Apple's TS bipbop HLS never starts and its
 fMP4 HLS opens only after 12 s, while the local trees play at once.
 
