@@ -1,0 +1,28 @@
+# The media suite's delivery (docs/media-plan.md §7a): the floor file over
+# progressive HTTP from the lane's local server (Range honoured), both HLS
+# trees and DASH, then the three failures: a 404, a local file that is not
+# there (the core's own check), and a port nothing listens on. `{media:…}`
+# is this lane's table, as in media_formats.
+expect label#0 "idle"
+click button#0
+expect label#1 "h264_aac.mp4"
+expect_video_ink video#0 "C83C1E"
+expect label#0 "ready 2.0s 160x90, played past 1s, ended, can_play yes"
+click button#0
+expect label#1 "hls_fmp4.m3u8"
+expect label#0 "{media:hls_fmp4.m3u8|ready 2.0s 160x90, played past 1s, ended, can_play yes}"
+click button#0
+expect label#1 "hls_mpegts.m3u8"
+expect label#0 "{media:hls_mpegts.m3u8|ready 2.0s 160x90, played past 1s, ended, can_play yes}"
+click button#0
+expect label#1 "dash.mpd"
+expect label#0 "{media:dash.mpd|ready 2.0s 160x90, played past 1s, ended, can_play yes}"
+click button#0
+expect label#1 "nope.mp4"
+expect label#0 "failed not_found, can_play yes"
+click button#0
+expect label#1 "missing.mp4"
+expect label#0 "failed not_found, can_play yes"
+click button#0
+expect label#1 "refused.mp4"
+expect label#0 "failed network, can_play yes"

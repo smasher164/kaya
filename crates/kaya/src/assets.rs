@@ -265,6 +265,36 @@ pub(crate) fn asset_why_not(name: &str) -> String {
     }
 }
 
+/// Where a media asset IS, as the URL a platform player opens
+/// (docs/media-plan.md §2): the players take a locator, never bytes, so
+/// this is the one resolver's answer in that form — a file:// URL, or the
+/// APK's own asset:/// URL — or `asset_why_not`'s sentence.
+pub(crate) fn media_locator(name: &str) -> Result<String, String> {
+    let why = asset_why_not(name);
+    if !why.is_empty() {
+        return Err(why);
+    }
+    match root().place {
+        Place::Dir(dir) => Ok(file_url(&dir.join(name))),
+        #[cfg(target_os = "android")]
+        Place::Apk => Ok(format!("asset:///kaya/{name}")),
+    }
+}
+
+/// An absolute path as a file:// URL, percent-encoding every byte outside
+/// RFC 3986's unreserved set and `/`.
+pub(crate) fn file_url(path: &std::path::Path) -> String {
+    let mut url = String::from("file://");
+    for byte in path.to_string_lossy().bytes() {
+        if byte.is_ascii_alphanumeric() || b"-._~/".contains(&byte) {
+            url.push(byte as char);
+        } else {
+            url.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    url
+}
+
 /// Which branch of `asset_why_not` applies. The prose lives there.
 pub(crate) enum Miss {
     Absent,

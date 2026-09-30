@@ -254,6 +254,8 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     ("min_gap", 48, PropKind::F64),
     ("low_label", 49, PropKind::Str),
     ("high_label", 50, PropKind::Str),
+    // docs/media-plan.md §3: how a video view fits its picture.
+    ("fit", 51, PropKind::Enum("fit")),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -360,6 +362,16 @@ pub const MENU_PROPS: &[(&'static str, u32, PropKind)] = &[
     ("swipe", 10, PropKind::Enum("swipe")),
 ];
 
+/// Player properties (docs/media-plan.md §2): the fourth typed surface
+/// table. `volume` is 0..1 relative to the system volume everywhere.
+pub const PLAYER_PROPS: &[(&'static str, u32, PropKind)] = &[
+    ("source", 1, PropKind::Str),
+    ("speed", 2, PropKind::F64),
+    ("volume", 3, PropKind::F64),
+    ("muted", 4, PropKind::Bool),
+    ("loop", 5, PropKind::Bool),
+];
+
 /// The variable tail of SET_PROPERTY, after `source`. The one record
 /// whose layout depends on a discriminant; generators emit one helper
 /// per source rather than a union type.
@@ -441,6 +453,12 @@ pub fn hash() -> u64 {
     }
     eat(b"menu_props");
     for (name, id, kind) in MENU_PROPS {
+        eat(name.as_bytes());
+        eat(&id.to_le_bytes());
+        eat(format!("{kind:?}").as_bytes());
+    }
+    eat(b"player_props");
+    for (name, id, kind) in PLAYER_PROPS {
         eat(name.as_bytes());
         eat(&id.to_le_bytes());
         eat(format!("{kind:?}").as_bytes());
@@ -1710,6 +1728,91 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   showing notifications), and the `badge` capability says \
                   whether a number will. Last write wins.",
         },
+        Record {
+            kind: 63,
+            name: "create_player",
+            fields: &[f("player", FieldTy::U64)],
+            payload: None,
+            doc: "Create a media player (docs/media-plan.md §2): an app-held \
+                  object with no place in the layout, its id guest-chosen in \
+                  its own space. It starts `idle`; a `source` write loads it. \
+                  An audio-only player is the same object shown by no video \
+                  view. A second create of a live id is a scene error.",
+        },
+        Record {
+            kind: 64,
+            name: "set_player_prop",
+            fields: &[
+                f("player", FieldTy::U64),
+                f("prop", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("value", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "Write a player property (PLAYER_PROPS) once: a player is an \
+                  object the app commands, so its props are written, never \
+                  bound to a signal or a row. `source` is an asset \
+                  name, an http(s) URL, or a picked file's absolute path; the \
+                  core checks a local one exists and publishes \
+                  failed(not_found) itself rather than hand a missing file \
+                  to the platform (docs/media-plan.md §7a).",
+        },
+        Record {
+            kind: 65,
+            name: "player_command",
+            fields: &[
+                f("player", FieldTy::U64),
+                f("command", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("at_ms", FieldTy::U64),
+            ],
+            payload: None,
+            doc: "play, pause, or seek to `at_ms` (PLAYER_COMMAND; `at_ms` is \
+                  0 for the other two). The app owns play state \
+                  (docs/media-plan.md §2 rule 3): the answer is the player's \
+                  own occurrences, never an echo of the command.",
+        },
+        Record {
+            kind: 66,
+            name: "release_player",
+            fields: &[f("player", FieldTy::U64)],
+            payload: None,
+            doc: "Stop and forget a player. A video view showing it goes \
+                  blank, the session detaches it, and no occurrence of its \
+                  follows. An unknown id is a scene error.",
+        },
+        Record {
+            kind: 67,
+            name: "set_video_player",
+            fields: &[f("widget_id", FieldTy::U64), f("player", FieldTy::U64)],
+            payload: None,
+            doc: "Show `player` in the video view `widget_id` \
+                  (docs/media-plan.md §3); 0 shows none. A live video view \
+                  only: the player is an object, not collection data.",
+        },
+        Record {
+            kind: 68,
+            name: "set_session",
+            fields: &[
+                f("player", FieldTy::U64),
+                f("actions", FieldTy::U32),
+                f("playback_state", FieldTy::U32),
+                f("title", FieldTy::Value),
+                f("artist", FieldTy::Value),
+                f("album", FieldTy::Value),
+                f("artwork", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "Declare the app's ONE media session (docs/media-plan.md §5), \
+                  replacing the last declaration: the attached `player` (0 \
+                  attaches none and withdraws the app from the system's \
+                  controls), `actions` a mask of 1 << SESSION_ACTION for the \
+                  actions the app handles itself, `playback_state` the \
+                  PLAYBACK_STATE the app states while no player is attached, \
+                  and the metadata as Str values, `artwork` an asset name \
+                  or empty. With a player attached, play, pause and seek_to \
+                  the app does not handle apply to that player.",
+        },
     ],
     apply: &[
         Record {
@@ -2489,6 +2592,73 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             doc: "Show `count` on the app's icon through the platform's own \
                   route, 0 clearing it (docs/app-badge-plan.md §2).",
         },
+        Record {
+            kind: 51,
+            name: "create_player",
+            fields: &[f("player", FieldTy::U64)],
+            payload: None,
+            doc: "Make a platform player for `player`, idle (docs/media-plan.md §2).",
+        },
+        Record {
+            kind: 52,
+            name: "set_player_prop",
+            fields: &[
+                f("player", FieldTy::U64),
+                f("prop", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("value", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "One player property's resolved value: `source` arrives as a \
+                  URL string (file:// for a local file the core found, \
+                  http(s) as written, empty for none), the rest as written.",
+        },
+        Record {
+            kind: 53,
+            name: "player_command",
+            fields: &[
+                f("player", FieldTy::U64),
+                f("command", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("at_ms", FieldTy::U64),
+            ],
+            payload: None,
+            doc: "play, pause, or seek to `at_ms` on the platform player.",
+        },
+        Record {
+            kind: 54,
+            name: "release_player",
+            fields: &[f("player", FieldTy::U64)],
+            payload: None,
+            doc: "Stop the platform player and drop it.",
+        },
+        Record {
+            kind: 55,
+            name: "set_video_player",
+            fields: &[f("widget_id", FieldTy::U64), f("player", FieldTy::U64)],
+            payload: None,
+            doc: "The video view `widget_id` shows `player` (0: none).",
+        },
+        Record {
+            kind: 56,
+            name: "set_session",
+            fields: &[
+                f("player", FieldTy::U64),
+                f("offered", FieldTy::U32),
+                f("playback_state", FieldTy::U32),
+                f("title", FieldTy::Value),
+                f("artist", FieldTy::Value),
+                f("album", FieldTy::Value),
+                f("artwork", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "The session as the system sees it: `offered` is the mask of \
+                  actions the CORE decided the system may send (the app's own \
+                  handlers plus the attached player's defaults), `artwork` \
+                  resolved to a file:// URL or empty. The backend publishes \
+                  it and follows the attached player's state \
+                  (docs/media-plan.md §5).",
+        },
     ],
     occurrence: &[
         Record {
@@ -3209,6 +3379,57 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   §3 rule 3). Not sent when the pair equals the last \
                   committed one; a property write never echoes.",
         },
+        Record {
+            kind: 39,
+            name: "player_changed",
+            fields: &[
+                f("player", FieldTy::U64),
+                f("state", FieldTy::U32),
+                f("failure", FieldTy::U32),
+                f("duration_ms", FieldTy::U64),
+                f("width", FieldTy::U32),
+                f("height", FieldTy::U32),
+                f("detail", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "A player's state moved (PLAYER_STATE), with the readings the \
+                  bindings mirror: the duration and the media size (0x0 for \
+                  audio). `failure` is MEDIA_FAILURE, `none` unless the state \
+                  is failed, and `detail` the platform's own sentence as a \
+                  Str, which no scene compares (docs/media-plan.md §7a). The \
+                  bindings hand `ended` and `failed` to the app as their own \
+                  occurrences.",
+        },
+        Record {
+            kind: 40,
+            name: "player_position",
+            fields: &[f("player", FieldTy::U64), f("position_ms", FieldTy::U64)],
+            payload: None,
+            doc: "The playhead, ticking every KAYA_MEDIA_POSITION_TICK_MS while \
+                  the player plays, and once when it stops.",
+        },
+        Record {
+            kind: 41,
+            name: "seek_completed",
+            fields: &[f("player", FieldTy::U64), f("position_ms", FieldTy::U64)],
+            payload: None,
+            doc: "A seek the app asked for has landed, at `position_ms`.",
+        },
+        Record {
+            kind: 42,
+            name: "session_action",
+            fields: &[
+                f("action", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("at_ms", FieldTy::U64),
+            ],
+            payload: None,
+            doc: "The system's media controls sent an action the app handles \
+                  (SESSION_ACTION; `at_ms` for seek_to, else 0). An action \
+                  the app does not handle never arrives: with a player \
+                  attached, play, pause and seek_to apply to it, and the rest \
+                  are not offered (docs/media-plan.md §5).",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -3265,6 +3486,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("number_field", 20),
                 ("color_picker", 21),
                 ("range", 22),
+                ("video", 23),
             ],
         },
         EnumSpec {
@@ -3378,6 +3600,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("min_gap", 48),
                 ("low_label", 49),
                 ("high_label", 50),
+                ("fit", 51),
             ],
         },
         EnumSpec {
@@ -3647,6 +3870,71 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             ],
         },
         EnumSpec {
+            // docs/media-plan.md §2: what a player reads, whatever the
+            // platform reported (rule 1).
+            name: "player_state",
+            variants: &[
+                ("idle", 0),
+                ("loading", 1),
+                ("ready", 2),
+                ("playing", 3),
+                ("paused", 4),
+                ("ended", 5),
+                ("failed", 6),
+            ],
+        },
+        EnumSpec {
+            // docs/media-plan.md §7a: CLOSED; the platform's sentence rides
+            // beside it as `detail`.
+            name: "media_failure",
+            variants: &[
+                ("none", 0),
+                ("unsupported_codec", 1),
+                ("unsupported_container", 2),
+                ("not_found", 3),
+                ("network", 4),
+                ("decode_error", 5),
+            ],
+        },
+        EnumSpec {
+            name: "player_command",
+            variants: &[("play", 1), ("pause", 2), ("seek", 3)],
+        },
+        EnumSpec {
+            // docs/media-plan.md §5, the web's MediaSessionAction names. A
+            // session's `actions` mask is 1 << value.
+            name: "session_action",
+            variants: &[
+                ("play", 1),
+                ("pause", 2),
+                ("stop", 3),
+                ("seek_to", 4),
+                ("seek_forward", 5),
+                ("seek_backward", 6),
+                ("next", 7),
+                ("previous", 8),
+            ],
+        },
+        EnumSpec {
+            name: "playback_state",
+            variants: &[("none", 0), ("playing", 1), ("paused", 2)],
+        },
+        EnumSpec {
+            // docs/media-plan.md §3: the video view's fit.
+            name: "fit",
+            variants: &[("contain", 0), ("cover", 1), ("fill", 2)],
+        },
+        EnumSpec {
+            name: "pprop",
+            variants: &[
+                ("source", 1),
+                ("speed", 2),
+                ("volume", 3),
+                ("muted", 4),
+                ("loop", 5),
+            ],
+        },
+        EnumSpec {
             name: "command",
             variants: &[("clear", 1), ("focus", 2), ("emoji_picker", 3)],
         },
@@ -3824,6 +4112,12 @@ mod tests {
             ("set_sheet_prop", wire::TX_SET_SHEET_PROP),
             ("scroll_to_row", wire::TX_SCROLL_TO_ROW),
             ("set_badge", wire::TX_SET_BADGE),
+            ("create_player", wire::TX_CREATE_PLAYER),
+            ("set_player_prop", wire::TX_SET_PLAYER_PROP),
+            ("player_command", wire::TX_PLAYER_COMMAND),
+            ("release_player", wire::TX_RELEASE_PLAYER),
+            ("set_video_player", wire::TX_SET_VIDEO_PLAYER),
+            ("set_session", wire::TX_SET_SESSION),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -3885,6 +4179,12 @@ mod tests {
                 ("set_sheet_prop", wire::APPLY_SET_SHEET_PROP),
                 ("scroll_to_row", wire::APPLY_SCROLL_TO_ROW),
                 ("set_badge", wire::APPLY_SET_BADGE),
+                ("create_player", wire::APPLY_CREATE_PLAYER),
+                ("set_player_prop", wire::APPLY_SET_PLAYER_PROP),
+                ("player_command", wire::APPLY_PLAYER_COMMAND),
+                ("release_player", wire::APPLY_RELEASE_PLAYER),
+                ("set_video_player", wire::APPLY_SET_VIDEO_PLAYER),
+                ("set_session", wire::APPLY_SET_SESSION),
             ]
         );
         // The WHOLE list, not indexed asserts: an indexed pin says
@@ -3932,6 +4232,10 @@ mod tests {
                 ("color_changed", crate::ring::REC_COLOR_CHANGED),
                 ("range_changed", crate::ring::REC_RANGE_CHANGED),
                 ("range_committed", crate::ring::REC_RANGE_COMMITTED),
+                ("player_changed", crate::ring::REC_PLAYER_CHANGED),
+                ("player_position", crate::ring::REC_PLAYER_POSITION),
+                ("seek_completed", crate::ring::REC_SEEK_COMPLETED),
+                ("session_action", crate::ring::REC_SESSION_ACTION),
             ]
         );
     }
@@ -4109,6 +4413,16 @@ mod tests {
             assert_eq!(name, ename);
             assert_eq!(id, eid);
         }
+        let pprop_enum = SPEC
+            .enums
+            .iter()
+            .find(|e| e.name == "pprop")
+            .expect("spec has a pprop enum");
+        assert_eq!(PLAYER_PROPS.len(), pprop_enum.variants.len());
+        for ((name, id, _), (ename, eid)) in PLAYER_PROPS.iter().zip(pprop_enum.variants) {
+            assert_eq!(name, ename);
+            assert_eq!(id, eid);
+        }
         let mprop_enum = SPEC
             .enums
             .iter()
@@ -4153,6 +4467,14 @@ mod tests {
                     ("kind", "number_field") => wire::KIND_NUMBER_FIELD,
                     ("kind", "color_picker") => wire::KIND_COLOR_PICKER,
                     ("kind", "range") => wire::KIND_RANGE,
+                    ("kind", "video") => wire::KIND_VIDEO,
+                    ("player_state", _) => canvas_pin(wire::PLAYER_STATES, name),
+                    ("media_failure", _) => canvas_pin(wire::MEDIA_FAILURES, name),
+                    ("player_command", _) => canvas_pin(wire::PLAYER_COMMANDS, name),
+                    ("session_action", _) => canvas_pin(wire::SESSION_ACTIONS, name),
+                    ("playback_state", _) => canvas_pin(wire::PLAYBACK_STATES, name),
+                    ("fit", _) => canvas_pin(wire::FITS, name),
+                    ("pprop", _) => canvas_pin(wire::PPROPS, name),
                     ("draw_op", _) => canvas_pin(wire::DRAW_OPS, name),
                     ("paint", _) => canvas_pin(wire::PAINTS, name),
                     ("fill_rule", _) => canvas_pin(wire::FILL_RULES, name),
@@ -4212,6 +4534,7 @@ mod tests {
                     ("prop", "min_gap") => wire::PROP_MIN_GAP,
                     ("prop", "low_label") => wire::PROP_LOW_LABEL,
                     ("prop", "high_label") => wire::PROP_HIGH_LABEL,
+                    ("prop", "fit") => wire::PROP_FIT,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,
@@ -4379,6 +4702,13 @@ mod tests {
             ("rich_attr", wire::RICH_ATTRS),
             ("block_kind", wire::BLOCK_KINDS),
             ("edit_source", wire::EDIT_SOURCES),
+            ("player_state", wire::PLAYER_STATES),
+            ("media_failure", wire::MEDIA_FAILURES),
+            ("player_command", wire::PLAYER_COMMANDS),
+            ("session_action", wire::SESSION_ACTIONS),
+            ("playback_state", wire::PLAYBACK_STATES),
+            ("fit", wire::FITS),
+            ("pprop", wire::PPROPS),
         ];
         for (enum_name, table) in pairs {
             let e = SPEC
@@ -4409,6 +4739,52 @@ mod tests {
                 assert_eq!(wire::vocab_name(table, *value), None, "{value} resolved");
             }
         }
+    }
+
+    /// The media records (docs/media-plan.md): what a binding writes from
+    /// the spec is what the core reads, and the core's own encoder agrees.
+    #[test]
+    fn media_records_round_trip_through_wire() {
+        use crate::protocol::{PlaybackState, PlayerCommand, PlayerId, PlayerProp, SessionSpec};
+        let mut w = GenericWriter { buf: Vec::new(), blobs: Vec::new() };
+        let s = |t: &str| Arg::Value(Value::from(t));
+        w.record(tx_record("create_player"), &[Arg::U64(4)]);
+        w.record(tx_record("set_player_prop"), &[Arg::U64(4), Arg::U32(1), Arg::U32(0), s("media/a.mp4")]);
+        w.record(
+            tx_record("set_player_prop"),
+            &[Arg::U64(4), Arg::U32(3), Arg::U32(0), Arg::Value(Value::F64(0.5))],
+        );
+        w.record(tx_record("player_command"), &[Arg::U64(4), Arg::U32(3), Arg::U32(0), Arg::U64(1500)]);
+        w.record(tx_record("set_video_player"), &[Arg::U64(9), Arg::U64(4)]);
+        w.record(
+            tx_record("set_session"),
+            &[Arg::U64(4), Arg::U32(1 << 7), Arg::U32(2), s("T"), s("A"), s("B"), s("")],
+        );
+        w.record(tx_record("release_player"), &[Arg::U64(4)]);
+        let want = vec![
+            TxOp::CreatePlayer { player: PlayerId(4) },
+            TxOp::SetPlayerProp { player: PlayerId(4), prop: PlayerProp::Source, value: Value::from("media/a.mp4") },
+            TxOp::SetPlayerProp { player: PlayerId(4), prop: PlayerProp::Volume, value: Value::F64(0.5) },
+            TxOp::PlayerCommand { player: PlayerId(4), command: PlayerCommand::Seek(1500) },
+            TxOp::SetVideoPlayer { widget: WidgetId(9), player: Some(PlayerId(4)) },
+            TxOp::SetSession(SessionSpec {
+                player: Some(PlayerId(4)),
+                actions: 1 << 7,
+                playback_state: PlaybackState::Paused,
+                title: "T".into(),
+                artist: "A".into(),
+                album: "B".into(),
+                artwork: String::new(),
+            }),
+            TxOp::ReleasePlayer { player: PlayerId(4) },
+        ];
+        let decoded = wire::decode_transaction(&w.buf);
+        assert_eq!(format!("{decoded:?}"), format!("{want:?}"));
+        let mut ours = wire::Writer::new();
+        for op in &want {
+            ours.tx_op(op);
+        }
+        assert_eq!(ours.into_bytes(), w.buf, "the core's encoder and the spec's disagree");
     }
 
     /// wire::SYMBOLS is a SECOND spelling of the symbol vocabulary — the

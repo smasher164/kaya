@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xee277a9499e5e52d
+	SpecHash uint64 = 0xfd32bf7c75c54fbb
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -51,6 +51,7 @@ const (
 	KindNumberField = 20
 	KindColorPicker = 21
 	KindRange = 22
+	KindVideo = 23
 	DrawOpMoveTo = 1
 	DrawOpLineTo = 2
 	DrawOpClose = 3
@@ -126,6 +127,7 @@ const (
 	PropMinGap = 48
 	PropLowLabel = 49
 	PropHighLabel = 50
+	PropFit = 51
 	WpropTitle = 1
 	WpropWidth = 2
 	WpropHeight = 3
@@ -263,6 +265,41 @@ const (
 	OccurrenceTextChanged = 2
 	OccurrenceToggled = 3
 	OccurrenceValueChanged = 4
+	PlayerStateIdle = 0
+	PlayerStateLoading = 1
+	PlayerStateReady = 2
+	PlayerStatePlaying = 3
+	PlayerStatePaused = 4
+	PlayerStateEnded = 5
+	PlayerStateFailed = 6
+	MediaFailureNone = 0
+	MediaFailureUnsupportedCodec = 1
+	MediaFailureUnsupportedContainer = 2
+	MediaFailureNotFound = 3
+	MediaFailureNetwork = 4
+	MediaFailureDecodeError = 5
+	PlayerCommandPlay = 1
+	PlayerCommandPause = 2
+	PlayerCommandSeek = 3
+	SessionActionPlay = 1
+	SessionActionPause = 2
+	SessionActionStop = 3
+	SessionActionSeekTo = 4
+	SessionActionSeekForward = 5
+	SessionActionSeekBackward = 6
+	SessionActionNext = 7
+	SessionActionPrevious = 8
+	PlaybackStateNone = 0
+	PlaybackStatePlaying = 1
+	PlaybackStatePaused = 2
+	FitContain = 0
+	FitCover = 1
+	FitFill = 2
+	PpropSource = 1
+	PpropSpeed = 2
+	PpropVolume = 3
+	PpropMuted = 4
+	PpropLoop = 5
 	CommandClear = 1
 	CommandFocus = 2
 	CommandEmojiPicker = 3
@@ -328,6 +365,12 @@ const (
 	txSetSheetProp = 60
 	txScrollToRow = 61
 	txSetBadge = 62
+	txCreatePlayer = 63
+	txSetPlayerProp = 64
+	txPlayerCommand = 65
+	txReleasePlayer = 66
+	txSetVideoPlayer = 67
+	txSetSession = 68
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -376,6 +419,12 @@ const (
 	applySetSheetProp = 48
 	applyScrollToRow = 49
 	applySetBadge = 50
+	applyCreatePlayer = 51
+	applySetPlayerProp = 52
+	applyPlayerCommand = 53
+	applyReleasePlayer = 54
+	applySetVideoPlayer = 55
+	applySetSession = 56
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3
@@ -414,6 +463,10 @@ const (
 	occColorChanged = 36
 	occRangeChanged = 37
 	occRangeCommitted = 38
+	occPlayerChanged = 39
+	occPlayerPosition = 40
+	occSeekCompleted = 41
+	occSessionAction = 42
 )
 
 func (d Detent) String() string {
@@ -1257,6 +1310,61 @@ func TxSetBadge(count uint32) []byte {
 	b := beginRecord(txSetBadge)
 	b = binary.LittleEndian.AppendUint32(b, count)
 	b = binary.LittleEndian.AppendUint32(b, 0)
+	return endRecord(b)
+}
+
+// TxCreatePlayer: Create a media player (docs/media-plan.md §2): an app-held object with no place in the layout, its id guest-chosen in its own space. It starts `idle`; a `source` write loads it. An audio-only player is the same object shown by no video view. A second create of a live id is a scene error.
+func TxCreatePlayer(player uint64) []byte {
+	b := beginRecord(txCreatePlayer)
+	b = binary.LittleEndian.AppendUint64(b, player)
+	return endRecord(b)
+}
+
+// TxSetPlayerProp: Write a player property (PLAYER_PROPS) once: a player is an object the app commands, so its props are written, never bound to a signal or a row. `source` is an asset name, an http(s) URL, or a picked file's absolute path; the core checks a local one exists and publishes failed(not_found) itself rather than hand a missing file to the platform (docs/media-plan.md §7a).
+func TxSetPlayerProp(player uint64, prop uint32, value any) []byte {
+	b := beginRecord(txSetPlayerProp)
+	b = binary.LittleEndian.AppendUint64(b, player)
+	b = binary.LittleEndian.AppendUint32(b, prop)
+	b = binary.LittleEndian.AppendUint32(b, 0)
+	b = encodeValue(b, value)
+	return endRecord(b)
+}
+
+// TxPlayerCommand: play, pause, or seek to `at_ms` (PLAYER_COMMAND; `at_ms` is 0 for the other two). The app owns play state (docs/media-plan.md §2 rule 3): the answer is the player's own occurrences, never an echo of the command.
+func TxPlayerCommand(player uint64, command uint32, atMs uint64) []byte {
+	b := beginRecord(txPlayerCommand)
+	b = binary.LittleEndian.AppendUint64(b, player)
+	b = binary.LittleEndian.AppendUint32(b, command)
+	b = binary.LittleEndian.AppendUint32(b, 0)
+	b = binary.LittleEndian.AppendUint64(b, atMs)
+	return endRecord(b)
+}
+
+// TxReleasePlayer: Stop and forget a player. A video view showing it goes blank, the session detaches it, and no occurrence of its follows. An unknown id is a scene error.
+func TxReleasePlayer(player uint64) []byte {
+	b := beginRecord(txReleasePlayer)
+	b = binary.LittleEndian.AppendUint64(b, player)
+	return endRecord(b)
+}
+
+// TxSetVideoPlayer: Show `player` in the video view `widget_id` (docs/media-plan.md §3); 0 shows none. A live video view only: the player is an object, not collection data.
+func TxSetVideoPlayer(widgetId uint64, player uint64) []byte {
+	b := beginRecord(txSetVideoPlayer)
+	b = binary.LittleEndian.AppendUint64(b, widgetId)
+	b = binary.LittleEndian.AppendUint64(b, player)
+	return endRecord(b)
+}
+
+// TxSetSession: Declare the app's ONE media session (docs/media-plan.md §5), replacing the last declaration: the attached `player` (0 attaches none and withdraws the app from the system's controls), `actions` a mask of 1 << SESSION_ACTION for the actions the app handles itself, `playback_state` the PLAYBACK_STATE the app states while no player is attached, and the metadata as Str values, `artwork` an asset name or empty. With a player attached, play, pause and seek_to the app does not handle apply to that player.
+func TxSetSession(player uint64, actions uint32, playbackState uint32, title any, artist any, album any, artwork any) []byte {
+	b := beginRecord(txSetSession)
+	b = binary.LittleEndian.AppendUint64(b, player)
+	b = binary.LittleEndian.AppendUint32(b, actions)
+	b = binary.LittleEndian.AppendUint32(b, playbackState)
+	b = encodeValue(b, title)
+	b = encodeValue(b, artist)
+	b = encodeValue(b, album)
+	b = encodeValue(b, artwork)
 	return endRecord(b)
 }
 
@@ -2890,6 +2998,38 @@ func TxBindHighLabelElement(widgetID uint64, level uint32, field uint32) []byte 
 	return endRecord(b)
 }
 
+// TxSetFit: set_property with a constant fit value.
+func TxSetFit(widgetID uint64, fit int64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropFit)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, fit)
+	return endRecord(b)
+}
+
+// TxBindFit: set_property with a signal-bound fit value.
+func TxBindFit(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropFit)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindFitElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindFitElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropFit)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
 // TxSetWindowTitle: set_window_prop with a constant title value (window 0, the primary surface).
 func TxSetWindowTitle(window uint64, title string) []byte {
 	b := beginRecord(txSetWindowProp)
@@ -3576,7 +3716,7 @@ func parseValue(rec []byte, at int) (any, int) {
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted && kind != occSheetDismissed && kind != occDismissRequested && kind != occSubmitted && kind != occNotificationReplied && kind != occFullscreenChanged && kind != occColorChanged && kind != occRangeChanged && kind != occRangeCommitted {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted && kind != occSheetDismissed && kind != occDismissRequested && kind != occSubmitted && kind != occNotificationReplied && kind != occFullscreenChanged && kind != occColorChanged && kind != occRangeChanged && kind != occRangeCommitted && kind != occPlayerChanged && kind != occPlayerPosition && kind != occSeekCompleted && kind != occSessionAction {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])
@@ -3734,7 +3874,7 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 		// no key path, no payload (derived from the record shapes).
 		return kind, id, nil, nil, true
 	}
-	if kind == occSectionSelected {
+	if kind == occSectionSelected || kind == occPlayerPosition || kind == occSeekCompleted {
 		// Surface-pair records (window, section): the SECOND id
 		// keys the handler; the first rides as the payload.
 		return kind, binary.LittleEndian.Uint64(rec[16:]), nil, id, true

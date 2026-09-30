@@ -34,6 +34,20 @@ pub type PickedOpener = unsafe extern "C" fn(
 /// `PickedSource` when a guest redeems a handle.
 pub(crate) static PICKED_OPENER: std::sync::OnceLock<PickedOpener> = std::sync::OnceLock::new();
 
+/// The capability query's platform half (docs/media-plan.md §8 ruling 1):
+/// AVFoundation's own answer for a MIME type with its codecs, NUL-terminated.
+pub type CanPlay = unsafe extern "C" fn(mime: *const c_char, codecs: *const c_char) -> u8;
+
+pub(crate) static CAN_PLAY: std::sync::OnceLock<CanPlay> = std::sync::OnceLock::new();
+
+/// AVFoundation's answer, or None when no backend that answers is loaded.
+pub(crate) fn can_play(mime: &str, codecs: &str) -> Option<bool> {
+    let query = CAN_PLAY.get()?;
+    let mime = CString::new(mime).ok()?;
+    let codecs = CString::new(codecs).ok()?;
+    Some(unsafe { query(mime.as_ptr(), codecs.as_ptr()) } != 0)
+}
+
 /// A picked file on iOS: the locator the backend answered with, opened
 /// through the backend on every redemption — Android's `UriSource` shape.
 /// iOS's good-looking POSIX path is a TRAP: re-opening it once the
@@ -133,6 +147,19 @@ pub struct KayaHostApi {
     /// docs/range-plan.md §3 rule 2: the one clamp, and the pair it settled.
     pub range_clamp: extern "C" fn(f64, f64, f64, f64, u8, f64, f64) -> f64,
     pub emit_range: unsafe extern "C" fn(*const u8, usize, f64, f64, u8),
+    /// docs/media-plan.md §2: a player's reports, through the core's state
+    /// machine; each answers the player's state after it.
+    pub player_loaded: unsafe extern "C" fn(u64, u64, u32, u32, u8, *const u8, usize) -> u32,
+    pub player_rate: extern "C" fn(u64, u8) -> u32,
+    pub player_ended: extern "C" fn(u64) -> u32,
+    pub player_failed: unsafe extern "C" fn(u64, *const u8, usize, i64, i64, *const u8, usize) -> u32,
+    pub player_position: extern "C" fn(u64, u64) -> u32,
+    pub player_seeked: extern "C" fn(u64, u64) -> u32,
+    pub player_overdue: extern "C" fn(u64) -> u32,
+    /// docs/media-plan.md §5: the core's route for a remote action, and the
+    /// system playback state to publish after every report.
+    pub session_action: extern "C" fn(u32, u64) -> u32,
+    pub session_state: extern "C" fn() -> u32,
     pub blob_data: unsafe extern "C" fn(u64, *mut usize) -> *const u8,
     pub blob_count: unsafe extern "C" fn() -> u64,
     /// The protocol fingerprint (capi::kaya_spec_hash), asserted by the
@@ -502,6 +529,11 @@ pub(crate) fn run() -> i32 {
         let opener: PickedOpener = unsafe { std::mem::transmute(opener) };
         let _ = PICKED_OPENER.set(opener);
     }
+    let can_play = unsafe { dlsym(handle, c"kaya_swiftui_can_play".as_ptr()) };
+    if !can_play.is_null() {
+        let can_play: CanPlay = unsafe { std::mem::transmute(can_play) };
+        let _ = CAN_PLAY.set(can_play);
+    }
     let api = KayaHostApi {
         emit_clicked: kaya_emit_clicked,
         next_commands: kaya_next_commands,
@@ -516,6 +548,15 @@ pub(crate) fn run() -> i32 {
         emit_color_changed: crate::capi::kaya_emit_color_changed,
         range_clamp: crate::capi::kaya_range_clamp,
         emit_range: crate::capi::kaya_emit_range,
+        player_loaded: crate::capi::kaya_player_loaded,
+        player_rate: crate::capi::kaya_player_rate,
+        player_ended: crate::capi::kaya_player_ended,
+        player_failed: crate::capi::kaya_player_failed,
+        player_position: crate::capi::kaya_player_position,
+        player_seeked: crate::capi::kaya_player_seeked,
+        player_overdue: crate::capi::kaya_player_overdue,
+        session_action: crate::capi::kaya_session_action,
+        session_state: crate::capi::kaya_session_state,
         blob_data: kaya_blob_data,
         blob_count: kaya_blob_count,
         spec_hash: crate::capi::kaya_spec_hash,

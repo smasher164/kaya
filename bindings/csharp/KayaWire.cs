@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xee277a9499e5e52d;
+    public const ulong SpecHash = 0xfd32bf7c75c54fbb;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -49,6 +49,7 @@ static class KayaWire
     public const uint KindNumberField = 20;
     public const uint KindColorPicker = 21;
     public const uint KindRange = 22;
+    public const uint KindVideo = 23;
     public const uint DrawOpMoveTo = 1;
     public const uint DrawOpLineTo = 2;
     public const uint DrawOpClose = 3;
@@ -124,6 +125,7 @@ static class KayaWire
     public const uint PropMinGap = 48;
     public const uint PropLowLabel = 49;
     public const uint PropHighLabel = 50;
+    public const uint PropFit = 51;
     public const uint WpropTitle = 1;
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
@@ -261,6 +263,41 @@ static class KayaWire
     public const uint OccurrenceTextChanged = 2;
     public const uint OccurrenceToggled = 3;
     public const uint OccurrenceValueChanged = 4;
+    public const uint PlayerStateIdle = 0;
+    public const uint PlayerStateLoading = 1;
+    public const uint PlayerStateReady = 2;
+    public const uint PlayerStatePlaying = 3;
+    public const uint PlayerStatePaused = 4;
+    public const uint PlayerStateEnded = 5;
+    public const uint PlayerStateFailed = 6;
+    public const uint MediaFailureNone = 0;
+    public const uint MediaFailureUnsupportedCodec = 1;
+    public const uint MediaFailureUnsupportedContainer = 2;
+    public const uint MediaFailureNotFound = 3;
+    public const uint MediaFailureNetwork = 4;
+    public const uint MediaFailureDecodeError = 5;
+    public const uint PlayerCommandPlay = 1;
+    public const uint PlayerCommandPause = 2;
+    public const uint PlayerCommandSeek = 3;
+    public const uint SessionActionPlay = 1;
+    public const uint SessionActionPause = 2;
+    public const uint SessionActionStop = 3;
+    public const uint SessionActionSeekTo = 4;
+    public const uint SessionActionSeekForward = 5;
+    public const uint SessionActionSeekBackward = 6;
+    public const uint SessionActionNext = 7;
+    public const uint SessionActionPrevious = 8;
+    public const uint PlaybackStateNone = 0;
+    public const uint PlaybackStatePlaying = 1;
+    public const uint PlaybackStatePaused = 2;
+    public const uint FitContain = 0;
+    public const uint FitCover = 1;
+    public const uint FitFill = 2;
+    public const uint PpropSource = 1;
+    public const uint PpropSpeed = 2;
+    public const uint PpropVolume = 3;
+    public const uint PpropMuted = 4;
+    public const uint PpropLoop = 5;
     public const uint CommandClear = 1;
     public const uint CommandFocus = 2;
     public const uint CommandEmojiPicker = 3;
@@ -326,6 +363,12 @@ static class KayaWire
     public const ushort TxKindSetSheetProp = 60;
     public const ushort TxKindScrollToRow = 61;
     public const ushort TxKindSetBadge = 62;
+    public const ushort TxKindCreatePlayer = 63;
+    public const ushort TxKindSetPlayerProp = 64;
+    public const ushort TxKindPlayerCommand = 65;
+    public const ushort TxKindReleasePlayer = 66;
+    public const ushort TxKindSetVideoPlayer = 67;
+    public const ushort TxKindSetSession = 68;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -374,6 +417,12 @@ static class KayaWire
     public const ushort ApplyKindSetSheetProp = 48;
     public const ushort ApplyKindScrollToRow = 49;
     public const ushort ApplyKindSetBadge = 50;
+    public const ushort ApplyKindCreatePlayer = 51;
+    public const ushort ApplyKindSetPlayerProp = 52;
+    public const ushort ApplyKindPlayerCommand = 53;
+    public const ushort ApplyKindReleasePlayer = 54;
+    public const ushort ApplyKindSetVideoPlayer = 55;
+    public const ushort ApplyKindSetSession = 56;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
@@ -412,6 +461,10 @@ static class KayaWire
     public const ushort OccKindColorChanged = 36;
     public const ushort OccKindRangeChanged = 37;
     public const ushort OccKindRangeCommitted = 38;
+    public const ushort OccKindPlayerChanged = 39;
+    public const ushort OccKindPlayerPosition = 40;
+    public const ushort OccKindSeekCompleted = 41;
+    public const ushort OccKindSessionAction = 42;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -1114,6 +1167,67 @@ static class KayaWire
         w.Write(count);
         w.Write(0u);
         return Finish(stream, w, TxKindSetBadge);
+    }
+
+    /// Create a media player (docs/media-plan.md §2): an app-held object with no place in the layout, its id guest-chosen in its own space. It starts `idle`; a `source` write loads it. An audio-only player is the same object shown by no video view. A second create of a live id is a scene error.
+    public static byte[] TxCreatePlayer(ulong player)
+    {
+        var w = Begin(out var stream);
+        w.Write(player);
+        return Finish(stream, w, TxKindCreatePlayer);
+    }
+
+    /// Write a player property (PLAYER_PROPS) once: a player is an object the app commands, so its props are written, never bound to a signal or a row. `source` is an asset name, an http(s) URL, or a picked file's absolute path; the core checks a local one exists and publishes failed(not_found) itself rather than hand a missing file to the platform (docs/media-plan.md §7a).
+    public static byte[] TxSetPlayerProp(ulong player, uint prop, object value)
+    {
+        var w = Begin(out var stream);
+        w.Write(player);
+        w.Write(prop);
+        w.Write(0u);
+        EncodeValue(w, value);
+        return Finish(stream, w, TxKindSetPlayerProp);
+    }
+
+    /// play, pause, or seek to `at_ms` (PLAYER_COMMAND; `at_ms` is 0 for the other two). The app owns play state (docs/media-plan.md §2 rule 3): the answer is the player's own occurrences, never an echo of the command.
+    public static byte[] TxPlayerCommand(ulong player, uint command, ulong atMs)
+    {
+        var w = Begin(out var stream);
+        w.Write(player);
+        w.Write(command);
+        w.Write(0u);
+        w.Write(atMs);
+        return Finish(stream, w, TxKindPlayerCommand);
+    }
+
+    /// Stop and forget a player. A video view showing it goes blank, the session detaches it, and no occurrence of its follows. An unknown id is a scene error.
+    public static byte[] TxReleasePlayer(ulong player)
+    {
+        var w = Begin(out var stream);
+        w.Write(player);
+        return Finish(stream, w, TxKindReleasePlayer);
+    }
+
+    /// Show `player` in the video view `widget_id` (docs/media-plan.md §3); 0 shows none. A live video view only: the player is an object, not collection data.
+    public static byte[] TxSetVideoPlayer(ulong widgetId, ulong player)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId);
+        w.Write(player);
+        return Finish(stream, w, TxKindSetVideoPlayer);
+    }
+
+    /// Declare the app's ONE media session (docs/media-plan.md §5), replacing the last declaration: the attached `player` (0 attaches none and withdraws the app from the system's controls), `actions` a mask of 1 << SESSION_ACTION for the actions the app handles itself, `playback_state` the PLAYBACK_STATE the app states while no player is attached, and the metadata as Str values, `artwork` an asset name or empty. With a player attached, play, pause and seek_to the app does not handle apply to that player.
+    public static byte[] TxSetSession(ulong player, uint actions, uint playbackState, object title, object artist, object album, object artwork)
+    {
+        var w = Begin(out var stream);
+        w.Write(player);
+        w.Write(actions);
+        w.Write(playbackState);
+        EncodeValue(w, title);
+        EncodeValue(w, artist);
+        EncodeValue(w, album);
+        EncodeValue(w, artwork);
+        return Finish(stream, w, TxKindSetSession);
     }
 
     /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
@@ -2402,6 +2516,31 @@ static class KayaWire
         return Finish(stream, w, TxKindSetProperty);
     }
 
+    /// set_property with a constant fit value.
+    public static byte[] TxSetFit(ulong widgetId, long fit)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropFit); w.Write(SourceConst);
+        EncodeValue(w, fit);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound fit value.
+    public static byte[] TxBindFit(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropFit); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindFitElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropFit); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
     /// set_window_prop with a constant title value (window 0, the primary surface).
     public static byte[] TxSetWindowTitle(ulong window, string title)
     {
@@ -2974,7 +3113,7 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted && kind != OccKindSheetDismissed && kind != OccKindDismissRequested && kind != OccKindSubmitted && kind != OccKindNotificationReplied && kind != OccKindFullscreenChanged && kind != OccKindColorChanged && kind != OccKindRangeChanged && kind != OccKindRangeCommitted)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted && kind != OccKindSheetDismissed && kind != OccKindDismissRequested && kind != OccKindSubmitted && kind != OccKindNotificationReplied && kind != OccKindFullscreenChanged && kind != OccKindColorChanged && kind != OccKindRangeChanged && kind != OccKindRangeCommitted && kind != OccKindPlayerChanged && kind != OccKindPlayerPosition && kind != OccKindSeekCompleted && kind != OccKindSessionAction)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         if (kind == OccKindAlertResult)
@@ -3066,7 +3205,7 @@ static class KayaWire
             return true;
         // Surface-pair records (window, section): the SECOND id
         // keys the handler; the first rides as the payload.
-        if (kind == OccKindSectionSelected)
+        if (kind == OccKindSectionSelected || kind == OccKindPlayerPosition || kind == OccKindSeekCompleted)
         {
             payload = id;
             id = BitConverter.ToUInt64(rec, 16);

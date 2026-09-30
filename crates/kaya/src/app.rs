@@ -14,6 +14,8 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
 mod tasks;
+mod media;
+pub use media::{can_play, MediaSource, PlayerReading, PlayerRef, SessionRef};
 pub use tasks::{AlertFutureRef, ClipboardFutureRef, DialogFuture, FileFutureRef, SaveFutureRef, TaskOutcome, TaskScope};
 
 use crate::protocol::{
@@ -1093,6 +1095,10 @@ pub struct AppCtx {
     /// Template node -> (collection, field) for every `textarea_rich_bound`,
     /// so a copy's edit folds into its row (docs/rich-text-plan.md §19).
     document_binds: RefCell<HashMap<u64, (CollectionId, u32)>>,
+    /// Players get their OWN id space (docs/media-plan.md §2), and the
+    /// binding's mirror of each one's readings.
+    next_player: Cell<u64>,
+    players: RefCell<HashMap<u64, PlayerReading>>,
 }
 
 impl AppCtx {
@@ -1124,6 +1130,8 @@ impl AppCtx {
             viewboxes: RefCell::new(HashMap::new()),
             documents: RefCell::new(HashMap::new()),
             document_binds: RefCell::new(HashMap::new()),
+            next_player: Cell::new(1),
+            players: RefCell::new(HashMap::new()),
         }
     }
 
@@ -1189,6 +1197,9 @@ impl AppCtx {
                                 Self::fold_format(doc, *range, name, value.as_deref())
                             })
                         }
+                        Occurrence::PlayerChanged { .. }
+                        | Occurrence::PlayerPosition { .. }
+                        | Occurrence::SeekCompleted { .. } => self.absorb_player(&occ),
                         _ => {}
                     }
                     return occ;
@@ -3487,6 +3498,16 @@ impl<'a> Tx<'a> {
         Widget { id: w, out: (), tx: self }
     }
 
+    /// A video view showing `player` (docs/media-plan.md §3): the
+    /// platform's own view with its controls off. `.fit()` chains. The live
+    /// zone only: which player a stamped copy shows awaits a ruling
+    /// (docs/deferred.md).
+    pub fn video(&mut self, player: crate::protocol::PlayerId) -> Widget<'_, 'a> {
+        let w = self.widget(WidgetKind::Video);
+        self.ops.push(TxOp::SetVideoPlayer { widget: w, player: Some(player) });
+        Widget { id: w, out: (), tx: self }
+    }
+
     pub fn color_picker_bound(&mut self, color: SignalId) -> Widget<'_, 'a> {
         let w = self.widget(WidgetKind::ColorPicker);
         self.bind(w, Prop::Color, color);
@@ -4873,6 +4894,11 @@ pub struct Messages<M> {
     /// receives every link whether it was running or was started by one,
     /// and a route never retires. Keyed by the route id the core matched.
     links: RefCell<HashMap<u64, Box<dyn Fn(&LinkParams) -> M>>>,
+    /// Per player, every registration, the widgets' newest-first rule.
+    players: RefCell<HashMap<u64, Vec<Mapper<M>>>>,
+    /// PROCESS-LEVEL: the app's one session (docs/media-plan.md §5).
+    #[allow(clippy::type_complexity)]
+    session: RefCell<Option<Box<dyn Fn(crate::protocol::SessionAction) -> M>>>,
     /// THE CANVAS'S DRAWING-AS-A-FUNCTION-OF-SIZE (docs/canvas-plan.md
     /// §3.2.1). Not a Mapper: these produce a DRAWING, not a message, so
     /// [`Messages::next`] answers them itself and keeps looping rather
@@ -4998,6 +5024,8 @@ impl<M> Messages<M> {
             redone: RefCell::new(HashMap::new()),
             links: RefCell::new(HashMap::new()),
             draws: RefCell::new(HashMap::new()),
+            players: RefCell::new(HashMap::new()),
+            session: RefCell::new(None),
         }
     }
 
@@ -5886,6 +5914,10 @@ impl<M> Messages<M> {
                 Occurrence::FullscreenChanged { window, on } => {
                     self.fullscreen_changed.borrow().get(&window.0).map(|f| f(*on))
                 }
+                Occurrence::PlayerChanged { .. }
+                | Occurrence::PlayerPosition { .. }
+                | Occurrence::SeekCompleted { .. }
+                | Occurrence::SessionAction { .. } => self.dispatch_media(&occ),
                 // Menu occurrences key the menu-item table — their own id
                 // space. Direct and node-anchored variants share it: an
                 // item has exactly one anchor, so its registered mapper
@@ -9448,7 +9480,11 @@ mod tests {
                     | Occurrence::DrawRequested { .. }
                     | Occurrence::InstanceDrawRequested { .. }
                     | Occurrence::Tick { .. }
-                    | Occurrence::InstanceTick { .. } => {}
+                    | Occurrence::InstanceTick { .. }
+                    | Occurrence::PlayerChanged { .. }
+                    | Occurrence::PlayerPosition { .. }
+                    | Occurrence::SeekCompleted { .. }
+                    | Occurrence::SessionAction { .. } => {}
                     Occurrence::LinkOpened { .. } => {}
                     Occurrence::Shutdown => break,
                 }

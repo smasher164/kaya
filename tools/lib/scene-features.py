@@ -124,6 +124,14 @@ VERB_FEATURE = {
     # docs/color-picker-plan.md §5, the same reasoning.
     "set_color": "colorpicker",
     "expect_color": "colorpicker",
+    # docs/media-plan.md §7a, the same reasoning: every media scene reads its
+    # video view, so a backend stubbing the media_formats feature holds all
+    # of their legs off.
+    "expect_video_ink": "media_formats",
+    "ax_action": "media_formats",
+    "session_send": "media_formats",
+    "expect_now_playing": "media_formats",
+    "expect_display_awake": "media_formats",
     # docs/range-plan.md §5, the same reasoning.
     "expect_thumb": "range",
     "expect_press_takes": "range",

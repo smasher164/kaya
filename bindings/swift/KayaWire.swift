@@ -24,7 +24,7 @@ public enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0xee277a9499e5e52d
+let kayaSpecHash: UInt64 = 0xfd32bf7c75c54fbb
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
 func kayaPackDate(_ year: Int, _ month: Int, _ day: Int) -> Int64 {
@@ -697,6 +697,61 @@ struct KayaTx {
         let kayaAt = self.begin(UInt16(KAYA_TX_SET_BADGE))
         self.u32(count)
         self.u32(0)
+        self.end(kayaAt)
+    }
+
+    /// Create a media player (docs/media-plan.md §2): an app-held object with no place in the layout, its id guest-chosen in its own space. It starts `idle`; a `source` write loads it. An audio-only player is the same object shown by no video view. A second create of a live id is a scene error.
+    mutating func createPlayer(_ player: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_CREATE_PLAYER))
+        self.u64(player)
+        self.end(kayaAt)
+    }
+
+    /// Write a player property (PLAYER_PROPS) once: a player is an object the app commands, so its props are written, never bound to a signal or a row. `source` is an asset name, an http(s) URL, or a picked file's absolute path; the core checks a local one exists and publishes failed(not_found) itself rather than hand a missing file to the platform (docs/media-plan.md §7a).
+    mutating func setPlayerProp(_ player: UInt64, _ prop: UInt32, _ value: KayaValue) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PLAYER_PROP))
+        self.u64(player)
+        self.u32(prop)
+        self.u32(0)
+        self.value(value)
+        self.end(kayaAt)
+    }
+
+    /// play, pause, or seek to `at_ms` (PLAYER_COMMAND; `at_ms` is 0 for the other two). The app owns play state (docs/media-plan.md §2 rule 3): the answer is the player's own occurrences, never an echo of the command.
+    mutating func playerCommand(_ player: UInt64, _ command: UInt32, _ atMs: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_PLAYER_COMMAND))
+        self.u64(player)
+        self.u32(command)
+        self.u32(0)
+        self.u64(atMs)
+        self.end(kayaAt)
+    }
+
+    /// Stop and forget a player. A video view showing it goes blank, the session detaches it, and no occurrence of its follows. An unknown id is a scene error.
+    mutating func releasePlayer(_ player: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_RELEASE_PLAYER))
+        self.u64(player)
+        self.end(kayaAt)
+    }
+
+    /// Show `player` in the video view `widget_id` (docs/media-plan.md §3); 0 shows none. A live video view only: the player is an object, not collection data.
+    mutating func setVideoPlayer(_ widgetId: UInt64, _ player: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_VIDEO_PLAYER))
+        self.u64(widgetId)
+        self.u64(player)
+        self.end(kayaAt)
+    }
+
+    /// Declare the app's ONE media session (docs/media-plan.md §5), replacing the last declaration: the attached `player` (0 attaches none and withdraws the app from the system's controls), `actions` a mask of 1 << SESSION_ACTION for the actions the app handles itself, `playback_state` the PLAYBACK_STATE the app states while no player is attached, and the metadata as Str values, `artwork` an asset name or empty. With a player attached, play, pause and seek_to the app does not handle apply to that player.
+    mutating func setSession(_ player: UInt64, _ actions: UInt32, _ playbackState: UInt32, _ title: KayaValue, _ artist: KayaValue, _ album: KayaValue, _ artwork: KayaValue) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_SESSION))
+        self.u64(player)
+        self.u32(actions)
+        self.u32(playbackState)
+        self.value(title)
+        self.value(artist)
+        self.value(album)
+        self.value(artwork)
         self.end(kayaAt)
     }
 
@@ -2300,6 +2355,38 @@ struct KayaTx {
         self.end(kayaAt)
     }
 
+    /// set_property with a constant fit value.
+    mutating func setFit(_ widgetId: UInt64, _ fit: Int64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_FIT))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.i64(fit))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound fit value.
+    mutating func bindFit(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_FIT))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindFitElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_FIT))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
     /// set_window_prop with a constant title value (window 0, the primary surface).
     mutating func setWindowTitle(_ window: UInt64, _ title: String) {
         let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
@@ -3031,6 +3118,10 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             || kind == UInt16(KAYA_OCCURRENCE_COLOR_CHANGED)
             || kind == UInt16(KAYA_OCCURRENCE_RANGE_CHANGED)
             || kind == UInt16(KAYA_OCCURRENCE_RANGE_COMMITTED)
+            || kind == UInt16(KAYA_OCCURRENCE_PLAYER_CHANGED)
+            || kind == UInt16(KAYA_OCCURRENCE_PLAYER_POSITION)
+            || kind == UInt16(KAYA_OCCURRENCE_SEEK_COMPLETED)
+            || kind == UInt16(KAYA_OCCURRENCE_SESSION_ACTION)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {
@@ -3132,6 +3223,8 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
         // Surface-pair records (window, section): the SECOND id
         // keys the handler; the first rides as the payload.
         if kind == UInt16(KAYA_OCCURRENCE_SECTION_SELECTED)
+            || kind == UInt16(KAYA_OCCURRENCE_PLAYER_POSITION)
+            || kind == UInt16(KAYA_OCCURRENCE_SEEK_COMPLETED)
         {
             let section = raw.loadUnaligned(fromByteOffset: 16, as: UInt64.self)
             return (kind, section, [], .i64(Int64(bitPattern: id)), [], nil, nil, [])

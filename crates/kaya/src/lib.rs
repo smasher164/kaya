@@ -46,6 +46,9 @@ mod prefs_keyfile;
 // matcher, and the door every platform arm hands a URL to. Ungated —
 // every target has a door.
 mod links;
+// The player's state machine, the failure table and the session's
+// one-owner rule (docs/media-plan.md); ungated, every backend reports here.
+mod media;
 // docs/number-field-plan.md; the SwiftUI arm is its caller until the
 // breadth slice's arms land.
 #[cfg_attr(not(any(target_os = "macos", target_os = "ios")), allow(dead_code))]
@@ -123,6 +126,8 @@ pub use app::{
     ValueKind,
     props, Dropped, Op, Block, Document, Edit, EditSource, Format, Run,
     AlertFutureRef, ClipboardFutureRef, DialogFuture, FileFutureRef, SaveFutureRef, TaskOutcome, TaskScope,
+    // docs/media-plan.md: the player, the video view and the session.
+    can_play, MediaSource, PlayerReading, PlayerRef, SessionRef,
 };
 
 /// The canvas surface (docs/canvas-plan.md §2.2).
@@ -138,6 +143,7 @@ pub use protocol::{
     SectionProp, SectionsPresentation, SignalId, TemplateNodeId, WindowProp,
     FileContent, FileDialogId, FileMode, PickedFile, PickedId, Representation, Time, UndoDelta, UndoText, Value,
     ValueType, WidgetId, WidgetKind, WindowId,
+    Fit, MediaFailure, PlaybackState, PlayerId, PlayerState, SessionAction, SessionActionKind,
 };
 
 #[cfg(target_os = "windows")]

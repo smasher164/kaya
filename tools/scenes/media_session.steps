@@ -1,0 +1,25 @@
+# The media session (docs/media-plan.md §5): the guest attaches its player,
+# muted and looping, to the app's one session and handles `next` itself.
+# Commands go THROUGH THE SYSTEM, as a media key or the Now Playing
+# controls would send them: pause and play reach the player by the session's
+# defaults, next reaches the app. The display stays awake exactly while the
+# shown player plays.
+expect label#1 "next 0"
+click button#0
+expect label#0 "playing"
+expect_video_ink video#0 "C83C1E"
+expect_now_playing "kaya media" playing
+expect_display_awake yes
+session_send pause
+expect label#0 "paused"
+expect_now_playing "kaya media" paused
+expect_display_awake no
+session_send play
+expect label#0 "playing"
+expect_now_playing "kaya media" playing
+session_send next
+expect label#1 "next 1"
+expect label#0 "playing"
+ax_action video#0 "Pause"
+expect label#0 "paused"
+expect_now_playing "kaya media" paused

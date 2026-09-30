@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0xee277a9499e5e52dL;
+    public static final long SPEC_HASH = 0xfd32bf7c75c54fbbL;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -50,6 +50,7 @@ public final class KayaWire {
     public static final int KIND_NUMBER_FIELD = 20;
     public static final int KIND_COLOR_PICKER = 21;
     public static final int KIND_RANGE = 22;
+    public static final int KIND_VIDEO = 23;
     public static final int DRAW_OP_MOVE_TO = 1;
     public static final int DRAW_OP_LINE_TO = 2;
     public static final int DRAW_OP_CLOSE = 3;
@@ -125,6 +126,7 @@ public final class KayaWire {
     public static final int PROP_MIN_GAP = 48;
     public static final int PROP_LOW_LABEL = 49;
     public static final int PROP_HIGH_LABEL = 50;
+    public static final int PROP_FIT = 51;
     public static final int WPROP_TITLE = 1;
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
@@ -262,6 +264,41 @@ public final class KayaWire {
     public static final int OCCURRENCE_TEXT_CHANGED = 2;
     public static final int OCCURRENCE_TOGGLED = 3;
     public static final int OCCURRENCE_VALUE_CHANGED = 4;
+    public static final int PLAYER_STATE_IDLE = 0;
+    public static final int PLAYER_STATE_LOADING = 1;
+    public static final int PLAYER_STATE_READY = 2;
+    public static final int PLAYER_STATE_PLAYING = 3;
+    public static final int PLAYER_STATE_PAUSED = 4;
+    public static final int PLAYER_STATE_ENDED = 5;
+    public static final int PLAYER_STATE_FAILED = 6;
+    public static final int MEDIA_FAILURE_NONE = 0;
+    public static final int MEDIA_FAILURE_UNSUPPORTED_CODEC = 1;
+    public static final int MEDIA_FAILURE_UNSUPPORTED_CONTAINER = 2;
+    public static final int MEDIA_FAILURE_NOT_FOUND = 3;
+    public static final int MEDIA_FAILURE_NETWORK = 4;
+    public static final int MEDIA_FAILURE_DECODE_ERROR = 5;
+    public static final int PLAYER_COMMAND_PLAY = 1;
+    public static final int PLAYER_COMMAND_PAUSE = 2;
+    public static final int PLAYER_COMMAND_SEEK = 3;
+    public static final int SESSION_ACTION_PLAY = 1;
+    public static final int SESSION_ACTION_PAUSE = 2;
+    public static final int SESSION_ACTION_STOP = 3;
+    public static final int SESSION_ACTION_SEEK_TO = 4;
+    public static final int SESSION_ACTION_SEEK_FORWARD = 5;
+    public static final int SESSION_ACTION_SEEK_BACKWARD = 6;
+    public static final int SESSION_ACTION_NEXT = 7;
+    public static final int SESSION_ACTION_PREVIOUS = 8;
+    public static final int PLAYBACK_STATE_NONE = 0;
+    public static final int PLAYBACK_STATE_PLAYING = 1;
+    public static final int PLAYBACK_STATE_PAUSED = 2;
+    public static final int FIT_CONTAIN = 0;
+    public static final int FIT_COVER = 1;
+    public static final int FIT_FILL = 2;
+    public static final int PPROP_SOURCE = 1;
+    public static final int PPROP_SPEED = 2;
+    public static final int PPROP_VOLUME = 3;
+    public static final int PPROP_MUTED = 4;
+    public static final int PPROP_LOOP = 5;
     public static final int COMMAND_CLEAR = 1;
     public static final int COMMAND_FOCUS = 2;
     public static final int COMMAND_EMOJI_PICKER = 3;
@@ -327,6 +364,12 @@ public final class KayaWire {
     public static final short TX_KIND_SET_SHEET_PROP = 60;
     public static final short TX_KIND_SCROLL_TO_ROW = 61;
     public static final short TX_KIND_SET_BADGE = 62;
+    public static final short TX_KIND_CREATE_PLAYER = 63;
+    public static final short TX_KIND_SET_PLAYER_PROP = 64;
+    public static final short TX_KIND_PLAYER_COMMAND = 65;
+    public static final short TX_KIND_RELEASE_PLAYER = 66;
+    public static final short TX_KIND_SET_VIDEO_PLAYER = 67;
+    public static final short TX_KIND_SET_SESSION = 68;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -375,6 +418,12 @@ public final class KayaWire {
     public static final short APPLY_KIND_SET_SHEET_PROP = 48;
     public static final short APPLY_KIND_SCROLL_TO_ROW = 49;
     public static final short APPLY_KIND_SET_BADGE = 50;
+    public static final short APPLY_KIND_CREATE_PLAYER = 51;
+    public static final short APPLY_KIND_SET_PLAYER_PROP = 52;
+    public static final short APPLY_KIND_PLAYER_COMMAND = 53;
+    public static final short APPLY_KIND_RELEASE_PLAYER = 54;
+    public static final short APPLY_KIND_SET_VIDEO_PLAYER = 55;
+    public static final short APPLY_KIND_SET_SESSION = 56;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
@@ -413,6 +462,10 @@ public final class KayaWire {
     public static final short OCC_KIND_COLOR_CHANGED = 36;
     public static final short OCC_KIND_RANGE_CHANGED = 37;
     public static final short OCC_KIND_RANGE_COMMITTED = 38;
+    public static final short OCC_KIND_PLAYER_CHANGED = 39;
+    public static final short OCC_KIND_PLAYER_POSITION = 40;
+    public static final short OCC_KIND_SEEK_COMPLETED = 41;
+    public static final short OCC_KIND_SESSION_ACTION = 42;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -1079,6 +1132,61 @@ public final class KayaWire {
         Enc b = begin(TX_KIND_SET_BADGE);
         b.putInt(count);
         b.putInt(0);
+        return finish(b);
+    }
+
+    /** Create a media player (docs/media-plan.md §2): an app-held object with no place in the layout, its id guest-chosen in its own space. It starts `idle`; a `source` write loads it. An audio-only player is the same object shown by no video view. A second create of a live id is a scene error. */
+    public static byte[] txCreatePlayer(long player) {
+        Enc b = begin(TX_KIND_CREATE_PLAYER);
+        b.putLong(player);
+        return finish(b);
+    }
+
+    /** Write a player property (PLAYER_PROPS) once: a player is an object the app commands, so its props are written, never bound to a signal or a row. `source` is an asset name, an http(s) URL, or a picked file's absolute path; the core checks a local one exists and publishes failed(not_found) itself rather than hand a missing file to the platform (docs/media-plan.md §7a). */
+    public static byte[] txSetPlayerProp(long player, int prop, Object value) {
+        Enc b = begin(TX_KIND_SET_PLAYER_PROP);
+        b.putLong(player);
+        b.putInt(prop);
+        b.putInt(0);
+        encodeValue(b, value);
+        return finish(b);
+    }
+
+    /** play, pause, or seek to `at_ms` (PLAYER_COMMAND; `at_ms` is 0 for the other two). The app owns play state (docs/media-plan.md §2 rule 3): the answer is the player's own occurrences, never an echo of the command. */
+    public static byte[] txPlayerCommand(long player, int command, long atMs) {
+        Enc b = begin(TX_KIND_PLAYER_COMMAND);
+        b.putLong(player);
+        b.putInt(command);
+        b.putInt(0);
+        b.putLong(atMs);
+        return finish(b);
+    }
+
+    /** Stop and forget a player. A video view showing it goes blank, the session detaches it, and no occurrence of its follows. An unknown id is a scene error. */
+    public static byte[] txReleasePlayer(long player) {
+        Enc b = begin(TX_KIND_RELEASE_PLAYER);
+        b.putLong(player);
+        return finish(b);
+    }
+
+    /** Show `player` in the video view `widget_id` (docs/media-plan.md §3); 0 shows none. A live video view only: the player is an object, not collection data. */
+    public static byte[] txSetVideoPlayer(long widgetId, long player) {
+        Enc b = begin(TX_KIND_SET_VIDEO_PLAYER);
+        b.putLong(widgetId);
+        b.putLong(player);
+        return finish(b);
+    }
+
+    /** Declare the app's ONE media session (docs/media-plan.md §5), replacing the last declaration: the attached `player` (0 attaches none and withdraws the app from the system's controls), `actions` a mask of 1 << SESSION_ACTION for the actions the app handles itself, `playback_state` the PLAYBACK_STATE the app states while no player is attached, and the metadata as Str values, `artwork` an asset name or empty. With a player attached, play, pause and seek_to the app does not handle apply to that player. */
+    public static byte[] txSetSession(long player, int actions, int playbackState, Object title, Object artist, Object album, Object artwork) {
+        Enc b = begin(TX_KIND_SET_SESSION);
+        b.putLong(player);
+        b.putInt(actions);
+        b.putInt(playbackState);
+        encodeValue(b, title);
+        encodeValue(b, artist);
+        encodeValue(b, album);
+        encodeValue(b, artwork);
         return finish(b);
     }
 
@@ -2273,6 +2381,29 @@ public final class KayaWire {
         return finish(b);
     }
 
+    /** set_property with a constant fit value. */
+    public static byte[] txSetFit(long widgetId, long fit) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_FIT).putInt(SOURCE_CONST);
+        encodeValue(b, fit);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound fit value. */
+    public static byte[] txBindFit(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_FIT).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindFitElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_FIT).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
     /** set_window_prop with a constant title value (window 0, the primary surface). */
     public static byte[] txSetWindowTitle(long window, String title) {
         Enc b = begin(TX_KIND_SET_WINDOW_PROP);
@@ -2942,7 +3073,7 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED && kind != OCC_KIND_FULLSCREEN_CHANGED && kind != OCC_KIND_COLOR_CHANGED && kind != OCC_KIND_RANGE_CHANGED && kind != OCC_KIND_RANGE_COMMITTED) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED && kind != OCC_KIND_FULLSCREEN_CHANGED && kind != OCC_KIND_COLOR_CHANGED && kind != OCC_KIND_RANGE_CHANGED && kind != OCC_KIND_RANGE_COMMITTED && kind != OCC_KIND_PLAYER_CHANGED && kind != OCC_KIND_PLAYER_POSITION && kind != OCC_KIND_SEEK_COMPLETED && kind != OCC_KIND_SESSION_ACTION) {
             return null;
         }
         long id = b.getLong(8);
@@ -3012,7 +3143,7 @@ public final class KayaWire {
         }
         // Surface-pair records (window, section): the SECOND id
         // keys the handler; the first rides as the payload.
-        if (kind == OCC_KIND_SECTION_SELECTED) {
+        if (kind == OCC_KIND_SECTION_SELECTED || kind == OCC_KIND_PLAYER_POSITION || kind == OCC_KIND_SEEK_COMPLETED) {
             return new Occ(kind, b.getLong(16), java.util.List.of(), id);
         }
         if (kind == OCC_KIND_UNDONE || kind == OCC_KIND_REDONE) {

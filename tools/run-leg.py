@@ -24,6 +24,7 @@ dev_shell_or_die()
 #   tools/run-leg.py <scene> <lang> [--build] [--appearance dark]
 
 import atexit
+import contextlib
 import os
 import shutil
 import signal
@@ -32,6 +33,7 @@ import tempfile
 import time
 
 import flightrec_lane
+import media_server
 from lanes import mac as lane
 
 args = [a for a in sys.argv[1:] if not a.startswith("--")]
@@ -166,7 +168,10 @@ print(f"run-leg: {scene}-{lang}: timeout 120 {' '.join(argv)}", flush=True)
 log = ROOT / f"target/run-leg-{scene}-{lang}.log"
 log.parent.mkdir(parents=True, exist_ok=True)
 t0 = time.monotonic()
-with open(log, "w", encoding="utf-8", errors="replace") as lf:
+# The media suite's server, the lane's way (tools/lib/media_server.py).
+served = (media_server.serving(log=ROOT / "target/run-leg-media-server.log")
+          if scene.startswith("media_") else contextlib.nullcontext())
+with served, open(log, "w", encoding="utf-8", errors="replace") as lf:
     rc = FR.watched_leg(SCRATCH / name, argv, env, lf, cwd=ROOT,
                         echo=sys.stdout)
 if second:

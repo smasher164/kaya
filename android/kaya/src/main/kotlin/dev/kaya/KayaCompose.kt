@@ -1923,6 +1923,8 @@ internal class KayaExpanded(val text: String, val refused: String?)
  * text-format class here, android.icu in KayaFormat.
  */
 internal fun kayaExpandTemplate(context: android.content.Context, want: String): KayaExpanded {
+    // docs/media-plan.md §7a: this lane's table of refused items.
+    if (want.contains("{media:")) depthStub("media_formats")
     if (!want.contains("{fmt:")) return KayaExpanded(want, null)
     val out = StringBuilder()
     var rest = want
@@ -2099,7 +2101,12 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0xee277a9499e5e52duL
+    /** The capability query's Compose half (docs/media-plan.md §8 ruling 1). */
+    @JvmStatic
+    @Suppress("UNUSED_PARAMETER")
+    fun canPlay(mime: String, codecs: String): Boolean = depthStub("media_formats")
+
+    private const val SPEC_HASH: ULong = 0xfd32bf7c75c54fbbuL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -2157,6 +2164,13 @@ object KayaCompose {
     private const val APPLY_POST_NOTIFICATION = 41
     private const val APPLY_CANCEL_NOTIFICATION = 42
     private const val APPLY_SET_BADGE = 50
+    /** docs/media-plan.md: the player, the video view and the session, a depth slice. */
+    private const val APPLY_CREATE_PLAYER = 51
+    private const val APPLY_SET_PLAYER_PROP = 52
+    private const val APPLY_PLAYER_COMMAND = 53
+    private const val APPLY_RELEASE_PLAYER = 54
+    private const val APPLY_SET_VIDEO_PLAYER = 55
+    private const val APPLY_SET_SESSION = 56
     /** The rich-text pair (docs/rich-text-plan.md §4); the arm is a depth slice. */
     private const val APPLY_SET_RICH_TEXT = 43
     private const val APPLY_APPLY_EDIT = 44
@@ -2333,6 +2347,7 @@ object KayaCompose {
     const val KIND_NUMBER_FIELD = 20
     const val KIND_COLOR_PICKER = 21
     const val KIND_RANGE = 22
+    const val KIND_VIDEO = 23
     private const val PROP_TEXT = 1
     private const val PROP_CHECKED = 2
     private const val PROP_VALUE = 3
@@ -2372,6 +2387,7 @@ object KayaCompose {
     private const val PROP_MIN_GAP = 48
     private const val PROP_LOW_LABEL = 49
     private const val PROP_HIGH_LABEL = 50
+    private const val PROP_FIT = 51
     private const val FILE_CONTENT_IMAGES = 1
     private const val PROP_COLUMNS = 11
     // The accessibility identifier (never spoken) and label (spoken).
@@ -3278,6 +3294,7 @@ object KayaCompose {
                         KIND_SEARCH -> KayaSceneModel.searches.add(node)
                         KIND_COLOR_PICKER -> KayaSceneModel.colorPickers.add(node)
                         KIND_RANGE -> KayaSceneModel.ranges.add(node)
+                        KIND_VIDEO -> depthStub("media_formats")
                         KIND_NUMBER_FIELD -> {
                             // docs/number-field-plan.md §2: unset bounds are
                             // ±2^53, the step 1, and the field shows its
@@ -3369,6 +3386,7 @@ object KayaCompose {
                         PROP_MIN_GAP -> KayaSceneModel.nodes[id]!!.minGap = readF64(b)
                         PROP_LOW_LABEL -> KayaSceneModel.nodes[id]!!.lowLabel = readString(b)
                         PROP_HIGH_LABEL -> KayaSceneModel.nodes[id]!!.highLabel = readString(b)
+                        PROP_FIT -> depthStub("media_formats")
                         // docs/rich-text-plan.md §14: this platform's lever
                         // is `clearHistory()`, so taking ownership drops what
                         // the field had banked.
@@ -3710,6 +3728,8 @@ object KayaCompose {
                     kayaPostNotification(nid, at, title, body, reply)
                 }
                 APPLY_CANCEL_NOTIFICATION -> kayaCancelNotification(b.long)
+                APPLY_CREATE_PLAYER, APPLY_SET_PLAYER_PROP, APPLY_PLAYER_COMMAND,
+                APPLY_RELEASE_PLAYER, APPLY_SET_VIDEO_PLAYER, APPLY_SET_SESSION -> depthStub("media_formats")
                 APPLY_SET_BADGE -> {
                     // { u32 count; u32 reserved } (docs/app-badge-plan.md §3).
                     val count = b.int
@@ -7084,6 +7104,7 @@ object KayaCompose {
             "number_field" -> KayaSceneModel.numberFields
             "color_picker" -> KayaSceneModel.colorPickers
             "range" -> KayaSceneModel.ranges
+            "video" -> depthStub("media_formats")
             "textarea" -> KayaSceneModel.textareas
             "date_picker" -> KayaSceneModel.datePickers
             "time_picker" -> KayaSceneModel.timePickers
@@ -8712,6 +8733,8 @@ object KayaCompose {
                         val sentence = answer.substringAfter('\n')
                         if (answer.startsWith("ok\n")) observed.add(sentence) else failures.add(sentence)
                     }
+                    "expect_video_ink", "ax_action", "session_send", "expect_now_playing",
+                    "expect_display_awake" -> depthStub("media_formats")
                     "expect_badge" -> {
                         // docs/app-badge-plan.md §4: the number the platform
                         // holds on the app's showing notifications, which is
@@ -14863,6 +14886,7 @@ private fun KayaRenderCore(
         KayaCompose.KIND_NUMBER_FIELD -> KayaNumberField(node, a11y, boxFill)
         KayaCompose.KIND_COLOR_PICKER -> KayaColorButton(node, a11y, boxFill)
         KayaCompose.KIND_RANGE -> KayaRangeSurface(node, boxFill, a11y)
+        KayaCompose.KIND_VIDEO -> depthStub("media_formats")
         KayaCompose.KIND_LABELED -> {
             // THE LABELLED ROW (docs/forms-plan.md §3): Material's own
             // labelled row, the value trailing and a WIDE control folded

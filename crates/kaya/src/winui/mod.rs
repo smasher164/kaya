@@ -14593,6 +14593,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // platform's own — the TextBox template's `DeleteButton` —
                 // and AutoSuggestBox is refused, both measured
                 // (docs/measurements/search-winui-2026-09-06.md).
+                WidgetKind::Video => crate::depth_stub("media_formats"),
                 WidgetKind::Range => {
                     let pair = RangePair::new(
                         tag.expect("ranges carry a tag").to_vec(),
@@ -16226,6 +16227,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
         ApplyOp::CancelNotification(notification) => {
             on_notify(move || notification_forget(notification.0));
         }
+        ApplyOp::CreatePlayer(_)
+        | ApplyOp::SetPlayerProp { .. }
+        | ApplyOp::PlayerCommand { .. }
+        | ApplyOp::ReleasePlayer(_)
+        | ApplyOp::SetVideoPlayer { .. }
+        | ApplyOp::SetSession { .. } => crate::depth_stub("media_formats"),
         ApplyOp::SetBadge { count } => {
             if let Err(e) = set_badge(core, count) {
                 eprintln!("KAYA_DIAG set_badge {count}: the taskbar overlay failed: {e}");
@@ -20230,6 +20237,7 @@ fn registry_widget_at(core: &CoreState, kind: crate::harness::TargetKind, i: usi
         K::Textarea => core.textarea_ids.get(i).copied(),
         K::Search => core.search_ids.get(i).copied(),
         K::Range => core.range_ids.get(i).copied(),
+        K::Video => crate::depth_stub("media_formats"),
         K::ColorPicker => core.color_picker_ids.get(i).copied(),
         K::NumberField => core.number_field_ids.get(i).copied(),
         K::Canvas => core.canvas_ids.get(i).copied(),
@@ -20525,6 +20533,7 @@ fn target_element(
         // TextBox's (docs/search-plan.md S7).
         K::Search => nth!(core.searches),
         K::Range => nth!(core.ranges),
+        K::Video => crate::depth_stub("media_formats"),
         K::ColorPicker => nth!(core.color_pickers),
         K::NumberField => nth!(core.number_fields),
         K::DatePicker => nth!(core.date_pickers),
@@ -20647,6 +20656,7 @@ fn registry_ids(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<u64> 
         K::Textarea => core.textarea_ids.clone(),
         K::Search => core.search_ids.clone(),
         K::Range => core.range_ids.clone(),
+        K::Video => crate::depth_stub("media_formats"),
         K::ColorPicker => core.color_picker_ids.clone(),
         K::NumberField => core.number_field_ids.clone(),
         K::Canvas => core.canvas_ids.clone(),
@@ -23682,6 +23692,7 @@ impl crate::harness::Stage for WinUiStage {
                 K::Textarea => find(core, K::Textarea, &core.textareas, &id),
                 K::Search => find(core, K::Search, &core.searches, &id),
                 K::Range => find(core, K::Range, &core.ranges, &id),
+                K::Video => crate::depth_stub("media_formats"),
                 K::ColorPicker => find(core, K::ColorPicker, &core.color_pickers, &id),
                 K::NumberField => find(core, K::NumberField, &core.number_fields, &id),
                 K::Canvas => find(core, K::Canvas, &core.canvases, &id),
@@ -24580,6 +24591,30 @@ impl crate::harness::Stage for WinUiStage {
         }
         tap(0x0d);
         Ok(())
+    }
+
+    fn video_ink(&self, _: crate::harness::Target) -> String {
+        crate::depth_stub("media_formats")
+    }
+
+    fn ax_action(&self, _: crate::harness::Target, _: &str) -> Result<(), String> {
+        crate::depth_stub("media_formats")
+    }
+
+    fn session_send(&self, _: &str) -> Result<(), String> {
+        crate::depth_stub("media_formats")
+    }
+
+    fn now_playing(&self) -> String {
+        crate::depth_stub("media_formats")
+    }
+
+    fn display_awake(&self) -> bool {
+        crate::depth_stub("media_formats")
+    }
+
+    fn media_refusal(&self, _: &str) -> Option<String> {
+        crate::depth_stub("media_formats")
     }
 
     /// The taskbar button's own help text, which the shell fills from the
@@ -30626,4 +30661,9 @@ mod tests {
             );
         }
     }
+}
+
+/// docs/media-plan.md §8 ruling 1, this backend's half of the capability query.
+pub(crate) fn can_play(_mime: &str, _codecs: &str) -> bool {
+    crate::depth_stub("media_formats")
 }

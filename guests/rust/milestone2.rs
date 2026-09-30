@@ -107,6 +107,10 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             | Occurrence::InstanceRangeChanged { .. }
             | Occurrence::RangeCommitted { .. }
             | Occurrence::InstanceRangeCommitted { .. }
+            | Occurrence::PlayerChanged { .. }
+            | Occurrence::PlayerPosition { .. }
+            | Occurrence::SeekCompleted { .. }
+            | Occurrence::SessionAction { .. }
             | Occurrence::Pasted { .. }
             | Occurrence::InstancePasted { .. }
             | Occurrence::Dropped { .. }

@@ -1013,6 +1013,29 @@ def check(root):
 
 
 # ---------------------------------------------------------- self-tests
+def media_derivation(root):
+    """C13 (docs/media-plan.md §7a): the media family is GENERATED and
+    committed, so it must be what tools/gen-media.py writes today. Run on
+    the real tree and on one negative only — FFmpeg per shadow would
+    multiply this gate's cost by its negatives."""
+    fam = pathlib.Path(root) / ASSET_ROOT / "media"
+    gen = ROOT / "tools" / "gen-media.py"
+    if not fam.is_dir():
+        return []
+    if not gen.is_file():
+        return ["tools/gen-media.py is gone while the media family exists "
+                "— the committed files would have no regeneration story"]
+    r = subprocess.run([sys.executable, str(gen), "--check", "--against",
+                        str(fam)], capture_output=True, text=True,
+                       check=False)
+    if r.returncode == 0:
+        return []
+    return ["guests/assets/media does not match what tools/gen-media.py "
+            "generates — the files are generated, never hand-edited: run "
+            "`tools/gen-media.py` and commit the result:\n"
+            + r.stderr.strip()[:600]]
+
+
 def fresh(name):
     """A shadow root the checker can read. THE ASSET ROOT IS COPIED,
     EVERYTHING ELSE IS LINKED: C2 refuses a symlink inside the root, so
@@ -1420,7 +1443,19 @@ doctor_shadow("N36's demoted sheet", s, GTK,
 refused(s, "the sheet added above libadwaita's own appears 0 time(s)",
         "N36 (the weight sheet below the theme's priority)")
 
-g.negatives_ran(37)
+# N37 — C13: one committed media file drifts from its generator.
+s = fresh("n37")
+wav = s / "guests/assets/media/tone.wav"
+raw = bytearray(wav.read_bytes())
+raw[-1] ^= 1
+wav.write_bytes(bytes(raw))
+print("check-assets: N37 flipped 1 byte of guests/assets/media/tone.wav "
+      "in the shadow")
+g.negative("N37 (a committed media file its generator no longer writes)",
+           lambda: media_derivation(s),
+           want="differs from what tools/gen-media.py generates")
+
+g.negatives_ran(38)
 
 # The vacuity floor rule 5 asks for, over the census the checker walks.
 g.counted("files under the asset root",
@@ -1430,6 +1465,7 @@ g.counted("files under the asset root",
 # ---------------------------------------------------------------------
 # The tree as it stands.
 out, bad = check(ROOT)
+bad += media_derivation(ROOT)
 print("\n".join(out))
 if bad:
     for b in bad:

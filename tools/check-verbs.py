@@ -3141,6 +3141,113 @@ for rel, label, pattern in (
     if not found:
         fail(f"check-verbs SELF-TEST: the range arm census passed with {label} cut")
 
+# --- THE MEDIA ARMS (docs/media-plan.md §3, §5) ------------------------
+# Three rules no scene can see. THE VIDEO VIEW IS A BARE LAYER: AVPlayerView
+# keeps Space, the arrows and J/K/L at every controls style,
+# AVPlayerViewController brings its own Now Playing session and SwiftUI's
+# VideoPlayer cannot hide its controls, and each would still show the
+# picture every media leg asserts. EVERY PLAYER REPORT TAKES ONE DOOR,
+# kayaPlayerReport, which follows the session, and the publish sets
+# macOS's playbackState before anything can return: macOS routes no media
+# key to an app that leaves it stale, and a report that skipped the door
+# would leave it stale only on that transition. AND expect_video_ink's
+# tolerance is one measured number (±2 in sRGB, docs/traps.md) in the two
+# harnesses that read a video view.
+VIDEO_INK_RULED = 2
+
+
+def media_arms(swift_src=None, harness_src=None):
+    bad = []
+    swift = swift_src if swift_src is not None else real(SWIFT)
+    harness = harness_src if harness_src is not None else real(HARNESS)
+    code = re.sub(r"//[^\n]*", "", swift)
+    for banned in ("AVPlayerView", "AVPlayerViewController", "VideoPlayer(",
+                   "import AVKit"):
+        if banned in code:
+            bad.append(f"KayaSwiftUI.swift names {banned!r} — the video view "
+                       f"is a bare AVPlayerLayer (docs/media-plan.md §3)")
+    calls = [m.start() for m in re.finditer(r"KayaHost\.api\.player_", code)]
+    if len(calls) < 7:
+        bad.append(f"only {len(calls)} KayaHost.api.player_ call(s) read — "
+                   f"the census reads too little to agree with anything")
+    stack, doors, at = [], [], 0
+    for i, ch in enumerate(code):
+        if ch == "{":
+            line = code[code.rfind("\n", 0, i) + 1:i]
+            stack.append("kayaPlayerReport(" in line)
+        elif ch == "}" and stack:
+            stack.pop()
+        while at < len(calls) and calls[at] == i:
+            doors.append(any(stack))
+            at += 1
+    outside = doors.count(False)
+    if outside:
+        bad.append(f"{outside} player report(s) outside kayaPlayerReport — "
+                   f"a transition that skips the door leaves the system's "
+                   f"playback state stale")
+
+    def body(name):
+        m = re.search(r"^func " + name + r"\(.*?^\}$", code, re.M | re.S)
+        return m.group(0) if m else None
+
+    door = body("kayaPlayerReport")
+    if door is None or "kayaSessionFollow(" not in door:
+        bad.append("kayaPlayerReport does not call kayaSessionFollow — the "
+                   "session does not follow the player's transitions")
+    follow = body("kayaSessionFollow")
+    if follow is None or "kayaPublishNowPlaying()" not in follow:
+        bad.append("kayaSessionFollow does not publish (kayaPublishNowPlaying)")
+    publish = body("kayaPublishNowPlaying")
+    if publish is None:
+        bad.append("KayaSwiftUI.swift has no kayaPublishNowPlaying to read")
+    else:
+        state = publish.find("center.playbackState =")
+        ret = publish.find("return")
+        if state < 0 or (0 <= ret < state):
+            bad.append("kayaPublishNowPlaying does not set playbackState "
+                       "before it can return — macOS routes no media key "
+                       "to an app that leaves it stale")
+    hm = re.search(r"const VIDEO_INK_TOLERANCE\s*:\s*\w+\s*=\s*(\d+)\s*;", harness)
+    sm = re.search(r"let kayaVideoInkTolerance\b[^=\n]*=\s*(\d+)\b", swift)
+    for label, m in (("harness.rs VIDEO_INK_TOLERANCE", hm),
+                     ("KayaSwiftUI.swift kayaVideoInkTolerance", sm)):
+        if not m:
+            bad.append(f"{label} is not there to read")
+        elif int(m.group(1)) != VIDEO_INK_RULED:
+            bad.append(f"{label} is {m.group(1)}, not the measured "
+                       f"{VIDEO_INK_RULED}")
+    return bad
+
+
+media_out = media_arms()
+media_status = 1 if media_out else 0
+if media_out:
+    print("check-verbs: the media arms broke a rule no scene can see:",
+          file=sys.stderr)
+    print("\n".join(media_out), file=sys.stderr)
+MEDIA_REPORTS = len(re.findall(r"KayaHost[.]api[.]player_", real(SWIFT)))
+print(f"check-verbs: media arms read ({MEDIA_REPORTS} player reports)")
+for pattern, repl, label, rel, want in (
+    (r"(let player = kayaPlayers\[node\.videoPlayer\]\?\.player\n)",
+     "            _ = AVPlayerView()\n", "an AVPlayerView hosted (both arms)", SWIFT, 2),
+    (r"(\n)                kayaPlayerReport\(self\.id\) "
+     r"\{ KayaHost\.api\.player_ended\(self\.id\) \}",
+     "                _ = KayaHost.api.player_ended(self.id)",
+     "a report outside the door", SWIFT, 1),
+    (r"(    _ = report\(\)\n)    kayaSessionFollow\(id\)", "",
+     "the door not following the session", SWIFT, 1),
+    (r"(    let state = KayaHost\.api\.session_state\(\)\n)    #if os\(macOS\)\n"
+     r"        center\.playbackState = [^\n]*\n    #endif\n",
+     "", "playbackState never set", SWIFT, 1),
+    (r"(let kayaVideoInkTolerance = )2", "3", "the video ink tolerance widened", SWIFT, 1),
+):
+    cut = g.doctor(f"media arms: {label}", real(rel), pattern,
+                   lambda m, repl=repl: m.group(1) + repl, want=want)
+    found = [f for f in media_arms(swift_src=cut) if f not in media_out]
+    print(f"check-verbs: media-arms negative ({label}): {len(found)} finding(s)")
+    if not found:
+        fail(f"check-verbs SELF-TEST: the media arms passed with {label}")
+
 # clip_mirrors() ran first and printed its own findings; its verdict
 # is read here so there is exactly ONE verdict line.
 if (clip_status or window_status or ink_status or ax_status
@@ -3149,7 +3256,7 @@ if (clip_status or window_status or ink_status or ax_status
         or vtrace_status or norm_status or ind_status
         or answer_status or seed_focus_status or notify_auth_status
         or pump_status or immersive_status or kind_status
-        or range_status):
+        or range_status or media_status):
     raise SystemExit(1)
 g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"({len(canvas_rows)} of them the canvas vocabularies) + "
@@ -3170,4 +3277,5 @@ g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"+ the Compose immersive arm read from the insets "
           f"+ every Compose kind's create and render arms "
           f"+ the range's arms in both interpreters "
+          f"+ the media arms (a bare layer, one report door, playbackState first) "
           f"+ spec hash against 2 interpreters")

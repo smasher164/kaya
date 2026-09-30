@@ -49,6 +49,175 @@ pub enum NotificationOutcome {
     Replied(String),
 }
 
+/// A media player's id: guest-chosen, its own space, live from
+/// create_player to release_player (docs/media-plan.md §2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PlayerId(pub u64);
+
+/// Player property keys (spec::PLAYER_PROPS).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PlayerProp {
+    /// An asset name, an http(s) URL, or a picked file's absolute path (Str).
+    Source,
+    /// The playback rate, 1 normal (F64).
+    Speed,
+    /// 0..1, relative to the system volume (F64).
+    Volume,
+    Muted,
+    Loop,
+}
+
+/// What a player reads (spec enum "player_state").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PlayerState {
+    Idle,
+    Loading,
+    Ready,
+    Playing,
+    Paused,
+    Ended,
+    Failed,
+}
+
+/// Why a player failed (spec enum "media_failure"), closed
+/// (docs/media-plan.md §7a).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MediaFailure {
+    UnsupportedCodec,
+    UnsupportedContainer,
+    NotFound,
+    Network,
+    DecodeError,
+}
+
+impl MediaFailure {
+    /// The reason's own word, as the spec's `media_failure` enum spells it.
+    pub fn name(self) -> &'static str {
+        match self {
+            MediaFailure::UnsupportedCodec => "unsupported_codec",
+            MediaFailure::UnsupportedContainer => "unsupported_container",
+            MediaFailure::NotFound => "not_found",
+            MediaFailure::Network => "network",
+            MediaFailure::DecodeError => "decode_error",
+        }
+    }
+}
+
+impl PlayerState {
+    /// The state's own word, as the spec's `player_state` enum spells it.
+    pub fn name(self) -> &'static str {
+        match self {
+            PlayerState::Idle => "idle",
+            PlayerState::Loading => "loading",
+            PlayerState::Ready => "ready",
+            PlayerState::Playing => "playing",
+            PlayerState::Paused => "paused",
+            PlayerState::Ended => "ended",
+            PlayerState::Failed => "failed",
+        }
+    }
+}
+
+/// A command the app aims at a player.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlayerCommand {
+    Play,
+    Pause,
+    /// To this many milliseconds from the start.
+    Seek(u64),
+}
+
+/// A media-control action (spec enum "session_action"), the web's
+/// MediaSessionAction set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SessionAction {
+    Play,
+    Pause,
+    Stop,
+    SeekTo(u64),
+    SeekForward,
+    SeekBackward,
+    Next,
+    Previous,
+}
+
+impl SessionAction {
+    pub fn kind(self) -> SessionActionKind {
+        match self {
+            SessionAction::Play => SessionActionKind::Play,
+            SessionAction::Pause => SessionActionKind::Pause,
+            SessionAction::Stop => SessionActionKind::Stop,
+            SessionAction::SeekTo(_) => SessionActionKind::SeekTo,
+            SessionAction::SeekForward => SessionActionKind::SeekForward,
+            SessionAction::SeekBackward => SessionActionKind::SeekBackward,
+            SessionAction::Next => SessionActionKind::Next,
+            SessionAction::Previous => SessionActionKind::Previous,
+        }
+    }
+}
+
+/// An action by name alone, for declaring which a session handles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SessionActionKind {
+    Play,
+    Pause,
+    Stop,
+    SeekTo,
+    SeekForward,
+    SeekBackward,
+    Next,
+    Previous,
+}
+
+impl SessionActionKind {
+    /// This action's bit in a session's `actions` mask.
+    pub fn bit(self) -> u32 {
+        let action = match self {
+            SessionActionKind::Play => SessionAction::Play,
+            SessionActionKind::Pause => SessionAction::Pause,
+            SessionActionKind::Stop => SessionAction::Stop,
+            SessionActionKind::SeekTo => SessionAction::SeekTo(0),
+            SessionActionKind::SeekForward => SessionAction::SeekForward,
+            SessionActionKind::SeekBackward => SessionAction::SeekBackward,
+            SessionActionKind::Next => SessionAction::Next,
+            SessionActionKind::Previous => SessionAction::Previous,
+        };
+        1 << crate::wire::session_action_raw(action).0
+    }
+}
+
+/// What the session states while no player is attached (spec enum
+/// "playback_state").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum PlaybackState {
+    #[default]
+    None,
+    Playing,
+    Paused,
+}
+
+/// A video view's fit (spec enum "fit").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Fit {
+    Contain,
+    Cover,
+    Fill,
+}
+
+/// The app's one media session, as declared (docs/media-plan.md §5).
+/// `actions` is a mask of `1 << action` for the actions the app handles.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SessionSpec {
+    pub player: Option<PlayerId>,
+    pub actions: u32,
+    pub playback_state: PlaybackState,
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    /// An asset name, or empty.
+    pub artwork: String,
+}
+
 /// A live file dialog, guest-chosen like an alert id, retiring when its
 /// result fires. One may be live per process.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -695,6 +864,25 @@ pub enum Occurrence {
     /// A range gesture's settled pair, once per gesture (§3 rule 3).
     RangeCommitted { id: WidgetId, low: f64, high: f64 },
     InstanceRangeCommitted { node: TemplateNodeId, path: Path, low: f64, high: f64 },
+    /// A player's state moved, with the readings the bindings mirror
+    /// (docs/media-plan.md §2). `failure` is Some exactly when the state is
+    /// failed; `detail` is the platform's sentence, which no scene compares.
+    PlayerChanged {
+        player: PlayerId,
+        state: PlayerState,
+        failure: Option<MediaFailure>,
+        duration_ms: u64,
+        width: u32,
+        height: u32,
+        detail: String,
+    },
+    /// The playhead, every crate::media::POSITION_TICK_MS while playing.
+    PlayerPosition { player: PlayerId, position_ms: u64 },
+    /// A seek the app asked for has landed.
+    SeekCompleted { player: PlayerId, position_ms: u64 },
+    /// The system's media controls sent an action the app handles
+    /// (docs/media-plan.md §5).
+    SessionAction { action: SessionAction },
     /// A menu action fired — clicked OR invoked through its shortcut:
     /// ONE occurrence, one dispatch path (DESIGN.md, Menus).
     MenuActivated { item: MenuItemId },
@@ -1061,6 +1249,9 @@ pub enum WidgetKind {
     /// slider's min, max and step; range_changed and range_committed carry
     /// both values.
     Range,
+    /// A VIDEO VIEW (docs/media-plan.md §3): shows one player through the
+    /// platform's own view, its controls off. Reports nothing itself.
+    Video,
 }
 
 /// An sRGB colour, 8 bits a channel, straight alpha: what a colour picker
@@ -1322,7 +1513,7 @@ impl WidgetKind {
     /// export `WidgetKind` into the public header as an opaque handle no C
     /// caller can use. `cfg(test)` because the sweeps that walk it are tests.
     #[cfg(test)]
-    pub(crate) const ALL: [WidgetKind; 22] = [
+    pub(crate) const ALL: [WidgetKind; 23] = [
         WidgetKind::Column,
         WidgetKind::Button,
         WidgetKind::Label,
@@ -1345,6 +1536,7 @@ impl WidgetKind {
         WidgetKind::NumberField,
         WidgetKind::ColorPicker,
         WidgetKind::Range,
+        WidgetKind::Video,
     ];
 
     /// Whether a widget of this kind carries an identity tag — the
@@ -1380,7 +1572,8 @@ impl WidgetKind {
             | WidgetKind::Progress
             | WidgetKind::Canvas
             | WidgetKind::Grid
-            | WidgetKind::Labeled => false,
+            | WidgetKind::Labeled
+            | WidgetKind::Video => false,
         }
     }
 }
@@ -1600,6 +1793,8 @@ pub enum Prop {
     MinGap,
     LowLabel,
     HighLabel,
+    /// A video view's fit (spec enum "fit", I64 on the wire).
+    Fit,
     /// The app owns a rich textarea's undo (Bool-valued; docs/rich-text-plan.md
     /// R6, §14): the native stack is off, the ledger never banks it, and
     /// Edit>Undo/Redo reach the app through the role item's own activation.
@@ -1973,6 +2168,15 @@ pub enum TxOp {
     ShowNotification(NotificationSpec),
     /// Withdraw a pending or delivered notification by id.
     CancelNotification(NotificationId),
+    /// docs/media-plan.md §2: a player's lifetime, its props and commands.
+    CreatePlayer { player: PlayerId },
+    SetPlayerProp { player: PlayerId, prop: PlayerProp, value: Value },
+    PlayerCommand { player: PlayerId, command: PlayerCommand },
+    ReleasePlayer { player: PlayerId },
+    /// docs/media-plan.md §3: the player a video view shows.
+    SetVideoPlayer { widget: WidgetId, player: Option<PlayerId> },
+    /// docs/media-plan.md §5: the app's one session, replaced whole.
+    SetSession(SessionSpec),
     /// Declare one app-link route (docs/app-links-plan.md §4). The core
     /// keeps the table and does the one match; a malformed or repeated
     /// pattern faults here, like every other declaration refusal.
@@ -2250,6 +2454,24 @@ pub enum ApplyOp {
     PostNotification(NotificationSpec),
     /// Withdraw a notification by id.
     CancelNotification(NotificationId),
+    /// docs/media-plan.md §2. `SetPlayerProp`'s source arrives RESOLVED: a
+    /// file:// or http(s) URL, or empty.
+    CreatePlayer(PlayerId),
+    SetPlayerProp { player: PlayerId, prop: PlayerProp, value: Value },
+    PlayerCommand { player: PlayerId, command: PlayerCommand },
+    ReleasePlayer(PlayerId),
+    SetVideoPlayer { widget: WidgetId, player: Option<PlayerId> },
+    /// The session as the system sees it (docs/media-plan.md §5): the core
+    /// decided `offered`, and `artwork` is a file:// URL or empty.
+    SetSession {
+        player: Option<PlayerId>,
+        offered: u32,
+        playback_state: PlaybackState,
+        title: String,
+        artist: String,
+        album: String,
+        artwork: String,
+    },
     /// Present the platform's real file picker (already validated).
     PresentFileDialog(FileDialogSpec),
     /// Present the platform's real save dialog (already validated).
@@ -2633,6 +2855,37 @@ impl OccSink {
                     body[..8].copy_from_slice(&window.0.to_le_bytes());
                     body[8..].copy_from_slice(&section.0.to_le_bytes());
                     ring.push_record(crate::ring::REC_SECTION_SELECTED, &body);
+                }
+                Occurrence::PlayerChanged { player, state, failure, duration_ms, width, height, detail } => {
+                    ring.push_record(
+                        crate::ring::REC_PLAYER_CHANGED,
+                        &crate::wire::player_changed_body(
+                            player,
+                            state,
+                            failure,
+                            duration_ms,
+                            (width, height),
+                            &detail,
+                        ),
+                    );
+                }
+                Occurrence::PlayerPosition { player, position_ms } => {
+                    ring.push_record(
+                        crate::ring::REC_PLAYER_POSITION,
+                        &crate::wire::player_ms_body(player, position_ms),
+                    );
+                }
+                Occurrence::SeekCompleted { player, position_ms } => {
+                    ring.push_record(
+                        crate::ring::REC_SEEK_COMPLETED,
+                        &crate::wire::player_ms_body(player, position_ms),
+                    );
+                }
+                Occurrence::SessionAction { action } => {
+                    ring.push_record(
+                        crate::ring::REC_SESSION_ACTION,
+                        &crate::wire::session_action_body(action),
+                    );
                 }
                 Occurrence::FullscreenChanged { window, on } => {
                     ring.push_record(

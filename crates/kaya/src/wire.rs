@@ -49,6 +49,13 @@ pub(crate) const TX_DISMISS_SHEET: u16 = 59;
 pub(crate) const TX_SET_SHEET_PROP: u16 = 60;
 pub(crate) const TX_SCROLL_TO_ROW: u16 = 61;
 pub(crate) const TX_SET_BADGE: u16 = 62;
+/// The media records (docs/media-plan.md §2, §3, §5).
+pub(crate) const TX_CREATE_PLAYER: u16 = 63;
+pub(crate) const TX_SET_PLAYER_PROP: u16 = 64;
+pub(crate) const TX_PLAYER_COMMAND: u16 = 65;
+pub(crate) const TX_RELEASE_PLAYER: u16 = 66;
+pub(crate) const TX_SET_VIDEO_PLAYER: u16 = 67;
+pub(crate) const TX_SET_SESSION: u16 = 68;
 pub(crate) const TX_ADD_SECTION: u16 = 25;
 pub(crate) const TX_SELECT_SECTION: u16 = 26;
 pub(crate) const TX_SET_SECTION_PROP: u16 = 27;
@@ -147,6 +154,12 @@ pub(crate) const APPLY_DISMISS_SHEET: u16 = 47;
 pub(crate) const APPLY_SET_SHEET_PROP: u16 = 48;
 pub(crate) const APPLY_SCROLL_TO_ROW: u16 = 49;
 pub(crate) const APPLY_SET_BADGE: u16 = 50;
+pub(crate) const APPLY_CREATE_PLAYER: u16 = 51;
+pub(crate) const APPLY_SET_PLAYER_PROP: u16 = 52;
+pub(crate) const APPLY_PLAYER_COMMAND: u16 = 53;
+pub(crate) const APPLY_RELEASE_PLAYER: u16 = 54;
+pub(crate) const APPLY_SET_VIDEO_PLAYER: u16 = 55;
+pub(crate) const APPLY_SET_SESSION: u16 = 56;
 pub(crate) const APPLY_ADD_SECTION: u16 = 15;
 pub(crate) const APPLY_SELECT_SECTION: u16 = 16;
 pub(crate) const APPLY_SET_SECTION_PROP: u16 = 17;
@@ -234,6 +247,7 @@ pub(crate) const KIND_SEARCH: u32 = 19;
 pub(crate) const KIND_NUMBER_FIELD: u32 = 20;
 pub(crate) const KIND_COLOR_PICKER: u32 = 21;
 pub(crate) const KIND_RANGE: u32 = 22;
+pub(crate) const KIND_VIDEO: u32 = 23;
 
 // Draw opcodes (docs/canvas-plan.md §3.3). The op stream is a flat run
 // of tagged values: one of these as an i64, then its operands.
@@ -306,6 +320,231 @@ pub(crate) const SIZE_POLICIES: &[(i64, &str)] = &[
     (SIZE_POLICY_REDRAW as i64, "redraw"),
     (SIZE_POLICY_TICK as i64, "tick"),
 ];
+
+/// The media vocabularies' (value, name) tables (docs/media-plan.md): the
+/// second spelling every diagnostic and refusal prints from, pinned to
+/// the spec's enums by spec::tests.
+pub(crate) const PLAYER_STATES: &[(i64, &str)] = &[
+    (0, "idle"),
+    (1, "loading"),
+    (2, "ready"),
+    (3, "playing"),
+    (4, "paused"),
+    (5, "ended"),
+    (6, "failed"),
+];
+
+pub(crate) const MEDIA_FAILURES: &[(i64, &str)] = &[
+    (0, "none"),
+    (1, "unsupported_codec"),
+    (2, "unsupported_container"),
+    (3, "not_found"),
+    (4, "network"),
+    (5, "decode_error"),
+];
+
+pub(crate) const PLAYER_COMMANDS: &[(i64, &str)] = &[(1, "play"), (2, "pause"), (3, "seek")];
+
+pub(crate) const SESSION_ACTIONS: &[(i64, &str)] = &[
+    (1, "play"),
+    (2, "pause"),
+    (3, "stop"),
+    (4, "seek_to"),
+    (5, "seek_forward"),
+    (6, "seek_backward"),
+    (7, "next"),
+    (8, "previous"),
+];
+
+pub(crate) const PLAYBACK_STATES: &[(i64, &str)] = &[(0, "none"), (1, "playing"), (2, "paused")];
+
+pub(crate) const FITS: &[(i64, &str)] = &[(0, "contain"), (1, "cover"), (2, "fill")];
+
+pub(crate) const PPROPS: &[(i64, &str)] = &[
+    (1, "source"),
+    (2, "speed"),
+    (3, "volume"),
+    (4, "muted"),
+    (5, "loop"),
+];
+
+pub(crate) fn player_state_raw(state: crate::protocol::PlayerState) -> u32 {
+    use crate::protocol::PlayerState as S;
+    match state {
+        S::Idle => 0,
+        S::Loading => 1,
+        S::Ready => 2,
+        S::Playing => 3,
+        S::Paused => 4,
+        S::Ended => 5,
+        S::Failed => 6,
+    }
+}
+
+pub(crate) fn media_failure_raw(failure: Option<crate::protocol::MediaFailure>) -> u32 {
+    use crate::protocol::MediaFailure as F;
+    match failure {
+        None => 0,
+        Some(F::UnsupportedCodec) => 1,
+        Some(F::UnsupportedContainer) => 2,
+        Some(F::NotFound) => 3,
+        Some(F::Network) => 4,
+        Some(F::DecodeError) => 5,
+    }
+}
+
+pub(crate) fn media_failure_from(raw: u32) -> Option<crate::protocol::MediaFailure> {
+    use crate::protocol::MediaFailure as F;
+    match raw {
+        1 => Some(F::UnsupportedCodec),
+        2 => Some(F::UnsupportedContainer),
+        3 => Some(F::NotFound),
+        4 => Some(F::Network),
+        5 => Some(F::DecodeError),
+        _ => None,
+    }
+}
+
+fn player_prop(raw: u32) -> crate::protocol::PlayerProp {
+    use crate::protocol::PlayerProp as P;
+    match raw {
+        1 => P::Source,
+        2 => P::Speed,
+        3 => P::Volume,
+        4 => P::Muted,
+        5 => P::Loop,
+        other => panic!("kaya: unknown player property {other}"),
+    }
+}
+
+pub(crate) fn player_prop_raw(prop: crate::protocol::PlayerProp) -> u32 {
+    use crate::protocol::PlayerProp as P;
+    match prop {
+        P::Source => 1,
+        P::Speed => 2,
+        P::Volume => 3,
+        P::Muted => 4,
+        P::Loop => 5,
+    }
+}
+
+pub(crate) fn player_command_raw(command: crate::protocol::PlayerCommand) -> (u32, u64) {
+    use crate::protocol::PlayerCommand as C;
+    match command {
+        C::Play => (1, 0),
+        C::Pause => (2, 0),
+        C::Seek(at) => (3, at),
+    }
+}
+
+fn player_command(raw: u32, at_ms: u64) -> crate::protocol::PlayerCommand {
+    use crate::protocol::PlayerCommand as C;
+    match raw {
+        1 => C::Play,
+        2 => C::Pause,
+        3 => C::Seek(at_ms),
+        other => panic!(
+            "kaya: player_command {other} is not a player_command (play=1, pause=2, seek=3)"
+        ),
+    }
+}
+
+pub(crate) fn session_action_raw(action: crate::protocol::SessionAction) -> (u32, u64) {
+    use crate::protocol::SessionAction as A;
+    match action {
+        A::Play => (1, 0),
+        A::Pause => (2, 0),
+        A::Stop => (3, 0),
+        A::SeekTo(at) => (4, at),
+        A::SeekForward => (5, 0),
+        A::SeekBackward => (6, 0),
+        A::Next => (7, 0),
+        A::Previous => (8, 0),
+    }
+}
+
+pub(crate) fn session_action_from(raw: u32, at_ms: u64) -> Option<crate::protocol::SessionAction> {
+    use crate::protocol::SessionAction as A;
+    Some(match raw {
+        1 => A::Play,
+        2 => A::Pause,
+        3 => A::Stop,
+        4 => A::SeekTo(at_ms),
+        5 => A::SeekForward,
+        6 => A::SeekBackward,
+        7 => A::Next,
+        8 => A::Previous,
+        _ => return None,
+    })
+}
+
+pub(crate) fn playback_state_raw(state: crate::protocol::PlaybackState) -> u32 {
+    use crate::protocol::PlaybackState as P;
+    match state {
+        P::None => 0,
+        P::Playing => 1,
+        P::Paused => 2,
+    }
+}
+
+fn playback_state(raw: u32) -> crate::protocol::PlaybackState {
+    use crate::protocol::PlaybackState as P;
+    match raw {
+        0 => P::None,
+        1 => P::Playing,
+        2 => P::Paused,
+        other => panic!(
+            "kaya: set_session's playback_state {other} is not a playback_state \
+             (none=0, playing=1, paused=2)"
+        ),
+    }
+}
+
+fn media_str(v: Value, what: &str) -> String {
+    match v {
+        Value::Str(s) => s,
+        other => panic!("kaya: {what} must be a Str value, got {other:?}"),
+    }
+}
+
+/// PLAYER_CHANGED { u64 player; u32 state; u32 failure; u64 duration_ms;
+/// u32 width; u32 height; Str detail }.
+pub(crate) fn player_changed_body(
+    player: crate::protocol::PlayerId,
+    state: crate::protocol::PlayerState,
+    failure: Option<crate::protocol::MediaFailure>,
+    duration_ms: u64,
+    size: (u32, u32),
+    detail: &str,
+) -> Vec<u8> {
+    let mut b = Vec::new();
+    b.extend_from_slice(&player.0.to_le_bytes());
+    b.extend_from_slice(&player_state_raw(state).to_le_bytes());
+    b.extend_from_slice(&media_failure_raw(failure).to_le_bytes());
+    b.extend_from_slice(&duration_ms.to_le_bytes());
+    b.extend_from_slice(&size.0.to_le_bytes());
+    b.extend_from_slice(&size.1.to_le_bytes());
+    let mut blobs = Vec::new();
+    write_value(&mut b, &Value::Str(detail.to_owned()), &mut blobs);
+    b
+}
+
+/// PLAYER_POSITION and SEEK_COMPLETED { u64 player; u64 position_ms }.
+pub(crate) fn player_ms_body(player: crate::protocol::PlayerId, ms: u64) -> [u8; 16] {
+    let mut b = [0u8; 16];
+    b[..8].copy_from_slice(&player.0.to_le_bytes());
+    b[8..].copy_from_slice(&ms.to_le_bytes());
+    b
+}
+
+/// SESSION_ACTION { u32 action; u32 reserved; u64 at_ms }.
+pub(crate) fn session_action_body(action: crate::protocol::SessionAction) -> [u8; 16] {
+    let (raw, at) = session_action_raw(action);
+    let mut b = [0u8; 16];
+    b[..4].copy_from_slice(&raw.to_le_bytes());
+    b[8..].copy_from_slice(&at.to_le_bytes());
+    b
+}
 
 pub(crate) const TEXT_ALIGNS: &[(i64, &str)] = &[
     (TEXT_ALIGN_START, "start"),
@@ -436,6 +675,7 @@ pub(crate) const PROP_HIGH: u32 = 47;
 pub(crate) const PROP_MIN_GAP: u32 = 48;
 pub(crate) const PROP_LOW_LABEL: u32 = 49;
 pub(crate) const PROP_HIGH_LABEL: u32 = 50;
+pub(crate) const PROP_FIT: u32 = 51;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
@@ -924,6 +1164,7 @@ fn widget_kind(raw: u32) -> WidgetKind {
         KIND_NUMBER_FIELD => WidgetKind::NumberField,
         KIND_COLOR_PICKER => WidgetKind::ColorPicker,
         KIND_RANGE => WidgetKind::Range,
+        KIND_VIDEO => WidgetKind::Video,
         other => panic!("kaya: unknown widget kind {other}"),
     }
 }
@@ -980,6 +1221,7 @@ fn prop(raw: u32) -> Prop {
         PROP_MIN_GAP => Prop::MinGap,
         PROP_LOW_LABEL => Prop::LowLabel,
         PROP_HIGH_LABEL => Prop::HighLabel,
+        PROP_FIT => Prop::Fit,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -1370,6 +1612,43 @@ pub fn decode_transaction_with_blobs(
                 let count = r.u32();
                 let _reserved = r.u32();
                 TxOp::SetBadge { count }
+            }
+            TX_CREATE_PLAYER => TxOp::CreatePlayer { player: crate::protocol::PlayerId(r.u64()) },
+            TX_SET_PLAYER_PROP => {
+                let player = crate::protocol::PlayerId(r.u64());
+                let prop = player_prop(r.u32());
+                let _reserved = r.u32();
+                TxOp::SetPlayerProp { player, prop, value: r.value() }
+            }
+            TX_PLAYER_COMMAND => {
+                let player = crate::protocol::PlayerId(r.u64());
+                let raw = r.u32();
+                let _reserved = r.u32();
+                let at_ms = r.u64();
+                TxOp::PlayerCommand { player, command: player_command(raw, at_ms) }
+            }
+            TX_RELEASE_PLAYER => TxOp::ReleasePlayer { player: crate::protocol::PlayerId(r.u64()) },
+            TX_SET_VIDEO_PLAYER => {
+                let widget = WidgetId(r.u64());
+                let player = r.u64();
+                TxOp::SetVideoPlayer {
+                    widget,
+                    player: (player != 0).then_some(crate::protocol::PlayerId(player)),
+                }
+            }
+            TX_SET_SESSION => {
+                let player = r.u64();
+                let actions = r.u32();
+                let state = playback_state(r.u32());
+                TxOp::SetSession(crate::protocol::SessionSpec {
+                    player: (player != 0).then_some(crate::protocol::PlayerId(player)),
+                    actions,
+                    playback_state: state,
+                    title: media_str(r.value(), "set_session's title"),
+                    artist: media_str(r.value(), "set_session's artist"),
+                    album: media_str(r.value(), "set_session's album"),
+                    artwork: media_str(r.value(), "set_session's artwork"),
+                })
             }
             TX_SET_RICH_TEXT => {
                 let widget = WidgetId(r.u64());
@@ -3419,6 +3698,41 @@ impl Writer {
                 b.extend_from_slice(&count.to_le_bytes());
                 b.extend_from_slice(&0u32.to_le_bytes());
             }),
+            ApplyOp::CreatePlayer(player) => self.record(APPLY_CREATE_PLAYER, |b, _| {
+                b.extend_from_slice(&player.0.to_le_bytes());
+            }),
+            ApplyOp::SetPlayerProp { player, prop, value } => {
+                self.record(APPLY_SET_PLAYER_PROP, |b, blobs| {
+                    b.extend_from_slice(&player.0.to_le_bytes());
+                    b.extend_from_slice(&player_prop_raw(*prop).to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    write_value(b, value, blobs);
+                })
+            }
+            ApplyOp::PlayerCommand { player, command } => self.record(APPLY_PLAYER_COMMAND, |b, _| {
+                let (raw, at) = player_command_raw(*command);
+                b.extend_from_slice(&player.0.to_le_bytes());
+                b.extend_from_slice(&raw.to_le_bytes());
+                b.extend_from_slice(&0u32.to_le_bytes());
+                b.extend_from_slice(&at.to_le_bytes());
+            }),
+            ApplyOp::ReleasePlayer(player) => self.record(APPLY_RELEASE_PLAYER, |b, _| {
+                b.extend_from_slice(&player.0.to_le_bytes());
+            }),
+            ApplyOp::SetVideoPlayer { widget, player } => self.record(APPLY_SET_VIDEO_PLAYER, |b, _| {
+                b.extend_from_slice(&widget.0.to_le_bytes());
+                b.extend_from_slice(&player.map_or(0, |p| p.0).to_le_bytes());
+            }),
+            ApplyOp::SetSession { player, offered, playback_state, title, artist, album, artwork } => {
+                self.record(APPLY_SET_SESSION, |b, blobs| {
+                    b.extend_from_slice(&player.map_or(0, |p| p.0).to_le_bytes());
+                    b.extend_from_slice(&offered.to_le_bytes());
+                    b.extend_from_slice(&playback_state_raw(*playback_state).to_le_bytes());
+                    for s in [title, artist, album, artwork] {
+                        write_value(b, &Value::Str(s.clone()), blobs);
+                    }
+                })
+            }
             ApplyOp::ScrollToRow { id, copy, index } => self.record(APPLY_SCROLL_TO_ROW, |b, _| {
                 b.extend_from_slice(&id.0.to_le_bytes());
                 b.extend_from_slice(&copy.map_or(0, |c| c.0).to_le_bytes());
@@ -3997,6 +4311,37 @@ impl Writer {
                 b.extend_from_slice(&count.to_le_bytes());
                 b.extend_from_slice(&0u32.to_le_bytes());
             }),
+            TxOp::CreatePlayer { player } => self.record(TX_CREATE_PLAYER, |b, _| {
+                b.extend_from_slice(&player.0.to_le_bytes());
+            }),
+            TxOp::SetPlayerProp { player, prop, value } => self.record(TX_SET_PLAYER_PROP, |b, blobs| {
+                b.extend_from_slice(&player.0.to_le_bytes());
+                b.extend_from_slice(&player_prop_raw(*prop).to_le_bytes());
+                b.extend_from_slice(&0u32.to_le_bytes());
+                write_value(b, value, blobs);
+            }),
+            TxOp::PlayerCommand { player, command } => self.record(TX_PLAYER_COMMAND, |b, _| {
+                let (raw, at) = player_command_raw(*command);
+                b.extend_from_slice(&player.0.to_le_bytes());
+                b.extend_from_slice(&raw.to_le_bytes());
+                b.extend_from_slice(&0u32.to_le_bytes());
+                b.extend_from_slice(&at.to_le_bytes());
+            }),
+            TxOp::ReleasePlayer { player } => self.record(TX_RELEASE_PLAYER, |b, _| {
+                b.extend_from_slice(&player.0.to_le_bytes());
+            }),
+            TxOp::SetVideoPlayer { widget, player } => self.record(TX_SET_VIDEO_PLAYER, |b, _| {
+                b.extend_from_slice(&widget.0.to_le_bytes());
+                b.extend_from_slice(&player.map_or(0, |p| p.0).to_le_bytes());
+            }),
+            TxOp::SetSession(spec) => self.record(TX_SET_SESSION, |b, blobs| {
+                b.extend_from_slice(&spec.player.map_or(0, |p| p.0).to_le_bytes());
+                b.extend_from_slice(&spec.actions.to_le_bytes());
+                b.extend_from_slice(&playback_state_raw(spec.playback_state).to_le_bytes());
+                for s in [&spec.title, &spec.artist, &spec.album, &spec.artwork] {
+                    write_value(b, &Value::Str(s.clone()), blobs);
+                }
+            }),
             TxOp::ScrollToRow { widget, key } => self.record(TX_SCROLL_TO_ROW, |b, blobs| {
                 b.extend_from_slice(&widget.0.to_le_bytes());
                 write_value(b, key, blobs);
@@ -4218,6 +4563,7 @@ fn kind_raw(kind: WidgetKind) -> u32 {
         WidgetKind::NumberField => KIND_NUMBER_FIELD,
         WidgetKind::ColorPicker => KIND_COLOR_PICKER,
         WidgetKind::Range => KIND_RANGE,
+        WidgetKind::Video => KIND_VIDEO,
     }
 }
 
@@ -4486,6 +4832,7 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::MinGap => PROP_MIN_GAP,
         Prop::LowLabel => PROP_LOW_LABEL,
         Prop::HighLabel => PROP_HIGH_LABEL,
+        Prop::Fit => PROP_FIT,
     }
 }
 

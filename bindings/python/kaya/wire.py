@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0xee277a9499e5e52d
+SPEC_HASH = 0xfd32bf7c75c54fbb
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -51,6 +51,7 @@ KIND_SEARCH = 19
 KIND_NUMBER_FIELD = 20
 KIND_COLOR_PICKER = 21
 KIND_RANGE = 22
+KIND_VIDEO = 23
 DRAW_OP_MOVE_TO = 1
 DRAW_OP_LINE_TO = 2
 DRAW_OP_CLOSE = 3
@@ -126,6 +127,7 @@ PROP_HIGH = 47
 PROP_MIN_GAP = 48
 PROP_LOW_LABEL = 49
 PROP_HIGH_LABEL = 50
+PROP_FIT = 51
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -263,6 +265,41 @@ OCCURRENCE_BUTTON_CLICKED = 1
 OCCURRENCE_TEXT_CHANGED = 2
 OCCURRENCE_TOGGLED = 3
 OCCURRENCE_VALUE_CHANGED = 4
+PLAYER_STATE_IDLE = 0
+PLAYER_STATE_LOADING = 1
+PLAYER_STATE_READY = 2
+PLAYER_STATE_PLAYING = 3
+PLAYER_STATE_PAUSED = 4
+PLAYER_STATE_ENDED = 5
+PLAYER_STATE_FAILED = 6
+MEDIA_FAILURE_NONE = 0
+MEDIA_FAILURE_UNSUPPORTED_CODEC = 1
+MEDIA_FAILURE_UNSUPPORTED_CONTAINER = 2
+MEDIA_FAILURE_NOT_FOUND = 3
+MEDIA_FAILURE_NETWORK = 4
+MEDIA_FAILURE_DECODE_ERROR = 5
+PLAYER_COMMAND_PLAY = 1
+PLAYER_COMMAND_PAUSE = 2
+PLAYER_COMMAND_SEEK = 3
+SESSION_ACTION_PLAY = 1
+SESSION_ACTION_PAUSE = 2
+SESSION_ACTION_STOP = 3
+SESSION_ACTION_SEEK_TO = 4
+SESSION_ACTION_SEEK_FORWARD = 5
+SESSION_ACTION_SEEK_BACKWARD = 6
+SESSION_ACTION_NEXT = 7
+SESSION_ACTION_PREVIOUS = 8
+PLAYBACK_STATE_NONE = 0
+PLAYBACK_STATE_PLAYING = 1
+PLAYBACK_STATE_PAUSED = 2
+FIT_CONTAIN = 0
+FIT_COVER = 1
+FIT_FILL = 2
+PPROP_SOURCE = 1
+PPROP_SPEED = 2
+PPROP_VOLUME = 3
+PPROP_MUTED = 4
+PPROP_LOOP = 5
 COMMAND_CLEAR = 1
 COMMAND_FOCUS = 2
 COMMAND_EMOJI_PICKER = 3
@@ -329,6 +366,12 @@ TX_DISMISS_SHEET = 59
 TX_SET_SHEET_PROP = 60
 TX_SCROLL_TO_ROW = 61
 TX_SET_BADGE = 62
+TX_CREATE_PLAYER = 63
+TX_SET_PLAYER_PROP = 64
+TX_PLAYER_COMMAND = 65
+TX_RELEASE_PLAYER = 66
+TX_SET_VIDEO_PLAYER = 67
+TX_SET_SESSION = 68
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -377,6 +420,12 @@ APPLY_DISMISS_SHEET = 47
 APPLY_SET_SHEET_PROP = 48
 APPLY_SCROLL_TO_ROW = 49
 APPLY_SET_BADGE = 50
+APPLY_CREATE_PLAYER = 51
+APPLY_SET_PLAYER_PROP = 52
+APPLY_PLAYER_COMMAND = 53
+APPLY_RELEASE_PLAYER = 54
+APPLY_SET_VIDEO_PLAYER = 55
+APPLY_SET_SESSION = 56
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
@@ -415,6 +464,10 @@ OCC_FULLSCREEN_CHANGED = 35
 OCC_COLOR_CHANGED = 36
 OCC_RANGE_CHANGED = 37
 OCC_RANGE_COMMITTED = 38
+OCC_PLAYER_CHANGED = 39
+OCC_PLAYER_POSITION = 40
+OCC_SEEK_COMPLETED = 41
+OCC_SESSION_ACTION = 42
 
 
 def _pad(b: bytes) -> bytes:
@@ -745,6 +798,30 @@ def tx_scroll_to_row(widget_id: int, key: Value) -> bytes:
 def tx_set_badge(count: int) -> bytes:
     """Ask the platform to show `count` on the app's icon, 0 clearing it (docs/app-badge-plan.md). Never refused: what appears is the platform's decision (the Dock tile's label, the home screen's badge, a taskbar overlay kaya draws, a Linux dock's LauncherEntry count, the number on Android's showing notifications), and the `badge` capability says whether a number will. Last write wins."""
     return record(TX_SET_BADGE, struct.pack("<I", count) + struct.pack("<I", 0))
+
+def tx_create_player(player: int) -> bytes:
+    """Create a media player (docs/media-plan.md §2): an app-held object with no place in the layout, its id guest-chosen in its own space. It starts `idle`; a `source` write loads it. An audio-only player is the same object shown by no video view. A second create of a live id is a scene error."""
+    return record(TX_CREATE_PLAYER, struct.pack("<Q", player))
+
+def tx_set_player_prop(player: int, prop: int, value: Value) -> bytes:
+    """Write a player property (PLAYER_PROPS) once: a player is an object the app commands, so its props are written, never bound to a signal or a row. `source` is an asset name, an http(s) URL, or a picked file's absolute path; the core checks a local one exists and publishes failed(not_found) itself rather than hand a missing file to the platform (docs/media-plan.md §7a)."""
+    return record(TX_SET_PLAYER_PROP, struct.pack("<Q", player) + struct.pack("<I", prop) + struct.pack("<I", 0) + _enc.value(value))
+
+def tx_player_command(player: int, command: int, at_ms: int) -> bytes:
+    """play, pause, or seek to `at_ms` (PLAYER_COMMAND; `at_ms` is 0 for the other two). The app owns play state (docs/media-plan.md §2 rule 3): the answer is the player's own occurrences, never an echo of the command."""
+    return record(TX_PLAYER_COMMAND, struct.pack("<Q", player) + struct.pack("<I", command) + struct.pack("<I", 0) + struct.pack("<Q", at_ms))
+
+def tx_release_player(player: int) -> bytes:
+    """Stop and forget a player. A video view showing it goes blank, the session detaches it, and no occurrence of its follows. An unknown id is a scene error."""
+    return record(TX_RELEASE_PLAYER, struct.pack("<Q", player))
+
+def tx_set_video_player(widget_id: int, player: int) -> bytes:
+    """Show `player` in the video view `widget_id` (docs/media-plan.md §3); 0 shows none. A live video view only: the player is an object, not collection data."""
+    return record(TX_SET_VIDEO_PLAYER, struct.pack("<Q", widget_id) + struct.pack("<Q", player))
+
+def tx_set_session(player: int, actions: int, playback_state: int, title: Value, artist: Value, album: Value, artwork: Value) -> bytes:
+    """Declare the app's ONE media session (docs/media-plan.md §5), replacing the last declaration: the attached `player` (0 attaches none and withdraws the app from the system's controls), `actions` a mask of 1 << SESSION_ACTION for the actions the app handles itself, `playback_state` the PLAYBACK_STATE the app states while no player is attached, and the metadata as Str values, `artwork` an asset name or empty. With a player attached, play, pause and seek_to the app does not handle apply to that player."""
+    return record(TX_SET_SESSION, struct.pack("<Q", player) + struct.pack("<I", actions) + struct.pack("<I", playback_state) + _enc.value(title) + _enc.value(artist) + _enc.value(album) + _enc.value(artwork))
 
 
 def tx_set_text(widget_id: int, text: str) -> bytes:
@@ -1497,6 +1574,21 @@ def tx_bind_high_label_element(widget_id: int, level: int = 0, field: int = 0) -
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_HIGH_LABEL, SOURCE_ELEMENT, level, field))
 
 
+def tx_set_fit(widget_id: int, fit: int) -> bytes:
+    """set_property with a constant fit value (int)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_FIT, SOURCE_CONST) + _enc.value(int(fit)))
+
+
+def tx_bind_fit(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound fit value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_FIT, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_fit_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_FIT, SOURCE_ELEMENT, level, field))
+
+
 def tx_set_window_title(window: int, title: str) -> bytes:
     """set_window_prop with a constant title value (str); window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_TITLE, SOURCE_CONST) + _enc.value(title))
@@ -1867,7 +1959,7 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
     value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION):
         return kind, None, [], None
     if kind == OCC_ALERT_RESULT:
         # A request's one answer: id + the u32 code.
@@ -1916,7 +2008,7 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
         # no key path, no payload (derived from the record shapes).
         (surface_id,) = struct.unpack_from("<Q", buf, 8)
         return kind, surface_id, [], None
-    if kind in (OCC_SECTION_SELECTED,):
+    if kind in (OCC_SECTION_SELECTED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED,):
         # Surface-pair records (window, section): the SECOND id
         # keys the handler (they scope to the section); the
         # first rides as the payload.

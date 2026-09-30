@@ -1,6 +1,10 @@
 # Media: the player, the video view, the surface and the session (design pass, 2026-09-29)
 
-Status: DESIGNED 2026-09-29, unbuilt. It replaces the headless design of
+Status: DESIGNED 2026-09-29; the DEPTH slice BUILT 2026-09-30 on the mac
+(the player, the video view, the session, the capability query and the
+media_formats, media_delivery and media_session scenes; what breadth owes is
+docs/deferred.md's "BUILD — media" entry, and the one open design question
+its "RULING — which player a stamped video view shows"). It replaces the headless design of
 docs/video-editor-plan.md §2 and §3, and it answers that plan's rulings 2
 and 3 and the roadmap's audio-playback question. The five pieces of shape
 in §0 are RULED by the maintainer, and so are §8's six (2026-09-29), the
@@ -262,6 +266,18 @@ no platform routes the keys to the app.
 
 ## §6. What is measured first
 
+The mac arm's questions were measured with the depth slice
+(docs/probes/media-mac-2026-09-30.md): the picture is read by a window capture
+by id, in-process through ScreenCaptureKit, converted to sRGB and compared
+within 2 per channel, once the clip carries the sRGB transfer tag (a BT.709
+transfer reads CF4421 for C83C1E); an `.accessory` guest becomes Now Playing
+muted, and a command reaches it through the system only when sent from
+Apple-signed `/usr/bin/perl` (one sent from the guest is dropped while
+answered true), so `session_send` does that and refuses unless the system
+names the guest; and `preventsDisplaySleepDuringVideoPlayback` holds the
+display assertion exactly while playing.
+
+
 1. WinUI: whether a rounded ancestor clip applies to `MediaPlayerElement`,
    whether `PrintWindow(PW_RENDERFULLCONTENT)` includes its picture, and
    what name the Windows media flyout shows for an unpackaged process.
@@ -437,12 +453,22 @@ on Android the first-frame signal instead; on the surface, the colour read
 back as a canvas is, with a tolerance stated for video (iOS decoded C93C1E,
 GTK 2B374D for 2C3B4F). Audio items assert state, position and `ended`.
 
+**The depth's scenes read the tables this way.** A summary line per item,
+written by the guest from its readings, and `{media:<item>|<the line where it
+plays>}` in the expectation: each harness expands it to `failed <reason>,
+can_play no` where its own lane table names the item, and to the scene's text
+everywhere else, so one scene serves five lanes and the table lives with the
+platform. The suite gained `vp9_aac.mp4` (VP9 in MP4), the mac's own quiet
+case: AVFoundation reaches ready and plays its audio with no picture, and the
+decodability check fails it (measured, docs/traps.md).
+
 **Lane tables: an item a platform cannot play is a tested failure, never
 a drop.** Each lane's table names the items it expects to fail, with the
 reason, and there the leg asserts that `failed(reason)` and a false
 `can_play` instead of playback:
 
-- macOS and iOS: the four WebM files and DASH, `unsupported_container`;
+- macOS and iOS: the four WebM files and DASH, `unsupported_container`,
+  and `vp9_aac.mp4`, `unsupported_codec`;
   on the simulator also `av1_aac.mp4`, `unsupported_codec` (the one kaya
   must synthesize). The sidecar WebVTT plays, its cues drawn by kaya
   (§3).

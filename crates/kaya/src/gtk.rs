@@ -4424,6 +4424,7 @@ fn kind_registry(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<gtk4
         K::Entry => core.entries.iter().map(|w| w.clone().upcast()).collect(),
         K::Search => core.searches.iter().map(|w| w.clone().upcast()).collect(),
         K::Range => core.ranges.iter().map(|p| p.group.clone().upcast()).collect(),
+        K::Video => crate::depth_stub("media_formats"),
         K::ColorPicker => core.color_pickers.iter().map(|f| f.button.clone().upcast()).collect(),
         K::NumberField => core.number_fields.iter().map(|f| f.spin.clone().upcast()).collect(),
         K::Label => core.labels.clone(),
@@ -9532,6 +9533,7 @@ fn context_anchor_id(core: &CoreState, t: crate::harness::Target) -> u64 {
         // The harness rejects editable text before the stage sees it
         // (their native context menus are dress).
         K::Range => core.ranges[resolve(t.index, core.ranges.len())].group.clone().upcast(),
+        K::Video => crate::depth_stub("media_formats"),
         K::ColorPicker => core.color_pickers[resolve(t.index, core.color_pickers.len())]
             .button
             .clone()
@@ -12204,6 +12206,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.grids.push(grid.clone());
                     NativeWidget::Grid(grid)
                 }
+                WidgetKind::Video => crate::depth_stub("media_formats"),
                 WidgetKind::Range => {
                     let (group, low, high) = range_view::build();
                     let pair = GtkRangePair {
@@ -14134,6 +14137,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
         ApplyOp::PostNotification(spec) => post_notification(core.occurrences.clone(), spec),
         ApplyOp::CancelNotification(id) => cancel_notification(id.0),
         ApplyOp::SetBadge { count } => set_badge(count),
+        ApplyOp::CreatePlayer(_)
+        | ApplyOp::SetPlayerProp { .. }
+        | ApplyOp::PlayerCommand { .. }
+        | ApplyOp::ReleasePlayer(_)
+        | ApplyOp::SetVideoPlayer { .. }
+        | ApplyOp::SetSession { .. } => crate::depth_stub("media_formats"),
         ApplyOp::PresentAlert(spec) => {
             // The platform's REAL modal dialog: gtk::AlertDialog maps the
             // vocabulary 1:1. Answered exactly once through
@@ -21420,6 +21429,30 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
+    fn video_ink(&self, _: crate::harness::Target) -> String {
+        crate::depth_stub("media_formats")
+    }
+
+    fn ax_action(&self, _: crate::harness::Target, _: &str) -> Result<(), String> {
+        crate::depth_stub("media_formats")
+    }
+
+    fn session_send(&self, _: &str) -> Result<(), String> {
+        crate::depth_stub("media_formats")
+    }
+
+    fn now_playing(&self) -> String {
+        crate::depth_stub("media_formats")
+    }
+
+    fn display_awake(&self) -> bool {
+        crate::depth_stub("media_formats")
+    }
+
+    fn media_refusal(&self, _: &str) -> Option<String> {
+        crate::depth_stub("media_formats")
+    }
+
     /// What the session bus delivered on LauncherEntry (docs/app-badge-plan.md
     /// §4): the signal is the platform's record here, since no dock on the
     /// lane draws one.
@@ -23027,6 +23060,7 @@ fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk
         K::Search => nth!(core.searches),
         K::Range => try_resolve(target.index, core.ranges.len())
             .map(|i| core.ranges[i].group.clone().upcast()),
+        K::Video => crate::depth_stub("media_formats"),
         K::ColorPicker => try_resolve(target.index, core.color_pickers.len())
             .map(|i| core.color_pickers[i].swatch.clone().upcast()),
         K::NumberField => try_resolve(target.index, core.number_fields.len())
@@ -24142,3 +24176,7 @@ fn atspi_promoted_buttons(title: &str) -> Result<Vec<(String, bool)>, AtspiMiss>
     })
 }
 
+/// docs/media-plan.md §8 ruling 1, this backend's half of the capability query.
+pub(crate) fn can_play(_mime: &str, _codecs: &str) -> bool {
+    crate::depth_stub("media_formats")
+}

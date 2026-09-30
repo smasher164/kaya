@@ -1364,7 +1364,15 @@ in docs/deferred.md.
    waits on a prompt that never comes, and its pump starts from both app
    delegates' did-finish-launching as well as the primary root, since a
    launch for a reply opens no window. No lane can see either; six watched
-   negatives, counts printed),
+   negatives, counts printed.
+   AND THE MEDIA ARMS SINCE 2026-09-30 (docs/media-plan.md §3, §5): the
+   interpreter names no AVPlayerView, AVPlayerViewController, VideoPlayer or
+   AVKit, since each would still show the picture every media leg reads while
+   keeping keys, controls or a Now Playing session of its own; every player
+   report goes through kayaPlayerReport, which follows the session; the
+   publish sets macOS's playbackState before it can return; and
+   expect_video_ink's tolerance is the measured 2 in both harnesses that
+   read a video view. Five watched negatives, counts printed),
    `tools/check-file-modes.py` (the file-mode NUMBERS agree with the
    spec's wherever they are written down. `kaya_open_picked` takes an
    integer, crates/kaya/src/spec.rs decides what it means, and five

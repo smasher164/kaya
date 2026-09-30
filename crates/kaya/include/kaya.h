@@ -9,6 +9,13 @@
 #include <stdlib.h>
 
 /**
+ * `expect_video_ink`'s tolerance per channel, in sRGB: a video's picture
+ * is decoded and colour-managed before the window server has it (±2
+ * measured, docs/traps.md), wider than INK_TOLERANCE's display profile.
+ */
+#define VIDEO_INK_TOLERANCE 2
+
+/**
  * Occurrence record kinds (the ring, core -> guest). BUTTON_CLICKED
  * body: u64 id, u32 path_len, u32 reserved, then path_len key values.
  * path_len 0 means id is a widget id (a click on a guest-created
@@ -166,6 +173,20 @@
 #define KAYA_OCCURRENCE_RANGE_COMMITTED 38
 
 /**
+ * PLAYER_CHANGED { u64 player; u32 state; u32 failure; u64 duration_ms;
+ * u32 width; u32 height; Str detail }; PLAYER_POSITION and SEEK_COMPLETED
+ * { u64 player; u64 position_ms }; SESSION_ACTION { u32 action; u32
+ * reserved; u64 at_ms } (docs/media-plan.md §2, §5).
+ */
+#define KAYA_OCCURRENCE_PLAYER_CHANGED 39
+
+#define KAYA_OCCURRENCE_PLAYER_POSITION 40
+
+#define KAYA_OCCURRENCE_SEEK_COMPLETED 41
+
+#define KAYA_OCCURRENCE_SESSION_ACTION 42
+
+/**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
  *   CREATE_SIGNAL:     u64 signal_id, value
@@ -278,6 +299,26 @@
  * SET_BADGE: u32 count, u32 reserved (docs/app-badge-plan.md).
  */
 #define KAYA_TX_SET_BADGE 62
+
+/**
+ * The media records (docs/media-plan.md): CREATE_PLAYER and RELEASE_PLAYER
+ * u64 player; SET_PLAYER_PROP u64 player, u32 pprop, u32 reserved, value
+ * (written once, never bound); PLAYER_COMMAND u64 player, u32
+ * player_command, u32 reserved, u64 at_ms; SET_VIDEO_PLAYER u64 widget,
+ * u64 player (0 none); SET_SESSION u64 player, u32 actions mask, u32
+ * playback_state, then title, artist, album and artwork as Str values.
+ */
+#define KAYA_TX_CREATE_PLAYER 63
+
+#define KAYA_TX_SET_PLAYER_PROP 64
+
+#define KAYA_TX_PLAYER_COMMAND 65
+
+#define KAYA_TX_RELEASE_PLAYER 66
+
+#define KAYA_TX_SET_VIDEO_PLAYER 67
+
+#define KAYA_TX_SET_SESSION 68
 
 #define KAYA_TX_ADD_SECTION 25
 
@@ -616,6 +657,23 @@
  */
 #define KAYA_APPLY_SET_BADGE 50
 
+/**
+ * The media applies, the tx layouts with SET_PLAYER_PROP's source
+ * RESOLVED to a URL string and SET_SESSION carrying the offered mask the
+ * core decided and the artwork as a file:// URL (docs/media-plan.md §5).
+ */
+#define KAYA_APPLY_CREATE_PLAYER 51
+
+#define KAYA_APPLY_SET_PLAYER_PROP 52
+
+#define KAYA_APPLY_PLAYER_COMMAND 53
+
+#define KAYA_APPLY_RELEASE_PLAYER 54
+
+#define KAYA_APPLY_SET_VIDEO_PLAYER 55
+
+#define KAYA_APPLY_SET_SESSION 56
+
 #define KAYA_APPLY_ADD_SECTION 15
 
 #define KAYA_APPLY_SELECT_SECTION 16
@@ -813,6 +871,8 @@
 
 #define KAYA_KIND_RANGE 22
 
+#define KAYA_KIND_VIDEO 23
+
 /**
  * Property keys.
  */
@@ -971,6 +1031,11 @@
 #define KAYA_PROP_LOW_LABEL 49
 
 #define KAYA_PROP_HIGH_LABEL 50
+
+/**
+ * A video view's fit, a KAYA_FIT_* (docs/media-plan.md §3).
+ */
+#define KAYA_PROP_FIT 51
 
 /**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
@@ -1367,6 +1432,89 @@
 #define KAYA_EDIT_SOURCE_DROP 4
 
 /**
+ * The media vocabularies (docs/media-plan.md): player properties, what a
+ * player reads, why it failed, the commands, the session's actions (a
+ * session's mask is 1 << action) and stated playback, and a view's fit.
+ */
+#define KAYA_PPROP_SOURCE 1
+
+#define KAYA_PPROP_SPEED 2
+
+#define KAYA_PPROP_VOLUME 3
+
+#define KAYA_PPROP_MUTED 4
+
+#define KAYA_PPROP_LOOP 5
+
+#define KAYA_PLAYER_STATE_IDLE 0
+
+#define KAYA_PLAYER_STATE_LOADING 1
+
+#define KAYA_PLAYER_STATE_READY 2
+
+#define KAYA_PLAYER_STATE_PLAYING 3
+
+#define KAYA_PLAYER_STATE_PAUSED 4
+
+#define KAYA_PLAYER_STATE_ENDED 5
+
+#define KAYA_PLAYER_STATE_FAILED 6
+
+#define KAYA_MEDIA_FAILURE_NONE 0
+
+#define KAYA_MEDIA_FAILURE_UNSUPPORTED_CODEC 1
+
+#define KAYA_MEDIA_FAILURE_UNSUPPORTED_CONTAINER 2
+
+#define KAYA_MEDIA_FAILURE_NOT_FOUND 3
+
+#define KAYA_MEDIA_FAILURE_NETWORK 4
+
+#define KAYA_MEDIA_FAILURE_DECODE_ERROR 5
+
+#define KAYA_PLAYER_COMMAND_PLAY 1
+
+#define KAYA_PLAYER_COMMAND_PAUSE 2
+
+#define KAYA_PLAYER_COMMAND_SEEK 3
+
+#define KAYA_SESSION_ACTION_PLAY 1
+
+#define KAYA_SESSION_ACTION_PAUSE 2
+
+#define KAYA_SESSION_ACTION_STOP 3
+
+#define KAYA_SESSION_ACTION_SEEK_TO 4
+
+#define KAYA_SESSION_ACTION_SEEK_FORWARD 5
+
+#define KAYA_SESSION_ACTION_SEEK_BACKWARD 6
+
+#define KAYA_SESSION_ACTION_NEXT 7
+
+#define KAYA_SESSION_ACTION_PREVIOUS 8
+
+#define KAYA_PLAYBACK_STATE_NONE 0
+
+#define KAYA_PLAYBACK_STATE_PLAYING 1
+
+#define KAYA_PLAYBACK_STATE_PAUSED 2
+
+#define KAYA_FIT_CONTAIN 0
+
+#define KAYA_FIT_COVER 1
+
+#define KAYA_FIT_FILL 2
+
+/**
+ * How often a playing player's position ticks, and how long a source may
+ * load before the core fails it (crate::media).
+ */
+#define KAYA_MEDIA_POSITION_TICK_MS 250
+
+#define KAYA_MEDIA_LOADING_CEILING_MS 20000
+
+/**
  * set_property sources. SOURCE_ELEMENT is valid only inside a template.
  */
 #define KAYA_SOURCE_CONST 0
@@ -1616,6 +1764,35 @@ typedef struct KayaHostApi {
    */
   double (*range_clamp)(double, double, double, double, uint8_t, double, double);
   void (*emit_range)(const uint8_t*, uintptr_t, double, double, uint8_t);
+  /**
+   * docs/media-plan.md §2: a player's reports, through the core's state
+   * machine; each answers the player's state after it.
+   */
+  uint32_t (*player_loaded)(uint64_t,
+                            uint64_t,
+                            uint32_t,
+                            uint32_t,
+                            uint8_t,
+                            const uint8_t*,
+                            uintptr_t);
+  uint32_t (*player_rate)(uint64_t, uint8_t);
+  uint32_t (*player_ended)(uint64_t);
+  uint32_t (*player_failed)(uint64_t,
+                            const uint8_t*,
+                            uintptr_t,
+                            int64_t,
+                            int64_t,
+                            const uint8_t*,
+                            uintptr_t);
+  uint32_t (*player_position)(uint64_t, uint64_t);
+  uint32_t (*player_seeked)(uint64_t, uint64_t);
+  uint32_t (*player_overdue)(uint64_t);
+  /**
+   * docs/media-plan.md §5: the core's route for a remote action, and the
+   * system playback state to publish after every report.
+   */
+  uint32_t (*session_action)(uint32_t, uint64_t);
+  uint32_t (*session_state)(void);
   const uint8_t *(*blob_data)(uint64_t, uintptr_t*);
   uint64_t (*blob_count)(void);
   /**
@@ -2667,6 +2844,99 @@ void kaya_emit_range(const uint8_t *tag,
                      double low,
                      double high,
                      uint8_t committed);
+
+/**
+ * Presentation side: the player's item opened — its duration, its
+ * picture's size (0x0 for audio), and whether the backend's decodability
+ * check found a track the platform cannot decode, with that check's own
+ * sentence (docs/media-plan.md §7a). Answers the player's state after.
+ *
+ * # Safety
+ * `detail` must describe `detail_len` readable UTF-8 bytes, or be NULL.
+ */
+uint32_t kaya_player_loaded(uint64_t player,
+                            uint64_t duration_ms,
+                            uint32_t width,
+                            uint32_t height,
+                            uint8_t undecodable,
+                            const uint8_t *detail,
+                            uintptr_t detail_len);
+
+/**
+ * Presentation side: the platform started (`playing` 1) or stopped
+ * advancing the player's clock.
+ */
+uint32_t kaya_player_rate(uint64_t player, uint8_t playing);
+
+/**
+ * Presentation side: the player's item played to its end.
+ */
+uint32_t kaya_player_ended(uint64_t player);
+
+/**
+ * Presentation side: the platform's error, as its domain and codes; the
+ * core maps them to the closed reason (crate::media::failure_reason).
+ *
+ * # Safety
+ * `domain` and `detail` must each describe readable UTF-8 bytes of their
+ * lengths, or be NULL with length 0.
+ */
+uint32_t kaya_player_failed(uint64_t player,
+                            const uint8_t *domain,
+                            uintptr_t domain_len,
+                            int64_t code,
+                            int64_t underlying,
+                            const uint8_t *detail,
+                            uintptr_t detail_len);
+
+/**
+ * Presentation side: the playhead, every KAYA_MEDIA_POSITION_TICK_MS
+ * while playing and once when it stops.
+ */
+uint32_t kaya_player_position(uint64_t player, uint64_t position_ms);
+
+/**
+ * Presentation side: a seek landed at `position_ms`.
+ */
+uint32_t kaya_player_seeked(uint64_t player, uint64_t position_ms);
+
+/**
+ * Presentation side: KAYA_MEDIA_LOADING_CEILING_MS passed since the
+ * backend was handed the player's source.
+ */
+uint32_t kaya_player_overdue(uint64_t player);
+
+/**
+ * Presentation side: the system's media controls sent a SESSION_ACTION
+ * (`at_ms` for seek_to). THE CORE ROUTES IT (docs/media-plan.md §5): 0
+ * the app handles it and has been told, 1 play, 2 pause and 3 seek to
+ * `at_ms` on the attached player, 5 play the attached player from the
+ * start, 4 not offered and dropped.
+ */
+uint32_t kaya_session_action(uint32_t action, uint64_t at_ms);
+
+/**
+ * Presentation side: what the system's playback state reads now — the
+ * attached player's, or what the app stated: 0 stopped, 1 playing, 2
+ * paused. The backend sets it after every player report (macOS routes no
+ * media key to an app that does not, docs/media-plan.md §5).
+ */
+uint32_t kaya_session_state(void);
+
+/**
+ * App side: whether this platform plays `mime` with `codecs` (an RFC 6381
+ * list; empty for none) — true exactly when such a source would not fail
+ * as unsupported_codec or unsupported_container (docs/media-plan.md §8
+ * ruling 1).
+ *
+ * # Safety
+ * `mime` and `codecs` must describe readable UTF-8 bytes of their
+ * lengths, or be NULL with length 0.
+ */
+uint8_t kaya_can_play(const uint8_t *mime,
+                      uintptr_t mime_len,
+                      const uint8_t *codecs,
+                      uintptr_t codecs_len);
 
 /**
  * Presentation side: the field SUBMITTED (docs/submit-plan.md S1) — `tag`

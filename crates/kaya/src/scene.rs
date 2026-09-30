@@ -648,6 +648,14 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         TxOp::ShowNotification(_) => UndoVerdict::Refused("show_notification"),
         TxOp::CancelNotification(_) => UndoVerdict::Refused("cancel_notification"),
         TxOp::SetBadge { .. } => UndoVerdict::Refused("set_badge"),
+        // A player and the session are objects the app commands, not
+        // state the ledger can invert (docs/media-plan.md §2 rule 3).
+        TxOp::CreatePlayer { .. } => UndoVerdict::Refused("create_player"),
+        TxOp::SetPlayerProp { .. } => UndoVerdict::Refused("set_player_prop"),
+        TxOp::PlayerCommand { .. } => UndoVerdict::Refused("player_command"),
+        TxOp::ReleasePlayer { .. } => UndoVerdict::Refused("release_player"),
+        TxOp::SetVideoPlayer { .. } => UndoVerdict::Refused("set_video_player"),
+        TxOp::SetSession(_) => UndoVerdict::Refused("set_session"),
         TxOp::DeclareLinkRoute { .. } => UndoVerdict::Refused("declare_link_route"),
         TxOp::ShowFileDialog(_) => UndoVerdict::Refused("show_file_dialog"),
         TxOp::ShowSaveDialog(_) => UndoVerdict::Refused("show_save_dialog"),
@@ -913,6 +921,9 @@ pub(crate) struct Scene {
     /// redraw one after its track was already known. Drained by the
     /// caller of [`Scene::apply`], because a scene owns no sink.
     asks: Vec<Occurrence>,
+    /// Every player and the one session (docs/media-plan.md): their
+    /// occurrences leave through `asks`, the core's own outbox.
+    media: crate::media::Media,
     when_sites: HashMap<u64, WhenSite>,
     when_by_signal: HashMap<SignalId, Vec<u64>>,
     /// Every live surface that has a mounted root, and WHICH widget
@@ -1074,6 +1085,8 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         Prop::Time | Prop::MinuteStep => matches!(kind, WidgetKind::TimePicker),
         // docs/color-picker-plan.md §2.
         Prop::Color | Prop::Alpha => matches!(kind, WidgetKind::ColorPicker),
+        // docs/media-plan.md §3.
+        Prop::Fit => matches!(kind, WidgetKind::Video),
         Prop::Indeterminate => matches!(kind, WidgetKind::Progress),
         Prop::Source => matches!(kind, WidgetKind::Image),
         // Layout weight is kind-agnostic: any child of a row/column may
@@ -1666,6 +1679,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::MaxLines => ValueType::F64,
         Prop::MaxWidth | Prop::MaxHeight => ValueType::F64,
         Prop::Axis => ValueType::I64,
+        Prop::Fit => ValueType::I64,
         Prop::Role => ValueType::I64,
         Prop::Symbol => ValueType::I64,
         Prop::Indeterminate | Prop::Fill | Prop::Wrap | Prop::Rich | Prop::Submits => ValueType::Bool,
@@ -2445,6 +2459,12 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
         assert!(
             (1..=5).contains(tint),
             "kaya: filled takes a tint (accent=1, success=2, warning=3, critical=4, neutral=5), got {tint}"
+        );
+    }
+    if let (Prop::Fit, Value::I64(fit)) = (prop, value) {
+        assert!(
+            crate::wire::vocab_name(crate::wire::FITS, *fit).is_some(),
+            "kaya: fit is contain (0), cover (1) or fill (2), got {fit}"
         );
     }
     // The axis enum's two values, nothing else: horizontal 0,
@@ -3331,6 +3351,31 @@ impl Scene {
                 TxOp::CancelNotification(id) => {
                     out.push(ApplyOp::CancelNotification(id));
                 }
+                TxOp::CreatePlayer { player } => out.push(self.media.create(player)),
+                TxOp::SetPlayerProp { player, prop, value } => {
+                    self.media.set_prop(player, prop, value, &mut out, &mut self.asks)
+                }
+                TxOp::PlayerCommand { player, command } => self.media.command(player, command, &mut out),
+                TxOp::ReleasePlayer { player } => self.media.release(player, &mut out),
+                TxOp::SetVideoPlayer { widget, player } => {
+                    let kind = self.widgets.get(&widget).copied();
+                    assert!(
+                        kind == Some(WidgetKind::Video),
+                        "kaya: set_video_player names widget {} ({kind:?}), which is not a live \
+                         video view — a player is shown by a video view (docs/media-plan.md §3)",
+                        widget.0
+                    );
+                    if let Some(player) = player {
+                        assert!(
+                            self.media.is_live(player),
+                            "kaya: set_video_player shows player {}, which is not live — \
+                             create_player first",
+                            player.0
+                        );
+                    }
+                    out.push(ApplyOp::SetVideoPlayer { widget, player });
+                }
+                TxOp::SetSession(spec) => self.media.set_session(spec, &mut out),
                 TxOp::DeclareLinkRoute { route, pattern } => {
                     // NOTHING REACHES THE BACKENDS: the route table is the
                     // core's, and the platform arms hand it URLs
@@ -8558,6 +8603,25 @@ impl Scene {
     }
 
     /// Draw requests a transaction produced, taken by whoever applied it.
+    /// A backend's report about one player, through the core's state
+    /// machine: what the app hears, and the player's state after.
+    pub(crate) fn media_report(
+        &mut self,
+        player: crate::protocol::PlayerId,
+        report: crate::media::Report,
+    ) -> (Vec<Occurrence>, Option<crate::protocol::PlayerState>) {
+        let published = self.media.report(player, report);
+        (published, self.media.state(player))
+    }
+
+    pub(crate) fn media_route(&self, action: crate::protocol::SessionAction) -> crate::media::Route {
+        self.media.route(action)
+    }
+
+    pub(crate) fn media_system_state(&self) -> u32 {
+        self.media.system_state()
+    }
+
     pub(crate) fn take_asks(&mut self) -> Vec<Occurrence> {
         std::mem::take(&mut self.asks)
     }

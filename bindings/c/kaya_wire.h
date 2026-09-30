@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0xee277a9499e5e52dULL
+#define KAYA_SPEC_HASH 0xfd32bf7c75c54fbbULL
 
 
 /* Create a signal holding `initial`. */
@@ -765,6 +765,61 @@ static inline void kaya_tx_set_badge(KayaTx *tx, uint32_t count) {
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_BADGE);
     kaya_wire_u32(tx, count);
     kaya_wire_u32(tx, 0);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Create a media player (docs/media-plan.md §2): an app-held object with no place in the layout, its id guest-chosen in its own space. It starts `idle`; a `source` write loads it. An audio-only player is the same object shown by no video view. A second create of a live id is a scene error. */
+static inline void kaya_tx_create_player(KayaTx *tx, uint64_t player) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_CREATE_PLAYER);
+    kaya_wire_u64(tx, player);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Write a player property (PLAYER_PROPS) once: a player is an object the app commands, so its props are written, never bound to a signal or a row. `source` is an asset name, an http(s) URL, or a picked file's absolute path; the core checks a local one exists and publishes failed(not_found) itself rather than hand a missing file to the platform (docs/media-plan.md §7a). */
+static inline void kaya_tx_set_player_prop(KayaTx *tx, uint64_t player, uint32_t prop, KayaVal value) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PLAYER_PROP);
+    kaya_wire_u64(tx, player);
+    kaya_wire_u32(tx, prop);
+    kaya_wire_u32(tx, 0);
+    kaya_wire_value(tx, value);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* play, pause, or seek to `at_ms` (PLAYER_COMMAND; `at_ms` is 0 for the other two). The app owns play state (docs/media-plan.md §2 rule 3): the answer is the player's own occurrences, never an echo of the command. */
+static inline void kaya_tx_player_command(KayaTx *tx, uint64_t player, uint32_t command, uint64_t at_ms) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_PLAYER_COMMAND);
+    kaya_wire_u64(tx, player);
+    kaya_wire_u32(tx, command);
+    kaya_wire_u32(tx, 0);
+    kaya_wire_u64(tx, at_ms);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Stop and forget a player. A video view showing it goes blank, the session detaches it, and no occurrence of its follows. An unknown id is a scene error. */
+static inline void kaya_tx_release_player(KayaTx *tx, uint64_t player) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_RELEASE_PLAYER);
+    kaya_wire_u64(tx, player);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Show `player` in the video view `widget_id` (docs/media-plan.md §3); 0 shows none. A live video view only: the player is an object, not collection data. */
+static inline void kaya_tx_set_video_player(KayaTx *tx, uint64_t widget_id, uint64_t player) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_VIDEO_PLAYER);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u64(tx, player);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Declare the app's ONE media session (docs/media-plan.md §5), replacing the last declaration: the attached `player` (0 attaches none and withdraws the app from the system's controls), `actions` a mask of 1 << SESSION_ACTION for the actions the app handles itself, `playback_state` the PLAYBACK_STATE the app states while no player is attached, and the metadata as Str values, `artwork` an asset name or empty. With a player attached, play, pause and seek_to the app does not handle apply to that player. */
+static inline void kaya_tx_set_session(KayaTx *tx, uint64_t player, uint32_t actions, uint32_t playback_state, KayaVal title, KayaVal artist, KayaVal album, KayaVal artwork) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_SESSION);
+    kaya_wire_u64(tx, player);
+    kaya_wire_u32(tx, actions);
+    kaya_wire_u32(tx, playback_state);
+    kaya_wire_value(tx, title);
+    kaya_wire_value(tx, artist);
+    kaya_wire_value(tx, album);
+    kaya_wire_value(tx, artwork);
     kaya_wire_end(tx, kaya_at);
 }
 
@@ -2400,6 +2455,38 @@ static inline void kaya_tx_bind_high_label_element(KayaTx *tx, uint64_t widget_i
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_HIGH_LABEL);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a constant fit value. */
+static inline void kaya_tx_set_fit(KayaTx *tx, uint64_t widget_id, int64_t fit) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_FIT);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_i64(fit));
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a signal-bound fit value. */
+static inline void kaya_tx_bind_fit(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_FIT);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_fit_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_FIT);
     kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
     kaya_wire_u32(tx, level);
     kaya_wire_u32(tx, field);

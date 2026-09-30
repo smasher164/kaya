@@ -118,6 +118,14 @@ pub const KAYA_OCCURRENCE_COLOR_CHANGED: u16 = 36;
 /// (docs/range-plan.md §2).
 pub const KAYA_OCCURRENCE_RANGE_CHANGED: u16 = 37;
 pub const KAYA_OCCURRENCE_RANGE_COMMITTED: u16 = 38;
+/// PLAYER_CHANGED { u64 player; u32 state; u32 failure; u64 duration_ms;
+/// u32 width; u32 height; Str detail }; PLAYER_POSITION and SEEK_COMPLETED
+/// { u64 player; u64 position_ms }; SESSION_ACTION { u32 action; u32
+/// reserved; u64 at_ms } (docs/media-plan.md §2, §5).
+pub const KAYA_OCCURRENCE_PLAYER_CHANGED: u16 = 39;
+pub const KAYA_OCCURRENCE_PLAYER_POSITION: u16 = 40;
+pub const KAYA_OCCURRENCE_SEEK_COMPLETED: u16 = 41;
+pub const KAYA_OCCURRENCE_SESSION_ACTION: u16 = 42;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -137,6 +145,10 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_COLOR_CHANGED == ring::REC_COLOR_CHANGED
         && KAYA_OCCURRENCE_RANGE_CHANGED == ring::REC_RANGE_CHANGED
         && KAYA_OCCURRENCE_RANGE_COMMITTED == ring::REC_RANGE_COMMITTED
+        && KAYA_OCCURRENCE_PLAYER_CHANGED == ring::REC_PLAYER_CHANGED
+        && KAYA_OCCURRENCE_PLAYER_POSITION == ring::REC_PLAYER_POSITION
+        && KAYA_OCCURRENCE_SEEK_COMPLETED == ring::REC_SEEK_COMPLETED
+        && KAYA_OCCURRENCE_SESSION_ACTION == ring::REC_SESSION_ACTION
         && KAYA_OCCURRENCE_SECTION_SELECTED == ring::REC_SECTION_SELECTED
         && KAYA_OCCURRENCE_MENU_ACTIVATED == ring::REC_MENU_ACTIVATED
         && KAYA_OCCURRENCE_MENU_TOGGLED == ring::REC_MENU_TOGGLED
@@ -233,6 +245,18 @@ pub const KAYA_TX_SET_SHEET_PROP: u16 = 60;
 pub const KAYA_TX_SCROLL_TO_ROW: u16 = 61;
 /// SET_BADGE: u32 count, u32 reserved (docs/app-badge-plan.md).
 pub const KAYA_TX_SET_BADGE: u16 = 62;
+/// The media records (docs/media-plan.md): CREATE_PLAYER and RELEASE_PLAYER
+/// u64 player; SET_PLAYER_PROP u64 player, u32 pprop, u32 reserved, value
+/// (written once, never bound); PLAYER_COMMAND u64 player, u32
+/// player_command, u32 reserved, u64 at_ms; SET_VIDEO_PLAYER u64 widget,
+/// u64 player (0 none); SET_SESSION u64 player, u32 actions mask, u32
+/// playback_state, then title, artist, album and artwork as Str values.
+pub const KAYA_TX_CREATE_PLAYER: u16 = 63;
+pub const KAYA_TX_SET_PLAYER_PROP: u16 = 64;
+pub const KAYA_TX_PLAYER_COMMAND: u16 = 65;
+pub const KAYA_TX_RELEASE_PLAYER: u16 = 66;
+pub const KAYA_TX_SET_VIDEO_PLAYER: u16 = 67;
+pub const KAYA_TX_SET_SESSION: u16 = 68;
 pub const KAYA_TX_ADD_SECTION: u16 = 25;
 pub const KAYA_TX_SELECT_SECTION: u16 = 26;
 pub const KAYA_TX_SET_SECTION_PROP: u16 = 27;
@@ -538,6 +562,12 @@ const _: () = assert!(
         && KAYA_TX_SET_SHEET_PROP == wire::TX_SET_SHEET_PROP
         && KAYA_TX_SCROLL_TO_ROW == wire::TX_SCROLL_TO_ROW
         && KAYA_TX_SET_BADGE == wire::TX_SET_BADGE
+        && KAYA_TX_CREATE_PLAYER == wire::TX_CREATE_PLAYER
+        && KAYA_TX_SET_PLAYER_PROP == wire::TX_SET_PLAYER_PROP
+        && KAYA_TX_PLAYER_COMMAND == wire::TX_PLAYER_COMMAND
+        && KAYA_TX_RELEASE_PLAYER == wire::TX_RELEASE_PLAYER
+        && KAYA_TX_SET_VIDEO_PLAYER == wire::TX_SET_VIDEO_PLAYER
+        && KAYA_TX_SET_SESSION == wire::TX_SET_SESSION
         && KAYA_TX_ADD_SECTION == wire::TX_ADD_SECTION
         && KAYA_TX_SELECT_SECTION == wire::TX_SELECT_SECTION
         && KAYA_TX_SET_SECTION_PROP == wire::TX_SET_SECTION_PROP
@@ -602,6 +632,15 @@ pub const KAYA_APPLY_SET_SHEET_PROP: u16 = 48;
 pub const KAYA_APPLY_SCROLL_TO_ROW: u16 = 49;
 /// SET_BADGE: u32 count, u32 reserved (docs/app-badge-plan.md §2).
 pub const KAYA_APPLY_SET_BADGE: u16 = 50;
+/// The media applies, the tx layouts with SET_PLAYER_PROP's source
+/// RESOLVED to a URL string and SET_SESSION carrying the offered mask the
+/// core decided and the artwork as a file:// URL (docs/media-plan.md §5).
+pub const KAYA_APPLY_CREATE_PLAYER: u16 = 51;
+pub const KAYA_APPLY_SET_PLAYER_PROP: u16 = 52;
+pub const KAYA_APPLY_PLAYER_COMMAND: u16 = 53;
+pub const KAYA_APPLY_RELEASE_PLAYER: u16 = 54;
+pub const KAYA_APPLY_SET_VIDEO_PLAYER: u16 = 55;
+pub const KAYA_APPLY_SET_SESSION: u16 = 56;
 pub const KAYA_APPLY_ADD_SECTION: u16 = 15;
 pub const KAYA_APPLY_SELECT_SECTION: u16 = 16;
 pub const KAYA_APPLY_SET_SECTION_PROP: u16 = 17;
@@ -724,6 +763,12 @@ const _: () = assert!(
         && KAYA_APPLY_SET_SHEET_PROP == wire::APPLY_SET_SHEET_PROP
         && KAYA_APPLY_SCROLL_TO_ROW == wire::APPLY_SCROLL_TO_ROW
         && KAYA_APPLY_SET_BADGE == wire::APPLY_SET_BADGE
+        && KAYA_APPLY_CREATE_PLAYER == wire::APPLY_CREATE_PLAYER
+        && KAYA_APPLY_SET_PLAYER_PROP == wire::APPLY_SET_PLAYER_PROP
+        && KAYA_APPLY_PLAYER_COMMAND == wire::APPLY_PLAYER_COMMAND
+        && KAYA_APPLY_RELEASE_PLAYER == wire::APPLY_RELEASE_PLAYER
+        && KAYA_APPLY_SET_VIDEO_PLAYER == wire::APPLY_SET_VIDEO_PLAYER
+        && KAYA_APPLY_SET_SESSION == wire::APPLY_SET_SESSION
         && KAYA_APPLY_ADD_SECTION == wire::APPLY_ADD_SECTION
         && KAYA_APPLY_SELECT_SECTION == wire::APPLY_SELECT_SECTION
         && KAYA_APPLY_SET_SECTION_PROP == wire::APPLY_SET_SECTION_PROP
@@ -784,6 +829,7 @@ pub const KAYA_KIND_SEARCH: u32 = 19;
 pub const KAYA_KIND_NUMBER_FIELD: u32 = 20;
 pub const KAYA_KIND_COLOR_PICKER: u32 = 21;
 pub const KAYA_KIND_RANGE: u32 = 22;
+pub const KAYA_KIND_VIDEO: u32 = 23;
 const _: () = assert!(
     KAYA_KIND_COLUMN == wire::KIND_COLUMN
         && KAYA_KIND_BUTTON == wire::KIND_BUTTON
@@ -807,6 +853,7 @@ const _: () = assert!(
         && KAYA_KIND_NUMBER_FIELD == wire::KIND_NUMBER_FIELD
         && KAYA_KIND_COLOR_PICKER == wire::KIND_COLOR_PICKER
         && KAYA_KIND_RANGE == wire::KIND_RANGE
+        && KAYA_KIND_VIDEO == wire::KIND_VIDEO
 );
 // Completeness, not just agreement: a value pin cannot see a FORGOTTEN
 // export (docs/traps.md, "A value pin cannot see a FORGOTTEN sibling").
@@ -824,7 +871,7 @@ const _: () = {
         n
     };
     assert!(
-        kinds == 22,
+        kinds == 23,
         "the spec kind enum grew: export the new KAYA_KIND_* above, extend the pin, and bump          this count"
     );
 };
@@ -924,6 +971,8 @@ pub const KAYA_PROP_HIGH: u32 = 47;
 pub const KAYA_PROP_MIN_GAP: u32 = 48;
 pub const KAYA_PROP_LOW_LABEL: u32 = 49;
 pub const KAYA_PROP_HIGH_LABEL: u32 = 50;
+/// A video view's fit, a KAYA_FIT_* (docs/media-plan.md §3).
+pub const KAYA_PROP_FIT: u32 = 51;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -1089,7 +1138,7 @@ const _: () = assert!(
 // Completeness for the occurrence exports (docs/traps.md): a new spec
 // occurrence trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 38,
+    crate::spec::SPEC.occurrence.len() == 42,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -1170,6 +1219,7 @@ const _: () = assert!(
         && KAYA_PROP_MIN_GAP == wire::PROP_MIN_GAP
         && KAYA_PROP_LOW_LABEL == wire::PROP_LOW_LABEL
         && KAYA_PROP_HIGH_LABEL == wire::PROP_HIGH_LABEL
+        && KAYA_PROP_FIT == wire::PROP_FIT
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -1443,10 +1493,127 @@ const _: () = {
          pin, and bump this count"
     );
 };
+/// The media vocabularies (docs/media-plan.md): player properties, what a
+/// player reads, why it failed, the commands, the session's actions (a
+/// session's mask is 1 << action) and stated playback, and a view's fit.
+pub const KAYA_PPROP_SOURCE: u32 = 1;
+pub const KAYA_PPROP_SPEED: u32 = 2;
+pub const KAYA_PPROP_VOLUME: u32 = 3;
+pub const KAYA_PPROP_MUTED: u32 = 4;
+pub const KAYA_PPROP_LOOP: u32 = 5;
+pub const KAYA_PLAYER_STATE_IDLE: u32 = 0;
+pub const KAYA_PLAYER_STATE_LOADING: u32 = 1;
+pub const KAYA_PLAYER_STATE_READY: u32 = 2;
+pub const KAYA_PLAYER_STATE_PLAYING: u32 = 3;
+pub const KAYA_PLAYER_STATE_PAUSED: u32 = 4;
+pub const KAYA_PLAYER_STATE_ENDED: u32 = 5;
+pub const KAYA_PLAYER_STATE_FAILED: u32 = 6;
+pub const KAYA_MEDIA_FAILURE_NONE: u32 = 0;
+pub const KAYA_MEDIA_FAILURE_UNSUPPORTED_CODEC: u32 = 1;
+pub const KAYA_MEDIA_FAILURE_UNSUPPORTED_CONTAINER: u32 = 2;
+pub const KAYA_MEDIA_FAILURE_NOT_FOUND: u32 = 3;
+pub const KAYA_MEDIA_FAILURE_NETWORK: u32 = 4;
+pub const KAYA_MEDIA_FAILURE_DECODE_ERROR: u32 = 5;
+pub const KAYA_PLAYER_COMMAND_PLAY: u32 = 1;
+pub const KAYA_PLAYER_COMMAND_PAUSE: u32 = 2;
+pub const KAYA_PLAYER_COMMAND_SEEK: u32 = 3;
+pub const KAYA_SESSION_ACTION_PLAY: u32 = 1;
+pub const KAYA_SESSION_ACTION_PAUSE: u32 = 2;
+pub const KAYA_SESSION_ACTION_STOP: u32 = 3;
+pub const KAYA_SESSION_ACTION_SEEK_TO: u32 = 4;
+pub const KAYA_SESSION_ACTION_SEEK_FORWARD: u32 = 5;
+pub const KAYA_SESSION_ACTION_SEEK_BACKWARD: u32 = 6;
+pub const KAYA_SESSION_ACTION_NEXT: u32 = 7;
+pub const KAYA_SESSION_ACTION_PREVIOUS: u32 = 8;
+pub const KAYA_PLAYBACK_STATE_NONE: u32 = 0;
+pub const KAYA_PLAYBACK_STATE_PLAYING: u32 = 1;
+pub const KAYA_PLAYBACK_STATE_PAUSED: u32 = 2;
+pub const KAYA_FIT_CONTAIN: u32 = 0;
+pub const KAYA_FIT_COVER: u32 = 1;
+pub const KAYA_FIT_FILL: u32 = 2;
+/// How often a playing player's position ticks, and how long a source may
+/// load before the core fails it (crate::media).
+pub const KAYA_MEDIA_POSITION_TICK_MS: u64 = 250;
+pub const KAYA_MEDIA_LOADING_CEILING_MS: u64 = 20_000;
+const _: () = assert!(
+    KAYA_MEDIA_POSITION_TICK_MS == crate::media::POSITION_TICK_MS
+        && KAYA_MEDIA_LOADING_CEILING_MS == crate::media::LOADING_CEILING_MS
+);
+const fn vocab_is(table: &[(i64, &str)], name: &str, value: u32) -> bool {
+    let mut i = 0;
+    while i < table.len() {
+        if konst_eq(table[i].1, name) {
+            return table[i].0 == value as i64;
+        }
+        i += 1;
+    }
+    false
+}
+const _: () = assert!(
+    vocab_is(wire::PPROPS, "source", KAYA_PPROP_SOURCE)
+        && vocab_is(wire::PPROPS, "speed", KAYA_PPROP_SPEED)
+        && vocab_is(wire::PPROPS, "volume", KAYA_PPROP_VOLUME)
+        && vocab_is(wire::PPROPS, "muted", KAYA_PPROP_MUTED)
+        && vocab_is(wire::PPROPS, "loop", KAYA_PPROP_LOOP)
+        && vocab_is(wire::PLAYER_STATES, "idle", KAYA_PLAYER_STATE_IDLE)
+        && vocab_is(wire::PLAYER_STATES, "loading", KAYA_PLAYER_STATE_LOADING)
+        && vocab_is(wire::PLAYER_STATES, "ready", KAYA_PLAYER_STATE_READY)
+        && vocab_is(wire::PLAYER_STATES, "playing", KAYA_PLAYER_STATE_PLAYING)
+        && vocab_is(wire::PLAYER_STATES, "paused", KAYA_PLAYER_STATE_PAUSED)
+        && vocab_is(wire::PLAYER_STATES, "ended", KAYA_PLAYER_STATE_ENDED)
+        && vocab_is(wire::PLAYER_STATES, "failed", KAYA_PLAYER_STATE_FAILED)
+        && vocab_is(wire::MEDIA_FAILURES, "none", KAYA_MEDIA_FAILURE_NONE)
+        && vocab_is(wire::MEDIA_FAILURES, "unsupported_codec", KAYA_MEDIA_FAILURE_UNSUPPORTED_CODEC)
+        && vocab_is(wire::MEDIA_FAILURES, "unsupported_container", KAYA_MEDIA_FAILURE_UNSUPPORTED_CONTAINER)
+        && vocab_is(wire::MEDIA_FAILURES, "not_found", KAYA_MEDIA_FAILURE_NOT_FOUND)
+        && vocab_is(wire::MEDIA_FAILURES, "network", KAYA_MEDIA_FAILURE_NETWORK)
+        && vocab_is(wire::MEDIA_FAILURES, "decode_error", KAYA_MEDIA_FAILURE_DECODE_ERROR)
+        && vocab_is(wire::PLAYER_COMMANDS, "play", KAYA_PLAYER_COMMAND_PLAY)
+        && vocab_is(wire::PLAYER_COMMANDS, "pause", KAYA_PLAYER_COMMAND_PAUSE)
+        && vocab_is(wire::PLAYER_COMMANDS, "seek", KAYA_PLAYER_COMMAND_SEEK)
+        && vocab_is(wire::SESSION_ACTIONS, "play", KAYA_SESSION_ACTION_PLAY)
+        && vocab_is(wire::SESSION_ACTIONS, "pause", KAYA_SESSION_ACTION_PAUSE)
+        && vocab_is(wire::SESSION_ACTIONS, "stop", KAYA_SESSION_ACTION_STOP)
+        && vocab_is(wire::SESSION_ACTIONS, "seek_to", KAYA_SESSION_ACTION_SEEK_TO)
+        && vocab_is(wire::SESSION_ACTIONS, "seek_forward", KAYA_SESSION_ACTION_SEEK_FORWARD)
+        && vocab_is(wire::SESSION_ACTIONS, "seek_backward", KAYA_SESSION_ACTION_SEEK_BACKWARD)
+        && vocab_is(wire::SESSION_ACTIONS, "next", KAYA_SESSION_ACTION_NEXT)
+        && vocab_is(wire::SESSION_ACTIONS, "previous", KAYA_SESSION_ACTION_PREVIOUS)
+        && vocab_is(wire::PLAYBACK_STATES, "none", KAYA_PLAYBACK_STATE_NONE)
+        && vocab_is(wire::PLAYBACK_STATES, "playing", KAYA_PLAYBACK_STATE_PLAYING)
+        && vocab_is(wire::PLAYBACK_STATES, "paused", KAYA_PLAYBACK_STATE_PAUSED)
+        && vocab_is(wire::FITS, "contain", KAYA_FIT_CONTAIN)
+        && vocab_is(wire::FITS, "cover", KAYA_FIT_COVER)
+        && vocab_is(wire::FITS, "fill", KAYA_FIT_FILL)
+);
+const _: () = {
+    assert!(spec_enum_variants("pprop") == 5, "the spec pprop enum grew: export KAYA_PPROP_*");
+    assert!(
+        spec_enum_variants("player_state") == 7,
+        "the spec player_state enum grew: export KAYA_PLAYER_STATE_*"
+    );
+    assert!(
+        spec_enum_variants("media_failure") == 6,
+        "the spec media_failure enum grew: export KAYA_MEDIA_FAILURE_*"
+    );
+    assert!(
+        spec_enum_variants("player_command") == 3,
+        "the spec player_command enum grew: export KAYA_PLAYER_COMMAND_*"
+    );
+    assert!(
+        spec_enum_variants("session_action") == 8,
+        "the spec session_action enum grew: export KAYA_SESSION_ACTION_*"
+    );
+    assert!(
+        spec_enum_variants("playback_state") == 3,
+        "the spec playback_state enum grew: export KAYA_PLAYBACK_STATE_*"
+    );
+    assert!(spec_enum_variants("fit") == 3, "the spec fit enum grew: export KAYA_FIT_*");
+};
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 50,
+    crate::spec::PROPS.len() == 51,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(
@@ -4178,6 +4345,161 @@ pub unsafe extern "C" fn kaya_emit_range(
     state().ring.push_record(kind, &wire::range_body(tag, low, high));
 }
 
+/// One player report through the core's state machine
+/// (docs/media-plan.md §2 rule 1): what the app hears is published here,
+/// and the player's state after it is the answer. A report with no
+/// presentation scene, or for a released player, changes nothing.
+fn player_report(player: u64, report: crate::media::Report) -> u32 {
+    let player = crate::protocol::PlayerId(player);
+    let mut scene_slot = PRESENTATION_SCENE.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(scene) = scene_slot.as_mut() else {
+        return wire::player_state_raw(crate::protocol::PlayerState::Idle);
+    };
+    let (published, state) = scene.media_report(player, report);
+    drop(scene_slot);
+    send_occurrences(published);
+    wire::player_state_raw(state.unwrap_or(crate::protocol::PlayerState::Idle))
+}
+
+/// # Safety
+/// `ptr` must describe `len` readable bytes, or be NULL with `len` 0.
+unsafe fn lossy(ptr: *const u8, len: usize) -> String {
+    if ptr.is_null() || len == 0 {
+        return String::new();
+    }
+    String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(ptr, len) }).into_owned()
+}
+
+/// Presentation side: the player's item opened — its duration, its
+/// picture's size (0x0 for audio), and whether the backend's decodability
+/// check found a track the platform cannot decode, with that check's own
+/// sentence (docs/media-plan.md §7a). Answers the player's state after.
+///
+/// # Safety
+/// `detail` must describe `detail_len` readable UTF-8 bytes, or be NULL.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_player_loaded(
+    player: u64,
+    duration_ms: u64,
+    width: u32,
+    height: u32,
+    undecodable: u8,
+    detail: *const u8,
+    detail_len: usize,
+) -> u32 {
+    let detail = unsafe { lossy(detail, detail_len) };
+    player_report(
+        player,
+        crate::media::Report::Loaded { duration_ms, size: (width, height), undecodable: undecodable != 0, detail },
+    )
+}
+
+/// Presentation side: the platform started (`playing` 1) or stopped
+/// advancing the player's clock.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_player_rate(player: u64, playing: u8) -> u32 {
+    player_report(player, crate::media::Report::Rate(playing != 0))
+}
+
+/// Presentation side: the player's item played to its end.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_player_ended(player: u64) -> u32 {
+    player_report(player, crate::media::Report::Ended)
+}
+
+/// Presentation side: the platform's error, as its domain and codes; the
+/// core maps them to the closed reason (crate::media::failure_reason).
+///
+/// # Safety
+/// `domain` and `detail` must each describe readable UTF-8 bytes of their
+/// lengths, or be NULL with length 0.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_player_failed(
+    player: u64,
+    domain: *const u8,
+    domain_len: usize,
+    code: i64,
+    underlying: i64,
+    detail: *const u8,
+    detail_len: usize,
+) -> u32 {
+    let domain = unsafe { lossy(domain, domain_len) };
+    let detail = unsafe { lossy(detail, detail_len) };
+    player_report(player, crate::media::Report::Failed { domain, code, underlying, detail })
+}
+
+/// Presentation side: the playhead, every KAYA_MEDIA_POSITION_TICK_MS
+/// while playing and once when it stops.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_player_position(player: u64, position_ms: u64) -> u32 {
+    player_report(player, crate::media::Report::Position(position_ms))
+}
+
+/// Presentation side: a seek landed at `position_ms`.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_player_seeked(player: u64, position_ms: u64) -> u32 {
+    player_report(player, crate::media::Report::Seeked(position_ms))
+}
+
+/// Presentation side: KAYA_MEDIA_LOADING_CEILING_MS passed since the
+/// backend was handed the player's source.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_player_overdue(player: u64) -> u32 {
+    player_report(player, crate::media::Report::Overdue)
+}
+
+/// Presentation side: the system's media controls sent a SESSION_ACTION
+/// (`at_ms` for seek_to). THE CORE ROUTES IT (docs/media-plan.md §5): 0
+/// the app handles it and has been told, 1 play, 2 pause and 3 seek to
+/// `at_ms` on the attached player, 5 play the attached player from the
+/// start, 4 not offered and dropped.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_session_action(action: u32, at_ms: u64) -> u32 {
+    let Some(action) = wire::session_action_from(action, at_ms) else {
+        return crate::media::Route::NotOffered.code();
+    };
+    let scene_slot = PRESENTATION_SCENE.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(scene) = scene_slot.as_ref() else {
+        return crate::media::Route::NotOffered.code();
+    };
+    let route = scene.media_route(action);
+    drop(scene_slot);
+    if route == crate::media::Route::App {
+        send_occurrences(vec![crate::protocol::Occurrence::SessionAction { action }]);
+    }
+    route.code()
+}
+
+/// Presentation side: what the system's playback state reads now — the
+/// attached player's, or what the app stated: 0 stopped, 1 playing, 2
+/// paused. The backend sets it after every player report (macOS routes no
+/// media key to an app that does not, docs/media-plan.md §5).
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_session_state() -> u32 {
+    let scene_slot = PRESENTATION_SCENE.lock().unwrap_or_else(|e| e.into_inner());
+    scene_slot.as_ref().map_or(0, |scene| scene.media_system_state())
+}
+
+/// App side: whether this platform plays `mime` with `codecs` (an RFC 6381
+/// list; empty for none) — true exactly when such a source would not fail
+/// as unsupported_codec or unsupported_container (docs/media-plan.md §8
+/// ruling 1).
+///
+/// # Safety
+/// `mime` and `codecs` must describe readable UTF-8 bytes of their
+/// lengths, or be NULL with length 0.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_can_play(
+    mime: *const u8,
+    mime_len: usize,
+    codecs: *const u8,
+    codecs_len: usize,
+) -> u8 {
+    let mime = unsafe { lossy(mime, mime_len) };
+    let codecs = unsafe { lossy(codecs, codecs_len) };
+    u8::from(crate::media::can_play(&mime, &codecs))
+}
+
 /// Presentation side: the field SUBMITTED (docs/submit-plan.md S1) — `tag`
 /// the field's CREATE tag, `text`/`text_len` its content at the gesture. The
 /// gesture's door alone calls this; an edit goes through kaya_emit_text_changed.
@@ -5004,10 +5326,17 @@ fn send_occurrences(occurrences: Vec<crate::protocol::Occurrence>) {
             // A range correction (docs/range-plan.md §3 rule 11) is packed
             // where every other occurrence is.
             other @ (crate::protocol::Occurrence::RangeCommitted { .. }
-            | crate::protocol::Occurrence::InstanceRangeCommitted { .. }) => {
+            | crate::protocol::Occurrence::InstanceRangeCommitted { .. }
+            | crate::protocol::Occurrence::PlayerChanged { .. }
+            | crate::protocol::Occurrence::PlayerPosition { .. }
+            | crate::protocol::Occurrence::SeekCompleted { .. }
+            | crate::protocol::Occurrence::SessionAction { .. }) => {
                 crate::protocol::OccSink::Ring(state.ring.clone()).send(other)
             }
-            other => unreachable!("send_occurrences carries only the canvas asks and range corrections: {other:?}"),
+            other => unreachable!(
+                "send_occurrences carries only the canvas asks, range corrections and the media \
+                 occurrences: {other:?}"
+            ),
         }
     }
 }
@@ -5623,6 +5952,12 @@ mod tests {
             ("set_sheet_prop", KAYA_TX_SET_SHEET_PROP),
             ("scroll_to_row", KAYA_TX_SCROLL_TO_ROW),
             ("set_badge", KAYA_TX_SET_BADGE),
+            ("create_player", KAYA_TX_CREATE_PLAYER),
+            ("set_player_prop", KAYA_TX_SET_PLAYER_PROP),
+            ("player_command", KAYA_TX_PLAYER_COMMAND),
+            ("release_player", KAYA_TX_RELEASE_PLAYER),
+            ("set_video_player", KAYA_TX_SET_VIDEO_PLAYER),
+            ("set_session", KAYA_TX_SET_SESSION),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -5673,6 +6008,12 @@ mod tests {
             ("set_sheet_prop", KAYA_APPLY_SET_SHEET_PROP),
             ("scroll_to_row", KAYA_APPLY_SCROLL_TO_ROW),
             ("set_badge", KAYA_APPLY_SET_BADGE),
+            ("create_player", KAYA_APPLY_CREATE_PLAYER),
+            ("set_player_prop", KAYA_APPLY_SET_PLAYER_PROP),
+            ("player_command", KAYA_APPLY_PLAYER_COMMAND),
+            ("release_player", KAYA_APPLY_RELEASE_PLAYER),
+            ("set_video_player", KAYA_APPLY_SET_VIDEO_PLAYER),
+            ("set_session", KAYA_APPLY_SET_SESSION),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

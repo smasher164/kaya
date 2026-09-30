@@ -32,6 +32,8 @@ import sys
 import threading
 import time
 
+import media_server
+
 # THE scene list: the mechanical per-scene surfaces derive from it —
 # the cargo --example flags, the rust-guest staging, build_swift's
 # sweep. Order preserved from the shell body's one line.
@@ -51,7 +53,7 @@ SCENES = [
 # has not landed — built and run rust-only until their guests arrive,
 # when they move into SCENES.
 DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows",
-                "format", "flexshrink", "listrow", "tints", "badge", "emoji"]
+                "format", "flexshrink", "listrow", "tints", "badge", "emoji", "media"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -74,7 +76,9 @@ LANGS = ("rust", "python", "go", "csharp", "ocaml", "haskell", "swift",
 GUEST_STEM = {"listdetail": "split", "taskspersist": "tasks",
               "links": "tasks", "formatde": "format", "formatar": "format",
               "tasksrtl": "tasks", "clock24": "format", "scrollrtl": "scroll",
-              "numberfieldde": "numberfield", "rangertl": "range"}
+              "numberfieldde": "numberfield", "rangertl": "range",
+              "media_formats": "media", "media_delivery": "media",
+              "media_session": "media"}
 
 # THE LOCALE A SCENE RUNS UNDER (docs/compliance-plan.md §4): the knob the
 # leg carries, so the same guest is read under German and Arabic; the
@@ -128,7 +132,10 @@ HAND_QUEUED = {"editor": "go", "chat": "go", "portfolio": "python", "varied": "p
                # The number field guest under de-DE (SCENE_LOCALE).
                "numberfieldde": "rust",
                # The range guest in Arabic (SCENE_LOCALE).
-               "rangertl": "rust"}
+               "rangertl": "rust",
+               # The media suite's scenes, one guest (docs/media-plan.md §7a).
+               "media_formats": "rust", "media_delivery": "rust",
+               "media_session": "rust"}
 
 # The queue, in run order. Entries:
 #   (scene, (lang, ...))    a group: script export + one leg per lang
@@ -249,6 +256,12 @@ ORDER = [
     # controls and nudge an in-process key, so it pools.
     ("range", LANGS),
     ("rangertl", LANGS),
+    # The media suite (docs/media-plan.md §7a): RUST ALONE while the eight
+    # bindings' sugar is the breadth slice. The players are muted; the
+    # delivery legs read the local server this lane starts.
+    ("media_formats", ("rust",)),
+    ("media_delivery", ("rust",)),
+    ("media_session", ("rust",)),
     ("richtext", ("rust", "python", "js", "go", "csharp", "java", "swift",
                   "ocaml", "haskell")),
     ("ownundo", ("rust", "python", "js", "go", "csharp", "java", "swift",
@@ -441,6 +454,9 @@ PANEL_SCENES = ("filedialog", "save", "editor")
 # (docs/emoji-picker-plan.md), and fullscreen, which switches the display to
 # the guest's own Space (docs/fullscreen-plan.md §4.1).
 HOST_UI_SCENES = ("emoji", "fullscreen")
+# And the media session, which takes the host's Now Playing and has the
+# system send it media commands (docs/media-plan.md §5).
+HOST_UI_SCENES = HOST_UI_SCENES + ("media_session",)
 EXCLUSIVE = {name for name, scene, _lang in legs()
              if scene in PANEL_SCENES or scene in HOST_UI_SCENES}
 # The scenes whose legs MOVE THE HOST'S DISPLAY and take its keyboard, which
@@ -987,6 +1003,9 @@ def scene_script(root, scene):
     return "\n".join(lines)
 
 
+MEDIA_URL = f"http://{media_server.HOST}:{media_server.PORT}"
+
+
 def leg_env(root, scene, lang, appearance=""):
     """Per-leg env, never a persisting export (the shell's one
     KAYA_SELFTEST_SCRIPT export once ran another scene's steps)."""
@@ -1003,6 +1022,11 @@ def leg_env(root, scene, lang, appearance=""):
         env["KAYA_LOCALE"] = SCENE_LOCALE[scene]
     if scene in SCENE_CLOCK:
         env["KAYA_CLOCK"] = SCENE_CLOCK[scene]
+    if scene.startswith("media_"):
+        env["KAYA_MEDIA_URL"] = MEDIA_URL
+        helper = media_server.mediaremote_lib(root)
+        if helper:
+            env["KAYA_MEDIAREMOTE_LIB"] = helper
     # ONE STATE HOME PER LEG: the harness's scratch stores and the act-two
     # marker are one tree per APP under it, and the pool runs many legs of
     # one app at once (docs/traps.md, 2026-09-09: a concurrent leg's act

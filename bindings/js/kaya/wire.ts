@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0xee277a9499e5e52dn;
+export const SPEC_HASH = 0xfd32bf7c75c54fbbn;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -44,6 +44,7 @@ export const KIND_SEARCH = 19;
 export const KIND_NUMBER_FIELD = 20;
 export const KIND_COLOR_PICKER = 21;
 export const KIND_RANGE = 22;
+export const KIND_VIDEO = 23;
 export const DRAW_OP_MOVE_TO = 1;
 export const DRAW_OP_LINE_TO = 2;
 export const DRAW_OP_CLOSE = 3;
@@ -119,6 +120,7 @@ export const PROP_HIGH = 47;
 export const PROP_MIN_GAP = 48;
 export const PROP_LOW_LABEL = 49;
 export const PROP_HIGH_LABEL = 50;
+export const PROP_FIT = 51;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -256,6 +258,41 @@ export const OCCURRENCE_BUTTON_CLICKED = 1;
 export const OCCURRENCE_TEXT_CHANGED = 2;
 export const OCCURRENCE_TOGGLED = 3;
 export const OCCURRENCE_VALUE_CHANGED = 4;
+export const PLAYER_STATE_IDLE = 0;
+export const PLAYER_STATE_LOADING = 1;
+export const PLAYER_STATE_READY = 2;
+export const PLAYER_STATE_PLAYING = 3;
+export const PLAYER_STATE_PAUSED = 4;
+export const PLAYER_STATE_ENDED = 5;
+export const PLAYER_STATE_FAILED = 6;
+export const MEDIA_FAILURE_NONE = 0;
+export const MEDIA_FAILURE_UNSUPPORTED_CODEC = 1;
+export const MEDIA_FAILURE_UNSUPPORTED_CONTAINER = 2;
+export const MEDIA_FAILURE_NOT_FOUND = 3;
+export const MEDIA_FAILURE_NETWORK = 4;
+export const MEDIA_FAILURE_DECODE_ERROR = 5;
+export const PLAYER_COMMAND_PLAY = 1;
+export const PLAYER_COMMAND_PAUSE = 2;
+export const PLAYER_COMMAND_SEEK = 3;
+export const SESSION_ACTION_PLAY = 1;
+export const SESSION_ACTION_PAUSE = 2;
+export const SESSION_ACTION_STOP = 3;
+export const SESSION_ACTION_SEEK_TO = 4;
+export const SESSION_ACTION_SEEK_FORWARD = 5;
+export const SESSION_ACTION_SEEK_BACKWARD = 6;
+export const SESSION_ACTION_NEXT = 7;
+export const SESSION_ACTION_PREVIOUS = 8;
+export const PLAYBACK_STATE_NONE = 0;
+export const PLAYBACK_STATE_PLAYING = 1;
+export const PLAYBACK_STATE_PAUSED = 2;
+export const FIT_CONTAIN = 0;
+export const FIT_COVER = 1;
+export const FIT_FILL = 2;
+export const PPROP_SOURCE = 1;
+export const PPROP_SPEED = 2;
+export const PPROP_VOLUME = 3;
+export const PPROP_MUTED = 4;
+export const PPROP_LOOP = 5;
 export const COMMAND_CLEAR = 1;
 export const COMMAND_FOCUS = 2;
 export const COMMAND_EMOJI_PICKER = 3;
@@ -322,6 +359,12 @@ export const TX_DISMISS_SHEET = 59;
 export const TX_SET_SHEET_PROP = 60;
 export const TX_SCROLL_TO_ROW = 61;
 export const TX_SET_BADGE = 62;
+export const TX_CREATE_PLAYER = 63;
+export const TX_SET_PLAYER_PROP = 64;
+export const TX_PLAYER_COMMAND = 65;
+export const TX_RELEASE_PLAYER = 66;
+export const TX_SET_VIDEO_PLAYER = 67;
+export const TX_SET_SESSION = 68;
 export const APPLY_CREATE = 1;
 export const APPLY_SET_PROP = 2;
 export const APPLY_ADD_CHILD = 3;
@@ -370,6 +413,12 @@ export const APPLY_DISMISS_SHEET = 47;
 export const APPLY_SET_SHEET_PROP = 48;
 export const APPLY_SCROLL_TO_ROW = 49;
 export const APPLY_SET_BADGE = 50;
+export const APPLY_CREATE_PLAYER = 51;
+export const APPLY_SET_PLAYER_PROP = 52;
+export const APPLY_PLAYER_COMMAND = 53;
+export const APPLY_RELEASE_PLAYER = 54;
+export const APPLY_SET_VIDEO_PLAYER = 55;
+export const APPLY_SET_SESSION = 56;
 export const OCC_BUTTON_CLICKED = 1;
 export const OCC_TEXT_CHANGED = 2;
 export const OCC_TOGGLED = 3;
@@ -408,6 +457,10 @@ export const OCC_FULLSCREEN_CHANGED = 35;
 export const OCC_COLOR_CHANGED = 36;
 export const OCC_RANGE_CHANGED = 37;
 export const OCC_RANGE_COMMITTED = 38;
+export const OCC_PLAYER_CHANGED = 39;
+export const OCC_PLAYER_POSITION = 40;
+export const OCC_SEEK_COMPLETED = 41;
+export const OCC_SESSION_ACTION = 42;
 
 const text_encoder = new TextEncoder();
 const text_decoder = new TextDecoder("utf-8", { fatal: true });
@@ -1100,6 +1153,61 @@ export function tx_set_badge(count: number): Uint8Array {
   enc.u32(count);
   enc.u32(0);
   return enc.end(TX_SET_BADGE);
+}
+
+/** Create a media player (docs/media-plan.md §2): an app-held object with no place in the layout, its id guest-chosen in its own space. It starts `idle`; a `source` write loads it. An audio-only player is the same object shown by no video view. A second create of a live id is a scene error. */
+export function tx_create_player(player: number): Uint8Array {
+  enc.begin();
+  enc.u64(player);
+  return enc.end(TX_CREATE_PLAYER);
+}
+
+/** Write a player property (PLAYER_PROPS) once: a player is an object the app commands, so its props are written, never bound to a signal or a row. `source` is an asset name, an http(s) URL, or a picked file's absolute path; the core checks a local one exists and publishes failed(not_found) itself rather than hand a missing file to the platform (docs/media-plan.md §7a). */
+export function tx_set_player_prop(player: number, prop: number, value: WireValue): Uint8Array {
+  enc.begin();
+  enc.u64(player);
+  enc.u32(prop);
+  enc.u32(0);
+  enc.value(value);
+  return enc.end(TX_SET_PLAYER_PROP);
+}
+
+/** play, pause, or seek to `at_ms` (PLAYER_COMMAND; `at_ms` is 0 for the other two). The app owns play state (docs/media-plan.md §2 rule 3): the answer is the player's own occurrences, never an echo of the command. */
+export function tx_player_command(player: number, command: number, at_ms: number): Uint8Array {
+  enc.begin();
+  enc.u64(player);
+  enc.u32(command);
+  enc.u32(0);
+  enc.u64(at_ms);
+  return enc.end(TX_PLAYER_COMMAND);
+}
+
+/** Stop and forget a player. A video view showing it goes blank, the session detaches it, and no occurrence of its follows. An unknown id is a scene error. */
+export function tx_release_player(player: number): Uint8Array {
+  enc.begin();
+  enc.u64(player);
+  return enc.end(TX_RELEASE_PLAYER);
+}
+
+/** Show `player` in the video view `widget_id` (docs/media-plan.md §3); 0 shows none. A live video view only: the player is an object, not collection data. */
+export function tx_set_video_player(widget_id: number, player: number): Uint8Array {
+  enc.begin();
+  enc.u64(widget_id);
+  enc.u64(player);
+  return enc.end(TX_SET_VIDEO_PLAYER);
+}
+
+/** Declare the app's ONE media session (docs/media-plan.md §5), replacing the last declaration: the attached `player` (0 attaches none and withdraws the app from the system's controls), `actions` a mask of 1 << SESSION_ACTION for the actions the app handles itself, `playback_state` the PLAYBACK_STATE the app states while no player is attached, and the metadata as Str values, `artwork` an asset name or empty. With a player attached, play, pause and seek_to the app does not handle apply to that player. */
+export function tx_set_session(player: number, actions: number, playback_state: number, title: WireValue, artist: WireValue, album: WireValue, artwork: WireValue): Uint8Array {
+  enc.begin();
+  enc.u64(player);
+  enc.u32(actions);
+  enc.u32(playback_state);
+  enc.value(title);
+  enc.value(artist);
+  enc.value(album);
+  enc.value(artwork);
+  return enc.end(TX_SET_SESSION);
 }
 
 /** A civil date as the wire's I64: year * 10000 + month * 100 + day. */
@@ -2032,6 +2140,24 @@ export function tx_bind_high_label_element(widget_id: number, level = 0, field =
   return enc.end(TX_SET_PROPERTY);
 }
 
+/** set_property with a constant fit value. */
+export function tx_set_fit(widget_id: number, fit: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_FIT); enc.u32(SOURCE_CONST); enc.value(new I64(fit));
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound fit value. */
+export function tx_bind_fit(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_FIT); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_fit_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_FIT); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
 /** set_window_prop with a constant title value; window 0, the primary surface. */
 export function tx_set_window_title(window: number, title: string): Uint8Array {
   enc.begin(); enc.u64(window); enc.u32(WPROP_TITLE); enc.u32(SOURCE_CONST); enc.value(title);
@@ -2478,7 +2604,7 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const size = view.getUint32(0, true);
   const kind = view.getUint16(4, true);
-  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED].includes(kind)) return { kind, id: null, keys: [], payload: null };
+  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION].includes(kind)) return { kind, id: null, keys: [], payload: null };
   if (kind === OCC_ALERT_RESULT) {
     // A request's one answer: id + the u32 code.
     return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };
@@ -2534,7 +2660,7 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
     // Surface lifecycle records carry the surface id alone.
     return { kind, id: read_u64(buf, 8), keys: [], payload: null };
   }
-  if ([OCC_SECTION_SELECTED].includes(kind)) {
+  if ([OCC_SECTION_SELECTED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED].includes(kind)) {
     // Surface-pair records (window, section): the SECOND id keys the
     // handler; the first rides as the payload.
     return { kind, id: read_u64(buf, 16), keys: [], payload: read_u64(buf, 8) };

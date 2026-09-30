@@ -56,6 +56,11 @@ static PREFS_CLASS: std::sync::OnceLock<jni::objects::GlobalRef> =
 static FORMAT_CLASS: std::sync::OnceLock<jni::objects::GlobalRef> =
     std::sync::OnceLock::new();
 
+/// dev.kaya.KayaCompose, taken at attach for the capability query, which the
+/// APP THREAD asks (docs/media-plan.md §8 ruling 1).
+static COMPOSE_CLASS: std::sync::OnceLock<jni::objects::GlobalRef> =
+    std::sync::OnceLock::new();
+
 /// The app's private files directory as the host handed it in
 /// (`Kaya.attach(activity, stateRoot)`), which is `app_data_dir()`'s
 /// answer here: only a Context knows it, so nothing may guess.
@@ -169,6 +174,9 @@ fn grant_measured_capabilities(env: &mut JNIEnv, activity: &JObject) {
         }
         return;
     };
+    if let Ok(global) = env.new_global_ref(&class) {
+        let _ = COMPOSE_CLASS.set(global);
+    }
     let called = env.call_static_method(
         class,
         "measuredCapabilities",
@@ -2292,4 +2300,28 @@ macro_rules! android_main {
             $crate::android::attach(env, activity, state_root, $app)
         }
     };
+}
+
+/// The capability query's Compose half (docs/media-plan.md §8 ruling 1):
+/// KayaCompose.canPlay, whose refusal is the Kotlin side's to state.
+pub(crate) fn can_play(mime: &str, codecs: &str) -> bool {
+    let (Some(vm), Some(class)) = (JVM.get(), COMPOSE_CLASS.get()) else {
+        panic!("kaya: can_play({mime:?}) before the Compose backend attached")
+    };
+    let mut env = vm.attach_current_thread().expect("kaya: attaching the app thread for can_play");
+    let (Ok(mime_arg), Ok(codecs_arg)) = (env.new_string(mime), env.new_string(codecs)) else {
+        panic!("kaya: can_play({mime:?}) could not hand its strings to the JVM")
+    };
+    let called = env.call_static_method(
+        class,
+        "canPlay",
+        "(Ljava/lang/String;Ljava/lang/String;)Z",
+        &[(&mime_arg).into(), (&codecs_arg).into()],
+    );
+    if env.exception_check().unwrap_or(false) {
+        let _ = env.exception_describe();
+        let _ = env.exception_clear();
+        panic!("kaya: KayaCompose.canPlay({mime:?}) threw; its sentence is in the log above");
+    }
+    called.and_then(|v| v.z()).unwrap_or(false)
 }

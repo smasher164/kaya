@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0xee277a9499e5e52dL
+let spec_hash = 0xfd32bf7c75c54fbbL
 
 let value_bool = 1
 let value_i64 = 2
@@ -67,6 +67,7 @@ let kind_search = 19
 let kind_number_field = 20
 let kind_color_picker = 21
 let kind_range = 22
+let kind_video = 23
 let draw_op_move_to = 1
 let draw_op_line_to = 2
 let draw_op_close = 3
@@ -142,6 +143,7 @@ let prop_high = 47
 let prop_min_gap = 48
 let prop_low_label = 49
 let prop_high_label = 50
+let prop_fit = 51
 let wprop_title = 1
 let wprop_width = 2
 let wprop_height = 3
@@ -279,6 +281,41 @@ let occurrence_button_clicked = 1
 let occurrence_text_changed = 2
 let occurrence_toggled = 3
 let occurrence_value_changed = 4
+let player_state_idle = 0
+let player_state_loading = 1
+let player_state_ready = 2
+let player_state_playing = 3
+let player_state_paused = 4
+let player_state_ended = 5
+let player_state_failed = 6
+let media_failure_none = 0
+let media_failure_unsupported_codec = 1
+let media_failure_unsupported_container = 2
+let media_failure_not_found = 3
+let media_failure_network = 4
+let media_failure_decode_error = 5
+let player_command_play = 1
+let player_command_pause = 2
+let player_command_seek = 3
+let session_action_play = 1
+let session_action_pause = 2
+let session_action_stop = 3
+let session_action_seek_to = 4
+let session_action_seek_forward = 5
+let session_action_seek_backward = 6
+let session_action_next = 7
+let session_action_previous = 8
+let playback_state_none = 0
+let playback_state_playing = 1
+let playback_state_paused = 2
+let fit_contain = 0
+let fit_cover = 1
+let fit_fill = 2
+let pprop_source = 1
+let pprop_speed = 2
+let pprop_volume = 3
+let pprop_muted = 4
+let pprop_loop = 5
 let command_clear = 1
 let command_focus = 2
 let command_emoji_picker = 3
@@ -344,6 +381,12 @@ let tx_kind_dismiss_sheet = 59
 let tx_kind_set_sheet_prop = 60
 let tx_kind_scroll_to_row = 61
 let tx_kind_set_badge = 62
+let tx_kind_create_player = 63
+let tx_kind_set_player_prop = 64
+let tx_kind_player_command = 65
+let tx_kind_release_player = 66
+let tx_kind_set_video_player = 67
+let tx_kind_set_session = 68
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -392,6 +435,12 @@ let apply_kind_dismiss_sheet = 47
 let apply_kind_set_sheet_prop = 48
 let apply_kind_scroll_to_row = 49
 let apply_kind_set_badge = 50
+let apply_kind_create_player = 51
+let apply_kind_set_player_prop = 52
+let apply_kind_player_command = 53
+let apply_kind_release_player = 54
+let apply_kind_set_video_player = 55
+let apply_kind_set_session = 56
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
@@ -430,6 +479,10 @@ let occ_kind_fullscreen_changed = 35
 let occ_kind_color_changed = 36
 let occ_kind_range_changed = 37
 let occ_kind_range_committed = 38
+let occ_kind_player_changed = 39
+let occ_kind_player_position = 40
+let occ_kind_seek_completed = 41
+let occ_kind_session_action = 42
 
 let pad8 b =
   while Buffer.length b mod 8 <> 0 do
@@ -928,6 +981,49 @@ let tx_set_badge count =
   finish tx_kind_set_badge (fun b ->
       Buffer.add_int32_le b (Int32.of_int count);
       Buffer.add_int32_le b 0l)
+
+(* Create a media player (docs/media-plan.md §2): an app-held object with no place in the layout, its id guest-chosen in its own space. It starts `idle`; a `source` write loads it. An audio-only player is the same object shown by no video view. A second create of a live id is a scene error. *)
+let tx_create_player player =
+  finish tx_kind_create_player (fun b ->
+      Buffer.add_int64_le b player)
+
+(* Write a player property (PLAYER_PROPS) once: a player is an object the app commands, so its props are written, never bound to a signal or a row. `source` is an asset name, an http(s) URL, or a picked file's absolute path; the core checks a local one exists and publishes failed(not_found) itself rather than hand a missing file to the platform (docs/media-plan.md §7a). *)
+let tx_set_player_prop player prop value =
+  finish tx_kind_set_player_prop (fun b ->
+      Buffer.add_int64_le b player;
+      Buffer.add_int32_le b (Int32.of_int prop);
+      Buffer.add_int32_le b 0l;
+      encode_value b value)
+
+(* play, pause, or seek to `at_ms` (PLAYER_COMMAND; `at_ms` is 0 for the other two). The app owns play state (docs/media-plan.md §2 rule 3): the answer is the player's own occurrences, never an echo of the command. *)
+let tx_player_command player command at_ms =
+  finish tx_kind_player_command (fun b ->
+      Buffer.add_int64_le b player;
+      Buffer.add_int32_le b (Int32.of_int command);
+      Buffer.add_int32_le b 0l;
+      Buffer.add_int64_le b at_ms)
+
+(* Stop and forget a player. A video view showing it goes blank, the session detaches it, and no occurrence of its follows. An unknown id is a scene error. *)
+let tx_release_player player =
+  finish tx_kind_release_player (fun b ->
+      Buffer.add_int64_le b player)
+
+(* Show `player` in the video view `widget_id` (docs/media-plan.md §3); 0 shows none. A live video view only: the player is an object, not collection data. *)
+let tx_set_video_player widget_id player =
+  finish tx_kind_set_video_player (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int64_le b player)
+
+(* Declare the app's ONE media session (docs/media-plan.md §5), replacing the last declaration: the attached `player` (0 attaches none and withdraws the app from the system's controls), `actions` a mask of 1 << SESSION_ACTION for the actions the app handles itself, `playback_state` the PLAYBACK_STATE the app states while no player is attached, and the metadata as Str values, `artwork` an asset name or empty. With a player attached, play, pause and seek_to the app does not handle apply to that player. *)
+let tx_set_session player actions playback_state title artist album artwork =
+  finish tx_kind_set_session (fun b ->
+      Buffer.add_int64_le b player;
+      Buffer.add_int32_le b (Int32.of_int actions);
+      Buffer.add_int32_le b (Int32.of_int playback_state);
+      encode_value b title;
+      encode_value b artist;
+      encode_value b album;
+      encode_value b artwork)
 
 (* A civil date as the wire's I64: year * 10000 + month * 100 + day. *)
 let pack_date year month day =
@@ -2255,6 +2351,32 @@ let tx_bind_high_label_element ?(level = 0) ?(field = 0) widget_id =
       Buffer.add_int32_le b (Int32.of_int level);
       Buffer.add_int32_le b (Int32.of_int field))
 
+(* set_property with a constant fit value. *)
+let tx_set_fit widget_id fit =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_fit);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (I64 fit))
+
+(* set_property with a signal-bound fit value. *)
+let tx_bind_fit widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_fit);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_fit_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_fit);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
 (* set_window_prop with a constant title value (window 0, the primary surface). *)
 let tx_set_window_title window title =
   finish tx_kind_set_window_prop (fun b ->
@@ -2810,7 +2932,7 @@ let parse_clip byte at =
    value), None for clicks. None for pad/unknown kinds. *)
 let parse_occurrence byte =
   let kind = u16_at byte 4 in
-  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended && kind <> occ_kind_date_changed && kind <> occ_kind_time_changed && kind <> occ_kind_value_committed && kind <> occ_kind_notification_result && kind <> occ_kind_link_opened && kind <> occ_kind_text_edited && kind <> occ_kind_text_formatted && kind <> occ_kind_sheet_dismissed && kind <> occ_kind_dismiss_requested && kind <> occ_kind_submitted && kind <> occ_kind_notification_replied && kind <> occ_kind_fullscreen_changed && kind <> occ_kind_color_changed && kind <> occ_kind_range_changed && kind <> occ_kind_range_committed then None
+  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended && kind <> occ_kind_date_changed && kind <> occ_kind_time_changed && kind <> occ_kind_value_committed && kind <> occ_kind_notification_result && kind <> occ_kind_link_opened && kind <> occ_kind_text_edited && kind <> occ_kind_text_formatted && kind <> occ_kind_sheet_dismissed && kind <> occ_kind_dismiss_requested && kind <> occ_kind_submitted && kind <> occ_kind_notification_replied && kind <> occ_kind_fullscreen_changed && kind <> occ_kind_color_changed && kind <> occ_kind_range_changed && kind <> occ_kind_range_committed && kind <> occ_kind_player_changed && kind <> occ_kind_player_position && kind <> occ_kind_seek_completed && kind <> occ_kind_session_action then None
   else begin
     (* ids are guest-allocated and small; the low u32 is the story. *)
     let id = u32_at byte 8 in
@@ -2873,7 +2995,7 @@ let parse_occurrence byte =
     then Some (kind, Int64.of_int id, [], None, None, None, [])
     (* Surface-pair records (window, section): the SECOND id
        keys the handler; the first rides as the payload. *)
-    else if kind = occ_kind_section_selected
+    else if kind = occ_kind_section_selected || kind = occ_kind_player_position || kind = occ_kind_seek_completed
     then
       Some
         ( kind,

@@ -1,0 +1,50 @@
+# The media suite's formats (docs/media-plan.md §7a): every file as a local
+# asset, one per button#0. The guest loads it, plays it muted to its end and
+# sums it up in label#0; `{media:<item>|…}` is this lane's table, the refusal
+# line where the platform is expected to refuse the item, the text given
+# here where it plays. vp9_aac.mp4 is the mac's QUIET case: its audio would
+# play with no picture and no error, and the decodability check fails it
+# as unsupported_codec (docs/media-plan.md §7a). The ink is the window server's picture of the video
+# view, the floor file's flat colour.
+expect label#0 "idle"
+click button#0
+expect label#1 "h264_aac.mp4"
+expect_video_ink video#0 "C83C1E"
+expect label#0 "{media:h264_aac.mp4|ready 2.0s 160x90, played past 1s, ended, can_play yes}"
+expect_ax video#0 "image/Clip"
+click button#0
+expect label#1 "hevc_aac.mp4"
+expect label#0 "{media:hevc_aac.mp4|ready 2.0s 160x90, played past 1s, ended, can_play yes}"
+click button#0
+expect label#1 "hevc_aac.mov"
+expect label#0 "{media:hevc_aac.mov|ready 2.0s 160x90, played past 1s, ended, can_play yes}"
+click button#0
+expect label#1 "vp9_opus.webm"
+expect label#0 "{media:vp9_opus.webm|ready 2.0s 160x90, played past 1s, ended, can_play yes}"
+click button#0
+expect label#1 "vp9_aac.mp4"
+expect label#0 "{media:vp9_aac.mp4|ready 2.0s 160x90, played past 1s, ended, can_play yes}"
+click button#0
+expect label#1 "av1_aac.mp4"
+expect label#0 "{media:av1_aac.mp4|ready 2.0s 160x90, played past 1s, ended, can_play yes}"
+click button#0
+expect label#1 "av1_opus.webm"
+expect label#0 "{media:av1_opus.webm|ready 2.0s 160x90, played past 1s, ended, can_play yes}"
+click button#0
+expect label#1 "tone.mp3"
+expect label#0 "{media:tone.mp3|ready 2.0s 0x0, played past 1s, ended, can_play yes}"
+click button#0
+expect label#1 "tone.m4a"
+expect label#0 "{media:tone.m4a|ready 2.0s 0x0, played past 1s, ended, can_play yes}"
+click button#0
+expect label#1 "tone.ogg"
+expect label#0 "{media:tone.ogg|ready 2.0s 0x0, played past 1s, ended, can_play yes}"
+click button#0
+expect label#1 "tone_opus.webm"
+expect label#0 "{media:tone_opus.webm|ready 2.0s 0x0, played past 1s, ended, can_play yes}"
+click button#0
+expect label#1 "tone.flac"
+expect label#0 "{media:tone.flac|ready 2.0s 0x0, played past 1s, ended, can_play yes}"
+click button#0
+expect label#1 "tone.wav"
+expect label#0 "{media:tone.wav|ready 2.0s 0x0, played past 1s, ended, can_play yes}"

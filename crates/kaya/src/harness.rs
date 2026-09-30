@@ -104,6 +104,9 @@ pub enum TargetKind {
     /// The range (docs/range-plan.md §5): the slider's verbs with a thumb
     /// word after the target.
     Range,
+    /// The video view (docs/media-plan.md §3): `expect_video_ink` reads its
+    /// picture from the window server, `ax_action` runs its play and pause.
+    Video,
 }
 
 /// Which of a range's two thumbs a step drives or reads
@@ -472,6 +475,24 @@ pub enum Step {
     /// The badge the PLATFORM shows on the app's icon reads this text, ""
     /// for none (docs/app-badge-plan.md §4).
     ExpectBadge(String),
+    /// `expect_video_ink video#0 "C83C1E"`: the video view's centre as the
+    /// WINDOW SERVER composited it, in sRGB, within VIDEO_INK_TOLERANCE per
+    /// channel (docs/media-plan.md §8 ruling 2): a player's picture is in
+    /// no process snapshot.
+    ExpectVideoInk(Target, String),
+    /// `ax_action video#0 "Play"`: run the target's named accessibility
+    /// action the way an assistive client does.
+    AxAction(Target, String),
+    /// `session_send pause`: a remote command sent to this app THROUGH THE
+    /// SYSTEM, as a media key or the Now Playing controls would
+    /// (docs/media-plan.md §5).
+    SessionSend(String),
+    /// `expect_now_playing "title" playing`: what this app published to the
+    /// system's Now Playing, and the playback state it states.
+    ExpectNowPlaying(String, String),
+    /// `expect_display_awake yes`: whether this process holds the
+    /// platform's keep-the-display-awake assertion (§2 rule 5).
+    ExpectDisplayAwake(bool),
     /// `expect_image_size image@x WxH`: the box the picture is DRAWN in, in
     /// points, rounded (docs/photo-attach-plan.md §5); `expect image@x` reads
     /// the decoded picture.
@@ -797,6 +818,8 @@ impl Step {
             | Step::SetText(t, _)
             | Step::Expect(t, _)
             | Step::ExpectImageSize(t, _)
+            | Step::ExpectVideoInk(t, _)
+            | Step::AxAction(t, _)
             | Step::SwipeAction(t, _)
             | Step::ExpectSwipeActions(t, _)
             | Step::ExpectOrder(t, _)
@@ -884,6 +907,9 @@ impl Step {
             | Step::ExpectNotification(..)
             | Step::ExpectNoNotification(..)
             | Step::ExpectBadge(..)
+            | Step::SessionSend(..)
+            | Step::ExpectNowPlaying(..)
+            | Step::ExpectDisplayAwake(..)
             | Step::PickEmoji(..)
             | Step::ExpectNoTarget(..)
             | Step::NotificationActivate(..)
@@ -1017,6 +1043,11 @@ impl Step {
             Step::ExpectNotification { .. } => true,
             Step::ExpectNoNotification { .. } => true,
             Step::ExpectBadge { .. } => true,
+            Step::ExpectVideoInk(..) => true,
+            Step::AxAction(..) => false,
+            Step::SessionSend(..) => false,
+            Step::ExpectNowPlaying(..) => true,
+            Step::ExpectDisplayAwake(..) => true,
             Step::PickEmoji { .. } => false,
             Step::NotificationActivate { .. } => false,
             Step::NotificationReply(..) => false,
@@ -1072,6 +1103,29 @@ impl Step {
     }
 }
 
+
+/// The actions `session_send` can send, the remote commands every
+/// platform's media controls carry (docs/media-plan.md §5).
+pub const SESSION_SENDS: [&str; 6] = ["play", "pause", "toggle", "stop", "next", "previous"];
+
+/// `expect_video_ink`'s tolerance per channel, in sRGB: a video's picture
+/// is decoded and colour-managed before the window server has it (±2
+/// measured, docs/traps.md), wider than INK_TOLERANCE's display profile.
+pub const VIDEO_INK_TOLERANCE: u8 = 2;
+
+pub fn video_ink_matches(got: &str, want: &str) -> bool {
+    let rgb = |s: &str| -> Option<[u8; 3]> {
+        if s.len() != 6 {
+            return None;
+        }
+        let n = u32::from_str_radix(s, 16).ok()?;
+        Some([(n >> 16) as u8, (n >> 8) as u8, n as u8])
+    };
+    match (rgb(got), rgb(want)) {
+        (Some(g), Some(w)) => g.iter().zip(w).all(|(a, b)| a.abs_diff(b) <= VIDEO_INK_TOLERANCE),
+        _ => false,
+    }
+}
 
 /// A thumb's position as `expect_thumb` spells it (docs/range-plan.md §5):
 /// two decimals, trailing zeros and point dropped.
@@ -1433,6 +1487,24 @@ pub trait Stage: Send + 'static {
     /// The badge the PLATFORM shows on the app's icon, "" for none: its own
     /// record, never kaya's copy of the count (docs/app-badge-plan.md §4).
     fn badge(&self) -> String;
+    /// The video view's centre pixel as the window server composited the
+    /// window, converted to sRGB, as `RRGGBB`; `<…>` saying what was
+    /// measured when there is no picture to read (docs/media-plan.md §3).
+    fn video_ink(&self, target: Target) -> String;
+    /// Run the target's accessibility action named `name`; Err naming the
+    /// actions it does carry.
+    fn ax_action(&self, target: Target, name: &str) -> Result<(), String>;
+    /// Send `action` to this app through the system's own remote-command
+    /// route, refusing unless the system names THIS process as Now Playing
+    /// (anything else would drive the user's own player).
+    fn session_send(&self, action: &str) -> Result<(), String>;
+    /// `"<title>" <state>` as this process published them to the system.
+    fn now_playing(&self) -> String;
+    /// Whether this process holds the display-awake assertion.
+    fn display_awake(&self) -> bool;
+    /// This platform's lane table (docs/media-plan.md §7a): the reason it is
+    /// expected to refuse `item`, None where it plays it.
+    fn media_refusal(&self, item: &str) -> Option<String>;
     /// Choose `emoji` in the emoji picker the app's command opened, through
     /// the picker's own route; Err naming what it found when none is open.
     fn pick_emoji(&self, emoji: &str) -> Result<(), String>;
@@ -2484,6 +2556,49 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 let mut words = rest.split_whitespace().map(str::to_owned);
                 Step::ExpectFileDialog(words.next(), words.collect())
             }
+            "expect_video_ink" => {
+                let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_video_ink wants a video and an RRGGBB string: {line:?}")
+                })?;
+                let target = parse_target(target)?;
+                if target.kind != TargetKind::Video {
+                    return Err(format!("expect_video_ink reads a video view, not {target:?}"));
+                }
+                let want = parse_string(text)?;
+                if want.len() != 6 || !want.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_lowercase()) {
+                    return Err(format!("expect_video_ink wants six uppercase hex digits, got {want:?}"));
+                }
+                Step::ExpectVideoInk(target, want)
+            }
+            "ax_action" => {
+                let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("ax_action wants a target and an action's name: {line:?}")
+                })?;
+                Step::AxAction(parse_target(target)?, parse_string(text)?)
+            }
+            "session_send" => {
+                let action = rest.trim();
+                if !SESSION_SENDS.contains(&action) {
+                    return Err(format!("session_send sends one of {SESSION_SENDS:?}, not {action:?}"));
+                }
+                Step::SessionSend(action.to_owned())
+            }
+            "expect_now_playing" => {
+                let (title, state) = rest.trim().rsplit_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_now_playing wants a \"title\" and playing|paused|stopped: {line:?}")
+                })?;
+                if !["playing", "paused", "stopped"].contains(&state) {
+                    return Err(format!("expect_now_playing's state is playing, paused or stopped, not {state:?}"));
+                }
+                Step::ExpectNowPlaying(parse_string(title)?, state.to_owned())
+            }
+            "expect_display_awake" => {
+                let word = rest.trim();
+                if word != "yes" && word != "no" {
+                    return Err(format!("expect_display_awake is yes or no, not {word:?}"));
+                }
+                Step::ExpectDisplayAwake(word == "yes")
+            }
             "expect_image_size" => {
                 let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
                     format!("expect_image_size wants an image and a WxH string: {line:?}")
@@ -3209,6 +3324,7 @@ fn parse_target_kind(kind: &str, spec: &str) -> Result<TargetKind, String> {
         "number_field" => TargetKind::NumberField,
         "color_picker" => TargetKind::ColorPicker,
         "range" => TargetKind::Range,
+        "video" => TargetKind::Video,
         other => return Err(format!("unknown target kind {other:?} in {spec:?}")),
     })
 }
@@ -4653,6 +4769,51 @@ fn run_with_log(
                 }
             })),
             Step::CopyAsset(name, path) => Some(crate::assets::copy_asset(name, &expand_path(path))),
+            Step::ExpectVideoInk(t, want) => Some(poll(|| {
+                let got = stage.video_ink(*t);
+                if video_ink_matches(&got, want) {
+                    Ok(format!("video ink {want}"))
+                } else {
+                    Err(format!("video ink {got}, wanted {want} within {VIDEO_INK_TOLERANCE} per channel"))
+                }
+            })),
+            Step::AxAction(t, name) => {
+                await_quiet();
+                let answered = crate::scene::answers();
+                let done = stage.ax_action(*t, name);
+                if done.is_ok() {
+                    await_answer(answered);
+                }
+                done.err().map(Err)
+            }
+            Step::SessionSend(action) => {
+                await_quiet();
+                let answered = crate::scene::answers();
+                let sent = poll(|| stage.session_send(action).map(|()| format!("sent {action}")));
+                if sent.is_ok() {
+                    await_answer(answered);
+                    None
+                } else {
+                    Some(sent)
+                }
+            }
+            Step::ExpectNowPlaying(title, state) => Some(poll(|| {
+                let got = stage.now_playing();
+                let want = format!("{title:?} {state}");
+                if got == want {
+                    Ok(format!("now playing {want}"))
+                } else {
+                    Err(format!("now playing {got}, wanted {want}"))
+                }
+            })),
+            Step::ExpectDisplayAwake(want) => Some(poll(|| {
+                let got = stage.display_awake();
+                if got == *want {
+                    Ok(format!("display awake {got}"))
+                } else {
+                    Err(format!("display awake {got}, wanted {want}"))
+                }
+            })),
             Step::ExpectBadge(want) => Some(poll(|| {
                 let got = stage.badge();
                 if got == *want {
@@ -5968,6 +6129,7 @@ fn target_spec(t: &Target) -> String {
         TargetKind::NumberField => "number_field",
         TargetKind::ColorPicker => "color_picker",
         TargetKind::Range => "range",
+        TargetKind::Video => "video",
     };
     if let Some(id) = t.id {
         t.keys.map_or_else(
@@ -6367,8 +6529,9 @@ mod expand_tests {
 /// rule 5). A placeholder the platform cannot
 /// answer is a refusal naming it, never an empty expectation.
 pub(crate) fn expand_template<S: Stage + ?Sized>(stage: &S, want: &str) -> Result<String, String> {
+    let want = &expand_media(stage, want)?;
     let mut out = String::new();
-    let mut rest = want;
+    let mut rest = want.as_str();
     while let Some(start) = rest.find("{fmt:") {
         out.push_str(&rest[..start]);
         let after = &rest[start + 5..];
@@ -6396,6 +6559,31 @@ pub(crate) fn expand_template<S: Stage + ?Sized>(stage: &S, want: &str) -> Resul
             return Err(format!("this platform's formatter answered nothing for {{fmt:{kind} {value} {length}}}"));
         }
         out.push_str(&answer);
+        rest = &after[end + 1..];
+    }
+    out.push_str(rest);
+    Ok(out)
+}
+
+/// `{media:<item>|<the line where it plays>}` (docs/media-plan.md §7a, the
+/// lane tables): the stage's refusal line where its platform's table names
+/// the item, the scene's own text everywhere else.
+pub(crate) fn expand_media<S: Stage + ?Sized>(stage: &S, want: &str) -> Result<String, String> {
+    let mut out = String::new();
+    let mut rest = want;
+    while let Some(start) = rest.find("{media:") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 7..];
+        let Some(end) = after.find('}') else {
+            return Err(format!("unterminated {{media:…}} in {want:?}"));
+        };
+        let Some((item, plays)) = after[..end].split_once('|') else {
+            return Err(format!("{{media:{}}} wants <item>|<text>", &after[..end]));
+        };
+        match stage.media_refusal(item) {
+            Some(reason) => out.push_str(&format!("failed {reason}, can_play no")),
+            None => out.push_str(plays),
+        }
         rest = &after[end + 1..];
     }
     out.push_str(rest);
@@ -6908,6 +7096,43 @@ mod tests {
         assert!(parse("type \"kaya 1.0 (x)\"").is_ok());
     }
 
+    /// The media verbs (docs/media-plan.md): the video view's picture by
+    /// window capture within its own tolerance, its accessibility action,
+    /// and the session read and driven through the system.
+    #[test]
+    fn the_media_verbs_parse_and_refuse() {
+        let video = Target { kind: TargetKind::Video, index: 0, id: None, keys: None };
+        assert!(matches!(
+            parse("expect_video_ink video#0 \"C83C1E\"").unwrap().as_slice(),
+            [Step::ExpectVideoInk(t, w)] if *t == video && w == "C83C1E"
+        ));
+        assert!(parse("expect_video_ink label#0 \"C83C1E\"").is_err());
+        assert!(parse("expect_video_ink video#0 \"c83c1e\"").is_err());
+        assert!(parse("expect_video_ink video#0 \"C83C1\"").is_err());
+        assert!(matches!(
+            parse("ax_action video#0 \"Pause\"").unwrap().as_slice(),
+            [Step::AxAction(t, n)] if *t == video && n == "Pause"
+        ));
+        assert!(matches!(
+            parse("session_send toggle").unwrap().as_slice(),
+            [Step::SessionSend(a)] if a == "toggle"
+        ));
+        assert!(parse("session_send rewind").is_err());
+        assert!(matches!(
+            parse("expect_now_playing \"Tone\" paused").unwrap().as_slice(),
+            [Step::ExpectNowPlaying(t, s)] if t == "Tone" && s == "paused"
+        ));
+        assert!(parse("expect_now_playing \"Tone\" asleep").is_err());
+        assert!(matches!(
+            parse("expect_display_awake yes").unwrap().as_slice(),
+            [Step::ExpectDisplayAwake(true)]
+        ));
+        assert!(parse("expect_display_awake maybe").is_err());
+        assert!(video_ink_matches("CA3E1C", "C83C1E"));
+        assert!(!video_ink_matches("CB3C1E", "C83C1E"));
+        assert!(!video_ink_matches("<no picture>", "C83C1E"));
+    }
+
     /// The range's verbs (docs/range-plan.md §5): a thumb word after a range
     /// target, both values in one fixed spelling, and the thumb's fraction.
     #[test]
@@ -7286,6 +7511,24 @@ mod tests {
         }
         fn badge(&self) -> String {
             String::new()
+        }
+        fn video_ink(&self, _target: Target) -> String {
+            String::new()
+        }
+        fn ax_action(&self, _target: Target, _name: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn session_send(&self, _action: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn now_playing(&self) -> String {
+            String::new()
+        }
+        fn display_awake(&self) -> bool {
+            false
+        }
+        fn media_refusal(&self, _item: &str) -> Option<String> {
+            None
         }
         fn pick_emoji(&self, _emoji: &str) -> Result<(), String> {
             Ok(())
@@ -8330,6 +8573,24 @@ mod tests {
         fn badge(&self) -> String {
             String::new()
         }
+        fn video_ink(&self, _target: Target) -> String {
+            String::new()
+        }
+        fn ax_action(&self, _target: Target, _name: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn session_send(&self, _action: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn now_playing(&self) -> String {
+            String::new()
+        }
+        fn display_awake(&self) -> bool {
+            false
+        }
+        fn media_refusal(&self, _item: &str) -> Option<String> {
+            None
+        }
         fn pick_emoji(&self, _emoji: &str) -> Result<(), String> {
             Ok(())
         }
@@ -8697,6 +8958,24 @@ mod tests {
         }
         fn badge(&self) -> String {
             String::new()
+        }
+        fn video_ink(&self, _target: Target) -> String {
+            String::new()
+        }
+        fn ax_action(&self, _target: Target, _name: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn session_send(&self, _action: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn now_playing(&self) -> String {
+            String::new()
+        }
+        fn display_awake(&self) -> bool {
+            false
+        }
+        fn media_refusal(&self, _item: &str) -> Option<String> {
+            None
         }
         fn pick_emoji(&self, _emoji: &str) -> Result<(), String> {
             Ok(())

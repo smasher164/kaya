@@ -13,6 +13,7 @@ dev_shell_or_die()
 # (docs/runner-conversion-plan.md §2, stage 4).
 
 import atexit
+import contextlib
 import hashlib
 import os
 import re
@@ -27,6 +28,7 @@ from lanes import mac as lane
 import exclusive
 import only  # noqa: E402
 import flightrec_lane
+import media_server
 from host_lib import HOST_LIB, host_lib_stamp
 
 TEXT = {"text": True, "encoding": "utf-8", "errors": "replace"}
@@ -298,11 +300,15 @@ if PANEL_MODE_STAMP.is_file():
         status = 1
 
 _torn = threading.Lock()
+# The media suite's server (tools/lib/media_server.py): up only while a
+# media_ leg is queued, and proven gone by its own exit.
+MEDIA = contextlib.ExitStack()
 
 
 def kaya_teardown():
     if not _torn.acquire(blocking=False):
         return
+    MEDIA.close()
     FR.flush()
     shutil.rmtree(LEGS_DIR, ignore_errors=True)
     shutil.rmtree(FLIGHTREC_SCRATCH, ignore_errors=True)
@@ -897,6 +903,18 @@ def leg_env(scene, lang, appearance=""):
     return env
 
 
+def media_queued():
+    mode = os.environ.get("KAYA_EXCLUSIVE", "")
+    return any(scene.startswith("media_") and only.wanted(name)
+               and not (mode in ("only", "skip")
+                        and (mode == "only") != (name in lane.EXCLUSIVE))
+               for name, scene, _lang in lane.legs())
+
+
+if media_queued():
+    MEDIA.enter_context(media_server.serving(
+        log=ROOT / "target/mac-media-server.log"))
+
 for _entry in lane.ORDER:
     _kind = _entry[0]
     if _entry == ("drain",):
@@ -928,6 +946,11 @@ for _entry in lane.ORDER:
                       _scene)
 drain()
 timing("legs")
+try:
+    MEDIA.close()
+except RuntimeError as e:
+    print(f"validate-mac: {e}", file=sys.stderr)
+    status = 1
 
 rec_suite_stop()
 if os.environ.get("KAYA_RECORD"):

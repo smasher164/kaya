@@ -75,6 +75,11 @@ pub(crate) const REC_COLOR_CHANGED: u16 = 36;
 /// docs/range-plan.md §2.
 pub(crate) const REC_RANGE_CHANGED: u16 = 37;
 pub(crate) const REC_RANGE_COMMITTED: u16 = 38;
+/// docs/media-plan.md §2, §5.
+pub(crate) const REC_PLAYER_CHANGED: u16 = 39;
+pub(crate) const REC_PLAYER_POSITION: u16 = 40;
+pub(crate) const REC_SEEK_COMPLETED: u16 = 41;
+pub(crate) const REC_SESSION_ACTION: u16 = 42;
 
 /// Wire framing of every record, exported through the C header so direct
 /// consumers cast a pointer instead of bit-twiddling. Little-endian;

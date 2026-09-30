@@ -9,6 +9,59 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
+## RULING — which player a stamped video view shows (found 2026-09-30, the media depth slice)
+KEY: video, template zone, Tpl video, LIVE_ONLY, tpl-surfaces, set_video_player
+
+Every kind has a template-zone constructor in every binding
+(tools/tpl-surfaces.py), and a video view in a collection row has none yet.
+A row cannot carry a player (a player is an object, not row data), and "every
+copy shows one player" is not one semantics everywhere: AVPlayer draws into
+any number of layers, while a media3 ExoPlayer and a WinUI MediaPlayer render
+into one surface or element at a time. The choice for a ruling: (a) a row
+binds a player through a new player-valued field type, (b) every copy shows
+one player and only the most recently realized copy draws where the
+platform allows one surface, or (c) the video view stays a live-zone kind,
+stated as a carve-out. Until then `video` is exempted by name in
+tools/tpl-surfaces.py's LIVE_ONLY, held to this heading, and the core refuses
+set_video_player on anything but a live video view.
+
+## BUILD — media: the player, the video view and the session (docs/media-plan.md), depth on the mac (2026-09-30); the GTK, WinUI and Compose arms, the iOS legs, the tracks and captions and the other eight bindings are the breadth slice
+KEY: media, player, PlayerId, create_player, set_player_prop, player_command, release_player, set_video_player, set_session, player_changed, player_position, seek_completed, session_action, KIND_VIDEO, PROP_FIT, media_formats, media_delivery, media_session, media_tracks, expect_video_ink, session_send, expect_now_playing, expect_display_awake, ax_action, kaya_can_play, DEPTH STUB media_formats, gen-media, media-server
+
+The depth slice: the spec's six transaction, six apply and four occurrence
+records, the core's one state machine, failure table, source check and
+session routing (crates/kaya/src/media.rs), the Rust binding, the SwiftUI
+arm (an AVPlayer per player, a bare AVPlayerLayer per video view,
+MPNowPlayingInfoCenter and MPRemoteCommandCenter), the media_formats,
+media_delivery and media_session scenes on the mac lane, the test assets
+(tools/gen-media.py) and the local server (tools/media-server.py). What
+breadth owes:
+
+  - **DEPTH STUB: media_formats on gtk** — playbin3 into gtk4paintablesink,
+    the GStreamer rows of the failure table, MPRIS2 through mpris-server,
+    and the lane image's -bad, -libav and -gtk4 packages (plan §7a).
+  - **DEPTH STUB: media_formats on winui** — MediaPlayer and
+    MediaPlayerElement, ExtendedErrorCode's rows of the failure table, the
+    SMTC, and the §6.1 measurements (rounded clip, PrintWindow).
+  - **DEPTH STUB: media_formats on compose** — media3 ExoPlayer and
+    PlayerSurface, the media3 rows, MediaSession with its foreground service.
+  - **DEPTH STUB: media_formats on swiftui/ios** — the iOS arm is built
+    (the layer view, the .playback category on play); the legs, the
+    simulator's AV1 case, a window read of the picture and a remote command
+    sent the way the system would are unmeasured there.
+  - The tracks and captions: track readings and selection, the
+    media_tracks scene, the caption renderer kaya draws for a sidecar
+    WebVTT on Apple, Android and GTK (plan §3), and the current cue as a
+    reading. Not built at depth.
+  - The other eight bindings (check-sugar-surface red by design on `video`
+    until they take it) and the C floor through kaya.h.
+  - The packaging manifest's UIBackgroundModes `audio` for an app that
+    declares a session on iOS (plan §5).
+  - The loading ceiling's reason (crates/kaya/src/media.rs,
+    LOADING_CEILING_MS): a stalled local source reads
+    unsupported_container and a stalled stream network. Recorded as the
+    depth's choice, for a ruling when GStreamer's stall shapes are built.
+
 ## ~~BUILD — the range and the vertical slider (docs/range-plan.md), depth on the mac (2026-09-29); the GTK, WinUI and Compose arms, the iOS legs, rangertl, the sliders scene's fader and the other eight bindings are the breadth slice~~ COMPLETE 2026-09-29: every item below LANDED, the last one by the maintainer's ruling (plan §3 rule 11); range, rangertl and the sliders fader on all five lanes, validation in the breadth commit; what the breadth found and left is in "WATCH — the range's tie and its readers' names"
 KEY: range, KIND_RANGE, range_changed, range_committed, min_gap, low_label, high_label, on_range, on_range_commit, kaya_range_clamp, clamp_thumb, expect_thumb, set_thumb, nudge_thumb, ax_thumb, vertical slider, slider axis, rangertl, DEPTH STUB range, user_range_committed, settle_range_writes, RANGE_SETTLED
 

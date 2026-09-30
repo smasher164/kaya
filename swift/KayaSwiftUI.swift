@@ -1,11 +1,18 @@
 // KayaSwiftUI: the Swift half of the SwiftUI backend — an interpreter of
 // resolved apply-op records over the presentation-side C ABI.
 
+import AVFoundation
 import CoreText
+import MediaPlayer
 import OSLog
 import SwiftUI
 import UniformTypeIdentifiers
 import UserNotifications
+import VideoToolbox
+#if os(macOS)
+    import IOKit.pwr_mgt
+    import ScreenCaptureKit
+#endif
 #if os(iOS)
     import PhotosUI
 #endif
@@ -14,7 +21,7 @@ import UserNotifications
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xee277a9499e5e52d
+let kayaSpecHash: UInt64 = 0xfd32bf7c75c54fbb
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -69,6 +76,13 @@ private let applySetSheetProp: UInt16 = 48
 /// The app's scroll to a row (docs/scroll-to-plan.md).
 private let applyScrollToRow: UInt16 = 49
 private let applySetBadge: UInt16 = 50
+/// docs/media-plan.md: the player, the video view and the session.
+private let applyCreatePlayer: UInt16 = 51
+private let applySetPlayerProp: UInt16 = 52
+private let applyPlayerCommand: UInt16 = 53
+private let applyReleasePlayer: UInt16 = 54
+private let applySetVideoPlayer: UInt16 = 55
+private let applySetSession: UInt16 = 56
 /// What a drop settles on (the wire's drag_op).
 let kayaDragOpNone: UInt32 = 0
 let kayaDragOpCopy: UInt32 = 1
@@ -185,6 +199,7 @@ private let kindSearch: UInt32 = 19
 private let kindNumberField: UInt32 = 20
 private let kindColorPicker: UInt32 = 21
 private let kindRange: UInt32 = 22
+private let kindVideo: UInt32 = 23
 private let propText: UInt32 = 1
 private let propChecked: UInt32 = 2
 private let propColumns: UInt32 = 11
@@ -282,6 +297,7 @@ private let propHigh: UInt32 = 47
 private let propMinGap: UInt32 = 48
 private let propLowLabel: UInt32 = 49
 private let propHighLabel: UInt32 = 50
+private let propFit: UInt32 = 51
 private let fileContentImages: UInt32 = 1
 private let tintAccent: Int64 = 1
 private let tintSuccess: Int64 = 2
@@ -754,6 +770,11 @@ final class KayaNode: Identifiable {
     var minGap = 0.0
     var lowLabel = ""
     var highLabel = ""
+    /// docs/media-plan.md §3: the player a video view shows (0 none), its fit,
+    /// and a bump for when that player's picture size is learned.
+    var videoPlayer: UInt64 = 0
+    var fit: Int64 = 0
+    var videoSeq = 0
     // The decoded native image (nil is the placeholder class) and its size
     // as the harness's "WxH" observation ("0x0" before a source lands or
     // after a failed decode).
@@ -1144,13 +1165,14 @@ final class KayaSceneModel {
     var numberFields: [KayaNode] = []
     var colorPickers: [KayaNode] = []
     var ranges: [KayaNode] = []
+    var videos: [KayaNode] = []
 
     /// Every kind registry, so a destroyed node leaves all of them at once.
     static let registries: [ReferenceWritableKeyPath<KayaSceneModel, [KayaNode]>] = [
         \.buttons, \.checkboxes, \.labels, \.entryWidgets, \.sliders, \.datePickers,
         \.timePickers, \.images, \.canvases, \.columns, \.rows, \.scrolls, \.progresses,
         \.selects, \.radios, \.grids, \.textareas, \.labeleds, \.searches, \.numberFields,
-        \.colorPickers, \.ranges,
+        \.colorPickers, \.ranges, \.videos,
     ]
 
     func forget(_ id: UInt64) {
@@ -5534,6 +5556,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case kindSearch: kayaScene.searches.append(node)
                 case kindColorPicker: kayaScene.colorPickers.append(node)
                 case kindRange: kayaScene.ranges.append(node)
+                case kindVideo: kayaScene.videos.append(node)
                 case kindNumberField:
                     // docs/number-field-plan.md §2: unset bounds are ±2^53, the
                     // step 1, and the field shows its value from the start.
@@ -6194,6 +6217,8 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case (propHighLabel, valueStr):
                     let bytes = raw[(body + 24)..<(body + 24 + len)]
                     kayaScene.nodes[id]!.highLabel = String(decoding: bytes, as: UTF8.self)
+                case (propFit, valueI64):
+                    kayaScene.nodes[id]!.fit = raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
                 case (propGrow, valueF64):
                     kayaScene.nodes[id]!.grow =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
@@ -6679,6 +6704,43 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
             case applySetBadge:
                 // { u32 count; u32 reserved } (docs/app-badge-plan.md §2).
                 kayaSetBadge(raw.loadUnaligned(fromByteOffset: body, as: UInt32.self))
+            case applyCreatePlayer:
+                let pid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                kayaPlayers[pid] = KayaPlayer(id: pid)
+            case applySetPlayerProp:
+                // { u64 player; u32 pprop; u32 reserved; value }, the source
+                // already a URL the core resolved.
+                kayaApplyPlayerProp(
+                    raw.loadUnaligned(fromByteOffset: body, as: UInt64.self),
+                    raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self), raw, body + 16)
+            case applyPlayerCommand:
+                kayaApplyPlayerCommand(
+                    raw.loadUnaligned(fromByteOffset: body, as: UInt64.self),
+                    raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self),
+                    raw.loadUnaligned(fromByteOffset: body + 16, as: UInt64.self))
+            case applyReleasePlayer:
+                let pid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                kayaPlayers.removeValue(forKey: pid)?.release()
+                for node in kayaScene.videos where node.videoPlayer == pid { node.videoSeq += 1 }
+            case applySetVideoPlayer:
+                let vid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let node = kayaScene.nodes[vid]!
+                node.videoPlayer = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                node.videoSeq += 1
+                kayaFollowKeepAwake()
+            case applySetSession:
+                // { u64 player; u32 offered; u32 playback_state; Str title,
+                //   artist, album, artwork (a file URL or empty) }.
+                var sat = body + 16
+                var session = KayaSession()
+                session.player = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                session.offered = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self)
+                session.stated = raw.loadUnaligned(fromByteOffset: body + 12, as: UInt32.self)
+                session.title = kayaReadStrValue(raw, &sat)
+                session.artist = kayaReadStrValue(raw, &sat)
+                session.album = kayaReadStrValue(raw, &sat)
+                session.artwork = kayaReadStrValue(raw, &sat)
+                kayaApplySession(session)
             case applyScrollToRow:
                 // { u64 container; u64 copy (0 = unrealized); u32 index; u32 pad }.
                 // A REQUEST held on the container until its tier can scroll
@@ -7944,6 +8006,7 @@ private func kayaAnyTarget(_ spec: Substring) -> KayaNode? {
     case "number_field": return kayaTarget(spec, "number_field", kayaScene.numberFields)
     case "color_picker": return kayaTarget(spec, "color_picker", kayaScene.colorPickers)
     case "range": return kayaTarget(spec, "range", kayaScene.ranges)
+    case "video": return kayaTarget(spec, "video", kayaScene.videos)
     default: return nil
     }
 }
@@ -10278,6 +10341,116 @@ private func kayaRunScript(_ script: String) {
                 }
                 let sentence = String(decoding: buffer.prefix(min(Int(n), buffer.count)), as: UTF8.self)
                 if ok == 1 { observed.append(sentence) } else { failures.append(sentence) }
+            case "expect_video_ink":
+                // docs/media-plan.md §8 ruling 2: the WINDOW SERVER's picture of
+                // the video view, in sRGB, within VIDEO_INK_TOLERANCE — no
+                // process snapshot holds a player's frames (measured).
+                let want = kayaQuoted(Array(parts[2...]))
+                #if os(macOS)
+                    let node = DispatchQueue.main.sync { kayaTarget(parts[1], "video", kayaScene.videos) }
+                    let got = node.map(kayaVideoInk) ?? "<no such target>"
+                    if kayaVideoInkMatches(got, want) {
+                        observed.append("video ink \(want)")
+                    } else {
+                        failures.append("video ink \(got), wanted \(want) within \(kayaVideoInkTolerance) per channel")
+                    }
+                #else
+                    _ = want
+                    kayaDepthStub("media_formats", on: "ios")
+                #endif
+            case "ax_action":
+                // docs/media-plan.md §3: the element must be in the platform's
+                // tree, and the action runs its own closure, the one the
+                // platform's assistive action runs.
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
+                let name = kayaQuoted(Array(parts[2...]))
+                let found = DispatchQueue.main.sync { () -> (String, [(String, () -> Void)])? in
+                    guard let node = kayaTarget(parts[1], "video", kayaScene.videos) else { return nil }
+                    return (node.a11yId, kayaVideoActions(node))
+                }
+                guard let (ident, actions) = found else {
+                    failures.append("no such target \(parts[1])")
+                    break
+                }
+                if ident.isEmpty {
+                    failures.append("ax_action \(parts[1]): no a11y_id authored, so no element to find")
+                } else if kayaAxRead(ident) == nil {
+                    failures.append("ax_action \(parts[1]): \(ident) is not in the accessibility tree")
+                } else if let action = actions.first(where: { $0.0 == name }) {
+                    DispatchQueue.main.sync { action.1() }
+                    kayaAwaitAnswer(answered)
+                } else {
+                    failures.append(
+                        "ax_action \(parts[1]) \"\(name)\": the actions are \(actions.map(\.0))")
+                }
+            case "session_send":
+                // docs/media-plan.md §5: THROUGH THE SYSTEM, retried until the
+                // system names this process as Now Playing (it takes the role
+                // once it plays).
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
+                #if os(macOS)
+                    // ARRIVAL, NOT MediaRemote's answer: a command it calls sent
+                    // can reach no handler (measured), so an attempt counts only
+                    // when a handler ran within 2 s, and is sent again if not.
+                    let action = String(parts[1])
+                    let deadline = Date().addingTimeInterval(10)
+                    var sent = (sent: false, said: "never sent")
+                    var arrived = false
+                    var attempts = 0
+                    while !arrived, Date() < deadline {
+                        attempts += 1
+                        let before = DispatchQueue.main.sync { kayaRemoteArrivals }
+                        sent = kayaSessionSend(action)
+                        kayaDiag("session_send \(action) attempt \(attempts): \(sent.said)")
+                        guard sent.sent else {
+                            Thread.sleep(forTimeInterval: 0.25)
+                            continue
+                        }
+                        let wait = Date().addingTimeInterval(2)
+                        while Date() < wait {
+                            if DispatchQueue.main.sync(execute: { kayaRemoteArrivals }) > before {
+                                arrived = true
+                                break
+                            }
+                            Thread.sleep(forTimeInterval: 0.02)
+                        }
+                    }
+                    if arrived {
+                        kayaAwaitAnswer(answered)
+                    } else if sent.sent {
+                        failures.append(
+                            "session_send \(action): MediaRemote answered sent \(attempts) time(s) and no "
+                                + "remote command reached this process's handlers")
+                    } else {
+                        failures.append("session_send \(action): \(sent.said)")
+                    }
+                #else
+                    _ = answered
+                    kayaDepthStub("media_formats", on: "ios")
+                #endif
+            case "expect_now_playing":
+                let state = String(parts[parts.count - 1])
+                let want = "\(kayaQuoted(Array(parts[1..<(parts.count - 1)])).debugDescription) \(state)"
+                let got = kayaNowPlaying()
+                if got == want {
+                    observed.append("now playing \(want)")
+                } else {
+                    failures.append("now playing \(got), wanted \(want)")
+                }
+            case "expect_display_awake":
+                #if os(macOS)
+                    let want = parts[1] == "yes"
+                    let got = kayaDisplayAwake()
+                    if got == want {
+                        observed.append("display awake \(got)")
+                    } else {
+                        failures.append("display awake \(got), wanted \(want)")
+                    }
+                #else
+                    kayaDepthStub("media_formats", on: "ios")
+                #endif
             case "expect_badge":
                 // docs/app-badge-plan.md §4: the platform's own record, retried
                 // like an expect since the Dock publishes the label later.
@@ -18500,6 +18673,33 @@ func kayaScriptOf(_ text: String) -> String? {
 struct KayaTemplateRefusal: Error { let why: String }
 
 func kayaExpandTemplate(_ want: String) -> Result<String, KayaTemplateRefusal> {
+    switch kayaExpandMedia(want) {
+    case .failure(let refusal): return .failure(refusal)
+    case .success(let expanded): return kayaExpandFormats(expanded)
+    }
+}
+
+/// `{media:<item>|<the line where it plays>}` (docs/media-plan.md §7a, the
+/// lane tables): this platform's refusal line where its table names the
+/// item, the scene's own text everywhere else.
+func kayaExpandMedia(_ want: String) -> Result<String, KayaTemplateRefusal> {
+    var out = ""
+    var rest = Substring(want)
+    while let start = rest.range(of: "{media:") {
+        out += rest[..<start.lowerBound]
+        let after = rest[start.upperBound...]
+        guard let end = after.firstIndex(of: "}"), let bar = after[..<end].firstIndex(of: "|") else {
+            return .failure(KayaTemplateRefusal(why: "{media:…} wants <item>|<text> and a closing brace in \(want.debugDescription)"))
+        }
+        let item = String(after[..<bar])
+        out += kayaMediaRefusal(item).map { "failed \($0), can_play no" } ?? String(after[after.index(after: bar)..<end])
+        rest = after[after.index(after: end)...]
+    }
+    out += rest
+    return .success(out)
+}
+
+func kayaExpandFormats(_ want: String) -> Result<String, KayaTemplateRefusal> {
     var out = ""
     var rest = Substring(want)
     while let start = rest.range(of: "{fmt:") {
@@ -19397,6 +19597,19 @@ struct KayaRender: View {
             // length.
             KayaRangeSurface(node: node)
                 .frame(maxWidth: node.grow > 0 ? .infinity : 200)
+        case kindVideo:
+            // docs/media-plan.md §3: the bare layer at its picture's size, a
+            // picture to an assistive reader, with play and pause as actions.
+            let natural = kayaVideoNatural(node)
+            let actions = kayaVideoActions(node)
+            KayaVideoSurface(node: node)
+                .frame(
+                    idealWidth: natural.width, maxWidth: node.grow > 0 ? .infinity : natural.width,
+                    idealHeight: natural.height, maxHeight: natural.height)
+                .accessibilityElement(children: .ignore)
+                .accessibilityAddTraits(.isImage)
+                .accessibilityAction(named: actions[0].0, actions[0].1)
+                .accessibilityAction(named: actions[1].0, actions[1].1)
         case kindDatePicker:
             // The platform's own control, hosted (docs/datetime-plan.md D6):
             // the compact field that opens the calendar. Its action is the
@@ -25880,4 +26093,663 @@ private func kayaPlaceWindow() {
     let y = 40.0 + Double(bounded / cols) * 345.0
     window.setFrame(NSRect(x: x, y: y, width: 540, height: 330), display: true)
     #endif
+}
+
+// MARK: - Media (docs/media-plan.md)
+//
+// The player is an AVPlayer the app holds by id; the video view is a BARE
+// AVPlayerLayer (never AVPlayerView, AVPlayerViewController or VideoPlayer,
+// which keep keyboard shortcuts, their own Now Playing session or controls:
+// tools/check-verbs.py); the session is MPNowPlayingInfoCenter plus
+// MPRemoteCommandCenter. The state machine and the failure table are the
+// core's: every report goes through kayaPlayerReport.
+
+/// One platform player.
+final class KayaPlayer {
+    let id: UInt64
+    let player = AVPlayer()
+    var looping = false
+    var speed: Float = 1
+    /// Bumped per source, so a late callback from the last item says nothing.
+    var generation = 0
+    var mediaSize = CGSize.zero
+    private var itemObservers: [NSKeyValueObservation] = []
+    private var rateObserver: NSKeyValueObservation?
+    private var tokens: [NSObjectProtocol] = []
+    private var timeObserver: Any?
+
+    init(id: UInt64) {
+        self.id = id
+        player.actionAtItemEnd = .pause
+        player.preventsDisplaySleepDuringVideoPlayback = false
+        rateObserver = player.observe(\.timeControlStatus, options: [.new]) { [weak self] p, _ in
+            let status = p.timeControlStatus
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch status {
+                case .playing: kayaPlayerReport(self.id) { KayaHost.api.player_rate(self.id, 1) }
+                case .paused: kayaPlayerReport(self.id) { KayaHost.api.player_rate(self.id, 0) }
+                default: break
+                }
+            }
+        }
+        let tick = CMTime(value: CMTimeValue(KAYA_MEDIA_POSITION_TICK_MS), timescale: 1000)
+        timeObserver = player.addPeriodicTimeObserver(forInterval: tick, queue: .main) { [weak self] t in
+            guard let self, self.player.currentItem != nil, t.isNumeric else { return }
+            let ms = UInt64(max(0, (t.seconds * 1000).rounded()))
+            kayaPlayerReport(self.id) { KayaHost.api.player_position(self.id, ms) }
+        }
+    }
+
+    func release() {
+        player.pause()
+        detach()
+        player.replaceCurrentItem(with: nil)
+        if let timeObserver { player.removeTimeObserver(timeObserver) }
+        rateObserver = nil
+    }
+
+    private func detach() {
+        itemObservers = []
+        for token in tokens { NotificationCenter.default.removeObserver(token) }
+        tokens = []
+    }
+
+    /// A source the core resolved: a file:// or http(s) URL, or "" for none.
+    func load(_ locator: String) {
+        generation += 1
+        let gen = generation
+        detach()
+        mediaSize = .zero
+        kayaVideoSizeChanged(id)
+        guard !locator.isEmpty, let url = URL(string: locator) else {
+            player.replaceCurrentItem(with: nil)
+            return
+        }
+        let asset = AVURLAsset(url: url)
+        let item = AVPlayerItem(asset: asset)
+        itemObservers.append(item.observe(\.status, options: [.new]) { [weak self] item, _ in
+            let status = item.status
+            let error = item.error
+            DispatchQueue.main.async {
+                guard let self, self.generation == gen else { return }
+                switch status {
+                case .readyToPlay: self.checkDecodable(asset, item, gen)
+                case .failed: kayaReportFailure(self.id, error)
+                default: break
+                }
+            }
+        })
+        tokens.append(NotificationCenter.default.addObserver(
+            forName: AVPlayerItem.didPlayToEndTimeNotification, object: item, queue: .main
+        ) { [weak self] _ in
+            guard let self, self.generation == gen else { return }
+            if self.looping {
+                self.player.seek(to: .zero)
+                self.player.play()
+            } else {
+                kayaPlayerReport(self.id) { KayaHost.api.player_ended(self.id) }
+            }
+        })
+        tokens.append(NotificationCenter.default.addObserver(
+            forName: AVPlayerItem.failedToPlayToEndTimeNotification, object: item, queue: .main
+        ) { [weak self] note in
+            guard let self, self.generation == gen else { return }
+            kayaReportFailure(self.id, note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error)
+        })
+        player.replaceCurrentItem(with: item)
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(Int(KAYA_MEDIA_LOADING_CEILING_MS))) {
+            [weak self] in
+            guard let self, self.generation == gen else { return }
+            kayaPlayerReport(self.id) { KayaHost.api.player_overdue(self.id) }
+        }
+    }
+
+    /// THE DECODABILITY CHECK (docs/media-plan.md §7a): the platform can
+    /// reach ready with a track it will never decode — the simulator's AV1,
+    /// played as audio alone — so every track is asked, and the core reads
+    /// an undecodable one as failed(unsupported_codec).
+    private func checkDecodable(_ asset: AVURLAsset, _ item: AVPlayerItem, _ gen: Int) {
+        Task { @MainActor in
+            var why = ""
+            if let tracks = try? await asset.load(.tracks) {
+                for track in tracks where track.mediaType == .video || track.mediaType == .audio {
+                    let answer = try? await track.load(.isPlayable, .isDecodable)
+                    let (playable, decodable) = answer ?? (true, true)
+                    if !playable || !decodable {
+                        let codecs = (try? await track.load(.formatDescriptions))?
+                            .map { kayaFourCC(CMFormatDescriptionGetMediaSubType($0)) } ?? []
+                        why = "the \(track.mediaType.rawValue) track (\(codecs.joined(separator: ", "))) is "
+                            + (playable ? "not decodable" : "not playable") + " on this platform"
+                        break
+                    }
+                }
+            }
+            if why.isEmpty, (try? await asset.load(.isPlayable)) == false {
+                why = "the asset reached ready and is not playable on this platform"
+            }
+            let hasVideo = item.tracks.contains { $0.assetTrack?.mediaType == .video }
+            let deadline = Date().addingTimeInterval(3)
+            while hasVideo && item.presentationSize == .zero && Date() < deadline {
+                try? await Task.sleep(nanoseconds: 50_000_000)
+            }
+            guard self.generation == gen else { return }
+            let size = item.presentationSize
+            self.mediaSize = size
+            kayaVideoSizeChanged(self.id)
+            let seconds = item.duration.isNumeric ? item.duration.seconds : 0
+            let bytes = Array(why.utf8)
+            kayaPlayerReport(self.id) {
+                bytes.withUnsafeBufferPointer {
+                    KayaHost.api.player_loaded(
+                        self.id, UInt64(max(0, (seconds * 1000).rounded())), UInt32(size.width.rounded()),
+                        UInt32(size.height.rounded()), why.isEmpty ? 0 : 1, $0.baseAddress, UInt($0.count))
+                }
+            }
+        }
+    }
+
+    func play() {
+        #if os(iOS)
+            // docs/media-plan.md §2 rule 6: sound with the Silent switch on,
+            // interrupting other apps' audio.
+            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+            try? AVAudioSession.sharedInstance().setActive(true)
+        #endif
+        player.defaultRate = speed
+        player.play()
+    }
+
+    func seek(_ ms: UInt64, report: Bool) {
+        let to = CMTime(value: CMTimeValue(ms), timescale: 1000)
+        player.seek(to: to, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
+            guard finished, report else { return }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                let now = UInt64(max(0, (self.player.currentTime().seconds * 1000).rounded()))
+                kayaPlayerReport(self.id) { KayaHost.api.player_seeked(self.id, now) }
+            }
+        }
+    }
+}
+
+nonisolated(unsafe) var kayaPlayers: [UInt64: KayaPlayer] = [:]
+
+func kayaFourCC(_ code: FourCharCode) -> String {
+    let bytes = [24, 16, 8, 0].map { UInt8((code >> $0) & 0xFF) }
+    return String(decoding: bytes, as: UTF8.self)
+}
+
+/// THE ONE DOOR every player report takes: the core's answer, then the
+/// session follows it, so the system's playback state moves on every
+/// transition (tools/check-verbs.py holds every report call inside here).
+func kayaPlayerReport(_ id: UInt64, _ report: () -> UInt32) {
+    _ = report()
+    kayaSessionFollow(id)
+}
+
+func kayaReportFailure(_ id: UInt64, _ error: Error?) {
+    let ns = error as NSError?
+    let domain = ns?.domain ?? "kaya"
+    let code = ns?.code ?? Int(KAYA_MEDIA_FAILURE_DECODE_ERROR)
+    let underlying = (ns?.userInfo[NSUnderlyingErrorKey] as? NSError)?.code ?? 0
+    let detail = ns.map { $0.localizedFailureReason ?? $0.localizedDescription } ?? ""
+    let d = Array(domain.utf8)
+    let t = Array(detail.utf8)
+    kayaPlayerReport(id) {
+        d.withUnsafeBufferPointer { dp in
+            t.withUnsafeBufferPointer { tp in
+                KayaHost.api.player_failed(
+                    id, dp.baseAddress, UInt(dp.count), Int64(code), Int64(underlying), tp.baseAddress,
+                    UInt(tp.count))
+            }
+        }
+    }
+}
+
+/// The video views showing `id` re-read its picture's size.
+func kayaVideoSizeChanged(_ id: UInt64) {
+    for node in kayaScene.videos where node.videoPlayer == id {
+        node.videoSeq += 1
+    }
+}
+
+/// Rule 5 (docs/media-plan.md §2): a player shown by a video view keeps the
+/// display awake while it plays — AVFoundation holds the assertion exactly
+/// then (measured) — and an audio-only one keeps nothing awake.
+func kayaFollowKeepAwake() {
+    for (id, player) in kayaPlayers {
+        player.player.preventsDisplaySleepDuringVideoPlayback =
+            kayaScene.videos.contains { $0.videoPlayer == id }
+    }
+}
+
+func kayaApplyPlayerProp(_ id: UInt64, _ prop: UInt32, _ raw: UnsafeRawBufferPointer, _ at: Int) {
+    guard let p = kayaPlayers[id] else { return }
+    let type = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)
+    switch (Int32(prop), type) {
+    case (KAYA_PPROP_SOURCE, valueStr):
+        var cursor = at
+        p.load(kayaReadStrValue(raw, &cursor))
+    case (KAYA_PPROP_SPEED, valueF64):
+        p.speed = Float(raw.loadUnaligned(fromByteOffset: at + 8, as: Double.self))
+        p.player.defaultRate = p.speed
+        if p.player.rate != 0 { p.player.rate = p.speed }
+    case (KAYA_PPROP_VOLUME, valueF64):
+        p.player.volume = Float(raw.loadUnaligned(fromByteOffset: at + 8, as: Double.self))
+    case (KAYA_PPROP_MUTED, valueBool):
+        p.player.isMuted = raw[at + 8] != 0
+    case (KAYA_PPROP_LOOP, valueBool):
+        // A looping item never pauses at its end: with `.pause` the clock
+        // stops for the seek back and the app would hear a paused it never
+        // asked for, once a loop.
+        p.looping = raw[at + 8] != 0
+        p.player.actionAtItemEnd = p.looping ? .none : .pause
+    default:
+        fatalError("kaya: bad player prop \(prop) value type \(type)")
+    }
+}
+
+func kayaApplyPlayerCommand(_ id: UInt64, _ command: UInt32, _ atMs: UInt64) {
+    guard let p = kayaPlayers[id] else { return }
+    switch Int32(command) {
+    case KAYA_PLAYER_COMMAND_PLAY: p.play()
+    case KAYA_PLAYER_COMMAND_PAUSE: p.player.pause()
+    case KAYA_PLAYER_COMMAND_SEEK: p.seek(atMs, report: true)
+    default: fatalError("kaya: bad player command \(command)")
+    }
+}
+
+// MARK: The session (docs/media-plan.md §5)
+
+struct KayaSession {
+    var player: UInt64 = 0
+    var offered: UInt32 = 0
+    var stated: UInt32 = 0
+    var title = ""
+    var artist = ""
+    var album = ""
+    var artwork = ""
+}
+
+nonisolated(unsafe) var kayaSession = KayaSession()
+nonisolated(unsafe) var kayaRemoteInstalled = false
+
+/// Which MPRemoteCommand answers which SESSION_ACTION.
+func kayaRemoteCommands() -> [(MPRemoteCommand, Int32)] {
+    let c = MPRemoteCommandCenter.shared()
+    return [
+        (c.playCommand, KAYA_SESSION_ACTION_PLAY), (c.pauseCommand, KAYA_SESSION_ACTION_PAUSE),
+        (c.stopCommand, KAYA_SESSION_ACTION_STOP),
+        (c.changePlaybackPositionCommand, KAYA_SESSION_ACTION_SEEK_TO),
+        (c.seekForwardCommand, KAYA_SESSION_ACTION_SEEK_FORWARD),
+        (c.seekBackwardCommand, KAYA_SESSION_ACTION_SEEK_BACKWARD),
+        (c.nextTrackCommand, KAYA_SESSION_ACTION_NEXT),
+        (c.previousTrackCommand, KAYA_SESSION_ACTION_PREVIOUS),
+    ]
+}
+
+/// An action from the system: the CORE routes it (kaya_session_action), and
+/// a default aimed at the attached player runs here, on that player.
+/// How many remote commands reached a handler: session_send's proof that the
+/// system delivered, since MediaRemote answers "sent" for a command it then
+/// drops (docs/traps.md).
+nonisolated(unsafe) var kayaRemoteArrivals = 0
+
+func kayaRemote(_ action: Int32, _ atMs: UInt64) -> MPRemoteCommandHandlerStatus {
+    kayaRemoteArrivals += 1
+    let route = KayaHost.api.session_action(UInt32(action), atMs)
+    kayaDiag("remote command action=\(action) at=\(atMs) routed \(route) (0 app, 1-3 and 5 the player, 4 not offered)")
+    guard let p = kayaPlayers[kayaSession.player] else { return route == 0 ? .success : .commandFailed }
+    switch route {
+    case 0: return .success
+    case 1: p.play()
+    case 2: p.player.pause()
+    case 3: p.seek(atMs, report: false)
+    case 5:
+        p.seek(0, report: false)
+        p.play()
+    default: return .commandFailed
+    }
+    return .success
+}
+
+func kayaApplySession(_ session: KayaSession) {
+    kayaSession = session
+    let center = MPRemoteCommandCenter.shared()
+    if !kayaRemoteInstalled {
+        kayaRemoteInstalled = true
+        for (command, action) in kayaRemoteCommands() {
+            _ = command.addTarget { event in
+                let at = (event as? MPChangePlaybackPositionCommandEvent).map {
+                    UInt64(max(0, ($0.positionTime * 1000).rounded()))
+                } ?? 0
+                return kayaRemote(action, at)
+            }
+        }
+        // The headset's one button: the stated or the player's state decides.
+        _ = center.togglePlayPauseCommand.addTarget { _ in
+            kayaRemote(
+                KayaHost.api.session_state() == 1 ? KAYA_SESSION_ACTION_PAUSE : KAYA_SESSION_ACTION_PLAY, 0)
+        }
+    }
+    for (command, action) in kayaRemoteCommands() {
+        command.isEnabled = session.offered & (1 << UInt32(action)) != 0
+    }
+    center.togglePlayPauseCommand.isEnabled =
+        session.offered & (1 << UInt32(KAYA_SESSION_ACTION_PLAY)) != 0
+        && session.offered & (1 << UInt32(KAYA_SESSION_ACTION_PAUSE)) != 0
+    kayaPublishNowPlaying()
+}
+
+/// After every report of the attached player.
+func kayaSessionFollow(_ id: UInt64) {
+    if kayaSession.player == id { kayaPublishNowPlaying() }
+}
+
+/// What the system shows, published by hand: nothing publishes for a bare
+/// layer on macOS. playbackState is set on EVERY call: macOS routes no
+/// media key to an app that leaves it stale (docs/media-plan.md §5).
+func kayaPublishNowPlaying() {
+    let center = MPNowPlayingInfoCenter.default()
+    let s = kayaSession
+    let state = KayaHost.api.session_state()
+    #if os(macOS)
+        center.playbackState = state == 1 ? .playing : state == 2 ? .paused : .stopped
+    #endif
+    guard s.player != 0 || s.offered != 0 else {
+        center.nowPlayingInfo = nil
+        return
+    }
+    var info: [String: Any] = [
+        MPMediaItemPropertyTitle: s.title, MPMediaItemPropertyArtist: s.artist,
+        MPMediaItemPropertyAlbumTitle: s.album,
+    ]
+    if let p = kayaPlayers[s.player], let item = p.player.currentItem {
+        if item.duration.isNumeric { info[MPMediaItemPropertyPlaybackDuration] = item.duration.seconds }
+        info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = p.player.currentTime().seconds
+        info[MPNowPlayingInfoPropertyPlaybackRate] = state == 1 ? Double(p.speed) : 0.0
+        info[MPNowPlayingInfoPropertyMediaType] =
+            (p.mediaSize == .zero ? MPNowPlayingInfoMediaType.audio : .video).rawValue
+    }
+    if !s.artwork.isEmpty, let url = URL(string: s.artwork), let image = KayaPlatformImage(contentsOfFile: url.path) {
+        info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+    }
+    center.nowPlayingInfo = info
+}
+
+// MARK: The video view (docs/media-plan.md §3)
+
+/// The views on screen by node, for the harness's reads.
+nonisolated(unsafe) var kayaVideoViews: [UInt64: KayaVideoView] = [:]
+
+func kayaVideoGravity(_ fit: Int64) -> AVLayerVideoGravity {
+    switch Int32(fit) {
+    case KAYA_FIT_COVER: return .resizeAspectFill
+    case KAYA_FIT_FILL: return .resize
+    default: return .resizeAspect
+    }
+}
+
+#if os(macOS)
+    /// A layer host and nothing else: no controls, no key handling, no Now
+    /// Playing session of its own.
+    final class KayaVideoView: NSView {
+        let playerLayer = AVPlayerLayer()
+
+        override init(frame: NSRect) {
+            super.init(frame: frame)
+            wantsLayer = true
+        }
+
+        required init?(coder: NSCoder) { fatalError("kaya: KayaVideoView is not archived") }
+
+        override func makeBackingLayer() -> CALayer { playerLayer }
+        override var acceptsFirstResponder: Bool { false }
+    }
+
+    struct KayaVideoSurface: NSViewRepresentable {
+        let node: KayaNode
+
+        func makeNSView(context: Context) -> KayaVideoView {
+            let view = KayaVideoView()
+            update(view)
+            return view
+        }
+
+        func updateNSView(_ view: KayaVideoView, context: Context) { update(view) }
+
+        private func update(_ view: KayaVideoView) {
+            _ = node.videoSeq
+            kayaVideoViews[node.id] = view
+            let player = kayaPlayers[node.videoPlayer]?.player
+            if view.playerLayer.player !== player { view.playerLayer.player = player }
+            view.playerLayer.videoGravity = kayaVideoGravity(node.fit)
+        }
+
+        static func dismantleNSView(_ view: KayaVideoView, coordinator: ()) {
+            for (id, held) in kayaVideoViews where held === view { kayaVideoViews.removeValue(forKey: id) }
+            view.playerLayer.player = nil
+        }
+    }
+#else
+    final class KayaVideoView: UIView {
+        override class var layerClass: AnyClass { AVPlayerLayer.self }
+        var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+    }
+
+    struct KayaVideoSurface: UIViewRepresentable {
+        let node: KayaNode
+
+        func makeUIView(context: Context) -> KayaVideoView {
+            let view = KayaVideoView()
+            update(view)
+            return view
+        }
+
+        func updateUIView(_ view: KayaVideoView, context: Context) { update(view) }
+
+        private func update(_ view: KayaVideoView) {
+            _ = node.videoSeq
+            kayaVideoViews[node.id] = view
+            let player = kayaPlayers[node.videoPlayer]?.player
+            if view.playerLayer.player !== player { view.playerLayer.player = player }
+            view.playerLayer.videoGravity = kayaVideoGravity(node.fit)
+        }
+
+        static func dismantleUIView(_ view: KayaVideoView, coordinator: ()) {
+            for (id, held) in kayaVideoViews where held === view { kayaVideoViews.removeValue(forKey: id) }
+            view.playerLayer.player = nil
+        }
+    }
+#endif
+
+/// The video view's natural size: its picture's, 320x180 until one is known.
+func kayaVideoNatural(_ node: KayaNode) -> CGSize {
+    _ = node.videoSeq
+    let size = kayaPlayers[node.videoPlayer]?.mediaSize ?? .zero
+    return size == .zero ? CGSize(width: 320, height: 180) : size
+}
+
+/// The accessibility actions a video view carries (docs/media-plan.md §3),
+/// by name: the same closures the platform's assistive action runs, so
+/// `ax_action` drives the one path.
+func kayaVideoActions(_ node: KayaNode) -> [(String, () -> Void)] {
+    let id = node.videoPlayer
+    return [
+        ("Play", { kayaPlayers[id]?.play() }),
+        ("Pause", { kayaPlayers[id]?.player.pause() }),
+    ]
+}
+
+// MARK: The capability query (docs/media-plan.md §8 ruling 1)
+
+/// AVFoundation's own answer; AV1 also needs a decoder this device has.
+@_cdecl("kaya_swiftui_can_play")
+public func kayaSwiftUICanPlay(_ mime: UnsafePointer<CChar>, _ codecs: UnsafePointer<CChar>) -> UInt8 {
+    let type = String(cString: mime)
+    let list = String(cString: codecs)
+    if list.lowercased().contains("av01") && !VTIsHardwareDecodeSupported(kCMVideoCodecType_AV1) {
+        return 0
+    }
+    let extended = list.isEmpty ? type : "\(type); codecs=\"\(list)\""
+    return AVURLAsset.isPlayableExtendedMIMEType(extended) ? 1 : 0
+}
+
+/// THIS PLATFORM'S TABLE (docs/media-plan.md §7a, the lane tables): the
+/// items it is expected to refuse, with the reason; `{media:item|text}` in a
+/// scene expands to the refusal line here, to the scene's own text elsewhere.
+func kayaMediaRefusal(_ item: String) -> String? {
+    let name = item.lowercased()
+    if name.hasSuffix(".webm") || name.hasSuffix(".mpd") { return "unsupported_container" }
+    if name.hasPrefix("vp9_") { return "unsupported_codec" }
+    #if targetEnvironment(simulator)
+        if name.hasPrefix("av1_") { return "unsupported_codec" }
+    #endif
+    return nil
+}
+
+// MARK: The harness's media reads
+
+#if os(macOS)
+    /// The video view's centre as the WINDOW SERVER composited it, in sRGB:
+    /// the picture is in no process snapshot (measured), and a window
+    /// capture by id reads it back colour-managed.
+    func kayaVideoInk(_ node: KayaNode) -> String {
+        let found = DispatchQueue.main.sync { () -> (CGWindowID, CGRect, CGFloat)? in
+            guard let view = kayaVideoViews[node.id], let window = view.window else { return nil }
+            // Window coordinates run from the frame's bottom-left, title bar
+            // included, and the capture is the whole frame from its top-left.
+            let inWindow = view.convert(view.bounds, to: nil)
+            let flipped = CGRect(
+                x: inWindow.minX, y: window.frame.height - inWindow.maxY, width: inWindow.width,
+                height: inWindow.height)
+            return (CGWindowID(window.windowNumber), flipped, window.backingScaleFactor)
+        }
+        guard let (wid, rect, scale) = found else { return "<no video view on screen>" }
+        let done = DispatchSemaphore(value: 0)
+        let answer = KayaAnswerBox("<no answer from ScreenCaptureKit within 5 s>")
+        Task.detached {
+            do {
+                let content = try await SCShareableContent.excludingDesktopWindows(
+                    false, onScreenWindowsOnly: true)
+                guard let window = content.windows.first(where: { $0.windowID == wid }) else {
+                    answer.said = "<the window server lists no window \(wid)>"
+                    done.signal()
+                    return
+                }
+                let filter = SCContentFilter(desktopIndependentWindow: window)
+                let config = SCStreamConfiguration()
+                config.width = Int(window.frame.width * scale)
+                config.height = Int(window.frame.height * scale)
+                config.showsCursor = false
+                let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+                let x = Int((rect.midX * scale).rounded())
+                let y = Int((rect.midY * scale).rounded())
+                answer.said = kayaSRGBPixel(image, x, y) ?? "<the capture is \(image.width)x\(image.height), no pixel at \(x),\(y)>"
+            } catch {
+                answer.said = "<ScreenCaptureKit: \(error.localizedDescription)>"
+            }
+            done.signal()
+        }
+        _ = done.wait(timeout: .now() + 5)
+        return answer.said
+    }
+
+    final class KayaAnswerBox: @unchecked Sendable {
+        var said: String
+        init(_ said: String) { self.said = said }
+    }
+
+    /// One pixel of `image`, converted into sRGB by CoreGraphics.
+    func kayaSRGBPixel(_ image: CGImage, _ x: Int, _ y: Int) -> String? {
+        guard x >= 0, y >= 0, x < image.width, y < image.height,
+            let crop = image.cropping(to: CGRect(x: x, y: y, width: 1, height: 1)),
+            let space = CGColorSpace(name: CGColorSpace.sRGB)
+        else { return nil }
+        var px = [UInt8](repeating: 0, count: 4)
+        guard let ctx = CGContext(
+            data: &px, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4, space: space,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        ctx.draw(crop, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        return String(format: "%02X%02X%02X", px[0], px[1], px[2])
+    }
+
+    /// session_send (docs/media-plan.md §5): the command goes to MediaRemote
+    /// from inside Apple's own /usr/bin/perl, since one sent from this
+    /// unentitled process is dropped while reported sent (measured), and the
+    /// helper refuses unless the system names THIS process as Now Playing.
+    func kayaSessionSend(_ action: String) -> (sent: Bool, said: String) {
+        let commands = ["play": 0, "pause": 1, "toggle": 2, "stop": 3, "next": 4, "previous": 5]
+        guard let command = commands[action] else { return (false, "session_send \(action): no such command") }
+        guard let lib = ProcessInfo.processInfo.environment["KAYA_MEDIAREMOTE_LIB"],
+            FileManager.default.fileExists(atPath: lib)
+        else {
+            return (false,
+                "session_send needs KAYA_MEDIAREMOTE_LIB, the helper tools/lib/media_server.py's "
+                    + "mediaremote_lib() builds from tools/mac/mediaremote.c; the lane sets it for media_ legs")
+        }
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
+        proc.arguments = [
+            "-e",
+            "use DynaLoader; my $l=DynaLoader::dl_load_file($ARGV[0],0) or die DynaLoader::dl_error(); "
+                + "my $s=DynaLoader::dl_find_symbol($l,'kaya_mediaremote_run') or die 'no symbol'; "
+                + "DynaLoader::dl_install_xsub('main::run',$s); run();",
+            lib,
+        ]
+        proc.environment = ["KAYA_MR_ACTION": "send:\(command):\(getpid())"]
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = pipe
+        do { try proc.run() } catch { return (false, "session_send could not start /usr/bin/perl: \(error)") }
+        proc.waitUntilExit()
+        let said = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (said.contains("mediaremote: sent"), said.isEmpty ? "perl said nothing, exit \(proc.terminationStatus)" : said)
+    }
+
+    /// Whether this process holds a display-sleep assertion.
+    func kayaDisplayAwake() -> Bool {
+        var byProcess: Unmanaged<CFDictionary>?
+        guard IOPMCopyAssertionsByProcess(&byProcess) == kIOReturnSuccess,
+            let all = byProcess?.takeRetainedValue() as? [NSNumber: [[String: Any]]]
+        else { return false }
+        return (all[NSNumber(value: getpid())] ?? []).contains {
+            ($0["AssertType"] as? String) == "PreventUserIdleDisplaySleep"
+        }
+    }
+#endif
+
+/// `"<title>" <state>` as this process published them.
+func kayaNowPlaying() -> String {
+    DispatchQueue.main.sync {
+        let center = MPNowPlayingInfoCenter.default()
+        let title = center.nowPlayingInfo?[MPMediaItemPropertyTitle] as? String ?? ""
+        #if os(macOS)
+            let state: String
+            switch center.playbackState {
+            case .playing: state = "playing"
+            case .paused: state = "paused"
+            default: state = "stopped"
+            }
+        #else
+            let rate = center.nowPlayingInfo?[MPNowPlayingInfoPropertyPlaybackRate] as? Double
+            let state = center.nowPlayingInfo == nil ? "stopped" : (rate ?? 0) > 0 ? "playing" : "paused"
+        #endif
+        return "\(title.debugDescription) \(state)"
+    }
+}
+
+/// expect_video_ink's tolerance per channel, harness.rs's VIDEO_INK_TOLERANCE.
+let kayaVideoInkTolerance = 2
+
+func kayaVideoInkMatches(_ got: String, _ want: String) -> Bool {
+    func rgb(_ s: String) -> [Int]? {
+        guard s.count == 6, let n = Int(s, radix: 16) else { return nil }
+        return [(n >> 16) & 0xFF, (n >> 8) & 0xFF, n & 0xFF]
+    }
+    guard let g = rgb(got), let w = rgb(want) else { return false }
+    return zip(g, w).allSatisfy { abs($0 - $1) <= kayaVideoInkTolerance }
 }

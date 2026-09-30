@@ -13115,3 +13115,50 @@ point from `TransformToVisual(None)` hit the slider the clip gives it. The
 hit test does honour `UIElement.Clip`: the left-to-right range legs answered
 the clipped thumb on the first run. `press_takes` in crates/kaya/src/winui/mod.rs
 uses the host point.
+
+## A video's TRANSFER tag decides the colour the window shows (measured 2026-09-30)
+AVFoundation colour-manages a decoded frame by its tags, so the same pixels
+read back differently by the transfer they are tagged with. sRGB C83C1E tagged
+BT.709 primaries, transfer and matrix reads CF4421 from a window capture
+converted to sRGB (and from the layer's own paused buffer); untagged reads the
+same; tagged with the sRGB transfer (`iec61966-2-1`) it reads C83C1E exactly.
+And FFmpeg's lavfi `color` source computes its YUV with the BT.601 formula
+whatever the file is tagged, so a flat colour has to be built as RGB
+(`,format=rgb24`) and converted with `scale=out_color_matrix=bt709`. Both are
+in tools/gen-media.py; the numbers are docs/probes/media-mac-2026-09-30.md.
+expect_video_ink compares in sRGB within 2 per channel (harness.rs
+VIDEO_INK_TOLERANCE, held by check-verbs).
+
+## MediaRemote drops a command from an unentitled process and answers true (measured 2026-09-30)
+`MRMediaRemoteSendCommand` called from kaya's own process returns true and
+reaches no handler; the Now Playing reads answer pid 0 and no info. Loaded into
+Apple's signed `/usr/bin/perl` (DynaLoader, the mediaremote-adapter route) the
+same calls work: the guest's MPRemoteCommandCenter handler fired for 6 of 6
+pauses and 5 of 6 plays. So `session_send` goes through tools/mac/mediaremote.c
+inside perl, and it refuses unless the system names the guest as Now Playing,
+since otherwise the command would drive the maintainer's own player. An
+`.accessory` guest is chosen as Now Playing muted or audible; `.regular` is not
+needed. AND EVEN FROM PERL, "SENT" IS NOT "DELIVERED": in back-to-back legs
+MediaRemote answered 1 for a command sent to the guest's own pid and no
+handler ran (a pause, then a next; the probe had seen it once, a play). So
+`session_send` counts handler arrivals and resends only when none came in 2 s
+(an arrival takes about 1 ms); with the counter cut it reports "MediaRemote
+answered sent 5 time(s) and no remote command reached this process's
+handlers".
+
+## A looping AVPlayer with `actionAtItemEnd = .pause` reports a pause at every loop (measured 2026-09-30)
+Seeking back to zero from the end notification is not seamless: the player's
+timeControlStatus goes `.paused` for the seek, the core publishes `paused`,
+and the app hears a pause it never asked for. It hid a real red: with the
+session's pause default cut, `expect label#0 "paused"` still passed four
+seconds later on a loop boundary. A looping player sets `actionAtItemEnd =
+.none` (swift/KayaSwiftUI.swift, the loop prop's arm).
+
+## VP9 in MP4 plays its audio and no picture on the mac, quietly (measured 2026-09-30)
+AVFoundation lists an MP4's VP9 track `isPlayable` false and `isDecodable`
+false, the asset `isPlayable` false, and still reaches ready and plays the
+AAC track: no error, presentation size 0x0. It is the mac's instance of the
+quiet shape docs/media-plan.md §7a found on the iOS simulator (AV1) and in
+GStreamer; the decodability check fails it as `unsupported_codec`, and with
+the check cut the formats leg reads "ready 2.0s 0x0". An MP2 audio track in
+MP4 is not listed as a track at all.
