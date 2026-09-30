@@ -3,8 +3,8 @@
 Status: DESIGNED 2026-09-29, unbuilt. It replaces the headless design of
 docs/video-editor-plan.md §2 and §3, and it answers that plan's rulings 2
 and 3 and the roadmap's audio-playback question. The five pieces of shape
-in §0 are RULED by the maintainer; §8 holds the rulings still open, each
-with a recommendation. The research behind every platform claim is
+in §0 are RULED by the maintainer, and so are §8's six (2026-09-29), the
+fourth as a research pass before its final ruling. The research behind every platform claim is
 docs/probes/video-native-2026-09-29/ (apple.md, android-linux.md,
 windows-survey.md), and for the test suite (§7a)
 docs/probes/media-suite-2026-09-29.md; "measured" below means measured
@@ -118,7 +118,7 @@ to it).
 
 Every lane asserts a player's state, position within a tolerance,
 duration, media size and occurrences; what else a scene may assert is
-open ruling 2 (§8).
+ruling 2 (§8).
 
 ## §3. The video view
 
@@ -153,7 +153,11 @@ cues from the player's text track (`Player.Listener.onCues`), styled from
 `CaptioningManager`'s user style and font scale; the track is already
 chosen from the system preference by media3. On GTK kaya draws cues from
 playbin's text track, scaled with the GTK text-scale setting as Showtime
-does, since GNOME has no system caption style. A shared scene asserts
+does, since GNOME has no system caption style. A SIDECAR WebVTT file
+(RULED 2026-09-29, the maintainer): AVFoundation takes WebVTT only inside
+HLS, so on Apple kaya parses the sidecar's cues and draws them with the
+same caption renderer it builds for Android and GTK; sidecar captions
+work on all five platforms. A shared scene asserts
 which caption track is selected and what cue text is current, never how
 the caption looks.
 
@@ -263,8 +267,8 @@ no platform routes the keys to the app.
    what name the Windows media flyout shows for an unpackaged process.
 2. iOS simulator: the bare `AVPlayerLayer`'s clip, scroll and overlay,
    and whether `displayedPixelBuffer()` answers while paused.
-3. Android: the chosen clip decoding on the emulator pool (open ruling
-   5), and the `MediaStyle` notification on the pool.
+3. Android: the chosen clip decoding on the emulator pool (ruling 5,
+   §8), and the `MediaStyle` notification on the pool.
 4. Linux: `mpris-server` on the lane's session bus, read back with
    `busctl`, since the lane image has no GNOME Shell.
 5. Each platform's first-frame signal and headphone-unplug behaviour.
@@ -294,8 +298,8 @@ platform's own player and no kaya code (docs/probes/media-suite-2026-09-29.md).
 
 **What each platform plays.** macOS 26.6 (M5 Pro) and the iOS 26.5
 simulator through AVPlayer; the Windows VM through `MediaPlayer` with the
-HEVC, AV1, VP9 and Web Media extensions installed ("without" is Microsoft's
-codec table, unmeasured); the lane image's GStreamer 1.26.2, naming the
+HEVC, AV1, VP9 and Web Media extensions installed and, measured
+2026-09-30, with those four removed for the user; the lane image's GStreamer 1.26.2, naming the
 package each item needs beyond the `-base` and `-good` the image already
 has; the API 35 pool through media3 1.10.1 with `media3-exoplayer-hls` and
 `-dash`. "container" is AVFoundation -11828, "This media format is not
@@ -304,21 +308,21 @@ supported.".
 | item | macOS | iOS sim | Windows (with / without) | Linux | Android |
 |---|---|---|---|---|---|
 | H.264 + AAC, MP4 | plays | plays | plays / plays | `-libav` or `-bad` | plays |
-| HEVC, MP4 and MOV | plays | plays | plays / fails, codec pack | `-libav` or `-bad` | plays (software) |
-| VP9 + Opus, WebM | fails: container | fails: container | plays / plays | plays | plays |
-| AV1, MP4 | plays (M3 and later) | no picture, NO error | plays / fails, codec pack | `-bad` | plays (dav1d) |
-| AV1, WebM | fails: container | fails: container | plays / fails, codec pack | `-bad`; without it, audio only, silently | plays |
+| HEVC, MP4 and MOV | plays | plays | plays / audio only, QUIET | `-libav` or `-bad` | plays (software) |
+| VP9 + Opus, WebM | fails: container | fails: container | plays / audio only, QUIET | plays | plays |
+| AV1, MP4 | plays (M3 and later) | no picture, NO error | plays / audio only, QUIET | `-bad` | plays (dav1d) |
+| AV1, WebM | fails: container | fails: container | plays / audio only, QUIET | `-bad`; without it, audio only, silently | plays |
 | MP3, FLAC, WAV | plays | plays | plays | plays | plays |
 | AAC (M4A) | plays | plays | plays | `-libav` or `-bad` | plays |
-| Opus in Ogg | plays | plays | plays / unsettled | plays | plays |
-| Opus in WebM | fails: container | fails: container | plays | plays | plays |
+| Opus in Ogg | plays | plays | plays / fails: `SourceNotSupported` | plays | plays |
+| Opus in WebM | fails: container | fails: container | plays / plays | plays | plays |
 | progressive HTTP | plays, Range required | plays | plays | plays | plays |
 | HLS, fMP4 segments | plays | plays | plays | plays with the decoders; one missing HANGS | plays |
 | HLS, TS segments | plays | plays | plays | `-bad` (`tsdemux`); without it HANGS | plays |
 | DASH | fails: container | fails: container | plays | plays with the decoders | plays |
-| sidecar WebVTT | not taken outside HLS | same | `TimedTextSource` (docs) | `suburi`, 2 cues | 2 cues |
+| sidecar WebVTT | not taken outside HLS; kaya draws (ruled) | same | `TimedTextSource`, 2 cues | `suburi`, 2 cues | 2 cues |
 | WebVTT in HLS | listed | listed | listed | 2 cues | 2 cues |
-| tx3g in MP4 | listed | listed | NOT listed | 2 cues | 2 cues |
+| tx3g in MP4 | listed | listed | not exposed by the MP4 source | 2 cues | 2 cues |
 | two audio tracks, switch | `en, fr`, switched | same | `en, fr` listed | `en, fr` read | switched |
 
 The headline: every platform but Apple plays the whole set once Linux has
@@ -326,10 +330,22 @@ The headline: every platform but Apple plays the whole set once Linux has
 dangerous cells are the quiet ones: the iOS simulator reaches ready on
 AV1 with no picture and no error, GStreamer plays the audio of a file
 whose video decoder is missing, and an HLS stream missing an element hangs
-with no error. Two further traps: AVPlayer refuses an HTTP server that
-ignores `Range` (-11850, "The server is not correctly configured."), and
-on the Windows VM a non-interactive (ssh) session fails H.264 whose height
-is not a multiple of 16, and all HEVC, that the interactive session plays.
+with no error. Windows without the Store packages is quiet too: HEVC, VP9
+and AV1 files reach `Playing` with the audio and no picture, and only the
+video track's `SupportInfo.DecoderStatus` (`UnsupportedSubtype`) says so.
+Measured by the DLLs each file loads, Windows' WebM container and Opus
+decoder are in-box, VP9 is the VP9 package's, and the Ogg container is Web
+Media Extensions'. Two further traps: AVPlayer refuses an HTTP server that
+ignores `Range` (-11850, "The server is not correctly configured."), which
+public DASH servers showed it reports BEFORE reading the format, so an
+unsupported manifest from such a server reads as a server error; and on the
+Windows VM an ssh login runs in session 0, which has no display, where
+`MediaPlayer`'s own presentation fails (`DecodingError`,
+`DXGI_ERROR_NOT_CURRENTLY_AVAILABLE`) for H.264 whose height is not a
+multiple of 16 and for all HEVC, although the decoders decode every frame
+there and frame-server mode plays everything. The lanes run in the
+interactive session and are unaffected; deploy-win's guest unit tests run
+over ssh, so a unit test that plays video there uses frame-server mode.
 CEA-608 is left out: FFmpeg has no encoder for it.
 
 **Failure semantics, one in nine bindings.** A player that cannot play
@@ -345,13 +361,20 @@ AVFoundation reports a missing file as -17913, which names nothing.
 | reason | Apple | WinUI | GStreamer | media3 |
 |---|---|---|---|---|
 | `unsupported_codec` | a track whose `isPlayable` or `isDecodable` is false, the item ready (-11821 decode failure on open is `decode_error`) | a track's `SupportInfo.DecoderStatus` not `FullySupported` | a missing-plugin message whose caps are a codec's; `STREAM_ERROR_CODEC_NOT_FOUND` | 4004, 4005, or a `Tracks` group with no supported track |
-| `unsupported_container` | -11828 / -12847 | `MediaPlayerError.SourceNotSupported` | a missing-plugin message whose caps are a container's or a manifest's; `STREAM_ERROR_TYPE_NOT_FOUND`, `_WRONG_TYPE`, `_DEMUX` | 3003, 3004 |
-| `not_found` | NSURLErrorDomain -1100, HTTP 404/410 | `MediaSource` failed on file-not-found or HTTP 404 | `RESOURCE_ERROR_NOT_FOUND` | 2005; 2004 with 404 or 410 |
-| `network` | other NSURLErrorDomain; -11850 | `MediaPlayerError.NetworkError` | other resource errors on an HTTP source | 2001, 2002, other 2004 |
+| `unsupported_container` | -11828 / -12847 | `SourceNotSupported` with 0xC00D36C4 (`MF_E_UNSUPPORTED_BYTESTREAM_TYPE`), 0xC00D6591 (an unsupported manifest profile) | a missing-plugin message whose caps are a container's or a manifest's; `STREAM_ERROR_TYPE_NOT_FOUND`, `_WRONG_TYPE`, `_DEMUX` | 3003, 3004 |
+| `not_found` | NSURLErrorDomain -1100, HTTP 404/410 | `SourceNotSupported` with 0xC00D001A (`NS_E_FILE_NOT_FOUND`), HTTP 404 | `RESOURCE_ERROR_NOT_FOUND` | 2005; 2004 with 404 or 410 |
+| `network` | other NSURLErrorDomain; -11850 | `SourceNotSupported` with 0xC00D0035 (`NS_E_SERVER_NOT_FOUND`), refused or unresolvable; `NetworkError` | a `STREAM_ERROR_FAILED` or resource error from the HTTP source element (refused, unresolvable and unroutable are stream errors) | 2001, 2002, other 2004 |
 | `decode_error` | -11821 | `MediaPlayerError.DecodingError` | `STREAM_ERROR_DECODE` | 4001, 4003, 3001, 3002 |
 
+Measured 2026-09-30: WinUI's `MediaPlayerError` is `SourceNotSupported` for a
+refused port, an unresolvable host, a 404 and an unknown container alike, so
+its reason comes from `ExtendedErrorCode`. On Apple a DASH manifest from a
+server that ignores `Range` reports -11850, a `network` code, so a `.mpd` or
+`application/dash+xml` source is `unsupported_container` from the capability
+query before it is loaded.
+
 **The capability query answers from the same knowledge.**
-`can_play(mime, codecs)` (open ruling 1) is true exactly when loading that
+`can_play(mime, codecs)` (ruling 1, §8) is true exactly when loading that
 media would not publish `unsupported_codec` or `unsupported_container`:
 Apple asks `AVURLAsset.isPlayableExtendedMIMEType` and, for AV1,
 `VTIsHardwareDecodeSupported`; WinUI `CodecQuery` for the decoder and a
@@ -386,7 +409,10 @@ simulator shares the host's network; an app bundle needs
 with cleartext allowed for that host alone in the test app's network
 security config; the Windows VM at the host's bridge address 192.168.64.1,
 the server bound there; the linux lane runs it inside the container on
-127.0.0.1.
+127.0.0.1, or reaches the host's loopback-bound server as
+`host.docker.internal`. Each route measured 2026-09-30 with a full fetch
+and a Range fetch; neither binding is reachable from the LAN, and this
+host's application firewall is off, so no prompt appears.
 
 **The scenes**, shared verbatim by every lane:
 
@@ -395,15 +421,17 @@ the server bound there; the linux lane runs it inside the container on
   stated tolerance, plays, expects the position past 1000 ms and `ended`.
 - `media_delivery`: `h264_aac.mp4` over progressive HTTP, both HLS trees,
   DASH; then a 404 expecting `failed(not_found)`, a missing local file
-  expecting the same, and a refused port expecting `failed(network)`
-  (media3 raises it only after its retries, and WinUI was still opening
-  8 s in, so that step's ceiling is measured before it is written).
+  expecting the same, and a refused port expecting `failed(network)`.
+  Measured 2026-09-30, the refused port fails in 0.1 s on Apple, under
+  0.2 s on GStreamer, 4.7 s on media3 and 16.3 to 16.6 s on WinUI (its HTTP
+  source retrying; the TCP stack alone refuses in 2 s), past the harness's
+  15 s expect window, so that step's shape is unsettled (below).
 - `media_tracks`: the two-track files and HLS expect audio `en, fr`,
   select `fr` and read it back; the tx3g, sidecar and HLS subtitle items
   select the caption track and expect cue text "first cue" at 500 ms and
   "second cue" at 1500 ms, never the look (§3).
 
-Per mode, following open ruling 2: on the video view, the colour by window
+Per mode, following ruling 2 (§8): on the video view, the colour by window
 capture where the picture is readable (Apple, GTK; WinUI after §6.1), and
 on Android the first-frame signal instead; on the surface, the colour read
 back as a canvas is, with a tolerance stated for video (iOS decoded C93C1E,
@@ -416,10 +444,12 @@ reason, and there the leg asserts that `failed(reason)` and a false
 
 - macOS and iOS: the four WebM files and DASH, `unsupported_container`;
   on the simulator also `av1_aac.mp4`, `unsupported_codec` (the one kaya
-  must synthesize). The sidecar WebVTT is unsettled (below).
+  must synthesize). The sidecar WebVTT plays, its cues drawn by kaya
+  (§3).
 - Windows: none. The runner reads the installed Store packages and refuses
-  naming a missing extension, so a rebuilt VM is not read as a kaya bug.
-  The tx3g item is unsettled.
+  naming a missing extension, so a rebuilt VM is not read as a kaya bug
+  (without them the video items play their audio alone, silently). The
+  tx3g item's captions are unsettled (below).
 - Linux: none once the image adds `gstreamer1.0-plugins-bad`,
   `gstreamer1.0-libav` (`avdec_h264` and `avdec_h265` over openh264 and
   libde265) and `gstreamer1.0-gtk4` for the sink; `-ugly` adds nothing.
@@ -428,49 +458,59 @@ reason, and there the leg asserts that `failed(reason)` and a false
   `failed`, the watched red for the audio-only and stall cases.
 - Android: none.
 
-**Unsettled.** Sidecar WebVTT on Apple: AVFoundation takes WebVTT only
-inside HLS, so either kaya parses the cues and draws them as it already
-must on Android, GTK and the surface, or Apple lanes expect a failure; to
-rule. tx3g on WinUI: not listed by the probe's poll, to read again from the
-real backend. Windows without extensions, and Opus's in-box status, are
-from the docs only.
+**Unsettled.** Two, both measured 2026-09-30. tx3g on WinUI: Media
+Foundation's MP4 source exposes no text track for tx3g (nor for 3GP, nor a
+QuickTime `text` track in MOV), while a sidecar WebVTT or SRT through
+`TimedTextSource` and SRT in Matroska deliver cues; so either kaya reads the
+tx3g samples and draws them with its caption renderer, or the Windows table
+expects the tx3g item's caption track absent. The refused-port step: WinUI
+fails it past the 15 s expect window; the scene's step needs a longer wait
+than an ordinary expect, or the network case uses an unresolvable `.invalid`
+host, which fails inside 3.3 s on every platform but needs a resolver that
+answers. Public streams (docs/probes/media-suite-2026-09-29.md) add one
+Windows caution beyond the suite: Apple's TS bipbop HLS never starts and its
+fMP4 HLS opens only after 12 s, while the local trees play at once.
 
 **It grows into the player demo.** The suite's guest (Rust at depth, every
 binding at breadth) is a small player: the item list, a video view, play,
 pause, audio and caption pickers and the `failed(reason)` line.
 
-## §8. Rulings still open
+## §8. The follow-on rulings
 
-1. **The codec floor.** RECOMMENDED: state H.264 video with AAC audio in
+All six were RULED by the maintainer on 2026-09-29 as recommended below;
+the fourth is ruled "research first", so its final ruling waits for that
+pass.
+
+1. **The codec floor.** RULED 2026-09-29, as recommended: state H.264 video with AAC audio in
    MP4 as the floor every platform plays with no extra install, and ship
    a capability query (`can_play(mime, codecs)`, the web's
    `canPlayType`) so an app can offer more where the platform has it
    (Apple plays no VP9 or WebM; Windows lacks HEVC without a Store
    extension).
-2. **What a video scene may assert per mode.** RECOMMENDED: geometry,
+2. **What a video scene may assert per mode.** RULED 2026-09-29, as
+   recommended: geometry,
    state and timing everywhere; on the video view a pixel check by window
    capture where the picture is readable (Apple by window id, compared in
    a stated colour space with a tolerance wider than ±1; GTK through its
    own renderer; WinUI only if §6.1 says `PrintWindow` sees it); on
    Android's video view a frames-arriving signal instead; on the surface
    the pixels exactly, as a canvas.
-3. **Filmstrips.** RECOMMENDED: a canvas `draw_image` op, so a timeline
+3. **Filmstrips.** RULED 2026-09-29, as recommended: a canvas `draw_image` op, so a timeline
    draws its filmstrip, waveform and playhead in one canvas; a row of
    image widgets remains the fallback that works today.
-4. **Thumbnail and waveform extraction.** RECOMMENDED: a short research
-   pass before ruling, pricing the platform APIs per backend
+4. **Thumbnail and waveform extraction.** RULED 2026-09-29: RESEARCH
+   FIRST. A short research pass comes before the ruling, pricing the platform APIs per backend
    (`AVAssetImageGenerator`, media3's frame extraction, a GStreamer
    `appsink`, `MediaComposition.GetThumbnailsAsync`, and the audio
    decode each needs for peaks) against FFmpeg, whose licence depends on
    the build: LGPL 2.1 without `--enable-gpl`, GPL with it, not
    redistributable with `--enable-nonfree`, and on iOS the LGPL's
    relinking clause is hard to meet (docs/probes/video-playback-2026-09-02-decoders.md §B6).
-5. **The one test clip.** RECOMMENDED: one short H.264/AAC MP4, a flat
+5. **The one test clip.** RULED 2026-09-29, as recommended: one short H.264/AAC MP4, a flat
    asymmetric colour with an audio track (Android's media keys need one),
    shared by all five lanes under guests/assets, after checking the
    emulator pool plays it with the audio track present.
 6. **The name of the choice between the view and the surface.**
-   RECOMMENDED: no setting on `video` at all; the kind is the choice, so
+   RULED 2026-09-29, as recommended: no setting on `video` at all; the kind is the choice, so
    an app writes `video(player)` for the view and `surface(player)` for
-   frames mode, and the surface's other producers read the same way. If a
-   prop on `video` is preferred instead, `frames` (a boolean).
+   frames mode, and the surface's other producers read the same way.

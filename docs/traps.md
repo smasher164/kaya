@@ -4,6 +4,21 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## A MediaPlayer run over ssh fails video that plays on the desktop (measured 2026-09-30)
+
+An ssh login on the Windows VM runs in session 0, whose window station has
+no display. There `Windows.Media.Playback.MediaPlayer` in its default mode
+opens a clip and then raises `MediaFailed` with `DecodingError` and
+0x887A0022 (`DXGI_ERROR_NOT_CURRENTLY_AVAILABLE`) for H.264 whose height is
+not a multiple of 16 and for every HEVC file, while the same clips play in
+the interactive session (`schtasks /it`, the lanes' route). The decoders are
+not the cause: a source reader decodes every frame in session 0, and the
+same player in frame-server mode plays them all. The windows lane's legs are
+unaffected; deploy-win's guest unit-test phase runs over ssh, so a unit test
+that plays video there uses frame-server mode, and any hand measurement of
+playback on the VM goes through `schtasks /it`. Measurements:
+docs/probes/media-suite-2026-09-29.md, "Follow-up, 2026-09-30".
+
 ## A Material slider's thumb takes its name off the node TalkBack focuses (2026-09-29)
 
 With foundation 1.11.4 (the rich-text pin, which also moves compose-ui to

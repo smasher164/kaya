@@ -87,12 +87,12 @@ data — nothing decodes while the user drags.
 The one gap on kaya's side: the canvas has no image op, so a filmstrip is
 either a row of `image` widgets (works today) or a new `draw_image` op
 (a spec change through eight bindings and three interpreter copies).
-Now docs/media-plan.md §8, open ruling 3.
+RULED 2026-09-29 as the `draw_image` op, docs/media-plan.md §8 ruling 3.
 
 Extraction itself is per-platform code in the APP's language, not in
 kaya's core — it is an editor feature, not a GUI feature — unless the
 maintainer wants `kaya.thumbnail(path, at_ms)` on the asset floor.
-Now docs/media-plan.md §8, open ruling 4.
+Now docs/media-plan.md §8 ruling 4, ruled 2026-09-29 as research first.
 
 ## §6 Sequencing: the probes, then depth, then breadth
 
@@ -149,18 +149,20 @@ scripts shared verbatim. The matrix before anything is called landed.
 3. Keep-awake and Now Playing metadata. RESOLVED 2026-09-29 by
    docs/media-plan.md: keep-awake belongs to the player (§2 rule 5), Now
    Playing to the media session (§5).
-4. The codec floor. MOVED to docs/media-plan.md §8, open ruling 1.
-5. What a video scene may assert. MOVED to docs/media-plan.md §8, open
-   ruling 2.
+4. The codec floor. MOVED to docs/media-plan.md §8 ruling 1, RULED
+   2026-09-29.
+5. What a video scene may assert. MOVED to docs/media-plan.md §8 ruling
+   2, RULED 2026-09-29.
 6. The range slider: a separate `range` kind (recommended) or a mode of
    `slider`. RULED 2026-09-28 (the maintainer): a separate `range` kind,
    horizontal, two thumbs for trim in and out. The vertical fader is a
    different need, spelled as the `axis` a row, column and scroll take,
    now legal on a slider (recommended, no ruling asked).
-7. Filmstrips. MOVED to docs/media-plan.md §8, open ruling 3.
-8. Thumbnail and waveform extraction. MOVED to docs/media-plan.md §8,
-   open ruling 4.
-9. The test asset. MOVED to docs/media-plan.md §8, open ruling 5.
+7. Filmstrips. MOVED to docs/media-plan.md §8 ruling 3, RULED 2026-09-29.
+8. Thumbnail and waveform extraction. MOVED to docs/media-plan.md §8
+   ruling 4, ruled 2026-09-29 as research first.
+9. The test asset. MOVED to docs/media-plan.md §8 ruling 5, RULED
+   2026-09-29.
 
 ## §8 What this milestone does not promise, on the record
 
