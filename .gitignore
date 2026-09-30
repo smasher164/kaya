@@ -1,4 +1,6 @@
 /target
+# Scratch logs and pid files from hand runs and agents; nothing reads them.
+/tmp/
 result
 .direnv
 /third_party/
