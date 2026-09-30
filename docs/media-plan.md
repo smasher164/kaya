@@ -501,6 +501,19 @@ fMP4 HLS opens only after 12 s, while the local trees play at once.
 binding at breadth) is a small player: the item list, a video view, play,
 pause, audio and caption pickers and the `failed(reason)` line.
 
+## §7b. A video view in a collection row (RULED 2026-09-30)
+
+A row binds a player through a player-valued field, as it binds a picked
+file; each row's video view shows its own player. A player is shown by at
+most one video view at a time on every platform: the root refuses a second
+view naming both, so media3's and WinUI's one-surface players and AVPlayer's
+many-layer one behave alike. The video view reports its visibility (entering
+and leaving the viewport, and the fraction shown), so an app keeps players
+only for the rows on screen and plays the most visible one, the feed-app
+pattern; kaya chooses nothing for the app. Running out of hardware decoders,
+which phones reach at a handful of players, fails with the reason
+`resources` rather than a black view.
+
 ## §8. The follow-on rulings
 
 All six were RULED by the maintainer on 2026-09-29 as recommended below;

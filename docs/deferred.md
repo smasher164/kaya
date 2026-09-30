@@ -9,7 +9,7 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
-## RULING — which player a stamped video view shows (found 2026-09-30, the media depth slice)
+## ~~RULING — which player a stamped video view shows (found 2026-09-30, the media depth slice)~~ RULED 2026-09-30 (the maintainer): option (a), a row binds a player through a player-valued field; a player is shown by at most ONE video view at a time on every platform (the root refuses a second, naming both views), so the platforms that render one surface per player hold by the rule rather than by accident; the video view gains a visibility occurrence (entering and leaving view, and how much of it shows) so an app keeps players only for rows on screen and plays the most visible one; and running out of hardware decoders is a failure with its own reason, `resources`. Built by the media breadth slice; `video` leaves tools/tpl-surfaces.py's LIVE_ONLY then
 KEY: video, template zone, Tpl video, LIVE_ONLY, tpl-surfaces, set_video_player
 
 Every kind has a template-zone constructor in every binding
