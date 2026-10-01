@@ -426,16 +426,25 @@ fields alike. What breadth owes:
     complete declaration, const and signal-bound, live and stamped; four
     scene tests, three of them watched failing with the rule cut.
 
-## DIVERGENCE — the glibc arm of the formatter door reads and writes ASCII digits under ar-EG, so a GTK number field refuses Arabic-Indic digits (found 2026-09-28, the number field's breadth)
-KEY: glibc arm, Arabic-Indic digits, ar-EG, parse_number, number_field ar-EG, formatar
+## RULING WANTED — DIVERGENCE — the glibc arm of the formatter door reads and writes ASCII digits under ar-EG, so a GTK number field refuses Arabic-Indic digits (found 2026-09-28, the number field's breadth)
+
+KEY: glibc arm, Arabic-Indic digits, ar-EG, parse_number, number_field ar-EG, formatar, outdigits, libicu
 
 `fmt::number` on Linux writes ASCII digits under ar-EG while the Apple,
 Android and Windows arms write Arabic-Indic ones (٣٫٥), and the glibc
 `parse_number` reads what its own arm writes, so a user typing Arabic-Indic
-digits into a GTK number field sees the text revert. Nothing a scene runs
-types them. The number field only exposes it: the formatar legs freeze the
-glibc spelling today. Fixing it is the door's question (which digits the
-Linux arm writes), then the parse folds them.
+digits into a GTK number field sees the text revert. MEASURED 2026-10-01
+(docs/probes/arabic-digits-2026-10-01.md): this is the platform, not kaya.
+glibc 2.41's ar_EG defines no Arabic-Indic outdigits, its separators are
+"." and ",", and `%I` still writes 3.5; no change to that locale file since
+2000 added them, the gap known since 2007. GTK and GNOME read glibc, so they
+write ASCII too. The image's ICU 76 agrees with the other three arms
+(٣٫٥, ١٬٢٣٤٬٥٦٧٫٨٩١). The parsers disagree as well: Apple and ICU read
+any digit set but only the locale's decimal separator (so "3.5" typed on a
+Latin keyboard is refused under ar-EG), glibc reads only ASCII and ".".
+Two questions for the maintainer: which digits Linux writes (glibc's ASCII
+as a stated carve-out, CLDR through the system's ICU, or a digit table of
+kaya's own), and what a typed number may contain on all five.
 
 ## RULING — a C# or Java guest host asked for a scene it does not carry runs milestone2 (found 2026-09-28, the number field's breadth)
 KEY: default arm, unknown scene, KAYA_SELFTEST, Program.cs, Main.java, milestone2 fallback
