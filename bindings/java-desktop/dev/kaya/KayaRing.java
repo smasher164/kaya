@@ -150,5 +150,8 @@ public final class KayaRing {
     public static native void catalog(byte[] app);
     public static native byte[] tr(byte[] key, byte[] args, int nargs);
 
+    /** kaya_can_play (docs/media-plan.md §8 ruling 1): any thread. */
+    public static native boolean canPlay(byte[] mime, byte[] codecs);
+
     private KayaRing() {}
 }

@@ -1368,13 +1368,11 @@ class MacRecorder(LaneRecorder):
                 "the desktop — the screen recording permission this "
                 "lane's window shots also need was refused")
 
-    def _shot(self, bundle, scratch):
-        """The fail-time attempt first; the sampler's live shot is
-        what answers when the guest is already gone (an assertion
-        failure exits at once); the DESKTOP answers when neither did,
-        which is the case the old skip sentence could only describe."""
+    @staticmethod
+    def _sampler_pid(scratch):
+        """The guest pid the sampler last resolved, "" for none."""
         pid = ""
-        sampler = scratch / "sampler.txt"
+        sampler = pathlib.Path(scratch) / "sampler.txt"
         if sampler.is_file():
             for line in sampler.read_text(encoding="utf-8",
                                           errors="replace").splitlines():
@@ -1382,6 +1380,14 @@ class MacRecorder(LaneRecorder):
                     if tok.startswith("guest_pid=") \
                             and tok[10:].isdigit():
                         pid = tok[10:]
+        return pid
+
+    def _shot(self, bundle, scratch):
+        """The fail-time attempt first; the sampler's live shot is
+        what answers when the guest is already gone (an assertion
+        failure exits at once); the DESKTOP answers when neither did,
+        which is the case the old skip sentence could only describe."""
+        pid = self._sampler_pid(scratch)
         if pid and self.shot_pid(pid, bundle / "shot.png"):
             self.mark(bundle, "shot", "ok",
                       (bundle / "shot.png").stat().st_size)
@@ -1484,11 +1490,19 @@ class MacRecorder(LaneRecorder):
                 self.skip(bundle, "desktop-shot",
                           "flightrec: the window list would not build, so "
                           "this bundle has no image of any kind — " + why_not)
+        # THIS LEG'S GUEST, not every kaya process: in the pool the other
+        # guests' AVFoundation lines filled the section's cap before the
+        # failing leg's own moment (docs/traps.md, the pooled ink read);
+        # the capture service answers for the guest, so replayd rides along.
+        pid = self._sampler_pid(scratch)
+        predicate = (f'processID == {pid} OR process == "replayd" OR '
+                     f'subsystem BEGINSWITH "com.apple.ScreenCaptureKit"'
+                     if pid else
+                     'process CONTAINS "kaya" OR senderImagePath CONTAINS '
+                     '"kaya" OR eventMessage CONTAINS "kaya"')
         self.section(bundle, "unified-log", [
             "log", "show", "--last", "2m", "--style", "compact",
-            "--predicate",
-            'process CONTAINS "kaya" OR senderImagePath CONTAINS '
-            '"kaya" OR eventMessage CONTAINS "kaya"'])
+            "--predicate", predicate])
         try:
             power = subprocess.run(["pmset", "-g", "log"], stdout=subprocess.PIPE,
                                    stderr=subprocess.STDOUT, text=True, encoding="utf-8",

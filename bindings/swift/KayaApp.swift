@@ -2508,6 +2508,8 @@ public final class KayaApp {
     // waits here for one (submitIfAny drains it head-first). Module
     // scope, not private: tools/checks/swift-notify reads the bytes back.
     var pendingRoutes = KayaTx()
+    /// The players' mirrors and handlers and the session's (KayaMedia.swift).
+    let media = KayaMediaState()
     var fileDialogs: [UInt64: (KayaAppTx, [KayaPickedFile]) throws -> Void] = [:]
     // Clipboard reads: one-shot, keyed by request id, on the alert's
     // request/result grammar.
@@ -3539,6 +3541,9 @@ public final class KayaApp {
             }
             guard let (kind, id, keys, payload, files, clip, drop, tail) = kayaParseOccurrence(buf)
             else { continue }
+            if mediaOccurrence(kind, id, keys, payload, tail, { h in self.dispatch { try self.build(h) } }) {
+                continue
+            }
             var text: String?
             var checked = false
             var value = 0.0
@@ -4927,6 +4932,22 @@ public final class KayaAppTx {
     public func image(_ source: KayaAsset, grow: Double? = nil) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_IMAGE))
         tx.setSource(w.id, source.blob())
+        if let grow { setGrow(w, grow) }
+        return w
+    }
+
+    /// A video view showing `player` (docs/media-plan.md §3): the platform's
+    /// own view with its controls off. A player is shown by one video view at
+    /// a time (§7b); `showPlayer` moves it.
+    @discardableResult
+    public func video(
+        _ player: KayaPlayer, fit: KayaFit? = nil,
+        onVisibility: ((KayaAppTx, Double) throws -> Void)? = nil, grow: Double? = nil
+    ) -> KayaWidget {
+        let w = widget(UInt32(KAYA_KIND_VIDEO))
+        tx.setPlayer(w.id, Int64(bitPattern: player.id))
+        if let fit { tx.setFit(w.id, fit.rawValue) }
+        if let onVisibility { app.onVisibility(w, onVisibility) }
         if let grow { setGrow(w, grow) }
         return w
     }
@@ -6991,6 +7012,36 @@ public final class KayaTpl {
     public func image(_ f: KayaField<Data>) -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_IMAGE))
         bindSourceField(n, f)
+        return n
+    }
+
+    /// A video view per stamped copy, showing the row's own player field
+    /// (docs/media-plan.md §7b): a player is shown by one view at a time, and
+    /// a row whose player is released shows nothing. Its visibility carries
+    /// the copy's keys first.
+    @discardableResult
+    public func video(
+        _ f: KayaField<KayaPlayer>, fit: KayaFit? = nil,
+        onVisibility: ((KayaAppTx, [KayaValue], Double) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_VIDEO))
+        tx.tx.bindPlayerElement(n.id, level: 0, field: f.index)
+        if let fit { tx.tx.setFit(n.id, fit.rawValue) }
+        if let onVisibility { tx.app.onVisibility(n, onVisibility) }
+        return n
+    }
+
+    /// A video view showing one player in every stamped copy, which the
+    /// one-view rule refuses past the first copy (docs/media-plan.md §7b).
+    @discardableResult
+    public func video(
+        _ player: KayaPlayer, fit: KayaFit? = nil,
+        onVisibility: ((KayaAppTx, [KayaValue], Double) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_VIDEO))
+        tx.tx.setPlayer(n.id, Int64(bitPattern: player.id))
+        if let fit { tx.tx.setFit(n.id, fit.rawValue) }
+        if let onVisibility { tx.app.onVisibility(n, onVisibility) }
         return n
     }
 

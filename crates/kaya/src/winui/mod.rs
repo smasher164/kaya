@@ -8,6 +8,7 @@
     clippy::all
 )]
 mod bindings;
+mod media;
 mod order;
 
 use order::{track_of, ChildOrder};
@@ -182,6 +183,9 @@ enum NativeWidget {
     ColorPicker(ColorSwatch),
     /// The range (docs/range-plan.md §6): two Sliders stacked over one track.
     Range(RangePair),
+    /// The video view (docs/media-plan.md §3): a MediaPlayerElement under a
+    /// Grid that also holds kaya's caption overlay (winui/media.rs).
+    Video { host: Grid, ax: Image },
 }
 
 impl NativeWidget {
@@ -228,6 +232,7 @@ impl NativeWidget {
             NativeWidget::NumberField(field) => field.cast(),
             NativeWidget::ColorPicker(swatch) => swatch.button.cast(),
             NativeWidget::Range(pair) => pair.root.cast(),
+            NativeWidget::Video { host, .. } => host.cast(),
         }
     }
 
@@ -241,6 +246,7 @@ impl NativeWidget {
         use windows_core::Interface;
         match self {
             NativeWidget::Search { field, .. } => field.cast(),
+            NativeWidget::Video { ax, .. } => ax.cast(),
             other => other.inner_element(),
         }
     }
@@ -813,6 +819,8 @@ struct CoreState {
     /// registers none, so Explorer and every Win32 source reach kaya only
     /// here).
     ole_targets: Vec<(isize, windows::Win32::System::Ole::IDropTarget)>,
+    /// The players, the video views and the session (winui/media.rs).
+    media: media::MediaState,
 }
 
 // ---- Text ranges: the two pieces of state that CANNOT live in
@@ -14593,7 +14601,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // platform's own — the TextBox template's `DeleteButton` —
                 // and AutoSuggestBox is refused, both measured
                 // (docs/measurements/search-winui-2026-09-06.md).
-                WidgetKind::Video => crate::depth_stub("media_formats"),
+                WidgetKind::Video => {
+                    let video = media::create_video(core, id.0)?;
+                    let native = NativeWidget::Video { host: video.host.clone(), ax: video.ax.clone() };
+                    media::register_video(core, id.0, video);
+                    native
+                }
                 WidgetKind::Range => {
                     let pair = RangePair::new(
                         tag.expect("ranges carry a tag").to_vec(),
@@ -15372,6 +15385,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
             }
             let widget = core.widgets.remove(&id).expect("scene validated the id");
+            if matches!(widget, NativeWidget::Video { .. }) {
+                media::destroy_video(core, id.0);
+            }
             // AND EVERY KIND REGISTRY (docs/traps.md 2026-09-14): a torn-down
             // copy that stayed addressable took a click on the mac; the
             // id-keyed pairs prune by id, the buttons by tag, the rest by
@@ -16227,14 +16243,27 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
         ApplyOp::CancelNotification(notification) => {
             on_notify(move || notification_forget(notification.0));
         }
-        ApplyOp::CreatePlayer(_)
-        | ApplyOp::SetPlayerProp { .. }
-        | ApplyOp::PlayerCommand { .. }
-        | ApplyOp::ReleasePlayer(_)
-        | ApplyOp::SetVideoPlayer { .. }
-        | ApplyOp::SelectTrack { .. }
-        | ApplyOp::CaptionTimes { .. }
-        | ApplyOp::SetSession { .. } => crate::depth_stub("media_formats"),
+        ApplyOp::CreatePlayer(player) => media::create_player(core, player.0)?,
+        ApplyOp::SetPlayerProp { player, prop, value } => media::set_player_prop(core, player.0, prop, value)?,
+        ApplyOp::PlayerCommand { player, command } => media::command(core, player.0, command)?,
+        ApplyOp::ReleasePlayer(player) => media::release(core, player.0)?,
+        ApplyOp::SetVideoPlayer { widget, player } => media::set_video_player(core, widget.0, player.map(|p| p.0))?,
+        ApplyOp::SelectTrack { player, kind, index } => media::select_track(core, player.0, kind, index)?,
+        ApplyOp::CaptionTimes { player, times } => media::caption_times(core, player.0, times),
+        ApplyOp::SetSession { player, offered, playback_state, title, artist, album, artwork } => {
+            media::set_session(
+                core,
+                media::SessionSpec {
+                    player: player.map(|p| p.0),
+                    offered,
+                    stated: crate::wire::playback_state_raw(playback_state),
+                    title,
+                    artist,
+                    album,
+                    artwork,
+                },
+            )?
+        }
         ApplyOp::SetBadge { count } => {
             if let Err(e) = set_badge(core, count) {
                 eprintln!("KAYA_DIAG set_badge {count}: the taskbar overlay failed: {e}");
@@ -17032,6 +17061,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (NativeWidget::Image(image), Prop::MaxWidth, Value::F64(bound)) => {
                     image.SetMaxWidth(bound)?;
                 }
+                (NativeWidget::Video { .. }, Prop::Fit, Value::I64(fit)) => media::set_fit(core, id.0, fit)?,
                 (NativeWidget::Image(image), Prop::MaxHeight, Value::F64(bound)) => {
                     image.SetMaxHeight(bound)?;
                 }
@@ -19397,6 +19427,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             reorder_rows: HashMap::new(),
             dnd_wired: std::collections::HashSet::new(),
             ole_targets: Vec::new(),
+            media: media::MediaState::default(),
         });
     });
 
@@ -20239,7 +20270,7 @@ fn registry_widget_at(core: &CoreState, kind: crate::harness::TargetKind, i: usi
         K::Textarea => core.textarea_ids.get(i).copied(),
         K::Search => core.search_ids.get(i).copied(),
         K::Range => core.range_ids.get(i).copied(),
-        K::Video => crate::depth_stub("media_formats"),
+        K::Video => core.media.video_ids.get(i).copied(),
         K::ColorPicker => core.color_picker_ids.get(i).copied(),
         K::NumberField => core.number_field_ids.get(i).copied(),
         K::Canvas => core.canvas_ids.get(i).copied(),
@@ -20535,7 +20566,7 @@ fn target_element(
         // TextBox's (docs/search-plan.md S7).
         K::Search => nth!(core.searches),
         K::Range => nth!(core.ranges),
-        K::Video => crate::depth_stub("media_formats"),
+        K::Video => nth!(media::elements(core)),
         K::ColorPicker => nth!(core.color_pickers),
         K::NumberField => nth!(core.number_fields),
         K::DatePicker => nth!(core.date_pickers),
@@ -20658,7 +20689,7 @@ fn registry_ids(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<u64> 
         K::Textarea => core.textarea_ids.clone(),
         K::Search => core.search_ids.clone(),
         K::Range => core.range_ids.clone(),
-        K::Video => crate::depth_stub("media_formats"),
+        K::Video => core.media.video_ids.clone(),
         K::ColorPicker => core.color_picker_ids.clone(),
         K::NumberField => core.number_field_ids.clone(),
         K::Canvas => core.canvas_ids.clone(),
@@ -23694,7 +23725,7 @@ impl crate::harness::Stage for WinUiStage {
                 K::Textarea => find(core, K::Textarea, &core.textareas, &id),
                 K::Search => find(core, K::Search, &core.searches, &id),
                 K::Range => find(core, K::Range, &core.ranges, &id),
-                K::Video => crate::depth_stub("media_formats"),
+                K::Video => find(core, K::Video, &media::elements(core), &id),
                 K::ColorPicker => find(core, K::ColorPicker, &core.color_pickers, &id),
                 K::NumberField => find(core, K::NumberField, &core.number_fields, &id),
                 K::Canvas => find(core, K::Canvas, &core.canvases, &id),
@@ -24595,36 +24626,86 @@ impl crate::harness::Stage for WinUiStage {
         Ok(())
     }
 
-    fn video_ink(&self, _: crate::harness::Target) -> String {
-        crate::depth_stub("media_formats")
+    /// The video view's centre as the window was COMPOSED, out of
+    /// `PrintWindow(PW_RENDERFULLCONTENT)` like every ink read here, and
+    /// out of the screen beside it, so the §6.1 measurement is printed on
+    /// every read (docs/media-plan.md §6).
+    fn video_ink(&self, target: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            let Some(widget) = media::stage::video_at(core, target.index) else {
+                return Ok(format!("<this window holds {} video views>", core.media.video_ids.len()));
+            };
+            let Some(host) = media::stage::host_of(core, widget) else {
+                return Ok(format!("<video view {widget} is not registered>"));
+            };
+            let element: FrameworkElement = windows_core::Interface::cast(&host)?;
+            let (w, h) = (element.ActualWidth()?, element.ActualHeight()?);
+            if w < 1.0 || h < 1.0 {
+                return Ok(format!("<the video view laid out at {w}x{h}>"));
+            }
+            let at = element_placement(core, &element)?;
+            let printed = match grab_canvas(&at) {
+                Ok(grab) => sample_grab(&grab, &[(50.0, 50.0)]),
+                Err(why) => format!("<the {}x{} video view could not be printed: {why}>", at.w, at.h),
+            };
+            let mut outer = Rect::default();
+            // SAFETY: a live HWND and a stack RECT.
+            unsafe { GetWindowRect(at.hwnd, &mut outer) };
+            let screen = capture(at.w, at.h, |mem| {
+                // SAFETY: the screen's DC and the DIB's own.
+                let dc = unsafe { GetDC(0) };
+                let ok = unsafe { BitBlt(mem, 0, 0, at.w, at.h, dc, outer.left + at.ox, outer.top + at.oy, 0x00CC_0020) };
+                unsafe { ReleaseDC(0, dc) };
+                if ok == 0 { Err("BitBlt from the screen answered 0".to_owned()) } else { Ok(()) }
+            })
+            .map(|grab| sample_grab(&grab, &[(50.0, 50.0)]))
+            .unwrap_or_else(|why| format!("<{why}>"));
+            eprintln!("KAYA_DIAG winui video ink: PrintWindow {printed}, screen {screen}");
+            Ok(printed)
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
-    fn ax_action(&self, _: crate::harness::Target, _: &str) -> Result<(), String> {
-        crate::depth_stub("media_formats")
+    fn ax_action(&self, target: crate::harness::Target, name: &str) -> Result<(), String> {
+        let name = name.to_owned();
+        Self::on_ui_mut(move |core| {
+            let Some(widget) = media::stage::video_at(core, target.index) else {
+                return Ok(Err(format!("this window holds {} video views", core.media.video_ids.len())));
+            };
+            Ok(media::stage::ax_action(core, widget, &name))
+        })
     }
 
-    fn session_send(&self, _: &str) -> Result<(), String> {
-        crate::depth_stub("media_formats")
+    fn session_send(&self, action: &str) -> Result<(), String> {
+        media::stage::session_send(declared_app_id().unwrap_or_default(), action)
     }
 
     fn now_playing(&self) -> String {
-        crate::depth_stub("media_formats")
+        media::stage::now_playing(declared_app_id().unwrap_or_default())
     }
 
     fn display_awake(&self) -> bool {
-        crate::depth_stub("media_formats")
+        media::stage::display_awake()
     }
 
+    /// This platform's lane table (docs/media-plan.md §7a): with the HEVC,
+    /// AV1, VP9 and Web Media extensions the lane requires, Windows plays
+    /// every item.
     fn media_refusal(&self, _: &str) -> Option<String> {
-        crate::depth_stub("media_formats")
+        None
     }
 
-    fn captions_absent(&self, _: &str) -> bool {
-        crate::depth_stub("media_formats")
+    /// Media Foundation's MP4 source exposes no text track (docs/media-plan.md
+    /// §7a, settled 2026-09-30).
+    fn captions_absent(&self, item: &str) -> bool {
+        item.to_ascii_lowercase().contains("tx3g")
     }
 
-    fn caption(&self, _: crate::harness::Target) -> String {
-        crate::depth_stub("media_formats")
+    fn caption(&self, target: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            Ok(media::stage::video_at(core, target.index).map_or_else(String::new, |w| media::stage::caption(core, w)))
+        })
+        .unwrap_or_default()
     }
 
     /// The taskbar button's own help text, which the shell fills from the
@@ -30671,9 +30752,34 @@ mod tests {
             );
         }
     }
+
+    /// THE CAPABILITY QUERY ASKS THIS GUEST'S OWN DECODERS (docs/media-plan.md
+    /// §8 ruling 1): the floor H.264 + AAC in MP4 everywhere, each Store
+    /// extension the lane requires (tools/lib/lanes/win.py CODEC_EXTENSIONS)
+    /// answering for its codec, and a type or codec nobody decodes refused.
+    #[test]
+    fn the_capability_query_answers_from_this_guests_decoders() {
+        assert!(media::can_play("video/mp4", "avc1.64000b, mp4a.40.2"));
+        assert!(media::can_play("video/mp4", "hvc1.1.6.L60.90, mp4a.40.2"));
+        assert!(media::can_play("video/webm", "vp09.00.10.08, opus"));
+        assert!(media::can_play("video/mp4", "av01.0.00M.08, mp4a.40.2"));
+        assert!(media::can_play("audio/ogg", "opus"));
+        assert!(media::can_play("audio/wav", ""));
+        assert!(!media::can_play("video/x-nope", ""));
+        assert!(!media::can_play("video/mp4", "zz99.1"));
+    }
+
+    /// THE PICTURE'S SIZE IS THE DISPLAY APERTURE'S (docs/traps.md, the
+    /// decoded frame): an MFVideoArea as Media Foundation lays it out.
+    #[test]
+    fn a_display_aperture_reads_as_the_pictures_size() {
+        let mut area = vec![0u8; 8];
+        area.extend_from_slice(&160i32.to_le_bytes());
+        area.extend_from_slice(&90i32.to_le_bytes());
+        assert_eq!(media::aperture_size(&area), Some((160, 90)));
+        assert_eq!(media::aperture_size(&area[..15]), None);
+        assert_eq!(media::aperture_size(&[0u8; 16]), None);
+    }
 }
 
-/// docs/media-plan.md §8 ruling 1, this backend's half of the capability query.
-pub(crate) fn can_play(_mime: &str, _codecs: &str) -> bool {
-    crate::depth_stub("media_formats")
-}
+pub(crate) use media::can_play;

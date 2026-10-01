@@ -3715,6 +3715,9 @@ enum NativeWidget {
     /// The labelled row (docs/forms-plan.md §3): Adwaita's own labelled
     /// row, whose seats the AddChild arm fills by child order.
     Labeled(adw::ActionRow),
+    /// docs/media-plan.md §3: a GtkPicture over the player's
+    /// gtk4paintablesink paintable, kaya's caption over it.
+    Video(gtk_media::GtkVideoView),
 }
 
 impl NativeWidget {
@@ -3746,6 +3749,7 @@ impl NativeWidget {
             NativeWidget::DatePicker(f) => f.button.clone().upcast(),
             NativeWidget::TimePicker(f) => f.button.clone().upcast(),
             NativeWidget::Labeled(row) => row.clone().upcast(),
+            NativeWidget::Video(v) => v.overlay.clone().upcast(),
         }
     }
 
@@ -4424,7 +4428,7 @@ fn kind_registry(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<gtk4
         K::Entry => core.entries.iter().map(|w| w.clone().upcast()).collect(),
         K::Search => core.searches.iter().map(|w| w.clone().upcast()).collect(),
         K::Range => core.ranges.iter().map(|p| p.group.clone().upcast()).collect(),
-        K::Video => crate::depth_stub("media_formats"),
+        K::Video => core.videos.iter().map(|v| v.overlay.clone().upcast()).collect(),
         K::ColorPicker => core.color_pickers.iter().map(|f| f.button.clone().upcast()).collect(),
         K::NumberField => core.number_fields.iter().map(|f| f.spin.clone().upcast()).collect(),
         K::Label => core.labels.clone(),
@@ -5389,6 +5393,8 @@ struct CoreState {
     date_pickers: Vec<GtkDateField>,
     time_pickers: Vec<GtkTimeField>,
     images: Vec<gtk4::Picture>,
+    /// The video views in creation order (docs/media-plan.md §3).
+    videos: Vec<gtk_media::GtkVideoView>,
     /// The canvases, and their CORE ids beside them: `canvas_probe` asks
     /// the core about a widget id, and `kind#index` is the only address
     /// the harness has (the `column_ids` shape).
@@ -9533,7 +9539,7 @@ fn context_anchor_id(core: &CoreState, t: crate::harness::Target) -> u64 {
         // The harness rejects editable text before the stage sees it
         // (their native context menus are dress).
         K::Range => core.ranges[resolve(t.index, core.ranges.len())].group.clone().upcast(),
-        K::Video => crate::depth_stub("media_formats"),
+        K::Video => core.videos[resolve(t.index, core.videos.len())].overlay.clone().upcast(),
         K::ColorPicker => core.color_pickers[resolve(t.index, core.color_pickers.len())]
             .button
             .clone()
@@ -12206,7 +12212,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.grids.push(grid.clone());
                     NativeWidget::Grid(grid)
                 }
-                WidgetKind::Video => crate::depth_stub("media_formats"),
+                WidgetKind::Video => {
+                    let view = gtk_media::build_video_view(id);
+                    core.videos.push(view.clone());
+                    NativeWidget::Video(view)
+                }
                 WidgetKind::Range => {
                     let (group, low, high) = range_view::build();
                     let pair = GtkRangePair {
@@ -12871,6 +12881,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 core.date_pickers.retain(|d| !gone(d.button.upcast_ref()));
                 core.time_pickers.retain(|t| !gone(t.button.upcast_ref()));
                 core.images.retain(|p| !gone(p.upcast_ref()));
+                core.videos.retain(|v| !gone(v.overlay.upcast_ref()));
                 core.scrolls.retain(|s| !gone(s.upcast_ref()));
                 core.progresses.retain(|p| !gone(p.upcast_ref()));
                 core.selects.retain(|d| !gone(d.upcast_ref()));
@@ -14137,14 +14148,21 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
         ApplyOp::PostNotification(spec) => post_notification(core.occurrences.clone(), spec),
         ApplyOp::CancelNotification(id) => cancel_notification(id.0),
         ApplyOp::SetBadge { count } => set_badge(count),
-        ApplyOp::CreatePlayer(_)
-        | ApplyOp::SetPlayerProp { .. }
-        | ApplyOp::PlayerCommand { .. }
-        | ApplyOp::ReleasePlayer(_)
-        | ApplyOp::SetVideoPlayer { .. }
-        | ApplyOp::SelectTrack { .. }
-        | ApplyOp::CaptionTimes { .. }
-        | ApplyOp::SetSession { .. } => crate::depth_stub("media_formats"),
+        ApplyOp::CreatePlayer(player) => gtk_media::create_player(core, player.0),
+        ApplyOp::SetPlayerProp { player, prop, value } => gtk_media::set_player_prop(player.0, prop, &value),
+        ApplyOp::PlayerCommand { player, command } => gtk_media::player_command(player.0, command),
+        ApplyOp::ReleasePlayer(player) => gtk_media::release_player(core, player.0),
+        ApplyOp::SetVideoPlayer { widget, player } => {
+            gtk_media::set_video_player(core, widget, player.map(|p| p.0));
+        }
+        ApplyOp::SelectTrack { player, kind, index } => gtk_media::select_track(player.0, kind, index),
+        ApplyOp::CaptionTimes { player, times } => gtk_media::caption_times(player.0, times),
+        ApplyOp::SetSession { player, offered, playback_state: _, title, artist, album, artwork } => {
+            gtk_media::set_session(
+                core,
+                gtk_media::SessionSpecGtk { player: player.map(|p| p.0), offered, title, artist, album, artwork },
+            );
+        }
         ApplyOp::PresentAlert(spec) => {
             // The platform's REAL modal dialog: gtk::AlertDialog maps the
             // vocabulary 1:1. Answered exactly once through
@@ -14198,6 +14216,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
         ApplyOp::SetProp { id, prop, value } => {
             let widget = core.widgets.get(&id).expect("scene validated the id");
             match (widget, prop, value) {
+                (NativeWidget::Video(view), Prop::Fit, Value::I64(fit)) => gtk_media::set_fit(view, fit),
                 (NativeWidget::Button(button), Prop::Text, Value::Str(s)) => {
                     use gtk4::prelude::AccessibleExt;
                     if button.icon_name().is_some() {
@@ -17068,6 +17087,9 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         let range_css = gtk4::CssProvider::new();
         watch_css_errors(&range_css, &css_error);
         load_kaya_css(&range_css, "range", RANGE_CSS, &css_error);
+        let video_css = gtk4::CssProvider::new();
+        watch_css_errors(&video_css, &css_error);
+        load_kaya_css(&video_css, "video caption", gtk_media::VIDEO_CSS, &css_error);
         // The label weights, at the WISH until a brand font says otherwise
         // (weight_css_for). Kept in CoreState, not handed to the display and
         // forgotten, because a SetTypeface with font bytes rewrites it.
@@ -17149,6 +17171,11 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             gtk4::style_context_add_provider_for_display(
                 &display,
                 &range_css,
+                gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
+            gtk4::style_context_add_provider_for_display(
+                &display,
+                &video_css,
                 gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
             );
             gtk4::style_context_add_provider_for_display(
@@ -17384,6 +17411,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 date_pickers: Vec::new(),
                 time_pickers: Vec::new(),
                 images: Vec::new(),
+                videos: Vec::new(),
                 canvases: Vec::new(),
                 canvas_ids: Vec::new(),
                 canvas_clock: false,
@@ -21431,36 +21459,60 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
-    fn video_ink(&self, _: crate::harness::Target) -> String {
-        crate::depth_stub("media_formats")
+    fn video_ink(&self, target: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            match crate::harness::try_resolve(target.index, core.videos.len()) {
+                Some(i) => gtk_media::video_pixel(&core.videos[i]),
+                None => format!("<no video#{} among {} video views>", target.index, core.videos.len()),
+            }
+        })
     }
 
-    fn ax_action(&self, _: crate::harness::Target, _: &str) -> Result<(), String> {
-        crate::depth_stub("media_formats")
+    /// The view's own accessible action (gtkatspiaction.c publishes a
+    /// widget's action group as `media.play` / `media.pause`), done over
+    /// AT-SPI as an assistive client does it.
+    fn ax_action(&self, target: crate::harness::Target, name: &str) -> Result<(), String> {
+        let rank = Self::on_main(move |core| {
+            let widget = target_widget(core, target).ok_or_else(|| "<no such target>".to_owned())?;
+            atspi_rank(&core.window, &widget).ok_or_else(|| "<not in the accessibility tree>".to_owned())
+        })?;
+        atspi_act(atspi::Role::Image, rank, name)
     }
 
-    fn session_send(&self, _: &str) -> Result<(), String> {
-        crate::depth_stub("media_formats")
+    fn session_send(&self, action: &str) -> Result<(), String> {
+        gtk_media::session_send(action)
+    }
+
+    fn video_ink_tolerance(&self) -> u8 {
+        gtk_media::GTK_VIDEO_INK_TOLERANCE
     }
 
     fn now_playing(&self) -> String {
-        crate::depth_stub("media_formats")
+        gtk_media::now_playing()
     }
 
     fn display_awake(&self) -> bool {
-        crate::depth_stub("media_formats")
+        gtk_media::display_awake().unwrap_or_else(|why| {
+            eprintln!("kaya: display_awake read nothing: {why}");
+            false
+        })
     }
 
-    fn media_refusal(&self, _: &str) -> Option<String> {
-        crate::depth_stub("media_formats")
+    fn media_refusal(&self, item: &str) -> Option<String> {
+        gtk_media::demoted_refusal(item)
     }
 
+    /// GStreamer exposes every embedded caption track the suite carries
+    /// (docs/media-plan.md §7a: tx3g, 2 cues on Linux).
     fn captions_absent(&self, _: &str) -> bool {
-        crate::depth_stub("media_formats")
+        false
     }
 
-    fn caption(&self, _: crate::harness::Target) -> String {
-        crate::depth_stub("media_formats")
+    fn caption(&self, target: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            crate::harness::try_resolve(target.index, core.videos.len())
+                .map_or_else(String::new, |i| gtk_media::drawn_caption(&core.videos[i]))
+        })
     }
 
     /// What the session bus delivered on LauncherEntry (docs/app-badge-plan.md
@@ -23070,7 +23122,7 @@ fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk
         K::Search => nth!(core.searches),
         K::Range => try_resolve(target.index, core.ranges.len())
             .map(|i| core.ranges[i].group.clone().upcast()),
-        K::Video => crate::depth_stub("media_formats"),
+        K::Video => try_resolve(target.index, core.videos.len()).map(|i| core.videos[i].overlay.clone().upcast()),
         K::ColorPicker => try_resolve(target.index, core.color_pickers.len())
             .map(|i| core.color_pickers[i].swatch.clone().upcast()),
         K::NumberField => try_resolve(target.index, core.number_fields.len())
@@ -23189,6 +23241,18 @@ fn atspi_role_of(w: &gtk4::Widget) -> Option<atspi::Role> {
     // (docs/number-field-plan.md §6).
     if w.is::<gtk4::SpinButton>() {
         return Some(atspi::Role::SpinButton);
+    }
+    // THE VIDEO VIEW (docs/media-plan.md §3) is its overlay, declared
+    // `AccessibleRole::Img`; the picture inside and kaya's caption over it
+    // are role None and publish no node.
+    if gtk_media::is_caption_overlay(w) {
+        return None;
+    }
+    if w.is::<gtk4::Overlay>() && w.accessible_role() == gtk4::AccessibleRole::Img {
+        return Some(atspi::Role::Image);
+    }
+    if w.is::<gtk4::Picture>() && w.accessible_role() == gtk4::AccessibleRole::None {
+        return None;
     }
     if w.is::<gtk4::Picture>() {
         return Some(atspi::Role::Image);
@@ -23908,6 +23972,88 @@ fn atspi_collect(want: atspi::Role, index: usize, want_description: bool) -> Opt
     })
 }
 
+/// Do the accessible action named `name` on our process's `index`th node of
+/// role `want`, as an assistive client does: the action is matched by its
+/// last dotted part, case-folded (GTK names a widget action `group.name`).
+#[cfg(all(feature = "harness", target_os = "linux"))]
+fn atspi_act(want: atspi::Role, index: usize, name: &str) -> Result<(), String> {
+    use atspi::proxy::accessible::AccessibleProxy;
+    use atspi::proxy::action::ActionProxy;
+    let name = name.to_owned();
+    atspi::zbus::block_on(async move {
+        let conn = atspi::connection::AccessibilityConnection::new()
+            .await
+            .map_err(|e| format!("no accessibility bus ({e})"))?;
+        let root = AccessibleProxy::builder(conn.connection())
+            .destination("org.a11y.atspi.Registry")
+            .and_then(|b| b.path("/org/a11y/atspi/accessible/root"))
+            .map_err(|e| e.to_string())?
+            .build()
+            .await
+            .map_err(|e| e.to_string())?;
+        async fn walk<'a>(node: AccessibleProxy<'a>, want: atspi::Role, out: &mut Vec<AccessibleProxy<'a>>, depth: usize) {
+            if depth > 24 {
+                return;
+            }
+            if node.get_role().await.ok() == Some(want) {
+                out.push(node.clone());
+            }
+            let Ok(children) = node.get_children().await else { return };
+            for child in children {
+                let Some(dest) = child.name() else { continue };
+                let Ok(proxy) = AccessibleProxy::builder(node.inner().connection())
+                    .destination(dest.to_owned())
+                    .and_then(|b| b.path(child.path().to_owned()))
+                else {
+                    continue;
+                };
+                if let Ok(proxy) = proxy.build().await {
+                    Box::pin(walk(proxy, want, out, depth + 1)).await;
+                }
+            }
+        }
+        let mut found = Vec::new();
+        for app in root.get_children().await.map_err(|e| e.to_string())? {
+            let Some(dest) = app.name() else { continue };
+            let Ok(builder) = AccessibleProxy::builder(conn.connection())
+                .destination(dest.to_owned())
+                .and_then(|b| b.path(app.path().to_owned()))
+            else {
+                continue;
+            };
+            let Ok(proxy) = builder.build().await else { continue };
+            if proxy.get_application().await.is_err() {
+                continue;
+            }
+            Box::pin(walk(proxy, want, &mut found, 0)).await;
+        }
+        let Some(node) = found.get(index) else {
+            return Err(format!("no {want:?}#{index} on the bus ({} of that role)", found.len()));
+        };
+        let action = ActionProxy::builder(node.inner().connection())
+            .destination(node.inner().destination().to_owned())
+            .and_then(|b| b.path(node.inner().path().to_owned()))
+            .map_err(|e| e.to_string())?
+            .build()
+            .await
+            .map_err(|e| e.to_string())?;
+        let n = action.n_actions().await.map_err(|e| format!("the node publishes no Action interface ({e})"))?;
+        let mut names = Vec::new();
+        for i in 0..n {
+            let said = action.get_name(i).await.unwrap_or_default();
+            if said.rsplit('.').next().is_some_and(|last| last.eq_ignore_ascii_case(&name)) {
+                return if action.do_action(i).await.unwrap_or(false) {
+                    Ok(())
+                } else {
+                    Err(format!("the action {said:?} answered false"))
+                };
+            }
+            names.push(said);
+        }
+        Err(format!("no action {name:?} on {want:?}#{index}; it carries {names:?}"))
+    })
+}
+
 /// Why an accessibility read could not answer, and whether asking again
 /// could change that. A read with no sentinel value (`window_dirty`
 /// returns a bare bool) has to tell those apart itself: a tree that has
@@ -24186,7 +24332,1732 @@ fn atspi_promoted_buttons(title: &str) -> Result<Vec<(String, bool)>, AtspiMiss>
     })
 }
 
+mod gtk_media {
+    use super::*;
+    use crate::protocol::{PlayerCommand, PlayerState};
+    // MARK: MEDIA (docs/media-plan.md): the player is playbin3 into
+    // gtk4paintablesink, the video view a GtkPicture holding the sink's
+    // paintable (never GtkVideo, never GtkMediaFile: tools/check-verbs.py), the
+    // session MPRIS2 on the session bus. Every GStreamer fact goes to the core's
+    // one state machine through `media_report`, the one door.
+
+    use gstreamer as gst;
+    use gstreamer::prelude::{ElementExt, ElementExtManual, GstBinExtManual, PadExt};
+
+    /// GStreamer, initialized once for the process: the player's pipelines and
+    /// the capability query's registry read.
+    fn gst_ready() -> Result<(), String> {
+        static READY: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
+        READY
+            .get_or_init(|| {
+                gst::init().map_err(|e| format!("kaya: GStreamer did not initialize: {e}"))?;
+                hold_have_type_during_preroll_calls();
+                Ok(())
+            })
+            .clone()
+    }
+
+    /// The pipelines inside a set_state call that can activate pads (to
+    /// PAUSED or PLAYING), by address, and the condition their typefinds
+    /// wait on.
+    static PREROLL_CALLS: std::sync::Mutex<Vec<(usize, std::thread::ThreadId)>> = std::sync::Mutex::new(Vec::new());
+    static PREROLL_DONE: std::sync::Condvar = std::sync::Condvar::new();
+
+    /// THE PREROLL DEADLOCK'S FIX (docs/traps.md, gstreamer#4472, open
+    /// upstream): urisourcebin's typefind task, answering have-type, syncs a
+    /// new parsebin's state while the thread inside set_state(PAUSED) holds
+    /// that state lock and, activating parsebin, waits for the typefind's
+    /// stream lock. So a typefind's have-type waits, before any handler runs
+    /// (a GLib emission hook runs first), until the set_state call on its own
+    /// pipeline has returned; the handler then activates parsebin itself,
+    /// which is the order upstream's #4225 fix meant to guarantee. A down
+    /// transition is never held (its deactivation takes that stream lock),
+    /// and the wait is bounded.
+    fn hold_have_type_during_preroll_calls() {
+        use glib::translate::{FromGlibPtrNone, IntoGlib};
+        let Ok(probe) = gst::ElementFactory::make("typefind").build() else { return };
+        let type_ = probe.type_();
+        unsafe extern "C" fn hook(
+            _ihint: *mut glib::gobject_ffi::GSignalInvocationHint,
+            n_params: std::ffi::c_uint,
+            params: *const glib::gobject_ffi::GValue,
+            _data: glib::ffi::gpointer,
+        ) -> glib::ffi::gboolean {
+            if n_params == 0 || params.is_null() {
+                return glib::ffi::GTRUE;
+            }
+            // SAFETY: GLib hands the emitting instance as the first value.
+            let raw = unsafe { glib::gobject_ffi::g_value_get_object(params) } as *mut gst::ffi::GstObject;
+            if raw.is_null() {
+                return glib::ffi::GTRUE;
+            }
+            // SAFETY: a live GstObject for the duration of the emission.
+            let mut top: gst::Object = unsafe { gst::Object::from_glib_none(raw) };
+            while let Some(parent) = gstreamer::prelude::GstObjectExt::parent(&top) {
+                top = parent;
+            }
+            let key = top.as_ptr() as usize;
+            let me = std::thread::current().id();
+            let held = |calls: &mut Vec<(usize, std::thread::ThreadId)>| {
+                calls.iter().any(|(k, by)| *k == key && *by != me)
+            };
+            let started = std::time::Instant::now();
+            let calls = PREROLL_CALLS.lock().unwrap_or_else(|e| e.into_inner());
+            let (_calls, waited) = PREROLL_DONE
+                .wait_timeout_while(calls, std::time::Duration::from_secs(10), held)
+                .unwrap_or_else(|e| e.into_inner());
+            if waited.timed_out() {
+                eprintln!(
+                    "kaya: a typefind in {} waited {} ms for that pipeline's state change to return and \
+                     went on — the preroll deadlock's hold expired (docs/traps.md, gstreamer#4472)",
+                    gstreamer::prelude::GstObjectExt::name(&top),
+                    started.elapsed().as_millis()
+                );
+            }
+            glib::ffi::GTRUE
+        }
+        // SAFETY: a signal the typefind class registers, looked up on its
+        // own type, and a hook with GLib's emission-hook signature that is
+        // never removed.
+        unsafe {
+            let id = glib::gobject_ffi::g_signal_lookup(c"have-type".as_ptr(), type_.into_glib());
+            if id != 0 {
+                glib::gobject_ffi::g_signal_add_emission_hook(id, 0, Some(hook), std::ptr::null_mut(), None);
+            }
+        }
+    }
+
+    /// EVERY state change of a player's playbin3 goes through here: one that
+    /// can activate pads holds the pipeline's typefinds off until it returns.
+    pub(super) fn set_playbin_state(playbin: &gst::Element, state: gst::State) {
+        if state >= gst::State::Paused {
+            while_prerolling(playbin, || {
+                let _ = playbin.set_state(state);
+            });
+        } else {
+            let _ = playbin.set_state(state);
+        }
+    }
+
+    pub(super) fn while_prerolling<R>(pipeline: &gst::Element, f: impl FnOnce() -> R) -> R {
+        let key = pipeline.as_ptr() as usize;
+        PREROLL_CALLS.lock().unwrap_or_else(|e| e.into_inner()).push((key, std::thread::current().id()));
+        let out = f();
+        {
+            let mut calls = PREROLL_CALLS.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(at) = calls.iter().position(|(k, _)| *k == key) {
+                calls.remove(at);
+            }
+        }
+        PREROLL_DONE.notify_all();
+        out
+    }
+
+    /// One video view: the picture holding the player's paintable, and kaya's
+    /// caption renderer's text over it.
+    #[derive(Clone)]
+    pub(super) struct GtkVideoView {
+        pub(super) id: WidgetId,
+        pub(super) overlay: gtk4::Overlay,
+        pub(super) picture: gtk4::Picture,
+        pub(super) caption: gtk4::Label,
+        pub(super) shown: Rc<std::cell::Cell<Option<u64>>>,
+    }
+
+    /// A caption overlay is no node of its own on the accessibility bus (the
+    /// SwiftUI arm's accessibilityHidden); atspi_role_of skips it by this mark.
+    const CAPTION_OVERLAY_KEY: &str = "kaya-caption-overlay";
+
+    #[cfg(feature = "harness")]
+    pub(super) fn is_caption_overlay(widget: &gtk4::Widget) -> bool {
+        // SAFETY: the key is private to this module and only ever set to `true`
+        // by build_video_view.
+        unsafe { widget.data::<bool>(CAPTION_OVERLAY_KEY).is_some() }
+    }
+
+    pub(super) const VIDEO_CSS: &str = "\
+    .kaya-caption { background-color: rgba(0, 0, 0, 0.75); color: white; \
+    padding: 2px 6px; border-radius: 4px; margin-bottom: 8px; }
+    ";
+
+    pub(super) fn build_video_view(id: WidgetId) -> GtkVideoView {
+        use gtk4::prelude::{AccessibleExt, WidgetExt};
+        let overlay: gtk4::Overlay =
+            glib::Object::builder().property("accessible-role", gtk4::AccessibleRole::Img).build();
+        let picture: gtk4::Picture =
+            glib::Object::builder().property("accessible-role", gtk4::AccessibleRole::None).build();
+        picture.set_can_shrink(false);
+        picture.set_size_request(320, 180);
+        picture.set_content_fit(gtk4::ContentFit::Contain);
+        overlay.set_child(Some(&picture));
+        let caption = gtk4::Label::new(None);
+        caption.set_accessible_role(gtk4::AccessibleRole::None);
+        // SAFETY: the only writer of the key.
+        unsafe { caption.set_data(CAPTION_OVERLAY_KEY, true) };
+        caption.add_css_class("kaya-caption");
+        caption.set_halign(gtk4::Align::Center);
+        caption.set_valign(gtk4::Align::End);
+        caption.set_wrap(true);
+        caption.set_justify(gtk4::Justification::Center);
+        caption.set_can_target(false);
+        caption.set_visible(false);
+        overlay.add_overlay(&caption);
+        // Play and pause as the view's own actions: GTK publishes a widget's
+        // action group on the AT-SPI Action interface (gtkatspiaction.c's
+        // widget_action_vtable), named `media.play` and `media.pause`.
+        let shown: Rc<std::cell::Cell<Option<u64>>> = Rc::new(std::cell::Cell::new(None));
+        let group = gio::SimpleActionGroup::new();
+        for (name, play) in [("play", true), ("pause", false)] {
+            let action = gio::SimpleAction::new(name, None);
+            let shown = shown.clone();
+            action.connect_activate(move |_, _| {
+                if let Some(player) = shown.get() {
+                    player_command(player, if play { PlayerCommand::Play } else { PlayerCommand::Pause });
+                }
+            });
+            group.add_action(&action);
+        }
+        overlay.insert_action_group("media", Some(&group));
+        // VISIBILITY (docs/media-plan.md §7b): the view's box against every
+        // scroll viewport it sits in, on every frame, reported when it moved;
+        // the core coalesces.
+        let last = Rc::new(std::cell::Cell::new(-1.0f64));
+        let seen = last.clone();
+        overlay.add_tick_callback(move |view, _| {
+            let shown = shown_fraction(view.upcast_ref());
+            if (shown - seen.get()).abs() > 1e-4 {
+                seen.set(shown);
+                queue(Pending::Visible(id, shown));
+            }
+            glib::ControlFlow::Continue
+        });
+        overlay.connect_unmap(move |_| {
+            if last.get() != 0.0 {
+                last.set(0.0);
+                queue(Pending::Visible(id, 0.0));
+            }
+        });
+        GtkVideoView { id, overlay, picture, caption, shown }
+    }
+
+    /// How much of `widget` shows: its box intersected with the window's and
+    /// with every scrolled window above it, over its own area.
+    fn shown_fraction(widget: &gtk4::Widget) -> f64 {
+        use gtk4::prelude::WidgetExt;
+        if !widget.is_mapped() {
+            return 0.0;
+        }
+        let Some(root) = widget.root() else { return 0.0 };
+        let root: gtk4::Widget = root.upcast();
+        let Some(own) = widget.compute_bounds(&root) else { return 0.0 };
+        let area = f64::from(own.width()) * f64::from(own.height());
+        if area <= 0.0 {
+            return 0.0;
+        }
+        let mut clip = own;
+        let window = gtk4::graphene::Rect::new(0.0, 0.0, root.width() as f32, root.height() as f32);
+        clip = match clip.intersection(&window) {
+            Some(r) => r,
+            None => return 0.0,
+        };
+        let mut up = widget.parent();
+        while let Some(ancestor) = up {
+            if ancestor.is::<gtk4::ScrolledWindow>() {
+                let Some(port) = ancestor.compute_bounds(&root) else { return 0.0 };
+                clip = match clip.intersection(&port) {
+                    Some(r) => r,
+                    None => return 0.0,
+                };
+            }
+            up = ancestor.parent();
+        }
+        (f64::from(clip.width()) * f64::from(clip.height()) / area).clamp(0.0, 1.0)
+    }
+
+    /// What the player saw of its text stream: a cue's text and where it ends
+    /// on the stream's clock.
+    struct PlatformCue {
+        text: String,
+        end_ms: Option<u64>,
+    }
+
+    struct PlayerInner {
+        generation: u64,
+        loaded: bool,
+        /// A missing-plugin message whose caps were a codec's: the decodability
+        /// check's answer at Loaded (docs/media-plan.md §7a).
+        missing_codec: Option<String>,
+        looping: bool,
+        speed: f64,
+        want_play: bool,
+        pending_seek: Option<u64>,
+        seeks: u32,
+        /// The stream collection, in playbin3's order: (id, kind, BCP 47 tag).
+        streams: Vec<(String, gst::StreamType, gst::Stream)>,
+        selected: Vec<String>,
+        /// The text stream whose cues kaya draws and reports, None for
+        /// captions off. The text stream keeps flowing while it is off: a
+        /// text stream deselected in a paused HLS pipeline never prerolls a
+        /// cue again once reselected, seeks or not (measured on hlsdemux2).
+        caption_shown: Option<String>,
+        /// The selection kaya asked for and playbin3 has not yet confirmed.
+        requested: Option<Vec<String>>,
+        cue: PlatformCue,
+        cue_timer: Option<glib::SourceId>,
+        caption_times: Vec<u64>,
+        kaya_caption: String,
+        boundary_timer: Option<glib::SourceId>,
+        tick: Option<glib::SourceId>,
+        overdue: Option<glib::SourceId>,
+        state: PlayerState,
+        volume: f64,
+        muted: bool,
+        captions_fetch: Option<(String, gst::Element, gst::bus::BusWatchGuard)>,
+    }
+
+    /// One source's pipeline. A NEW ONE PER SOURCE: playbin3 reused for a
+    /// second URI after a stalled one aborted the process inside playsink
+    /// (gstplaysink.c:3624 `gst_play_sink_do_reconfigure: assertion failed:
+    /// (it)`, after "Padname src_0 is not unique in element
+    /// streamsynchronizer0"; measured on the TS-demuxer leg, 2026-09-30).
+    struct Pipe {
+        playbin: gst::Element,
+        paintable: gdk::Paintable,
+        _watch: gst::bus::BusWatchGuard,
+    }
+
+    struct GtkPlayer {
+        id: u64,
+        pipe: RefCell<Pipe>,
+        inner: RefCell<PlayerInner>,
+    }
+
+    impl GtkPlayer {
+        fn pb(&self) -> gst::Element {
+            self.pipe.borrow().playbin.clone()
+        }
+
+        fn paintable(&self) -> gdk::Paintable {
+            self.pipe.borrow().paintable.clone()
+        }
+    }
+
+    thread_local! {
+        static PLAYERS: RefCell<HashMap<u64, Rc<GtkPlayer>>> = RefCell::new(HashMap::new());
+    }
+
+    fn player(id: u64) -> Option<Rc<GtkPlayer>> {
+        PLAYERS.with_borrow(|p| p.get(&id).cloned())
+    }
+
+    /// What waits for the one door: a player's report, a caption ask, a video
+    /// view's visibility, a remote command. Queued and flushed from an idle so
+    /// no GStreamer or GTK callback ever borrows CORE (a frame-clock tick can
+    /// arrive while the harness holds it).
+    enum Pending {
+        /// A new source's pipeline: the views showing the player take its
+        /// paintable.
+        Repaint(u64),
+        Report(u64, crate::media::Report),
+        Ask(u64),
+        Visible(WidgetId, f64),
+        Remote(crate::protocol::SessionAction),
+        Publish,
+    }
+
+    thread_local! {
+        static PENDING: RefCell<std::collections::VecDeque<Pending>> = RefCell::new(Default::default());
+        static FLUSH_SCHEDULED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    fn queue(item: Pending) {
+        PENDING.with_borrow_mut(|q| q.push_back(item));
+        if !FLUSH_SCHEDULED.replace(true) {
+            glib::idle_add_local_once(flush);
+        }
+    }
+
+    fn report(id: u64, r: crate::media::Report) {
+        queue(Pending::Report(id, r));
+    }
+
+    fn flush() {
+        FLUSH_SCHEDULED.set(false);
+        let busy = CORE.with(|c| c.try_borrow_mut().is_err());
+        if busy {
+            if !FLUSH_SCHEDULED.replace(true) {
+                glib::timeout_add_local_once(std::time::Duration::from_millis(5), flush);
+            }
+            return;
+        }
+        while let Some(item) = PENDING.with_borrow_mut(|q| q.pop_front()) {
+            CORE.with_borrow_mut(|core| {
+                let Some(core) = core.as_mut() else { return };
+                crate::fault::guard("a media report", || match item {
+                    Pending::Report(id, r) => media_report(core, id, r),
+                    Pending::Ask(id) => caption_ask(core, id),
+                    Pending::Visible(widget, shown) => {
+                        for occ in core.scene.video_visible(widget, shown) {
+                            core.occurrences.send(occ);
+                        }
+                    }
+                    Pending::Remote(action) => remote_action(core, action),
+                    Pending::Publish => publish_session(core),
+                    Pending::Repaint(id) => {
+                        if let Some(p) = player(id) {
+                            use gtk4::prelude::WidgetExt;
+                            let paintable = p.paintable();
+                            for view in core.videos.iter().filter(|v| v.shown.get() == Some(id)) {
+                                view.picture.set_paintable(Some(&paintable));
+                                view.picture.queue_draw();
+                            }
+                        }
+                    }
+                });
+            });
+        }
+    }
+
+    /// THE ONE DOOR every player report takes: the core decides, the app hears
+    /// it, and the session's PlaybackStatus follows on every transition
+    /// (tools/check-verbs.py holds every media_report call inside here).
+    fn media_report(core: &mut CoreState, id: u64, r: crate::media::Report) {
+        let (published, state) = core.scene.media_report(crate::protocol::PlayerId(id), r);
+        for occ in published {
+            core.occurrences.send(occ);
+        }
+        if let (Some(p), Some(state)) = (player(id), state) {
+            p.inner.borrow_mut().state = state;
+        }
+        session_follow(core);
+        follow_keep_awake(core);
+        redraw_captions(core, id);
+    }
+
+    fn caption_ask(core: &mut CoreState, id: u64) {
+        let Some(p) = player(id) else { return };
+        if p.inner.borrow().caption_times.is_empty() {
+            return;
+        }
+        let at = position_ms(&p.pb());
+        let (text, published) = core.scene.caption_at(crate::protocol::PlayerId(id), at);
+        for occ in published {
+            core.occurrences.send(occ);
+        }
+        p.inner.borrow_mut().kaya_caption = text;
+        redraw_captions(core, id);
+        schedule_boundary(&p);
+    }
+
+    /// Every video view showing `id` draws the current caption: kaya's sidecar
+    /// cue while a sidecar is selected, the platform's own cue otherwise.
+    fn redraw_captions(core: &CoreState, id: u64) {
+        use gtk4::prelude::WidgetExt;
+        let text = player(id).map(|p| {
+            let s = p.inner.borrow();
+            if s.caption_times.is_empty() { s.cue.text.clone() } else { s.kaya_caption.clone() }
+        });
+        for view in core.videos.iter().filter(|v| v.shown.get() == Some(id)) {
+            let text = text.clone().unwrap_or_default();
+            view.caption.set_text(&text);
+            view.caption.set_visible(!text.is_empty());
+        }
+    }
+
+    fn position_ms(playbin: &gst::Element) -> u64 {
+        playbin.query_position::<gst::ClockTime>().map_or(0, gst::ClockTime::mseconds)
+    }
+
+    pub(super) fn create_player(core: &CoreState, id: u64) {
+        if let Err(why) = gst_ready() {
+            panic!("{why}");
+        }
+        let _ = core;
+        let player = Rc::new(GtkPlayer {
+            id,
+            pipe: RefCell::new(build_pipe(id)),
+            inner: RefCell::new(PlayerInner {
+                generation: 0,
+                loaded: false,
+                missing_codec: None,
+                looping: false,
+                speed: 1.0,
+                want_play: false,
+                pending_seek: None,
+                seeks: 0,
+                streams: Vec::new(),
+                selected: Vec::new(),
+                caption_shown: None,
+                requested: None,
+                cue: PlatformCue { text: String::new(), end_ms: None },
+                cue_timer: None,
+                caption_times: Vec::new(),
+                kaya_caption: String::new(),
+                boundary_timer: None,
+                tick: None,
+                overdue: None,
+                state: PlayerState::Idle,
+                volume: 1.0,
+                muted: false,
+                captions_fetch: None,
+            }),
+        });
+        PLAYERS.with_borrow_mut(|p| p.insert(id, player));
+    }
+
+    fn build_pipe(id: u64) -> Pipe {
+        let make = |factory: &str| {
+            gst::ElementFactory::make(factory).build().unwrap_or_else(|e| {
+                panic!(
+                    "kaya: the media arm needs GStreamer's {factory} ({e}) — gstreamer1.0-gtk4 \
+                     (gtk4paintablesink) and gstreamer1.0-plugins-base (playbin3), docs/media-plan.md §2"
+                )
+            })
+        };
+        let playbin = make("playbin3");
+        let sink = make("gtk4paintablesink");
+        let paintable = sink.property::<gdk::Paintable>("paintable");
+        playbin.set_property("video-sink", &sink);
+        let text_sink = gstreamer_app::AppSink::builder()
+            .caps(&gst::Caps::builder("text/x-raw").build())
+            .sync(true)
+            .build();
+        let on_text = move |sink: &gstreamer_app::AppSink, preroll: bool| {
+            let sample = if preroll { sink.pull_preroll() } else { sink.pull_sample() };
+            if let Ok(sample) = sample {
+                text_sample(id, &sample, preroll);
+            }
+            Ok(gst::FlowSuccess::Ok)
+        };
+        text_sink.set_callbacks(
+            gstreamer_app::AppSinkCallbacks::builder()
+                .new_sample(move |s| on_text(s, false))
+                .new_preroll(move |s| on_text(s, true))
+                .build(),
+        );
+        playbin.set_property("text-sink", &text_sink);
+        let bus = playbin.bus().expect("a pipeline has a bus");
+        let watch = bus
+            .add_watch_local(move |_, msg| {
+                bus_message(id, msg);
+                glib::ControlFlow::Continue
+            })
+            .expect("kaya: a new pipeline's bus already had a watch");
+        Pipe { playbin, paintable, _watch: watch }
+    }
+
+    pub(super) fn release_player(core: &mut CoreState, id: u64) {
+        let Some(p) = PLAYERS.with_borrow_mut(|p| p.remove(&id)) else { return };
+        set_playbin_state(&p.pb(), gst::State::Null);
+        let mut s = p.inner.borrow_mut();
+        for timer in [s.cue_timer.take(), s.boundary_timer.take(), s.tick.take(), s.overdue.take()].into_iter().flatten() {
+            timer.remove();
+        }
+        if let Some((_, fetch, _)) = s.captions_fetch.take() {
+            let _ = fetch.set_state(gst::State::Null);
+        }
+        drop(s);
+        for view in core.videos.iter().filter(|v| v.shown.get() == Some(id)) {
+            use gtk4::prelude::WidgetExt;
+            view.picture.set_paintable(None::<&gdk::Paintable>);
+            view.shown.set(None);
+            view.caption.set_visible(false);
+        }
+        follow_keep_awake(core);
+    }
+
+    fn stop_timer(slot: &mut Option<glib::SourceId>) {
+        if let Some(t) = slot.take() {
+            t.remove();
+        }
+    }
+
+    fn load(p: &Rc<GtkPlayer>, url: &str) {
+        set_playbin_state(&p.pb(), gst::State::Null);
+        let generation = {
+            let mut s = p.inner.borrow_mut();
+            s.generation += 1;
+            s.loaded = false;
+            s.missing_codec = None;
+            s.pending_seek = None;
+            s.seeks = 0;
+            s.want_play = false;
+            s.streams.clear();
+            s.selected.clear();
+            s.caption_shown = None;
+            s.requested = None;
+            s.cue = PlatformCue { text: String::new(), end_ms: None };
+            stop_timer(&mut s.cue_timer);
+            stop_timer(&mut s.tick);
+            stop_timer(&mut s.overdue);
+            s.generation
+        };
+        if url.is_empty() {
+            return;
+        }
+        let fresh = build_pipe(p.id);
+        {
+            let s = p.inner.borrow();
+            fresh.playbin.set_property("volume", s.volume);
+            fresh.playbin.set_property("mute", s.muted);
+        }
+        let old = p.pipe.replace(fresh);
+        set_playbin_state(&old.playbin, gst::State::Null);
+        drop(old);
+        queue(Pending::Repaint(p.id));
+        p.pb().set_property("uri", url);
+        set_playbin_state(&p.pb(), gst::State::Paused);
+        let id = p.id;
+        let overdue = glib::timeout_add_local_once(
+            std::time::Duration::from_millis(crate::media::LOADING_CEILING_MS),
+            move || {
+                let Some(p) = player(id) else { return };
+                let stale = {
+                    let mut s = p.inner.borrow_mut();
+                    s.overdue = None;
+                    s.generation != generation || s.loaded
+                };
+                if !stale {
+                    report(id, crate::media::Report::Overdue);
+                }
+            },
+        );
+        p.inner.borrow_mut().overdue = Some(overdue);
+    }
+
+    pub(super) fn set_player_prop(id: u64, prop: crate::protocol::PlayerProp, value: &Value) {
+        use crate::protocol::PlayerProp as P;
+        let Some(p) = player(id) else { return };
+        match (prop, value) {
+            (P::Source, Value::Str(url)) => load(&p, url),
+            (P::Speed, Value::F64(x)) => {
+                p.inner.borrow_mut().speed = *x;
+                if p.inner.borrow().loaded {
+                    seek_to(&p, position_ms(&p.pb()));
+                }
+            }
+            (P::Volume, Value::F64(x)) => {
+                p.inner.borrow_mut().volume = *x;
+                p.pb().set_property("volume", *x);
+            }
+            (P::Muted, Value::Bool(on)) => {
+                p.inner.borrow_mut().muted = *on;
+                p.pb().set_property("mute", *on);
+            }
+            (P::Loop, Value::Bool(on)) => p.inner.borrow_mut().looping = *on,
+            (P::Captions, Value::Str(url)) => fetch_captions(&p, url),
+            (prop, value) => panic!("kaya: player prop {prop:?} with {value:?} never reaches a backend"),
+        }
+    }
+
+    fn seek_to(p: &GtkPlayer, ms: u64) {
+        let speed = p.inner.borrow().speed;
+        let _ = p.pb().seek(
+            speed,
+            gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE,
+            gst::SeekType::Set,
+            gst::ClockTime::from_mseconds(ms),
+            gst::SeekType::None,
+            gst::ClockTime::NONE,
+        );
+    }
+
+    pub(super) fn player_command(id: u64, command: PlayerCommand) {
+        let Some(p) = player(id) else { return };
+        let loaded = p.inner.borrow().loaded;
+        match command {
+            PlayerCommand::Play => {
+                p.inner.borrow_mut().want_play = true;
+                if loaded {
+                    set_playbin_state(&p.pb(), gst::State::Playing);
+                }
+            }
+            PlayerCommand::Pause => {
+                p.inner.borrow_mut().want_play = false;
+                if loaded {
+                    set_playbin_state(&p.pb(), gst::State::Paused);
+                }
+            }
+            PlayerCommand::Seek(ms) => {
+                let mut s = p.inner.borrow_mut();
+                s.seeks += 1;
+                s.cue = PlatformCue { text: String::new(), end_ms: None };
+                stop_timer(&mut s.cue_timer);
+                if !loaded {
+                    s.pending_seek = Some(ms);
+                    return;
+                }
+                drop(s);
+                report(id, crate::media::Report::Cue(String::new()));
+                seek_to(&p, ms);
+            }
+        }
+    }
+
+    /// select_track (docs/media-plan.md §3): the platform's own audio or text
+    /// stream, counting from 1 in the listing kaya reported; 0 turns text off.
+    pub(super) fn select_track(id: u64, kind: crate::protocol::TrackKind, index: u32) {
+        let Some(p) = player(id) else { return };
+        let (audio, text, selected) = {
+            let s = p.inner.borrow();
+            let of = |t: gst::StreamType| -> Vec<String> {
+                s.streams.iter().filter(|(_, k, _)| k.contains(t)).map(|(sid, _, _)| sid.clone()).collect()
+            };
+            (of(gst::StreamType::AUDIO), of(gst::StreamType::TEXT), s.selected.clone())
+        };
+        match kind {
+            crate::protocol::TrackKind::Audio => {
+                let Some(pick) = audio.get(index as usize - 1).cloned() else { return };
+                let mut want: Vec<String> = selected.into_iter().filter(|sid| !audio.contains(sid)).collect();
+                want.push(pick);
+                select_streams(&p, want);
+            }
+            crate::protocol::TrackKind::Caption => {
+                let pick = if index == 0 { None } else { text.get(index as usize - 1).cloned() };
+                {
+                    let mut s = p.inner.borrow_mut();
+                    s.caption_shown = pick.clone();
+                    s.cue = PlatformCue { text: String::new(), end_ms: None };
+                    stop_timer(&mut s.cue_timer);
+                }
+                report(id, crate::media::Report::Cue(String::new()));
+                match pick {
+                    Some(pick) if !selected.contains(&pick) => {
+                        let mut want: Vec<String> = selected.into_iter().filter(|sid| !text.contains(sid)).collect();
+                        want.push(pick);
+                        select_streams(&p, want);
+                    }
+                    _ => report_tracks(&p),
+                }
+            }
+        }
+    }
+
+    /// A SELECT_STREAMS the pipeline ACCEPTED is its selection: an adaptive
+    /// demuxer marks the tracks selected at once and switches its output at
+    /// the next data (measured: hlsdemux2 and a paused qtdemux post no
+    /// STREAMS_SELECTED until data flows), so the listing reports what it
+    /// holds, and STREAMS_SELECTED confirms it later.
+    fn select_streams(p: &GtkPlayer, want: Vec<String>) {
+        let taken = p.pb().send_event(gst::event::SelectStreams::new(want.iter().map(String::as_str)));
+        if taken {
+            {
+                let mut s = p.inner.borrow_mut();
+                s.requested = Some(want.clone());
+                s.selected = want;
+            }
+            report_tracks(p);
+        } else {
+            let (id, generation) = (p.id, p.inner.borrow().generation);
+            glib::timeout_add_local_once(std::time::Duration::from_millis(50), move || {
+                if let Some(p) = player(id).filter(|p| p.inner.borrow().generation == generation) {
+                    select_streams(&p, want);
+                }
+            });
+        }
+    }
+
+    pub(super) fn caption_times(id: u64, times: Vec<u64>) {
+        let Some(p) = player(id) else { return };
+        {
+            let mut s = p.inner.borrow_mut();
+            s.caption_times = times;
+            s.kaya_caption.clear();
+            stop_timer(&mut s.boundary_timer);
+        }
+        queue(Pending::Ask(id));
+    }
+
+    /// The next sidecar boundary on this player's clock, while it plays.
+    fn schedule_boundary(p: &Rc<GtkPlayer>) {
+        let mut s = p.inner.borrow_mut();
+        stop_timer(&mut s.boundary_timer);
+        if s.caption_times.is_empty() || s.state != PlayerState::Playing {
+            return;
+        }
+        let now = position_ms(&p.pb());
+        let Some(next) = s.caption_times.iter().copied().find(|t| *t > now) else { return };
+        let wait = ((next - now) as f64 / s.speed.max(0.01)).ceil() as u64 + 1;
+        let id = p.id;
+        s.boundary_timer = Some(glib::timeout_add_local_once(std::time::Duration::from_millis(wait), move || {
+            if let Some(p) = player(id) {
+                p.inner.borrow_mut().boundary_timer = None;
+            }
+            queue(Pending::Ask(id));
+        }));
+    }
+
+    /// A text buffer from playbin3's text stream, on the streaming thread: its
+    /// text and where it ends on the stream's clock, handed to the main thread.
+    fn text_sample(id: u64, sample: &gst::Sample, preroll: bool) {
+        let Some(buffer) = sample.buffer() else { return };
+        let Ok(map) = buffer.map_readable() else { return };
+        let raw = String::from_utf8_lossy(map.as_slice()).trim_end_matches('\0').to_owned();
+        let markup = sample
+            .caps()
+            .and_then(|c| c.structure(0).and_then(|s| s.get::<&str>("format").ok().map(|f| f == "pango-markup")))
+            .unwrap_or(false);
+        let end = sample
+            .segment()
+            .and_then(|seg| seg.downcast_ref::<gst::ClockTime>().cloned())
+            .and_then(|seg| {
+                let pts = buffer.pts()?;
+                seg.to_stream_time(pts + buffer.duration().unwrap_or(gst::ClockTime::ZERO))
+            })
+            .map(gst::ClockTime::mseconds);
+        glib::MainContext::default().invoke(move || {
+            let text = if markup {
+                pango::parse_markup(&raw, '\0').map(|(_, t, _)| t.to_string()).unwrap_or(raw)
+            } else {
+                raw
+            };
+            platform_cue(id, text.trim().to_owned(), end, preroll);
+        });
+    }
+
+    fn platform_cue(id: u64, text: String, end_ms: Option<u64>, preroll: bool) {
+        let Some(p) = player(id) else { return };
+        if p.inner.borrow().caption_shown.is_none() {
+            return;
+        }
+        let mut s = p.inner.borrow_mut();
+        stop_timer(&mut s.cue_timer);
+        s.cue = PlatformCue { text: text.clone(), end_ms };
+        if !preroll && s.state == PlayerState::Playing {
+            if let Some(end) = end_ms {
+                let now = position_ms(&p.pb());
+                let wait = (end.saturating_sub(now) as f64 / s.speed.max(0.01)).ceil() as u64 + 1;
+                s.cue_timer = Some(glib::timeout_add_local_once(std::time::Duration::from_millis(wait), move || {
+                    let Some(p) = player(id) else { return };
+                    let expired = {
+                        let mut s = p.inner.borrow_mut();
+                        s.cue_timer = None;
+                        let done = s.cue.end_ms.is_some_and(|e| position_ms(&p.pb()) + 20 >= e);
+                        if done {
+                            s.cue = PlatformCue { text: String::new(), end_ms: None };
+                        }
+                        done
+                    };
+                    if expired {
+                        report(id, crate::media::Report::Cue(String::new()));
+                    }
+                }));
+            }
+        }
+        drop(s);
+        report(id, crate::media::Report::Cue(text));
+    }
+
+    /// The BCP 47 tag of a stream: GStreamer's own ISO 639-1 canonicalizer
+    /// (gst_tag_get_language_code_iso_639_1, "eng" reads "en"), `und` for none.
+    fn language_tag(stream: &gst::Stream) -> String {
+        let raw = stream
+            .tags()
+            .and_then(|t| t.get::<gst::tags::LanguageCode>().map(|v| v.get().to_owned()))
+            .unwrap_or_default();
+        if raw.is_empty() || raw == "und" {
+            return "und".to_owned();
+        }
+        #[link(name = "gsttag-1.0")]
+        unsafe extern "C" {
+            fn gst_tag_get_language_code_iso_639_1(lang_code: *const std::ffi::c_char) -> *const std::ffi::c_char;
+        }
+        let Ok(c) = std::ffi::CString::new(raw.clone()) else { return raw };
+        // SAFETY: a NUL-terminated string in, a static string or NULL out.
+        let two = unsafe { gst_tag_get_language_code_iso_639_1(c.as_ptr()) };
+        if two.is_null() {
+            raw
+        } else {
+            // SAFETY: GStreamer answers a static NUL-terminated ISO code.
+            unsafe { std::ffi::CStr::from_ptr(two) }.to_string_lossy().into_owned()
+        }
+    }
+
+    fn report_tracks(p: &GtkPlayer) {
+        let s = p.inner.borrow();
+        let list = |t: gst::StreamType| -> (Vec<String>, Option<usize>) {
+            let of: Vec<&(String, gst::StreamType, gst::Stream)> =
+                s.streams.iter().filter(|(_, k, _)| k.contains(t)).collect();
+            let at = of.iter().position(|(sid, _, _)| s.selected.contains(sid));
+            (of.iter().map(|(_, _, stream)| language_tag(stream)).collect(), at)
+        };
+        let (audio, audio_selected) = list(gst::StreamType::AUDIO);
+        let (captions, _) = list(gst::StreamType::TEXT);
+        let caption_selected = s.caption_shown.as_ref().and_then(|shown| {
+            s.streams.iter().filter(|(_, k, _)| k.contains(gst::StreamType::TEXT)).position(|(sid, _, _)| sid == shown)
+        });
+        drop(s);
+        report(p.id, crate::media::Report::Tracks { audio, captions, audio_selected, caption_selected });
+    }
+
+    /// The GError behind a bus error, as the failure table reads it: its
+    /// domain's quark string and code, and whether a network source posted it.
+    fn gst_error_report(msg: &gst::Message, err: &glib::Error) -> crate::media::Report {
+        use glib::translate::ToGlibPtr;
+        let raw: *const glib::ffi::GError = err.to_glib_none().0;
+        // SAFETY: `raw` is the live GError `err` wraps.
+        let code = i64::from(unsafe { (*raw).code });
+        let network = msg
+            .src()
+            .and_then(|o| o.clone().downcast::<gst::Element>().ok())
+            .and_then(|e| e.factory())
+            .is_some_and(|f| f.klass().contains("Source/Network"));
+        crate::media::Report::Failed {
+            domain: err.domain().as_str().to_string(),
+            code,
+            underlying: if network { crate::media::GST_FROM_NETWORK_SOURCE } else { 0 },
+            detail: err.message().to_owned(),
+        }
+    }
+
+    fn bus_message(id: u64, msg: &gst::Message) {
+        use gst::MessageView as M;
+        let Some(p) = player(id) else { return };
+        let from_playbin = msg.src().is_some_and(|s| s == p.pb().upcast_ref::<gst::Object>());
+        match msg.view() {
+            M::Error(e) => {
+                set_playbin_state(&p.pb(), gst::State::Null);
+                stop_timer(&mut p.inner.borrow_mut().tick);
+                report(id, gst_error_report(msg, &e.error()));
+            }
+            M::Element(e) => {
+                let Some(s) = e.structure() else { return };
+                if s.name() != "missing-plugin" {
+                    return;
+                }
+                let caps = s.get::<gst::Caps>("detail").ok();
+                let media = caps
+                    .as_ref()
+                    .and_then(|c| c.structure(0).map(|s| s.name().to_string()))
+                    .unwrap_or_else(|| s.get::<String>("detail").unwrap_or_default());
+                let what = s.get::<String>("name").unwrap_or_else(|_| media.clone());
+                let detail = format!("GStreamer has no element for {media} ({what})");
+                let domain = format!("{}{media}", crate::media::GST_MISSING_PLUGIN);
+                if media.starts_with("text/") || media.starts_with("application/x-subtitle") {
+                    return;
+                }
+                if !crate::media::gst_container_caps(&media) {
+                    p.inner.borrow_mut().missing_codec.get_or_insert(detail);
+                } else {
+                    set_playbin_state(&p.pb(), gst::State::Null);
+                    report(id, crate::media::Report::Failed { domain, code: 0, underlying: 0, detail });
+                }
+            }
+            M::StreamCollection(c) => {
+                let collection = c.stream_collection();
+                let streams: Vec<(String, gst::StreamType, gst::Stream)> = collection
+                    .iter()
+                    .filter_map(|st| Some((st.stream_id()?.to_string(), st.stream_type(), st.clone())))
+                    .collect();
+                let (moved, known) = {
+                    let mut s = p.inner.borrow_mut();
+                    let ids = |v: &[(String, gst::StreamType, gst::Stream)]| -> Vec<String> {
+                        v.iter().map(|(i, _, _)| i.clone()).collect()
+                    };
+                    let moved = ids(&s.streams) != ids(&streams);
+                    s.streams = streams;
+                    if moved {
+                        s.requested = None;
+                    }
+                    (moved, !s.selected.is_empty())
+                };
+                // A collection re-posted with the tags read so far: the
+                // listing's languages follow it.
+                if !moved && known {
+                    report_tracks(&p);
+                }
+            }
+            M::Tag(_) if !p.inner.borrow().selected.is_empty() => report_tracks(&p),
+            M::StreamsSelected(sel) => {
+                let selected: Vec<String> = sel.streams().filter_map(|st| st.stream_id().map(|s| s.to_string())).collect();
+                let requested = p.inner.borrow().requested.clone();
+                // GTK has no system caption preference, so a stream starts
+                // with its captions off (caption_shown None) as on every other
+                // platform's first listing (the scenes' `captions en [-]`),
+                // while playbin3's own text stream keeps flowing.
+                match requested {
+                    Some(want) if want.iter().any(|w| !selected.contains(w)) || selected.iter().any(|s| !want.contains(s)) => {}
+                    _ => {
+                        {
+                            let mut s = p.inner.borrow_mut();
+                            s.selected = selected;
+                            s.requested = Some(s.selected.clone());
+                        }
+                        report_tracks(&p);
+                    }
+                }
+            }
+            M::AsyncDone(_) => {
+                let loaded = p.inner.borrow().loaded;
+                if !loaded {
+                    let generation = {
+                        let mut s = p.inner.borrow_mut();
+                        s.loaded = true;
+                        stop_timer(&mut s.overdue);
+                        s.generation
+                    };
+                    finish_load(&p, generation, 0);
+                    return;
+                }
+                let reported = {
+                    let mut s = p.inner.borrow_mut();
+                    if s.seeks > 0 {
+                        s.seeks -= 1;
+                        true
+                    } else {
+                        false
+                    }
+                };
+                if reported {
+                    report(id, crate::media::Report::Seeked(position_ms(&p.pb())));
+                }
+                if p.inner.borrow().want_play {
+                    set_playbin_state(&p.pb(), gst::State::Playing);
+                }
+                queue(Pending::Ask(id));
+            }
+            M::StateChanged(change) if from_playbin => {
+                let (old, new) = (change.old(), change.current());
+                if new == gst::State::Playing && old != gst::State::Playing {
+                    report(id, crate::media::Report::Rate(true));
+                    start_tick(&p);
+                } else if old == gst::State::Playing && new != gst::State::Playing {
+                    stop_timer(&mut p.inner.borrow_mut().tick);
+                    report(id, crate::media::Report::Position(position_ms(&p.pb())));
+                    report(id, crate::media::Report::Rate(false));
+                }
+                queue(Pending::Ask(id));
+            }
+            M::Eos(_) => {
+                if p.inner.borrow().looping {
+                    seek_to(&p, 0);
+                    return;
+                }
+                report(id, crate::media::Report::Position(position_ms(&p.pb())));
+                report(id, crate::media::Report::Ended);
+                p.inner.borrow_mut().want_play = false;
+                set_playbin_state(&p.pb(), gst::State::Paused);
+            }
+            _ => {}
+        }
+    }
+
+    /// Loaded, once the pipeline prerolled: a WAV or MP3 can answer no
+    /// duration at its first ASYNC_DONE (measured on tone.wav: 0), so the
+    /// query is asked again for up to a second before the item is reported.
+    fn finish_load(p: &Rc<GtkPlayer>, generation: u64, tries: u32) {
+        let id = p.id;
+        if p.inner.borrow().generation != generation {
+            return;
+        }
+        let Some(duration) = p
+            .pb()
+            .query_duration::<gst::ClockTime>()
+            .map(gst::ClockTime::mseconds)
+            .filter(|ms| *ms > 0)
+            .or_else(|| (tries >= 40).then_some(0))
+        else {
+            glib::timeout_add_local_once(std::time::Duration::from_millis(25), move || {
+                if let Some(p) = player(id) {
+                    finish_load(&p, generation, tries + 1);
+                }
+            });
+            return;
+        };
+        let sink = p.pb().property::<Option<gst::Element>>("video-sink");
+        let size = sink
+            .and_then(|s| s.static_pad("sink"))
+            .and_then(|pad| pad.current_caps())
+            .and_then(|caps| {
+                let s = caps.structure(0)?;
+                Some((s.get::<i32>("width").ok()? as u32, s.get::<i32>("height").ok()? as u32))
+            })
+            .unwrap_or((0, 0));
+        let (undecodable, detail, pending, play) = {
+            let mut s = p.inner.borrow_mut();
+            let detail = s.missing_codec.clone().unwrap_or_default();
+            (s.missing_codec.is_some(), detail, s.pending_seek.take(), s.want_play)
+        };
+        let size = if undecodable { (0, 0) } else { size };
+        report(id, crate::media::Report::Loaded { duration_ms: duration, size, undecodable, detail });
+        if undecodable {
+            set_playbin_state(&p.pb(), gst::State::Null);
+            return;
+        }
+        if let Some(ms) = pending {
+            report(id, crate::media::Report::Cue(String::new()));
+            seek_to(p, ms);
+        } else if play {
+            set_playbin_state(&p.pb(), gst::State::Playing);
+        }
+        queue(Pending::Ask(id));
+    }
+
+    fn start_tick(p: &Rc<GtkPlayer>) {
+        let id = p.id;
+        let mut s = p.inner.borrow_mut();
+        stop_timer(&mut s.tick);
+        s.tick = Some(glib::timeout_add_local(
+            std::time::Duration::from_millis(crate::media::POSITION_TICK_MS),
+            move || {
+                let Some(p) = player(id) else { return glib::ControlFlow::Break };
+                report(id, crate::media::Report::Position(position_ms(&p.pb())));
+                glib::ControlFlow::Continue
+            },
+        ));
+    }
+
+    /// An http(s) sidecar caption file, fetched through GStreamer's own HTTP
+    /// source (the stack the player streams through) and handed to the core's
+    /// one WebVTT parser; "" cancels a fetch still pending (mb-http-sidecar).
+    fn fetch_captions(p: &Rc<GtkPlayer>, url: &str) {
+        if let Some((_, old, _)) = p.inner.borrow_mut().captions_fetch.take() {
+            let _ = old.set_state(gst::State::Null);
+        }
+        if url.is_empty() {
+            return;
+        }
+        let id = p.id;
+        let pipeline = gst::Pipeline::new();
+        let src = gst::Element::make_from_uri(gst::URIType::Src, url, None).unwrap_or_else(|e| {
+            panic!("kaya: GStreamer has no source for the caption file {url} ({e})")
+        });
+        let sink = gstreamer_app::AppSink::builder().sync(false).build();
+        pipeline.add_many([&src, sink.upcast_ref()]).expect("a fresh pipeline takes two elements");
+        src.link(&sink).expect("a source links to an appsink");
+        let body = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+        let into = body.clone();
+        sink.set_callbacks(
+            gstreamer_app::AppSinkCallbacks::builder()
+                .new_sample(move |s| {
+                    if let Ok(sample) = s.pull_sample() {
+                        if let Some(map) = sample.buffer().and_then(|b| b.map_readable().ok()) {
+                            into.lock().unwrap_or_else(|e| e.into_inner()).extend_from_slice(map.as_slice());
+                        }
+                    }
+                    Ok(gst::FlowSuccess::Ok)
+                })
+                .build(),
+        );
+        let status = Rc::new(std::cell::Cell::new(0u32));
+        let key = url.to_owned();
+        let url = url.to_owned();
+        let bus = pipeline.bus().expect("a pipeline has a bus");
+        let held = pipeline.clone();
+        let watch = bus.add_watch_local(move |_, msg| {
+            use gst::MessageView as M;
+            let finish = |r: crate::media::Report| {
+                let _ = held.set_state(gst::State::Null);
+                report(id, r);
+                glib::ControlFlow::Break
+            };
+            match msg.view() {
+                M::Element(e) => {
+                    if let Some(s) = e.structure().filter(|s| s.name() == "http-headers") {
+                        status.set(s.get::<u32>("http-status-code").unwrap_or(0));
+                    }
+                    glib::ControlFlow::Continue
+                }
+                M::Eos(_) => {
+                    let bytes = std::mem::take(&mut *body.lock().unwrap_or_else(|e| e.into_inner()));
+                    finish(crate::media::Report::CaptionsText {
+                        url: url.clone(),
+                        text: String::from_utf8_lossy(&bytes).into_owned(),
+                    })
+                }
+                M::Error(e) => {
+                    let err = e.error();
+                    let r = match gst_error_report(msg, &err) {
+                        crate::media::Report::Failed { .. } if status.get() >= 400 => crate::media::Report::CaptionsFailed {
+                            url: url.clone(),
+                            domain: "http".into(),
+                            code: i64::from(status.get()),
+                            underlying: 0,
+                            detail: err.message().to_owned(),
+                        },
+                        crate::media::Report::Failed { domain, code, underlying, detail } => {
+                            crate::media::Report::CaptionsFailed { url: url.clone(), domain, code, underlying, detail }
+                        }
+                        _ => unreachable!("gst_error_report answers Failed"),
+                    };
+                    finish(r)
+                }
+                _ => glib::ControlFlow::Continue,
+            }
+        })
+        .expect("kaya: a new pipeline's bus already had a watch");
+        let _ = pipeline.set_state(gst::State::Playing);
+        p.inner.borrow_mut().captions_fetch = Some((key, pipeline.upcast(), watch));
+    }
+
+    pub(super) fn set_video_player(core: &mut CoreState, widget: WidgetId, shown: Option<u64>) {
+        use gtk4::prelude::WidgetExt;
+        let Some(view) = core.videos.iter().find(|v| v.id == widget).cloned() else { return };
+        view.shown.set(shown);
+        let paintable = shown.and_then(player).map(|p| p.paintable());
+        view.picture.set_paintable(paintable.as_ref());
+        if shown.is_none() {
+            view.caption.set_visible(false);
+        }
+        if let Some(id) = shown {
+            redraw_captions(core, id);
+        }
+        follow_keep_awake(core);
+    }
+
+    pub(super) fn set_fit(view: &GtkVideoView, fit: i64) {
+        view.picture.set_content_fit(match fit {
+            1 => gtk4::ContentFit::Cover,
+            2 => gtk4::ContentFit::Fill,
+            _ => gtk4::ContentFit::Contain,
+        });
+    }
+
+    thread_local! {
+        /// The inhibitor this process holds: Some(cookie) while a shown player
+        /// plays, the cookie 0 when GTK found nothing to take it.
+        static AWAKE: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };
+    }
+
+    /// Rule 5 (docs/media-plan.md §2): the display stays awake exactly while a
+    /// player shown by a mapped video view plays, through GtkApplication's own
+    /// idle inhibitor as GNOME's Showtime does.
+    fn follow_keep_awake(core: &CoreState) {
+        use gtk4::prelude::{GtkApplicationExt, WidgetExt};
+        let want = core.videos.iter().any(|v| {
+            v.overlay.is_mapped()
+                && v.shown.get().and_then(player).is_some_and(|p| p.inner.borrow().state == PlayerState::Playing)
+        });
+        let Some(app) = core.app.as_ref() else { return };
+        match (want, AWAKE.get()) {
+            (true, None) => {
+                let cookie = app.inhibit(Some(&core.window), gtk4::ApplicationInhibitFlags::IDLE, Some("Playing a video"));
+                if cookie == 0 {
+                    eprintln!(
+                        "kaya: GtkApplication.inhibit(IDLE) answered 0 — neither the compositor's idle \
+                         inhibitor nor a session manager on the bus took it"
+                    );
+                }
+                AWAKE.set(Some(cookie));
+            }
+            (false, Some(cookie)) => {
+                if cookie != 0 {
+                    app.uninhibit(cookie);
+                }
+                AWAKE.set(None);
+            }
+            _ => {}
+        }
+    }
+
+    // MARK: the session (docs/media-plan.md §5): MPRIS2 through mpris-server.
+
+    struct Session {
+        spec: Option<SessionSpecGtk>,
+        mpris: Option<Rc<mpris_server::Player>>,
+        building: bool,
+    }
+
+    #[derive(Clone)]
+    pub(super) struct SessionSpecGtk {
+        pub(super) player: Option<u64>,
+        pub(super) offered: u32,
+        pub(super) title: String,
+        pub(super) artist: String,
+        pub(super) album: String,
+        pub(super) artwork: String,
+    }
+
+    thread_local! {
+        static SESSION: RefCell<Session> = const { RefCell::new(Session { spec: None, mpris: None, building: false }) };
+    }
+
+    /// The bus name this process owns, for the harness's reads from outside.
+    static MPRIS_NAME: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+    fn bit(action: crate::protocol::SessionAction) -> u32 {
+        1 << crate::wire::session_action_raw(action).0
+    }
+
+    pub(super) fn set_session(core: &CoreState, spec: SessionSpecGtk) {
+        SESSION.with_borrow_mut(|s| s.spec = Some(spec));
+        let build = SESSION.with_borrow_mut(|s| {
+            let go = s.mpris.is_none() && !s.building;
+            s.building |= go;
+            go
+        });
+        if build {
+            let app_id = core
+                .app
+                .as_ref()
+                .and_then(|a| gtk4::prelude::ApplicationExt::application_id(a).map(|s| s.to_string()))
+                .unwrap_or_else(|| "dev.kaya.App".to_owned());
+            let identity = core.identity_name.clone().unwrap_or_else(|| app_id.clone());
+            glib::MainContext::default().spawn_local(async move {
+                let player = match build_mpris(&app_id, &identity).await {
+                    Ok(p) => Rc::new(p),
+                    Err(why) => {
+                        eprintln!("kaya: the media session could not own its MPRIS name: {why}");
+                        SESSION.with_borrow_mut(|s| s.building = false);
+                        return;
+                    }
+                };
+                glib::MainContext::default().spawn_local(player.run());
+                SESSION.with_borrow_mut(|s| {
+                    s.mpris = Some(player);
+                    s.building = false;
+                });
+                queue(Pending::Publish);
+            });
+        }
+        publish_session(core);
+    }
+
+    async fn build_mpris(app_id: &str, identity: &str) -> Result<mpris_server::Player, String> {
+        let make = |suffix: String| {
+            mpris_server::Player::builder(&suffix)
+                .identity(identity)
+                .desktop_entry(app_id)
+                .can_control(true)
+                .build()
+        };
+        let (player, name) = match make(app_id.to_owned()).await {
+            Ok(p) => (p, format!("org.mpris.MediaPlayer2.{app_id}")),
+            Err(_) => {
+                let suffix = format!("{app_id}.instance{}", std::process::id());
+                let p = make(suffix.clone()).await.map_err(|e| e.to_string())?;
+                (p, format!("org.mpris.MediaPlayer2.{suffix}"))
+            }
+        };
+        use crate::protocol::SessionAction as A;
+        player.connect_play(|_| queue(Pending::Remote(A::Play)));
+        player.connect_pause(|_| queue(Pending::Remote(A::Pause)));
+        player.connect_play_pause(|_| {
+            let playing = CORE.with(|c| c.try_borrow().ok().and_then(|c| c.as_ref().map(|c| c.scene.media_system_state())));
+            queue(Pending::Remote(if playing == Some(1) { A::Pause } else { A::Play }));
+        });
+        player.connect_stop(|_| queue(Pending::Remote(A::Stop)));
+        player.connect_next(|_| queue(Pending::Remote(A::Next)));
+        player.connect_previous(|_| queue(Pending::Remote(A::Previous)));
+        player.connect_seek(|_, offset| {
+            queue(Pending::Remote(if offset.as_micros() < 0 { A::SeekBackward } else { A::SeekForward }))
+        });
+        player.connect_set_position(|_, _, at| {
+            queue(Pending::Remote(A::SeekTo(u64::try_from(at.as_millis()).unwrap_or(0))))
+        });
+        *MPRIS_NAME.lock().unwrap_or_else(|e| e.into_inner()) = Some(name);
+        Ok(player)
+    }
+
+    fn remote_action(core: &mut CoreState, action: crate::protocol::SessionAction) {
+        use crate::media::Route;
+        match core.scene.media_route(action) {
+            Route::App => core.occurrences.send(Occurrence::SessionAction { action }),
+            Route::Player(p, command) => player_command(p.0, command),
+            Route::Replay(p) => {
+                player_command(p.0, PlayerCommand::Seek(0));
+                player_command(p.0, PlayerCommand::Play);
+            }
+            Route::NotOffered => {}
+        }
+    }
+
+    /// What the system shows, on every SetSession and after EVERY player report:
+    /// PlaybackStatus follows the core's reading of the attached player.
+    fn publish_session(core: &CoreState) {
+        use crate::protocol::SessionAction as A;
+        let Some(mpris) = SESSION.with_borrow(|s| s.mpris.clone()) else { return };
+        let Some(spec) = SESSION.with_borrow(|s| s.spec.clone()) else { return };
+        let status = match core.scene.media_system_state() {
+            1 => mpris_server::PlaybackStatus::Playing,
+            2 => mpris_server::PlaybackStatus::Paused,
+            _ => mpris_server::PlaybackStatus::Stopped,
+        };
+        let has = |a: A| spec.offered & bit(a) != 0;
+        let mut metadata = mpris_server::Metadata::new();
+        metadata.set_title(Some(spec.title.clone()));
+        metadata.set_artist((!spec.artist.is_empty()).then(|| [spec.artist.clone()]));
+        metadata.set_album((!spec.album.is_empty()).then(|| spec.album.clone()));
+        metadata.set_art_url((!spec.artwork.is_empty()).then(|| spec.artwork.clone()));
+        if let Some(p) = spec.player.and_then(player) {
+            let ms = p.pb().query_duration::<gst::ClockTime>().map_or(0, gst::ClockTime::mseconds);
+            metadata.set_length(Some(mpris_server::Time::from_millis(ms as i64)));
+        }
+        let can_play = spec.player.is_some() || has(A::Play);
+        let (can_pause, can_seek, next, previous) = (has(A::Pause), has(A::SeekTo(0)), has(A::Next), has(A::Previous));
+        glib::MainContext::default().spawn_local(async move {
+            let _ = mpris.set_metadata(metadata).await;
+            let _ = mpris.set_can_play(can_play).await;
+            let _ = mpris.set_can_pause(can_pause).await;
+            let _ = mpris.set_can_seek(can_seek).await;
+            let _ = mpris.set_can_go_next(next).await;
+            let _ = mpris.set_can_go_previous(previous).await;
+            let _ = mpris.set_playback_status(status).await;
+        });
+    }
+
+    fn session_follow(core: &CoreState) {
+        publish_session(core);
+    }
+
+    /// docs/media-plan.md §8 ruling 1: the GStreamer registry holds a demuxer for
+    /// the container and a decoder for every codec at a usable rank, the caps a
+    /// missing-plugin message would otherwise name.
+    pub(super) fn registry_can_play(mime: &str, codecs: &str) -> bool {
+        if gst_ready().is_err() {
+            return false;
+        }
+        let (containers, default_codec): (&[&str], Option<&str>) = match mime {
+            "video/mp4" | "audio/mp4" | "video/quicktime" | "audio/x-m4a" => (&["video/quicktime"], None),
+            "video/webm" | "audio/webm" => (&["video/webm"], None),
+            "video/x-matroska" | "audio/x-matroska" => (&["video/x-matroska"], None),
+            "audio/ogg" | "video/ogg" | "application/ogg" => (&["application/ogg"], Some("vorbis")),
+            "audio/wav" | "audio/x-wav" | "audio/wave" => (&["audio/x-wav"], None),
+            "audio/flac" | "audio/x-flac" => (&[], Some("flac")),
+            "audio/mpeg" | "audio/mp3" => (&[], Some("mp3")),
+            "video/mp2t" => (&["video/mpegts"], None),
+            // HLS's segments are MPEG-TS (the RFC 8216 baseline) or fragmented
+            // MP4, so a manifest alone asks for both demuxers.
+            "application/vnd.apple.mpegurl" | "application/x-mpegurl" => {
+                (&["application/x-hls", "video/mpegts", "video/quicktime"], None)
+            }
+            "application/dash+xml" => (&["application/dash+xml", "video/quicktime"], None),
+            _ => return false,
+        };
+        let usable = |kind: gst::ElementFactoryType, caps: &gst::Caps| {
+            gst::ElementFactory::factories_with_type(kind, gst::Rank::MARGINAL)
+                .iter()
+                .any(|f| f.can_sink_any_caps(caps))
+        };
+        for container in containers {
+            if !usable(gst::ElementFactoryType::DEMUXER, &gst::Caps::builder(*container).build()) {
+                return false;
+            }
+        }
+        let listed: Vec<&str> = codecs.split(',').map(str::trim).filter(|c| !c.is_empty()).collect();
+        let codecs = if listed.is_empty() { default_codec.into_iter().collect() } else { listed };
+        codecs.into_iter().all(|codec| {
+            let lower = codec.to_ascii_lowercase();
+            let caps = match lower.split('.').next().unwrap_or("") {
+                "avc1" | "avc3" => gst::Caps::builder("video/x-h264").build(),
+                "hvc1" | "hev1" => gst::Caps::builder("video/x-h265").build(),
+                "vp09" | "vp9" => gst::Caps::builder("video/x-vp9").build(),
+                "vp8" => gst::Caps::builder("video/x-vp8").build(),
+                "av01" => gst::Caps::builder("video/x-av1").build(),
+                "mp4a" if lower == "mp4a.6b" || lower == "mp4a.69" => {
+                    gst::Caps::builder("audio/mpeg").field("mpegversion", 1i32).field("layer", 3i32).build()
+                }
+                "mp4a" => gst::Caps::builder("audio/mpeg").field("mpegversion", 4i32).build(),
+                "mp3" => gst::Caps::builder("audio/mpeg").field("mpegversion", 1i32).field("layer", 3i32).build(),
+                "opus" => gst::Caps::builder("audio/x-opus").build(),
+                "vorbis" => gst::Caps::builder("audio/x-vorbis").build(),
+                "flac" => gst::Caps::builder("audio/x-flac").build(),
+                _ => return false,
+            };
+            usable(gst::ElementFactoryType::DECODER, &caps)
+        })
+    }
+
+    /// This lane's table (docs/media-plan.md §7a): Linux refuses nothing with
+    /// the image's packages, so the items it expects to fail are the ones whose
+    /// element the run demoted with GST_PLUGIN_FEATURE_RANK — the two negative
+    /// legs, which must see `failed` where the audio would otherwise play alone
+    /// or the stream stall.
+    #[cfg(feature = "harness")]
+    pub(super) fn demoted_refusal(item: &str) -> Option<String> {
+        demoted_refusal_in(&std::env::var("GST_PLUGIN_FEATURE_RANK").unwrap_or_default(), item)
+    }
+
+    #[cfg(feature = "harness")]
+    pub(super) fn demoted_refusal_in(ranks: &str, item: &str) -> Option<String> {
+        let demoted: Vec<String> = ranks
+            .split(',')
+            .filter_map(|pair| {
+                let (name, rank) = pair.split_once(':')?;
+                matches!(rank.trim().to_ascii_uppercase().as_str(), "NONE" | "0").then(|| name.trim().to_owned())
+            })
+            .collect();
+        let item = item.to_ascii_lowercase();
+        if demoted.iter().any(|e| e == "av1dec") && item.starts_with("av1_") {
+            return Some("unsupported_codec".to_owned());
+        }
+        if demoted.iter().any(|e| e == "tsdemux") && item.starts_with("hls_mpegts") {
+            return Some("unsupported_container".to_owned());
+        }
+        None
+    }
+
+    // MARK: the harness's media reads (docs/media-plan.md §7a)
+
+    /// expect_video_ink's tolerance here: GStreamer's YUV to RGB conversion
+    /// reads the sRGB-tagged C83C1E as C6381D (green 4 off) through GTK's
+    /// own renderer, measured on both protocols 2026-09-30 (and 2B374D for
+    /// 2C3B4F in the 2026-09-29 probe, the same 4 in green).
+    #[cfg(feature = "harness")]
+    pub(super) const GTK_VIDEO_INK_TOLERANCE: u8 = 4;
+
+    /// The caption kaya's renderer drew on this view, "" for none.
+    #[cfg(feature = "harness")]
+    pub(super) fn drawn_caption(view: &GtkVideoView) -> String {
+        use gtk4::prelude::WidgetExt;
+        if view.caption.is_visible() { view.caption.text().to_string() } else { String::new() }
+    }
+
+    /// The view's centre as GTK's own renderer draws it: the picture is an
+    /// ordinary composited paintable here (docs/probes/video-native-2026-09-29,
+    /// android-linux.md §5), read back as the widget's own snapshot.
+    #[cfg(feature = "harness")]
+    pub(super) fn video_pixel(view: &GtkVideoView) -> String {
+        use gtk4::prelude::{NativeExt, SnapshotExt, WidgetExt};
+        let widget: gtk4::Widget = view.picture.clone().upcast();
+        let Some(native) = widget.native() else {
+            return "<the video view is in no toplevel>".to_owned();
+        };
+        let (w, h) = (f64::from(widget.width()), f64::from(widget.height()));
+        if w < 2.0 || h < 2.0 {
+            return format!("<the video view laid out at {w}x{h}>");
+        }
+        if view.picture.paintable().is_none() {
+            return "<the video view shows no player>".to_owned();
+        }
+        let Some(renderer) = native.renderer() else {
+            return "<this toplevel has no GSK renderer>".to_owned();
+        };
+        let paintable = gtk4::WidgetPaintable::new(Some(&widget));
+        let snapshot = gtk4::Snapshot::new();
+        gdk::prelude::PaintableExt::snapshot(&paintable, &snapshot, w, h);
+        let Some(node) = snapshot.to_node() else {
+            return format!("<the video view snapshotted to nothing at {w}x{h}: no frame yet>");
+        };
+        let shot = renderer.render_texture(&node, None);
+        let (tw, th) = (shot.width(), shot.height());
+        if tw < 1 || th < 1 {
+            return format!("<the video view rendered to {tw}x{th} pixels>");
+        }
+        let stride = tw as usize * 4;
+        let mut buf = vec![0u8; stride * th as usize];
+        gtk4::gdk::prelude::TextureExtManual::download(&shot, &mut buf, stride);
+        let (x, y) = ((tw / 2) as usize, (th / 2) as usize);
+        let at = y * stride + x * 4;
+        let word = u32::from_ne_bytes([buf[at], buf[at + 1], buf[at + 2], buf[at + 3]]);
+        if (word >> 24) & 0xff != 0xff {
+            return format!("<the centre is {:08X}, not an opaque picture: no frame drawn>", word);
+        }
+        format!("{:02X}{:02X}{:02X}", (word >> 16) & 0xff, (word >> 8) & 0xff, word & 0xff)
+    }
+
+    #[cfg(feature = "harness")]
+    fn dbus_send(args: &[&str]) -> Result<String, String> {
+        let out = std::process::Command::new("dbus-send")
+            .arg("--session")
+            .arg("--print-reply")
+            .args(args)
+            .output()
+            .map_err(|e| format!("dbus-send could not start: {e}"))?;
+        let said = String::from_utf8_lossy(&out.stdout).into_owned();
+        if out.status.success() {
+            Ok(said)
+        } else {
+            Err(format!("dbus-send {}: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim()))
+        }
+    }
+
+    /// The MPRIS name this process owns, checked on the bus: the harness drives
+    /// only its own player, never a desktop's.
+    #[cfg(feature = "harness")]
+    fn own_mpris_name() -> Result<String, String> {
+        let Some(name) = MPRIS_NAME.lock().unwrap_or_else(|e| e.into_inner()).clone() else {
+            return Err("this process owns no MPRIS name yet (no set_session reached the backend)".to_owned());
+        };
+        let said = dbus_send(&[
+            "--dest=org.freedesktop.DBus",
+            "/org/freedesktop/DBus",
+            "org.freedesktop.DBus.GetConnectionUnixProcessID",
+            &format!("string:{name}"),
+        ])?;
+        let pid = said.split_whitespace().last().and_then(|w| w.parse::<u32>().ok());
+        if pid == Some(std::process::id()) {
+            Ok(name)
+        } else {
+            Err(format!("the bus says {name} belongs to pid {pid:?}, not this process ({})", std::process::id()))
+        }
+    }
+
+    /// session_send (docs/media-plan.md §5): the MPRIS method a media key's
+    /// daemon calls (gnome-settings-daemon's media-keys plugin), sent from
+    /// outside this process over the session bus; the reply comes back once the
+    /// handler ran, which is the arrival the scene needs.
+    #[cfg(feature = "harness")]
+    pub(super) fn session_send(action: &str) -> Result<(), String> {
+        let method = match action {
+            "play" => "Play",
+            "pause" => "Pause",
+            "toggle" => "PlayPause",
+            "stop" => "Stop",
+            "next" => "Next",
+            "previous" => "Previous",
+            other => return Err(format!("session_send {other}: no such MPRIS method")),
+        };
+        let name = own_mpris_name()?;
+        dbus_send(&[
+            &format!("--dest={name}"),
+            "/org/mpris/MediaPlayer2",
+            &format!("org.mpris.MediaPlayer2.Player.{method}"),
+        ])
+        .map(|_| ())
+    }
+
+    /// `"<title>" <state>` read back over the bus, as a shell's card reads it.
+    #[cfg(feature = "harness")]
+    pub(super) fn now_playing() -> String {
+        let Ok(name) = own_mpris_name() else {
+            return "\"\" stopped".to_owned();
+        };
+        let get = |prop: &str| {
+            dbus_send(&[
+                &format!("--dest={name}"),
+                "/org/mpris/MediaPlayer2",
+                "org.freedesktop.DBus.Properties.Get",
+                "string:org.mpris.MediaPlayer2.Player",
+                &format!("string:{prop}"),
+            ])
+        };
+        let quoted = |line: &str| line.split_once('"').and_then(|(_, rest)| rest.rsplit_once('"')).map(|(s, _)| s.to_owned());
+        let status = get("PlaybackStatus")
+            .ok()
+            .and_then(|s| s.lines().find_map(quoted))
+            .unwrap_or_else(|| "<no PlaybackStatus>".to_owned())
+            .to_ascii_lowercase();
+        let metadata = get("Metadata").unwrap_or_default();
+        let lines: Vec<&str> = metadata.lines().collect();
+        let title = lines
+            .iter()
+            .position(|l| l.contains("\"xesam:title\""))
+            .and_then(|i| lines.get(i + 1))
+            .and_then(|l| quoted(l))
+            .unwrap_or_default();
+        format!("{title:?} {status}")
+    }
+
+    /// Whether this process holds the idle inhibitor, from the record the
+    /// inhibitor went to: the compositor's (sway's tree, `inhibit_idle`) on
+    /// wayland, the session manager's (org.gnome.SessionManager.IsInhibited) on
+    /// x11 — GTK's two routes (gtkapplication-wayland.c, gtkapplication-dbus.c).
+    #[cfg(feature = "harness")]
+    pub(super) fn display_awake() -> Result<bool, String> {
+        if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+            let out = std::process::Command::new("swaymsg")
+                .args(["-r", "-t", "get_tree"])
+                .output()
+                .map_err(|e| format!("swaymsg could not start: {e}"))?;
+            let tree = String::from_utf8_lossy(&out.stdout);
+            let key = format!("\"pid\": {},", std::process::id());
+            let Some(at) = tree.find(&key) else {
+                return Err(format!("sway's tree lists no view of pid {}", std::process::id()));
+            };
+            let rest = &tree[at..];
+            let end = rest[key.len()..].find("\"pid\":").map_or(rest.len(), |e| e + key.len());
+            let view = &rest[..end];
+            return match view.find("\"inhibit_idle\": ") {
+                Some(i) => Ok(view[i + 16..].starts_with("true")),
+                None => Err("sway's view of this process carries no inhibit_idle".to_owned()),
+            };
+        }
+        let said = dbus_send(&[
+            "--dest=org.gnome.SessionManager",
+            "/org/gnome/SessionManager",
+            "org.gnome.SessionManager.IsInhibited",
+            "uint32:8",
+        ])?;
+        Ok(said.contains("boolean true"))
+    }
+}
+
+#[cfg(all(test, feature = "harness"))]
+mod media_tests {
+    use super::gtk_media::{demoted_refusal_in, registry_can_play, while_prerolling};
+
+    /// When a have-type on a typefind inside `pipeline` finished, relative to
+    /// a 300 ms preroll call on `held`; the emission starts 50 ms in.
+    fn have_type_during_a_preroll_call(pipeline: &gstreamer::Element, held: &gstreamer::Element) -> bool {
+        use gstreamer::prelude::*;
+        let bin = pipeline.clone().downcast::<gstreamer::Bin>().expect("a pipeline is a bin");
+        let typefind = gstreamer::ElementFactory::make("typefind").build().expect("typefind");
+        bin.add(&typefind).expect("the bin takes the typefind");
+        let caps = gstreamer::Caps::builder("video/quicktime").build();
+        let emitter = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            typefind.emit_by_name::<()>("have-type", &[&100u32, &caps]);
+            std::time::Instant::now()
+        });
+        let returned = while_prerolling(held, || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            std::time::Instant::now()
+        });
+        let emitted = emitter.join().expect("the emitter thread");
+        emitted >= returned
+    }
+
+    /// THE PREROLL DEADLOCK'S GUARD (docs/traps.md, gstreamer#4472): a
+    /// typefind's have-type waits until the set_state call on ITS OWN
+    /// pipeline returns, so urisourcebin's handler can never sync parsebin
+    /// while that call holds parsebin's state lock; one in another pipeline
+    /// is not held.
+    #[test]
+    fn gtk_media_have_type_waits_for_its_pipelines_preroll_call() {
+        assert!(super::can_play("video/mp4", "avc1.64000b, mp4a.40.2"), "GStreamer answers");
+        let one = gstreamer::Pipeline::new().into();
+        let other: gstreamer::Element = gstreamer::Pipeline::new().into();
+        assert!(have_type_during_a_preroll_call(&one, &one), "have-type ran inside its own pipeline's preroll call");
+        assert!(!have_type_during_a_preroll_call(&other, &one), "another pipeline's have-type was held");
+    }
+
+    /// The capability query reads the registry at a usable rank: the image's
+    /// packages play the suite, an unknown type is refused, and a decoder
+    /// demoted to NONE (the negative legs' GST_PLUGIN_FEATURE_RANK) takes its
+    /// codec's `can_play` with it, as the lane table then expects.
+    #[test]
+    fn gtk_media_can_play_follows_the_registry() {
+        use gstreamer::prelude::PluginFeatureExtManual;
+        let h264 = "avc1.64000b, mp4a.40.2";
+        assert!(registry_can_play("video/mp4", h264));
+        assert!(registry_can_play("video/webm", "vp09.00.10.08, opus"));
+        assert!(registry_can_play("audio/mpeg", ""));
+        assert!(registry_can_play("application/vnd.apple.mpegurl", ""));
+        assert!(registry_can_play("application/dash+xml", ""));
+        assert!(!registry_can_play("video/x-kaya-nothing", ""));
+        assert!(!registry_can_play("video/mp4", "zz99.1"));
+        assert!(registry_can_play("video/mp4", "av01.0.00M.08, mp4a.40.2"));
+        let registry = gstreamer::Registry::get();
+        for name in ["av1dec", "dav1ddec", "avdec_av1"] {
+            if let Some(f) = registry.lookup_feature(name) {
+                f.set_rank(gstreamer::Rank::NONE);
+            }
+        }
+        assert!(!registry_can_play("video/mp4", "av01.0.00M.08, mp4a.40.2"));
+        assert!(registry_can_play("video/mp4", h264));
+        if let Some(f) = registry.lookup_feature("tsdemux") {
+            f.set_rank(gstreamer::Rank::NONE);
+        }
+        assert!(!registry_can_play("application/vnd.apple.mpegurl", ""));
+    }
+
+    #[test]
+    fn gtk_media_lane_table_reads_the_demoted_elements() {
+        assert_eq!(demoted_refusal_in("", "av1_aac.mp4"), None);
+        assert_eq!(demoted_refusal_in("av1dec:NONE", "av1_aac.mp4").as_deref(), Some("unsupported_codec"));
+        assert_eq!(demoted_refusal_in("av1dec:0", "av1_opus.webm").as_deref(), Some("unsupported_codec"));
+        assert_eq!(demoted_refusal_in("av1dec:PRIMARY", "av1_aac.mp4"), None);
+        assert_eq!(demoted_refusal_in("av1dec:NONE", "h264_aac.mp4"), None);
+        assert_eq!(
+            demoted_refusal_in("x:1,tsdemux:none", "hls_mpegts.m3u8").as_deref(),
+            Some("unsupported_container")
+        );
+        assert_eq!(demoted_refusal_in("tsdemux:NONE", "hls_fmp4.m3u8"), None);
+    }
+}
+
 /// docs/media-plan.md §8 ruling 1, this backend's half of the capability query.
-pub(crate) fn can_play(_mime: &str, _codecs: &str) -> bool {
-    crate::depth_stub("media_formats")
+pub(crate) fn can_play(mime: &str, codecs: &str) -> bool {
+    gtk_media::registry_can_play(mime, codecs)
 }

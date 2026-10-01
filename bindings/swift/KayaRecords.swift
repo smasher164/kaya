@@ -168,6 +168,7 @@ func wireValue(_ any: Any) -> KayaValue? {
     case let d as KayaDate: return .i64(kayaPackedDate("a Date field", d))
     case let t as KayaTime: return .i64(kayaPackedTime("a Time field", t))
     case let c as KayaColor: return .i64(Int64(c.hex))
+    case let p as KayaPlayer: return .i64(Int64(bitPattern: p.id))
     case let s as String: return .str(s)
     case let b as Bool: return .bool(b)
     case let n as Int64: return .i64(n)

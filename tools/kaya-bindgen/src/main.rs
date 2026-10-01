@@ -33,20 +33,12 @@ fn main() {
     validate_identifiers(&SPEC, "swift", swift::RESERVED);
     validate_identifiers(&SPEC, "js", js::RESERVED);
 
-    let outputs: Vec<(&str, String)> = vec![
-        ("bindings/python/kaya/wire.py", python::emit(&SPEC)),
-        ("bindings/c/kaya_wire.h", c::emit(&SPEC)),
-        ("bindings/go/kaya_wire.go", go::emit(&SPEC)),
-        ("bindings/csharp/KayaWire.cs", csharp::emit(&SPEC)),
-        ("bindings/ocaml/kaya_wire.ml", ocaml::emit(&SPEC)),
-        ("bindings/haskell/KayaWire.hs", haskell::emit(&SPEC)),
-        ("bindings/java/dev/kaya/KayaWire.java", java::emit(&SPEC)),
-        ("bindings/swift/KayaWire.swift", swift::emit(&SPEC)),
-        ("bindings/js/kaya/wire.ts", js::emit(&SPEC)),
-    ];
+    let outputs = generate_all(&SPEC);
 
     every_code_answer_is_decoded(&SPEC, &outputs);
     every_value_answer_is_decoded(&SPEC, &outputs);
+    let bad = occurrence_decode_refusals(&SPEC, &outputs);
+    assert!(bad.is_empty(), "kaya-bindgen: {}", bad.join("; "));
 
     let mut stale = false;
     for (rel, content) in &outputs {
@@ -141,6 +133,68 @@ fn every_value_answer_is_decoded(spec: &ProtocolSpec, outputs: &[(&str, String)]
         }
     }
     assert!(bad.is_empty(), "kaya-bindgen: {}", bad.join("; "));
+}
+
+/// EVERY OCCURRENCE RECORD DECODES AS THE SHAPE IT HAS, checked where
+/// the code- and value-answer rules are. A record with a key path must
+/// carry it where the click tag reads one (a u64 id, then `path_len`);
+/// every record without one falls into a derived family, the flat one
+/// last; and every binding carries one flat arm per flat record. The
+/// failure refused is measured (2026-09-30): player_changed,
+/// player_tracks and session_action fell to the click tail in all eight
+/// decoders, which took `state`, `audio_selected` and `reserved` for a
+/// key-path length.
+fn occurrence_decode_refusals(spec: &ProtocolSpec, outputs: &[(&str, String)]) -> Vec<String> {
+    let mut bad = Vec::new();
+    for r in spec.occurrence {
+        if let Some(at) = r.fields.iter().position(|f| f.name == "path_len") {
+            if at != 1 || !matches!(r.fields[0].ty, kaya::spec::FieldTy::U64) {
+                bad.push(format!(
+                    "occurrence {} carries `path_len` as field {at} after a {:?}, where the \
+                     click tag reads a u64 id and then the key-path length",
+                    r.name, r.fields[0].ty
+                ));
+            }
+        }
+        if matches!(r.fields.first().map(|f| f.ty), Some(kaya::spec::FieldTy::VariantSchemas))
+            || (flat_occurrence_names(spec).contains(&r.name)
+                && r.fields.iter().any(|f| matches!(f.ty, kaya::spec::FieldTy::VariantSchemas)))
+        {
+            bad.push(format!("occurrence {} is flat and carries variant schemas, which no flat arm reads", r.name));
+        }
+    }
+    let family = flat_occurrence_names(spec);
+    for (rel, content) in outputs {
+        if rel.ends_with(".h") {
+            continue;
+        }
+        let arms = content.matches(FLAT_MARK).count();
+        println!("kaya-bindgen: {rel}: {arms} flat decode arms");
+        if arms != family.len() {
+            bad.push(format!(
+                "{rel} decodes {arms} of the {} flat occurrences ({}) — a record with no key \
+                 path is read by the CLICK tail otherwise; the arm is emitted from \
+                 flat_occurrence_names",
+                family.len(),
+                family.join(", ")
+            ));
+        }
+    }
+    bad
+}
+
+fn generate_all(spec: &ProtocolSpec) -> Vec<(&'static str, String)> {
+    vec![
+        ("bindings/python/kaya/wire.py", python::emit(spec)),
+        ("bindings/c/kaya_wire.h", c::emit(spec)),
+        ("bindings/go/kaya_wire.go", go::emit(spec)),
+        ("bindings/csharp/KayaWire.cs", csharp::emit(spec)),
+        ("bindings/ocaml/kaya_wire.ml", ocaml::emit(spec)),
+        ("bindings/haskell/KayaWire.hs", haskell::emit(spec)),
+        ("bindings/java/dev/kaya/KayaWire.java", java::emit(spec)),
+        ("bindings/swift/KayaWire.swift", swift::emit(spec)),
+        ("bindings/js/kaya/wire.ts", js::emit(spec)),
+    ]
 }
 
 /// Shared emitter helpers.
@@ -562,6 +616,39 @@ pub(crate) fn undo_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
         .collect()
 }
 
+/// The records every emitter decodes BY NAME in an arm of its own.
+const NAMED_DECODE_ARMS: &[&str] = &["file_dialog_result", "link_opened"];
+
+/// FLAT RECORDS: no key path and no payload, in no family above
+/// (player_changed, player_tracks, session_action). Every decoder reads
+/// their fields IN ORDER from offset 8 into the generic tail: the first
+/// field is the id when it is a u64 (else the id is 0) and is not repeated;
+/// u32 and u64 read as I64, `reserved` skipped; a Value as itself; a
+/// Values block as I64(count) then its values. Without this arm the click
+/// tail takes the second field for a key-path length
+/// (scratchpad finding, docs/media-plan.md §2).
+pub(crate) fn flat_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
+    let id_only = id_only_occurrence_names(spec);
+    let id_pair = id_pair_occurrence_names(spec);
+    let code = code_answer_occurrence_names(spec);
+    let value = value_answer_occurrence_names(spec);
+    let undo = undo_occurrence_names(spec);
+    spec.occurrence
+        .iter()
+        .filter(|r| {
+            r.payload.is_none()
+                && !r.fields.iter().any(|f| f.name == "path_len")
+                && !representation_shaped(r)
+                && !NAMED_DECODE_ARMS.contains(&r.name)
+                && ![&id_only, &id_pair, &code, &value, &undo].iter().any(|fam| fam.contains(&r.name))
+        })
+        .map(|r| r.name)
+        .collect()
+}
+
+/// The flat arm's comment, counted like [`CODE_ANSWER_MARK`].
+pub(crate) const FLAT_MARK: &str = "A flat record: its fields in order, into the tail.";
+
 /// Click-shaped occurrences without a payload: {u64 id, u32 path_len,
 /// u32 reserved}, then the key path. Needed because the C floor emits
 /// one named parser per record.
@@ -613,6 +700,40 @@ pub(crate) fn record_params(rec: &Record) -> Vec<&'static Field> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn doctored(name: &str, fields: &'static [Field]) -> ProtocolSpec {
+        let occ: Vec<Record> = SPEC
+            .occurrence
+            .iter()
+            .map(|r| if r.name == name { Record { fields, ..*r } } else { *r })
+            .collect();
+        ProtocolSpec { tx: SPEC.tx, apply: SPEC.apply, occurrence: Box::leak(occ.into_boxed_slice()), enums: SPEC.enums }
+    }
+
+    /// The guard's two refusals, each made to fire (counts printed).
+    #[test]
+    fn occurrence_decode_refusals_fire() {
+        let outputs = generate_all(&SPEC);
+        let clean = occurrence_decode_refusals(&SPEC, &outputs);
+        assert!(clean.is_empty(), "{clean:?}");
+        static MOVED: &[Field] = &[
+            Field { name: "id", ty: FieldTy::U64 },
+            Field { name: "reserved", ty: FieldTy::U32 },
+            Field { name: "path_len", ty: FieldTy::U32 },
+        ];
+        let spec = doctored("button_clicked", MOVED);
+        let bad = occurrence_decode_refusals(&spec, &generate_all(&spec));
+        println!("path_len moved: {} refusal(s)", bad.len());
+        assert!(bad.iter().any(|b| b.contains("button_clicked")), "{bad:?}");
+        let mut short = outputs.clone();
+        let (_, swift) = short.iter_mut().find(|(rel, _)| rel.ends_with(".swift")).unwrap();
+        let before = swift.matches(FLAT_MARK).count();
+        *swift = swift.replacen(FLAT_MARK, "cut", 1);
+        println!("flat arm cut: {} -> {}", before, swift.matches(FLAT_MARK).count());
+        let bad = occurrence_decode_refusals(&SPEC, &short);
+        println!("flat arm cut: {} refusal(s)", bad.len());
+        assert!(bad.len() == 1 && bad[0].contains("flat occurrences"), "{bad:?}");
+    }
 
     /// The shared vector table for the shortcut canonicalizer. `escape`,
     /// shift-only/bare alphanumerics and the reserved floor are ACCEPTED

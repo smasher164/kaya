@@ -456,6 +456,10 @@ PY
             gtk::frame_tests::gtk_frame_memory_skips_a_fullscreen_frame \\
         && run_exact_test gtk::color_tests::gtk_color_round_trips_every_byte \\
         && run_exact_test gtk::range_tests::gtk_range_press_split_and_travel \\
+        && run_exact_test gtk::media_tests::gtk_media_can_play_follows_the_registry \\
+        && run_exact_test gtk::media_tests::gtk_media_lane_table_reads_the_demoted_elements \\
+        && run_exact_test \\
+            gtk::media_tests::gtk_media_have_type_waits_for_its_pipelines_preroll_call \\
         && run_exact_test \\
             gtk::notify_tests::gtk_notification_timer_parameter_parses_as_the_action_declares \\
         && run_exact_test \\

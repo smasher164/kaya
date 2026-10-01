@@ -1836,6 +1836,19 @@ typedef struct KayaHostApi {
                             uint32_t);
   uint32_t (*player_cue)(uint64_t, const uint8_t*, uintptr_t);
   uintptr_t (*caption_at)(uint64_t, uint64_t, uint8_t*, uintptr_t);
+  /**
+   * docs/media-plan.md §3: an http(s) sidecar fetched by the platform.
+   */
+  uint32_t (*player_captions_text)(uint64_t, const uint8_t*, uintptr_t, const uint8_t*, uintptr_t);
+  uint32_t (*player_captions_failed)(uint64_t,
+                                     const uint8_t*,
+                                     uintptr_t,
+                                     const uint8_t*,
+                                     uintptr_t,
+                                     int64_t,
+                                     int64_t,
+                                     const uint8_t*,
+                                     uintptr_t);
   void (*video_visible)(uint64_t, double);
   /**
    * docs/media-plan.md §5: the core's route for a remote action, and the
@@ -2981,6 +2994,40 @@ uint32_t kaya_player_tracks(uint64_t player,
  * `text` must describe `text_len` readable UTF-8 bytes, or be NULL.
  */
 uint32_t kaya_player_cue(uint64_t player, const uint8_t *text, uintptr_t text_len);
+
+/**
+ * Presentation side: an http(s) sidecar caption file the backend fetched
+ * with the platform's own networking (docs/media-plan.md §3), `url` the one
+ * it was handed in set_player_prop's captions; the core parses and times it.
+ *
+ * # Safety
+ * `url` and `text` must each describe readable UTF-8 bytes of their
+ * lengths, or be NULL with length 0.
+ */
+uint32_t kaya_player_captions_text(uint64_t player,
+                                   const uint8_t *url,
+                                   uintptr_t url_len,
+                                   const uint8_t *text,
+                                   uintptr_t text_len);
+
+/**
+ * Presentation side: that fetch failed, as the platform's domain and codes
+ * ("http" and the status for an HTTP answer); the player fails with the
+ * mapped reason.
+ *
+ * # Safety
+ * `url`, `domain` and `detail` must each describe readable UTF-8 bytes of
+ * their lengths, or be NULL with length 0.
+ */
+uint32_t kaya_player_captions_failed(uint64_t player,
+                                     const uint8_t *url,
+                                     uintptr_t url_len,
+                                     const uint8_t *domain,
+                                     uintptr_t domain_len,
+                                     int64_t code,
+                                     int64_t underlying,
+                                     const uint8_t *detail,
+                                     uintptr_t detail_len);
 
 /**
  * Presentation side: KAYA'S CAPTION RENDERER asks what to draw (docs/media-

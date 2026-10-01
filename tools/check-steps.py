@@ -4692,7 +4692,7 @@ out = android_scenes(
     android_selected(android_lane, "compose"),
     "tools/lib/lanes/android.py",
     read_rel("guests/rust/rusthost.rs"),
-    "guests/rust/rusthost.rs", r'Ok\("([a-z0-9]+)"\)')
+    "guests/rust/rusthost.rs", r'Ok\("([a-z0-9_]+)"\)')
 if out:
     print("check-steps: an android leg selects a scene the APK's guest "
           "cannot run:", file=sys.stderr)
@@ -4708,7 +4708,7 @@ out = android_scenes(
     read_rel("android/javahost/src/main/kotlin/dev/kaya/"
              "javahost/MainActivity.kt"),
     "android/javahost/src/main/kotlin/dev/kaya/javahost/"
-    "MainActivity.kt", r'"([a-z0-9]+)" ->', exempt=("1",))
+    "MainActivity.kt", r'"([a-z0-9_]+)"(?=(?:, "[a-z0-9_]+")* ->)', exempt=("1",))
 if out:
     print("check-steps: an android JVM leg selects a scene "
           "MainActivity.kt has no arm for — it would run milestone2 "
@@ -4723,7 +4723,7 @@ out = android_scenes(
     android_selected(android_lane, "go"),
     "tools/lib/lanes/android.py",
     read_rel("guests/go/cmd/scenes.go"), "guests/go/cmd/scenes.go",
-    r'^\t"([a-z0-9]+)":')
+    r'^\t"([a-z0-9_]+)":')
 if out:
     print("check-steps: an android Go leg selects a scene the Go "
           "guest does not carry (guests/go/cmd/scenes.go's table):",
@@ -4745,7 +4745,7 @@ def go_desktop_scenes(table_text, table, runners):
     launcher files, kind "selected" a precomputed set of
     KAYA_SELFTEST values (a lane module's go legs) — the three
     spellings the three lanes use."""
-    armed = set(re.findall(r'^\t"([a-z0-9]+)":', table_text, re.M))
+    armed = set(re.findall(r'^\t"([a-z0-9_]+)":', table_text, re.M))
     bad = []
     if not armed:
         bad.append(f"{table}: no scene table here — the map-key "
@@ -4770,7 +4770,7 @@ def go_desktop_scenes(table_text, table, runners):
                     bad.append(f"{name}: a go launcher that does not "
                                f"build dev.kaya/guests/go/cmd")
                     continue
-                names = re.findall(r"set KAYA_SELFTEST=([A-Za-z0-9]+)",
+                names = re.findall(r"set KAYA_SELFTEST=([A-Za-z0-9_]+)",
                                    src)
                 if not names:
                     bad.append(f"{name}: builds the Go guest and sets "
@@ -4782,7 +4782,7 @@ def go_desktop_scenes(table_text, table, runners):
         else:
             src = payload.replace("\\\n", " ")
             selected = set(re.findall(
-                r"KAYA_SELFTEST=([a-z0-9]+)[^\n]*go-guests/kaya-go",
+                r"KAYA_SELFTEST=([a-z0-9_]+)[^\n]*go-guests/kaya-go",
                 src))
         if not selected:
             bad.append(f"{label}: names no Go scene — the selection "

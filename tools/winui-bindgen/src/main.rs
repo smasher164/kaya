@@ -658,6 +658,87 @@ fn main() {
         "Microsoft.UI.Xaml.Controls.ColorPicker".to_string(),
         "Microsoft.UI.Xaml.Controls.ColorChangedEventArgs".to_string(),
         "Microsoft.UI.Xaml.Controls.Flyout".to_string(),
+        // MEDIA (docs/media-plan.md §2, §3, §5; the WinUI rows). The video
+        // view is MediaPlayerElement with its transport controls off; the
+        // player, its session, its item's tracks and each track's decoder
+        // status (the decodability check) are Windows.Media; the session's
+        // system half is the attached player's SMTC; the harness reads the
+        // system's own record through the global session manager; a
+        // streamed sidecar is fetched with Windows.Web.Http; kaya's caption
+        // renderer takes the user's style from ClosedCaptionProperties; the
+        // capability query asks CodecQuery.
+        "Microsoft.UI.Xaml.Controls.MediaPlayerElement".to_string(),
+        "Microsoft.UI.Dispatching.DispatcherQueueTimer".to_string(),
+        "Windows.Foundation.IClosable".to_string(),
+        "Windows.Media.Playback.MediaPlayer".to_string(),
+        "Windows.Media.Playback.MediaPlaybackSession".to_string(),
+        "Windows.Media.Playback.MediaPlaybackState".to_string(),
+        "Windows.Media.Playback.MediaPlayerFailedEventArgs".to_string(),
+        "Windows.Media.Playback.MediaPlayerError".to_string(),
+        "Windows.Media.Playback.MediaPlaybackItem".to_string(),
+        "Windows.Media.Playback.IMediaPlaybackSource".to_string(),
+        "Windows.Media.Playback.MediaPlaybackAudioTrackList".to_string(),
+        "Windows.Media.Playback.MediaPlaybackVideoTrackList".to_string(),
+        "Windows.Media.Playback.MediaPlaybackTimedMetadataTrackList".to_string(),
+        "Windows.Media.Playback.TimedMetadataPresentationModeChangedEventArgs".to_string(),
+        "Windows.Media.Playback.TimedMetadataTrackPresentationMode".to_string(),
+        "Windows.Media.Playback.MediaPlaybackCommandManager".to_string(),
+        "Windows.Media.Playback.MediaItemDisplayProperties".to_string(),
+        "Windows.Media.Core.MediaSource".to_string(),
+        "Windows.Media.Core.MediaSourceState".to_string(),
+        "Windows.Media.Core.IMediaTrack".to_string(),
+        "Windows.Media.Core.MediaTrackKind".to_string(),
+        "Windows.Media.Core.ISingleSelectMediaTrackList".to_string(),
+        "Windows.Media.Core.AudioTrack".to_string(),
+        "Windows.Media.Core.VideoTrack".to_string(),
+        "Windows.Media.Core.AudioTrackSupportInfo".to_string(),
+        "Windows.Media.Core.VideoTrackSupportInfo".to_string(),
+        "Windows.Media.MediaProperties.VideoEncodingProperties".to_string(),
+        "Windows.Media.MediaProperties.IMediaEncodingProperties".to_string(),
+        "Windows.Media.MediaProperties.IVideoEncodingProperties".to_string(),
+        "Windows.Media.MediaProperties.MediaRatio".to_string(),
+        "Windows.Media.MediaProperties.MediaPropertySet".to_string(),
+        "Windows.Foundation.IPropertyValue".to_string(),
+        "Windows.Foundation.PropertyType".to_string(),
+        "Windows.Media.Core.MediaDecoderStatus".to_string(),
+        "Windows.Media.Core.TimedMetadataTrack".to_string(),
+        "Windows.Media.Core.TimedMetadataKind".to_string(),
+        "Windows.Media.Core.MediaCueEventArgs".to_string(),
+        "Windows.Media.Core.IMediaCue".to_string(),
+        "Windows.Media.Core.TimedTextCue".to_string(),
+        "Windows.Media.Core.TimedTextLine".to_string(),
+        "Windows.Media.Core.CodecQuery".to_string(),
+        "Windows.Media.Core.CodecInfo".to_string(),
+        "Windows.Media.Core.CodecKind".to_string(),
+        "Windows.Media.Core.CodecCategory".to_string(),
+        "Windows.Media.Core.CodecSubtypes".to_string(),
+        "Windows.Media.SystemMediaTransportControls".to_string(),
+        "Windows.Media.SystemMediaTransportControlsDisplayUpdater".to_string(),
+        "Windows.Media.SystemMediaTransportControlsButton".to_string(),
+        "Windows.Media.SystemMediaTransportControlsButtonPressedEventArgs".to_string(),
+        "Windows.Media.SystemMediaTransportControlsTimelineProperties".to_string(),
+        "Windows.Media.PlaybackPositionChangeRequestedEventArgs".to_string(),
+        "Windows.Media.MediaPlaybackStatus".to_string(),
+        "Windows.Media.MediaPlaybackType".to_string(),
+        "Windows.Media.MusicDisplayProperties".to_string(),
+        "Windows.Media.VideoDisplayProperties".to_string(),
+        "Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager".to_string(),
+        "Windows.Media.Control.GlobalSystemMediaTransportControlsSession".to_string(),
+        "Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties".to_string(),
+        "Windows.Media.Control.GlobalSystemMediaTransportControlsSessionPlaybackInfo".to_string(),
+        "Windows.Media.Control.GlobalSystemMediaTransportControlsSessionPlaybackStatus".to_string(),
+        "Windows.Media.ClosedCaptioning.ClosedCaptionProperties".to_string(),
+        "Windows.Media.ClosedCaptioning.ClosedCaptionColor".to_string(),
+        "Windows.Media.ClosedCaptioning.ClosedCaptionOpacity".to_string(),
+        "Windows.Media.ClosedCaptioning.ClosedCaptionSize".to_string(),
+        "Windows.Media.ClosedCaptioning.ClosedCaptionEdgeEffect".to_string(),
+        "Windows.Media.ClosedCaptioning.ClosedCaptionStyle".to_string(),
+        "Windows.Web.Http.HttpClient".to_string(),
+        "Windows.Web.Http.HttpResponseMessage".to_string(),
+        "Windows.Web.Http.HttpStatusCode".to_string(),
+        "Windows.Web.Http.IHttpContent".to_string(),
+        "Windows.Web.Http.HttpProgress".to_string(),
+        "Windows.Web.Http.HttpProgressStage".to_string(),
     ];
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     // The returned Warnings are windows-bindgen's own notes about the metadata,
@@ -699,12 +780,13 @@ fn fix_observable_vector_paths(path: &str) {
     // The observable vector's pair, and ValueSet's map interfaces (the toast
     // reply's UserInput): windows-collections 0.3 has none of them, and the
     // windows crate's Foundation_Collections has all.
-    const MOVED: [&str; 5] = [
+    const MOVED: [&str; 6] = [
         "IObservableVector",
         "VectorChangedEventHandler",
         "IObservableMap",
         "MapChangedEventHandler",
         "IPropertySet",
+        "IVectorChangedEventArgs",
     ];
     let src = std::fs::read_to_string(path).expect("bindings.rs was just generated");
     if !MOVED.iter().any(|name| src.contains(&format!("windows_collections::{name}")) || src.contains(&format!("windows_collections:: {name}"))) {

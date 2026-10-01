@@ -21,6 +21,11 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 SCRIPT = ROOT / "tools" / "media-server.py"
 HOST = "127.0.0.1"
 PORT = 8765
+# ONE PORT PER LANE ON THE HOST: the lanes run concurrently, and the mac, the
+# iOS simulator and the emulator all reach the host's loopback; the linux
+# lane's server lives in its own container's network.
+LANE_PORTS = {"mac": 8765, "ios": 8766, "android": 8767, "windows": 8768,
+              "linux": 8765}
 PROBE = "h264_aac.mp4"
 READY_S = 15.0
 

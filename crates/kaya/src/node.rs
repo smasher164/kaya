@@ -172,6 +172,7 @@ pub unsafe extern "C" fn napi_register_module_v1(env: Env, exports: Value) -> Va
         ("locale", locale),
         ("direction", direction),
         ("textScale", text_scale),
+        ("canPlay", can_play),
         ("catalog", catalog),
         ("tr", tr),
         ("startPump", start_pump),
@@ -539,6 +540,15 @@ unsafe extern "C" fn direction(env: Env, _info: CbInfo) -> Value {
 
 unsafe extern "C" fn text_scale(env: Env, _info: CbInfo) -> Value {
     unsafe { number(env, capi::kaya_text_scale()) }
+}
+
+/// `canPlay(mime, codecs)`: kaya_can_play (docs/media-plan.md §8 ruling 1).
+unsafe extern "C" fn can_play(env: Env, info: CbInfo) -> Value {
+    let [m, c] = unsafe { args::<2>(env, info) };
+    let mime = try_or_throw!(env, unsafe { string_arg(env, m, "canPlay mime") });
+    let codecs = try_or_throw!(env, unsafe { string_arg(env, c, "canPlay codecs") });
+    let yes = unsafe { capi::kaya_can_play(mime.as_ptr(), mime.len(), codecs.as_ptr(), codecs.len()) };
+    unsafe { boolean(env, yes != 0) }
 }
 
 unsafe extern "C" fn catalog(env: Env, info: CbInfo) -> Value {

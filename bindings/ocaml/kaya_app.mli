@@ -403,6 +403,91 @@ val string_of_color : color -> string
 val pack_color : color -> int64
 val color_of_packed : int64 -> color
 
+(* Media (docs/media-plan.md): what a player reads, why it failed, what the
+   system's controls ask, what the app states, and a video view's fit. Each
+   [name] is the vocabulary's own word. *)
+module Player_state : sig
+  type t = Idle | Loading | Ready | Playing | Paused | Ended | Failed
+
+  val name : t -> string
+end
+
+module Media_failure : sig
+  type t =
+    | Unsupported_codec
+    | Unsupported_container
+    | Not_found
+    | Network
+    | Decode_error
+    | Resources
+
+  val name : t -> string
+end
+
+module Session_action : sig
+  module Kind : sig
+    type t = Play | Pause | Stop | Seek_to | Seek_forward | Seek_backward | Next | Previous
+
+    val name : t -> string
+  end
+
+  (* [Seek_to ms] carries where the system asked to go. *)
+  type t = Play | Pause | Stop | Seek_to of int | Seek_forward | Seek_backward | Next | Previous
+
+  val kind : t -> Kind.t
+end
+
+module Playback_state : sig
+  type t = None | Playing | Paused
+end
+
+module Fit : sig
+  type t = Contain | Cover | Fill
+end
+
+(* Where a player reads its media: an asset name, an http(s) URL, or a
+   picked file — never bytes. *)
+module Media_source : sig
+  type t
+
+  val asset : string -> t
+  val url : string -> t
+  val picked : picked_file -> t
+end
+
+(* A media player the app holds (docs/media-plan.md §2). *)
+type player
+
+(* A row showing no player. *)
+val no_player : player
+
+val pack_player : player -> int64
+val player_of_packed : int64 -> player
+
+(* A player's readings as the core last published them; the size is 0x0
+   for audio. *)
+module Player_reading : sig
+  type t = {
+    state : Player_state.t;
+    failure : Media_failure.t option;
+    position_ms : int;
+    duration_ms : int;
+    width : int;
+    height : int;
+  }
+end
+
+(* A player's tracks: BCP 47 tags in the platform's order, a sidecar
+   caption track last, and the selections counting from 0. *)
+module Tracks : sig
+  type t = {
+    audio : string list;
+    captions : string list;
+    audio_selected : int option;
+    caption_selected : int option;
+  }
+end
+
 (* The formatter door (docs/compliance-plan.md §1.4, the OCaml row): a
    value in, the platform's own string out, in the process locale; pure,
    any thread, no transaction. An unstated digit count is the platform's
@@ -870,6 +955,87 @@ val color_picker :
   ?bind:color signal ->
   ?alpha:bool -> ?on_color:(color -> unit) -> unit -> widget
 
+(* A media player: an object with no place in the layout, shown by a
+   [video] or heard alone. Created inside a transaction. *)
+val player :
+  ?source:Media_source.t ->
+  ?speed:float ->
+  ?volume:float ->
+  ?muted:bool ->
+  ?loop:bool -> ?captions:Media_source.t * string -> unit -> player
+
+(* Load a source, replacing what the player held; it reads loading until
+   the platform answers. *)
+val player_source : player -> Media_source.t -> unit
+
+(* Unload, back to idle. *)
+val clear_player : player -> unit
+
+val player_speed : player -> float -> unit
+
+(* 0..1, relative to the system volume. *)
+val player_volume : player -> float -> unit
+
+val player_muted : player -> bool -> unit
+val player_loop : player -> bool -> unit
+
+(* A sidecar WebVTT file (an asset, an http(s) URL or a picked file),
+   [language] its BCP 47 tag, listed as the last caption track. *)
+val player_captions : player -> Media_source.t -> language:string -> unit
+
+val clear_captions : player -> unit
+
+(* Play; from the start when the player had ended. *)
+val play : player -> unit
+
+val pause : player -> unit
+
+(* To [ms] from the start. *)
+val seek : player -> int -> unit
+
+val release_player : player -> unit
+
+(* Select audio track [index], 0-based in [tracks]. *)
+val select_audio : player -> int -> unit
+
+(* Select a caption track, 0-based in [tracks], or [None]. *)
+val select_captions : player -> int option -> unit
+
+val set_fit : widget -> Fit.t -> unit
+
+(* Show another player in a live video view, or none; a player is shown
+   by one video view at a time. *)
+val show_player : widget -> player option -> unit
+
+(* A video view showing [~player]: the platform's own view, its controls
+   off. [~on_visibility] hears how much of it shows, 0 to 1. *)
+val video :
+  ?grow:float ->
+  ?fill:bool ->
+  ?a11y_id:string ->
+  ?a11y_id_bind:string signal ->
+  ?a11y_label:string ->
+  ?a11y_label_bind:string signal ->
+  ?help:string ->
+  ?help_bind:string signal ->
+  ?a11y_hint:string ->
+  ?fit:Fit.t -> ?on_visibility:(float -> unit) -> player:player -> unit -> widget
+
+(* Declare the app's one media session, replacing the last. [~handles]
+   are the actions the app answers through [on_session]; play, pause and
+   seek_to it leaves out apply to the attached [~player]. *)
+val declare_session :
+  ?player:player ->
+  ?title:string ->
+  ?artist:string ->
+  ?album:string ->
+  ?artwork:string ->
+  ?handles:Session_action.Kind.t list -> ?playback_state:Playback_state.t -> unit -> unit
+
+(* Whether this platform plays [mime] with [codecs] (an RFC 6381 list, ""
+   for none). Any thread, no transaction. *)
+val can_play : string -> string -> bool
+
 (* A time picker over civil times: hours and minutes, no seconds.
    [~step] is the minute granularity and a pick snaps to it. *)
 val time_picker :
@@ -1061,6 +1227,9 @@ val f64_field : int -> ('a, float) field
 val date_field : int -> ('a, date) field
 val time_field : int -> ('a, time) field
 val color_field : int -> ('a, color) field
+
+(* A row's player, the field a stamped video view shows. *)
+val player_field : int -> ('a, player) field
 
 (* A blob field's MODEL value carries the guest's own bytes. *)
 val blob_field : int -> ('a, bytes) field
@@ -1890,6 +2059,28 @@ module Tpl : sig
     ?level:int ->
     ?a11y_level:int -> ?on_color:(key list -> color -> unit) -> unit -> node
 
+  (* A video view per stamped copy: [~bind_field] the row's own
+     (_, player) field, or one constant [~player]. [~on_visibility]
+     carries the copy's keys first. *)
+  val video :
+    ?grow:float ->
+    ?fill:bool ->
+    ?a11y_id:string ->
+    ?a11y_id_bind:string signal ->
+    ?a11y_id_field:('a, string) field ->
+    ?a11y_label:string ->
+    ?a11y_label_bind:string signal ->
+    ?a11y_label_field:('b, string) field ->
+    ?help:string ->
+    ?help_bind:string signal ->
+    ?help_field:('c, string) field ->
+    ?a11y_hint:string ->
+    ?player:player ->
+    ?bind_field:('d, player) field ->
+    ?fit:Fit.t ->
+    ?level:int ->
+    ?a11y_level:int -> ?on_visibility:(key list -> float -> unit) -> unit -> node
+
   (* A time picker per stamped copy — the date picker's three sources,
      hours and minutes. *)
   val time_picker :
@@ -2105,6 +2296,47 @@ val on_format_node : app -> node -> (key list -> format_act -> unit) -> unit
 
 (* The value a live slider's gesture SETTLED ON -- once per release or
    key move, after that gesture's moves (docs/slider-plan.md S2). *)
+(* A player's readings, tracks and current cue, as of the last occurrence
+   this loop took (docs/media-plan.md §2, §3). *)
+val player_reading : app -> player -> Player_reading.t
+
+val tracks : app -> player -> Tracks.t
+val cue : app -> player -> string
+
+(* A player's occurrences. [on_player_state] hears every state, ended and
+   failed included; [on_failed] the closed reason and the platform's
+   sentence; [on_position] the playhead while playing. *)
+val on_player_state : app -> player -> (Player_state.t -> unit) -> unit
+
+val on_ended : app -> player -> (unit -> unit) -> unit
+val on_failed : app -> player -> (Media_failure.t -> string -> unit) -> unit
+val on_seek_completed : app -> player -> (int -> unit) -> unit
+val on_position : app -> player -> (int -> unit) -> unit
+val on_tracks : app -> player -> (Tracks.t -> unit) -> unit
+val on_cue : app -> player -> (string -> unit) -> unit
+
+(* How much of a video view shows, 0 to 1; a stamped one's keys first. *)
+val on_visibility : app -> widget -> (float -> unit) -> unit
+
+val on_visibility_node : app -> node -> (key list -> float -> unit) -> unit
+
+(* The actions the declared session handles. *)
+val on_session : app -> (Session_action.t -> unit) -> unit
+
+(* The dispatch loop's media arm — (kind, id, keys, payload, tail) as
+   Kaya_wire.parse_occurrence answers them — for bindings/ocaml/checks
+   alone; a guest calls none of it. *)
+module For_media_checks : sig
+  val occurrence :
+    app ->
+    int ->
+    int64 ->
+    Kaya_wire.value list ->
+    Kaya_wire.value option ->
+    Kaya_wire.value list ->
+    bool
+end
+
 val on_value_committed : app -> widget -> (float -> unit) -> unit
 
 (* A stamped slider's settled value, the copy's keys first. *)

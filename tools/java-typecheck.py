@@ -707,4 +707,71 @@ if keyed_after != keyed_before:
          "the keyed-get negative. It must only ever doctor the copy in "
          "the scratch directory.")
 
+
+# THE MEDIA SURFACE, RUN (docs/media-plan.md §2, §3, §7b): the three flat
+# records through the GENERATED decoder, the mirror moved before a handler
+# reads it, the failed handler's closed reason, a row's player field on the
+# wire as its id and a stamped video bound from it. No lane reads the
+# mirror's order or the template's source: a scene sees only the labels.
+MEDIA_CHECK = "tools/checks/java-media/dev/kaya/MediaCheck.java"
+MEDIA_ENV = dict(os.environ, KAYA_LIB=str(LIBKAYA))
+(TMP / "mediaclasses").mkdir()
+if run_javac("-encoding", "UTF-8", "-cp", TMP / "classes", "-d",
+             TMP / "mediaclasses", MEDIA_CHECK) != 0:
+    fail("FAIL — the media exerciser did not compile.")
+if run_java("-cp", f"{TMP / 'classes'}:{TMP / 'mediaclasses'}",
+            "dev.kaya.MediaCheck", env=MEDIA_ENV) != 0:
+    fail("FAIL — the Java media surface's decode, mirror or player field "
+         "is wrong (tools/checks/java-media).")
+
+# ITS WATCHED NEGATIVES, one per clause, each on a COPY with the count
+# printed and the exerciser's own sentence demanded back.
+MEDIA_NEGATIVES = [
+    ("media negative: the mirror left behind the handler", "KayaApp.java",
+     r"playerReadings\.put\(player, new PlayerReading\(state, failure, position,",
+     "playerReadings.put(player, new PlayerReading(was.state(), failure, position,",
+     "the media arm answered"),
+    ("media negative: a row's player packed as 0", "KayaRecords.java",
+     r"if \(v instanceof KayaApp\.Player p\) \{\n            return p\.id;",
+     "if (v instanceof KayaApp.Player p) {\n            return 0L;",
+     "a row's player field packed as"),
+    ("media negative: a stamped video ignores the row's field", "KayaApp.java",
+     r"tx\.emit\(KayaWire\.txBindPlayerElement\(n\.id, 0, f\.index\(\)\)\);",
+     "tx.emit(KayaWire.txSetPlayer(n.id, 0));",
+     "the template video emitted no PROP_PLAYER"),
+    ("media negative: the flat tail decoded as a click", "KayaWire.java",
+     r"kind == OCC_KIND_PLAYER_TRACKS\b",
+     "kind == -1",
+     "player_tracks read back as"),
+]
+for label, name, pattern, repl, sentence in MEDIA_NEGATIVES:
+    rel = ROOT / "bindings" / "java" / "dev" / "kaya" / name
+    before = hashlib.sha256(rel.read_bytes()).hexdigest()
+    stem = "m" + hashlib.sha256(label.encode("utf-8")).hexdigest()[:8]
+    (TMP / stem).mkdir()
+    for p in sorted((ROOT / "bindings" / "java" / "dev" / "kaya").glob("*.java")):
+        (TMP / stem / p.name).write_bytes(p.read_bytes())
+    copy = TMP / stem / name
+    copy.write_text(g.doctor(label, copy.read_text(encoding="utf-8"), pattern, repl),
+                    encoding="utf-8")
+    if run_javac("-encoding", "UTF-8", "-d", TMP / (stem + "classes"),
+                 "bindings/java-desktop/dev/kaya/KayaRing.java",
+                 *sorted((TMP / stem).glob("*.java")), MEDIA_CHECK) != 0:
+        fail(f"FAIL — the doctored copy for '{label}' did not compile.")
+    log = TMP / (stem + ".log")
+    if run_java("-cp", str(TMP / (stem + "classes")), "dev.kaya.MediaCheck",
+                log=log, env=MEDIA_ENV) == 0:
+        fail(f"FAIL — the media exerciser PASSED under '{label}', so it does "
+             f"not exercise that clause.")
+    said = log.read_text(encoding="utf-8", errors="replace")
+    if sentence not in said:
+        print(f"java-typecheck: FAIL — '{label}' failed, but not with "
+              f"'{sentence}'. What it printed:")
+        print(said)
+        raise SystemExit(1)
+    if hashlib.sha256(rel.read_bytes()).hexdigest() != before:
+        fail(f"FAIL — {rel} changed during '{label}'. It must only ever "
+             f"doctor the copy in the scratch directory.")
+    print(f"java-typecheck: {label}: red with its own sentence")
+
 g.verdict()

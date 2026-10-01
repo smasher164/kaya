@@ -239,6 +239,86 @@ def rust_spans_of(text, path):
     return spans, None
 
 
+# Kotlin's lexer: line and NESTED block comments, `"…"` with escapes and
+# `"""…"""` raw strings, both interpolating with `$name` or `${…}` (whose
+# braces may hold strings of their own), and char literals, lexed so a
+# `'"'` cannot open a string.
+KOTLIN_CHAR = re.compile(r"'(?:\\u[0-9a-fA-F]{4}|\\.|[^'\\\n])'")
+
+
+def kotlin_spans_of(text, path):
+    spans = []
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if text.startswith("//", i):
+            j = text.find("\n", i)
+            j = n if j < 0 else j
+            spans.append((i, j, "comment", False))
+            i = j
+            continue
+        if text.startswith("/*", i):
+            depth, j = 1, i + 2
+            while j < n and depth:
+                if text.startswith("/*", j):
+                    depth, j = depth + 1, j + 2
+                elif text.startswith("*/", j):
+                    depth, j = depth - 1, j + 2
+                else:
+                    j += 1
+            if depth:
+                return None, (f"{path}: unterminated /* comment at "
+                              f"offset {i}")
+            spans.append((i, j, "comment", False))
+            i = j
+            continue
+        if c == "'":
+            m = KOTLIN_CHAR.match(text, i)
+            if m:
+                i = m.end()
+                continue
+        if c == '"':
+            raw = text.startswith('"""', i)
+            quote = '"""' if raw else '"'
+            j, interp = i + len(quote), False
+            while True:
+                if j >= n:
+                    return None, (f"{path}: unterminated string at "
+                                  f"offset {i}")
+                if not raw and text[j] == "\\":
+                    j += 2
+                    continue
+                if text.startswith("${", j):
+                    interp, depth, j = True, 1, j + 2
+                    while j < n and depth:
+                        if text[j] == "{":
+                            depth += 1
+                        elif text[j] == "}":
+                            depth -= 1
+                        elif text[j] == '"':
+                            k = j + 1
+                            while k < n and text[k] != '"':
+                                k += 2 if text[k] == "\\" else 1
+                            j = k
+                        j += 1
+                    continue
+                if text[j] == "$" and j + 1 < n and \
+                        re.match(r"[A-Za-z_]", text[j + 1]):
+                    interp = True
+                if text.startswith(quote, j):
+                    j += len(quote)
+                    break
+                if not raw and text[j] == "\n":
+                    return None, (f"{path}: newline inside a string at "
+                                  f"offset {i}")
+                j += 1
+            spans.append((i, j, "string", interp))
+            i = j
+            continue
+        i += 1
+    return spans, None
+
+
 def masked(text, spans):
     out = list(text)
     for start, end, _kind, _interp in spans:
@@ -282,16 +362,19 @@ SWIFT_FUNC = re.compile(r"\bfunc\s+(" + NAME + r")\s*\(")
 # lookahead leaves the match end sitting on it, where rust_body starts.
 RUST_FN = re.compile(r"\bfn\s+(" + NAME + r")\s*(?=[(<])")
 # Every STILL-UNREAD language's definition keyword, for the refusal
-# below. `fn` came off this list when the Rust arm landed: Rust is read
+# below. `fn` came off this list when the Rust arm landed, and `fun` with
+# the Kotlin arm (2026-09-30): each is read
 # now, and a pattern kept for a language nothing can reach is the
 # vacuous guard this repo has been bitten by twice.
-OTHER_FUNC = re.compile(r"\b(?:fun|def|func|sub)\s+(" + NAME + r")\s*[(<]")
+OTHER_FUNC = re.compile(r"\b(?:def|func|sub)\s+(" + NAME + r")\s*[(<]")
+KOTLIN_FUN = re.compile(r"\bfun\s+(?:<[^>]*>\s*)?(" + NAME + r")\s*\(")
 SWIFT_EXT = ".swift"
 RUST_EXT = ".rs"
+KOTLIN_EXT = (".kt", ".kts")
 # The extensions with a clause analysis behind them. Everything else in
 # CODE_EXT gets the refusal, and an override may only redirect a file
 # this gate actually reads.
-READ_EXT = (SWIFT_EXT, RUST_EXT)
+READ_EXT = (SWIFT_EXT, RUST_EXT, *KOTLIN_EXT)
 CODE_EXT = (".swift", ".rs", ".kt", ".kts", ".java", ".cs", ".go",
             ".py", ".ml", ".mli", ".hs", ".c", ".h", ".m")
 # "assets" joined 2026-08-28: an assets directory holds packaged
@@ -621,6 +704,48 @@ def audit_swift(path, text):
     return bad, census
 
 
+def audit_kotlin(path, text):
+    """(findings, census) for one Kotlin source: Swift's `return` rule,
+    since a Kotlin diagnostic answers through `return` (an elvis
+    `?: return "…"` included) the way a Swift one does."""
+    bad, census = [], []
+    spans, err = kotlin_spans_of(text, path)
+    if err:
+        return [err + " — this gate could not read the file, so it is "
+                      "not reporting on it"], census
+    code = masked(text, spans)
+
+    def line(off):
+        return text[:off].count("\n") + 1
+
+    for m in KOTLIN_FUN.finditer(code):
+        name = m.group(1)
+        open_at = code.find("{", m.end())
+        eq_at = code.find("=", m.end())
+        if 0 <= eq_at < open_at or open_at < 0:
+            bad.append(f"{path}:{line(m.start())}: {name} has an "
+                       f"expression body, whose answers this gate cannot "
+                       f"read; give it a block body with returns")
+            continue
+        end = close_brace(code, open_at)
+        if end < 0:
+            bad.append(f"{path}:{line(m.start())}: {name}: this gate "
+                       f"cannot find the function body — the parse is "
+                       f"wrong, fix the gate")
+            continue
+        b, c = report(
+            path, text, line(m.start()), name,
+            answers(code, spans, open_at + 1, end),
+            "String" in code[m.end():open_at],
+            f"{path}:{line(m.start())}: {name} returns a String this "
+            "gate cannot see: no `return` in it carries a literal. Write "
+            "the answers as returns, or teach tools/check-diagnostics.py "
+            "to follow this shape.")
+        bad += b
+        census.append(c)
+    return bad, census
+
+
 def audit_rust(path, text):
     """(findings, census) for one Rust source."""
     bad, census = [], []
@@ -696,13 +821,18 @@ def audit(roots, override=None):
             bad += b
             census += c
             continue
+        if path.endswith(KOTLIN_EXT):
+            b, c = audit_kotlin(path, text)
+            bad += b
+            census += c
+            continue
         # Every language with no clause analysis yet: named, not read.
         # Refuse loudly.
         for m in OTHER_FUNC.finditer(text):
             bad.append(
                 f"{path}:{text[:m.start()].count(chr(10)) + 1}: "
                 f"{m.group(1)} is a diagnostic by the naming "
-                f"convention, but this gate reads Swift and Rust only, "
+                f"convention, but this gate reads Swift, Rust and Kotlin only, "
                 f"so nothing is checking it. Add this language to "
                 f"tools/check-diagnostics.py (a lexer and an "
                 f"interpolation rule, ~30 lines) — do not rename the "
@@ -902,6 +1032,46 @@ if not any(f"{RUST_NAME} answer 2 of " in b for b in bad4):
           "second answer. What it said:", file=sys.stderr)
     print("\n".join(bad4), file=sys.stderr)
     raise SystemExit(1)
+
+# THE KOTLIN ARM, watched the same two ways on a copy of the one Kotlin
+# diagnostic the tree has.
+KT_TARGET = "android/kaya/src/main/kotlin/dev/kaya/KayaMedia.kt"
+KT_NAME = "kayaVideoFramesWhyNot"
+kt_text = (ROOT / KT_TARGET).read_text(encoding="utf-8")
+kt_spans, err = kotlin_spans_of(kt_text, KT_TARGET)
+if err:
+    g.refuse("self-test: " + err)
+kt_code = masked(kt_text, kt_spans)
+km = re.search(r"\bfun\s+" + KT_NAME + r"\s*\(", kt_code)
+if not km:
+    g.refuse(f"self-test: no {KT_NAME} in {KT_TARGET} — re-point the "
+             f"Kotlin self-test at the diagnostic that replaced it")
+k_open = kt_code.find("{", km.end())
+k_end = close_brace(kt_code, k_open)
+kt_sole_text = (kt_text[:k_open + 1] + '\n    return "no frames"\n'
+                + kt_text[k_end:])
+kt_answers = answers(kt_code, kt_spans, k_open + 1, k_end)
+second = kt_answers[1][1]
+kt_prose_text = (kt_text[:second[0][0]] + '"the view has composed no surface"'
+                 + kt_text[second[-1][1]:])
+for label, doctored, want in (
+        ("replaced the body with a single answer", kt_sole_text,
+         f"{KT_NAME} has exactly ONE answer"),
+        ("answer 2 rewritten to interpolate nothing", kt_prose_text,
+         f"{KT_NAME} answer 2 of ")):
+    if doctored == kt_text:
+        g.refuse("self-test: the Kotlin perturbation changed NOTHING — 0 "
+                 "substitutions is a failed self-test")
+    out = T / ("kt-" + label.split()[0] + ".kt")
+    out.write_text(doctored, encoding="utf-8")
+    print(f"check-diagnostics: self-test: Kotlin {label} (1 substitution)")
+    got, _ = audit([KT_TARGET], {os.path.normpath(KT_TARGET): out})
+    if not any(want in b for b in got):
+        print(f"check-diagnostics: SELF-TEST FAILED — the Kotlin copy "
+              f"({label}) was not refused for it. What it said:",
+              file=sys.stderr)
+        print("\n".join(got) or "(nothing)", file=sys.stderr)
+        raise SystemExit(1)
 
 print(f"check-diagnostics: self-test: the pre-fix body ({PREFIX_REV}) "
       f"fails FIXED-PROSE and a one-answer body fails SOLE-ANSWER, in "

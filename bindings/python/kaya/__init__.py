@@ -119,6 +119,17 @@ _WIRE_TYPES: list[tuple[type, int]] = [
                (datetime.time, wire.VALUE_I64), (Color, wire.VALUE_I64)]
 
 
+def _field_type(py_type: object) -> object:
+    """`Player | None` is a Player field whose none is 0 on the wire
+    (docs/media-plan.md §7b); every other annotation is itself."""
+    if isinstance(py_type, types.UnionType):
+        members = [a for a in py_type.__args__ if a is not type(None)]
+        if len(members) == 1 and len(py_type.__args__) == 2 \
+                and getattr(members[0], "__name__", "") == "Player":
+            return members[0]
+    return py_type
+
+
 def _wire_tag(py_type: object) -> int | None:
     for ty, tag in _WIRE_TYPES:
         if py_type is ty:
@@ -911,6 +922,12 @@ class Widget(_Handle):
         change."""
         _records().append(wire.tx_widget_command(self.id, wire.COMMAND_EMOJI_PICKER))
 
+    def show_player(self, player: Player | None) -> None:
+        """Show another player in this video view, or none. A player is
+        shown by one video view at a time (docs/media-plan.md §7b)."""
+        _records().append(wire.tx_set_player(
+            self.id, 0 if player is None else player.id))
+
     def scroll_to_row(self, key: Key) -> None:
         """Scroll the For mounted in this container so the row keyed
         `key` has its top at the viewport's top, clamped at the content's
@@ -1649,15 +1666,16 @@ class _Variant:
         self.schema = []
         self.getters = []
         for f in dataclasses.fields(cls):
-            tag = _wire_tag(f.type)
+            ftype = _field_type(f.type)
+            tag = _wire_tag(ftype)
             if tag is None:
                 continue
             self.fields[f.name] = len(self.schema)
             self.schema.append(tag)
-            self.types.append(f.type)
+            self.types.append(ftype)
             self.getters.append(operator.attrgetter(f.name))
-            self.encoders.append(_FIELD_ENCODERS.get(f.type, _identity))
-            self.decoders.append(_FIELD_DECODERS.get(f.type, _identity))
+            self.encoders.append(_FIELD_ENCODERS.get(ftype, _identity))
+            self.decoders.append(_FIELD_DECODERS.get(ftype, _identity))
         if not self.schema:
             raise KayaTypeError(f"kaya: {cls.__name__} has no wire-typed fields")
 
@@ -5917,6 +5935,460 @@ class _TxScope:
         return False
 
 
+# --- MEDIA (docs/media-plan.md): the player, the video view, the session --
+
+
+class PlayerState(enum.IntEnum):
+    """What a player reads (docs/media-plan.md §2). `str()` is the wire's
+    own word, `playing`."""
+
+    IDLE = wire.PLAYER_STATE_IDLE
+    LOADING = wire.PLAYER_STATE_LOADING
+    READY = wire.PLAYER_STATE_READY
+    PLAYING = wire.PLAYER_STATE_PLAYING
+    PAUSED = wire.PLAYER_STATE_PAUSED
+    ENDED = wire.PLAYER_STATE_ENDED
+    FAILED = wire.PLAYER_STATE_FAILED
+
+    def __str__(self) -> str:
+        return self.name.lower()
+
+    @classmethod
+    def _missing_(cls, value: object) -> Any:
+        return _vocab_missing(cls, value, "a player state",
+                              "kaya.PlayerState.PLAYING")
+
+
+class MediaFailure(enum.IntEnum):
+    """Why a player cannot play: the closed reason (docs/media-plan.md
+    §7a). `str()` is the wire's own word, `unsupported_codec`."""
+
+    UNSUPPORTED_CODEC = wire.MEDIA_FAILURE_UNSUPPORTED_CODEC
+    UNSUPPORTED_CONTAINER = wire.MEDIA_FAILURE_UNSUPPORTED_CONTAINER
+    NOT_FOUND = wire.MEDIA_FAILURE_NOT_FOUND
+    NETWORK = wire.MEDIA_FAILURE_NETWORK
+    DECODE_ERROR = wire.MEDIA_FAILURE_DECODE_ERROR
+    RESOURCES = wire.MEDIA_FAILURE_RESOURCES
+
+    def __str__(self) -> str:
+        return self.name.lower()
+
+    @classmethod
+    def _missing_(cls, value: object) -> Any:
+        return _vocab_missing(cls, value, "a media failure",
+                              "kaya.MediaFailure.NETWORK")
+
+
+class SessionAction(enum.IntEnum):
+    """What the system's media controls ask of the app's session
+    (docs/media-plan.md §5)."""
+
+    PLAY = wire.SESSION_ACTION_PLAY
+    PAUSE = wire.SESSION_ACTION_PAUSE
+    STOP = wire.SESSION_ACTION_STOP
+    SEEK_TO = wire.SESSION_ACTION_SEEK_TO
+    SEEK_FORWARD = wire.SESSION_ACTION_SEEK_FORWARD
+    SEEK_BACKWARD = wire.SESSION_ACTION_SEEK_BACKWARD
+    NEXT = wire.SESSION_ACTION_NEXT
+    PREVIOUS = wire.SESSION_ACTION_PREVIOUS
+
+    def __str__(self) -> str:
+        return self.name.lower()
+
+    @classmethod
+    def _missing_(cls, value: object) -> Any:
+        return _vocab_missing(cls, value, "a session action",
+                              "kaya.SessionAction.NEXT")
+
+
+class PlaybackState(enum.IntEnum):
+    """What the session states while no player is attached."""
+
+    NONE = wire.PLAYBACK_STATE_NONE
+    PLAYING = wire.PLAYBACK_STATE_PLAYING
+    PAUSED = wire.PLAYBACK_STATE_PAUSED
+
+    @classmethod
+    def _missing_(cls, value: object) -> Any:
+        return _vocab_missing(cls, value, "a playback state",
+                              "kaya.PlaybackState.PAUSED")
+
+
+class Fit(enum.IntEnum):
+    """How a video view fits its picture (docs/media-plan.md §3)."""
+
+    CONTAIN = wire.FIT_CONTAIN
+    COVER = wire.FIT_COVER
+    FILL = wire.FIT_FILL
+
+    @classmethod
+    def _missing_(cls, value: object) -> Any:
+        return _vocab_missing(cls, value, "a fit", "kaya.Fit.COVER")
+
+
+class MediaSource:
+    """Where a player reads its media from: an asset under the app's
+    asset root, an http(s) URL, or a file the user picked. A path, never
+    bytes (docs/media-plan.md §2)."""
+
+    __slots__ = ("_path",)
+
+    def __init__(self, path: str) -> None:
+        self._path = path
+
+    @classmethod
+    def asset(cls, name: str) -> MediaSource:
+        return cls(_text_value("MediaSource.asset", name))
+
+    @classmethod
+    def url(cls, url: str) -> MediaSource:
+        return cls(_text_value("MediaSource.url", url))
+
+    @classmethod
+    def picked(cls, file: PickedFile) -> MediaSource:
+        return cls("" if file.local_path is None else str(file.local_path))
+
+    def __str__(self) -> str:
+        return self._path
+
+    def __repr__(self) -> str:
+        return f"kaya.MediaSource({self._path!r})"
+
+
+def _media_source(what: str, source: object) -> str:
+    if not isinstance(source, MediaSource):
+        raise KayaTypeError(
+            f"kaya: {what} takes a kaya.MediaSource (asset, url or picked), "
+            f"not {type(source).__name__}")
+    return source._path
+
+
+@dataclasses.dataclass(frozen=True)
+class Tracks:
+    """A player's tracks (docs/media-plan.md §3): BCP 47 tags in the
+    platform's order, a sidecar caption track last, and the selections,
+    0-based, None for none."""
+
+    audio: tuple[str, ...] = ()
+    captions: tuple[str, ...] = ()
+    audio_selected: int | None = None
+    caption_selected: int | None = None
+
+
+class Player:
+    """A media player (docs/media-plan.md §2): an object the app holds,
+    with no place in the layout, shown by `kaya.video`; shown by none it
+    is audio. Its readings are the last occurrence the loop took; its
+    commands ride the ambient transaction."""
+
+    __slots__ = ("id", "_state", "_failure", "_detail", "_position_ms",
+                 "_duration_ms", "_width", "_height", "_tracks", "_cue",
+                 "_on_state", "_on_ended", "_on_failed", "_on_seek_completed",
+                 "_on_position", "_on_tracks", "_on_cue")
+
+    def __init__(self, ident: int) -> None:
+        self.id: int = ident
+        self._state = PlayerState.IDLE
+        self._failure: MediaFailure | None = None
+        self._detail = ""
+        self._position_ms = 0
+        self._duration_ms = 0
+        self._width = 0
+        self._height = 0
+        self._tracks = Tracks()
+        self._cue = ""
+        self._on_state: Callable[[PlayerState], object] | None = None
+        self._on_ended: Callable[[], object] | None = None
+        self._on_failed: Callable[[MediaFailure, str], object] | None = None
+        self._on_seek_completed: Callable[[int], object] | None = None
+        self._on_position: Callable[[int], object] | None = None
+        self._on_tracks: Callable[[Tracks], object] | None = None
+        self._on_cue: Callable[[str], object] | None = None
+
+    @property
+    def state(self) -> PlayerState:
+        return self._state
+
+    @property
+    def failure(self) -> MediaFailure | None:
+        return self._failure
+
+    @property
+    def detail(self) -> str:
+        """The platform's sentence beside a failure; no two word it alike."""
+        return self._detail
+
+    @property
+    def position_ms(self) -> int:
+        return self._position_ms
+
+    @property
+    def duration_ms(self) -> int:
+        return self._duration_ms
+
+    @property
+    def width(self) -> int:
+        """The picture's width; 0 for audio."""
+        return self._width
+
+    @property
+    def height(self) -> int:
+        return self._height
+
+    @property
+    def tracks(self) -> Tracks:
+        return self._tracks
+
+    @property
+    def cue(self) -> str:
+        """The caption cue current on the player's clock, "" for none."""
+        return self._cue
+
+    def _prop(self, prop: int, value: wire.Value) -> None:
+        _records().append(wire.tx_set_player_prop(self.id, prop, value))
+
+    def set_source(self, source: MediaSource) -> None:
+        """Load `source`, replacing what the player held; it reads
+        `loading` until the platform answers."""
+        self._prop(wire.PPROP_SOURCE, _media_source("Player.set_source", source))
+
+    def unload(self) -> None:
+        """Back to `idle`."""
+        self._prop(wire.PPROP_SOURCE, "")
+
+    def set_speed(self, rate: float) -> None:
+        self._prop(wire.PPROP_SPEED, float(rate))
+
+    def set_volume(self, volume: float) -> None:
+        """0..1, relative to the system volume."""
+        self._prop(wire.PPROP_VOLUME, float(volume))
+
+    def set_muted(self, on: bool) -> None:
+        self._prop(wire.PPROP_MUTED, bool(on))
+
+    def set_loop(self, on: bool) -> None:
+        self._prop(wire.PPROP_LOOP, bool(on))
+
+    def set_captions(self, source: MediaSource, language: str) -> None:
+        """A sidecar WebVTT file (`language` its BCP 47 tag): kaya parses
+        it and draws its cues, listed as the last caption track
+        (docs/media-plan.md §3)."""
+        path = _media_source("Player.set_captions", source)
+        self._prop(wire.PPROP_CAPTIONS_LANGUAGE,
+                   _text_value("a captions language", language))
+        self._prop(wire.PPROP_CAPTIONS, path)
+
+    def clear_captions(self) -> None:
+        self._prop(wire.PPROP_CAPTIONS, "")
+
+    def play(self) -> None:
+        """Play; from the start when the player had ended."""
+        _records().append(wire.tx_player_command(
+            self.id, wire.PLAYER_COMMAND_PLAY, 0))
+
+    def pause(self) -> None:
+        _records().append(wire.tx_player_command(
+            self.id, wire.PLAYER_COMMAND_PAUSE, 0))
+
+    def seek(self, ms: int) -> None:
+        """To `ms` from the start; on_seek_completed hears where it landed."""
+        if isinstance(ms, bool) or not isinstance(ms, int) or ms < 0:
+            raise KayaValueError(f"kaya: Player.seek takes ms >= 0, not {ms!r}")
+        _records().append(wire.tx_player_command(
+            self.id, wire.PLAYER_COMMAND_SEEK, ms))
+
+    def select_audio(self, index: int) -> None:
+        """Select audio track `index`, 0-based in `tracks.audio`."""
+        _records().append(wire.tx_select_track(
+            self.id, wire.TRACK_KIND_AUDIO, int(index) + 1))
+
+    def select_captions(self, index: int | None) -> None:
+        """Select a caption track, 0-based in `tracks.captions`, or None."""
+        _records().append(wire.tx_select_track(
+            self.id, wire.TRACK_KIND_CAPTION,
+            0 if index is None else int(index) + 1))
+
+    def release(self) -> None:
+        """Stop and forget the player; a view showing it goes blank."""
+        _records().append(wire.tx_release_player(self.id))
+
+    def _absorb(self, kind: int, payload: Any) -> None:
+        if kind == wire.OCC_PLAYER_CHANGED:
+            state, failure, duration, width, height, detail = payload
+            self._state = PlayerState(state)
+            self._failure = None if failure == wire.MEDIA_FAILURE_NONE \
+                else MediaFailure(failure)
+            self._detail = str(detail)
+            self._duration_ms = int(duration)
+            self._width = int(width)
+            self._height = int(height)
+            if self._state in (PlayerState.LOADING, PlayerState.IDLE):
+                self._position_ms = 0
+        elif kind in (wire.OCC_PLAYER_POSITION, wire.OCC_SEEK_COMPLETED):
+            self._position_ms = int(payload)
+        elif kind == wire.OCC_PLAYER_TRACKS:
+            audio_sel, caption_sel = int(payload[0]), int(payload[1])
+            n_audio = int(payload[2])
+            audio = tuple(str(v) for v in payload[3:3 + n_audio])
+            rest = payload[3 + n_audio:]
+            captions = tuple(str(v) for v in rest[1:1 + int(rest[0])])
+            self._tracks = Tracks(audio, captions,
+                                  audio_sel - 1 if audio_sel else None,
+                                  caption_sel - 1 if caption_sel else None)
+        elif kind == wire.OCC_CAPTION_CUE:
+            self._cue = str(payload)
+
+    def _handlers(self, kind: int) -> list[tuple[Callable[..., object], tuple[Any, ...]]]:
+        """The handlers one occurrence reaches, in order, with their
+        arguments: the state first, then `ended` or `failed`."""
+        out: list[tuple[Callable[..., object], tuple[Any, ...]]] = []
+        if kind == wire.OCC_PLAYER_CHANGED:
+            if self._on_state is not None:
+                out.append((self._on_state, (self._state,)))
+            if self._state == PlayerState.ENDED and self._on_ended is not None:
+                out.append((self._on_ended, ()))
+            if (self._state == PlayerState.FAILED and self._failure is not None
+                    and self._on_failed is not None):
+                out.append((self._on_failed, (self._failure, self._detail)))
+        elif kind == wire.OCC_PLAYER_POSITION and self._on_position is not None:
+            out.append((self._on_position, (self._position_ms,)))
+        elif kind == wire.OCC_SEEK_COMPLETED and self._on_seek_completed is not None:
+            out.append((self._on_seek_completed, (self._position_ms,)))
+        elif kind == wire.OCC_PLAYER_TRACKS and self._on_tracks is not None:
+            out.append((self._on_tracks, (self._tracks,)))
+        elif kind == wire.OCC_CAPTION_CUE and self._on_cue is not None:
+            out.append((self._on_cue, (self._cue,)))
+        return out
+
+    def __repr__(self) -> str:
+        return f"<kaya.Player {self.id} {self._state}>"
+
+
+def player(source: MediaSource | None = None, *,
+           speed: float | None = None, volume: float | None = None,
+           muted: bool | None = None, loop: bool | None = None,
+           captions: MediaSource | None = None, captions_language: str = "und",
+           on_state: Callable[[PlayerState], object] | None = None,
+           on_ended: Callable[[], object] | None = None,
+           on_failed: Callable[[MediaFailure, str], object] | None = None,
+           on_seek_completed: Callable[[int], object] | None = None,
+           on_position: Callable[[int], object] | None = None,
+           on_tracks: Callable[[Tracks], object] | None = None,
+           on_cue: Callable[[str], object] | None = None) -> Player:
+    """A media player (docs/media-plan.md §2), created in the ambient
+    transaction: an object with no place in the layout. `on_failed`
+    receives the closed reason and the platform's sentence; `on_position`
+    the playhead every KAYA_MEDIA_POSITION_TICK_MS while playing."""
+    records = _records()
+    p = Player(_app._next("player"))
+    records.append(wire.tx_create_player(p.id))
+    _app._players[p.id] = p
+    p._on_state, p._on_ended, p._on_failed = on_state, on_ended, on_failed
+    p._on_seek_completed, p._on_position = on_seek_completed, on_position
+    p._on_tracks, p._on_cue = on_tracks, on_cue
+    if muted is not None:
+        p.set_muted(muted)
+    if loop is not None:
+        p.set_loop(loop)
+    if speed is not None:
+        p.set_speed(speed)
+    if volume is not None:
+        p.set_volume(volume)
+    if captions is not None:
+        p.set_captions(captions, captions_language)
+    if source is not None:
+        p.set_source(source)
+    return p
+
+
+def _encode_player_field(value: Player | None) -> int:
+    if value is None:
+        return 0
+    if not isinstance(value, Player):
+        raise KayaTypeError(
+            f"kaya: a Player field holds a kaya.Player or None, not "
+            f"{type(value).__name__}")
+    return value.id
+
+
+def _decode_player_field(ident: int) -> Player | None:
+    if not ident:
+        return None
+    known = _app._players.get(int(ident))
+    return known if known is not None else Player(int(ident))
+
+
+# A row's player (docs/media-plan.md §7b): the field a stamped video view
+# shows, its id as an I64, 0 for none (`Player | None` spells that).
+_WIRE_TYPES.append((Player, wire.VALUE_I64))
+_FIELD_ENCODERS[Player] = _encode_player_field
+_FIELD_DECODERS[Player] = _decode_player_field
+
+
+def video(player: Player | Source | None = None, *,
+          fit: Fit | str | int | None = None,
+          on_visibility: Handler | None = None,
+          grow: float | None = None) -> Widget:
+    """A video view showing `player` (docs/media-plan.md §3): the
+    platform's own view with its controls off. In a template the source
+    is the row's Player field. A player is shown by one video view at a
+    time (§7b). `on_visibility` hears how much of the view shows, 0 to 1,
+    as it enters, leaves, moves by a tenth and shows whole — a stamped
+    copy's `Row` first."""
+    handle = _widget(wire.KIND_VIDEO)
+    if isinstance(player, Player):
+        _records().append(wire.tx_set_player(handle.id, player.id))
+    elif isinstance(player, FieldRef):
+        _picker_field("a video view", player, Player)
+        _records().append(wire.tx_bind_player_element(
+            handle.id, player._level(), player._index))
+    elif player is not None:
+        raise KayaTypeError(
+            "kaya: a video view shows a kaya.Player or a row's Player "
+            f"field, not {type(player).__name__}")
+    if fit is not None:
+        _records().append(wire.tx_set_fit(handle.id, int(Fit(fit))))
+    if on_visibility is not None:
+        _app._register(handle, wire.OCC_VIDEO_VISIBILITY,
+                       lambda *args: on_visibility(*args[:-1], float(args[-1])))
+    _set_grow(handle, grow)
+    return handle
+
+
+def session(*, player: Player | None = None, title: str = "",
+            artist: str = "", album: str = "", artwork: str = "",
+            handles: Sequence[SessionAction] = (),
+            playback_state: PlaybackState | str | int = PlaybackState.NONE,
+            on_action: Callable[[SessionAction, int], object] | None = None
+            ) -> None:
+    """Declare the app's one media session, replacing the last
+    (docs/media-plan.md §5). `player` is the one the system's controls
+    speak to; `handles` the actions the app answers itself through
+    `on_action(action, at_ms)` (`at_ms` for SEEK_TO, else 0) — play,
+    pause and seek_to it leaves out apply to the attached player.
+    `artwork` is an asset name."""
+    mask = 0
+    for action in handles:
+        mask |= 1 << int(SessionAction(action))
+    _records().append(wire.tx_set_session(
+        0 if player is None else player.id, mask,
+        int(PlaybackState(playback_state)),
+        _text_value("a session title", title),
+        _text_value("a session artist", artist),
+        _text_value("a session album", album),
+        _text_value("a session artwork", artwork)))
+    _app._session_action = on_action
+
+
+def can_play(mime: str, codecs: str = "") -> bool:
+    """Whether this platform plays `mime` with `codecs` (an RFC 6381
+    list): true exactly when loading such media would not fail as
+    unsupported_codec or unsupported_container. Any thread, no
+    transaction."""
+    return runtime.can_play(_text_value("can_play's mime", mime),
+                            _text_value("can_play's codecs", codecs))
+
+
 class App:
     """The process's app: the scene scopes (`window`, `build`,
     `push_entry`, `add_section`), the window command catalog, and the
@@ -5928,7 +6400,7 @@ class App:
         # Binding conventions).
         self._counters = {"signal": 0, "widget": 0, "collection": 0,
                           "alert": 0, "menu_item": 0, "file_dialog": 0,
-                          "clipboard": 0, "link_route": 0}
+                          "clipboard": 0, "link_route": 0, "player": 0}
         # The wire routes by path_len, not by number, so two dicts.
         self._widget_handlers: dict[tuple[int, int], Handler] = {}
         self._alert_handlers: dict[int, Callable[[AlertChoice], object]] = {}
@@ -5996,6 +6468,10 @@ class App:
         self._document_binds: dict[int, tuple[Collection[Any], int]] = {}
         # THE ONLY STATE HERE TOUCHED FROM ANOTHER THREAD, and the only
         # reason App carries a lock.
+        # The players' mirrors, by id (docs/media-plan.md §2), outside the
+        # rollback journal as the Rust binding's are.
+        self._players: dict[int, Player] = {}
+        self._session_action: Callable[[SessionAction, int], object] | None = None
         self._post_lock = threading.Lock()
         self._posted: list[tuple[Callable[..., object], tuple[Any, ...]]] = []
         _app = self
@@ -6674,6 +7150,26 @@ class App:
                 handler = table.get((kind, ident))
                 if handler is not None:
                     self._dispatch(handler, *self._row_args(ident, keys), arg)
+                continue
+            if kind in (wire.OCC_PLAYER_CHANGED, wire.OCC_PLAYER_POSITION,
+                        wire.OCC_SEEK_COMPLETED, wire.OCC_PLAYER_TRACKS,
+                        wire.OCC_CAPTION_CUE):
+                # THE MIRROR FOLLOWS FIRST, handler or none. The surface-pair
+                # decode hands position/seek back as (position, player).
+                if kind in (wire.OCC_PLAYER_POSITION, wire.OCC_SEEK_COMPLETED):
+                    ident, payload = payload, ident
+                seat = self._players.get(int(ident))
+                if seat is None:
+                    continue
+                seat._absorb(kind, payload)
+                for fn, args in seat._handlers(kind):
+                    self._dispatch(fn, *args)
+                continue
+            if kind == wire.OCC_SESSION_ACTION:
+                if self._session_action is not None:
+                    action, at_ms = payload
+                    self._dispatch(self._session_action,
+                                   SessionAction(action), int(at_ms))
                 continue
             if kind in (wire.OCC_MENU_ACTIVATED, wire.OCC_MENU_TOGGLED,
                         wire.OCC_MENU_VALUE_CHANGED):

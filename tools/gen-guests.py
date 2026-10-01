@@ -137,7 +137,8 @@ def generate(tmp):
                        "guests/swift/colorpicker.swift",
                        "guests/swift/range.swift",
                        "guests/swift/tooltips.swift",
-                       "guests/swift/richrows.swift"],
+                       "guests/swift/richrows.swift",
+                       "guests/swift/media.swift"],
                       env=env, check=False).returncode != 0:
         return 1
     return 0

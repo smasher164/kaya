@@ -540,7 +540,196 @@ end
 
 type format_act = Format.t
 
+(* Media (docs/media-plan.md): the player the app holds, what it reads,
+   the video view's fit and the one session. *)
+module Player_state = struct
+  type t = Idle | Loading | Ready | Playing | Paused | Ended | Failed
+
+  let of_wire n =
+    if n = Kaya_wire.player_state_idle then Idle
+    else if n = Kaya_wire.player_state_loading then Loading
+    else if n = Kaya_wire.player_state_ready then Ready
+    else if n = Kaya_wire.player_state_playing then Playing
+    else if n = Kaya_wire.player_state_paused then Paused
+    else if n = Kaya_wire.player_state_ended then Ended
+    else if n = Kaya_wire.player_state_failed then Failed
+    else invalid_arg (Printf.sprintf "kaya: a player state of %d, which this build does not know" n)
+
+  let name = function
+    | Idle -> "idle"
+    | Loading -> "loading"
+    | Ready -> "ready"
+    | Playing -> "playing"
+    | Paused -> "paused"
+    | Ended -> "ended"
+    | Failed -> "failed"
+end
+
+module Media_failure = struct
+  type t =
+    | Unsupported_codec
+    | Unsupported_container
+    | Not_found
+    | Network
+    | Decode_error
+    | Resources
+
+  let of_wire n =
+    if n = Kaya_wire.media_failure_none then Option.none
+    else if n = Kaya_wire.media_failure_unsupported_codec then Some Unsupported_codec
+    else if n = Kaya_wire.media_failure_unsupported_container then Some Unsupported_container
+    else if n = Kaya_wire.media_failure_not_found then Some Not_found
+    else if n = Kaya_wire.media_failure_network then Some Network
+    else if n = Kaya_wire.media_failure_decode_error then Some Decode_error
+    else if n = Kaya_wire.media_failure_resources then Some Resources
+    else invalid_arg (Printf.sprintf "kaya: a media failure of %d, which this build does not know" n)
+
+  let name = function
+    | Unsupported_codec -> "unsupported_codec"
+    | Unsupported_container -> "unsupported_container"
+    | Not_found -> "not_found"
+    | Network -> "network"
+    | Decode_error -> "decode_error"
+    | Resources -> "resources"
+end
+
+module Session_action = struct
+  module Kind = struct
+    type t = Play | Pause | Stop | Seek_to | Seek_forward | Seek_backward | Next | Previous
+
+    let wire = function
+      | Play -> Kaya_wire.session_action_play
+      | Pause -> Kaya_wire.session_action_pause
+      | Stop -> Kaya_wire.session_action_stop
+      | Seek_to -> Kaya_wire.session_action_seek_to
+      | Seek_forward -> Kaya_wire.session_action_seek_forward
+      | Seek_backward -> Kaya_wire.session_action_seek_backward
+      | Next -> Kaya_wire.session_action_next
+      | Previous -> Kaya_wire.session_action_previous
+
+    let name = function
+      | Play -> "play"
+      | Pause -> "pause"
+      | Stop -> "stop"
+      | Seek_to -> "seek_to"
+      | Seek_forward -> "seek_forward"
+      | Seek_backward -> "seek_backward"
+      | Next -> "next"
+      | Previous -> "previous"
+  end
+
+  (* [Seek_to ms] carries where the system asked to go. *)
+  type t = Play | Pause | Stop | Seek_to of int | Seek_forward | Seek_backward | Next | Previous
+
+  let kind : t -> Kind.t = function
+    | Play -> Kind.Play
+    | Pause -> Kind.Pause
+    | Stop -> Kind.Stop
+    | Seek_to _ -> Kind.Seek_to
+    | Seek_forward -> Kind.Seek_forward
+    | Seek_backward -> Kind.Seek_backward
+    | Next -> Kind.Next
+    | Previous -> Kind.Previous
+
+  let of_wire n at_ms =
+    if n = Kaya_wire.session_action_play then Play
+    else if n = Kaya_wire.session_action_pause then Pause
+    else if n = Kaya_wire.session_action_stop then Stop
+    else if n = Kaya_wire.session_action_seek_to then Seek_to at_ms
+    else if n = Kaya_wire.session_action_seek_forward then Seek_forward
+    else if n = Kaya_wire.session_action_seek_backward then Seek_backward
+    else if n = Kaya_wire.session_action_next then Next
+    else if n = Kaya_wire.session_action_previous then Previous
+    else invalid_arg (Printf.sprintf "kaya: a session action of %d, which this build does not know" n)
+end
+
+module Playback_state = struct
+  type t = None | Playing | Paused
+
+  let wire = function
+    | None -> Kaya_wire.playback_state_none
+    | Playing -> Kaya_wire.playback_state_playing
+    | Paused -> Kaya_wire.playback_state_paused
+end
+
+module Fit = struct
+  type t = Contain | Cover | Fill
+
+  let wire = function
+    | Contain -> Kaya_wire.fit_contain
+    | Cover -> Kaya_wire.fit_cover
+    | Fill -> Kaya_wire.fit_fill
+end
+
+(* Where a player reads its media: an asset name, an http(s) URL, or a
+   picked file's path — never bytes (docs/media-plan.md §2). *)
+module Media_source = struct
+  type t = Source of string
+
+  let asset name = Source name
+  let url u = Source u
+  let picked (f : picked_file) = Source f.local_path
+  let text (Source s) = s
+end
+
+type player = Player of int64
+
+(* A row showing no player: a player field holding it shows nothing. *)
+let no_player = Player 0L
+
+let pack_player (Player id) = id
+let player_of_packed id = Player id
+
+(* A player's readings as the core last published them. *)
+module Player_reading = struct
+  type t = {
+    state : Player_state.t;
+    failure : Media_failure.t option;
+    position_ms : int;
+    duration_ms : int;
+    width : int;
+    height : int;
+  }
+
+  let initial =
+    { state = Player_state.Idle; failure = Option.none; position_ms = 0; duration_ms = 0; width = 0; height = 0 }
+end
+
+(* A player's tracks: language tags in the platform's order, a sidecar
+   caption track last, and the selections counting from 0. *)
+module Tracks = struct
+  type t = {
+    audio : string list;
+    captions : string list;
+    audio_selected : int option;
+    caption_selected : int option;
+  }
+
+  let empty = { audio = []; captions = []; audio_selected = Option.none; caption_selected = Option.none }
+end
+
+type media_occ =
+  | Media_changed of Player_state.t * Media_failure.t option * string
+  | Media_position of int
+  | Media_seeked of int
+  | Media_tracks of Tracks.t
+  | Media_cue of string
+
+type media = {
+  mutable next_player : int64;
+  readings : (int64, Player_reading.t) Hashtbl.t;
+  player_tracks : (int64, Tracks.t) Hashtbl.t;
+  cues : (int64, string) Hashtbl.t;
+  (* Per (player, occurrence name): the newest registration wins, the
+     widgets' rule. *)
+  player_handlers : (int64 * string, media_occ -> unit) Hashtbl.t;
+  widget_visibility : (int64, float -> unit) Hashtbl.t;
+  node_visibility : (int64, Kaya_wire.value list -> float -> unit) Hashtbl.t;
+  mutable session_handler : (Session_action.t -> unit) option;
+}
+
 type app = {
+  media : media;
   (* Work handed over by other threads, waiting to run as transactions
      on the app thread. THE ONLY FIELD HERE TOUCHED FROM ANOTHER
      THREAD, and the only reason this record carries a mutex at all —
@@ -761,6 +950,17 @@ let the_tx () =
 
 let create () =
   {
+    media =
+      {
+        next_player = 1L;
+        readings = Hashtbl.create 8;
+        player_tracks = Hashtbl.create 8;
+        cues = Hashtbl.create 8;
+        player_handlers = Hashtbl.create 8;
+        widget_visibility = Hashtbl.create 8;
+        node_visibility = Hashtbl.create 8;
+        session_handler = Option.none;
+      };
     post_lock = Mutex.create ();
     posted = [];
     c_signal = 0L;
@@ -2260,6 +2460,114 @@ let color_picker ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind
   | None -> ());
   w
 
+(* --- MEDIA (docs/media-plan.md) ---------------------------------------
+   A player is an object the app holds, created and commanded in a
+   transaction; its props are written, never bound. *)
+let write_player_prop (Player id) prop value =
+  emit (the_tx ()) (Kaya_wire.tx_set_player_prop id prop value)
+
+let player_source p src = write_player_prop p Kaya_wire.pprop_source (Kaya_wire.Str (Media_source.text src))
+
+(* Unload, back to idle. *)
+let clear_player p = write_player_prop p Kaya_wire.pprop_source (Kaya_wire.Str "")
+
+let player_speed p rate = write_player_prop p Kaya_wire.pprop_speed (Kaya_wire.F64 rate)
+
+(* 0..1, relative to the system volume. *)
+let player_volume p v = write_player_prop p Kaya_wire.pprop_volume (Kaya_wire.F64 v)
+
+let player_muted p on = write_player_prop p Kaya_wire.pprop_muted (Kaya_wire.Bool on)
+let player_loop p on = write_player_prop p Kaya_wire.pprop_loop (Kaya_wire.Bool on)
+
+(* A sidecar WebVTT file, [language] its BCP 47 tag, listed as the last
+   caption track (docs/media-plan.md §3). *)
+let player_captions p src ~language =
+  write_player_prop p Kaya_wire.pprop_captions_language (Kaya_wire.Str language);
+  write_player_prop p Kaya_wire.pprop_captions (Kaya_wire.Str (Media_source.text src))
+
+let clear_captions p = write_player_prop p Kaya_wire.pprop_captions (Kaya_wire.Str "")
+
+let player ?source ?speed ?volume ?muted ?loop ?captions () =
+  let tx = the_tx () in
+  let id = tx.app.media.next_player in
+  tx.app.media.next_player <- Int64.succ id;
+  emit tx (Kaya_wire.tx_create_player id);
+  let p = Player id in
+  Option.iter (player_source p) source;
+  Option.iter (player_speed p) speed;
+  Option.iter (player_volume p) volume;
+  Option.iter (player_muted p) muted;
+  Option.iter (player_loop p) loop;
+  Option.iter (fun (src, language) -> player_captions p src ~language) captions;
+  p
+
+let player_command (Player id) command at_ms =
+  emit (the_tx ()) (Kaya_wire.tx_player_command id command (Int64.of_int at_ms))
+
+(* Play; from the start when the player had ended. *)
+let play p = player_command p Kaya_wire.player_command_play 0
+let pause p = player_command p Kaya_wire.player_command_pause 0
+
+(* To [ms] from the start; [on_seek_completed] hears where it landed. *)
+let seek p ms = player_command p Kaya_wire.player_command_seek ms
+
+let release_player (Player id) = emit (the_tx ()) (Kaya_wire.tx_release_player id)
+
+(* Select audio track [index], 0-based in [tracks]. *)
+let select_audio (Player id) index =
+  emit (the_tx ()) (Kaya_wire.tx_select_track id Kaya_wire.track_kind_audio (index + 1))
+
+(* Select a caption track, 0-based in [tracks], or [None] for none. *)
+let select_captions (Player id) index =
+  let wire = match index with Some i -> i + 1 | None -> 0 in
+  emit (the_tx ()) (Kaya_wire.tx_select_track id Kaya_wire.track_kind_caption wire)
+
+let set_fit (Widget id) fit =
+  emit (the_tx ()) (Kaya_wire.tx_set_fit id (Int64.of_int (Fit.wire fit)))
+
+(* Show another player in a live video view, or none. A player is shown
+   by one video view at a time (docs/media-plan.md §7b). *)
+let show_player (Widget id) p =
+  emit (the_tx ())
+    (Kaya_wire.tx_set_player id (match p with Some (Player pid) -> pid | None -> 0L))
+
+(* A video view showing [~player] (docs/media-plan.md §3): the platform's
+   own view with its controls off. [~on_visibility] hears how much of it
+   shows, 0 to 1. *)
+let video ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind
+    ?a11y_hint ?fit ?on_visibility ~player () =
+  let tx = the_tx () in
+  let w = widget Kaya_wire.kind_video in
+  Option.iter (fun g -> set_grow w g) grow;
+  Option.iter (fun v -> set_fill w v) fill;
+  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
+  Option.iter (fun v -> set_a11y_hint w v) a11y_hint;
+  let (Widget id) = w in
+  emit tx (Kaya_wire.tx_set_player id (pack_player player));
+  Option.iter (set_fit w) fit;
+  Option.iter (fun f -> Hashtbl.replace tx.app.media.widget_visibility id f) on_visibility;
+  w
+
+(* Declare the app's one media session, replacing the last
+   (docs/media-plan.md §5). [~handles] are the actions the app answers
+   itself through [on_session]; play, pause and seek_to it leaves out
+   apply to the attached [~player]. *)
+let declare_session ?player ?(title = "") ?(artist = "") ?(album = "") ?(artwork = "")
+    ?(handles = []) ?(playback_state = Playback_state.None) () =
+  let mask =
+    List.fold_left (fun m k -> m lor (1 lsl Session_action.Kind.wire k)) 0 handles
+  in
+  emit (the_tx ())
+    (Kaya_wire.tx_set_session
+       (match player with Some (Player id) -> id | None -> 0L)
+       mask (Playback_state.wire playback_state) (Kaya_wire.Str title) (Kaya_wire.Str artist)
+       (Kaya_wire.Str album) (Kaya_wire.Str artwork))
+
+(* Whether this platform plays [mime] with [codecs] (an RFC 6381 list, ""
+   for none): true exactly when loading it would not fail as
+   unsupported_codec or unsupported_container. Any thread. *)
+let can_play mime codecs = Kaya_runtime.can_play mime codecs
+
 (* A time picker over civil times: hours and minutes, no seconds.
    [~step] is the minute granularity (1, 5, 10, 15 or 30) and a pick
    snaps to it. *)
@@ -2705,6 +3013,11 @@ let date_field index : ('a, date) field =
 
 let color_field index : ('a, color) field =
   { fd_index = index; fd_to_value = (fun c -> Kaya_wire.I64 (pack_color c)) }
+
+(* A row's player (docs/media-plan.md §7b), the field a stamped video view
+   shows; [no_player] shows none. *)
+let player_field index : ('a, player) field =
+  { fd_index = index; fd_to_value = (fun p -> Kaya_wire.I64 (pack_player p)) }
 
 let time_field index : ('a, time) field =
   { fd_index = index; fd_to_value = (fun t -> Kaya_wire.I64 (pack_time t)) }
@@ -4847,6 +5160,35 @@ module Tpl = struct
     Option.iter (fun fd -> Floor.bind_source_field ~level n fd) bind_field;
     n
 
+  (* A video view per stamped copy (docs/media-plan.md §7b): [~bind_field]
+     the row's own (_, player) field, or [~player] one constant player. A
+     player is shown by one view at a time; a row whose player is released
+     shows nothing. [~on_visibility] carries the copy's keys first. *)
+  let video ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_hint ?player ?bind_field
+      ?fit ?(level = 0) ?(a11y_level = level) ?on_visibility () =
+    let n = Floor.widget Kaya_wire.kind_video in
+    Option.iter (fun g -> Floor.set_grow n g) grow;
+    Option.iter (fun v -> Floor.set_fill n v) fill;
+    Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~a11y_level n;
+    Option.iter (fun v -> Floor.set_a11y_hint n v) a11y_hint;
+    let (Node id) = n in
+    Option.iter (fun p -> emit (the_tx ()) (Kaya_wire.tx_set_player id (pack_player p))) player;
+    Option.iter
+      (fun (fd : (_, player) field) ->
+        emit (the_tx ()) (Kaya_wire.tx_bind_player_element ~level ~field:fd.fd_index id))
+      bind_field;
+    Option.iter
+      (fun f -> emit (the_tx ()) (Kaya_wire.tx_set_fit id (Int64.of_int (Fit.wire f))))
+      fit;
+    (match on_visibility with
+    | Some handler ->
+        Hashtbl.replace (the_tx ()).app.media.node_visibility id (fun keys shown ->
+            handler (List.map key_of_wire keys) shown)
+    | None -> ());
+    n
+
   (* A canvas per stamped copy -- a sparkline in a table cell
      (docs/canvas-plan.md §3.1). The drawing is declared with the node, so
      every copy is born with it; [draw_at] re-declares one copy's. *)
@@ -5271,6 +5613,183 @@ let absorb_undo app (delta : Undo_delta.t) =
            (instances_of app o.collection)))
     delta.orders
 
+(* --- MEDIA READINGS AND HANDLERS (docs/media-plan.md §2, §3, §5, §7b) *)
+
+(* A player's readings, as of the last occurrence this loop took. *)
+let player_reading app (Player id) =
+  Option.value (Hashtbl.find_opt app.media.readings id) ~default:Player_reading.initial
+
+let tracks app (Player id) =
+  Option.value (Hashtbl.find_opt app.media.player_tracks id) ~default:Tracks.empty
+
+(* The caption cue current on the player's clock, "" for none. *)
+let cue app (Player id) = Option.value (Hashtbl.find_opt app.media.cues id) ~default:""
+
+let on_player app (Player id) what handler =
+  Hashtbl.replace app.media.player_handlers (id, what) handler
+
+(* Every state the player moves to, ended and failed included. *)
+let on_player_state app p (f : Player_state.t -> unit) =
+  on_player app p "state" (function Media_changed (s, _, _) -> f s | _ -> ())
+
+(* The player reached its end (never, while it loops). *)
+let on_ended app p (f : unit -> unit) =
+  on_player app p "ended" (function Media_changed (Player_state.Ended, _, _) -> f () | _ -> ())
+
+(* The player cannot play: the closed reason, and the platform's
+   sentence, which no two platforms word alike. *)
+let on_failed app p (f : Media_failure.t -> string -> unit) =
+  on_player app p "failed" (function
+    | Media_changed (Player_state.Failed, Some why, detail) -> f why detail
+    | _ -> ())
+
+(* Where a seek the app asked for landed, in ms. *)
+let on_seek_completed app p (f : int -> unit) =
+  on_player app p "seek_completed" (function Media_seeked ms -> f ms | _ -> ())
+
+(* The playhead, every KAYA_MEDIA_POSITION_TICK_MS while playing. *)
+let on_position app p (f : int -> unit) =
+  on_player app p "position" (function Media_position ms -> f ms | _ -> ())
+
+(* The player's track listing or a selection moved. *)
+let on_tracks app p (f : Tracks.t -> unit) =
+  on_player app p "tracks" (function Media_tracks t -> f t | _ -> ())
+
+(* The current caption cue changed ("" between cues), whoever draws it. *)
+let on_cue app p (f : string -> unit) =
+  on_player app p "cue" (function Media_cue s -> f s | _ -> ())
+
+(* How much of a live video view shows, 0 to 1. *)
+let on_visibility app (Widget id) (f : float -> unit) =
+  Hashtbl.replace app.media.widget_visibility id f
+
+(* A stamped video view's visibility, the copy's keys first. *)
+let on_visibility_node app (Node id) (f : key list -> float -> unit) =
+  Hashtbl.replace app.media.node_visibility id (fun keys shown ->
+      f (List.map key_of_wire keys) shown)
+
+(* The actions the declared session handles, from the system's media
+   controls. *)
+let on_session app (f : Session_action.t -> unit) = app.media.session_handler <- Some f
+
+let player_occurrence_names = [ "state"; "ended"; "failed"; "seek_completed"; "position"; "tracks"; "cue" ]
+
+let fire_player app id occ =
+  let handlers =
+    List.filter_map (fun what -> Hashtbl.find_opt app.media.player_handlers (id, what))
+      player_occurrence_names
+  in
+  if handlers <> [] then dispatch app (fun () -> List.iter (fun h -> h occ) handlers)
+
+let int_of_value = function Kaya_wire.I64 n -> Int64.to_int n | _ -> 0
+
+(* A player_tracks tail: the two selections, then each list as its count
+   and its tags (the flat records, tools/kaya-bindgen). *)
+let tracks_of_tail = function
+  | Kaya_wire.I64 asel :: Kaya_wire.I64 csel :: rest ->
+      let rec take n l acc =
+        if n = 0 then (List.rev acc, l)
+        else
+          match l with
+          | Kaya_wire.Str s :: tl -> take (n - 1) tl (s :: acc)
+          | _ :: tl -> take (n - 1) tl acc
+          | [] -> (List.rev acc, [])
+      in
+      let audio, rest =
+        match rest with Kaya_wire.I64 n :: tl -> take (Int64.to_int n) tl [] | _ -> ([], [])
+      in
+      let captions, _ =
+        match rest with Kaya_wire.I64 n :: tl -> take (Int64.to_int n) tl [] | _ -> ([], [])
+      in
+      let sel n = if n = 0L then Option.none else Some (Int64.to_int n - 1) in
+      Some { Tracks.audio; captions; audio_selected = sel asel; caption_selected = sel csel }
+  | _ -> Option.none
+
+(* Absorb a media occurrence into the mirror, THEN hand it on, so a
+   handler reads the readings it was told about. True when [kind] was a
+   media occurrence. *)
+let media_occurrence app kind id keys payload tail =
+  let m = app.media in
+  let reading pid = Option.value (Hashtbl.find_opt m.readings pid) ~default:Player_reading.initial in
+  if kind = Kaya_wire.occ_kind_player_changed then begin
+    (match tail with
+    | Kaya_wire.I64 st :: Kaya_wire.I64 fl :: Kaya_wire.I64 dur :: Kaya_wire.I64 w
+      :: Kaya_wire.I64 h :: detail :: _ ->
+        let state = Player_state.of_wire (Int64.to_int st) in
+        let failure = Media_failure.of_wire (Int64.to_int fl) in
+        let r = reading id in
+        let position_ms =
+          if state = Player_state.Loading || state = Player_state.Idle then 0 else r.position_ms
+        in
+        Hashtbl.replace m.readings id
+          {
+            Player_reading.state;
+            failure;
+            position_ms;
+            duration_ms = Int64.to_int dur;
+            width = Int64.to_int w;
+            height = Int64.to_int h;
+          };
+        let detail = match detail with Kaya_wire.Str s -> s | _ -> "" in
+        fire_player app id (Media_changed (state, failure, detail))
+    | _ -> ());
+    true
+  end
+  else if kind = Kaya_wire.occ_kind_player_position || kind = Kaya_wire.occ_kind_seek_completed
+  then begin
+    (* The pair class: the position keys the record, the player rides as
+       the payload. *)
+    (match payload with
+    | Some (Kaya_wire.I64 pid) ->
+        let ms = Int64.to_int id in
+        Hashtbl.replace m.readings pid { (reading pid) with Player_reading.position_ms = ms };
+        fire_player app pid
+          (if kind = Kaya_wire.occ_kind_player_position then Media_position ms else Media_seeked ms)
+    | _ -> ());
+    true
+  end
+  else if kind = Kaya_wire.occ_kind_player_tracks then begin
+    (match tracks_of_tail tail with
+    | Some t ->
+        Hashtbl.replace m.player_tracks id t;
+        fire_player app id (Media_tracks t)
+    | None -> ());
+    true
+  end
+  else if kind = Kaya_wire.occ_kind_caption_cue then begin
+    let text = match payload with Some (Kaya_wire.Str s) -> s | _ -> "" in
+    Hashtbl.replace m.cues id text;
+    fire_player app id (Media_cue text);
+    true
+  end
+  else if kind = Kaya_wire.occ_kind_video_visibility then begin
+    (match (payload, keys) with
+    | Some (Kaya_wire.F64 shown), [] -> (
+        match Hashtbl.find_opt m.widget_visibility id with
+        | Some f -> dispatch app (fun () -> f shown)
+        | None -> ())
+    | Some (Kaya_wire.F64 shown), keys -> (
+        match Hashtbl.find_opt m.node_visibility id with
+        | Some f -> dispatch app (fun () -> f keys shown)
+        | None -> ())
+    | _ -> ());
+    true
+  end
+  else if kind = Kaya_wire.occ_kind_session_action then begin
+    (match (tail, m.session_handler) with
+    | action :: at_ms :: _, Some f ->
+        let a = Session_action.of_wire (int_of_value action) (int_of_value at_ms) in
+        dispatch app (fun () -> f a)
+    | _ -> ());
+    true
+  end
+  else false
+
+(* The dispatch loop's media arm, for bindings/ocaml/checks alone. *)
+module For_media_checks = struct
+  let occurrence = media_occurrence
+end
+
 let dispatch_loop app =
   (* Claim the thread before the first occurrence: every build after
      this point must happen here. *)
@@ -5307,6 +5826,7 @@ let dispatch_loop app =
                    emit tx
                      (drawing_record id [] box (fun d -> handler d box time)))
            | _ -> ())
+         else if media_occurrence app kind id keys payload tail then ()
          else if
            kind = Kaya_wire.occ_kind_range_changed
            || kind = Kaya_wire.occ_kind_range_committed

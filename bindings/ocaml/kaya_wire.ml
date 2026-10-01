@@ -3000,6 +3000,69 @@ let parse_occurrence byte =
       let value, _ = parse_value byte 16 in
       Some (kind, Int64.of_int id, [], Some value, None, None, [])
     end
+    else if kind = occ_kind_player_changed
+    then begin
+      (* A flat record: its fields in order, into the tail. *)
+      let at = ref 8 in
+      let out = ref [] in
+      at := !at + 8;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      out := I64 (Int64.logor (Int64.of_int (u32_at byte !at))
+        (Int64.shift_left (Int64.of_int (u32_at byte (!at + 4))) 32)) :: !out;
+      at := !at + 8;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      (let v, next = parse_value byte !at in
+       out := v :: !out;
+       at := next);
+      Some (kind, Int64.of_int id, [], None, None, None, List.rev !out)
+    end
+    else if kind = occ_kind_session_action
+    then begin
+      (* A flat record: its fields in order, into the tail. *)
+      let at = ref 8 in
+      let out = ref [] in
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      at := !at + 4;
+      out := I64 (Int64.logor (Int64.of_int (u32_at byte !at))
+        (Int64.shift_left (Int64.of_int (u32_at byte (!at + 4))) 32)) :: !out;
+      at := !at + 8;
+      Some (kind, 0L, [], None, None, None, List.rev !out)
+    end
+    else if kind = occ_kind_player_tracks
+    then begin
+      (* A flat record: its fields in order, into the tail. *)
+      let at = ref 8 in
+      let out = ref [] in
+      at := !at + 8;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      (let count = u32_at byte !at in
+       at := !at + 8;
+       out := I64 (Int64.of_int count) :: !out;
+       for _ = 1 to count do
+         let v, next = parse_value byte !at in
+         out := v :: !out;
+         at := next
+       done);
+      (let count = u32_at byte !at in
+       at := !at + 8;
+       out := I64 (Int64.of_int count) :: !out;
+       for _ = 1 to count do
+         let v, next = parse_value byte !at in
+         out := v :: !out;
+         at := next
+       done);
+      Some (kind, Int64.of_int id, [], None, None, None, List.rev !out)
+    end
     else if kind = occ_kind_file_dialog_result
     then begin
       (* id, a count, then three Values per file (handle, name,

@@ -25,4 +25,7 @@ expect label#1 "missing.mp4"
 expect label#0 "failed not_found, can_play yes"
 click button#0
 expect label#1 "refused.mp4"
+# WinUI's HTTP source fails a refused port at about 16.5 s, past one expect's
+# window (docs/media-plan.md §7a), so this step waits longer on every lane.
+settle 5000
 expect label#0 "failed network, can_play yes"

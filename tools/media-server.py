@@ -16,6 +16,7 @@ import argparse
 import http.server
 import os
 import re
+import time
 
 FAMILY = ROOT / "guests" / "assets" / "media"
 
@@ -42,7 +43,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt, *args):
-        sys.stderr.write("media-server: " + (fmt % args) + "\n")
+        at = time.strftime("%H:%M:%S") + f".{int(time.time() * 1000) % 1000:03d}"
+        client = f"{self.client_address[0]}:{self.client_address[1]}"
+        sys.stderr.write(f"media-server: {at} {client} " + (fmt % args) + "\n")
 
     def _file(self):
         name = self.path.split("?", 1)[0].lstrip("/")

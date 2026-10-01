@@ -25,6 +25,7 @@ dev_shell_or_die()
 
 import atexit
 import base64
+import contextlib
 import hashlib
 import json
 import os
@@ -41,11 +42,13 @@ import urllib.parse
 
 from packaging import identity as app_identity
 from packaging import ios as packaging_ios
+from packaging import mark
 from lanes import ios as lane
 import exclusive
 import only  # noqa: E402
 import scene_cut
 import flightrec_lane
+import media_server
 from swift_sdk import require_ios_sdk
 
 SELF = pathlib.Path(__file__).resolve()
@@ -345,7 +348,7 @@ def verify_bundle_assets(src, dst, leg):
         sys.exit(1)
 
 
-def make_bundle(name, bundle_id, executable_path, identity=""):
+def make_bundle(name, bundle_id, executable_path, identity="", session=False):
     """One .app: Info.plist from the template, the asset root, the
     executable. A non-empty `identity` puts the declared identity into
     THIS bundle — OPT-IN AND NOT GLOBAL: `expect_app_icon` reads this
@@ -405,13 +408,21 @@ def make_bundle(name, bundle_id, executable_path, identity=""):
         tpl.replace("@EXECUTABLE@", name).replace("@BUNDLE_ID@", bundle_id)
            .replace("@NAME@", name).replace("@IDENTITY@", block)
            .replace("@URLTYPES@", url_types)
-           .replace("@LAUNCH@", launch),
+           .replace("@LAUNCH@", launch)
+           .replace("@MEDIA@", "<key>UIBackgroundModes</key>\n"
+                    "    <array><string>audio</string></array>" if session else ""),
         encoding="utf-8")
     # PARSED BACK, because the template is TEXT and a plist iOS cannot
     # read is a bundle that fails at INSTALL with the reason on the
     # simulator's side of the fence. Measured 2026-09-07: an XML comment
     # may not carry a double hyphen, and one quoted in the launch slot's
     # own comment made every bundle in this lane malformed.
+    # plistlib takes stray text inside a dict that the simulator refuses
+    # (measured 2026-09-30, an unsubstituted @MEDIA@), so leftovers are named.
+    left = sorted(set(re.findall(r"@[A-Z_]+@", (app / "Info.plist").read_text(encoding="utf-8"))))
+    if left:
+        die(f"run-sim: the {name} bundle's Info.plist leaves {left} unsubstituted "
+            f"— every placeholder in tools/ios/Info.plist.in needs a replace here")
     try:
         plistlib.loads((app / "Info.plist").read_bytes())
     except Exception as exc:                              # noqa: BLE001
@@ -1353,6 +1364,47 @@ def clip_verb(udid, parts):
     return 0, got
 
 
+MEDIAREMOTE_SIM = ROOT / "target/ios-tools/mediaremote"
+
+
+def screen_pixel(png, x, y):
+    """One pixel of a simulator screenshot as RRGGBB, or an error sentence.
+    The screenshot must say it is sRGB (measured: `simctl io screenshot`
+    tags it), since the verb compares in sRGB."""
+    if b"sRGB" not in png[:4096]:
+        return None, "the screenshot carries no sRGB chunk, so its colours are in no stated space"
+    w, h, ch, rows = mark.decode_png(png)
+    if not (0 <= x < w and 0 <= y < h):
+        return None, f"the screenshot is {w}x{h}, no pixel at {x},{y}"
+    px = rows[y][x * ch:x * ch + 3]
+    return "%02X%02X%02X" % tuple(px), ""
+
+
+def media_verb(udid, parts):
+    """The media suite's host verbs (docs/media-plan.md §6): the device's
+    own screenshot read at a pixel, and a MediaRemote command sent from a
+    process spawned in the simulator. Returns (rc, body)."""
+    verb = parts[0]
+    if verb == "media_screen" and len(parts) == 3:
+        with tempfile.TemporaryDirectory() as tmp:
+            shot = pathlib.Path(tmp) / "screen.png"
+            got = subprocess.run(["xcrun", "simctl", "io", udid, "screenshot", str(shot)],
+                                 capture_output=True, check=False, **TEXT)
+            if got.returncode != 0 or not shot.is_file():
+                return 1, f"simctl io screenshot exited {got.returncode}: {got.stderr.strip()}"
+            hexed, err = screen_pixel(shot.read_bytes(), int(parts[1]), int(parts[2]))
+        return (0, hexed) if hexed else (1, err)
+    if verb == "media_send" and len(parts) == 2:
+        if not MEDIAREMOTE_SIM.is_file():
+            return 1, (f"{MEDIAREMOTE_SIM} was not built; run-sim builds it "
+                       f"when a media_ leg is queued")
+        got = subprocess.run(["xcrun", "simctl", "spawn", udid, str(MEDIAREMOTE_SIM), parts[1]],
+                             capture_output=True, check=False, **TEXT)
+        said = (got.stdout + got.stderr).strip()
+        return (0 if got.returncode == 0 else 1), said or f"exit {got.returncode}"
+    return 1, f"unknown media verb {' '.join(parts)}"
+
+
 # Every verb the SwiftUI harness answers through KayaSimdrive.ask on iOS:
 # the picker's, the save sheet's, the pasteboard's, and the keys of `type`
 # and `compose` (swift/KayaSwiftUI.swift, the `#else` arms).
@@ -1365,6 +1417,8 @@ BRIDGE_VERBS = frozenset((
     # A badge needs real notification permission, whose prompt only the
     # driver can answer (docs/app-badge-plan.md §4).
     "expect_badge",
+    # The screenshot and the remote command are the host's (media_verb).
+    "expect_video_ink", "session_send",
 ))
 
 
@@ -1415,6 +1469,8 @@ def simdrive_watch(udid, bundle_id, docs_dir, log_path, stop):
                 pid, pid_ms = "", "none"
                 if parts and parts[0].startswith("clip_"):
                     rc, body = clip_verb(udid, parts)
+                elif parts and parts[0].startswith("media_"):
+                    rc, body = media_verb(udid, parts)
                 else:
                     # THE PICKER VERBS GO TO THE DEVICE'S DRIVER, attached
                     # to this leg's app on the first ask (the app is
@@ -1795,6 +1851,9 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
         env["SIMCTL_CHILD_KAYA_TEXT_SCALE"] = lane.SCENE_TEXT_SCALE[selftest]
     if selftest in lane.SCENE_CLOCK:
         env["SIMCTL_CHILD_KAYA_CLOCK"] = lane.SCENE_CLOCK[selftest]
+    # The simulator shares the host's loopback (docs/media-plan.md §7a).
+    if scene.startswith("media_"):
+        env["SIMCTL_CHILD_KAYA_MEDIA_URL"] = MEDIA_URL
     # THE VERB TRACE AND THE PANIC LOG, both RELATIVE names: the
     # interpreter resolves one under its Documents and the core the
     # other under $HOME/Documents — the same container directory —
@@ -2417,7 +2476,25 @@ _prep_joined = False
 status = 0
 
 
+# The media suite's server on this lane's own port (tools/lib/media_server.py
+# LANE_PORTS): up only while a media_ leg is queued, proven gone on exit.
+MEDIA_PORT = media_server.LANE_PORTS["ios"]
+MEDIA_URL = f"http://{media_server.HOST}:{MEDIA_PORT}"
+MEDIA = contextlib.ExitStack()
+
+
+def media_queued():
+    mode = os.environ.get("KAYA_EXCLUSIVE", "")
+    suites = lane.SUITES if SUITE == "all" else (SUITE,)
+    return any(name.startswith("media_") and only.wanted(name)
+               and not (mode in ("only", "skip")
+                        and (mode == "only") != (name in lane.EXCLUSIVE))
+               for suite in suites for name in lane.suite_legs(suite))
+
+
 def cleanup():
+    with contextlib.suppress(RuntimeError):
+        MEDIA.close()
     xcuidrive_stop_all()
     FR.flush()
     shutil.rmtree(LEGS_DIR, ignore_errors=True)
@@ -2787,6 +2864,9 @@ if os.environ.get("KAYA_RECORD"):
     prep_join()
 rec_suite_start()
 timing("boot")
+if media_queued():
+    MEDIA.enter_context(media_server.serving(
+        media_server.HOST, MEDIA_PORT, log=ROOT / "target/ios-media-server.log"))
 
 SDKROOT_SIM = out_of(["xcrun", "-sdk", "iphonesimulator",
                       "--show-sdk-path"]).strip()
@@ -2794,6 +2874,14 @@ SDKROOT_SIM = out_of(["xcrun", "-sdk", "iphonesimulator",
 # Clean slate: a stale main.swift once put the LAYOUT guest inside the
 # milestone2 bundle.
 shutil.rmtree(BUNDLES, ignore_errors=True)
+
+if media_queued():
+    MEDIAREMOTE_SIM.parent.mkdir(parents=True, exist_ok=True)
+    if run(["xcrun", "-sdk", "iphonesimulator", "clang", "-isysroot", SDKROOT_SIM,
+            "-target", f"arm64-apple-ios{IOS_MIN}-simulator", "-framework",
+            "CoreFoundation", "tools/ios/mediaremote.c", "-o",
+            str(MEDIAREMOTE_SIM)]).returncode != 0:
+        sys.exit(1)
 
 
 # THE C COMPILER FOR THIS TARGET IS XCODE'S, NOT THE SHELL'S (the same
@@ -2927,10 +3015,17 @@ if SUITE in ("swift", "all"):
     verify_built(TARGET_DIR / "libkaya.a")
     build_swiftui_dylib()
     build_kaya_package()
+    # A FILTERED RUN BUILDS ONLY WHAT IT RUNS (tools/lib/only.py).
+    def _swift_legs(entry):
+        scene = lane.swift_scene(entry)[0]
+        return ["swift"] if scene == "milestone2" else [
+            f"{scene}-swift", f"{scene}dark-swift"]
+    SWIFT_BUILT = [e for e in lane.SWIFT_ENTRIES
+                   if not only.active() or only.matches(_swift_legs(e))]
     # With more than one input file, swiftc only allows top-level code
     # in a file named main.swift — each scene stages its own.
     builds = []
-    for entry in lane.SWIFT_ENTRIES:
+    for entry in SWIFT_BUILT:
         guest, src = lane.swift_scene(entry)
         stage = BUNDLES / f".stage-{guest}"
         stage.mkdir(parents=True, exist_ok=True)
@@ -2971,11 +3066,11 @@ if SUITE in ("swift", "all"):
     # was linked in — `-L -lkaya` would let ld64 prefer the .dylib
     # beside it, and the bundle would name a build-machine path outside
     # itself and tell nobody.
-    for entry in lane.SWIFT_ENTRIES:
+    for entry in SWIFT_BUILT:
         guest, _src = lane.swift_scene(entry)
         verify_built(BUNDLES / f"{guest}swift-bin")
         require_ios_sdk(BUNDLES / f"{guest}swift-bin", pathlib.Path(SDKROOT_SIM))
-    for entry in lane.SWIFT_ENTRIES:
+    for entry in SWIFT_BUILT:
         guest, _src = lane.swift_scene(entry)
         # THE DECLARED IDENTITY GOES INTO ONE BUNDLE, the one whose
         # guest declares an identity (make_bundle's opt-in).
@@ -2983,7 +3078,8 @@ if SUITE in ("swift", "all"):
         app = with_dylib(make_bundle(f"{guest}swift",
                                      f"dev.kaya.{guest}swift",
                                      BUNDLES / f"{guest}swift-bin",
-                                     ident))
+                                     ident,
+                                     session=guest in lane.SESSION_SCENES))
         if guest == "scroll":
             queue_xcuidrive_pan(app, "dev.kaya.scrollswift")
         if guest == "milestone2":
@@ -3034,7 +3130,8 @@ if SUITE in ("go", "all"):
     for guest in lane.GO_SCENES:
         ident = "identity" if guest == "identity" else ""
         app = with_dylib(make_bundle(f"{guest}go", f"dev.kaya.{guest}go",
-                                     BUNDLES / "go-bin", ident))
+                                     BUNDLES / "go-bin", ident,
+                                     session=guest in lane.SESSION_SCENES))
         if guest == "milestone2":
             queue_scene_leg("go", guest, "go", app,
                             "dev.kaya.milestone2go", "1", "milestone2")
@@ -3143,6 +3240,12 @@ if SUITE in ("rust-swiftui", "all"):
     build_swiftui_dylib()
     for scene in lane.RUST_SCENES:
         example = lane.rust_example(scene)
+        # A FILTERED RUN BUILDS ONLY WHAT IT RUNS (tools/lib/only.py): the
+        # example of a scene none of whose legs is wanted is not built.
+        if only.active() and not only.matches(
+                ["rust-swiftui" if scene == "milestone2" else f"{scene}-swiftui",
+                 f"{scene}-swiftui-pad", f"{scene}dark-swiftui"]):
+            continue
         cargo_ios(["build", "--locked", "--target",
                    "aarch64-apple-ios-sim", "--example", example])
         if scene == "milestone2":
@@ -3158,7 +3261,8 @@ if SUITE in ("rust-swiftui", "all"):
         ident = "identity" if scene == "identity" else ""
         app = with_dylib(make_bundle(
             f"{scene}rs-swiftui", f"dev.kaya.{scene}swiftui",
-            TARGET_DIR / f"examples/{example}", ident))
+            TARGET_DIR / f"examples/{example}", ident,
+            session=scene in lane.SESSION_SCENES))
         queue_scene_leg("rust-swiftui", scene, f"{scene}-swiftui", app,
                         f"dev.kaya.{scene}swiftui", scene, scene)
         if scene in lane.PAD_EXTRAS:
@@ -3180,6 +3284,11 @@ if SUITE in ("rust-swiftui", "all"):
 drain()
 if SUITE == "all" and not os.environ.get("KAYA_RECORD"):
     timing("all-legs-drained")
+try:
+    MEDIA.close()
+except RuntimeError as e:
+    print(f"run-sim: {e}", file=sys.stderr)
+    status = 1
 
 if not rec_suite_stop():
     status = 1

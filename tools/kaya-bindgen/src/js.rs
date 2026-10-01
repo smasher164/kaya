@@ -587,6 +587,57 @@ export function record(kind: number, body: Uint8Array): Uint8Array {
         c.line("    return { kind, id: read_u64(buf, 8), keys: [], payload: value };");
         c.line("  }");
     }
+    // main.rs's flat_occurrence_names: the fields in order into the tail.
+    for name in crate::flat_occurrence_names(spec) {
+        let rec = spec.occurrence.iter().find(|r| r.name == name).unwrap();
+        c.line(&format!("  if (kind === OCC_{}) {{", name.to_uppercase()));
+        c.line(&format!("    // {}", crate::FLAT_MARK));
+        c.line("    let at = 8;");
+        c.line("    const tail: Decoded[] = [];");
+        let mut fields = rec.fields.iter();
+        let flat_id = if matches!(rec.fields[0].ty, FieldTy::U64) {
+            fields.next();
+            c.line("    at += 8;");
+            "read_u64(buf, 8)"
+        } else {
+            "0"
+        };
+        for f in fields {
+            match f.ty {
+                FieldTy::U32 if f.name == "reserved" => c.line("    at += 4;"),
+                FieldTy::U32 => {
+                    c.line("    tail.push(read_u32(buf, at));");
+                    c.line("    at += 4;");
+                }
+                FieldTy::U64 => {
+                    c.line("    tail.push(read_u64(buf, at));");
+                    c.line("    at += 8;");
+                }
+                FieldTy::Value => {
+                    c.line("    {");
+                    c.line("      let value: Decoded;");
+                    c.line("      [value, at] = parse_value(buf, at);");
+                    c.line("      tail.push(value);");
+                    c.line("    }");
+                }
+                FieldTy::Values => {
+                    c.line("    {");
+                    c.line("      const count = read_u32(buf, at);");
+                    c.line("      at += 8;");
+                    c.line("      tail.push(count);");
+                    c.line("      for (let i = 0; i < count; i++) {");
+                    c.line("        let value: Decoded;");
+                    c.line("        [value, at] = parse_value(buf, at);");
+                    c.line("        tail.push(value);");
+                    c.line("      }");
+                    c.line("    }");
+                }
+                FieldTy::VariantSchemas => panic!("kaya-bindgen: flat record {name} carries variant schemas"),
+            }
+        }
+        c.line(&format!("    return {{ kind, id: {flat_id}, keys: [], payload: tail }};"));
+        c.line("  }");
+    }
     // The picker's answer: its own arm (python.rs carries the reasoning).
     c.line("  if (kind === OCC_FILE_DIALOG_RESULT) {");
     c.line("    const dialog = read_u64(buf, 8);");

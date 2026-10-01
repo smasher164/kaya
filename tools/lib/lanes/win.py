@@ -34,6 +34,9 @@ SCENES = [
     # The formatter door and the catalog in every language this lane runs
     # (docs/compliance-plan.md §6); formatde/formatar reuse its guests.
     "format",
+    # The media suite's one guest in every language (docs/media-plan.md
+    # §7a); its scenes are media_formats and kin, GUEST_STEM below.
+    "media",
 ]
 
 # THE LEGS THAT RUN AS THE ONLY INPUT-DRIVING LEG ON THE HOST (tools/lib/
@@ -293,6 +296,42 @@ ORDER = [
      # The sheet pool: the modal Popup and the close button's own route,
      # no real mouse and no OS-global key (docs/sheet-plan.md U1).
      "sheet_rust", "sheet_python", "sheet_js", "sheet_go", "sheet_csharp", "sheet_java",
+    ],
+    # THE MEDIA SUITE (docs/media-plan.md §7a), pooled: every player is
+    # muted, nothing is typed or pointed at, and the picture is read out of
+    # the leg's own window. The local server is the runner's
+    # (tools/lib/media_server.py, LANE_PORTS["windows"]).
+    [
+     "media_formats_rust", "media_formats_python", "media_formats_js",
+     "media_formats_go", "media_formats_csharp", "media_formats_java",
+     "media_delivery_rust", "media_delivery_python", "media_delivery_js",
+     "media_delivery_go", "media_delivery_csharp", "media_delivery_java",
+     "media_tracks_rust", "media_tracks_python", "media_tracks_js",
+     "media_tracks_go", "media_tracks_csharp", "media_tracks_java",
+     "media_feed_rust", "media_feed_python", "media_feed_js",
+     "media_feed_go", "media_feed_csharp", "media_feed_java",
+    ],
+    # EACH media_session LEG ALONE: the system's media session manager is one
+    # per desktop, every unpackaged kaya process wears the same declared app id
+    # in it, and the leg sends commands through it to whichever session
+    # carries that id (docs/media-plan.md §5).
+    [
+     "media_session_rust",
+    ],
+    [
+     "media_session_python",
+    ],
+    [
+     "media_session_js",
+    ],
+    [
+     "media_session_go",
+    ],
+    [
+     "media_session_csharp",
+    ],
+    [
+     "media_session_java",
     ],
     # dirty_rust ALONE: the leg drives a real WM_CLOSE on its own
     # window and the veto keeps it — a window disappearing out from
@@ -748,7 +787,27 @@ def launcher(leg):
 GUEST_STEM = {"listdetail": "split", "formatde": "format", "formatar": "format",
               "taskspersist": "tasks", "links": "tasks", "tasksrtl": "tasks",
               "tasksbig": "tasks", "formatbig": "format", "clock24": "format",
-              "scrollrtl": "scroll", "numberfieldde": "numberfield", "rangertl": "range"}
+              "scrollrtl": "scroll", "numberfieldde": "numberfield", "rangertl": "range",
+              "media_formats": "media", "media_delivery": "media", "media_session": "media",
+              "media_tracks": "media", "media_feed": "media"}
+
+# THE MEDIA SUITE'S SERVER (docs/media-plan.md §7a): the VM reaches the host
+# over UTM's bridge, so the runner binds it there, on this lane's own port,
+# and every media launcher names that URL (tools/deploy-win.py refuses one
+# that names another).
+MEDIA_HOST = "192.168.64.1"
+
+
+def media_leg(leg):
+    return scene_lang(leg)[0].startswith("media_")
+
+
+# The Store packages that carry the decoders and the Ogg source the lane
+# table assumes (docs/media-plan.md §7a, measured with and without): the
+# runner refuses a VM that lacks one, naming it, since without them the
+# video items play their audio alone and silently.
+CODEC_EXTENSIONS = ("Microsoft.HEVCVideoExtension", "Microsoft.AV1VideoExtension",
+                    "Microsoft.VP9VideoExtensions", "Microsoft.WebMediaExtensions")
 
 
 def guest_stem(scene):

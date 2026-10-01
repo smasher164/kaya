@@ -13185,3 +13185,243 @@ quiet shape docs/media-plan.md §7a found on the iOS simulator (AV1) and in
 GStreamer; the decodability check fails it as `unsupported_codec`, and with
 the check cut the formats leg reads "ready 2.0s 0x0". An MP2 audio track in
 MP4 is not listed as a track at all.
+
+## On the iOS simulator no leg can see the playback category or a display-sleep hold (measured 2026-09-30)
+With `setCategory(.playback)` cut out of the player's play, the simulator's
+media_session leg stayed GREEN: MediaRemote commands still reached the app and
+Now Playing still read back. And AVFoundation's keep-awake leaves no record on
+the simulator at all: `isIdleTimerDisabled` stays false, no power assertion
+names the app on the host or through the simulator's IOKit, and no SpringBoard
+or backboardd idle-timer line appears, because the simulator renders video
+in-process while the hold belongs to a device's remote video queue. So the
+category is held by tools/check-verbs.py's iOS media rows, and the iOS
+`expect_display_awake` reads the shown player's
+`preventsDisplaySleepDuringVideoPlayback` while it plays; what a device holds
+is unmeasured.
+
+## Python's plistlib accepts stray text inside a dict that the simulator refuses (measured 2026-09-30)
+An unsubstituted `@MEDIA@` in tools/ios/Info.plist.in parsed with
+`plistlib.loads` and `simctl install` then refused the bundle as "Missing
+bundle ID" (IXErrorDomain 13), which took the LocalStorage export probe and
+with it every device's preparation. Both renderers of the template
+(run-sim's make_bundle, tools/ios/exportprobe/build.sh) now refuse any
+leftover `@NAME@` token by pattern, not by a list of the known ones.
+
+## WinUI's MediaPlayer states the DECODED frame's size, and a placeholder for HLS (measured 2026-09-30)
+On the lane VM, `MediaPlaybackSession.NaturalVideoHeight` and the video
+track's `VideoEncodingProperties.Height` both read 96 for the 160x90 HEVC
+clips: the Store HEVC decoder outputs whole 16-row blocks, and only the
+encoding properties' `MF_MT_MINIMUM_DISPLAY_APERTURE` says 160x90. The local
+HLS trees open reading 1920x1080 in the session (and in the TS tree's track
+too) until the first frame decodes and `NaturalVideoSizeChanged` fires. The
+arm reads the aperture first and, for an HLS or DASH source, waits for that
+event (at most 3 s) before it reports the item loaded
+(crates/kaya/src/winui/media.rs, `finish_open`).
+
+## Media Foundation's MP4 source selects the LAST audio track (measured 2026-09-30)
+`h264_2audio.mp4` marks its `eng` track default and `fra` not; WinUI's
+`AudioTracks.SelectedIndex` reads 1 at open. Every other platform starts on
+the first, so the arm selects track 0 at open when the platform chose
+another (`opened`).
+
+## An HLS caption track's `Cues` stays empty on WinUI; `ActiveCues` is the read (measured 2026-09-30)
+With the subtitle rendition PlatformPresented, `TimedMetadataTrack.Cues`
+listed 0 cues at every read while `ActiveCues` held the current one, after a
+paused seek too. The platform cue is read from `ActiveCues`.
+
+## A WinUI item typed as video holds no display request (measured 2026-09-30)
+`MediaItemDisplayProperties.Type = Video` on a shown, playing item left
+`powercfg /requests` reading `DISPLAY: None.` for the whole leg (389 reads),
+though the docs say it keeps the screen saver off. The arm holds
+`PowerSetRequest(PowerRequestDisplayRequired)` itself while a shown player
+plays, which `powercfg` then names by the exe.
+
+## A named MediaPlayerElement publishes a Group (measured 2026-09-30)
+With `AutomationProperties.Name` on it, the element's peer is
+`NamedContainerAutomationPeer`, control type Group. The video view's
+accessibility props sit on an empty `Image` over the picture instead
+(an `ImageAutomationPeer`, read `image/Clip`), and the element itself is
+`AccessibilityView.Raw`.
+
+## A Windows path spelled as a unix file URL opens nothing (found 2026-09-30)
+`assets::file_url` wrote `file://C%3A%5Ckaya%5C...`; Media Foundation needs
+`file:///C:/kaya/...` (RFC 8089). `file_url_of` spells both, held by
+assets::tests::a_file_url_keeps_a_windows_drive_and_turns_its_backslashes.
+
+## Two emulator phones had no network after five days up (measured 2026-09-30)
+emulator-5558 and emulator-5560 of the pool (API 35, up 4 d 22 h) showed
+`eth0` and `wlan0` with no IPv4 address and no route, so `nc 10.0.2.2
+<port>` answered `Network is unreachable` and every stream in a media leg
+failed as `network` (media3 2001) while the same leg passed on the other
+phones. Toggling Wi-Fi (`svc wifi`) did not bring them back. The android
+runner now fetches the probe file from inside each phone when the media
+server starts and gives the media legs only to phones that reach it,
+printing the others (tools/android/run-emulator.py, `media_route`).
+
+## The emulator pool's 15th playing ExoPlayer fails as a decode error (measured 2026-09-30)
+A throwaway probe (media3 1.10.1, each player on its own SurfaceTexture,
+emulator-5558) opened 14 players of `h264_aac.mp4` and of `hevc_aac.mp4`
+and failed the 15th with 4003 `ERROR_CODE_DECODING_FAILED` over a
+`MediaCodec.CodecException` whose code is 14 (0xe) on `c2.goldfish.h264` and
+`c2.android.hevc`; AV1 failed the 15th with code -19 ("rendering to
+non-initialized(obsolete) surface"), isRecoverable and isTransient false in
+all three. None is MediaCodec's ERROR_INSUFFICIENT_RESOURCE (1100) or
+ERROR_RECLAIMED (1101), which media.rs maps to `resources`, so on the pool
+running out reads `decode_error` (docs/deferred.md's WATCH — media entry).
+
+## A paused seek right after selecting an HLS caption track never gets its cue (measured 2026-09-30)
+On the iOS 26.5 simulator, over hls_mpegts.m3u8 served locally: selecting the
+WebVTT option and seeking the PAUSED player to 1.5 s at once delivered no cue
+to AVPlayerItemLegibleOutput in 4 of 4 tries, and later seeks to the same time
+(0, 50 and 200 ms after) delivered nothing either, 0 of 9; with 40 ms or more
+between the selection and the seek, 12 of 12 delivered "second cue". The
+discriminator is the item's own track list: an enabled subtitle AVPlayerItemTrack
+appears 3 to 7 ms after the selection, and seeking as soon as it is there
+delivered 8 of 8. The fMP4 tree delivered at 0 ms. It reached the lane once as
+`label#4 reads "", wanted "second cue"` on media_tracks-go (the selection and
+the seek 46 ms apart under a loaded pool). KayaPlayer.seek now waits for that
+track (legibleSwitching, bounded at 2 s), and tools/check-verbs.py's media rows
+hold the wait, since no leg can make the race happen on demand.
+
+## A caption boundary at the item's end can go unfired on the mac (seen 2026-09-30)
+
+media_tracks-go, played through the sidecar item: the 1000 ms boundary fired
+(`caption boundary player=1 clock=1000.08 ms`) and the 2000 ms one, equal to
+the clip's duration, never did, so kaya's drawn caption and the cue label
+stayed "second cue" for the whole expect. One sighting in 45 mac legs; the
+depth had measured the end boundary firing at 2000.0 ms. The SwiftUI arm now
+also asks the core for the cue at the item's duration when the item plays to
+its end (`askCaption(at:)` in the didPlayToEnd observer), so the end no longer
+depends on the boundary observer.
+
+## A WinUI adaptive item's clock can run past its end with no MediaEnded (measured 2026-09-30)
+Six pooled media_delivery legs on the lane VM: in about half of them the
+local DASH or HLS fMP4 item stayed `Playing` with the position passing 9 s
+of a 2 s item, no MediaEnded and no state change (positions logged every
+250 ms). Alone, the same items ended. The arm reads the end as the clock
+passing the item's duration by END_OVERRUN_MS (500) on a non-looping
+player, pauses it and reports Ended (crates/kaya/src/winui/media.rs,
+`tick`); after that, six of six pooled passed and the overrun fired in
+three.
+
+## playbin3 reused for a second URI after a stalled one can abort the process (measured 2026-09-30)
+On the linux lane's GStreamer 1.26.2, the GTK arm's first shape set its one
+playbin3 to NULL and handed it the next URI: on media_delivery with `tsdemux`
+demoted, loading dash.mpd right after the stalled TS stream aborted the guest
+inside playsink (`gstplaysink.c:3624 gst_play_sink_do_reconfigure: assertion
+failed: (it)`, after "Padname src_0 is not unique in element
+streamsynchronizer0"), 1 leg in 4. A GLib assertion, not an error message, so
+nothing reaches the bus. The arm builds a fresh playbin3, sink and bus watch
+per source (gtk.rs, gtk_media's `Pipe`), and the views showing the player take
+the new paintable.
+
+## A GStreamer track switch while paused is not confirmed, and a deselected HLS text stream never comes back (measured 2026-09-30)
+In the lane image, SELECT_STREAMS sent to a PAUSED playbin3 is accepted (the
+event answers true) but no STREAMS_SELECTED follows for qtdemux until data
+flows (a flushing seek at the current position brings it), and never for
+hlsdemux2, which marks the new tracks selected and switches at its next
+output. And a text stream deselected in a paused HLS pipeline delivers no cue
+again once reselected, seeks or not (python probe over playbin3 and a text
+appsink: no TEXT after reselecting and seeking to 500 and 1500 ms, where the
+same seeks with the text never deselected preroll "first cue" and "second
+cue"). So the GTK arm reports the selection the pipeline ACCEPTED, and keeps
+the text stream flowing while captions are off: the caption selection is which
+text stream kaya draws (gtk_media's `caption_shown`).
+
+## A pooled mac ink read got no answer from ScreenCaptureKit for 15 s (seen 2026-09-30)
+
+`validate-all --only media`, mac lane, 45 pooled legs: media_delivery-js's
+first `expect_video_ink` read "<no answer from ScreenCaptureKit within 5 s>"
+on all three attempts of its 15 s window, while the leg's other steps and 44
+other legs (each reading ink the same way) passed; the bundle's unified log
+held no ScreenCaptureKit line from that guest's pid, so it could not say
+whether the capture task never ran, the shareable-content query hung, or the
+screenshot did. The read now names the stage it was at when the 5 s ran out
+(task never started, SCShareableContent asked, captureImage asked with the
+window count), each stage forced to print once by a sleep planted in a copy.
+THREE SIGHTINGS, all media_delivery-js in the pool and green alone: every one
+at `captureImage asked, never answered`, and with the recorder's unified log
+scoped to the guest (below) the node guest's replayd connection read
+`RPDaemonProxy: connection INTERRUPTED` and re-initialized about 850 times in
+300 ms right after the request. The read now falls back to
+`screencapture -x -o -l<wid>` (its own process and connection, measured equal
+in docs/probes/media-mac-2026-09-30.md) when the in-process capture has not
+answered in 5 s, logging both answers under KAYA_DIAG; a failure names both.
+A fourth pooled sighting (media_delivery-rust) answered at once with
+"The user declined TCCs for application, window, display capture" while
+every other leg's capture was allowed, so an in-process ERROR takes the same
+fallback (forced with a thrown error in a copy: green through screencapture,
+red naming both when screencapture was pointed at no window).
+The pooled mac lane went ALL PASS after it. Why replayd drops that one
+client is not known. THE BUNDLE HAD NOT SAID: the mac unified-log section
+took every kaya process and hit its 2 MB cap on other guests' AVPlayer lines
+before the failing step; it now reads the leg's own guest pid, replayd and
+ScreenCaptureKit (tools/lib/flightrec_lane.py).
+
+## A pooled linux media_feed leg never finished its scene-ready wait (seen 2026-09-30)
+
+`validate-all --only media`, linux lane: media_feed-csharp-wayland entered
+the scene-ready wait and was ended by the 60 s step ceiling with no verb
+record, its window black, while 83 other media legs of the run and 48
+media_feed legs in three filtered reruns passed. The bundle named no thread:
+the verdict cannot tell a wedged UI thread from a slow one. The harness now
+runs eu-stack on its own process when the ceiling fires on Linux (the image
+carries elfutils; the process allows the tracer first, for Yama's scope) and
+writes every thread's stack into the leg's log; forced once with a 2 s
+ceiling on media_delivery-rust, it printed the main thread in
+g_main_context_iteration and every GStreamer thread. One sighting; the next
+names the thread.
+
+## A WinUI adaptive item can stay Opening with its source Opened (measured 2026-09-30, cause NOT established)
+Pooled on the lane VM while the host was loaded (siblings' builds, the full
+matrix), a local HLS or DASH item sometimes stayed `Opening` with its
+MediaSource `Opened` and raised no MediaOpened for 15 s and more; the one
+recovery seen was a seek. Ruled out by measurement: reading the item's track
+lists while it opens (deferred: still red 4/30 in one run) and the replaced
+source still fetching (closed on replace: still red 2/3 runs). At the stall
+the process held two ESTABLISHED connections to the media server. With the
+host quiet, 12 pooled runs of the 24 legs were green. The arm prints the
+source and session states and its connections at 5 s and nudges a stuck
+session with a seek to 0 (crates/kaya/src/winui/media.rs); tools/media-server.py
+logs each request's time and client port, so the next stall can be matched
+request by request.
+
+## An X11 display rebooted without waiting lost its server (measured 2026-09-30)
+
+The linux lane reboots a pool display after a failed x11 leg. It killed the
+old Xvfb and started the new one at once, and the new one, finding the old
+still listening, exited ("Cannot establish any listening sockets"): the next
+leg on that display failed with "Failed to open display" and an empty Xvfb
+log (identity-csharp-x11, right after assets-c-x11 failed on :100). Measured
+in the image: 2 of 20 immediate reboots lost the display, 0 of 40 that waited
+for the old pid to exit. x11_display_boot now waits the old server out itself
+(wayland_session_boot's rule), so no caller can reboot without it, and a
+reboot that still fails says so on the lane.
+
+## playbin3 over a local file can deadlock its own preroll, in the thread that calls set_state (measured 2026-09-30)
+GStreamer 1.26.2's urisourcebin, over a pull-capable filesrc: the typefind
+task's have-type handler adds parsebin and syncs its state, waiting for
+parsebin's STATE lock, while the thread in set_state(PAUSED) holds that lock
+and, activating parsebin's own typefind in pull mode, waits for the upstream
+typefind's STREAM lock, which the task holds. Upstream this is
+gstreamer#4472, still open; #4225's fix (in 1.26.1) only narrowed it. On the
+linux lane it wedged the GTK arm's MAIN thread twice under a full matrix
+(media_feed, ten players prerolling at once; the stacks in
+target/validate-lanes/linux.log from harness.rs's wedge_stacks), and a
+python probe of bare playbin3s reproduced it with no kaya code: 1 wedged
+set_state in about 56,000 under CPU load, and 5 in 30 runs of 6,000 under
+heavier load. A push-only source (`pushfile://`) never wedged in the same
+30 runs, but it is not the fix: in push mode oggdemux answers no duration
+(tone.ogg read "ready 0.0s") and qtdemux prerolls no tx3g cue after a paused
+seek, 16 legs of each on every lane run. The GTK arm instead holds every
+typefind's have-type, through a GLib emission hook that runs before any
+handler, until the set_state call on that typefind's own pipeline returns
+(gtk_media's hold_have_type_during_preroll_calls and set_playbin_state), so
+urisourcebin's handler activates parsebin itself, the order #4225 meant to
+guarantee; the gtk unit test
+gtk_media_have_type_waits_for_its_pipelines_preroll_call holds it, and
+tools/check-verbs.py every playbin3 state change to that function. A separate,
+rarer stall seen in the same probe is not this: a preroll that never
+completes, with a streaming thread parked in a blocking pad probe and no
+thread in a mutex, on file:// and pushfile:// alike; kaya reports it as
+Overdue.

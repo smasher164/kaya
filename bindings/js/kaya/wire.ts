@@ -2658,6 +2658,70 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
     const [value] = parse_value(buf, 16);
     return { kind, id: read_u64(buf, 8), keys: [], payload: value };
   }
+  if (kind === OCC_PLAYER_CHANGED) {
+    // A flat record: its fields in order, into the tail.
+    let at = 8;
+    const tail: Decoded[] = [];
+    at += 8;
+    tail.push(read_u32(buf, at));
+    at += 4;
+    tail.push(read_u32(buf, at));
+    at += 4;
+    tail.push(read_u64(buf, at));
+    at += 8;
+    tail.push(read_u32(buf, at));
+    at += 4;
+    tail.push(read_u32(buf, at));
+    at += 4;
+    {
+      let value: Decoded;
+      [value, at] = parse_value(buf, at);
+      tail.push(value);
+    }
+    return { kind, id: read_u64(buf, 8), keys: [], payload: tail };
+  }
+  if (kind === OCC_SESSION_ACTION) {
+    // A flat record: its fields in order, into the tail.
+    let at = 8;
+    const tail: Decoded[] = [];
+    tail.push(read_u32(buf, at));
+    at += 4;
+    at += 4;
+    tail.push(read_u64(buf, at));
+    at += 8;
+    return { kind, id: 0, keys: [], payload: tail };
+  }
+  if (kind === OCC_PLAYER_TRACKS) {
+    // A flat record: its fields in order, into the tail.
+    let at = 8;
+    const tail: Decoded[] = [];
+    at += 8;
+    tail.push(read_u32(buf, at));
+    at += 4;
+    tail.push(read_u32(buf, at));
+    at += 4;
+    {
+      const count = read_u32(buf, at);
+      at += 8;
+      tail.push(count);
+      for (let i = 0; i < count; i++) {
+        let value: Decoded;
+        [value, at] = parse_value(buf, at);
+        tail.push(value);
+      }
+    }
+    {
+      const count = read_u32(buf, at);
+      at += 8;
+      tail.push(count);
+      for (let i = 0; i < count; i++) {
+        let value: Decoded;
+        [value, at] = parse_value(buf, at);
+        tail.push(value);
+      }
+    }
+    return { kind, id: read_u64(buf, 8), keys: [], payload: tail };
+  }
   if (kind === OCC_FILE_DIALOG_RESULT) {
     const dialog = read_u64(buf, 8);
     const count = read_u32(buf, 16);

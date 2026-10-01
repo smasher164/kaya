@@ -679,6 +679,64 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("            return (kind, id, [], value, [], nil, nil, [])");
         c.line("        }");
     }
+    // main.rs's flat_occurrence_names: the fields in order into the tail.
+    for name in crate::flat_occurrence_names(spec) {
+        let rec = spec.occurrence.iter().find(|r| r.name == name).unwrap();
+        c.line(&format!(
+            "        if kind == UInt16(KAYA_OCCURRENCE_{}) {{",
+            name.to_uppercase()
+        ));
+        c.line(&format!("            // {}", crate::FLAT_MARK));
+        c.line("            var at = 8");
+        c.line("            var tail: [KayaValue] = []");
+        c.line("            func value() -> KayaValue {");
+        c.line("                let vtype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)");
+        c.line("                let vlen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))");
+        c.line("                defer { at += 8 + ((vlen + 7) & ~7) }");
+        c.line("                switch vtype {");
+        c.line("                case UInt32(KAYA_VALUE_BOOL): return .bool(raw[at + 8] != 0)");
+        c.line("                case UInt32(KAYA_VALUE_I64):");
+        c.line("                    return .i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))");
+        c.line("                case UInt32(KAYA_VALUE_F64):");
+        c.line("                    return .f64(Double(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))");
+        c.line("                default:");
+        c.line("                    return .str(String(decoding: raw[(at + 8)..<(at + 8 + vlen)], as: UTF8.self))");
+        c.line("                }");
+        c.line("            }");
+        let mut fields = rec.fields.iter();
+        let flat_id = if matches!(rec.fields[0].ty, FieldTy::U64) {
+            fields.next();
+            c.line("            at += 8");
+            "id"
+        } else {
+            "0"
+        };
+        for f in fields {
+            match f.ty {
+                FieldTy::U32 if f.name == "reserved" => c.line("            at += 4"),
+                FieldTy::U32 => {
+                    c.line("            tail.append(.i64(Int64(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))))");
+                    c.line("            at += 4");
+                }
+                FieldTy::U64 => {
+                    c.line("            tail.append(.i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at, as: UInt64.self))))");
+                    c.line("            at += 8");
+                }
+                FieldTy::Value => c.line("            tail.append(value())"),
+                FieldTy::Values => {
+                    c.line("            do {");
+                    c.line("                let count = Int(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))");
+                    c.line("                at += 8");
+                    c.line("                tail.append(.i64(Int64(count)))");
+                    c.line("                for _ in 0..<count { tail.append(value()) }");
+                    c.line("            }");
+                }
+                FieldTy::VariantSchemas => panic!("kaya-bindgen: flat record {name} carries variant schemas"),
+            }
+        }
+        c.line(&format!("            return (kind, {flat_id}, [], nil, [], nil, nil, tail)"));
+        c.line("        }");
+    }
     // The picker's answer is a LIST OF RECORDS, which no single
     // KayaValue can carry — hence the tuple's `files` member. Its own
     // arm: the generic tail would take the file count for a key-path

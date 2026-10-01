@@ -6,15 +6,14 @@ import (
 	kaya "dev.kaya/bindings/go"
 
 	"dev.kaya/guests/go/a11y"
-	"dev.kaya/guests/go/sheet"
-	"dev.kaya/guests/go/format"
 	"dev.kaya/guests/go/a11yrows"
 	"dev.kaya/guests/go/adaptive"
 	"dev.kaya/guests/go/align"
 	"dev.kaya/guests/go/assets"
 	"dev.kaya/guests/go/background"
-	"dev.kaya/guests/go/clipboard"
 	"dev.kaya/guests/go/chat"
+	"dev.kaya/guests/go/clipboard"
+	"dev.kaya/guests/go/colorpicker"
 	"dev.kaya/guests/go/commands"
 	"dev.kaya/guests/go/confirm"
 	"dev.kaya/guests/go/dirty"
@@ -23,16 +22,17 @@ import (
 	"dev.kaya/guests/go/entry"
 	"dev.kaya/guests/go/feed"
 	"dev.kaya/guests/go/filedialog"
+	"dev.kaya/guests/go/format"
 	"dev.kaya/guests/go/fullscreen"
 	"dev.kaya/guests/go/gallery"
 	"dev.kaya/guests/go/grid"
 	"dev.kaya/guests/go/grow"
 	"dev.kaya/guests/go/identity"
 	"dev.kaya/guests/go/layout"
+	"dev.kaya/guests/go/media"
 	"dev.kaya/guests/go/menus"
 	"dev.kaya/guests/go/milestone2"
 	"dev.kaya/guests/go/nav"
-	"dev.kaya/guests/go/colorpicker"
 	"dev.kaya/guests/go/numberfield"
 	"dev.kaya/guests/go/ownundo"
 	"dev.kaya/guests/go/panels"
@@ -52,6 +52,7 @@ import (
 	"dev.kaya/guests/go/search"
 	"dev.kaya/guests/go/sections"
 	selectscene "dev.kaya/guests/go/select"
+	"dev.kaya/guests/go/sheet"
 	"dev.kaya/guests/go/sizepolicy"
 	"dev.kaya/guests/go/sliders"
 	"dev.kaya/guests/go/split"
@@ -75,72 +76,78 @@ const defaultScene = "1"
 // scenes holds EVERY SCENE THE GO TREE HAS, including ones a host cannot
 // run: those die on the capability gate, not in pick().
 var scenes = map[string]func() *kaya.App{
-	"1":          milestone2.App,
-	"a11y":       a11y.App,
-	"a11yrows":   a11yrows.App,
-	"adaptive":   adaptive.App,
-	"align":      align.App,
-	"assets":     assets.App,
-	"background": background.App,
-	"clipboard":  clipboard.App,
-	"commands":   commands.App,
-	"confirm":    confirm.App,
-	"dirty":      dirty.App,
-	"dnd":        dnd.App,
-	"editor":     editor.App,
-	"entry":      entry.App,
-	"feed":       feed.App,
-	"filedialog": filedialog.App,
-	"fullscreen": fullscreen.App,
-	"gallery":    gallery.App,
-	"grid":       grid.App,
-	"grow":       grow.App,
-	"identity":   identity.App,
-	"layout":     layout.App,
-	"listdetail": split.App,
-	"menus":      menus.App,
-	"nav":        nav.App,
-	"numberfield": numberfield.App,
-	"colorpicker": colorpicker.App,
-	"numberfieldde": numberfield.App,
-	"sheet":      sheet.App,
-	"format":     format.App,
-	"formatde":   format.App,
-	"formatar":   format.App,
-	"ownundo":    ownundo.App,
-	"panels":     panels.App,
-	"panes":      panes.App,
-	"pickers":    pickers.App,
-	"sliders":    sliders.App,
-	"progress":   progress.App,
-	"radio":      radio.App,
-	"range":      rangescene.App,
-	"rangertl":   rangescene.App,
-	"ranges":     ranges.App,
-	"richlabel":  richlabel.App,
-	"richrows":   richrows.App,
-	"richtext":   richtext.App,
-	"reorder":    reorder.App,
-	"table":      table.App,
-	"save":       save.App,
-	"scroll":     scroll.App,
-	"scrollto":   scrollto.App,
-	"chat":       chat.App,
-	"sections":   sections.App,
-	"search":     search.App,
-	"select":     selectscene.App,
-	"sizepolicy": sizepolicy.App,
-	"split":      split.App,
-	"stall":      stall.App,
-	"styling":    styling.App,
-	"submit":     submit.App,
-	"textarea":   textarea.App,
-	"todos":      todos.App,
-	"toolbar":    toolbar.App,
-	"tooltips":   tooltips.App,
-	"typeface":   typeface.App,
-	"undo":       undo.App,
-	"window":     window.App,
+	"1":              milestone2.App,
+	"a11y":           a11y.App,
+	"a11yrows":       a11yrows.App,
+	"adaptive":       adaptive.App,
+	"align":          align.App,
+	"assets":         assets.App,
+	"background":     background.App,
+	"clipboard":      clipboard.App,
+	"commands":       commands.App,
+	"confirm":        confirm.App,
+	"dirty":          dirty.App,
+	"dnd":            dnd.App,
+	"editor":         editor.App,
+	"entry":          entry.App,
+	"feed":           feed.App,
+	"filedialog":     filedialog.App,
+	"fullscreen":     fullscreen.App,
+	"gallery":        gallery.App,
+	"grid":           grid.App,
+	"grow":           grow.App,
+	"identity":       identity.App,
+	"layout":         layout.App,
+	"media":          media.App,
+	"media_formats":  media.App,
+	"media_delivery": media.App,
+	"media_session":  media.App,
+	"media_tracks":   media.App,
+	"media_feed":     media.App,
+	"listdetail":     split.App,
+	"menus":          menus.App,
+	"nav":            nav.App,
+	"numberfield":    numberfield.App,
+	"colorpicker":    colorpicker.App,
+	"numberfieldde":  numberfield.App,
+	"sheet":          sheet.App,
+	"format":         format.App,
+	"formatde":       format.App,
+	"formatar":       format.App,
+	"ownundo":        ownundo.App,
+	"panels":         panels.App,
+	"panes":          panes.App,
+	"pickers":        pickers.App,
+	"sliders":        sliders.App,
+	"progress":       progress.App,
+	"radio":          radio.App,
+	"range":          rangescene.App,
+	"rangertl":       rangescene.App,
+	"ranges":         ranges.App,
+	"richlabel":      richlabel.App,
+	"richrows":       richrows.App,
+	"richtext":       richtext.App,
+	"reorder":        reorder.App,
+	"table":          table.App,
+	"save":           save.App,
+	"scroll":         scroll.App,
+	"scrollto":       scrollto.App,
+	"chat":           chat.App,
+	"sections":       sections.App,
+	"search":         search.App,
+	"select":         selectscene.App,
+	"sizepolicy":     sizepolicy.App,
+	"split":          split.App,
+	"stall":          stall.App,
+	"styling":        styling.App,
+	"submit":         submit.App,
+	"textarea":       textarea.App,
+	"todos":          todos.App,
+	"toolbar":        toolbar.App,
+	"tooltips":       tooltips.App,
+	"typeface":       typeface.App,
+	"undo":           undo.App,
+	"window":         window.App,
 }
 
 // pick is the half both hosts share; the EMPTY name is the arm they answer

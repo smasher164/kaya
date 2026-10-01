@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- THE MEDIA SUITE'S LOCAL SERVER (docs/media-plan.md §7a): the emulator
+     reaches the host's loopback as 10.0.2.2, over plain HTTP, and nothing
+     else is let through in the clear. Named by the validation apps'
+     manifests, never by the library's. -->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>

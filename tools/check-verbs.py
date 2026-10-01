@@ -2853,7 +2853,10 @@ def seed_focus_clauses(gtk_src=None):
             bad.append(f"the wayland clipboard seed: {label} — `fn {fn}` in "
                        f"gtk.rs no longer matches /{pattern}/. {why}")
     # ONE SPELLING OF THE REQUEST, for the seed and the copy alike.
-    asks = len(re.findall(r'Command::new\("swaymsg"\)', text))
+    # The media arm's READ of sway's tree (`-t get_tree`, the idle
+    # inhibitor's record) is not a focus request and is not counted.
+    asks = len(re.findall(r'Command::new\("swaymsg"\)(?!\s*\.args\(\["-r", "-t", "get_tree"\]\))',
+                          text))
     if asks != 1:
         bad.append(f"the wayland clipboard seat: gtk.rs spells the "
                    f"compositor's focus command {asks} time(s), wanted 1 — "
@@ -3156,6 +3159,60 @@ for rel, label, pattern in (
 VIDEO_INK_RULED = 2
 
 
+def ios_media_rows(code):
+    """The iOS half's own rows (docs/media-plan.md §2 rule 6, §5, §6): the
+    playback category activated before every play, the view's layer class
+    the bare AVPlayerLayer, a session refused in a bundle without the audio
+    background mode, and the picture read from the simulator's screenshot,
+    since no in-process read holds it while it plays (measured)."""
+    bad = []
+    play = re.search(r"\n    func play\(\) \{\n(.*?)\n    \}\n", code, re.S)
+    if play is None:
+        bad.append("KayaPlayer has no `func play()` to read")
+    else:
+        b = play.group(1)
+        ios = b.find("#if os(iOS)")
+        cat = b.find("setCategory(.playback")
+        act = b.find("setActive(true)")
+        go = b.find("player.play()")
+        if min(ios, cat, act) < 0 or not ios < cat < act < go:
+            bad.append("KayaPlayer.play() does not activate the .playback "
+                       "category (setCategory then setActive, iOS only) "
+                       "before it plays — iOS then mutes it under the Silent "
+                       "switch and it never becomes Now Playing")
+    view = re.search(r"final class KayaVideoView: UIView \{(.*?)\n    \}", code, re.S)
+    if view is None or not re.search(
+            r"override class var layerClass: AnyClass \{ AVPlayerLayer\.self \}",
+            view.group(1)):
+        bad.append("the iOS KayaVideoView is not backed by a bare AVPlayerLayer "
+                   "(layerClass)")
+    session = re.search(r"^func kayaApplySession\(.*?^\}$", code, re.M | re.S)
+    if session is None or not re.search(
+            r'#if os\(iOS\).*"UIBackgroundModes".*modes\.contains\("audio"\).*fatalError',
+            session.group(0), re.S):
+        bad.append("kayaApplySession does not refuse a session in an iOS "
+                   "bundle without UIBackgroundModes audio")
+    seek = re.search(r"\n    func seek\(_ ms: UInt64, report: Bool, waited: Int = 0\) \{\n"
+                     r"        if legibleSwitching && waited < \d+ \{", code)
+    switching = re.search(r"private var legibleSwitching: Bool \{(.*?)\n    \}", code, re.S)
+    if seek is None or switching is None or "item.tracks.contains" not in switching.group(1):
+        bad.append("KayaPlayer.seek does not first wait for a newly selected caption "
+                   "track to be enabled (legibleSwitching over item.tracks) — a paused "
+                   "seek before the switch never gets its cue (docs/traps.md)")
+    ink = [m.group(0) for m in re.finditer(
+        r"\n    func kayaVideoInk\(.*?\n    \}\n", code, re.S)]
+    ios_ink = [b for b in ink if "KayaSimdrive" in b or "UIView" in b
+               or "screen.scale" in b]
+    if len(ink) != 2 or len(ios_ink) != 1 \
+            or 'KayaSimdrive.ask("media_screen' not in ios_ink[0] \
+            or re.search(r"displayedPixelBuffer|drawHierarchy|render\(in:",
+                         ios_ink[0]):
+        bad.append("the iOS kayaVideoInk does not read the simulator's own "
+                   "screenshot through the host (media_screen) — an "
+                   "in-process read holds no playing picture")
+    return bad
+
+
 def media_arms(swift_src=None, harness_src=None):
     bad = []
     swift = swift_src if swift_src is not None else real(SWIFT)
@@ -3207,6 +3264,7 @@ def media_arms(swift_src=None, harness_src=None):
             bad.append("kayaPublishNowPlaying does not set playbackState "
                        "before it can return — macOS routes no media key "
                        "to an app that leaves it stale")
+    bad += ios_media_rows(code)
     hm = re.search(r"const VIDEO_INK_TOLERANCE\s*:\s*\w+\s*=\s*(\d+)\s*;", harness)
     sm = re.search(r"let kayaVideoInkTolerance\b[^=\n]*=\s*(\d+)\b", swift)
     for label, m in (("harness.rs VIDEO_INK_TOLERANCE", hm),
@@ -3240,6 +3298,17 @@ for pattern, repl, label, rel, want in (
      r"        center\.playbackState = [^\n]*\n    #endif\n",
      "", "playbackState never set", SWIFT, 1),
     (r"(let kayaVideoInkTolerance = )2", "3", "the video ink tolerance widened", SWIFT, 1),
+    (r"(\n)            try\? AVAudioSession\.sharedInstance\(\)\.setCategory\(\.playback[^\n]*\n",
+     "", "iOS play without the playback category", SWIFT, 1),
+    (r"(override class var layerClass: AnyClass \{ )AVPlayerLayer\.self",
+     "CALayer.self", "the iOS view on a plain layer", SWIFT, 1),
+    (r"(\n)        if \(session\.player != 0 \|\| session\.offered != 0\) "
+     r"&& !modes\.contains\(\"audio\"\) \{",
+     "        if false {", "the background-mode refusal cut", SWIFT, 1),
+    (r'(KayaSimdrive\.ask\(")media_screen', "media_pixelbuffer",
+     "the iOS ink read not through the screenshot", SWIFT, 1),
+    (r"(\n        if )legibleSwitching && waited < ", "false && waited < ",
+     "a seek not waiting for the caption switch", SWIFT, 1),
 ):
     cut = g.doctor(f"media arms: {label}", real(rel), pattern,
                    lambda m, repl=repl: m.group(1) + repl, want=want)
@@ -3247,6 +3316,373 @@ for pattern, repl, label, rel, want in (
     print(f"check-verbs: media-arms negative ({label}): {len(found)} finding(s)")
     if not found:
         fail(f"check-verbs SELF-TEST: the media arms passed with {label}")
+
+# --- THE COMPOSE MEDIA ARM (docs/media-plan.md §2, §3, §5, §7a) ---------
+# The mac clause's rules on Android, none of which a scene can see: THE VIEW
+# IS media3's PlayerSurface of the SurfaceView type, never PlayerView (its
+# controller keeps its own keys) or a TextureView (no protected path); EVERY
+# PLAYER REPORT TAKES ONE DOOR, kayaPlayerReport, which republishes the
+# session's state (invalidateState) — media3 routes no media key to a
+# session left stale; THE BACKEND REPORTS RAW FACTS: no failure reason is
+# spelled in the arm outside its lane table; THE DECODABILITY CHECK reads a
+# Tracks group with no supported track into playerLoaded's flag; audio focus
+# and becoming-noisy are both on (§2 rule 6); and the wire's media numbers,
+# hand-copied, equal kaya.h's.
+KOTLIN_MEDIA = "android/kaya/src/main/kotlin/dev/kaya/KayaMedia.kt"
+KAYA_H = "crates/kaya/include/kaya.h"
+MEDIA_REASONS = ("unsupported_codec", "unsupported_container", "not_found",
+                 "network", "decode_error", "resources")
+
+
+def kotlin_code(text):
+    return re.sub(r"//[^\n]*", "", re.sub(r"/\*.*?\*/", "", text, flags=re.S))
+
+
+def kotlin_fun(code, name):
+    m = re.search(r"^(?:internal |private )?(?:inline )?fun " + name + r"\(",
+                  code, re.M)
+    if not m:
+        m = re.search(r"^    (?:override |private )?fun " + name + r"\(", code, re.M)
+    if not m:
+        return None
+    i = code.find("{", m.end())
+    depth = 0
+    for j in range(i, len(code)):
+        if code[j] == "{":
+            depth += 1
+        elif code[j] == "}":
+            depth -= 1
+            if depth == 0:
+                return code[m.start():j + 1]
+    return None
+
+
+def compose_media_arms(media_src=None, header_src=None):
+    bad = []
+    code = kotlin_code(media_src if media_src is not None else real(KOTLIN_MEDIA))
+    header = header_src if header_src is not None else real(KAYA_H)
+    for banned in ("PlayerView", "SubtitleView", "SURFACE_TYPE_TEXTURE_VIEW",
+                   "TextureView"):
+        if re.search(r"\b" + banned + r"\b", code):
+            bad.append(f"KayaMedia.kt names {banned} — the video view is media3's "
+                       f"PlayerSurface of the SurfaceView type (docs/media-plan.md §3)")
+    if not re.search(r"PlayerSurface\((?:(?!\n\s*\)).)*?surfaceType = SURFACE_TYPE_SURFACE_VIEW",
+                     code, re.S):
+        bad.append("KayaMedia.kt draws no PlayerSurface with SURFACE_TYPE_SURFACE_VIEW")
+    calls = [m.start() for m in re.finditer(r"KayaPresent\.player[A-Z]", code)]
+    if len(calls) < 9:
+        bad.append(f"only {len(calls)} KayaPresent.player* call(s) read — the "
+                   f"census reads too little to agree with anything")
+    stack, at, outside = [], 0, 0
+    for i, ch in enumerate(code):
+        if ch == "{":
+            line = code[code.rfind("\n", 0, i) + 1:i]
+            stack.append("kayaPlayerReport(" in line)
+        elif ch == "}" and stack:
+            stack.pop()
+        while at < len(calls) and calls[at] == i:
+            if not any(stack):
+                outside += 1
+            at += 1
+    if outside:
+        bad.append(f"{outside} player report(s) outside kayaPlayerReport — a "
+                   f"transition that skips the door leaves the session's state stale")
+    door = kotlin_fun(code, "kayaPlayerReport")
+    if door is None or "KayaMediaSession.follow(" not in door:
+        bad.append("kayaPlayerReport does not call KayaMediaSession.follow — the "
+                   "session does not follow the player's transitions")
+    follow = kotlin_fun(code, "follow")
+    if follow is None or "publish()" not in follow:
+        bad.append("KayaMediaSession.follow does not publish the session player's state")
+    publish = re.search(r"fun publish\(\)\s*=\s*invalidateState\(\)", code)
+    if not publish:
+        bad.append("KayaSessionPlayer.publish is not invalidateState() — media3 "
+                   "re-reads a SimpleBasePlayer's state only when told")
+    table = kotlin_fun(code, "kayaMediaRefusal") or ""
+    rest = code.replace(table, "")
+    for word in MEDIA_REASONS:
+        if f'"{word}"' in rest:
+            bad.append(f'KayaMedia.kt spells the reason "{word}" outside its lane '
+                       f"table — the core maps a platform's codes, the backend "
+                       f"reports them raw (crates/kaya/src/media.rs failure_reason)")
+    loaded = kotlin_fun(code, "reportLoaded") or ""
+    if not re.search(r"!group\.isSupported", loaded) or "why.isNotEmpty()" not in loaded:
+        bad.append("reportLoaded does not read a Tracks group with no supported "
+                   "track into playerLoaded's undecodable flag (docs/media-plan.md §7a)")
+    if not re.search(r"setAudioAttributes\([^;]*?,\s*true,?\s*\)", code, re.S) \
+            or "setHandleAudioBecomingNoisy(true)" not in code:
+        bad.append("the ExoPlayer builder turns off audio focus or becoming-noisy "
+                   "(docs/media-plan.md §2 rule 6)")
+    defines = dict(re.findall(
+        r"#define KAYA_((?:PPROP|PLAYER_COMMAND|SESSION_ACTION|TRACK_KIND|FIT|"
+        r"MEDIA_POSITION_TICK_MS|MEDIA_LOADING_CEILING_MS)\w*) (\d+)", header))
+    copies = re.findall(r"internal const val ((?:PPROP|PLAYER_COMMAND|SESSION_ACTION|"
+                        r"TRACK_KIND|FIT|MEDIA_POSITION_TICK_MS|MEDIA_LOADING_CEILING_MS)"
+                        r"\w*) = (\d+)", code)
+    if len(copies) < 20 or len(defines) < 20:
+        bad.append(f"the media numbers read {len(copies)} Kotlin copies against "
+                   f"{len(defines)} kaya.h defines — too few to agree with anything")
+    for name, value in copies:
+        if defines.get(name) != value:
+            bad.append(f"KayaMedia.kt {name} = {value}, kaya.h KAYA_{name} = "
+                       f"{defines.get(name)}")
+    return bad
+
+
+compose_media_out = compose_media_arms()
+if compose_media_out:
+    media_status = 1
+    print("check-verbs: the Compose media arm broke a rule no scene can see:",
+          file=sys.stderr)
+    print("\n".join(compose_media_out), file=sys.stderr)
+print(f"check-verbs: Compose media arm read "
+      f"({len(re.findall(r'KayaPresent[.]player[A-Z]', real(KOTLIN_MEDIA)))} player reports)")
+for pattern, repl, label, want in (
+    (r"(surfaceType = )SURFACE_TYPE_SURFACE_VIEW", "SURFACE_TYPE_TEXTURE_VIEW",
+     "a TextureView surface", 1),
+    (r"(\n +)kayaPlayerReport\(id\) \{ KayaPresent\.playerEnded\(id\) \}",
+     "KayaPresent.playerEnded(id)", "a report outside the door", 1),
+    (r"(    report\(\)\n)    KayaMediaSession\.follow\(id\)\n", "",
+     "the door not following the session", 1),
+    (r"(fun publish\(\) = )invalidateState\(\)", "Unit", "the state never invalidated", 1),
+    (r"(\s)if \(!group\.isSupported\) \{", " if (false) {",
+     "the decodability check cut", 1),
+    (r"(\.setHandleAudioBecomingNoisy\()true", "false", "becoming-noisy off", 1),
+    (r"(internal const val SESSION_ACTION_NEXT = )7", "8", "a drifted media number", 1),
+    (r"(var domain = )\"media3\"", "\"network\"", "a reason spelled by the arm", 1),
+):
+    cut = g.doctor(f"compose media: {label}", real(KOTLIN_MEDIA), pattern,
+                   lambda m, repl=repl: m.group(1) + repl, want=want)
+    found = [f for f in compose_media_arms(media_src=cut) if f not in compose_media_out]
+    print(f"check-verbs: compose-media negative ({label}): {len(found)} finding(s)")
+    if not found:
+        fail(f"check-verbs SELF-TEST: the Compose media arm passed with {label}")
+
+# --- THE GTK MEDIA ARM (docs/media-plan.md §2, §3, §5, §7a) -------------
+# The mac clause's rules on Linux, none of which a scene can see: THE VIEW IS
+# a GtkPicture over gtk4paintablesink's paintable, never GtkVideo (its
+# controls cannot be turned off) or GtkMediaFile/GtkMediaStream (no rate, no
+# tracks, no captions); EVERY PLAYER REPORT TAKES ONE DOOR, media_report,
+# which follows the session so MPRIS's PlaybackStatus moves on every
+# transition; the arm reports RAW facts and spells no failure reason outside
+# its lane table; and a missing codec reaches Loaded as undecodable, since
+# playbin3 plays the audio of a file whose video decoder is missing with no
+# error at all (docs/traps.md).
+GTK_VIDEO_INK_RULED = 4
+
+
+def gtk_media_arms(src=None):
+    bad = []
+    code = re.sub(r"//[^\n]*", "", src if src is not None else real(GTK))
+    for banned in (r"gtk4::Video\b", r"gtk4::MediaFile\b", r"gtk4::MediaStream\b",
+                   r"\bMediaFile::", r"\bVideo::new"):
+        if re.search(banned, code):
+            bad.append(f"gtk.rs names {banned!r} — the video view is a GtkPicture over "
+                       f"gtk4paintablesink's paintable (docs/media-plan.md §3)")
+    if 'make("gtk4paintablesink")' not in code or 'make("playbin3")' not in code:
+        bad.append("gtk.rs builds no playbin3 into gtk4paintablesink (docs/media-plan.md §2)")
+    door = re.search(r"\n    fn media_report\(core: &mut CoreState[^\n]*\n(.*?)\n    \}\n",
+                     code, re.S)
+    calls = len(re.findall(r"\.media_report\(", code))
+    if door is None:
+        bad.append("gtk.rs has no fn media_report door to read")
+    else:
+        inside = len(re.findall(r"\.media_report\(", door.group(1)))
+        if calls != inside or inside != 1:
+            bad.append(f"{calls - inside} scene.media_report call(s) outside the door — a "
+                       f"transition that skips it leaves MPRIS's PlaybackStatus stale")
+        if "session_follow(core)" not in door.group(1):
+            bad.append("the media_report door does not call session_follow")
+    follow = re.search(r"\n    fn session_follow\(core: &CoreState\) \{\n(.*?)\n    \}\n",
+                       code, re.S)
+    if follow is None or "publish_session(core)" not in follow.group(1):
+        bad.append("session_follow does not publish the session")
+    publish = re.search(r"\n    fn publish_session\(core: &CoreState\) \{\n(.*?)\n    \}\n",
+                        code, re.S)
+    if publish is None or "set_playback_status(status)" not in publish.group(1) \
+            or "media_system_state()" not in publish.group(1):
+        bad.append("publish_session does not set PlaybackStatus from the core's "
+                   "media_system_state")
+    module = re.search(r"\nmod gtk_media \{\n(.*?)\n\}\n", code, re.S)
+    body = module.group(1) if module else ""
+    if not body:
+        bad.append("gtk.rs has no mod gtk_media to read")
+    table = re.search(r"fn demoted_refusal_in\(.*?\n    \}\n", body, re.S)
+    outside = body.replace(table.group(0), "") if table else body
+    for word in MEDIA_REASONS:
+        if f'"{word}"' in outside:
+            bad.append(f'gtk.rs spells the reason "{word}" outside its lane table — the '
+                       f"arm reports raw facts (crates/kaya/src/media.rs failure_reason)")
+    if "MediaFailure::" in body:
+        bad.append("gtk.rs names a MediaFailure — the core maps, the arm reports")
+    tol = re.search(r"const GTK_VIDEO_INK_TOLERANCE: u8 = (\d+);", body)
+    if not tol or int(tol.group(1)) != GTK_VIDEO_INK_RULED:
+        bad.append(f"gtk.rs GTK_VIDEO_INK_TOLERANCE is {tol.group(1) if tol else 'absent'}, "
+                   f"not the measured {GTK_VIDEO_INK_RULED} (GStreamer's YUV conversion, "
+                   f"C6381D for C83C1E)")
+    if "gtk_media::GTK_VIDEO_INK_TOLERANCE" not in code:
+        bad.append("the GTK Stage does not state GTK_VIDEO_INK_TOLERANCE as its video "
+                   "ink tolerance")
+    raw = [m.group(0) for m in re.finditer(r"[\w.()]*\.set_state\(", body)
+           if not m.group(0).startswith(("playbin.set_state", "fetch.", "held.", "pipeline.",
+                                         "old.set_state"))]
+    if raw or body.count("playbin.set_state(state)") != 2:
+        bad.append(f"a playbin3 state change outside set_playbin_state ({raw}) — every "
+                   f"one that can activate pads holds the typefinds off (docs/traps.md, "
+                   f"gstreamer#4472)")
+    if "wait_timeout_while(calls" not in body or "g_signal_add_emission_hook" not in body:
+        bad.append("the have-type emission hook no longer waits for its pipeline's preroll call "
+                   "(docs/traps.md, gstreamer#4472)")
+    if not re.search(r"\(s\.missing_codec\.is_some\(\), detail,", body) \
+            or "Report::Loaded { duration_ms: duration, size, undecodable, detail }" not in body:
+        bad.append("gtk.rs does not carry a missing-plugin codec into Loaded's "
+                   "undecodable flag (docs/media-plan.md §7a)")
+    return bad
+
+
+gtk_media_out = gtk_media_arms()
+if gtk_media_out:
+    media_status = 1
+    print("check-verbs: the GTK media arm broke a rule no scene can see:",
+          file=sys.stderr)
+    print("\n".join(gtk_media_out), file=sys.stderr)
+print(f"check-verbs: GTK media arm read "
+      f"({len(re.findall(r'report\(id, crate::media::Report::', real(GTK)))} player reports)")
+for pattern, repl, label, want in (
+    (r"(let picture: gtk4::Picture =)", " gtk4::Video::new(); let _v:",
+     "a GtkVideo built", 1),
+    (r"(    fn caption_ask\(core: &mut CoreState, id: u64\) \{\n)",
+     "        let _ = core.scene.media_report(crate::protocol::PlayerId(id), "
+     "crate::media::Report::Ended);\n", "a report outside the door", 1),
+    (r"(\n        )session_follow\(core\);\n", "", "the door not following the session", 1),
+    (r"(\n            let _ = mpris\.)set_playback_status\(status\)\.await;",
+     "set_rate(1.0).await;", "PlaybackStatus never set", 1),
+    (r"(\()s\.missing_codec\.is_some\(\), detail,", "false, detail,",
+     "the decodability check cut", 1),
+    (r"(const GTK_VIDEO_INK_TOLERANCE: u8 = )4;", "8;", "the GTK video ink tolerance widened", 1),
+    (r"(\n        )set_playbin_state\(&p\.pb\(\), gst::State::Paused\);\n        let id = p\.id;",
+     "let _ = p.pb().set_state(gst::State::Paused);\n        let id = p.id;",
+     "a preroll outside set_playbin_state", 1),
+    (r"(let \(_calls, waited\) = PREROLL_DONE\n *)"
+     r"\.wait_timeout_while\(calls, [^)]*\), held\)",
+     ".wait_timeout(calls, std::time::Duration::ZERO)",
+     "the have-type hook not waiting", 1),
+    (r"(                report\(id, )crate::media::Report::Failed "
+     r"\{ domain, code: 0, underlying: 0, detail \}",
+     "crate::media::Report::Failed { domain: \"kaya\".into(), code: "
+     "crate::protocol::MediaFailure::UnsupportedContainer as i64, underlying: 0, detail }",
+     "a reason chosen by the arm", 1),
+):
+    cut = g.doctor(f"gtk media: {label}", real(GTK), pattern,
+                   lambda m, repl=repl: m.group(1) + repl, want=want)
+    found = [f for f in gtk_media_arms(src=cut) if f not in gtk_media_out]
+    print(f"check-verbs: gtk-media negative ({label}): {len(found)} finding(s)")
+    if not found:
+        fail(f"check-verbs SELF-TEST: the GTK media arm passed with {label}")
+
+# --- THE WINUI MEDIA ARM (docs/media-plan.md §2, §3, §5, §7a) ----------
+# The same rules on Windows, none of which a scene can see: THE VIEW IS
+# MediaPlayerElement WITH ITS TRANSPORT CONTROLS OFF, never MediaElement nor
+# the element's own transport bar; EVERY PLAYER REPORT TAKES ONE DOOR,
+# `report`, which follows the session, and the follow sets the SMTC's
+# PlaybackStatus; THE BACKEND REPORTS RAW FACTS, no MediaFailure or
+# PlayerState spelled in the arm; THE DECODABILITY CHECK reads each track's
+# SupportInfo.DecoderStatus into Loaded's flag; and the command manager is off
+# on every player, so no remote command reaches a player past the core.
+WINUI_MEDIA = "crates/kaya/src/winui/media.rs"
+
+
+def rust_fn(code, name):
+    m = re.search(r"^(?:pub(?:\([^)]*\))? )?fn " + name + r"\b.*?^\}$", code, re.M | re.S)
+    return m.group(0) if m else None
+
+
+def winui_media_arms(media_src=None):
+    bad = []
+    src = media_src if media_src is not None else real(WINUI_MEDIA)
+    code = re.sub(r"//[^\n]*", "", src)
+    if re.search(r"\bMediaElement\b|[.]TransportControls[(]|SetTransportControls[(]", code) \
+            or "SetAreTransportControlsEnabled(true)" in code:
+        bad.append("winui/media.rs names MediaElement or the element's transport "
+                   "controls — the video view is a MediaPlayerElement with its "
+                   "controls off (docs/media-plan.md §3)")
+    if "SetAreTransportControlsEnabled(false)" not in code:
+        bad.append("winui/media.rs never turns the MediaPlayerElement's transport "
+                   "controls off")
+    calls = [m.start() for m in re.finditer(r"\.media_report\(", code)]
+    door = rust_fn(code, "report")
+    if not calls:
+        bad.append("winui/media.rs has no media_report call to read — the census "
+                   "reads too little to agree with anything")
+    if door is None:
+        bad.append("winui/media.rs has no fn report, the one door")
+    else:
+        start = code.find(door)
+        outside = [c for c in calls if not start <= c < start + len(door)]
+        if outside:
+            bad.append(f"{len(outside)} media_report call(s) outside fn report — a "
+                       f"transition that skips the door leaves the SMTC stale")
+        if "session_follow(core)" not in door:
+            bad.append("fn report does not call session_follow — the session does "
+                       "not follow the player's transitions")
+    follow = rust_fn(code, "session_follow")
+    if follow is None or "SetPlaybackStatus(" not in follow:
+        bad.append("session_follow does not set the SMTC's PlaybackStatus")
+    for spelled in ("MediaFailure::", "PlayerState::"):
+        if spelled in code:
+            bad.append(f"winui/media.rs spells {spelled} — the backend reports raw "
+                       f"facts and crate::media decides (docs/media-plan.md §2 rule 1)")
+    opened = rust_fn(code, "finish_open")
+    if opened is None or opened.count("DecoderStatus()") < 2 \
+            or "undecodable" not in opened:
+        bad.append("fn finish_open does not read every track's DecoderStatus into "
+                   "Loaded's undecodable flag (docs/media-plan.md §7a)")
+    tracks = rust_fn(code, "report_tracks")
+    if tracks is None or not (0 <= tracks.find("if !p.loaded") < tracks.find(".AudioTracks()")):
+        bad.append("report_tracks reads the item's tracks before it has opened — an HLS "
+                   "item read while opening never raised MediaOpened (docs/traps.md)")
+    if "CommandManager()?.SetIsEnabled(false)" not in code:
+        bad.append("the players' command manager is left on — Windows would drive "
+                   "a player from the flyout past the core's routing")
+    return bad
+
+
+winui_media_out = winui_media_arms()
+if winui_media_out:
+    media_status = 1
+    print("check-verbs: the WinUI media arm broke a rule no scene can see:",
+          file=sys.stderr)
+    print("\n".join(winui_media_out), file=sys.stderr)
+print(f"check-verbs: WinUI media arm read "
+      f"({len(re.findall(r'[.]media_report[(]', real(WINUI_MEDIA)))} report door(s))")
+for pattern, repl, label, want in (
+    (r"(element\.SetAreTransportControlsEnabled\()false", "true",
+     "the element's transport controls on", 1),
+    (r"(\n +)report\(core, id, Report::Ended\);(?=\n +ask_caption)",
+     "let _ = core.scene.media_report(PlayerId(id), Report::Ended);",
+     "a report outside the door", 1),
+    (r"(    \}\n)    session_follow\(core\);\n    keep_awake\(core\);\n\}",
+     "    keep_awake(core);\n}",
+     "the door not following the session", 1),
+    (r"(    if let Err\(e\) = )smtc\.SetPlaybackStatus\(status\)",
+     "Ok::<(), windows_core::Error>(())",
+     "the playback status never set", 1),
+    (r"(\n +)let status = track\.SupportInfo\(\)\?\.DecoderStatus\(\)\?;",
+     "let status = MediaDecoderStatus::FullySupported;", "the video decodability check cut", 1),
+    (r"(\n    )report\(core, id, Report::Loaded",
+     "let _ = MediaFailure::UnsupportedCodec;\n    report(core, id, Report::Loaded",
+     "a reason spelled by the arm", 1),
+    (r"(player\.CommandManager\(\)\?\.SetIsEnabled\()false", "true",
+     "the command manager left on", 1),
+    (r"(\n +)if !p\.loaded \{\n +return Ok\(None\);\n +\}", "",
+     "the tracks read before the item opens", 1),
+):
+    cut = g.doctor(f"winui media: {label}", real(WINUI_MEDIA), pattern,
+                   lambda m, repl=repl: m.group(1) + repl, want=want)
+    found = [f for f in winui_media_arms(media_src=cut) if f not in winui_media_out]
+    print(f"check-verbs: winui-media negative ({label}): {len(found)} finding(s)")
+    if not found:
+        fail(f"check-verbs SELF-TEST: the WinUI media arm passed with {label}")
 
 # clip_mirrors() ran first and printed its own findings; its verdict
 # is read here so there is exactly ONE verdict line.
@@ -3278,4 +3714,6 @@ g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"+ every Compose kind's create and render arms "
           f"+ the range's arms in both interpreters "
           f"+ the media arms (a bare layer, one report door, playbackState first) "
+          f"+ the Compose media arm (PlayerSurface, one door, raw facts, decodability) "
+          f"+ the GTK media arm (GtkPicture over the sink, one door, raw facts, decodability) "
           f"+ spec hash against 2 interpreters")

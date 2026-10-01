@@ -586,13 +586,13 @@ in docs/deferred.md.
    live in all nine, the one word everywhere (Haskell's paint roles are
    prefixed, `PaintAxis`, to free it); fake-name and rename-in-a-copy
    negatives, counts printed.
-   AND THE MEDIA ROW SINCE 2026-09-30 (docs/media-plan.md §3, §7b): a
-   row's player field, the template video in both of Rust's template
-   surfaces, visibility in both zones, and the track, caption and cue
-   surface, read out of Rust's own files; RUST ALONE until the breadth adds
-   the other eight, whose `video` the kind census and tools/tpl-surfaces.py
-   already hold red in both zones. Thirteen fake-name and thirteen
-   rename-in-a-copy negatives, counts printed.
+   AND THE MEDIA SURFACE SINCE 2026-09-30 (docs/media-plan.md §3, §5,
+   §7b): the player, its sources, readings and handlers, `video` in both
+   zones with a row's player field, visibility in both zones, the track,
+   caption and cue surface, the session and `can_play`, 161 rows across all
+   nine, each read out of the binding's own files, beside a part census (nine
+   bindings by fifteen parts) whose withheld row is a finding. Fake-name and
+   rename-in-a-copy negatives on every row, counts printed.
    AND THE COLOUR PICKER SINCE 2026-09-28 (docs/color-picker-plan.md §7):
    `color_picker` in both zones with `alpha`, `on_color` where each binding
    spells the date picker's handler, and each binding's own `Color` value
@@ -1379,7 +1379,17 @@ in docs/deferred.md.
    report goes through kayaPlayerReport, which follows the session; the
    publish sets macOS's playbackState before it can return; and
    expect_video_ink's tolerance is the measured 2 in both harnesses that
-   read a video view. Five watched negatives, counts printed),
+   read a video view. AND ON EVERY BACKEND SINCE THE BREADTH: no platform
+   view with controls of its own (GtkVideo and GtkMediaFile, a
+   MediaPlayerElement with transport controls, media3's PlayerView), every
+   report through the arm's one door that then sets the platform's playback
+   state (MPRIS PlaybackStatus, the SMTC's, the media3 session's), no reason
+   word decided in an arm, and each arm's decodability check (a
+   missing-plugin message, SupportInfo.DecoderStatus, a Tracks group with no
+   supported track); GTK's ink tolerance pinned at its measured 4, the iOS
+   playback category before play, and the Compose arms' constants and verbs
+   in the census. Five, seven, seven, eight and five watched negatives,
+   counts printed),
    `tools/check-file-modes.py` (the file-mode NUMBERS agree with the
    spec's wherever they are written down. `kaya_open_picked` takes an
    integer, crates/kaya/src/spec.rs decides what it means, and five

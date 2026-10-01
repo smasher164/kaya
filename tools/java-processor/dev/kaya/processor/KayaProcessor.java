@@ -232,6 +232,8 @@ public final class KayaProcessor extends AbstractProcessor {
             case "java.time.LocalTime" -> "java.time.LocalTime";
             // docs/color-picker-plan.md §2.
             case "dev.kaya.KayaApp.Color" -> "dev.kaya.KayaApp.Color";
+            // docs/media-plan.md §7b.
+            case "dev.kaya.KayaApp.Player" -> "dev.kaya.KayaApp.Player";
             default -> null;
         };
     }

@@ -82,6 +82,8 @@ func (r itemRow) ColorPicker(f kaya.Field[kaya.Color], onColor func(*kaya.Tx, st
 	return r.c.ColorPicker(r.t, f, onColor)
 }
 
+func (r itemRow) Video(f kaya.Field[kaya.Player]) kaya.Node { return r.t.VideoBound(f) }
+
 func (r itemRow) TimePicker(f kaya.Field[kaya.Time], onTime func(*kaya.Tx, string, kaya.Time)) kaya.Node {
 	return r.c.TimePicker(r.t, f, onTime)
 }
@@ -108,6 +110,8 @@ func (r itemRow) SetMin(n kaya.Node, min float64) { r.t.SetMin(n, min) }
 func (r itemRow) SetMax(n kaya.Node, max float64) { r.t.SetMax(n, max) }
 
 func (r itemRow) SetAlpha(n kaya.Node, on bool) { r.t.SetAlpha(n, on) }
+
+func (r itemRow) SetFit(n kaya.Node, fit kaya.Fit) { r.t.SetFit(n, fit) }
 
 func (r itemRow) SetMinGap(n kaya.Node, gap float64)          { r.t.SetMinGap(n, gap) }
 func (r itemRow) SetLowLabel(n kaya.Node, label string)       { r.t.SetLowLabel(n, label) }

@@ -556,6 +556,66 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("          (value, _) <- parseValue rec 16");
         c.line("          return (Just (kind, ident, [], Just value, Nothing, Nothing, []))");
     }
+    // main.rs's flat_occurrence_names: the fields in order into the tail.
+    for name in crate::flat_occurrence_names(spec) {
+        let rec = spec.occurrence.iter().find(|r| r.name == name).unwrap();
+        c.line(&format!("      else if kind == occKind{}", pascal(name)));
+        c.line("        then do");
+        c.line(&format!("          -- {}", crate::FLAT_MARK));
+        if rec.fields.iter().any(|f| matches!(f.ty, FieldTy::Values)) {
+            c.line("          let readN 0 at acc = return (reverse acc, at)");
+            c.line("              readN n at acc = do");
+            c.line("                (v, next) <- parseValue rec at");
+            c.line("                readN (n - 1 :: Int) next (v : acc)");
+        }
+        let mut fields: Vec<_> = rec.fields.iter().collect();
+        let flat_id = if matches!(rec.fields[0].ty, FieldTy::U64) {
+            fields.remove(0);
+            c.line("          let at0 = 16 :: Int");
+            "ident"
+        } else {
+            c.line("          let at0 = 8 :: Int");
+            "0"
+        };
+        let mut pieces: Vec<String> = Vec::new();
+        let last = fields.len();
+        for (k, f) in fields.iter().enumerate() {
+            let next = if k + 1 == last { "_".to_string() } else { format!("at{}", k + 1) };
+            let advance = |c: &mut Ctx, n: usize| {
+                if k + 1 != last {
+                    c.line(&format!("          let at{} = at{k} + {n}", k + 1));
+                }
+            };
+            match f.ty {
+                FieldTy::U32 if f.name == "reserved" => advance(&mut c, 4),
+                FieldTy::U32 => {
+                    c.line(&format!("          w{k} <- peekByteOff rec at{k} :: IO Word32"));
+                    advance(&mut c, 4);
+                    pieces.push(format!("[VI64 (fromIntegral w{k})]"));
+                }
+                FieldTy::U64 => {
+                    c.line(&format!("          w{k} <- peekByteOff rec at{k} :: IO Word64"));
+                    advance(&mut c, 8);
+                    pieces.push(format!("[VI64 (fromIntegral w{k})]"));
+                }
+                FieldTy::Value => {
+                    c.line(&format!("          (v{k}, {next}) <- parseValue rec at{k}"));
+                    pieces.push(format!("[v{k}]"));
+                }
+                FieldTy::Values => {
+                    c.line(&format!("          n{k} <- peekByteOff rec at{k} :: IO Word32"));
+                    c.line(&format!("          (vs{k}, {next}) <- readN (fromIntegral n{k}) (at{k} + 8) []"));
+                    pieces.push(format!("[VI64 (fromIntegral n{k})]"));
+                    pieces.push(format!("vs{k}"));
+                }
+                FieldTy::VariantSchemas => panic!("kaya-bindgen: flat record {name} carries variant schemas"),
+            }
+        }
+        c.line(&format!(
+            "          return (Just (kind, {flat_id}, [], Nothing, Nothing, Nothing, concat [{}]))",
+            pieces.join(", ")
+        ));
+    }
     // The picker's answer is a LIST OF RECORDS and no single Value can
     // carry one, so the three values per file ride the VALUES slot
     // flattened and KayaApp regroups them in threes. Its own arm: the

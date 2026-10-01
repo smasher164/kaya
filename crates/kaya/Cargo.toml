@@ -219,6 +219,13 @@ gdk4-wayland = { version = "0.11.4", features = ["v4_10"] }
 x11-dl = "2.20"
 # The desktop JVM guest tier (jvm.rs).
 jni = "0.21"
+# THE MEDIA ARM (docs/media-plan.md §2, §5), PINNED EXACTLY: playbin3 into
+# gtk4paintablesink, GStreamer's own text stream through an appsink for
+# kaya's caption renderer, and MPRIS2 on the session bus. 0.25 is the
+# GStreamer line on glib 0.22, gtk4 0.11's; a bump moves all three together.
+gstreamer = "=0.25.4"
+gstreamer-app = "=0.25.2"
+mpris-server = "=0.10.0"
 
 [target.'cfg(target_os = "ios")'.dependencies]
 dispatch2 = "0.3.1"

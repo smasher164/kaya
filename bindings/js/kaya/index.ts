@@ -79,9 +79,11 @@ export type ColorToken = typeof Color;
 /** A stamped copy's document is a FIELD of its row: a Blob carrying the
  * document's own value list (docs/rich-text-plan.md §19). */
 export type DocumentToken = typeof Document;
-export type Token = StringConstructor | BooleanConstructor | NumberConstructor | Uint8ArrayConstructor | IntToken | CivilDateToken | CivilTimeToken | DocumentToken | ColorToken;
+export type Token = StringConstructor | BooleanConstructor | NumberConstructor | Uint8ArrayConstructor | IntToken | CivilDateToken | CivilTimeToken | DocumentToken | ColorToken | PlayerToken;
 export type Schema = { readonly [name: string]: Token };
-type FieldOf<T> = T extends DocumentToken
+type FieldOf<T> = T extends PlayerToken
+  ? Player | null
+  : T extends DocumentToken
   ? Document
   : T extends ColorToken
     ? Color
@@ -123,10 +125,10 @@ function wireTag(token: Token, name: string): number {
   if (token === Number) return wire.VALUE_F64;
   if (token === Uint8Array) return wire.VALUE_BLOB;
   if (token === Int) return wire.VALUE_I64;
-  if (token === CivilDate || token === CivilTime || token === Color) return wire.VALUE_I64;
+  if (token === CivilDate || token === CivilTime || token === Color || token === Player) return wire.VALUE_I64;
   if (token === Document) return wire.VALUE_BLOB;
   throw new TypeError(
-    `kaya: field ${JSON.stringify(name)} has no wire type — a schema names String, Boolean, Number, kaya.Int, kaya.CivilDate, kaya.CivilTime, kaya.Color, kaya.Document or Uint8Array per field`,
+    `kaya: field ${JSON.stringify(name)} has no wire type — a schema names String, Boolean, Number, kaya.Int, kaya.CivilDate, kaya.CivilTime, kaya.Color, kaya.Player, kaya.Document or Uint8Array per field`,
   );
 }
 
@@ -960,6 +962,13 @@ export class Widget extends Handle {
     records().push(wire.tx_widget_command(this.id, wire.COMMAND_FOCUS));
   }
 
+  /** Show another player in this video view, or none. A player is shown
+   * by one video view at a time (docs/media-plan.md §7b). */
+  showPlayer(player: Player | null): void {
+    this._live("showPlayer()");
+    records().push(wire.tx_set_player(this.id, player === null ? 0 : player.id));
+  }
+
   /** Focus this text field and open the platform's emoji picker on it
    * (docs/emoji-picker-plan.md); a chosen emoji arrives as its text change. */
   showEmojiPicker(): void {
@@ -1403,6 +1412,8 @@ function fieldDecoder(token: Token): (v: wire.Decoded | Uint8Array) => unknown {
   if (token === CivilDate) return (v) => civilDate(v as number);
   if (token === CivilTime) return (v) => civilTime(v as number);
   if (token === Color) return (v) => Color.fromHex(v as number);
+  // A row's player (docs/media-plan.md §7b): its id, 0 for none.
+  if (token === Player) return (v) => (Number(v) === 0 ? null : (app()._players.get(Number(v)) ?? new Player(Number(v))));
   if (token === Document) return (v) => documentOfBytes(v as Uint8Array);
   return (v) => v;
 }
@@ -1414,6 +1425,7 @@ function fieldEncoder(token: Token, tag: number, type: string): (v: unknown, nam
   if (token === CivilDate) return (v, name) => new wire.I64(wire.pack_date(...dateParts(`${type}.${name}`, v)));
   if (token === CivilTime) return (v, name) => new wire.I64(wire.pack_time(...timeParts(`${type}.${name}`, v)));
   if (token === Color) return (v, name) => (v instanceof Color ? new wire.I64(v.hex()) : refuse(v, name, "kaya.Color"));
+  if (token === Player) return (v, name) => (v === null ? new wire.I64(0) : v instanceof Player ? new wire.I64(v.id) : refuse(v, name, "kaya.Player or null"));
   // A Document field IS a Blob field carrying `documentBytes`' list (§19).
   if (token === Document) return (v, name) => (v instanceof Document ? new BlobHandle(runtime.registerBlob(documentBytes(v))) : refuse(v, name, "kaya.Document"));
   switch (tag) {
@@ -4914,8 +4926,407 @@ export type SectionOptions = { title?: string; symbol?: SymbolValue | SymbolName
 export type BarMenuOptions = MenuOptions & { window?: number };
 export type BarRadioGroupOptions = RadioGroupOptions & { window?: number };
 
+// --- MEDIA (docs/media-plan.md): the player, the video view, the session --
+
+/** What a player reads (docs/media-plan.md §2), the wire's own words. */
+export type PlayerState = "idle" | "loading" | "ready" | "playing" | "paused" | "ended" | "failed";
+/** Why a player cannot play: the closed reason (docs/media-plan.md §7a). */
+export type MediaFailure = "unsupported_codec" | "unsupported_container" | "not_found" | "network" | "decode_error" | "resources";
+/** What the system's media controls ask of the app's session (§5). */
+export type SessionAction = "play" | "pause" | "stop" | "seek_to" | "seek_forward" | "seek_backward" | "next" | "previous";
+/** What the session states while no player is attached. */
+export type PlaybackState = "none" | "playing" | "paused";
+/** How a video view fits its picture (§3). */
+export type Fit = "contain" | "cover" | "fill";
+
+const PLAYER_STATES: ReadonlyMap<number, PlayerState> = new Map([
+  [wire.PLAYER_STATE_IDLE, "idle"],
+  [wire.PLAYER_STATE_LOADING, "loading"],
+  [wire.PLAYER_STATE_READY, "ready"],
+  [wire.PLAYER_STATE_PLAYING, "playing"],
+  [wire.PLAYER_STATE_PAUSED, "paused"],
+  [wire.PLAYER_STATE_ENDED, "ended"],
+  [wire.PLAYER_STATE_FAILED, "failed"],
+] as const);
+
+const MEDIA_FAILURES: ReadonlyMap<number, MediaFailure> = new Map([
+  [wire.MEDIA_FAILURE_UNSUPPORTED_CODEC, "unsupported_codec"],
+  [wire.MEDIA_FAILURE_UNSUPPORTED_CONTAINER, "unsupported_container"],
+  [wire.MEDIA_FAILURE_NOT_FOUND, "not_found"],
+  [wire.MEDIA_FAILURE_NETWORK, "network"],
+  [wire.MEDIA_FAILURE_DECODE_ERROR, "decode_error"],
+  [wire.MEDIA_FAILURE_RESOURCES, "resources"],
+] as const);
+
+const SESSION_ACTIONS: Record<SessionAction, number> = {
+  play: wire.SESSION_ACTION_PLAY,
+  pause: wire.SESSION_ACTION_PAUSE,
+  stop: wire.SESSION_ACTION_STOP,
+  seek_to: wire.SESSION_ACTION_SEEK_TO,
+  seek_forward: wire.SESSION_ACTION_SEEK_FORWARD,
+  seek_backward: wire.SESSION_ACTION_SEEK_BACKWARD,
+  next: wire.SESSION_ACTION_NEXT,
+  previous: wire.SESSION_ACTION_PREVIOUS,
+};
+
+const PLAYBACK_STATES: Record<PlaybackState, number> = {
+  none: wire.PLAYBACK_STATE_NONE,
+  playing: wire.PLAYBACK_STATE_PLAYING,
+  paused: wire.PLAYBACK_STATE_PAUSED,
+};
+
+const FITS: Record<Fit, number> = { contain: wire.FIT_CONTAIN, cover: wire.FIT_COVER, fill: wire.FIT_FILL };
+
+function known<T>(table: ReadonlyMap<number, T>, code: number, what: string): T {
+  const word = table.get(code);
+  if (word === undefined) throw new Error(`kaya: a ${what} carries ${code}, which this build does not know`);
+  return word;
+}
+
+/** Where a player reads its media from: an asset under the app's asset
+ * root, an http(s) URL, or a file the user picked. A path, never bytes
+ * (docs/media-plan.md §2). */
+export class MediaSource {
+  /** @internal */ readonly _path: string;
+
+  private constructor(path: string) {
+    this._path = path;
+  }
+
+  static asset(name: string): MediaSource {
+    return new MediaSource(textValue("MediaSource.asset", name));
+  }
+
+  static url(url: string): MediaSource {
+    return new MediaSource(textValue("MediaSource.url", url));
+  }
+
+  static picked(file: PickedFile): MediaSource {
+    return new MediaSource(file.localPath ?? "");
+  }
+
+  toString(): string {
+    return this._path;
+  }
+}
+
+function mediaPath(what: string, source: unknown): string {
+  if (!(source instanceof MediaSource)) throw new TypeError(`kaya: ${what} takes a kaya.MediaSource (asset, url or picked), not ${runtime.describe(source)}`);
+  return source._path;
+}
+
+/** A player's tracks (docs/media-plan.md §3): BCP 47 tags in the
+ * platform's order, a sidecar caption track last, and the selections,
+ * 0-based, null for none. */
+export type Tracks = {
+  readonly audio: readonly string[];
+  readonly captions: readonly string[];
+  readonly audioSelected: number | null;
+  readonly captionSelected: number | null;
+};
+
+export type PlayerOptions = {
+  source?: MediaSource;
+  speed?: number;
+  /** 0..1, relative to the system volume. */
+  volume?: number;
+  muted?: boolean;
+  loop?: boolean;
+  /** A sidecar WebVTT file, listed as the last caption track (§3). */
+  captions?: MediaSource;
+  captionsLanguage?: string;
+  onState?: (state: PlayerState) => void;
+  onEnded?: () => void;
+  /** The closed reason, and the platform's sentence, which no two word alike. */
+  onFailed?: (reason: MediaFailure, detail: string) => void;
+  onSeekCompleted?: (positionMs: number) => void;
+  /** The playhead, every KAYA_MEDIA_POSITION_TICK_MS while playing. */
+  onPosition?: (positionMs: number) => void;
+  onTracks?: (tracks: Tracks) => void;
+  onCue?: (text: string) => void;
+};
+
+/** A media player (docs/media-plan.md §2): an object the app holds, with
+ * no place in the layout, shown by `kaya.video`; shown by none it is
+ * audio. Its readings are the last occurrence the loop took; its commands
+ * ride the ambient transaction. */
+export class Player {
+  readonly id: number;
+  private _state: PlayerState = "idle";
+  private _failure: MediaFailure | null = null;
+  private _detail = "";
+  private _positionMs = 0;
+  private _durationMs = 0;
+  private _width = 0;
+  private _height = 0;
+  private _tracks: Tracks = { audio: [], captions: [], audioSelected: null, captionSelected: null };
+  private _cue = "";
+  /** @internal */ _opts: PlayerOptions = {};
+
+  /** @internal */
+  constructor(id: number) {
+    this.id = id;
+  }
+
+  get state(): PlayerState {
+    return this._state;
+  }
+
+  get failure(): MediaFailure | null {
+    return this._failure;
+  }
+
+  get detail(): string {
+    return this._detail;
+  }
+
+  get positionMs(): number {
+    return this._positionMs;
+  }
+
+  get durationMs(): number {
+    return this._durationMs;
+  }
+
+  /** The picture's width; 0 for audio. */
+  get width(): number {
+    return this._width;
+  }
+
+  get height(): number {
+    return this._height;
+  }
+
+  get tracks(): Tracks {
+    return this._tracks;
+  }
+
+  /** The caption cue current on the player's clock, "" for none. */
+  get cue(): string {
+    return this._cue;
+  }
+
+  private _prop(prop: number, value: wire.WireValue): void {
+    records().push(wire.tx_set_player_prop(this.id, prop, value));
+  }
+
+  /** Load `source`, replacing what the player held; it reads `loading`
+   * until the platform answers. */
+  setSource(source: MediaSource): void {
+    this._prop(wire.PPROP_SOURCE, mediaPath("Player.setSource", source));
+  }
+
+  /** Back to `idle`. */
+  unload(): void {
+    this._prop(wire.PPROP_SOURCE, "");
+  }
+
+  setSpeed(rate: number): void {
+    this._prop(wire.PPROP_SPEED, Number(rate));
+  }
+
+  setVolume(volume: number): void {
+    this._prop(wire.PPROP_VOLUME, Number(volume));
+  }
+
+  setMuted(on: boolean): void {
+    this._prop(wire.PPROP_MUTED, Boolean(on));
+  }
+
+  setLoop(on: boolean): void {
+    this._prop(wire.PPROP_LOOP, Boolean(on));
+  }
+
+  /** A sidecar WebVTT file (`language` its BCP 47 tag): kaya parses it
+   * and draws its cues, listed as the last caption track. */
+  setCaptions(source: MediaSource, language: string): void {
+    const path = mediaPath("Player.setCaptions", source);
+    this._prop(wire.PPROP_CAPTIONS_LANGUAGE, textValue("a captions language", language));
+    this._prop(wire.PPROP_CAPTIONS, path);
+  }
+
+  clearCaptions(): void {
+    this._prop(wire.PPROP_CAPTIONS, "");
+  }
+
+  /** Play; from the start when the player had ended. */
+  play(): void {
+    records().push(wire.tx_player_command(this.id, wire.PLAYER_COMMAND_PLAY, 0));
+  }
+
+  pause(): void {
+    records().push(wire.tx_player_command(this.id, wire.PLAYER_COMMAND_PAUSE, 0));
+  }
+
+  /** To `ms` from the start; onSeekCompleted hears where it landed. */
+  seek(ms: number): void {
+    if (typeof ms !== "number" || !Number.isInteger(ms) || ms < 0) throw new RangeError(`kaya: Player.seek takes ms >= 0, not ${runtime.describe(ms)}`);
+    records().push(wire.tx_player_command(this.id, wire.PLAYER_COMMAND_SEEK, ms));
+  }
+
+  /** Select audio track `index`, 0-based in `tracks.audio`. */
+  selectAudio(index: number): void {
+    records().push(wire.tx_select_track(this.id, wire.TRACK_KIND_AUDIO, Math.trunc(index) + 1));
+  }
+
+  /** Select a caption track, 0-based in `tracks.captions`, or null. */
+  selectCaptions(index: number | null): void {
+    records().push(wire.tx_select_track(this.id, wire.TRACK_KIND_CAPTION, index === null ? 0 : Math.trunc(index) + 1));
+  }
+
+  /** Stop and forget the player; a view showing it goes blank. */
+  release(): void {
+    records().push(wire.tx_release_player(this.id));
+  }
+
+  /** @internal The mirror follows first, handler or none. */
+  _absorb(kind: number, payload: unknown): void {
+    if (kind === wire.OCC_PLAYER_CHANGED) {
+      const [state, failure, duration, width, height, detail] = payload as [number, number, number, number, number, string];
+      this._state = known(PLAYER_STATES, Number(state), "player state");
+      this._failure = Number(failure) === wire.MEDIA_FAILURE_NONE ? null : known(MEDIA_FAILURES, Number(failure), "media failure");
+      this._detail = String(detail);
+      this._durationMs = Number(duration);
+      this._width = Number(width);
+      this._height = Number(height);
+      if (this._state === "loading" || this._state === "idle") this._positionMs = 0;
+    } else if (kind === wire.OCC_PLAYER_POSITION || kind === wire.OCC_SEEK_COMPLETED) {
+      this._positionMs = Number(payload);
+    } else if (kind === wire.OCC_PLAYER_TRACKS) {
+      const flat = payload as unknown[];
+      const audioSel = Number(flat[0]);
+      const captionSel = Number(flat[1]);
+      const nAudio = Number(flat[2]);
+      const audio = flat.slice(3, 3 + nAudio).map(String);
+      const rest = flat.slice(3 + nAudio);
+      const captions = rest.slice(1, 1 + Number(rest[0])).map(String);
+      this._tracks = { audio, captions, audioSelected: audioSel === 0 ? null : audioSel - 1, captionSelected: captionSel === 0 ? null : captionSel - 1 };
+    } else if (kind === wire.OCC_CAPTION_CUE) {
+      this._cue = String(payload);
+    }
+  }
+
+  /** @internal The handlers one occurrence reaches, in order: the state
+   * first, then `ended` or `failed`. */
+  _handlers(kind: number): [Handler, unknown[]][] {
+    const o = this._opts;
+    const out: [Handler, unknown[]][] = [];
+    if (kind === wire.OCC_PLAYER_CHANGED) {
+      if (o.onState !== undefined) out.push([o.onState as Handler, [this._state]]);
+      if (this._state === "ended" && o.onEnded !== undefined) out.push([o.onEnded as Handler, []]);
+      if (this._state === "failed" && this._failure !== null && o.onFailed !== undefined) out.push([o.onFailed as Handler, [this._failure, this._detail]]);
+    } else if (kind === wire.OCC_PLAYER_POSITION && o.onPosition !== undefined) out.push([o.onPosition as Handler, [this._positionMs]]);
+    else if (kind === wire.OCC_SEEK_COMPLETED && o.onSeekCompleted !== undefined) out.push([o.onSeekCompleted as Handler, [this._positionMs]]);
+    else if (kind === wire.OCC_PLAYER_TRACKS && o.onTracks !== undefined) out.push([o.onTracks as Handler, [this._tracks]]);
+    else if (kind === wire.OCC_CAPTION_CUE && o.onCue !== undefined) out.push([o.onCue as Handler, [this._cue]]);
+    return out;
+  }
+}
+export type PlayerToken = typeof Player;
+
+/** A media player (docs/media-plan.md §2), created in the ambient
+ * transaction: an object with no place in the layout. */
+export function player(opts: PlayerOptions = {}): Player {
+  const recs = records();
+  const p = new Player(app()._next("player"));
+  recs.push(wire.tx_create_player(p.id));
+  app()._players.set(p.id, p);
+  p._opts = opts;
+  if (opts.muted !== undefined) p.setMuted(opts.muted);
+  if (opts.loop !== undefined) p.setLoop(opts.loop);
+  if (opts.speed !== undefined) p.setSpeed(opts.speed);
+  if (opts.volume !== undefined) p.setVolume(opts.volume);
+  if (opts.captions !== undefined) p.setCaptions(opts.captions, opts.captionsLanguage ?? "und");
+  if (opts.source !== undefined) p.setSource(opts.source);
+  return p;
+}
+
+export type VideoOptions = GrowOption & {
+  fit?: Fit;
+  /** How much of the view shows, 0 to 1, as it enters, leaves, moves by a
+   * tenth and shows whole — a stamped copy's row first (§7b). */
+  onVisibility?: Handler;
+};
+
+/** A video view showing `player` (docs/media-plan.md §3): the platform's
+ * own view with its controls off. In a template the source is the row's
+ * Player field. A player is shown by one video view at a time (§7b). */
+export function video(source: Player | FieldRef | null, opts: VideoOptions = {}): Widget {
+  const handle = widget(wire.KIND_VIDEO);
+  if (source instanceof Player) records().push(wire.tx_set_player(handle.id, source.id));
+  else if (source instanceof FieldRef) {
+    pickerField("a video view", source, Player, "kaya.Player");
+    records().push(wire.tx_bind_player_element(handle.id, source._level(), source._index));
+  } else if (source !== null) throw new TypeError(`kaya: a video view shows a kaya.Player or a row's Player field, not ${runtime.describe(source)}`);
+  if (opts.fit !== undefined) {
+    const fit = FITS[opts.fit];
+    if (fit === undefined) throw new Error(`kaya: fit must be one of ${JSON.stringify(Object.keys(FITS))}, got ${JSON.stringify(opts.fit)}`);
+    records().push(wire.tx_set_fit(handle.id, fit));
+  }
+  const onVisibility = opts.onVisibility;
+  if (onVisibility !== undefined) {
+    app()._register(handle, wire.OCC_VIDEO_VISIBILITY, (...args: unknown[]) => onVisibility(...args.slice(0, -1), Number(args[args.length - 1])));
+  }
+  setGrow(handle, opts);
+  return handle;
+}
+
+export type SessionOptions = {
+  /** The player the system's controls speak to. */
+  player?: Player;
+  title?: string;
+  artist?: string;
+  album?: string;
+  /** An asset name. */
+  artwork?: string;
+  /** The actions the app answers itself through onAction; play, pause and
+   * seek_to it leaves out apply to the attached player. */
+  handles?: readonly SessionAction[];
+  playbackState?: PlaybackState;
+  /** `atMs` for seek_to, else 0. */
+  onAction?: (action: SessionAction, atMs: number) => void;
+};
+
+/** Declare the app's one media session, replacing the last
+ * (docs/media-plan.md §5). */
+export function session(opts: SessionOptions = {}): void {
+  let mask = 0;
+  for (const action of opts.handles ?? []) {
+    const bit = SESSION_ACTIONS[action];
+    if (bit === undefined) throw new Error(`kaya: a session action must be one of ${JSON.stringify(Object.keys(SESSION_ACTIONS))}, got ${JSON.stringify(action)}`);
+    mask |= 1 << bit;
+  }
+  const state = PLAYBACK_STATES[opts.playbackState ?? "none"];
+  if (state === undefined) throw new Error(`kaya: a playback state must be one of ${JSON.stringify(Object.keys(PLAYBACK_STATES))}, got ${JSON.stringify(opts.playbackState)}`);
+  records().push(
+    wire.tx_set_session(
+      opts.player?.id ?? 0,
+      mask,
+      state,
+      textValue("a session title", opts.title ?? ""),
+      textValue("a session artist", opts.artist ?? ""),
+      textValue("a session album", opts.album ?? ""),
+      textValue("a session artwork", opts.artwork ?? ""),
+    ),
+  );
+  app()._sessionAction = opts.onAction;
+}
+
+/** Whether this platform plays `mime` with `codecs` (an RFC 6381 list):
+ * true exactly when loading such media would not fail as
+ * unsupported_codec or unsupported_container. No transaction. */
+export function canPlay(mime: string, codecs = ""): boolean {
+  return runtime.canPlay(textValue("canPlay's mime", mime), textValue("canPlay's codecs", codecs));
+}
+
+/** @internal The session action a wire code names. */
+function sessionAction(code: number): SessionAction {
+  for (const [word, value] of Object.entries(SESSION_ACTIONS)) if (value === code) return word as SessionAction;
+  throw new Error(`kaya: a session action carries ${code}, which this build does not know`);
+}
+
 export class App {
-  private readonly _counters: Record<string, number> = { signal: 0, widget: 0, collection: 0, alert: 0, menu_item: 0, file_dialog: 0, clipboard: 0, link_route: 0 };
+  private readonly _counters: Record<string, number> = { signal: 0, widget: 0, collection: 0, alert: 0, menu_item: 0, file_dialog: 0, clipboard: 0, link_route: 0, player: 0 };
   /** @internal */ readonly _widgetHandlers = new Map<string, Handler>();
   /** @internal */ readonly _nodeHandlers = new Map<string, Handler>();
   /** @internal */ readonly _nodeOwners = new Map<number, Collection<unknown, unknown>>();
@@ -4963,6 +5374,10 @@ export class App {
   /** @internal Template node -> [collection, field index] per bound
    * `document`, so a stamped copy's act folds into its row (§19). */
   readonly _documentBinds = new Map<number, [Collection<unknown, unknown>, number]>();
+  /** @internal The players' mirrors, by id (docs/media-plan.md §2),
+   * outside the rollback journal as the Rust binding's are. */
+  readonly _players = new Map<number, Player>();
+  /** @internal */ _sessionAction: ((action: SessionAction, atMs: number) => void) | undefined;
   private _posted: [Handler, unknown[]][] = [];
   private _drainScheduled = false;
   private _shutdown: (() => void) | null = null;
@@ -5485,6 +5900,24 @@ export class App {
       }
       const handler = keys.length > 0 ? this._nodeHandlers.get(menuKey(kind, ident)) : this._widgetHandlers.get(menuKey(kind, ident));
       if (handler !== undefined) this._dispatch(handler, ...this._rowArgs(ident, keys as Key[]), arg);
+      return;
+    }
+    if (kind === wire.OCC_PLAYER_CHANGED || kind === wire.OCC_PLAYER_POSITION || kind === wire.OCC_SEEK_COMPLETED || kind === wire.OCC_PLAYER_TRACKS || kind === wire.OCC_CAPTION_CUE) {
+      // THE MIRROR FOLLOWS FIRST, handler or none. The surface-pair decode
+      // hands position/seek back as (position, player).
+      const pair = kind === wire.OCC_PLAYER_POSITION || kind === wire.OCC_SEEK_COMPLETED;
+      const seat = this._players.get(Number(pair ? payload : ident));
+      if (seat === undefined) return;
+      seat._absorb(kind, pair ? ident : payload);
+      for (const [fn, args] of seat._handlers(kind)) this._dispatch(fn, ...args);
+      return;
+    }
+    if (kind === wire.OCC_SESSION_ACTION) {
+      const act = this._sessionAction;
+      if (act !== undefined) {
+        const [action, atMs] = payload as [number, number];
+        this._dispatch(act as Handler, sessionAction(Number(action)), Number(atMs));
+      }
       return;
     }
     if (kind === wire.OCC_MENU_ACTIVATED || kind === wire.OCC_MENU_TOGGLED || kind === wire.OCC_MENU_VALUE_CHANGED) {

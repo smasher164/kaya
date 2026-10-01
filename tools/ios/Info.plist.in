@@ -105,5 +105,10 @@
          before the slot was declared. -->
     <key>UILaunchScreen</key>
     @LAUNCH@
+    <!-- THE MEDIA SESSION'S BACKGROUND MODE (docs/media-plan.md §5), opt-in
+         per bundle: make_bundle writes UIBackgroundModes audio for a guest
+         that declares a session, and the interpreter refuses a session in a
+         bundle without it. -->
+    @MEDIA@
 </dict>
 </plist>

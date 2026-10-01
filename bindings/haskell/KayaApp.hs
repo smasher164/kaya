@@ -280,6 +280,41 @@ module KayaApp
     timePickerBoundOn,
     colorPickerOn,
     colorPickerBoundOn,
+    videoShowing,
+    player,
+    PlayerAttr (..),
+    playerSource,
+    clearPlayer,
+    playerSpeed,
+    playerVolume,
+    playerMuted,
+    playerLoop,
+    playerCaptions,
+    clearCaptions,
+    play,
+    pause,
+    seek,
+    releasePlayer,
+    selectAudio,
+    selectCaptions,
+    showPlayer,
+    declareSession,
+    SessionAttr (..),
+    playerReading,
+    playerTracks,
+    playerCue,
+    onPlayerState,
+    onEnded,
+    onFailed,
+    onSeekCompleted,
+    onPosition,
+    onTracks,
+    onCue,
+    onSession,
+    canPlay,
+    -- The dispatch loop's media arm, for guests/haskell/AbortCheck.hs
+    -- alone; a guest calls none of it.
+    mediaOccurrence,
     sliderOn,
     sliderBoundOn,
     rangeOn,
@@ -329,6 +364,8 @@ module KayaApp
     datePicker,
     timePicker,
     colorPicker,
+    video,
+    TplPlayerSource (..),
     bindDateField,
     bindTimeField,
     bindColorField,
@@ -428,7 +465,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time.Calendar (Day, toGregorian)
 import Data.Time.LocalTime (TimeOfDay (..))
-import Data.Word (Word32, Word64)
+import Data.Word (Word16, Word32, Word64)
 import System.Exit (ExitCode (..), exitSuccess, exitWith)
 
 import Control.Exception (SomeException, catch, evaluate)
@@ -2807,6 +2844,8 @@ data Attr (c :: WClass) where
   -- | Whether a colour picker's user may choose translucency
   -- (docs\/color-picker-plan.md §3 rule 3); off by default.
   Alpha :: Bool -> Attr 'LeafW
+  -- | How a video view fits its picture (docs\/media-plan.md §3).
+  FitAs :: Fit -> Attr 'LeafW
   -- | The granularity a slider's thumb rests on: min + k * step
   -- (docs\/slider-plan.md S1). Divides the range evenly; 0 is continuous.
   Step :: Double -> Attr 'LeafW
@@ -2882,6 +2921,7 @@ applyAttr (MaxDate d) (Widget n) =
   let (y, m, dd) = toGregorian d
    in emitB (W.txSetMaxDate n (fromIntegral y) m dd)
 applyAttr (Alpha on) (Widget n) = emitB (W.txSetAlpha n on)
+applyAttr (FitAs f) (Widget n) = emitB (W.txSetFit n (fitWire f))
 applyAttr (MinuteStep minutes) (Widget n) =
   emitB (W.txSetMinuteStep n (fromIntegral minutes))
 applyAttr (Step step) (Widget n) = emitB (W.txSetStep n step)
@@ -3342,6 +3382,143 @@ imageBound sig = leafish $ do
   bindSource w sig
   return w
 
+-- | A video view showing a player (docs\/media-plan.md §3): the platform's
+-- own view with its controls off. 'FitAs' sets the fit; its visibility
+-- arrives through 'onVisibility'.
+videoShowing :: (LeafArgs r) => Player -> r
+videoShowing (Player p) = leafish $ do
+  w@(Widget n) <- widget W.kindVideo
+  emitB (W.txSetPlayer n (fromIntegral p))
+  return w
+
+-- | A player's settings at creation.
+data PlayerAttr
+  = PlayerSourceIs MediaSource
+  | PlayerSpeedIs Double
+  | PlayerVolumeIs Double
+  | PlayerMutedIs Bool
+  | PlayerLoopIs Bool
+  | -- | A sidecar WebVTT file and its BCP 47 language.
+    PlayerCaptionsIs MediaSource Text
+
+-- | A media player (docs\/media-plan.md §2): an object with no place in
+-- the layout, shown by 'videoShowing' or heard alone.
+player :: [PlayerAttr] -> Build Player
+player attrs = do
+  n <- allocP
+  emitB (W.txCreatePlayer n)
+  let p = Player n
+  mapM_
+    ( \a -> case a of
+        PlayerSourceIs s -> playerSource p s
+        PlayerSpeedIs r -> playerSpeed p r
+        PlayerVolumeIs v -> playerVolume p v
+        PlayerMutedIs on -> playerMuted p on
+        PlayerLoopIs on -> playerLoop p on
+        PlayerCaptionsIs s lang -> playerCaptions p s lang
+    )
+    attrs
+  return p
+
+writePlayerProp :: Player -> Word32 -> W.Value -> Build ()
+writePlayerProp (Player p) prop v = emitB (W.txSetPlayerProp p prop v)
+
+-- | Load a source, replacing what the player held.
+playerSource :: Player -> MediaSource -> Build ()
+playerSource p (MediaSource s) = writePlayerProp p W.ppropSource (W.VStr (T.unpack s))
+
+-- | Unload, back to idle.
+clearPlayer :: Player -> Build ()
+clearPlayer p = writePlayerProp p W.ppropSource (W.VStr "")
+
+playerSpeed :: Player -> Double -> Build ()
+playerSpeed p r = writePlayerProp p W.ppropSpeed (W.VF64 r)
+
+-- | 0..1, relative to the system volume.
+playerVolume :: Player -> Double -> Build ()
+playerVolume p v = writePlayerProp p W.ppropVolume (W.VF64 v)
+
+playerMuted :: Player -> Bool -> Build ()
+playerMuted p on = writePlayerProp p W.ppropMuted (W.VBool on)
+
+playerLoop :: Player -> Bool -> Build ()
+playerLoop p on = writePlayerProp p W.ppropLoop (W.VBool on)
+
+-- | A sidecar WebVTT file (an asset, an http(s) URL or a picked file) and
+-- its BCP 47 language, listed as the last caption track.
+playerCaptions :: Player -> MediaSource -> Text -> Build ()
+playerCaptions p (MediaSource s) lang = do
+  writePlayerProp p W.ppropCaptionsLanguage (W.VStr (T.unpack lang))
+  writePlayerProp p W.ppropCaptions (W.VStr (T.unpack s))
+
+clearCaptions :: Player -> Build ()
+clearCaptions p = writePlayerProp p W.ppropCaptions (W.VStr "")
+
+-- | Play; from the start when the player had ended.
+play :: Player -> Build ()
+play (Player p) = emitB (W.txPlayerCommand p W.playerCommandPlay 0)
+
+pause :: Player -> Build ()
+pause (Player p) = emitB (W.txPlayerCommand p W.playerCommandPause 0)
+
+-- | To @ms@ from the start; 'onSeekCompleted' hears where it landed.
+seek :: Player -> Int -> Build ()
+seek (Player p) ms = emitB (W.txPlayerCommand p W.playerCommandSeek (fromIntegral ms))
+
+releasePlayer :: Player -> Build ()
+releasePlayer (Player p) = emitB (W.txReleasePlayer p)
+
+-- | Select audio track @index@, 0-based in 'playerTracks'.
+selectAudio :: Player -> Int -> Build ()
+selectAudio (Player p) i = emitB (W.txSelectTrack p W.trackKindAudio (fromIntegral i + 1))
+
+-- | Select a caption track, 0-based in 'playerTracks', or none.
+selectCaptions :: Player -> Maybe Int -> Build ()
+selectCaptions (Player p) i =
+  emitB (W.txSelectTrack p W.trackKindCaption (maybe 0 (\x -> fromIntegral x + 1) i))
+
+-- | Show another player in a live video view, or none; a player is shown
+-- by one video view at a time (docs\/media-plan.md §7b).
+showPlayer :: Widget -> Maybe Player -> Build ()
+showPlayer (Widget n) mp = emitB (W.txSetPlayer n (maybe 0 (\(Player p) -> fromIntegral p) mp))
+
+-- | The session's declaration.
+data SessionAttr
+  = SessionPlayer Player
+  | SessionTitle Text
+  | SessionArtist Text
+  | SessionAlbum Text
+  | -- | An asset name.
+    SessionArtwork Text
+  | -- | The actions the app answers itself through 'onSession'; play,
+    -- pause and seek_to it leaves out apply to the attached player.
+    SessionHandles [SessionActionKind]
+  | -- | What the system shows while no player is attached.
+    SessionPlaybackState PlaybackState
+
+-- | Declare the app's one media session, replacing the last
+-- (docs\/media-plan.md §5).
+declareSession :: [SessionAttr] -> Build ()
+declareSession attrs =
+  emitB
+    ( W.txSetSession
+        (last (0 : [p | SessionPlayer (Player p) <- attrs]))
+        (foldr (\k m -> m + 2 ^ sessionActionKindWire k) 0 (concat [ks | SessionHandles ks <- attrs]))
+        (playbackStateWire (last (PlaybackNone : [s | SessionPlaybackState s <- attrs])))
+        (str [x | SessionTitle x <- attrs])
+        (str [x | SessionArtist x <- attrs])
+        (str [x | SessionAlbum x <- attrs])
+        (str [x | SessionArtwork x <- attrs])
+    )
+  where
+    str xs = W.VStr (T.unpack (last ("" : xs)))
+
+-- | Whether this platform plays @mime@ with @codecs@ (an RFC 6381 list,
+-- "" for none): true exactly when loading it would not fail as
+-- unsupported_codec or unsupported_container. Any thread.
+canPlay :: Text -> Text -> IO Bool
+canPlay = R.canPlayRaw
+
 -- THE CANVAS (docs/canvas-plan.md §2.2): 'DrawOp' holds one opcode and
 -- its operands already encoded, which is what the wire carries anyway.
 
@@ -3751,6 +3928,8 @@ data TplAttr where
   TplMax :: Double -> TplAttr
   -- | A stamped colour picker's translucency switch, constant across the copies.
   TplAlpha :: Bool -> TplAttr
+  -- | A stamped video view's fit, constant across the copies.
+  TplFitAs :: Fit -> TplAttr
   -- | What this stamped copy takes from a paste — the closed kinds by
   -- name plus any custom format ids. A CONSTANT LIST AND NOT A SOURCE.
   -- Every backend gates the paste occurrence on the focused widget's
@@ -3814,6 +3993,7 @@ applyTplAttr (TplTickSpacing spacing) (Node n) = emitT (W.txSetTickSpacing n spa
 applyTplAttr (TplMin v) (Node n) = emitT (W.txSetMin n v)
 applyTplAttr (TplMax v) (Node n) = emitT (W.txSetMax n v)
 applyTplAttr (TplAlpha on) (Node n) = emitT (W.txSetAlpha n on)
+applyTplAttr (TplFitAs f) (Node n) = emitT (W.txSetFit n (fitWire f))
 applyTplAttr (TplAccepts kinds) n = setNodeAccepts n kinds
 applyTplAttr (TplDraggable clip ops) n = setNodeDragSource n clip ops
 applyTplAttr (TplDropTarget ops) n = setNodeDropTarget n ops
@@ -3915,6 +4095,26 @@ image :: TplImageSource s => s -> Tpl Node
 image src = do
   n <- widget W.kindImage
   bindImageSource n src
+  return n
+
+-- | What a stamped video view shows: one constant player, or the row's
+-- own Player field (docs\/media-plan.md §7b).
+class TplPlayerSource s where
+  bindPlayerSource :: Node -> s -> Tpl ()
+
+instance TplPlayerSource Player where
+  bindPlayerSource (Node n) (Player p) = emitT (W.txSetPlayer n (fromIntegral p))
+
+instance TplPlayerSource (KField Player) where
+  bindPlayerSource (Node n) (KField i) = emitT (W.txBindPlayerElement n 0 i)
+
+-- | A video view per stamped copy: a player is shown by one view at a
+-- time, and a row whose player is released shows nothing; its visibility
+-- arrives through 'onVisibility', the copy's keys first.
+video :: TplPlayerSource s => s -> Tpl Node
+video src = do
+  n <- widget W.kindVideo
+  bindPlayerSource n src
   return n
 
 -- | A stamped button whose caption comes from an addressable source — a
@@ -4383,6 +4583,10 @@ class HandlerTarget e where
   -- the copy's keys come first.
   onDragEnded :: App -> e -> Keyed e (Maybe Op -> IO ()) -> IO ()
 
+  -- | How much of a video view shows, 0 to 1, as it enters, leaves, moves
+  -- by a tenth and shows whole (docs\/media-plan.md §7b).
+  onVisibility :: App -> e -> Keyed e (Double -> IO ()) -> IO ()
+
 instance HandlerTarget Widget where
   type Keyed Widget p = p
   onClick app (Widget n) handler =
@@ -4409,6 +4613,8 @@ instance HandlerTarget Widget where
     modifyIORef' (app.appWidgetDrops) (Map.insert n handler)
   onDragEnded app (Widget n) handler =
     modifyIORef' (app.appDragEnded) (Map.insert n handler)
+  onVisibility app (Widget n) handler =
+    modifyIORef' app.appMedia.widgetVisibility (Map.insert n handler)
 
 instance HandlerTarget Node where
   type Keyed Node p = [Key] -> p
@@ -4436,6 +4642,145 @@ instance HandlerTarget Node where
     modifyIORef' (app.appNodeDrops) (Map.insert n handler)
   onDragEnded app (Node n) handler =
     modifyIORef' (app.appNodeDragEnded) (Map.insert n handler)
+  onVisibility app (Node n) handler =
+    modifyIORef' app.appMedia.nodeVisibility (Map.insert n handler)
+
+-- MEDIA READINGS AND HANDLERS (docs/media-plan.md §2, §3, §5).
+
+-- | A player's readings, as of the last occurrence this loop took.
+playerReading :: App -> Player -> IO PlayerReading
+playerReading app (Player p) = Map.findWithDefault initialReading p <$> readIORef app.appMedia.readings
+
+playerTracks :: App -> Player -> IO Tracks
+playerTracks app (Player p) = Map.findWithDefault emptyTracks p <$> readIORef app.appMedia.playerTracks
+
+-- | The caption cue current on the player's clock, "" for none.
+playerCue :: App -> Player -> IO Text
+playerCue app (Player p) = Map.findWithDefault "" p <$> readIORef app.appMedia.cues
+
+onPlayer :: App -> Player -> Text -> (MediaOcc -> IO ()) -> IO ()
+onPlayer app (Player p) what h = modifyIORef' app.appMedia.playerHandlers (Map.insert (p, what) h)
+
+-- | Every state the player moves to, ended and failed included.
+onPlayerState :: App -> Player -> (PlayerState -> IO ()) -> IO ()
+onPlayerState app p f = onPlayer app p "state" $ \o -> case o of
+  MediaChanged s _ _ -> f s
+  _ -> return ()
+
+-- | The player reached its end (never, while it loops).
+onEnded :: App -> Player -> IO () -> IO ()
+onEnded app p f = onPlayer app p "ended" $ \o -> case o of
+  MediaChanged PlayerEnded _ _ -> f
+  _ -> return ()
+
+-- | The player cannot play: the closed reason, and the platform's
+-- sentence, which no two platforms word alike.
+onFailed :: App -> Player -> (MediaFailure -> Text -> IO ()) -> IO ()
+onFailed app p f = onPlayer app p "failed" $ \o -> case o of
+  MediaChanged PlayerFailed (Just why) detail -> f why detail
+  _ -> return ()
+
+-- | Where a seek the app asked for landed, in ms.
+onSeekCompleted :: App -> Player -> (Int -> IO ()) -> IO ()
+onSeekCompleted app p f = onPlayer app p "seek_completed" $ \o -> case o of
+  MediaSeeked ms -> f ms
+  _ -> return ()
+
+-- | The playhead, every KAYA_MEDIA_POSITION_TICK_MS while playing.
+onPosition :: App -> Player -> (Int -> IO ()) -> IO ()
+onPosition app p f = onPlayer app p "position" $ \o -> case o of
+  MediaPosition ms -> f ms
+  _ -> return ()
+
+-- | The player's track listing or a selection moved.
+onTracks :: App -> Player -> (Tracks -> IO ()) -> IO ()
+onTracks app p f = onPlayer app p "tracks" $ \o -> case o of
+  MediaTracks t -> f t
+  _ -> return ()
+
+-- | The current caption cue changed ("" between cues), whoever draws it.
+onCue :: App -> Player -> (Text -> IO ()) -> IO ()
+onCue app p f = onPlayer app p "cue" $ \o -> case o of
+  MediaCue s -> f s
+  _ -> return ()
+
+-- | The actions the declared session handles, from the system's media
+-- controls.
+onSession :: App -> (SessionAction -> IO ()) -> IO ()
+onSession app f = writeIORef app.appMedia.sessionHandler (Just f)
+
+-- | Fold a media occurrence into the mirror, THEN hand it on, so a
+-- handler reads the readings it was told about. The flat records'
+-- tails are tools/kaya-bindgen's (the fields in order, lists as a count
+-- then their values).
+mediaOccurrence :: App -> Word16 -> Word64 -> [W.Value] -> Maybe W.Value -> [W.Value] -> IO Bool
+mediaOccurrence app kind ident keys payload tail_
+  | kind == W.occKindPlayerChanged = do
+      case tail_ of
+        W.VI64 st : W.VI64 fl : W.VI64 dur : W.VI64 w : W.VI64 h : detail : _ -> do
+          let s = playerStateOfWire (fromIntegral st)
+              why = mediaFailureOfWire (fromIntegral fl)
+          old <- Map.findWithDefault initialReading ident <$> readIORef m.readings
+          let pos = if s == PlayerLoading || s == PlayerIdle then 0 else old.positionMs
+          modifyIORef' m.readings (Map.insert ident (PlayerReading s why pos (fromIntegral dur) (fromIntegral w) (fromIntegral h)))
+          fire ident (MediaChanged s why (case detail of W.VStr d -> T.pack d; _ -> ""))
+        _ -> return ()
+      return True
+  | kind == W.occKindPlayerPosition || kind == W.occKindSeekCompleted = do
+      -- The pair class: the position keys the record, the player rides
+      -- as the payload.
+      case payload of
+        Just (W.VI64 pid) -> do
+          let p = fromIntegral pid
+              ms = fromIntegral ident
+          modifyIORef' m.readings (Map.alter (\r -> Just (let o = maybe initialReading id r in o {positionMs = ms})) p)
+          fire p (if kind == W.occKindPlayerPosition then MediaPosition ms else MediaSeeked ms)
+        _ -> return ()
+      return True
+  | kind == W.occKindPlayerTracks = do
+      case tail_ of
+        W.VI64 asel : W.VI64 csel : W.VI64 na : rest -> do
+          let (audio, rest') = splitAt (fromIntegral na) rest
+              caps = case rest' of
+                W.VI64 nc : more -> take (fromIntegral nc) more
+                _ -> []
+              tags vs = [T.pack s | W.VStr s <- vs]
+              sel n = if n == 0 then Nothing else Just (fromIntegral n - 1)
+              t = Tracks (tags audio) (tags caps) (sel asel) (sel csel)
+          modifyIORef' m.playerTracks (Map.insert ident t)
+          fire ident (MediaTracks t)
+        _ -> return ()
+      return True
+  | kind == W.occKindCaptionCue = do
+      let text = case payload of Just (W.VStr s) -> T.pack s; _ -> ""
+      modifyIORef' m.cues (Map.insert ident text)
+      fire ident (MediaCue text)
+      return True
+  | kind == W.occKindVideoVisibility = do
+      case payload of
+        Just (W.VF64 shown) -> case keys of
+          [] -> do
+            hs <- readIORef m.widgetVisibility
+            dispatch (mapM_ ($ shown) (Map.lookup ident hs))
+          _ -> do
+            hs <- readIORef m.nodeVisibility
+            dispatch (mapM_ (\h -> h (keyPath keys) shown) (Map.lookup ident hs))
+        _ -> return ()
+      return True
+  | kind == W.occKindSessionAction = do
+      case tail_ of
+        W.VI64 action : W.VI64 atMs : _ -> do
+          h <- readIORef m.sessionHandler
+          dispatch (mapM_ ($ sessionActionOfWire (fromIntegral action) (fromIntegral atMs)) h)
+        _ -> return ()
+      return True
+  | otherwise = return False
+  where
+    m = app.appMedia
+    fire p occ = do
+      hs <- readIORef m.playerHandlers
+      let found = [h | name <- ["state", "ended", "failed", "seek_completed", "position", "tracks", "cue"], Just h <- [Map.lookup (p, name) hs]]
+      if null found then return () else dispatch (mapM_ ($ occ) found)
 
 -- | Turn the decoder's kind-and-parts into the sum, or Nothing. EMPTY
 -- IS THE UNIVERSAL NO: Nothing covers a denied prompt, an unfocused
@@ -4473,7 +4818,7 @@ newApp :: IO App
 newApp =
   App
     <$> newMVar [] -- appPosted
-    <*> newIORef (Counters 0 0 0 0 0 0 0) -- appCounters
+    <*> newIORef (Counters 0 0 0 0 0 0 0 0) -- appCounters
     <*> newIORef (Map.empty, Map.empty) -- appModel
     <*> newIORef Map.empty -- appFresh
     <*> newIORef Map.empty -- appDerived
@@ -4538,6 +4883,15 @@ newApp =
     <*> newIORef Map.empty -- appMenuSelected
     <*> newIORef Map.empty -- appMenuSelectedNode
     <*> newIORef Map.empty -- appDraws
+    <*> ( MediaState
+            <$> newIORef Map.empty
+            <*> newIORef Map.empty
+            <*> newIORef Map.empty
+            <*> newIORef Map.empty
+            <*> newIORef Map.empty
+            <*> newIORef Map.empty
+            <*> newIORef Nothing
+        ) -- appMedia
 
 -- | Set up (build the scene, register handlers) and run: occurrences
 -- dispatch on the app thread while the core owns the calling thread,
@@ -4586,6 +4940,10 @@ drainPosted app = do
   batch <- modifyMVar (app.appPosted) (\queued -> return ([], queued))
   mapM_ dispatch batch
 
+isMediaKind :: Word16 -> Bool
+isMediaKind kind =
+  kind `elem` [W.occKindPlayerChanged, W.occKindPlayerPosition, W.occKindSeekCompleted, W.occKindPlayerTracks, W.occKindCaptionCue, W.occKindVideoVisibility, W.occKindSessionAction]
+
 dispatchLoop :: App -> IO ()
 dispatchLoop app = do
   -- Claim the thread before the first occurrence: every build after
@@ -4615,6 +4973,9 @@ dispatchLoop app = do
               dispatch $ do
                 let (box, time) = askSize askTail
                 submitTx app (emitB (drawingRecord ident [] box (f box time)))
+          dispatchLoop app
+      | isMediaKind kind -> do
+          _ <- mediaOccurrence app kind ident keys payload askTail
           dispatchLoop app
       | kind == W.occKindRangeChanged || kind == W.occKindRangeCommitted -> do
           let live = kind == W.occKindRangeChanged

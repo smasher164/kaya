@@ -273,6 +273,8 @@ type App struct {
 	nodeRanges     map[uint64]func(*Tx, []any, float64, float64)
 	widgetSettles  map[uint64]func(*Tx, float64, float64)
 	nodeSettles    map[uint64]func(*Tx, []any, float64, float64)
+	// The players' mirrors and the media handlers (media.go).
+	media mediaState
 	widgetTimes    map[uint64]func(*Tx, Time)
 	nodeTimes      map[uint64]func(*Tx, []any, Time)
 	// Window lifecycle: one handler each, receiving the window id.
@@ -2104,6 +2106,15 @@ func (tx *Tx) DatePickerBound(date Signal[Date], onDate func(*Tx, Date)) Widget 
 	if onDate != nil {
 		w.OnDate(onDate)
 	}
+	return w
+}
+
+// Video creates a video view showing p (docs/media-plan.md §3): the
+// platform's own view with its controls off. A player is shown by one
+// video view at a time (§7b).
+func (tx *Tx) Video(p Player) Widget {
+	w := tx.Widget(KindVideo)
+	tx.emit(TxSetPlayer(w.id, int64(p.id)))
 	return w
 }
 
@@ -5417,6 +5428,21 @@ func (t *Tpl) DatePickerBound[S interface {
 	return n
 }
 
+// Video creates a video view in the blueprint showing a constant player;
+// VideoBound shows the row's own Player field, so each copy shows its
+// row's player (docs/media-plan.md §7b).
+func (t *Tpl) Video(p Player) Node {
+	n := t.Widget(KindVideo)
+	t.tx.emit(TxSetPlayer(n.id, int64(p.id)))
+	return n
+}
+
+func (t *Tpl) VideoBound(f Field[Player]) Node {
+	n := t.Widget(KindVideo)
+	t.BindPlayerField(n, 0, f)
+	return n
+}
+
 // ColorPicker creates a colour picker at a constant colour in the
 // blueprint; ColorPickerBound reads a signal or the row's own Color field.
 // Choices register against the node (Node.OnColor).
@@ -6563,6 +6589,8 @@ func (a *App) Serve() {
 		// record and keeps looping. The transaction is the binding's
 		// (tools/check-ambient-tx.py), and an unclaimed ask drops like
 		// any other.
+		case mediaOccurrence(kind):
+			a.mediaOccurred(kind, id, keys, payload)
 		case kind == occDrawRequested || kind == occTick:
 			a.answerCanvasAsk(kind, id, keys, tail)
 		case kind == occButtonClicked && len(keys) == 0:

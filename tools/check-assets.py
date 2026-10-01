@@ -600,6 +600,27 @@ def check(root):
                            f"it is deliberately expensive to change, "
                            f"because every lane has to stage what it "
                            f"names")
+            # THE C GUEST SIZES THE SENTENCE: guests/c/assets.c reads the
+            # census into a fixed buffer and refuses a truncation, so a
+            # root that outgrows it is a red on three lanes (docs/traps.md,
+            # the media family's 60 files).
+            c_guest = root / "guests/c/assets.c"
+            sized = re.search(r"char census\[(\d+)\];",
+                              c_guest.read_text(encoding="utf-8")
+                              if c_guest.is_file() else "")
+            sentence = len(m.group(0)) + 64
+            if sized is None:
+                bad.append("guests/c/assets.c no longer declares "
+                           "`char census[N];` — the C guest's census "
+                           "buffer is what this reads to hold the "
+                           "sentence to its size")
+            elif sentence > int(sized.group(1)):
+                bad.append(f"guests/c/assets.c reads the census into "
+                           f"{sized.group(1)} bytes and the sentence for "
+                           f"this root is about {sentence}: the C guest "
+                           f"refuses the truncation, so assets-c goes "
+                           f"red on every lane; grow `census` (and the "
+                           f"transaction buffer that carries it)")
             missing = re.search(r"no asset named \"([^\"]+)\"", line)
             if missing and missing.group(1) in assets:
                 bad.append(f"{ASSETS_SCENE} names {missing.group(1)!r} "
@@ -1180,6 +1201,14 @@ doctor_shadow("N9's census removal", s, "tools/scenes/assets.steps",
 refused(s, "freezes no census",
         "N9 (a scene that stopped asserting the census)")
 
+# N9b — C6: the C guest's census buffer shrunk below the sentence the
+# root produces (the shipped state once the media family arrived).
+s = fresh("n9b")
+doctor_shadow("N9b's census buffer", s, "guests/c/assets.c",
+              r"char census\[\d+\];", "char census[1024];")
+refused(s, "reads the census into 1024 bytes",
+        "N9b (a C census buffer smaller than the sentence)")
+
 # N10 — C7: the APK's prefix is spelled differently in two of the three
 # files, so the build copies into one directory and the reader reads
 # another.
@@ -1455,7 +1484,7 @@ g.negative("N37 (a committed media file its generator no longer writes)",
            lambda: media_derivation(s),
            want="differs from what tools/gen-media.py generates")
 
-g.negatives_ran(38)
+g.negatives_ran(39)
 
 # The vacuity floor rule 5 asks for, over the census the checker walks.
 g.counted("files under the asset root",

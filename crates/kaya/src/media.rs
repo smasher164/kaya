@@ -38,6 +38,10 @@ pub(crate) enum Report {
     Tracks { audio: Vec<String>, captions: Vec<String>, audio_selected: Option<usize>, caption_selected: Option<usize> },
     /// The text the platform shows for its own selected caption track now.
     Cue(String),
+    /// An http(s) sidecar the backend fetched with the platform's own
+    /// networking, `url` echoing the one it was handed.
+    CaptionsText { url: String, text: String },
+    CaptionsFailed { url: String, domain: String, code: i64, underlying: i64, detail: String },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -60,6 +64,8 @@ struct Player {
     sidecar: Option<Captions>,
     sidecar_language: String,
     sidecar_selected: bool,
+    /// An http(s) sidecar the backend is fetching.
+    sidecar_fetch: Option<String>,
     /// What the app last heard: the listing, and the current cue.
     published_tracks: PlayerTracks,
     cue: String,
@@ -81,6 +87,7 @@ impl Player {
             sidecar: None,
             sidecar_language: "und".to_owned(),
             sidecar_selected: false,
+            sidecar_fetch: None,
             published_tracks: PlayerTracks::default(),
             cue: String::new(),
         }
@@ -247,7 +254,15 @@ impl Media {
                 out.push(ApplyOp::SetPlayerProp { player, prop, value: Value::Str(url) });
             }
             (PlayerProp::Captions, Value::Str(source)) => {
-                p.sidecar = if source.is_empty() { None } else { Some(read_sidecar(player, &source)) };
+                let remote = is_remote(&source);
+                if p.sidecar_fetch.take().is_some() && !remote {
+                    out.push(ApplyOp::SetPlayerProp { player, prop, value: Value::Str(String::new()) });
+                }
+                p.sidecar = if source.is_empty() || remote { None } else { Some(read_sidecar(player, &source)) };
+                if remote {
+                    p.sidecar_fetch = Some(source.clone());
+                    out.push(ApplyOp::SetPlayerProp { player, prop, value: Value::Str(source) });
+                }
                 if p.sidecar.is_none() && p.sidecar_selected {
                     p.sidecar_selected = false;
                     p.publish_cue(player, String::new(), published);
@@ -531,6 +546,37 @@ impl Media {
                 p.publish_tracks(player, &mut out);
             }
             (_, Report::Cue(text)) if !p.sidecar_selected => p.publish_cue(player, text, &mut out),
+            (_, Report::CaptionsText { url, text }) if p.sidecar_fetch.as_deref() == Some(url.as_str()) => {
+                p.sidecar_fetch = None;
+                match Captions::parse(&text) {
+                    Ok(c) => {
+                        p.sidecar = Some(c);
+                        p.publish_tracks(player, &mut out);
+                    }
+                    Err(why) if p.state != S::Failed => {
+                        p.state = S::Failed;
+                        p.failure = Some(MediaFailure::DecodeError);
+                        p.detail = format!("kaya: captions {url}: {why}");
+                        out.push(changed(player, p));
+                    }
+                    Err(_) => {}
+                }
+            }
+            (state, Report::CaptionsFailed { url, domain, code, underlying, detail })
+                if p.sidecar_fetch.as_deref() == Some(url.as_str()) =>
+            {
+                p.sidecar_fetch = None;
+                if state != S::Failed {
+                    p.state = S::Failed;
+                    p.failure = Some(failure_reason(&domain, code, underlying));
+                    p.detail = if detail.is_empty() {
+                        format!("kaya: captions {url}: {domain} {code}")
+                    } else {
+                        format!("kaya: captions {url}: {detail}")
+                    };
+                    out.push(changed(player, p));
+                }
+            }
             (S::Ready | S::Playing | S::Paused | S::Ended, Report::Seeked(ms)) if p.seeks > 0 => {
                 p.seeks -= 1;
                 if p.state == S::Ended {
@@ -557,6 +603,38 @@ fn changed(player: PlayerId, p: &Player) -> Occurrence {
     }
 }
 
+/// GStreamer's `missing-plugin` element message, as the GTK arm reports it:
+/// this prefix, then the media type of the caps nothing could handle.
+pub(crate) const GST_MISSING_PLUGIN: &str = "missing-plugin:";
+
+/// A GStreamer error's `underlying` when the element that posted it is a
+/// network source (klass Source/Network): a refused, unresolvable or
+/// unroutable connection is a stream error from that element alone
+/// (docs/probes/media-suite-2026-09-29.md).
+pub(crate) const GST_FROM_NETWORK_SOURCE: i64 = 1;
+
+/// Whether a missing-plugin message's caps name a container or a manifest
+/// (a demuxer was missing) rather than a codec.
+pub(crate) fn gst_container_caps(media_type: &str) -> bool {
+    matches!(
+        media_type,
+        "video/quicktime"
+            | "video/x-matroska"
+            | "video/webm"
+            | "audio/webm"
+            | "video/mpegts"
+            | "application/ogg"
+            | "audio/ogg"
+            | "video/ogg"
+            | "audio/x-wav"
+            | "video/x-msvideo"
+            | "video/x-flv"
+            | "application/x-hls"
+            | "application/dash+xml"
+            | "application/vnd.ms-sstr+xml"
+    )
+}
+
 /// THE FAILURE TABLE (docs/media-plan.md §7a): a platform's error, as its
 /// domain and codes, to the closed reason. `kaya` is a backend's own
 /// classification (the MEDIA_FAILURE value as the code); `http` a status.
@@ -577,9 +655,55 @@ pub(crate) fn failure_reason(domain: &str, code: i64, underlying: i64) -> MediaF
         ("NSURLErrorDomain", _, _) => F::Network,
         ("CoreMediaErrorDomain", -12938, _) => F::NotFound,
         ("CoreMediaErrorDomain", -12847, _) => F::UnsupportedContainer,
+        // media3's PlaybackException.errorCode, the HTTP status beneath 2004.
+        ("media3", 4004 | 4005, _) => F::UnsupportedCodec,
+        ("media3", 3003 | 3004, _) => F::UnsupportedContainer,
+        ("media3", 2005, _) => F::NotFound,
+        ("media3", 2004, 404 | 410) => F::NotFound,
+        ("media3", 2001 | 2002 | 2004, _) => F::Network,
+        // MediaCodec.CodecException's ERROR_INSUFFICIENT_RESOURCE and
+        // ERROR_RECLAIMED, and media3's reclaimed code: the platform's own
+        // resource signals (docs/traps.md, the emulator pool's 15th player).
+        ("media3", 4001 | 4003, 1100 | 1101) => F::Resources,
+        ("media3", 4006, _) => F::Resources,
+        ("media3", 4001 | 4003 | 3001 | 3002, _) => F::DecodeError,
+        // GStreamer's GError quarks and codes, and the missing-plugin
+        // message's caps (the GTK arm).
+        (d, _, _) if d.starts_with(GST_MISSING_PLUGIN) => {
+            if gst_container_caps(&d[GST_MISSING_PLUGIN.len()..]) {
+                F::UnsupportedContainer
+            } else {
+                F::UnsupportedCodec
+            }
+        }
+        ("gst-stream-error-quark", 6, _) => F::UnsupportedCodec,
+        ("gst-stream-error-quark", 4 | 5 | 9, _) => F::UnsupportedContainer,
+        ("gst-stream-error-quark", 7, _) => F::DecodeError,
+        ("gst-stream-error-quark", 1, GST_FROM_NETWORK_SOURCE) => F::Network,
+        ("gst-resource-error-quark", 3, _) => F::NotFound,
+        ("gst-resource-error-quark", _, GST_FROM_NETWORK_SOURCE) => F::Network,
+        // WinUI's MediaPlayerError (2 NetworkError, 3 DecodingError, 4
+        // SourceNotSupported) over its ExtendedErrorCode: one
+        // SourceNotSupported for a refused port, a 404 and an unknown
+        // container alike, told apart by the HRESULT (measured,
+        // docs/probes/media-suite-2026-09-29.md).
+        ("MediaPlayerError", 4, WIN_UNSUPPORTED_BYTESTREAM | WIN_UNSUPPORTED_MANIFEST) => F::UnsupportedContainer,
+        ("MediaPlayerError", 4, WIN_FILE_NOT_FOUND) => F::NotFound,
+        ("MediaPlayerError", 4, WIN_SERVER_NOT_FOUND) => F::Network,
+        ("MediaPlayerError", 2, _) => F::Network,
+        ("MediaPlayerError", 3, _) => F::DecodeError,
+        // A transport failure of the HTTP client a WinUI sidecar is fetched
+        // with; a status arrives as `http`.
+        ("Windows.Web.Http", _, _) => F::Network,
         _ => F::DecodeError,
     }
 }
+
+/// Media Foundation's HRESULTs under WinUI's MediaPlayerError, as u32.
+const WIN_UNSUPPORTED_BYTESTREAM: i64 = 0xC00D_36C4;
+const WIN_UNSUPPORTED_MANIFEST: i64 = 0xC00D_6591;
+const WIN_FILE_NOT_FOUND: i64 = 0xC00D_001A;
+const WIN_SERVER_NOT_FOUND: i64 = 0xC00D_0035;
 
 /// Where a `source` points, checked before any backend sees it: an asset
 /// name through the one resolver, an http(s) URL as written, a picked
@@ -600,7 +724,7 @@ pub(crate) fn resolve_source(source: &str) -> Resolved {
     if let Some(refusal) = refused_before_load(&lower) {
         return refusal;
     }
-    if source.starts_with('/') {
+    if std::path::Path::new(source).is_absolute() {
         return if std::path::Path::new(source).is_file() {
             Resolved::Url { url: crate::assets::file_url(std::path::Path::new(source)), remote: false }
         } else {
@@ -613,18 +737,16 @@ pub(crate) fn resolve_source(source: &str) -> Resolved {
     }
 }
 
-/// A sidecar WebVTT file, read and parsed by the core (docs/media-plan.md
-/// §3): an asset name or a picked file's absolute path. kaya has no HTTP
-/// client, so a stream's captions ride inside the stream (HLS) instead.
-fn read_sidecar(player: PlayerId, source: &str) -> Captions {
+fn is_remote(source: &str) -> bool {
     let lower = source.to_ascii_lowercase();
-    assert!(
-        !(lower.starts_with("http://") || lower.starts_with("https://")),
-        "kaya: player {} captions {source:?} — a sidecar caption file is a local source, an asset \
-         name or a picked file's path; a stream carries its captions inside it (docs/media-plan.md §3)",
-        player.0
-    );
-    let bytes = if source.starts_with('/') {
+    lower.starts_with("http://") || lower.starts_with("https://")
+}
+
+/// A LOCAL sidecar WebVTT file, read and parsed by the core (docs/media-plan.md
+/// §3): an asset name or a picked file's absolute path. An http(s) one is
+/// fetched by the backend and handed back as Report::CaptionsText.
+fn read_sidecar(player: PlayerId, source: &str) -> Captions {
+    let bytes = if std::path::Path::new(source).is_absolute() {
         std::fs::read(source).map_err(|e| format!("kaya: no caption file at {source}: {e}"))
     } else {
         crate::assets::read(source)
@@ -938,6 +1060,64 @@ mod tests {
             ("kaya", 1, 0, F::UnsupportedCodec),
             ("kaya", 2, 0, F::UnsupportedContainer),
             ("somewhere", 1, 2, F::DecodeError),
+            ("MediaPlayerError", 4, 0xC00D_36C4, F::UnsupportedContainer),
+            ("MediaPlayerError", 4, 0xC00D_6591, F::UnsupportedContainer),
+            ("MediaPlayerError", 4, 0xC00D_001A, F::NotFound),
+            ("MediaPlayerError", 4, 0xC00D_0035, F::Network),
+            ("MediaPlayerError", 2, 0, F::Network),
+            ("MediaPlayerError", 3, 0x887A_0022, F::DecodeError),
+            ("MediaPlayerError", 4, 0x8000_4005, F::DecodeError),
+            ("Windows.Web.Http", 0x8007_2EFD, 0, F::Network),
+            ("media3", 4004, 0, F::UnsupportedCodec),
+            ("media3", 4005, 0, F::UnsupportedCodec),
+            ("media3", 3003, 0, F::UnsupportedContainer),
+            ("media3", 3004, 0, F::UnsupportedContainer),
+            ("media3", 2005, 0, F::NotFound),
+            ("media3", 2004, 404, F::NotFound),
+            ("media3", 2004, 410, F::NotFound),
+            ("media3", 2004, 500, F::Network),
+            ("media3", 2001, 0, F::Network),
+            ("media3", 2002, 0, F::Network),
+            ("media3", 4001, 0, F::DecodeError),
+            ("media3", 4003, 0, F::DecodeError),
+            ("media3", 3001, 0, F::DecodeError),
+            ("media3", 3002, 0, F::DecodeError),
+            ("media3", 4001, 1100, F::Resources),
+            ("media3", 4003, 1101, F::Resources),
+            ("media3", 4006, 0, F::Resources),
+            ("media3", 4003, 14, F::DecodeError),
+        ];
+        for (domain, code, underlying, want) in rows {
+            assert_eq!(failure_reason(domain, *code, *underlying), *want, "{domain} {code} {underlying}");
+        }
+    }
+
+    /// The GStreamer column (the GTK arm): GError quark and code, the
+    /// network source flag, and a missing-plugin message's caps.
+    #[test]
+    fn the_failure_table_maps_gstreamer_errors_and_missing_plugins() {
+        use MediaFailure as F;
+        let net = GST_FROM_NETWORK_SOURCE;
+        let rows: &[(&str, i64, i64, F)] = &[
+            ("missing-plugin:video/x-av1", 0, 0, F::UnsupportedCodec),
+            ("missing-plugin:video/x-h264", 0, 0, F::UnsupportedCodec),
+            ("missing-plugin:audio/mpeg", 0, 0, F::UnsupportedCodec),
+            ("missing-plugin:video/mpegts", 0, 0, F::UnsupportedContainer),
+            ("missing-plugin:video/quicktime", 0, 0, F::UnsupportedContainer),
+            ("missing-plugin:video/x-matroska", 0, 0, F::UnsupportedContainer),
+            ("missing-plugin:application/x-hls", 0, 0, F::UnsupportedContainer),
+            ("missing-plugin:application/dash+xml", 0, 0, F::UnsupportedContainer),
+            ("gst-stream-error-quark", 6, 0, F::UnsupportedCodec),
+            ("gst-stream-error-quark", 4, 0, F::UnsupportedContainer),
+            ("gst-stream-error-quark", 5, 0, F::UnsupportedContainer),
+            ("gst-stream-error-quark", 9, 0, F::UnsupportedContainer),
+            ("gst-stream-error-quark", 7, 0, F::DecodeError),
+            ("gst-stream-error-quark", 1, net, F::Network),
+            ("gst-stream-error-quark", 1, 0, F::DecodeError),
+            ("gst-resource-error-quark", 3, 0, F::NotFound),
+            ("gst-resource-error-quark", 3, net, F::NotFound),
+            ("gst-resource-error-quark", 5, net, F::Network),
+            ("gst-resource-error-quark", 5, 0, F::DecodeError),
         ];
         for (domain, code, underlying, want) in rows {
             assert_eq!(failure_reason(domain, *code, *underlying), *want, "{domain} {code} {underlying}");
@@ -1218,6 +1398,63 @@ mod tests {
         assert!(scene.video_visible(copy, 1.0).is_empty(), "a torn-down copy reports nothing");
     }
 
+    const VTT: &str = "WEBVTT\n\n00:00.000 --> 00:01.000\nfirst cue\n\n00:01.000 --> 00:02.000\nsecond cue\n";
+
+    #[test]
+    fn an_http_sidecar_is_fetched_by_the_backend_and_parsed_here() {
+        let (mut m, _, _) = with_source("media/h264_aac.mp4");
+        let (mut out, mut heard) = (Vec::new(), Vec::new());
+        let url = "http://127.0.0.1:8765/captions.vtt";
+        m.set_prop(P, PlayerProp::Captions, Value::Str(url.into()), &mut out, &mut heard);
+        assert!(
+            out.contains(&ApplyOp::SetPlayerProp { player: P, prop: PlayerProp::Captions, value: Value::Str(url.into()) }),
+            "the backend is handed the URL to fetch: {out:?}"
+        );
+        assert!(m.report(P, Report::CaptionsText { url: "http://elsewhere/old.vtt".into(), text: VTT.into() }).is_empty());
+        let heard = m.report(P, Report::CaptionsText { url: url.into(), text: VTT.into() });
+        assert!(
+            heard.iter().any(|o| matches!(o, Occurrence::PlayerTracks { tracks, .. } if tracks.captions == ["und"])),
+            "the fetched sidecar is listed: {heard:?}"
+        );
+        let (mut out, mut heard) = (Vec::new(), Vec::new());
+        m.select(P, TrackKind::Caption, 1, &mut out, &mut heard);
+        assert_eq!(m.caption_at(P, 1500).0, "second cue");
+    }
+
+    #[test]
+    fn a_failed_sidecar_fetch_fails_the_player_with_the_mapped_reason() {
+        for (code, want) in [(404, MediaFailure::NotFound), (503, MediaFailure::Network)] {
+            let (mut m, _, _) = with_source("media/h264_aac.mp4");
+            let (mut out, mut heard) = (Vec::new(), Vec::new());
+            let url = "http://127.0.0.1:8765/nope.vtt";
+            m.set_prop(P, PlayerProp::Captions, Value::Str(url.into()), &mut out, &mut heard);
+            let heard = m.report(
+                P,
+                Report::CaptionsFailed { url: url.into(), domain: "http".into(), code, underlying: 0, detail: String::new() },
+            );
+            assert!(
+                heard.iter().any(|o| matches!(o, Occurrence::PlayerChanged { state: PlayerState::Failed, failure: Some(f), .. } if *f == want)),
+                "{code}: {heard:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn replacing_a_pending_fetch_with_a_local_sidecar_cancels_it() {
+        let (mut m, _, _) = with_source("media/h264_aac.mp4");
+        let (mut out, mut heard) = (Vec::new(), Vec::new());
+        let url = "https://example.invalid/c.vtt";
+        m.set_prop(P, PlayerProp::Captions, Value::Str(url.into()), &mut out, &mut heard);
+        out.clear();
+        m.set_prop(P, PlayerProp::Captions, Value::Str("media/captions.vtt".into()), &mut out, &mut heard);
+        assert!(out.contains(&ApplyOp::SetPlayerProp { player: P, prop: PlayerProp::Captions, value: Value::Str(String::new()) }));
+        let late = m.report(
+            P,
+            Report::CaptionsFailed { url: url.into(), domain: "http".into(), code: 404, underlying: 0, detail: String::new() },
+        );
+        assert!(late.is_empty(), "a stale fetch's answer is not news: {late:?}");
+    }
+
     #[test]
     fn a_sidecar_is_the_last_caption_track_and_the_core_times_its_cues() {
         let (mut m, _, _) = with_source("media/h264_aac.mp4");
@@ -1289,13 +1526,6 @@ mod tests {
     fn a_caption_track_past_the_listing_is_refused() {
         let (mut m, _, _) = with_source("media/h264_aac.mp4");
         m.select(P, TrackKind::Caption, 3, &mut Vec::new(), &mut Vec::new());
-    }
-
-    #[test]
-    #[should_panic(expected = "a sidecar caption file is a local source")]
-    fn a_streamed_sidecar_is_refused() {
-        let (mut m, mut out, mut heard) = with_source("media/h264_aac.mp4");
-        m.set_prop(P, PlayerProp::Captions, Value::Str("http://127.0.0.1/c.vtt".into()), &mut out, &mut heard);
     }
 
     #[test]

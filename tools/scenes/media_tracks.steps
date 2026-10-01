@@ -2,9 +2,11 @@
 # item's audio and caption listing (BCP 47 tags, the selection in brackets
 # counting from 1), a second audio track selected, the last caption track
 # selected, and the current cue read with the player paused at 0.5 s and
-# 1.5 s, and once played through. The last item is the floor file with a sidecar WebVTT, which kaya
-# parses, times and draws on every platform, so there expect_caption reads
-# what kaya's caption renderer drew. `{media:…}` is this lane's table of
+# 1.5 s, and once played through. The last items are the floor file with a
+# sidecar WebVTT, which kaya parses, times and draws on every platform, so
+# there expect_caption reads what kaya's caption renderer drew: an asset,
+# the same file fetched from the lane's local server with the platform's
+# own networking, and a 404 there, which fails the player. `{media:…}` is this lane's table of
 # refused items and `{captions:…}` its table of embedded caption tracks it
 # does not expose (MP4 text on Windows, settled). The look is never asserted.
 expect label#0 "idle"
@@ -78,3 +80,18 @@ click button#5
 expect label#3 "captions en [-]"
 expect label#4 ""
 expect_caption video#0 ""
+click button#0
+expect label#1 "h264_aac.mp4 + http captions.vtt"
+expect label#0 "ready, can_play yes"
+expect label#3 "captions en [-]"
+click button#2
+expect label#3 "captions en [1]"
+click button#3
+expect label#4 "first cue"
+expect_caption video#0 "first cue"
+click button#4
+expect label#4 "second cue"
+expect_caption video#0 "second cue"
+click button#0
+expect label#1 "h264_aac.mp4 + http nope.vtt"
+expect label#0 "failed not_found, can_play yes"

@@ -369,6 +369,7 @@ var notForwarded = map[string]string{
 	"DateField":    "Tpl.BindDateField, the floor under DatePicker",
 	"TimeField":    "Tpl.BindTimeField, the floor under TimePicker",
 	"ColorField":   "Tpl.BindColorField, the floor under ColorPicker",
+	"PlayerField":  "Tpl.BindPlayerField, the floor under Video",
 }
 
 // props reads the prop writes a surface declares: a method whose FIRST
@@ -415,7 +416,7 @@ const (
 )
 
 func TestEveryTemplatePropReachesTheSealedSurfaces(t *testing.T) {
-	base := readSource(t, "app.go") + readSource(t, "records.go")
+	base := readSource(t, "app.go") + readSource(t, "records.go") + readSource(t, "media.go")
 	arm := readSource(t, "sums.go")
 	gen := readSource(t, "../../cmd/kaya-gen/main.go")
 

@@ -50,6 +50,25 @@ CANVAS = "crates/kaya/src/canvas.rs"
 CARGO = "crates/kaya/Cargo.toml"
 
 
+def without_block(text, opener):
+    """`text` with the brace block `opener` opens cut out (its lines kept
+    as blanks, so line numbers hold); None when `opener` is not there."""
+    at = text.find(opener)
+    if at < 0:
+        return None
+    depth, j = 0, at + len(opener) - 1
+    while j < len(text):
+        if text[j] == "{":
+            depth += 1
+        elif text[j] == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        j += 1
+    cut = text[at:j + 1]
+    return text[:at] + "\n" * cut.count("\n") + text[j + 1:]
+
+
 def strip_comments(text):
     """Comments legitimately DISCUSS the vocabulary — every file here
     explains why it does not read one — so a clause that searched raw
@@ -388,9 +407,17 @@ def check(gtk, winui, swiftui, compose):
     # its parent assigned, so a squeezed `fixed` canvas meets one of
     # those fits whichever is chosen. KayaCanvas's natural size IS the
     # blit and its snapshot draws the blit at that size.
-    m = re.search(r"\bContentFit\b", gtk_body)
+    # The video view's `fit` IS GtkContentFit (docs/media-plan.md §3), so
+    # the media module is read apart; the canvas's own code may not name it.
+    canvas_side = without_block(gtk_body, "mod gtk_media {")
+    if canvas_side is None:
+        bad.append(
+            f"{paths['gtk']}: `mod gtk_media {{` is gone, so this clause's "
+            f"one exemption names nothing; move it with the video view")
+        canvas_side = gtk_body
+    m = re.search(r"\bContentFit\b", canvas_side)
     if m:
-        n = gtk_body.count("\n", 0, m.start()) + 1
+        n = canvas_side.count("\n", 0, m.start()) + 1
         bad.append(
             f"{paths['gtk']}:{n} names GtkContentFit. Every member of "
             f"that vocabulary scales the blit at some size — Fill "
@@ -669,6 +696,14 @@ def negatives():
                lambda p=s: check(str(p), WINUI, SWIFTUI, COMPOSE),
                want="names GtkContentFit")
 
+    # N4e2: THE VIDEO VIEW'S EXEMPTION NAMING NOTHING — the media module
+    # renamed, so its ContentFit would count against the canvas.
+    s = g.perturb("N4e2 (the media module the exemption names, renamed)",
+                  GTK, r"mod gtk_media \{", "mod gtk_video {", flags=re.S)
+    g.negative("a ContentFit exemption whose module is gone",
+               lambda p=s: check(str(p), WINUI, SWIFTUI, COMPOSE),
+               want="`mod gtk_media {` is gone")
+
     # N4f: THE COMPOSE TRACK REPORT REMOVED — the same silent-inert
     # state as N4c, one interpreter over.
     s = g.perturb("N4f (the Compose canvas track report removed)",
@@ -751,7 +786,7 @@ def negatives():
                lambda p=s: check_canonical(str(p), CARGO),
                want="no longer switches threads on by size")
 
-    g.negatives_ran(24)
+    g.negatives_ran(25)
 
 
 negatives()

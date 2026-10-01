@@ -191,6 +191,34 @@ module Kaya.Core
     colorIsOpaque,
     packColorValue,
     colorOfPacked,
+    PlayerState (..),
+    playerStateName,
+    playerStateOfWire,
+    MediaFailure (..),
+    mediaFailureName,
+    mediaFailureOfWire,
+    SessionAction (..),
+    SessionActionKind (..),
+    sessionActionKind,
+    sessionActionKindWire,
+    sessionActionOfWire,
+    PlaybackState (..),
+    playbackStateWire,
+    Fit (..),
+    fitWire,
+    MediaSource (..),
+    mediaAsset,
+    mediaUrl,
+    mediaPicked,
+    Player (..),
+    noPlayer,
+    PlayerReading (..),
+    initialReading,
+    Tracks (..),
+    emptyTracks,
+    MediaOcc (..),
+    MediaState (..),
+    allocP,
     recordHandle,
     insertRecord,
     insertFresh,
@@ -361,7 +389,8 @@ data Counters = Counters
     cAlert :: !Word64,
     cFileDialog :: !Word64,
     cClipboardRead :: !Word64,
-    cMenuItem :: !Word64
+    cMenuItem :: !Word64,
+    cPlayer :: !Word64
   }
 
 -- One collection instance: the table inside the stamped copy its path
@@ -1465,6 +1494,235 @@ colorOfPacked packed =
   let (red, green, blue, alpha) = W.unpackColor packed
    in Color (fromIntegral red) (fromIntegral green) (fromIntegral blue) (fromIntegral alpha)
 
+-- | What a media player reads (docs\/media-plan.md §2).
+data PlayerState
+  = PlayerIdle
+  | PlayerLoading
+  | PlayerReady
+  | PlayerPlaying
+  | PlayerPaused
+  | PlayerEnded
+  | PlayerFailed
+  deriving (Eq, Show)
+
+-- | The vocabulary's own word: @ready@, @failed@.
+playerStateName :: PlayerState -> Text
+playerStateName s = case s of
+  PlayerIdle -> "idle"
+  PlayerLoading -> "loading"
+  PlayerReady -> "ready"
+  PlayerPlaying -> "playing"
+  PlayerPaused -> "paused"
+  PlayerEnded -> "ended"
+  PlayerFailed -> "failed"
+
+playerStateOfWire :: Word32 -> PlayerState
+playerStateOfWire n
+  | n == W.playerStateIdle = PlayerIdle
+  | n == W.playerStateLoading = PlayerLoading
+  | n == W.playerStateReady = PlayerReady
+  | n == W.playerStatePlaying = PlayerPlaying
+  | n == W.playerStatePaused = PlayerPaused
+  | n == W.playerStateEnded = PlayerEnded
+  | n == W.playerStateFailed = PlayerFailed
+  | otherwise = error ("kaya: a player state of " <> show n <> ", which this build does not know")
+
+-- | Why a player cannot play: the closed reason (docs\/media-plan.md §7a).
+data MediaFailure
+  = MediaUnsupportedCodec
+  | MediaUnsupportedContainer
+  | MediaNotFound
+  | MediaNetwork
+  | MediaDecodeError
+  | MediaResources
+  deriving (Eq, Show)
+
+-- | The vocabulary's own word: @not_found@, @network@.
+mediaFailureName :: MediaFailure -> Text
+mediaFailureName f = case f of
+  MediaUnsupportedCodec -> "unsupported_codec"
+  MediaUnsupportedContainer -> "unsupported_container"
+  MediaNotFound -> "not_found"
+  MediaNetwork -> "network"
+  MediaDecodeError -> "decode_error"
+  MediaResources -> "resources"
+
+mediaFailureOfWire :: Word32 -> Maybe MediaFailure
+mediaFailureOfWire n
+  | n == W.mediaFailureNone = Nothing
+  | n == W.mediaFailureUnsupportedCodec = Just MediaUnsupportedCodec
+  | n == W.mediaFailureUnsupportedContainer = Just MediaUnsupportedContainer
+  | n == W.mediaFailureNotFound = Just MediaNotFound
+  | n == W.mediaFailureNetwork = Just MediaNetwork
+  | n == W.mediaFailureDecodeError = Just MediaDecodeError
+  | n == W.mediaFailureResources = Just MediaResources
+  | otherwise = error ("kaya: a media failure of " <> show n <> ", which this build does not know")
+
+-- | What the system's media controls ask (docs\/media-plan.md §5);
+-- 'SessionSeekTo' carries where, in ms.
+data SessionAction
+  = SessionPlay
+  | SessionPause
+  | SessionStop
+  | SessionSeekTo Int
+  | SessionSeekForward
+  | SessionSeekBackward
+  | SessionNext
+  | SessionPrevious
+  deriving (Eq, Show)
+
+-- | An action a session declares it handles.
+data SessionActionKind
+  = ActionPlay
+  | ActionPause
+  | ActionStop
+  | ActionSeekTo
+  | ActionSeekForward
+  | ActionSeekBackward
+  | ActionNext
+  | ActionPrevious
+  deriving (Eq, Show)
+
+sessionActionKind :: SessionAction -> SessionActionKind
+sessionActionKind a = case a of
+  SessionPlay -> ActionPlay
+  SessionPause -> ActionPause
+  SessionStop -> ActionStop
+  SessionSeekTo _ -> ActionSeekTo
+  SessionSeekForward -> ActionSeekForward
+  SessionSeekBackward -> ActionSeekBackward
+  SessionNext -> ActionNext
+  SessionPrevious -> ActionPrevious
+
+sessionActionKindWire :: SessionActionKind -> Word32
+sessionActionKindWire k = case k of
+  ActionPlay -> W.sessionActionPlay
+  ActionPause -> W.sessionActionPause
+  ActionStop -> W.sessionActionStop
+  ActionSeekTo -> W.sessionActionSeekTo
+  ActionSeekForward -> W.sessionActionSeekForward
+  ActionSeekBackward -> W.sessionActionSeekBackward
+  ActionNext -> W.sessionActionNext
+  ActionPrevious -> W.sessionActionPrevious
+
+sessionActionOfWire :: Word32 -> Int -> SessionAction
+sessionActionOfWire n atMs
+  | n == W.sessionActionPlay = SessionPlay
+  | n == W.sessionActionPause = SessionPause
+  | n == W.sessionActionStop = SessionStop
+  | n == W.sessionActionSeekTo = SessionSeekTo atMs
+  | n == W.sessionActionSeekForward = SessionSeekForward
+  | n == W.sessionActionSeekBackward = SessionSeekBackward
+  | n == W.sessionActionNext = SessionNext
+  | n == W.sessionActionPrevious = SessionPrevious
+  | otherwise = error ("kaya: a session action of " <> show n <> ", which this build does not know")
+
+-- | What the system shows while no player is attached to the session.
+data PlaybackState = PlaybackNone | PlaybackPlaying | PlaybackPaused
+  deriving (Eq, Show)
+
+playbackStateWire :: PlaybackState -> Word32
+playbackStateWire s = case s of
+  PlaybackNone -> W.playbackStateNone
+  PlaybackPlaying -> W.playbackStatePlaying
+  PlaybackPaused -> W.playbackStatePaused
+
+-- | How a video view fits its picture (docs\/media-plan.md §3).
+data Fit = FitContain | FitCover | FitFill
+  deriving (Eq, Show)
+
+fitWire :: Fit -> Int64
+fitWire f = fromIntegral $ case f of
+  FitContain -> W.fitContain
+  FitCover -> W.fitCover
+  FitFill -> W.fitFill
+
+-- | Where a player reads its media: an asset name, an http(s) URL, or a
+-- picked file — never bytes (docs\/media-plan.md §2).
+newtype MediaSource = MediaSource Text
+  deriving (Eq, Show)
+
+mediaAsset :: Text -> MediaSource
+mediaAsset = MediaSource
+
+mediaUrl :: Text -> MediaSource
+mediaUrl = MediaSource
+
+mediaPicked :: PickedFile -> MediaSource
+mediaPicked f = MediaSource (T.pack f.localPath)
+
+-- | A media player the app holds (docs\/media-plan.md §2); a record field
+-- of this type is what a stamped video view shows (§7b).
+newtype Player = Player Word64
+  deriving (Eq, Ord, Show)
+
+-- | A row showing no player.
+noPlayer :: Player
+noPlayer = Player 0
+
+instance KayaValue Player where
+  toWire (Player p) = W.VI64 (fromIntegral p)
+  fromWire v = case v of W.VI64 n -> Player (fromIntegral n); _ -> error "kaya: value is not a Player"
+
+instance KayaFieldType Player where
+  fieldTag _ = W.valueI64
+  toFieldValue (Player p) = W.VI64 (fromIntegral p)
+  fromFieldValue v = case v of W.VI64 n -> Player (fromIntegral n); _ -> error "kaya: field is not a Player"
+
+-- | A player's readings as the core last published them; the size is
+-- 0x0 for audio.
+data PlayerReading = PlayerReading
+  { state :: !PlayerState,
+    failure :: !(Maybe MediaFailure),
+    positionMs :: !Int,
+    durationMs :: !Int,
+    width :: !Int,
+    height :: !Int
+  }
+  deriving (Eq, Show)
+
+initialReading :: PlayerReading
+initialReading = PlayerReading PlayerIdle Nothing 0 0 0 0
+
+-- | A player's tracks: BCP 47 tags in the platform's order, a sidecar
+-- caption track last, and the selections counting from 0.
+data Tracks = Tracks
+  { audio :: ![Text],
+    captions :: ![Text],
+    audioSelected :: !(Maybe Int),
+    captionSelected :: !(Maybe Int)
+  }
+  deriving (Eq, Show)
+
+emptyTracks :: Tracks
+emptyTracks = Tracks [] [] Nothing Nothing
+
+data MediaOcc
+  = MediaChanged PlayerState (Maybe MediaFailure) Text
+  | MediaPosition Int
+  | MediaSeeked Int
+  | MediaTracks Tracks
+  | MediaCue Text
+
+-- | The binding's media mirror and handler tables, app-thread only.
+data MediaState = MediaState
+  { readings :: IORef (Map.Map Word64 PlayerReading),
+    playerTracks :: IORef (Map.Map Word64 Tracks),
+    cues :: IORef (Map.Map Word64 Text),
+    -- Per (player, occurrence name): the newest registration wins.
+    playerHandlers :: IORef (Map.Map (Word64, Text) (MediaOcc -> IO ())),
+    widgetVisibility :: IORef (Map.Map Word64 (Double -> IO ())),
+    nodeVisibility :: IORef (Map.Map Word64 ([Key] -> Double -> IO ())),
+    sessionHandler :: IORef (Maybe (SessionAction -> IO ()))
+  }
+
+-- | Players get their OWN id space (docs\/media-plan.md §2).
+allocP :: Build Word64
+allocP = state $ \s ->
+  let c = s.bCounters
+      n = c.cPlayer + 1
+   in (n, s {bCounters = c {cPlayer = n}})
+
 dayOfPacked :: Int64 -> Day
 dayOfPacked packed =
   let (y, m, d) = W.unpackDate packed in fromGregorian (fromIntegral y) m d
@@ -1715,5 +1973,7 @@ data App = App
     -- the ask itself and the guest never sees it. ONE STORED SHAPE for
     -- both policies, so the answer path has one call shape and the frame
     -- time is 0 for a plain redraw.
-    appDraws :: IORef (Map.Map Word64 (Viewbox -> Double -> [DrawOp]))
+    appDraws :: IORef (Map.Map Word64 (Viewbox -> Double -> [DrawOp])),
+    -- The media mirror and handlers (docs/media-plan.md).
+    appMedia :: MediaState
   }

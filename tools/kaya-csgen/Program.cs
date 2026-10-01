@@ -98,7 +98,7 @@ static class Program
     // runtime schema.
     static readonly System.Collections.Generic.HashSet<string> Wire =
         new() { "string", "bool", "long", "double", "byte[]", "Document",
-            "System.DateOnly", "System.TimeOnly", "Color" };
+            "System.DateOnly", "System.TimeOnly", "Color", "Player", "Player?" };
 
     // The generated files carry no usings of their own — every type
     // Program.cs emits is spelled fully, the two picker types included,
@@ -290,6 +290,7 @@ static class Program
         var onColor = $"System.Action<Tx, {keys}, Color>?";
         var onRange = $"System.Action<Tx, {keys}, double, double>?";
         var onSelect = $"System.Action<Tx, {keys}, int>?";
+        var onVisibility = $"System.Action<Tx, {keys}, double>?";
 
         // One forwarder, wrapped the way the hand-written Tpl wraps: a
         // trailing handler parameter goes on its own line rather than
@@ -367,6 +368,13 @@ static class Program
             "f, alpha, onColor");
         Fwd("TimePicker", ["Signal value", $"{onTime} onTime = null"], "value, onTime");
         Fwd("TimePicker", ["Field<System.TimeOnly> f", $"{onTime} onTime = null"], "f, onTime");
+        // The row's player field (docs/media-plan.md §7b).
+        Fwd("Video", ["Player player", $"{onVisibility} onVisibility = null"],
+            "player, onVisibility");
+        Fwd("Video", ["Field<Player> f", $"{onVisibility} onVisibility = null"],
+            "f, onVisibility");
+        Fwd("Video", ["Field<Player?> f", $"{onVisibility} onVisibility = null"],
+            "f, onVisibility");
         Fwd("Entry", [$"{onText} onChange = null", $"{onText} onSubmit = null"],
             "onChange, onSubmit");
         Fwd("Entry", ["string text", $"{onText} onChange = null", $"{onText} onSubmit = null"],
@@ -509,6 +517,7 @@ static class Program
         Set("SetMaxHeight", ["Node n", "double points"], "n, points");
         Set("SetColumnsAuto", ["Node n", "double minWidth"], "n, minWidth");
         Set("SetWrap", ["Node n", "bool on"], "n, on");
+        Set("SetFit", ["Node n", "Fit fit"], "n, fit");
         // Fwd leaves a trailing blank line; the class brace closes on it.
         b.Length -= System.Environment.NewLine.Length;
         b.AppendLine("}");

@@ -235,7 +235,9 @@ fn app(ctx: kaya::AppCtx) {
         Ok("numberfield") | Ok("numberfieldde") => numberfield::app(ctx),
         Ok("colorpicker") => colorpicker::app(ctx),
         Ok("range") | Ok("rangertl") => range::app(ctx),
-        Ok("media_formats") | Ok("media_delivery") | Ok("media_session") => media::app(ctx),
+        Ok("media_formats") | Ok("media_delivery") | Ok("media_session") | Ok("media_tracks") | Ok("media_feed") => {
+            media::app(ctx)
+        }
         Ok("sheet") => sheet::app(ctx),
         // One guest under three locales (tools/lib/lanes/android.py's
         // SCENE_LOCALE): a scene selects a SCRIPT, never an app.

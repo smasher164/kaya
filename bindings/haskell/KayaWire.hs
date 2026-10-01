@@ -2777,6 +2777,48 @@ parseOccurrence redeem rec = do
           -- An answer carrying one value: id + the Value.
           (value, _) <- parseValue rec 16
           return (Just (kind, ident, [], Just value, Nothing, Nothing, []))
+      else if kind == occKindPlayerChanged
+        then do
+          -- A flat record: its fields in order, into the tail.
+          let at0 = 16 :: Int
+          w0 <- peekByteOff rec at0 :: IO Word32
+          let at1 = at0 + 4
+          w1 <- peekByteOff rec at1 :: IO Word32
+          let at2 = at1 + 4
+          w2 <- peekByteOff rec at2 :: IO Word64
+          let at3 = at2 + 8
+          w3 <- peekByteOff rec at3 :: IO Word32
+          let at4 = at3 + 4
+          w4 <- peekByteOff rec at4 :: IO Word32
+          let at5 = at4 + 4
+          (v5, _) <- parseValue rec at5
+          return (Just (kind, ident, [], Nothing, Nothing, Nothing, concat [[VI64 (fromIntegral w0)], [VI64 (fromIntegral w1)], [VI64 (fromIntegral w2)], [VI64 (fromIntegral w3)], [VI64 (fromIntegral w4)], [v5]]))
+      else if kind == occKindSessionAction
+        then do
+          -- A flat record: its fields in order, into the tail.
+          let at0 = 8 :: Int
+          w0 <- peekByteOff rec at0 :: IO Word32
+          let at1 = at0 + 4
+          let at2 = at1 + 4
+          w2 <- peekByteOff rec at2 :: IO Word64
+          return (Just (kind, 0, [], Nothing, Nothing, Nothing, concat [[VI64 (fromIntegral w0)], [VI64 (fromIntegral w2)]]))
+      else if kind == occKindPlayerTracks
+        then do
+          -- A flat record: its fields in order, into the tail.
+          let readN 0 at acc = return (reverse acc, at)
+              readN n at acc = do
+                (v, next) <- parseValue rec at
+                readN (n - 1 :: Int) next (v : acc)
+          let at0 = 16 :: Int
+          w0 <- peekByteOff rec at0 :: IO Word32
+          let at1 = at0 + 4
+          w1 <- peekByteOff rec at1 :: IO Word32
+          let at2 = at1 + 4
+          n2 <- peekByteOff rec at2 :: IO Word32
+          (vs2, at3) <- readN (fromIntegral n2) (at2 + 8) []
+          n3 <- peekByteOff rec at3 :: IO Word32
+          (vs3, _) <- readN (fromIntegral n3) (at3 + 8) []
+          return (Just (kind, ident, [], Nothing, Nothing, Nothing, concat [[VI64 (fromIntegral w0)], [VI64 (fromIntegral w1)], [VI64 (fromIntegral n2)], vs2, [VI64 (fromIntegral n3)], vs3]))
       else if kind == occKindFileDialogResult
         then do
           -- id, a count, then three Values per file (handle,

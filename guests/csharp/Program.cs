@@ -20,6 +20,11 @@ static class Program
             NotifyOrderCheck.Run();
             System.Environment.Exit(0);
         }
+        if (System.Environment.GetEnvironmentVariable("KAYA_CHECK") == "media")
+        {
+            MediaCheck.Run();
+            System.Environment.Exit(0);
+        }
         switch (System.Environment.GetEnvironmentVariable("KAYA_SELFTEST"))
         {
             case "a11y": A11yScene.Run(); break;
@@ -80,6 +85,8 @@ static class Program
             case "numberfield": case "numberfieldde": NumberFieldScene.Run(); break;
             case "colorpicker": ColorPickerScene.Run(); break;
             case "range": case "rangertl": RangeScene.Run(); break;
+            case "media": case "media_formats": case "media_delivery": case "media_session":
+            case "media_tracks": case "media_feed": Media.MediaScene.Run(); break;
             case "adaptive": AdaptiveScene.Run(); break;
             case "encodebench": EncodeBench.Run(); break;
             default: Milestone2Scene.Run(); break;

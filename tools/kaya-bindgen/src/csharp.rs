@@ -646,6 +646,63 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("            return true;");
         c.line("        }");
     }
+    // main.rs's flat_occurrence_names: the fields in order into the tail.
+    for name in crate::flat_occurrence_names(spec) {
+        let rec = spec.occurrence.iter().find(|r| r.name == name).unwrap();
+        let value = |c: &mut Ctx, pad: &str| {
+            c.line(&format!("{pad}{{"));
+            c.line(&format!("{pad}    uint vtype = BitConverter.ToUInt32(rec, flatAt);"));
+            c.line(&format!("{pad}    int vlen = (int)BitConverter.ToUInt32(rec, flatAt + 4);"));
+            c.line(&format!("{pad}    switch (vtype)"));
+            c.line(&format!("{pad}    {{"));
+            c.line(&format!("{pad}        case ValueBool: tail.Add(rec[flatAt + 8] != 0); break;"));
+            c.line(&format!("{pad}        case ValueI64: tail.Add(BitConverter.ToInt64(rec, flatAt + 8)); break;"));
+            c.line(&format!("{pad}        case ValueF64: tail.Add(BitConverter.ToDouble(rec, flatAt + 8)); break;"));
+            c.line(&format!("{pad}        default: tail.Add(Encoding.UTF8.GetString(rec, flatAt + 8, vlen)); break;"));
+            c.line(&format!("{pad}    }}"));
+            c.line(&format!("{pad}    flatAt += 8 + ((vlen + 7) & ~7);"));
+            c.line(&format!("{pad}}}"));
+        };
+        c.line(&format!("        if (kind == OccKind{})", pascal(name)));
+        c.line("        {");
+        c.line(&format!("            // {}", crate::FLAT_MARK));
+        c.line("            int flatAt = 8;");
+        c.line("            var tail = new List<object>();");
+        let mut fields = rec.fields.iter();
+        if matches!(rec.fields[0].ty, FieldTy::U64) {
+            fields.next();
+            c.line("            flatAt += 8;");
+        } else {
+            c.line("            id = 0;");
+        }
+        for f in fields {
+            match f.ty {
+                FieldTy::U32 if f.name == "reserved" => c.line("            flatAt += 4;"),
+                FieldTy::U32 => {
+                    c.line("            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));");
+                    c.line("            flatAt += 4;");
+                }
+                FieldTy::U64 => {
+                    c.line("            tail.Add(BitConverter.ToInt64(rec, flatAt));");
+                    c.line("            flatAt += 8;");
+                }
+                FieldTy::Value => value(&mut c, "            "),
+                FieldTy::Values => {
+                    c.line("            {");
+                    c.line("                int count = (int)BitConverter.ToUInt32(rec, flatAt);");
+                    c.line("                flatAt += 8;");
+                    c.line("                tail.Add((long)count);");
+                    c.line("                for (int i = 0; i < count; i++)");
+                    value(&mut c, "                ");
+                    c.line("            }");
+                }
+                FieldTy::VariantSchemas => panic!("kaya-bindgen: flat record {name} carries variant schemas"),
+            }
+        }
+        c.line("            payload = tail;");
+        c.line("            return true;");
+        c.line("        }");
+    }
     // The picker's answer is a LIST OF RECORDS, so it needs its own
     // arm: the generic tail would take the file count for a key-path
     // length and start eight bytes early.

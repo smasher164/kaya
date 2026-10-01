@@ -24,6 +24,7 @@ module KayaRuntime
     localeLine,
     directionBit,
     textScaleRaw,
+    canPlayRaw,
     catalogRaw,
     TrArgRaw (..),
     trRaw,
@@ -208,6 +209,9 @@ foreign import ccall unsafe "kaya_direction"
 
 foreign import ccall unsafe "kaya_text_scale"
   c_kaya_text_scale :: IO Double
+
+foreign import ccall unsafe "kaya_can_play"
+  c_kaya_can_play :: Ptr Word8 -> CSize -> Ptr Word8 -> CSize -> IO Word8
 
 foreign import ccall unsafe "kaya_catalog"
   c_kaya_catalog :: Ptr Word8 -> IO ()
@@ -404,6 +408,13 @@ directionBit = c_kaya_direction
 
 textScaleRaw :: IO Double
 textScaleRaw = c_kaya_text_scale
+
+-- | kaya_can_play (docs/media-plan.md §8 ruling 1).
+canPlayRaw :: Text -> Text -> IO Bool
+canPlayRaw mime codecs =
+  unsafeUseAsCStringLen (TE.encodeUtf8 mime) $ \(m, ml) ->
+    unsafeUseAsCStringLen (TE.encodeUtf8 codecs) $ \(c, cl) ->
+      (/= 0) <$> c_kaya_can_play (castPtr m) (fromIntegral ml) (castPtr c) (fromIntegral cl)
 
 catalogRaw :: Text -> IO ()
 catalogRaw app = withCString0 app c_kaya_catalog

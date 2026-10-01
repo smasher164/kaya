@@ -144,6 +144,7 @@ object KayaRing {
     @JvmStatic external fun catalog(app: ByteArray)
 
     @JvmStatic external fun tr(key: ByteArray, args: ByteArray, nargs: Int): ByteArray?
+    @JvmStatic external fun canPlay(mime: ByteArray, codecs: ByteArray): Boolean
 
     @JvmStatic external fun prefGetI64(key: ByteArray): LongArray?
 

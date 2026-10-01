@@ -803,6 +803,130 @@ enum Platform : long
     Android = KayaWire.PlatformAndroid,
 }
 
+/// A media player the app holds (docs/media-plan.md §2): an id in its own
+/// space, with no place in the layout. Tx.Player makes one, a video view
+/// shows it, and a record field of this type is a row's player (§7b).
+readonly record struct Player(ulong Id);
+
+/// Where a player reads its media from: an asset under the app's asset
+/// root, an http(s) URL, or a file the user picked. A path, never bytes.
+readonly record struct MediaSource(string Path)
+{
+    public static MediaSource Asset(string name) => new(name);
+
+    public static MediaSource Url(string url) => new(url);
+
+    public static MediaSource Picked(PickedFile file) => new(file.LocalPath ?? "");
+}
+
+enum PlayerState : uint
+{
+    Idle = KayaWire.PlayerStateIdle,
+    Loading = KayaWire.PlayerStateLoading,
+    Ready = KayaWire.PlayerStateReady,
+    Playing = KayaWire.PlayerStatePlaying,
+    Paused = KayaWire.PlayerStatePaused,
+    Ended = KayaWire.PlayerStateEnded,
+    Failed = KayaWire.PlayerStateFailed,
+}
+
+/// Why a player cannot play: the closed reason (docs/media-plan.md §7a).
+enum MediaFailure : uint
+{
+    UnsupportedCodec = KayaWire.MediaFailureUnsupportedCodec,
+    UnsupportedContainer = KayaWire.MediaFailureUnsupportedContainer,
+    NotFound = KayaWire.MediaFailureNotFound,
+    Network = KayaWire.MediaFailureNetwork,
+    DecodeError = KayaWire.MediaFailureDecodeError,
+    Resources = KayaWire.MediaFailureResources,
+}
+
+enum SessionActionKind : uint
+{
+    Play = KayaWire.SessionActionPlay,
+    Pause = KayaWire.SessionActionPause,
+    Stop = KayaWire.SessionActionStop,
+    SeekTo = KayaWire.SessionActionSeekTo,
+    SeekForward = KayaWire.SessionActionSeekForward,
+    SeekBackward = KayaWire.SessionActionSeekBackward,
+    Next = KayaWire.SessionActionNext,
+    Previous = KayaWire.SessionActionPrevious,
+}
+
+/// What the system's media controls sent; AtMs is seek_to's target.
+readonly record struct SessionAction(SessionActionKind Kind, ulong AtMs = 0);
+
+/// What the system shows while no player is attached to the session.
+enum PlaybackState : uint
+{
+    None = KayaWire.PlaybackStateNone,
+    Playing = KayaWire.PlaybackStatePlaying,
+    Paused = KayaWire.PlaybackStatePaused,
+}
+
+/// How a video view fits its picture (docs/media-plan.md §3).
+enum Fit : uint
+{
+    Contain = KayaWire.FitContain,
+    Cover = KayaWire.FitCover,
+    Fill = KayaWire.FitFill,
+}
+
+/// A player's readings, as the core last published them.
+readonly record struct PlayerReading(PlayerState State, MediaFailure? Failure,
+    ulong PositionMs, ulong DurationMs, uint Width, uint Height);
+
+/// A player's tracks (docs/media-plan.md §3): language tags in the
+/// platform's order, a sidecar caption track last, the selections 0-based.
+sealed record PlayerTracks(IReadOnlyList<string> Audio, IReadOnlyList<string> Captions,
+    int? AudioSelected, int? CaptionSelected)
+{
+    public static readonly PlayerTracks None =
+        new(Array.Empty<string>(), Array.Empty<string>(), null, null);
+}
+
+/// The wire's words for the media vocabularies.
+static class MediaWords
+{
+    public static string Name(this PlayerState s) => s switch
+    {
+        PlayerState.Idle => "idle",
+        PlayerState.Loading => "loading",
+        PlayerState.Ready => "ready",
+        PlayerState.Playing => "playing",
+        PlayerState.Paused => "paused",
+        PlayerState.Ended => "ended",
+        _ => "failed",
+    };
+
+    public static string Name(this MediaFailure f) => f switch
+    {
+        MediaFailure.UnsupportedCodec => "unsupported_codec",
+        MediaFailure.UnsupportedContainer => "unsupported_container",
+        MediaFailure.NotFound => "not_found",
+        MediaFailure.Network => "network",
+        MediaFailure.DecodeError => "decode_error",
+        _ => "resources",
+    };
+}
+
+static partial class Kaya
+{
+    [System.Runtime.InteropServices.DllImport("kaya")]
+    static extern byte kaya_can_play(byte[] mime, nuint mimeLen, byte[] codecs, nuint codecsLen);
+
+    /// Whether this platform plays `mime` with `codecs` (an RFC 6381 list,
+    /// "" for none): true exactly when loading such media would not fail as
+    /// unsupported_codec or unsupported_container (docs/media-plan.md §8
+    /// ruling 1). Any thread, no transaction.
+    public static bool CanPlay(string mime, string codecs = "")
+    {
+        var m = System.Text.Encoding.UTF8.GetBytes(mime);
+        var c = System.Text.Encoding.UTF8.GetBytes(codecs);
+        return kaya_can_play(m, (nuint)m.Length, c, (nuint)c.Length) != 0;
+    }
+}
+
 /// ONE OCCURRENCE, TYPED. The ring hands over a kind, an id, a key path
 /// and an `object?` whose shape the KIND implies; KayaApp.OccurrenceOf is
 /// the ONE place that implication is cashed in, so no dispatch arm
@@ -892,6 +1016,24 @@ sealed record MenuValueChanged(ulong Id, List<object> Keys, int Index) : Occurre
 /// An undo or a redo, as the CORE put it back; Redo tells them apart,
 /// because one ledger walk is the same fold either way.
 sealed record HistoryWalked(ulong Id, List<object> Keys, UndoStep Step, bool Redo)
+    : Occurrence(Id, Keys);
+
+// The media occurrences (docs/media-plan.md): Id is the PLAYER, the
+// session's the app's one.
+sealed record PlayerMoved(ulong Id, List<object> Keys, PlayerState State, MediaFailure? Failure,
+    ulong DurationMs, uint Width, uint Height, string Detail) : Occurrence(Id, Keys);
+
+sealed record PlayerAt(ulong Id, List<object> Keys, ulong PositionMs, bool Seeked)
+    : Occurrence(Id, Keys);
+
+sealed record TracksListed(ulong Id, List<object> Keys, PlayerTracks Tracks)
+    : Occurrence(Id, Keys);
+
+sealed record CueChanged(ulong Id, List<object> Keys, string Text) : Occurrence(Id, Keys);
+
+sealed record VideoShown(ulong Id, List<object> Keys, double Shown) : Occurrence(Id, Keys);
+
+sealed record SessionActed(ulong Id, List<object> Keys, SessionAction Action)
     : Occurrence(Id, Keys);
 
 sealed class KayaInstance
@@ -1372,6 +1514,22 @@ sealed class KayaApp
     readonly Dictionary<ulong, Action<Tx, List<object>, double, double>> nodeRanges = new();
     readonly Dictionary<ulong, Action<Tx, double, double>> widgetRangeCommits = new();
     readonly Dictionary<ulong, Action<Tx, List<object>, double, double>> nodeRangeCommits = new();
+    // Each player's mirror and occurrence handlers, keyed by player id,
+    // and the video views' visibility (docs/media-plan.md §2, §3, §7b).
+    ulong players;
+    readonly Dictionary<ulong, PlayerReading> playerReadings = new();
+    readonly Dictionary<ulong, PlayerTracks> playerTracks = new();
+    readonly Dictionary<ulong, string> playerCues = new();
+    readonly Dictionary<ulong, Action<Tx, PlayerState>> playerStates = new();
+    readonly Dictionary<ulong, Action<Tx>> playerEnded = new();
+    readonly Dictionary<ulong, Action<Tx, MediaFailure, string>> playerFailed = new();
+    readonly Dictionary<ulong, Action<Tx, ulong>> playerSeeks = new();
+    readonly Dictionary<ulong, Action<Tx, ulong>> playerPositions = new();
+    readonly Dictionary<ulong, Action<Tx, PlayerTracks>> playerTracksHandlers = new();
+    readonly Dictionary<ulong, Action<Tx, string>> playerCueHandlers = new();
+    readonly Dictionary<ulong, Action<Tx, double>> widgetVisibility = new();
+    readonly Dictionary<ulong, Action<Tx, List<object>, double>> nodeVisibility = new();
+    Action<Tx, SessionAction>? sessionHandler;
     // Window lifecycle: one handler each, receiving the window id.
     internal readonly Dictionary<ulong, Action<Tx>> closeRequested = new();
     internal readonly Dictionary<ulong, Action<Tx>> entryPopped = new();
@@ -1473,6 +1631,8 @@ sealed class KayaApp
     internal MenuItem NextMenuItem() => new(++menuItems);
 
     internal Node NextNode() => new(++widgets);
+
+    internal Player NextPlayer() => new(++players);
 
     internal Collection NextCollection() => new(++collections, Array.Empty<object>());
 
@@ -2142,6 +2302,140 @@ sealed class KayaApp
     public void OnRangeCommitted(Node n, Action<Tx, List<object>, double, double> handler) =>
         nodeRangeCommits[n.Id] = handler;
 
+    /// A player's readings: its state, where it is, how long it is and its
+    /// picture's size (0x0 for audio), as of the last occurrence taken.
+    public PlayerReading Player(Player p) => PlayerReadingOf(p.Id);
+
+    PlayerReading PlayerReadingOf(ulong player) =>
+        playerReadings.TryGetValue(player, out var r) ? r : default;
+
+    /// A player's tracks (docs/media-plan.md §3).
+    public PlayerTracks Tracks(Player p) =>
+        playerTracks.TryGetValue(p.Id, out var t) ? t : PlayerTracks.None;
+
+    /// The caption cue current on the player's clock, "" for none.
+    public string Cue(Player p) => playerCues.TryGetValue(p.Id, out var c) ? c : "";
+
+    /// Every state the player moves to, ended and failed included.
+    public void OnPlayerState(Player p, Action<Tx, PlayerState> handler) =>
+        playerStates[p.Id] = handler;
+
+    /// The player reached its end (never, while it loops).
+    public void OnEnded(Player p, Action<Tx> handler) => playerEnded[p.Id] = handler;
+
+    /// The player cannot play: the closed reason, and the platform's
+    /// sentence, which no two platforms word alike.
+    public void OnFailed(Player p, Action<Tx, MediaFailure, string> handler) =>
+        playerFailed[p.Id] = handler;
+
+    /// Where a seek the app asked for landed, in ms.
+    public void OnSeekCompleted(Player p, Action<Tx, ulong> handler) =>
+        playerSeeks[p.Id] = handler;
+
+    /// The playhead, every KAYA_MEDIA_POSITION_TICK_MS while playing.
+    public void OnPosition(Player p, Action<Tx, ulong> handler) =>
+        playerPositions[p.Id] = handler;
+
+    /// The player's track listing or a selection moved.
+    public void OnTracks(Player p, Action<Tx, PlayerTracks> handler) =>
+        playerTracksHandlers[p.Id] = handler;
+
+    /// The current caption cue changed ("" between cues), whoever draws it.
+    public void OnCue(Player p, Action<Tx, string> handler) => playerCueHandlers[p.Id] = handler;
+
+    /// How much of a live video view shows, 0 to 1, as it enters, leaves,
+    /// moves by a tenth and shows whole (docs/media-plan.md §7b).
+    public void OnVisibility(Widget w, Action<Tx, double> handler) =>
+        widgetVisibility[w.Id] = handler;
+
+    /// A stamped video view's visibility, keys first.
+    public void OnVisibility(Node n, Action<Tx, List<object>, double> handler) =>
+        nodeVisibility[n.Id] = handler;
+
+    /// The actions the declared session handles, from the system's media
+    /// controls (docs/media-plan.md §5).
+    public void OnSession(Action<Tx, SessionAction> handler) => sessionHandler = handler;
+
+    /// A player's occurrences, the visibility and the session: THE MIRROR
+    /// FOLLOWS FIRST, handlers or none, so a handler reads the readings the
+    /// occurrence brought (docs/media-plan.md §2). The ring loop's arm and
+    /// guests/csharp/MediaCheck.cs both come through here.
+    internal void DispatchMedia(Occurrence? occurrence)
+    {
+        switch (occurrence)
+        {
+            case PlayerMoved moved:
+                AbsorbPlayer(moved);
+                DispatchPlayer(moved);
+                break;
+            case PlayerAt at:
+                playerReadings[at.Id] = PlayerReadingOf(at.Id) with { PositionMs = at.PositionMs };
+                if ((at.Seeked ? playerSeeks : playerPositions)
+                    .TryGetValue(at.Id, out var onAt))
+                    Dispatch(tx => onAt(tx, at.PositionMs));
+                break;
+            case TracksListed listed:
+                playerTracks[listed.Id] = listed.Tracks;
+                if (playerTracksHandlers.TryGetValue(listed.Id, out var onTracks))
+                    Dispatch(tx => onTracks(tx, listed.Tracks));
+                break;
+            case CueChanged cue:
+                playerCues[cue.Id] = cue.Text;
+                if (playerCueHandlers.TryGetValue(cue.Id, out var onCue))
+                    Dispatch(tx => onCue(tx, cue.Text));
+                break;
+            case VideoShown { Live: true } shownLive
+                when widgetVisibility.TryGetValue(shownLive.Id, out var onShown):
+                Dispatch(tx => onShown(tx, shownLive.Shown));
+                break;
+            case VideoShown shownRow
+                when nodeVisibility.TryGetValue(shownRow.Id, out var onShownRow):
+                Dispatch(tx => onShownRow(tx, shownRow.Keys, shownRow.Shown));
+                break;
+            case SessionActed acted when sessionHandler is { } onSession:
+                Dispatch(tx => onSession(tx, acted.Action));
+                break;
+        }
+    }
+
+    /// The ring's decode of one record, for guests/csharp/MediaCheck.cs.
+    internal static Occurrence? DecodeRecord(byte[] rec) =>
+        KayaWire.ParseOccurrence(rec, out var kind, out var id, out var keys, out var payload)
+            ? OccurrenceOf(kind, id, keys, payload)
+            : null;
+
+    void AbsorbPlayer(PlayerMoved m)
+    {
+        var r = PlayerReadingOf(m.Id);
+        playerReadings[m.Id] = r with
+        {
+            State = m.State,
+            Failure = m.Failure,
+            DurationMs = m.DurationMs,
+            Width = m.Width,
+            Height = m.Height,
+            PositionMs = m.State is PlayerState.Loading or PlayerState.Idle ? 0 : r.PositionMs,
+        };
+    }
+
+    /// One transaction for a state move: the state handler, then ended's or
+    /// failed's own.
+    void DispatchPlayer(PlayerMoved m)
+    {
+        playerStates.TryGetValue(m.Id, out var onState);
+        Action<Tx>? onEnded = m.State == PlayerState.Ended
+            && playerEnded.TryGetValue(m.Id, out var e) ? e : null;
+        Action<Tx, MediaFailure, string>? onFailed = m.State == PlayerState.Failed
+            && m.Failure is not null && playerFailed.TryGetValue(m.Id, out var f) ? f : null;
+        if (onState == null && onEnded == null && onFailed == null) return;
+        Dispatch(tx =>
+        {
+            onState?.Invoke(tx, m.State);
+            onEnded?.Invoke(tx);
+            if (onFailed != null) onFailed(tx, m.Failure!.Value, m.Detail);
+        });
+    }
+
     /// The open transaction, reached ambiently by the chained canvas
     /// declarations (Widget.Fixed, OnDraw, OnTick) — Signal.Derive's route
     /// and for the same reason: the handle is an id alone.
@@ -2306,6 +2600,56 @@ sealed class KayaApp
         return TextRange.Bytes(from, to);
     }
 
+    /// A flat record's fields in wire order (tools/kaya-bindgen's
+    /// flat_occurrence_names), refused by name when short.
+    static List<object> FlatTail(string what, List<object>? tail, int atLeast)
+    {
+        if (tail == null || tail.Count < atLeast)
+            throw new InvalidOperationException(
+                $"kaya: a {what} carries {tail?.Count ?? 0} values, want {atLeast} or more");
+        return tail;
+    }
+
+    static long Int(object v) => v switch
+    {
+        long l => l,
+        ulong u => (long)u,
+        uint u => u,
+        _ => throw new InvalidOperationException(
+            $"kaya: a media record's field is a {v?.GetType().Name ?? "null"}, want an integer"),
+    };
+
+    /// player_changed's tail: state, failure, duration_ms, width, height,
+    /// detail.
+    static PlayerMoved PlayerMovedOf(ulong player, List<object> keys, List<object>? payload)
+    {
+        var tail = FlatTail("player_changed", payload, 6);
+        var failure = (uint)Int(tail[1]);
+        return new PlayerMoved(player, keys, (PlayerState)(uint)Int(tail[0]),
+            failure == KayaWire.MediaFailureNone ? null : (MediaFailure)failure,
+            (ulong)Int(tail[2]), (uint)Int(tail[3]), (uint)Int(tail[4]), tail[5] as string ?? "");
+    }
+
+    /// player_tracks' tail: the two selections counting from 1 (0 none),
+    /// then each list as its count and its tags.
+    static PlayerTracks TracksOf(List<object>? payload)
+    {
+        var tail = FlatTail("player_tracks", payload, 4);
+        int at = 2;
+        List<string> List()
+        {
+            int n = (int)Int(tail[at++]);
+            var tags = new List<string>(n);
+            for (int i = 0; i < n; i++)
+                tags.Add(tail[at++] as string ?? "");
+            return tags;
+        }
+        var audio = List();
+        var captions = List();
+        int? Selected(object v) => Int(v) is var one and > 0 ? (int)one - 1 : null;
+        return new PlayerTracks(audio, captions, Selected(tail[0]), Selected(tail[1]));
+    }
+
     static TextRun RunOf(List<object> tail, int at)
     {
         if (tail[at] is not long start || tail[at + 1] is not long stop)
@@ -2407,6 +2751,25 @@ sealed class KayaApp
                     payload as UndoStep ?? throw new InvalidOperationException(
                         "kaya: an undone/redone occurrence carries no step"),
                     kind == KayaWire.OccKindRedone);
+            case KayaWire.OccKindPlayerChanged:
+                return PlayerMovedOf(id, keys, payload as List<object>);
+            // The surface-pair shape: the SECOND u64 (the position) keys
+            // the record and the player rides as the payload.
+            case KayaWire.OccKindPlayerPosition:
+            case KayaWire.OccKindSeekCompleted:
+                return new PlayerAt(payload is ulong player ? player : 0, keys, id,
+                    kind == KayaWire.OccKindSeekCompleted);
+            case KayaWire.OccKindPlayerTracks:
+                return new TracksListed(id, keys, TracksOf(payload as List<object>));
+            case KayaWire.OccKindCaptionCue:
+                return new CueChanged(id, keys, payload as string ?? "");
+            case KayaWire.OccKindVideoVisibility: return new VideoShown(id, keys, number);
+            case KayaWire.OccKindSessionAction:
+            {
+                var tail = FlatTail("session_action", payload as List<object>, 2);
+                return new SessionActed(id, keys,
+                    new SessionAction((SessionActionKind)(uint)(long)tail[0], (ulong)(long)tail[1]));
+            }
             default: return null;
         }
     }
@@ -2428,7 +2791,8 @@ sealed class KayaApp
                 if (!Kaya.WaitOccurrences()) return; // shutdown
                 continue;
             }
-            switch (OccurrenceOf(kind, id, keys, payload))
+            var occurrence = OccurrenceOf(kind, id, keys, payload);
+            switch (occurrence)
             {
                 // THE CANVAS'S TWO ASKS ARE ANSWERED HERE AND NEVER HANDED
                 // OVER (docs/canvas-plan.md §3.2.1). No registration means
@@ -2642,6 +3006,10 @@ sealed class KayaApp
                     var table = walk.Redo ? redone : undone;
                     if (table.TryGetValue(walk.Id, out var onWalk))
                         Dispatch(tx => onWalk(tx, walk.Step.Label, walk.Step.Delta));
+                    break;
+                case PlayerMoved or PlayerAt or TracksListed or CueChanged or VideoShown
+                    or SessionActed:
+                    DispatchMedia(occurrence);
                     break;
                 // A paste rides a click tag verbatim, so it arrives on the
                 // ordinary widget/node split. Never empty: a paste that
@@ -3535,6 +3903,121 @@ sealed class Tx : IDisposable
         if (onCommit != null) App.OnRangeCommitted(w, onCommit);
         if (grow is double g) SetGrow(w, g);
         return w;
+    }
+
+    /// A media player (docs/media-plan.md §2): an object with no place in
+    /// the layout, shown by a video view or, shown by none, audio. Its
+    /// settings are written once here; the Set* calls rewrite them. A
+    /// sidecar caption file is `captions` with its BCP 47 `captionsLanguage`.
+    public Player Player(MediaSource? source = null, double? speed = null,
+        double? volume = null, bool? muted = null, bool? loop = null,
+        MediaSource? captions = null, string captionsLanguage = "und")
+    {
+        var p = App.NextPlayer();
+        Records.Add(KayaWire.TxCreatePlayer(p.Id));
+        if (speed is double s) SetSpeed(p, s);
+        if (volume is double v) SetVolume(p, v);
+        if (muted is bool m) SetMuted(p, m);
+        if (loop is bool l) SetLoop(p, l);
+        if (captions is MediaSource c) SetCaptions(p, c, captionsLanguage);
+        if (source is MediaSource src) SetSource(p, src);
+        return p;
+    }
+
+    void PlayerProp(Player p, uint prop, object value) =>
+        Records.Add(KayaWire.TxSetPlayerProp(p.Id, prop, value));
+
+    /// Load `source`, replacing what the player held; it reads loading
+    /// until the platform answers.
+    public void SetSource(Player p, MediaSource source) =>
+        PlayerProp(p, KayaWire.PpropSource, source.Path);
+
+    /// Unload, back to idle.
+    public void ClearPlayer(Player p) => PlayerProp(p, KayaWire.PpropSource, "");
+
+    public void SetSpeed(Player p, double rate) => PlayerProp(p, KayaWire.PpropSpeed, rate);
+
+    /// 0..1, relative to the system volume.
+    public void SetVolume(Player p, double volume) =>
+        PlayerProp(p, KayaWire.PpropVolume, volume);
+
+    public void SetMuted(Player p, bool on) => PlayerProp(p, KayaWire.PpropMuted, on);
+
+    public void SetLoop(Player p, bool on) => PlayerProp(p, KayaWire.PpropLoop, on);
+
+    /// A sidecar WebVTT file (an asset, a picked file or an http(s) URL),
+    /// `language` its BCP 47 tag: kaya parses it and draws its cues, listed
+    /// as the last caption track (docs/media-plan.md §3).
+    public void SetCaptions(Player p, MediaSource source, string language)
+    {
+        PlayerProp(p, KayaWire.PpropCaptionsLanguage, language);
+        PlayerProp(p, KayaWire.PpropCaptions, source.Path);
+    }
+
+    /// No sidecar captions.
+    public void ClearCaptions(Player p) => PlayerProp(p, KayaWire.PpropCaptions, "");
+
+    /// Play; from the start when the player had ended.
+    public void Play(Player p) =>
+        Records.Add(KayaWire.TxPlayerCommand(p.Id, KayaWire.PlayerCommandPlay, 0));
+
+    public void Pause(Player p) =>
+        Records.Add(KayaWire.TxPlayerCommand(p.Id, KayaWire.PlayerCommandPause, 0));
+
+    /// To `ms` from the start; OnSeekCompleted hears where it landed.
+    public void Seek(Player p, ulong ms) =>
+        Records.Add(KayaWire.TxPlayerCommand(p.Id, KayaWire.PlayerCommandSeek, ms));
+
+    public void ReleasePlayer(Player p) => Records.Add(KayaWire.TxReleasePlayer(p.Id));
+
+    /// Select audio track `index`, 0-based in App.Tracks.
+    public void SelectAudio(Player p, int index) =>
+        Records.Add(KayaWire.TxSelectTrack(p.Id, KayaWire.TrackKindAudio, (uint)index + 1));
+
+    /// Select a caption track, 0-based in App.Tracks, or none; a sidecar
+    /// file's track is selected the same way.
+    public void SelectCaptions(Player p, int? index) =>
+        Records.Add(KayaWire.TxSelectTrack(p.Id, KayaWire.TrackKindCaption,
+            index is int i ? (uint)i + 1 : 0));
+
+    /// A video view showing `player` (docs/media-plan.md §3): the platform's
+    /// own view with its controls off. A player is shown by one video view
+    /// at a time (§7b).
+    public Widget Video(Player player, Fit? fit = null,
+        Action<Tx, double>? onVisibility = null, double? grow = null)
+    {
+        var w = Widget(KayaWire.KindVideo);
+        Records.Add(KayaWire.TxSetPlayer(w.Id, (long)player.Id));
+        if (fit is Fit f) SetFit(w, f);
+        if (onVisibility != null) App.OnVisibility(w, onVisibility);
+        if (grow is double g) SetGrow(w, g);
+        return w;
+    }
+
+    /// Show another player in a live video view, or none.
+    public void ShowPlayer(Widget video, Player? player) =>
+        Records.Add(KayaWire.TxSetPlayer(video.Id, (long)(player?.Id ?? 0)));
+
+    public void SetFit(Widget video, Fit fit) =>
+        Records.Add(KayaWire.TxSetFit(video.Id, (long)fit));
+
+    /// Declare the app's one media session, replacing the last
+    /// (docs/media-plan.md §5): the attached player the system's controls
+    /// speak to, the metadata (artwork an asset name), the actions the app
+    /// answers itself through `onAction` (play, pause and seek_to left out
+    /// apply to the attached player), and what the system shows while no
+    /// player is attached.
+    public void Session(Player? player = null, string title = "", string artist = "",
+        string album = "", string artwork = "", SessionActionKind[]? handles = null,
+        PlaybackState playbackState = PlaybackState.None,
+        Action<Tx, SessionAction>? onAction = null)
+    {
+        uint mask = 0;
+        foreach (var kind in handles ?? Array.Empty<SessionActionKind>())
+            mask |= 1u << (int)kind;
+        Records.Add(KayaWire.TxSetSession(player?.Id ?? 0, mask, (uint)playbackState,
+            title, artist, album, artwork));
+        if (onAction != null) App.OnSession(onAction);
     }
 
     /// A number field at value (docs/number-field-plan.md), its commit
@@ -5420,6 +5903,42 @@ sealed class Tpl
         BindColorField(n, 0, f);
         return n;
     }
+
+    /// A video view per stamped copy (docs/media-plan.md §7b): the row's own
+    /// player field, or one player for every copy (which the one-view rule
+    /// refuses past the first). A row whose player is released, or a
+    /// Player? field holding null, shows nothing. The visibility handler
+    /// receives the copy's keys first.
+    public Node Video(Player player, Action<Tx, List<object>, double>? onVisibility = null)
+    {
+        var n = VideoOf(onVisibility);
+        tx.Records.Add(KayaWire.TxSetPlayer(n.Id, (long)player.Id));
+        return n;
+    }
+
+    public Node Video(Field<Player> f, Action<Tx, List<object>, double>? onVisibility = null)
+    {
+        var n = VideoOf(onVisibility);
+        tx.Records.Add(KayaWire.TxBindPlayerElement(n.Id, 0, f.Index));
+        return n;
+    }
+
+    public Node Video(Field<Player?> f, Action<Tx, List<object>, double>? onVisibility = null)
+    {
+        var n = VideoOf(onVisibility);
+        tx.Records.Add(KayaWire.TxBindPlayerElement(n.Id, 0, f.Index));
+        return n;
+    }
+
+    Node VideoOf(Action<Tx, List<object>, double>? onVisibility)
+    {
+        var n = Widget(KayaWire.KindVideo);
+        if (onVisibility != null) tx.App.OnVisibility(n, onVisibility);
+        return n;
+    }
+
+    /// How every stamped copy's video view fits its picture.
+    public void SetFit(Node n, Fit fit) => tx.Records.Add(KayaWire.TxSetFit(n.Id, (long)fit));
 
     Node ColorPickerOf(bool alpha, Action<Tx, List<object>, Color>? onColor)
     {

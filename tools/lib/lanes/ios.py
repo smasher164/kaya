@@ -38,6 +38,9 @@ SWIFT_ENTRIES = [
     "colorpicker",
     # The range and the rotated fader, and under ar-EG (docs/range-plan.md §4).
     "range", "rangertl:range",
+    # The media suite, one guest (docs/media-plan.md §7a).
+    "media_formats:media", "media_delivery:media", "media_session:media",
+    "media_tracks:media", "media_feed:media",
 ]
 
 # The go suite: the swift roster entry for entry minus the two
@@ -56,6 +59,8 @@ GO_SCENES = [
     "numberfield", "numberfieldde",
     "colorpicker",
     "range", "rangertl",
+    "media_formats", "media_delivery", "media_session", "media_tracks",
+    "media_feed",
 ]
 
 # CPython embedded in ONE bundle carrying every python scene
@@ -132,6 +137,10 @@ RUST_SCENES = [
     # The range and the rotated fader, and under ar-EG (docs/range-plan.md
     # §4.2, §4.3).
     "range", "rangertl",
+    # The media suite (docs/media-plan.md §7a), one guest; the lane's
+    # local server is up while any of these is queued.
+    "media_formats", "media_delivery", "media_session", "media_tracks",
+    "media_feed",
 ]
 
 # The iPad legs, queued right after their phone sibling: the phone pool is
@@ -160,9 +169,7 @@ DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes"]
 # tooltips with its own (docs/tooltip-plan.md §5) — the iOS arm is the
 # shared interpreter's `.help`, which lands on the accessibility hint,
 # and expect_help reads it there.
-# The media suite's iOS arm (the layer view, the .playback category) is
-# built; its legs are the breadth slice's to measure (docs/media-plan.md §7).
-UNWIRED_SCENES = ["media_formats", "media_delivery", "media_session", "media_tracks", "media_feed"]
+UNWIRED_SCENES = []
 
 # The fullscreen scene's app-only way back after the cut, the same steps as
 # tools/lib/lanes/android.py's FULLSCREEN_APP_TAIL: no user change arrives.
@@ -323,7 +330,16 @@ RUST_EXAMPLE = {"listdetail": "split", "taskspersist": "tasks",
                 "links": "tasks", "formatde": "format", "formatar": "format",
                 "tasksrtl": "tasks", "tasksbig": "tasks", "formatbig": "format",
                 "clock24": "format", "scrollrtl": "scroll",
-                "numberfieldde": "numberfield", "rangertl": "range"}
+                "numberfieldde": "numberfield", "rangertl": "range",
+                "media_formats": "media", "media_delivery": "media",
+                "media_session": "media", "media_tracks": "media",
+                "media_feed": "media"}
+
+# The scenes whose guest declares a media session: their bundles carry
+# UIBackgroundModes audio (docs/media-plan.md §5). The media guest is one
+# app for the five scenes, so all five bundles carry it.
+SESSION_SCENES = ("media_formats", "media_delivery", "media_session",
+                  "media_tracks", "media_feed")
 
 # The locale a scene runs under, the knob the leg carries
 # (docs/compliance-plan.md §4); the reads ask the platform, never this.

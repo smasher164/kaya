@@ -197,9 +197,10 @@ impl<'a> Tx<'a> {
         self.ops.push(TxOp::SelectTrack { player, kind: TrackKind::Caption, index });
     }
 
-    /// A sidecar WebVTT file for the player (an asset name, or a picked
-    /// file), `language` its BCP 47 tag: kaya parses it and draws its cues,
-    /// listed as the last caption track (docs/media-plan.md §3).
+    /// A sidecar WebVTT file for the player (an asset name, a picked file,
+    /// or an http(s) URL the platform fetches), `language` its BCP 47 tag:
+    /// kaya parses it and draws its cues, listed as the last caption track
+    /// (docs/media-plan.md §3).
     pub fn player_captions(&mut self, player: PlayerId, source: &MediaSource, language: &str) {
         self.player_prop(player, PlayerProp::CaptionsLanguage, Value::Str(language.to_owned()));
         self.player_prop(player, PlayerProp::Captions, Value::Str(source.0.clone()));

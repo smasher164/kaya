@@ -186,6 +186,14 @@ public final class Main {
             case "rangertl":
                 app = Range::app;
                 break;
+            case "media":
+            case "media_formats":
+            case "media_delivery":
+            case "media_session":
+            case "media_tracks":
+            case "media_feed":
+                app = Media::app;
+                break;
             case "tooltips":
                 app = Tooltips::app;
                 break;

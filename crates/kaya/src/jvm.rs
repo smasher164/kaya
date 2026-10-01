@@ -167,6 +167,8 @@ pub(crate) fn register_ring_natives(env: &mut JNIEnv) -> jni::errors::Result<()>
             NativeMethod { name: "textScale".into(), sig: "()D".into(), fn_ptr: ring_text_scale as *mut _ },
             NativeMethod { name: "catalog".into(), sig: "([B)V".into(), fn_ptr: ring_catalog as *mut _ },
             NativeMethod { name: "tr".into(), sig: "([B[BI)[B".into(), fn_ptr: ring_tr as *mut _ },
+            // The capability query (docs/media-plan.md §8 ruling 1).
+            NativeMethod { name: "canPlay".into(), sig: "([B[B)Z".into(), fn_ptr: ring_can_play as *mut _ },
             NativeMethod {
                 name: "prefRemove".into(),
                 sig: "([B)V".into(),
@@ -469,6 +471,17 @@ extern "system" fn ring_direction(_env: JNIEnv, _class: JClass) -> jint {
 
 extern "system" fn ring_text_scale(_env: JNIEnv, _class: JClass) -> jdouble {
     crate::capi::kaya_text_scale()
+}
+
+extern "system" fn ring_can_play<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    mime: JByteArray<'a>,
+    codecs: JByteArray<'a>,
+) -> jboolean {
+    let mime = env.convert_byte_array(&mime).expect("kaya: reading the mime type failed");
+    let codecs = env.convert_byte_array(&codecs).expect("kaya: reading the codecs failed");
+    unsafe { crate::capi::kaya_can_play(mime.as_ptr(), mime.len(), codecs.as_ptr(), codecs.len()) }
 }
 
 extern "system" fn ring_catalog<'a>(env: JNIEnv<'a>, _class: JClass<'a>, app: JByteArray<'a>) {

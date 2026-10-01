@@ -51,6 +51,7 @@ type Floor = {
   locale(): string;
   direction(): number;
   textScale(): number;
+  canPlay(mime: string, codecs: string): boolean;
   catalog(app: string): void;
   tr(key: string, args: [string, number, number, number, string][]): string;
   openPicked(handle: number, mode: number): { raw: number; seekable: boolean };
@@ -286,6 +287,10 @@ export function direction(): number {
 
 export function textScale(): number {
   return lib.textScale();
+}
+
+export function canPlay(mime: string, codecs: string): boolean {
+  return lib.canPlay(mime, codecs);
 }
 
 export function catalog(app: string): void {

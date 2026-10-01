@@ -228,18 +228,21 @@ fn track_line(what: &str, tags: &[String], selected: Option<usize>) -> String {
 /// media_tracks (docs/media-plan.md §3, §7a): each item's audio and caption
 /// listing, a second audio track selected, the last caption track selected,
 /// and the cue read at 0.5 s and 1.5 s with the player paused there. The
-/// sidecar item is the suite's floor file with captions.vtt, which kaya
-/// parses, times and draws.
+/// sidecar items are the suite's floor file with captions.vtt, which kaya
+/// parses, times and draws: an asset, then fetched from the local server,
+/// then a 404 there.
 fn tracks_app(ctx: kaya::AppCtx) {
     let base = media_url();
-    let sidecar = MediaSource::asset("media/captions.vtt");
-    let items: Vec<(Item, bool)> = vec![
-        (local("h264_2audio.mp4", "video/mp4", H264), false),
-        (local("vp9_2audio.webm", "video/webm", "vp09.00.10.08, opus"), false),
-        (served(&base, "hls_fmp4.m3u8", "application/vnd.apple.mpegurl", ""), false),
-        (served(&base, "hls_mpegts.m3u8", "application/vnd.apple.mpegurl", ""), false),
-        (local("h264_tx3g.mp4", "video/mp4", H264), false),
-        (Item { name: "h264_aac.mp4 + captions.vtt".to_owned(), ..local("h264_aac.mp4", "video/mp4", H264) }, true),
+    let floor = |label: &str| Item { name: label.to_owned(), ..local("h264_aac.mp4", "video/mp4", H264) };
+    let items: Vec<(Item, Option<MediaSource>)> = vec![
+        (local("h264_2audio.mp4", "video/mp4", H264), None),
+        (local("vp9_2audio.webm", "video/webm", "vp09.00.10.08, opus"), None),
+        (served(&base, "hls_fmp4.m3u8", "application/vnd.apple.mpegurl", ""), None),
+        (served(&base, "hls_mpegts.m3u8", "application/vnd.apple.mpegurl", ""), None),
+        (local("h264_tx3g.mp4", "video/mp4", H264), None),
+        (floor("h264_aac.mp4 + captions.vtt"), Some(MediaSource::asset("media/captions.vtt"))),
+        (floor("h264_aac.mp4 + http captions.vtt"), Some(MediaSource::url(format!("{base}/captions.vtt")))),
+        (floor("h264_aac.mp4 + http nope.vtt"), Some(MediaSource::url(format!("{base}/nope.vtt")))),
     ];
     let msgs = kaya::Messages::<TrackMsg>::new();
     let (summary, name, audio, captions, cue, player) = ctx.apply(|tx| {
@@ -285,12 +288,12 @@ fn tracks_app(ctx: kaya::AppCtx) {
     while let Some(msg) = msgs.next(&ctx) {
         match msg {
             TrackMsg::Next => {
-                let Some((item, with_sidecar)) = items.get(at) else { continue };
+                let Some((item, sidecar)) = items.get(at) else { continue };
                 at += 1;
                 can = kaya::can_play(item.mime, item.codecs);
                 ctx.apply(|tx| {
-                    if *with_sidecar {
-                        tx.player_captions(player, &sidecar, "en");
+                    if let Some(sidecar) = sidecar {
+                        tx.player_captions(player, sidecar, "en");
                     } else {
                         tx.clear_captions(player);
                     }

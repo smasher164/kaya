@@ -3134,6 +3134,62 @@ public final class KayaWire {
             // An answer carrying one value: id + the Value.
             return new Occ(kind, id, java.util.List.of(), parseValue(rec, b, new int[] {16}));
         }
+        if (kind == OCC_KIND_PLAYER_CHANGED) {
+            // A flat record: its fields in order, into the tail.
+            int[] at = {8};
+            java.util.List<Object> tail = new java.util.ArrayList<>();
+            at[0] += 8;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            tail.add(b.getLong(at[0]));
+            at[0] += 8;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            tail.add(parseValue(rec, b, at));
+            return new Occ(kind, id, java.util.List.of(), tail);
+        }
+        if (kind == OCC_KIND_SESSION_ACTION) {
+            // A flat record: its fields in order, into the tail.
+            int[] at = {8};
+            java.util.List<Object> tail = new java.util.ArrayList<>();
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            at[0] += 4;
+            tail.add(b.getLong(at[0]));
+            at[0] += 8;
+            return new Occ(kind, 0L, java.util.List.of(), tail);
+        }
+        if (kind == OCC_KIND_PLAYER_TRACKS) {
+            // A flat record: its fields in order, into the tail.
+            int[] at = {8};
+            java.util.List<Object> tail = new java.util.ArrayList<>();
+            at[0] += 8;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            {
+                int count = b.getInt(at[0]);
+                at[0] += 8;
+                tail.add((long) count);
+                for (int i = 0; i < count; i++) {
+                    tail.add(parseValue(rec, b, at));
+                }
+            }
+            {
+                int count = b.getInt(at[0]);
+                at[0] += 8;
+                tail.add((long) count);
+                for (int i = 0; i < count; i++) {
+                    tail.add(parseValue(rec, b, at));
+                }
+            }
+            return new Occ(kind, id, java.util.List.of(), tail);
+        }
         if (kind == OCC_KIND_FILE_DIALOG_RESULT) {
             // id, a count, then three Values per file
             // (handle, name, local_path). EMPTY IS CANCEL.

@@ -52,6 +52,8 @@ let wire: [String: (valueCase: String, zero: String)] = [
     "KayaTime": ("i64", "KayaTime(hour: 0, minute: 0)"),
     // docs/color-picker-plan.md §2.
     "KayaColor": ("i64", "KayaColor(hex: 0x000000FF)"),
+    // A row's player (docs/media-plan.md §7b): the id, `.none` for none.
+    "KayaPlayer": ("i64", "KayaPlayer.none"),
 ]
 
 /// The READ direction — `init(values:)`, the shape an undo's restored
@@ -68,6 +70,7 @@ let readWire: [String: (valueCase: String, lift: (String) -> String)] = [
     "KayaDate": ("i64", { "kayaDate(packed: \($0))" }),
     "KayaTime": ("i64", { "kayaTime(packed: \($0))" }),
     "KayaColor": ("i64", { "kayaColor(packed: \($0))" }),
+    "KayaPlayer": ("i64", { "kayaPlayer(packed: \($0))" }),
 ]
 
 func conformsToKayaGen(_ clause: InheritanceClauseSyntax?) -> Bool {
@@ -405,6 +408,14 @@ func generateRecord(_ name: String, _ fields: [Field]) -> String {
     line("        onColor: ((KayaAppTx, [KayaValue], KayaColor) -> Void)? = nil")
     line("    ) -> KayaNodeHandle {")
     line("        t.colorPicker(f, alpha: alpha, onColor: onColor)")
+    line("    }")
+    line("")
+    line("    @discardableResult")
+    line("    func video(")
+    line("        _ f: KayaField<KayaPlayer>, fit: KayaFit? = nil,")
+    line("        onVisibility: ((KayaAppTx, [KayaValue], Double) -> Void)? = nil")
+    line("    ) -> KayaNodeHandle {")
+    line("        t.video(f, fit: fit, onVisibility: onVisibility)")
     line("    }")
     line("")
     line("    @discardableResult")

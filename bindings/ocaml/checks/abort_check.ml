@@ -1022,4 +1022,104 @@ let () =
         fail "for_each did not answer its body's value (node %Ld after For %Ld)"
           row for_site);
 
+  (* MEDIA (docs/media-plan.md): the three flat records through the
+     GENERATED decoder, then the binding's mirror and handlers. *)
+  let record kind fill =
+    let b = Buffer.create 64 in
+    fill b;
+    let body = Buffer.contents b in
+    let h = Buffer.create 64 in
+    Buffer.add_int32_le h (Int32.of_int (8 + String.length body));
+    Buffer.add_uint16_le h kind;
+    Buffer.add_uint16_le h 0;
+    Buffer.add_string h body;
+    let bytes = Buffer.contents h in
+    match Kaya_wire.parse_occurrence (fun i -> Char.code bytes.[i]) with
+    | Some (k, id, keys, payload, _, _, tail) -> (k, id, keys, payload, tail)
+    | None -> fail "the generated decoder refused media record kind %d" kind
+  in
+  let changed =
+    record Kaya_wire.occ_kind_player_changed (fun b ->
+        Buffer.add_int64_le b 7L;
+        Buffer.add_int32_le b (Int32.of_int Kaya_wire.player_state_failed);
+        Buffer.add_int32_le b (Int32.of_int Kaya_wire.media_failure_not_found);
+        Buffer.add_int64_le b 2000L;
+        Buffer.add_int32_le b 160l;
+        Buffer.add_int32_le b 90l;
+        Kaya_wire.encode_value b (Str "gone"))
+  in
+  (match changed with
+  | _, 7L, [], None, [ I64 6L; I64 3L; I64 2000L; I64 160L; I64 90L; Str "gone" ] -> ()
+  | _, id, _, _, tail ->
+      fail "player_changed decoded as id %Ld tail [%s]" id
+        (String.concat "; " (List.map show_wire_value tail)));
+  let values b vs =
+    Buffer.add_int32_le b (Int32.of_int (List.length vs));
+    Buffer.add_int32_le b 0l;
+    List.iter (fun v -> Kaya_wire.encode_value b (Str v)) vs
+  in
+  let listing =
+    record Kaya_wire.occ_kind_player_tracks (fun b ->
+        Buffer.add_int64_le b 7L;
+        Buffer.add_int32_le b 2l;
+        Buffer.add_int32_le b 0l;
+        values b [ "en"; "fr" ];
+        values b [ "en" ])
+  in
+  (match listing with
+  | _, 7L, [], None, [ I64 2L; I64 0L; I64 2L; Str "en"; Str "fr"; I64 1L; Str "en" ] -> ()
+  | _, id, _, _, tail ->
+      fail "player_tracks decoded as id %Ld tail [%s]" id
+        (String.concat "; " (List.map show_wire_value tail)));
+  let action =
+    record Kaya_wire.occ_kind_session_action (fun b ->
+        Buffer.add_int32_le b (Int32.of_int Kaya_wire.session_action_seek_to);
+        Buffer.add_int32_le b 0l;
+        Buffer.add_int64_le b 1500L)
+  in
+  (match action with
+  | _, 0L, [], None, [ I64 4L; I64 1500L ] -> ()
+  | _, id, _, _, tail ->
+      fail "session_action decoded as id %Ld tail [%s]" id
+        (String.concat "; " (List.map show_wire_value tail)));
+  let media_app = Kaya_app.create () in
+  let p = build media_app (fun () -> player ~muted:true ()) in
+  let heard = ref "" in
+  on_failed media_app p (fun why detail -> heard := Media_failure.name why ^ " " ^ detail);
+  let feed (kind, id, keys, payload, tail) =
+    if not (For_media_checks.occurrence media_app kind id keys payload tail) then
+      fail "the media arm did not take occurrence kind %d" kind
+  in
+  let k, _, keys, payload, tail = changed in
+  feed (k, pack_player p, keys, payload, tail);
+  let r = player_reading media_app p in
+  if r.state <> Player_state.Failed || r.duration_ms <> 2000 || r.width <> 160 || r.height <> 90
+  then fail "the mirror did not take player_changed (state %s)" (Player_state.name r.state);
+  if !heard <> "not_found gone" then fail "on_failed heard %S, wanted the reason and detail" !heard;
+  feed (Kaya_wire.occ_kind_player_position, 1234L, [], Some (I64 (pack_player p)), []);
+  if (player_reading media_app p).position_ms <> 1234 then
+    fail "the mirror did not take player_position";
+  let k, _, keys, payload, tail = listing in
+  feed (k, pack_player p, keys, payload, tail);
+  let t = tracks media_app p in
+  if t.audio <> [ "en"; "fr" ] || t.audio_selected <> Some 1 || t.captions <> [ "en" ]
+     || t.caption_selected <> None
+  then fail "the mirror did not take player_tracks";
+  (* A stamped video's player comes from the row's own field. *)
+  let rows = build media_app (fun () -> collection ()) in
+  build media_app (fun () ->
+      let tx = the_tx () in
+      let before = List.length (For_checks.records tx) in
+      ignore (for_each rows (fun () -> Tpl.(video ~bind_field:(player_field 1) ())) ());
+      let fresh = queued_since tx before in
+      let bound r =
+        String.length r >= 32
+        && Kaya_wire.u16_at (fun i -> Char.code r.[i]) 4 = Kaya_wire.tx_kind_set_property
+        && Kaya_wire.u32_at (fun i -> Char.code r.[i]) 16 = Kaya_wire.prop_player
+        && Kaya_wire.u32_at (fun i -> Char.code r.[i]) 20 = Kaya_wire.source_element
+        && Kaya_wire.u32_at (fun i -> Char.code r.[i]) 28 = 1
+      in
+      if not (List.exists bound fresh) then
+        fail "a stamped video's player field never reached PROP_PLAYER");
+
   print_endline "ocaml abort check: OK"

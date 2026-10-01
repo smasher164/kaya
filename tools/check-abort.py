@@ -476,6 +476,14 @@ with scratch_dir("check-abort-") as tmp:
          ["dotnet", "exec", "guests/csharp/bin/Debug/net10.0/kaya-guests.dll"],
          tmp / "cs-notify.log", env=dict(ENV, KAYA_CHECK="notify"),
          echo=("notify-order:", "link-route:"))
+    # The media records' decode, the mirror and the stamped video
+    # (guests/csharp/MediaCheck.cs), same binary.
+    step("csharp-media",
+         ["dotnet", "exec", "guests/csharp/bin/Debug/net10.0/kaya-guests.dll"],
+         tmp / "cs-media.log", env=dict(ENV, KAYA_CHECK="media"), echo="media-check:")
+    if "media-check: OK" not in (tmp / "cs-media.log").read_text(encoding="utf-8",
+                                                                 errors="replace"):
+        fail("csharp-media (exited 0 without its verdict)", tmp / "cs-media.log")
 
     for name, before, after, expected in (
         ("ambient", "try { job(); }", "try { Build(_ => job()); }",

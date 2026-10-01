@@ -284,9 +284,17 @@ pub(crate) fn media_locator(name: &str) -> Result<String, String> {
 /// An absolute path as a file:// URL, percent-encoding every byte outside
 /// RFC 3986's unreserved set and `/`.
 pub(crate) fn file_url(path: &std::path::Path) -> String {
+    file_url_of(&path.to_string_lossy(), cfg!(windows))
+}
+
+/// A Windows path is a drive and backslashes, `file:///C:/kaya/...`
+/// (RFC 8089 §E.2): Media Foundation opens nothing from the unix spelling.
+fn file_url_of(path: &str, windows: bool) -> String {
     let mut url = String::from("file://");
-    for byte in path.to_string_lossy().bytes() {
-        if byte.is_ascii_alphanumeric() || b"-._~/".contains(&byte) {
+    let text = if windows { format!("/{}", path.replace('\\', "/")) } else { path.to_owned() };
+    for (at, byte) in text.bytes().enumerate() {
+        let drive = windows && at == 2 && byte == b':';
+        if drive || byte.is_ascii_alphanumeric() || b"-._~/".contains(&byte) {
             url.push(byte as char);
         } else {
             url.push_str(&format!("%{byte:02X}"));
@@ -376,6 +384,16 @@ pub(crate) fn serially() -> std::sync::MutexGuard<'static, ()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_file_url_keeps_a_windows_drive_and_turns_its_backslashes() {
+        assert_eq!(
+            file_url_of("C:\\kaya\\assets\\media/h264_aac.mp4", true),
+            "file:///C:/kaya/assets/media/h264_aac.mp4"
+        );
+        assert_eq!(file_url_of("C:\\a b\\c.mp4", true), "file:///C:/a%20b/c.mp4");
+        assert_eq!(file_url_of("/Users/a\\b/c.mp4", false), "file:///Users/a%5Cb/c.mp4");
+    }
 
     /// Every branch of the diagnostic made to print (invariant 3).
     #[test]

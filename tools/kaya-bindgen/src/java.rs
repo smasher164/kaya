@@ -805,6 +805,49 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("            return new Occ(kind, id, java.util.List.of(), parseValue(rec, b, new int[] {16}));");
         c.line("        }");
     }
+    // main.rs's flat_occurrence_names: the fields in order into the tail.
+    for name in crate::flat_occurrence_names(spec) {
+        let rec = spec.occurrence.iter().find(|r| r.name == name).unwrap();
+        c.line(&format!("        if (kind == OCC_KIND_{}) {{", name.to_uppercase()));
+        c.line(&format!("            // {}", crate::FLAT_MARK));
+        c.line("            int[] at = {8};");
+        c.line("            java.util.List<Object> tail = new java.util.ArrayList<>();");
+        let mut fields = rec.fields.iter();
+        let flat_id = if matches!(rec.fields[0].ty, FieldTy::U64) {
+            fields.next();
+            c.line("            at[0] += 8;");
+            "id"
+        } else {
+            "0L"
+        };
+        for f in fields {
+            match f.ty {
+                FieldTy::U32 if f.name == "reserved" => c.line("            at[0] += 4;"),
+                FieldTy::U32 => {
+                    c.line("            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));");
+                    c.line("            at[0] += 4;");
+                }
+                FieldTy::U64 => {
+                    c.line("            tail.add(b.getLong(at[0]));");
+                    c.line("            at[0] += 8;");
+                }
+                FieldTy::Value => c.line("            tail.add(parseValue(rec, b, at));"),
+                FieldTy::Values => {
+                    c.line("            {");
+                    c.line("                int count = b.getInt(at[0]);");
+                    c.line("                at[0] += 8;");
+                    c.line("                tail.add((long) count);");
+                    c.line("                for (int i = 0; i < count; i++) {");
+                    c.line("                    tail.add(parseValue(rec, b, at));");
+                    c.line("                }");
+                    c.line("            }");
+                }
+                FieldTy::VariantSchemas => panic!("kaya-bindgen: flat record {name} carries variant schemas"),
+            }
+        }
+        c.line(&format!("            return new Occ(kind, {flat_id}, java.util.List.of(), tail);"));
+        c.line("        }");
+    }
     // The picker's answer is a LIST OF RECORDS, so it needs its own
     // arm: the generic tail would take the file count for a key-path
     // length and start eight bytes early.

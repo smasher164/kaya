@@ -1196,7 +1196,7 @@ if proof.returncode != 0:
 # a few legs, and nothing but this clause could tell.
 ONLY_FILES = {
     "tools/validate-mac.py": ("only.wanted(", "only.summary(\"validate-mac\""),
-    "tools/ios/run-sim.py": ("only.wanted(", "only.summary(\"run-sim\""),
+    "tools/ios/run-sim.py": ("if not only.wanted(name)", "only.summary(\"run-sim\""),
     "tools/android/run-emulator.py": ("only.matches(",
                                       "only.summary(\"run-emulator\""),
     "tools/deploy-win.py": ("only.matches(lane.legs())",
@@ -1241,7 +1241,7 @@ if problem:
     fail("the matrix filter: " + problem)
 
 # N24 — a python lane that stopped filtering its queue must be reported.
-doctored, n = re.subn(r"only\.wanted\(name\)", "True",
+doctored, n = re.subn(r"if not only\.wanted\(name\)", "if not True",
                       only_texts["tools/ios/run-sim.py"], count=1)
 print(f"check-gates: self-test N24 unhooked the iOS runner's filter, "
       f"{n} substitution(s)")

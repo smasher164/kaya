@@ -74,7 +74,7 @@ static uint64_t open_or_die(const char *name) {
 }
 
 static void build_scene(void) {
-    uint8_t buf[2048];
+    uint8_t buf[8192];
     KayaTx tx = {buf, 0, sizeof buf};
 
     window_prop(&tx, 0, KAYA_WPROP_TITLE, kaya_str("assets"));
@@ -99,7 +99,7 @@ static void build_scene(void) {
         return;
     }
 
-    char census[1024];
+    char census[4096];
     why_not(MISSING, census, sizeof census);
 
     char complaint[1024];

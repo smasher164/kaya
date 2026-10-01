@@ -569,6 +569,13 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     var lowLabel by mutableStateOf("")
     var highLabel by mutableStateOf("")
 
+    /** THE VIDEO VIEW (docs/media-plan.md §3): the player it shows (0 none),
+     * its fit, and a counter bumped whenever that player's picture, size or
+     * caption moves. */
+    var videoPlayer by mutableLongStateOf(0L)
+    var fit by mutableLongStateOf(0L)
+    var videoSeq by mutableIntStateOf(0)
+
     /**
      * THE PICKERS' SLOTS (docs/datetime-plan.md D2), packed decimal:
      * [date], [minDate] and [maxDate] as YYYYMMDD (0 = no bound),
@@ -1424,13 +1431,14 @@ object KayaSceneModel {
     val numberFields = ArrayList<KayaNode>()
     val colorPickers = ArrayList<KayaNode>()
     val ranges = ArrayList<KayaNode>()
+    val videos = ArrayList<KayaNode>()
 
     // Every kind registry, so a destroyed node leaves all of them at once
     // (docs/traps.md 2026-09-14: a torn-down copy stayed addressable).
     private val registries = listOf(
         buttons, checkboxes, labels, entryWidgets, sliders, images, columns, rows, scrolls,
         progresses, selects, radios, grids, textareas, canvases, datePickers, timePickers,
-        labeleds, searches, numberFields, colorPickers, ranges,
+        labeleds, searches, numberFields, colorPickers, ranges, videos,
     )
 
     fun forget(id: Long) {
@@ -1924,7 +1932,11 @@ internal class KayaExpanded(val text: String, val refused: String?)
  */
 internal fun kayaExpandTemplate(context: android.content.Context, want: String): KayaExpanded {
     // docs/media-plan.md §7a: this lane's table of refused items.
-    if (want.contains("{media:") || want.contains("{captions:")) depthStub("media_formats")
+    if (want.contains("{media:") || want.contains("{captions:")) {
+        val media = kayaExpandMedia(want)
+        if (media.refused != null || !media.text.contains("{fmt:")) return media
+        return kayaExpandTemplate(context, media.text)
+    }
     if (!want.contains("{fmt:")) return KayaExpanded(want, null)
     val out = StringBuilder()
     var rest = want
@@ -2103,8 +2115,7 @@ object KayaCompose {
     // game and a Kotlin Long hex literal cannot express it.
     /** The capability query's Compose half (docs/media-plan.md §8 ruling 1). */
     @JvmStatic
-    @Suppress("UNUSED_PARAMETER")
-    fun canPlay(mime: String, codecs: String): Boolean = depthStub("media_formats")
+    fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
     private const val SPEC_HASH: ULong = 0x1d479d566df30301uL
 
@@ -3297,7 +3308,7 @@ object KayaCompose {
                         KIND_SEARCH -> KayaSceneModel.searches.add(node)
                         KIND_COLOR_PICKER -> KayaSceneModel.colorPickers.add(node)
                         KIND_RANGE -> KayaSceneModel.ranges.add(node)
-                        KIND_VIDEO -> depthStub("media_formats")
+                        KIND_VIDEO -> KayaSceneModel.videos.add(node)
                         KIND_NUMBER_FIELD -> {
                             // docs/number-field-plan.md §2: unset bounds are
                             // ±2^53, the step 1, and the field shows its
@@ -3389,7 +3400,7 @@ object KayaCompose {
                         PROP_MIN_GAP -> KayaSceneModel.nodes[id]!!.minGap = readF64(b)
                         PROP_LOW_LABEL -> KayaSceneModel.nodes[id]!!.lowLabel = readString(b)
                         PROP_HIGH_LABEL -> KayaSceneModel.nodes[id]!!.highLabel = readString(b)
-                        PROP_FIT -> depthStub("media_formats")
+                        PROP_FIT -> KayaSceneModel.nodes[id]!!.fit = readI64(b)
                         PROP_PLAYER -> error("kaya: a video view's player arrives as set_video_player; the core never forwards the player prop")
                         // docs/rich-text-plan.md §14: this platform's lever
                         // is `clearHistory()`, so taking ownership drops what
@@ -3732,9 +3743,71 @@ object KayaCompose {
                     kayaPostNotification(nid, at, title, body, reply)
                 }
                 APPLY_CANCEL_NOTIFICATION -> kayaCancelNotification(b.long)
-                APPLY_CREATE_PLAYER, APPLY_SET_PLAYER_PROP, APPLY_PLAYER_COMMAND,
-                APPLY_RELEASE_PLAYER, APPLY_SET_VIDEO_PLAYER, APPLY_SET_SESSION, APPLY_SELECT_TRACK,
-                APPLY_CAPTION_TIMES -> depthStub("media_formats")
+                // docs/media-plan.md: the player, the video view and the
+                // session (KayaMedia.kt).
+                APPLY_CREATE_PLAYER -> kayaMediaCreate(b.long)
+                APPLY_SET_PLAYER_PROP -> {
+                    // { u64 player; u32 pprop; u32 reserved; value }, a source
+                    // already the URL the core resolved.
+                    val pid = b.long
+                    val pprop = b.int
+                    b.int
+                    val p = kayaPlayers[pid] ?: error("kaya: set_player_prop on unknown player $pid")
+                    when (pprop) {
+                        PPROP_SOURCE -> p.load(readString(b))
+                        PPROP_SPEED -> p.changeSpeed(readF64(b).toFloat())
+                        PPROP_VOLUME -> p.setVolume(readF64(b).toFloat())
+                        PPROP_MUTED -> p.setMuted(readBool(b))
+                        PPROP_LOOP -> p.setLooping(readBool(b))
+                        // Only an http(s) sidecar reaches a backend: the fetch.
+                        PPROP_CAPTIONS -> p.fetchCaptions(readString(b))
+                        else -> error("kaya: bad player prop $pprop")
+                    }
+                }
+                APPLY_PLAYER_COMMAND -> {
+                    // { u64 player; u32 command; u32 reserved; u64 at_ms }.
+                    val pid = b.long
+                    val command = b.int
+                    b.int
+                    kayaMediaCommand(pid, command, b.long)
+                }
+                APPLY_RELEASE_PLAYER -> kayaMediaRelease(b.long)
+                APPLY_SET_VIDEO_PLAYER -> {
+                    // { u64 widget; u64 player }, 0 for none.
+                    val vid = b.long
+                    val vnode = KayaSceneModel.nodes[vid] ?: error("kaya: set_video_player on unknown widget $vid")
+                    vnode.videoPlayer = b.long
+                    vnode.videoSeq += 1
+                    kayaFollowKeepAwake()
+                }
+                APPLY_SET_SESSION -> {
+                    // { u64 player; u32 offered; u32 playback_state; Str title,
+                    //   artist, album, artwork (a file URL or empty) }.
+                    val attached = b.long
+                    val offered = b.int
+                    b.int
+                    val title = readString(b)
+                    val artist = readString(b)
+                    val album = readString(b)
+                    val artwork = readString(b)
+                    val context = kayaAppContext ?: error("kaya: set_session before the Compose backend attached")
+                    KayaMediaSession.apply(context, attached, offered, title, artist, album, artwork)
+                }
+                APPLY_SELECT_TRACK -> {
+                    // { u64 player; u32 track_kind; u32 index }, from 1, 0 off.
+                    val pid = b.long
+                    val kind = b.int
+                    kayaPlayers[pid]?.select(kind, b.int)
+                }
+                APPLY_CAPTION_TIMES -> {
+                    // { u64 player; u32 count; u32 reserved; count I64 ms }: the
+                    // sidecar's boundaries, kaya's to draw.
+                    val pid = b.long
+                    val count = b.int
+                    b.int
+                    val times = List(count) { readI64(b) }
+                    kayaPlayers[pid]?.setCaptionTimes(times)
+                }
                 APPLY_SET_BADGE -> {
                     // { u32 count; u32 reserved } (docs/app-badge-plan.md §3).
                     val count = b.int
@@ -4613,6 +4686,41 @@ object KayaCompose {
     /** notify_tap requests printed this run; the runner keys its own
      * retries on the sequence number, as it does for a drag. */
     private var kayaNotifyTaps = 0
+
+    /** The media verbs' requests to the runner (docs/media-plan.md §5): a media
+     * key dispatched through the system, the window manager's keep-screen-on. */
+    private var kayaHostRequests = 0
+
+    /** The runner's answer to request [seq], written into this app's files
+     * directory with run-as; null when none came within 8 s. */
+    private fun kayaHostAnswer(activity: ComponentActivity, seq: Int): String? {
+        val file = java.io.File(activity.filesDir, "kaya-host-$seq.txt")
+        val deadline = System.nanoTime() + 8_000_000_000L
+        while (System.nanoTime() < deadline) {
+            // Written in one piece and ended by a newline, so a read that
+            // beats the writer waits for the rest.
+            val said = if (file.isFile) file.readText(Charsets.UTF_8) else ""
+            if (said.endsWith("\n")) {
+                file.delete()
+                return said.trim()
+            }
+            Thread.sleep(50)
+        }
+        return null
+    }
+
+    /** ax_action's performance: the node info's action whose label is [name],
+     * through the provider; null when it ran, else what was seen. */
+    private fun kayaAxPerform(activity: ComponentActivity, tag: String, name: String): String? {
+        val view = kayaComposeRoot(activity.window.decorView) ?: return "no Compose root in the window"
+        val node = kayaAxFind((view as RootForTest).semanticsOwner.rootSemanticsNode, tag)
+            ?: return "nothing carries test tag \"$tag\""
+        val provider = view.accessibilityNodeProvider ?: return "the view serves no accessibility provider"
+        val info = provider.createAccessibilityNodeInfo(node.id) ?: return "the provider has no node info for \"$tag\""
+        val action = info.actionList.firstOrNull { it.label?.toString() == name }
+            ?: return "the actions are ${info.actionList.mapNotNull { it.label?.toString() }}"
+        return if (provider.performAction(node.id, action.id, null)) null else "the provider refused ${action.id}"
+    }
 
     /**
      * THE TAP'S ACK: an activation reached the core — the content
@@ -7109,7 +7217,7 @@ object KayaCompose {
             "number_field" -> KayaSceneModel.numberFields
             "color_picker" -> KayaSceneModel.colorPickers
             "range" -> KayaSceneModel.ranges
-            "video" -> depthStub("media_formats")
+            "video" -> KayaSceneModel.videos
             "textarea" -> KayaSceneModel.textareas
             "date_picker" -> KayaSceneModel.datePickers
             "time_picker" -> KayaSceneModel.timePickers
@@ -8738,8 +8846,104 @@ object KayaCompose {
                         val sentence = answer.substringAfter('\n')
                         if (answer.startsWith("ok\n")) observed.add(sentence) else failures.add(sentence)
                     }
-                    "expect_video_ink", "ax_action", "session_send", "expect_now_playing",
-                    "expect_display_awake", "expect_caption" -> depthStub("media_formats")
+                    "expect_video_ink" -> {
+                        // docs/media-plan.md §8 ruling 2: the SurfaceView is a
+                        // hole to the window's PixelCopy (measured 000000), so
+                        // this platform asserts FRAMES ARRIVING, never the colour.
+                        val want = quoted(parts.drop(2))
+                        val vnode = kayaWidgetTarget(parts[1])
+                        if (vnode == null) {
+                            failures.add("no such target ${parts[1]}")
+                        } else {
+                            val why = onUi(activity) { kayaVideoFramesWhyNot(vnode) }
+                            if (why == null) {
+                                observed.add("video frames arriving on ${parts[1]} ($want not read: a SurfaceView's pixels)")
+                            } else {
+                                failures.add("video ${parts[1]}: $why, wanted frames arriving ($want not read here)")
+                            }
+                        }
+                    }
+                    "expect_caption" -> {
+                        // docs/media-plan.md §3: the text kaya's caption
+                        // renderer drew over the view, never its look.
+                        val want = quoted(parts.drop(2))
+                        val got = kayaWidgetTarget(parts[1])?.let { kayaCaptionShown[it.id] ?: "" }
+                        if (got == want) {
+                            observed.add("caption ${kayaDebugQuoted(want)}")
+                        } else {
+                            failures.add("caption ${kayaDebugQuoted(got ?: "<no such target>")}, wanted ${kayaDebugQuoted(want)}")
+                        }
+                    }
+                    "ax_action" -> {
+                        // docs/media-plan.md §3: the action the view's node info
+                        // lists under that name, performed through the
+                        // accessibility provider a service calls.
+                        kayaAwaitQuiet()
+                        val answered = kayaBatches
+                        val name = quoted(parts.drop(2))
+                        val vnode = kayaWidgetTarget(parts[1])
+                        when {
+                            vnode == null -> failures.add("no such target ${parts[1]}")
+                            vnode.a11yId.isEmpty() ->
+                                failures.add("ax_action ${parts[1]}: no a11y_id authored, so no element to find")
+                            else -> {
+                                val said = onUi(activity) { kayaAxPerform(activity, vnode.a11yId, name) }
+                                if (said == null) kayaAwaitAnswer(answered)
+                                else failures.add("ax_action ${parts[1]} \"$name\": $said")
+                            }
+                        }
+                    }
+                    "session_send" -> {
+                        // docs/media-plan.md §5: THROUGH THE SYSTEM. The runner
+                        // dispatches the media key with `cmd media_session
+                        // dispatch`, the system hands it to its media button
+                        // session, and ARRIVAL at this session is the proof;
+                        // the runner re-dispatches until the ack.
+                        kayaAwaitQuiet()
+                        val answered = kayaBatches
+                        val key = if (parts[1] == "toggle") "play-pause" else parts[1]
+                        val before = KayaMediaSession.arrivals
+                        kayaHostRequests += 1
+                        val seq = kayaHostRequests
+                        Log.i("kaya", "KAYA_REQUEST: media_key $seq $key")
+                        val deadline = System.nanoTime() + 12_000_000_000L
+                        while (KayaMediaSession.arrivals == before && System.nanoTime() < deadline) Thread.sleep(20)
+                        if (KayaMediaSession.arrivals > before) {
+                            Log.i("kaya", "KAYA_ACK: media_key $seq")
+                            kayaAwaitAnswer(answered)
+                        } else {
+                            failures.add(
+                                "session_send ${parts[1]}: no command reached this app's session within 12 s " +
+                                    "of the runner's `cmd media_session dispatch $key` (the leg log names the " +
+                                    "system's media button session at each dispatch)")
+                        }
+                    }
+                    "expect_now_playing" -> {
+                        // The session as the SYSTEM holds it: a platform
+                        // MediaController on the session's token.
+                        val state = parts[parts.size - 1]
+                        val want = "${kayaDebugQuoted(quoted(parts.subList(1, parts.size - 1)))} $state"
+                        val got = onUi(activity) { KayaMediaSession.nowPlaying(activity) }
+                        if (got == want) observed.add("now playing $want")
+                        else failures.add("now playing $got, wanted $want")
+                    }
+                    "expect_display_awake" -> {
+                        // The keep-screen-on the WINDOW MANAGER holds: the
+                        // runner reads `dumpsys window`'s mHoldScreenWindow and
+                        // writes it back (no app may dump the window manager).
+                        val want = parts[1] == "yes"
+                        kayaHostRequests += 1
+                        val seq = kayaHostRequests
+                        Log.i("kaya", "KAYA_REQUEST: hold_screen $seq")
+                        val said = kayaHostAnswer(activity, seq)
+                        if (said == null) {
+                            failures.add("display awake: the runner wrote no `dumpsys window` reading within 8 s")
+                        } else {
+                            val got = said.contains(activity.packageName + "/")
+                            if (got == want) observed.add("display awake $got")
+                            else failures.add("display awake $got ($said), wanted $want")
+                        }
+                    }
                     "expect_badge" -> {
                         // docs/app-badge-plan.md §4: the number the platform
                         // holds on the app's showing notifications, which is
@@ -14891,7 +15095,7 @@ private fun KayaRenderCore(
         KayaCompose.KIND_NUMBER_FIELD -> KayaNumberField(node, a11y, boxFill)
         KayaCompose.KIND_COLOR_PICKER -> KayaColorButton(node, a11y, boxFill)
         KayaCompose.KIND_RANGE -> KayaRangeSurface(node, boxFill, a11y)
-        KayaCompose.KIND_VIDEO -> depthStub("media_formats")
+        KayaCompose.KIND_VIDEO -> KayaVideoView(node, a11y, boxFill)
         KayaCompose.KIND_LABELED -> {
             // THE LABELLED ROW (docs/forms-plan.md §3): Material's own
             // labelled row, the value trailing and a WIDE control folded

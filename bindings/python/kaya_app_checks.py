@@ -4774,4 +4774,158 @@ check("fmt.direction answers one of the two words",
       kaya.fmt.direction() in ("ltr", "rtl"))
 check("fmt.text_scale answers a factor", kaya.fmt.text_scale() >= 1.0)
 
+# --- MEDIA (docs/media-plan.md): the three flat records through the
+# GENERATED decoder, the mirror absorbed before the handlers, the closed
+# reason, and a stamped video's Player field reaching PROP_PLAYER. The
+# bytes are packed as crates/kaya/src/wire.rs's player_changed_body,
+# player_tracks_body and session_action_body pack them.
+_W = kaya.wire
+
+
+def _occ_bytes(kind, body):
+    return _W.record(kind, body)
+
+
+def _changed(player, state, failure, duration, w, h, detail):
+    return _occ_bytes(_W.OCC_PLAYER_CHANGED,
+                      struct.pack("<QIIQII", player, state, failure, duration, w, h)
+                      + _W._enc.value(detail))
+
+
+def _tracks(player, a_sel, c_sel, audio, captions):
+    return _occ_bytes(_W.OCC_PLAYER_TRACKS,
+                      struct.pack("<QII", player, a_sel, c_sel)
+                      + _W._enc.values(audio) + _W._enc.values(captions))
+
+
+def _pair(kind, player, ms):
+    return _occ_bytes(kind, struct.pack("<QQ", player, ms))
+
+
+def _session(action, at_ms):
+    return _occ_bytes(_W.OCC_SESSION_ACTION, struct.pack("<IIQ", action, 0, at_ms))
+
+
+def _decoded(buf):
+    """The generated decoder's answer, or the exception it raised: the
+    shipped click-tail misread raises on these records."""
+    try:
+        return _W.parse_occurrence(buf)
+    except Exception as e:  # noqa: BLE001
+        return e
+
+
+check("player_changed decodes through the generated decoder, every field",
+      _decoded(_changed(7, _W.PLAYER_STATE_FAILED,
+                                   _W.MEDIA_FAILURE_NETWORK, 2000, 160, 90,
+                                   "refused"))
+      == (_W.OCC_PLAYER_CHANGED, 7, [],
+          [_W.PLAYER_STATE_FAILED, _W.MEDIA_FAILURE_NETWORK, 2000, 160, 90,
+           "refused"]))
+check("player_tracks decodes both lists and both selections",
+      _decoded(_tracks(7, 2, 0, ["en", "fr"], ["en"]))
+      == (_W.OCC_PLAYER_TRACKS, 7, [], [2, 0, 2, "en", "fr", 1, "en"]))
+check("session_action decodes its action and at_ms",
+      _decoded(_session(_W.SESSION_ACTION_SEEK_TO, 1500))
+      == (_W.OCC_SESSION_ACTION, 0, [], [_W.SESSION_ACTION_SEEK_TO, 1500]))
+
+
+@dataclass
+class MdClip:
+    name: str
+    player: kaya.Player | None
+
+
+app_md = kaya.App()
+md_seen = []
+md_node = None
+md_live = None
+md_records = []
+with app_md.window():
+    before_md = len(kaya._tx)
+    md_player = kaya.player(
+        kaya.MediaSource.asset("media/h264_aac.mp4"), muted=True,
+        on_state=lambda s: md_seen.append(("state", s, md_player.position_ms)),
+        on_ended=lambda: md_seen.append(("ended",)),
+        on_failed=lambda why, detail: md_seen.append(("failed", why, detail)),
+        on_position=lambda ms: md_seen.append(("position", ms)),
+        on_tracks=lambda t: md_seen.append(("tracks", t)),
+        on_cue=lambda text: md_seen.append(("cue", text)))
+    with kaya.column():
+        md_live = kaya.video(md_player, fit=kaya.Fit.COVER)
+        md_clips = kaya.collection(MdClip)
+        for md_clip in md_clips:
+            md_node = kaya.video(md_clip.player,
+                                 on_visibility=lambda row, shown:
+                                 md_seen.append(("shown", row.key, shown)))
+    md_records = kaya._tx[before_md:]
+    kaya.session(player=md_player, handles=[kaya.SessionAction.NEXT],
+                 on_action=lambda a, ms: md_seen.append(("session", a, ms)))
+    md_spec = md_clips._variants[0]
+
+check("a player is created, muted, then loaded in that order",
+      md_records[:3] == [
+          _W.tx_create_player(md_player.id),
+          _W.tx_set_player_prop(md_player.id, _W.PPROP_MUTED, True),
+          _W.tx_set_player_prop(md_player.id, _W.PPROP_SOURCE,
+                                "media/h264_aac.mp4")])
+with app_md.window():
+    before_cap = len(kaya._tx)
+    cap_player = kaya.player(captions=kaya.MediaSource.asset("media/captions.vtt"))
+    cap_records = kaya._tx[before_cap:]
+check("a sidecar given no language is `und`, the core's own default, never empty",
+      _W.tx_set_player_prop(cap_player.id, _W.PPROP_CAPTIONS_LANGUAGE, "und")
+      in cap_records)
+check("a live video view shows its player and packs its fit",
+      _W.tx_set_player(md_live.id, md_player.id) in md_records
+      and _W.tx_set_fit(md_live.id, _W.FIT_COVER) in md_records)
+check("a stamped video view binds the row's Player field to PROP_PLAYER",
+      _W.tx_bind_player_element(md_node.id, 0, 1) in md_records)
+check("a `Player | None` field is the I64 slot, its none 0",
+      md_spec.schema == [_W.VALUE_STR, _W.VALUE_I64]
+      and md_spec.encoders[1](md_player) == md_player.id
+      and md_spec.encoders[1](None) == 0
+      and md_spec.decoders[1](0) is None
+      and md_spec.decoders[1](md_player.id) is md_player)
+
+md_occs = [_decoded(b) for b in [
+    _pair(_W.OCC_PLAYER_POSITION, md_player.id, 1200),
+    _changed(md_player.id, _W.PLAYER_STATE_LOADING, 0, 0, 0, 0, ""),
+    _changed(md_player.id, _W.PLAYER_STATE_ENDED, 0, 2000, 160, 90, ""),
+    _changed(md_player.id, _W.PLAYER_STATE_FAILED,
+             _W.MEDIA_FAILURE_NOT_FOUND, 0, 0, 0, "404"),
+    _tracks(md_player.id, 2, 0, ["en", "fr"], ["en"]),
+    _occ_bytes(_W.OCC_CAPTION_CUE,
+               struct.pack("<Q", md_player.id) + _W._enc.value("first cue")),
+    _session(_W.SESSION_ACTION_NEXT, 0),
+]] + [(_W.OCC_VIDEO_VISIBILITY, md_node.id, [3], 0.5)]
+md_occs = [o for o in md_occs if isinstance(o, tuple)]
+real_next_md = kaya.runtime.next_occurrence
+kaya.runtime.next_occurrence = lambda: md_occs.pop(0) if md_occs else None
+try:
+    app_md._dispatch_loop()
+finally:
+    kaya.runtime.next_occurrence = real_next_md
+
+check("the mirror is absorbed before the handler: loading resets the position",
+      ("state", kaya.PlayerState.LOADING, 0) in md_seen
+      and ("position", 1200) in md_seen)
+check("ended reaches on_state then on_ended, the readings current",
+      ("state", kaya.PlayerState.ENDED, 0) in md_seen
+      and md_seen.index(("state", kaya.PlayerState.ENDED, 0))
+      < md_seen.index(("ended",)))
+check("failed reaches on_failed with the closed reason and the sentence",
+      ("failed", kaya.MediaFailure.NOT_FOUND, "404") in md_seen
+      and str(kaya.MediaFailure.NOT_FOUND) == "not_found"
+      and md_player.failure == kaya.MediaFailure.NOT_FOUND)
+check("tracks arrive 0-based, none as None",
+      ("tracks", kaya.Tracks(("en", "fr"), ("en",), 1, None)) in md_seen
+      and md_player.tracks.audio_selected == 1)
+check("the cue reaches on_cue and the reading",
+      ("cue", "first cue") in md_seen and md_player.cue == "first cue")
+check("a session action reaches on_action as the closed action",
+      ("session", kaya.SessionAction.NEXT, 0) in md_seen)
+check("a stamped video's visibility passes the copy's row first",
+      ("shown", 3, 0.5) in md_seen)
+
 sys.exit(1 if failures else 0)

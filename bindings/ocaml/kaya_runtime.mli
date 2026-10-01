@@ -24,6 +24,9 @@ val fmt_currency : float -> string -> string option
 val locale_line : unit -> string option
 val direction_bit : unit -> int
 val text_scale : unit -> float
+
+(* kaya_can_play (docs/media-plan.md §8 ruling 1). *)
+val can_play : string -> string -> bool
 val catalog : string -> unit
 
 type tr_arg =

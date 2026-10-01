@@ -161,6 +161,10 @@ pub struct KayaHostApi {
     pub player_tracks: unsafe extern "C" fn(u64, *const u8, usize, *const u8, usize, u32, u32) -> u32,
     pub player_cue: unsafe extern "C" fn(u64, *const u8, usize) -> u32,
     pub caption_at: unsafe extern "C" fn(u64, u64, *mut u8, usize) -> usize,
+    /// docs/media-plan.md §3: an http(s) sidecar fetched by the platform.
+    pub player_captions_text: unsafe extern "C" fn(u64, *const u8, usize, *const u8, usize) -> u32,
+    pub player_captions_failed:
+        unsafe extern "C" fn(u64, *const u8, usize, *const u8, usize, i64, i64, *const u8, usize) -> u32,
     pub video_visible: extern "C" fn(u64, f64),
     /// docs/media-plan.md §5: the core's route for a remote action, and the
     /// system playback state to publish after every report.
@@ -564,6 +568,8 @@ pub(crate) fn run() -> i32 {
         player_tracks: crate::capi::kaya_player_tracks,
         player_cue: crate::capi::kaya_player_cue,
         caption_at: crate::capi::kaya_caption_at,
+        player_captions_text: crate::capi::kaya_player_captions_text,
+        player_captions_failed: crate::capi::kaya_player_captions_failed,
         video_visible: crate::capi::kaya_video_visible,
         session_action: crate::capi::kaya_session_action,
         session_state: crate::capi::kaya_session_state,

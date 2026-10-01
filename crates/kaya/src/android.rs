@@ -754,6 +754,83 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 sig: "([BDDZ)V".into(),
                 fn_ptr: present_emit_range as *mut _,
             },
+            // The media reports (docs/media-plan.md §2 rule 1): raw facts to
+            // the core's one state machine, each answering the state after.
+            NativeMethod {
+                name: "playerLoaded".into(),
+                sig: "(JJIIZLjava/lang/String;)I".into(),
+                fn_ptr: present_player_loaded as *mut _,
+            },
+            NativeMethod {
+                name: "playerRate".into(),
+                sig: "(JZ)I".into(),
+                fn_ptr: present_player_rate as *mut _,
+            },
+            NativeMethod {
+                name: "playerEnded".into(),
+                sig: "(J)I".into(),
+                fn_ptr: present_player_ended as *mut _,
+            },
+            NativeMethod {
+                name: "playerFailed".into(),
+                sig: "(JLjava/lang/String;JJLjava/lang/String;)I".into(),
+                fn_ptr: present_player_failed as *mut _,
+            },
+            NativeMethod {
+                name: "playerPosition".into(),
+                sig: "(JJ)I".into(),
+                fn_ptr: present_player_position as *mut _,
+            },
+            NativeMethod {
+                name: "playerSeeked".into(),
+                sig: "(JJ)I".into(),
+                fn_ptr: present_player_seeked as *mut _,
+            },
+            NativeMethod {
+                name: "playerOverdue".into(),
+                sig: "(J)I".into(),
+                fn_ptr: present_player_overdue as *mut _,
+            },
+            NativeMethod {
+                name: "playerTracks".into(),
+                sig: "(JLjava/lang/String;Ljava/lang/String;II)I".into(),
+                fn_ptr: present_player_tracks as *mut _,
+            },
+            NativeMethod {
+                name: "playerCue".into(),
+                sig: "(JLjava/lang/String;)I".into(),
+                fn_ptr: present_player_cue as *mut _,
+            },
+            NativeMethod {
+                name: "playerCaptionsText".into(),
+                sig: "(JLjava/lang/String;Ljava/lang/String;)I".into(),
+                fn_ptr: present_player_captions_text as *mut _,
+            },
+            NativeMethod {
+                name: "playerCaptionsFailed".into(),
+                sig: "(JLjava/lang/String;Ljava/lang/String;JJLjava/lang/String;)I".into(),
+                fn_ptr: present_player_captions_failed as *mut _,
+            },
+            NativeMethod {
+                name: "captionAt".into(),
+                sig: "(JJ)Ljava/lang/String;".into(),
+                fn_ptr: present_caption_at as *mut _,
+            },
+            NativeMethod {
+                name: "videoVisible".into(),
+                sig: "(JD)V".into(),
+                fn_ptr: present_video_visible as *mut _,
+            },
+            NativeMethod {
+                name: "sessionAction".into(),
+                sig: "(IJ)I".into(),
+                fn_ptr: present_session_action as *mut _,
+            },
+            NativeMethod {
+                name: "sessionState".into(),
+                sig: "()I".into(),
+                fn_ptr: present_session_state as *mut _,
+            },
             NativeMethod {
                 name: "emitSortRequested".into(),
                 sig: "([BI)V".into(),
@@ -2182,6 +2259,181 @@ extern "system" fn present_emit_range(
         .convert_byte_array(&tag)
         .expect("kaya: reading the range tag failed");
     unsafe { crate::capi::kaya_emit_range(bytes.as_ptr(), bytes.len(), low, high, committed) };
+}
+
+fn jstring_text(env: &mut JNIEnv, s: &JString, what: &str) -> String {
+    env.get_string(s)
+        .unwrap_or_else(|e| panic!("kaya: reading the {what} string from the JVM failed ({e})"))
+        .into()
+}
+
+extern "system" fn present_player_loaded(
+    mut env: JNIEnv,
+    _class: JClass,
+    player: jlong,
+    duration_ms: jlong,
+    width: jint,
+    height: jint,
+    undecodable: jni::sys::jboolean,
+    detail: JString,
+) -> jint {
+    let detail = jstring_text(&mut env, &detail, "player's decodability");
+    (unsafe {
+        crate::capi::kaya_player_loaded(
+            player as u64,
+            duration_ms.max(0) as u64,
+            width.max(0) as u32,
+            height.max(0) as u32,
+            u8::from(undecodable != 0),
+            detail.as_ptr(),
+            detail.len(),
+        )
+    }) as jint
+}
+
+extern "system" fn present_player_rate(_env: JNIEnv, _class: JClass, player: jlong, playing: jni::sys::jboolean) -> jint {
+    crate::capi::kaya_player_rate(player as u64, u8::from(playing != 0)) as jint
+}
+
+extern "system" fn present_player_ended(_env: JNIEnv, _class: JClass, player: jlong) -> jint {
+    crate::capi::kaya_player_ended(player as u64) as jint
+}
+
+extern "system" fn present_player_failed(
+    mut env: JNIEnv,
+    _class: JClass,
+    player: jlong,
+    domain: JString,
+    code: jlong,
+    underlying: jlong,
+    detail: JString,
+) -> jint {
+    let domain = jstring_text(&mut env, &domain, "player failure's domain");
+    let detail = jstring_text(&mut env, &detail, "player failure's detail");
+    (unsafe {
+        crate::capi::kaya_player_failed(
+            player as u64,
+            domain.as_ptr(),
+            domain.len(),
+            code,
+            underlying,
+            detail.as_ptr(),
+            detail.len(),
+        )
+    }) as jint
+}
+
+extern "system" fn present_player_position(_env: JNIEnv, _class: JClass, player: jlong, at: jlong) -> jint {
+    crate::capi::kaya_player_position(player as u64, at.max(0) as u64) as jint
+}
+
+extern "system" fn present_player_seeked(_env: JNIEnv, _class: JClass, player: jlong, at: jlong) -> jint {
+    crate::capi::kaya_player_seeked(player as u64, at.max(0) as u64) as jint
+}
+
+extern "system" fn present_player_overdue(_env: JNIEnv, _class: JClass, player: jlong) -> jint {
+    crate::capi::kaya_player_overdue(player as u64) as jint
+}
+
+extern "system" fn present_player_tracks(
+    mut env: JNIEnv,
+    _class: JClass,
+    player: jlong,
+    audio: JString,
+    captions: JString,
+    audio_selected: jint,
+    caption_selected: jint,
+) -> jint {
+    let audio = jstring_text(&mut env, &audio, "audio track list");
+    let captions = jstring_text(&mut env, &captions, "caption track list");
+    (unsafe {
+        crate::capi::kaya_player_tracks(
+            player as u64,
+            audio.as_ptr(),
+            audio.len(),
+            captions.as_ptr(),
+            captions.len(),
+            audio_selected.max(0) as u32,
+            caption_selected.max(0) as u32,
+        )
+    }) as jint
+}
+
+extern "system" fn present_player_cue(mut env: JNIEnv, _class: JClass, player: jlong, text: JString) -> jint {
+    let text = jstring_text(&mut env, &text, "platform cue");
+    (unsafe { crate::capi::kaya_player_cue(player as u64, text.as_ptr(), text.len()) }) as jint
+}
+
+extern "system" fn present_player_captions_text(
+    mut env: JNIEnv,
+    _class: JClass,
+    player: jlong,
+    url: JString,
+    text: JString,
+) -> jint {
+    let url = jstring_text(&mut env, &url, "caption file's url");
+    let text = jstring_text(&mut env, &text, "caption file's text");
+    (unsafe {
+        crate::capi::kaya_player_captions_text(player as u64, url.as_ptr(), url.len(), text.as_ptr(), text.len())
+    }) as jint
+}
+
+extern "system" fn present_player_captions_failed(
+    mut env: JNIEnv,
+    _class: JClass,
+    player: jlong,
+    url: JString,
+    domain: JString,
+    code: jlong,
+    underlying: jlong,
+    detail: JString,
+) -> jint {
+    let url = jstring_text(&mut env, &url, "caption file's url");
+    let domain = jstring_text(&mut env, &domain, "caption fetch's domain");
+    let detail = jstring_text(&mut env, &detail, "caption fetch's detail");
+    (unsafe {
+        crate::capi::kaya_player_captions_failed(
+            player as u64,
+            url.as_ptr(),
+            url.len(),
+            domain.as_ptr(),
+            domain.len(),
+            code,
+            underlying,
+            detail.as_ptr(),
+            detail.len(),
+        )
+    }) as jint
+}
+
+extern "system" fn present_caption_at<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass,
+    player: jlong,
+    t_ms: jlong,
+) -> jni::sys::jstring {
+    let mut buf = vec![0u8; 256];
+    let mut n = unsafe { crate::capi::kaya_caption_at(player as u64, t_ms.max(0) as u64, buf.as_mut_ptr(), buf.len()) };
+    if n > buf.len() {
+        buf = vec![0u8; n];
+        n = unsafe { crate::capi::kaya_caption_at(player as u64, t_ms.max(0) as u64, buf.as_mut_ptr(), buf.len()) };
+    }
+    let text = String::from_utf8_lossy(&buf[..n.min(buf.len())]).into_owned();
+    env.new_string(text)
+        .expect("kaya: handing a caption back to the JVM failed")
+        .into_raw()
+}
+
+extern "system" fn present_video_visible(_env: JNIEnv, _class: JClass, widget: jlong, shown: jni::sys::jdouble) {
+    crate::capi::kaya_video_visible(widget as u64, shown)
+}
+
+extern "system" fn present_session_action(_env: JNIEnv, _class: JClass, action: jint, at_ms: jlong) -> jint {
+    crate::capi::kaya_session_action(action.max(0) as u32, at_ms.max(0) as u64) as jint
+}
+
+extern "system" fn present_session_state(_env: JNIEnv, _class: JClass) -> jint {
+    crate::capi::kaya_session_state() as jint
 }
 
 extern "system" fn present_color_palette(env: JNIEnv, _class: JClass) -> jni::sys::jlongArray {

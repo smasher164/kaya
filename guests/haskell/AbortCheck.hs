@@ -12,9 +12,13 @@ import Control.Monad (unless)
 import Data.Bits (shiftR, (.&.))
 import qualified Data.ByteString as BS
 import Data.ByteString.Builder (toLazyByteString)
+import qualified Data.ByteString.Builder as BB
 import qualified Data.ByteString.Char8 as BC
 import qualified Data.ByteString.Lazy as BL
+import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.List (isInfixOf)
+import Data.Word (Word8)
+import Foreign.Ptr (castPtr)
 import GHC.Generics (Generic)
 import System.Exit (exitFailure)
 import System.IO (hPutStrLn, stderr)
@@ -26,6 +30,11 @@ import qualified KayaWire as W
 
 -- A record with a DOCUMENT field (docs/rich-text-plan.md §19).
 data CheckNote = CheckNote {cnTitle :: Text, cnBody :: Document}
+  deriving stock (Generic)
+  deriving anyclass (KayaRecord)
+
+-- A record with a PLAYER field (docs/media-plan.md §7b).
+data CheckClip = CheckClip {ccName :: Text, ccPlayer :: Player}
   deriving stock (Generic)
   deriving anyclass (KayaRecord)
 
@@ -282,5 +291,67 @@ main = do
   case gotMissing of
     Nothing -> return ()
     Just _ -> failWith "getRecord found a row at an absent key"
+
+  -- MEDIA (docs/media-plan.md): the three flat records through the
+  -- GENERATED decoder, then the binding's mirror and handlers.
+  let le n v = BL.toStrict (toLazyByteString (mconcat [BB.word8 (fromIntegral (v `shiftR` (8 * k)) :: Word8) | k <- [0 .. n - 1]]))
+      u16 = le 2 :: Integer -> BS.ByteString
+      u32 = le 4 :: Integer -> BS.ByteString
+      u64 = le 8 :: Integer -> BS.ByteString
+      str s = BL.toStrict (toLazyByteString (W.encodeValue (VStr s)))
+      strs ss = u32 (fromIntegral (length ss)) <> u32 0 <> mconcat (map str ss)
+      decode kind body = do
+        let bytes = u32 (fromIntegral (8 + BS.length body)) <> u16 (fromIntegral kind) <> u16 0 <> body
+        got <- BS.useAsCString bytes (W.parseOccurrence (\_ -> return BS.empty) . castPtr)
+        case got of
+          Just (k, ident, keys, payload, _, _, tail_) -> return (k, ident, keys, payload, tail_)
+          Nothing -> failWith ("the generated decoder refused media record kind " ++ show kind)
+  changed@(_, cId, _, _, cTail) <-
+    decode W.occKindPlayerChanged
+      ( u64 7 <> u32 (fromIntegral W.playerStateFailed) <> u32 (fromIntegral W.mediaFailureNotFound)
+          <> u64 2000 <> u32 160 <> u32 90 <> str "gone" )
+  check (cId == 7 && cTail == [VI64 6, VI64 3, VI64 2000, VI64 160, VI64 90, VStr "gone"])
+    ("player_changed decoded as id " ++ show cId ++ " tail " ++ show cTail)
+  listing@(_, lId, _, _, lTail) <-
+    decode W.occKindPlayerTracks (u64 7 <> u32 2 <> u32 0 <> strs ["en", "fr"] <> strs ["en"])
+  check (lId == 7 && lTail == [VI64 2, VI64 0, VI64 2, VStr "en", VStr "fr", VI64 1, VStr "en"])
+    ("player_tracks decoded as id " ++ show lId ++ " tail " ++ show lTail)
+  (_, aId, _, _, aTail) <-
+    decode W.occKindSessionAction (u32 (fromIntegral W.sessionActionSeekTo) <> u32 0 <> u64 1500)
+  check (aId == 0 && aTail == [VI64 4, VI64 1500])
+    ("session_action decoded as id " ++ show aId ++ " tail " ++ show aTail)
+  mediaApp <- newApp
+  p@(Player pid) <- buildTx mediaApp (player [PlayerMutedIs True])
+  heard <- newIORef ""
+  onFailed mediaApp p $ \why detail -> writeIORef heard (mediaFailureName why <> " " <> detail)
+  let feed (k, _, keys, payload, tail_) = do
+        took <- mediaOccurrence mediaApp k pid keys payload tail_
+        check took ("the media arm did not take occurrence kind " ++ show k)
+  feed changed
+  r <- playerReading mediaApp p
+  check (r.state == PlayerFailed && r.durationMs == 2000 && r.width == 160 && r.height == 90)
+    ("the mirror did not take player_changed: " ++ show r)
+  readIORef heard >>= \h -> check (h == "not_found gone") ("onFailed heard " ++ show h ++ ", wanted the reason and detail")
+  took <- mediaOccurrence mediaApp W.occKindPlayerPosition 1234 [] (Just (VI64 (fromIntegral pid))) []
+  check took "the media arm did not take player_position"
+  playerReading mediaApp p >>= \r' -> check (r'.positionMs == 1234) "the mirror did not take player_position"
+  feed listing
+  t <- playerTracks mediaApp p
+  check (t.audio == ["en", "fr"] && t.audioSelected == Just 1 && t.captions == ["en"] && t.captionSelected == Nothing)
+    ("the mirror did not take player_tracks: " ++ show t)
+  -- A stamped video's player comes from the row's own field.
+  clips <- buildTx mediaApp (collectionOf @CheckClip)
+  staged <- BL.toStrict . toLazyByteString . snd <$> stageTx mediaApp (forEach (recordHandle clips) (video (field @"ccPlayer" @CheckClip)))
+  let wordAt n at = sum [fromIntegral (BS.index staged (at + k)) * (256 ^ k) | k <- [0 .. n - 1]] :: Int
+      records at
+        | at + 8 > BS.length staged = []
+        | otherwise = let size = wordAt 4 at in at : (if size <= 0 then [] else records (at + size))
+      bound at =
+        at + 32 <= BS.length staged
+          && wordAt 2 (at + 4) == fromIntegral W.txKindSetProperty
+          && wordAt 4 (at + 16) == fromIntegral W.propPlayer
+          && wordAt 4 (at + 20) == fromIntegral W.sourceElement
+          && wordAt 4 (at + 28) == 1
+  check (any bound (records 0)) "a stamped video's player field never reached PROP_PLAYER"
 
   putStrLn "haskell abort check: OK"

@@ -1121,6 +1121,12 @@ pub const SESSION_SENDS: [&str; 6] = ["play", "pause", "toggle", "stop", "next",
 pub const VIDEO_INK_TOLERANCE: u8 = 2;
 
 pub fn video_ink_matches(got: &str, want: &str) -> bool {
+    video_ink_within(got, want, VIDEO_INK_TOLERANCE)
+}
+
+/// The same compare at a platform's own measured tolerance
+/// (Stage::video_ink_tolerance).
+pub fn video_ink_within(got: &str, want: &str, tolerance: u8) -> bool {
     let rgb = |s: &str| -> Option<[u8; 3]> {
         if s.len() != 6 {
             return None;
@@ -1129,7 +1135,7 @@ pub fn video_ink_matches(got: &str, want: &str) -> bool {
         Some([(n >> 16) as u8, (n >> 8) as u8, n as u8])
     };
     match (rgb(got), rgb(want)) {
-        (Some(g), Some(w)) => g.iter().zip(w).all(|(a, b)| a.abs_diff(b) <= VIDEO_INK_TOLERANCE),
+        (Some(g), Some(w)) => g.iter().zip(w).all(|(a, b)| a.abs_diff(b) <= tolerance),
         _ => false,
     }
 }
@@ -1498,6 +1504,13 @@ pub trait Stage: Send + 'static {
     /// window, converted to sRGB, as `RRGGBB`; `<…>` saying what was
     /// measured when there is no picture to read (docs/media-plan.md §3).
     fn video_ink(&self, target: Target) -> String;
+    /// `expect_video_ink`'s per-channel tolerance on this platform: the
+    /// window server's colour-managed read is VIDEO_INK_TOLERANCE, and a
+    /// backend whose decoder converts YUV to RGB further off states its own
+    /// measured number.
+    fn video_ink_tolerance(&self) -> u8 {
+        VIDEO_INK_TOLERANCE
+    }
     /// The caption text the video view shows now, "" for none: what kaya's
     /// caption renderer drew, or the platform's own cue where it draws.
     fn caption(&self, target: Target) -> String;
@@ -4794,10 +4807,11 @@ fn run_with_log(
             Step::CopyAsset(name, path) => Some(crate::assets::copy_asset(name, &expand_path(path))),
             Step::ExpectVideoInk(t, want) => Some(poll(|| {
                 let got = stage.video_ink(*t);
-                if video_ink_matches(&got, want) {
+                let tolerance = stage.video_ink_tolerance();
+                if video_ink_within(&got, want, tolerance) {
                     Ok(format!("video ink {want}"))
                 } else {
-                    Err(format!("video ink {got}, wanted {want} within {VIDEO_INK_TOLERANCE} per channel"))
+                    Err(format!("video ink {got}, wanted {want} within {tolerance} per channel"))
                 }
             })),
             Step::ExpectCaption(t, want) => Some(poll(|| {
@@ -6414,7 +6428,9 @@ impl StepWatchdog {
                             // harness thread is still inside it
                             // (crates/kaya/src/vtrace.rs).
                             crate::vtrace::dump("the step ceiling fired: no verdict");
-                            eprintln!("{text}")
+                            eprintln!("{text}");
+                            #[cfg(target_os = "linux")]
+                            wedge_stacks();
                         }
                         // NOT a second verdict: the leg's own is
                         // already out, and overwriting it would lose
@@ -6444,6 +6460,52 @@ impl StepWatchdog {
 
     fn clear(&self) {
         *self.watched.lock().unwrap() = None;
+    }
+}
+
+/// EVERY THREAD OF THIS PROCESS at the ceiling, through eu-stack, into the
+/// leg's log: the verdict cannot tell a wedged UI thread from a slow one,
+/// and the stacks can (docs/traps.md, the wedged media_feed leg). The
+/// process names any tracer allowed first, since the lane kernel's Yama
+/// scope lets a child trace its parent only when asked.
+#[cfg(target_os = "linux")]
+fn wedge_stacks() {
+    // SAFETY: prctl with integer arguments only.
+    unsafe { libc::prctl(libc::PR_SET_PTRACER, libc::PR_SET_PTRACER_ANY, 0, 0, 0) };
+    let pid = std::process::id().to_string();
+    let child = std::process::Command::new("eu-stack")
+        .args(["-m", "-p", &pid])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn();
+    let mut child = match child {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("KAYA_HARNESS: no thread stacks at the ceiling: eu-stack did not start: {e}");
+            return;
+        }
+    };
+    let until = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < until {
+        if let Ok(Some(_)) = child.try_wait() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    if matches!(child.try_wait(), Ok(None)) {
+        let _ = child.kill();
+        eprintln!("KAYA_HARNESS: no thread stacks at the ceiling: eu-stack ran past 10 s and was killed");
+        return;
+    }
+    match child.wait_with_output() {
+        Ok(out) => eprintln!(
+            "KAYA_HARNESS: thread stacks at the ceiling (eu-stack, exit {}):\n{}{}",
+            out.status,
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        ),
+        Err(e) => eprintln!("KAYA_HARNESS: no thread stacks at the ceiling: eu-stack's output: {e}"),
     }
 }
 

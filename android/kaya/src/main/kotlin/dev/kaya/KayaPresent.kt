@@ -101,6 +101,56 @@ object KayaPresent {
     ): Double
     @JvmStatic external fun emitRange(tag: ByteArray, low: Double, high: Double, committed: Boolean)
 
+    /** A player's RAW facts to the core's one state machine (docs/media-plan.md
+     * §2 rule 1), kaya_player_*'s JNI spellings: each answers the player's state
+     * after. Called only inside kayaPlayerReport (tools/check-verbs.py). */
+    @JvmStatic external fun playerLoaded(
+        player: Long,
+        durationMs: Long,
+        width: Int,
+        height: Int,
+        undecodable: Boolean,
+        detail: String,
+    ): Int
+    @JvmStatic external fun playerRate(player: Long, playing: Boolean): Int
+    @JvmStatic external fun playerEnded(player: Long): Int
+    @JvmStatic external fun playerFailed(
+        player: Long,
+        domain: String,
+        code: Long,
+        underlying: Long,
+        detail: String,
+    ): Int
+    @JvmStatic external fun playerPosition(player: Long, positionMs: Long): Int
+    @JvmStatic external fun playerSeeked(player: Long, positionMs: Long): Int
+    @JvmStatic external fun playerOverdue(player: Long): Int
+    @JvmStatic external fun playerTracks(
+        player: Long,
+        audio: String,
+        captions: String,
+        audioSelected: Int,
+        captionSelected: Int,
+    ): Int
+    @JvmStatic external fun playerCue(player: Long, text: String): Int
+    @JvmStatic external fun playerCaptionsText(player: Long, url: String, text: String): Int
+    @JvmStatic external fun playerCaptionsFailed(
+        player: Long,
+        url: String,
+        domain: String,
+        code: Long,
+        underlying: Long,
+        detail: String,
+    ): Int
+
+    /** kaya's caption renderer asks the core what to draw at [tMs]
+     * (kaya_caption_at); a video view's shown fraction (kaya_video_visible);
+     * a system media command routed by the core (kaya_session_action) and the
+     * system's playback state (kaya_session_state). */
+    @JvmStatic external fun captionAt(player: Long, tMs: Long): String
+    @JvmStatic external fun videoVisible(widget: Long, shown: Double)
+    @JvmStatic external fun sessionAction(action: Int, atMs: Long): Int
+    @JvmStatic external fun sessionState(): Int
+
     /** Emit a column-header click: [tag] is the sort tag delivered
      * with the container's SET_COLUMN_HEADERS record, verbatim;
      * [column] the 0-based index. A REQUEST — the guest sorts

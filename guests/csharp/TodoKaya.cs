@@ -144,6 +144,18 @@ sealed class TodoRow
         System.Action<Tx, System.Collections.Generic.List<object>, System.TimeOnly>? onTime = null) =>
         t.TimePicker(f, onTime);
 
+    public Node Video(Player player,
+        System.Action<Tx, System.Collections.Generic.List<object>, double>? onVisibility = null) =>
+        t.Video(player, onVisibility);
+
+    public Node Video(Field<Player> f,
+        System.Action<Tx, System.Collections.Generic.List<object>, double>? onVisibility = null) =>
+        t.Video(f, onVisibility);
+
+    public Node Video(Field<Player?> f,
+        System.Action<Tx, System.Collections.Generic.List<object>, double>? onVisibility = null) =>
+        t.Video(f, onVisibility);
+
     public Node Entry(System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null,
         System.Action<Tx, System.Collections.Generic.List<object>, string>? onSubmit = null) =>
         t.Entry(onChange, onSubmit);
@@ -377,6 +389,8 @@ sealed class TodoRow
         t.SetColumnsAuto(n, minWidth);
 
     public void SetWrap(Node n, bool on) => t.SetWrap(n, on);
+
+    public void SetFit(Node n, Fit fit) => t.SetFit(n, fit);
 }
 
 /// <summary>The duck-typed enumerable behind Rows(): no IEnumerable,

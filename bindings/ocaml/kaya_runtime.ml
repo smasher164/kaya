@@ -128,6 +128,9 @@ let kaya_locale =
 
 let kaya_direction = foreign ~from:lib "kaya_direction" (void @-> returning uint32_t)
 let kaya_text_scale = foreign ~from:lib "kaya_text_scale" (void @-> returning double)
+let kaya_can_play =
+  foreign ~from:lib "kaya_can_play"
+    (string @-> size_t @-> string @-> size_t @-> returning uint8_t)
 let kaya_catalog = foreign ~from:lib "kaya_catalog" (string @-> returning void)
 
 type tr_arg_c
@@ -183,6 +186,12 @@ let fmt_currency value code = fill (kaya_fmt_currency value code)
 let locale_line () = fill kaya_locale
 let direction_bit () = Unsigned.UInt32.to_int (kaya_direction ())
 let text_scale () = kaya_text_scale ()
+
+let can_play mime codecs =
+  Unsigned.UInt8.to_int
+    (kaya_can_play mime (Unsigned.Size_t.of_int (String.length mime)) codecs
+       (Unsigned.Size_t.of_int (String.length codecs)))
+  <> 0
 let catalog app = kaya_catalog app
 
 type tr_arg =

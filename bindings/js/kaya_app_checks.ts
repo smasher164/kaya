@@ -2099,6 +2099,155 @@ if (isMainThread) {
 
   console.log(`rich text: ${richChecks.length} checks over the fold, driven from packed occurrence bytes through App._onOccurrence`);
 
+  // ------------------------------------------------------------- media
+  // (docs/media-plan.md.) The three flat records through the GENERATED
+  // decoder, packed as crates/kaya/src/wire.rs's player_changed_body,
+  // player_tracks_body and session_action_body pack them; the mirror
+  // absorbed before the handlers; the closed reason; a stamped video's
+  // Player field reaching PROP_PLAYER.
+  const frame = (kind: number, head: (v: DataView) => void, headLen: number, tail: Uint8Array[]): Uint8Array => {
+    const body = headLen + tail.reduce((n, b) => n + b.length, 0);
+    const out = new Uint8Array(8 + body + ((8 - ((8 + body) % 8)) % 8));
+    const v = new DataView(out.buffer);
+    v.setUint32(0, out.length, true);
+    v.setUint16(4, kind, true);
+    head(v);
+    let at = 8 + headLen;
+    for (const b of tail) {
+      out.set(b, at);
+      at += b.length;
+    }
+    return out;
+  };
+  const valuesBlock = (vals: string[]): Uint8Array[] => {
+    const head = new Uint8Array(8);
+    new DataView(head.buffer).setUint32(0, vals.length, true);
+    return [head, ...vals.map((s) => valueBytes(s))];
+  };
+  const packChanged = (player: number, state: number, failure: number, duration: number, w: number, h: number, detail: string): Uint8Array =>
+    frame(wire.OCC_PLAYER_CHANGED, (v) => {
+      v.setBigUint64(8, BigInt(player), true);
+      v.setUint32(16, state, true);
+      v.setUint32(20, failure, true);
+      v.setBigUint64(24, BigInt(duration), true);
+      v.setUint32(32, w, true);
+      v.setUint32(36, h, true);
+    }, 32, [valueBytes(detail)]);
+  const packTracks = (player: number, aSel: number, cSel: number, audio: string[], captions: string[]): Uint8Array =>
+    frame(wire.OCC_PLAYER_TRACKS, (v) => {
+      v.setBigUint64(8, BigInt(player), true);
+      v.setUint32(16, aSel, true);
+      v.setUint32(20, cSel, true);
+    }, 16, [...valuesBlock(audio), ...valuesBlock(captions)]);
+  const packMs = (kind: number, player: number, ms: number): Uint8Array =>
+    frame(kind, (v) => {
+      v.setBigUint64(8, BigInt(player), true);
+      v.setBigUint64(16, BigInt(ms), true);
+    }, 16, []);
+  const packSession = (action: number, atMs: number): Uint8Array =>
+    frame(wire.OCC_SESSION_ACTION, (v) => {
+      v.setUint32(8, action, true);
+      v.setBigUint64(16, BigInt(atMs), true);
+    }, 16, []);
+  const decoded = (b: Uint8Array): string => {
+    try {
+      const o = wire.parse_occurrence(b);
+      return JSON.stringify([o.kind, o.id, o.keys, o.payload]);
+    } catch (e) {
+      return `threw ${String(e)}`;
+    }
+  };
+  check("player_changed decodes through the generated decoder, every field",
+    decoded(packChanged(7, wire.PLAYER_STATE_FAILED, wire.MEDIA_FAILURE_NETWORK, 2000, 160, 90, "refused"))
+      === JSON.stringify([wire.OCC_PLAYER_CHANGED, 7, [], [wire.PLAYER_STATE_FAILED, wire.MEDIA_FAILURE_NETWORK, 2000, 160, 90, "refused"]]));
+  check("player_tracks decodes both lists and both selections",
+    decoded(packTracks(7, 2, 0, ["en", "fr"], ["en"])) === JSON.stringify([wire.OCC_PLAYER_TRACKS, 7, [], [2, 0, 2, "en", "fr", 1, "en"]]));
+  check("session_action decodes its action and at_ms",
+    decoded(packSession(wire.SESSION_ACTION_SEEK_TO, 1500)) === JSON.stringify([wire.OCC_SESSION_ACTION, 0, [], [wire.SESSION_ACTION_SEEK_TO, 1500]]));
+
+  const MdClip = kaya.record({ name: String, player: kaya.Player }, "MdClip");
+  let mdPlayer!: K.Player;
+  let mdLive!: K.Widget;
+  let mdNode!: K.Widget;
+  let mdBind!: Uint8Array;
+  let mdCap!: K.Player;
+  let mdClips!: K.Collection<K.Fields<typeof MdClip.schema>, K.Row<typeof MdClip.schema>>;
+  const mdSeen: unknown[][] = [];
+  shipped.length = 0;
+  app.window(() => {
+    mdPlayer = kaya.player({
+      source: kaya.MediaSource.asset("media/h264_aac.mp4"), muted: true,
+      onState: (s) => mdSeen.push(["state", s, mdPlayer.positionMs]),
+      onEnded: () => mdSeen.push(["ended"]),
+      onFailed: (why, detail) => mdSeen.push(["failed", why, detail]),
+      onPosition: (ms) => mdSeen.push(["position", ms]),
+      onTracks: (t) => mdSeen.push(["tracks", t]),
+      onCue: (text) => mdSeen.push(["cue", text]),
+    });
+    mdClips = kaya.collection(MdClip);
+    kaya.column(() => {
+      mdLive = kaya.video(mdPlayer, { fit: "cover" });
+      for (const clip of mdClips) {
+        mdNode = kaya.video(clip.player, {
+          onVisibility: (row: K.RowHandle<K.Fields<typeof MdClip.schema>>, shown: number) => mdSeen.push(["shown", row.key, shown]),
+        });
+        mdBind = wire.tx_bind_player_element(mdNode.id, clip.player._level(), clip.player._index);
+      }
+    });
+    mdCap = kaya.player({ captions: kaya.MediaSource.asset("media/captions.vtt") });
+    kaya.session({ player: mdPlayer, handles: ["next"], onAction: (a, ms) => mdSeen.push(["session", a, ms]) });
+  });
+  const mdRecords = shipped[0]!.map((r) => JSON.stringify([...r]));
+  const mdHas = (r: Uint8Array): boolean => mdRecords.includes(JSON.stringify([...r]));
+  const mdIdx = (r: Uint8Array): number => mdRecords.indexOf(JSON.stringify([...r]));
+  check("a player is created, muted, then loaded in that order",
+    mdIdx(wire.tx_create_player(mdPlayer.id)) >= 0
+      && mdIdx(wire.tx_create_player(mdPlayer.id)) < mdIdx(wire.tx_set_player_prop(mdPlayer.id, wire.PPROP_MUTED, true))
+      && mdIdx(wire.tx_set_player_prop(mdPlayer.id, wire.PPROP_MUTED, true)) < mdIdx(wire.tx_set_player_prop(mdPlayer.id, wire.PPROP_SOURCE, "media/h264_aac.mp4")));
+  check("a sidecar given no language is `und`, the core's own default, never empty",
+    mdHas(wire.tx_set_player_prop(mdCap.id, wire.PPROP_CAPTIONS_LANGUAGE, "und")));
+  check("a live video view shows its player and packs its fit", mdHas(wire.tx_set_player(mdLive.id, mdPlayer.id)) && mdHas(wire.tx_set_fit(mdLive.id, wire.FIT_COVER)));
+  check("a stamped video view binds the row's Player field to PROP_PLAYER", mdHas(mdBind) && mdHas(wire.tx_bind_player_element(mdNode.id, 0, 1)));
+  app.build(() => {
+    mdClips.insert(3, MdClip({ name: "c", player: mdPlayer }));
+    mdClips.insert(4, MdClip({ name: "d", player: null }));
+  });
+  const contains = (hay: Uint8Array, needle: Uint8Array): boolean => {
+    for (let i = 0; i + needle.length <= hay.length; i++) if (needle.every((b, j) => hay[i + j] === b)) return true;
+    return false;
+  };
+  const [insC, insD] = shipped.at(-1)!;
+  check("a Player field packs its id, and null as 0",
+    insC !== undefined && insD !== undefined
+      && contains(insC, valueBytes(new wire.I64(mdPlayer.id))) && contains(insD, valueBytes(new wire.I64(0)))
+      && mdClips.get(3)!.player === mdPlayer && mdClips.get(4)!.player === null);
+  for (const b of [
+    packMs(wire.OCC_PLAYER_POSITION, mdPlayer.id, 1200),
+    packChanged(mdPlayer.id, wire.PLAYER_STATE_LOADING, 0, 0, 0, 0, ""),
+    packChanged(mdPlayer.id, wire.PLAYER_STATE_ENDED, 0, 2000, 160, 90, ""),
+    packChanged(mdPlayer.id, wire.PLAYER_STATE_FAILED, wire.MEDIA_FAILURE_NOT_FOUND, 0, 0, 0, "404"),
+    packTracks(mdPlayer.id, 2, 0, ["en", "fr"], ["en"]),
+    frame(wire.OCC_CAPTION_CUE, (v) => v.setBigUint64(8, BigInt(mdPlayer.id), true), 8, [valueBytes("first cue")]),
+    packSession(wire.SESSION_ACTION_NEXT, 0),
+    packStamped(wire.OCC_VIDEO_VISIBILITY, mdNode.id, [3], 0.5),
+  ]) {
+    try {
+      fire(wire.parse_occurrence(b));
+    } catch (e) {
+      mdSeen.push(["threw", String(e)]);
+    }
+  }
+  const mdSaw = (entry: unknown[]): boolean => mdSeen.some((s) => JSON.stringify(s) === JSON.stringify(entry));
+  check("the mirror is absorbed before the handler: loading resets the position", mdSaw(["position", 1200]) && mdSaw(["state", "loading", 0]));
+  check("ended reaches onState then onEnded, the readings current",
+    mdSaw(["state", "ended", 0]) && mdSeen.findIndex((s) => s[0] === "ended") > mdSeen.findIndex((s) => s[1] === "ended"));
+  check("failed reaches onFailed with the closed reason and the sentence", mdSaw(["failed", "not_found", "404"]) && mdPlayer.failure === "not_found");
+  check("tracks arrive 0-based, none as null",
+    mdSaw(["tracks", { audio: ["en", "fr"], captions: ["en"], audioSelected: 1, captionSelected: null }]) && mdPlayer.tracks.audioSelected === 1);
+  check("the cue reaches onCue and the reading", mdSaw(["cue", "first cue"]) && mdPlayer.cue === "first cue");
+  check("a session action reaches onAction as the closed action", mdSaw(["session", "next", 0]));
+  check("a stamped video's visibility passes the copy's row first", mdSaw(["shown", 3, 0.5]));
+
   // THE FORMATTER DOOR AND THE CATALOG (docs/compliance-plan.md §1.4): the
   // binding's own walls, each refused by name before the addon is asked —
   // a length outside the three, a Date instant where a civil date is

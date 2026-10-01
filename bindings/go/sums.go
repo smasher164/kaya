@@ -323,6 +323,12 @@ func (sc SumCase[K, V]) Image(sel func(*V) *[]byte) Node {
 	return n
 }
 
+// Video showing the player the selector names: each copy its own row's
+// (docs/media-plan.md §7b).
+func (sc SumCase[K, V]) Video(sel func(*V) *Player) Node {
+	return sc.t.VideoBound(FieldBy(sel))
+}
+
 // Progress bound to the fraction field the selector names: display-only
 // (0..=1, domain-checked at the root).
 func (sc SumCase[K, V]) Progress(sel func(*V) *float64) Node {
@@ -433,6 +439,9 @@ func (sc SumCase[K, V]) BindHighLabel(n Node, sel func(*V) *string) {
 // SetAlpha lets a colour picker this arm stamps choose translucency
 // (Tpl.SetAlpha).
 func (sc SumCase[K, V]) SetAlpha(n Node, on bool) { sc.t.SetAlpha(n, on) }
+
+// SetFit is how a video view this arm stamps fits its picture (Tpl.SetFit).
+func (sc SumCase[K, V]) SetFit(n Node, fit Fit) { sc.t.SetFit(n, fit) }
 
 // SetTickSpacing is the distance between that slider's drawn ticks
 // (Tpl.SetTickSpacing).

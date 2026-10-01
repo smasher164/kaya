@@ -2010,6 +2010,59 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
         request = struct.unpack_from("<Q", buf, 8)[0]
         value, _ = parse_value(buf, 16)
         return kind, request, [], value
+    if kind == OCC_PLAYER_CHANGED:
+        # A flat record: its fields in order, into the tail.
+        at = 8
+        tail = []
+        flat_id = struct.unpack_from("<Q", buf, 8)[0]
+        at += 8
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        tail.append(struct.unpack_from("<Q", buf, at)[0])
+        at += 8
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        value, at = parse_value(buf, at)
+        tail.append(value)
+        return kind, flat_id, [], tail
+    if kind == OCC_SESSION_ACTION:
+        # A flat record: its fields in order, into the tail.
+        at = 8
+        tail = []
+        flat_id = 0
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        at += 4
+        tail.append(struct.unpack_from("<Q", buf, at)[0])
+        at += 8
+        return kind, flat_id, [], tail
+    if kind == OCC_PLAYER_TRACKS:
+        # A flat record: its fields in order, into the tail.
+        at = 8
+        tail = []
+        flat_id = struct.unpack_from("<Q", buf, 8)[0]
+        at += 8
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        count = struct.unpack_from("<I", buf, at)[0]
+        at += 8
+        tail.append(count)
+        for _ in range(count):
+            value, at = parse_value(buf, at)
+            tail.append(value)
+        count = struct.unpack_from("<I", buf, at)[0]
+        at += 8
+        tail.append(count)
+        for _ in range(count):
+            value, at = parse_value(buf, at)
+            tail.append(value)
+        return kind, flat_id, [], tail
     if kind == OCC_FILE_DIALOG_RESULT:
         dialog, count = struct.unpack_from("<QI", buf, 8)
         at = 32  # past dialog, count, pad, values count, reserved

@@ -4524,6 +4524,51 @@ pub unsafe extern "C" fn kaya_player_cue(player: u64, text: *const u8, text_len:
     player_report(player, crate::media::Report::Cue(text))
 }
 
+/// Presentation side: an http(s) sidecar caption file the backend fetched
+/// with the platform's own networking (docs/media-plan.md §3), `url` the one
+/// it was handed in set_player_prop's captions; the core parses and times it.
+///
+/// # Safety
+/// `url` and `text` must each describe readable UTF-8 bytes of their
+/// lengths, or be NULL with length 0.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_player_captions_text(
+    player: u64,
+    url: *const u8,
+    url_len: usize,
+    text: *const u8,
+    text_len: usize,
+) -> u32 {
+    let url = unsafe { lossy(url, url_len) };
+    let text = unsafe { lossy(text, text_len) };
+    player_report(player, crate::media::Report::CaptionsText { url, text })
+}
+
+/// Presentation side: that fetch failed, as the platform's domain and codes
+/// ("http" and the status for an HTTP answer); the player fails with the
+/// mapped reason.
+///
+/// # Safety
+/// `url`, `domain` and `detail` must each describe readable UTF-8 bytes of
+/// their lengths, or be NULL with length 0.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_player_captions_failed(
+    player: u64,
+    url: *const u8,
+    url_len: usize,
+    domain: *const u8,
+    domain_len: usize,
+    code: i64,
+    underlying: i64,
+    detail: *const u8,
+    detail_len: usize,
+) -> u32 {
+    let url = unsafe { lossy(url, url_len) };
+    let domain = unsafe { lossy(domain, domain_len) };
+    let detail = unsafe { lossy(detail, detail_len) };
+    player_report(player, crate::media::Report::CaptionsFailed { url, domain, code, underlying, detail })
+}
+
 /// Presentation side: KAYA'S CAPTION RENDERER asks what to draw (docs/media-
 /// plan.md §3). The core times the sidecar's cues: this answers the text
 /// current at `t_ms` on the backend's clock, "" for none, and publishes it

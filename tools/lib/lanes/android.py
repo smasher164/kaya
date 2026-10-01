@@ -144,6 +144,12 @@ LEGS = {
         # guest (docs/compliance-plan.md §6; SCENE_TEXT_SCALE).
         "tasksbig-compose", "formatbig-compose",
         "clock24-compose",
+        # The media suite (docs/media-plan.md §7a) against the lane's own
+        # local server (tools/lib/media_server.py's LANE_PORTS). NOT EXCLUSIVE:
+        # the media key goes to the emulator's own media button session, which
+        # no other lane and no other device of the pool shares.
+        "media_formats-compose", "media_delivery-compose", "media_session-compose",
+        "media_tracks-compose", "media_feed-compose",
     ],
     "jvm": [
         "jvm", "a11y-jvm", "entry-jvm",
@@ -164,6 +170,8 @@ LEGS = {
         "format-jvm", "formatde-jvm", "formatar-jvm",
         "numberfield-jvm", "numberfieldde-jvm", "colorpicker-jvm",
         "range-jvm", "rangertl-jvm",
+        "media_formats-jvm", "media_delivery-jvm", "media_session-jvm",
+        "media_tracks-jvm", "media_feed-jvm",
     ],
     "go": [
         "go", "a11y-go", "a11yrows-go",
@@ -184,6 +192,8 @@ LEGS = {
         "format-go", "formatde-go", "formatar-go",
         "numberfield-go", "numberfieldde-go", "colorpicker-go",
         "range-go", "rangertl-go",
+        "media_formats-go", "media_delivery-go", "media_session-go",
+        "media_tracks-go", "media_feed-go",
     ],
     "python": [
         "varied-python", "portfolio-python",

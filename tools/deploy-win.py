@@ -50,6 +50,8 @@ from packaging import windows as win_package
 import exclusive
 import only  # noqa: E402
 import flightrec_lane
+import media_server
+import contextlib
 
 SELF = pathlib.Path(__file__).resolve()
 LANE_MODULE = ROOT / "tools/lib/lanes/win.py"
@@ -2459,6 +2461,75 @@ if not (SUITE.startswith("probe=")
         sys.exit(1)
 timing("desk-warm")
 
+
+def queued_legs():
+    return lane.legs() if SUITE == "all" else LEGS
+
+
+def media_url_of(launcher):
+    for line in launcher.read_text(encoding="utf-8").splitlines():
+        if line.startswith("set KAYA_MEDIA_URL="):
+            return line.split("=", 1)[1].strip()
+    return None
+
+
+def codec_extensions():
+    """THE STORE EXTENSIONS THE LANE TABLE ASSUMES (docs/media-plan.md §7a):
+    without them the video items play their audio alone, silently, and a
+    rebuilt VM would read as a kaya bug. Listed out of the user's own
+    package store; a missing one refuses the lane by name."""
+    listed = run_ssh_out(
+        'powershell -NoProfile -Command "Get-AppxPackage | ForEach-Object '
+        '{ $_.Name + \\" \\" + $_.Version + \\" \\" + $_.Status }"')
+    if listed is None:
+        die("deploy-win: could not list the VM's Store packages over ssh, so "
+            "the media legs' codec extensions cannot be checked")
+    have = {}
+    for line in listed.replace("\r", "").splitlines():
+        parts = line.split()
+        if len(parts) >= 3:
+            have[parts[0]] = (parts[1], parts[2])
+    missing = [name for name in lane.CODEC_EXTENSIONS
+               if have.get(name, ("", ""))[1] != "Ok"]
+    if missing:
+        print("deploy-win: THE MEDIA LEGS NEED THE STORE CODEC EXTENSIONS, and "
+              "this VM lacks", file=sys.stderr)
+        for name in missing:
+            state = have.get(name)
+            print(f"  {name}: " + (f"version {state[0]}, status {state[1]}"
+                                   if state else "not installed for this user"),
+                  file=sys.stderr)
+        print("  Without them the HEVC, VP9 and AV1 items play their audio "
+              "alone with no error", file=sys.stderr)
+        print("  and Opus in Ogg fails (docs/media-plan.md §7a, measured "
+              "with and without).", file=sys.stderr)
+        print("  Install them from the Microsoft Store in the VM's desktop "
+              "session.", file=sys.stderr)
+        sys.exit(1)
+    print("== codec extensions: " + ", ".join(
+        f"{name} {have[name][0]}" for name in lane.CODEC_EXTENSIONS) + " ==")
+
+
+MEDIA = contextlib.ExitStack()
+atexit.register(MEDIA.close)
+if any(lane.media_leg(leg) for leg in queued_legs()):
+    codec_extensions()
+    _port = media_server.LANE_PORTS["windows"]
+    _base = f"http://{lane.MEDIA_HOST}:{_port}"
+    for _leg in queued_legs():
+        if lane.media_leg(_leg):
+            _named = media_url_of(ROOT / "tools/guest" / lane.launcher(_leg))
+            if _named != _base:
+                die(f"deploy-win: tools/guest/{lane.launcher(_leg)} hands its "
+                    f"guest KAYA_MEDIA_URL={_named}, and this lane serves the "
+                    f"media suite at {_base} (tools/lib/lanes/win.py "
+                    f"MEDIA_HOST, tools/lib/media_server.py LANE_PORTS). "
+                    f"Set the launcher's line to that URL.")
+    MEDIA.enter_context(media_server.serving(
+        host=lane.MEDIA_HOST, port=_port,
+        log=ROOT / "target/windows-media-server.log"))
+    timing("media-server")
+
 rec_suite_start()
 if SUITE == "all":
     # FIRST, AND ALONE: the probe drives a real border drag and a width
@@ -2503,6 +2574,13 @@ else:
             drain_suites()
 drain_suites()
 timing("suites")
+# The media server stops HERE, before the verdict, and proves it is gone
+# (tools/lib/media_server.py raises otherwise).
+try:
+    MEDIA.close()
+except RuntimeError as e:
+    print(f"deploy-win: {e}", file=sys.stderr)
+    status = 1
 if not rec_suite_stop():
     status = 1
 if os.environ.get("KAYA_RECORD"):

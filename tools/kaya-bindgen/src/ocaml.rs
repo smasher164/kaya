@@ -534,6 +534,55 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("      Some (kind, Int64.of_int id, [], Some value, None, None, [])");
         c.line("    end");
     }
+    // main.rs's flat_occurrence_names: the fields in order into the tail.
+    for name in crate::flat_occurrence_names(spec) {
+        let rec = spec.occurrence.iter().find(|r| r.name == name).unwrap();
+        c.line(&format!("    else if kind = occ_kind_{name}"));
+        c.line("    then begin");
+        c.line(&format!("      (* {} *)", crate::FLAT_MARK));
+        c.line("      let at = ref 8 in");
+        c.line("      let out = ref [] in");
+        let mut fields = rec.fields.iter();
+        let flat_id = if matches!(rec.fields[0].ty, FieldTy::U64) {
+            fields.next();
+            c.line("      at := !at + 8;");
+            "Int64.of_int id"
+        } else {
+            "0L"
+        };
+        for f in fields {
+            match f.ty {
+                FieldTy::U32 if f.name == "reserved" => c.line("      at := !at + 4;"),
+                FieldTy::U32 => {
+                    c.line("      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;");
+                    c.line("      at := !at + 4;");
+                }
+                FieldTy::U64 => {
+                    c.line("      out := I64 (Int64.logor (Int64.of_int (u32_at byte !at))");
+                    c.line("        (Int64.shift_left (Int64.of_int (u32_at byte (!at + 4))) 32)) :: !out;");
+                    c.line("      at := !at + 8;");
+                }
+                FieldTy::Value => {
+                    c.line("      (let v, next = parse_value byte !at in");
+                    c.line("       out := v :: !out;");
+                    c.line("       at := next);");
+                }
+                FieldTy::Values => {
+                    c.line("      (let count = u32_at byte !at in");
+                    c.line("       at := !at + 8;");
+                    c.line("       out := I64 (Int64.of_int count) :: !out;");
+                    c.line("       for _ = 1 to count do");
+                    c.line("         let v, next = parse_value byte !at in");
+                    c.line("         out := v :: !out;");
+                    c.line("         at := next");
+                    c.line("       done);");
+                }
+                FieldTy::VariantSchemas => panic!("kaya-bindgen: flat record {name} carries variant schemas"),
+            }
+        }
+        c.line(&format!("      Some (kind, {flat_id}, [], None, None, None, List.rev !out)"));
+        c.line("    end");
+    }
     // The picker's answer is a LIST OF RECORDS and no single `value`
     // can carry one, so the three values per file ride the VALUES slot
     // flattened and kaya_app regroups them in threes. Its own arm: the

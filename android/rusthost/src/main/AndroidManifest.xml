@@ -14,6 +14,12 @@
          what this app IS — a reminders app qualifies, and a library may
          not make that claim for every app built on it. SCHEDULE_EXACT_ALARM
          is its pre-33 spelling, granted at install there. -->
+    <!-- THE MEDIA SUITE (docs/media-plan.md §5, §7a): the session's
+         mediaPlayback foreground service, and the streams from the lane's
+         local server. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission
@@ -31,6 +37,7 @@
          activity wears Theme.Kaya.NoActionBar from installSplashScreen()
          on. -->
     <application
+        android:networkSecurityConfig="@xml/kaya_harness_network"
         android:icon="@mipmap/kaya_mark"
         android:label="${kayaAppLabel}"
         android:theme="@style/Theme.Kaya.Launch">

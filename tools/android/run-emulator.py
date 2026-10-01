@@ -16,6 +16,7 @@ dev_shell_or_die()
 # DATA: tools/lib/lanes/android.py, the source the gates import too.
 
 import atexit
+import contextlib
 import hashlib
 import os
 import re
@@ -33,6 +34,7 @@ import exclusive
 import only  # noqa: E402
 import scene_cut
 import flightrec_lane
+import media_server
 
 # Device output is not clean UTF-8 (docs/traps.md, "NOT UTF-8").
 TEXT = {"text": True, "encoding": "utf-8", "errors": "replace"}
@@ -680,11 +682,21 @@ CLIPHELPER_IME_ON = []
 # now that the runner holds the press itself (DRAG_HOLD_MS above).
 DRAG_POINTER_DOWN = {}
 _torn = threading.Lock()
+# The media suite's server (tools/lib/media_server.py) on this lane's own
+# host port, which the emulator reaches as 10.0.2.2: up only while a media_
+# leg is queued, and proven gone by its own exit.
+MEDIA = contextlib.ExitStack()
+MEDIA_PORT = media_server.LANE_PORTS["android"]
+MEDIA_URL = f"http://10.0.2.2:{MEDIA_PORT}"
 
 
 def kaya_teardown():
     if not _torn.acquire(blocking=False):
         return
+    try:
+        MEDIA.close()
+    except RuntimeError as e:
+        print(f"run-emulator: {e}", file=sys.stderr)
     FR.flush()
     shutil.rmtree(LEGS_DIR, ignore_errors=True)
     for serial, (x, y) in list(DRAG_POINTER_DOWN.items()):
@@ -1402,6 +1414,8 @@ def run_apk_on(serial, name, apk, component, script, extras,
     # number — the drag's bookkeeping, one verb over.
     tapped = {}
     replied = {}
+    keyed = {}
+    held = set()
     # 240 ROUNDS, roughly 0.7s each: the budget has to outlast a leg that
     # is FAILING, and a failing step costs this backend up to 15s now
     # (KayaCompose.kt's stepDeadline, the core's own POLL_DEADLINE). At
@@ -1454,6 +1468,26 @@ def run_apk_on(serial, name, apk, component, script, extras,
             tapped[seq] = (tries + 1, time.monotonic())
             print(f"{name}: notify_tap #{seq} try {tries + 1} -> {told} in "
                   f"{int((time.monotonic() - began) * 1000)}ms", file=log)
+        # THE MEDIA VERBS' HAND (docs/media-plan.md §5): a media key
+        # dispatched THROUGH THE SYSTEM, re-dispatched until the app acks
+        # its arrival, and the window manager's keep-screen-on read back
+        # into the app's files directory, since no app may dump it.
+        key_acked = set(re.findall(r"KAYA_ACK: media_key (\d+)", dump))
+        for seq, key in re.findall(r"KAYA_REQUEST: media_key (\d+) (\S+)", dump):
+            tries, last = keyed.get(seq, (0, 0.0))
+            if seq in key_acked or tries >= MEDIA_KEY_TRIES:
+                continue
+            if tries and time.monotonic() - last < MEDIA_KEY_RETRY_S:
+                continue
+            told = dispatch_media_key(serial, key, log)
+            keyed[seq] = (tries + 1, time.monotonic())
+            print(f"{name}: media_key #{seq} {key} try {tries + 1} -> {told}", file=log)
+        for seq in re.findall(r"KAYA_REQUEST: hold_screen (\d+)", dump):
+            if seq in held:
+                continue
+            held.add(seq)
+            told = answer_hold_screen(serial, package, seq, log)
+            print(f"{name}: hold_screen #{seq} -> {told}", file=log)
         for seq, *point in re.findall(
                 r"KAYA_REQUEST: draganddrop (\d+) (-?\d+) (-?\d+) (-?\d+) "
                 r"(-?\d+) (\d+)", dump):
@@ -1671,17 +1705,29 @@ _leg_threads = []
 _tablet_threads = []
 
 
-def _claim_device():
+def _claim_device(eligible=None):
+    """A free slot; with [eligible], only one of those (a media leg's)."""
     with _slots_lock:
-        while not _dev_slots:
+        while True:
+            if eligible is None and _dev_slots:
+                return _dev_slots.pop(0)
+            fit = [s for s in _dev_slots if eligible is not None and s in eligible]
+            if fit:
+                _dev_slots.remove(fit[0])
+                return fit[0]
             _slots_lock.wait()
-        return _dev_slots.pop(0)
 
 
 def _release_device(slot):
     with _slots_lock:
         _dev_slots.append(slot)
-        _slots_lock.notify()
+        _slots_lock.notify_all()
+
+
+def _leg_refused(name):
+    """A leg no device could run, written down as the verdict files say."""
+    for suffix, text in ((".secs", "0\n"), (".verdict", "FAIL\n")):
+        (LEGS_DIR / f"{name}{suffix}").write_text(text, encoding="utf-8")
 
 
 def _leg_worker(name, script, args, tablet):
@@ -1690,6 +1736,16 @@ def _leg_worker(name, script, args, tablet):
         if tablet:
             _tablet_lock.acquire()
             serial, slot = TABLET_SERIAL, None
+        elif script.startswith("media_"):
+            # A MEDIA LEG RUNS ONLY WHERE THE LANE'S SERVER ANSWERS
+            # (MEDIA_ROUTES, measured once when it started).
+            if not MEDIA_ROUTES:
+                print(f"{name}: no device of the pool reaches {MEDIA_URL}: "
+                      f"{'; '.join(MEDIA_UNROUTED)}", file=log)
+                _leg_refused(name)
+                return
+            slot = _claim_device(MEDIA_ROUTES)
+            serial = SERIALS[slot]
         else:
             slot = _claim_device()
             serial = SERIALS[slot]
@@ -1963,6 +2019,39 @@ def motionevent(serial, kind, x, y, log):
 # is another app's window. The title is what the scene asserted, so the
 # row it names is the row it posted.
 NOTIFY_TAP_TRIES = 3
+MEDIA_KEY_TRIES = 5
+MEDIA_KEY_RETRY_S = 2.0
+
+
+def dispatch_media_key(serial, key, log):
+    """session_send's hand: the key through the system's media session
+    service, which picks the media button session, and that pick said."""
+    got = subprocess.run(["timeout", "20", "adb", "-s", serial, "shell", "cmd",
+                          "media_session", "dispatch", key],
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         check=False, **TEXT)
+    dump = out_of(["timeout", "20", "adb", "-s", serial, "shell", "dumpsys",
+                   "media_session"])
+    chosen = re.search(r"Media button session is (.*)", dump)
+    return (f"exit {got.returncode} {got.stdout.strip()!r}; media button "
+            f"session: {chosen.group(1).strip() if chosen else 'not named'}")
+
+
+def answer_hold_screen(serial, package, seq, log):
+    """expect_display_awake's hand: `dumpsys window`'s mHoldScreenWindow,
+    the window the window manager keeps the screen on for, written into the
+    app's files directory for the verb to read."""
+    dump = out_of(["timeout", "20", "adb", "-s", serial, "shell", "dumpsys",
+                   "window"])
+    held = re.search(r"mHoldScreenWindow=(\S.*)", dump)
+    line = held.group(0).strip() if held else "mHoldScreenWindow absent from dumpsys window"
+    name = f"files/kaya-host-{seq}.txt"
+    got = subprocess.run(
+        ["timeout", "20", "adb", "-s", serial, "exec-in",
+         f"run-as {package} sh -c 'cat > {name}'"],
+        input=line + "\n", stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        check=False, **TEXT)
+    return f"{line!r}, written exit {got.returncode} {got.stdout.strip()!r}"
 NOTIFY_TAP_RETRY_S = 4.0
 
 
@@ -3063,6 +3152,8 @@ def run_suite_legs(suite):
             extras += ["--es", "KAYA_LOCALE", lane.SCENE_LOCALE[scene]]
         if scene in lane.SCENE_TEXT_SCALE:
             extras += ["--es", "KAYA_TEXT_SCALE", lane.SCENE_TEXT_SCALE[scene]]
+        if scene.startswith("media_"):
+            extras += ["--es", "KAYA_MEDIA_URL", MEDIA_URL]
         # THE VERB TRACE, a RELATIVE name the interpreter resolves under
         # the app's own files dir — the one place run-as can read back
         # (crates/kaya/src/vtrace.rs).
@@ -3091,6 +3182,45 @@ def run_suite_legs(suite):
     timing(f"legs-{suite}")
 
 
+def media_queued():
+    mode = os.environ.get("KAYA_EXCLUSIVE", "")
+    return any(lane.scene_of(leg).startswith("media_")
+               and not (mode in ("only", "skip")
+                        and (mode == "only") != (leg in lane.EXCLUSIVE))
+               for suite in lane.SUITES if SUITE in (suite, "all")
+               for leg in selected_legs(suite))
+
+
+MEDIA_ROUTES = set()
+MEDIA_UNROUTED = []
+
+
+def media_route(serial):
+    """A Range fetch of the probe file from INSIDE the device: its first
+    line, or what nc said instead."""
+    got = subprocess.run(
+        ["timeout", "20", "adb", "-s", serial, "shell",
+         f"printf 'GET /{media_server.PROBE} HTTP/1.0\\r\\nRange: bytes=0-1"
+         f"\\r\\n\\r\\n' | nc -w 3 10.0.2.2 {MEDIA_PORT} 2>&1 | head -1"],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False, **TEXT)
+    return got.stdout.strip() or f"no answer, exit {got.returncode}"
+
+
+if media_queued():
+    MEDIA.enter_context(media_server.serving(
+        port=MEDIA_PORT, log=ROOT / "target/android-media-server.log"))
+    # MEASURED 2026-09-30: two of the five pool phones had lost eth0's and
+    # wlan0's addresses after five days up, so nothing reached 10.0.2.2 and
+    # every stream failed as network (docs/traps.md). The media legs go to
+    # the phones that reach the server; the others are named here.
+    for _slot, _serial in enumerate(SERIALS):
+        _said = media_route(_serial)
+        if " 206 " in f"{_said} ":
+            MEDIA_ROUTES.add(_slot)
+        else:
+            MEDIA_UNROUTED.append(f"{_serial}: {_said}")
+        print(f"media-server: {_serial} -> {MEDIA_URL}: {_said}", flush=True)
+
 for _suite in lane.SUITES:
     if SUITE not in (_suite, "all"):
         continue
@@ -3099,6 +3229,12 @@ for _suite in lane.SUITES:
     if not build_suite(_suite):
         sys.exit(1)
     run_suite_legs(_suite)
+
+try:
+    MEDIA.close()
+except RuntimeError as e:
+    print(f"run-emulator: {e}", file=sys.stderr)
+    status = 1
 
 only.summary("run-emulator", _selected)
 

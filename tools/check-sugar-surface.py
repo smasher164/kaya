@@ -2484,9 +2484,9 @@ print(f"check-sugar-surface: scroll-axis cuts watched red {_axis_cuts}/{_axis_wa
 # video view binds), the visibility handlers in both zones, the track
 # selections and readings, and the sidecar captions. No scene sees a
 # binding that ships a template video with no player field to bind, so each
-# part is read out of the binding's own file. RUST ONLY until the breadth
-# slice: the other eight join this table with their `video`, which the kind
-# census and tools/tpl-surfaces.py already hold red in both zones.
+# part is read out of the binding's own file, in all nine; MEDIA_PARTS below is
+# what every binding must carry a row for, so a row dropped from this table is
+# a finding rather than a part nobody reads.
 MEDIA_SURFACES = [
     ("rust", "crates/kaya/src/app.rs", "player field", "PlayerId",
      r"impl KayaField for crate::protocol::{0} \{{"),
@@ -2516,6 +2516,316 @@ MEDIA_SURFACES = [
      r"pub fn {0}\(&self, player: PlayerId, f: impl Fn\(&PlayerTracks\) -> M"),
     ("rust", "crates/kaya/src/app/media.rs", "cue handler", "on_cue",
      r"pub fn {0}\(&self, player: PlayerId, f: impl Fn\(&str\) -> M"),
+    # rust: the parts the depth's rows did not name
+    ("rust", "crates/kaya/src/app/media.rs", "player object", "player",
+     r"pub fn {0}\(&mut self\) -> PlayerRef<'_, 'a>"),
+    ("rust", "crates/kaya/src/app.rs", "live video", "video",
+     r"pub fn {0}\(&mut self, player: crate::protocol::PlayerId\) -> Widget<'_, 'a>"),
+    ("rust", "crates/kaya/src/app/media.rs", "failed handler", "on_failed",
+     r"pub fn {0}\(&self, player: PlayerId, f: impl Fn\(MediaFailure, &str\) -> M"),
+    ("rust", "crates/kaya/src/app/media.rs", "session", "session",
+     r"pub fn {0}\(&mut self\) -> SessionRef<'_, 'a>"),
+    ("rust", "crates/kaya/src/app/media.rs", "session handler", "on_session",
+     r"pub fn {0}\(&self, f: impl Fn\(SessionAction\) -> M"),
+    ("rust", "crates/kaya/src/app/media.rs", "capability", "can_play",
+     r"pub fn {0}\(mime: &str, codecs: &str\) -> bool"),
+    ("rust", "crates/kaya/src/app/media.rs", "picked source", "picked",
+     r"pub fn {0}\(file: &crate::protocol::PickedFile\) -> Self"),
+    # go
+    ("go", "bindings/go/media.go", "player object", "Player",
+     r"func \(tx \*Tx\) {0}\(\) PlayerRef \{{"),
+    ("go", "bindings/go/records.go", "player field", "playerType",
+     r"if t == dateType \|\| t == timeType \|\| t == colorType \|\| t == {0} \{{"),
+    ("go", "bindings/go/app.go", "live video", "Video",
+     r"func \(tx \*Tx\) {0}\(p Player\) Widget \{{"),
+    ("go", "bindings/go/app.go", "template video", "VideoBound",
+     r"func \(t \*Tpl\) {0}\(f Field\[Player\]\) Node \{{"),
+    ("go", "bindings/go/media.go", "visibility", "OnVisibility",
+     r"func \(w Widget\) {0}\(fn func\(\*Tx, float64\)\) Widget \{{"),
+    ("go", "bindings/go/media.go", "stamped visibility", "OnVisibility",
+     r"func \(n Node\) {0}\(fn func\(\*Tx, \[\]any, float64\)\) Node \{{"),
+    ("go", "bindings/go/media.go", "audio selection", "SelectAudio",
+     r"func \(tx \*Tx\) {0}\(p Player, index int\)"),
+    ("go", "bindings/go/media.go", "caption selection", "SelectCaptions",
+     r"func \(tx \*Tx\) {0}\(p Player, index int\)"),
+    ("go", "bindings/go/media.go", "sidecar captions", "PlayerCaptions",
+     r"func \(tx \*Tx\) {0}\(p Player, src MediaSource, language string\)"),
+    ("go", "bindings/go/media.go", "track reading", "Tracks",
+     r"func \(a \*App\) {0}\(p Player\) PlayerTracks"),
+    ("go", "bindings/go/media.go", "cue reading", "Cue",
+     r"func \(a \*App\) {0}\(p Player\) string"),
+    ("go", "bindings/go/media.go", "track handler", "OnTracks",
+     r"func \(r PlayerRef\) {0}\(fn func\(\*Tx, PlayerTracks\)\) PlayerRef"),
+    ("go", "bindings/go/media.go", "cue handler", "OnCue",
+     r"func \(r PlayerRef\) {0}\(fn func\(\*Tx, string\)\) PlayerRef"),
+    ("go", "bindings/go/media.go", "failed handler", "OnFailed",
+     r"func \(r PlayerRef\) {0}\(fn func\(\*Tx, MediaFailure, string\)\) PlayerRef"),
+    ("go", "bindings/go/media.go", "session", "Session", r"func \(tx \*Tx\) {0}\(\) SessionRef"),
+    ("go", "bindings/go/media.go", "session handler", "OnSession",
+     r"func \(a \*App\) {0}\(fn func\(\*Tx, SessionAction\)\)"),
+    ("go", "bindings/go/media.go", "capability", "CanPlay",
+     r"func {0}\(mime, codecs string\) bool"),
+    ("go", "bindings/go/media.go", "picked source", "MediaPicked",
+     r"func {0}\(file PickedFile\) MediaSource"),
+    # csharp
+    ("csharp", "bindings/csharp/KayaApp.cs", "player object", "Player",
+     r"public Player {0}\(MediaSource\? source = null"),
+    ("csharp", "bindings/csharp/KayaRecords.cs", "player field", "Player",
+     r"t == typeof\({0}\) \|\| t == typeof\({0}\?\) \? KayaWire\.ValueI64"),
+    ("csharp", "bindings/csharp/KayaApp.cs", "live video", "Video",
+     r"public Widget {0}\(Player player, Fit\? fit = null"),
+    ("csharp", "bindings/csharp/KayaApp.cs", "template video", "Video",
+     r"public Node {0}\(Field<Player> f, Action<Tx, List<object>, double>\? onVisibility = null\)"),
+    ("csharp", "bindings/csharp/KayaApp.cs", "visibility", "OnVisibility",
+     r"public void {0}\(Widget w, Action<Tx, double> handler\)"),
+    ("csharp", "bindings/csharp/KayaApp.cs", "stamped visibility", "OnVisibility",
+     r"public void {0}\(Node n, Action<Tx, List<object>, double> handler\)"),
+    ("csharp", "bindings/csharp/KayaApp.cs", "audio selection", "SelectAudio",
+     r"public void {0}\(Player p, int index\)"),
+    ("csharp", "bindings/csharp/KayaApp.cs", "caption selection", "SelectCaptions",
+     r"public void {0}\(Player p, int\? index\)"),
+    ("csharp", "bindings/csharp/KayaApp.cs", "sidecar captions", "SetCaptions",
+     r"public void {0}\(Player p, MediaSource source, string language\)"),
+    ("csharp", "bindings/csharp/KayaApp.cs", "track reading", "Tracks",
+     r"public PlayerTracks {0}\(Player p\)"),
+    ("csharp", "bindings/csharp/KayaApp.cs", "cue reading", "Cue",
+     r"public string {0}\(Player p\)"),
+    ("csharp", "bindings/csharp/KayaApp.cs", "track handler", "OnTracks",
+     r"public void {0}\(Player p, Action<Tx, PlayerTracks> handler\)"),
+    ("csharp", "bindings/csharp/KayaApp.cs", "cue handler", "OnCue",
+     r"public void {0}\(Player p, Action<Tx, string> handler\)"),
+    ("csharp", "bindings/csharp/KayaApp.cs", "failed handler", "OnFailed",
+     r"public void {0}\(Player p, Action<Tx, MediaFailure, string> handler\)"),
+    ("csharp", "bindings/csharp/KayaApp.cs", "session", "Session",
+     r"public void {0}\(Player\? player = null, string title = \"\""),
+    ("csharp", "bindings/csharp/KayaApp.cs", "session handler", "OnSession",
+     r"public void {0}\(Action<Tx, SessionAction> handler\)"),
+    ("csharp", "bindings/csharp/KayaApp.cs", "capability", "CanPlay",
+     r"public static bool {0}\(string mime, string codecs = \"\"\)"),
+    ("csharp", "bindings/csharp/KayaApp.cs", "picked source", "Picked",
+     r"public static MediaSource {0}\(PickedFile file\)"),
+    # java
+    ("java", "bindings/java/dev/kaya/KayaApp.java", "player object", "player",
+     r"public Player {0}\(\) \{{"),
+    ("java", "bindings/java/dev/kaya/KayaRecords.java", "player field", "Player",
+     r"if \(t == KayaApp\.{0}\.class\) return KayaWire\.VALUE_I64;"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", "live video", "video",
+     r"public Widget {0}\(Player player\) \{{"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", "template video", "video",
+     r"public Node {0}\(KayaRecords\.Field<Player> f\) \{{\n\s*Node n = widget\(KayaWire\.KIND_VI"
+     r"DEO\);"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", "row video", "video",
+     r"public Node {0}\(KayaRecords\.Field<Player> f\) \{{\n\s*return t\.{0}\(f\);"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", "visibility", "onVisibility",
+     r"public void {0}\(Widget video, BiConsumer<Tx, Double> handler\)"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", "stamped visibility", "onVisibility",
+     r"public void {0}\(Node video, VisibilityHandler handler\)"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", "audio selection", "selectAudio",
+     r"public void {0}\(Player p, int index\)"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", "caption selection", "selectCaptions",
+     r"public void {0}\(Player p, int index\)"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", "sidecar captions", "playerCaptions",
+     r"public void {0}\(Player p, MediaSource source, String language\)"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", "track reading", "tracks",
+     r"public PlayerTracks {0}\(Player p\)"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", "cue reading", "cue",
+     r"public String {0}\(Player p\)"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", "track handler", "onTracks",
+     r"public void {0}\(Player p, BiConsumer<Tx, PlayerTracks> handler\)"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", "cue handler", "onCue",
+     r"public void {0}\(Player p, BiConsumer<Tx, String> handler\)"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", "failed handler", "onFailed",
+     r"public void {0}\(Player p, FailedHandler handler\)"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", "session", "session",
+     r"public Session {0}\(\) \{{"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", "session handler", "onSession",
+     r"public void {0}\(BiConsumer<Tx, SessionAction> handler\)"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", "capability", "canPlay",
+     r"public static boolean {0}\(String mime, String codecs\)"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", "picked source", "picked",
+     r"public static MediaSource {0}\(PickedFile file\)"),
+    # swift
+    ("swift", "bindings/swift/KayaMedia.swift", "player object", "player",
+     r"public func {0}\(\n\s*source: KayaMediaSource\? = nil"),
+    ("swift", "tools/kaya-swift-gen/Sources/main.swift", "player field", "KayaPlayer",
+     r"\"{0}\": \(\"i64\", \"KayaPlayer\.none\"\)"),
+    ("swift", "bindings/swift/KayaApp.swift", "live video", "video",
+     r"public func {0}\(\n\s*_ player: KayaPlayer, fit: KayaFit\? = nil,\n\s*onVisibility: \(\(Ka"
+     r"yaAppTx, Double\) throws -> Void\)\? = nil, grow: Double\? = nil\n\s*\) -> KayaWidget"),
+    ("swift", "bindings/swift/KayaApp.swift", "template video", "video",
+     r"public func {0}\(\n\s*_ f: KayaField<KayaPlayer>, fit: KayaFit\? = nil,"),
+    ("swift", "bindings/swift/KayaMedia.swift", "visibility", "onVisibility",
+     r"public func {0}\(_ w: KayaWidget, _ handler: @escaping \(KayaAppTx, Double\) throws -> Voi"
+     r"d\)"),
+    ("swift", "bindings/swift/KayaMedia.swift", "stamped visibility", "onVisibility",
+     r"public func {0}\(\n\s*_ n: KayaNodeHandle, _ handler: @escaping \(KayaAppTx, \[KayaValue\]"
+     r", Double\) throws -> Void"),
+    ("swift", "bindings/swift/KayaMedia.swift", "audio selection", "selectAudio",
+     r"public func {0}\(_ p: KayaPlayer, _ index: Int\)"),
+    ("swift", "bindings/swift/KayaMedia.swift", "caption selection", "selectCaptions",
+     r"public func {0}\(_ p: KayaPlayer, _ index: Int\?\)"),
+    ("swift", "bindings/swift/KayaMedia.swift", "sidecar captions", "playerCaptions",
+     r"public func {0}\(_ p: KayaPlayer, _ source: KayaMediaSource, language: String\)"),
+    ("swift", "bindings/swift/KayaMedia.swift", "track reading", "tracks",
+     r"public func {0}\(_ p: KayaPlayer\) -> KayaTracks"),
+    ("swift", "bindings/swift/KayaMedia.swift", "cue reading", "cue",
+     r"public func {0}\(_ p: KayaPlayer\) -> String"),
+    ("swift", "bindings/swift/KayaMedia.swift", "track handler", "onTracks",
+     r"public func {0}\(_ p: KayaPlayer, _ handler: @escaping \(KayaAppTx, KayaTracks\) throws ->"
+     r" Void\)"),
+    ("swift", "bindings/swift/KayaMedia.swift", "cue handler", "onCue",
+     r"public func {0}\(_ p: KayaPlayer, _ handler: @escaping \(KayaAppTx, String\) throws -> Voi"
+     r"d\)"),
+    ("swift", "bindings/swift/KayaMedia.swift", "failed handler", "onFailed",
+     r"public func {0}\(\n\s*_ p: KayaPlayer, _ handler: @escaping \(KayaAppTx, KayaMediaFailure,"
+     r" String\) throws -> Void"),
+    ("swift", "bindings/swift/KayaMedia.swift", "session", "session",
+     r"public func {0}\(\n\s*player: KayaPlayer\? = nil, title: String"),
+    ("swift", "bindings/swift/KayaMedia.swift", "session handler", "onSessionAction",
+     r"public func {0}\(_ handler: @escaping \(KayaAppTx, KayaSessionAction\) throws -> Void\)"),
+    ("swift", "bindings/swift/KayaMedia.swift", "capability", "canPlay",
+     r"public static func {0}\(_ mime: String, codecs: String = \"\"\) -> Bool"),
+    ("swift", "bindings/swift/KayaMedia.swift", "picked source", "picked",
+     r"public static func {0}\(_ file: KayaPickedFile\) -> KayaMediaSource"),
+    # python (one surface serves both zones)
+    ("python", "bindings/python/kaya/__init__.py", "player object", "player",
+     r"^def {0}\(source: MediaSource \| None = None, \*,"),
+    ("python", "bindings/python/kaya/__init__.py", "player field", "Player",
+     r"and getattr\(members\[0\], \"__name__\", \"\"\) == \"{0}\""),
+    ("python", "bindings/python/kaya/__init__.py", "video", "video",
+     r"^def {0}\(player: Player \| Source \| None = None, \*,\n\s*fit: Fit \| str \| int \| None "
+     r"= None,"),
+    ("python", "bindings/python/kaya/__init__.py", "visibility", "on_visibility",
+     r"^def \w+\(player: Player \| Source \| None = None, \*,\n\s*fit: Fit \| str \| int \| None "
+     r"= None,\n\s*{0}: Handler \| None = None,"),
+    ("python", "bindings/python/kaya/__init__.py", "session handler", "on_action",
+     r"^\s*{0}: Callable\[\[SessionAction, int\], object\] \| None = None\n\s*\) -> None:"),
+    ("python", "bindings/python/kaya/__init__.py", "audio selection", "select_audio",
+     r"    def {0}\(self, index: int\) -> None:"),
+    ("python", "bindings/python/kaya/__init__.py", "caption selection", "select_captions",
+     r"    def {0}\(self, index: int \| None\) -> None:"),
+    ("python", "bindings/python/kaya/__init__.py", "sidecar captions", "set_captions",
+     r"    def {0}\(self, source: MediaSource, language: str\) -> None:"),
+    ("python", "bindings/python/kaya/__init__.py", "track reading", "tracks",
+     r"    def {0}\(self\) -> Tracks:"),
+    ("python", "bindings/python/kaya/__init__.py", "cue reading", "cue",
+     r"    def {0}\(self\) -> str:\n"),
+    ("python", "bindings/python/kaya/__init__.py", "track handler", "on_tracks",
+     r"^\s*{0}: Callable\[\[Tracks\], object\] \| None = None,\n\s*\w+: Callable\[\[str\]"),
+    ("python", "bindings/python/kaya/__init__.py", "cue handler", "on_cue",
+     r"^\s*{0}: Callable\[\[str\], object\] \| None = None\) -> Player:"),
+    ("python", "bindings/python/kaya/__init__.py", "failed handler", "on_failed",
+     r"^\s*{0}: Callable\[\[MediaFailure, str\], object\] \| None = None,"),
+    ("python", "bindings/python/kaya/__init__.py", "session", "session",
+     r"^def {0}\(\*, player: Player \| None = None, title: str = \"\","),
+    ("python", "bindings/python/kaya/__init__.py", "capability", "can_play",
+     r"^def {0}\(mime: str, codecs: str = \"\"\) -> bool:"),
+    ("python", "bindings/python/kaya/__init__.py", "picked source", "picked",
+     r"    def {0}\(cls, file: PickedFile\) -> MediaSource:"),
+    # js
+    ("js", "bindings/js/kaya/index.ts", "player object", "player",
+     r"^export function {0}\(opts: PlayerOptions = \{{\}}\): Player \{{"),
+    ("js", "bindings/js/kaya/index.ts", "player field", "Player",
+     r"token === Color \|\| token === {0}\) return wire\.VALUE_I64;"),
+    ("js", "bindings/js/kaya/index.ts", "video", "video",
+     r"^export function {0}\(source: Player \| FieldRef \| null, opts: VideoOptions = \{{\}}\): W"
+     r"idget \{{"),
+    ("js", "bindings/js/kaya/index.ts", "visibility", "onVisibility", r"^  {0}\?: Handler;"),
+    ("js", "bindings/js/kaya/index.ts", "audio selection", "selectAudio",
+     r"^  {0}\(index: number\): void \{{"),
+    ("js", "bindings/js/kaya/index.ts", "caption selection", "selectCaptions",
+     r"^  {0}\(index: number \| null\): void \{{"),
+    ("js", "bindings/js/kaya/index.ts", "sidecar captions", "setCaptions",
+     r"^  {0}\(source: MediaSource, language: string\): void \{{"),
+    ("js", "bindings/js/kaya/index.ts", "track reading", "tracks", r"^  get {0}\(\): Tracks \{{"),
+    ("js", "bindings/js/kaya/index.ts", "cue reading", "cue", r"^  get {0}\(\): string \{{"),
+    ("js", "bindings/js/kaya/index.ts", "track handler", "onTracks",
+     r"^  {0}\?: \(tracks: Tracks\) => void;"),
+    ("js", "bindings/js/kaya/index.ts", "cue handler", "onCue",
+     r"^  {0}\?: \(text: string\) => void;"),
+    ("js", "bindings/js/kaya/index.ts", "failed handler", "onFailed",
+     r"^  {0}\?: \(reason: MediaFailure, detail: string\) => void;"),
+    ("js", "bindings/js/kaya/index.ts", "session", "session",
+     r"^export function {0}\(opts: SessionOptions = \{{\}}\): void \{{"),
+    ("js", "bindings/js/kaya/index.ts", "session handler", "onAction",
+     r"^  {0}\?: \(action: SessionAction, atMs: number\) => void;"),
+    ("js", "bindings/js/kaya/index.ts", "capability", "canPlay",
+     r"^export function {0}\(mime: string, codecs = \"\"\): boolean \{{"),
+    ("js", "bindings/js/kaya/index.ts", "picked source", "picked",
+     r"^  static {0}\(file: PickedFile\): MediaSource \{{"),
+    # ocaml
+    ("ocaml", "bindings/ocaml/kaya_app.ml", "player object", "player",
+     r"^let {0} \?source \?speed \?volume \?muted \?loop \?captions \(\) ="),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", "player field", "player_field",
+     r"^let {0} index : \('a, player\) field ="),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", "live video", "video",
+     r"^let {0} \?grow \?fill .*\n(.*\n)?\s*\?a11y_hint \?fit \?on_visibility ~player \(\) ="),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", "template video", "video",
+     r"^  let {0} \?grow \?fill .*\n.*\?player \?bind_field\n\s*\?fit \?\(level = 0\) \?\(a11y_le"
+     r"vel = level\) \?on_visibility \(\) ="),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", "visibility", "on_visibility",
+     r"^let {0} app \(Widget id\) \(f : float -> unit\) ="),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", "stamped visibility", "on_visibility_node",
+     r"^let {0} app \(Node id\) \(f : key list -> float -> unit\) ="),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", "audio selection", "select_audio",
+     r"^let {0} \(Player id\) index ="),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", "caption selection", "select_captions",
+     r"^let {0} \(Player id\) index ="),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", "sidecar captions", "player_captions",
+     r"^let {0} p src ~language ="),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", "track reading", "tracks",
+     r"^let {0} app \(Player id\) ="),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", "cue reading", "cue", r"^let {0} app \(Player id\) ="),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", "track handler", "on_tracks",
+     r"^let {0} app p \(f : Tracks\.t -> unit\) ="),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", "cue handler", "on_cue",
+     r"^let {0} app p \(f : string -> unit\) ="),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", "failed handler", "on_failed",
+     r"^let {0} app p \(f : Media_failure\.t -> string -> unit\) ="),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", "session", "declare_session",
+     r"^let {0} \?player \?\(title = \"\"\)"),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", "session handler", "on_session",
+     r"^let {0} app \(f : Session_action\.t -> unit\) ="),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", "capability", "can_play", r"^let {0} mime codecs ="),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", "picked source", "picked",
+     r"^  let {0} \(f : picked_file\) = Source f\.local_path"),
+    # haskell
+    ("haskell", "bindings/haskell/KayaApp.hs", "player object", "player",
+     r"^{0} :: \[PlayerAttr\] -> Build Player"),
+    ("haskell", "bindings/haskell/Kaya/Core.hs", "player field", "Player",
+     r"^instance KayaFieldType {0} where"),
+    ("haskell", "bindings/haskell/KayaApp.hs", "live video", "videoShowing",
+     r"^{0} :: \(LeafArgs r\) => Player -> r"),
+    ("haskell", "bindings/haskell/KayaApp.hs", "template video", "video",
+     r"^{0} :: TplPlayerSource s => s -> Tpl Node"),
+    ("haskell", "bindings/haskell/KayaApp.hs", "visibility", "onVisibility",
+     r"^  {0} :: App -> e -> Keyed e \(Double -> IO \(\)\) -> IO \(\)"),
+    ("haskell", "bindings/haskell/KayaApp.hs", "stamped visibility", "onVisibility",
+     r"^  {0} app \(Node n\) handler ="),
+    ("haskell", "bindings/haskell/KayaApp.hs", "audio selection", "selectAudio",
+     r"^{0} :: Player -> Int -> Build \(\)"),
+    ("haskell", "bindings/haskell/KayaApp.hs", "caption selection", "selectCaptions",
+     r"^{0} :: Player -> Maybe Int -> Build \(\)"),
+    ("haskell", "bindings/haskell/KayaApp.hs", "sidecar captions", "playerCaptions",
+     r"^{0} :: Player -> MediaSource -> Text -> Build \(\)"),
+    ("haskell", "bindings/haskell/KayaApp.hs", "track reading", "playerTracks",
+     r"^{0} :: App -> Player -> IO Tracks"),
+    ("haskell", "bindings/haskell/KayaApp.hs", "cue reading", "playerCue",
+     r"^{0} :: App -> Player -> IO Text"),
+    ("haskell", "bindings/haskell/KayaApp.hs", "track handler", "onTracks",
+     r"^{0} :: App -> Player -> \(Tracks -> IO \(\)\) -> IO \(\)"),
+    ("haskell", "bindings/haskell/KayaApp.hs", "cue handler", "onCue",
+     r"^{0} :: App -> Player -> \(Text -> IO \(\)\) -> IO \(\)"),
+    ("haskell", "bindings/haskell/KayaApp.hs", "failed handler", "onFailed",
+     r"^{0} :: App -> Player -> \(MediaFailure -> Text -> IO \(\)\) -> IO \(\)"),
+    ("haskell", "bindings/haskell/KayaApp.hs", "session", "declareSession",
+     r"^{0} :: \[SessionAttr\] -> Build \(\)"),
+    ("haskell", "bindings/haskell/KayaApp.hs", "session handler", "onSession",
+     r"^{0} :: App -> \(SessionAction -> IO \(\)\) -> IO \(\)"),
+    ("haskell", "bindings/haskell/KayaApp.hs", "capability", "canPlay",
+     r"^{0} :: Text -> Text -> IO Bool"),
+    ("haskell", "bindings/haskell/Kaya/Core.hs", "picked source", "mediaPicked",
+     r"^{0} :: PickedFile -> MediaSource"),
 ]
 
 
@@ -2564,6 +2874,37 @@ for _lang, _rel, _part, _name, _template in MEDIA_SURFACES:
                       f"under the media cut)")
     _media_cuts += 1
 print(f"check-sugar-surface: media cuts watched red {_media_cuts}/{len(MEDIA_SURFACES)}")
+
+MEDIA_LANGS = ("rust", "python", "go", "csharp", "java", "swift", "ocaml", "haskell", "js")
+MEDIA_PARTS = ("player object", "player field", "visibility", "audio selection",
+               "caption selection", "sidecar captions", "track reading", "cue reading",
+               "track handler", "cue handler", "failed handler", "session",
+               "session handler", "capability", "picked source")
+
+
+def media_parts_missing(table):
+    have = {(lang, part) for lang, _rel, part, _name, _tpl in table}
+    out = [f"{lang} {part}" for lang in MEDIA_LANGS for part in MEDIA_PARTS
+           if (lang, part) not in have]
+    out += [f"{lang} video" for lang in MEDIA_LANGS
+            if (lang, "video") not in have
+            and not {(lang, "live video"), (lang, "template video")} <= have]
+    return out
+
+
+_missing = media_parts_missing(MEDIA_SURFACES)
+if _missing:
+    print("check-sugar-surface: MEDIA_SURFACES names no row for " + ", ".join(_missing)
+          + " (docs/media-plan.md §2-§5: every binding carries the whole media surface)")
+    status = 1
+_dropped = [r for r in MEDIA_SURFACES if (r[0], r[2]) != ("python", "session")]
+_neg = media_parts_missing(_dropped)
+print(f"check-sugar-surface: media part census {len(MEDIA_LANGS)}x{len(MEDIA_PARTS)}+video, "
+      f"python session row withheld: {len(MEDIA_SURFACES) - len(_dropped)} row(s) removed, "
+      f"{len(_neg)} finding(s)")
+if _neg != ["python session"]:
+    selftest_exit(f"check-sugar-surface: self-test failed (the media part census with "
+                  f"python's session row withheld answered {_neg}, wanted ['python session'])")
 
 
 # --- THE SIZE-POLICY SURFACE, in all nine ---------------------------
@@ -5927,7 +6268,7 @@ discardable = tpl_discardable_probe()
 WANT_DISCARDABLE = """swift-row-member=applied:1 rc:1 named:True
 swift-arm-member=applied:1 rc:1 named:True
 swift-eliminator=applied:1 rc:1 named:True
-swift-census-floor=applied:16 rc:1 named:True"""
+swift-census-floor=applied:17 rc:1 named:True"""
 if discardable != WANT_DISCARDABLE:
     print("check-sugar-surface: SELF-TEST FAIL (the Swift generated-surface "
           "discard census did not catch its watched cuts). Wanted:",
@@ -6692,7 +7033,7 @@ def csharp_facade_probe():
     run("csharp-twin-reader",
         src.replace("sealed class TableItemRow\n",
                     "sealed class TableItemRowGone\n")
-        if n == 1 else src, n, "typed-row reader found only 14")
+        if n == 1 else src, n, "typed-row reader found only 16")
     return "\n".join(lines)
 
 
@@ -9264,6 +9605,7 @@ WIRE_TAG_EXEMPT = {  # keyed by the stem lowercased with underscores dropped
     "abortcheck": "a check that packs wire records by hand to prove the abort path",
     "notifyordercheck": "a check that reads the wire's notification order records",
     "encodebench": "a bench that times the wire encoder itself",
+    "mediacheck": "a check that packs media occurrences as wire.rs does, for the decoder",
 }
 WIRE_TAG_FLOOR = 40
 

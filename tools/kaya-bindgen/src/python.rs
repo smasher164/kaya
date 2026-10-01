@@ -517,6 +517,49 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("        value, _ = parse_value(buf, 16)");
         c.line("        return kind, request, [], value");
     }
+    // main.rs's flat_occurrence_names: the fields in order into the tail.
+    for name in crate::flat_occurrence_names(spec) {
+        let rec = spec.occurrence.iter().find(|r| r.name == name).unwrap();
+        c.line(&format!("    if kind == OCC_{}:", name.to_uppercase()));
+        c.line(&format!("        # {}", crate::FLAT_MARK));
+        c.line("        at = 8");
+        c.line("        tail = []");
+        let mut fields = rec.fields.iter();
+        if matches!(rec.fields[0].ty, FieldTy::U64) {
+            fields.next();
+            c.line("        flat_id = struct.unpack_from(\"<Q\", buf, 8)[0]");
+            c.line("        at += 8");
+        } else {
+            c.line("        flat_id = 0");
+        }
+        for f in fields {
+            match f.ty {
+                FieldTy::U32 if f.name == "reserved" => c.line("        at += 4"),
+                FieldTy::U32 => {
+                    c.line("        tail.append(struct.unpack_from(\"<I\", buf, at)[0])");
+                    c.line("        at += 4");
+                }
+                FieldTy::U64 => {
+                    c.line("        tail.append(struct.unpack_from(\"<Q\", buf, at)[0])");
+                    c.line("        at += 8");
+                }
+                FieldTy::Value => {
+                    c.line("        value, at = parse_value(buf, at)");
+                    c.line("        tail.append(value)");
+                }
+                FieldTy::Values => {
+                    c.line("        count = struct.unpack_from(\"<I\", buf, at)[0]");
+                    c.line("        at += 8");
+                    c.line("        tail.append(count)");
+                    c.line("        for _ in range(count):");
+                    c.line("            value, at = parse_value(buf, at)");
+                    c.line("            tail.append(value)");
+                }
+                FieldTy::VariantSchemas => panic!("kaya-bindgen: flat record {name} carries variant schemas"),
+            }
+        }
+        c.line("        return kind, flat_id, [], tail");
+    }
     // The picker's answer is the one occurrence whose payload is a LIST
     // OF RECORDS rather than a scalar, so it needs its own arm: the
     // generic tail below would take the count for a key-path length and

@@ -10376,8 +10376,15 @@ private func kayaRunScript(_ script: String) {
                         failures.append("video ink \(got), wanted \(want) within \(kayaVideoInkTolerance) per channel")
                     }
                 #else
-                    _ = want
-                    kayaDepthStub("media_formats", on: "ios")
+                    // The simulator's own screenshot, taken by the host, is
+                    // sRGB and holds the layer's picture (docs/media-plan.md §6).
+                    let node = DispatchQueue.main.sync { kayaTarget(parts[1], "video", kayaScene.videos) }
+                    let got = node.map(kayaVideoInk) ?? "<no such target>"
+                    if kayaVideoInkMatches(got, want) {
+                        observed.append("video ink \(want)")
+                    } else {
+                        failures.append("video ink \(got), wanted \(want) within \(kayaVideoInkTolerance) per channel")
+                    }
                 #endif
             case "expect_caption":
                 // docs/media-plan.md §3: the text the view shows, never its look.
@@ -10422,46 +10429,41 @@ private func kayaRunScript(_ script: String) {
                 // once it plays).
                 kayaAwaitQuiet()
                 let answered = kayaAnswers()
-                #if os(macOS)
-                    // ARRIVAL, NOT MediaRemote's answer: a command it calls sent
-                    // can reach no handler (measured), so an attempt counts only
-                    // when a handler ran within 2 s, and is sent again if not.
-                    let action = String(parts[1])
-                    let deadline = Date().addingTimeInterval(10)
-                    var sent = (sent: false, said: "never sent")
-                    var arrived = false
-                    var attempts = 0
-                    while !arrived, Date() < deadline {
-                        attempts += 1
-                        let before = DispatchQueue.main.sync { kayaRemoteArrivals }
-                        sent = kayaSessionSend(action)
-                        kayaDiag("session_send \(action) attempt \(attempts): \(sent.said)")
-                        guard sent.sent else {
-                            Thread.sleep(forTimeInterval: 0.25)
-                            continue
-                        }
-                        let wait = Date().addingTimeInterval(2)
-                        while Date() < wait {
-                            if DispatchQueue.main.sync(execute: { kayaRemoteArrivals }) > before {
-                                arrived = true
-                                break
-                            }
-                            Thread.sleep(forTimeInterval: 0.02)
-                        }
+                // ARRIVAL, NOT MediaRemote's answer: a command it calls sent
+                // can reach no handler (measured), so an attempt counts only
+                // when a handler ran within 2 s, and is sent again if not.
+                let action = String(parts[1])
+                let deadline = Date().addingTimeInterval(10)
+                var sent = (sent: false, said: "never sent")
+                var arrived = false
+                var attempts = 0
+                while !arrived, Date() < deadline {
+                    attempts += 1
+                    let before = DispatchQueue.main.sync { kayaRemoteArrivals }
+                    sent = kayaSessionSend(action)
+                    kayaDiag("session_send \(action) attempt \(attempts): \(sent.said)")
+                    guard sent.sent else {
+                        Thread.sleep(forTimeInterval: 0.25)
+                        continue
                     }
-                    if arrived {
-                        kayaAwaitAnswer(answered)
-                    } else if sent.sent {
-                        failures.append(
-                            "session_send \(action): MediaRemote answered sent \(attempts) time(s) and no "
-                                + "remote command reached this process's handlers")
-                    } else {
-                        failures.append("session_send \(action): \(sent.said)")
+                    let wait = Date().addingTimeInterval(2)
+                    while Date() < wait {
+                        if DispatchQueue.main.sync(execute: { kayaRemoteArrivals }) > before {
+                            arrived = true
+                            break
+                        }
+                        Thread.sleep(forTimeInterval: 0.02)
                     }
-                #else
-                    _ = answered
-                    kayaDepthStub("media_formats", on: "ios")
-                #endif
+                }
+                if arrived {
+                    kayaAwaitAnswer(answered)
+                } else if sent.sent {
+                    failures.append(
+                        "session_send \(action): MediaRemote answered sent \(attempts) time(s) and no "
+                            + "remote command reached this process's handlers")
+                } else {
+                    failures.append("session_send \(action): \(sent.said)")
+                }
             case "expect_now_playing":
                 let state = String(parts[parts.count - 1])
                 let want = "\(kayaQuoted(Array(parts[1..<(parts.count - 1)])).debugDescription) \(state)"
@@ -10472,17 +10474,13 @@ private func kayaRunScript(_ script: String) {
                     failures.append("now playing \(got), wanted \(want)")
                 }
             case "expect_display_awake":
-                #if os(macOS)
-                    let want = parts[1] == "yes"
-                    let got = kayaDisplayAwake()
-                    if got == want {
-                        observed.append("display awake \(got)")
-                    } else {
-                        failures.append("display awake \(got), wanted \(want)")
-                    }
-                #else
-                    kayaDepthStub("media_formats", on: "ios")
-                #endif
+                let want = parts[1] == "yes"
+                let got = kayaDisplayAwake()
+                if got == want {
+                    observed.append("display awake \(got)")
+                } else {
+                    failures.append("display awake \(got), wanted \(want)")
+                }
             case "expect_badge":
                 // docs/app-badge-plan.md §4: the platform's own record, retried
                 // like an expect since the Dock publishes the label later.
@@ -26172,6 +26170,8 @@ final class KayaPlayer {
     /// from.
     var kayaCaption = ""
     var platformCue = ""
+    /// An http(s) sidecar being fetched through URLSession (docs/media-plan.md §3).
+    var captionsFetch: URLSessionDataTask?
     private var captionTimes: [UInt64] = []
     private var boundaryObserver: Any?
     private var audible: AVMediaSelectionGroup?
@@ -26207,6 +26207,8 @@ final class KayaPlayer {
 
     func release() {
         player.pause()
+        captionsFetch?.cancel()
+        captionsFetch = nil
         if let boundaryObserver { player.removeTimeObserver(boundaryObserver) }
         boundaryObserver = nil
         detach()
@@ -26253,6 +26255,10 @@ final class KayaPlayer {
             forName: AVPlayerItem.didPlayToEndTimeNotification, object: item, queue: .main
         ) { [weak self] _ in
             guard let self, self.generation == gen else { return }
+            // A cue ending at the item's end: the boundary observer can miss
+            // a time equal to the duration (docs/traps.md), so the end asks.
+            let end = item.duration
+            self.askCaption(at: end.isNumeric ? UInt64((end.seconds * 1000).rounded()) : nil)
             if self.looping {
                 self.player.seek(to: .zero)
                 self.player.play()
@@ -26427,11 +26433,11 @@ final class KayaPlayer {
         askCaption()
     }
 
-    func askCaption() {
+    func askCaption(at clock: UInt64? = nil) {
         var text = ""
         if !captionTimes.isEmpty {
             let now = player.currentTime()
-            let ms = UInt64(max(0, now.isNumeric ? (now.seconds * 1000).rounded() : 0))
+            let ms = clock ?? UInt64(max(0, now.isNumeric ? (now.seconds * 1000).rounded() : 0))
             var buffer = [UInt8](repeating: 0, count: 256)
             var n = buffer.withUnsafeMutableBufferPointer {
                 KayaHost.api.caption_at(id, ms, $0.baseAddress, UInt($0.count))
@@ -26461,7 +26467,25 @@ final class KayaPlayer {
         player.play()
     }
 
-    func seek(_ ms: UInt64, report: Bool) {
+    /// A platform caption option is selected and the item has not enabled its
+    /// track yet: a paused seek issued then gets no cue, and neither does a
+    /// later seek to the same time (measured, docs/traps.md).
+    private var legibleSwitching: Bool {
+        guard let item = player.currentItem, let legible,
+            item.currentMediaSelection.selectedMediaOption(in: legible) != nil
+        else { return false }
+        return !item.tracks.contains {
+            $0.isEnabled && [.subtitle, .text, .closedCaption].contains($0.assetTrack?.mediaType ?? .video)
+        }
+    }
+
+    func seek(_ ms: UInt64, report: Bool, waited: Int = 0) {
+        if legibleSwitching && waited < 400 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(5)) { [weak self] in
+                self?.seek(ms, report: report, waited: waited + 1)
+            }
+            return
+        }
         let to = CMTime(value: CMTimeValue(ms), timescale: 1000)
         player.seek(to: to, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
             guard finished else { return }
@@ -26544,6 +26568,64 @@ func kayaReportFailure(_ id: UInt64, _ error: Error?) {
     }
 }
 
+/// An http(s) sidecar caption file, fetched with the platform's own
+/// networking and handed to the core as text; "" cancels a fetch still
+/// pending (docs/media-plan.md §3, RULED 2026-09-30).
+func kayaFetchCaptions(_ p: KayaPlayer, _ url: String) {
+    p.captionsFetch?.cancel()
+    p.captionsFetch = nil
+    guard !url.isEmpty else { return }
+    let id = p.id
+    guard let target = URL(string: url) else {
+        kayaCaptionsFailed(id, url, "kaya", Int(KAYA_MEDIA_FAILURE_NOT_FOUND), 0, "not a URL")
+        return
+    }
+    let task = URLSession.shared.dataTask(with: target) { data, response, error in
+        DispatchQueue.main.async {
+            guard let p = kayaPlayers[id], p.captionsFetch != nil else { return }
+            p.captionsFetch = nil
+            if let ns = error as NSError? {
+                let underlying = (ns.userInfo[NSUnderlyingErrorKey] as? NSError)?.code ?? 0
+                kayaCaptionsFailed(id, url, ns.domain, ns.code, underlying, ns.localizedDescription)
+            } else if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                kayaCaptionsFailed(
+                    id, url, "http", http.statusCode, 0,
+                    HTTPURLResponse.localizedString(forStatusCode: http.statusCode))
+            } else {
+                let u = Array(url.utf8)
+                let t = Array(data ?? Data())
+                kayaPlayerReport(id) {
+                    u.withUnsafeBufferPointer { up in
+                        t.withUnsafeBufferPointer { tp in
+                            KayaHost.api.player_captions_text(
+                                id, up.baseAddress, UInt(up.count), tp.baseAddress, UInt(tp.count))
+                        }
+                    }
+                }
+            }
+        }
+    }
+    p.captionsFetch = task
+    task.resume()
+}
+
+func kayaCaptionsFailed(_ id: UInt64, _ url: String, _ domain: String, _ code: Int, _ underlying: Int, _ detail: String) {
+    let u = Array(url.utf8)
+    let d = Array(domain.utf8)
+    let t = Array(detail.utf8)
+    kayaPlayerReport(id) {
+        u.withUnsafeBufferPointer { up in
+            d.withUnsafeBufferPointer { dp in
+                t.withUnsafeBufferPointer { tp in
+                    KayaHost.api.player_captions_failed(
+                        id, up.baseAddress, UInt(up.count), dp.baseAddress, UInt(dp.count), Int64(code),
+                        Int64(underlying), tp.baseAddress, UInt(tp.count))
+                }
+            }
+        }
+    }
+}
+
 /// The video views showing `id` re-read its picture's size.
 func kayaVideoSizeChanged(_ id: UInt64) {
     for node in kayaScene.videos where node.videoPlayer == id {
@@ -26576,6 +26658,9 @@ func kayaApplyPlayerProp(_ id: UInt64, _ prop: UInt32, _ raw: UnsafeRawBufferPoi
         p.player.volume = Float(raw.loadUnaligned(fromByteOffset: at + 8, as: Double.self))
     case (KAYA_PPROP_MUTED, valueBool):
         p.player.isMuted = raw[at + 8] != 0
+    case (KAYA_PPROP_CAPTIONS, valueStr):
+        var cursor = at
+        kayaFetchCaptions(p, kayaReadStrValue(raw, &cursor))
     case (KAYA_PPROP_LOOP, valueBool):
         // A looping item never pauses at its end: with `.pause` the clock
         // stops for the seek back and the app would hear a paused it never
@@ -26652,6 +26737,18 @@ func kayaRemote(_ action: Int32, _ atMs: UInt64) -> MPRemoteCommandHandlerStatus
 }
 
 func kayaApplySession(_ session: KayaSession) {
+    #if os(iOS)
+        // docs/media-plan.md §5: the session's audio background mode is the
+        // bundle's to declare, and a session without it goes silent when
+        // the screen locks with nothing saying why.
+        let modes = Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String] ?? []
+        if (session.player != 0 || session.offered != 0) && !modes.contains("audio") {
+            fatalError(
+                "kaya: this app declares a media session and its bundle's Info.plist has no UIBackgroundModes "
+                    + "`audio` (it has \(modes)); the bundle writer adds it for an app with a session "
+                    + "(tools/ios/run-sim.py make_bundle's `session`, docs/media-plan.md §5)")
+        }
+    #endif
     kayaSession = session
     let center = MPRemoteCommandCenter.shared()
     if !kayaRemoteInstalled {
@@ -26989,9 +27086,12 @@ func kayaMediaRefusal(_ item: String) -> String? {
         }
         guard let (wid, rect, scale) = found else { return "<no video view on screen>" }
         let done = DispatchSemaphore(value: 0)
-        let answer = KayaAnswerBox("<no answer from ScreenCaptureKit within 5 s>")
+        // Each stage says where a capture stood when the 5 s ran out
+        // (docs/traps.md, the pooled ink read that never answered).
+        let answer = KayaAnswerBox("<no answer from ScreenCaptureKit within 5 s: the capture task never started>")
         Task.detached {
             do {
+                answer.said = "<no answer from ScreenCaptureKit within 5 s: SCShareableContent asked, never answered>"
                 let content = try await SCShareableContent.excludingDesktopWindows(
                     false, onScreenWindowsOnly: true)
                 guard let window = content.windows.first(where: { $0.windowID == wid }) else {
@@ -27004,21 +27104,58 @@ func kayaMediaRefusal(_ item: String) -> String? {
                 config.width = Int(window.frame.width * scale)
                 config.height = Int(window.frame.height * scale)
                 config.showsCursor = false
+                answer.said =
+                    "<no answer from ScreenCaptureKit within 5 s: window \(wid) listed among "
+                    + "\(content.windows.count), captureImage asked, never answered>"
                 let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
                 let x = Int((rect.midX * scale).rounded())
                 let y = Int((rect.midY * scale).rounded())
                 answer.said = kayaSRGBPixel(image, x, y) ?? "<the capture is \(image.width)x\(image.height), no pixel at \(x),\(y)>"
             } catch {
                 answer.said = "<ScreenCaptureKit: \(error.localizedDescription)>"
+                answer.refused = true
             }
             done.signal()
         }
-        _ = done.wait(timeout: .now() + 5)
+        if done.wait(timeout: .now() + 5) == .timedOut || answer.refused {
+            // The same window server picture through screencapture(1), its
+            // own process and replayd connection (measured equal,
+            // docs/probes/media-mac-2026-09-30.md): a pooled guest's own
+            // connection was seen interrupted in a loop, and refused as
+            // "declined TCCs" once, both under the pool (docs/traps.md).
+            let hung = answer.said
+            let read = kayaScreencapturePixel(wid, Int((rect.midX * scale).rounded()), Int((rect.midY * scale).rounded()))
+            kayaDiag("video ink: \(hung); screencapture -l\(wid) answered \(read)")
+            return read.hasPrefix("<") ? "\(hung), and screencapture: \(read)" : read
+        }
         return answer.said
+    }
+
+    /// One pixel of window `wid` as screencapture(1) captures it, in sRGB.
+    func kayaScreencapturePixel(_ wid: CGWindowID, _ x: Int, _ y: Int) -> String {
+        let out = FileManager.default.temporaryDirectory
+            .appendingPathComponent("kaya-ink-\(getpid())-\(wid).png")
+        defer { try? FileManager.default.removeItem(at: out) }
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        task.arguments = ["-x", "-o", "-t", "png", "-l\(wid)", out.path]
+        do { try task.run() } catch { return "<could not start: \(error.localizedDescription)>" }
+        let until = Date().addingTimeInterval(5)
+        while task.isRunning, Date() < until { Thread.sleep(forTimeInterval: 0.02) }
+        if task.isRunning {
+            task.terminate()
+            return "<no picture within 5 s>"
+        }
+        guard task.terminationStatus == 0 else { return "<exited \(task.terminationStatus)>" }
+        guard let source = CGImageSourceCreateWithURL(out as CFURL, nil),
+            let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
+        else { return "<wrote no image to \(out.lastPathComponent)>" }
+        return kayaSRGBPixel(image, x, y) ?? "<the capture is \(image.width)x\(image.height), no pixel at \(x),\(y)>"
     }
 
     final class KayaAnswerBox: @unchecked Sendable {
         var said: String
+        var refused = false
         init(_ said: String) { self.said = said }
     }
 
@@ -27079,6 +27216,46 @@ func kayaMediaRefusal(_ item: String) -> String? {
         else { return false }
         return (all[NSNumber(value: getpid())] ?? []).contains {
             ($0["AssertType"] as? String) == "PreventUserIdleDisplaySleep"
+        }
+    }
+#else
+    /// The video view's centre in the SIMULATOR'S OWN SCREENSHOT, taken by the
+    /// host (`simctl io screenshot`, sRGB, measured to hold the layer's
+    /// picture); no in-process read sees it while playing
+    /// (docs/media-plan.md §6).
+    func kayaVideoInk(_ node: KayaNode) -> String {
+        let found = DispatchQueue.main.sync { () -> CGPoint? in
+            guard let view = kayaVideoViews[node.id], let window = view.window else { return nil }
+            let r = view.convert(view.bounds, to: window.screen.coordinateSpace)
+            let scale = window.screen.scale
+            return CGPoint(x: (r.midX * scale).rounded(), y: (r.midY * scale).rounded())
+        }
+        guard let at = found else { return "<no video view on screen>" }
+        let (ok, lines) = KayaSimdrive.ask("media_screen \(Int(at.x)) \(Int(at.y))", timeout: 30)
+        let said = lines.joined(separator: " ")
+        return ok ? said : "<the host's screenshot: \(said)>"
+    }
+
+    /// session_send (docs/media-plan.md §5): MediaRemote's command sent from a
+    /// process the host spawns in this simulator, which reaches the app's
+    /// MPRemoteCommandCenter as Control Center's does (measured); the
+    /// simulator answers no Now Playing read to it, so arrival is the proof.
+    func kayaSessionSend(_ action: String) -> (sent: Bool, said: String) {
+        let commands = ["play": 0, "pause": 1, "toggle": 2, "stop": 3, "next": 4, "previous": 5]
+        guard let command = commands[action] else { return (false, "session_send \(action): no such command") }
+        let (ok, lines) = KayaSimdrive.ask("media_send \(command)", timeout: 30)
+        return (ok, lines.joined(separator: " "))
+    }
+
+    /// The simulator keeps no record of a display-sleep hold (measured:
+    /// no idle-timer change, no power assertion), so this reads the
+    /// platform's own contract: a player that prevents display sleep and is
+    /// playing.
+    func kayaDisplayAwake() -> Bool {
+        DispatchQueue.main.sync {
+            kayaPlayers.values.contains {
+                $0.player.preventsDisplaySleepDuringVideoPlayback && $0.player.timeControlStatus == .playing
+            }
         }
     }
 #endif

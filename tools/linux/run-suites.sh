@@ -30,7 +30,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) the foreign suites load;
 # --example alone would build only the rlib it depends on.
-SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen numberfield colorpicker range"
+SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen numberfield colorpicker range media"
 # Depth-slice scenes, rust only. `windowed` and `canvas` are rust BY
 # DESIGN rather than by depth — the compiled conformance scenes every
 # lane runs (docs/virtualization-plan.md §6.3, docs/canvas-plan.md
@@ -327,7 +327,7 @@ gtk_layout_clean_selftest
 KAYA_EXCLUSIVE_LEGS=" dndwitness-in-x11 dndwitness-out-x11 dndwitness-in-wayland dndwitness-out-wayland clipboard-python-wayland clipboard-js-wayland clipboard-rust-wayland "
 # A lane that dies mid-run is exactly when the journal matters, and this
 # runner has no other EXIT trap to share.
-trap 'flightrec_flush; focus_ring_stop; rm -rf "$FLIGHTREC_SCRATCH"' EXIT
+trap 'flightrec_flush; focus_ring_stop; media_server_stop; rm -rf "$FLIGHTREC_SCRATCH"' EXIT
 
 # THE FOCUS RING (tools/linux/focus-ring.py; docs/deferred.md's wayland
 # clipboard seed entry). One sampler for the lane, writing ONE ring per
@@ -370,6 +370,20 @@ focus_ring_stop() {
 # KAYA_RECORD: a film wants a display of its own, so recording keeps
 # xvfb-run.
 x11_display_boot() { # display-number
+    # A REBOOT WAITS THE OLD SERVER OUT FIRST, wayland_session_boot's rule:
+    # killed and replaced at once, the new Xvfb found the old one still
+    # listening and exited, 2 of 20 in the image (docs/traps.md).
+    local old waited=0
+    old="$(cat "$LEGS_DIR/.x11-pid-$1" 2>/dev/null)"
+    if [ -n "$old" ]; then
+        kill "$old" 2>/dev/null
+        while kill -0 "$old" 2>/dev/null && [ "$waited" -lt 60 ]; do
+            waited=$((waited + 1))
+            sleep 0.05
+        done
+        rm -f "/tmp/.X11-unix/X$1" "/tmp/.X$1-lock"
+        waited=0
+    fi
     Xvfb ":$1" -screen 0 1600x1000x24 &>"/tmp/xvfb-$1.log" &
     echo $! >"$LEGS_DIR/.x11-pid-$1"
     # NOT a job: run()'s throttle counts running jobs, and eight
@@ -581,9 +595,9 @@ run_one() {
                 # A failed leg may leave windows behind; the next leg on
                 # this display must not meet them. Reboot it, still under
                 # the claim.
-                kill "$(cat "$LEGS_DIR/.x11-pid-$kaya_display" 2>/dev/null)" 2>/dev/null
-                rm -f "/tmp/.X11-unix/X$kaya_display" "/tmp/.X$kaya_display-lock"
-                x11_display_boot "$kaya_display"
+                if ! x11_display_boot "$kaya_display"; then
+                    echo "run-suites: display :$kaya_display did not come back after $name-$proto's reboot" >&2
+                fi
             fi
             rmdir "$LEGS_DIR/.x11-$kaya_display" 2>/dev/null
             return "$kaya_rc"
@@ -823,6 +837,45 @@ scene_runs_on() { # scene proto
     esac
     return 1
 }
+
+# THE MEDIA SUITE'S LOCAL SERVER (docs/media-plan.md §7a): inside this
+# container on 127.0.0.1, never the internet, started before the first leg
+# and stopped after the last, the stop PROVEN — the pid gone and the port
+# closed — or the lane fails (tools/lib/media_server.py's rule).
+KAYA_MEDIA_PORT=8765
+export KAYA_MEDIA_URL="http://127.0.0.1:$KAYA_MEDIA_PORT"
+KAYA_MEDIA_PID=""
+media_server_start() {
+    local tries=0
+    python3 tools/media-server.py --bind 127.0.0.1 --port "$KAYA_MEDIA_PORT" \
+        >/tmp/media-server.log 2>&1 &
+    KAYA_MEDIA_PID=$!
+    until curl -s -o /dev/null -w '%{http_code}' -r 0-1 \
+        "$KAYA_MEDIA_URL/h264_aac.mp4" 2>/dev/null | grep -q 206; do
+        tries=$((tries + 1))
+        if [ "$tries" -gt 150 ] || ! kill -0 "$KAYA_MEDIA_PID" 2>/dev/null; then
+            echo "run-suites: the media server never answered a Range fetch:" >&2
+            cat /tmp/media-server.log >&2
+            exit 1
+        fi
+        sleep 0.1
+    done
+    echo "run-suites: media server $KAYA_MEDIA_URL answering Range, pid $KAYA_MEDIA_PID"
+}
+media_server_stop() {
+    [ -n "$KAYA_MEDIA_PID" ] || return 0
+    kill "$KAYA_MEDIA_PID" 2>/dev/null
+    wait "$KAYA_MEDIA_PID" 2>/dev/null
+    if kill -0 "$KAYA_MEDIA_PID" 2>/dev/null \
+        || curl -s -o /dev/null "$KAYA_MEDIA_URL/h264_aac.mp4" 2>/dev/null; then
+        echo "run-suites: the media server is still running after its stop — pid $KAYA_MEDIA_PID" >&2
+        status=1
+    else
+        echo "run-suites: media server stopped, pid $KAYA_MEDIA_PID gone and port $KAYA_MEDIA_PORT closed"
+    fi
+    KAYA_MEDIA_PID=""
+}
+media_server_start
 
 for proto in x11 wayland; do
     run "$proto" rust "$CARGO_TARGET_DIR/debug/examples/milestone2"
@@ -1722,6 +1775,113 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$(hs_bin range)"
     run "$proto" rangertl-java env KAYA_LOCALE=ar-EG KAYA_SELFTEST=rangertl KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    # THE MEDIA SUITE (docs/media-plan.md §7a), every leg on its own session
+    # bus with the x11 idle inhibitor's session manager (media-leg.sh) and
+    # through a11y-leg.sh for expect_ax and ax_action; the lane's server is
+    # KAYA_MEDIA_URL. Players stay muted (the guests' own props).
+    run "$proto" media_formats-rust env KAYA_SELFTEST=media_formats \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/media"
+    run "$proto" media_formats-python env KAYA_SELFTEST=media_formats KAYA_LIB="$LIB" \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh python3 guests/python/media.py
+    run "$proto" media_formats-js env KAYA_SELFTEST=media_formats KAYA_LIB="$LIB" \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh node guests/js/media.ts
+    run "$proto" media_formats-go env KAYA_SELFTEST=media_formats \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" media_formats-csharp env KAYA_SELFTEST=media_formats KAYA_LIB="$LIB" \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" media_formats-ocaml env KAYA_SELFTEST=media_formats KAYA_LIB="$LIB" \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/media.exe
+    run "$proto" media_formats-haskell env KAYA_SELFTEST=media_formats \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh "$(hs_bin media)"
+    run "$proto" media_formats-java env KAYA_SELFTEST=media_formats KAYA_LIB="$LIB" \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    run "$proto" media_delivery-rust env KAYA_SELFTEST=media_delivery \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/media"
+    run "$proto" media_delivery-python env KAYA_SELFTEST=media_delivery KAYA_LIB="$LIB" \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh python3 guests/python/media.py
+    run "$proto" media_delivery-js env KAYA_SELFTEST=media_delivery KAYA_LIB="$LIB" \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh node guests/js/media.ts
+    run "$proto" media_delivery-go env KAYA_SELFTEST=media_delivery \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" media_delivery-csharp env KAYA_SELFTEST=media_delivery KAYA_LIB="$LIB" \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" media_delivery-ocaml env KAYA_SELFTEST=media_delivery KAYA_LIB="$LIB" \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/media.exe
+    run "$proto" media_delivery-haskell env KAYA_SELFTEST=media_delivery \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh "$(hs_bin media)"
+    run "$proto" media_delivery-java env KAYA_SELFTEST=media_delivery KAYA_LIB="$LIB" \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    run "$proto" media_session-rust env KAYA_SELFTEST=media_session \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/media"
+    run "$proto" media_session-python env KAYA_SELFTEST=media_session KAYA_LIB="$LIB" \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh python3 guests/python/media.py
+    run "$proto" media_session-js env KAYA_SELFTEST=media_session KAYA_LIB="$LIB" \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh node guests/js/media.ts
+    run "$proto" media_session-go env KAYA_SELFTEST=media_session \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" media_session-csharp env KAYA_SELFTEST=media_session KAYA_LIB="$LIB" \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" media_session-ocaml env KAYA_SELFTEST=media_session KAYA_LIB="$LIB" \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/media.exe
+    run "$proto" media_session-haskell env KAYA_SELFTEST=media_session \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh "$(hs_bin media)"
+    run "$proto" media_session-java env KAYA_SELFTEST=media_session KAYA_LIB="$LIB" \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    run "$proto" media_tracks-rust env KAYA_SELFTEST=media_tracks \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/media"
+    run "$proto" media_tracks-python env KAYA_SELFTEST=media_tracks KAYA_LIB="$LIB" \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh python3 guests/python/media.py
+    run "$proto" media_tracks-js env KAYA_SELFTEST=media_tracks KAYA_LIB="$LIB" \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh node guests/js/media.ts
+    run "$proto" media_tracks-go env KAYA_SELFTEST=media_tracks \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" media_tracks-csharp env KAYA_SELFTEST=media_tracks KAYA_LIB="$LIB" \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" media_tracks-ocaml env KAYA_SELFTEST=media_tracks KAYA_LIB="$LIB" \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/media.exe
+    run "$proto" media_tracks-haskell env KAYA_SELFTEST=media_tracks \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh "$(hs_bin media)"
+    run "$proto" media_tracks-java env KAYA_SELFTEST=media_tracks KAYA_LIB="$LIB" \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    run "$proto" media_feed-rust env KAYA_SELFTEST=media_feed \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/media"
+    run "$proto" media_feed-python env KAYA_SELFTEST=media_feed KAYA_LIB="$LIB" \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh python3 guests/python/media.py
+    run "$proto" media_feed-js env KAYA_SELFTEST=media_feed KAYA_LIB="$LIB" \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh node guests/js/media.ts
+    run "$proto" media_feed-go env KAYA_SELFTEST=media_feed \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" media_feed-csharp env KAYA_SELFTEST=media_feed KAYA_LIB="$LIB" \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" media_feed-ocaml env KAYA_SELFTEST=media_feed KAYA_LIB="$LIB" \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/media.exe
+    run "$proto" media_feed-haskell env KAYA_SELFTEST=media_feed \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh "$(hs_bin media)"
+    run "$proto" media_feed-java env KAYA_SELFTEST=media_feed KAYA_LIB="$LIB" \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    # THE TWO WATCHED REDS OF docs/media-plan.md §7a, as legs that must go
+    # GREEN: the AV1 decoder demoted (the audio would play alone, silently)
+    # and the TS demuxer demoted (the stream would stall), each read by the
+    # GTK Stage's table as the item it must see `failed` (gtk_media's
+    # demoted_refusal).
+    run "$proto" media_formats-rust-noav1dec env KAYA_SELFTEST=media_formats \
+        GST_PLUGIN_FEATURE_RANK=av1dec:NONE \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/media"
+    # The TS leg drops ONE step, the fMP4 manifest's summary: `can_play` of
+    # an HLS manifest asks for both segment demuxers (a manifest does not
+    # say which it carries), so under this demotion it answers no for the
+    # fMP4 tree that still plays. The drop is counted, never assumed.
+    if ! notsdemux_script="$(python3 tools/linux/scene-mods.py media_delivery | grep -v -F '{media:hls_fmp4.m3u8|')"; then
+        echo "run-suites: the media_delivery script for the TS leg could not be made (above)" >&2
+        exit 1
+    fi
+    if [ "$(python3 tools/linux/scene-mods.py media_delivery 2>/dev/null | wc -l)" -ne "$(($(printf '%s\n' "$notsdemux_script" | wc -l) + 1))" ]; then
+        echo "run-suites: the TS leg's drop of the fMP4 summary did not take exactly one step" >&2
+        exit 1
+    fi
+    run "$proto" media_delivery-rust-notsdemux env KAYA_SELFTEST=media_delivery \
+        KAYA_SELFTEST_SCRIPT="$notsdemux_script" GST_PLUGIN_FEATURE_RANK=tsdemux:NONE \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/media"
     run "$proto" scroll-rust env KAYA_SELFTEST=scroll "$CARGO_TARGET_DIR/debug/examples/scroll"
     # The sideways strip in Arabic (docs/hscroll-plan.md §4).
     run "$proto" scrollrtl-rust env KAYA_LOCALE=ar-EG KAYA_SELFTEST=scrollrtl \
@@ -1978,6 +2138,7 @@ for proto in x11 wayland; do
 done
 drain
 timing legs
+media_server_stop
 
 for kaya_slot in "${WAYLAND_POOL[@]}"; do
     kill "$(cat "/tmp/xdg-wl-$kaya_slot/sway.pid" 2>/dev/null)" 2>/dev/null

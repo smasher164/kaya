@@ -176,12 +176,13 @@ func timeOf(packed int64) Time {
 var dateType = reflect.TypeFor[Date]()
 var timeType = reflect.TypeFor[Time]()
 var colorType = reflect.TypeFor[Color]()
+var playerType = reflect.TypeFor[Player]()
 var documentType = reflect.TypeFor[Document]()
 
 func wireTag(t reflect.Type) (uint32, bool) {
 	// The two picker types ride the I64 tag in packed decimal; every
 	// other struct field is guest-only.
-	if t == dateType || t == timeType || t == colorType {
+	if t == dateType || t == timeType || t == colorType || t == playerType {
 		return ValueI64, true
 	}
 	// A Document field IS a Blob field carrying documentBlob's value
@@ -282,6 +283,8 @@ func scalarWire(v any) any {
 		return d.packed()
 	case Color:
 		return d.packed()
+	case Player:
+		return int64(d.id)
 	}
 	if rv := reflect.ValueOf(v); rv.Kind() == reflect.Slice && rv.Type().Elem().Kind() == reflect.Uint8 {
 		return blobWire(v)
@@ -404,6 +407,15 @@ func restoreRecord(t reflect.Type, info *recordInfo, fields []any) any {
 			field.Set(reflect.ValueOf(documentOf(raw)))
 			continue
 		}
+		if field.Type() == playerType {
+			id, ok := fields[wire].(int64)
+			if !ok || id < 0 {
+				panic(fmt.Sprintf("kaya: an undone entry of %v carries %v for %s, which is a Player",
+					t, fields[wire], t.Field(idx).Name))
+			}
+			field.Set(reflect.ValueOf(Player{uint64(id)}))
+			continue
+		}
 		if field.Type() == dateType || field.Type() == timeType || field.Type() == colorType {
 			// A packed I64 comes back as the picker type it was written
 			// from, never as the integer it travelled as.
@@ -471,6 +483,8 @@ func (info *recordInfo) encode(field uint32, v any) any {
 		return d.packed()
 	case Color:
 		return d.packed()
+	case Player:
+		return int64(d.id)
 	}
 	return v
 }

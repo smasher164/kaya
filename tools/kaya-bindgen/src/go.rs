@@ -57,6 +57,12 @@ fn enum_go_type(name: &str) -> Option<&'static str> {
         "sections_presentation" => Some("SectionsPresentation"),
         // The sheet's detent (docs/sheet-plan.md §1.4).
         "detent" => Some("Detent"),
+        // The media vocabularies (docs/media-plan.md §2, §5).
+        "player_state" => Some("PlayerState"),
+        "media_failure" => Some("MediaFailure"),
+        "session_action" => Some("SessionActionKind"),
+        "playback_state" => Some("PlaybackState"),
+        "fit" => Some("Fit"),
         _ => None,
     }
 }
@@ -702,6 +708,57 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("\t\t// {}", crate::VALUE_ANSWER_MARK));
         c.line("\t\tvalue, _ := parseValue(rec, 16)");
         c.line("\t\treturn kind, id, nil, value, true");
+        c.line("\t}");
+    }
+    // main.rs's flat_occurrence_names: the fields in order into the tail.
+    for name in crate::flat_occurrence_names(spec) {
+        let rec = spec.occurrence.iter().find(|r| r.name == name).unwrap();
+        c.line(&format!("\tif kind == occ{} {{", camel(name)));
+        c.line(&format!("\t\t// {}", crate::FLAT_MARK));
+        c.line("\t\tat := 8");
+        c.line("\t\ttail := []any{}");
+        let mut fields = rec.fields.iter();
+        if matches!(rec.fields[0].ty, FieldTy::U64) {
+            fields.next();
+            c.line("\t\tat += 8");
+        } else {
+            c.line("\t\tid = 0");
+        }
+        for f in fields {
+            match f.ty {
+                FieldTy::U32 if f.name == "reserved" => c.line("\t\tat += 4"),
+                FieldTy::U32 => {
+                    c.line("\t\ttail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))");
+                    c.line("\t\tat += 4");
+                }
+                FieldTy::U64 => {
+                    c.line("\t\ttail = append(tail, int64(binary.LittleEndian.Uint64(rec[at:])))");
+                    c.line("\t\tat += 8");
+                }
+                FieldTy::Value => {
+                    c.line("\t\t{");
+                    c.line("\t\t\tvar v any");
+                    c.line("\t\t\tv, at = parseValue(rec, at)");
+                    c.line("\t\t\ttail = append(tail, v)");
+                    c.line("\t\t}");
+                }
+                FieldTy::Values => {
+                    c.line("\t\t{");
+                    c.line("\t\t\tcount := int(binary.LittleEndian.Uint32(rec[at:]))");
+                    c.line("\t\t\tat += 8");
+                    c.line("\t\t\ttail = append(tail, int64(count))");
+                    c.line("\t\t\tfor i := 0; i < count; i++ {");
+                    c.line("\t\t\t\tvar v any");
+                    c.line("\t\t\t\tv, at = parseValue(rec, at)");
+                    c.line("\t\t\t\ttail = append(tail, v)");
+                    c.line("\t\t\t}");
+                    c.line("\t\t}");
+                }
+                FieldTy::VariantSchemas => panic!("kaya-bindgen: flat record {name} carries variant schemas"),
+            }
+        }
+        c.line("\t\t_ = at");
+        c.line("\t\treturn kind, id, nil, tail, true");
         c.line("\t}");
     }
     // The picker's answer is a LIST OF RECORDS, so it needs its own

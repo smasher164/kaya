@@ -161,6 +161,9 @@ _lib.kaya_locale.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
 _lib.kaya_locale.restype = ctypes.c_size_t
 _lib.kaya_direction.restype = ctypes.c_uint32
 _lib.kaya_text_scale.restype = ctypes.c_double
+_lib.kaya_can_play.argtypes = [ctypes.c_char_p, ctypes.c_size_t,
+                               ctypes.c_char_p, ctypes.c_size_t]
+_lib.kaya_can_play.restype = ctypes.c_uint8
 _lib.kaya_catalog.argtypes = [ctypes.c_char_p]
 _lib.kaya_catalog.restype = None
 
@@ -457,6 +460,11 @@ def direction() -> int:
 
 def text_scale() -> float:
     return _lib.kaya_text_scale()
+
+
+def can_play(mime: str, codecs: str) -> bool:
+    m, c = mime.encode("utf-8"), codecs.encode("utf-8")
+    return _lib.kaya_can_play(m, len(m), c, len(c)) != 0
 
 
 def catalog(app: str) -> None:

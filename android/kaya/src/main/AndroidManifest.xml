@@ -24,6 +24,20 @@
         <receiver
             android:name="dev.kaya.KayaNotificationReply"
             android:exported="false" />
+        <!-- THE MEDIA SESSION'S SERVICE (docs/media-plan.md §5): a
+             mediaPlayback foreground service posting the MediaStyle
+             notification, in the LIBRARY's manifest for the receivers'
+             reason. The app that declares a session declares its
+             permissions: FOREGROUND_SERVICE, FOREGROUND_SERVICE_MEDIA_PLAYBACK
+             and, from Android 13, POST_NOTIFICATIONS. -->
+        <service
+            android:name="dev.kaya.KayaMediaService"
+            android:exported="true"
+            android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+            </intent-filter>
+        </service>
         <provider
             android:name="dev.kaya.KayaClipProvider"
             android:authorities="${applicationId}.clip"

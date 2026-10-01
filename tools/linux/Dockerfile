@@ -267,6 +267,34 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && command -v grim
 
+# MEDIA (docs/media-plan.md §2, §7a): the GTK arm drives playbin3 into
+# gtk4paintablesink (`gstreamer1.0-gtk4`), and the suite plays whole on
+# Linux only with `-bad` (openh264, libde265, faad, av1dec, tsdemux) and
+# `-libav` (avdec_h264/h265 over the first two). The dev headers are what
+# the gstreamer crates' pkg-config builds need; `-tools` is the read-back
+# below and gst-inspect for a red leg. The version is READ because the
+# failure table's GStreamer rows were measured against 1.26.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+    gstreamer1.0-plugins-bad gstreamer1.0-libav gstreamer1.0-gtk4 \
+    gstreamer1.0-tools \
+    && rm -rf /var/lib/apt/lists/* \
+    && test "$(dpkg-query -W -f='${Version}' gstreamer1.0-plugins-bad | cut -d. -f1-2)" = "1.26" \
+    && gst-inspect-1.0 --exists gtk4paintablesink \
+    && gst-inspect-1.0 --exists playbin3 \
+    && gst-inspect-1.0 --exists av1dec \
+    && gst-inspect-1.0 --exists tsdemux \
+    && gst-inspect-1.0 --exists avdec_h264
+
+# THE WEDGED GUEST'S THREADS: the harness runs eu-stack on its own process
+# when the step ceiling fires (crates/kaya/src/harness.rs), since a leg that
+# never came back from its UI thread otherwise leaves a bundle naming no
+# thread at all (docs/traps.md, the wedged media_feed leg).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    elfutils \
+    && rm -rf /var/lib/apt/lists/* \
+    && command -v eu-stack
+
 COPY gtk-settings.ini /etc/gtk-4.0/settings.ini
 COPY 99-kaya-font.gschema.override \
     /usr/share/glib-2.0/schemas/99-kaya-font.gschema.override

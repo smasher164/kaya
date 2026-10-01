@@ -4,8 +4,12 @@ Status: DESIGNED 2026-09-29; the DEPTH slice BUILT 2026-09-30 on the mac
 (the player, the video view, the session, the capability query, the tracks
 and captions with kaya's caption renderer, a video view in a collection row
 with its visibility, the `resources` reason, and the media_formats,
-media_delivery, media_session, media_tracks and media_feed scenes; what
-breadth owes is docs/deferred.md's "BUILD — media" entry). It replaces the headless design of
+media_delivery, media_session, media_tracks and media_feed scenes), and the
+BREADTH BUILT 2026-09-30: GTK, WinUI and Compose arms, the iOS legs, the
+http(s) sidecar (§3) and the other eight bindings, the five scenes on all
+five lanes (docs/deferred.md's struck "BUILD — media" entry; what no lane
+settles is its "WATCH — media" entry). The surface in frames mode is next
+(§7). It replaces the headless design of
 docs/video-editor-plan.md §2 and §3, and it answers that plan's rulings 2
 and 3 and the roadmap's audio-playback question. The five pieces of shape
 in §0 are RULED by the maintainer, and so are §8's six (2026-09-29), the
@@ -51,7 +55,7 @@ platforms, and the native view brings services the frames route loses:
 |---|---|---|---|---|---|---|---|
 | macOS, iOS | bare `AVPlayerLayer` | yes: rounded clip, scroll, overlay, measured on macOS; iOS by the same Core Animation model, unmeasured | yes, drawn by the layer from MediaAccessibility | FairPlay | `AVPictureInPictureController(playerLayer:)`, measured possible | EDR, automatic | not in `cacheDisplay` or `CALayer.render`; yes in a window-server capture by window id, colour-managed (sRGB C83C1E read as P3 BE4E2F) |
 | GTK 4 | `GtkPicture` over a media stream or `gtk4paintablesink`'s paintable | yes, and it is the same object the headless design used | no system caption style exists; playbin draws subtitles | none on the desktop | none | no | yes, through GTK's own renderer (2B374D for 2C3B4F) |
-| WinUI 3 | `MediaPlayerElement`, transport controls off | a leaf visual in the XAML tree: scrolls, moves, rectangular clip, drawn over; nothing behind it, no see-through, no acrylic sampling; a rounded ancestor clip unsettled | yes, `CueStyler` reads the system caption settings | PlayReady | window-level only (CompactOverlay) | yes | unsettled: whether `PrintWindow(PW_RENDERFULLCONTENT)` includes the swap chain |
+| WinUI 3 | `MediaPlayerElement`, transport controls off | a leaf visual in the XAML tree: scrolls, moves, clipped by a rectangular or rounded ancestor (measured, §6), drawn over; nothing behind it, no see-through, no acrylic sampling | yes, `CueStyler` reads the system caption settings | PlayReady | window-level only (CompactOverlay) | yes | yes, `PrintWindow(PW_RENDERFULLCONTENT)` includes the swap chain (measured, §6) |
 | Android | media3 `PlayerSurface`, SurfaceView type | a hole punched by SurfaceFlinger that still follows scroll, move and a rectangular clip (from API 24), a rounded clip only over an opaque ground (measured), views on top | no: `SubtitleView` is View-only; kaya draws cues | Widevine L1 (SurfaceView only) | whole-activity | yes, overlay plane | no: kaya's window `PixelCopy` reads the hole (000000) |
 
 The frames route gives up captions in the user's style, DRM, PiP and
@@ -109,9 +113,10 @@ to it).
    `AVPlayer.preventsDisplaySleepDuringVideoPlayback` (default true on
    iOS, false on macOS, so kaya sets it on both), `keepScreenOn` on the
    Android view (neither `PlayerView` nor `PlayerSurface` sets it),
-   `GtkApplication.inhibit(IDLE)` as GNOME's Showtime does, and the
-   player's display type set to video on Windows ("preventing the screen
-   saver from activating during playback"). An audio-only player keeps
+   `GtkApplication.inhibit(IDLE)` as GNOME's Showtime does, and on Windows
+   a display request (`PowerSetRequest(PowerRequestDisplayRequired)`) held
+   by kaya, since the item's display type set to video was measured putting
+   none in the power manager's record (§6). An audio-only player keeps
    nothing awake. This is each platform's own behaviour for a video
    player, so no prop is needed.
 6. On iOS a playing player activates the `.playback` audio category,
@@ -137,15 +142,15 @@ and Android, and WinUI's peer names only the control type), and takes
 |---|---|---|---|
 | macOS, iOS | a representable backed by a bare `AVPlayerLayer`; never `AVPlayerView` (it keeps Space, arrows and J/K/L at every controls style), `AVPlayerViewController` (child view controller parenting, its own Now Playing session) or SwiftUI `VideoPlayer` (no way to hide its controls; dims a paused picture) | `videoGravity` | `isReadyForDisplay` |
 | GTK 4 | `GtkPicture` holding the sink's paintable; never `GtkVideo`, which has no property to turn its controls off | `content-fit` | the paintable's size leaving 0x0 |
-| WinUI 3 | `MediaPlayerElement` with `AreTransportControlsEnabled` false and the player set by `SetMediaPlayer` | `Stretch` | measured first |
+| WinUI 3 | `MediaPlayerElement` with `AreTransportControlsEnabled` false and the player set by `SetMediaPlayer` | `Stretch` | `NaturalVideoSizeChanged` (an HLS or DASH source states a placeholder size until its first frame, measured) |
 | Android | media3 `PlayerSurface` with `SURFACE_TYPE_SURFACE_VIEW` | the containing frame's resize mode | `onRenderedFirstFrame` |
 
 **What each platform cannot do, stated once.** On Apple and GTK the video
 view is an ordinary composited widget: see-through, rounded over anything,
 animated, drawn over. On WinUI it is "external content": kaya can draw
 over it, scroll, move and clip it to a rectangle, but nothing of kaya's
-can show behind or through it, acrylic over it samples transparent black,
-and whether a rounded ancestor clip applies is unsettled. On Android the
+can show behind or through it, and acrylic over it samples transparent
+black; a rounded ancestor clip applies (measured, §6). On Android the
 SurfaceView is a hole: no see-through before API 34 (kaya's minSdk is
 26), a rounded clip only over a solid colour, no interleaving between
 kaya layers (the video is behind the whole window or above all of it),
@@ -170,9 +175,20 @@ the caption looks.
 (the platform's own canonicalizer, `und` for a track that names none) in
 the platform's order, audio and captions apart, with which of each is
 selected; the app selects by position, and captions off. A sidecar file is
-a player prop (`captions`, a local source, with `captions_language`), listed
-as the last caption track and selected like any other; a stream carries its
-captions inside it. THE CAPTION RENDERER IS SPLIT at the core: the core
+a player prop (`captions`, an asset, a picked file or an http(s) URL, with
+`captions_language`), listed as the last caption track and selected like any
+other; a stream carries its captions inside it. AN HTTP(S) SIDECAR, RULED
+2026-09-30 (the maintainer): the backend fetches it with the platform's own
+networking, the stack its player uses for the video (URLSession on macOS and
+iOS, media3's DataSource on Android, GStreamer's souphttpsrc or libsoup on
+GTK, the platform's HTTP client on WinUI), never an HTTP client in the core;
+the core hands the backend the URL as the `captions` player prop, the backend
+hands the text back (`kaya_player_captions_text`) and it goes through the
+core's one WebVTT parser and caption renderer as a local sidecar does, listed
+once it has arrived. A fetch that fails (`kaya_player_captions_failed`) is a
+player failure with the `network` or `not_found` reason, mapped by the failure
+table, on all five; the media_tracks scene fetches the sidecar from the lane's
+local server and expects a 404 there to fail the player. THE CAPTION RENDERER IS SPLIT at the core: the core
 parses the WebVTT (crates/kaya/src/captions.rs), holds the cue timing and
 hands the backend every boundary time (`caption_times`); the backend
 watches its own clock for those times, asks the core what is current
@@ -274,7 +290,7 @@ system's controls.
 
 | platform | mapping |
 |---|---|
-| macOS, iOS | `MPNowPlayingInfoCenter` published by hand (nothing auto-publishes for a bare layer on macOS), re-set on seek, rate and item change; `MPRemoteCommandCenter` handlers, disabled when the app has none. macOS: `playbackState` set on every start and stop, or the media keys do not route. iOS: the `.playback` category and the `audio` background mode, declared by the packaging manifest when an app uses a session. |
+| macOS, iOS | `MPNowPlayingInfoCenter` published by hand (nothing auto-publishes for a bare layer on macOS), re-set on seek, rate and item change; `MPRemoteCommandCenter` handlers, disabled when the app has none. macOS: `playbackState` set on every start and stop, or the media keys do not route. iOS: the `.playback` category and the `audio` background mode, written into the bundle's Info.plist for an app that uses a session (tools/ios/run-sim.py `make_bundle`, the only iOS Info.plist writer); the interpreter refuses a session in a bundle without it. |
 | WinUI 3 | the attached player's own `MediaPlayer.SystemMediaTransportControls`; every unattached player has its command manager off, since Windows shows a tab per active `MediaPlayer`. A session with no player uses `ISystemMediaTransportControlsInterop::GetForWindow` on kaya's top-level window (`GetForCurrentView` throws in WinUI 3). |
 | GTK 4 | MPRIS2 on the session bus through the `mpris-server` crate: `org.mpris.MediaPlayer2.<app id>`, `DesktopEntry` from the declared identity (GNOME Shell names the card from it), `CanPlay` true while a player is attached, since the Shell shows only players with `CanPlay`. |
 | Android | media3 `MediaSession` over the attached player; `MediaSessionService` as a `mediaPlayback` foreground service for background play and the `MediaStyle` notification, with `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PLAYBACK` and, from Android 13, `POST_NOTIFICATIONS`. |
@@ -300,11 +316,40 @@ names the guest; and `preventsDisplaySleepDuringVideoPlayback` holds the
 display assertion exactly while playing.
 
 
-1. WinUI: whether a rounded ancestor clip applies to `MediaPlayerElement`,
-   whether `PrintWindow(PW_RENDERFULLCONTENT)` includes its picture, and
-   what name the Windows media flyout shows for an unpackaged process.
-2. iOS simulator: the bare `AVPlayerLayer`'s clip, scroll and overlay,
-   and whether `displayedPixelBuffer()` answers while paused.
+1. WinUI, MEASURED 2026-09-30 (the lane VM, Windows 11 25H2 arm64, the
+   interactive session, a temporary probe in the arm since deleted): a
+   rounded ancestor clip APPLIES to `MediaPlayerElement` (a host Grid with
+   CornerRadius 40 over a 160x90 view: its corner pixel reads the window's
+   ground F3F3F3 while the top and left edges' middles read C83C1E, and the
+   picture shows as a pill); `PrintWindow(PW_RENDERFULLCONTENT)` DOES include
+   its picture (C83C1E, the same bytes a screen BitBlt of its box reads), so
+   `expect_video_ink` reads the window's print like every other WinUI ink
+   read, and reads the ground F3F3F3 until the first frame; and the media
+   flyout names an unpackaged process "Unknown app" even with the declared
+   app id registered under HKCU AppUserModelId (the system's session manager
+   names the session by that id, `dev.kaya.aurora.notes`), under the title
+   and artist kaya published. The item's display type set to video put no
+   display request in `powercfg /requests`, so the arm holds
+   `PowerSetRequest(PowerRequestDisplayRequired)` itself (§2 rule 5).
+2. iOS simulator, MEASURED 2026-09-30 (iOS 26.5 simulator on an M5 Pro,
+   Xcode 26.6): a rounded ancestor clip, a scroll view's offset and clip,
+   and a view drawn over it all apply to the bare `AVPlayerLayer`'s
+   picture; `simctl io screenshot` holds that picture, tagged sRGB, and
+   reads the clip's C83C1E exactly, so the iOS `expect_video_ink` is the
+   host's screenshot of the device; `displayedPixelBuffer()` answers while
+   paused (160x90, `420v`) and is nil while playing. MediaRemote's command
+   sent from a process `simctl spawn` starts in the simulator reaches the
+   app's `MPRemoteCommandCenter`, while every Now Playing read answers an
+   unentitled process nothing, so `session_send` proves arrival by the
+   app's own handler. The simulator keeps no record of a display-sleep hold
+   (no idle-timer change, no power assertion: its video renders in-process,
+   and AVFoundation's hold is a device's remote video queue), so the iOS
+   `expect_display_awake` reads the shown player's
+   `preventsDisplaySleepDuringVideoPlayback` while it plays. AV1 in MP4
+   reaches ready there with its video track `isPlayable` and `isDecodable`
+   false, plays the audio and draws nothing; the decodability check fails
+   it `unsupported_codec` (with the check cut, the leg reads "ready 2.0s
+   0x0, played past 1s, ended").
 3. Android: the chosen clip decoding on the emulator pool (ruling 5,
    §8), and the `MediaStyle` notification on the pool.
 4. Linux: `mpris-server` on the lane's session bus, read back with
@@ -403,7 +448,7 @@ AVFoundation reports a missing file as -17913, which names nothing.
 | `not_found` | NSURLErrorDomain -1100, HTTP 404/410 | `SourceNotSupported` with 0xC00D001A (`NS_E_FILE_NOT_FOUND`), HTTP 404 | `RESOURCE_ERROR_NOT_FOUND` | 2005; 2004 with 404 or 410 |
 | `network` | other NSURLErrorDomain; -11850 | `SourceNotSupported` with 0xC00D0035 (`NS_E_SERVER_NOT_FOUND`), refused or unresolvable; `NetworkError` | a `STREAM_ERROR_FAILED` or resource error from the HTTP source element (refused, unresolvable and unroutable are stream errors) | 2001, 2002, other 2004 |
 | `decode_error` | -11821 | `MediaPlayerError.DecodingError` | `STREAM_ERROR_DECODE` | 4001, 4003, 3001, 3002 |
-| `resources` | -11839 ("The decoder required for this media is busy."), underlying -12913 (`kVTVideoDecoderNotAvailableNowErr`); measured at the 257th AV1 player on an M5 Pro, where H.264 and HEVC opened 1024 | measured at breadth | measured at breadth | measured at breadth |
+| `resources` | -11839 ("The decoder required for this media is busy."), underlying -12913 (`kVTVideoDecoderNotAvailableNowErr`); measured at the 257th AV1 player on an M5 Pro, where H.264 and HEVC opened 1024 | measured at breadth | not reached: the lane's decoders are software with no instance cap (256 AV1 players prerolled in 1.1 s; 256 H.264 or HEVC ran out of CPU and memory with no error), so no GStreamer row maps to it | measured at breadth |
 
 Measured 2026-09-30: WinUI's `MediaPlayerError` is `SourceNotSupported` for a
 refused port, an unresolvable host, a 404 and an unknown container alike, so
@@ -443,8 +488,8 @@ local items are APK assets (`asset:///`).
 honouring `Range` and serving the manifest and segment MIME types. Each
 lane runner starts it before its media legs and stops it after, showing the
 process gone. The mac and the iOS simulator reach it at 127.0.0.1 (the
-simulator shares the host's network; an app bundle needs
-`NSAllowsLocalNetworking`); the emulator at 10.0.2.2, the host's loopback,
+simulator shares the host's network; loopback needs no App Transport
+Security key, measured 2026-09-30 for AVPlayer and URLSession alike); the emulator at 10.0.2.2, the host's loopback,
 with cleartext allowed for that host alone in the test app's network
 security config; the Windows VM at the host's bridge address 192.168.64.1,
 the server bound there; the linux lane runs it inside the container on

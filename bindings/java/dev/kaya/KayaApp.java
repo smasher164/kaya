@@ -9,6 +9,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.function.BiConsumer;
@@ -367,6 +369,23 @@ public final class KayaApp {
     private final java.util.Map<Long, BiConsumer<Tx, AlertChoice>> alerts =
             new java.util.HashMap<>();
     private long nextAlert;
+    // Players get their own id space (docs/media-plan.md §2); the
+    // mirror each occurrence moves before any handler runs, and the
+    // handlers per player.
+    private long nextPlayer;
+    private final Map<Long, PlayerReading> playerReadings = new HashMap<>();
+    private final Map<Long, PlayerTracks> playerTracks = new HashMap<>();
+    private final Map<Long, String> playerCues = new HashMap<>();
+    private final Map<Long, BiConsumer<Tx, PlayerState>> playerStates = new HashMap<>();
+    private final Map<Long, Consumer<Tx>> playerEnded = new HashMap<>();
+    private final Map<Long, FailedHandler> playerFailed = new HashMap<>();
+    private final Map<Long, BiConsumer<Tx, Long>> playerSeeks = new HashMap<>();
+    private final Map<Long, BiConsumer<Tx, Long>> playerPositions = new HashMap<>();
+    private final Map<Long, BiConsumer<Tx, PlayerTracks>> playerTrackHandlers = new HashMap<>();
+    private final Map<Long, BiConsumer<Tx, String>> playerCueHandlers = new HashMap<>();
+    private final Map<Long, BiConsumer<Tx, Double>> widgetVisibility = new HashMap<>();
+    private final Map<Long, VisibilityHandler> nodeVisibility = new HashMap<>();
+    private BiConsumer<Tx, SessionAction> sessionHandler;
     private long nextFileDialog;
     // One-shot, keyed by request id — the alert's request/result
     // grammar.
@@ -1450,6 +1469,357 @@ public final class KayaApp {
         public String toString() {
             return String.format("%08X", hex());
         }
+    }
+
+    /** A player's state (docs/media-plan.md §2); {@code toString} is
+     * the wire's word. */
+    public enum PlayerState {
+        IDLE(KayaWire.PLAYER_STATE_IDLE, "idle"),
+        LOADING(KayaWire.PLAYER_STATE_LOADING, "loading"),
+        READY(KayaWire.PLAYER_STATE_READY, "ready"),
+        PLAYING(KayaWire.PLAYER_STATE_PLAYING, "playing"),
+        PAUSED(KayaWire.PLAYER_STATE_PAUSED, "paused"),
+        ENDED(KayaWire.PLAYER_STATE_ENDED, "ended"),
+        FAILED(KayaWire.PLAYER_STATE_FAILED, "failed");
+
+        final int wire;
+        final String word;
+
+        PlayerState(int wire, String word) {
+            this.wire = wire;
+            this.word = word;
+        }
+
+        @Override
+        public String toString() {
+            return word;
+        }
+
+        static PlayerState fromWire(long number) {
+            for (PlayerState s : values()) {
+                if (s.wire == number) {
+                    return s;
+                }
+            }
+            throw new IllegalStateException("kaya: player state " + number
+                    + " is not one this build of the Java binding knows");
+        }
+    }
+
+    /** Why a player cannot play: the closed reason vocabulary
+     * (docs/media-plan.md §7a). The platform's own sentence rides beside
+     * it as the failed handler's detail. */
+    public enum MediaFailure {
+        UNSUPPORTED_CODEC(KayaWire.MEDIA_FAILURE_UNSUPPORTED_CODEC, "unsupported_codec"),
+        UNSUPPORTED_CONTAINER(KayaWire.MEDIA_FAILURE_UNSUPPORTED_CONTAINER, "unsupported_container"),
+        NOT_FOUND(KayaWire.MEDIA_FAILURE_NOT_FOUND, "not_found"),
+        NETWORK(KayaWire.MEDIA_FAILURE_NETWORK, "network"),
+        DECODE_ERROR(KayaWire.MEDIA_FAILURE_DECODE_ERROR, "decode_error"),
+        RESOURCES(KayaWire.MEDIA_FAILURE_RESOURCES, "resources");
+
+        final int wire;
+        final String word;
+
+        MediaFailure(int wire, String word) {
+            this.wire = wire;
+            this.word = word;
+        }
+
+        @Override
+        public String toString() {
+            return word;
+        }
+
+        /** Empty for the wire's none. */
+        static Optional<MediaFailure> fromWire(long number) {
+            if (number == KayaWire.MEDIA_FAILURE_NONE) {
+                return Optional.empty();
+            }
+            for (MediaFailure f : values()) {
+                if (f.wire == number) {
+                    return Optional.of(f);
+                }
+            }
+            throw new IllegalStateException("kaya: media failure " + number
+                    + " is not one this build of the Java binding knows");
+        }
+    }
+
+    /** What the system's media controls can ask of the app's session
+     * (docs/media-plan.md §5). */
+    public enum SessionActionKind {
+        PLAY(KayaWire.SESSION_ACTION_PLAY, "play"),
+        PAUSE(KayaWire.SESSION_ACTION_PAUSE, "pause"),
+        STOP(KayaWire.SESSION_ACTION_STOP, "stop"),
+        SEEK_TO(KayaWire.SESSION_ACTION_SEEK_TO, "seek_to"),
+        SEEK_FORWARD(KayaWire.SESSION_ACTION_SEEK_FORWARD, "seek_forward"),
+        SEEK_BACKWARD(KayaWire.SESSION_ACTION_SEEK_BACKWARD, "seek_backward"),
+        NEXT(KayaWire.SESSION_ACTION_NEXT, "next"),
+        PREVIOUS(KayaWire.SESSION_ACTION_PREVIOUS, "previous");
+
+        final int wire;
+        final String word;
+
+        SessionActionKind(int wire, String word) {
+            this.wire = wire;
+            this.word = word;
+        }
+
+        @Override
+        public String toString() {
+            return word;
+        }
+
+        static SessionActionKind fromWire(long number) {
+            for (SessionActionKind k : values()) {
+                if (k.wire == number) {
+                    return k;
+                }
+            }
+            throw new IllegalStateException("kaya: session action " + number
+                    + " is not one this build of the Java binding knows");
+        }
+    }
+
+    /** One action from the system's media controls; {@code atMs} is
+     * where a SEEK_TO lands, 0 for the others. */
+    public record SessionAction(SessionActionKind kind, long atMs) {}
+
+    /** What the system shows for the session while no player is
+     * attached. */
+    public enum PlaybackState {
+        NONE(KayaWire.PLAYBACK_STATE_NONE, "none"),
+        PLAYING(KayaWire.PLAYBACK_STATE_PLAYING, "playing"),
+        PAUSED(KayaWire.PLAYBACK_STATE_PAUSED, "paused");
+
+        final int wire;
+        final String word;
+
+        PlaybackState(int wire, String word) {
+            this.wire = wire;
+            this.word = word;
+        }
+
+        @Override
+        public String toString() {
+            return word;
+        }
+    }
+
+    /** How a video view fits its picture (docs/media-plan.md §3). */
+    public enum Fit {
+        CONTAIN(KayaWire.FIT_CONTAIN, "contain"),
+        COVER(KayaWire.FIT_COVER, "cover"),
+        FILL(KayaWire.FIT_FILL, "fill");
+
+        final int wire;
+        final String word;
+
+        Fit(int wire, String word) {
+            this.wire = wire;
+            this.word = word;
+        }
+
+        @Override
+        public String toString() {
+            return word;
+        }
+    }
+
+    /** Where a player reads its media from: an asset under the app's
+     * asset root, an http(s) URL, or a file the user picked. A path,
+     * never bytes (docs/media-plan.md §2). */
+    public record MediaSource(String path) {
+        public static MediaSource asset(String name) {
+            return new MediaSource(name);
+        }
+
+        public static MediaSource url(String url) {
+            return new MediaSource(url);
+        }
+
+        public static MediaSource picked(PickedFile file) {
+            return new MediaSource(file.localPath());
+        }
+    }
+
+    /** A player's readings as the core last published them, current
+     * before any handler of the occurrence that moved them runs. */
+    public record PlayerReading(PlayerState state, Optional<MediaFailure> failure,
+            long positionMs, long durationMs, int width, int height) {
+        static final PlayerReading IDLE =
+                new PlayerReading(PlayerState.IDLE, Optional.empty(), 0, 0, 0, 0);
+    }
+
+    /** A player's tracks (docs/media-plan.md §3): BCP 47 tags in the
+     * platform's order, a sidecar caption track last, and which of each
+     * is selected, counting from 0. */
+    public record PlayerTracks(List<String> audio, List<String> captions,
+            OptionalInt audioSelected, OptionalInt captionSelected) {
+        static final PlayerTracks EMPTY =
+                new PlayerTracks(List.of(), List.of(), OptionalInt.empty(), OptionalInt.empty());
+    }
+
+    /**
+     * A media player (docs/media-plan.md §2): an object the app holds,
+     * with no place in the layout; a video view shows it, and shown by
+     * none it is audio. Its settings chain where it is created, under the
+     * Widget chain's discipline; later they are Tx verbs.
+     */
+    public static final class Player {
+        final long id;
+        final Tx tx;
+
+        Player(long id, Tx tx) {
+            this.id = id;
+            this.tx = tx;
+        }
+
+        public long id() {
+            return id;
+        }
+
+        private Tx building(String what) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException("kaya: " + what + " on a player outside the"
+                        + " transaction that created it — use the Tx verb inside a live transaction");
+            }
+            return tx;
+        }
+
+        public Player source(MediaSource source) {
+            building("source").playerSource(this, source);
+            return this;
+        }
+
+        public Player speed(double rate) {
+            building("speed").playerSpeed(this, rate);
+            return this;
+        }
+
+        public Player volume(double volume) {
+            building("volume").playerVolume(this, volume);
+            return this;
+        }
+
+        public Player muted(boolean on) {
+            building("muted").playerMuted(this, on);
+            return this;
+        }
+
+        public Player looping(boolean on) {
+            building("looping").playerLoop(this, on);
+            return this;
+        }
+
+        public Player captions(MediaSource source, String language) {
+            building("captions").playerCaptions(this, source, language);
+            return this;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            return o instanceof Player other && other.id == id;
+        }
+
+        @Override
+        public int hashCode() {
+            return Long.hashCode(id);
+        }
+
+        @Override
+        public String toString() {
+            return "Player(" + id + ")";
+        }
+    }
+
+    /** The app's one media session (docs/media-plan.md §5), declared by
+     * {@link #declare}, replacing the last declaration. */
+    public static final class Session {
+        private final Tx tx;
+        private Player player;
+        private String title = "";
+        private String artist = "";
+        private String album = "";
+        private String artwork = "";
+        private int actions;
+        private PlaybackState playbackState = PlaybackState.NONE;
+
+        Session(Tx tx) {
+            this.tx = tx;
+        }
+
+        /** The player the system's controls speak to; without one, the
+         * app's own handlers are all there is. */
+        public Session player(Player player) {
+            this.player = player;
+            return this;
+        }
+
+        public Session title(String title) {
+            this.title = title;
+            return this;
+        }
+
+        public Session artist(String artist) {
+            this.artist = artist;
+            return this;
+        }
+
+        public Session album(String album) {
+            this.album = album;
+            return this;
+        }
+
+        /** An asset name. */
+        public Session artwork(String asset) {
+            this.artwork = asset;
+            return this;
+        }
+
+        /** The actions the app answers itself through
+         * {@link KayaApp#onSession}; play, pause and seek_to it leaves
+         * out apply to the attached player. */
+        public Session handles(SessionActionKind... kinds) {
+            for (SessionActionKind k : kinds) {
+                actions |= 1 << k.wire;
+            }
+            return this;
+        }
+
+        /** What the system shows while no player is attached. */
+        public Session playbackState(PlaybackState state) {
+            this.playbackState = state;
+            return this;
+        }
+
+        public void declare() {
+            tx.emit(KayaWire.txSetSession(player == null ? 0 : player.id, actions,
+                    playbackState.wire, title, artist, album, artwork));
+        }
+    }
+
+    /** The player cannot play: the closed reason, and the platform's
+     * sentence, which no two platforms word alike. */
+    @FunctionalInterface
+    public interface FailedHandler {
+        void accept(Tx tx, MediaFailure reason, String detail);
+    }
+
+    /** A stamped video view's visibility: the copy's keys, then how much
+     * of it shows, 0 to 1. */
+    @FunctionalInterface
+    public interface VisibilityHandler {
+        void accept(Tx tx, List<Object> keys, double shown);
+    }
+
+    /** Whether this platform plays {@code mime} with {@code codecs} (an
+     * RFC 6381 list, "" for none): true exactly when loading such media
+     * would not fail as unsupported_codec or unsupported_container
+     * (docs/media-plan.md §8 ruling 1). Any thread, no transaction. */
+    public static boolean canPlay(String mime, String codecs) {
+        return KayaRing.canPlay(mime.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                codecs.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
     /** Which way the layout runs, decided by the locale's script. */
@@ -3744,6 +4114,17 @@ public final class KayaApp {
             return this;
         }
 
+        /** How a video view fits its picture (docs/media-plan.md §3). */
+        public Widget fit(Fit fit) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: fit on a widget outside its build transaction"
+                    + " — a video view's fit is declared where the view is built");
+            }
+            tx.emit(KayaWire.txSetFit(id, fit.wire));
+            return this;
+        }
+
         /** Let a colour picker's user choose translucency (off by
          * default: docs/color-picker-plan.md §3 rule 3). */
         public Widget alpha(boolean on) {
@@ -4431,6 +4812,14 @@ public final class KayaApp {
 
         public Node colorPicker(KayaRecords.Field<Color> f) {
             return t.colorPicker(f);
+        }
+
+        public Node video(Player player) {
+            return t.video(player);
+        }
+
+        public Node video(KayaRecords.Field<Player> f) {
+            return t.video(f);
         }
 
         public Node range(double min, double max, double low, double high) {
@@ -6024,6 +6413,119 @@ public final class KayaApp {
                 KayaApp.this.onColor(w, onColor);
             }
             return w;
+        }
+
+        /** A media player (docs/media-plan.md §2): an object with no
+         * place in the layout; show it with {@link #video}. Shown by
+         * none it is audio. */
+        public Player player() {
+            Player p = new Player(++nextPlayer, this);
+            emit(KayaWire.txCreatePlayer(p.id));
+            return p;
+        }
+
+        private void playerProp(Player p, int prop, Object value) {
+            emit(KayaWire.txSetPlayerProp(p.id, prop, value));
+        }
+
+        /** Load {@code source}, replacing what the player held; it reads
+         * loading until the platform answers. */
+        public void playerSource(Player p, MediaSource source) {
+            playerProp(p, KayaWire.PPROP_SOURCE, source.path());
+        }
+
+        /** Unload, back to idle. */
+        public void clearPlayer(Player p) {
+            playerProp(p, KayaWire.PPROP_SOURCE, "");
+        }
+
+        public void playerSpeed(Player p, double rate) {
+            playerProp(p, KayaWire.PPROP_SPEED, rate);
+        }
+
+        /** 0..1, relative to the system volume. */
+        public void playerVolume(Player p, double volume) {
+            playerProp(p, KayaWire.PPROP_VOLUME, volume);
+        }
+
+        public void playerMuted(Player p, boolean on) {
+            playerProp(p, KayaWire.PPROP_MUTED, on);
+        }
+
+        public void playerLoop(Player p, boolean on) {
+            playerProp(p, KayaWire.PPROP_LOOP, on);
+        }
+
+        /** Play; from the start when the player had ended. */
+        public void play(Player p) {
+            emit(KayaWire.txPlayerCommand(p.id, KayaWire.PLAYER_COMMAND_PLAY, 0));
+        }
+
+        public void pause(Player p) {
+            emit(KayaWire.txPlayerCommand(p.id, KayaWire.PLAYER_COMMAND_PAUSE, 0));
+        }
+
+        /** To {@code ms} from the start; onSeekCompleted hears where it
+         * landed. */
+        public void seek(Player p, long ms) {
+            emit(KayaWire.txPlayerCommand(p.id, KayaWire.PLAYER_COMMAND_SEEK, ms));
+        }
+
+        public void releasePlayer(Player p) {
+            emit(KayaWire.txReleasePlayer(p.id));
+        }
+
+        /** A sidecar WebVTT file for the player (an asset, an http(s) URL
+         * or a picked file), {@code language} its BCP 47 tag: kaya parses
+         * it and draws its cues, listed as the last caption track
+         * (docs/media-plan.md §3). */
+        public void playerCaptions(Player p, MediaSource source, String language) {
+            playerProp(p, KayaWire.PPROP_CAPTIONS_LANGUAGE, language);
+            playerProp(p, KayaWire.PPROP_CAPTIONS, source.path());
+        }
+
+        /** No sidecar captions. */
+        public void clearCaptions(Player p) {
+            playerProp(p, KayaWire.PPROP_CAPTIONS, "");
+        }
+
+        /** Select audio track {@code index} (0-based in
+         * {@link KayaApp#tracks}). */
+        public void selectAudio(Player p, int index) {
+            emit(KayaWire.txSelectTrack(p.id, KayaWire.TRACK_KIND_AUDIO, index + 1));
+        }
+
+        /** Select caption track {@code index} (0-based in
+         * {@link KayaApp#tracks}); a sidecar file's track is selected the
+         * same way. */
+        public void selectCaptions(Player p, int index) {
+            emit(KayaWire.txSelectTrack(p.id, KayaWire.TRACK_KIND_CAPTION, index + 1));
+        }
+
+        /** No caption track. */
+        public void captionsOff(Player p) {
+            emit(KayaWire.txSelectTrack(p.id, KayaWire.TRACK_KIND_CAPTION, 0));
+        }
+
+        /** A video view showing {@code player} (docs/media-plan.md §3):
+         * the platform's own view with its controls off. A player is
+         * shown by one video view at a time (§7b). */
+        public Widget video(Player player) {
+            Widget w = widget(KayaWire.KIND_VIDEO);
+            emit(KayaWire.txSetPlayer(w.id, player.id));
+            return w;
+        }
+
+        /** Show another player in a live video view, or none (null). */
+        public void showPlayer(Widget video, Player player) {
+            emit(KayaWire.txSetPlayer(video.id, player == null ? 0 : player.id));
+        }
+
+        /** Declare the app's one media session, replacing the last
+         * (docs/media-plan.md §5); {@code .declare()} sends it. */
+        public Session session() {
+            alive();
+            return new Session(this);
         }
 
         /** A range over min..max with its thumbs at low and high
@@ -7868,6 +8370,23 @@ public final class KayaApp {
             return n;
         }
 
+        /** A video view per stamped copy, showing one player
+         * (docs/media-plan.md §7b); a row's own player field is the usual
+         * source. */
+        public Node video(Player player) {
+            Node n = widget(KayaWire.KIND_VIDEO);
+            tx.emit(KayaWire.txSetPlayer(n.id, player == null ? 0 : player.id));
+            return n;
+        }
+
+        /** Each copy shows its row's player field; a row whose player is
+         * released, or null, shows nothing. */
+        public Node video(KayaRecords.Field<Player> f) {
+            Node n = widget(KayaWire.KIND_VIDEO);
+            tx.emit(KayaWire.txBindPlayerElement(n.id, 0, f.index()));
+            return n;
+        }
+
         /** A stamped range, the slider's three sources for each thumb, a
          * row's own fields being the point (a clip's trim in and out;
          * docs/range-plan.md §2). Register its handlers with
@@ -9058,6 +9577,198 @@ public final class KayaApp {
         nodeColors.put(n.id, handler);
     }
 
+    /** A player's readings: its state, where it is, how long it is and
+     * its picture's size, as of the last occurrence this loop took. */
+    public PlayerReading player(Player p) {
+        return playerReadings.getOrDefault(p.id, PlayerReading.IDLE);
+    }
+
+    /** A player's tracks (docs/media-plan.md §3). */
+    public PlayerTracks tracks(Player p) {
+        return playerTracks.getOrDefault(p.id, PlayerTracks.EMPTY);
+    }
+
+    /** The caption cue current on the player's clock, "" for none. */
+    public String cue(Player p) {
+        return playerCues.getOrDefault(p.id, "");
+    }
+
+    /** Every state the player moves to, ended and failed included. */
+    public void onPlayerState(Player p, BiConsumer<Tx, PlayerState> handler) {
+        playerStates.put(p.id, handler);
+    }
+
+    /** The player reached its end (never, while it loops). */
+    public void onEnded(Player p, Consumer<Tx> handler) {
+        playerEnded.put(p.id, handler);
+    }
+
+    /** The player cannot play (docs/media-plan.md §7a). */
+    public void onFailed(Player p, FailedHandler handler) {
+        playerFailed.put(p.id, handler);
+    }
+
+    /** Where a seek the app asked for landed, in ms. */
+    public void onSeekCompleted(Player p, BiConsumer<Tx, Long> handler) {
+        playerSeeks.put(p.id, handler);
+    }
+
+    /** The playhead, every KAYA_MEDIA_POSITION_TICK_MS while playing. */
+    public void onPosition(Player p, BiConsumer<Tx, Long> handler) {
+        playerPositions.put(p.id, handler);
+    }
+
+    /** The player's track listing or a selection moved. */
+    public void onTracks(Player p, BiConsumer<Tx, PlayerTracks> handler) {
+        playerTrackHandlers.put(p.id, handler);
+    }
+
+    /** The current caption cue changed ("" between cues), whoever draws
+     * it. */
+    public void onCue(Player p, BiConsumer<Tx, String> handler) {
+        playerCueHandlers.put(p.id, handler);
+    }
+
+    /** How much of a live video view shows, 0 to 1, as it enters,
+     * leaves, moves by a tenth and shows whole (docs/media-plan.md §7b). */
+    public void onVisibility(Widget video, BiConsumer<Tx, Double> handler) {
+        widgetVisibility.put(video.id, handler);
+    }
+
+    /** A stamped video view's visibility, the copy's keys first. */
+    public void onVisibility(Node video, VisibilityHandler handler) {
+        nodeVisibility.put(video.id, handler);
+    }
+
+    /** The actions the declared session handles, from the system's media
+     * controls (docs/media-plan.md §5). */
+    public void onSession(BiConsumer<Tx, SessionAction> handler) {
+        sessionHandler = handler;
+    }
+
+    private static boolean mediaOccurrence(short kind) {
+        return kind == KayaWire.OCC_KIND_PLAYER_CHANGED
+                || kind == KayaWire.OCC_KIND_PLAYER_POSITION
+                || kind == KayaWire.OCC_KIND_SEEK_COMPLETED
+                || kind == KayaWire.OCC_KIND_PLAYER_TRACKS
+                || kind == KayaWire.OCC_KIND_CAPTION_CUE
+                || kind == KayaWire.OCC_KIND_VIDEO_VISIBILITY
+                || kind == KayaWire.OCC_KIND_SESSION_ACTION;
+    }
+
+    private static long flatLong(List<?> tail, int at) {
+        return (Long) tail.get(at);
+    }
+
+    /** A player_tracks tail's counted list at {@code at[0]}, advancing it. */
+    private static List<String> flatTags(List<?> tail, int[] at) {
+        int n = (int) flatLong(tail, at[0]);
+        List<String> tags = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            tags.add((String) tail.get(at[0] + 1 + i));
+        }
+        at[0] += 1 + n;
+        return List.copyOf(tags);
+    }
+
+    private static OptionalInt selection(long wire) {
+        return wire == 0 ? OptionalInt.empty() : OptionalInt.of((int) wire - 1);
+    }
+
+    /** One media occurrence: the mirror moves first, then the handlers,
+     * each in its own transaction. The flat records' tails are
+     * tools/kaya-bindgen's flat class (player_changed, player_tracks,
+     * session_action); position and seek_completed are the surface-pair
+     * class, the position keying and the player riding. */
+    void mediaOccurrence(KayaWire.Occ occ) {
+        switch (occ.kind) {
+            case KayaWire.OCC_KIND_PLAYER_CHANGED -> {
+                long player = occ.id;
+                List<?> tail = (List<?>) occ.payload;
+                PlayerState state = PlayerState.fromWire(flatLong(tail, 0));
+                Optional<MediaFailure> failure = MediaFailure.fromWire(flatLong(tail, 1));
+                String detail = tail.get(5) instanceof String s ? s : "";
+                PlayerReading was = playerReadings.getOrDefault(player, PlayerReading.IDLE);
+                long position = state == PlayerState.LOADING || state == PlayerState.IDLE
+                        ? 0 : was.positionMs();
+                playerReadings.put(player, new PlayerReading(state, failure, position,
+                        flatLong(tail, 2), (int) flatLong(tail, 3), (int) flatLong(tail, 4)));
+                BiConsumer<Tx, PlayerState> onState = playerStates.get(player);
+                if (onState != null) {
+                    dispatch(tx -> onState.accept(tx, state));
+                }
+                Consumer<Tx> onEnd = playerEnded.get(player);
+                if (state == PlayerState.ENDED && onEnd != null) {
+                    dispatch(onEnd);
+                }
+                FailedHandler onFail = playerFailed.get(player);
+                if (state == PlayerState.FAILED && failure.isPresent() && onFail != null) {
+                    dispatch(tx -> onFail.accept(tx, failure.get(), detail));
+                }
+            }
+            case KayaWire.OCC_KIND_PLAYER_POSITION, KayaWire.OCC_KIND_SEEK_COMPLETED -> {
+                long player = (Long) occ.payload;
+                long position = occ.id;
+                PlayerReading was = playerReadings.getOrDefault(player, PlayerReading.IDLE);
+                playerReadings.put(player, new PlayerReading(was.state(), was.failure(), position,
+                        was.durationMs(), was.width(), was.height()));
+                BiConsumer<Tx, Long> handler = (occ.kind == KayaWire.OCC_KIND_PLAYER_POSITION
+                        ? playerPositions : playerSeeks).get(player);
+                if (handler != null) {
+                    dispatch(tx -> handler.accept(tx, position));
+                }
+            }
+            case KayaWire.OCC_KIND_PLAYER_TRACKS -> {
+                long player = occ.id;
+                List<?> tail = (List<?>) occ.payload;
+                int[] at = {2};
+                List<String> audio = flatTags(tail, at);
+                List<String> captions = flatTags(tail, at);
+                PlayerTracks tracks = new PlayerTracks(audio, captions,
+                        selection(flatLong(tail, 0)), selection(flatLong(tail, 1)));
+                playerTracks.put(player, tracks);
+                BiConsumer<Tx, PlayerTracks> handler = playerTrackHandlers.get(player);
+                if (handler != null) {
+                    dispatch(tx -> handler.accept(tx, tracks));
+                }
+            }
+            case KayaWire.OCC_KIND_CAPTION_CUE -> {
+                long player = occ.id;
+                String text = occ.payload instanceof String s ? s : "";
+                playerCues.put(player, text);
+                BiConsumer<Tx, String> handler = playerCueHandlers.get(player);
+                if (handler != null) {
+                    dispatch(tx -> handler.accept(tx, text));
+                }
+            }
+            case KayaWire.OCC_KIND_VIDEO_VISIBILITY -> {
+                double shown = (Double) occ.payload;
+                if (occ.keys.isEmpty()) {
+                    BiConsumer<Tx, Double> handler = widgetVisibility.get(occ.id);
+                    if (handler != null) {
+                        dispatch(tx -> handler.accept(tx, shown));
+                    }
+                } else {
+                    VisibilityHandler handler = nodeVisibility.get(occ.id);
+                    if (handler != null) {
+                        dispatch(tx -> handler.accept(tx, occ.keys, shown));
+                    }
+                }
+            }
+            case KayaWire.OCC_KIND_SESSION_ACTION -> {
+                List<?> tail = (List<?>) occ.payload;
+                SessionAction action = new SessionAction(
+                        SessionActionKind.fromWire(flatLong(tail, 0)), flatLong(tail, 1));
+                BiConsumer<Tx, SessionAction> handler = sessionHandler;
+                if (handler != null) {
+                    dispatch(tx -> handler.accept(tx, action));
+                }
+            }
+            default -> throw new IllegalStateException("kaya: occurrence " + occ.kind
+                    + " is not a media occurrence");
+        }
+    }
+
     /** Register a live range's move handler: every movement of either
      * thumb, both values (docs/range-plan.md §2). */
     public void onRangeChanged(Widget w, RangeChange handler) {
@@ -9371,7 +10082,9 @@ public final class KayaApp {
             if (occ == null) {
                 continue;
             }
-            if (occ.kind == KayaWire.OCC_KIND_SORT_REQUESTED && occ.keys.isEmpty()) {
+            if (mediaOccurrence(occ.kind)) {
+                mediaOccurrence(occ);
+            } else             if (occ.kind == KayaWire.OCC_KIND_SORT_REQUESTED && occ.keys.isEmpty()) {
                 BiConsumer<Tx, Integer> handler = sortHandlers.get(occ.id);
                 if (handler != null) {
                     int column = occ.payload instanceof Integer i ? i : 0;

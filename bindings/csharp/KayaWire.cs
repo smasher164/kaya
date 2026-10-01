@@ -3207,6 +3207,100 @@ static class KayaWire
             }
             return true;
         }
+        if (kind == OccKindPlayerChanged)
+        {
+            // A flat record: its fields in order, into the tail.
+            int flatAt = 8;
+            var tail = new List<object>();
+            flatAt += 8;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            tail.Add(BitConverter.ToInt64(rec, flatAt));
+            flatAt += 8;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            {
+                uint vtype = BitConverter.ToUInt32(rec, flatAt);
+                int vlen = (int)BitConverter.ToUInt32(rec, flatAt + 4);
+                switch (vtype)
+                {
+                    case ValueBool: tail.Add(rec[flatAt + 8] != 0); break;
+                    case ValueI64: tail.Add(BitConverter.ToInt64(rec, flatAt + 8)); break;
+                    case ValueF64: tail.Add(BitConverter.ToDouble(rec, flatAt + 8)); break;
+                    default: tail.Add(Encoding.UTF8.GetString(rec, flatAt + 8, vlen)); break;
+                }
+                flatAt += 8 + ((vlen + 7) & ~7);
+            }
+            payload = tail;
+            return true;
+        }
+        if (kind == OccKindSessionAction)
+        {
+            // A flat record: its fields in order, into the tail.
+            int flatAt = 8;
+            var tail = new List<object>();
+            id = 0;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            flatAt += 4;
+            tail.Add(BitConverter.ToInt64(rec, flatAt));
+            flatAt += 8;
+            payload = tail;
+            return true;
+        }
+        if (kind == OccKindPlayerTracks)
+        {
+            // A flat record: its fields in order, into the tail.
+            int flatAt = 8;
+            var tail = new List<object>();
+            flatAt += 8;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            {
+                int count = (int)BitConverter.ToUInt32(rec, flatAt);
+                flatAt += 8;
+                tail.Add((long)count);
+                for (int i = 0; i < count; i++)
+                {
+                    uint vtype = BitConverter.ToUInt32(rec, flatAt);
+                    int vlen = (int)BitConverter.ToUInt32(rec, flatAt + 4);
+                    switch (vtype)
+                    {
+                        case ValueBool: tail.Add(rec[flatAt + 8] != 0); break;
+                        case ValueI64: tail.Add(BitConverter.ToInt64(rec, flatAt + 8)); break;
+                        case ValueF64: tail.Add(BitConverter.ToDouble(rec, flatAt + 8)); break;
+                        default: tail.Add(Encoding.UTF8.GetString(rec, flatAt + 8, vlen)); break;
+                    }
+                    flatAt += 8 + ((vlen + 7) & ~7);
+                }
+            }
+            {
+                int count = (int)BitConverter.ToUInt32(rec, flatAt);
+                flatAt += 8;
+                tail.Add((long)count);
+                for (int i = 0; i < count; i++)
+                {
+                    uint vtype = BitConverter.ToUInt32(rec, flatAt);
+                    int vlen = (int)BitConverter.ToUInt32(rec, flatAt + 4);
+                    switch (vtype)
+                    {
+                        case ValueBool: tail.Add(rec[flatAt + 8] != 0); break;
+                        case ValueI64: tail.Add(BitConverter.ToInt64(rec, flatAt + 8)); break;
+                        case ValueF64: tail.Add(BitConverter.ToDouble(rec, flatAt + 8)); break;
+                        default: tail.Add(Encoding.UTF8.GetString(rec, flatAt + 8, vlen)); break;
+                    }
+                    flatAt += 8 + ((vlen + 7) & ~7);
+                }
+            }
+            payload = tail;
+            return true;
+        }
         if (kind == OccKindFileDialogResult)
         {
             // id, a count, then three Values per file

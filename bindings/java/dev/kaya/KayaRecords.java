@@ -65,6 +65,8 @@ public final class KayaRecords {
             // (docs/datetime-plan.md D10).
             if (t == LocalDate.class || t == LocalTime.class) return KayaWire.VALUE_I64;
             if (t == KayaApp.Color.class) return KayaWire.VALUE_I64;
+            // A row's player: its id, 0 for none (docs/media-plan.md §7b).
+            if (t == KayaApp.Player.class) return KayaWire.VALUE_I64;
             return null;
         }
 
@@ -166,8 +168,12 @@ public final class KayaRecords {
          * carrying a blob field re-registers.
          */
         Object encodeField(int wireIndex, Object value) {
+            if (value == null
+                    && accessors[wireToComponent[wireIndex]].getReturnType() == KayaApp.Player.class) {
+                return 0L;
+            }
             if (value instanceof LocalDate || value instanceof LocalTime
-                    || value instanceof KayaApp.Color) {
+                    || value instanceof KayaApp.Color || value instanceof KayaApp.Player) {
                 return scalarWire(value);
             }
             if (schema[wireIndex] == KayaWire.VALUE_BLOB) {
@@ -214,6 +220,8 @@ public final class KayaRecords {
                     args[at] = timeOf(fields.get(wire));
                 } else if (want == KayaApp.Color.class) {
                     args[at] = colorOf(fields.get(wire));
+                } else if (want == KayaApp.Player.class) {
+                    args[at] = playerOf(fields.get(wire));
                 } else if (want == KayaApp.Document.class) {
                     // A restored Document field is the blob's BYTES,
                     // redeemed by KayaWire.parseValue
@@ -696,6 +704,7 @@ public final class KayaRecords {
     private static final LocalTime SENTINEL_TIME = LocalTime.of(23, 45);
     private static final KayaApp.Color DEFAULT_COLOR = KayaApp.Color.fromHex(0x000000FF);
     private static final KayaApp.Color SENTINEL_COLOR = KayaApp.Color.fromHex(0x5EED5EED);
+    private static final KayaApp.Player SENTINEL_PLAYER = new KayaApp.Player(0x5eedL, null);
 
     /** A scalar's wire value: a civil date or time packs, everything
      * else travels as itself (docs/datetime-plan.md D2). */
@@ -709,6 +718,9 @@ public final class KayaRecords {
         if (v instanceof KayaApp.Color c) {
             return KayaWire.packColor(c.r(), c.g(), c.b(), c.a());
         }
+        if (v instanceof KayaApp.Player p) {
+            return p.id;
+        }
         return v;
     }
 
@@ -720,6 +732,13 @@ public final class KayaRecords {
     static KayaApp.Color colorOf(Object packed) {
         KayaWire.ColorChannels c = KayaWire.unpackColor(packed instanceof Long l ? l : 0L);
         return new KayaApp.Color(c.r(), c.g(), c.b(), c.a());
+    }
+
+    /** A row's player field off the wire: null for 0, the row showing
+     * none. */
+    static KayaApp.Player playerOf(Object id) {
+        long n = id instanceof Long l ? l : 0L;
+        return n == 0 ? null : new KayaApp.Player(n, null);
     }
 
     static LocalTime timeOf(Object packed) {
@@ -749,6 +768,7 @@ public final class KayaRecords {
         if (t == LocalDate.class) return SENTINEL_DATE;
         if (t == LocalTime.class) return SENTINEL_TIME;
         if (t == KayaApp.Color.class) return SENTINEL_COLOR;
+        if (t == KayaApp.Player.class) return SENTINEL_PLAYER;
         throw new IllegalStateException("kaya: no sentinel for " + t.getName());
     }
 

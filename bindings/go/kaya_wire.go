@@ -266,37 +266,37 @@ const (
 	OccurrenceTextChanged = 2
 	OccurrenceToggled = 3
 	OccurrenceValueChanged = 4
-	PlayerStateIdle = 0
-	PlayerStateLoading = 1
-	PlayerStateReady = 2
-	PlayerStatePlaying = 3
-	PlayerStatePaused = 4
-	PlayerStateEnded = 5
-	PlayerStateFailed = 6
-	MediaFailureNone = 0
-	MediaFailureUnsupportedCodec = 1
-	MediaFailureUnsupportedContainer = 2
-	MediaFailureNotFound = 3
-	MediaFailureNetwork = 4
-	MediaFailureDecodeError = 5
-	MediaFailureResources = 6
+	PlayerStateIdle PlayerState = 0
+	PlayerStateLoading PlayerState = 1
+	PlayerStateReady PlayerState = 2
+	PlayerStatePlaying PlayerState = 3
+	PlayerStatePaused PlayerState = 4
+	PlayerStateEnded PlayerState = 5
+	PlayerStateFailed PlayerState = 6
+	MediaFailureNone MediaFailure = 0
+	MediaFailureUnsupportedCodec MediaFailure = 1
+	MediaFailureUnsupportedContainer MediaFailure = 2
+	MediaFailureNotFound MediaFailure = 3
+	MediaFailureNetwork MediaFailure = 4
+	MediaFailureDecodeError MediaFailure = 5
+	MediaFailureResources MediaFailure = 6
 	PlayerCommandPlay = 1
 	PlayerCommandPause = 2
 	PlayerCommandSeek = 3
-	SessionActionPlay = 1
-	SessionActionPause = 2
-	SessionActionStop = 3
-	SessionActionSeekTo = 4
-	SessionActionSeekForward = 5
-	SessionActionSeekBackward = 6
-	SessionActionNext = 7
-	SessionActionPrevious = 8
-	PlaybackStateNone = 0
-	PlaybackStatePlaying = 1
-	PlaybackStatePaused = 2
-	FitContain = 0
-	FitCover = 1
-	FitFill = 2
+	SessionActionPlay SessionActionKind = 1
+	SessionActionPause SessionActionKind = 2
+	SessionActionStop SessionActionKind = 3
+	SessionActionSeekTo SessionActionKind = 4
+	SessionActionSeekForward SessionActionKind = 5
+	SessionActionSeekBackward SessionActionKind = 6
+	SessionActionNext SessionActionKind = 7
+	SessionActionPrevious SessionActionKind = 8
+	PlaybackStateNone PlaybackState = 0
+	PlaybackStatePlaying PlaybackState = 1
+	PlaybackStatePaused PlaybackState = 2
+	FitContain Fit = 0
+	FitCover Fit = 1
+	FitFill Fit = 2
 	TrackKindAudio = 0
 	TrackKindCaption = 1
 	PpropSource = 1
@@ -674,6 +674,92 @@ func (s Symbol) String() string {
 		return "mic"
 	}
 	return "Symbol(" + strconv.FormatInt(int64(s), 10) + ")"
+}
+
+func (p PlayerState) String() string {
+	switch p {
+	case PlayerStateIdle:
+		return "idle"
+	case PlayerStateLoading:
+		return "loading"
+	case PlayerStateReady:
+		return "ready"
+	case PlayerStatePlaying:
+		return "playing"
+	case PlayerStatePaused:
+		return "paused"
+	case PlayerStateEnded:
+		return "ended"
+	case PlayerStateFailed:
+		return "failed"
+	}
+	return "PlayerState(" + strconv.FormatInt(int64(p), 10) + ")"
+}
+
+func (m MediaFailure) String() string {
+	switch m {
+	case MediaFailureNone:
+		return "none"
+	case MediaFailureUnsupportedCodec:
+		return "unsupported_codec"
+	case MediaFailureUnsupportedContainer:
+		return "unsupported_container"
+	case MediaFailureNotFound:
+		return "not_found"
+	case MediaFailureNetwork:
+		return "network"
+	case MediaFailureDecodeError:
+		return "decode_error"
+	case MediaFailureResources:
+		return "resources"
+	}
+	return "MediaFailure(" + strconv.FormatInt(int64(m), 10) + ")"
+}
+
+func (s SessionActionKind) String() string {
+	switch s {
+	case SessionActionPlay:
+		return "play"
+	case SessionActionPause:
+		return "pause"
+	case SessionActionStop:
+		return "stop"
+	case SessionActionSeekTo:
+		return "seek_to"
+	case SessionActionSeekForward:
+		return "seek_forward"
+	case SessionActionSeekBackward:
+		return "seek_backward"
+	case SessionActionNext:
+		return "next"
+	case SessionActionPrevious:
+		return "previous"
+	}
+	return "SessionActionKind(" + strconv.FormatInt(int64(s), 10) + ")"
+}
+
+func (p PlaybackState) String() string {
+	switch p {
+	case PlaybackStateNone:
+		return "none"
+	case PlaybackStatePlaying:
+		return "playing"
+	case PlaybackStatePaused:
+		return "paused"
+	}
+	return "PlaybackState(" + strconv.FormatInt(int64(p), 10) + ")"
+}
+
+func (f Fit) String() string {
+	switch f {
+	case FitContain:
+		return "contain"
+	case FitCover:
+		return "cover"
+	case FitFill:
+		return "fill"
+	}
+	return "Fit(" + strconv.FormatInt(int64(f), 10) + ")"
 }
 
 func pad8(b []byte) []byte {
@@ -3786,6 +3872,74 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 		// An answer carrying one value: id + the Value.
 		value, _ := parseValue(rec, 16)
 		return kind, id, nil, value, true
+	}
+	if kind == occPlayerChanged {
+		// A flat record: its fields in order, into the tail.
+		at := 8
+		tail := []any{}
+		at += 8
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		tail = append(tail, int64(binary.LittleEndian.Uint64(rec[at:])))
+		at += 8
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		{
+			var v any
+			v, at = parseValue(rec, at)
+			tail = append(tail, v)
+		}
+		_ = at
+		return kind, id, nil, tail, true
+	}
+	if kind == occSessionAction {
+		// A flat record: its fields in order, into the tail.
+		at := 8
+		tail := []any{}
+		id = 0
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		at += 4
+		tail = append(tail, int64(binary.LittleEndian.Uint64(rec[at:])))
+		at += 8
+		_ = at
+		return kind, id, nil, tail, true
+	}
+	if kind == occPlayerTracks {
+		// A flat record: its fields in order, into the tail.
+		at := 8
+		tail := []any{}
+		at += 8
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		{
+			count := int(binary.LittleEndian.Uint32(rec[at:]))
+			at += 8
+			tail = append(tail, int64(count))
+			for i := 0; i < count; i++ {
+				var v any
+				v, at = parseValue(rec, at)
+				tail = append(tail, v)
+			}
+		}
+		{
+			count := int(binary.LittleEndian.Uint32(rec[at:]))
+			at += 8
+			tail = append(tail, int64(count))
+			for i := 0; i < count; i++ {
+				var v any
+				v, at = parseValue(rec, at)
+				tail = append(tail, v)
+			}
+		}
+		_ = at
+		return kind, id, nil, tail, true
 	}
 	if kind == occFileDialogResult {
 		// The picker's answer: id, a count, then three Values

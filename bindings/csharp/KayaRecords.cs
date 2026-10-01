@@ -42,6 +42,8 @@ sealed class RecordInfo
         : t == typeof(DateOnly) ? KayaWire.ValueI64
         : t == typeof(TimeOnly) ? KayaWire.ValueI64
         : t == typeof(Color) ? KayaWire.ValueI64
+        // A row's player is its id, 0 for none (docs/media-plan.md §7b).
+        : t == typeof(Player) || t == typeof(Player?) ? KayaWire.ValueI64
         : (uint?)null;
 
     // One reflection walk per record type, ever: FieldOf runs per event
@@ -100,7 +102,8 @@ sealed class RecordInfo
     internal object EncodeField(uint wireIndex, object value)
     {
         string name = Ctor.GetParameters()[WireToCtor[wireIndex]].Name!;
-        if (value is DateOnly or TimeOnly or Color) return KayaRecords.ScalarWire(value);
+        if (value is DateOnly or TimeOnly or Color or Player) return KayaRecords.ScalarWire(value);
+        if (NoPlayer(wireIndex, value)) return 0L;
         if (Schema[wireIndex] == KayaWire.ValueBlob)
         {
             if (value is Document document)
@@ -118,6 +121,10 @@ sealed class RecordInfo
                 + "byte[]-typed record field (or Tx.Image)");
         return value;
     }
+
+    /// A Player? field holding null: the row shows no player, id 0.
+    bool NoPlayer(uint wireIndex, object? value) =>
+        value is null && Ctor.GetParameters()[WireToCtor[wireIndex]].ParameterType == typeof(Player?);
 
     /// The wire direction an undo travels: one entry's fields as the
     /// core states them, back into the object the model keeps.
@@ -147,6 +154,10 @@ sealed class RecordInfo
                     ? KayaRecords.TimeOf(fields[wire])
                     : want == typeof(Color)
                         ? Color.Of(fields[wire])
+                    : want == typeof(Player)
+                        ? KayaRecords.PlayerOf(fields[wire])
+                    : want == typeof(Player?)
+                        ? KayaRecords.OptionalPlayerOf(fields[wire])
                     : want == typeof(Document)
                         ? KayaApp.DocumentOfBlob(fields[wire])
                         : fields[wire];
@@ -374,8 +385,16 @@ static class KayaRecords
         DateOnly d => (long)KayaWire.PackDate(d.Year, d.Month, d.Day),
         TimeOnly t => (long)KayaWire.PackTime(t.Hour, t.Minute),
         Color c => c.Packed,
+        Player p => (long)p.Id,
         _ => v,
     };
+
+    internal static Player PlayerOf(object? id) =>
+        OptionalPlayerOf(id) ?? throw new InvalidOperationException(
+            "kaya: expected a player field (a nonzero I64 on the wire), the model holds none");
+
+    internal static Player? OptionalPlayerOf(object? id) =>
+        id is long n && n > 0 ? new Player((ulong)n) : null;
 
     internal static DateOnly DateOf(object? packed)
     {

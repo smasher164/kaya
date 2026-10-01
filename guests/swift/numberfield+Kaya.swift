@@ -83,6 +83,14 @@ struct LineRow {
     }
 
     @discardableResult
+    func video(
+        _ f: KayaField<KayaPlayer>, fit: KayaFit? = nil,
+        onVisibility: ((KayaAppTx, [KayaValue], Double) -> Void)? = nil
+    ) -> KayaNodeHandle {
+        t.video(f, fit: fit, onVisibility: onVisibility)
+    }
+
+    @discardableResult
     func slider(
         min: Double = 0.0, max: Double = 1.0, value f: KayaField<Double>,
         step: Double? = nil, tickSpacing: Double? = nil,

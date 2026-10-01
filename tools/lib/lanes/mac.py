@@ -256,14 +256,13 @@ ORDER = [
     # controls and nudge an in-process key, so it pools.
     ("range", LANGS),
     ("rangertl", LANGS),
-    # The media suite (docs/media-plan.md §7a): RUST ALONE while the eight
-    # bindings' sugar is the breadth slice. The players are muted; the
-    # delivery legs read the local server this lane starts.
-    ("media_formats", ("rust",)),
-    ("media_delivery", ("rust",)),
-    ("media_session", ("rust",)),
-    ("media_tracks", ("rust",)),
-    ("media_feed", ("rust",)),
+    # The media suite (docs/media-plan.md §7a). The players are muted; the
+    # media legs read the local server this lane starts.
+    ("media_formats", LANGS),
+    ("media_delivery", LANGS),
+    ("media_session", LANGS),
+    ("media_tracks", LANGS),
+    ("media_feed", LANGS),
     ("richtext", ("rust", "python", "js", "go", "csharp", "java", "swift",
                   "ocaml", "haskell")),
     ("ownundo", ("rust", "python", "js", "go", "csharp", "java", "swift",

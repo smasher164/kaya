@@ -83,6 +83,15 @@ dependencies {
     // androidx's emoji picker, the panel the emoji command opens
     // (docs/emoji-picker-plan.md R1).
     implementation("androidx.emoji2:emoji2-emojipicker:1.5.0")
+    // THE PLAYER, THE VIDEO VIEW AND THE SESSION (docs/media-plan.md §2,
+    // §3, §5). 1.10.1 IS THE CEILING: 1.11 ships Kotlin 2.2 metadata and a
+    // compose BOM that would move compose-ui
+    // (docs/probes/video-native-2026-09-29/android-linux.md §0).
+    implementation("androidx.media3:media3-exoplayer:1.10.1")
+    implementation("androidx.media3:media3-exoplayer-hls:1.10.1")
+    implementation("androidx.media3:media3-exoplayer-dash:1.10.1")
+    implementation("androidx.media3:media3-session:1.10.1")
+    implementation("androidx.media3:media3-ui-compose:1.10.1")
     // KayaColorSchemesTest, the wall check-compose runs so the emulator
     // never proves the brand scheme first.
     testImplementation("junit:junit:4.13.2")

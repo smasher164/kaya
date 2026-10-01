@@ -25,8 +25,8 @@ stated as a carve-out. Until then `video` is exempted by name in
 tools/tpl-surfaces.py's LIVE_ONLY, held to this heading, and the core refuses
 set_video_player on anything but a live video view.
 
-## BUILD — media: the player, the video view and the session (docs/media-plan.md), depth on the mac (2026-09-30); the GTK, WinUI and Compose arms, the iOS legs, the tracks and captions and the other eight bindings are the breadth slice
-KEY: media, player, PlayerId, create_player, set_player_prop, player_command, release_player, set_video_player, set_session, player_changed, player_position, seek_completed, session_action, KIND_VIDEO, PROP_FIT, PROP_PLAYER, PlayerKind, select_track, caption_times, player_tracks, caption_cue, video_visibility, kaya_caption_at, kaya_video_visible, captions.rs, media_formats, media_delivery, media_session, media_tracks, media_feed, expect_video_ink, expect_caption, {captions:, session_send, expect_now_playing, expect_display_awake, ax_action, kaya_can_play, DEPTH STUB media_formats, gen-media, media-server, resources
+## ~~BUILD — media: the player, the video view and the session (docs/media-plan.md), depth on the mac (2026-09-30); the GTK, WinUI and Compose arms, the iOS legs, the tracks and captions and the other eight bindings are the breadth slice~~ COMPLETE 2026-09-30: every item below LANDED in the breadth slice; the five media scenes run on all five lanes in every language each lane runs; what the breadth found and left is in "WATCH — media: what the breadth measured and no lane settles"
+KEY: media, player, PlayerId, create_player, set_player_prop, player_command, release_player, set_video_player, set_session, player_changed, player_position, seek_completed, session_action, KIND_VIDEO, PROP_FIT, PROP_PLAYER, PlayerKind, select_track, caption_times, player_tracks, caption_cue, video_visibility, kaya_caption_at, kaya_video_visible, captions.rs, media_formats, media_delivery, media_session, media_tracks, media_feed, expect_video_ink, expect_caption, {captions:, session_send, expect_now_playing, expect_display_awake, ax_action, kaya_can_play, DEPTH STUB media_formats, gen-media, media-server, resources, kaya_player_captions_text, kaya_player_captions_failed, LANE_PORTS, video_ink_tolerance, flat_occurrence_names
 
 The depth slice: the spec's six transaction, six apply and four occurrence
 records, the core's one state machine, failure table, source check and
@@ -35,40 +35,69 @@ arm (an AVPlayer per player, a bare AVPlayerLayer per video view,
 MPNowPlayingInfoCenter and MPRemoteCommandCenter), the media_formats,
 media_delivery and media_session scenes on the mac lane, the test assets
 (tools/gen-media.py) and the local server (tools/media-server.py). What
-breadth owes:
+breadth owed:
 
-  - **DEPTH STUB: media_formats on gtk** — playbin3 into gtk4paintablesink,
-    the GStreamer rows of the failure table, MPRIS2 through mpris-server,
-    and the lane image's -bad, -libav and -gtk4 packages (plan §7a).
-  - **DEPTH STUB: media_formats on winui** — MediaPlayer and
-    MediaPlayerElement, ExtendedErrorCode's rows of the failure table, the
-    SMTC, and the §6.1 measurements (rounded clip, PrintWindow).
-  - **DEPTH STUB: media_formats on compose** — media3 ExoPlayer and
-    PlayerSurface, the media3 rows, MediaSession with its foreground service.
-  - **DEPTH STUB: media_formats on swiftui/ios** — the iOS arm is built
-    (the layer view, the .playback category on play); the legs, the
-    simulator's AV1 case, a window read of the picture and a remote command
-    sent the way the system would are unmeasured there.
-  - The tracks and captions on GTK, WinUI and Compose (built at depth on
-    the mac 2026-09-30, plan §3): each backend's track listing and
-    selection through kaya_player_tracks and select_track, its own cue
-    through kaya_player_cue, and kaya's caption renderer's drawing half
-    (caption_times, kaya_caption_at) on Android and GTK in their users'
-    caption styles; the Windows lane table's `{captions:}` answer for the
-    tx3g item (the Stage's captions_absent, a depth stub today).
-  - The video view's visibility on GTK, WinUI, Compose and iOS
-    (kaya_video_visible from each backend's own geometry; plan §7b), and
-    `resources` in each backend's rows of the failure table, measured.
-  - The other eight bindings: `video` in both zones, a row's player field,
-    the visibility handlers, the track and cue surface
-    (check-sugar-surface red by design on `video`; its media-row table is
-    Rust's alone until they join it) and the C floor through kaya.h.
-  - The packaging manifest's UIBackgroundModes `audio` for an app that
-    declares a session on iOS (plan §5).
-  - The loading ceiling's reason (crates/kaya/src/media.rs,
-    LOADING_CEILING_MS): a stalled local source reads
-    unsupported_container and a stalled stream network. Recorded as the
-    depth's choice, for a ruling when GStreamer's stall shapes are built.
+  - ~~**DEPTH STUB: media_formats on gtk**~~ — LANDED 2026-09-30: playbin3
+    into gtk4paintablesink, a GtkPicture view, kaya-drawn captions following
+    GTK's text scale, MPRIS through mpris-server (pinned exactly) on a session
+    bus per leg (tools/linux/media-leg.sh, and tools/linux/sessionmgr.py for
+    the x11 idle inhibit), keep-awake through GtkApplication.inhibit; the
+    image gained -bad, -libav and -gtk4; a fresh pipeline per source (a
+    reused one aborted after a stall, docs/traps.md). The linux lane runs 84
+    media legs, the av1dec and tsdemux rank demotions included. The video ink
+    is compared within 4 on GTK (Stage::video_ink_tolerance), GStreamer's YUV
+    conversion reading C6381D for C83C1E.
+  - ~~**DEPTH STUB: media_formats on winui**~~ — LANDED 2026-09-30:
+    crates/kaya/src/winui/media.rs, a MediaPlayer per player with its command
+    manager off, MediaPlayerElement with transport controls off, decodability
+    from each track's SupportInfo.DecoderStatus, the picture size from the
+    display aperture, ExtendedErrorCode's rows with unit rows, the SMTC for
+    the attached player, keep-awake by a display power request (the video
+    display type records nothing, measured), PrintWindow for the ink; §6.1
+    measured (plan §6). deploy-win refuses a VM missing any of the four codec
+    extensions and serves the suite at 192.168.64.1:8768. 30 legs, six
+    languages; media_session alone per language. A sidecar is drawn by kaya's
+    renderer in the user's caption style, as on every platform.
+  - ~~**DEPTH STUB: media_formats on compose**~~ — LANDED 2026-09-30:
+    android/kaya/src/main/kotlin/dev/kaya/KayaMedia.kt, media3 1.10.1
+    ExoPlayer, PlayerSurface of the SurfaceView type, a MediaSession over a
+    player holding kaya's state with the MediaStyle notification from a
+    mediaPlayback foreground service (measured), media3's rows with unit
+    rows, and expect_video_ink as frames arriving (ruling 2: the SurfaceView
+    is a hole to PixelCopy). 15 legs on compose, jvm and go.
+  - ~~**DEPTH STUB: media_formats on swiftui/ios**~~ — LANDED 2026-09-30:
+    15 legs on swift, go and rust-swiftui; the ink through the device's own
+    screenshot (C83C1E exact; §6.2 measured), session_send through
+    MediaRemote from a process the simulator spawns, proven by arrival;
+    av1_aac.mp4 is the simulator's quiet case, failed by the decodability
+    check.
+  - ~~The tracks and captions on GTK, WinUI and Compose~~ — LANDED
+    2026-09-30 in each arm above, with the Windows `{captions:}` answer for
+    the tx3g item. AND THE HTTP(S) SIDECAR, RULED 2026-09-30 by the
+    maintainer and built: each backend fetches it with its player's own
+    networking and hands the text to the core (kaya_player_captions_text, or
+    kaya_player_captions_failed, a player failure network or not_found);
+    media_tracks fetches from each lane's server and expects a 404 there.
+  - ~~The video view's visibility on GTK, WinUI, Compose and iOS~~ —
+    LANDED 2026-09-30; `resources` measured unreachable on GTK (software
+    decoders) and WinUI (no hardware decoder on the VM), and reached on the
+    emulator pool only as media3 4003 over codec error 14 or -19 (the WATCH
+    below).
+  - ~~The other eight bindings~~ — LANDED 2026-09-30: the whole media
+    surface in Python, JS, Go, C#, Java, Swift, OCaml and Haskell, a media
+    guest in each serving the five scenes, 45 mac legs; the C floor packs
+    every media record (a compile probe). The generated occurrence decoders
+    of all eight had misread player_changed, player_tracks and session_action
+    as click-tag records; tools/kaya-bindgen decodes them as flat records and
+    refuses a binding with no decode arm. check-sugar-surface's media table
+    holds 161 rows.
+  - ~~The packaging manifest's UIBackgroundModes `audio`~~ — LANDED
+    2026-09-30: written for an app that declares a session, and the
+    interpreter refuses a session in a bundle without it.
+  - ~~The loading ceiling's reason~~ — CLOSED 2026-09-30: GTK fails a
+    missing element at the missing-plugin message with its caps' reason, so
+    the ceiling is the fallback it was chosen as and no stall shape reaches
+    it on any lane; the depth's choice stands.
 
 ## ~~BUILD — the range and the vertical slider (docs/range-plan.md), depth on the mac (2026-09-29); the GTK, WinUI and Compose arms, the iOS legs, rangertl, the sliders scene's fader and the other eight bindings are the breadth slice~~ COMPLETE 2026-09-29: every item below LANDED, the last one by the maintainer's ruling (plan §3 rule 11); range, rangertl and the sliders fader on all five lanes, validation in the breadth commit; what the breadth found and left is in "WATCH — the range's tie and its readers' names"
 KEY: range, KIND_RANGE, range_changed, range_committed, min_gap, low_label, high_label, on_range, on_range_commit, kaya_range_clamp, clamp_thumb, expect_thumb, set_thumb, nudge_thumb, ax_thumb, vertical slider, slider axis, rangertl, DEPTH STUB range, user_range_committed, settle_range_writes, RANGE_SETTLED
@@ -143,6 +172,39 @@ tools/scenes/range.steps green on the mac lane. What breadth owed:
     unit tests watched failing on five cuts; tools/scenes/range.steps' `late`
     button on every lane; check-slider-commit's record clause (every committed
     send recorded, every drain emptying the queue first).
+
+## WATCH — media: what the breadth measured and no lane settles (docs/media-plan.md), found 2026-09-30
+KEY: resources, 4003, CodecException 14, emulator-5558, emulator-5560, picked file, content URI, video_ink_tolerance, MediaRemote non-delivery, HLS TS MediaOpened, display awake, playback category
+
+For the maintainer's review, each measured and none asserted by a lane:
+  - `resources` on Android: the pool's 15th playing ExoPlayer fails 4003
+    over CodecException 14 (H.264, HEVC) or -19 (AV1), never the documented
+    1100/1101, so it reads `decode_error` today (docs/traps.md). A ruling on
+    mapping 4003 over 14 to `resources`.
+  - A picked file with no local path (the phones' content URIs) silently
+    unloads the player in all nine bindings. A ruling on its spelling.
+  - The GTK video ink is compared within 4 where the others use 2, stated
+    per platform through Stage::video_ink_tolerance under plan §7a's "a
+    tolerance stated for video". The maintainer may prefer another shape.
+  - Two pool phones (emulator-5558, emulator-5560) lost their network after
+    five days up; the android runner probes each phone at server start and
+    runs the media legs on the phones that reach it. Not rebooted.
+  - MediaRemote's send-side non-delivery on the mac media_session (docs/
+    traps.md) was seen twice in this slice, green on rerun. A pooled WinUI
+    adaptive (HLS) item sometimes never opens: the source reads Opened, the
+    session stays Opening, no MediaOpened (5 of 9 pooled runs under host
+    load, then 12 runs green); two causes ruled out by measurement, the
+    cause not established (docs/traps.md). The arm logs the states and its
+    TCP connections to the server at 5 s and nudges such a session with a
+    seek to 0, logged; the nudge has never fired, so whether it recovers a
+    real stall is unmeasured.
+  - The mac's in-process ScreenCaptureKit read hung or was refused
+    ("declined TCCs") for a pooled media_delivery guest four times; the
+    read falls back to screencapture(1) and says so (docs/traps.md). Why
+    replayd drops that client is not known.
+  - On iOS expect_display_awake reads the player's own setting, since the
+    simulator keeps no record of the hold; a device is unmeasured. The iOS
+    playback category is held only by check-verbs (its cut stayed green).
 
 ## WATCH — the range's tie and its readers' names (docs/range-plan.md), found by the breadth slice 2026-09-29
 KEY: tie ring, tie outline, min_gap 0, content-desc, accessibility frame, per-thumb frame, Material slider name
@@ -9227,6 +9289,17 @@ the entry remains open. Per maintainer direction there is no rerun,
 ceiling move or scheduler change. Whole-host contention, thermal state
 and unrelated applications were uncontrolled variables, not measured
 causes.
+
+A SIGHTING WITH A NON-EMPTY LIST (2026-09-30, save-compose, the media
+breadth's first full matrix, host load 31 over 15 min with Finder at 99%):
+`KAYA_DIALOG_UNSEEN: dialog=1 kind=open ms=20058 2 windows, 0 with an
+unreadable root: [id=1059 com.android.systemui, id=1057 com.android.phone]`
+while the same leg log shows PickActivity created at 14:43:53.275, resumed
+at 53.732 and DocumentsUI drawing — so the window list ARRIVED and was
+still wrong for twenty seconds, which is the case this entry said any
+further remedy waits on. Bundle
+runs/20260930T213932Z-011284/bundles/android-save-compose; the slice
+touched no android dialog code.
 
 ## ~~WATCH — a windows dialog leg's process is held ~60s from ITS OWN START, intermittently (2026-08-27)~~
 KEY: dialog leg 64s, TerminateProcess, harness_exit, exit grace hostage,
