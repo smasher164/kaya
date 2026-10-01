@@ -4,6 +4,60 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## A decoder moved onto a SurfaceView with setOutputSurface draws black on the pool's emulators (measured 2026-09-30)
+
+On the pool's API 35 emulators every row of media_feed showed black while
+media3 reported each row's first frame rendered, and the lane was green,
+because Android's `expect_video_ink` asserted that report and read no
+pixels. SurfaceFlinger held one opaque 160x90 buffer per row
+(`dumpsys SurfaceFlinger`: frame=1, composed DEVICE, the rows' black
+background layers fully covered), so the buffers themselves were black: no
+hole, z-order or opaque row background. The feed sources each row's player
+in the transaction that mounts the row, so `prepare` runs before Compose
+composes the SurfaceView: media3 configures the decoder without it and later
+moves it there with `setOutputSurface` (two per codec in logcat, one for a
+view that existed first). Experiments on emulator-5554, row centres read off
+the screencap: a seek after the surface arrived, black; the software decoder
+(goldfish excluded), black; no 320x180 to 160x90 resize, black; `prepare`
+deferred until the surface existed, C83C1E; media3's setOutputSurface
+workaround (the decoder re-created for the new surface), C83C1E. media3 1.10
+parks such a decoder on Android 15's DETACHED surface
+(`shouldUseDetachedSurface` true); refusing that, so media3's
+PlaceholderSurface holds it, drew five rows of five, but then failed 2 of 9
+feed legs across the three hosts (a jvm leg's row 0, a go leg's row 9, both
+000000 over the whole box). So the move itself is the defect, from either
+parking surface: kaya's video renderer takes media3's workaround and
+re-creates the decoder on every surface change (KayaRenderersFactory in
+KayaMedia.kt; 18 of 18 feed legs green after it), and the read is the device's own screencap now
+(run-emulator.py's answer_video_ink), with the frames report kept as its
+diagnostic line. A single view (media_tracks) drew all along because its
+surface existed before its first source. GUARD: check-verbs' Android video
+read (the screencap request, the runner's screencap, the workaround, the
+tolerance), each cut watched; media_feed-compose watched red on the unfixed
+tree naming 000000 over the whole box.
+
+## A player with no picture: GTK's sink paints black and Android's SurfaceView keeps the last frame (seen 2026-09-30)
+
+Handed an audio-only item after a video one, the macOS, iOS and WinUI views
+draw nothing, GTK drew a black box (the new pipeline's gtk4paintablesink
+paintable) and Android went on showing the previous clip's last frame,
+stretched over the view's 320x180 box. A view whose player has no picture
+now shows nothing on all five: GTK's view takes no paintable once the
+loaded item carries no video stream (`GtkPlayer::picture`), Compose
+composes no PlayerSurface (`KayaMediaPlayer.showsPicture`). GUARD:
+media_formats' `expect_video_ink video#0 "none"` after tone.mp3; the
+Compose gate cut watched red reading BD2E22 over the whole box.
+
+## The emulator composes a BT.709 video with the BT.601 matrix (measured 2026-09-30)
+
+The suite's clip is C83C1E tagged BT.709 limited range; the pool's emulators
+put it on screen as BD2E22 on every phone and in every media leg (decoding
+its BT.709 YUV with BT.601 coefficients gives BB2F20). The deviation is 14 at
+most per channel (R 11, G 14, B 4), so Android's `expect_video_ink` compares
+within KAYA_VIDEO_INK_TOLERANCE = 14 (KayaMedia.kt), held by check-verbs. A
+physical phone that honours the dataspace would read nearer C83C1E; nothing
+here measured one.
+
 ## AVFoundation lists a forced-only twin of every subtitle track, and selects it (measured 2026-09-30)
 
 An MP4 with one `mov_text` track (guests/assets/media/h264_tx3g.mp4) has TWO

@@ -21487,6 +21487,13 @@ impl crate::harness::Stage for GtkStage {
         gtk_media::GTK_VIDEO_INK_TOLERANCE
     }
 
+    fn video_ground(&self, target: crate::harness::Target) -> String {
+        Self::on_main(move |core| match crate::harness::try_resolve(target.index, core.videos.len()) {
+            Some(i) => gtk_media::video_ground_pixel(&core.videos[i]),
+            None => format!("<no video#{} among {} video views>", target.index, core.videos.len()),
+        })
+    }
+
     fn now_playing(&self) -> String {
         gtk_media::now_playing()
     }
@@ -24640,6 +24647,14 @@ mod gtk_media {
         fn paintable(&self) -> gdk::Paintable {
             self.pipe.borrow().paintable.clone()
         }
+
+        /// What a view of this player shows: nothing once the loaded item
+        /// turned out to carry no video stream (docs/media-plan.md §7b).
+        fn picture(&self) -> Option<gdk::Paintable> {
+            let s = self.inner.borrow();
+            let audio_only = s.loaded && !s.streams.iter().any(|(_, k, _)| k.contains(gst::StreamType::VIDEO));
+            (!audio_only).then(|| self.paintable())
+        }
     }
 
     thread_local! {
@@ -24655,8 +24670,8 @@ mod gtk_media {
     /// no GStreamer or GTK callback ever borrows CORE (a frame-clock tick can
     /// arrive while the harness holds it).
     enum Pending {
-        /// A new source's pipeline: the views showing the player take its
-        /// paintable.
+        /// A new source's pipeline, or its streams known: the views showing
+        /// the player take its picture.
         Repaint(u64),
         Report(u64, crate::media::Report),
         Ask(u64),
@@ -24706,9 +24721,9 @@ mod gtk_media {
                     Pending::Repaint(id) => {
                         if let Some(p) = player(id) {
                             use gtk4::prelude::WidgetExt;
-                            let paintable = p.paintable();
+                            let paintable = p.picture();
                             for view in core.videos.iter().filter(|v| v.shown.get() == Some(id)) {
-                                view.picture.set_paintable(Some(&paintable));
+                                view.picture.set_paintable(paintable.as_ref());
                                 view.picture.queue_draw();
                             }
                         }
@@ -25380,6 +25395,7 @@ mod gtk_media {
         };
         let size = if undecodable { (0, 0) } else { size };
         report(id, crate::media::Report::Loaded { duration_ms: duration, size, undecodable, detail });
+        queue(Pending::Repaint(id));
         if undecodable {
             set_playbin_state(&p.pb(), gst::State::Null);
             return;
@@ -25494,7 +25510,7 @@ mod gtk_media {
         use gtk4::prelude::WidgetExt;
         let Some(view) = core.videos.iter().find(|v| v.id == widget).cloned() else { return };
         view.shown.set(shown);
-        let paintable = shown.and_then(player).map(|p| p.paintable());
+        let paintable = shown.and_then(player).and_then(|p| p.picture());
         view.picture.set_paintable(paintable.as_ref());
         if shown.is_none() {
             view.caption.set_visible(false);
@@ -25818,7 +25834,7 @@ mod gtk_media {
             return format!("<the video view laid out at {w}x{h}>");
         }
         if view.picture.paintable().is_none() {
-            return "<the video view shows no player>".to_owned();
+            return window_pixel(&widget, w / 2.0, h / 2.0);
         }
         let Some(renderer) = native.renderer() else {
             return "<this toplevel has no GSK renderer>".to_owned();
@@ -25841,8 +25857,53 @@ mod gtk_media {
         let at = y * stride + x * 4;
         let word = u32::from_ne_bytes([buf[at], buf[at + 1], buf[at + 2], buf[at + 3]]);
         if (word >> 24) & 0xff != 0xff {
-            return format!("<the centre is {:08X}, not an opaque picture: no frame drawn>", word);
+            return window_pixel(&widget, w / 2.0, h / 2.0);
         }
+        format!("{:02X}{:02X}{:02X}", (word >> 16) & 0xff, (word >> 8) & 0xff, word & 0xff)
+    }
+
+    #[cfg(feature = "harness")]
+    pub(super) fn video_ground_pixel(view: &GtkVideoView) -> String {
+        use gtk4::prelude::WidgetExt;
+        let widget: gtk4::Widget = view.picture.clone().upcast();
+        let (w, h) = (f64::from(widget.width()), f64::from(widget.height()));
+        window_pixel(&widget, w + crate::harness::VIDEO_GROUND_OFFSET, h / 2.0)
+    }
+
+    /// One pixel of the whole toplevel as GSK renders it, at a point in
+    /// `widget`'s own coordinates, as `RRGGBB`.
+    #[cfg(feature = "harness")]
+    fn window_pixel(widget: &gtk4::Widget, x: f64, y: f64) -> String {
+        use gtk4::prelude::{NativeExt, SnapshotExt, WidgetExt};
+        let Some(root) = widget.root() else {
+            return "<the video view is in no toplevel>".to_owned();
+        };
+        let root: gtk4::Widget = root.upcast();
+        let Some(renderer) = widget.native().and_then(|n| n.renderer()) else {
+            return "<this toplevel has no GSK renderer>".to_owned();
+        };
+        let Some(at) = widget.compute_point(&root, &gtk4::graphene::Point::new(x as f32, y as f32)) else {
+            return format!("<{x},{y} in the video view has no place in its toplevel>");
+        };
+        let (rw, rh) = (f64::from(root.width()), f64::from(root.height()));
+        let paintable = gtk4::WidgetPaintable::new(Some(&root));
+        let snapshot = gtk4::Snapshot::new();
+        gdk::prelude::PaintableExt::snapshot(&paintable, &snapshot, rw, rh);
+        let Some(node) = snapshot.to_node() else {
+            return format!("<the {rw}x{rh} toplevel snapshotted to nothing>");
+        };
+        let shot = renderer.render_texture(&node, None);
+        let (tw, th) = (shot.width(), shot.height());
+        let px = (f64::from(at.x()) * f64::from(tw) / rw) as i64;
+        let py = (f64::from(at.y()) * f64::from(th) / rh) as i64;
+        if px < 0 || py < 0 || px >= i64::from(tw) || py >= i64::from(th) {
+            return format!("<{px},{py} is outside the {tw}x{th} render of the toplevel>");
+        }
+        let stride = tw as usize * 4;
+        let mut buf = vec![0u8; stride * th as usize];
+        gtk4::gdk::prelude::TextureExtManual::download(&shot, &mut buf, stride);
+        let at = py as usize * stride + px as usize * 4;
+        let word = u32::from_ne_bytes([buf[at], buf[at + 1], buf[at + 2], buf[at + 3]]);
         format!("{:02X}{:02X}{:02X}", (word >> 16) & 0xff, (word >> 8) & 0xff, word & 0xff)
     }
 

@@ -56,7 +56,7 @@ platforms, and the native view brings services the frames route loses:
 | macOS, iOS | bare `AVPlayerLayer` | yes: rounded clip, scroll, overlay, measured on macOS; iOS by the same Core Animation model, unmeasured | yes, drawn by the layer from MediaAccessibility | FairPlay | `AVPictureInPictureController(playerLayer:)`, measured possible | EDR, automatic | not in `cacheDisplay` or `CALayer.render`; yes in a window-server capture by window id, colour-managed (sRGB C83C1E read as P3 BE4E2F) |
 | GTK 4 | `GtkPicture` over a media stream or `gtk4paintablesink`'s paintable | yes, and it is the same object the headless design used | no system caption style exists; playbin draws subtitles | none on the desktop | none | no | yes, through GTK's own renderer (2B374D for 2C3B4F) |
 | WinUI 3 | `MediaPlayerElement`, transport controls off | a leaf visual in the XAML tree: scrolls, moves, clipped by a rectangular or rounded ancestor (measured, §6), drawn over; nothing behind it, no see-through, no acrylic sampling | yes, `CueStyler` reads the system caption settings | PlayReady | window-level only (CompactOverlay) | yes | yes, `PrintWindow(PW_RENDERFULLCONTENT)` includes the swap chain (measured, §6) |
-| Android | media3 `PlayerSurface`, SurfaceView type | a hole punched by SurfaceFlinger that still follows scroll, move and a rectangular clip (from API 24), a rounded clip only over an opaque ground (measured), views on top | no: `SubtitleView` is View-only; kaya draws cues | Widevine L1 (SurfaceView only) | whole-activity | yes, overlay plane | no: kaya's window `PixelCopy` reads the hole (000000) |
+| Android | media3 `PlayerSurface`, SurfaceView type | a hole punched by SurfaceFlinger that still follows scroll, move and a rectangular clip (from API 24), a rounded clip only over an opaque ground (measured), views on top | no: `SubtitleView` is View-only; kaya draws cues | Widevine L1 (SurfaceView only) | whole-activity | yes, overlay plane | not in-process (kaya's window `PixelCopy` reads the hole, 000000); yes in the device's own screencap, read by the host (measured 2026-09-30) |
 
 The frames route gives up captions in the user's style, DRM, PiP and
 HDR on Apple and Windows (Windows' frame-server mode is reported broken
@@ -154,7 +154,8 @@ black; a rounded ancestor clip applies (measured, §6). On Android the
 SurfaceView is a hole: no see-through before API 34 (kaya's minSdk is
 26), a rounded clip only over a solid colour, no interleaving between
 kaya layers (the video is behind the whole window or above all of it),
-no post-layout transforms of views over it, and no test read-back. An
+no post-layout transforms of views over it, and no in-process test
+read-back (the device's screencap, taken by the host, holds it). An
 app that needs any of these asks for the surface (§4).
 
 **Captions.** On Apple and WinUI the platform draws the selected caption
@@ -525,7 +526,8 @@ host's application firewall is off, so no prompt appears.
 
 Per mode, following ruling 2 (§8): on the video view, the colour by window
 capture where the picture is readable (Apple, GTK; WinUI after §6.1), and
-on Android the first-frame signal instead; on the surface, the colour read
+on Android the device's own screencap (amended 2026-09-30, ruling 2 below);
+on the surface, the colour read
 back as a canvas is, with a tolerance stated for video (iOS decoded C93C1E,
 GTK 2B374D for 2C3B4F). Audio items assert state, position and `ended`.
 
@@ -609,7 +611,10 @@ rule on each transaction's END state, so rows trading players in one
 transaction is one move; the refusal names both views, a stamped one by its
 template node and keys. A row still naming a released player shows nothing
 (the app replaces it when the row comes back into view); an id never created
-is refused. Visibility is reported by the backend as often as the view's
+is refused. A view whose player has no picture (no item, or an item with
+no video track) shows nothing, as a released player's does, on all five;
+`expect_video_ink <video> "none"` reads its centre against the window's
+ground 8 points right of it. Visibility is reported by the backend as often as the view's
 geometry moves (on SwiftUI its frame against every scroll viewport it sits
 in) and coalesced by the core into bands: entering, each tenth shown,
 shown whole, leaving; a copy torn down while shown is heard leaving.
@@ -633,7 +638,10 @@ pass.
    a stated colour space with a tolerance wider than ±1; GTK through its
    own renderer; WinUI only if §6.1 says `PrintWindow` sees it); on
    Android's video view a frames-arriving signal instead; on the surface
-   the pixels exactly, as a canvas.
+   the pixels exactly, as a canvas. AMENDED 2026-09-30: Android's video
+   view is read from the device's own screencap, as iOS's is, within the
+   emulator's measured 14; frames arriving passed a feed whose every row
+   was black (docs/traps.md) and stays as the read's diagnostic line.
 3. **Filmstrips.** RULED 2026-09-29, as recommended: a canvas `draw_image` op, so a timeline
    draws its filmstrip, waveform and playhead in one canvas; a row of
    image widgets remains the fallback that works today.

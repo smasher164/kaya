@@ -10369,8 +10369,17 @@ private func kayaRunScript(_ script: String) {
                 let want = kayaQuoted(Array(parts[2...]))
                 #if os(macOS)
                     let node = DispatchQueue.main.sync { kayaTarget(parts[1], "video", kayaScene.videos) }
-                    let got = node.map(kayaVideoInk) ?? "<no such target>"
-                    if kayaVideoInkMatches(got, want) {
+                    let got = node.map { kayaVideoInk($0) } ?? "<no such target>"
+                    if want == "none" {
+                        let ground = node.map { kayaVideoInk($0, beside: true) } ?? "<no such target>"
+                        if kayaVideoInkMatches(got, ground) {
+                            observed.append("video ink \(want)")
+                        } else {
+                            failures.append(
+                                "video ink \(got) with the ground beside it \(ground), wanted \(want) within "
+                                    + "\(kayaVideoInkTolerance) per channel")
+                        }
+                    } else if kayaVideoInkMatches(got, want) {
                         observed.append("video ink \(want)")
                     } else {
                         failures.append("video ink \(got), wanted \(want) within \(kayaVideoInkTolerance) per channel")
@@ -10379,8 +10388,17 @@ private func kayaRunScript(_ script: String) {
                     // The simulator's own screenshot, taken by the host, is
                     // sRGB and holds the layer's picture (docs/media-plan.md §6).
                     let node = DispatchQueue.main.sync { kayaTarget(parts[1], "video", kayaScene.videos) }
-                    let got = node.map(kayaVideoInk) ?? "<no such target>"
-                    if kayaVideoInkMatches(got, want) {
+                    let got = node.map { kayaVideoInk($0) } ?? "<no such target>"
+                    if want == "none" {
+                        let ground = node.map { kayaVideoInk($0, beside: true) } ?? "<no such target>"
+                        if kayaVideoInkMatches(got, ground) {
+                            observed.append("video ink \(want)")
+                        } else {
+                            failures.append(
+                                "video ink \(got) with the ground beside it \(ground), wanted \(want) within "
+                                    + "\(kayaVideoInkTolerance) per channel")
+                        }
+                    } else if kayaVideoInkMatches(got, want) {
                         observed.append("video ink \(want)")
                     } else {
                         failures.append("video ink \(got), wanted \(want) within \(kayaVideoInkTolerance) per channel")
@@ -27097,7 +27115,7 @@ func kayaMediaRefusal(_ item: String) -> String? {
     /// The video view's centre as the WINDOW SERVER composited it, in sRGB:
     /// the picture is in no process snapshot (measured), and a window
     /// capture by id reads it back colour-managed.
-    func kayaVideoInk(_ node: KayaNode) -> String {
+    func kayaVideoInk(_ node: KayaNode, beside: Bool = false) -> String {
         let found = DispatchQueue.main.sync { () -> (CGWindowID, CGRect, CGFloat)? in
             guard let view = kayaVideoViews[node.id], let window = view.window else { return nil }
             // Window coordinates run from the frame's bottom-left, title bar
@@ -27109,6 +27127,8 @@ func kayaMediaRefusal(_ item: String) -> String? {
             return (CGWindowID(window.windowNumber), flipped, window.backingScaleFactor)
         }
         guard let (wid, rect, scale) = found else { return "<no video view on screen>" }
+        let px = Int(((beside ? rect.maxX + kayaVideoGroundOffset : rect.midX) * scale).rounded())
+        let py = Int((rect.midY * scale).rounded())
         let done = DispatchSemaphore(value: 0)
         // Each stage says where a capture stood when the 5 s ran out
         // (docs/traps.md, the pooled ink read that never answered).
@@ -27132,9 +27152,7 @@ func kayaMediaRefusal(_ item: String) -> String? {
                     "<no answer from ScreenCaptureKit within 5 s: window \(wid) listed among "
                     + "\(content.windows.count), captureImage asked, never answered>"
                 let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
-                let x = Int((rect.midX * scale).rounded())
-                let y = Int((rect.midY * scale).rounded())
-                answer.said = kayaSRGBPixel(image, x, y) ?? "<the capture is \(image.width)x\(image.height), no pixel at \(x),\(y)>"
+                answer.said = kayaSRGBPixel(image, px, py) ?? "<the capture is \(image.width)x\(image.height), no pixel at \(px),\(py)>"
             } catch {
                 answer.said = "<ScreenCaptureKit: \(error.localizedDescription)>"
                 answer.refused = true
@@ -27148,7 +27166,7 @@ func kayaMediaRefusal(_ item: String) -> String? {
             // connection was seen interrupted in a loop, and refused as
             // "declined TCCs" once, both under the pool (docs/traps.md).
             let hung = answer.said
-            let read = kayaScreencapturePixel(wid, Int((rect.midX * scale).rounded()), Int((rect.midY * scale).rounded()))
+            let read = kayaScreencapturePixel(wid, px, py)
             kayaDiag("video ink: \(hung); screencapture -l\(wid) answered \(read)")
             return read.hasPrefix("<") ? "\(hung), and screencapture: \(read)" : read
         }
@@ -27247,12 +27265,13 @@ func kayaMediaRefusal(_ item: String) -> String? {
     /// host (`simctl io screenshot`, sRGB, measured to hold the layer's
     /// picture); no in-process read sees it while playing
     /// (docs/media-plan.md §6).
-    func kayaVideoInk(_ node: KayaNode) -> String {
+    func kayaVideoInk(_ node: KayaNode, beside: Bool = false) -> String {
         let found = DispatchQueue.main.sync { () -> CGPoint? in
             guard let view = kayaVideoViews[node.id], let window = view.window else { return nil }
             let r = view.convert(view.bounds, to: window.screen.coordinateSpace)
             let scale = window.screen.scale
-            return CGPoint(x: (r.midX * scale).rounded(), y: (r.midY * scale).rounded())
+            let x = beside ? r.maxX + kayaVideoGroundOffset : r.midX
+            return CGPoint(x: (x * scale).rounded(), y: (r.midY * scale).rounded())
         }
         guard let at = found else { return "<no video view on screen>" }
         let (ok, lines) = KayaSimdrive.ask("media_screen \(Int(at.x)) \(Int(at.y))", timeout: 30)
@@ -27306,6 +27325,9 @@ func kayaNowPlaying() -> String {
 
 /// expect_video_ink's tolerance per channel, harness.rs's VIDEO_INK_TOLERANCE.
 let kayaVideoInkTolerance = 2
+
+/// harness.rs's VIDEO_GROUND_OFFSET: where `"none"` reads the ground beside a video view.
+let kayaVideoGroundOffset: CGFloat = 8
 
 func kayaVideoInkMatches(_ got: String, _ want: String) -> Bool {
     func rgb(_ s: String) -> [Int]? {

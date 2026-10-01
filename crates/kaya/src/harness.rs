@@ -478,7 +478,8 @@ pub enum Step {
     /// `expect_video_ink video#0 "C83C1E"`: the video view's centre as the
     /// WINDOW SERVER composited it, in sRGB, within VIDEO_INK_TOLERANCE per
     /// channel (docs/media-plan.md §8 ruling 2): a player's picture is in
-    /// no process snapshot.
+    /// no process snapshot. `"none"`: the view shows no picture, its centre
+    /// reading the ground beside it (docs/media-plan.md §7b).
     ExpectVideoInk(Target, String),
     /// `expect_caption video#0 "first cue"`: the caption text the video view
     /// shows now, "" for none — kaya's caption renderer's where kaya draws,
@@ -1120,6 +1121,12 @@ pub const SESSION_SENDS: [&str; 6] = ["play", "pause", "toggle", "stop", "next",
 /// measured, docs/traps.md), wider than INK_TOLERANCE's display profile.
 pub const VIDEO_INK_TOLERANCE: u8 = 2;
 
+/// `expect_video_ink`'s word for a view showing no picture.
+pub const VIDEO_INK_NONE: &str = "none";
+
+/// How far right of a video view's box `Stage::video_ground` reads, in points.
+pub(crate) const VIDEO_GROUND_OFFSET: f64 = 8.0;
+
 pub fn video_ink_matches(got: &str, want: &str) -> bool {
     video_ink_within(got, want, VIDEO_INK_TOLERANCE)
 }
@@ -1511,6 +1518,9 @@ pub trait Stage: Send + 'static {
     fn video_ink_tolerance(&self) -> u8 {
         VIDEO_INK_TOLERANCE
     }
+    /// The window's ground beside the video view, VIDEO_GROUND_OFFSET points
+    /// right of its box at its vertical centre, read as video_ink reads.
+    fn video_ground(&self, target: Target) -> String;
     /// The caption text the video view shows now, "" for none: what kaya's
     /// caption renderer drew, or the platform's own cue where it draws.
     fn caption(&self, target: Target) -> String;
@@ -2591,8 +2601,12 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     return Err(format!("expect_video_ink reads a video view, not {target:?}"));
                 }
                 let want = parse_string(text)?;
-                if want.len() != 6 || !want.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_lowercase()) {
-                    return Err(format!("expect_video_ink wants six uppercase hex digits, got {want:?}"));
+                if want != VIDEO_INK_NONE
+                    && (want.len() != 6 || !want.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_lowercase()))
+                {
+                    return Err(format!(
+                        "expect_video_ink wants six uppercase hex digits or {VIDEO_INK_NONE:?}, got {want:?}"
+                    ));
                 }
                 Step::ExpectVideoInk(target, want)
             }
@@ -4805,6 +4819,18 @@ fn run_with_log(
                 }
             })),
             Step::CopyAsset(name, path) => Some(crate::assets::copy_asset(name, &expand_path(path))),
+            Step::ExpectVideoInk(t, want) if want == VIDEO_INK_NONE => Some(poll(|| {
+                let got = stage.video_ink(*t);
+                let ground = stage.video_ground(*t);
+                let tolerance = stage.video_ink_tolerance();
+                if video_ink_within(&got, &ground, tolerance) {
+                    Ok(format!("video ink {want}"))
+                } else {
+                    Err(format!(
+                        "video ink {got} with the ground beside it {ground}, wanted {want} within {tolerance} per channel"
+                    ))
+                }
+            })),
             Step::ExpectVideoInk(t, want) => Some(poll(|| {
                 let got = stage.video_ink(*t);
                 let tolerance = stage.video_ink_tolerance();
@@ -7226,6 +7252,11 @@ mod tests {
         assert!(parse("expect_video_ink video#0 \"c83c1e\"").is_err());
         assert!(parse("expect_video_ink video#0 \"C83C1\"").is_err());
         assert!(matches!(
+            parse("expect_video_ink video#0 \"none\"").unwrap().as_slice(),
+            [Step::ExpectVideoInk(_, w)] if w == VIDEO_INK_NONE
+        ));
+        assert!(parse("expect_video_ink video#0 \"None\"").is_err());
+        assert!(matches!(
             parse("expect_caption video#0 \"first cue\"").unwrap().as_slice(),
             [Step::ExpectCaption(t, w)] if *t == video && w == "first cue"
         ));
@@ -7638,6 +7669,9 @@ mod tests {
             String::new()
         }
         fn video_ink(&self, _target: Target) -> String {
+            String::new()
+        }
+        fn video_ground(&self, _target: Target) -> String {
             String::new()
         }
         fn caption(&self, _target: Target) -> String {
@@ -8707,6 +8741,9 @@ mod tests {
         fn video_ink(&self, _target: Target) -> String {
             String::new()
         }
+        fn video_ground(&self, _target: Target) -> String {
+            String::new()
+        }
         fn caption(&self, _target: Target) -> String {
             String::new()
         }
@@ -9097,6 +9134,9 @@ mod tests {
             String::new()
         }
         fn video_ink(&self, _target: Target) -> String {
+            String::new()
+        }
+        fn video_ground(&self, _target: Target) -> String {
             String::new()
         }
         fn caption(&self, _target: Target) -> String {

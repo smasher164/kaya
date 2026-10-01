@@ -4688,7 +4688,8 @@ object KayaCompose {
     private var kayaNotifyTaps = 0
 
     /** The media verbs' requests to the runner (docs/media-plan.md §5): a media
-     * key dispatched through the system, the window manager's keep-screen-on. */
+     * key dispatched through the system, the window manager's keep-screen-on,
+     * the composed picture under a video view. */
     private var kayaHostRequests = 0
 
     /** The runner's answer to request [seq], written into this app's files
@@ -8847,19 +8848,35 @@ object KayaCompose {
                         if (answer.startsWith("ok\n")) observed.add(sentence) else failures.add(sentence)
                     }
                     "expect_video_ink" -> {
-                        // docs/media-plan.md §8 ruling 2: the SurfaceView is a
-                        // hole to the window's PixelCopy (measured 000000), so
-                        // this platform asserts FRAMES ARRIVING, never the colour.
+                        // The picture SurfaceFlinger composed, read by the
+                        // runner's screencap at the view's centre: PixelCopy
+                        // reads the SurfaceView's hole (docs/media-plan.md §6).
                         val want = quoted(parts.drop(2))
                         val vnode = kayaWidgetTarget(parts[1])
                         if (vnode == null) {
                             failures.add("no such target ${parts[1]}")
                         } else {
-                            val why = onUi(activity) { kayaVideoFramesWhyNot(vnode) }
-                            if (why == null) {
-                                observed.add("video frames arriving on ${parts[1]} ($want not read: a SurfaceView's pixels)")
+                            val (box, why) = onUi(activity) {
+                                kayaVideoScreenBox(activity.window.decorView, vnode) to kayaVideoFramesWhyNot(vnode)
+                            }
+                            val frames = why ?: "media3 rendered this item's first frame to the view's surface"
+                            if (box == null) {
+                                failures.add("video ${parts[1]} has no box on screen to read; $frames")
                             } else {
-                                failures.add("video ${parts[1]}: $why, wanted frames arriving ($want not read here)")
+                                kayaHostRequests += 1
+                                val seq = kayaHostRequests
+                                Log.i("kaya", "KAYA_REQUEST: video_ink $seq $box")
+                                val said = kayaHostAnswer(activity, seq)
+                                val words = said?.split(' ') ?: emptyList()
+                                val got = words.getOrElse(0) { "" }
+                                val ground = words.getOrElse(1) { "" }
+                                if (said == null) {
+                                    failures.add("video ${parts[1]}: the runner wrote no screencap reading of $box within 8 s; $frames")
+                                } else if (if (want == "none") kayaVideoInkWithin(got, ground) else kayaVideoInkWithin(got, want)) {
+                                    observed.add("video ink $want")
+                                } else {
+                                    failures.add("video ink $said, wanted $want within $KAYA_VIDEO_INK_TOLERANCE per channel; $frames")
+                                }
                             }
                         }
                     }

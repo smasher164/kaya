@@ -33,6 +33,9 @@ expect label#0 "{media:av1_opus.webm|ready 2.0s 160x90, played past 1s, ended, c
 click button#0
 expect label#1 "tone.mp3"
 expect label#0 "{media:tone.mp3|ready 2.0s 0x0, played past 1s, ended, can_play yes}"
+# An audio item after the video ones: the view shows no picture, its centre
+# reading the ground beside it (docs/media-plan.md §7b).
+expect_video_ink video#0 "none"
 click button#0
 expect label#1 "tone.m4a"
 expect label#0 "{media:tone.m4a|ready 2.0s 0x0, played past 1s, ended, can_play yes}"

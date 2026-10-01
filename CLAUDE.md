@@ -1394,7 +1394,14 @@ in docs/deferred.md.
    supported track); GTK's ink tolerance pinned at its measured 4, the iOS
    playback category before play, and the Compose arms' constants and verbs
    in the census. Five, seven, seven, eight and five watched negatives,
-   counts printed),
+   counts printed. AND THE ANDROID VIDEO READ SINCE 2026-09-30 (docs/traps.md,
+   the media feed entry): Compose's expect_video_ink passed on media3's
+   first-frame report while every feed row was black on screen, so it asks
+   the runner for the device's own screencap and compares that within the
+   emulator's measured 14, the report kept as its diagnostic line; the
+   video renderer never moves a decoder between surfaces, the black rows'
+   cause; and a player with no picture composes no SurfaceView. Five
+   watched negatives, counts printed),
    `tools/check-file-modes.py` (the file-mode NUMBERS agree with the
    spec's wherever they are written down. `kaya_open_picked` takes an
    integer, crates/kaya/src/spec.rs decides what it means, and five

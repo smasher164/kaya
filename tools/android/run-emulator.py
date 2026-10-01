@@ -28,6 +28,7 @@ import threading
 import time
 
 from packaging import android as packaging_android
+from packaging import mark
 from packaging import identity as app_identity
 from lanes import android as lane
 import exclusive
@@ -1488,6 +1489,14 @@ def run_apk_on(serial, name, apk, component, script, extras,
             held.add(seq)
             told = answer_hold_screen(serial, package, seq, log)
             print(f"{name}: hold_screen #{seq} -> {told}", file=log)
+        for seq, *box, ground_x in re.findall(
+                r"KAYA_REQUEST: video_ink (\d+) (-?\d+) (-?\d+) (-?\d+) (-?\d+) (-?\d+)", dump):
+            if seq in held:
+                continue
+            held.add(seq)
+            told = answer_video_ink(serial, package, seq, tuple(int(v) for v in box),
+                                    int(ground_x), log)
+            print(f"{name}: video_ink #{seq} -> {told}", file=log)
         for seq, *point in re.findall(
                 r"KAYA_REQUEST: draganddrop (\d+) (-?\d+) (-?\d+) (-?\d+) "
                 r"(-?\d+) (\d+)", dump):
@@ -2052,6 +2061,83 @@ def answer_hold_screen(serial, package, seq, log):
         input=line + "\n", stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         check=False, **TEXT)
     return f"{line!r}, written exit {got.returncode} {got.stdout.strip()!r}"
+
+
+def video_ink_reading(png, box, ground_x):
+    """expect_video_ink's reading of a screencap: the pixel at the centre of
+    the view's box (screen pixels, left top right bottom) and the ground at
+    ground_x beside it, both as RRGGBB, then what the box holds; or None and
+    why not. The screencap must say it is sRGB, since the verb compares in
+    sRGB."""
+    if not png.startswith(b"\x89PNG"):
+        return None, f"the screencap is not a PNG ({len(png)} bytes)"
+    if b"sRGB" not in png[:4096]:
+        return None, "the screencap carries no sRGB chunk, so its colours are in no stated space"
+    w, h, ch, rows = mark.decode_png(png)
+    left, top, right, bottom = box
+    left, top = max(left, 0), max(top, 0)
+    right, bottom = min(right, w), min(bottom, h)
+    if right <= left or bottom <= top:
+        return None, f"the view's box {box} is outside the {w}x{h} screencap"
+    cx, cy = (left + right) // 2, (top + bottom) // 2
+    centre = "%02X%02X%02X" % tuple(rows[cy][cx * ch:cx * ch + 3])
+    ground = ("%02X%02X%02X" % tuple(rows[cy][ground_x * ch:ground_x * ch + 3])
+              if 0 <= ground_x < w else f"<x {ground_x} outside the screencap>")
+    counts = {}
+    for y in range(top, bottom):
+        row = rows[y]
+        for x in range(left, right):
+            px = bytes(row[x * ch:x * ch + 3])
+            counts[px] = counts.get(px, 0) + 1
+    common, n = max(counts.items(), key=lambda kv: kv[1])
+    area = (right - left) * (bottom - top)
+    return (f"{centre} {ground} at {cx},{cy} and {ground_x},{cy} of a {w}x{h} screencap; the box "
+            f"{left},{top}-{right},{bottom} is {n * 100 // area}% "
+            f"{common.hex().upper()} over {len(counts)} colour(s)"), ""
+
+
+def video_ink_reading_selftest():
+    """The reader watched both ways on a synthesized screencap: a red box on
+    a black ground reads red at its centre, and a black one reads black."""
+    w, h = 40, 30
+    rows = [[0, 0, 0] * w for _ in range(h)]
+    for y in range(10, 20):
+        for x in range(8, 24):
+            rows[y][x * 3:x * 3 + 3] = [0xC8, 0x3C, 0x1E]
+    png = mark._png(w, h, rows)
+    tagged = png[:33] + mark._chunk(b"sRGB", b"\x00") + png[33:]
+    red, _ = video_ink_reading(tagged, (8, 10, 24, 20), 30)
+    black, _ = video_ink_reading(tagged, (24, 20, 40, 30), 2)
+    untagged, why = video_ink_reading(png, (8, 10, 24, 20), 30)
+    if not (red or "").startswith("C83C1E 000000 ") \
+            or not (black or "").startswith("000000 000000 ") \
+            or untagged is not None or "sRGB" not in why:
+        die(f"run-emulator: SELF-TEST FAIL — the video ink reader read {red!r}, "
+            f"{black!r} and {untagged!r}/{why!r} off a synthesized screencap")
+
+
+video_ink_reading_selftest()
+
+
+def answer_video_ink(serial, package, seq, box, ground_x, log):
+    """expect_video_ink's hand: the device's own screencap, which holds what
+    SurfaceFlinger composed (a SurfaceView's picture included), read at the
+    view's box and written into the app's files directory for the verb."""
+    got = subprocess.run(["timeout", "20", "adb", "-s", serial, "exec-out", "screencap", "-p"],
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    if got.returncode != 0:
+        line = (f"<no reading: `adb exec-out screencap -p` exited {got.returncode}: "
+                f"{got.stderr.decode('utf-8', 'replace').strip()}>")
+    else:
+        reading, why = video_ink_reading(got.stdout, box, ground_x)
+        line = reading or f"<no reading: {why}>"
+    name = f"files/kaya-host-{seq}.txt"
+    wrote = subprocess.run(
+        ["timeout", "20", "adb", "-s", serial, "exec-in",
+         f"run-as {package} sh -c 'cat > {name}'"],
+        input=line + "\n", stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        check=False, **TEXT)
+    return f"{line!r}, written exit {wrote.returncode} {wrote.stdout.strip()!r}"
 NOTIFY_TAP_RETRY_S = 4.0
 
 

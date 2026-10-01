@@ -3481,6 +3481,87 @@ for pattern, repl, label, want in (
     if not found:
         fail(f"check-verbs SELF-TEST: the Compose media arm passed with {label}")
 
+# --- THE ANDROID VIDEO READ (docs/traps.md, the media feed entry) --------
+# A lane cannot see its own read go soft: expect_video_ink on Compose passed
+# on media3's first-frame report while every row of the feed was black on
+# screen. So the arm asks the runner for its screencap and compares what it
+# says, the runner answers with `screencap`, and the tolerance is the
+# measured 14. Beside the read, two rules the feed and formats legs hold only
+# while the read is honest: the video renderer never moves a decoder between
+# surfaces (the black rows' cause), and a view whose player has no picture
+# composes no SurfaceView (the audio item's stale frame).
+ANDROID_RUNNER = "tools/android/run-emulator.py"
+ANDROID_VIDEO_INK_RULED = 14
+
+
+def android_video_read(media_src=None, compose_src=None, runner_src=None):
+    bad = []
+    media = kotlin_code(media_src if media_src is not None else real(KOTLIN_MEDIA))
+    compose = kotlin_code(compose_src if compose_src is not None else real(KOTLIN))
+    runner = runner_src if runner_src is not None else real(ANDROID_RUNNER)
+    arm = kotlin_action_arm(compose, "expect_video_ink")
+    if arm is None:
+        bad.append("KayaCompose.kt has no one expect_video_ink arm to read")
+    elif "KAYA_REQUEST: video_ink" not in arm or "kayaVideoInkWithin(" not in arm \
+            or "kayaHostAnswer(" not in arm:
+        bad.append("Compose's expect_video_ink does not compare the runner's screencap "
+                   "(KAYA_REQUEST: video_ink, kayaHostAnswer, kayaVideoInkWithin) — "
+                   "the frames-arriving report passed a black feed")
+    answer = re.search(r"^def answer_video_ink\(.*?(?=^def |\Z)", runner, re.M | re.S)
+    if answer is None or '"screencap"' not in answer.group(0) \
+            or "video_ink_reading(" not in answer.group(0):
+        bad.append("run-emulator.py's answer_video_ink does not read the device's own "
+                   "screencap through video_ink_reading")
+    if not re.search(r"KAYA_REQUEST: video_ink .*\n.*\n.*\n.*\n.*answer_video_ink\(", runner):
+        bad.append("run-emulator.py's leg poll does not answer KAYA_REQUEST: video_ink")
+    tol = re.search(r"internal const val KAYA_VIDEO_INK_TOLERANCE = (\d+)", media)
+    if not tol or int(tol.group(1)) != ANDROID_VIDEO_INK_RULED:
+        bad.append(f"KayaMedia.kt KAYA_VIDEO_INK_TOLERANCE is "
+                   f"{tol.group(1) if tol else 'absent'}, not the measured "
+                   f"{ANDROID_VIDEO_INK_RULED} (the emulator's BT.601 composition)")
+    factory = re.search(r"class KayaRenderersFactory\b.*?\n\}", media, re.S)
+    if factory is None or not re.search(
+            r"override fun codecNeedsSetOutputSurfaceWorkaround\([^)]*\): Boolean = true",
+            factory.group(0)):
+        bad.append("KayaMedia.kt's KayaRenderersFactory moves a decoder between surfaces "
+                   "(codecNeedsSetOutputSurfaceWorkaround not true) — feed rows went black")
+    if "ExoPlayer.Builder(context, KayaRenderersFactory(context))" not in media:
+        bad.append("the ExoPlayer is not built with KayaRenderersFactory")
+    view = kotlin_fun(media, "KayaVideoView") or ""
+    if not re.search(r"if \(p != null && p\.showsPicture\) \{\s*val scale", view):
+        bad.append("KayaVideoView composes its PlayerSurface for a player with no "
+                   "picture (showsPicture) — the SurfaceView keeps the last video's frame")
+    return bad
+
+
+android_read_out = android_video_read()
+if android_read_out:
+    media_status = 1
+    print("check-verbs: the Android video read broke a rule no scene can see:",
+          file=sys.stderr)
+    print("\n".join(android_read_out), file=sys.stderr)
+print("check-verbs: Android video read held (screencap, tolerance, renderer, picture)")
+for pattern, repl, label, which in (
+    (r"(Log\.i\(\"kaya\", \"KAYA_REQUEST: )video_ink", "video_frames",
+     "the Compose arm not asking for the screencap", "compose"),
+    (r'(\["timeout", "20", "adb", "-s", serial, "exec-out", )"screencap", "-p"\]',
+     '"cat", "/dev/null"]', "the runner not taking the screencap", "runner"),
+    (r"(internal const val KAYA_VIDEO_INK_TOLERANCE = )14", "20",
+     "the Android video ink tolerance widened", "media"),
+    (r"(override fun codecNeedsSetOutputSurfaceWorkaround\(name: String\): Boolean = )true",
+     "super.codecNeedsSetOutputSurfaceWorkaround(name)", "a decoder moved between surfaces",
+     "media"),
+    (r"(if \(p != null)( && p\.showsPicture)\) \{", ") {",
+     "a SurfaceView composed for a player with no picture", "media"),
+):
+    src = {"media": KOTLIN_MEDIA, "compose": KOTLIN, "runner": ANDROID_RUNNER}[which]
+    cut = g.doctor(f"android video read: {label}", real(src), pattern,
+                   lambda m, repl=repl: m.group(1) + repl)
+    found = [f for f in android_video_read(**{f"{which}_src": cut}) if f not in android_read_out]
+    print(f"check-verbs: android-video-read negative ({label}): {len(found)} finding(s)")
+    if not found:
+        fail(f"check-verbs SELF-TEST: the Android video read passed with {label}")
+
 # --- THE GTK MEDIA ARM (docs/media-plan.md §2, §3, §5, §7a) -------------
 # The mac clause's rules on Linux, none of which a scene can see: THE VIEW IS
 # a GtkPicture over gtk4paintablesink's paintable, never GtkVideo (its
@@ -3739,4 +3820,6 @@ g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"+ the media arms (a bare layer, one report door, playbackState first) "
           f"+ the Compose media arm (PlayerSurface, one door, raw facts, decodability) "
           f"+ the GTK media arm (GtkPicture over the sink, one door, raw facts, decodability) "
+          f"+ the Android video read (the device's screencap, its tolerance, no decoder moved "
+          f"between surfaces, no picture no SurfaceView) "
           f"+ spec hash against 2 interpreters")

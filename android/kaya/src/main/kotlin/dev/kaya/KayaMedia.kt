@@ -60,7 +60,12 @@ import androidx.media3.datasource.DataSourceUtil
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.HttpDataSource
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.Renderer
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
+import androidx.media3.exoplayer.video.MediaCodecVideoRenderer
+import androidx.media3.exoplayer.video.VideoRendererEventListener
 import androidx.media3.exoplayer.PlayerMessage
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -106,6 +111,9 @@ internal val kayaCaptionShown = ConcurrentHashMap<Long, String>()
 /** Which player each video view's surface was composed with, by node. */
 internal val kayaVideoSurfaces = ConcurrentHashMap<Long, Long>()
 
+/** Each video view's box in window pixels, clipped by its ancestors, by node. */
+internal val kayaVideoBoxes = ConcurrentHashMap<Long, androidx.compose.ui.geometry.Rect>()
+
 /** The window's view, which carries keepScreenOn (docs/media-plan.md §2 rule 5). */
 internal var kayaMediaHostView: android.view.View? = null
 
@@ -116,7 +124,7 @@ private var kayaCaptionStyleWatched = false
 /** One platform player: a media3 ExoPlayer the app holds by id. Every fact it
  * learns goes to the core raw, through [kayaPlayerReport]. */
 internal class KayaMediaPlayer(val id: Long, context: Context) : Player.Listener {
-    val exo: ExoPlayer = ExoPlayer.Builder(context)
+    val exo: ExoPlayer = ExoPlayer.Builder(context, KayaRenderersFactory(context))
         // docs/media-plan.md §2 rule 6: audio focus and becoming-noisy, both on.
         .setAudioAttributes(
             AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
@@ -153,6 +161,11 @@ internal class KayaMediaPlayer(val id: Long, context: Context) : Player.Listener
     var kayaCaption = ""
     var platformCue = ""
     val drawsSidecar: Boolean get() = captionTimes.isNotEmpty()
+
+    /** Whether a view of this player shows a picture: not with no item, nor
+     * once the loaded item turned out to carry no video track (docs/media-plan.md §7b). */
+    val showsPicture: Boolean
+        get() = exo.mediaItemCount > 0 && !(loaded && !exo.currentTracks.containsType(C.TRACK_TYPE_VIDEO))
 
     /** An http(s) sidecar being fetched (the maintainer's ruling of 2026-09-30). */
     private var fetchGeneration = 0
@@ -458,6 +471,32 @@ internal class KayaMediaPlayer(val id: Long, context: Context) : Player.Listener
     }
 }
 
+/** media3's renderers with a decoder never moved between surfaces (docs/traps.md, the media feed entry). */
+private class KayaRenderersFactory(context: Context) : DefaultRenderersFactory(context) {
+    override fun buildVideoRenderers(
+        context: Context,
+        extensionRendererMode: Int,
+        mediaCodecSelector: MediaCodecSelector,
+        enableDecoderFallback: Boolean,
+        eventHandler: Handler,
+        eventListener: VideoRendererEventListener,
+        allowedVideoJoiningTimeMs: Long,
+        out: java.util.ArrayList<Renderer>,
+    ) {
+        val builder = MediaCodecVideoRenderer.Builder(context)
+            .setCodecAdapterFactory(codecAdapterFactory)
+            .setMediaCodecSelector(mediaCodecSelector)
+            .setAllowedJoiningTimeMs(allowedVideoJoiningTimeMs)
+            .setEnableDecoderFallback(enableDecoderFallback)
+            .setEventHandler(eventHandler)
+            .setEventListener(eventListener)
+            .setMaxDroppedFramesToNotify(MAX_DROPPED_VIDEO_FRAME_COUNT_TO_NOTIFY)
+        out.add(object : MediaCodecVideoRenderer(builder) {
+            override fun codecNeedsSetOutputSurfaceWorkaround(name: String): Boolean = true
+        })
+    }
+}
+
 /** A language as BCP 47 through the platform's own canonicalizer; "und" for none. */
 internal fun kayaLanguageTag(raw: String?): String {
     if (raw.isNullOrEmpty() || raw == "und") return "und"
@@ -547,17 +586,19 @@ internal fun KayaVideoView(node: KayaNode, a11y: Modifier, boxFill: Modifier) {
             .onGloballyPositioned { c ->
                 val all = c.size.width.toFloat() * c.size.height
                 val shown = c.boundsInWindow()
+                kayaVideoBoxes[node.id] = shown
                 KayaPresent.videoVisible(node.id, if (all > 0) (shown.width * shown.height / all).toDouble() else 0.0)
             },
     ) {
         DisposableEffect(node.id) {
             onDispose {
                 kayaVideoSurfaces.remove(node.id)
+                kayaVideoBoxes.remove(node.id)
                 kayaCaptionShown.remove(node.id)
                 KayaPresent.videoVisible(node.id, 0.0)
             }
         }
-        if (p != null) {
+        if (p != null && p.showsPicture) {
             val scale = when (node.fit.toInt()) {
                 FIT_COVER -> ContentScale.Crop
                 FIT_FILL -> ContentScale.FillBounds
@@ -629,12 +670,40 @@ private fun kayaWatchCaptionStyle(context: Context) {
     )
 }
 
+/** expect_video_ink's tolerance on this lane (docs/traps.md, the BT.601 entry). */
+internal const val KAYA_VIDEO_INK_TOLERANCE = 14
+
+internal fun kayaVideoInkWithin(got: String, want: String): Boolean {
+    fun rgb(s: String): List<Int>? {
+        if (s.length != 6) return null
+        val n = s.toIntOrNull(16) ?: return null
+        return listOf((n shr 16) and 0xFF, (n shr 8) and 0xFF, n and 0xFF)
+    }
+    val g = rgb(got) ?: return false
+    val w = rgb(want) ?: return false
+    return g.zip(w).all { (a, b) -> kotlin.math.abs(a - b) <= KAYA_VIDEO_INK_TOLERANCE }
+}
+
+/** harness.rs's VIDEO_GROUND_OFFSET, in dp: where `"none"` reads the ground beside a video view. */
+internal const val KAYA_VIDEO_GROUND_OFFSET = 8f
+
+/** The view's shown box in SCREEN pixels, "left top right bottom", then the x
+ * of the ground beside it, the space the runner's screencap is in; null when
+ * none of it is on screen. Main thread. */
+internal fun kayaVideoScreenBox(decor: android.view.View, node: KayaNode): String? {
+    val box = kayaVideoBoxes[node.id] ?: return null
+    if (box.width < 1f || box.height < 1f) return null
+    val corner = IntArray(2)
+    decor.getLocationOnScreen(corner)
+    val beside = box.right + KAYA_VIDEO_GROUND_OFFSET * decor.resources.displayMetrics.density
+    return "${corner[0] + box.left.toInt()} ${corner[1] + box.top.toInt()} " +
+        "${corner[0] + box.right.toInt()} ${corner[1] + box.bottom.toInt()} ${corner[0] + beside.toInt()}"
+}
+
 /**
- * expect_video_ink's read on this platform (docs/media-plan.md §8 ruling 2):
- * the SurfaceView is a hole to kaya's window PixelCopy (measured, 000000), so
- * the assertion is that FRAMES ARRIVE — media3 rendered this item's first
- * frame to the surface the view composed with its player. Null when they do,
- * else what was seen.
+ * The frames-arriving reading, expect_video_ink's diagnostic line beside the
+ * runner's screencap: media3 rendered this item's first frame to the surface
+ * the view composed with its player. Null when it did, else what was seen.
  */
 internal fun kayaVideoFramesWhyNot(node: KayaNode): String? {
     val p = kayaPlayers[node.videoPlayer] ?: return "the view shows no player (player ${node.videoPlayer})"

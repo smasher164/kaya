@@ -24666,6 +24666,33 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
+    /// The window's ground beside the video view, out of the same
+    /// `PrintWindow(PW_RENDERFULLCONTENT)` print video_ink reads.
+    fn video_ground(&self, target: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            let Some(widget) = media::stage::video_at(core, target.index) else {
+                return Ok(format!("<this window holds {} video views>", core.media.video_ids.len()));
+            };
+            let Some(host) = media::stage::host_of(core, widget) else {
+                return Ok(format!("<video view {widget} is not registered>"));
+            };
+            let element: FrameworkElement = windows_core::Interface::cast(&host)?;
+            let at = element_placement(core, &element)?;
+            let beside = Placement {
+                ox: at.ox + at.w + (crate::harness::VIDEO_GROUND_OFFSET * at.scale).round() as i32,
+                oy: at.oy + at.h / 2,
+                w: 1,
+                h: 1,
+                ..at
+            };
+            Ok(match grab_canvas(&beside) {
+                Ok(grab) => sample_grab(&grab, &[(0.0, 0.0)]),
+                Err(why) => format!("<the ground beside the video view could not be printed: {why}>"),
+            })
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
     fn ax_action(&self, target: crate::harness::Target, name: &str) -> Result<(), String> {
         let name = name.to_owned();
         Self::on_ui_mut(move |core| {

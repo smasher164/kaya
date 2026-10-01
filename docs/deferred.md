@@ -64,7 +64,9 @@ breadth owed:
     player holding kaya's state with the MediaStyle notification from a
     mediaPlayback foreground service (measured), media3's rows with unit
     rows, and expect_video_ink as frames arriving (ruling 2: the SurfaceView
-    is a hole to PixelCopy). 15 legs on compose, jvm and go.
+    is a hole to PixelCopy). 15 legs on compose, jvm and go. AMENDED
+    2026-09-30: frames arriving passed a feed whose every row was black, so
+    the read is the device's screencap now (in the WATCH below).
   - ~~**DEPTH STUB: media_formats on swiftui/ios**~~ — LANDED 2026-09-30:
     15 legs on swift, go and rust-swiftui; the ink through the device's own
     screenshot (C83C1E exact; §6.2 measured), session_send through
@@ -174,7 +176,7 @@ tools/scenes/range.steps green on the mac lane. What breadth owed:
     send recorded, every drain emptying the queue first).
 
 ## WATCH — media: what the breadth measured and no lane settles (docs/media-plan.md), found 2026-09-30
-KEY: resources, 4003, CodecException 14, emulator-5558, emulator-5560, picked file, content URI, video_ink_tolerance, MediaRemote non-delivery, HLS TS MediaOpened, display awake, playback category
+KEY: resources, 4003, CodecException 14, emulator-5558, emulator-5560, picked file, content URI, video_ink_tolerance, MediaRemote non-delivery, HLS TS MediaOpened, display awake, playback category, KAYA_VIDEO_INK_TOLERANCE, setOutputSurface, detached surface, screencap, video_ground, VIDEO_INK_NONE
 
 For the maintainer's review, each measured and none asserted by a lane:
   - ~~`resources` on Android~~ — BUILT 2026-09-30 by the maintainer's
@@ -193,6 +195,20 @@ For the maintainer's review, each measured and none asserted by a lane:
     check-sugar-surface holds the nine (the shipped local-path form watched
     red per binding) and check-verbs the iOS hand-off; no simulator leg can
     see the scope, since a file in the app's own container needs none there.
+  - ~~Every media_feed row black on the Android emulators while the lane was
+    green~~ — FIXED 2026-09-30: expect_video_ink on Compose asserted media3's
+    first-frame report; it reads the device's own screencap now, and the
+    cause, a decoder moved onto its row's SurfaceView with setOutputSurface
+    after it was configured without one, is gone: kaya's video renderer
+    re-creates the decoder instead (docs/traps.md, the media feed entry;
+    check-verbs' Android video read).
+  - ~~A player with no picture shows three ways~~ — FIXED 2026-09-30: an
+    audio item showed black on GTK and the previous frame on Android; all
+    five show nothing, media_formats reads it (`"none"`, docs/traps.md).
+  - The Android video ink is compared within 14 (KAYA_VIDEO_INK_TOLERANCE),
+    the emulator composing the BT.709 clip as BD2E22 (docs/traps.md), stated
+    per platform as GTK's 4 is. For the maintainer's review: GTK's was
+    ruled, this one is not.
   - The GTK video ink is compared within 4 where the others use 2, stated
     per platform through Stage::video_ink_tolerance under plan §7a's "a
     tolerance stated for video". RULED 2026-09-30 (the maintainer): kept,
