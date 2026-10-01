@@ -13550,3 +13550,81 @@ rarer stall seen in the same probe is not this: a preroll that never
 completes, with a streaming thread parked in a blocking pad probe and no
 thread in a mutex, on file:// and pushfile:// alike; kaya reports it as
 Overdue.
+
+## Media Foundation's clock ignores an MP4 edit list, so a WinUI seek lands two frames early (measured 2026-10-01)
+An H.264 file with B-frames starts its pictures a reorder delay into the
+track's media timeline (composition time 80 ms at 25 fps for FFmpeg's x264
+with `-bf 2`), and the muxer writes a video `elst` whose media_time skips it.
+AVFoundation, media3 and GStreamer honour the list; Media Foundation's MPEG-4
+source does not, for its thumbnails and source reader
+(docs/probes/media-extraction-2026-10-01.md) and for the WinUI MediaPlayer
+too. Measured on the lane's VM with a clip whose every frame carries its own
+colour (red 5n for frame n), paused seeks to 500, 1000, 1500 and 580 ms showed
+frames 10, 23, 35 and 12 where the mac's AVPlayer showed 12, 25, 37 and 14,
+while `PlaybackSession.Position` read back the asked time: the clock runs
+80 ms, the edit, ahead of the picture. `NaturalDuration` is NOT shifted (2.0 s,
+the edit's own length). kaya reads the video track's edit list itself
+(crates/kaya/src/edit_list.rs; a local file read directly, an http(s) one by
+`Range` requests with the open held until it answers) and the WinUI arm moves
+every Position read and every seek by it (winui/media.rs `shown_ms`, the seek
+in `command`); one edit at normal rate is the shape read, any other is left
+alone and said so on the leg's log. The guard is media_tracks'
+`expect_video_ink video#0 "A0A0A0"` on h264_frames.mp4 at 1.5 s on all five
+lanes, watched reading C83C1E with the correction cut, and check-verbs'
+clause holding every Position read and the seek to the shift. The audio
+track's own edit (the AAC priming, 1024 samples) is ignored by Media
+Foundation too and nothing corrects the sound against the picture; that lip
+sync offset is not measured.
+
+## A WinUI paused seek can leave the previous picture on screen (measured 2026-10-01)
+On the lane's VM a paused seek on a local B-frame MP4 completed, and the
+position read the asked time, while the picture stayed the previous one: the
+FIRST paused seek after an open left frame 0 in 3, 3 and 1 of 10 trials, a
+paused seek after a play-through left the last frame in 1 of 12, and a seek
+issued 34 ms after another (media_tracks' 0.5 s then 1.5 s) left the first
+one's picture on 1 of 6 windows legs of a filtered matrix and on media_tracks_js
+of the next. A second seek to the same time draws nothing, and a seek one
+100 ns tick away (same frame) did not help (3 of 10). What draws it is a frame
+step there and back: `StepForwardOneFrame` then `StepBackwardOneFrame` after
+the last paused seek completes, which raises no SeekCompleted, and 20 of 20,
+then 28 of 28 (10 first seeks, 10 back-to-back pairs, 8 after a play-through)
+drew the right picture. The step is skipped when the app's last word was play
+(`play_asked`), since a frame step pauses a playing player and was measured
+stopping a play-through that a seek(0)+play had just started; and a seek
+asked while one is in flight is held and issued when it completes
+(`seek_held`), so the step follows the last. check-verbs holds the step, its
+guard and the hold, four cuts watched.
+
+Also from the edit-list fix: Media Foundation's clock stops at
+`NaturalDuration`, the edit's own length, so a B-frame file's shifted clock
+ended 80 ms short of the item and kaya's caption renderer kept the last cue
+after the end (five windows media_tracks legs); `position_ms` reads a clock at
+its end as the item's end.
+
+## A WinUI window's caption mirrors only through WS_EX_LAYOUTRTL, and then its TitleBar's drag regions land mirrored (measured 2026-10-01)
+WinUI 3 has no window-level FlowDirection (microsoft-ui-xaml#4213, closed
+not planned), so under KAYA_LOCALE=ar-EG the content mirrored and the caption
+kept the close button at the right. Setting WS_EX_LAYOUTRTL on the top-level
+HWND, the Win32 route the issue names, mirrors the caption (buttons left,
+title and icon right) and left the content as it was on the lane's VM:
+scrollrtl and tasksrtl green with it, with WS_EX_NOINHERITLAYOUT added or
+not, and kaya keeps NOINHERITLAYOUT so the content's child windows stay
+unmirrored. The extended caption (a window with a toolbar) then breaks
+(microsoft-ui-xaml#8559, #8671): the TitleBar control writes its passthrough
+rects unmirrored and a mirrored window reads them mirrored, so a scan of the
+caption with WindowFromPoint and WM_NCHITTEST found the toolbar and the menu
+bar answering HTCAPTION (a click drags the window) and the content answering
+over the close and maximize buttons. kaya turns the control's
+AutoRefreshDragRegions off on a mirrored window and writes the passthrough
+rects itself from the headers' bounds in the RTL ground, whose coordinates
+are the mirrored window's (winui/mod.rs `publish_mirrored_passthrough`).
+Also: a mirrored window's ClientToScreen answers its client area's RIGHT
+edge, so every screen geometry read goes through `client_origin`. The
+reading is WinUI's expect_direction, which reads the frame where a click
+lands (which side answers HTCLOSE, and each caption header HTCLIENT at its
+centre, both asked of this window's own child under the point so an
+overlapping window on a pooled lane cannot answer); tasksrtl reads it again
+with the toolbar in the caption. Watched red with the mirroring cut ("rtl
+content in an ltr frame" on formatar) and with the drag regions left to the
+control (no point answers HTCLOSE on tasksrtl); check-verbs holds both window
+births, the drag regions, the client origin and the reader, four cuts.

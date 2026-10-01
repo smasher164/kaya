@@ -157,8 +157,9 @@ trackLine what tags selected =
 -- | media_tracks (docs/media-plan.md §3, §7a): each item's audio and
 -- caption listing, a second audio track selected, the last caption track
 -- selected, and the cue read at 0.5 s and 1.5 s with the player paused
--- there. The sidecar items are the suite's floor file with captions.vtt:
--- an asset, then fetched from the local server, then a 404 there.
+-- there. The sidecar items are the suite's floor file with captions.vtt (the
+-- first over h264_frames.mp4): an asset, then fetched from the local server,
+-- then a 404 there.
 tracksApp :: App -> IO ()
 tracksApp app = do
   base <-
@@ -172,7 +173,7 @@ tracksApp app = do
           (served base "hls_fmp4.m3u8" "application/vnd.apple.mpegurl" "", Nothing),
           (served base "hls_mpegts.m3u8" "application/vnd.apple.mpegurl" "", Nothing),
           (local "h264_tx3g.mp4" "video/mp4" h264, Nothing),
-          (floorAs "h264_aac.mp4 + captions.vtt", Just (mediaAsset "media/captions.vtt")),
+          (Item "h264_frames.mp4 + captions.vtt" (mediaAsset "media/h264_frames.mp4") "video/mp4" h264, Just (mediaAsset "media/captions.vtt")),
           (floorAs "h264_aac.mp4 + http captions.vtt", Just (mediaUrl (base <> "/captions.vtt"))),
           (floorAs "h264_aac.mp4 + http nope.vtt", Just (mediaUrl (base <> "/nope.vtt")))
         ]

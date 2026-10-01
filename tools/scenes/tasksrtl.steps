@@ -88,3 +88,7 @@ expect_no_clipping
 expect_ax checkbox@hide_badge[s] "switch/إخفاء شارة اليوم"
 back
 expect_entries 0
+# Again with the toolbar in the caption: on Windows the frame's caption
+# buttons and its drag regions are part of the direction (docs/traps.md, the
+# WinUI title bar under right to left).
+expect_direction rtl

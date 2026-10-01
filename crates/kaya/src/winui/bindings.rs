@@ -22,6 +22,18 @@ pub mod Microsoft {
             const SIGNATURE: windows_core::imp::ConstBuffer =
                 windows_core::imp::ConstBuffer::from_slice(b"struct(Microsoft.UI.IconId;u8)");
         }
+        #[repr(C)]
+        #[derive(Clone, Copy, Debug, Default, PartialEq)]
+        pub struct XamlWindowId {
+            pub Value: u64,
+        }
+        impl windows_core::TypeKind for XamlWindowId {
+            type TypeKind = windows_core::CopyType;
+        }
+        impl windows_core::RuntimeType for XamlWindowId {
+            const SIGNATURE: windows_core::imp::ConstBuffer =
+                windows_core::imp::ConstBuffer::from_slice(b"struct(Microsoft.UI.WindowId;u8)");
+        }
         pub mod Composition {
             windows_core::imp::define_interface!(
                 IAnimationObject,
@@ -740,6 +752,380 @@ pub mod Microsoft {
                 ) -> windows_core::HRESULT,
                 pub RemoveTick:
                     unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+            }
+        }
+        pub mod Input {
+            windows_core::imp::define_interface!(
+                IInputNonClientPointerSource,
+                IInputNonClientPointerSource_Vtbl,
+                0x471732b4_3d07_5104_b192_ebacf71e86df
+            );
+            impl windows_core::RuntimeType for IInputNonClientPointerSource {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IInputNonClientPointerSource_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub DispatcherQueue: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub ClearAllRegionRects:
+                    unsafe extern "system" fn(*mut core::ffi::c_void) -> windows_core::HRESULT,
+                pub ClearRegionRects: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    NonClientRegionKind,
+                )
+                    -> windows_core::HRESULT,
+                pub GetRegionRects: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    NonClientRegionKind,
+                    *mut u32,
+                    *mut *mut super::super::super::Windows::Graphics::RectInt32,
+                )
+                    -> windows_core::HRESULT,
+                pub SetRegionRects: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    NonClientRegionKind,
+                    u32,
+                    *const super::super::super::Windows::Graphics::RectInt32,
+                )
+                    -> windows_core::HRESULT,
+                CaptionTapped: usize,
+                pub RemoveCaptionTapped:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+                PointerEntered: usize,
+                pub RemovePointerEntered:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+                PointerExited: usize,
+                pub RemovePointerExited:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+                PointerMoved: usize,
+                pub RemovePointerMoved:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+                PointerPressed: usize,
+                pub RemovePointerPressed:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+                PointerReleased: usize,
+                pub RemovePointerReleased:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+                RegionsChanged: usize,
+                pub RemoveRegionsChanged:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IInputNonClientPointerSource2,
+                IInputNonClientPointerSource2_Vtbl,
+                0xdd2b10c4_7de6_5c1d_b438_06ddc994058f
+            );
+            impl windows_core::RuntimeType for IInputNonClientPointerSource2 {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IInputNonClientPointerSource2_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                EnteringMoveSize: usize,
+                pub RemoveEnteringMoveSize:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+                EnteredMoveSize: usize,
+                pub RemoveEnteredMoveSize:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+                WindowRectChanging: usize,
+                pub RemoveWindowRectChanging:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+                WindowRectChanged: usize,
+                pub RemoveWindowRectChanged:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+                ExitedMoveSize: usize,
+                pub RemoveExitedMoveSize:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IInputNonClientPointerSourceStatics,
+                IInputNonClientPointerSourceStatics_Vtbl,
+                0x7d0b775c_1903_5dc7_bd2f_7a4b31f0cff2
+            );
+            impl windows_core::RuntimeType for IInputNonClientPointerSourceStatics {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IInputNonClientPointerSourceStatics_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub GetForWindowId: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    super::XamlWindowId,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+            }
+            #[repr(transparent)]
+            #[derive(Clone, Debug, Eq, PartialEq)]
+            pub struct InputNonClientPointerSource(windows_core::IUnknown);
+            windows_core::imp::interface_hierarchy!(
+                InputNonClientPointerSource,
+                windows_core::IUnknown,
+                windows_core::IInspectable
+            );
+            impl InputNonClientPointerSource {
+                pub fn DispatcherQueue(
+                    &self,
+                ) -> windows_core::Result<super::Dispatching::DispatcherQueue> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).DispatcherQueue)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn ClearAllRegionRects(&self) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).ClearAllRegionRects)(
+                            windows_core::Interface::as_raw(this),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn ClearRegionRects(
+                    &self,
+                    region: NonClientRegionKind,
+                ) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).ClearRegionRects)(
+                            windows_core::Interface::as_raw(this),
+                            region,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn GetRegionRects(
+                    &self,
+                    region: NonClientRegionKind,
+                ) -> windows_core::Result<
+                    windows_core::Array<super::super::super::Windows::Graphics::RectInt32>,
+                > {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::MaybeUninit::zeroed();
+                        ( windows_core::Interface::vtable ( this ) . GetRegionRects ) ( windows_core::Interface::as_raw ( this ) , region , windows_core::Array:: < super::super::super::Windows::Graphics:: RectInt32 >::set_abi_len ( core::mem::transmute ( & mut result__ ) ) , result__ . as_mut_ptr ( ) as * mut _ as _ ) . map ( || result__ . assume_init ( ) )
+                    }
+                }
+                pub fn SetRegionRects(
+                    &self,
+                    region: NonClientRegionKind,
+                    rects: &[super::super::super::Windows::Graphics::RectInt32],
+                ) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetRegionRects)(
+                            windows_core::Interface::as_raw(this),
+                            region,
+                            rects.len().try_into().unwrap(),
+                            rects.as_ptr(),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn RemoveCaptionTapped(&self, token: i64) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).RemoveCaptionTapped)(
+                            windows_core::Interface::as_raw(this),
+                            token,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).RemovePointerEntered)(
+                            windows_core::Interface::as_raw(this),
+                            token,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).RemovePointerExited)(
+                            windows_core::Interface::as_raw(this),
+                            token,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).RemovePointerMoved)(
+                            windows_core::Interface::as_raw(this),
+                            token,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).RemovePointerPressed)(
+                            windows_core::Interface::as_raw(this),
+                            token,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).RemovePointerReleased)(
+                            windows_core::Interface::as_raw(this),
+                            token,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn RemoveRegionsChanged(&self, token: i64) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).RemoveRegionsChanged)(
+                            windows_core::Interface::as_raw(this),
+                            token,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn RemoveEnteringMoveSize(&self, token: i64) -> windows_core::Result<()> {
+                    let this =
+                        &windows_core::Interface::cast::<IInputNonClientPointerSource2>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).RemoveEnteringMoveSize)(
+                            windows_core::Interface::as_raw(this),
+                            token,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn RemoveEnteredMoveSize(&self, token: i64) -> windows_core::Result<()> {
+                    let this =
+                        &windows_core::Interface::cast::<IInputNonClientPointerSource2>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).RemoveEnteredMoveSize)(
+                            windows_core::Interface::as_raw(this),
+                            token,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn RemoveWindowRectChanging(&self, token: i64) -> windows_core::Result<()> {
+                    let this =
+                        &windows_core::Interface::cast::<IInputNonClientPointerSource2>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).RemoveWindowRectChanging)(
+                            windows_core::Interface::as_raw(this),
+                            token,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn RemoveWindowRectChanged(&self, token: i64) -> windows_core::Result<()> {
+                    let this =
+                        &windows_core::Interface::cast::<IInputNonClientPointerSource2>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).RemoveWindowRectChanged)(
+                            windows_core::Interface::as_raw(this),
+                            token,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn RemoveExitedMoveSize(&self, token: i64) -> windows_core::Result<()> {
+                    let this =
+                        &windows_core::Interface::cast::<IInputNonClientPointerSource2>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).RemoveExitedMoveSize)(
+                            windows_core::Interface::as_raw(this),
+                            token,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn GetForWindowId(
+                    windowid: super::XamlWindowId,
+                ) -> windows_core::Result<InputNonClientPointerSource> {
+                    Self::IInputNonClientPointerSourceStatics(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).GetForWindowId)(
+                            windows_core::Interface::as_raw(this),
+                            windowid,
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
+                fn IInputNonClientPointerSourceStatics<
+                    R,
+                    F: FnOnce(&IInputNonClientPointerSourceStatics) -> windows_core::Result<R>,
+                >(
+                    callback: F,
+                ) -> windows_core::Result<R> {
+                    static SHARED: windows_core::imp::FactoryCache<
+                        InputNonClientPointerSource,
+                        IInputNonClientPointerSourceStatics,
+                    > = windows_core::imp::FactoryCache::new();
+                    SHARED.call(callback)
+                }
+            }
+            impl windows_core::RuntimeType for InputNonClientPointerSource {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_class::<Self, IInputNonClientPointerSource>(
+                    );
+            }
+            unsafe impl windows_core::Interface for InputNonClientPointerSource {
+                type Vtable = <IInputNonClientPointerSource as windows_core::Interface>::Vtable;
+                const IID: windows_core::GUID =
+                    <IInputNonClientPointerSource as windows_core::Interface>::IID;
+            }
+            impl windows_core::RuntimeName for InputNonClientPointerSource {
+                const NAME: &'static str = "Microsoft.UI.Input.InputNonClientPointerSource";
+            }
+            unsafe impl Send for InputNonClientPointerSource {}
+            unsafe impl Sync for InputNonClientPointerSource {}
+            #[repr(transparent)]
+            #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+            pub struct NonClientRegionKind(pub i32);
+            impl NonClientRegionKind {
+                pub const Close: Self = Self(0i32);
+                pub const Maximize: Self = Self(1i32);
+                pub const Minimize: Self = Self(2i32);
+                pub const Icon: Self = Self(3i32);
+                pub const Caption: Self = Self(4i32);
+                pub const TopBorder: Self = Self(5i32);
+                pub const LeftBorder: Self = Self(6i32);
+                pub const BottomBorder: Self = Self(7i32);
+                pub const RightBorder: Self = Self(8i32);
+                pub const Passthrough: Self = Self(9i32);
+            }
+            impl windows_core::TypeKind for NonClientRegionKind {
+                type TypeKind = windows_core::CopyType;
+            }
+            impl windows_core::RuntimeType for NonClientRegionKind {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::from_slice(
+                        b"enum(Microsoft.UI.Input.NonClientRegionKind;i4)",
+                    );
             }
         }
         pub mod Text {
@@ -6744,6 +7130,17 @@ pub mod Microsoft {
                 windows_core::IInspectable
             );
             impl AppWindow {
+                pub fn Id(&self) -> windows_core::Result<super::XamlWindowId> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Id)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
                 pub fn IsShownInSwitchers(&self) -> windows_core::Result<bool> {
                     let this = self;
                     unsafe {
@@ -6770,6 +7167,17 @@ pub mod Microsoft {
                     unsafe {
                         let mut result__ = core::mem::zeroed();
                         (windows_core::Interface::vtable(this).IsVisible)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn OwnerWindowId(&self) -> windows_core::Result<super::XamlWindowId> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).OwnerWindowId)(
                             windows_core::Interface::as_raw(this),
                             &mut result__,
                         )
@@ -7092,6 +7500,19 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn MoveInZOrderBelow(
+                    &self,
+                    windowid: super::XamlWindowId,
+                ) -> windows_core::Result<()> {
+                    let this = &windows_core::Interface::cast::<IAppWindow2>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).MoveInZOrderBelow)(
+                            windows_core::Interface::as_raw(this),
+                            windowid,
+                        )
+                        .ok()
+                    }
+                }
                 pub fn ResizeClient(
                     &self,
                     size: super::super::super::Windows::Graphics::SizeInt32,
@@ -7221,6 +7642,58 @@ pub mod Microsoft {
                         .and_then(|| windows_core::Type::from_abi(result__))
                     })
                 }
+                pub fn CreateWithPresenterAndOwner<P0>(
+                    appwindowpresenter: P0,
+                    ownerwindowid: super::XamlWindowId,
+                ) -> windows_core::Result<AppWindow>
+                where
+                    P0: windows_core::Param<AppWindowPresenter>,
+                {
+                    Self::IAppWindowStatics(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).CreateWithPresenterAndOwner)(
+                            windows_core::Interface::as_raw(this),
+                            appwindowpresenter.param().abi(),
+                            ownerwindowid,
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
+                pub fn GetFromWindowId(
+                    windowid: super::XamlWindowId,
+                ) -> windows_core::Result<AppWindow> {
+                    Self::IAppWindowStatics(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).GetFromWindowId)(
+                            windows_core::Interface::as_raw(this),
+                            windowid,
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
+                pub fn CreateWithDispatcherQueue<P0, P2>(
+                    appwindowpresenter: P0,
+                    ownerwindowid: super::XamlWindowId,
+                    dispatcherqueue: P2,
+                ) -> windows_core::Result<AppWindow>
+                where
+                    P0: windows_core::Param<AppWindowPresenter>,
+                    P2: windows_core::Param<super::Dispatching::DispatcherQueue>,
+                {
+                    Self::IAppWindowStatics2(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).CreateWithDispatcherQueue)(
+                            windows_core::Interface::as_raw(this),
+                            appwindowpresenter.param().abi(),
+                            ownerwindowid,
+                            dispatcherqueue.param().abi(),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
                 fn IAppWindowStatics<
                     R,
                     F: FnOnce(&IAppWindowStatics) -> windows_core::Result<R>,
@@ -7335,6 +7808,17 @@ pub mod Microsoft {
                     unsafe {
                         let mut result__ = core::mem::zeroed();
                         (windows_core::Interface::vtable(this).IsZOrderAtTop)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ZOrderBelowWindowId(&self) -> windows_core::Result<super::XamlWindowId> {
+                    let this = &windows_core::Interface::cast::<IAppWindowChangedEventArgs2>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ZOrderBelowWindowId)(
                             windows_core::Interface::as_raw(this),
                             &mut result__,
                         )
@@ -8055,6 +8539,21 @@ pub mod Microsoft {
                         .and_then(|| windows_core::Type::from_abi(result__))
                     })
                 }
+                pub fn GetFromWindowId(
+                    windowid: super::XamlWindowId,
+                    displayareafallback: DisplayAreaFallback,
+                ) -> windows_core::Result<DisplayArea> {
+                    Self::IDisplayAreaStatics(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).GetFromWindowId)(
+                            windows_core::Interface::as_raw(this),
+                            windowid,
+                            displayareafallback,
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
                 pub fn GetFromPoint(
                     point: super::super::super::Windows::Graphics::PointInt32,
                     displayareafallback: DisplayAreaFallback,
@@ -8153,7 +8652,10 @@ pub mod Microsoft {
             #[doc(hidden)]
             pub struct IAppWindow_Vtbl {
                 pub base__: windows_core::IInspectable_Vtbl,
-                Id: usize,
+                pub Id: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut super::XamlWindowId,
+                ) -> windows_core::HRESULT,
                 pub IsShownInSwitchers: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut bool,
@@ -8168,7 +8670,11 @@ pub mod Microsoft {
                     *mut core::ffi::c_void,
                     *mut bool,
                 ) -> windows_core::HRESULT,
-                OwnerWindowId: usize,
+                pub OwnerWindowId: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut super::XamlWindowId,
+                )
+                    -> windows_core::HRESULT,
                 pub Position: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut super::super::super::Windows::Graphics::PointInt32,
@@ -8281,7 +8787,11 @@ pub mod Microsoft {
                     unsafe extern "system" fn(*mut core::ffi::c_void) -> windows_core::HRESULT,
                 pub MoveInZOrderAtTop:
                     unsafe extern "system" fn(*mut core::ffi::c_void) -> windows_core::HRESULT,
-                MoveInZOrderBelow: usize,
+                pub MoveInZOrderBelow: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    super::XamlWindowId,
+                )
+                    -> windows_core::HRESULT,
                 pub ResizeClient: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     super::super::super::Windows::Graphics::SizeInt32,
@@ -8410,7 +8920,11 @@ pub mod Microsoft {
                     *mut bool,
                 )
                     -> windows_core::HRESULT,
-                ZOrderBelowWindowId: usize,
+                pub ZOrderBelowWindowId: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut super::XamlWindowId,
+                )
+                    -> windows_core::HRESULT,
             }
             windows_core::imp::define_interface!(
                 IAppWindowPresenter,
@@ -8467,8 +8981,19 @@ pub mod Microsoft {
                     *mut *mut core::ffi::c_void,
                 )
                     -> windows_core::HRESULT,
-                CreateWithPresenterAndOwner: usize,
-                GetFromWindowId: usize,
+                pub CreateWithPresenterAndOwner: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    super::XamlWindowId,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub GetFromWindowId: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    super::XamlWindowId,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
             }
             windows_core::imp::define_interface!(
                 IAppWindowStatics2,
@@ -8483,7 +9008,14 @@ pub mod Microsoft {
             #[doc(hidden)]
             pub struct IAppWindowStatics2_Vtbl {
                 pub base__: windows_core::IInspectable_Vtbl,
-                CreateWithDispatcherQueue: usize,
+                pub CreateWithDispatcherQueue: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    super::XamlWindowId,
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
             }
             windows_core::imp::define_interface!(
                 IAppWindowTitleBar,
@@ -8760,7 +9292,13 @@ pub mod Microsoft {
                     *mut core::ffi::c_void,
                     *mut *mut core::ffi::c_void,
                 ) -> windows_core::HRESULT,
-                GetFromWindowId: usize,
+                pub GetFromWindowId: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    super::XamlWindowId,
+                    DisplayAreaFallback,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
                 pub GetFromPoint: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     super::super::super::Windows::Graphics::PointInt32,
@@ -287774,6 +288312,28 @@ pub mod Windows {
                         .and_then(|| windows_core::Type::from_abi(result__))
                     }
                 }
+                pub fn GetWithOptionAsync<P0>(
+                    &self,
+                    uri: P0,
+                    completionoption: HttpCompletionOption,
+                ) -> windows_core::Result<
+                    windows_future::IAsyncOperationWithProgress<HttpResponseMessage, HttpProgress>,
+                >
+                where
+                    P0: windows_core::Param<super::super::Foundation::Uri>,
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).GetWithOptionAsync)(
+                            windows_core::Interface::as_raw(this),
+                            uri.param().abi(),
+                            completionoption,
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
                 pub fn GetBufferAsync<P0>(
                     &self,
                     uri: P0,
@@ -287889,6 +288449,61 @@ pub mod Windows {
                         .and_then(|| windows_core::Type::from_abi(result__))
                     }
                 }
+                pub fn SendRequestAsync<P0>(
+                    &self,
+                    request: P0,
+                ) -> windows_core::Result<
+                    windows_future::IAsyncOperationWithProgress<HttpResponseMessage, HttpProgress>,
+                >
+                where
+                    P0: windows_core::Param<HttpRequestMessage>,
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).SendRequestAsync)(
+                            windows_core::Interface::as_raw(this),
+                            request.param().abi(),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn SendRequestWithOptionAsync<P0>(
+                    &self,
+                    request: P0,
+                    completionoption: HttpCompletionOption,
+                ) -> windows_core::Result<
+                    windows_future::IAsyncOperationWithProgress<HttpResponseMessage, HttpProgress>,
+                >
+                where
+                    P0: windows_core::Param<HttpRequestMessage>,
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).SendRequestWithOptionAsync)(
+                            windows_core::Interface::as_raw(this),
+                            request.param().abi(),
+                            completionoption,
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn DefaultRequestHeaders(
+                    &self,
+                ) -> windows_core::Result<Headers::HttpRequestHeaderCollection> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).DefaultRequestHeaders)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
                 pub fn DefaultPrivacyAnnotation(
                     &self,
                 ) -> windows_core::Result<windows_core::HSTRING> {
@@ -287952,6 +288567,174 @@ pub mod Windows {
             }
             unsafe impl Send for HttpClient {}
             unsafe impl Sync for HttpClient {}
+            #[repr(transparent)]
+            #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+            pub struct HttpCompletionOption(pub i32);
+            impl HttpCompletionOption {
+                pub const ResponseContentRead: Self = Self(0i32);
+                pub const ResponseHeadersRead: Self = Self(1i32);
+            }
+            impl windows_core::TypeKind for HttpCompletionOption {
+                type TypeKind = windows_core::CopyType;
+            }
+            impl windows_core::RuntimeType for HttpCompletionOption {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::from_slice(
+                        b"enum(Windows.Web.Http.HttpCompletionOption;i4)",
+                    );
+            }
+            #[repr(transparent)]
+            #[derive(Clone, Debug, Eq, PartialEq)]
+            pub struct HttpMethod(windows_core::IUnknown);
+            windows_core::imp::interface_hierarchy!(
+                HttpMethod,
+                windows_core::IUnknown,
+                windows_core::IInspectable
+            );
+            windows_core::imp::required_hierarchy!(
+                HttpMethod,
+                super::super::Foundation::IStringable
+            );
+            impl HttpMethod {
+                pub fn Method(&self) -> windows_core::Result<windows_core::HSTRING> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Method)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| core::mem::transmute(result__))
+                    }
+                }
+                pub fn Create(method: &windows_core::HSTRING) -> windows_core::Result<HttpMethod> {
+                    Self::IHttpMethodFactory(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Create)(
+                            windows_core::Interface::as_raw(this),
+                            core::mem::transmute_copy(method),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
+                pub fn Delete() -> windows_core::Result<HttpMethod> {
+                    Self::IHttpMethodStatics(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Delete)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
+                pub fn Get() -> windows_core::Result<HttpMethod> {
+                    Self::IHttpMethodStatics(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Get)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
+                pub fn Head() -> windows_core::Result<HttpMethod> {
+                    Self::IHttpMethodStatics(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Head)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
+                pub fn Options() -> windows_core::Result<HttpMethod> {
+                    Self::IHttpMethodStatics(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Options)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
+                pub fn Patch() -> windows_core::Result<HttpMethod> {
+                    Self::IHttpMethodStatics(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Patch)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
+                pub fn Post() -> windows_core::Result<HttpMethod> {
+                    Self::IHttpMethodStatics(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Post)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
+                pub fn Put() -> windows_core::Result<HttpMethod> {
+                    Self::IHttpMethodStatics(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Put)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
+                pub fn ToString(&self) -> windows_core::Result<windows_core::HSTRING> {
+                    let this = &windows_core::Interface::cast::<
+                        super::super::Foundation::IStringable,
+                    >(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ToString)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| core::mem::transmute(result__))
+                    }
+                }
+                fn IHttpMethodFactory<
+                    R,
+                    F: FnOnce(&IHttpMethodFactory) -> windows_core::Result<R>,
+                >(
+                    callback: F,
+                ) -> windows_core::Result<R> {
+                    static SHARED: windows_core::imp::FactoryCache<HttpMethod, IHttpMethodFactory> =
+                        windows_core::imp::FactoryCache::new();
+                    SHARED.call(callback)
+                }
+                fn IHttpMethodStatics<
+                    R,
+                    F: FnOnce(&IHttpMethodStatics) -> windows_core::Result<R>,
+                >(
+                    callback: F,
+                ) -> windows_core::Result<R> {
+                    static SHARED: windows_core::imp::FactoryCache<HttpMethod, IHttpMethodStatics> =
+                        windows_core::imp::FactoryCache::new();
+                    SHARED.call(callback)
+                }
+            }
+            impl windows_core::RuntimeType for HttpMethod {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_class::<Self, IHttpMethod>();
+            }
+            unsafe impl windows_core::Interface for HttpMethod {
+                type Vtable = <IHttpMethod as windows_core::Interface>::Vtable;
+                const IID: windows_core::GUID = <IHttpMethod as windows_core::Interface>::IID;
+            }
+            impl windows_core::RuntimeName for HttpMethod {
+                const NAME: &'static str = "Windows.Web.Http.HttpMethod";
+            }
+            unsafe impl Send for HttpMethod {}
+            unsafe impl Sync for HttpMethod {}
             #[repr(C)]
             #[derive(Clone, Debug, Default, PartialEq)]
             pub struct HttpProgress {
@@ -287992,6 +288775,229 @@ pub mod Windows {
                         b"enum(Windows.Web.Http.HttpProgressStage;i4)",
                     );
             }
+            #[repr(transparent)]
+            #[derive(Clone, Debug, Eq, PartialEq)]
+            pub struct HttpRequestMessage(windows_core::IUnknown);
+            windows_core::imp::interface_hierarchy!(
+                HttpRequestMessage,
+                windows_core::IUnknown,
+                windows_core::IInspectable
+            );
+            windows_core::imp::required_hierarchy!(
+                HttpRequestMessage,
+                super::super::Foundation::IClosable,
+                super::super::Foundation::IStringable
+            );
+            impl HttpRequestMessage {
+                pub fn new() -> windows_core::Result<Self> {
+                    Self::IActivationFactory(|f| f.ActivateInstance::<Self>())
+                }
+                fn IActivationFactory<
+                    R,
+                    F: FnOnce(&windows_core::imp::IGenericFactory) -> windows_core::Result<R>,
+                >(
+                    callback: F,
+                ) -> windows_core::Result<R> {
+                    static SHARED: windows_core::imp::FactoryCache<
+                        HttpRequestMessage,
+                        windows_core::imp::IGenericFactory,
+                    > = windows_core::imp::FactoryCache::new();
+                    SHARED.call(callback)
+                }
+                pub fn Close(&self) -> windows_core::Result<()> {
+                    let this = &windows_core::Interface::cast::<super::super::Foundation::IClosable>(
+                        self,
+                    )?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).Close)(
+                            windows_core::Interface::as_raw(this),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn Content(&self) -> windows_core::Result<IHttpContent> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Content)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn SetContent<P0>(&self, value: P0) -> windows_core::Result<()>
+                where
+                    P0: windows_core::Param<IHttpContent>,
+                {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetContent)(
+                            windows_core::Interface::as_raw(this),
+                            value.param().abi(),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn Headers(
+                    &self,
+                ) -> windows_core::Result<Headers::HttpRequestHeaderCollection> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Headers)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn Method(&self) -> windows_core::Result<HttpMethod> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Method)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn SetMethod<P0>(&self, value: P0) -> windows_core::Result<()>
+                where
+                    P0: windows_core::Param<HttpMethod>,
+                {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetMethod)(
+                            windows_core::Interface::as_raw(this),
+                            value.param().abi(),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn Properties(
+                    &self,
+                ) -> windows_core::Result<
+                    windows_collections::IMap<windows_core::HSTRING, windows_core::IInspectable>,
+                > {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Properties)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn RequestUri(&self) -> windows_core::Result<super::super::Foundation::Uri> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).RequestUri)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn SetRequestUri<P0>(&self, value: P0) -> windows_core::Result<()>
+                where
+                    P0: windows_core::Param<super::super::Foundation::Uri>,
+                {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetRequestUri)(
+                            windows_core::Interface::as_raw(this),
+                            value.param().abi(),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn PrivacyAnnotation(&self) -> windows_core::Result<windows_core::HSTRING> {
+                    let this = &windows_core::Interface::cast::<IHttpRequestMessage2>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).PrivacyAnnotation)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| core::mem::transmute(result__))
+                    }
+                }
+                pub fn SetPrivacyAnnotation(
+                    &self,
+                    value: &windows_core::HSTRING,
+                ) -> windows_core::Result<()> {
+                    let this = &windows_core::Interface::cast::<IHttpRequestMessage2>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetPrivacyAnnotation)(
+                            windows_core::Interface::as_raw(this),
+                            core::mem::transmute_copy(value),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn Create<P0, P1>(
+                    method: P0,
+                    uri: P1,
+                ) -> windows_core::Result<HttpRequestMessage>
+                where
+                    P0: windows_core::Param<HttpMethod>,
+                    P1: windows_core::Param<super::super::Foundation::Uri>,
+                {
+                    Self::IHttpRequestMessageFactory(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Create)(
+                            windows_core::Interface::as_raw(this),
+                            method.param().abi(),
+                            uri.param().abi(),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
+                pub fn ToString(&self) -> windows_core::Result<windows_core::HSTRING> {
+                    let this = &windows_core::Interface::cast::<
+                        super::super::Foundation::IStringable,
+                    >(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ToString)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| core::mem::transmute(result__))
+                    }
+                }
+                fn IHttpRequestMessageFactory<
+                    R,
+                    F: FnOnce(&IHttpRequestMessageFactory) -> windows_core::Result<R>,
+                >(
+                    callback: F,
+                ) -> windows_core::Result<R> {
+                    static SHARED: windows_core::imp::FactoryCache<
+                        HttpRequestMessage,
+                        IHttpRequestMessageFactory,
+                    > = windows_core::imp::FactoryCache::new();
+                    SHARED.call(callback)
+                }
+            }
+            impl windows_core::RuntimeType for HttpRequestMessage {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_class::<Self, IHttpRequestMessage>();
+            }
+            unsafe impl windows_core::Interface for HttpRequestMessage {
+                type Vtable = <IHttpRequestMessage as windows_core::Interface>::Vtable;
+                const IID: windows_core::GUID =
+                    <IHttpRequestMessage as windows_core::Interface>::IID;
+            }
+            impl windows_core::RuntimeName for HttpRequestMessage {
+                const NAME: &'static str = "Windows.Web.Http.HttpRequestMessage";
+            }
+            unsafe impl Send for HttpRequestMessage {}
+            unsafe impl Sync for HttpRequestMessage {}
             #[repr(transparent)]
             #[derive(Clone, Debug, Eq, PartialEq)]
             pub struct HttpResponseMessage(windows_core::IUnknown);
@@ -288087,6 +289093,30 @@ pub mod Windows {
                         (windows_core::Interface::vtable(this).SetReasonPhrase)(
                             windows_core::Interface::as_raw(this),
                             core::mem::transmute_copy(value),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn RequestMessage(&self) -> windows_core::Result<HttpRequestMessage> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).RequestMessage)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn SetRequestMessage<P0>(&self, value: P0) -> windows_core::Result<()>
+                where
+                    P0: windows_core::Param<HttpRequestMessage>,
+                {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetRequestMessage)(
+                            windows_core::Interface::as_raw(this),
+                            value.param().abi(),
                         )
                         .ok()
                     }
@@ -288272,7 +289302,13 @@ pub mod Windows {
                     *mut core::ffi::c_void,
                     *mut *mut core::ffi::c_void,
                 ) -> windows_core::HRESULT,
-                GetWithOptionAsync: usize,
+                pub GetWithOptionAsync: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    HttpCompletionOption,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
                 pub GetBufferAsync: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut core::ffi::c_void,
@@ -288303,9 +289339,24 @@ pub mod Windows {
                     *mut core::ffi::c_void,
                     *mut *mut core::ffi::c_void,
                 ) -> windows_core::HRESULT,
-                SendRequestAsync: usize,
-                SendRequestWithOptionAsync: usize,
-                DefaultRequestHeaders: usize,
+                pub SendRequestAsync: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub SendRequestWithOptionAsync: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    HttpCompletionOption,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub DefaultRequestHeaders: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
             }
             windows_core::imp::define_interface!(
                 IHttpClient2,
@@ -288720,6 +289771,177 @@ pub mod Windows {
                     -> windows_core::HRESULT,
             }
             windows_core::imp::define_interface!(
+                IHttpMethod,
+                IHttpMethod_Vtbl,
+                0x728d4022_700d_4fe0_afa5_40299c58dbfd
+            );
+            impl windows_core::RuntimeType for IHttpMethod {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IHttpMethod_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub Method: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IHttpMethodFactory,
+                IHttpMethodFactory_Vtbl,
+                0x3c51d10d_36d7_40f8_a86d_e759caf2f83f
+            );
+            impl windows_core::RuntimeType for IHttpMethodFactory {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IHttpMethodFactory_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub Create: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IHttpMethodStatics,
+                IHttpMethodStatics_Vtbl,
+                0x64d171f0_d99a_4153_8dc6_d68cc4cce317
+            );
+            impl windows_core::RuntimeType for IHttpMethodStatics {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IHttpMethodStatics_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub Delete: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub Get: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub Head: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub Options: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub Patch: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub Post: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub Put: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IHttpRequestMessage,
+                IHttpRequestMessage_Vtbl,
+                0xf5762b3c_74d4_4811_b5dc_9f8b4e2f9abf
+            );
+            impl windows_core::RuntimeType for IHttpRequestMessage {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IHttpRequestMessage_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub Content: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub SetContent: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub Headers: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub Method: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub SetMethod: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub Properties: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub RequestUri: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub SetRequestUri: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                TransportInformation: usize,
+            }
+            windows_core::imp::define_interface!(
+                IHttpRequestMessage2,
+                IHttpRequestMessage2_Vtbl,
+                0xc3c60489_62c2_4a3f_9554_226e7c60bd96
+            );
+            impl windows_core::RuntimeType for IHttpRequestMessage2 {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IHttpRequestMessage2_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub PrivacyAnnotation: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub SetPrivacyAnnotation: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IHttpRequestMessageFactory,
+                IHttpRequestMessageFactory_Vtbl,
+                0x5bac994e_3886_412e_aec3_52ec7f25616f
+            );
+            impl windows_core::RuntimeType for IHttpRequestMessageFactory {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IHttpRequestMessageFactory_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub Create: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
                 IHttpResponseMessage,
                 IHttpResponseMessage_Vtbl,
                 0xfee200fb_8664_44e0_95d9_42696199bffc
@@ -288756,8 +289978,16 @@ pub mod Windows {
                     *mut core::ffi::c_void,
                 )
                     -> windows_core::HRESULT,
-                RequestMessage: usize,
-                SetRequestMessage: usize,
+                pub RequestMessage: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub SetRequestMessage: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
                 Source: usize,
                 SetSource: usize,
                 pub StatusCode: unsafe extern "system" fn(
@@ -288795,6 +290025,517 @@ pub mod Windows {
                     HttpStatusCode,
                     *mut *mut core::ffi::c_void,
                 ) -> windows_core::HRESULT,
+            }
+            pub mod Headers {
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct HttpRequestHeaderCollection(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    HttpRequestHeaderCollection,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                windows_core::imp::required_hierarchy ! ( HttpRequestHeaderCollection , windows_collections:: IIterable < windows_collections:: IKeyValuePair < windows_core::HSTRING , windows_core::HSTRING > > , windows_collections:: IMap < windows_core::HSTRING , windows_core::HSTRING > , super::super::super::Foundation:: IStringable );
+                impl HttpRequestHeaderCollection {
+                    pub fn Date(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::Foundation::IReference<
+                            super::super::super::Foundation::DateTime,
+                        >,
+                    > {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Date)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetDate<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<
+                            super::super::super::Foundation::IReference<
+                                super::super::super::Foundation::DateTime,
+                            >,
+                        >,
+                    {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetDate)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn From(&self) -> windows_core::Result<windows_core::HSTRING> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).From)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| core::mem::transmute(result__))
+                        }
+                    }
+                    pub fn SetFrom(
+                        &self,
+                        value: &windows_core::HSTRING,
+                    ) -> windows_core::Result<()> {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFrom)(
+                                windows_core::Interface::as_raw(this),
+                                core::mem::transmute_copy(value),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn IfModifiedSince(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::Foundation::IReference<
+                            super::super::super::Foundation::DateTime,
+                        >,
+                    > {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).IfModifiedSince)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetIfModifiedSince<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<
+                            super::super::super::Foundation::IReference<
+                                super::super::super::Foundation::DateTime,
+                            >,
+                        >,
+                    {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetIfModifiedSince)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn IfUnmodifiedSince(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::Foundation::IReference<
+                            super::super::super::Foundation::DateTime,
+                        >,
+                    > {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).IfUnmodifiedSince)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetIfUnmodifiedSince<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<
+                            super::super::super::Foundation::IReference<
+                                super::super::super::Foundation::DateTime,
+                            >,
+                        >,
+                    {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetIfUnmodifiedSince)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn MaxForwards(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::Foundation::IReference<u32>>
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).MaxForwards)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetMaxForwards<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::super::super::Foundation::IReference<u32>>,
+                    {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetMaxForwards)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Referer(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::Foundation::Uri>
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Referer)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetReferer<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::super::super::Foundation::Uri>,
+                    {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetReferer)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Append(
+                        &self,
+                        name: &windows_core::HSTRING,
+                        value: &windows_core::HSTRING,
+                    ) -> windows_core::Result<()> {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Append)(
+                                windows_core::Interface::as_raw(this),
+                                core::mem::transmute_copy(name),
+                                core::mem::transmute_copy(value),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn TryAppendWithoutValidation(
+                        &self,
+                        name: &windows_core::HSTRING,
+                        value: &windows_core::HSTRING,
+                    ) -> windows_core::Result<bool> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).TryAppendWithoutValidation)(
+                                windows_core::Interface::as_raw(this),
+                                core::mem::transmute_copy(name),
+                                core::mem::transmute_copy(value),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn First(
+                        &self,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterator<
+                            windows_collections::IKeyValuePair<
+                                windows_core::HSTRING,
+                                windows_core::HSTRING,
+                            >,
+                        >,
+                    > {
+                        let this = &windows_core::Interface::cast::<
+                            windows_collections::IIterable<
+                                windows_collections::IKeyValuePair<
+                                    windows_core::HSTRING,
+                                    windows_core::HSTRING,
+                                >,
+                            >,
+                        >(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).First)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn Lookup(
+                        &self,
+                        key: &windows_core::HSTRING,
+                    ) -> windows_core::Result<windows_core::HSTRING> {
+                        let this = &windows_core::Interface::cast::<
+                            windows_collections::IMap<windows_core::HSTRING, windows_core::HSTRING>,
+                        >(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Lookup)(
+                                windows_core::Interface::as_raw(this),
+                                core::mem::transmute_copy(key),
+                                &mut result__,
+                            )
+                            .map(|| core::mem::transmute(result__))
+                        }
+                    }
+                    pub fn Size(&self) -> windows_core::Result<u32> {
+                        let this = &windows_core::Interface::cast::<
+                            windows_collections::IMap<windows_core::HSTRING, windows_core::HSTRING>,
+                        >(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Size)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn HasKey(
+                        &self,
+                        key: &windows_core::HSTRING,
+                    ) -> windows_core::Result<bool> {
+                        let this = &windows_core::Interface::cast::<
+                            windows_collections::IMap<windows_core::HSTRING, windows_core::HSTRING>,
+                        >(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).HasKey)(
+                                windows_core::Interface::as_raw(this),
+                                core::mem::transmute_copy(key),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn GetView(
+                        &self,
+                    ) -> windows_core::Result<
+                        windows_collections::IMapView<windows_core::HSTRING, windows_core::HSTRING>,
+                    > {
+                        let this = &windows_core::Interface::cast::<
+                            windows_collections::IMap<windows_core::HSTRING, windows_core::HSTRING>,
+                        >(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetView)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn Insert(
+                        &self,
+                        key: &windows_core::HSTRING,
+                        value: &windows_core::HSTRING,
+                    ) -> windows_core::Result<bool> {
+                        let this = &windows_core::Interface::cast::<
+                            windows_collections::IMap<windows_core::HSTRING, windows_core::HSTRING>,
+                        >(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Insert)(
+                                windows_core::Interface::as_raw(this),
+                                core::mem::transmute_copy(key),
+                                core::mem::transmute_copy(value),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn Remove(&self, key: &windows_core::HSTRING) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<
+                            windows_collections::IMap<windows_core::HSTRING, windows_core::HSTRING>,
+                        >(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Remove)(
+                                windows_core::Interface::as_raw(this),
+                                core::mem::transmute_copy(key),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Clear(&self) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<
+                            windows_collections::IMap<windows_core::HSTRING, windows_core::HSTRING>,
+                        >(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Clear)(
+                                windows_core::Interface::as_raw(this),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn ToString(&self) -> windows_core::Result<windows_core::HSTRING> {
+                        let this = &windows_core::Interface::cast::<
+                            super::super::super::Foundation::IStringable,
+                        >(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ToString)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| core::mem::transmute(result__))
+                        }
+                    }
+                }
+                impl windows_core::RuntimeType for HttpRequestHeaderCollection {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<
+                            Self,
+                            IHttpRequestHeaderCollection,
+                        >();
+                }
+                unsafe impl windows_core::Interface for HttpRequestHeaderCollection {
+                    type Vtable = <IHttpRequestHeaderCollection as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID =
+                        <IHttpRequestHeaderCollection as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for HttpRequestHeaderCollection {
+                    const NAME: &'static str =
+                        "Windows.Web.Http.Headers.HttpRequestHeaderCollection";
+                }
+                unsafe impl Send for HttpRequestHeaderCollection {}
+                unsafe impl Sync for HttpRequestHeaderCollection {}
+                impl IntoIterator for HttpRequestHeaderCollection {
+                    type Item = windows_collections::IKeyValuePair<
+                        windows_core::HSTRING,
+                        windows_core::HSTRING,
+                    >;
+                    type IntoIter = windows_collections::IIterator<Self::Item>;
+                    fn into_iter(self) -> Self::IntoIter {
+                        IntoIterator::into_iter(&self)
+                    }
+                }
+                impl IntoIterator for &HttpRequestHeaderCollection {
+                    type Item = windows_collections::IKeyValuePair<
+                        windows_core::HSTRING,
+                        windows_core::HSTRING,
+                    >;
+                    type IntoIter = windows_collections::IIterator<Self::Item>;
+                    fn into_iter(self) -> Self::IntoIter {
+                        self.First().unwrap()
+                    }
+                }
+                windows_core::imp::define_interface!(
+                    IHttpRequestHeaderCollection,
+                    IHttpRequestHeaderCollection_Vtbl,
+                    0xaf40329b_b544_469b_86b9_ac3d466fea36
+                );
+                impl windows_core::RuntimeType for IHttpRequestHeaderCollection {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IHttpRequestHeaderCollection_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    Accept: usize,
+                    AcceptEncoding: usize,
+                    AcceptLanguage: usize,
+                    Authorization: usize,
+                    SetAuthorization: usize,
+                    CacheControl: usize,
+                    Connection: usize,
+                    Cookie: usize,
+                    pub Date: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetDate: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    Expect: usize,
+                    pub From: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetFrom: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    Host: usize,
+                    SetHost: usize,
+                    pub IfModifiedSince: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetIfModifiedSince: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub IfUnmodifiedSince: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetIfUnmodifiedSince: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub MaxForwards: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetMaxForwards: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    ProxyAuthorization: usize,
+                    SetProxyAuthorization: usize,
+                    pub Referer: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetReferer: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    TransferEncoding: usize,
+                    UserAgent: usize,
+                    pub Append: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub TryAppendWithoutValidation:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                            *mut bool,
+                        ) -> windows_core::HRESULT,
+                }
             }
         }
     }

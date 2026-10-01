@@ -158,8 +158,9 @@ let track_line what tags selected =
 (* media_tracks (docs/media-plan.md §3, §7a): each item's audio and caption
    listing, a second audio track selected, the last caption track
    selected, and the cue read at 0.5 s and 1.5 s with the player paused
-   there. The sidecar items are the suite's floor file with captions.vtt:
-   an asset, then fetched from the local server, then a 404 there. *)
+   there. The sidecar items are the suite's floor file with captions.vtt (the
+   first over h264_frames.mp4): an asset, then fetched from the local server,
+   then a 404 there. *)
 let tracks_app app =
   let base = media_url () in
   let floor label = { (local "h264_aac.mp4" "video/mp4" h264) with item_name = label } in
@@ -171,7 +172,8 @@ let tracks_app app =
         (served base "hls_fmp4.m3u8" "application/vnd.apple.mpegurl" "", None);
         (served base "hls_mpegts.m3u8" "application/vnd.apple.mpegurl" "", None);
         (local "h264_tx3g.mp4" "video/mp4" h264, None);
-        (floor "h264_aac.mp4 + captions.vtt", Some (Media_source.asset "media/captions.vtt"));
+        ( { (local "h264_frames.mp4" "video/mp4" h264) with item_name = "h264_frames.mp4 + captions.vtt" },
+          Some (Media_source.asset "media/captions.vtt") );
         ( floor "h264_aac.mp4 + http captions.vtt",
           Some (Media_source.url (base ^ "/captions.vtt")) );
         (floor "h264_aac.mp4 + http nope.vtt", Some (Media_source.url (base ^ "/nope.vtt")));

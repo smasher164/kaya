@@ -336,9 +336,9 @@ fn track_line(what: &str, tags: &[String], selected: Option<usize>) -> String {
 /// media_tracks (docs/media-plan.md §3, §7a): each item's audio and caption
 /// listing, a second audio track selected, the last caption track selected,
 /// and the cue read at 0.5 s and 1.5 s with the player paused there. The
-/// sidecar items are the suite's floor file with captions.vtt, which kaya
-/// parses, times and draws: an asset, then fetched from the local server,
-/// then a 404 there.
+/// sidecar items are the suite's floor file with captions.vtt (the first over
+/// h264_frames.mp4), which kaya parses, times and draws: an asset, then fetched
+/// from the local server, then a 404 there.
 fn tracks_app(ctx: kaya::AppCtx) {
     let base = media_url();
     let floor = |label: &str| Item { name: label.to_owned(), ..local("h264_aac.mp4", "video/mp4", H264) };
@@ -348,7 +348,10 @@ fn tracks_app(ctx: kaya::AppCtx) {
         (served(&base, "hls_fmp4.m3u8", "application/vnd.apple.mpegurl", ""), None),
         (served(&base, "hls_mpegts.m3u8", "application/vnd.apple.mpegurl", ""), None),
         (local("h264_tx3g.mp4", "video/mp4", H264), None),
-        (floor("h264_aac.mp4 + captions.vtt"), Some(MediaSource::asset("media/captions.vtt"))),
+        (
+            Item { name: "h264_frames.mp4 + captions.vtt".to_owned(), ..local("h264_frames.mp4", "video/mp4", H264) },
+            Some(MediaSource::asset("media/captions.vtt")),
+        ),
         (floor("h264_aac.mp4 + http captions.vtt"), Some(MediaSource::url(format!("{base}/captions.vtt")))),
         (floor("h264_aac.mp4 + http nope.vtt"), Some(MediaSource::url(format!("{base}/nope.vtt")))),
     ];

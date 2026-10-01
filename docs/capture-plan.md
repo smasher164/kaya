@@ -268,6 +268,19 @@ platform's own path as the lane can reach):
    choice, `in_use` with FaceTime holding the camera, the indicator on and
    off with `camera` set to none, and the echo canceller with speakers on.
 
+## §7a. An opt-in check on real devices (the maintainer, 2026-10-01)
+
+The lanes never open a real camera or microphone: their assertions need
+fixed content, the runs are unattended on the maintainer's own machine (the
+camera light, a recording of the room, screenshots kept in a failure
+bundle), macOS asks permission for every rebuilt guest, and four of five
+lanes have no real device. Beside the maintainer's own hand run of the chat
+app's call, an OPT-IN leg that only a person starts, never part of any
+matrix, checks what does not depend on what the camera sees: the real
+devices are listed, frames arrive at a plausible size and rate, samples
+arrive from the microphone, and stopping the capture turns the device's
+indicator off. It keeps no pixels and no samples in its log or bundle.
+
 ## §8. Sequencing and bindings
 
 Depth on the mac with the in-process source: the capture object, the

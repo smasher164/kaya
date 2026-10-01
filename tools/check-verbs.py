@@ -3777,6 +3777,39 @@ def winui_media_arms(media_src=None):
             or "trail.print(generation)" not in command:
         bad.append("fn command's seek does not report a seek that never completes with its "
                    "trail — a paused seek the pipeline lost reads only as a missing cue")
+    # MEDIA FOUNDATION IGNORES AN MP4 EDIT LIST (docs/traps.md): every read of
+    # the session's clock goes through shown_ms, the seek adds the shift, a
+    # progressive load reads it, and an open waits for an http(s) read.
+    # media_tracks sees the seek on its one B-frame clip; a raw Position read
+    # elsewhere (the position tick, the caption clock) no scene can see.
+    clock = rust_fn(code, "position_ms") or ""
+    reads = re.findall(r"[^\n]*\bPosition\(\)[^\n]*", code)
+    raw = [r.strip() for r in reads if "shown_ms(" not in r
+           and not ("shown_ms(" in clock and r in clock)]
+    if not reads or raw:
+        bad.append("winui/media.rs reads the session's Position without shown_ms ("
+                   + ("; ".join(raw) or "no Position read at all") + ") — Media "
+                   "Foundation's clock runs ahead of the picture by the edit list")
+    if command is None or not re.search(r"saturating_add\(p\.shift\.load\(", command):
+        bad.append("fn command's seek does not add the edit list's shift — a Windows seek "
+                   "lands two frames early on a B-frame MP4")
+    if load is None or not 0 <= other < load.find("read_shift(core, id, generation, url)"):
+        bad.append("fn load does not read a progressive source's edit list (read_shift in "
+                   "the non-adaptive branch)")
+    if command is None or "let held = p.seek_in_flight;" not in command \
+            or not re.search(r"if held \{\s*p\.seek_held = Some\(at\)", command):
+        bad.append("fn command issues a seek while another is in flight — Media Foundation "
+                   "then leaves the earlier picture drawn (docs/traps.md)")
+    step = code.find("StepForwardOneFrame().and_then(|()| p.player.StepBackwardOneFrame())")
+    guard = code.rfind("if !p.playing && !p.play_asked && p.seek_held.is_none()", 0, step)
+    if step < 0 or guard < 0 or step - guard > 200:
+        bad.append("a completed paused seek is not drawn by a frame step there and back, guarded "
+                   "on the app not having asked to play — the seek alone left the old picture "
+                   "(docs/traps.md, the WinUI paused seek)")
+    if "seek_held.take()" not in code:
+        bad.append("nothing issues a held seek when the one in flight completes")
+    if opened is None or "p.shift_pending" not in opened.split("return;", 1)[0]:
+        bad.append("fn finish_open does not wait for an http(s) edit list still being read")
     return bad
 
 
@@ -3820,6 +3853,21 @@ for pattern, repl, label, want in (
     (r"(\n +)p\.trail\.print\(generation\);(?=\n +\}\n +\}\);\n +\}\n +std::thread::sleep\("
      r"std::time::Duration::from_millis\(crate::media::TIMEOUT_MS - SEEK_REPORT_MS)", "",
      "the stalled seek's trail not printed", 1),
+    (r"(\n +)let ms = position_ms\(p\);(?=\n +report\(core, id, Report::Position)",
+     "let ms = p.player.PlaybackSession().and_then(|s| s.Position()).map(ms_of).unwrap_or(0);",
+     "the position tick reading the raw clock", 1),
+    (r"(let at = span_of\(ms\)\.Duration)\.saturating_add\(p\.shift\.load\(Ordering::SeqCst\)\)",
+     "", "the seek without the edit list's shift", 1),
+    (r"(\n +)read_shift\(core, id, generation, url\);", "",
+     "the edit list never read", 1),
+    (r"(let held = )p\.seek_in_flight;", "false;", "a seek issued over one in flight", 1),
+    (r"(if let Some\(held\) = p\.)seek_held\.take\(\)", "seek_held.clone()",
+     "the held seek never issued", 1),
+    (r"(if !p\.playing )&& !p\.play_asked ", "", "a frame step over a play the app asked for", 1),
+    (r"(if let Err\(e\) = p\.player\.)StepForwardOneFrame\(\)\.and_then\(\|\(\)\| "
+     r"p\.player\.StepBackwardOneFrame\(\)\)", "Pause()", "the paused seek's frame step cut", 1),
+    (r"(\|p\| p\.loaded) \|\| p\.shift_pending\)", ")",
+     "the open not waiting for the edit list", 1),
 ):
     cut = g.doctor(f"winui media: {label}", real(WINUI_MEDIA), pattern,
                    lambda m, repl=repl: m.group(1) + repl, want=want)
@@ -3947,6 +3995,67 @@ for path, pattern, repl, label in (
     if not found:
         fail(f"check-verbs SELF-TEST: the bound's arms passed with {label}")
 
+# --- THE WINUI FRAME UNDER RIGHT TO LEFT (docs/traps.md) ------------------
+# Every window is mirrored at birth, a mirrored caption's drag regions are
+# kaya's own, and expect_direction reads the frame. tasksrtl and formatar
+# read the primary window; no RTL scene opens a second one, and a mirrored
+# window's ClientToScreen answers its right edge, so these are read here.
+
+
+def winui_frame_arms(src=None):
+    bad = []
+    code = re.sub(r"//[^\n]*", "", src if src is not None else real(WINUI))
+    for head in ("fn setup(occ_tx", "ApplyOp::CreateWindow { window } => {"):
+        at = code.find(head)
+        body = brace_body(code[at + len(head) - 1:], "{") if at >= 0 else None
+        if body is None or not 0 <= body.find("subclass(") < body.find("mirror_frame("):
+            bad.append(f"`{head}` does not mirror its window after subclassing it "
+                       f"(mirror_frame) — its caption stays left to right under an RTL locale")
+    toolbar = rust_fn(code, "refresh_toolbar")
+    if toolbar is None or toolbar.count("publish_mirrored_passthrough(") < 2 \
+            or "SetAutoRefreshDragRegions(!frame_mirrored())" not in toolbar:
+        bad.append("refresh_toolbar does not own a mirrored caption's drag regions — the "
+                   "TitleBar's own land mirrored and steal the caption buttons")
+    raw = [m.start() for m in re.finditer(r"ClientToScreen\(hwnd, &mut", code)]
+    origin = rust_fn(code, "client_origin")
+    start = code.find(origin) if origin else -1
+    if origin is None or len(raw) != 1 or not start <= raw[0] < start + len(origin):
+        bad.append("a ClientToScreen outside client_origin — a mirrored window answers its "
+                   "right edge there")
+    direction = brace_body(code, "    fn direction(&self) -> String {")
+    if direction is None or "frame_direction(core)" not in direction:
+        bad.append("the WinUI direction reader does not read the frame")
+    return bad
+
+
+frame_out = winui_frame_arms()
+frame_status = 1 if frame_out else 0
+if frame_out:
+    print("check-verbs: the WinUI frame under right to left broke a rule no scene can see:",
+          file=sys.stderr)
+    print("\n".join(frame_out), file=sys.stderr)
+print("check-verbs: the WinUI frame's mirroring read (2 window births, the caption's "
+      "drag regions, the client origin, the direction reader)")
+for pattern, repl, label in (
+    (r"(\n            subclass\(&aux, window\.0\)\?;)\n            mirror_frame\(&aux\)\?;", "",
+     "a second window left unmirrored"),
+    (r"(titlebar\.SetAutoRefreshDragRegions\()!frame_mirrored\(\)", "true",
+     "the TitleBar's own drag regions kept"),
+    (r"(\n    let client = )client_origin\(hwnd\);\n    let mut outer",
+     "{ let mut p = Point32 { x: 0, y: 0 }; unsafe { ClientToScreen(hwnd, &mut p) }; p };"
+     "\n    let mut outer",
+     "a raw ClientToScreen in the ink placement"),
+    (r"(\n            Ok\(match )frame_direction\(core\) \{",
+     "Ok::<(String, Vec<String>), String>((content.to_owned(), Vec::new())) {",
+     "the direction reader not reading the frame"),
+):
+    cut = g.doctor(f"winui frame: {label}", real(WINUI), pattern,
+                   lambda m, repl=repl: m.group(1) + repl)
+    found = [f for f in winui_frame_arms(cut) if f not in frame_out]
+    print(f"check-verbs: winui-frame negative ({label}): {len(found)} finding(s)")
+    if not found:
+        fail(f"check-verbs SELF-TEST: the WinUI frame passed with {label}")
+
 # clip_mirrors() ran first and printed its own findings; its verdict
 # is read here so there is exactly ONE verdict line.
 if (clip_status or window_status or ink_status or ax_status
@@ -3955,7 +4064,7 @@ if (clip_status or window_status or ink_status or ax_status
         or vtrace_status or norm_status or ind_status
         or answer_status or seed_focus_status or notify_auth_status
         or pump_status or immersive_status or kind_status
-        or range_status or media_status or timeout_status):
+        or range_status or media_status or timeout_status or frame_status):
     raise SystemExit(1)
 g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"({len(canvas_rows)} of them the canvas vocabularies) + "
@@ -3978,6 +4087,7 @@ g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"+ the range's arms in both interpreters "
           f"+ the media arms (a bare layer, one report door, playbackState first) "
           f"+ the bound's wake and teardown on 4 arms "
+          f"+ the WinUI frame mirrored under right to left "
           f"+ the Compose media arm (PlayerSurface, one door, raw facts, decodability) "
           f"+ the GTK media arm (GtkPicture over the sink, one door, raw facts, decodability) "
           f"+ the Android video read (the device's screencap, its tolerance, no decoder moved "

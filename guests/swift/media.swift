@@ -163,8 +163,9 @@ func trackLine(_ what: String, _ tags: [String], _ selected: Int?) -> String {
 /// media_tracks (docs/media-plan.md §3, §7a): each item's audio and caption
 /// listing, a second audio track selected, the last caption track selected,
 /// and the cue read at 0.5 s and 1.5 s with the player paused there. The
-/// sidecar items are the floor file with captions.vtt: an asset, then fetched
-/// from the local server, then a 404 there.
+/// sidecar items are the floor file with captions.vtt (the first over
+/// h264_frames.mp4): an asset, then fetched from the local server, then a 404
+/// there.
 @KayaAppActor func tracksApp(_ app: KayaApp) {
     let base = mediaURL()
     func floor(_ label: String) -> Item {
@@ -176,7 +177,8 @@ func trackLine(_ what: String, _ tags: [String], _ selected: Int?) -> String {
         (served(base, "hls_fmp4.m3u8", "application/vnd.apple.mpegurl", ""), nil),
         (served(base, "hls_mpegts.m3u8", "application/vnd.apple.mpegurl", ""), nil),
         (local("h264_tx3g.mp4", "video/mp4", h264), nil),
-        (floor("h264_aac.mp4 + captions.vtt"), .asset("media/captions.vtt")),
+        (Item(name: "h264_frames.mp4 + captions.vtt", source: .asset("media/h264_frames.mp4"), mime: "video/mp4", codecs: h264),
+         .asset("media/captions.vtt")),
         (floor("h264_aac.mp4 + http captions.vtt"), .url("\(base)/captions.vtt")),
         (floor("h264_aac.mp4 + http nope.vtt"), .url("\(base)/nope.vtt")),
     ]

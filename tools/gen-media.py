@@ -72,6 +72,31 @@ def video():
             f"color=c={COLOR}:s={SIZE}:r={FPS}:d={SECONDS},format=rgb24"]
 
 
+# h264_frames.mp4 (docs/traps.md, the edit-list entry): B-frames, so FFmpeg
+# writes a video edit list of two frames, and three-frame bands of their own
+# colour around 0.5 s and 1.5 s, where a picture two frames off reads A. The
+# bands are GREY: no chroma, so no lane's matrix or saturation moves them
+# (a green band read 27AF4E on GTK and 35C954 on Android).
+BANDS = ((11, 13, (0x50, 0x50, 0x50)), (36, 38, (0xA0, 0xA0, 0xA0)))
+FRAMES_H264 = ["-c:v", "libx264", "-profile:v", "high", "-level:v", "1.1",
+               "-bf", "2", "-g", str(FPS * SECONDS), "-keyint_min", str(FPS * SECONDS),
+               "-sc_threshold", "0", "-qp", "4", "-threads", "1",
+               "-x264-params", "threads=1:lookahead-threads=1:sliced-threads=0"]
+
+
+def banded():
+    base = tuple(int(COLOR[i:i + 2], 16) for i in (2, 4, 6))
+
+    def channel(c):
+        e = str(base[c])
+        for lo, hi, rgb in reversed(BANDS):
+            e = f"if(between(N\\,{lo}\\,{hi})\\,{rgb[c]}\\,{e})"
+        return f"'{e}'"
+    geq = f"geq=r={channel(0)}:g={channel(1)}:b={channel(2)}"
+    return ["-f", "lavfi", "-i",
+            f"color=c=black:s={SIZE}:r={FPS}:d={SECONDS},format=gbrp,{geq},format=rgb24"]
+
+
 def tone(hz):
     return ["-f", "lavfi", "-i",
             f"sine=frequency={hz}:sample_rate=48000:duration={SECONDS}"]
@@ -174,6 +199,8 @@ def dash(out):
 def generate(out):
     out.mkdir(parents=True, exist_ok=True)
     av(out, "h264_aac.mp4", H264, AAC)
+    ffmpeg(out, *banded(), *tone(440), "-map", "0:v", "-map", "1:a",
+           "-vf", VF, *TAGS709, *FRAMES_H264, *AAC, *BITEXACT, "h264_frames.mp4")
     av(out, "hevc_aac.mp4", HEVC, AAC)
     av(out, "hevc_aac.mov", HEVC, AAC)
     av(out, "vp9_opus.webm", VP9, OPUS)

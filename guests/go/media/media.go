@@ -221,7 +221,7 @@ func tracksApp() *kaya.App {
 		{item: served(base, "hls_fmp4.m3u8", "application/vnd.apple.mpegurl", "")},
 		{item: served(base, "hls_mpegts.m3u8", "application/vnd.apple.mpegurl", "")},
 		{item: local("h264_tx3g.mp4", "video/mp4", h264)},
-		{h264Named("h264_aac.mp4 + captions.vtt"), kaya.MediaAsset("media/captions.vtt"), true},
+		{item{"h264_frames.mp4 + captions.vtt", kaya.MediaAsset("media/h264_frames.mp4"), "video/mp4", h264}, kaya.MediaAsset("media/captions.vtt"), true},
 		{h264Named("h264_aac.mp4 + http captions.vtt"), kaya.MediaURL(base + "/captions.vtt"), true},
 		{h264Named("h264_aac.mp4 + http nope.vtt"), kaya.MediaURL(base + "/nope.vtt"), true},
 	}

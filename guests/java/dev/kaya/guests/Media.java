@@ -189,9 +189,9 @@ public final class Media {
     /** media_tracks (docs/media-plan.md §3, §7a): each item's audio and
      * caption listing, a second audio track selected, the last caption
      * track selected, and the cue read at 0.5 s and 1.5 s with the player
-     * paused there. The sidecar items are the floor file with
-     * captions.vtt: an asset, then fetched from the local server, then a
-     * 404 there. */
+     * paused there. The sidecar items are the floor file with captions.vtt (the
+     * first over h264_frames.mp4): an asset, then fetched from the local
+     * server, then a 404 there. */
     private static void tracksApp() {
         String base = mediaUrl();
         Item floor = local("h264_aac.mp4", "video/mp4", H264);
@@ -201,8 +201,8 @@ public final class Media {
                 new TrackItem(served(base, "hls_fmp4.m3u8", "application/vnd.apple.mpegurl", ""), null),
                 new TrackItem(served(base, "hls_mpegts.m3u8", "application/vnd.apple.mpegurl", ""), null),
                 new TrackItem(local("h264_tx3g.mp4", "video/mp4", H264), null),
-                new TrackItem(new Item("h264_aac.mp4 + captions.vtt", floor.source(), floor.mime(), floor.codecs()),
-                        MediaSource.asset("media/captions.vtt")),
+                new TrackItem(new Item("h264_frames.mp4 + captions.vtt", MediaSource.asset("media/h264_frames.mp4"),
+                        "video/mp4", H264), MediaSource.asset("media/captions.vtt")),
                 new TrackItem(new Item("h264_aac.mp4 + http captions.vtt", floor.source(), floor.mime(),
                         floor.codecs()), MediaSource.url(base + "/captions.vtt")),
                 new TrackItem(new Item("h264_aac.mp4 + http nope.vtt", floor.source(), floor.mime(),

@@ -51,6 +51,8 @@ mod links;
 mod media;
 // kaya's caption renderer's parser and cue timing (docs/media-plan.md §3).
 mod captions;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+mod edit_list;
 // docs/number-field-plan.md; the SwiftUI arm is its caller until the
 // breadth slice's arms land.
 #[cfg_attr(not(any(target_os = "macos", target_os = "ios")), allow(dead_code))]

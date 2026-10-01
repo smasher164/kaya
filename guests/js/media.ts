@@ -154,8 +154,9 @@ function trackLine(what: string, tags: readonly string[], selected: number | nul
 // media_tracks (docs/media-plan.md §3, §7a): each item's audio and caption
 // listing, a second audio track selected, the last caption track selected,
 // and the cue read at 0.5 s and 1.5 s with the player paused there. The
-// sidecar items are the floor file with captions.vtt: an asset, then
-// fetched from the local server, then a 404 there.
+// sidecar items are the floor file with captions.vtt (the first over
+// h264_frames.mp4): an asset, then fetched from the local server, then a 404
+// there.
 function tracksApp(): void {
   const base = mediaUrl();
   const items: [Item, kaya.MediaSource | null][] = [
@@ -164,7 +165,7 @@ function tracksApp(): void {
     [served(base, "hls_fmp4.m3u8", "application/vnd.apple.mpegurl", ""), null],
     [served(base, "hls_mpegts.m3u8", "application/vnd.apple.mpegurl", ""), null],
     [local("h264_tx3g.mp4", "video/mp4", H264), null],
-    [local("h264_aac.mp4", "video/mp4", H264, "h264_aac.mp4 + captions.vtt"), kaya.MediaSource.asset("media/captions.vtt")],
+    [local("h264_frames.mp4", "video/mp4", H264, "h264_frames.mp4 + captions.vtt"), kaya.MediaSource.asset("media/captions.vtt")],
     [local("h264_aac.mp4", "video/mp4", H264, "h264_aac.mp4 + http captions.vtt"), kaya.MediaSource.url(`${base}/captions.vtt`)],
     [local("h264_aac.mp4", "video/mp4", H264, "h264_aac.mp4 + http nope.vtt"), kaya.MediaSource.url(`${base}/nope.vtt`)],
   ];

@@ -18,6 +18,11 @@ first's `eng`, so a check can tell them apart by pitch.
   `av1_aac.mp4`, `av1_opus.webm` (libaom), and `vp9_aac.mp4`, VP9 in MP4,
   whose video Apple lists as undecodable while the audio would play: the
   quiet failure kaya's decodability check has to catch on the mac.
+- `h264_frames.mp4`: H.264 WITH B-frames, so FFmpeg writes a video edit
+  list starting two frames in, the 2 s one GOP; C83C1E except frames 11-13
+  (grey 505050) and 36-38 (grey A0A0A0), so the picture at 0.5 s and at 1.5 s has a
+  colour of its own and one two frames either side does not (docs/traps.md,
+  the edit-list entry; tools/scenes/media_tracks.steps).
 - `tone.mp3`, `tone.m4a` (AAC), `tone.ogg` (Opus), `tone_opus.webm`,
   `tone.flac`, `tone.wav`: audio only.
 - `captions.vtt`: two cues, "first cue" 0-1 s and "second cue" 1-2 s, the

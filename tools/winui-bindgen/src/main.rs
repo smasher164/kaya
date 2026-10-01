@@ -739,6 +739,18 @@ fn main() {
         "Windows.Web.Http.IHttpContent".to_string(),
         "Windows.Web.Http.HttpProgress".to_string(),
         "Windows.Web.Http.HttpProgressStage".to_string(),
+        // A MIRRORED FRAME'S DRAG REGIONS (docs/traps.md, the WinUI title bar
+        // under right to left): the caption's passthrough rects, written in
+        // the mirrored window's own coordinates.
+        "Microsoft.UI.WindowId".to_string(),
+        "Microsoft.UI.Input.InputNonClientPointerSource".to_string(),
+        "Microsoft.UI.Input.NonClientRegionKind".to_string(),
+        // A progressive MP4's `moov`, read by byte range for its edit list
+        // (crates/kaya/src/edit_list.rs; docs/traps.md, the edit-list entry).
+        "Windows.Web.Http.HttpRequestMessage".to_string(),
+        "Windows.Web.Http.HttpMethod".to_string(),
+        "Windows.Web.Http.HttpCompletionOption".to_string(),
+        "Windows.Web.Http.Headers.HttpRequestHeaderCollection".to_string(),
         // An adaptive item's own downloads and diagnostics, for the record
         // a stalled open prints (docs/traps.md, the adaptive item that
         // never opens).
@@ -761,6 +773,7 @@ fn main() {
     let _warnings = windows_bindgen::bindgen(args);
     fix_array_proxy_paths(&out);
     fix_observable_vector_paths(&out);
+    rename_window_id(&out);
     if !check {
         println!("generated crates/kaya/src/winui/bindings.rs");
         return;
@@ -820,6 +833,24 @@ fn fix_observable_vector_paths(path: &str) {
                 || fixed.contains(&format!("windows_collections:: {name}"))
         }),
         "collections fixup left references behind; check windows-bindgen output"
+    );
+    std::fs::write(path, fixed).expect("write bindings.rs");
+}
+
+/// `Microsoft.UI.WindowId` is projected as `XamlWindowId`: cbindgen reads
+/// this file with the rest of the crate, and a second `WindowId` replaced
+/// kaya's own in crates/kaya/include/kaya.h. The metadata name in the type's
+/// signature string is kept.
+fn rename_window_id(path: &str) {
+    const SIGNATURE: &str = "Microsoft.UI.WindowId";
+    const HELD: &str = "\u{0}KAYA_WINDOW_ID_SIGNATURE\u{0}";
+    let src = std::fs::read_to_string(path).expect("bindings.rs was just generated");
+    let held = src.replace(SIGNATURE, HELD);
+    let renamed = regex_lite::Regex::new(r"\bWindowId\b").unwrap().replace_all(&held, "XamlWindowId");
+    let fixed = renamed.replace(HELD, SIGNATURE);
+    assert!(
+        !regex_lite::Regex::new(r"\bWindowId\b").unwrap().is_match(&fixed.replace(SIGNATURE, "")),
+        "the WindowId rename left a reference behind; check windows-bindgen output"
     );
     std::fs::write(path, fixed).expect("write bindings.rs");
 }

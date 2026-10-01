@@ -265,8 +265,13 @@ Findings:
   returns 1,024 more samples than the file's duration. Apple, Android and
   GStreamer all return the right picture. A filmstrip does not care about
   66 ms; an editor that cuts on a frame does, and so would a test reading
-  frame numbers. Whether kaya's WinUI player position carries the same
-  offset was not measured here.
+  frame numbers. The WinUI MediaPlayer carries the same offset (measured
+  2026-10-01, docs/traps.md, the edit-list entry): its paused seeks drew the
+  picture two frames before the one its reported position names, and kaya's
+  WinUI arm now reads the video `elst` and moves the clock by it
+  (crates/kaya/src/edit_list.rs). The video's two frames are the B-frame
+  reorder delay; the audio's 1024 samples are the AAC priming, and the two
+  tracks' edits being the same number here is a coincidence of timescales.
 - THE EXACT SOURCE-READER LOOP IS SLOW BECAUSE OF HOW IT WAS ASKED, not the
   decoder: with RGB32 output, every one of the 4,338 frames decoded on the
   way was colour-converted by the video processor. A real implementation
@@ -482,11 +487,12 @@ edit-list defect here, and it would fail on Windows today.
 
 ### Unsettled
 
-- WINDOWS' EDIT LIST: kaya would have to read the MP4 `elst` itself (Media
-  Foundation exposes no attribute for it that this pass found) and shift
-  times by it, or document the two-frame error. Whether the WinUI player's
-  reported position carries the same offset is unmeasured and worth one
-  check, since the player's position is a shared-scene observable.
+- ~~WINDOWS' EDIT LIST~~ SETTLED 2026-10-01 for the player: Media
+  Foundation exposes no attribute for it, so kaya reads the MP4 `elst`
+  itself (crates/kaya/src/edit_list.rs) and the WinUI arm shifts its
+  position and seeks by it (docs/traps.md, the edit-list entry). A reader
+  built over Media Foundation would apply the same shift to its actual
+  times.
 - Android's waveform speed on a real phone, and whether a parallel or
   async-mode `MediaCodec` helps; only the emulator was measured.
 - `FrameExtractor` itself was not measured (it needs an app module);

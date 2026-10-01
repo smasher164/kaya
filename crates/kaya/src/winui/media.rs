@@ -5,7 +5,7 @@
 //! state machine through `report`; the core decides what the app hears.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use windows_core::{Interface as _, HSTRING};
@@ -32,7 +32,7 @@ use super::bindings::Windows::Media::{
 use super::bindings::Windows::Media::Streaming::Adaptive::{
     AdaptiveMediaSource, AdaptiveMediaSourceCreationResult, AdaptiveMediaSourceCreationStatus,
 };
-use super::bindings::Windows::Web::Http::HttpClient;
+use super::bindings::Windows::Web::Http::{HttpClient, HttpCompletionOption, HttpMethod, HttpRequestMessage};
 use super::{CoreState, CORE, DISPATCHER};
 use crate::media::Report;
 use crate::protocol::{PlayerCommand, PlayerId, PlayerProp, SessionAction, TrackKind, Value, WidgetId};
@@ -78,6 +78,18 @@ pub(super) struct WinPlayer {
     trail: Trail,
     /// SeekCompleted events raised, for the seek that never completes.
     seeks: Arc<AtomicU64>,
+    /// The video edit list's start in 100 ns, which Media Foundation's clock
+    /// runs ahead of the picture by (crate::edit_list; docs/traps.md).
+    shift: Arc<AtomicI64>,
+    /// An http(s) item's edit list is still being read; its open waits.
+    shift_pending: bool,
+    opened: bool,
+    /// A seek issued while another has not completed waits for it
+    /// (docs/deferred.md, the WinUI paused seek that leaves the old picture).
+    seek_in_flight: bool,
+    seek_held: Option<i64>,
+    /// The app's last word was play: a frame step would pause it.
+    play_asked: bool,
 }
 
 /// WHAT AN OPENING ITEM DID, per load, printed only when the open stalls
@@ -341,6 +353,24 @@ fn span_of(ms: u64) -> TimeSpan {
     TimeSpan { Duration: (ms as i64).saturating_mul(10_000) }
 }
 
+/// The platform's clock as the picture's time (docs/traps.md, the edit-list
+/// entry); every read of `Position` goes through here.
+fn shown_ms(span: TimeSpan, shift: &AtomicI64) -> u64 {
+    ms_of(TimeSpan { Duration: span.Duration.saturating_sub(shift.load(Ordering::SeqCst)) })
+}
+
+/// At its end Media Foundation's clock stops at `NaturalDuration`, which is
+/// the edit's length, so a shifted clock there reads the item's end, not the
+/// edit before it. An unshifted clock is left alone: `tick` reads an adaptive
+/// item's end from that clock running past the duration.
+fn position_ms(p: &WinPlayer) -> u64 {
+    let Ok(at) = p.player.PlaybackSession().and_then(|s| s.Position()) else { return 0 };
+    if p.shift.load(Ordering::SeqCst) != 0 && p.duration_ms > 0 && ms_of(at) >= p.duration_ms {
+        return p.duration_ms;
+    }
+    shown_ms(at, &p.shift)
+}
+
 /// THE ONE DOOR every player report takes: the core's state machine, then
 /// the session and the keep-awake follow it, so the system's playback
 /// status moves on every transition (tools/check-verbs.py holds every
@@ -471,18 +501,41 @@ pub(super) fn create_player(core: &mut CoreState, id: u64) -> windows_core::Resu
     let t = trail.clone();
     let seeks = Arc::new(AtomicU64::new(0));
     let done = seeks.clone();
+    let shift = Arc::new(AtomicI64::new(0));
+    let ahead = shift.clone();
     session.SeekCompleted(&TypedEventHandler::new(
         move |sender: windows_core::Ref<'_, super::bindings::Windows::Media::Playback::MediaPlaybackSession>, _| {
             let at = g.load(Ordering::SeqCst);
             let Some(sender) = sender.as_ref() else { return Ok(()) };
-            let ms = sender.Position().map(ms_of).unwrap_or(0);
+            let ms = sender.Position().map_or(0, |pos| shown_ms(pos, &ahead));
             t.note(at, format!("seek completed at {ms} ms"));
             done.fetch_add(1, Ordering::SeqCst);
             post(move |core| {
                 if live(core, id, at) {
+                    if let Some(p) = core.media.players.get_mut(&id) {
+                        p.seek_in_flight = false;
+                        if let Some(held) = p.seek_held.take() {
+                            p.seek_in_flight = true;
+                            if let Err(e) = p.player.PlaybackSession().and_then(|s| s.SetPosition(TimeSpan { Duration: held })) {
+                                eprintln!("KAYA_DIAG winui player {id}: the held seek failed: {}", e.message());
+                            }
+                            return;
+                        }
+                    }
                     report(core, id, Report::Seeked(ms));
                     ask_caption(core, id);
                     platform_cue(core, id);
+                    // A PAUSED SEEK'S PICTURE IS DRAWN BY A FRAME STEP THERE
+                    // AND BACK: the seek alone left the old picture on 3 of
+                    // 10 (docs/traps.md, the WinUI paused seek); a step
+                    // raises no SeekCompleted.
+                    if let Some(p) = core.media.players.get(&id) {
+                        if !p.playing && !p.play_asked && p.seek_held.is_none() && p.size.0 > 0 {
+                            if let Err(e) = p.player.StepForwardOneFrame().and_then(|()| p.player.StepBackwardOneFrame()) {
+                                eprintln!("KAYA_DIAG winui player {id}: the paused seek's frame step failed: {}", e.message());
+                            }
+                        }
+                    }
                 }
             });
             Ok(())
@@ -515,6 +568,12 @@ pub(super) fn create_player(core: &mut CoreState, id: u64) -> windows_core::Resu
             duration_ms: 0,
             trail,
             seeks,
+            shift,
+            shift_pending: false,
+            opened: false,
+            seek_in_flight: false,
+            seek_held: None,
+            play_asked: false,
         },
     );
     ensure_timer(core)?;
@@ -582,6 +641,7 @@ fn opened(core: &mut CoreState, id: u64, generation: u64) {
         return;
     }
     let Some(p) = core.media.players.get_mut(&id) else { return };
+    p.opened = true;
     // THE FIRST AUDIO TRACK, the file's default: Media Foundation's MP4
     // source selects the LAST one and ignores the default disposition
     // (measured on h264_2audio.mp4, eng default, SelectedIndex 1).
@@ -649,7 +709,7 @@ pub(super) fn aperture_size(area: &[u8]) -> Option<(u32, u32)> {
 /// of a file whose video decoder is missing and reports nothing, and only
 /// each track's `SupportInfo.DecoderStatus` says so — then the tracks.
 fn finish_open(core: &mut CoreState, id: u64, generation: u64) {
-    if !live(core, id, generation) || core.media.players.get(&id).is_none_or(|p| p.loaded) {
+    if !live(core, id, generation) || core.media.players.get(&id).is_none_or(|p| p.loaded || p.shift_pending) {
         return;
     }
     let read = (|| -> windows_core::Result<(u64, (u32, u32), bool, String)> {
@@ -735,6 +795,12 @@ fn load(core: &mut CoreState, id: u64, url: &str) -> windows_core::Result<()> {
     p.loaded = false;
     p.awaiting_size = false;
     p.duration_ms = 0;
+    p.shift.store(0, Ordering::SeqCst);
+    p.shift_pending = false;
+    p.opened = false;
+    p.seek_in_flight = false;
+    p.seek_held = None;
+    p.play_asked = false;
     let path = url.split(['?', '#']).next().unwrap_or(url).to_ascii_lowercase();
     p.adaptive = path.ends_with(".m3u8") || path.ends_with(".mpd");
     let previous = p.source.take();
@@ -766,6 +832,7 @@ fn load(core: &mut CoreState, id: u64, url: &str) -> windows_core::Result<()> {
             post(move |core| adaptive_created(core, id, generation, made));
         });
     } else {
+        read_shift(core, id, generation, url);
         let source = MediaSource::CreateFromUri(&uri)?;
         attach(core, id, generation, source)?;
         close_source(previous, previous_adaptive);
@@ -809,6 +876,88 @@ fn load(core: &mut CoreState, id: u64, url: &str) -> windows_core::Result<()> {
         });
     });
     Ok(())
+}
+
+/// MEDIA FOUNDATION IGNORES AN MP4 EDIT LIST (docs/traps.md): a local file's
+/// video `elst` is read here, an http(s) one's by byte range on a thread with
+/// the open held until it answers.
+fn read_shift(core: &mut CoreState, id: u64, generation: u64, url: &str) {
+    let Some(p) = core.media.players.get_mut(&id) else { return };
+    if let Some(path) = crate::edit_list::file_url_path(url) {
+        let read = std::fs::File::open(&path)
+            .map_err(|e| format!("opening {path}: {e}"))
+            .and_then(|f| crate::edit_list::video_shift(&mut crate::edit_list::LocalFile(f)));
+        settle_shift(p, id, url, read);
+        return;
+    }
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return;
+    }
+    p.shift_pending = true;
+    let url = url.to_owned();
+    std::thread::spawn(move || {
+        // SAFETY: this thread's own apartment, ended with the thread.
+        unsafe { super::CoInitializeEx(std::ptr::null(), 0x0) };
+        let read = (|| -> windows_core::Result<HttpRange> {
+            Ok(HttpRange { client: HttpClient::new()?, uri: Uri::CreateUri(&HSTRING::from(url.as_str()))? })
+        })()
+        .map_err(|e| format!("starting the byte-range client: {}", e.message()))
+        .and_then(|mut range| crate::edit_list::video_shift(&mut range));
+        post(move |core| {
+            if !live(core, id, generation) {
+                return;
+            }
+            let Some(p) = core.media.players.get_mut(&id) else { return };
+            p.shift_pending = false;
+            settle_shift(p, id, &url, read);
+            if p.opened {
+                finish_open(core, id, generation);
+            }
+        });
+    });
+}
+
+fn settle_shift(p: &mut WinPlayer, id: u64, url: &str, read: Result<Option<crate::edit_list::Shift>, String>) {
+    match read {
+        Ok(Some(crate::edit_list::Shift(hns))) => {
+            p.shift.store(hns, Ordering::SeqCst);
+            eprintln!("KAYA_DIAG winui player {id}: {url}'s video edit list starts {hns} hns in; the clock is moved by it");
+        }
+        Ok(None) => {}
+        Err(why) => eprintln!("KAYA_DIAG winui player {id}: {url}'s edit list was not read, so the clock is not moved: {why}"),
+    }
+}
+
+/// An http(s) file read by `Range` requests, for its `moov`.
+struct HttpRange {
+    client: HttpClient,
+    uri: Uri,
+}
+
+impl crate::edit_list::ReadAt for HttpRange {
+    fn read_at(&mut self, offset: u64, len: usize) -> Result<Vec<u8>, String> {
+        if len == 0 {
+            return Ok(Vec::new());
+        }
+        let last = offset + len as u64 - 1;
+        let got = (|| -> windows_core::Result<Result<Vec<u8>, String>> {
+            let request = HttpRequestMessage::Create(&HttpMethod::Get()?, &self.uri)?;
+            request.Headers()?.TryAppendWithoutValidation(&HSTRING::from("Range"), &HSTRING::from(format!("bytes={offset}-{last}")))?;
+            let response = self.client.SendRequestWithOptionAsync(&request, HttpCompletionOption::ResponseHeadersRead)?.join()?;
+            match response.StatusCode()?.0 {
+                206 => {}
+                416 => return Ok(Ok(Vec::new())),
+                status => return Ok(Err(format!("HTTP {status} to `Range: bytes={offset}-{last}`"))),
+            }
+            let buffer = response.Content()?.ReadAsBufferAsync()?.join()?;
+            let n = buffer.Length()? as usize;
+            let access: windows::Win32::System::WinRT::IBufferByteAccess = buffer.cast()?;
+            // SAFETY: the buffer owns `n` bytes and outlives the copy.
+            let bytes = unsafe { std::slice::from_raw_parts(access.Buffer()?, n).to_vec() };
+            Ok(Ok(bytes))
+        })();
+        got.map_err(|e| format!("`Range: bytes={offset}-{last}` failed: {}", e.message()))?
+    }
 }
 
 /// The adaptive source's creation answered: attach it, or report why not.
@@ -947,8 +1096,16 @@ pub(super) fn command(core: &mut CoreState, id: u64, command: PlayerCommand) -> 
         PlayerCommand::Play => {
             p.player.PlaybackSession()?.SetPlaybackRate(p.speed)?;
             p.player.Play()?;
+            if let Some(p) = core.media.players.get_mut(&id) {
+                p.play_asked = true;
+            }
         }
-        PlayerCommand::Pause => p.player.Pause()?,
+        PlayerCommand::Pause => {
+            p.player.Pause()?;
+            if let Some(p) = core.media.players.get_mut(&id) {
+                p.play_asked = false;
+            }
+        }
         PlayerCommand::Seek(ms) => {
             p.trail.note(p.generation.load(Ordering::SeqCst), format!("seek to {ms} ms asked"));
             // A SEEK THAT NEVER COMPLETES says so, with the trail
@@ -978,7 +1135,18 @@ pub(super) fn command(core: &mut CoreState, id: u64, command: PlayerCommand) -> 
                     }
                 });
             });
-            p.player.PlaybackSession()?.SetPosition(span_of(ms))?
+            let at = span_of(ms).Duration.saturating_add(p.shift.load(Ordering::SeqCst)).max(0);
+            let held = p.seek_in_flight;
+            if !held {
+                p.player.PlaybackSession()?.SetPosition(TimeSpan { Duration: at })?;
+            }
+            if let Some(p) = core.media.players.get_mut(&id) {
+                if held {
+                    p.seek_held = Some(at);
+                } else {
+                    p.seek_in_flight = true;
+                }
+            }
         }
     }
     Ok(())
@@ -1150,7 +1318,7 @@ fn ask_caption(core: &mut CoreState, id: u64) {
     let text = if p.caption_times.is_empty() {
         String::new()
     } else {
-        let now = p.player.PlaybackSession().and_then(|s| s.Position()).map(ms_of).unwrap_or(0);
+        let now = position_ms(p);
         let (text, published) = core.scene.caption_at(PlayerId(id), now);
         for occ in published {
             core.occurrences.send(occ);
@@ -1278,7 +1446,7 @@ fn tick(core: &mut CoreState) {
         let every = std::time::Duration::from_millis(crate::media::POSITION_TICK_MS);
         if p.last_position.is_none_or(|last| now.duration_since(last) >= every) {
             p.last_position = Some(now);
-            let ms = p.player.PlaybackSession().and_then(|s| s.Position()).map(ms_of).unwrap_or(0);
+            let ms = position_ms(p);
             report(core, id, Report::Position(ms));
             // AN ADAPTIVE CLOCK THAT RUNS PAST THE END: the local DASH and
             // HLS items, played pooled, kept `Playing` with the position past

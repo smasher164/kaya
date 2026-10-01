@@ -2,11 +2,13 @@
 # item's audio and caption listing (BCP 47 tags, the selection in brackets
 # counting from 1), a second audio track selected, the last caption track
 # selected, and the current cue read with the player paused at 0.5 s and
-# 1.5 s, and once played through. The last items are the floor file with a
-# sidecar WebVTT, which kaya parses, times and draws on every platform, so
-# there expect_caption reads what kaya's caption renderer drew: an asset,
-# the same file fetched from the lane's local server with the platform's
-# own networking, and a 404 there, which fails the player. `{media:…}` is this lane's table of
+# 1.5 s, and once played through. The last items carry a sidecar WebVTT,
+# which kaya parses, times and draws on every platform, so there
+# expect_caption reads what kaya's caption renderer drew: as an asset over
+# h264_frames.mp4, whose picture at 1.5 s is the only one grey A0A0A0
+# (two frames either side is not; docs/traps.md, the edit-list entry), then
+# over the floor file fetched from the lane's local server with the
+# platform's own networking, and a 404 there, which fails the player. `{media:…}` is this lane's table of
 # refused items and `{captions:…}` its table of embedded caption tracks it
 # does not expose (MP4 text on Windows, settled). The look is never asserted.
 expect label#0 "idle"
@@ -55,7 +57,7 @@ expect label#4 "{captions:h264_tx3g.mp4|first cue}"
 click button#4
 expect label#4 "{captions:h264_tx3g.mp4|second cue}"
 click button#0
-expect label#1 "h264_aac.mp4 + captions.vtt"
+expect label#1 "h264_frames.mp4 + captions.vtt"
 expect label#0 "ready, can_play yes"
 expect label#3 "captions en [-]"
 expect_caption video#0 ""
@@ -67,6 +69,7 @@ expect_caption video#0 "first cue"
 click button#4
 expect label#4 "second cue"
 expect_caption video#0 "second cue"
+expect_video_ink video#0 "A0A0A0"
 # Played through from the start, the cues change on the player's own clock
 # (kaya times them at the boundaries the core handed the backend).
 click button#6

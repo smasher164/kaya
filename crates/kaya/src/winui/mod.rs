@@ -7003,10 +7003,20 @@ fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()
                 }
             });
             titlebar.LayoutUpdated(&recentre)?;
+            if frame_mirrored() {
+                let id = target.AppWindow()?.Id()?;
+                let weak_titlebar = titlebar.downgrade()?;
+                titlebar.LayoutUpdated(&EventHandler::<windows_core::IInspectable>::new(move |_, _| {
+                    match weak_titlebar.upgrade() {
+                        Some(titlebar) => publish_mirrored_passthrough(id, &titlebar),
+                        None => Ok(()),
+                    }
+                }))?;
+            }
 
             let bar = CommandBar::new()?;
             titlebar.SetRightHeader(&bar.cast::<UIElement>()?)?;
-            titlebar.SetAutoRefreshDragRegions(true)?;
+            titlebar.SetAutoRefreshDragRegions(!frame_mirrored())?;
 
             // ORDER IS LOAD-BEARING AND DOCUMENTED: "To specify a custom
             // title bar, you must first set ExtendsContentIntoTitleBar to
@@ -7107,7 +7117,11 @@ fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()
         // the control's automatic refresh does not watch. Without this the
         // passthrough rects describe the PREVIOUS set of buttons. The menu
         // has the same problem for the same reason.
-        titlebar.RecomputeDragRegions()?;
+        if frame_mirrored() {
+            publish_mirrored_passthrough(target.AppWindow()?.Id()?, &titlebar)?;
+        } else {
+            titlebar.RecomputeDragRegions()?;
+        }
         refresh_caption(core, window)?;
     }
     Ok(())
@@ -10038,8 +10052,7 @@ fn element_screen_rect(core: &CoreState, element: &UIElement) -> Option<(f64, f6
     let scale = element.XamlRoot().ok()?.RasterizationScale().ok()?;
     let native: IWindowNative = Interface::cast(&core.window).ok()?;
     let hwnd = native.window_handle().ok()?;
-    let mut client = Point32 { x: 0, y: 0 };
-    unsafe { ClientToScreen(hwnd, &mut client) };
+    let client = client_origin(hwnd);
     Some((
         f64::from(client.x) + f64::from(origin.X) * scale,
         f64::from(client.y) + f64::from(origin.Y) * scale,
@@ -14472,11 +14485,10 @@ fn element_placement(core: &CoreState, element: &FrameworkElement) -> windows_co
         .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
     let native: IWindowNative = windows_core::Interface::cast(&core.window)?;
     let hwnd = native.window_handle()?;
-    let mut client = Point32 { x: 0, y: 0 };
+    let client = client_origin(hwnd);
     let mut outer = Rect::default();
-    // SAFETY: a live HWND with a stack POINT and a stack RECT.
+    // SAFETY: a live HWND with a stack RECT.
     unsafe {
-        ClientToScreen(hwnd, &mut client);
         GetWindowRect(hwnd, &mut outer);
     }
     Ok(Placement {
@@ -15555,6 +15567,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             watch_frame(&aux, window.0)?;
             watch_fullscreen(&aux, window.0)?;
             subclass(&aux, window.0)?;
+            mirror_frame(&aux)?;
             core.aux_windows.insert(window.0, aux);
             // A WINDOW BORN AFTER THE DECLARATION still belongs to the
             // same app (docs/app-identity-plan.md): identity is per-APP,
@@ -18588,6 +18601,10 @@ unsafe extern "system" {
     #[cfg(feature = "harness")]
     fn SetCursorPos(x: i32, y: i32) -> i32;
     #[cfg(feature = "harness")]
+    fn ScreenToClient(hwnd: isize, point: *mut Point32) -> i32;
+    #[cfg(feature = "harness")]
+    fn ChildWindowFromPointEx(hwnd: isize, point: Point32, flags: u32) -> isize;
+    #[cfg(feature = "harness")]
     fn mouse_event(flags: u32, dx: u32, dy: u32, data: u32, extra: usize);
     #[cfg(feature = "harness")]
     fn GetSystemMetrics(index: i32) -> i32;
@@ -18631,7 +18648,6 @@ unsafe extern "system" {
         alpha: *mut u8,
         flags: *mut u32,
     ) -> i32;
-    #[cfg(feature = "harness")]
     fn GetWindowLongPtrW(hwnd: isize, index: i32) -> isize;
     #[cfg(feature = "harness")]
     fn GetWindowThreadProcessId(hwnd: isize, pid: *mut u32) -> u32;
@@ -19195,6 +19211,159 @@ fn fullscreen_dress() -> bool {
     true
 }
 
+/// THE FRAME FOLLOWS THE PROCESS DIRECTION (docs/traps.md, the WinUI title
+/// bar under right to left): WinUI has no window-level FlowDirection, and
+/// WS_EX_LAYOUTRTL is what mirrors the caption. NOINHERITLAYOUT keeps the
+/// content's own child windows unmirrored, as they were measured working.
+fn frame_mirrored() -> bool {
+    crate::fmt::direction() == crate::fmt::Direction::Rtl
+}
+
+fn mirror_frame(window: &Window) -> windows_core::Result<()> {
+    const GWL_EXSTYLE: i32 = -20;
+    const WS_EX_NOINHERITLAYOUT: isize = 0x0010_0000;
+    const WS_EX_LAYOUTRTL: isize = 0x0040_0000;
+    if !frame_mirrored() {
+        return Ok(());
+    }
+    let hwnd = windows_core::Interface::cast::<IWindowNative>(window)?.window_handle()?;
+    // SAFETY: a live top-level HWND this thread created.
+    unsafe {
+        let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYOUTRTL | WS_EX_NOINHERITLAYOUT);
+    }
+    Ok(())
+}
+
+/// A MIRRORED WINDOW READS ITS DRAG REGIONS MIRRORED, and the TitleBar
+/// control writes them unmirrored, so a click on the toolbar dragged the
+/// window (measured, docs/traps.md). An RTL ground's own coordinates are
+/// already the mirrored window's, so the headers' bounds in the ground are
+/// the rects.
+fn publish_mirrored_passthrough(id: bindings::Microsoft::UI::XamlWindowId, titlebar: &TitleBar) -> windows_core::Result<()> {
+    use bindings::Microsoft::UI::Input::{InputNonClientPointerSource, NonClientRegionKind};
+    use bindings::Windows::Graphics::RectInt32;
+    let Ok(root) = titlebar.XamlRoot() else { return Ok(()) };
+    let Ok(ground) = root.Content() else { return Ok(()) };
+    let scale = root.RasterizationScale()?;
+    let mut rects = Vec::new();
+    for header in [titlebar.LeftHeader(), titlebar.RightHeader()].into_iter().flatten() {
+        let element: FrameworkElement = header.cast()?;
+        let (w, h) = (element.ActualWidth()?, element.ActualHeight()?);
+        if header.Visibility()? != Visibility::Visible || w <= 0.0 || h <= 0.0 {
+            continue;
+        }
+        let b = header.TransformToVisual(&ground)?.TransformBounds(bindings::Windows::Foundation::Rect {
+            X: 0.0,
+            Y: 0.0,
+            Width: w as f32,
+            Height: h as f32,
+        })?;
+        rects.push(RectInt32 {
+            X: (f64::from(b.X) * scale).round() as i32,
+            Y: (f64::from(b.Y) * scale).round() as i32,
+            Width: (f64::from(b.Width) * scale).round() as i32,
+            Height: (f64::from(b.Height) * scale).round() as i32,
+        });
+    }
+    let source = InputNonClientPointerSource::GetForWindowId(id)?;
+    if source.GetRegionRects(NonClientRegionKind::Passthrough)?[..] != rects[..] {
+        source.SetRegionRects(NonClientRegionKind::Passthrough, &rects)?;
+    }
+    Ok(())
+}
+
+/// The client area's left-top on screen. A mirrored window's client x runs
+/// from its right edge, so its ClientToScreen answers that edge.
+fn client_origin(hwnd: isize) -> Point32 {
+    const GWL_EXSTYLE: i32 = -20;
+    const WS_EX_LAYOUTRTL: isize = 0x0040_0000;
+    let mut origin = Point32 { x: 0, y: 0 };
+    let mut client = Rect::default();
+    // SAFETY: a live HWND with a stack POINT and a stack RECT.
+    unsafe {
+        ClientToScreen(hwnd, &mut origin);
+        if GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_LAYOUTRTL != 0 && GetClientRect(hwnd, &mut client) != 0 {
+            origin.x -= client.right - client.left;
+        }
+    }
+    origin
+}
+
+/// THE FRAME'S DIRECTION, read where a click would land: along the caption
+/// band, which side of the window answers HTCLOSE, and whether each caption
+/// header (the toolbar, the menu bar) answers HTCLIENT at its own centre.
+/// Each point is asked of the child of this window under it, so a window
+/// overlapping it on a pooled lane cannot answer.
+#[cfg(feature = "harness")]
+fn frame_direction(core: &CoreState) -> Result<(String, Vec<String>), String> {
+    const WM_NCHITTEST: u32 = 0x0084;
+    const HTCLIENT: isize = 1;
+    const HTCLOSE: isize = 20;
+    let hwnd = window_hwnd(core, 0).ok_or("the window has no HWND")?;
+    let answer = |x: i32, y: i32| -> isize {
+        let mut at = Point32 { x, y };
+        // SAFETY: a live HWND and stack POINTs; the hit test is a query.
+        unsafe {
+            ScreenToClient(hwnd, &mut at);
+            let child = ChildWindowFromPointEx(hwnd, at, 0x0001);
+            let target = if child == 0 { hwnd } else { child };
+            let lp = ((y as u32 as isize & 0xffff) << 16) | (x as u32 as isize & 0xffff);
+            SendMessageW(target, WM_NCHITTEST, 0, lp)
+        }
+    };
+    let mut win = Rect::default();
+    // SAFETY: a live HWND with a stack RECT.
+    let dpi = unsafe {
+        GetWindowRect(hwnd, &mut win);
+        GetDpiForWindow(hwnd).max(96)
+    };
+    let y = win.top + (16 * dpi as i32) / 96;
+    let close: Vec<i32> = (win.left + 1..win.right - 1).step_by(2).filter(|&x| answer(x, y) == HTCLOSE).collect();
+    let Some(&first) = close.first() else {
+        return Err(format!("no point along y={y} from x={} to x={} answers HTCLOSE", win.left, win.right));
+    };
+    let last = *close.last().unwrap_or(&first);
+    let side = format!(
+        "{} (HTCLOSE at x={first}..{last} of {}..{})",
+        if (first + last) / 2 < (win.left + win.right) / 2 { "rtl" } else { "ltr" },
+        win.left,
+        win.right
+    );
+    let mut wrong = Vec::new();
+    if let Some(titlebar) = core.window_titlebars.get(&0) {
+        let client = client_origin(hwnd);
+        for (name, header) in [("left header", titlebar.LeftHeader()), ("right header", titlebar.RightHeader())] {
+            let Ok(header) = header else { continue };
+            let element: FrameworkElement = header.cast().map_err(|e| e.message().to_string())?;
+            let (w, h) = (element.ActualWidth().unwrap_or(0.0), element.ActualHeight().unwrap_or(0.0));
+            if header.Visibility().ok() != Some(Visibility::Visible) || w <= 0.0 || h <= 0.0 {
+                continue;
+            }
+            let read = (|| -> windows_core::Result<(i32, i32)> {
+                let scale = header.XamlRoot()?.RasterizationScale()?;
+                let at = header
+                    .TransformToVisual(None::<&UIElement>)?
+                    .TransformPoint(bindings::Windows::Foundation::Point { X: (w / 2.0) as f32, Y: (h / 2.0) as f32 })?;
+                Ok((
+                    client.x + (f64::from(at.X) * scale).round() as i32,
+                    client.y + (f64::from(at.Y) * scale).round() as i32,
+                ))
+            })();
+            match read {
+                Ok((x, cy)) => {
+                    let ht = answer(x, cy);
+                    if ht != HTCLIENT {
+                        wrong.push(format!("the caption's {name} answers hit test {ht} at its centre ({x},{cy})"));
+                    }
+                }
+                Err(e) => wrong.push(format!("the caption's {name} could not be placed: {}", e.message())),
+            }
+        }
+    }
+    Ok((side, wrong))
+}
+
 fn window_hwnd(core: &CoreState, window: u64) -> Option<isize> {
     let target = winui_window(core, window).ok()?;
     let native: IWindowNative = windows_core::Interface::cast(&target).ok()?;
@@ -19250,6 +19419,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
     // The close grammar (veto/report) rides a WNDPROC subclass; the
     // non-veto primary falls through into the Closed handler below.
     subclass(&window, 0)?;
+    mirror_frame(&window)?;
 
     let closed = bindings::Windows::Foundation::TypedEventHandler::new(|_, _| {
         request_exit(0);
@@ -25077,11 +25247,25 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|e| format!("the labels could not be read: {e}"))
     }
     fn direction(&self) -> String {
-        // The ground's own resolved direction (window_ground writes it).
+        // The ground's own resolved direction (window_ground writes it), and
+        // the frame's, which must agree (docs/traps.md, the WinUI title bar
+        // under right to left).
         Self::on_ui_read(|core| {
             let ground = window_ground(&core.window)?;
             let element: FrameworkElement = windows_core::Interface::cast(&ground)?;
-            Ok(if element.FlowDirection()? == FlowDirection::RightToLeft { "rtl" } else { "ltr" }.to_owned())
+            let content = if element.FlowDirection()? == FlowDirection::RightToLeft { "rtl" } else { "ltr" };
+            Ok(match frame_direction(core) {
+                Ok((frame, wrong)) if frame.starts_with(content) && wrong.is_empty() => content.to_owned(),
+                Ok((frame, wrong)) => {
+                    let mut said = format!("{content} content in an {frame} frame");
+                    for w in wrong {
+                        said.push_str("; ");
+                        said.push_str(&w);
+                    }
+                    said
+                }
+                Err(why) => format!("{content} content, frame unread: {why}"),
+            })
         })
         .unwrap_or_else(|e| format!("unread: {e}"))
     }
