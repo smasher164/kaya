@@ -34,6 +34,8 @@ var wireTypes = map[string]bool{
 	// The picker types (docs/datetime-plan.md D10): a Date field is an
 	// I64 on the wire and a kaya.Date everywhere the record is touched.
 	"kaya.Date": true, "kaya.Time": true, "kaya.Color": true,
+	// A row's player (docs/media-plan.md §7b): the id, an I64.
+	"kaya.Player": true,
 	// A stamped copy's document is a FIELD of its row
 	// (docs/rich-text-plan.md §19): VALUE_BLOB in the schema, a
 	// kaya.Document everywhere the record is touched.
@@ -409,6 +411,8 @@ func generateRecord(w func(string, ...any), strct *ast.StructType, name, key str
 	w("\treturn r.c.ColorPicker(r.t, f, onColor)")
 	w("}")
 	w("")
+	w("func (r %sRow) Video(f kaya.Field[kaya.Player]) kaya.Node { return r.t.VideoBound(f) }", lowerFirst(name))
+	w("")
 	w("func (r %sRow) TimePicker(f kaya.Field[kaya.Time], onTime func(*kaya.Tx, %s, kaya.Time)) kaya.Node {", lowerFirst(name), key)
 	w("\treturn r.c.TimePicker(r.t, f, onTime)")
 	w("}")
@@ -442,6 +446,8 @@ func generateRecord(w func(string, ...any), strct *ast.StructType, name, key str
 	w("func (r %sRow) SetMax(n kaya.Node, max float64) { r.t.SetMax(n, max) }", lowerFirst(name))
 	w("")
 	w("func (r %sRow) SetAlpha(n kaya.Node, on bool) { r.t.SetAlpha(n, on) }", lowerFirst(name))
+	w("")
+	w("func (r %sRow) SetFit(n kaya.Node, fit kaya.Fit) { r.t.SetFit(n, fit) }", lowerFirst(name))
 	w("")
 	w("func (r %sRow) SetMinGap(n kaya.Node, gap float64) { r.t.SetMinGap(n, gap) }", lowerFirst(name))
 	w("func (r %sRow) SetLowLabel(n kaya.Node, label string) { r.t.SetLowLabel(n, label) }", lowerFirst(name))
