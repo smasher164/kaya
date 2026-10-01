@@ -378,8 +378,9 @@ pub const PLAYER_PROPS: &[(&'static str, u32, PropKind)] = &[
     ("volume", 3, PropKind::F64),
     ("muted", 4, PropKind::Bool),
     ("loop", 5, PropKind::Bool),
-    // docs/media-plan.md §3: a sidecar WebVTT file (a local source: an asset
-    // name or a picked file's path, "" for none) and its BCP 47 language.
+    // docs/media-plan.md §3: a sidecar WebVTT file (an asset name, an
+    // http(s) URL or a picked file's I64 handle, "" for none) and its BCP 47
+    // language.
     // kaya parses it and draws its cues on every platform.
     ("captions", 6, PropKind::Str),
     ("captions_language", 7, PropKind::Str),
@@ -1765,10 +1766,13 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             doc: "Write a player property (PLAYER_PROPS) once: a player is an \
                   object the app commands, so its props are written, never \
                   bound to a signal or a row. `source` is an asset \
-                  name, an http(s) URL, or a picked file's absolute path; the \
-                  core checks a local one exists and publishes \
+                  name or an http(s) URL as a Str, or a picked file's \
+                  handle as an I64, which the core resolves where the \
+                  picked table lives (the clipboard's rule); the core \
+                  checks a local path exists and publishes \
                   failed(not_found) itself rather than hand a missing file \
-                  to the platform (docs/media-plan.md §7a).",
+                  to the platform (docs/media-plan.md §7a). `captions` \
+                  takes the same three forms.",
         },
         Record {
             kind: 65,
@@ -2631,7 +2635,9 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             payload: None,
             doc: "One player property's resolved value: `source` arrives as a \
                   URL string (file:// for a local file the core found, \
-                  http(s) as written, empty for none), the rest as written.",
+                  http(s) as written, a picked file's own platform reference \
+                  where it has no path — a content:// URI, an iOS file URL \
+                  — empty for none), the rest as written.",
         },
         Record {
             kind: 53,

@@ -4984,12 +4984,12 @@ function known<T>(table: ReadonlyMap<number, T>, code: number, what: string): T 
 }
 
 /** Where a player reads its media from: an asset under the app's asset
- * root, an http(s) URL, or a file the user picked. A path, never bytes
+ * root, an http(s) URL, or a file the user picked. Never bytes
  * (docs/media-plan.md §2). */
 export class MediaSource {
-  /** @internal */ readonly _path: string;
+  /** @internal */ readonly _path: string | I64;
 
-  private constructor(path: string) {
+  private constructor(path: string | I64) {
     this._path = path;
   }
 
@@ -5001,16 +5001,19 @@ export class MediaSource {
     return new MediaSource(textValue("MediaSource.url", url));
   }
 
+  /** The picked file itself, which the platform's player opens however
+   * the platform names it: a path, a content:// URI, an iOS URL. */
   static picked(file: PickedFile): MediaSource {
-    return new MediaSource(file.localPath ?? "");
+    if (!(file instanceof PickedFile)) throw new TypeError(`kaya: MediaSource.picked takes a kaya.PickedFile, not ${runtime.describe(file)}`);
+    return new MediaSource(new I64(file.handle));
   }
 
   toString(): string {
-    return this._path;
+    return typeof this._path === "string" ? this._path : `picked ${this._path.value}`;
   }
 }
 
-function mediaPath(what: string, source: unknown): string {
+function mediaPath(what: string, source: unknown): string | I64 {
   if (!(source instanceof MediaSource)) throw new TypeError(`kaya: ${what} takes a kaya.MediaSource (asset, url or picked), not ${runtime.describe(source)}`);
   return source._path;
 }

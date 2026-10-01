@@ -6028,12 +6028,12 @@ class Fit(enum.IntEnum):
 
 class MediaSource:
     """Where a player reads its media from: an asset under the app's
-    asset root, an http(s) URL, or a file the user picked. A path, never
-    bytes (docs/media-plan.md §2)."""
+    asset root, an http(s) URL, or a file the user picked. Never bytes
+    (docs/media-plan.md §2)."""
 
     __slots__ = ("_path",)
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str | int) -> None:
         self._path = path
 
     @classmethod
@@ -6046,16 +6046,23 @@ class MediaSource:
 
     @classmethod
     def picked(cls, file: PickedFile) -> MediaSource:
-        return cls("" if file.local_path is None else str(file.local_path))
+        """The picked file itself, which the platform's player opens
+        however the platform names it: a path, a content:// URI, an iOS
+        URL."""
+        if not isinstance(file, PickedFile):
+            raise KayaTypeError(
+                f"kaya: MediaSource.picked takes a kaya.PickedFile, "
+                f"not {type(file).__name__}")
+        return cls(file.handle)
 
     def __str__(self) -> str:
-        return self._path
+        return str(self._path)
 
     def __repr__(self) -> str:
         return f"kaya.MediaSource({self._path!r})"
 
 
-def _media_source(what: str, source: object) -> str:
+def _media_source(what: str, source: object) -> str | int:
     if not isinstance(source, MediaSource):
         raise KayaTypeError(
             f"kaya: {what} takes a kaya.MediaSource (asset, url or picked), "

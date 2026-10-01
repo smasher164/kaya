@@ -1188,7 +1188,7 @@ static class KayaWire
         return Finish(stream, w, TxKindCreatePlayer);
     }
 
-    /// Write a player property (PLAYER_PROPS) once: a player is an object the app commands, so its props are written, never bound to a signal or a row. `source` is an asset name, an http(s) URL, or a picked file's absolute path; the core checks a local one exists and publishes failed(not_found) itself rather than hand a missing file to the platform (docs/media-plan.md §7a).
+    /// Write a player property (PLAYER_PROPS) once: a player is an object the app commands, so its props are written, never bound to a signal or a row. `source` is an asset name or an http(s) URL as a Str, or a picked file's handle as an I64, which the core resolves where the picked table lives (the clipboard's rule); the core checks a local path exists and publishes failed(not_found) itself rather than hand a missing file to the platform (docs/media-plan.md §7a). `captions` takes the same three forms.
     public static byte[] TxSetPlayerProp(ulong player, uint prop, object value)
     {
         var w = Begin(out var stream);

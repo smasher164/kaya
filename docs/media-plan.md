@@ -79,8 +79,8 @@ audio and keeps audio and video in sync.
 | WinUI 3 | `Windows.Media.Playback.MediaPlayer` | the app must close a player it set on an element; kaya does |
 | Android | media3 `ExoPlayer` 1.10.1 | the highest media3 kaya's Kotlin 2.0.21 / compileSdk 36 pins take; resolved and built against them |
 
-**Props** (the app writes): `source` (an asset name or a picked-file
-handle; a path, never a stream, since AVFoundation has no in-memory
+**Props** (the app writes): `source` (an asset name, an http(s) URL or a
+picked-file handle; never a stream, since AVFoundation has no in-memory
 initializer), `speed`, `volume` (0..1, relative to the system volume everywhere),
 `muted`, `loop`.
 
@@ -448,7 +448,7 @@ AVFoundation reports a missing file as -17913, which names nothing.
 | `not_found` | NSURLErrorDomain -1100, HTTP 404/410 | `SourceNotSupported` with 0xC00D001A (`NS_E_FILE_NOT_FOUND`), HTTP 404 | `RESOURCE_ERROR_NOT_FOUND` | 2005; 2004 with 404 or 410 |
 | `network` | other NSURLErrorDomain; -11850 | `SourceNotSupported` with 0xC00D0035 (`NS_E_SERVER_NOT_FOUND`), refused or unresolvable; `NetworkError` | a `STREAM_ERROR_FAILED` or resource error from the HTTP source element (refused, unresolvable and unroutable are stream errors) | 2001, 2002, other 2004 |
 | `decode_error` | -11821 | `MediaPlayerError.DecodingError` | `STREAM_ERROR_DECODE` | 4001, 4003, 3001, 3002 |
-| `resources` | -11839 ("The decoder required for this media is busy."), underlying -12913 (`kVTVideoDecoderNotAvailableNowErr`); measured at the 257th AV1 player on an M5 Pro, where H.264 and HEVC opened 1024 | measured at breadth | not reached: the lane's decoders are software with no instance cap (256 AV1 players prerolled in 1.1 s; 256 H.264 or HEVC ran out of CPU and memory with no error), so no GStreamer row maps to it | measured at breadth |
+| `resources` | -11839 ("The decoder required for this media is busy."), underlying -12913 (`kVTVideoDecoderNotAvailableNowErr`); measured at the 257th AV1 player on an M5 Pro, where H.264 and HEVC opened 1024 | not reached: no hardware decoder on the lane's VM | not reached: the lane's decoders are software with no instance cap (256 AV1 players prerolled in 1.1 s; 256 H.264 or HEVC ran out of CPU and memory with no error), so no GStreamer row maps to it | 4001 or 4003 over 1100/1101, 4006; and (RULED 2026-09-30) 4001 or 4003 from a player that never readied while other players are open, which is how the emulator pool reports running out (4003 over CodecException 14 or -19 at the 15th player, docs/traps.md) |
 
 Measured 2026-09-30: WinUI's `MediaPlayerError` is `SourceNotSupported` for a
 refused port, an unresolvable host, a 404 and an unknown container alike, so
@@ -589,6 +589,17 @@ only for the rows on screen and plays the most visible one, the feed-app
 pattern; kaya chooses nothing for the app. Running out of hardware decoders,
 which phones reach at a handful of players, fails with the reason
 `resources` rather than a black view.
+
+**A picked file (RULED 2026-09-30, built).** `source` and `captions` take a
+picked file as its handle, an I64 on the wire, which the core resolves where
+the picked table lives, the clipboard's rule: a picked path is checked like
+any path, and a file the platform names only by its own reference (an Android
+`content://` URI, the iOS picker's URL) is handed to the player as that
+reference. media3 reads a content URI through its DataSource; the iOS arm
+opens the picker's own URL object with its security scope held until the item
+is replaced. A platform that cannot open it fails the player with its reason.
+A picked sidecar is read through the picked file's own open. media_picked
+picks a clip through each platform's picker and plays it.
 
 **Built at depth (2026-09-30).** The player is a video view's `player`
 prop (PropKind::Player, an id, 0 for none) in both zones: a constant, or a

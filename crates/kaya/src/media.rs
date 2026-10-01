@@ -93,6 +93,12 @@ impl Player {
         }
     }
 
+    /// Whether the platform holds a decoder open for it: a source handed
+    /// over and not failed.
+    fn is_open(&self) -> bool {
+        !matches!(self.state, PlayerState::Idle | PlayerState::Failed)
+    }
+
     /// The listing the app reads: the platform's tracks, a sidecar's
     /// caption track last.
     fn tracks(&self) -> PlayerTracks {
@@ -221,8 +227,12 @@ impl Media {
     ) {
         let p = self.live_mut(player, "set_player_prop");
         match (prop, value) {
-            (PlayerProp::Source, Value::Str(source)) => {
-                let resolved = resolve_source(&source);
+            (PlayerProp::Source, value @ (Value::Str(_) | Value::I64(_))) => {
+                let resolved = match value {
+                    Value::I64(handle) => resolve_picked(player, handle),
+                    Value::Str(source) => resolve_source(&source),
+                    _ => unreachable!(),
+                };
                 let url = match &resolved {
                     Resolved::Url { url, .. } => url.clone(),
                     _ => String::new(),
@@ -252,6 +262,14 @@ impl Media {
                     p.publish_cue(player, String::new(), published);
                 }
                 out.push(ApplyOp::SetPlayerProp { player, prop, value: Value::Str(url) });
+            }
+            (PlayerProp::Captions, Value::I64(handle)) => {
+                if p.sidecar_fetch.take().is_some() {
+                    out.push(ApplyOp::SetPlayerProp { player, prop, value: Value::Str(String::new()) });
+                }
+                p.sidecar = Some(read_picked_sidecar(player, handle));
+                p.publish_tracks(player, published);
+                out.push(p.caption_times(player));
             }
             (PlayerProp::Captions, Value::Str(source)) => {
                 let remote = is_remote(&source);
@@ -303,8 +321,9 @@ impl Media {
                 out.push(ApplyOp::SetPlayerProp { player, prop, value: Value::Bool(on) });
             }
             (prop, value) => panic!(
-                "kaya: player {} {prop:?} got {value:?} — source, captions and captions_language \
-                 are Str, speed and volume F64, muted and loop Bool (spec::PLAYER_PROPS)",
+                "kaya: player {} {prop:?} got {value:?} — source and captions are Str or a picked \
+                 file's I64 handle, captions_language Str, speed and volume F64, muted and loop \
+                 Bool (spec::PLAYER_PROPS)",
                 player.0
             ),
         }
@@ -488,6 +507,7 @@ impl Media {
     /// what the app hears. A report for a released player, or one its
     /// state has no transition for, changes nothing and publishes nothing.
     pub(crate) fn report(&mut self, player: PlayerId, report: Report) -> Vec<Occurrence> {
+        let others_open = self.players.iter().filter(|(id, q)| **id != player && q.is_open()).count();
         let Some(p) = self.players.get_mut(&player) else {
             return Vec::new();
         };
@@ -525,8 +545,12 @@ impl Media {
                 out.push(changed(player, p));
             }
             (S::Loading | S::Ready | S::Playing | S::Paused | S::Ended, Report::Failed { domain, code, underlying, detail }) => {
+                p.failure = Some(if decoder_never_started(&domain, code, p.state, others_open) {
+                    MediaFailure::Resources
+                } else {
+                    failure_reason(&domain, code, underlying)
+                });
                 p.state = S::Failed;
-                p.failure = Some(failure_reason(&domain, code, underlying));
                 p.detail = if detail.is_empty() { format!("{domain} {code}") } else { detail };
                 out.push(changed(player, p));
             }
@@ -699,6 +723,15 @@ pub(crate) fn failure_reason(domain: &str, code: i64, underlying: i64) -> MediaF
     }
 }
 
+/// RULED 2026-09-30 (the maintainer): media3 reports running out of
+/// decoders as a decoder failing (4001, 4003) over the codec's own error
+/// (14, -19), never as 1100/1101 (docs/traps.md, the emulator pool's 15th
+/// player), so such a failure is `resources` when it comes before the
+/// player ever readied and other players are open.
+fn decoder_never_started(domain: &str, code: i64, state: PlayerState, others_open: usize) -> bool {
+    domain == "media3" && matches!(code, 4001 | 4003) && state == PlayerState::Loading && others_open > 0
+}
+
 /// Media Foundation's HRESULTs under WinUI's MediaPlayerError, as u32.
 const WIN_UNSUPPORTED_BYTESTREAM: i64 = 0xC00D_36C4;
 const WIN_UNSUPPORTED_MANIFEST: i64 = 0xC00D_6591;
@@ -737,13 +770,53 @@ pub(crate) fn resolve_source(source: &str) -> Resolved {
     }
 }
 
+/// A picked file as a source (the maintainer's ruling of 2026-09-30): where
+/// the platform hands back a path, the path's own check; where it hands back
+/// only its own reference (an Android `content://` URI, an iOS URL), that
+/// reference as written, for the platform's player to open or fail on.
+fn resolve_picked(player: PlayerId, handle: i64) -> Resolved {
+    let source = picked(player, "source", handle);
+    let local = crate::protocol::PickedSource::local_path(&*source);
+    if local.is_empty() {
+        Resolved::Url { url: crate::protocol::PickedSource::locator(&*source).to_owned(), remote: false }
+    } else {
+        resolve_source(local)
+    }
+}
+
+fn picked(player: PlayerId, what: &str, handle: i64) -> std::sync::Arc<dyn crate::protocol::PickedSource> {
+    crate::capi::picked_source(crate::protocol::PickedId(handle as u64)).unwrap_or_else(|| {
+        panic!(
+            "kaya: player {} {what} names picked file {handle}, which was never minted — a file \
+             handle comes from a picker result",
+            player.0
+        )
+    })
+}
+
+/// A picked sidecar, read through the picked file's own open, which every
+/// platform's reference answers.
+fn read_picked_sidecar(player: PlayerId, handle: i64) -> Captions {
+    use std::io::Read;
+    let source = picked(player, "captions", handle);
+    let name = crate::protocol::PickedSource::name(&*source).to_owned();
+    let mut bytes = Vec::new();
+    source
+        .open(crate::protocol::FileMode::Read)
+        .and_then(|(raw, _)| unsafe { crate::protocol::file_from_raw(raw) }.read_to_end(&mut bytes))
+        .unwrap_or_else(|e| panic!("kaya: player {} captions: the picked file {name:?} would not open: {e}", player.0));
+    let text = String::from_utf8(bytes)
+        .unwrap_or_else(|_| panic!("kaya: player {} captions {name:?} is not UTF-8, which WebVTT is", player.0));
+    Captions::parse(&text).unwrap_or_else(|why| panic!("kaya: player {} captions {name:?}: {why}", player.0))
+}
+
 fn is_remote(source: &str) -> bool {
     let lower = source.to_ascii_lowercase();
     lower.starts_with("http://") || lower.starts_with("https://")
 }
 
 /// A LOCAL sidecar WebVTT file, read and parsed by the core (docs/media-plan.md
-/// §3): an asset name or a picked file's absolute path. An http(s) one is
+/// §3): an asset name or an absolute path. An http(s) one is
 /// fetched by the backend and handed back as Report::CaptionsText.
 fn read_sidecar(player: PlayerId, source: &str) -> Captions {
     let bytes = if std::path::Path::new(source).is_absolute() {
@@ -1541,6 +1614,165 @@ mod tests {
             },
         );
         assert!(matches!(occs.as_slice(), [Occurrence::PlayerChanged { failure: Some(MediaFailure::Resources), .. }]));
+    }
+
+    fn failed(domain: &str, code: i64, underlying: i64) -> Report {
+        Report::Failed { domain: domain.into(), code, underlying, detail: String::new() }
+    }
+
+    fn failure(occs: &[Occurrence]) -> Option<MediaFailure> {
+        occs.iter().find_map(|o| match o {
+            Occurrence::PlayerChanged { state: PlayerState::Failed, failure, .. } => *failure,
+            _ => None,
+        })
+    }
+
+    /// Q opened first and is in `others`' state, then P loads.
+    fn two_players(other: PlayerState) -> Media {
+        const Q: PlayerId = PlayerId(8);
+        let (mut m, mut out, mut heard) = (Media::default(), Vec::new(), Vec::new());
+        m.create(Q);
+        m.create(P);
+        if other != PlayerState::Idle {
+            m.set_prop(Q, PlayerProp::Source, Value::Str("media/h264_aac.mp4".into()), &mut out, &mut heard);
+        }
+        match other {
+            PlayerState::Ready => drop(m.report(Q, loaded(false))),
+            PlayerState::Playing => {
+                m.report(Q, loaded(false));
+                m.report(Q, Report::Rate(true));
+            }
+            PlayerState::Failed => drop(m.report(Q, failed("media3", 2005, 0))),
+            _ => {}
+        }
+        assert_eq!(m.state(Q), Some(other));
+        m.set_prop(P, PlayerProp::Source, Value::Str("media/h264_aac.mp4".into()), &mut out, &mut heard);
+        m
+    }
+
+    /// The ruling of 2026-09-30, measured on the emulator pool: the 15th
+    /// player's decoder fails 4003 over CodecException 14 (H.264, HEVC) or
+    /// -19 (AV1) while fourteen play.
+    #[test]
+    fn a_decoder_that_never_started_while_other_players_are_open_is_resources() {
+        for (code, underlying) in [(4003, 14), (4003, -19), (4001, 0)] {
+            for other in [PlayerState::Loading, PlayerState::Ready, PlayerState::Playing] {
+                let mut m = two_players(other);
+                let heard = m.report(P, failed("media3", code, underlying));
+                assert_eq!(failure(&heard), Some(MediaFailure::Resources), "{code} over {underlying}, the other {other:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_same_failure_alone_or_after_the_start_is_a_decode_error() {
+        for other in [PlayerState::Idle, PlayerState::Failed] {
+            let mut m = two_players(other);
+            assert_eq!(failure(&m.report(P, failed("media3", 4003, 14))), Some(MediaFailure::DecodeError), "{other:?}");
+        }
+        let mut m = two_players(PlayerState::Playing);
+        m.report(P, loaded(false));
+        assert_eq!(failure(&m.report(P, failed("media3", 4003, 14))), Some(MediaFailure::DecodeError));
+        let mut m = two_players(PlayerState::Playing);
+        assert_eq!(
+            failure(&m.report(P, failed("AVFoundationErrorDomain", -11821, 0))),
+            Some(MediaFailure::DecodeError)
+        );
+        let mut m = two_players(PlayerState::Playing);
+        assert_eq!(failure(&m.report(P, failed("media3", 3001, 0))), Some(MediaFailure::DecodeError));
+    }
+
+    /// A picked file the platform names only by its own reference.
+    struct Reference {
+        locator: String,
+        bytes: std::path::PathBuf,
+    }
+
+    impl crate::protocol::PickedSource for Reference {
+        fn open(&self, _: crate::protocol::FileMode) -> std::io::Result<(i64, bool)> {
+            Ok((crate::protocol::raw_handle(std::fs::File::open(&self.bytes)?), true))
+        }
+        fn name(&self) -> &str {
+            "clip"
+        }
+        fn local_path(&self) -> &str {
+            ""
+        }
+        fn locator(&self) -> &str {
+            &self.locator
+        }
+    }
+
+    fn handed(out: &[ApplyOp], prop: PlayerProp) -> Vec<String> {
+        out.iter()
+            .filter_map(|op| match op {
+                ApplyOp::SetPlayerProp { prop: p, value: Value::Str(s), .. } if *p == prop => Some(s.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_picked_file_with_only_the_platforms_reference_is_handed_over_as_that_reference() {
+        let uri = "content://com.android.externalstorage.documents/document/primary%3ADocuments%2Fclip.mp4";
+        let handle = crate::capi::picked_register(std::sync::Arc::new(Reference {
+            locator: uri.into(),
+            bytes: std::path::PathBuf::from("/nonexistent"),
+        }));
+        let (mut m, mut out, mut heard) = (Media::default(), Vec::new(), Vec::new());
+        m.create(P);
+        m.set_prop(P, PlayerProp::Source, Value::I64(handle.0 as i64), &mut out, &mut heard);
+        assert_eq!(handed(&out, PlayerProp::Source), [uri]);
+        assert_eq!(states(&heard), [PlayerState::Loading]);
+        assert!(!m.players[&P].remote);
+    }
+
+    #[test]
+    fn a_picked_path_is_checked_and_handed_over_like_any_path() {
+        let dir = std::env::temp_dir().join(format!("kaya-media-picked-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let clip = dir.join("clip.mp4");
+        std::fs::write(&clip, b"not really").unwrap();
+        let path = |p: &std::path::Path| {
+            crate::capi::picked_register(std::sync::Arc::new(crate::protocol::PathSource {
+                name: "clip.mp4".into(),
+                path: p.to_string_lossy().into_owned(),
+            }))
+        };
+        let (here, gone) = (path(&clip), path(&dir.join("gone.mp4")));
+        let (mut m, mut out, mut heard) = (Media::default(), Vec::new(), Vec::new());
+        m.create(P);
+        m.set_prop(P, PlayerProp::Source, Value::I64(here.0 as i64), &mut out, &mut heard);
+        assert_eq!(handed(&out, PlayerProp::Source), [crate::assets::file_url(&clip)]);
+        out.clear();
+        heard.clear();
+        m.set_prop(P, PlayerProp::Source, Value::I64(gone.0 as i64), &mut out, &mut heard);
+        assert_eq!(failure(&heard), Some(MediaFailure::NotFound));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_picked_sidecar_is_read_through_its_own_open() {
+        let dir = std::env::temp_dir().join(format!("kaya-media-picked-vtt-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("c.vtt"), VTT).unwrap();
+        let handle = crate::capi::picked_register(std::sync::Arc::new(Reference {
+            locator: "content://provider/c.vtt".into(),
+            bytes: dir.join("c.vtt"),
+        }));
+        let (mut m, mut out, mut heard) = with_source("media/h264_aac.mp4");
+        m.set_prop(P, PlayerProp::Captions, Value::I64(handle.0 as i64), &mut out, &mut heard);
+        assert!(handed(&out, PlayerProp::Captions).is_empty(), "nothing to fetch: {out:?}");
+        m.select(P, TrackKind::Caption, 1, &mut out, &mut heard);
+        assert_eq!(m.caption_at(P, 1500).0, "second cue");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "names picked file 999999, which was never minted")]
+    fn a_picked_handle_never_minted_is_refused() {
+        let (mut m, _, _) = with_source("media/h264_aac.mp4");
+        m.set_prop(P, PlayerProp::Source, Value::I64(999_999), &mut Vec::new(), &mut Vec::new());
     }
 
     #[test]

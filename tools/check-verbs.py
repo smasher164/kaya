@@ -3210,6 +3210,23 @@ def ios_media_rows(code):
         bad.append("the iOS kayaVideoInk does not read the simulator's own "
                    "screenshot through the host (media_screen) — an "
                    "in-process read holds no playing picture")
+    hand = re.search(r"\n    private func platformURL\(_ locator: String\) -> URL\? \{"
+                     r"(.*?)\n    \}\n",
+                     code, re.S)
+    load = re.search(r"\n    func load\(_ locator: String\) \{(.*?)\n    \}\n", code, re.S)
+    rel = re.search(r"\n    func release\(\) \{(.*?)\n    \}\n", code, re.S)
+    if hand is None or load is None or rel is None \
+            or not re.search(r"#else\s+guard let picked = kayaPickedURLs\[locator\] else"
+                             r".*?picked\.startAccessingSecurityScopedResource\(\)"
+                             r".*?return picked", hand.group(1), re.S) \
+            or "let url = platformURL(locator)" not in load.group(1) \
+            or "releaseScope()" not in rel.group(1):
+        bad.append("KayaPlayer does not hand an iOS picked file's own URL to the "
+                   "player with its scope held (platformURL over kayaPickedURLs, "
+                   "opened by load, the scope released with the player) — the "
+                   "maintainer's ruling of 2026-09-30, which no simulator leg "
+                   "can see, since a file in the app's own container needs no "
+                   "scope there")
     return bad
 
 
@@ -3309,6 +3326,12 @@ for pattern, repl, label, rel, want in (
      "the iOS ink read not through the screenshot", SWIFT, 1),
     (r"(\n        if )legibleSwitching && waited < ", "false && waited < ",
      "a seek not waiting for the caption switch", SWIFT, 1),
+    (r"(guard let picked = )kayaPickedURLs\[locator\]", "Optional<URL>.none",
+     "the iOS picked URL not handed over", SWIFT, 1),
+    (r"(let url = )platformURL\(locator\)", "URL(string: locator)",
+     "the iOS load not through the picked hand-off", SWIFT, 1),
+    (r"(\n        player\.replaceCurrentItem\(with: nil\)\n)        releaseScope\(\)\n", "",
+     "the picked scope kept past release", SWIFT, 1),
 ):
     cut = g.doctor(f"media arms: {label}", real(rel), pattern,
                    lambda m, repl=repl: m.group(1) + repl, want=want)

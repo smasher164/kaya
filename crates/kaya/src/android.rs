@@ -157,9 +157,15 @@ pub fn attach(
         .spawn(move || app_main(ctx))
         .expect("failed to spawn the app thread");
     crate::capi::set_presentation_sink(OccSink::Mpsc(occ_tx));
-    register_present_natives(&mut env)
-        .expect("kaya: registering KayaPresent natives failed");
+    register_natives(&mut env);
     PRESENT_GUEST
+}
+
+/// BOTH CLASSES ON EVERY TIER (docs/traps.md, the Rust tier's copy_asset);
+/// tools/check-jni.py holds both attach paths to this one call.
+fn register_natives(env: &mut JNIEnv) {
+    crate::jvm::register_ring_natives(env).expect("kaya: registering KayaRing natives failed");
+    register_present_natives(env).expect("kaya: registering KayaPresent natives failed");
 }
 
 /// THE RUNTIME CAPABILITY BITS, MEASURED BEFORE ANY GUEST CAN ASK
@@ -219,10 +225,7 @@ extern "system" fn Java_dev_kaya_KayaRing_attach(
     crate::fmt::install_locale_knob();
     arm_state(&mut env, &state_root);
     grant_measured_capabilities(&mut env, &activity);
-    crate::jvm::register_ring_natives(&mut env)
-        .expect("kaya: registering KayaRing natives failed");
-    register_present_natives(&mut env)
-        .expect("kaya: registering KayaPresent natives failed");
+    register_natives(&mut env);
 }
 
 /// The second act's state root as the platform handed it in

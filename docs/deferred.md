@@ -177,16 +177,22 @@ tools/scenes/range.steps green on the mac lane. What breadth owed:
 KEY: resources, 4003, CodecException 14, emulator-5558, emulator-5560, picked file, content URI, video_ink_tolerance, MediaRemote non-delivery, HLS TS MediaOpened, display awake, playback category
 
 For the maintainer's review, each measured and none asserted by a lane:
-  - `resources` on Android: the pool's 15th playing ExoPlayer fails 4003
-    over CodecException 14 (H.264, HEVC) or -19 (AV1), never the documented
-    1100/1101, so it reads `decode_error` today (docs/traps.md). RULED
-    2026-09-30 (the maintainer): a decoder that fails to start while other
-    players are open reads `resources`; being built.
-  - A picked file with no local path (the phones' content URIs) silently
-    unloads the player in all nine bindings. RULED 2026-09-30 (the
-    maintainer): the platform's own reference (an Android content URI, an
-    iOS security-scoped URL) is handed to the player, which plays it
-    directly; never silent. Being built.
+  - ~~`resources` on Android~~ — BUILT 2026-09-30 by the maintainer's
+    ruling of that day: the pool's 15th playing ExoPlayer fails 4003 over
+    CodecException 14 (H.264, HEVC) or -19 (AV1), never the documented
+    1100/1101 (docs/traps.md), and the core's failure table now reads media3
+    4001/4003 from a player that never readied while another player is open
+    as `resources` (media.rs `decoder_never_started`, the core counting the
+    open players itself; unit tests watched failing on three cuts).
+  - ~~A picked file with no local path silently unloads the player~~ —
+    BUILT 2026-09-30 by the maintainer's ruling of that day: all nine
+    bindings send a picked source as its handle, the core hands a path's
+    check or the platform's own reference (docs/media-plan.md §7b's picked
+    paragraph), the iOS arm opens the picker's URL with its scope held, and
+    media_picked plays a clip picked through each platform's own picker.
+    check-sugar-surface holds the nine (the shipped local-path form watched
+    red per binding) and check-verbs the iOS hand-off; no simulator leg can
+    see the scope, since a file in the app's own container needs none there.
   - The GTK video ink is compared within 4 where the others use 2, stated
     per platform through Stage::video_ink_tolerance under plan §7a's "a
     tolerance stated for video". RULED 2026-09-30 (the maintainer): kept,
@@ -201,8 +207,13 @@ For the maintainer's review, each measured and none asserted by a lane:
     load, then 12 runs green); two causes ruled out by measurement, the
     cause not established (docs/traps.md). The arm logs the states and its
     TCP connections to the server at 5 s and nudges such a session with a
-    seek to 0, logged; the nudge has never fired, so whether it recovers a
-    real stall is unmeasured.
+    seek to 0, logged. THE NUDGE FIRED 2026-09-30 on a pooled
+    media_delivery_go under `--only media` (source Opened, session Opening,
+    two ESTABLISHED connections to the server) and did NOT recover it: the
+    leg read "loading" at the end (bundle runs/20261001T024816Z-000590), so
+    a seek is not the remedy. The same day a pooled media_tracks_js read no
+    platform cue for hls_fmp4.m3u8 after select and seek, 15 s each (bundle
+    runs/20261001T023438Z-087292), green on a rerun; one sighting.
   - The mac's in-process ScreenCaptureKit read hung or was refused
     ("declined TCCs") for a pooled media_delivery guest four times; the
     read falls back to screencapture(1) and says so (docs/traps.md). Why

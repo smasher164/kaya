@@ -4,7 +4,9 @@
 //! attaches the player to the app's session and answers `next` itself;
 //! `media_tracks` lists and selects each item's audio and caption tracks
 //! and reads the current cue; `media_feed` stamps a video view per row,
-//! each showing its row's own player, and reads their visibility (§7b).
+//! each showing its row's own player, and reads their visibility (§7b);
+//! `media_picked` plays a clip the user picked through the platform's own
+//! picker (§2).
 
 use kaya::{MediaFailure, MediaSource, PathKey, PlayerId, PlayerState, PlayerTracks, SessionAction, SessionActionKind};
 
@@ -88,6 +90,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     match scene.as_str() {
         "media_tracks" => return tracks_app(ctx),
         "media_feed" => return feed_app(ctx),
+        "media_picked" => return picked_app(ctx),
         _ => {}
     }
     let session = scene == "media_session";
@@ -188,6 +191,90 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 ctx.apply(|tx| tx.write(name, format!("next {nexts}")));
             }
             Msg::Session(_) => {}
+        }
+    }
+}
+
+#[derive(Clone)]
+enum PickMsg {
+    Open,
+    Picked(Option<kaya::PickedFile>),
+    State(PlayerState),
+    Failed(MediaFailure),
+    Position(u64),
+}
+
+/// media_picked (docs/media-plan.md §2, the maintainer's ruling of
+/// 2026-09-30): the file the picker answers with is handed to the player as
+/// the platform names it, played to its end and summed up as media_delivery
+/// does.
+fn picked_app(ctx: kaya::AppCtx) {
+    let msgs = kaya::Messages::<PickMsg>::new();
+    let (summary, name, player) = ctx.apply(|tx| {
+        tx.window(kaya::DEFAULT_WINDOW).title("media picked");
+        let summary = tx.signal("idle");
+        let name = tx.signal("none");
+        let player = tx.player().muted(true).id();
+        let root = tx
+            .column(|tx| {
+                tx.label(summary); // label#0
+                tx.label(name); // label#1
+                tx.video(player).a11y_id("clip").a11y_label("Clip"); // video#0
+                let open = tx.button("open").id(); // button#0
+                msgs.on_click(open, PickMsg::Open);
+            })
+            .id();
+        tx.mount(root);
+        (summary, name, player)
+    });
+    msgs.on_player_state(player, PickMsg::State);
+    msgs.on_failed(player, |why, _| PickMsg::Failed(why));
+    msgs.on_position(player, PickMsg::Position);
+
+    let mut can = false;
+    let mut furthest = 0u64;
+    while let Some(msg) = msgs.next(&ctx) {
+        match msg {
+            PickMsg::Open => ctx.apply(|tx| {
+                let dialog = tx.pick_file().show();
+                msgs.on_files(dialog, |files| PickMsg::Picked(files.into_iter().next()));
+            }),
+            PickMsg::Picked(None) => ctx.apply(|tx| tx.write(summary, "cancelled")),
+            PickMsg::Picked(Some(file)) => {
+                furthest = 0;
+                can = kaya::can_play("video/mp4", H264);
+                ctx.apply(|tx| {
+                    tx.player_source(player, &MediaSource::picked(&file));
+                    tx.write(name, file.name.clone());
+                    tx.write(summary, "loading");
+                });
+            }
+            PickMsg::State(PlayerState::Ready) => ctx.apply(|tx| tx.play(player)),
+            PickMsg::State(PlayerState::Ended) => {
+                let r = ctx.player(player);
+                let played = if furthest >= 1000 {
+                    "played past 1s".to_owned()
+                } else {
+                    format!("played to {furthest}ms")
+                };
+                ctx.apply(|tx| {
+                    tx.write(
+                        summary,
+                        format!(
+                            "ready {:.1}s {}x{}, {played}, ended, can_play {}",
+                            r.duration_ms as f64 / 1000.0,
+                            r.width,
+                            r.height,
+                            if can { "yes" } else { "no" }
+                        ),
+                    );
+                });
+            }
+            PickMsg::State(_) => {}
+            PickMsg::Failed(why) => ctx.apply(|tx| {
+                tx.write(summary, format!("failed {}, can_play {}", why.name(), if can { "yes" } else { "no" }));
+            }),
+            PickMsg::Position(ms) => furthest = furthest.max(ms),
         }
     }
 }

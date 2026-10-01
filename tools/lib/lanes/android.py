@@ -150,6 +150,8 @@ LEGS = {
         # no other lane and no other device of the pool shares.
         "media_formats-compose", "media_delivery-compose", "media_session-compose",
         "media_tracks-compose", "media_feed-compose",
+        # A picked clip played (docs/media-plan.md §2): rust-only, DocumentsUI.
+        "media_picked-compose",
     ],
     "jvm": [
         "jvm", "a11y-jvm", "entry-jvm",
@@ -375,7 +377,7 @@ MODS = {
 # verbs: the scenes that leave the app for DocumentsUI (the
 # accessibility service), and the one that opens a composing region
 # (the helper IME).
-A11Y_SCENES = ["chat", "filedialog", "save", "editor"]
+A11Y_SCENES = ["chat", "filedialog", "save", "editor", "media_picked"]
 IME_SCENES = ["ranges", "richtext"]
 
 # A scene is wired on this lane IF AND ONLY IF a suite lists it, or it

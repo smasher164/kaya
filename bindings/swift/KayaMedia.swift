@@ -19,16 +19,30 @@ public struct KayaPlayer: Hashable, Sendable {
 public func kayaPlayer(packed: Int64) -> KayaPlayer { KayaPlayer(id: UInt64(bitPattern: packed)) }
 
 /// Where a player reads its media from: an asset under the app's asset root,
-/// an http(s) URL, or a file the user picked. A path, never bytes.
+/// an http(s) URL, or a file the user picked. Never bytes.
 public struct KayaMediaSource: Sendable {
-    let location: String
+    enum Named: Sendable {
+        case text(String)
+        case picked(UInt64)
+    }
 
-    public static func asset(_ name: String) -> KayaMediaSource { KayaMediaSource(location: name) }
+    let named: Named
 
-    public static func url(_ url: String) -> KayaMediaSource { KayaMediaSource(location: url) }
+    public static func asset(_ name: String) -> KayaMediaSource { KayaMediaSource(named: .text(name)) }
 
+    public static func url(_ url: String) -> KayaMediaSource { KayaMediaSource(named: .text(url)) }
+
+    /// The picked file itself, which the platform's player opens however the
+    /// platform names it: a path, a content:// URI, an iOS URL.
     public static func picked(_ file: KayaPickedFile) -> KayaMediaSource {
-        KayaMediaSource(location: file.localPath ?? "")
+        KayaMediaSource(named: .picked(file.handle))
+    }
+
+    var value: KayaValue {
+        switch named {
+        case .text(let s): return .str(s)
+        case .picked(let handle): return .i64(Int64(handle))
+        }
     }
 }
 
@@ -417,7 +431,7 @@ extension KayaAppTx {
     /// Load `source`, replacing what the player held; it reads loading
     /// until the platform answers.
     public func playerSource(_ p: KayaPlayer, _ source: KayaMediaSource) {
-        playerProp(p, KAYA_PPROP_SOURCE, .str(source.location))
+        playerProp(p, KAYA_PPROP_SOURCE, source.value)
     }
 
     /// Unload, back to idle.
@@ -447,7 +461,7 @@ extension KayaAppTx {
     /// cues, listed as the last caption track (docs/media-plan.md §3).
     public func playerCaptions(_ p: KayaPlayer, _ source: KayaMediaSource, language: String) {
         playerProp(p, KAYA_PPROP_CAPTIONS_LANGUAGE, .str(language))
-        playerProp(p, KAYA_PPROP_CAPTIONS, .str(source.location))
+        playerProp(p, KAYA_PPROP_CAPTIONS, source.value)
     }
 
     /// No sidecar captions.

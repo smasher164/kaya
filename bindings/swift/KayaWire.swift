@@ -707,7 +707,7 @@ struct KayaTx {
         self.end(kayaAt)
     }
 
-    /// Write a player property (PLAYER_PROPS) once: a player is an object the app commands, so its props are written, never bound to a signal or a row. `source` is an asset name, an http(s) URL, or a picked file's absolute path; the core checks a local one exists and publishes failed(not_found) itself rather than hand a missing file to the platform (docs/media-plan.md §7a).
+    /// Write a player property (PLAYER_PROPS) once: a player is an object the app commands, so its props are written, never bound to a signal or a row. `source` is an asset name or an http(s) URL as a Str, or a picked file's handle as an I64, which the core resolves where the picked table lives (the clipboard's rule); the core checks a local path exists and publishes failed(not_found) itself rather than hand a missing file to the platform (docs/media-plan.md §7a). `captions` takes the same three forms.
     mutating func setPlayerProp(_ player: UInt64, _ prop: UInt32, _ value: KayaValue) {
         let kayaAt = self.begin(UInt16(KAYA_TX_SET_PLAYER_PROP))
         self.u64(player)

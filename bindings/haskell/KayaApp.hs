@@ -3425,7 +3425,11 @@ writePlayerProp (Player p) prop v = emitB (W.txSetPlayerProp p prop v)
 
 -- | Load a source, replacing what the player held.
 playerSource :: Player -> MediaSource -> Build ()
-playerSource p (MediaSource s) = writePlayerProp p W.ppropSource (W.VStr (T.unpack s))
+playerSource p src = writePlayerProp p W.ppropSource (mediaSourceValue src)
+
+mediaSourceValue :: MediaSource -> W.Value
+mediaSourceValue (MediaSource s) = W.VStr (T.unpack s)
+mediaSourceValue (MediaPicked handle) = W.VI64 (fromIntegral handle)
 
 -- | Unload, back to idle.
 clearPlayer :: Player -> Build ()
@@ -3447,9 +3451,9 @@ playerLoop p on = writePlayerProp p W.ppropLoop (W.VBool on)
 -- | A sidecar WebVTT file (an asset, an http(s) URL or a picked file) and
 -- its BCP 47 language, listed as the last caption track.
 playerCaptions :: Player -> MediaSource -> Text -> Build ()
-playerCaptions p (MediaSource s) lang = do
+playerCaptions p src lang = do
   writePlayerProp p W.ppropCaptionsLanguage (W.VStr (T.unpack lang))
-  writePlayerProp p W.ppropCaptions (W.VStr (T.unpack s))
+  writePlayerProp p W.ppropCaptions (mediaSourceValue src)
 
 clearCaptions :: Player -> Build ()
 clearCaptions p = writePlayerProp p W.ppropCaptions (W.VStr "")

@@ -258,6 +258,50 @@ if _census:
 print(f"check-jni: the class census read {len(_found)} file(s), "
       f"{len(UNREGISTERED)} exempt (4 watched negatives, all red)")
 
+# --- BOTH NATIVE CLASSES ON EVERY ANDROID ATTACH PATH ------------------
+# The class census above proves every native is in SOME registration list;
+# a tier that never runs a list still leaves the native unlinked until first
+# use. The Compose interpreter calls KayaRing natives on all three tiers, and
+# the Rust tier's `attach` registered KayaPresent alone: the first rust leg
+# to run copy_asset died of UnsatisfiedLinkError (docs/traps.md). Both attach
+# paths call register_natives, which registers both classes, and nothing
+# else in android.rs registers either.
+def attach_paths(text):
+    bad = []
+    body = re.search(r"\nfn register_natives\(env: &mut JNIEnv\) \{(.*?)\n\}", text, re.S)
+    if body is None or "register_ring_natives(env)" not in body.group(1) \
+            or "register_present_natives(env)" not in body.group(1):
+        bad.append("android.rs's register_natives does not register both KayaRing "
+                   "and KayaPresent")
+    for name in ("pub fn attach(", "extern \"system\" fn Java_dev_kaya_KayaRing_attach("):
+        at = text.find(name)
+        end = text.find("\n}\n", at)
+        if at < 0 or "register_natives(&mut env);" not in text[at:end]:
+            bad.append(f"android.rs's {name.rstrip('(')} does not call register_natives")
+    stray = len(re.findall(r"register_(?:ring|present)_natives\(&mut env\)", text))
+    if stray:
+        bad.append(f"android.rs registers a native class {stray} time(s) outside "
+                   f"register_natives")
+    return bad
+
+
+_android = (ROOT / "crates/kaya/src/android.rs").read_text(encoding="utf-8")
+_bad = attach_paths(_android)
+for e in _bad:
+    print(f"check-jni: {e}", file=sys.stderr)
+if _bad:
+    sys.exit(1)
+_cut, _n = re.subn(r"\n    register_natives\(&mut env\);\n    PRESENT_GUEST",
+                   "\n    register_present_natives(&mut env).expect(\"x\");"
+                   "\n    PRESENT_GUEST", _android)
+print(f"check-jni: attach-path negative (the rust tier registering KayaPresent alone): "
+      f"{_n} substitution(s)")
+if _n != 1 or len(attach_paths(_cut)) != 2:
+    print("check-jni: SELF-TEST BROKEN — the rust tier's shipped registration was not "
+          "refused by the attach-path clause", file=sys.stderr)
+    sys.exit(1)
+print("check-jni: both attach paths register both native classes (1 negative, red)")
+
 # --- THE APP-LINK DOOR, ON EVERY HOST APK -----------------------------
 # The JNI census above is about a native nobody registered; this one is
 # about a DOOR nobody opened, and it lives here because both are the same

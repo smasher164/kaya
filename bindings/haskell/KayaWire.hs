@@ -1234,7 +1234,7 @@ txSetBadge count = wireRecord txKindSetBadge (word32LE count <> word32LE 0)
 txCreatePlayer :: Word64 -> Builder
 txCreatePlayer player = wireRecord txKindCreatePlayer (word64LE player)
 
--- Write a player property (PLAYER_PROPS) once: a player is an object the app commands, so its props are written, never bound to a signal or a row. `source` is an asset name, an http(s) URL, or a picked file's absolute path; the core checks a local one exists and publishes failed(not_found) itself rather than hand a missing file to the platform (docs/media-plan.md §7a).
+-- Write a player property (PLAYER_PROPS) once: a player is an object the app commands, so its props are written, never bound to a signal or a row. `source` is an asset name or an http(s) URL as a Str, or a picked file's handle as an I64, which the core resolves where the picked table lives (the clipboard's rule); the core checks a local path exists and publishes failed(not_found) itself rather than hand a missing file to the platform (docs/media-plan.md §7a). `captions` takes the same three forms.
 txSetPlayerProp :: Word64 -> Word32 -> Value -> Builder
 txSetPlayerProp player prop value = wireRecord txKindSetPlayerProp (word64LE player <> word32LE prop <> word32LE 0 <> encodeValue value)
 

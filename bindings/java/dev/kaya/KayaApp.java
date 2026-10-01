@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.concurrent.CompletableFuture;
@@ -1627,19 +1628,47 @@ public final class KayaApp {
     }
 
     /** Where a player reads its media from: an asset under the app's
-     * asset root, an http(s) URL, or a file the user picked. A path,
-     * never bytes (docs/media-plan.md §2). */
-    public record MediaSource(String path) {
+     * asset root, an http(s) URL, or a file the user picked. Never bytes
+     * (docs/media-plan.md §2). */
+    public static final class MediaSource {
+        private final Object value;
+
+        private MediaSource(Object value) {
+            this.value = value;
+        }
+
         public static MediaSource asset(String name) {
-            return new MediaSource(name);
+            return new MediaSource(Objects.requireNonNull(name, "kaya: MediaSource.asset takes a name"));
         }
 
         public static MediaSource url(String url) {
-            return new MediaSource(url);
+            return new MediaSource(Objects.requireNonNull(url, "kaya: MediaSource.url takes a URL"));
         }
 
+        /** The picked file itself, which the platform's player opens
+         * however the platform names it: a path, a content:// URI, an iOS
+         * URL. */
         public static MediaSource picked(PickedFile file) {
-            return new MediaSource(file.localPath());
+            return new MediaSource(file.handle());
+        }
+
+        Object value() {
+            return value;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            return other instanceof MediaSource o && o.value.equals(value);
+        }
+
+        @Override
+        public int hashCode() {
+            return value.hashCode();
+        }
+
+        @Override
+        public String toString() {
+            return "MediaSource[" + value + "]";
         }
     }
 
@@ -6431,7 +6460,7 @@ public final class KayaApp {
         /** Load {@code source}, replacing what the player held; it reads
          * loading until the platform answers. */
         public void playerSource(Player p, MediaSource source) {
-            playerProp(p, KayaWire.PPROP_SOURCE, source.path());
+            playerProp(p, KayaWire.PPROP_SOURCE, source.value());
         }
 
         /** Unload, back to idle. */
@@ -6481,7 +6510,7 @@ public final class KayaApp {
          * (docs/media-plan.md §3). */
         public void playerCaptions(Player p, MediaSource source, String language) {
             playerProp(p, KayaWire.PPROP_CAPTIONS_LANGUAGE, language);
-            playerProp(p, KayaWire.PPROP_CAPTIONS, source.path());
+            playerProp(p, KayaWire.PPROP_CAPTIONS, source.value());
         }
 
         /** No sidecar captions. */

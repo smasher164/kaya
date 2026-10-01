@@ -1,0 +1,17 @@
+# A clip the user picked through the platform's own picker plays
+# (docs/media-plan.md §2, the maintainer's ruling of 2026-09-30): the picked
+# file reaches the player as the platform names it, a path on the desktops, a
+# content:// URI on Android and the picker's URL on iOS, where a phone used to
+# leave the player idle without a word. Two clips, the decoy sorting first,
+# since a dialog completes with the only row when nothing is selected
+# (docs/traps.md).
+expect label#0 "idle"
+copy_asset media/hevc_aac.mp4 $TMP/kaya-clips-$PID/decoy.mp4
+copy_asset media/h264_aac.mp4 $TMP/kaya-clips-$PID/picked.mp4
+file_dialog_goto $TMP/kaya-clips-$PID
+click button#0
+expect_file_dialog kaya-clips-$PID decoy.mp4 picked.mp4
+file_choose picked.mp4
+expect label#1 "picked.mp4"
+expect_video_ink video#0 "C83C1E"
+expect label#0 "ready 2.0s 160x90, played past 1s, ended, can_play yes"

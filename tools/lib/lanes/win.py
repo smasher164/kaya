@@ -636,6 +636,11 @@ ORDER = [
     [
      "filedialog_java",
     ],
+    # A clip picked through the Shell's dialog and played (docs/media-plan.md
+    # §2): the filedialog rule, one leg per drain.
+    [
+     "media_picked_rust",
+    ],
     # save_rust: the filedialog rule — the save dialog is the same
     # OS-global `#32770` chrome, found the same way.
     [
@@ -789,7 +794,7 @@ GUEST_STEM = {"listdetail": "split", "formatde": "format", "formatar": "format",
               "tasksbig": "tasks", "formatbig": "format", "clock24": "format",
               "scrollrtl": "scroll", "numberfieldde": "numberfield", "rangertl": "range",
               "media_formats": "media", "media_delivery": "media", "media_session": "media",
-              "media_tracks": "media", "media_feed": "media"}
+              "media_tracks": "media", "media_feed": "media", "media_picked": "media"}
 
 # THE MEDIA SUITE'S SERVER (docs/media-plan.md §7a): the VM reaches the host
 # over UTM's bridge, so the runner binds it there, on this lane's own port,

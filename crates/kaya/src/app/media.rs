@@ -10,22 +10,37 @@ use crate::protocol::{
 };
 
 /// Where a player reads its media from: an asset under the app's asset
-/// root, an http(s) URL, or a file the user picked. A path, never bytes
+/// root, an http(s) URL, or a file the user picked. Never bytes
 /// (docs/media-plan.md §2).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MediaSource(String);
+pub struct MediaSource(Named);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Named {
+    Text(String),
+    Picked(crate::protocol::PickedId),
+}
 
 impl MediaSource {
     pub fn asset(name: impl Into<String>) -> Self {
-        MediaSource(name.into())
+        MediaSource(Named::Text(name.into()))
     }
 
     pub fn url(url: impl Into<String>) -> Self {
-        MediaSource(url.into())
+        MediaSource(Named::Text(url.into()))
     }
 
+    /// The picked file itself, which the platform's player opens however
+    /// the platform names it: a path, a `content://` URI, an iOS URL.
     pub fn picked(file: &crate::protocol::PickedFile) -> Self {
-        MediaSource(file.local_path.clone())
+        MediaSource(Named::Picked(file.handle))
+    }
+
+    fn value(&self) -> Value {
+        match &self.0 {
+            Named::Text(s) => Value::Str(s.clone()),
+            Named::Picked(handle) => Value::I64(handle.0 as i64),
+        }
     }
 }
 
@@ -136,7 +151,7 @@ impl<'a> Tx<'a> {
     /// Load `source`, replacing what the player held; it reads `loading`
     /// until the platform answers.
     pub fn player_source(&mut self, player: PlayerId, source: &MediaSource) {
-        self.player_prop(player, PlayerProp::Source, Value::Str(source.0.clone()));
+        self.player_prop(player, PlayerProp::Source, source.value());
     }
 
     /// Unload, back to `idle`.
@@ -203,7 +218,7 @@ impl<'a> Tx<'a> {
     /// (docs/media-plan.md §3).
     pub fn player_captions(&mut self, player: PlayerId, source: &MediaSource, language: &str) {
         self.player_prop(player, PlayerProp::CaptionsLanguage, Value::Str(language.to_owned()));
-        self.player_prop(player, PlayerProp::Captions, Value::Str(source.0.clone()));
+        self.player_prop(player, PlayerProp::Captions, source.value());
     }
 
     /// No sidecar captions.

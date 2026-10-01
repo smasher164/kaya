@@ -1859,6 +1859,10 @@ for proto in x11 wayland; do
         tools/linux/media-leg.sh tools/linux/a11y-leg.sh "$(hs_bin media)"
     run "$proto" media_feed-java env KAYA_SELFTEST=media_feed KAYA_LIB="$LIB" \
         tools/linux/media-leg.sh tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    # A clip picked through GNOME's own picker and played (docs/media-plan.md
+    # §2): rust-only, pooled like filedialog.
+    run "$proto" media_picked-rust env KAYA_SELFTEST=media_picked \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/media"
     # THE TWO WATCHED REDS OF docs/media-plan.md §7a, as legs that must go
     # GREEN: the AV1 decoder demoted (the audio would play alone, silently)
     # and the TS demuxer demoted (the stream would stall), each read by the

@@ -26181,6 +26181,8 @@ final class KayaPlayer {
     private var rateObserver: NSKeyValueObservation?
     private var tokens: [NSObjectProtocol] = []
     private var timeObserver: Any?
+    /// A picked file's security scope, held while its item is the player's.
+    private var scoped: URL?
 
     init(id: UInt64) {
         self.id = id
@@ -26213,8 +26215,27 @@ final class KayaPlayer {
         boundaryObserver = nil
         detach()
         player.replaceCurrentItem(with: nil)
+        releaseScope()
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         rateObserver = nil
+    }
+
+    private func releaseScope() {
+        scoped?.stopAccessingSecurityScopedResource()
+        scoped = nil
+    }
+
+    /// The URL the player opens: on iOS a picked file's own URL object, its
+    /// scope held until the item is replaced (the maintainer's ruling of
+    /// 2026-09-30), since only that object re-acquires the scope.
+    private func platformURL(_ locator: String) -> URL? {
+        #if os(macOS)
+            return URL(string: locator)
+        #else
+            guard let picked = kayaPickedURLs[locator] else { return URL(string: locator) }
+            if picked.startAccessingSecurityScopedResource() { scoped = picked }
+            return picked
+        #endif
     }
 
     private func detach() {
@@ -26233,7 +26254,10 @@ final class KayaPlayer {
         legible = nil
         platformCue = ""
         kayaVideoSizeChanged(id)
-        guard !locator.isEmpty, let url = URL(string: locator) else {
+        let held = scoped
+        scoped = nil
+        defer { held?.stopAccessingSecurityScopedResource() }
+        guard !locator.isEmpty, let url = platformURL(locator) else {
             player.replaceCurrentItem(with: nil)
             return
         }

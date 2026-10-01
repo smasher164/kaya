@@ -48,18 +48,30 @@ type PlaybackState int64
 type Fit int64
 
 // MediaSource is where a player reads its media from: an asset under the
-// app's asset root, an http(s) URL, or a file the user picked. A path,
-// never bytes (docs/media-plan.md §2).
-type MediaSource struct{ path string }
+// app's asset root, an http(s) URL, or a file the user picked. Never
+// bytes (docs/media-plan.md §2).
+type MediaSource struct {
+	path   string
+	picked uint64
+}
 
 // MediaAsset names an asset, e.g. MediaAsset("media/h264_aac.mp4").
-func MediaAsset(name string) MediaSource { return MediaSource{name} }
+func MediaAsset(name string) MediaSource { return MediaSource{path: name} }
 
 // MediaURL is an http(s) URL.
-func MediaURL(url string) MediaSource { return MediaSource{url} }
+func MediaURL(url string) MediaSource { return MediaSource{path: url} }
 
-// MediaPicked is a file the user picked.
-func MediaPicked(file PickedFile) MediaSource { return MediaSource{file.LocalPath} }
+// MediaPicked is a file the user picked, which the platform's player
+// opens however the platform names it: a path, a content:// URI, an iOS
+// URL.
+func MediaPicked(file PickedFile) MediaSource { return MediaSource{picked: file.Handle} }
+
+func (s MediaSource) value() any {
+	if s.picked != 0 {
+		return int64(s.picked)
+	}
+	return s.path
+}
 
 // PlayerReading is a player's readings as the core last published them.
 type PlayerReading struct {
@@ -220,7 +232,7 @@ func (tx *Tx) playerProp(p Player, prop uint32, value any) {
 
 // PlayerSource loads src, replacing what the player held; it reads
 // loading until the platform answers.
-func (tx *Tx) PlayerSource(p Player, src MediaSource) { tx.playerProp(p, PpropSource, src.path) }
+func (tx *Tx) PlayerSource(p Player, src MediaSource) { tx.playerProp(p, PpropSource, src.value()) }
 
 // ClearPlayer unloads the player, back to idle.
 func (tx *Tx) ClearPlayer(p Player) { tx.playerProp(p, PpropSource, "") }
@@ -239,7 +251,7 @@ func (tx *Tx) PlayerLoop(p Player, on bool) { tx.playerProp(p, PpropLoop, on) }
 // caption track (docs/media-plan.md §3).
 func (tx *Tx) PlayerCaptions(p Player, src MediaSource, language string) {
 	tx.playerProp(p, PpropCaptionsLanguage, language)
-	tx.playerProp(p, PpropCaptions, src.path)
+	tx.playerProp(p, PpropCaptions, src.value())
 }
 
 // ClearCaptions drops the sidecar captions.

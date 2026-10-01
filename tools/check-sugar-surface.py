@@ -2530,7 +2530,8 @@ MEDIA_SURFACES = [
     ("rust", "crates/kaya/src/app/media.rs", "capability", "can_play",
      r"pub fn {0}\(mime: &str, codecs: &str\) -> bool"),
     ("rust", "crates/kaya/src/app/media.rs", "picked source", "picked",
-     r"pub fn {0}\(file: &crate::protocol::PickedFile\) -> Self"),
+     r"pub fn {0}\(file: &crate::protocol::PickedFile\) -> Self \{{\n"
+     r"\s*MediaSource\(Named::Picked\(file\.handle\)\)"),
     # go
     ("go", "bindings/go/media.go", "player object", "Player",
      r"func \(tx \*Tx\) {0}\(\) PlayerRef \{{"),
@@ -2566,7 +2567,8 @@ MEDIA_SURFACES = [
     ("go", "bindings/go/media.go", "capability", "CanPlay",
      r"func {0}\(mime, codecs string\) bool"),
     ("go", "bindings/go/media.go", "picked source", "MediaPicked",
-     r"func {0}\(file PickedFile\) MediaSource"),
+     r"func {0}\(file PickedFile\) MediaSource \{{ "
+     r"return MediaSource\{{picked: file\.Handle\}} \}}"),
     # csharp
     ("csharp", "bindings/csharp/KayaApp.cs", "player object", "Player",
      r"public Player {0}\(MediaSource\? source = null"),
@@ -2603,7 +2605,7 @@ MEDIA_SURFACES = [
     ("csharp", "bindings/csharp/KayaApp.cs", "capability", "CanPlay",
      r"public static bool {0}\(string mime, string codecs = \"\"\)"),
     ("csharp", "bindings/csharp/KayaApp.cs", "picked source", "Picked",
-     r"public static MediaSource {0}\(PickedFile file\)"),
+     r"public static MediaSource {0}\(PickedFile file\) => new\(\(long\)file\.Handle\);"),
     # java
     ("java", "bindings/java/dev/kaya/KayaApp.java", "player object", "player",
      r"public Player {0}\(\) \{{"),
@@ -2643,7 +2645,8 @@ MEDIA_SURFACES = [
     ("java", "bindings/java/dev/kaya/KayaApp.java", "capability", "canPlay",
      r"public static boolean {0}\(String mime, String codecs\)"),
     ("java", "bindings/java/dev/kaya/KayaApp.java", "picked source", "picked",
-     r"public static MediaSource {0}\(PickedFile file\)"),
+     r"public static MediaSource {0}\(PickedFile file\) \{{\n"
+     r"\s*return new MediaSource\(file\.handle\(\)\);"),
     # swift
     ("swift", "bindings/swift/KayaMedia.swift", "player object", "player",
      r"public func {0}\(\n\s*source: KayaMediaSource\? = nil"),
@@ -2686,7 +2689,8 @@ MEDIA_SURFACES = [
     ("swift", "bindings/swift/KayaMedia.swift", "capability", "canPlay",
      r"public static func {0}\(_ mime: String, codecs: String = \"\"\) -> Bool"),
     ("swift", "bindings/swift/KayaMedia.swift", "picked source", "picked",
-     r"public static func {0}\(_ file: KayaPickedFile\) -> KayaMediaSource"),
+     r"public static func {0}\(_ file: KayaPickedFile\) -> KayaMediaSource \{{\n"
+     r"\s*KayaMediaSource\(named: \.picked\(file\.handle\)\)"),
     # python (one surface serves both zones)
     ("python", "bindings/python/kaya/__init__.py", "player object", "player",
      r"^def {0}\(source: MediaSource \| None = None, \*,"),
@@ -2721,7 +2725,8 @@ MEDIA_SURFACES = [
     ("python", "bindings/python/kaya/__init__.py", "capability", "can_play",
      r"^def {0}\(mime: str, codecs: str = \"\"\) -> bool:"),
     ("python", "bindings/python/kaya/__init__.py", "picked source", "picked",
-     r"    def {0}\(cls, file: PickedFile\) -> MediaSource:"),
+     r"    def {0}\(cls, file: PickedFile\) -> MediaSource:\n(?:(?!    def ).*\n)*?"
+     r"        return cls\(file\.handle\)$"),
     # js
     ("js", "bindings/js/kaya/index.ts", "player object", "player",
      r"^export function {0}\(opts: PlayerOptions = \{{\}}\): Player \{{"),
@@ -2752,7 +2757,8 @@ MEDIA_SURFACES = [
     ("js", "bindings/js/kaya/index.ts", "capability", "canPlay",
      r"^export function {0}\(mime: string, codecs = \"\"\): boolean \{{"),
     ("js", "bindings/js/kaya/index.ts", "picked source", "picked",
-     r"^  static {0}\(file: PickedFile\): MediaSource \{{"),
+     r"^  static {0}\(file: PickedFile\): MediaSource \{{\n(?:(?!  \}}).*\n)*?"
+     r"    return new MediaSource\(new I64\(file\.handle\)\);"),
     # ocaml
     ("ocaml", "bindings/ocaml/kaya_app.ml", "player object", "player",
      r"^let {0} \?source \?speed \?volume \?muted \?loop \?captions \(\) ="),
@@ -2788,7 +2794,7 @@ MEDIA_SURFACES = [
      r"^let {0} app \(f : Session_action\.t -> unit\) ="),
     ("ocaml", "bindings/ocaml/kaya_app.ml", "capability", "can_play", r"^let {0} mime codecs ="),
     ("ocaml", "bindings/ocaml/kaya_app.ml", "picked source", "picked",
-     r"^  let {0} \(f : picked_file\) = Source f\.local_path"),
+     r"^  let {0} \(f : picked_file\) = Picked f\.handle$"),
     # haskell
     ("haskell", "bindings/haskell/KayaApp.hs", "player object", "player",
      r"^{0} :: \[PlayerAttr\] -> Build Player"),
@@ -2825,7 +2831,7 @@ MEDIA_SURFACES = [
     ("haskell", "bindings/haskell/KayaApp.hs", "capability", "canPlay",
      r"^{0} :: Text -> Text -> IO Bool"),
     ("haskell", "bindings/haskell/Kaya/Core.hs", "picked source", "mediaPicked",
-     r"^{0} :: PickedFile -> MediaSource"),
+     r"^{0} :: PickedFile -> MediaSource\n{0} f = MediaPicked f\.handle$"),
 ]
 
 
@@ -2891,6 +2897,49 @@ def media_parts_missing(table):
             and not {(lang, "live video"), (lang, "template video")} <= have]
     return out
 
+
+# A PICKED SOURCE RIDES AS THE PICKED HANDLE in all nine (the maintainer's
+# ruling of 2026-09-30, docs/media-plan.md §2): a binding that sends the file's
+# local path instead silently unloads the player on the phones, whose picked
+# files have none. Each row above holds the handle; the shipped local-path
+# form is put back in a copy per binding and must be the one finding.
+PICKED_SHIPPED = [
+    ("rust", "crates/kaya/src/app/media.rs", "MediaSource(Named::Picked(file.handle))",
+     "MediaSource(Named::Text(file.local_path.clone()))"),
+    ("go", "bindings/go/media.go", "MediaSource{picked: file.Handle}",
+     "MediaSource{path: file.LocalPath}"),
+    ("csharp", "bindings/csharp/KayaApp.cs", "new((long)file.Handle);",
+     "new(file.LocalPath ?? \"\");"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", "return new MediaSource(file.handle());",
+     "return new MediaSource(file.localPath());"),
+    ("swift", "bindings/swift/KayaMedia.swift", "KayaMediaSource(named: .picked(file.handle))",
+     "KayaMediaSource(named: .text(file.localPath ?? \"\"))"),
+    ("python", "bindings/python/kaya/__init__.py", "        return cls(file.handle)\n",
+     "        return cls(\"\" if file.local_path is None else str(file.local_path))\n"),
+    ("js", "bindings/js/kaya/index.ts", "return new MediaSource(new I64(file.handle));",
+     "return new MediaSource(file.localPath ?? \"\");"),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", "= Picked f.handle\n", "= Source f.local_path\n"),
+    ("haskell", "bindings/haskell/Kaya/Core.hs", "f = MediaPicked f.handle\n",
+     "f = MediaSource (T.pack f.localPath)\n"),
+]
+_picked_red = 0
+for _lang, _rel, _now, _shipped in PICKED_SHIPPED:
+    _real = read_rel(_rel)
+    _copy, _n = _real.replace(_now, _shipped), _real.count(_now)
+    print(f"check-sugar-surface: picked source shipped form {_lang}: {_n} substitution(s)")
+    if _n != 1:
+        selftest_exit(f"check-sugar-surface: self-test failed (the {_lang} picked source's "
+                      f"shipped form applied {_n} substitution(s), wanted 1)")
+    _found = []
+    check_media_surface(
+        findings=_found,
+        text_for=lambda lang, rel, _c=_copy, _r=_rel: _c if rel == _r else read_rel(rel))
+    if len(_found) != 1 or "picked source" not in _found[0]:
+        selftest_exit(f"check-sugar-surface: self-test failed ({_lang}'s shipped local-path "
+                      f"picked source gave {len(_found)} finding(s), wanted the picked source)")
+    _picked_red += 1
+print(f"check-sugar-surface: picked sources' shipped local-path form watched red "
+      f"{_picked_red}/{len(PICKED_SHIPPED)}")
 
 _missing = media_parts_missing(MEDIA_SURFACES)
 if _missing:

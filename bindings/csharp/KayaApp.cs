@@ -809,14 +809,22 @@ enum Platform : long
 readonly record struct Player(ulong Id);
 
 /// Where a player reads its media from: an asset under the app's asset
-/// root, an http(s) URL, or a file the user picked. A path, never bytes.
-readonly record struct MediaSource(string Path)
+/// root, an http(s) URL, or a file the user picked. Never bytes.
+readonly record struct MediaSource
 {
+    readonly object value;
+
+    MediaSource(object value) => this.value = value;
+
     public static MediaSource Asset(string name) => new(name);
 
     public static MediaSource Url(string url) => new(url);
 
-    public static MediaSource Picked(PickedFile file) => new(file.LocalPath ?? "");
+    /// The picked file itself, which the platform's player opens however
+    /// the platform names it: a path, a content:// URI, an iOS URL.
+    public static MediaSource Picked(PickedFile file) => new((long)file.Handle);
+
+    internal object Value => value ?? "";
 }
 
 enum PlayerState : uint
@@ -3930,7 +3938,7 @@ sealed class Tx : IDisposable
     /// Load `source`, replacing what the player held; it reads loading
     /// until the platform answers.
     public void SetSource(Player p, MediaSource source) =>
-        PlayerProp(p, KayaWire.PpropSource, source.Path);
+        PlayerProp(p, KayaWire.PpropSource, source.Value);
 
     /// Unload, back to idle.
     public void ClearPlayer(Player p) => PlayerProp(p, KayaWire.PpropSource, "");
@@ -3951,7 +3959,7 @@ sealed class Tx : IDisposable
     public void SetCaptions(Player p, MediaSource source, string language)
     {
         PlayerProp(p, KayaWire.PpropCaptionsLanguage, language);
-        PlayerProp(p, KayaWire.PpropCaptions, source.Path);
+        PlayerProp(p, KayaWire.PpropCaptions, source.Value);
     }
 
     /// No sidecar captions.

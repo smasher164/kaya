@@ -13267,7 +13267,35 @@ and failed the 15th with 4003 `ERROR_CODE_DECODING_FAILED` over a
 non-initialized(obsolete) surface"), isRecoverable and isTransient false in
 all three. None is MediaCodec's ERROR_INSUFFICIENT_RESOURCE (1100) or
 ERROR_RECLAIMED (1101), which media.rs maps to `resources`, so on the pool
-running out reads `decode_error` (docs/deferred.md's WATCH — media entry).
+running out read `decode_error` until the maintainer's ruling of 2026-09-30:
+a 4001 or 4003 from a player that never readied while other players are open
+is `resources` now (media.rs `decoder_never_started`).
+
+Measured again THROUGH KAYA the same day (a probe guest in media_feed's place,
+N muted looping players of h264_aac.mp4 each on its own PlayerSurface in one
+row, emulator-5554, restored after): 20 players all played; with 40 loading
+at once the decoders ran out at 32, and the eight left failed 4001 over
+1100, `ERROR_CODE_DECODER_INIT_FAILED` with `Decoder init failed:
+c2.goldfish.h264.decoder` (the table's documented row, already `resources`);
+the process then died of a Java OutOfMemoryError in ExoPlayer:Playback, and a
+34-player run straight after was killed by lowmemorykiller with the device
+thrashing on swap. So the pool reports running out two ways, 4003 over 14 at
+the 15th on a SurfaceTexture (emulator-5558) and 4001 over 1100 past 32 on
+PlayerSurfaces (emulator-5554), and both read `resources`. A probe past ~30
+players puts the phone under memory pressure; let it recover before a leg.
+
+## The Rust tier on Android never registered the KayaRing natives (measured 2026-09-30)
+The Compose interpreter's harness answers `copy_asset` through
+`KayaRing.copyAsset`, a JNI native registered by `jvm::register_ring_natives`.
+The JVM and Go tiers attach through `Java_dev_kaya_KayaRing_attach`, which ran
+that list; the Rust tier attaches through `android::attach`, which registered
+KayaPresent alone. Every scene using `copy_asset` until then ran on the go or
+jvm suite (chat-go), so the first rust leg to call it, media_picked-compose,
+died at that step with `UnsatisfiedLinkError: No implementation found for
+byte[] dev.kaya.KayaRing.copyAsset(byte[], byte[])` and a 132 s timeout.
+check-jni's class census could not see it: the native IS in a registration
+list, just not one the Rust tier runs. Both attach paths now call one
+`register_natives`, and check-jni's attach-path clause holds them to it.
 
 ## A paused seek right after selecting an HLS caption track never gets its cue (measured 2026-09-30)
 On the iOS 26.5 simulator, over hls_mpegts.m3u8 served locally: selecting the

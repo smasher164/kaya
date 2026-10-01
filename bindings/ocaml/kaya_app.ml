@@ -662,14 +662,18 @@ module Fit = struct
 end
 
 (* Where a player reads its media: an asset name, an http(s) URL, or a
-   picked file's path — never bytes (docs/media-plan.md §2). *)
+   picked file itself, which the platform's player opens however the
+   platform names it — never bytes (docs/media-plan.md §2). *)
 module Media_source = struct
-  type t = Source of string
+  type t = Source of string | Picked of int64
 
   let asset name = Source name
   let url u = Source u
-  let picked (f : picked_file) = Source f.local_path
-  let text (Source s) = s
+  let picked (f : picked_file) = Picked f.handle
+
+  let value = function
+    | Source s -> Kaya_wire.Str s
+    | Picked handle -> Kaya_wire.I64 handle
 end
 
 type player = Player of int64
@@ -2466,7 +2470,7 @@ let color_picker ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind
 let write_player_prop (Player id) prop value =
   emit (the_tx ()) (Kaya_wire.tx_set_player_prop id prop value)
 
-let player_source p src = write_player_prop p Kaya_wire.pprop_source (Kaya_wire.Str (Media_source.text src))
+let player_source p src = write_player_prop p Kaya_wire.pprop_source (Media_source.value src)
 
 (* Unload, back to idle. *)
 let clear_player p = write_player_prop p Kaya_wire.pprop_source (Kaya_wire.Str "")
@@ -2483,7 +2487,7 @@ let player_loop p on = write_player_prop p Kaya_wire.pprop_loop (Kaya_wire.Bool 
    caption track (docs/media-plan.md §3). *)
 let player_captions p src ~language =
   write_player_prop p Kaya_wire.pprop_captions_language (Kaya_wire.Str language);
-  write_player_prop p Kaya_wire.pprop_captions (Kaya_wire.Str (Media_source.text src))
+  write_player_prop p Kaya_wire.pprop_captions (Media_source.value src)
 
 let clear_captions p = write_player_prop p Kaya_wire.pprop_captions (Kaya_wire.Str "")
 

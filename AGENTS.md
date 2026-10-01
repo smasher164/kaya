@@ -581,6 +581,11 @@ in docs/deferred.md.
    `number_field` in both zones with `min`, `max`, `step` and `on_commit`
    where each binding spells the slider's, all nine; fake-name negatives,
    counts printed.
+   AND A PICKED MEDIA SOURCE RIDES AS ITS HANDLE SINCE 2026-09-30
+   (docs/media-plan.md §7b): a binding sending the picked file's local path
+   leaves a phone's player idle without a word, so each of the nine picked
+   source rows holds the handle and the shipped local-path form is put back
+   per binding and watched red, nine negatives.
    AND `axis` ON A SCROLL SINCE 2026-09-28 (docs/hscroll-plan.md §1): the
    direction a scroll runs, spelled where each binding's scroll options
    live in all nine, the one word everywhere (Haskell's paint roles are
@@ -1587,7 +1592,10 @@ in docs/deferred.md.
    declared-and-unregistered one just waits, and the UnsatisfiedLinkError
    fires at FIRST USE — which is how `KayaRing.openPicked` sat in the
    desktop-only list for months, under a comment promising it was
-   shared),
+   shared. AND BOTH ANDROID ATTACH PATHS RUN BOTH LISTS since 2026-09-30:
+   the Rust tier registered KayaPresent alone, so its first `copy_asset`
+   died of UnsatisfiedLinkError with the native in a list all along
+   (docs/traps.md); one negative, watched red),
    `tools/check-build-id.py` (the stale-artifact guard is live: each of
    the three compiled artifacts — libkaya, the SwiftUI interpreter, the
    Compose interpreter — carries the id of the sources it came from,

@@ -57,7 +57,7 @@ pub struct PlayerId(pub u64);
 /// Player property keys (spec::PLAYER_PROPS).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PlayerProp {
-    /// An asset name, an http(s) URL, or a picked file's absolute path (Str).
+    /// An asset name or an http(s) URL (Str), or a picked file's handle (I64).
     Source,
     /// The playback rate, 1 normal (F64).
     Speed,
@@ -65,7 +65,8 @@ pub enum PlayerProp {
     Volume,
     Muted,
     Loop,
-    /// A sidecar WebVTT file: an asset name or a picked file's path (Str).
+    /// A sidecar WebVTT file: an asset name or an http(s) URL (Str), or a
+    /// picked file's handle (I64).
     Captions,
     /// The sidecar's BCP 47 language (Str).
     CaptionsLanguage,
@@ -2497,7 +2498,8 @@ pub enum ApplyOp {
     /// Withdraw a notification by id.
     CancelNotification(NotificationId),
     /// docs/media-plan.md §2. `SetPlayerProp`'s source arrives RESOLVED: a
-    /// file:// or http(s) URL, or empty.
+    /// file:// or http(s) URL, a picked file's own platform reference (a
+    /// content:// URI, an iOS file URL), or empty.
     CreatePlayer(PlayerId),
     SetPlayerProp { player: PlayerId, prop: PlayerProp, value: Value },
     PlayerCommand { player: PlayerId, command: PlayerCommand },

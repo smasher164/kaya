@@ -78,7 +78,8 @@ GUEST_STEM = {"listdetail": "split", "taskspersist": "tasks",
               "tasksrtl": "tasks", "clock24": "format", "scrollrtl": "scroll",
               "numberfieldde": "numberfield", "rangertl": "range",
               "media_formats": "media", "media_delivery": "media",
-              "media_session": "media", "media_tracks": "media", "media_feed": "media"}
+              "media_session": "media", "media_tracks": "media", "media_feed": "media",
+              "media_picked": "media"}
 
 # THE LOCALE A SCENE RUNS UNDER (docs/compliance-plan.md §4): the knob the
 # leg carries, so the same guest is read under German and Arabic; the
@@ -135,7 +136,9 @@ HAND_QUEUED = {"editor": "go", "chat": "go", "portfolio": "python", "varied": "p
                "rangertl": "rust",
                # The media suite's scenes, one guest (docs/media-plan.md §7a).
                "media_formats": "rust", "media_delivery": "rust",
-               "media_session": "rust", "media_tracks": "rust", "media_feed": "rust"}
+               "media_session": "rust", "media_tracks": "rust", "media_feed": "rust",
+               # A picked clip played (docs/media-plan.md §2): rust-only.
+               "media_picked": "rust"}
 
 # The queue, in run order. Entries:
 #   (scene, (lang, ...))    a group: script export + one leg per lang
@@ -208,6 +211,10 @@ ORDER = [
     ("save", ("c",)),
     ("drain",),
     ("save", ("js",)),
+    ("drain",),
+    # A clip picked through the panel and played (docs/media-plan.md §2),
+    # alone between drains for the panel's reason.
+    ("media_picked", ("rust",)),
     ("drain",),
     # The text editor: go alone by design, alone between drains (real
     # panels, real keys).
@@ -445,11 +452,11 @@ def wired_scenes():
 
 
 # The legs that run as the only input-driving leg on the host (tools/lib/
-# exclusive.py), derived from the queue: the three scenes that press the
+# exclusive.py), derived from the queue: the four scenes that press the
 # file panel's own buttons through the accessibility client, since a press
 # posted while a human holds the foreground is swallowed and AX still
 # reports success (docs/deferred.md, the swallowed-press entry).
-PANEL_SCENES = ("filedialog", "save", "editor")
+PANEL_SCENES = ("filedialog", "save", "editor", "media_picked")
 # And the scenes that open system UI on the host's own screen, which a person
 # at the keyboard would see and could type into: the emoji palette
 # (docs/emoji-picker-plan.md), and fullscreen, which switches the display to

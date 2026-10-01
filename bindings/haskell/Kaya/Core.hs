@@ -1638,8 +1638,9 @@ fitWire f = fromIntegral $ case f of
   FitFill -> W.fitFill
 
 -- | Where a player reads its media: an asset name, an http(s) URL, or a
--- picked file — never bytes (docs\/media-plan.md §2).
-newtype MediaSource = MediaSource Text
+-- picked file itself, which the platform's player opens however the
+-- platform names it — never bytes (docs\/media-plan.md §2).
+data MediaSource = MediaSource Text | MediaPicked Word64
   deriving (Eq, Show)
 
 mediaAsset :: Text -> MediaSource
@@ -1649,7 +1650,7 @@ mediaUrl :: Text -> MediaSource
 mediaUrl = MediaSource
 
 mediaPicked :: PickedFile -> MediaSource
-mediaPicked f = MediaSource (T.pack f.localPath)
+mediaPicked f = MediaPicked f.handle
 
 -- | A media player the app holds (docs\/media-plan.md §2); a record field
 -- of this type is what a stamped video view shows (§7b).

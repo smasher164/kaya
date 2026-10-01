@@ -3086,6 +3086,14 @@ pub(crate) fn picked_locator(handle: crate::protocol::PickedId) -> String {
     }
 }
 
+/// The picked file a handle names, None for one never minted: a player's
+/// `source` or `captions` (docs/media-plan.md §2).
+pub(crate) fn picked_source(
+    handle: crate::protocol::PickedId,
+) -> Option<std::sync::Arc<dyn crate::protocol::PickedSource>> {
+    picked().lock().unwrap().live.get(&handle.0).cloned()
+}
+
 /// Redeem a handle for an open descriptor. THE ONE ENTRY HERE THAT IS SAFE
 /// FROM ANY THREAD, alongside kaya_wake. Returns 0 on success and writes
 /// `out_fd` plus `out_seekable`, the errno-shaped failure otherwise: the
