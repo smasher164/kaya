@@ -378,7 +378,12 @@ BUDGETS = {
     # ceiling, and every media matrix read 1368-1420 net with every leg
     # green and no per-leg growth among the legs it already had; 1500 is
     # about 1.06x over the highest. Speeding the lane is on the ledger.
-    "windows": 1500,
+    # 1650 since 2026-10-01 (the maintainer's media-stall ruling): the twelve
+    # media_delivery and media_tracks legs run one at a time (the media
+    # suites 131-133s pooled -> 297s), and the full matrix on an idle host
+    # read 1533s net (1686 wall, 153 of token waits) with all 394 legs
+    # green; 1650 is about 1.08x over it.
+    "windows": 1650,
     # 600 since 2026-09-01: the lane ran 113 legs from 2026-08-31, five
     # accepted matrices measuring 452-491s. 600 is 1.22x over that band's
     # top. HELD at 600 on 2026-09-03 with the roster at 116 (the dnd leg
