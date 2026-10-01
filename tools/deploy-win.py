@@ -2528,6 +2528,7 @@ if any(lane.media_leg(leg) for leg in queued_legs()):
     MEDIA.enter_context(media_server.serving(
         host=lane.MEDIA_HOST, port=_port,
         log=ROOT / "target/windows-media-server.log"))
+    FR.media_log = ROOT / "target/windows-media-server.log"
     timing("media-server")
 
 rec_suite_start()

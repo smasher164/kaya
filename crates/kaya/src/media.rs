@@ -719,6 +719,12 @@ pub(crate) fn failure_reason(domain: &str, code: i64, underlying: i64) -> MediaF
         // A transport failure of the HTTP client a WinUI sidecar is fetched
         // with; a status arrives as `http`.
         ("Windows.Web.Http", _, _) => F::Network,
+        // A WinUI adaptive source that could not be created, its HTTP status
+        // as the underlying (winui/media.rs adaptive_created): 1 is
+        // ManifestDownloadFailure, 2-5 a manifest it cannot read.
+        ("AdaptiveMediaSourceCreationStatus", 1, 404 | 410) => F::NotFound,
+        ("AdaptiveMediaSourceCreationStatus", 1, _) => F::Network,
+        ("AdaptiveMediaSourceCreationStatus", 2..=5, _) => F::UnsupportedContainer,
         _ => F::DecodeError,
     }
 }
@@ -1141,6 +1147,13 @@ mod tests {
             ("MediaPlayerError", 3, 0x887A_0022, F::DecodeError),
             ("MediaPlayerError", 4, 0x8000_4005, F::DecodeError),
             ("Windows.Web.Http", 0x8007_2EFD, 0, F::Network),
+            ("AdaptiveMediaSourceCreationStatus", 1, 404, F::NotFound),
+            ("AdaptiveMediaSourceCreationStatus", 1, 410, F::NotFound),
+            ("AdaptiveMediaSourceCreationStatus", 1, 0, F::Network),
+            ("AdaptiveMediaSourceCreationStatus", 1, 503, F::Network),
+            ("AdaptiveMediaSourceCreationStatus", 2, 200, F::UnsupportedContainer),
+            ("AdaptiveMediaSourceCreationStatus", 5, 200, F::UnsupportedContainer),
+            ("AdaptiveMediaSourceCreationStatus", 6, 200, F::DecodeError),
             ("media3", 4004, 0, F::UnsupportedCodec),
             ("media3", 4005, 0, F::UnsupportedCodec),
             ("media3", 3003, 0, F::UnsupportedContainer),

@@ -45,7 +45,7 @@ SECTIONS = {
             "windowserver", "sampler", "sample", "unified-log", "power-history"),
     "windows": ("leg-log", "verb-trace", "shot", "desktop-shot", "desktop",
                 "foreground", "foreground-text", "desktop-live", "notifications",
-                "toast-moment", "gesture-moment"),
+                "toast-moment", "gesture-moment", "media-server"),
     "ios": ("leg-log", "verb-trace", "shot", "panic", "app-log", "devices", "binary-stamp"),
     "android": ("leg-log", "verb-trace", "shot", "logcat", "devices",
                 "system-events", "anr-history"),
@@ -468,6 +468,8 @@ class WinRecorder(LaneRecorder):
         # leak from a neighbour's (docs/deferred.md, the LEAK entry).
         self.run_token = f"{int(time.time())}-{os.getpid()}"
         self._stopped_clean = False
+        # The media suite server's log while the lane serves it (deploy-win).
+        self.media_log = None
 
     def bind(self, run_ssh, run_ssh_out, scp_from):
         """run_ssh(cmd)->rc, run_ssh_out(cmd)->text|None,
@@ -750,6 +752,42 @@ class WinRecorder(LaneRecorder):
         (bundle / "desktop-live.when").write_text(newest[2] + "\n", encoding="utf-8")
         self.mark(bundle, "desktop-live", "ok", dest.stat().st_size)
 
+    def media_server(self, bundle, log, t0):
+        """The media server's own lines while this leg ran (docs/traps.md,
+        the WinUI adaptive pipeline that goes idle): every request on arrival and
+        once answered, so a request the server never finished, or one the
+        guest never made, can be told apart. The server is lane-wide; the
+        local ports the leg's own still-opening line printed are named."""
+        if self.media_log is None or not pathlib.Path(self.media_log).is_file():
+            self.skip(bundle, "media-server",
+                      "flightrec: no media server ran in this lane run, so "
+                      "there is no request log for this leg")
+            return
+        lo, hi = (t0 - 2) * 1000, (int(time.time()) + 2) * 1000
+        picked = []
+        with open(self.media_log, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                m = re.match(r"media-server: (\d{13}) ", line)
+                if m and lo <= int(m.group(1)) <= hi:
+                    picked.append(line)
+        ports = []
+        if pathlib.Path(log).is_file():
+            text = pathlib.Path(log).read_text(encoding="utf-8", errors="replace")
+            for found in re.findall(r"by local port: (\{[^}]*\})", text):
+                ports += re.findall(r'"(\d+)"', found)
+        if not picked:
+            self.skip(bundle, "media-server",
+                      f"flightrec: the media server logged nothing between "
+                      f"host unix ms {lo} and {hi} ({self.media_log})")
+            return
+        dest = bundle / "media-server.txt"
+        head = (f"flightrec: {self.media_log}, host unix ms {lo}..{hi}, "
+                f"{len(picked)} line(s), LANE-WIDE (every pooled leg's requests).\n"
+                f"flightrec: this leg's own connections, as its still-opening "
+                f"line printed them: {sorted(set(ports)) or 'none printed'}\n")
+        dest.write_text(head + "".join(picked), encoding="utf-8")
+        self.mark(bundle, "media-server", "ok", dest.stat().st_size)
+
     @staticmethod
     def _drop_db(db):
         """The copy AND the two files sqlite makes beside it. A read-only
@@ -978,6 +1016,7 @@ class WinRecorder(LaneRecorder):
                 # foreground wait.
                 self.toast_moment(bundle, leg, t0)
                 self.gesture_moment(bundle, leg)
+                self.media_server(bundle, log, t0)
                 # The Rust verb trace (crates/kaya/src/vtrace.rs), dumped by
                 # the guest on a failed verdict to the file its launcher
                 # names (since 2026-09-07; check-steps holds the line).

@@ -3748,6 +3748,35 @@ def winui_media_arms(media_src=None):
     if "CommandManager()?.SetIsEnabled(false)" not in code:
         bad.append("the players' command manager is left on — Windows would drive "
                    "a player from the flyout past the core's routing")
+    # AN ADAPTIVE SOURCE IS AN AdaptiveMediaSource ON ITS OWN HttpClient, and
+    # the in-box route is taken only by a progressive one: Media Foundation's
+    # in-box HLS/DASH downloader goes silent for the process (docs/traps.md,
+    # the WinUI adaptive pipeline that goes idle), and no quiet lane can make it.
+    load = rust_fn(code, "load")
+    branch = load.find("if p.adaptive {") if load else -1
+    other = load.find("} else {", branch) if load else -1
+    made = (load.find("AdaptiveMediaSource::CreateFromUriWithDownloaderAsync(", branch)
+            if load else -1)
+    inbox = [m.start() for m in re.finditer(r"MediaSource::CreateFromUri\(", load or "")]
+    if load is None or branch < 0 or other < 0 or not branch < made < other \
+            or not inbox or any(i < other for i in inbox) \
+            or len(re.findall(r"MediaSource::CreateFromUri\(", code)) != len(inbox):
+        bad.append("fn load does not give an adaptive source its own AdaptiveMediaSource "
+                   "(CreateFromUriWithDownloaderAsync in the `if p.adaptive` branch, "
+                   "MediaSource::CreateFromUri only in the else) — the in-box route "
+                   "stalls (docs/traps.md, the WinUI adaptive pipeline that goes idle)")
+    created = rust_fn(code, "adaptive_created")
+    if created is None or not (0 <= created.find("trail_adaptive(") < created.find("attach(")):
+        bad.append("fn adaptive_created attaches the source without trail_adaptive — a "
+                   "stalled open's trail would carry no download")
+    if load is None or "trail.print(generation)" not in load:
+        bad.append("fn load's still-opening line does not print the open trail — the "
+                   "bundle of a stalled open would not say which download it waited on")
+    command = rust_fn(code, "command")
+    if command is None or "SEEK_REPORT_MS" not in command \
+            or "trail.print(generation)" not in command:
+        bad.append("fn command's seek does not report a seek that never completes with its "
+                   "trail — a paused seek the pipeline lost reads only as a missing cue")
     return bad
 
 
@@ -3780,6 +3809,16 @@ for pattern, repl, label, want in (
      "the command manager left on", 1),
     (r"(\n +)if !p\.loaded \{\n +return Ok\(None\);\n +\}", "",
      "the tracks read before the item opens", 1),
+    (r"(\n    )if p\.adaptive \{", "if p.adaptive && false {",
+     "the adaptive source left to the in-box route", 1),
+    (r"(\n +)trail_adaptive\(&adaptive, &trail, generation\);", "",
+     "the adaptive downloads not watched", 1),
+    (r"(\n +)p\.trail\.print\(generation\);"
+     r"(?=\n +\}\n +\}\);\n +std::thread::sleep\(std::time::Duration::from_millis\(crate::media)",
+     "",
+     "the stalled open's trail not printed", 1),
+    (r"(\n +)p\.trail\.print\(generation\);(?=\n +\}\n +\}\);\n +\}\n +\}\);)", "",
+     "the stalled seek's trail not printed", 1),
 ):
     cut = g.doctor(f"winui media: {label}", real(WINUI_MEDIA), pattern,
                    lambda m, repl=repl: m.group(1) + repl, want=want)

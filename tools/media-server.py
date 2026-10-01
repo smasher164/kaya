@@ -16,6 +16,7 @@ import argparse
 import http.server
 import os
 import re
+import threading
 import time
 
 FAMILY = ROOT / "guests" / "assets" / "media"
@@ -39,13 +40,57 @@ TYPES = {
 RANGE = re.compile(r"^bytes=(\d*)-(\d*)$")
 
 
+OPEN = 0
+OPEN_LOCK = threading.Lock()
+
+
+def stamp():
+    now = time.time()
+    ms = int(now * 1000)
+    return f"{ms} " + time.strftime("%H:%M:%S", time.localtime(now)) + f".{ms % 1000:03d}"
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
+    """Every line carries unix ms and the client's address, and a request is
+    logged when it ARRIVES and again when its body has been written, with the
+    connection's open and close around them: a request with no `sent` line
+    is one this server never finished (docs/traps.md, the WinUI adaptive
+    pipeline that goes idle)."""
+
     protocol_version = "HTTP/1.1"
 
-    def log_message(self, fmt, *args):
-        at = time.strftime("%H:%M:%S") + f".{int(time.time() * 1000) % 1000:03d}"
+    def say(self, text):
         client = f"{self.client_address[0]}:{self.client_address[1]}"
-        sys.stderr.write(f"media-server: {at} {client} " + (fmt % args) + "\n")
+        sys.stderr.write(f"media-server: {stamp()} {client} {text}\n")
+        sys.stderr.flush()
+
+    def log_message(self, fmt, *args):
+        self.say(fmt % args)
+
+    def setup(self):
+        global OPEN
+        super().setup()
+        self.served = 0
+        with OPEN_LOCK:
+            OPEN += 1
+            n = OPEN
+        self.say(f"open ({n} connections open)")
+
+    def finish(self):
+        global OPEN
+        try:
+            super().finish()
+        finally:
+            with OPEN_LOCK:
+                OPEN -= 1
+                n = OPEN
+            self.say(f"close after {self.served} request(s) ({n} connections open)")
+
+    def handle(self):
+        try:
+            super().handle()
+        except (ConnectionResetError, BrokenPipeError) as e:
+            self.say(f"connection ended by the client: {type(e).__name__}")
 
     def _file(self):
         name = self.path.split("?", 1)[0].lstrip("/")
@@ -86,6 +131,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             status = 206
         body = data[start:end + 1]
+        began = time.monotonic()
+        self.say(f"request {self.command} {self.path} range {rng or '-'}")
         self.send_response(status)
         self.send_header("Content-Type", TYPES.get(f.suffix, "application/octet-stream"))
         self.send_header("Accept-Ranges", "bytes")
@@ -95,6 +142,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         if send_body:
             self.wfile.write(body)
+        self.served += 1
+        self.say(f"sent {self.command} {self.path} {status} {len(body) if send_body else 0} bytes "
+                 f"in {(time.monotonic() - began) * 1000:.0f} ms")
 
     def do_GET(self):
         self._head(True)
@@ -109,7 +159,7 @@ def main():
     ap.add_argument("--port", type=int, default=8765)
     args = ap.parse_args()
     server = http.server.ThreadingHTTPServer((args.bind, args.port), Handler)
-    print(f"media-server: serving {FAMILY} on http://{args.bind}:{args.port} "
+    print(f"media-server: {stamp()} serving {FAMILY} on http://{args.bind}:{args.port} "
           f"pid {os.getpid()}", flush=True)
     server.serve_forever()
 

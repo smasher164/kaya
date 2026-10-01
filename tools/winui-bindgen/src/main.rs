@@ -739,6 +739,21 @@ fn main() {
         "Windows.Web.Http.IHttpContent".to_string(),
         "Windows.Web.Http.HttpProgress".to_string(),
         "Windows.Web.Http.HttpProgressStage".to_string(),
+        // An adaptive item's own downloads and diagnostics, for the record
+        // a stalled open prints (docs/traps.md, the adaptive item that
+        // never opens).
+        "Windows.Media.Streaming.Adaptive.AdaptiveMediaSource".to_string(),
+        "Windows.Media.Streaming.Adaptive.AdaptiveMediaSourceCreationResult".to_string(),
+        "Windows.Media.Streaming.Adaptive.AdaptiveMediaSourceCreationStatus".to_string(),
+        "Windows.Media.Streaming.Adaptive.AdaptiveMediaSourceDownloadRequestedEventArgs".to_string(),
+        "Windows.Media.Streaming.Adaptive.AdaptiveMediaSourceDownloadCompletedEventArgs".to_string(),
+        "Windows.Media.Streaming.Adaptive.AdaptiveMediaSourceDownloadFailedEventArgs".to_string(),
+        "Windows.Media.Streaming.Adaptive.AdaptiveMediaSourceDownloadStatistics".to_string(),
+        "Windows.Media.Streaming.Adaptive.AdaptiveMediaSourceResourceType".to_string(),
+        "Windows.Media.Streaming.Adaptive.AdaptiveMediaSourceDiagnostics".to_string(),
+        "Windows.Media.Streaming.Adaptive.AdaptiveMediaSourceDiagnosticAvailableEventArgs".to_string(),
+        "Windows.Media.Streaming.Adaptive.AdaptiveMediaSourceDiagnosticType".to_string(),
+        "Windows.Media.Core.MediaSourceStateChangedEventArgs".to_string(),
     ];
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     // The returned Warnings are windows-bindgen's own notes about the metadata,

@@ -76,7 +76,7 @@ audio and keeps audio and video in sync.
 |---|---|---|
 | macOS, iOS | `AVPlayer` over an `AVPlayerItem` | rate, volume relative to the system volume |
 | GTK 4 | `GstPlay` / `playbin3` driven by kaya with `gtk4paintablesink` as its video sink | `GtkMediaFile` has no rate, tracks or subtitles, so it is not used |
-| WinUI 3 | `Windows.Media.Playback.MediaPlayer` | the app must close a player it set on an element; kaya does |
+| WinUI 3 | `Windows.Media.Playback.MediaPlayer`; an HLS or DASH source opens as an `AdaptiveMediaSource` on its own `HttpClient` (docs/traps.md, the WinUI adaptive pipeline that goes idle) | the app must close a player it set on an element; kaya does |
 | Android | media3 `ExoPlayer` 1.10.1 | the highest media3 kaya's Kotlin 2.0.21 / compileSdk 36 pins take; resolved and built against them |
 
 **Props** (the app writes): `source` (an asset name, an http(s) URL or a

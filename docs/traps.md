@@ -13454,19 +13454,47 @@ ceiling on media_delivery-rust, it printed the main thread in
 g_main_context_iteration and every GStreamer thread. One sighting; the next
 names the thread.
 
-## A WinUI adaptive item can stay Opening with its source Opened (measured 2026-09-30, cause NOT established)
-Pooled on the lane VM while the host was loaded (siblings' builds, the full
-matrix), a local HLS or DASH item sometimes stayed `Opening` with its
-MediaSource `Opened` and raised no MediaOpened for 15 s and more; the one
-recovery seen was a seek. Ruled out by measurement: reading the item's track
-lists while it opens (deferred: still red 4/30 in one run) and the replaced
-source still fetching (closed on replace: still red 2/3 runs). At the stall
-the process held two ESTABLISHED connections to the media server. With the
-host quiet, 12 pooled runs of the 24 legs were green. The arm prints the
-source and session states and its connections at 5 s and nudges a stuck
-session with a seek to 0 (crates/kaya/src/winui/media.rs); tools/media-server.py
-logs each request's time and client port, so the next stall can be matched
-request by request.
+## The WinUI adaptive pipeline that goes idle under pooled load: an open that never prerolls, a paused seek that never completes (measured 2026-10-01)
+On the lane VM, six media guests pooled beside each other with the host
+loaded (18 CPU spinners), an HLS or DASH item sometimes stops making
+progress: the open stays `Opening` with its source `Opened` and no
+MediaOpened, or a paused seek raises no SeekCompleted (the "missing cue" face:
+media_tracks' cue label stays "" because the seek it waits on never lands).
+Measured, step by step:
+- NOT THE SERVER. tools/media-server.py logs each request on arrival and once
+  its body is written: every request a stalled guest made was answered in 0 ms;
+  no request was left unanswered and no connection half-open.
+- NOT THE DOWNLOADER. Through MediaSource::CreateFromUri, Media Foundation's
+  in-box HLS source has no AdaptiveMediaSource behind it, and in one stall its
+  downloader went silent for the rest of the process (the next item never asked
+  for its playlist). The arm now opens HLS and DASH as an AdaptiveMediaSource on
+  its own HttpClient, Microsoft's documented route, whose downloads are
+  observable: in the next open stall all six segments had completed with HTTP
+  200 within 43 ms of the source opening, and the session stayed `Opening`.
+  The next item in that process opened in 439 ms.
+- THE PIPELINE IS IDLE, NOT DEADLOCKED. Two full dumps of stalled guests
+  (comsvcs MiniDump, stacks walked by frame pointer and symbolised from
+  Microsoft's symbol server) show no thread inside mfcore, mfplat or the media
+  engine, the work-queue threads idle, and the software H.264 decoder's worker
+  in its idle wait for input (msmpeg2vdec+0x32e14, the INFINITE wait it falls
+  into after a 1 s wait times out). The same function in a healthy dump waits
+  at +0x32db4, its 1 s wait. Nothing is blocked: an event in Media Foundation's
+  asynchronous pipeline was lost.
+- CONCURRENCY IS THE TRIGGER. Under the same load, delivery+tracks pooled
+  6 wide stalled about once per 12-leg run (E: 1 of 3 runs, D: 2 of 3, and
+  5 of 5 24-leg runs); 2 wide, 1 stall in 48 legs; 1 wide, 0 in 48. No
+  progressive item ever stalled, including media_feed's ten players in one
+  process.
+No public report names this shape (WindowsAppSDK #4095, an HLS stream that
+freezes in MediaPlayerElement, was closed "not planned"); the prior-art search
+is in docs/deferred.md's media WATCH. A seek nudge was tried and did not
+recover an open stall. What the arm does now: a stalled open prints its
+states, its connections and its OPEN TRAIL (source and session transitions,
+every adaptive download with status, bytes and timings, track selections,
+seeks, cues) at 5 s; a seek with no SeekCompleted after 5 s prints the same;
+and a red windows media leg's bundle carries the server's own request log
+for the leg's span (tools/lib/flightrec_lane.py, the `media-server` section).
+tools/check-verbs.py holds the adaptive route and both trail prints.
 
 ## An X11 display rebooted without waiting lost its server (measured 2026-09-30)
 

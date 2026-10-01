@@ -176,7 +176,7 @@ tools/scenes/range.steps green on the mac lane. What breadth owed:
     send recorded, every drain emptying the queue first).
 
 ## WATCH — media: what the breadth measured and no lane settles (docs/media-plan.md), found 2026-09-30
-KEY: resources, 4003, CodecException 14, emulator-5558, emulator-5560, picked file, content URI, video_ink_tolerance, MediaRemote non-delivery, HLS TS MediaOpened, display awake, playback category, KAYA_VIDEO_INK_TOLERANCE, setOutputSurface, detached surface, screencap, video_ground, VIDEO_INK_NONE
+KEY: resources, 4003, CodecException 14, emulator-5558, emulator-5560, picked file, content URI, video_ink_tolerance, MediaRemote non-delivery, HLS TS MediaOpened, display awake, playback category, KAYA_VIDEO_INK_TOLERANCE, setOutputSurface, detached surface, screencap, video_ground, VIDEO_INK_NONE, AdaptiveMediaSource, open trail, media-server section, SEEK_REPORT_MS, msmpeg2vdec
 
 For the maintainer's review, each measured and none asserted by a lane:
   - ~~`resources` on Android~~ — BUILT 2026-09-30 by the maintainer's
@@ -217,19 +217,33 @@ For the maintainer's review, each measured and none asserted by a lane:
     five days up; the android runner probes each phone at server start and
     runs the media legs on the phones that reach it. Not rebooted.
   - MediaRemote's send-side non-delivery on the mac media_session (docs/
-    traps.md) was seen twice in this slice, green on rerun. A pooled WinUI
-    adaptive (HLS) item sometimes never opens: the source reads Opened, the
-    session stays Opening, no MediaOpened (5 of 9 pooled runs under host
-    load, then 12 runs green); two causes ruled out by measurement, the
-    cause not established (docs/traps.md). The arm logs the states and its
-    TCP connections to the server at 5 s and nudges such a session with a
-    seek to 0, logged. THE NUDGE FIRED 2026-09-30 on a pooled
-    media_delivery_go under `--only media` (source Opened, session Opening,
-    two ESTABLISHED connections to the server) and did NOT recover it: the
-    leg read "loading" at the end (bundle runs/20261001T024816Z-000590), so
-    a seek is not the remedy. The same day a pooled media_tracks_js read no
-    platform cue for hls_fmp4.m3u8 after select and seek, 15 s each (bundle
-    runs/20261001T023438Z-087292), green on a rerun; one sighting.
+    traps.md) was seen twice in this slice, green on rerun.
+  - A pooled WinUI adaptive (HLS or DASH) item sometimes stops making
+    progress: an open stays `Opening` with its source `Opened`, or a paused
+    seek never completes (the media_tracks "missing cue" sightings are this,
+    not a caption race). MEASURED 2026-10-01 (docs/traps.md, the adaptive
+    item's playback pipeline going idle): not the media server (every
+    request answered, now logged on arrival and completion), not the
+    downloader (the arm opens adaptive sources as an AdaptiveMediaSource on
+    its own HttpClient now, and in a stall every segment had arrived HTTP
+    200), not a deadlock (two process dumps: every Media Foundation thread
+    idle, the software H.264 decoder waiting for input); an event lost in
+    Media Foundation's pipeline when six media guests run beside each other
+    on the loaded VM. Under an 18-spinner host load, delivery+tracks stalled
+    about once per run 6 wide, 1 in 48 legs 2 wide, 0 in 48 one at a time.
+    The seek nudge was removed (measured not recovering). A red leg's
+    bundle now names it: the open trail (every adaptive download, state,
+    selection, seek and cue) at the 5 s still-opening and seek lines, and
+    the server's request log as the `media-server` section. Prior art: no
+    public report or workaround for this shape (WindowsAppSDK #4095 closed
+    "not planned"; Flutter's MF player declines HLS, media_kit and Qt use
+    FFmpeg, Chromium its own HLS demuxer). OPEN, FOR THE MAINTAINER'S
+    RULING: (a) run media_delivery and media_tracks one leg at a time on
+    the windows lane (measured 0/48; +160 s on a lane reading 1368-1420
+    of its 1500), (b) a recovery in the arm that rebuilds a stalled item
+    at the same position with its track choices restored (one item swap
+    was measured opening at once in a process whose previous item had
+    stalled; its observable semantics need ruling), or (c) both.
   - The mac's in-process ScreenCaptureKit read hung or was refused
     ("declined TCCs") for a pooled media_delivery guest four times; the
     read falls back to screencapture(1) and says so (docs/traps.md). Why

@@ -29,6 +29,10 @@ use super::bindings::Windows::Media::Playback::{
 use super::bindings::Windows::Media::{
     MediaPlaybackStatus, MediaPlaybackType, SystemMediaTransportControls, SystemMediaTransportControlsButton,
 };
+use super::bindings::Windows::Media::Streaming::Adaptive::{
+    AdaptiveMediaSource, AdaptiveMediaSourceCreationResult, AdaptiveMediaSourceCreationStatus,
+};
+use super::bindings::Windows::Web::Http::HttpClient;
 use super::{CoreState, CORE, DISPATCHER};
 use crate::media::Report;
 use crate::protocol::{PlayerCommand, PlayerId, PlayerProp, SessionAction, TrackKind, Value, WidgetId};
@@ -44,6 +48,10 @@ pub(super) struct WinPlayer {
     item: Option<MediaPlaybackItem>,
     /// The item's source, closed when the item is replaced or released.
     source: Option<MediaSource>,
+    /// An adaptive source's own AdaptiveMediaSource and the HttpClient it
+    /// downloads through (`load`).
+    adaptive_source: Option<AdaptiveMediaSource>,
+    http: Option<HttpClient>,
     speed: f64,
     size: (u32, u32),
     /// The platform's clock is running (its PlaybackState reads Playing).
@@ -67,6 +75,193 @@ pub(super) struct WinPlayer {
     loaded: bool,
     looping: bool,
     duration_ms: u64,
+    trail: Trail,
+    /// SeekCompleted events raised, for the seek that never completes.
+    seeks: Arc<AtomicU64>,
+}
+
+/// WHAT AN OPENING ITEM DID, per load, printed only when the open stalls
+/// (docs/traps.md, the WinUI adaptive pipeline that goes idle): the source's and
+/// the session's transitions and, for an adaptive source, every download
+/// and diagnostic it raised, each stamped from the load. Once printed, every
+/// later line is printed as it comes.
+#[derive(Clone)]
+struct Trail(Arc<std::sync::Mutex<TrailLines>>);
+
+struct TrailLines {
+    player: u64,
+    generation: u64,
+    since: std::time::Instant,
+    lines: Vec<String>,
+    live: bool,
+}
+
+const TRAIL_CAP: usize = 400;
+
+impl Trail {
+    fn new(player: u64) -> Self {
+        Trail(Arc::new(std::sync::Mutex::new(TrailLines {
+            player,
+            generation: 0,
+            since: std::time::Instant::now(),
+            lines: Vec::new(),
+            live: false,
+        })))
+    }
+
+    fn restart(&self, generation: u64) {
+        let Ok(mut t) = self.0.lock() else { return };
+        t.generation = generation;
+        t.since = std::time::Instant::now();
+        t.lines.clear();
+        t.live = false;
+    }
+
+    fn note(&self, generation: u64, text: String) {
+        let Ok(mut t) = self.0.lock() else { return };
+        if t.generation != generation {
+            return;
+        }
+        let line = format!("+{}ms {text}", t.since.elapsed().as_millis());
+        if t.live {
+            eprintln!("KAYA_DIAG winui player {} open trail: {line}", t.player);
+        }
+        if t.lines.len() < TRAIL_CAP {
+            t.lines.push(line);
+        }
+    }
+
+    fn print(&self, generation: u64) {
+        let Ok(mut t) = self.0.lock() else { return };
+        if t.generation != generation {
+            return;
+        }
+        eprintln!("KAYA_DIAG winui player {} open trail ({} lines, cap {TRAIL_CAP}):", t.player, t.lines.len());
+        for line in &t.lines {
+            eprintln!("KAYA_DIAG winui player {} open trail: {line}", t.player);
+        }
+        t.live = true;
+    }
+}
+
+fn unix_ms() -> u128 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis())
+}
+
+fn uri_text(uri: windows_core::Result<Uri>) -> String {
+    uri.and_then(|u| u.Path()).map(|p| p.to_string()).unwrap_or_else(|e| format!("<uri: {}>", e.message()))
+}
+
+fn span_text(span: windows_core::Result<super::bindings::Windows::Foundation::IReference<TimeSpan>>) -> String {
+    span.and_then(|r| r.Value()).map(|t| format!("{}ms", t.Duration / 10_000)).unwrap_or_else(|_| "-".to_owned())
+}
+
+fn statistics_text(
+    stats: windows_core::Result<super::bindings::Windows::Media::Streaming::Adaptive::AdaptiveMediaSourceDownloadStatistics>,
+) -> String {
+    match stats {
+        Ok(s) => format!(
+            "{} bytes, headers {}, first byte {}, last byte {}",
+            s.ContentBytesReceivedCount().map_or_else(|_| "?".to_owned(), |n| n.to_string()),
+            span_text(s.TimeToHeadersReceived()),
+            span_text(s.TimeToFirstByteReceived()),
+            span_text(s.TimeToLastByteReceived())
+        ),
+        Err(e) => format!("no statistics ({})", e.message()),
+    }
+}
+
+fn status_text(response: windows_core::Result<super::bindings::Windows::Web::Http::HttpResponseMessage>) -> String {
+    response.and_then(|r| r.StatusCode()).map(|c| format!("HTTP {}", c.0)).unwrap_or_else(|_| "no response".to_owned())
+}
+
+/// An adaptive source's downloads and diagnostics, noted on the trail.
+fn trail_adaptive(adaptive: &AdaptiveMediaSource, trail: &Trail, generation: u64) {
+    use super::bindings::Windows::Media::Streaming::Adaptive::{
+        AdaptiveMediaSourceDiagnosticAvailableEventArgs, AdaptiveMediaSourceDiagnostics,
+        AdaptiveMediaSourceDownloadCompletedEventArgs, AdaptiveMediaSourceDownloadFailedEventArgs,
+        AdaptiveMediaSourceDownloadRequestedEventArgs,
+    };
+    trail.note(generation, "adaptive source: watching its downloads".to_owned());
+    let t = trail.clone();
+    let _ = adaptive.DownloadRequested(&TypedEventHandler::new(
+        move |_: windows_core::Ref<'_, AdaptiveMediaSource>,
+              args: windows_core::Ref<'_, AdaptiveMediaSourceDownloadRequestedEventArgs>| {
+            if let Some(a) = args.as_ref() {
+                t.note(
+                    generation,
+                    format!(
+                        "download requested #{} type {} {} offset {} length {}",
+                        a.RequestId().unwrap_or(-1),
+                        a.ResourceType().map_or(-1, |r| r.0),
+                        uri_text(a.ResourceUri()),
+                        a.ResourceByteRangeOffset().and_then(|r| r.Value()).map_or_else(|_| "-".to_owned(), |n| n.to_string()),
+                        a.ResourceByteRangeLength().and_then(|r| r.Value()).map_or_else(|_| "-".to_owned(), |n| n.to_string())
+                    ),
+                );
+            }
+            Ok(())
+        },
+    ));
+    let t = trail.clone();
+    let _ = adaptive.DownloadCompleted(&TypedEventHandler::new(
+        move |_: windows_core::Ref<'_, AdaptiveMediaSource>,
+              args: windows_core::Ref<'_, AdaptiveMediaSourceDownloadCompletedEventArgs>| {
+            if let Some(a) = args.as_ref() {
+                t.note(
+                    generation,
+                    format!(
+                        "download completed #{} {} {}: {}",
+                        a.RequestId().unwrap_or(-1),
+                        uri_text(a.ResourceUri()),
+                        status_text(a.HttpResponseMessage()),
+                        statistics_text(a.Statistics())
+                    ),
+                );
+            }
+            Ok(())
+        },
+    ));
+    let t = trail.clone();
+    let _ = adaptive.DownloadFailed(&TypedEventHandler::new(
+        move |_: windows_core::Ref<'_, AdaptiveMediaSource>,
+              args: windows_core::Ref<'_, AdaptiveMediaSourceDownloadFailedEventArgs>| {
+            if let Some(a) = args.as_ref() {
+                t.note(
+                    generation,
+                    format!(
+                        "download FAILED #{} {} {} error {:#010x}: {}",
+                        a.RequestId().unwrap_or(-1),
+                        uri_text(a.ResourceUri()),
+                        status_text(a.HttpResponseMessage()),
+                        a.ExtendedError().map_or(0, |h| h.0 as u32),
+                        statistics_text(a.Statistics())
+                    ),
+                );
+            }
+            Ok(())
+        },
+    ));
+    let t = trail.clone();
+    if let Ok(diagnostics) = adaptive.Diagnostics() {
+        let _ = diagnostics.DiagnosticAvailable(&TypedEventHandler::new(
+            move |_: windows_core::Ref<'_, AdaptiveMediaSourceDiagnostics>,
+                  args: windows_core::Ref<'_, AdaptiveMediaSourceDiagnosticAvailableEventArgs>| {
+                if let Some(a) = args.as_ref() {
+                    t.note(
+                        generation,
+                        format!(
+                            "diagnostic type {} {} error {:#010x}",
+                            a.DiagnosticType().map_or(-1, |d| d.0),
+                            uri_text(a.ResourceUri()),
+                            a.ExtendedError().map_or(0, |h| h.0 as u32)
+                        ),
+                    );
+                }
+                Ok(())
+            },
+        ));
+    }
 }
 
 pub(super) struct WinVideo {
@@ -174,19 +369,24 @@ pub(super) fn create_player(core: &mut CoreState, id: u64) -> windows_core::Resu
     player.CommandManager()?.SetIsEnabled(false)?;
     player.SystemMediaTransportControls()?.SetIsEnabled(false)?;
     let generation = Arc::new(AtomicU64::new(0));
+    let trail = Trail::new(id);
     let g = generation.clone();
+    let t = trail.clone();
     player.MediaOpened(&TypedEventHandler::<MediaPlayer, windows_core::IInspectable>::new(move |_, _| {
         let at = g.load(Ordering::SeqCst);
+        t.note(at, "MediaOpened".to_owned());
         post(move |core| opened(core, id, at));
         Ok(())
     }))?;
     let g = generation.clone();
+    let t = trail.clone();
     player.MediaFailed(&TypedEventHandler::new(
         move |_, args: windows_core::Ref<'_, super::bindings::Windows::Media::Playback::MediaPlayerFailedEventArgs>| {
             let at = g.load(Ordering::SeqCst);
             let Some(args) = args.as_ref() else { return Ok(()) };
             let error = args.Error().unwrap_or(MediaPlayerError::Unknown);
             let code = args.ExtendedErrorCode().map(|h| h.0).unwrap_or(0);
+            t.note(at, format!("MediaFailed {} {:#010x}", error.0, code as u32));
             let message = args.ErrorMessage().map(|m| m.to_string()).unwrap_or_default();
             post(move |core| {
                 if !live(core, id, at) {
@@ -229,15 +429,30 @@ pub(super) fn create_player(core: &mut CoreState, id: u64) -> windows_core::Resu
     }))?;
     let session = player.PlaybackSession()?;
     let g = generation.clone();
+    let t = trail.clone();
     session.PlaybackStateChanged(&TypedEventHandler::new(
         move |sender: windows_core::Ref<'_, super::bindings::Windows::Media::Playback::MediaPlaybackSession>, _| {
             let at = g.load(Ordering::SeqCst);
             let Some(sender) = sender.as_ref() else { return Ok(()) };
             let state = sender.PlaybackState().unwrap_or(MediaPlaybackState::None);
+            t.note(at, format!("session state {}", state.0));
             post(move |core| state_changed(core, id, at, state));
             Ok(())
         },
     ))?;
+    for (started, name) in [(true, "buffering started"), (false, "buffering ended")] {
+        let g = generation.clone();
+        let t = trail.clone();
+        let handler = TypedEventHandler::new(move |_, _| {
+            t.note(g.load(Ordering::SeqCst), name.to_owned());
+            Ok(())
+        });
+        if started {
+            session.BufferingStarted(&handler)?;
+        } else {
+            session.BufferingEnded(&handler)?;
+        }
+    }
     let g = generation.clone();
     session.NaturalVideoSizeChanged(&TypedEventHandler::new(move |_, _| {
         let at = g.load(Ordering::SeqCst);
@@ -245,11 +460,16 @@ pub(super) fn create_player(core: &mut CoreState, id: u64) -> windows_core::Resu
         Ok(())
     }))?;
     let g = generation.clone();
+    let t = trail.clone();
+    let seeks = Arc::new(AtomicU64::new(0));
+    let done = seeks.clone();
     session.SeekCompleted(&TypedEventHandler::new(
         move |sender: windows_core::Ref<'_, super::bindings::Windows::Media::Playback::MediaPlaybackSession>, _| {
             let at = g.load(Ordering::SeqCst);
             let Some(sender) = sender.as_ref() else { return Ok(()) };
             let ms = sender.Position().map(ms_of).unwrap_or(0);
+            t.note(at, format!("seek completed at {ms} ms"));
+            done.fetch_add(1, Ordering::SeqCst);
             post(move |core| {
                 if live(core, id, at) {
                     report(core, id, Report::Seeked(ms));
@@ -267,6 +487,8 @@ pub(super) fn create_player(core: &mut CoreState, id: u64) -> windows_core::Resu
             generation,
             item: None,
             source: None,
+            adaptive_source: None,
+            http: None,
             speed: 1.0,
             size: (0, 0),
             playing: false,
@@ -283,6 +505,8 @@ pub(super) fn create_player(core: &mut CoreState, id: u64) -> windows_core::Resu
             loaded: false,
             looping: false,
             duration_ms: 0,
+            trail,
+            seeks,
         },
     );
     ensure_timer(core)?;
@@ -310,11 +534,16 @@ fn connections_to(endpoint: &str) -> String {
     if states.is_empty() { "none".to_owned() } else { format!("{states:?}") }
 }
 
-/// A replaced source is closed, so an adaptive one stops fetching.
-fn close_source(source: Option<MediaSource>) {
+/// A replaced source is closed, so it stops fetching.
+fn close_source(source: Option<MediaSource>, adaptive: Option<AdaptiveMediaSource>) {
     if let Some(source) = source {
         if let Err(e) = source.Close() {
             eprintln!("KAYA_DIAG winui: closing the replaced media source failed: {}", e.message());
+        }
+    }
+    if let Some(adaptive) = adaptive {
+        if let Err(e) = adaptive.Close() {
+            eprintln!("KAYA_DIAG winui: closing the replaced adaptive source failed: {}", e.message());
         }
     }
 }
@@ -369,6 +598,9 @@ fn opened(core: &mut CoreState, id: u64, generation: u64) {
 
 /// When a source still opening says where it stands.
 const OPEN_REPORT_MS: u64 = 5000;
+
+/// When a seek that has not completed says where it stands.
+const SEEK_REPORT_MS: u64 = 5000;
 
 /// How far past its duration an item's clock may run before its end is read.
 const END_OVERRUN_MS: u64 = 500;
@@ -498,13 +730,151 @@ fn load(core: &mut CoreState, id: u64, url: &str) -> windows_core::Result<()> {
     let path = url.split(['?', '#']).next().unwrap_or(url).to_ascii_lowercase();
     p.adaptive = path.ends_with(".m3u8") || path.ends_with(".mpd");
     let previous = p.source.take();
+    let previous_adaptive = p.adaptive_source.take();
+    p.http = None;
+    p.item = None;
     if url.is_empty() {
-        p.item = None;
         p.player.SetSource(None::<&IMediaPlaybackSource>)?;
-        close_source(previous);
+        close_source(previous, previous_adaptive);
         return Ok(());
     }
-    let source = MediaSource::CreateFromUri(&Uri::CreateUri(&HSTRING::from(url))?)?;
+    p.trail.restart(generation);
+    p.trail.note(generation, format!("source set to {url} at unix ms {}", unix_ms()));
+    let uri = Uri::CreateUri(&HSTRING::from(url))?;
+    if p.adaptive {
+        // AN ADAPTIVE SOURCE IS AN AdaptiveMediaSource OF ITS OWN, ON ITS
+        // OWN HttpClient, whose downloads the trail can see (docs/traps.md,
+        // the WinUI adaptive pipeline that goes idle).
+        p.player.SetSource(None::<&IMediaPlaybackSource>)?;
+        close_source(previous, previous_adaptive);
+        std::thread::spawn(move || {
+            // SAFETY: this thread's own apartment, ended with the thread.
+            unsafe { super::CoInitializeEx(std::ptr::null(), 0x0) };
+            let made = (|| -> windows_core::Result<(AdaptiveMediaSourceCreationResult, HttpClient)> {
+                let client = HttpClient::new()?;
+                let result = AdaptiveMediaSource::CreateFromUriWithDownloaderAsync(&uri, &client)?.join()?;
+                Ok((result, client))
+            })();
+            post(move |core| adaptive_created(core, id, generation, made));
+        });
+    } else {
+        let source = MediaSource::CreateFromUri(&uri)?;
+        attach(core, id, generation, source)?;
+        close_source(previous, previous_adaptive);
+    }
+    keep_awake(core);
+    let endpoint = url
+        .split("://")
+        .nth(1)
+        .and_then(|rest| rest.split('/').next())
+        .unwrap_or("")
+        .to_owned();
+    std::thread::spawn(move || {
+        // WHAT A SOURCE STILL OPENING IS DOING, for the leg's log: its
+        // states, its connections and its trail (docs/traps.md, the WinUI
+        // adaptive pipeline that goes idle).
+        std::thread::sleep(std::time::Duration::from_millis(OPEN_REPORT_MS));
+        let connections = connections_to(&endpoint);
+        post(move |core| {
+            if live(core, id, generation) && core.media.players.get(&id).is_some_and(|p| !p.loaded) {
+                let p = &core.media.players[&id];
+                let state = match &p.source {
+                    Some(source) => format!("{}", source.State().map(|s| s.0).unwrap_or(-1)),
+                    None => "none yet (the AdaptiveMediaSource is still being created)".to_owned(),
+                };
+                let session = p.player.PlaybackSession().and_then(|s| s.PlaybackState());
+                eprintln!(
+                    "KAYA_DIAG winui player {id}: still opening after {OPEN_REPORT_MS} ms — MediaSource.State {state} \
+                     (0 Initial, 1 Opening, 2 Opened, 3 Failed), session state {:?}; this process's TCP \
+                     connections to {endpoint} by local port: {connections}; unix ms {}",
+                    session.as_ref().map(|s| s.0),
+                    unix_ms()
+                );
+                p.trail.print(generation);
+            }
+        });
+        std::thread::sleep(std::time::Duration::from_millis(crate::media::LOADING_CEILING_MS - OPEN_REPORT_MS));
+        post(move |core| {
+            if live(core, id, generation) {
+                report(core, id, Report::Overdue);
+            }
+        });
+    });
+    Ok(())
+}
+
+/// The adaptive source's creation answered: attach it, or report why not.
+fn adaptive_created(
+    core: &mut CoreState,
+    id: u64,
+    generation: u64,
+    made: windows_core::Result<(AdaptiveMediaSourceCreationResult, HttpClient)>,
+) {
+    if !live(core, id, generation) {
+        if let Ok((result, _)) = made {
+            if let Ok(adaptive) = result.MediaSource() {
+                let _ = adaptive.Close();
+            }
+        }
+        return;
+    }
+    let trail = core.media.players[&id].trail.clone();
+    let failed = |domain: &str, code: i64, underlying: i64, detail: String| Report::Failed {
+        domain: domain.to_owned(),
+        code,
+        underlying,
+        detail,
+    };
+    let (result, client) = match made {
+        Ok(made) => made,
+        Err(e) => {
+            trail.note(generation, format!("AdaptiveMediaSource creation threw {:#010x}", e.code().0 as u32));
+            let r = failed("Windows.Web.Http", i64::from(e.code().0 as u32), 0, e.message().to_string());
+            report(core, id, r);
+            return;
+        }
+    };
+    let status = result.Status().map_or(-1, |s| s.0);
+    let http = result.HttpResponseMessage().and_then(|r| r.StatusCode()).map_or(0, |c| c.0);
+    let extended = result.ExtendedError().map_or(0, |h| h.0 as u32);
+    trail.note(generation, format!("AdaptiveMediaSource created: status {status}, HTTP {http}, error {extended:#010x}"));
+    if status != AdaptiveMediaSourceCreationStatus::Success.0 {
+        let detail = format!("AdaptiveMediaSourceCreationStatus {status}, HTTP {http}, error {extended:#010x}");
+        let r = failed("AdaptiveMediaSourceCreationStatus", i64::from(status), i64::from(http), detail);
+        report(core, id, r);
+        return;
+    }
+    let attached = (|| -> windows_core::Result<()> {
+        let adaptive = result.MediaSource()?;
+        trail_adaptive(&adaptive, &trail, generation);
+        let source = MediaSource::CreateFromAdaptiveMediaSource(&adaptive)?;
+        if let Some(p) = core.media.players.get_mut(&id) {
+            p.adaptive_source = Some(adaptive);
+            p.http = Some(client);
+        }
+        attach(core, id, generation, source)
+    })();
+    if let Err(e) = attached {
+        let r = failed("AdaptiveMediaSource", i64::from(e.code().0 as u32), 0, e.message().to_string());
+        report(core, id, r);
+    }
+}
+
+/// A source becomes the player's item.
+fn attach(core: &mut CoreState, id: u64, generation: u64, source: MediaSource) -> windows_core::Result<()> {
+    let Some(p) = core.media.players.get_mut(&id) else { return Ok(()) };
+    let t = p.trail.clone();
+    source.StateChanged(&TypedEventHandler::new(
+        move |_: windows_core::Ref<'_, MediaSource>,
+              args: windows_core::Ref<'_, super::bindings::Windows::Media::Core::MediaSourceStateChangedEventArgs>| {
+            let Some(args) = args.as_ref() else { return Ok(()) };
+            t.note(
+                generation,
+                format!("source state {} -> {}", args.OldState().map_or(-1, |s| s.0), args.NewState().map_or(-1, |s| s.0)),
+            );
+            Ok(())
+        },
+    ))?;
     let item = MediaPlaybackItem::Create(&source)?;
     let g = p.generation.clone();
     item.TimedMetadataTracksChanged(&TypedEventHandler::new(move |_, _| {
@@ -527,51 +897,8 @@ fn load(core: &mut CoreState, id: u64, url: &str) -> windows_core::Result<()> {
         Ok(())
     }))?;
     p.player.SetSource(&item)?;
-    close_source(previous);
     p.item = Some(item);
-    p.source = Some(source.clone());
-    keep_awake(core);
-    let opening = source.clone();
-    let endpoint = url
-        .split("://")
-        .nth(1)
-        .and_then(|rest| rest.split('/').next())
-        .unwrap_or("")
-        .to_owned();
-    std::thread::spawn(move || {
-        // WHAT A SOURCE STILL OPENING IS DOING, for the leg's log: one
-        // pooled local TS HLS open raised no MediaOpened for 15 s
-        // (2026-09-30), and nothing said where it stood.
-        std::thread::sleep(std::time::Duration::from_millis(OPEN_REPORT_MS));
-        let state = opening.State().map(|s| s.0).unwrap_or(-1);
-        let connections = connections_to(&endpoint);
-        post(move |core| {
-            if live(core, id, generation) && core.media.players.get(&id).is_some_and(|p| !p.loaded) {
-                let session = core.media.players[&id].player.PlaybackSession().and_then(|s| s.PlaybackState());
-                eprintln!(
-                    "KAYA_DIAG winui player {id}: still opening after {OPEN_REPORT_MS} ms — MediaSource.State {state} \
-                     (0 Initial, 1 Opening, 2 Opened, 3 Failed), session state {:?}; this process's TCP \
-                     connections to {endpoint} by local port: {connections}; unix ms {}",
-                    session.as_ref().map(|s| s.0),
-                    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis())
-                );
-                // THE NUDGE (docs/traps.md, the adaptive item that never
-                // opens): its source Opened and its session still Opening,
-                // the one measured recovery was a seek, which opened it at
-                // once. So a seek to the start is asked, and said.
-                if state == 2 && session.as_ref().is_ok_and(|s| *s == MediaPlaybackState::Opening) {
-                    let nudged = core.media.players[&id].player.PlaybackSession().and_then(|s| s.SetPosition(span_of(0)));
-                    eprintln!("KAYA_DIAG winui player {id}: nudged its session with a seek to 0: {nudged:?}");
-                }
-            }
-        });
-        std::thread::sleep(std::time::Duration::from_millis(crate::media::LOADING_CEILING_MS - OPEN_REPORT_MS));
-        post(move |core| {
-            if live(core, id, generation) {
-                report(core, id, Report::Overdue);
-            }
-        });
-    });
+    p.source = Some(source);
     Ok(())
 }
 
@@ -614,7 +941,31 @@ pub(super) fn command(core: &mut CoreState, id: u64, command: PlayerCommand) -> 
             p.player.Play()?;
         }
         PlayerCommand::Pause => p.player.Pause()?,
-        PlayerCommand::Seek(ms) => p.player.PlaybackSession()?.SetPosition(span_of(ms))?,
+        PlayerCommand::Seek(ms) => {
+            p.trail.note(p.generation.load(Ordering::SeqCst), format!("seek to {ms} ms asked"));
+            // A SEEK THAT NEVER COMPLETES says so, with the trail
+            // (docs/traps.md, the WinUI adaptive pipeline that goes idle).
+            let (seeks, before, generation) = (p.seeks.clone(), p.seeks.load(Ordering::SeqCst), p.generation.load(Ordering::SeqCst));
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(SEEK_REPORT_MS));
+                if seeks.load(Ordering::SeqCst) == before {
+                    post(move |core| {
+                        if live(core, id, generation) {
+                            let p = &core.media.players[&id];
+                            let session = p.player.PlaybackSession().and_then(|s| s.PlaybackState());
+                            eprintln!(
+                                "KAYA_DIAG winui player {id}: the seek to {ms} ms has not completed after {SEEK_REPORT_MS} ms \
+                                 — session state {:?}; unix ms {}",
+                                session.as_ref().map(|s| s.0),
+                                unix_ms()
+                            );
+                            p.trail.print(generation);
+                        }
+                    });
+                }
+            });
+            p.player.PlaybackSession()?.SetPosition(span_of(ms))?
+        }
     }
     Ok(())
 }
@@ -624,7 +975,7 @@ pub(super) fn release(core: &mut CoreState, id: u64) -> windows_core::Result<()>
     p.generation.fetch_add(1, Ordering::SeqCst);
     p.fetch.fetch_add(1, Ordering::SeqCst);
     let _ = p.player.Pause();
-    close_source(p.source.clone());
+    close_source(p.source.clone(), p.adaptive_source.clone());
     for video in core.media.videos.values_mut().filter(|v| v.player == Some(id)) {
         video.player = None;
         video.element.SetMediaPlayer(None::<&MediaPlayer>)?;
@@ -694,8 +1045,10 @@ fn report_tracks(core: &mut CoreState, id: u64) {
             indices.push(i);
             if !p.caption_tracks.contains(&i) {
                 let g = p.generation.clone();
+                let t = p.trail.clone();
                 let cue = TypedEventHandler::new(move |_, _| {
                     let at = g.load(Ordering::SeqCst);
+                    t.note(at, format!("caption track {i} cue entered or exited"));
                     post(move |core| {
                         if live(core, id, at) {
                             platform_cue(core, id);
@@ -720,6 +1073,7 @@ fn report_tracks(core: &mut CoreState, id: u64) {
 
 pub(super) fn select_track(core: &mut CoreState, id: u64, kind: TrackKind, index: u32) -> windows_core::Result<()> {
     let Some(p) = core.media.players.get(&id) else { return Ok(()) };
+    p.trail.note(p.generation.load(Ordering::SeqCst), format!("select {kind:?} track {index}"));
     let Some(item) = p.item.clone() else { return Ok(()) };
     match kind {
         TrackKind::Audio => item.AudioTracks()?.SetSelectedIndex(index as i32 - 1)?,
@@ -762,6 +1116,7 @@ fn platform_cue(core: &mut CoreState, id: u64) {
     .unwrap_or_default();
     let Some(p) = core.media.players.get_mut(&id) else { return };
     if p.platform_cue != text {
+        p.trail.note(p.generation.load(Ordering::SeqCst), format!("platform cue now {text:?}"));
         p.platform_cue = text.clone();
         report(core, id, Report::Cue(text));
     }
@@ -846,7 +1201,6 @@ fn fetch_captions(core: &mut CoreState, id: u64, url: String) {
         // SAFETY: this thread's own apartment, ended with the thread.
         unsafe { super::CoInitializeEx(std::ptr::null(), 0x0) };
         let got = (|| -> Result<Result<String, (String, i64, String)>, windows_core::Error> {
-            use super::bindings::Windows::Web::Http::HttpClient;
             let client = HttpClient::new()?;
             let response = client.GetAsync(&Uri::CreateUri(&HSTRING::from(url.as_str()))?)?.join()?;
             let status = response.StatusCode()?.0;
