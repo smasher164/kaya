@@ -179,13 +179,18 @@ KEY: resources, 4003, CodecException 14, emulator-5558, emulator-5560, picked fi
 For the maintainer's review, each measured and none asserted by a lane:
   - `resources` on Android: the pool's 15th playing ExoPlayer fails 4003
     over CodecException 14 (H.264, HEVC) or -19 (AV1), never the documented
-    1100/1101, so it reads `decode_error` today (docs/traps.md). A ruling on
-    mapping 4003 over 14 to `resources`.
+    1100/1101, so it reads `decode_error` today (docs/traps.md). RULED
+    2026-09-30 (the maintainer): a decoder that fails to start while other
+    players are open reads `resources`; being built.
   - A picked file with no local path (the phones' content URIs) silently
-    unloads the player in all nine bindings. A ruling on its spelling.
+    unloads the player in all nine bindings. RULED 2026-09-30 (the
+    maintainer): the platform's own reference (an Android content URI, an
+    iOS security-scoped URL) is handed to the player, which plays it
+    directly; never silent. Being built.
   - The GTK video ink is compared within 4 where the others use 2, stated
     per platform through Stage::video_ink_tolerance under plan §7a's "a
-    tolerance stated for video". The maintainer may prefer another shape.
+    tolerance stated for video". RULED 2026-09-30 (the maintainer): kept,
+    GTK's stated tolerance being GStreamer's own colour conversion.
   - Two pool phones (emulator-5558, emulator-5560) lost their network after
     five days up; the android runner probes each phone at server start and
     runs the media legs on the phones that reach it. Not rebooted.

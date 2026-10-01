@@ -372,8 +372,13 @@ BUDGETS = {
     # carries the App SDK's AppLifecycle bindings (build 3 -> 97), the
     # guest's unit phase runs 31 tests with the redirect's (5 -> 60), deploy
     # 26 -> 43 — while the suites read 1027 against the previous 1035; the
-    # first matrix read 1296. 1350 is 1.04x over it.
-    "windows": 1350,
+    # first matrix read 1296. 1350 is 1.04x over it. 1500 since 2026-09-30
+    # (media, the maintainer's ruling): the media legs add 481s of leg time
+    # (30 legs, media_session alone per language) to a lane already at its
+    # ceiling, and every media matrix read 1368-1420 net with every leg
+    # green and no per-leg growth among the legs it already had; 1500 is
+    # about 1.06x over the highest. Speeding the lane is on the ledger.
+    "windows": 1500,
     # 600 since 2026-09-01: the lane ran 113 legs from 2026-08-31, five
     # accepted matrices measuring 452-491s. 600 is 1.22x over that band's
     # top. HELD at 600 on 2026-09-03 with the roster at 116 (the dnd leg
@@ -393,7 +398,12 @@ BUDGETS = {
     # (the sole-claimant rule) and answers SpringBoard's one-time alert
     # through the driver; the matrices read 984, 855 and 1058 against 1050.
     # 1150 is 1.09x over the top, every leg green.
-    "ios": 1150,
+    # 1350 since 2026-09-30 (media, the maintainer's ruling): the media legs
+    # add 245s over three sims (15 legs) and the media matrices read
+    # 1167-1252 net with every leg green; 1350 is about 1.08x over the
+    # highest. This net figure moves with the token's waits as well
+    # (docs/deferred.md, the iOS net-duration entry).
+    "ios": 1350,
     # 310 since 2026-08-20: the pool-degradation trap's remedy is a COLD
     # BOOT (docs/traps.md), and a reboot run carries ~60-90s of emulator
     # startup a warm-pool ceiling read as an anomaly; a measured cold-boot
