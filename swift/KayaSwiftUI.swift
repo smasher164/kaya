@@ -22,7 +22,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x1d479d566df30301
+let kayaSpecHash: UInt64 = 0x39c348180962e0db
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -26201,6 +26201,10 @@ final class KayaPlayer {
     private var timeObserver: Any?
     /// A picked file's security scope, held while its item is the player's.
     private var scoped: URL?
+    /// The item's asset, whose loading a replaced item cancels: AVFoundation
+    /// opens no next item on the host while one never answers (measured
+    /// 2026-10-01, docs/traps.md, the media timeout's teardown).
+    private var asset: AVURLAsset?
 
     init(id: UInt64) {
         self.id = id
@@ -26275,11 +26279,14 @@ final class KayaPlayer {
         let held = scoped
         scoped = nil
         defer { held?.stopAccessingSecurityScopedResource() }
+        self.asset?.cancelLoading()
+        self.asset = nil
         guard !locator.isEmpty, let url = platformURL(locator) else {
             player.replaceCurrentItem(with: nil)
             return
         }
         let asset = AVURLAsset(url: url)
+        self.asset = asset
         let item = AVPlayerItem(asset: asset)
         itemObservers.append(item.observe(\.status, options: [.new]) { [weak self] item, _ in
             let status = item.status
@@ -26328,10 +26335,21 @@ final class KayaPlayer {
             kayaReportFailure(self.id, note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error)
         })
         player.replaceCurrentItem(with: item)
-        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(Int(KAYA_MEDIA_LOADING_CEILING_MS))) {
+        wakeAtTheBound(gen)
+    }
+
+    /// The core's clock decides at the bound (docs/media-plan.md §7c), and a
+    /// player it failed `timeout` is torn down.
+    private func wakeAtTheBound(_ gen: Int) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(Int(KAYA_MEDIA_TIMEOUT_MS))) {
             [weak self] in
             guard let self, self.generation == gen else { return }
-            kayaPlayerReport(self.id) { KayaHost.api.player_overdue(self.id) }
+            var timedOut: UInt32 = 0
+            kayaPlayerReport(self.id) {
+                timedOut = KayaHost.api.player_overdue(self.id)
+                return timedOut
+            }
+            if timedOut == 1 { self.load("") }
         }
     }
 
@@ -26528,6 +26546,7 @@ final class KayaPlayer {
             }
             return
         }
+        wakeAtTheBound(generation)
         let to = CMTime(value: CMTimeValue(ms), timescale: 1000)
         player.seek(to: to, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
             guard finished else { return }

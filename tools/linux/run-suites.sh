@@ -1863,6 +1863,9 @@ for proto in x11 wayland; do
     # §2): rust-only, pooled like filedialog.
     run "$proto" media_picked-rust env KAYA_SELFTEST=media_picked \
         tools/linux/media-leg.sh tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/media"
+    # The bound (docs/media-plan.md §7c): rust-only, one 30 s wait.
+    run "$proto" media_timeout-rust env KAYA_SELFTEST=media_timeout \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/media"
     # THE TWO WATCHED REDS OF docs/media-plan.md §7a, as legs that must go
     # GREEN: the AV1 decoder demoted (the audio would play alone, silently)
     # and the TS demuxer demoted (the stream would stall), each read by the

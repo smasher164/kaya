@@ -113,6 +113,9 @@ pub enum MediaFailure {
     DecodeError,
     /// The platform ran out of decoders (docs/media-plan.md §7b).
     Resources,
+    /// Neither an open nor a seek finished within the bound, and the
+    /// platform said nothing (docs/media-plan.md §7c).
+    Timeout,
 }
 
 impl MediaFailure {
@@ -125,6 +128,7 @@ impl MediaFailure {
             MediaFailure::Network => "network",
             MediaFailure::DecodeError => "decode_error",
             MediaFailure::Resources => "resources",
+            MediaFailure::Timeout => "timeout",
         }
     }
 }

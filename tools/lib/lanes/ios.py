@@ -143,6 +143,8 @@ RUST_SCENES = [
     "media_feed",
     # A picked clip played (docs/media-plan.md §2): rust-only.
     "media_picked",
+    # The bound (docs/media-plan.md §7c): rust-only.
+    "media_timeout",
 ]
 
 # The iPad legs, queued right after their phone sibling: the phone pool is
@@ -335,13 +337,14 @@ RUST_EXAMPLE = {"listdetail": "split", "taskspersist": "tasks",
                 "numberfieldde": "numberfield", "rangertl": "range",
                 "media_formats": "media", "media_delivery": "media",
                 "media_session": "media", "media_tracks": "media",
-                "media_feed": "media", "media_picked": "media"}
+                "media_feed": "media", "media_picked": "media",
+                "media_timeout": "media"}
 
 # The scenes whose guest declares a media session: their bundles carry
 # UIBackgroundModes audio (docs/media-plan.md §5). The media guest is one
 # app for the five scenes, so all five bundles carry it.
 SESSION_SCENES = ("media_formats", "media_delivery", "media_session",
-                  "media_tracks", "media_feed", "media_picked")
+                  "media_tracks", "media_feed", "media_picked", "media_timeout")
 
 # The locale a scene runs under, the knob the leg carries
 # (docs/compliance-plan.md §4); the reads ask the platform, never this.

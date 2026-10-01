@@ -236,7 +236,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("colorpicker") => colorpicker::app(ctx),
         Ok("range") | Ok("rangertl") => range::app(ctx),
         Ok("media_formats") | Ok("media_delivery") | Ok("media_session") | Ok("media_tracks") | Ok("media_feed")
-        | Ok("media_picked") => {
+        | Ok("media_picked") | Ok("media_timeout") => {
             media::app(ctx)
         }
         Ok("sheet") => sheet::app(ctx),

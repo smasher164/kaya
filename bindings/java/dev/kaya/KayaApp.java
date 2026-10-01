@@ -1516,7 +1516,8 @@ public final class KayaApp {
         NOT_FOUND(KayaWire.MEDIA_FAILURE_NOT_FOUND, "not_found"),
         NETWORK(KayaWire.MEDIA_FAILURE_NETWORK, "network"),
         DECODE_ERROR(KayaWire.MEDIA_FAILURE_DECODE_ERROR, "decode_error"),
-        RESOURCES(KayaWire.MEDIA_FAILURE_RESOURCES, "resources");
+        RESOURCES(KayaWire.MEDIA_FAILURE_RESOURCES, "resources"),
+        TIMEOUT(KayaWire.MEDIA_FAILURE_TIMEOUT, "timeout");
 
         final int wire;
         final String word;

@@ -1539,6 +1539,7 @@ pub const KAYA_MEDIA_FAILURE_NOT_FOUND: u32 = 3;
 pub const KAYA_MEDIA_FAILURE_NETWORK: u32 = 4;
 pub const KAYA_MEDIA_FAILURE_DECODE_ERROR: u32 = 5;
 pub const KAYA_MEDIA_FAILURE_RESOURCES: u32 = 6;
+pub const KAYA_MEDIA_FAILURE_TIMEOUT: u32 = 7;
 pub const KAYA_PLAYER_COMMAND_PLAY: u32 = 1;
 pub const KAYA_PLAYER_COMMAND_PAUSE: u32 = 2;
 pub const KAYA_PLAYER_COMMAND_SEEK: u32 = 3;
@@ -1556,13 +1557,14 @@ pub const KAYA_PLAYBACK_STATE_PAUSED: u32 = 2;
 pub const KAYA_FIT_CONTAIN: u32 = 0;
 pub const KAYA_FIT_COVER: u32 = 1;
 pub const KAYA_FIT_FILL: u32 = 2;
-/// How often a playing player's position ticks, and how long a source may
-/// load before the core fails it (crate::media).
+/// How often a playing player's position ticks, and how long an open or an
+/// app's seek may go unanswered before the core fails the player `timeout`
+/// (crate::media).
 pub const KAYA_MEDIA_POSITION_TICK_MS: u64 = 250;
-pub const KAYA_MEDIA_LOADING_CEILING_MS: u64 = 20_000;
+pub const KAYA_MEDIA_TIMEOUT_MS: u64 = 30_000;
 const _: () = assert!(
     KAYA_MEDIA_POSITION_TICK_MS == crate::media::POSITION_TICK_MS
-        && KAYA_MEDIA_LOADING_CEILING_MS == crate::media::LOADING_CEILING_MS
+        && KAYA_MEDIA_TIMEOUT_MS == crate::media::TIMEOUT_MS
 );
 const fn vocab_is(table: &[(i64, &str)], name: &str, value: u32) -> bool {
     let mut i = 0;
@@ -1598,6 +1600,7 @@ const _: () = assert!(
         && vocab_is(wire::MEDIA_FAILURES, "network", KAYA_MEDIA_FAILURE_NETWORK)
         && vocab_is(wire::MEDIA_FAILURES, "decode_error", KAYA_MEDIA_FAILURE_DECODE_ERROR)
         && vocab_is(wire::MEDIA_FAILURES, "resources", KAYA_MEDIA_FAILURE_RESOURCES)
+        && vocab_is(wire::MEDIA_FAILURES, "timeout", KAYA_MEDIA_FAILURE_TIMEOUT)
         && vocab_is(wire::PLAYER_COMMANDS, "play", KAYA_PLAYER_COMMAND_PLAY)
         && vocab_is(wire::PLAYER_COMMANDS, "pause", KAYA_PLAYER_COMMAND_PAUSE)
         && vocab_is(wire::PLAYER_COMMANDS, "seek", KAYA_PLAYER_COMMAND_SEEK)
@@ -1624,7 +1627,7 @@ const _: () = {
         "the spec player_state enum grew: export KAYA_PLAYER_STATE_*"
     );
     assert!(
-        spec_enum_variants("media_failure") == 7,
+        spec_enum_variants("media_failure") == 8,
         "the spec media_failure enum grew: export KAYA_MEDIA_FAILURE_*"
     );
     assert!(
@@ -4480,11 +4483,21 @@ pub extern "C" fn kaya_player_seeked(player: u64, position_ms: u64) -> u32 {
     player_report(player, crate::media::Report::Seeked(position_ms))
 }
 
-/// Presentation side: KAYA_MEDIA_LOADING_CEILING_MS passed since the
-/// backend was handed the player's source.
+/// Presentation side: KAYA_MEDIA_TIMEOUT_MS passed since the backend was
+/// handed the player's source, or a seek. The core reads its own clock and
+/// answers 1 when this failed the player `timeout`, so the backend tears its
+/// item down, else 0 (docs/media-plan.md §7c).
 #[unsafe(no_mangle)]
 pub extern "C" fn kaya_player_overdue(player: u64) -> u32 {
-    player_report(player, crate::media::Report::Overdue)
+    let mut scene_slot = PRESENTATION_SCENE.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(scene) = scene_slot.as_mut() else {
+        return 0;
+    };
+    let (published, _) = scene.media_report(crate::protocol::PlayerId(player), crate::media::Report::Overdue);
+    drop(scene_slot);
+    let failed = crate::media::timed_out(&published);
+    send_occurrences(published);
+    u32::from(failed)
 }
 
 /// Presentation side: the platform's own tracks (docs/media-plan.md §3):

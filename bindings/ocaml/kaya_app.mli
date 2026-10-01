@@ -420,6 +420,7 @@ module Media_failure : sig
     | Network
     | Decode_error
     | Resources
+    | Timeout
 
   val name : t -> string
 end

@@ -13495,6 +13495,21 @@ seeks, cues) at 5 s; a seek with no SeekCompleted after 5 s prints the same;
 and a red windows media leg's bundle carries the server's own request log
 for the leg's span (tools/lib/flightrec_lane.py, the `media-server` section).
 tools/check-verbs.py holds the adaptive route and both trail prints.
+RULED 2026-10-01 (docs/media-plan.md §7c): the windows lane runs every
+media_delivery and media_tracks leg alone, and a player whose open or seek
+passes the 30 s bound fails `timeout` on every platform, its item torn down,
+the retry the app's.
+
+## AVFoundation opens no next item on a host while an asset's load hangs (measured 2026-10-01)
+Against a server that accepts a connection and never answers (the media
+server's never-answering mode at the time), `replaceCurrentItem(with: nil)` and then a new
+item for the same server left the new item `loading` for good: AVFoundation
+never sent its request (the server's log has none), and the held connection
+was let go only 60.6 s in. The replaced AVURLAsset's loading goes on after its
+item is gone. `cancelLoading()` on the old asset, which the SwiftUI arm now
+calls on every source change, released the connection at once (the server's
+"closed by the client after 30.5 s", the bound) and the next item opened in
+0.1 s. media_timeout reads it: its retry step was the red.
 
 ## An X11 display rebooted without waiting lost its server (measured 2026-09-30)
 

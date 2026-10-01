@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x1d479d566df30301
+	SpecHash uint64 = 0x39c348180962e0db
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -280,6 +280,7 @@ const (
 	MediaFailureNetwork MediaFailure = 4
 	MediaFailureDecodeError MediaFailure = 5
 	MediaFailureResources MediaFailure = 6
+	MediaFailureTimeout MediaFailure = 7
 	PlayerCommandPlay = 1
 	PlayerCommandPause = 2
 	PlayerCommandSeek = 3
@@ -712,6 +713,8 @@ func (m MediaFailure) String() string {
 		return "decode_error"
 	case MediaFailureResources:
 		return "resources"
+	case MediaFailureTimeout:
+		return "timeout"
 	}
 	return "MediaFailure(" + strconv.FormatInt(int64(m), 10) + ")"
 }

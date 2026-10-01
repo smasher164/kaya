@@ -1535,6 +1535,7 @@ data MediaFailure
   | MediaNetwork
   | MediaDecodeError
   | MediaResources
+  | MediaTimeout
   deriving (Eq, Show)
 
 -- | The vocabulary's own word: @not_found@, @network@.
@@ -1546,6 +1547,7 @@ mediaFailureName f = case f of
   MediaNetwork -> "network"
   MediaDecodeError -> "decode_error"
   MediaResources -> "resources"
+  MediaTimeout -> "timeout"
 
 mediaFailureOfWire :: Word32 -> Maybe MediaFailure
 mediaFailureOfWire n
@@ -1556,6 +1558,7 @@ mediaFailureOfWire n
   | n == W.mediaFailureNetwork = Just MediaNetwork
   | n == W.mediaFailureDecodeError = Just MediaDecodeError
   | n == W.mediaFailureResources = Just MediaResources
+  | n == W.mediaFailureTimeout = Just MediaTimeout
   | otherwise = error ("kaya: a media failure of " <> show n <> ", which this build does not know")
 
 -- | What the system's media controls ask (docs\/media-plan.md §5);

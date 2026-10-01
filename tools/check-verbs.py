@@ -3354,7 +3354,7 @@ for pattern, repl, label, rel, want in (
 KOTLIN_MEDIA = "android/kaya/src/main/kotlin/dev/kaya/KayaMedia.kt"
 KAYA_H = "crates/kaya/include/kaya.h"
 MEDIA_REASONS = ("unsupported_codec", "unsupported_container", "not_found",
-                 "network", "decode_error", "resources")
+                 "network", "decode_error", "resources", "timeout")
 
 
 def kotlin_code(text):
@@ -3438,9 +3438,9 @@ def compose_media_arms(media_src=None, header_src=None):
                    "(docs/media-plan.md §2 rule 6)")
     defines = dict(re.findall(
         r"#define KAYA_((?:PPROP|PLAYER_COMMAND|SESSION_ACTION|TRACK_KIND|FIT|"
-        r"MEDIA_POSITION_TICK_MS|MEDIA_LOADING_CEILING_MS)\w*) (\d+)", header))
+        r"MEDIA_POSITION_TICK_MS|MEDIA_TIMEOUT_MS)\w*) (\d+)", header))
     copies = re.findall(r"internal const val ((?:PPROP|PLAYER_COMMAND|SESSION_ACTION|"
-                        r"TRACK_KIND|FIT|MEDIA_POSITION_TICK_MS|MEDIA_LOADING_CEILING_MS)"
+                        r"TRACK_KIND|FIT|MEDIA_POSITION_TICK_MS|MEDIA_TIMEOUT_MS)"
                         r"\w*) = (\d+)", code)
     if len(copies) < 20 or len(defines) < 20:
         bad.append(f"the media numbers read {len(copies)} Kotlin copies against "
@@ -3817,7 +3817,8 @@ for pattern, repl, label, want in (
      r"(?=\n +\}\n +\}\);\n +std::thread::sleep\(std::time::Duration::from_millis\(crate::media)",
      "",
      "the stalled open's trail not printed", 1),
-    (r"(\n +)p\.trail\.print\(generation\);(?=\n +\}\n +\}\);\n +\}\n +\}\);)", "",
+    (r"(\n +)p\.trail\.print\(generation\);(?=\n +\}\n +\}\);\n +\}\n +std::thread::sleep\("
+     r"std::time::Duration::from_millis\(crate::media::TIMEOUT_MS - SEEK_REPORT_MS)", "",
      "the stalled seek's trail not printed", 1),
 ):
     cut = g.doctor(f"winui media: {label}", real(WINUI_MEDIA), pattern,
@@ -3827,6 +3828,125 @@ for pattern, repl, label, want in (
     if not found:
         fail(f"check-verbs SELF-TEST: the WinUI media arm passed with {label}")
 
+# --- THE BOUND'S ARMS (docs/media-plan.md §7c, RULED 2026-10-01) ----------
+# The core decides an open or a seek past the bound with its own clock; each
+# backend only WAKES it, after a source and after every seek, and TEARS ITS
+# ITEM DOWN when the answer says the player timed out. media_timeout sees the
+# open half on every lane (and the mac's teardown, since AVFoundation opens no
+# next item while one hangs); no scene can make a seek hang, and no other lane
+# can see an item left fetching, so these are read here.
+
+
+def brace_body(code, head):
+    at = code.find(head)
+    if at < 0:
+        return None
+    start = code.find("{", at)
+    depth = 0
+    for i in range(start, len(code)):
+        if code[i] == "{":
+            depth += 1
+        elif code[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return code[start:i + 1]
+    return None
+
+
+SWIFT_WAKE = ("KAYA_MEDIA_TIMEOUT_MS", "player_overdue(", "timedOut == 1",
+              'self.load("")')
+KOTLIN_WAKE = ("MEDIA_TIMEOUT_MS", "playerOverdue(", "timedOut == 1", 'load("")')
+RUST_WAKE = ("crate::media::TIMEOUT_MS", "Report::Overdue")
+TIMEOUT_ARMS = (
+    ("SwiftUI", SWIFT, (
+        ("private func wakeAtTheBound(", SWIFT_WAKE),
+        ("    func load(_ locator: String)", ("wakeAtTheBound(", "cancelLoading()")),
+        ("    func seek(_ ms: UInt64", ("wakeAtTheBound(",)),
+    )),
+    ("Compose", KOTLIN_MEDIA, (
+        ("private fun wakeAtTheBound(", KOTLIN_WAKE),
+        ("    fun load(locator: String)", ("wakeAtTheBound(",)),
+        ("    fun seek(ms: Long", ("wakeAtTheBound(",)),
+    )),
+    ("GTK", GTK, (
+        ("fn media_report(core: &mut CoreState",
+         ("crate::media::timed_out(&published)", 'load(&p, "")')),
+        ("fn load(p: &Rc<GtkPlayer>", RUST_WAKE),
+        ("pub(super) fn player_command(id: u64", RUST_WAKE),
+    )),
+    ("WinUI", WINUI_MEDIA, (
+        ("fn report(core: &mut CoreState, player: u64",
+         ("crate::media::timed_out(&published)", 'load(core, player, "")')),
+        ("fn load(core: &mut CoreState, id: u64, url: &str)", RUST_WAKE),
+        ("pub(super) fn command(core: &mut CoreState", RUST_WAKE),
+    )),
+)
+
+
+def timeout_arms(sources=None):
+    bad = []
+    for backend, path, rules in TIMEOUT_ARMS:
+        text = (sources or {}).get(path)
+        code = re.sub(r"//[^\n]*", "", text if text is not None else real(path))
+        for head, needs in rules:
+            body = brace_body(code, head)
+            if body is None:
+                bad.append(f"{backend} ({path}): no `{head.strip()}` to read — the census "
+                           f"reads too little to agree with anything")
+                continue
+            for need in needs:
+                if need not in body:
+                    bad.append(f"{backend} ({path}): `{head.strip()}` lacks `{need}` — "
+                               f"the bound's wake or its teardown is gone "
+                               f"(docs/media-plan.md §7c)")
+    return bad
+
+
+timeout_out = timeout_arms()
+timeout_status = 1 if timeout_out else 0
+if timeout_out:
+    print("check-verbs: the bound's arms broke a rule no scene can see:", file=sys.stderr)
+    print("\n".join(timeout_out), file=sys.stderr)
+print(f"check-verbs: the bound's arms read ({sum(len(r) for _, _, r in TIMEOUT_ARMS)} "
+      f"bodies on {len(TIMEOUT_ARMS)} backends)")
+GTK_SEEK_WAKE = (
+    r"(PlayerCommand::Seek\(ms\) => \{\n +let generation = p\.inner\.borrow\(\)\.generation;\n)"
+    r" +glib::timeout_add_local_once\(std::time::Duration::from_millis\("
+    r"crate::media::TIMEOUT_MS\), move \|\| \{\n"
+    r" +if player\(id\)[^\n]*\n +report\(id, crate::media::Report::Overdue\);\n"
+    r" +\}\n +\}\);\n")
+WINUI_SEEK_WAKE = (
+    r"(\n +)std::thread::sleep\(std::time::Duration::from_millis\("
+    r"crate::media::TIMEOUT_MS - SEEK_REPORT_MS\)\);"
+    r"\n +post\(move \|core\| \{\n +if live\(core, id, generation\) \{\n"
+    r" +report\(core, id, Report::Overdue\);\n +\}\n +\}\);")
+for path, pattern, repl, label in (
+    (SWIFT, r'(\n +)if timedOut == 1 \{ self\.load\(""\) \}', "",
+     "SwiftUI's teardown cut"),
+    (SWIFT, r"(\n +)wakeAtTheBound\(generation\)(?=\n +let to = CMTime)", "",
+     "SwiftUI's seek wake cut"),
+    (SWIFT, r"(\n +)self\.asset\?\.cancelLoading\(\)", "",
+     "SwiftUI's asset left loading"),
+    (KOTLIN_MEDIA, r'(\n +)if \(timedOut == 1\) load\(""\)', "",
+     "Compose's teardown cut"),
+    (KOTLIN_MEDIA,
+     r"(fun seek\(ms: Long, report: Boolean\) \{\n +)wakeAtTheBound\(generation\)\n", "",
+     "Compose's seek wake cut"),
+    (GTK, r'(\n +)if torn_down \{\n +if let Some\(p\) = player\(id\) \{\n'
+     r' +load\(&p, ""\);\n +\}\n +\}', "",
+     "GTK's teardown cut"),
+    (GTK, GTK_SEEK_WAKE, "", "GTK's seek wake cut"),
+    (WINUI_MEDIA, r'(\n    )if torn_down \{\n(?: [^\n]*\n){3}    \}', "",
+     "WinUI's teardown cut"),
+    (WINUI_MEDIA, WINUI_SEEK_WAKE, "", "WinUI's seek wake cut"),
+):
+    cut = g.doctor(f"the bound: {label}", real(path), pattern,
+                   lambda m, repl=repl: m.group(1) + repl)
+    found = [f for f in timeout_arms({path: cut}) if f not in timeout_out]
+    print(f"check-verbs: the bound negative ({label}): {len(found)} finding(s)")
+    if not found:
+        fail(f"check-verbs SELF-TEST: the bound's arms passed with {label}")
+
 # clip_mirrors() ran first and printed its own findings; its verdict
 # is read here so there is exactly ONE verdict line.
 if (clip_status or window_status or ink_status or ax_status
@@ -3835,7 +3955,7 @@ if (clip_status or window_status or ink_status or ax_status
         or vtrace_status or norm_status or ind_status
         or answer_status or seed_focus_status or notify_auth_status
         or pump_status or immersive_status or kind_status
-        or range_status or media_status):
+        or range_status or media_status or timeout_status):
     raise SystemExit(1)
 g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"({len(canvas_rows)} of them the canvas vocabularies) + "
@@ -3857,6 +3977,7 @@ g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"+ every Compose kind's create and render arms "
           f"+ the range's arms in both interpreters "
           f"+ the media arms (a bare layer, one report door, playbackState first) "
+          f"+ the bound's wake and teardown on 4 arms "
           f"+ the Compose media arm (PlayerSurface, one door, raw facts, decodability) "
           f"+ the GTK media arm (GtkPicture over the sink, one door, raw facts, decodability) "
           f"+ the Android video read (the device's screencap, its tolerance, no decoder moved "

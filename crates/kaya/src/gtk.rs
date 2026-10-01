@@ -24737,9 +24737,17 @@ mod gtk_media {
     /// it, and the session's PlaybackStatus follows on every transition
     /// (tools/check-verbs.py holds every media_report call inside here).
     fn media_report(core: &mut CoreState, id: u64, r: crate::media::Report) {
+        let overdue = r == crate::media::Report::Overdue;
         let (published, state) = core.scene.media_report(crate::protocol::PlayerId(id), r);
+        // A PLAYER THAT TIMED OUT IS TORN DOWN (docs/media-plan.md §7c).
+        let torn_down = overdue && crate::media::timed_out(&published);
         for occ in published {
             core.occurrences.send(occ);
+        }
+        if torn_down {
+            if let Some(p) = player(id) {
+                load(&p, "");
+            }
         }
         if let (Some(p), Some(state)) = (player(id), state) {
             p.inner.borrow_mut().state = state;
@@ -24924,7 +24932,7 @@ mod gtk_media {
         set_playbin_state(&p.pb(), gst::State::Paused);
         let id = p.id;
         let overdue = glib::timeout_add_local_once(
-            std::time::Duration::from_millis(crate::media::LOADING_CEILING_MS),
+            std::time::Duration::from_millis(crate::media::TIMEOUT_MS),
             move || {
                 let Some(p) = player(id) else { return };
                 let stale = {
@@ -24994,6 +25002,12 @@ mod gtk_media {
                 }
             }
             PlayerCommand::Seek(ms) => {
+                let generation = p.inner.borrow().generation;
+                glib::timeout_add_local_once(std::time::Duration::from_millis(crate::media::TIMEOUT_MS), move || {
+                    if player(id).is_some_and(|p| p.inner.borrow().generation == generation) {
+                        report(id, crate::media::Report::Overdue);
+                    }
+                });
                 let mut s = p.inner.borrow_mut();
                 s.seeks += 1;
                 s.cue = PlatformCue { text: String::new(), end_ms: None };

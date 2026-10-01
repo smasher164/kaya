@@ -6,7 +6,8 @@
 //! and reads the current cue; `media_feed` stamps a video view per row,
 //! each showing its row's own player, and reads their visibility (§7b);
 //! `media_picked` plays a clip the user picked through the platform's own
-//! picker (§2).
+//! picker (§2); `media_timeout` loads a source the server sends a byte at a time,
+//! hears `failed timeout`, and plays the next item on the same player (§7c).
 
 use kaya::{MediaFailure, MediaSource, PathKey, PlayerId, PlayerState, PlayerTracks, SessionAction, SessionActionKind};
 
@@ -59,15 +60,19 @@ fn formats() -> Vec<Item> {
     ]
 }
 
+fn server_base(scene: &str) -> String {
+    std::env::var("KAYA_MEDIA_URL").unwrap_or_else(|_| {
+        panic!(
+            "kaya: the {scene} scene reads KAYA_MEDIA_URL, the local server the lane \
+             starts (tools/lib/media_server.py); a hand run goes through tools/run-leg.py"
+        )
+    })
+}
+
 /// The local server's items, and the three failures: a 404, a local file
 /// that is not there, and a port nothing listens on.
 fn delivery() -> Vec<Item> {
-    let base = std::env::var("KAYA_MEDIA_URL").unwrap_or_else(|_| {
-        panic!(
-            "kaya: the media_delivery scene reads KAYA_MEDIA_URL, the local server the lane \
-             starts (tools/lib/media_server.py); a hand run goes through tools/run-leg.py"
-        )
-    });
+    let base = server_base("media_delivery");
     let refused = base.rsplit_once(':').map_or(base.clone(), |(host, _)| format!("{host}:9"));
     vec![
         served(&base, "h264_aac.mp4", "video/mp4", H264),
@@ -85,6 +90,21 @@ fn delivery() -> Vec<Item> {
     ]
 }
 
+/// A source the server sends a byte at a time, then the floor file from the
+/// same server on the same player: the app's retry after `timeout`.
+fn timeout() -> Vec<Item> {
+    let base = server_base("media_timeout");
+    vec![
+        Item {
+            name: "trickle.mp4".to_owned(),
+            source: MediaSource::url(format!("{base}/trickle/h264_aac.mp4")),
+            mime: "video/mp4",
+            codecs: H264,
+        },
+        served(&base, "h264_aac.mp4", "video/mp4", H264),
+    ]
+}
+
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let scene = std::env::var("KAYA_SELFTEST").unwrap_or_default();
     match scene.as_str() {
@@ -96,6 +116,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     let session = scene == "media_session";
     let items = match scene.as_str() {
         "media_delivery" => delivery(),
+        "media_timeout" => timeout(),
         _ => formats(),
     };
     let msgs = kaya::Messages::<Msg>::new();

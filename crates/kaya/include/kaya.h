@@ -1508,6 +1508,8 @@
 
 #define KAYA_MEDIA_FAILURE_RESOURCES 6
 
+#define KAYA_MEDIA_FAILURE_TIMEOUT 7
+
 #define KAYA_PLAYER_COMMAND_PLAY 1
 
 #define KAYA_PLAYER_COMMAND_PAUSE 2
@@ -1543,12 +1545,13 @@
 #define KAYA_FIT_FILL 2
 
 /**
- * How often a playing player's position ticks, and how long a source may
- * load before the core fails it (crate::media).
+ * How often a playing player's position ticks, and how long an open or an
+ * app's seek may go unanswered before the core fails the player `timeout`
+ * (crate::media).
  */
 #define KAYA_MEDIA_POSITION_TICK_MS 250
 
-#define KAYA_MEDIA_LOADING_CEILING_MS 20000
+#define KAYA_MEDIA_TIMEOUT_MS 30000
 
 /**
  * set_property sources. SOURCE_ELEMENT is valid only inside a template.
@@ -2964,8 +2967,10 @@ uint32_t kaya_player_position(uint64_t player, uint64_t position_ms);
 uint32_t kaya_player_seeked(uint64_t player, uint64_t position_ms);
 
 /**
- * Presentation side: KAYA_MEDIA_LOADING_CEILING_MS passed since the
- * backend was handed the player's source.
+ * Presentation side: KAYA_MEDIA_TIMEOUT_MS passed since the backend was
+ * handed the player's source, or a seek. The core reads its own clock and
+ * answers 1 when this failed the player `timeout`, so the backend tears its
+ * item down, else 0 (docs/media-plan.md §7c).
  */
 uint32_t kaya_player_overdue(uint64_t player);
 

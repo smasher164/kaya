@@ -344,6 +344,7 @@ pub(crate) const MEDIA_FAILURES: &[(i64, &str)] = &[
     (4, "network"),
     (5, "decode_error"),
     (6, "resources"),
+    (7, "timeout"),
 ];
 
 pub(crate) const PLAYER_COMMANDS: &[(i64, &str)] = &[(1, "play"), (2, "pause"), (3, "seek")];
@@ -413,6 +414,7 @@ pub(crate) fn media_failure_raw(failure: Option<crate::protocol::MediaFailure>) 
         Some(F::Network) => 4,
         Some(F::DecodeError) => 5,
         Some(F::Resources) => 6,
+        Some(F::Timeout) => 7,
     }
 }
 
@@ -425,6 +427,7 @@ pub(crate) fn media_failure_from(raw: u32) -> Option<crate::protocol::MediaFailu
         4 => Some(F::Network),
         5 => Some(F::DecodeError),
         6 => Some(F::Resources),
+        7 => Some(F::Timeout),
         _ => None,
     }
 }

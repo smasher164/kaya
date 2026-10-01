@@ -304,13 +304,30 @@ ORDER = [
     [
      "media_formats_rust", "media_formats_python", "media_formats_js",
      "media_formats_go", "media_formats_csharp", "media_formats_java",
-     "media_delivery_rust", "media_delivery_python", "media_delivery_js",
-     "media_delivery_go", "media_delivery_csharp", "media_delivery_java",
-     "media_tracks_rust", "media_tracks_python", "media_tracks_js",
-     "media_tracks_go", "media_tracks_csharp", "media_tracks_java",
      "media_feed_rust", "media_feed_python", "media_feed_js",
      "media_feed_go", "media_feed_csharp", "media_feed_java",
+     # The bound (docs/media-plan.md §7c): a source the server never answers
+     # fails `timeout`; progressive, so it pools.
+     "media_timeout_rust",
     ],
+    # EACH media_delivery AND media_tracks LEG ALONE (RULED 2026-10-01,
+    # docs/media-plan.md §7c): Media Foundation's adaptive pipeline loses an
+    # event when media guests run beside each other on the loaded VM, so an
+    # HLS or DASH open never readies or a paused seek never completes;
+    # measured 1 in about 12 legs six wide, 1 in 48 two wide, 0 in 48 one at
+    # a time (docs/traps.md, the WinUI adaptive pipeline that goes idle).
+    ["media_delivery_rust"],
+    ["media_delivery_python"],
+    ["media_delivery_js"],
+    ["media_delivery_go"],
+    ["media_delivery_csharp"],
+    ["media_delivery_java"],
+    ["media_tracks_rust"],
+    ["media_tracks_python"],
+    ["media_tracks_js"],
+    ["media_tracks_go"],
+    ["media_tracks_csharp"],
+    ["media_tracks_java"],
     # EACH media_session LEG ALONE: the system's media session manager is one
     # per desktop, every unpackaged kaya process wears the same declared app id
     # in it, and the leg sends commands through it to whichever session
@@ -794,7 +811,8 @@ GUEST_STEM = {"listdetail": "split", "formatde": "format", "formatar": "format",
               "tasksbig": "tasks", "formatbig": "format", "clock24": "format",
               "scrollrtl": "scroll", "numberfieldde": "numberfield", "rangertl": "range",
               "media_formats": "media", "media_delivery": "media", "media_session": "media",
-              "media_tracks": "media", "media_feed": "media", "media_picked": "media"}
+              "media_tracks": "media", "media_feed": "media", "media_picked": "media",
+              "media_timeout": "media"}
 
 # THE MEDIA SUITE'S SERVER (docs/media-plan.md §7a): the VM reaches the host
 # over UTM's bridge, so the runner binds it there, on this lane's own port,

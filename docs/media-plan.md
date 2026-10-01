@@ -8,7 +8,8 @@ media_delivery, media_session, media_tracks and media_feed scenes), and the
 BREADTH BUILT 2026-09-30: GTK, WinUI and Compose arms, the iOS legs, the
 http(s) sidecar (§3) and the other eight bindings, the five scenes on all
 five lanes (docs/deferred.md's struck "BUILD — media" entry; what no lane
-settles is its "WATCH — media" entry). The surface in frames mode is next
+settles is its "WATCH — media" entry), and the bound on an open and a seek
+RULED and BUILT 2026-10-01 (§7c). The surface in frames mode is next
 (§7). It replaces the headless design of
 docs/video-editor-plan.md §2 and §3, and it answers that plan's rulings 2
 and 3 and the roadmap's audio-playback question. The five pieces of shape
@@ -435,7 +436,7 @@ CEA-608 is left out: FFmpeg has no encoder for it.
 **Failure semantics, one in nine bindings.** A player that cannot play
 publishes `failed(reason)` and reads `state` `failed`. `reason` is closed:
 `unsupported_codec`, `unsupported_container`, `not_found`, `network`,
-`decode_error`, `resources` (§7b); each binding spells it as its own enum, and the platform's
+`decode_error`, `resources` (§7b), `timeout` (§7c); each binding spells it as its own enum, and the platform's
 sentence rides beside it as `detail`, which no scene compares. Rule: a track
 the platform cannot decode is `failed(unsupported_codec)` even when the
 rest plays, and a missing element is `failed` even when the pipeline only
@@ -618,6 +619,64 @@ ground 8 points right of it. Visibility is reported by the backend as often as t
 geometry moves (on SwiftUI its frame against every scroll viewport it sits
 in) and coalesced by the core into bands: entering, each tenth shown,
 shown whole, leaving; a copy torn down while shown is heard leaving.
+
+## §7c. The bound on an open and a seek (RULED 2026-10-01)
+
+The maintainer's ruling on the WinUI adaptive stall (docs/traps.md, the WinUI
+adaptive pipeline that goes idle; docs/deferred.md's media WATCH):
+
+(a) TESTS: on the Windows lane every media_delivery and media_tracks leg runs
+alone between drains (tools/lib/lanes/win.py, the reason beside the blocks),
+since the stall was measured only with media guests running beside each other:
+about 1 in 12 legs six wide, 1 in 48 two wide, 0 in 48 one at a time.
+
+(c) PRODUCT: an open that has not readied, or an app's seek that has not
+completed, `TIMEOUT_MS` after it was asked FAILS THE PLAYER with the reason
+`timeout`, the same on all five platforms and in all nine bindings; the app
+decides whether to retry, and kaya never rebuilds a player by itself. What was
+chosen, and why:
+
+- THE REASON is a new entry, `timeout` (7), in the closed vocabulary. None of
+  the six fits honestly: the depth's ceiling had called a stall `network` for
+  a remote source and `unsupported_container` for a local one, and the WinUI
+  stall had every byte in the process while GStreamer's missing demuxer is a
+  container problem whatever the URL. kaya knows only that the platform said
+  neither yes nor no; `detail` names the open or the seek and the bound.
+- THE BOUND is 30 s (`KAYA_MEDIA_TIMEOUT_MS`), a plain deadline from the ask.
+  The slowest real open measured is 12 s (Apple's public fMP4 HLS on Windows,
+  §7a's settled paragraph), and the slowest platform failure the suite relies
+  on is WinUI's refused port at 16.5 s, which must stay `network`; the
+  depth's 20 s left that 3.5 s. "No progress for N seconds" is not
+  measurable on every backend (Media Foundation's progressive source and
+  AVFoundation raise no live download events), so it is not offered. A
+  server that accepts and never answers is a transport failure the platforms
+  name themselves, at different times: GStreamer's souphttpsrc failed it
+  `network` before the bound (measured on both linux protocols, 2026-10-01),
+  while media3, WinUI and AVFoundation said nothing for 30 s (AVFoundation
+  nothing for 60 s). That is the platform's answer and stands.
+- NO PROP. An app that wants less watches `loading` with its own timer and
+  releases or replaces the source; no app can ask for more, which is stated
+  here rather than surfaced in nine bindings.
+- THE SEEK HALF is the stall's second face (a paused seek that never
+  completes, the media_tracks "missing cue"). The clock runs from the LATEST
+  app seek and any seek report stops it, because AVFoundation reports only a
+  seek that finished, so a superseded seek's report never comes. A seek asked
+  while the item still opens is covered by the open's bound first.
+- THE CORE DECIDES (crates/kaya/src/media.rs): it stamps the source's
+  hand-over and each app seek with its own clock. Each backend arms one timer
+  of the bound after handing over a source and after every seek, which only
+  wakes the core (`kaya_player_overdue`), and the core answers 1 when that
+  wake failed the player; the backend then tears its item down through its
+  own empty-source path: AVPlayer's item replaced and its asset's loading
+  cancelled (AVFoundation opens no next item on a host while one hangs,
+  measured, docs/traps.md), ExoPlayer stopped and cleared, the playbin set to
+  NULL, and on WinUI the source cleared and closed.
+
+media_timeout (Rust, all five lanes) loads a source tools/media-server.py
+sends one byte every 2 s (its `/trickle/` prefix: no transport times out,
+and the log says when the client lets the connection go), reads `failed
+timeout`, and plays the floor file on the same player, the app's retry. tools/check-verbs.py holds each arm's wake
+and teardown; the core's unit tests hold the clock.
 
 ## §8. The follow-on rulings
 

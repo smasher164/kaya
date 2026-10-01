@@ -14,10 +14,14 @@ use crate::protocol::{
 /// How often `player_position` ticks while a player plays.
 pub(crate) const POSITION_TICK_MS: u64 = 250;
 
-/// How long a source may stay `loading` before the core calls it failed: a
-/// pipeline missing an element stalls without a word (docs/media-plan.md
-/// §7a), 20 s being the probe's own hang window.
-pub(crate) const LOADING_CEILING_MS: u64 = 20_000;
+/// THE BOUND (RULED 2026-10-01, docs/media-plan.md §7c): an open that has
+/// not readied, or an app's seek that has not completed, this long after it
+/// was asked fails the player `timeout`.
+pub(crate) const TIMEOUT_MS: u64 = 30_000;
+
+/// A backend's wake-up timer and the core's clock are two clocks; a wake this
+/// close to the bound counts as past it.
+const TIMEOUT_SLACK_MS: u64 = 250;
 
 /// What a backend reports about one player, in its platform's own terms.
 #[derive(Debug, Clone, PartialEq)]
@@ -31,7 +35,8 @@ pub(crate) enum Report {
     Failed { domain: String, code: i64, underlying: i64, detail: String },
     Position(u64),
     Seeked(u64),
-    /// LOADING_CEILING_MS passed since the source was handed over.
+    /// A backend's timer, TIMEOUT_MS after it was handed a source or a
+    /// seek: the core reads its own clock and decides.
     Overdue,
     /// The platform's own tracks: language tags in its order, and which of
     /// each list it has selected.
@@ -52,12 +57,15 @@ struct Player {
     duration_ms: u64,
     size: (u32, u32),
     looping: bool,
-    remote: bool,
     /// A `playing` report that beat the item's own `loaded` one.
     early_rate: bool,
     /// Seeks the APP asked for and the platform has not yet landed; a seek
     /// the core issued itself (a replay after `ended`) is not the app's.
     seeks: u32,
+    /// When the current source was handed over.
+    opened_at: Option<std::time::Instant>,
+    /// The latest app seek no seek report has followed: when, and where to.
+    seek_wait: Option<(std::time::Instant, u64)>,
     /// The platform's own tracks, as it last reported them.
     platform: PlayerTracks,
     /// A sidecar WebVTT file, kaya's to draw, and whether it is selected.
@@ -80,9 +88,10 @@ impl Player {
             duration_ms: 0,
             size: (0, 0),
             looping: false,
-            remote: false,
             early_rate: false,
             seeks: 0,
+            opened_at: None,
+            seek_wait: None,
             platform: PlayerTracks::default(),
             sidecar: None,
             sidecar_language: "und".to_owned(),
@@ -170,7 +179,7 @@ impl Route {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Resolved {
     None,
-    Url { url: String, remote: bool },
+    Url { url: String },
     Refused(MediaFailure, String),
 }
 
@@ -192,9 +201,15 @@ pub(crate) struct Media {
     /// §7b), where an id never created is a scene error.
     released: std::collections::HashSet<PlayerId>,
     session: SessionSpec,
+    /// Added to the clock, so a unit test can pass the bound.
+    skew: std::time::Duration,
 }
 
 impl Media {
+    fn now(&self) -> std::time::Instant {
+        std::time::Instant::now() + self.skew
+    }
+
     pub(crate) fn is_live(&self, player: PlayerId) -> bool {
         self.players.contains_key(&player)
     }
@@ -225,6 +240,7 @@ impl Media {
         out: &mut Vec<ApplyOp>,
         published: &mut Vec<Occurrence>,
     ) {
+        let now = self.now();
         let p = self.live_mut(player, "set_player_prop");
         match (prop, value) {
             (PlayerProp::Source, value @ (Value::Str(_) | Value::I64(_))) => {
@@ -243,13 +259,12 @@ impl Media {
                 p.size = (0, 0);
                 p.early_rate = false;
                 p.seeks = 0;
+                p.opened_at = Some(now);
+                p.seek_wait = None;
                 p.platform = PlayerTracks::default();
                 match resolved {
                     Resolved::None => p.state = PlayerState::Idle,
-                    Resolved::Url { remote, .. } => {
-                        p.state = PlayerState::Loading;
-                        p.remote = remote;
-                    }
+                    Resolved::Url { .. } => p.state = PlayerState::Loading,
                     Resolved::Refused(failure, detail) => {
                         p.state = PlayerState::Failed;
                         p.failure = Some(failure);
@@ -330,12 +345,16 @@ impl Media {
     }
 
     pub(crate) fn command(&mut self, player: PlayerId, command: PlayerCommand, out: &mut Vec<ApplyOp>) {
+        let now = self.now();
         let p = self.live_mut(player, "player_command");
         match command {
             PlayerCommand::Play if p.state == PlayerState::Ended => {
                 out.push(ApplyOp::PlayerCommand { player, command: PlayerCommand::Seek(0) });
             }
-            PlayerCommand::Seek(_) => p.seeks += 1,
+            PlayerCommand::Seek(to) => {
+                p.seeks += 1;
+                p.seek_wait = Some((now, to));
+            }
             _ => {}
         }
         out.push(ApplyOp::PlayerCommand { player, command });
@@ -508,11 +527,18 @@ impl Media {
     /// state has no transition for, changes nothing and publishes nothing.
     pub(crate) fn report(&mut self, player: PlayerId, report: Report) -> Vec<Occurrence> {
         let others_open = self.players.iter().filter(|(id, q)| **id != player && q.is_open()).count();
+        let now = self.now();
         let Some(p) = self.players.get_mut(&player) else {
             return Vec::new();
         };
         use PlayerState as S;
         let mut out = Vec::new();
+        if matches!(report, Report::Seeked(_)) {
+            p.seek_wait = None;
+        }
+        let past = |since: std::time::Instant| {
+            now.saturating_duration_since(since).as_millis() as u64 + TIMEOUT_SLACK_MS >= TIMEOUT_MS
+        };
         match (p.state, report) {
             (S::Loading, Report::Loaded { duration_ms, size, undecodable, detail }) => {
                 p.duration_ms = duration_ms;
@@ -554,11 +580,24 @@ impl Media {
                 p.detail = if detail.is_empty() { format!("{domain} {code}") } else { detail };
                 out.push(changed(player, p));
             }
-            (S::Loading, Report::Overdue) => {
+            (S::Loading, Report::Overdue) if p.opened_at.is_some_and(past) => {
                 p.state = S::Failed;
-                p.failure = Some(if p.remote { MediaFailure::Network } else { MediaFailure::UnsupportedContainer });
+                p.failure = Some(MediaFailure::Timeout);
                 p.detail = format!(
-                    "kaya: still loading after {LOADING_CEILING_MS} ms and the platform reported nothing"
+                    "kaya: the source did not open within {TIMEOUT_MS} ms, and the platform reported \
+                     neither readiness nor a failure"
+                );
+                out.push(changed(player, p));
+            }
+            (S::Ready | S::Playing | S::Paused | S::Ended, Report::Overdue)
+                if p.seek_wait.is_some_and(|(since, _)| past(since)) =>
+            {
+                let to = p.seek_wait.take().map_or(0, |(_, to)| to);
+                p.state = S::Failed;
+                p.failure = Some(MediaFailure::Timeout);
+                p.detail = format!(
+                    "kaya: the seek to {to} ms did not complete within {TIMEOUT_MS} ms, and the platform \
+                     reported neither its completion nor a failure"
                 );
                 out.push(changed(player, p));
             }
@@ -613,6 +652,14 @@ impl Media {
         }
         out
     }
+}
+
+/// Whether a report's answer failed the player `timeout`: the backend's cue
+/// to tear its item down (docs/media-plan.md §7c).
+pub(crate) fn timed_out(published: &[Occurrence]) -> bool {
+    published.iter().any(|o| {
+        matches!(o, Occurrence::PlayerChanged { state: PlayerState::Failed, failure: Some(MediaFailure::Timeout), .. })
+    })
 }
 
 fn changed(player: PlayerId, p: &Player) -> Occurrence {
@@ -758,20 +805,20 @@ pub(crate) fn resolve_source(source: &str) -> Resolved {
         if let Some(refusal) = refused_before_load(&lower) {
             return refusal;
         }
-        return Resolved::Url { url: source.to_owned(), remote: true };
+        return Resolved::Url { url: source.to_owned() };
     }
     if let Some(refusal) = refused_before_load(&lower) {
         return refusal;
     }
     if std::path::Path::new(source).is_absolute() {
         return if std::path::Path::new(source).is_file() {
-            Resolved::Url { url: crate::assets::file_url(std::path::Path::new(source)), remote: false }
+            Resolved::Url { url: crate::assets::file_url(std::path::Path::new(source)) }
         } else {
             Resolved::Refused(MediaFailure::NotFound, format!("kaya: no file at {source}"))
         };
     }
     match crate::assets::media_locator(source) {
-        Ok(url) => Resolved::Url { url, remote: false },
+        Ok(url) => Resolved::Url { url },
         Err(why) => Resolved::Refused(MediaFailure::NotFound, why),
     }
 }
@@ -784,7 +831,7 @@ fn resolve_picked(player: PlayerId, handle: i64) -> Resolved {
     let source = picked(player, "source", handle);
     let local = crate::protocol::PickedSource::local_path(&*source);
     if local.is_empty() {
-        Resolved::Url { url: crate::protocol::PickedSource::locator(&*source).to_owned(), remote: false }
+        Resolved::Url { url: crate::protocol::PickedSource::locator(&*source).to_owned() }
     } else {
         resolve_source(local)
     }
@@ -1073,7 +1120,7 @@ mod tests {
         assert!(url.starts_with("file://") && url.ends_with("/media/h264_aac.mp4"), "{url}");
         assert_eq!(
             resolve_source("https://example.invalid/a.m3u8"),
-            Resolved::Url { url: "https://example.invalid/a.m3u8".into(), remote: true }
+            Resolved::Url { url: "https://example.invalid/a.m3u8".into() }
         );
     }
 
@@ -1086,21 +1133,94 @@ mod tests {
         ));
     }
 
+    fn pass(m: &mut Media, ms: u64) {
+        m.skew += std::time::Duration::from_millis(ms);
+    }
+
     #[test]
-    fn a_stall_past_the_ceiling_fails_by_where_the_source_lives() {
-        let (mut m, _, _) = with_source("media/h264_aac.mp4");
-        assert!(matches!(
-            m.report(P, Report::Overdue).as_slice(),
-            [Occurrence::PlayerChanged { failure: Some(MediaFailure::UnsupportedContainer), .. }]
-        ));
-        let (mut m, _, _) = with_source("http://127.0.0.1:8765/hls_mpegts.m3u8");
-        assert!(matches!(
-            m.report(P, Report::Overdue).as_slice(),
-            [Occurrence::PlayerChanged { failure: Some(MediaFailure::Network), .. }]
-        ));
-        // A player that readied is past the ceiling's reach.
+    fn an_open_past_the_bound_fails_timeout_whatever_the_source() {
+        for source in ["media/h264_aac.mp4", "http://127.0.0.1:8765/hls_mpegts.m3u8"] {
+            let (mut m, _, _) = with_source(source);
+            pass(&mut m, TIMEOUT_MS - TIMEOUT_SLACK_MS - 1000);
+            assert!(m.report(P, Report::Overdue).is_empty(), "{source}: a wake before the bound");
+            pass(&mut m, 1000);
+            let occs = m.report(P, Report::Overdue);
+            assert_eq!(failure(&occs), Some(MediaFailure::Timeout), "{source}");
+            assert!(timed_out(&occs));
+            assert_eq!(m.state(P), Some(PlayerState::Failed));
+            // The platform's late answer is not the app's news.
+            assert!(m.report(P, loaded(false)).is_empty());
+        }
+    }
+
+    #[test]
+    fn a_new_source_restarts_the_open_bound() {
+        let (mut m, mut out, mut published) = with_source("media/h264_aac.mp4");
+        pass(&mut m, TIMEOUT_MS / 2);
+        m.set_prop(P, PlayerProp::Source, Value::Str("media/tone.mp3".into()), &mut out, &mut published);
+        pass(&mut m, TIMEOUT_MS / 2 + 1000);
+        assert!(m.report(P, Report::Overdue).is_empty(), "the first source's wake, the second's clock");
+        pass(&mut m, TIMEOUT_MS);
+        assert_eq!(failure(&m.report(P, Report::Overdue)), Some(MediaFailure::Timeout));
+    }
+
+    #[test]
+    fn a_player_that_opened_is_past_the_open_bound() {
         let (mut m, _, _) = with_source("media/h264_aac.mp4");
         m.report(P, loaded(false));
+        pass(&mut m, TIMEOUT_MS * 2);
+        assert!(m.report(P, Report::Overdue).is_empty());
+        assert_eq!(m.state(P), Some(PlayerState::Ready));
+    }
+
+    #[test]
+    fn an_apps_seek_past_the_bound_fails_timeout() {
+        let (mut m, _, _) = with_source("media/h264_aac.mp4");
+        m.report(P, loaded(false));
+        let mut out = Vec::new();
+        m.command(P, PlayerCommand::Seek(500), &mut out);
+        pass(&mut m, TIMEOUT_MS - TIMEOUT_SLACK_MS - 1000);
+        assert!(m.report(P, Report::Overdue).is_empty());
+        pass(&mut m, 1000);
+        let occs = m.report(P, Report::Overdue);
+        assert_eq!(failure(&occs), Some(MediaFailure::Timeout));
+        assert!(matches!(
+            occs.as_slice(),
+            [Occurrence::PlayerChanged { detail, .. }] if detail.contains("seek to 500 ms")
+        ));
+    }
+
+    #[test]
+    fn a_seek_report_ends_the_wait_and_the_latest_seek_restarts_it() {
+        let (mut m, _, _) = with_source("media/h264_aac.mp4");
+        m.report(P, loaded(false));
+        let mut out = Vec::new();
+        m.command(P, PlayerCommand::Seek(500), &mut out);
+        m.report(P, Report::Seeked(500));
+        pass(&mut m, TIMEOUT_MS * 2);
+        assert!(m.report(P, Report::Overdue).is_empty(), "a completed seek waits on nothing");
+        // A superseded seek's report never comes (AVFoundation reports only
+        // a finished one): the latest seek's report ends the wait.
+        m.command(P, PlayerCommand::Seek(100), &mut out);
+        pass(&mut m, TIMEOUT_MS / 2);
+        m.command(P, PlayerCommand::Seek(1500), &mut out);
+        pass(&mut m, TIMEOUT_MS / 2 + 1000);
+        assert!(m.report(P, Report::Overdue).is_empty(), "the first seek's wake, the latest seek's clock");
+        m.report(P, Report::Seeked(1500));
+        pass(&mut m, TIMEOUT_MS);
+        assert!(m.report(P, Report::Overdue).is_empty());
+        assert_eq!(m.state(P), Some(PlayerState::Ready));
+    }
+
+    #[test]
+    fn the_cores_own_replay_seek_waits_on_nothing() {
+        let (mut m, _, _) = with_source("media/h264_aac.mp4");
+        m.report(P, loaded(false));
+        m.report(P, Report::Rate(true));
+        m.report(P, Report::Ended);
+        let mut out = Vec::new();
+        m.command(P, PlayerCommand::Play, &mut out);
+        pass(&mut m, TIMEOUT_MS * 2);
         assert!(m.report(P, Report::Overdue).is_empty());
     }
 
@@ -1737,7 +1857,6 @@ mod tests {
         m.set_prop(P, PlayerProp::Source, Value::I64(handle.0 as i64), &mut out, &mut heard);
         assert_eq!(handed(&out, PlayerProp::Source), [uri]);
         assert_eq!(states(&heard), [PlayerState::Loading]);
-        assert!(!m.players[&P].remote);
     }
 
     #[test]

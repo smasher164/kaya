@@ -84,6 +84,7 @@ public enum KayaMediaFailure: UInt32, Sendable {
     case network = 4
     case decodeError = 5
     case resources = 6
+    case timeout = 7
 
     /// The wire's own word.
     public var name: String {
@@ -94,6 +95,7 @@ public enum KayaMediaFailure: UInt32, Sendable {
         case .network: return "network"
         case .decodeError: return "decode_error"
         case .resources: return "resources"
+        case .timeout: return "timeout"
         }
     }
 

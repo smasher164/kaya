@@ -5969,6 +5969,7 @@ class MediaFailure(enum.IntEnum):
     NETWORK = wire.MEDIA_FAILURE_NETWORK
     DECODE_ERROR = wire.MEDIA_FAILURE_DECODE_ERROR
     RESOURCES = wire.MEDIA_FAILURE_RESOURCES
+    TIMEOUT = wire.MEDIA_FAILURE_TIMEOUT
 
     def __str__(self) -> str:
         return self.name.lower()

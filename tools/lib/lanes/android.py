@@ -152,6 +152,8 @@ LEGS = {
         "media_tracks-compose", "media_feed-compose",
         # A picked clip played (docs/media-plan.md §2): rust-only, DocumentsUI.
         "media_picked-compose",
+        # The bound (docs/media-plan.md §7c): rust-only.
+        "media_timeout-compose",
     ],
     "jvm": [
         "jvm", "a11y-jvm", "entry-jvm",

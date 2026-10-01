@@ -79,7 +79,7 @@ GUEST_STEM = {"listdetail": "split", "taskspersist": "tasks",
               "numberfieldde": "numberfield", "rangertl": "range",
               "media_formats": "media", "media_delivery": "media",
               "media_session": "media", "media_tracks": "media", "media_feed": "media",
-              "media_picked": "media"}
+              "media_picked": "media", "media_timeout": "media"}
 
 # THE LOCALE A SCENE RUNS UNDER (docs/compliance-plan.md §4): the knob the
 # leg carries, so the same guest is read under German and Arabic; the
@@ -138,7 +138,9 @@ HAND_QUEUED = {"editor": "go", "chat": "go", "portfolio": "python", "varied": "p
                "media_formats": "rust", "media_delivery": "rust",
                "media_session": "rust", "media_tracks": "rust", "media_feed": "rust",
                # A picked clip played (docs/media-plan.md §2): rust-only.
-               "media_picked": "rust"}
+               "media_picked": "rust",
+               # The bound (docs/media-plan.md §7c): rust-only, one 30 s wait.
+               "media_timeout": "rust"}
 
 # The queue, in run order. Entries:
 #   (scene, (lang, ...))    a group: script export + one leg per lang
@@ -270,6 +272,7 @@ ORDER = [
     ("media_session", LANGS),
     ("media_tracks", LANGS),
     ("media_feed", LANGS),
+    ("media_timeout", ("rust",)),
     ("richtext", ("rust", "python", "js", "go", "csharp", "java", "swift",
                   "ocaml", "haskell")),
     ("ownundo", ("rust", "python", "js", "go", "csharp", "java", "swift",

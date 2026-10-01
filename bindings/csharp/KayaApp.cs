@@ -847,6 +847,7 @@ enum MediaFailure : uint
     Network = KayaWire.MediaFailureNetwork,
     DecodeError = KayaWire.MediaFailureDecodeError,
     Resources = KayaWire.MediaFailureResources,
+    Timeout = KayaWire.MediaFailureTimeout,
 }
 
 enum SessionActionKind : uint
@@ -914,7 +915,8 @@ static class MediaWords
         MediaFailure.NotFound => "not_found",
         MediaFailure.Network => "network",
         MediaFailure.DecodeError => "decode_error",
-        _ => "resources",
+        MediaFailure.Resources => "resources",
+        _ => "timeout",
     };
 }
 

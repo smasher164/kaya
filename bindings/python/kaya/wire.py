@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x1d479d566df30301
+SPEC_HASH = 0x39c348180962e0db
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -280,6 +280,7 @@ MEDIA_FAILURE_NOT_FOUND = 3
 MEDIA_FAILURE_NETWORK = 4
 MEDIA_FAILURE_DECODE_ERROR = 5
 MEDIA_FAILURE_RESOURCES = 6
+MEDIA_FAILURE_TIMEOUT = 7
 PLAYER_COMMAND_PLAY = 1
 PLAYER_COMMAND_PAUSE = 2
 PLAYER_COMMAND_SEEK = 3

@@ -99,7 +99,9 @@ breadth owed:
   - ~~The loading ceiling's reason~~ — CLOSED 2026-09-30: GTK fails a
     missing element at the missing-plugin message with its caps' reason, so
     the ceiling is the fallback it was chosen as and no stall shape reaches
-    it on any lane; the depth's choice stands.
+    it on any lane; the depth's choice stood until 2026-10-01, when the
+    maintainer's ruling replaced it with the `timeout` reason and a 30 s
+    bound on an open and a seek (docs/media-plan.md §7c).
 
 ## ~~BUILD — the range and the vertical slider (docs/range-plan.md), depth on the mac (2026-09-29); the GTK, WinUI and Compose arms, the iOS legs, rangertl, the sliders scene's fader and the other eight bindings are the breadth slice~~ COMPLETE 2026-09-29: every item below LANDED, the last one by the maintainer's ruling (plan §3 rule 11); range, rangertl and the sliders fader on all five lanes, validation in the breadth commit; what the breadth found and left is in "WATCH — the range's tie and its readers' names"
 KEY: range, KIND_RANGE, range_changed, range_committed, min_gap, low_label, high_label, on_range, on_range_commit, kaya_range_clamp, clamp_thumb, expect_thumb, set_thumb, nudge_thumb, ax_thumb, vertical slider, slider axis, rangertl, DEPTH STUB range, user_range_committed, settle_range_writes, RANGE_SETTLED
@@ -176,7 +178,7 @@ tools/scenes/range.steps green on the mac lane. What breadth owed:
     send recorded, every drain emptying the queue first).
 
 ## WATCH — media: what the breadth measured and no lane settles (docs/media-plan.md), found 2026-09-30
-KEY: resources, 4003, CodecException 14, emulator-5558, emulator-5560, picked file, content URI, video_ink_tolerance, MediaRemote non-delivery, HLS TS MediaOpened, display awake, playback category, KAYA_VIDEO_INK_TOLERANCE, setOutputSurface, detached surface, screencap, video_ground, VIDEO_INK_NONE, AdaptiveMediaSource, open trail, media-server section, SEEK_REPORT_MS, msmpeg2vdec
+KEY: resources, 4003, CodecException 14, emulator-5558, emulator-5560, picked file, content URI, video_ink_tolerance, MediaRemote non-delivery, HLS TS MediaOpened, display awake, playback category, KAYA_VIDEO_INK_TOLERANCE, setOutputSurface, detached surface, screencap, video_ground, VIDEO_INK_NONE, AdaptiveMediaSource, open trail, media-server section, SEEK_REPORT_MS, msmpeg2vdec, timeout, TIMEOUT_MS, media_timeout, trickle
 
 For the maintainer's review, each measured and none asserted by a lane:
   - ~~`resources` on Android~~ — BUILT 2026-09-30 by the maintainer's
@@ -218,32 +220,25 @@ For the maintainer's review, each measured and none asserted by a lane:
     runs the media legs on the phones that reach it. Not rebooted.
   - MediaRemote's send-side non-delivery on the mac media_session (docs/
     traps.md) was seen twice in this slice, green on rerun.
-  - A pooled WinUI adaptive (HLS or DASH) item sometimes stops making
-    progress: an open stays `Opening` with its source `Opened`, or a paused
-    seek never completes (the media_tracks "missing cue" sightings are this,
-    not a caption race). MEASURED 2026-10-01 (docs/traps.md, the adaptive
-    item's playback pipeline going idle): not the media server (every
-    request answered, now logged on arrival and completion), not the
-    downloader (the arm opens adaptive sources as an AdaptiveMediaSource on
-    its own HttpClient now, and in a stall every segment had arrived HTTP
-    200), not a deadlock (two process dumps: every Media Foundation thread
-    idle, the software H.264 decoder waiting for input); an event lost in
-    Media Foundation's pipeline when six media guests run beside each other
-    on the loaded VM. Under an 18-spinner host load, delivery+tracks stalled
-    about once per run 6 wide, 1 in 48 legs 2 wide, 0 in 48 one at a time.
-    The seek nudge was removed (measured not recovering). A red leg's
-    bundle now names it: the open trail (every adaptive download, state,
-    selection, seek and cue) at the 5 s still-opening and seek lines, and
-    the server's request log as the `media-server` section. Prior art: no
-    public report or workaround for this shape (WindowsAppSDK #4095 closed
-    "not planned"; Flutter's MF player declines HLS, media_kit and Qt use
-    FFmpeg, Chromium its own HLS demuxer). OPEN, FOR THE MAINTAINER'S
-    RULING: (a) run media_delivery and media_tracks one leg at a time on
-    the windows lane (measured 0/48; +160 s on a lane reading 1368-1420
-    of its 1500), (b) a recovery in the arm that rebuilds a stalled item
-    at the same position with its track choices restored (one item swap
-    was measured opening at once in a process whose previous item had
-    stalled; its observable semantics need ruling), or (c) both.
+  - ~~A pooled WinUI adaptive (HLS or DASH) item sometimes stops making
+    progress~~ — RULED 2026-10-01 by the maintainer and BUILT (docs/media-plan.md
+    §7c): (a) the windows lane runs every media_delivery and media_tracks leg
+    alone (tools/lib/lanes/win.py); (c) an open that has not readied, or an
+    app's seek that has not completed, 30 s after it was asked fails the
+    player with the new reason `timeout` on all five platforms and in all nine
+    bindings, the core deciding with its own clock and each arm tearing its
+    item down, the retry left to the app. media_timeout (Rust, five lanes)
+    reads it against the local server's `/trickle/` source and plays the
+    floor file after it; watched red on the mac and both linux protocols with
+    the core's deadline cut, and on the mac with the teardown short of
+    cancelling the asset's loading (docs/traps.md). The cause stays Media
+    Foundation's, MEASURED 2026-10-01 (docs/traps.md, the adaptive item's
+    playback pipeline going idle): not the server, not the downloader, not a
+    deadlock; an event lost when six media guests run beside each other on
+    the loaded VM, 0 in 48 legs one at a time. The windows media legs took
+    297 s alone against 131-133 s pooled (--only media); the full lane read
+    1368-1420 of its 1500 s ceiling before, so it is expected to pass it,
+    left for the maintainer rather than raised.
   - The mac's in-process ScreenCaptureKit read hung or was refused
     ("declined TCCs") for a pooled media_delivery guest four times; the
     read falls back to screencapture(1) and says so (docs/traps.md). Why

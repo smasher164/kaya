@@ -16,6 +16,8 @@ import argparse
 import http.server
 import os
 import re
+import select
+import socket
 import threading
 import time
 
@@ -38,6 +40,14 @@ TYPES = {
 }
 
 RANGE = re.compile(r"^bytes=(\d*)-(\d*)$")
+
+# A file under this prefix is answered one byte every TRICKLE_S: no
+# platform's transport times out (media3 reads with 8 s, souphttpsrc 15 s),
+# and no open finishes within the bound — the media_timeout scene's source
+# (docs/media-plan.md §7c). A server that never answered was measured failing
+# `network` on GStreamer before the bound.
+TRICKLE = "/trickle/"
+TRICKLE_S = 2.0
 
 
 OPEN = 0
@@ -146,11 +156,60 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.say(f"sent {self.command} {self.path} {status} {len(body) if send_body else 0} bytes "
                  f"in {(time.monotonic() - began) * 1000:.0f} ms")
 
+    def _trickle(self, send_body):
+        """The file the rest of the path names, Range honoured, its body one
+        byte per TRICKLE_S; the log says when the client let go, which is the
+        backend's teardown seen from here."""
+        self.path = "/" + self.path[len(TRICKLE):]
+        f = self._file()
+        if f is None:
+            self._head(send_body)
+            return
+        data = f.read_bytes()
+        start, end = 0, len(data) - 1
+        m = RANGE.match((self.headers.get("Range") or "").strip())
+        if m and m.group(1):
+            start = int(m.group(1))
+            end = min(int(m.group(2)), end) if m.group(2) else end
+        body = data[start:end + 1]
+        self.say(f"request {self.command} {TRICKLE}{self.path[1:]} range "
+                 f"{self.headers.get('Range') or '-'}: trickled, a byte per {TRICKLE_S:.0f} s")
+        self.send_response(206 if m else 200)
+        self.send_header("Content-Type", TYPES.get(f.suffix, "application/octet-stream"))
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(len(body)))
+        if m:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{len(data)}")
+        self.end_headers()
+        began = time.time()
+        sent = 0
+        try:
+            while send_body and sent < len(body):
+                self.wfile.write(body[sent:sent + 1])
+                self.wfile.flush()
+                sent += 1
+                ready, _, _ = select.select([self.connection], [], [], TRICKLE_S)
+                if ready and not self.connection.recv(1, socket.MSG_PEEK):
+                    raise ConnectionResetError("the client closed the connection")
+        except OSError as e:
+            self.say(f"trickled {self.path} closed by the client after "
+                     f"{time.time() - began:.1f} s, {sent} byte(s): {type(e).__name__}")
+            self.close_connection = True
+            return
+        self.served += 1
+        self.say(f"trickled {self.path} whole, {sent} byte(s) in {time.time() - began:.1f} s")
+
     def do_GET(self):
-        self._head(True)
+        if self.path.startswith(TRICKLE):
+            self._trickle(True)
+        else:
+            self._head(True)
 
     def do_HEAD(self):
-        self._head(False)
+        if self.path.startswith(TRICKLE):
+            self._trickle(False)
+        else:
+            self._head(False)
 
 
 def main():

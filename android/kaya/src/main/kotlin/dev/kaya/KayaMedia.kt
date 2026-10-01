@@ -99,7 +99,7 @@ internal const val TRACK_KIND_AUDIO = 0
 internal const val FIT_COVER = 1
 internal const val FIT_FILL = 2
 internal const val MEDIA_POSITION_TICK_MS = 250
-internal const val MEDIA_LOADING_CEILING_MS = 20000
+internal const val MEDIA_TIMEOUT_MS = 30000
 
 /** The players by id; the UI thread's alone. */
 internal val kayaPlayers = HashMap<Long, KayaMediaPlayer>()
@@ -212,9 +212,22 @@ internal class KayaMediaPlayer(val id: Long, context: Context) : Player.Listener
         exo.setMediaItem(MediaItem.fromUri(locator))
         exo.prepare()
         armCaptionMessages()
+        wakeAtTheBound(gen)
+    }
+
+    /** The core's clock decides at the bound (docs/media-plan.md §7c), and a
+     * player it failed `timeout` is torn down. */
+    private fun wakeAtTheBound(gen: Int) {
         main.postDelayed({
-            if (generation == gen && !loaded) kayaPlayerReport(id) { KayaPresent.playerOverdue(id) }
-        }, MEDIA_LOADING_CEILING_MS.toLong())
+            if (generation == gen) {
+                var timedOut = 0
+                kayaPlayerReport(id) {
+                    timedOut = KayaPresent.playerOverdue(id)
+                    timedOut
+                }
+                if (timedOut == 1) load("")
+            }
+        }, MEDIA_TIMEOUT_MS.toLong())
     }
 
     fun setVolume(v: Float) {
@@ -241,6 +254,7 @@ internal class KayaMediaPlayer(val id: Long, context: Context) : Player.Listener
     fun pause() = exo.pause()
 
     fun seek(ms: Long, report: Boolean) {
+        wakeAtTheBound(generation)
         if (report) seeksToReport += 1
         awaitingSeek = true
         exo.seekTo(ms)

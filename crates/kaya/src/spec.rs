@@ -3991,6 +3991,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("network", 4),
                 ("decode_error", 5),
                 ("resources", 6),
+                ("timeout", 7),
             ],
         },
         EnumSpec {

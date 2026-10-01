@@ -346,9 +346,17 @@ fn span_of(ms: u64) -> TimeSpan {
 /// status moves on every transition (tools/check-verbs.py holds every
 /// `media_report` call inside here).
 fn report(core: &mut CoreState, player: u64, report: Report) {
+    let overdue = report == Report::Overdue;
     let (published, _) = core.scene.media_report(PlayerId(player), report);
+    // A PLAYER THAT TIMED OUT IS TORN DOWN (docs/media-plan.md §7c).
+    let torn_down = overdue && crate::media::timed_out(&published);
     for occ in published {
         core.occurrences.send(occ);
+    }
+    if torn_down {
+        if let Err(e) = load(core, player, "") {
+            eprintln!("KAYA_DIAG winui player {player}: tearing down the timed-out item failed: {}", e.message());
+        }
     }
     session_follow(core);
     keep_awake(core);
@@ -793,7 +801,7 @@ fn load(core: &mut CoreState, id: u64, url: &str) -> windows_core::Result<()> {
                 p.trail.print(generation);
             }
         });
-        std::thread::sleep(std::time::Duration::from_millis(crate::media::LOADING_CEILING_MS - OPEN_REPORT_MS));
+        std::thread::sleep(std::time::Duration::from_millis(crate::media::TIMEOUT_MS - OPEN_REPORT_MS));
         post(move |core| {
             if live(core, id, generation) {
                 report(core, id, Report::Overdue);
@@ -963,6 +971,12 @@ pub(super) fn command(core: &mut CoreState, id: u64, command: PlayerCommand) -> 
                         }
                     });
                 }
+                std::thread::sleep(std::time::Duration::from_millis(crate::media::TIMEOUT_MS - SEEK_REPORT_MS));
+                post(move |core| {
+                    if live(core, id, generation) {
+                        report(core, id, Report::Overdue);
+                    }
+                });
             });
             p.player.PlaybackSession()?.SetPosition(span_of(ms))?
         }

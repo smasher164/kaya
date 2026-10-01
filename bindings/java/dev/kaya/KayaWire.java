@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x1d479d566df30301L;
+    public static final long SPEC_HASH = 0x39c348180962e0dbL;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -279,6 +279,7 @@ public final class KayaWire {
     public static final int MEDIA_FAILURE_NETWORK = 4;
     public static final int MEDIA_FAILURE_DECODE_ERROR = 5;
     public static final int MEDIA_FAILURE_RESOURCES = 6;
+    public static final int MEDIA_FAILURE_TIMEOUT = 7;
     public static final int PLAYER_COMMAND_PLAY = 1;
     public static final int PLAYER_COMMAND_PAUSE = 2;
     public static final int PLAYER_COMMAND_SEEK = 3;
