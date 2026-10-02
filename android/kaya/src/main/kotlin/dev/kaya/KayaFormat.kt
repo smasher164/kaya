@@ -114,18 +114,6 @@ object KayaFormat {
     fun number(value: Double, min: Int, max: Int, grouping: Boolean): String =
         NumberFormat.getInstance(locale()).also { digits(it, min, max, grouping) }.format(value)
 
-    /**
-     * The number field's reading (docs/number-field-plan.md §3 rule 5): the
-     * formatter [number] writes with, grouping off, over the WHOLE text.
-     * Answers the value in Java's own spelling, or "" when the text is not
-     * one number.
-     */
-    @JvmStatic
-    fun parseNumber(text: String): String {
-        val f = NumberFormat.getInstance(locale()).also { it.isGroupingUsed = false }
-        return kayaWholeNumber(text) { s, at -> f.parse(s, at) }
-    }
-
     @JvmStatic
     fun percent(value: Double, min: Int, max: Int, grouping: Boolean): String =
         NumberFormat.getPercentInstance(locale()).also { digits(it, min, max, grouping) }.format(value)
@@ -167,16 +155,4 @@ object KayaFormat {
         Locale.setDefault(locale)
         return Locale.getDefault().toLanguageTag()
     }
-}
-
-/** The whole text as one number or "" (KayaFormat.parseNumber's rule), over
- * any formatter's positional parse; held by KayaFormatParseTest. */
-internal fun kayaWholeNumber(
-    text: String,
-    parse: (String, java.text.ParsePosition) -> Number?,
-): String {
-    val at = java.text.ParsePosition(0)
-    val n = parse(text, at) ?: return ""
-    if (at.errorIndex >= 0 || at.index != text.length) return ""
-    return n.toDouble().toString()
 }

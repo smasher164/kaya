@@ -232,7 +232,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("pickers") => pickers::app(ctx),
         Ok("sliders") => sliders::app(ctx),
         // One guest under two locales, format's shape.
-        Ok("numberfield") | Ok("numberfieldde") => numberfield::app(ctx),
+        Ok("numberfield") | Ok("numberfieldde") | Ok("numberfieldar") => numberfield::app(ctx),
         Ok("colorpicker") => colorpicker::app(ctx),
         Ok("range") | Ok("rangertl") => range::app(ctx),
         Ok("media_formats") | Ok("media_delivery") | Ok("media_session") | Ok("media_tracks") | Ok("media_feed")

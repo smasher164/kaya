@@ -84,12 +84,45 @@ unit beside the field), and an empty state (§8, ruling 2).
    is `fmt::number(value)` with the fraction digits of rule 4 and grouping
    off (no platform groups inside an editable number: GTK prints none and
    `DecimalFormatter` defaults to ungrouped), so `3.5` reads `3,5` under
-   de-DE and `٣٫٥` under ar-EG. The door gains ONE call, `fmt::parse_number`,
-   over the same platform formatter on each arm (`CFNumberFormatter`,
-   Android ICU's `NumberFormat.parse` in KayaFormat.kt, glibc `strtod` under
-   `LC_NUMERIC`, `DecimalFormatter.ParseDouble`). One reader of the text on
-   five backends is what makes rule 2 one rule, and what lets a scene freeze
-   the displayed text with `{fmt:number …}`.
+   de-DE and `٣٫٥` under ar-EG. The door gains ONE call, `fmt::parse_number`.
+   One reader of the text on five backends is what makes rule 2 one rule,
+   and what lets a scene freeze the displayed text with `{fmt:number …}`.
+
+   **What a typed number may contain: RULED 2026-10-02** (the maintainer,
+   option B of docs/probes/number-input-2026-10-01.md, whose measurements
+   found each platform's own parse committing a number the user did not
+   mean on four of the five). ONE rule on all five, read by kaya over the
+   marks the platform's formatter writes, never by a bundled ICU:
+   1. Any decimal digit system, in any locale: every Unicode `Nd` run (ASCII,
+      Arabic-Indic, extended Arabic-Indic, Devanagari and the rest). A digit
+      is never ambiguous.
+   2. The decimal mark is the locale's own, TAKEN FROM THE PLATFORM'S
+      FORMATTER AT THE MOMENT OF PARSING, so a user's own separators
+      (Windows' Region settings, Apple's number format) are the ones read;
+      and "." as well, wherever "." is neither the locale's decimal nor its
+      group mark.
+   3. The locale's group mark, from the same formatter, only where a group
+      falls: the formatter's own group sizes (threes, or India's twos left
+      of the first three). A misplaced group mark is refused.
+   4. Everything else is refused and the field reverts (rule 2), never
+      guessed. So `1,234` and `3,5` under ar-EG are refused (CLDR's marks
+      there are `٫` and `٬`; ICU's comma class read them as 1.234 and 3.5 on
+      Android and Apple, the one wrong number the old arms committed), `3.5`
+      under de-DE is refused, and a leading minus is read: the hyphen,
+      U+2212 or the locale's own, after any direction mark.
+   Linux keeps glibc's marks (docs/compliance-plan.md §1.3, ruled
+   2026-10-01): its ar-EG writes "." and ",", so the rule reads Arabic-Indic
+   digits there and reads `1,234` as 1234, the grouping that platform's own
+   ar-EG writes. AS BUILT: crates/kaya/src/typed_number.rs holds the digit
+   table and the rule; the door asks the platform to write -1234567.5
+   grouped at one fraction digit and reads the marks off that spelling, so
+   the five arms carry no parse of their own. Where the formatter's group
+   mark is a space no ordinary keyboard types (U+202F for fr-FR, U+00A0 for
+   fr-CA, sv-SE, ru-RU, pl-PL and others on Apple, measured 2026-10-02;
+   U+2009 and U+2007 too), a plain space is that group mark, still only
+   where a group falls: `1 234,5` reads under fr-FR, `12 34` does not, and
+   a plain space under en-US is refused. A space means nothing else in a
+   number, so nothing becomes ambiguous.
 6. **Stepping** moves by `step` from the committed value, clamped, and
    commits. The page keys move by ten steps (the slider's S7 page rule,
    and the mac HIG's Shift-click ten).
@@ -153,8 +186,8 @@ unit beside the field), and an empty state (§8, ruling 2).
    MEASURED 2026-09-29 in the lane's image (Debian trixie glibc): ar_EG's
    LC_NUMERIC is a full stop and a comma, so the glibc arm writes `3.5`,
    ASCII, and reads it back (fmt's glibc test holds both); no backend on
-   this lane writes Arabic-Indic digits, and text typed in them is refused
-   and reverts. AMENDED 2026-09-29 (§6): the `input` handler does NOT
+   this lane writes Arabic-Indic digits, and text typed in them was refused
+   until §3 rule 5's ruling (2026-10-02), which reads them. AMENDED 2026-09-29 (§6): the `input` handler does NOT
    answer `GTK_INPUT_ERROR`. Under `ALWAYS`, `gtk_spin_button_update`
    leaves its value uninitialized on that answer and then sets it (GTK
    4.20's gtkspinbutton.c), so the handler answers the committed value for
@@ -168,9 +201,9 @@ unit beside the field), and an empty state (§8, ruling 2).
    MEASURED 2026-09-28 on the windows lane's VM: the door's language list
    parses the user's separator (de-DE `12,5`, en-US `12.5`, ar-EG `٣٫٥`,
    each refusing the other's), BUT `ParseDouble` reads a grouping separator
-   whatever `IsGrouped` says (`1,234.5` under en-US), so the arm admits only
-   digits and the characters the same formatter writes for an ungrouped
-   `-1.5`. A cleared box raises `ValueChanged(old, NaN)` and cannot be put
+   whatever `IsGrouped` says (`1,234.5` under en-US), so the arm admitted
+   only digits and the characters the same formatter writes for an
+   ungrouped `-1.5` (superseded 2026-10-02 by §3 rule 5's one rule). A cleared box raises `ValueChanged(old, NaN)` and cannot be put
    back before it; a value written INSIDE the handler is taken (NumberBox
    ignores the nested change and renders its text from that value), so the
    revert happens there and nothing fires. The NumberBox's `NumberFormatter`
@@ -323,12 +356,12 @@ check, the digits from the step capped at six, the rounding, the text
 through `fmt::number` at those digits with grouping off, a commit's
 reading of the text and a step), and `fmt::parse_number` reads the WHOLE
 text as one number in the process locale or refuses it. It is not guest
-surface: the arms are its callers. The Apple arm is CoreFoundation's
-parse over the full range with grouping off; the glibc arm is written
-(the separator `localeconv` names, ASCII digits, an optional minus); the
-Windows and Android arms refused by name until the breadth slice wrote
-them (§4.4 for Windows; ICU's `NumberFormat.parse` in KayaFormat.kt for
-Android).
+surface: the arms are its callers. SUPERSEDED 2026-10-02 (§3 rule 5's
+ruling): the four platform parses this slice and the breadth wrote
+(CoreFoundation's, glibc's separators over ASCII digits, ICU's
+`NumberFormat.parse` in KayaFormat.kt, `ParseDouble` behind a character
+filter) are gone, and the door reads every arm's text through
+crates/kaya/src/typed_number.rs.
 The SwiftUI arm reaches the rules through three vtable slots
 (`number_text`, `number_commit`, `number_step`), so its commit and its
 text are the core's and not a Swift copy. The harness asks the platform

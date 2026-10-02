@@ -74,6 +74,8 @@ LEGS = {
         # The number field in the everyday locale and in German
         # (docs/number-field-plan.md §5); MODS cuts the steps.
         "numberfield-compose", "numberfieldde-compose",
+        # Under ar-EG, what a typed number may contain (§3 rule 5).
+        "numberfieldar-compose",
         # The colour picker's synthesized sheet (docs/color-picker-plan.md §6).
         "colorpicker-compose",
         # The range and the rotated fader, and under ar-EG (docs/range-plan.md
@@ -208,7 +210,8 @@ LEGS = {
 # extra (docs/compliance-plan.md §4); the reads ask the platform, never
 # this.
 SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG",
-                "scrollrtl": "ar-EG", "numberfieldde": "de-DE", "rangertl": "ar-EG"}
+                "scrollrtl": "ar-EG", "numberfieldde": "de-DE", "numberfieldar": "ar-EG",
+                "rangertl": "ar-EG"}
 
 # The text-scale knob a scene carries (docs/compliance-plan.md §2.1): the
 # forced Configuration's fontScale and the Density every sp reads.

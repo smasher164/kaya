@@ -464,7 +464,8 @@ def winui_number_findings(source):
                    f"platform's parse and display (§3 rule 5)")
     if "crate::fmt::parse_number(" not in reader:
         out.append(f"{WINUI}: KayaNumberText reads the text for itself, not through "
-                   f"fmt::parse_number — the platform's parse decides the value (§3 rule 5)")
+                   f"fmt::parse_number — the platform's own parse, not kaya's one rule, "
+                   f"decides the value (§3 rule 5)")
     if "send_value_committed_tag(" in arm:
         out.append(f"{WINUI}: the number field's create arm emits for itself — the one emit is "
                    f"winui_number_settle's")

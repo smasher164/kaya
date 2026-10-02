@@ -5,6 +5,7 @@
 //! with no arm yet refuses through the depth stub.
 
 use crate::protocol::{Date, Time};
+use crate::typed_number;
 
 /// How much of a date or time to write. `Short` is the numeric form,
 /// `Medium` the abbreviated words, `Long` the full words; each maps onto
@@ -105,14 +106,33 @@ pub fn number(value: f64, options: NumberOptions) -> String {
     platform::number(value, options)
 }
 
-/// The number a person typed, read by the same platform formatter that
-/// writes `number` (docs/number-field-plan.md §3 rule 5): the WHOLE text
-/// must read as one number in the process locale, or the answer is None.
-/// The number field's commit is its caller; a text with a grouping
-/// separator or a stray character is unreadable, never half-read.
+/// The number a person typed (docs/number-field-plan.md §3 rule 5, RULED
+/// 2026-10-02): crate::typed_number's one rule over the WHOLE text, with
+/// the marks the platform's formatter writes now, so a user's own
+/// separators are the ones read. None for anything the rule refuses.
 pub(crate) fn parse_number(text: &str) -> Option<f64> {
     install_locale_knob();
-    platform::parse_number(text).filter(|v| v.is_finite())
+    read_with(platform::number(typed_number::SAMPLE, SAMPLE_OPTIONS), text)
+}
+
+const SAMPLE_OPTIONS: NumberOptions =
+    NumberOptions { min_fraction_digits: Some(1), max_fraction_digits: Some(1), grouping: true };
+
+fn read_with(written: String, text: &str) -> Option<f64> {
+    let marks = typed_number::Marks::from_sample(&written).unwrap_or_else(|| {
+        panic!(
+            "kaya: the platform's formatter wrote {written:?} for {}, which is not digits with one \
+             decimal mark and one group mark, so no typed number can be read (crates/kaya/src/typed_number.rs)",
+            typed_number::SAMPLE
+        )
+    });
+    typed_number::read(text, &marks).filter(|v| v.is_finite())
+}
+
+/// The door's reading under a named locale, for the arms' own tests.
+#[cfg(all(test, any(target_os = "macos", target_os = "windows")))]
+fn parse_for(tag: &str, text: &str) -> Option<f64> {
+    read_with(platform::number_for(tag, typed_number::SAMPLE, SAMPLE_OPTIONS), text)
 }
 
 /// A fraction as the locale's percentage: 0.256 is `26%` in en-US.
@@ -367,13 +387,6 @@ mod platform {
             ty: isize,
             ptr: *const c_void,
         ) -> CFStringRef;
-        fn CFNumberFormatterGetValueFromString(
-            f: CFNumberFormatterRef,
-            s: CFStringRef,
-            range: *mut CFRange,
-            ty: isize,
-            ptr: *mut c_void,
-        ) -> bool;
         fn CFNumberCreate(alloc: *const c_void, ty: isize, ptr: *const c_void) -> CFTypeRef;
         #[cfg(test)]
         fn CFLocaleCreate(alloc: *const c_void, id: CFStringRef) -> CFLocaleRef;
@@ -384,12 +397,6 @@ mod platform {
         ) -> CFStringRef;
         fn CFStringGetCString(s: CFStringRef, buf: *mut c_char, cap: isize, encoding: u32) -> bool;
         fn CFStringGetLength(s: CFStringRef) -> isize;
-    }
-
-    #[repr(C)]
-    struct CFRange {
-        location: isize,
-        length: isize,
     }
 
     struct Owned(CFTypeRef);
@@ -530,34 +537,6 @@ mod platform {
         number_with(1, value, options, None)
     }
 
-    /// The decimal style, grouping off, the whole string or nothing: the
-    /// parse range must come back covering every UTF-16 unit.
-    fn parse_in(locale: &Owned, text: &str) -> Option<f64> {
-        if text.is_empty() || text.contains('\0') {
-            return None;
-        }
-        let f = Owned(unsafe { CFNumberFormatterCreate(kCFAllocatorDefault, locale.0, 1) });
-        unsafe { CFNumberFormatterSetProperty(f.0, kCFNumberFormatterUseGroupingSeparator, kCFBooleanFalse) };
-        let s = cfstr(text);
-        let length = unsafe { CFStringGetLength(s.0) };
-        let mut range = CFRange { location: 0, length };
-        let mut value = 0.0f64;
-        let ok = unsafe {
-            CFNumberFormatterGetValueFromString(
-                f.0,
-                s.0,
-                &mut range,
-                K_CF_NUMBER_DOUBLE_TYPE,
-                &mut value as *mut f64 as *mut c_void,
-            )
-        };
-        (ok && range.location == 0 && range.length == length).then_some(value)
-    }
-
-    pub(super) fn parse_number(text: &str) -> Option<f64> {
-        parse_in(&current_locale(), text)
-    }
-
     #[cfg(test)]
     fn locale_of(tag: &str) -> Owned {
         let id = cfstr(tag);
@@ -567,11 +546,6 @@ mod platform {
     #[cfg(test)]
     pub(super) fn number_for(tag: &str, value: f64, options: NumberOptions) -> String {
         number_in(&locale_of(tag), 1, value, options, None)
-    }
-
-    #[cfg(test)]
-    pub(super) fn parse_for(tag: &str, text: &str) -> Option<f64> {
-        parse_in(&locale_of(tag), text)
     }
 
     pub(super) fn percent(value: f64, options: NumberOptions) -> String {
@@ -879,24 +853,6 @@ mod platform {
         grouped(value, min, max, options.grouping, &n)
     }
 
-    /// What `grouped` writes, read back: an optional minus, ASCII digits and
-    /// at most one of the locale's decimal separator, nothing else.
-    pub(super) fn parse_number(text: &str) -> Option<f64> {
-        let n = numeric();
-        let (whole, fraction) = match text.split_once(n.decimal.as_str()) {
-            Some((whole, fraction)) => (whole, Some(fraction)),
-            None => (text, None),
-        };
-        let (sign, whole) = whole.strip_prefix('-').map_or(("", whole), |rest| ("-", rest));
-        let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
-        let whole_ok = digits(whole) || (whole.is_empty() && fraction.is_some_and(digits));
-        if !whole_ok || fraction.is_some_and(|f| !digits(f)) {
-            return None;
-        }
-        let whole = if whole.is_empty() { "0" } else { whole };
-        format!("{sign}{whole}.{}", fraction.unwrap_or("0")).parse().ok()
-    }
-
     pub(super) fn percent(value: f64, options: NumberOptions) -> String {
         let n = numeric();
         let min = usize::from(options.min_fraction_digits.unwrap_or(0));
@@ -1077,16 +1033,6 @@ mod platform {
             &[JValue::Double(value), min, max, grouping],
             None,
         )
-    }
-
-    /// KayaFormat.parseNumber: ICU's reading over the whole text, grouping
-    /// off, answering Java's spelling of the value or "" for none.
-    pub(super) fn parse_number(text: &str) -> Option<f64> {
-        if text.is_empty() {
-            return None;
-        }
-        let read = format_call("parseNumber", &format!("({STRING}){STRING}"), false, &[], Some(text));
-        read.parse().ok()
     }
 
     pub(super) fn percent(value: f64, options: NumberOptions) -> String {
@@ -1290,28 +1236,6 @@ mod platform {
         write_number(&decimal_in(languages()), o, Some((0, 3)), 1.0, value)
     }
 
-    /// ParseDouble reads a grouping separator whatever IsGrouped says
-    /// (`1,234.5` under en-US, measured on the lane's VM 2026-09-28), so a
-    /// text may hold digits and only the characters this formatter writes
-    /// in an ungrouped negative decimal.
-    fn parse_in(langs: Option<IIterable<HSTRING>>, text: &str) -> Option<f64> {
-        if text.is_empty() {
-            return None;
-        }
-        let one = NumberOptions { min_fraction_digits: Some(1), max_fraction_digits: Some(1), grouping: false };
-        let spelled = write_number(&decimal_in(langs.clone()), one, None, 1.0, -1.5);
-        if text.chars().any(|c| !c.is_numeric() && !spelled.contains(c)) {
-            return None;
-        }
-        let f = decimal_in(langs);
-        f.SetIsGrouped(false).unwrap_or_else(|e| fail("an ungrouped parser", e));
-        f.ParseDouble(&HSTRING::from(text)).and_then(|v| v.Value()).ok()
-    }
-
-    pub(super) fn parse_number(text: &str) -> Option<f64> {
-        parse_in(languages(), text)
-    }
-
     #[cfg(test)]
     fn langs_of(tag: &str) -> Option<IIterable<HSTRING>> {
         Some(IIterable::<HSTRING>::from(vec![HSTRING::from(tag)]))
@@ -1320,11 +1244,6 @@ mod platform {
     #[cfg(test)]
     pub(super) fn number_for(tag: &str, value: f64, o: NumberOptions) -> String {
         write_number(&decimal_in(langs_of(tag)), o, Some((0, 3)), 1.0, value)
-    }
-
-    #[cfg(test)]
-    pub(super) fn parse_for(tag: &str, text: &str) -> Option<f64> {
-        parse_in(langs_of(tag), text)
     }
 
     pub(super) fn percent(value: f64, o: NumberOptions) -> String {
@@ -1431,9 +1350,6 @@ mod platform {
     pub(super) fn number(_: f64, _: NumberOptions) -> String {
         refuse()
     }
-    pub(super) fn parse_number(_: &str) -> Option<f64> {
-        refuse()
-    }
     pub(super) fn percent(_: f64, _: NumberOptions) -> String {
         refuse()
     }
@@ -1469,11 +1385,12 @@ mod win_tests {
         assert_eq!(number(3.0, two), "3.00");
     }
 
-    /// `parse_number` per language list (docs/number-field-plan.md §7), the
-    /// Apple arm's test on this arm's own formatter.
+    /// `parse_number` per language list (docs/number-field-plan.md §3 rule
+    /// 5, §7), the Apple arm's test on this arm's own formatter.
     #[test]
     fn the_windows_arm_reads_what_it_writes() {
-        use super::platform::{number_for, parse_for};
+        use super::parse_for;
+        use super::platform::number_for;
         let at = |d: u8| NumberOptions { min_fraction_digits: Some(d), max_fraction_digits: Some(d), grouping: false };
         for (tag, value, d, want) in [
             ("en-US", 12.5, 1, "12.5"),
@@ -1488,12 +1405,10 @@ mod win_tests {
             assert_eq!(read, Some(value), "{tag} {written:?}");
             assert_eq!(number_for(tag, read.unwrap(), at(d)), written, "{tag}");
         }
-        assert_eq!(parse_for("de-DE", "12.5"), None);
         assert_eq!(parse_for("en-US", "abc"), None);
         assert_eq!(parse_for("en-US", "12.5abc"), None);
         assert_eq!(parse_for("en-US", ""), None);
-        assert_eq!(parse_for("en-US", "1,234.5"), None);
-        assert_eq!(parse_for("de-DE", "1.234,5"), None);
+        super::tests::the_rule_over_the_arms_marks(parse_for);
     }
 }
 
@@ -1558,12 +1473,14 @@ mod tests {
         assert_eq!(parse_number(&number(12.5, at(1))), Some(12.5));
         assert_eq!(parse_number("-40"), Some(-40.0));
         assert_eq!(parse_number("12,5"), None);
+        assert_eq!(parse_number("1,234.5"), Some(1234.5));
         assert_eq!(parse_number("12.5abc"), None);
         assert_eq!(parse_number(""), None);
         set("de_DE.UTF-8");
         assert_eq!(number(12.5, at(1)), "12,5");
         assert_eq!(parse_number("12,5"), Some(12.5));
         assert_eq!(parse_number("12.5"), None);
+        assert_eq!(parse_number("1.234"), Some(1234.0));
         assert_eq!(number(parse_number(&number(1234.25, at(2))).unwrap(), at(2)), "1234,25");
         assert_eq!(date(d, Length::Short), "07.09.2026");
         assert_eq!(date(d, Length::Medium), "7 Sep 2026");
@@ -1577,6 +1494,12 @@ mod tests {
         // reads that back (docs/number-field-plan.md §4.3, measured).
         assert_eq!(crate::number_field::text(3.5, 0.5), "3.5");
         assert_eq!(parse_number(&number(3.5, at(1))), Some(3.5));
+        // The rule over glibc's own marks, "." and ",": Arabic-Indic digits
+        // read (docs/number-field-plan.md §3 rule 5), and "," groups.
+        assert_eq!(parse_number("٣٤"), Some(34.0));
+        assert_eq!(parse_number("٣.٥"), Some(3.5));
+        assert_eq!(parse_number("12,34"), None);
+        assert_eq!(parse_number("٣٫٥"), None);
         assert_eq!(date(d, Length::Short), "07 سبت, 2026");
         assert_eq!(date(d, Length::Medium), "7 سبت 2026");
         assert_eq!(date(d, Length::Long), "7 سبتمبر 2026");
@@ -1601,15 +1524,94 @@ mod tests {
         ] {
             let written = platform::number_for(tag, value, at(d));
             assert_eq!(written, want, "{tag}");
-            let read = platform::parse_for(tag, &written);
+            let read = parse_for(tag, &written);
             assert_eq!(read, Some(value), "{tag} {written:?}");
             assert_eq!(platform::number_for(tag, read.unwrap(), at(d)), written, "{tag}");
         }
-        assert_eq!(platform::parse_for("de-DE", "12.5"), None);
-        assert_eq!(platform::parse_for("en-US", "abc"), None);
-        assert_eq!(platform::parse_for("en-US", "12.5abc"), None);
-        assert_eq!(platform::parse_for("en-US", ""), None);
-        assert_eq!(platform::parse_for("en-US", "1,234.5"), None);
+        assert_eq!(parse_for("en-US", "abc"), None);
+        assert_eq!(parse_for("en-US", "12.5abc"), None);
+        assert_eq!(parse_for("en-US", ""), None);
+        the_rule_over_the_arms_marks(parse_for);
+    }
+
+    /// The ruling's cases over an arm's REAL marks under three CLDR locales
+    /// (docs/number-field-plan.md §3 rule 5): the Apple arm here, the
+    /// Windows arm on the lane's VM (win_tests).
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    pub(super) fn the_rule_over_the_arms_marks(parse_for: fn(&str, &str) -> Option<f64>) {
+        for (tag, text, want) in [
+            ("ar-EG", "٣٤", Some(34.0)),
+            ("ar-EG", "34", Some(34.0)),
+            ("ar-EG", "٣٫٥", Some(3.5)),
+            ("ar-EG", "3.5", Some(3.5)),
+            ("ar-EG", "١٬٢٣٤", Some(1234.0)),
+            ("ar-EG", "-٣٫٥", Some(-3.5)),
+            ("ar-EG", "1,234", None),
+            ("ar-EG", "3,5", None),
+            ("ar-EG", "12,34", None),
+            ("ar-EG", "١٢٬٣٤", None),
+            ("de-DE", "3,5", Some(3.5)),
+            ("de-DE", "1.234", Some(1234.0)),
+            ("de-DE", "1.234,5", Some(1234.5)),
+            ("de-DE", "٣٤", Some(34.0)),
+            ("de-DE", "3.5", None),
+            ("de-DE", "1,234.5", None),
+            ("de-DE", "1.2.3", None),
+            ("en-US", "1,234.5", Some(1234.5)),
+            ("en-US", "٣.٥", Some(3.5)),
+            ("en-US", "-3.5", Some(-3.5)),
+            ("en-US", "12,34", None),
+            ("en-US", "3,5", None),
+            ("en-US", "+3.5", None),
+            ("en-US", "1 234", None),
+            ("fr-FR", "1 234,5", Some(1234.5)),
+            ("fr-FR", "12 34", None),
+            ("fr-FR", "3.5", Some(3.5)),
+        ] {
+            assert_eq!(parse_for(tag, text), want, "{tag} {text:?}");
+        }
+    }
+
+    /// A user's own separators reach the rule (docs/number-field-plan.md §3
+    /// rule 5): Apple's number format setting writes `AppleICUNumberSymbols`,
+    /// and a FRESH process reads it, so the reading runs in a child with the
+    /// setting in its own argument domain and KAYA_LOCALE unset, since the
+    /// knob replaces that domain (docs/compliance-plan.md §2.2).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_users_own_separators_are_read() {
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--ignored", "--exact", "fmt::tests::customised_separators_child", "--nocapture"])
+            .env("KAYA_FMT_CUSTOM_CHILD", "1")
+            .env_remove("KAYA_LOCALE")
+            .env_remove("KAYA_CLOCK")
+            .output()
+            .unwrap();
+        let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(out.status.success(), "{said}");
+        assert!(said.contains("customised: 12,5 written; 1.234 read 1234"), "the child ran nothing: {said}");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "run in a fresh process by a_users_own_separators_are_read"]
+    fn customised_separators_child() {
+        use objc2_foundation::{NSArgumentDomain, NSDictionary, NSString, NSUserDefaults};
+        assert_eq!(std::env::var("KAYA_FMT_CUSTOM_CHILD").as_deref(), Ok("1"), "run by its parent");
+        let s = |t: &str| NSString::from_str(t);
+        let (zero, one, ten, seventeen) = (s("0"), s("1"), s("10"), s("17"));
+        let (comma, point) = (s(","), s("."));
+        let symbols = NSDictionary::from_slices(&[&*zero, &*one, &*ten, &*seventeen], &[&*comma, &*point, &*comma, &*point]);
+        let (k_locale, k_symbols, en) = (s("AppleLocale"), s("AppleICUNumberSymbols"), s("en_US"));
+        let domain: objc2::rc::Retained<NSDictionary<NSString, objc2::runtime::AnyObject>> =
+            NSDictionary::from_slices(&[&*k_locale, &*k_symbols], &[&*en as &objc2::runtime::AnyObject, &*symbols]);
+        unsafe { NSUserDefaults::standardUserDefaults().setVolatileDomain_forName(&domain, NSArgumentDomain) };
+        let one_digit = NumberOptions { min_fraction_digits: Some(1), max_fraction_digits: Some(1), grouping: false };
+        assert_eq!(number(12.5, one_digit), "12,5");
+        assert_eq!(parse_number("1.234"), Some(1234.0));
+        assert_eq!(parse_number("3,5"), Some(3.5));
+        assert_eq!(parse_number("3.5"), None);
+        println!("customised: 12,5 written; 1.234 read 1234");
     }
 
     /// The Apple arm against this Mac's own locale: the shapes the probe

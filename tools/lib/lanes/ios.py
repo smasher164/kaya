@@ -131,7 +131,7 @@ RUST_SCENES = [
     # reason; the copy's act is the harness's format verb, no keyboard.
     "richrows",
     # The number field (docs/number-field-plan.md §4.2), and under de-DE.
-    "numberfield", "numberfieldde",
+    "numberfield", "numberfieldde", "numberfieldar",
     # The colour picker (docs/color-picker-plan.md §4.2).
     "colorpicker",
     # The range and the rotated fader, and under ar-EG (docs/range-plan.md
@@ -334,7 +334,8 @@ RUST_EXAMPLE = {"listdetail": "split", "taskspersist": "tasks",
                 "links": "tasks", "formatde": "format", "formatar": "format",
                 "tasksrtl": "tasks", "tasksbig": "tasks", "formatbig": "format",
                 "clock24": "format", "scrollrtl": "scroll",
-                "numberfieldde": "numberfield", "rangertl": "range",
+                "numberfieldde": "numberfield", "numberfieldar": "numberfield",
+                "rangertl": "range",
                 "media_formats": "media", "media_delivery": "media",
                 "media_session": "media", "media_tracks": "media",
                 "media_feed": "media", "media_picked": "media",
@@ -349,7 +350,8 @@ SESSION_SCENES = ("media_formats", "media_delivery", "media_session",
 # The locale a scene runs under, the knob the leg carries
 # (docs/compliance-plan.md §4); the reads ask the platform, never this.
 SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG",
-                "scrollrtl": "ar-EG", "numberfieldde": "de-DE", "rangertl": "ar-EG"}
+                "scrollrtl": "ar-EG", "numberfieldde": "de-DE", "numberfieldar": "ar-EG",
+                "rangertl": "ar-EG"}
 
 # The text-scale knob a scene carries (docs/compliance-plan.md §2.1): the
 # window's content size category nearest the factor.

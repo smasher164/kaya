@@ -1,0 +1,33 @@
+# The number field guest under KAYA_LOCALE=ar-EG: what a typed number may
+# contain (docs/number-field-plan.md §3 rule 5, RULED 2026-10-02). The
+# Arabic-Indic digits arrive by set_text, an IME's commit; the lanes' key
+# routes carry ASCII.
+expect_locale ar-EG
+expect number_field@amount "{fmt:field 0 0.5}"
+expect label@commits "commits: 0"
+click number_field@amount
+set_text number_field@amount "٣٤"
+press return
+expect_value number_field@amount "34"
+expect number_field@amount "{fmt:field 34 0.5}"
+expect label@commits "commits: 1"
+# "." where it is neither of the locale's marks is a decimal point.
+click number_field@amount
+expect_focused number_field@amount
+set_text number_field@amount ""
+type "3.5"
+press return
+expect_value number_field@amount "3.5"
+expect number_field@amount "{fmt:field 3.5 0.5}"
+expect label@commits "commits: 2"
+# "," is neither ar-EG mark where CLDR's are read, and glibc's group out
+# of place on Linux: refused, never 12.34 through ICU's comma class.
+click number_field@amount
+expect_focused number_field@amount
+set_text number_field@amount ""
+type "12,34"
+press return
+expect number_field@amount "{fmt:field 3.5 0.5}"
+expect_value number_field@amount "3.5"
+settle 500
+expect label@commits "commits: 2"

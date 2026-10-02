@@ -76,7 +76,8 @@ LANGS = ("rust", "python", "go", "csharp", "ocaml", "haskell", "swift",
 GUEST_STEM = {"listdetail": "split", "taskspersist": "tasks",
               "links": "tasks", "formatde": "format", "formatar": "format",
               "tasksrtl": "tasks", "clock24": "format", "scrollrtl": "scroll",
-              "numberfieldde": "numberfield", "rangertl": "range",
+              "numberfieldde": "numberfield", "numberfieldar": "numberfield",
+              "rangertl": "range",
               "media_formats": "media", "media_delivery": "media",
               "media_session": "media", "media_tracks": "media", "media_feed": "media",
               "media_picked": "media", "media_timeout": "media"}
@@ -85,7 +86,8 @@ GUEST_STEM = {"listdetail": "split", "taskspersist": "tasks",
 # leg carries, so the same guest is read under German and Arabic; the
 # platform installs it and the reads ask the platform, never this table.
 SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG",
-                "scrollrtl": "ar-EG", "numberfieldde": "de-DE", "rangertl": "ar-EG"}
+                "scrollrtl": "ar-EG", "numberfieldde": "de-DE", "numberfieldar": "ar-EG",
+                "rangertl": "ar-EG"}
 
 # The scenes this lane DECLARES OFF, each with its reason, read by
 # tools/check-steps.py beside the phones' declarations: macOS has no text
@@ -132,6 +134,9 @@ HAND_QUEUED = {"editor": "go", "chat": "go", "portfolio": "python", "varied": "p
                "clock24": "rust",
                # The number field guest under de-DE (SCENE_LOCALE).
                "numberfieldde": "rust",
+               # Under ar-EG: what a typed number may contain
+               # (docs/number-field-plan.md §3 rule 5); the rule is the core's.
+               "numberfieldar": "rust",
                # The range guest in Arabic (SCENE_LOCALE).
                "rangertl": "rust",
                # The media suite's scenes, one guest (docs/media-plan.md §7a).
@@ -158,6 +163,7 @@ ORDER = [
     # (docs/number-field-plan.md §5).
     ("numberfield", LANGS),
     ("numberfieldde", LANGS),
+    ("numberfieldar", ("rust",)),
     # set_color never opens the shared panel, so the everyday scene pools
     # (docs/color-picker-plan.md §5).
     ("colorpicker", LANGS),

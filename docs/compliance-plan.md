@@ -223,6 +223,19 @@ below) and the settings follow the platform's own defaults for it.
 | GTK | `setlocale(LC_ALL, "ar_EG.UTF-8")` and `LANGUAGE` before GTK init — needs the locale GENERATED in the lane image (`locales` + `locale-gen`; the image has only C and POSIX today), U2 | `gtk4::Widget::set_default_direction(Rtl)` before the first window | `root.direction()`; `setlocale(LC_ALL, NULL)` |
 | WinUI | `ApplicationLanguages.PrimaryLanguageOverride` before the first element (U5: an unpackaged app) and `Language` on each root (BUILT 2026-09-23: the override is refused unpackaged, so the knob is a language list per formatter and the window ground's own `Language`, which defaults to en-US whatever the user's is and so is written from the process locale on every ground) | `FlowDirection.RightToLeft` on each window's root element (BUILT: the ground's, from the core's reading of the tag's script) | the ground's `FlowDirection`; the ground's `Language` |
 
+
+THE KNOB REPLACES THE USER'S OWN NUMBER FORMAT (measured 2026-10-02,
+docs/probes/number-input-2026-10-01.md). On the Apple lanes the knob
+writes the argument domain whole, so an `AppleICUNumberSymbols`
+customisation there is dropped; on Windows the knob is a language list,
+and a formatter over the user's own language was measured following the
+Region settings' separators while one over another language was not
+measured; Android has no such setting. So a knob leg reads the locale's
+CLDR marks, and the customised reading of a typed number
+(docs/number-field-plan.md §3 rule 5) is held by
+`fmt::tests::a_users_own_separators_are_read` on the mac: a child
+process with the setting in its own argument domain and the knob unset.
+
 ### 2.3 The formatter, per platform
 
 Six calls — `date`, `time`, `date_time`, `number`, `percent`,

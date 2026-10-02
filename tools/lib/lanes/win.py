@@ -606,6 +606,11 @@ ORDER = [
     [
      "numberfieldde_java",
     ],
+    # Under ar-EG, what a typed number may contain (docs/number-field-plan.md
+    # §3 rule 5); the rule is the core's, so rust alone.
+    [
+     "numberfieldar_rust",
+    ],
     [
      "scrollto_rust", "scrollto_python", "scrollto_js",
      "scrollto_go", "scrollto_csharp", "scrollto_java",
@@ -809,7 +814,8 @@ def launcher(leg):
 GUEST_STEM = {"listdetail": "split", "formatde": "format", "formatar": "format",
               "taskspersist": "tasks", "links": "tasks", "tasksrtl": "tasks",
               "tasksbig": "tasks", "formatbig": "format", "clock24": "format",
-              "scrollrtl": "scroll", "numberfieldde": "numberfield", "rangertl": "range",
+              "scrollrtl": "scroll", "numberfieldde": "numberfield", "numberfieldar": "numberfield",
+              "rangertl": "range",
               "media_formats": "media", "media_delivery": "media", "media_session": "media",
               "media_tracks": "media", "media_feed": "media", "media_picked": "media",
               "media_timeout": "media"}

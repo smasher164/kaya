@@ -58,6 +58,7 @@ mod edit_list;
 #[cfg_attr(not(any(target_os = "macos", target_os = "ios")), allow(dead_code))]
 mod number_field;
 mod protocol;
+mod typed_number;
 mod range;
 mod ring;
 // The row-windowing band machine (docs/virtualization-plan.md §1-§2).

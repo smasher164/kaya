@@ -389,9 +389,11 @@ fields alike. What breadth owes:
     INumberFormatter2 + INumberParser over `number_field::text` and
     `fmt::parse_number`; ValueChanged settles through the core, a cleared
     box's NaN reverting inside the handler. The Windows arm of
-    `fmt::parse_number` is `DecimalFormatter.ParseDouble` over the door's
+    `fmt::parse_number` was `DecimalFormatter.ParseDouble` over the door's
     languages plus a character whitelist, since ParseDouble reads
-    `1,234.5` whatever IsGrouped says (plan §4.4, measured on the VM).
+    `1,234.5` whatever IsGrouped says (plan §4.4, measured on the VM),
+    until the 2026-10-02 ruling moved every arm's reading into
+    crates/kaya/src/typed_number.rs (plan §3 rule 5).
     Held by fmt::win_tests on the guest's unit phase, check-submit's WinUI
     number row and the 12 windows legs. The quiet guard on ValueChanged is
     visible to no scene (the committed mirror is written before the quiet
@@ -402,12 +404,15 @@ fields alike. What breadth owes:
     KeyboardType.Number/Decimal and ImeAction.Done, committing on the
     keyboard action, a hardware Return and focus loss through
     KayaPresent.numberCommit (`number_field::commit` over JNI), one
-    value_committed; the Android arm of `fmt::parse_number` is
-    KayaFormat.parseNumber (ICU, grouping off, the whole text). Plan §4.2
+    value_committed; the Android arm of `fmt::parse_number` was
+    KayaFormat.parseNumber (ICU, grouping off, the whole text) until the
+    2026-10-02 ruling moved every arm's reading into
+    crates/kaya/src/typed_number.rs (plan §3 rule 5). Plan §4.2
     measured: Gboard draws one pad with a minus for both keyboard types;
     `unfocus` is Tab (§4.5); the phones cut the scene at `nudge`. Held by
     check-submit's Compose number row, check-verbs' Compose kind-arms
-    clause, KayaFormatParseTest and the 6 android legs.
+    clause and the 6 android legs (KayaFormatParseTest went with
+    parseNumber on 2026-10-02).
   - ~~The iOS legs~~ — WIRED 2026-09-28: plan §4.2 and §4.5 measured on the
     simulator; `unfocus` taps the keyboard toolbar's Done through the
     XCUITest driver's `keyboard_done`, `press return` commits once and ends
@@ -426,7 +431,7 @@ fields alike. What breadth owes:
     complete declaration, const and signal-bound, live and stamped; four
     scene tests, three of them watched failing with the rule cut.
 
-## RULING WANTED (half ruled) — the glibc arm of the formatter door reads and writes ASCII digits under ar-EG, so a GTK number field refuses Arabic-Indic digits (found 2026-09-28, the number field's breadth)
+## ~~RULING WANTED (half ruled) — the glibc arm of the formatter door reads and writes ASCII digits under ar-EG, so a GTK number field refuses Arabic-Indic digits (found 2026-09-28, the number field's breadth)~~ RESOLVED 2026-10-02, ruled and built: a typed number is read by ONE kaya rule on all five over the marks the platform's formatter writes (any digit system; the locale's decimal and "." where it is neither mark; the group mark only where a group falls; everything else refused), so a GTK number field reads Arabic-Indic digits while Linux keeps writing glibc's ASCII (docs/number-field-plan.md §3 rule 5; crates/kaya/src/typed_number.rs; the numberfieldar leg on five lanes)
 
 KEY: glibc arm, Arabic-Indic digits, ar-EG, parse_number, number_field ar-EG, formatar, outdigits, libicu
 
@@ -446,8 +451,14 @@ Two questions for the maintainer. WHICH DIGITS LINUX WRITES: RULED
 2026-10-01 (the maintainer), glibc's answer, ASCII under ar-EG, as a stated
 carve-out — "if other toolkits keep linux's answer, we should too", and
 bundling ICU would reopen the compliance plan's choice of the platform's own
-formatter (§1.3) for far more than digits. Still open: what a typed number
-may contain on all five, pending a survey of how other toolkits parse.
+formatter (§1.3) for far more than digits. WHAT A TYPED NUMBER MAY CONTAIN:
+RULED 2026-10-02 (the maintainer, option B of
+docs/probes/number-input-2026-10-01.md after the survey and the per-platform
+measurements), built as the headline says. The four platform parses are
+gone; the old Apple and Android arms' one wrong number, ar-EG `1,234` read
+as 1.234 through ICU's comma class, is refused, and `3.5` under ar-EG now
+reads on all five. Under glibc's ar-EG marks "," is the group, so Linux
+reads ar-EG `1,234` as 1234; the scene uses `12,34`, refused on all five.
 
 ## RULING — a C# or Java guest host asked for a scene it does not carry runs milestone2 (found 2026-09-28, the number field's breadth)
 KEY: default arm, unknown scene, KAYA_SELFTEST, Program.cs, Main.java, milestone2 fallback

@@ -1695,6 +1695,8 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/numberfield"
     run "$proto" numberfieldde-rust env KAYA_LOCALE=de-DE KAYA_SELFTEST=numberfieldde \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/numberfield"
+    run "$proto" numberfieldar-rust env KAYA_LOCALE=ar-EG KAYA_SELFTEST=numberfieldar \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/numberfield"
     run "$proto" numberfield-python env KAYA_SELFTEST=numberfield KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/numberfield.py
     run "$proto" numberfield-js env KAYA_SELFTEST=numberfield KAYA_LIB="$LIB" \
