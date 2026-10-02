@@ -712,6 +712,15 @@ pass.
    the build: LGPL 2.1 without `--enable-gpl`, GPL with it, not
    redistributable with `--enable-nonfree`, and on iOS the LGPL's
    relinking clause is hard to meet (docs/probes/video-playback-2026-09-02-decoders.md §B6).
+   RULED 2026-10-02 after the research (docs/probes/media-extraction-2026-10-01.md):
+   one kaya call over each platform's own frameworks, no FFmpeg, through a
+   READER object separate from the player: `frames(times, max size,
+   keyframe|exact)` answers each time with the requested and the actual time
+   and a kaya-held premultiplied RGBA8 image the canvas `draw_image` op
+   draws (ruling 3), and `peaks(samples_per_pair)` decodes on the platform
+   and computes min/max pairs in the core; cancellation through the
+   binding's own async cancel or closing the reader; failures from the
+   player's closed vocabulary.
 5. **The one test clip.** RULED 2026-09-29, as recommended: one short H.264/AAC MP4, a flat
    asymmetric colour with an audio track (Android's media keys need one),
    shared by all five lanes under guests/assets, after checking the

@@ -297,7 +297,7 @@ incoming call as a notification. Not promised: recording to a file, photo
 capture (the system camera UI through a picker is a separate, smaller
 slice), screen sharing, background calls, CallKit, ConnectionService.
 
-## §9. The rulings asked
+## §9. The rulings asked — all five RULED 2026-10-02 as recommended (the maintainer: "go with your recommendation"), the Windows VM's one-time virtual camera and loopback install with its reboot included
 
 1. **The preview is the video view given a capture**, `video(capture)`,
    not a new kind. RECOMMENDED: yes. Three of four backends lower it to the
