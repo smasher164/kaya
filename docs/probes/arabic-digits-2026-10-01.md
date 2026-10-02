@@ -5,7 +5,7 @@ and GNOME read) names ASCII digits and a full stop for ar_EG. Nothing in the
 repo was changed.
 
 ## 1. glibc in the lane image (kaya-linux:latest, Debian GLIBC 2.41-12+deb13u4)
-Probe: scratchpad/ar/probe.c, run in the image with setlocale(LC_ALL, "ar_EG.UTF-8").
+Probe: docs/probes/arabic-digits-2026-10-01/probe.c, run in the image with setlocale(LC_ALL, "ar_EG.UTF-8").
 - localeconv: decimal_point ".", thousands_sep ",", grouping 3; mon "." ","; EGP; ج.م.
 - printf: %f 3.500000; %'.3f 1,234,567.891; %I.1f 3.5 (ASCII); %'Id 1,234,567; %I.1f -3.5
 - nl_langinfo RADIXCHAR ".", THOUSEP ","; ALT_DIGITS empty
@@ -28,14 +28,14 @@ Probe: scratchpad/ar/probe.c, run in the image with setlocale(LC_ALL, "ar_EG.UTF
   and GNOME under ar_EG write ASCII. No GNOME app (calculator, clocks) is in
   the image to photograph; this is read from the data they consume.
 
-## 2. ICU on the same image (libicu76 76.1-4, present as a dependency; scratchpad/ar/icu.c)
+## 2. ICU on the same image (libicu76 76.1-4, present as a dependency; docs/probes/arabic-digits-2026-10-01/icu.c)
 - unum DECIMAL ar_EG / ar-EG: 3.5 -> ٣٫٥; -40 -> U+061C-٤٠ (ALM before the minus);
   1234.25 -> ١٢٣٤٫٢٥; grouped 1234567.891 -> ١٬٢٣٤٬٥٦٧٫٨٩١. de_DE 3,5; en_US 3.5.
 - parse (grouping off, whole text): ar_EG reads ٣٫٥, 3٫5, ٣,٥, 3,5, -٤٠, −٤٠,
   ALM-٤٠, -40, ١٢٣٤٫٢٥, ۳٫۵; STOPS at "." (3.5 -> 3 at 1/3, 1234.25 -> 1234 at 4/7).
   de_DE reads ٣٫٥ and ٣,٥ as 3.5; en_US refuses both.
 
-## 3. Apple (this Mac, CFNumberFormatter, scratchpad/ar/cf.c)
+## 3. Apple (this Mac, CFNumberFormatter, docs/probes/arabic-digits-2026-10-01/cf.c)
 - ar-EG writes ٣٫٥, ALM-٤٠, ١٬٢٣٤٬٥٦٧٫٨٩١ (identical to ICU above).
 - parse, whole range required (the arm's rule): ar-EG READS ٣٫٥, 3٫5, 3,5, ٣,٥,
   -40, -٤٠, ALM-٤٠, ١٢٣٤٫٢٥; REFUSES 3.5, ٣.٥, 1234.25 (the full stop).
