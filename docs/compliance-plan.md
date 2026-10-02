@@ -103,6 +103,13 @@ once (§4). RULED: the platform formats. If the four arms prove
 burdensome the door to ICU4X stays open, and this section records what
 it would buy.
 
+A consequence stated on purpose (the maintainer, 2026-10-01): where a
+platform's own locale data differs from CLDR, kaya shows the platform's
+answer. Under ar-EG, glibc defines no Arabic-Indic digits and "." as the
+decimal, so the Linux arm writes 3.5 where the Apple, Android and Windows
+arms write ٣٫٥ — what GNOME's own apps show (docs/probes/arabic-digits-2026-10-01.md;
+docs/deferred.md, the ar-EG digits entry).
+
 ### 1.4 What is spelling, per language
 
 The catalog lookup and the formatters are PURE FUNCTIONS: a value in, a
