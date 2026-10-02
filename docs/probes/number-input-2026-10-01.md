@@ -446,3 +446,481 @@ Not settled by this pass:
 Only `docker run --rm` probes were started (`docker ps` empty after);
 the Foundation probe ran as its own short process. No VM, emulator or
 simulator was touched.
+
+## Measurements, 2026-10-02
+
+Typing into each platform's own number entry under ar-EG, de-DE and en-US,
+for the three options the maintainer is choosing between: (A) each
+platform's own parsing exactly; (B) one kaya rule enforced over the
+platform parse; (C) the platform's own parsing, with kaya refusing only
+inputs where a misread is possible or the platforms disagree. Filled in
+platform by platform as measured.
+
+
+### Windows: `DecimalFormatter.ParseDouble` (measured)
+
+The windows lane's VM (Windows 11 arm64, user format en-US, home region US),
+probe docs/probes/number-input-2026-10-01/windows/parse-double.ps1: a
+`DecimalFormatter` per language built the way NumberBox's default is
+(`[lang]`, the home region, `NumberRounder` null, `IntegerDigits` 1,
+`FractionDigits` 0), each text through `ParseDouble`. `IsGrouped` true and
+false gave identical answers for every text, and a default-constructed
+formatter (the user's settings, en-US) answered as the en-US column.
+
+| typed | en-US | de-DE | ar-EG |
+|---|---|---|---|
+| `34` | 34 | 34 | 34 |
+| `3.5` | 3.5 | null | 3.5 |
+| `3,5` | null | 3.5 | null |
+| `٣٤` | 34 | 34 | 34 |
+| `٣٫٥` | 3.5 | 3.5 | 3.5 |
+| `٣.٥` / `٣,٥` / `3٫5` (mixed) | null | null | null |
+| `1,234.5` | 1234.5 | null | 1234.5 |
+| `1.234,5` | null | 1234.5 | null |
+| `1.234` | 1.234 | 1234 | 1.234 |
+| `1,234` | 1234 | **1.234** | 1234 |
+| `12,34` / `1,23,4.5` / `1.2.3` / `12.34,5` (misplaced) | null | `12,34` → 12.34, others null | null |
+| `١٬٢٣٤` | 1234 | null | 1234 |
+| `١٬٢٣٤٫٥` | 1234.5 | null | 1234.5 |
+| `١٢٬٣٤` (misplaced) | null | null | null |
+| `-3.5` | -3.5 | null | -3.5 |
+| `-3,5` | null | -3.5 | null |
+| `-٣٫٥` | -3.5 | -3.5 | -3.5 |
+| `−3.5` (U+2212), ALM or RLM before `-` | null | null | null |
+| ` 3.5 `, `+3.5`, `3.5e2` | null | null | null |
+
+What ar-EG's formatter WRITES is `-١٢٣٤٫٥` (grouped `-١٬٢٣٤٫٥`): a plain
+hyphen-minus with no direction mark.
+
+- Under ar-EG, `ParseDouble` reads BOTH conventions whole: the Arabic one
+  (`٣٫٥`, `١٬٢٣٤`) and the en-US one (`3.5`, `1,234` → 1234). So case F
+  (`3.5`) is ACCEPTED on Windows, and `1,234` under ar-EG means 1234 here
+  while Apple's ICU reads it as 1.234 (§3, measured): the two platforms
+  disagree on the same text in the same locale.
+- Arabic-Indic digits are read in every locale (case C accepted). The
+  Arabic separators come with them under en-US and ar-EG (`١٬٢٣٤` → 1234),
+  not under de-DE, where only an ungrouped `٣٫٥` reads.
+- Grouping is placement-checked: `12,34` and `1,23,4.5` are refused under
+  en-US, and a group separator after the decimal is refused.
+- Under de-DE `1,234` is 1.234 (the locale's decimal), and `1.234` is 1234.
+  Neither is refused; which one the user meant is the locale's reading.
+
+### Windows: typed into a NumberBox (measured)
+
+Typed on the VM's console session through schtasks `/it`, never over ssh.
+The build is kaya's numberfield guest from a scratch worktree with
+docs/probes/number-input-2026-10-01/windows/probe-build.diff applied: the
+`type` verb sends a non-ASCII character as a `KEYEVENTF_UNICODE` key event
+(how a touch keyboard or an IME delivers one), and
+`KAYA_PROBE_STOCK_NUMBERBOX` skips kaya's `SetNumberFormatter`, which
+leaves the NumberBox with its OWN default formatter (`GetRegionalSettingsAwareDecimalFormatter`,
+the user's format). The scene (windows/nfprobe.steps) types each text
+between alternating sentinel commits and presses Return; the record is
+NumberBox's `ValueChanged` value in the verb trace (windows/analyze.py).
+The field is the scene's 0..100 field, so a read above 100 shows as 100
+and a negative one as 0: "acc" below means a value was committed. For the
+stock box the user format was switched with `Set-Culture` (§ restoring
+below); kaya's door ran under `KAYA_LOCALE`.
+
+Stock NumberBox (the platform's own entry):
+
+| typed | en-US | de-DE | ar-EG |
+|---|---|---|---|
+| `34` | 34 | 34 | 34 |
+| `3.5` | 3.5 | refused | 3.5 |
+| `3,5` | refused | 3.5 | refused |
+| `٣٤` | 34 | 34 | 34 |
+| `٣٫٥` | 3.5 | 3.5 | 3.5 |
+| `1.234` | 1.234 | ≥100 (1234) | 1.234 |
+| `1,234` | ≥100 (1234) | **1.234** | ≥100 (1234) |
+| `1,234.5` | ≥100 | refused | ≥100 |
+| `1.234,5` | refused | ≥100 | refused |
+| `١٬٢٣٤` | ≥100 | refused | ≥100 |
+| `12,34` | refused | 12.34 | refused |
+| `1.2.3` | refused | refused | refused |
+| `-3.5` | acc (negative) | refused | acc (negative) |
+| `-3,5` | refused | acc (negative) | refused |
+| `-٣٫٥` | acc (negative) | acc (negative) | acc (negative) |
+| `٣.٥` | refused | refused | refused |
+
+Every cell equals `ParseDouble` above: NumberBox filters no keystroke, and
+the typed text is what its formatter parses on Return. Windows' own ar-EG
+user format (what `Set-Culture ar-EG` writes) is `sDecimal` "." and
+`sThousand` "," with Arabic-Indic native digits, while the formatter
+writes `٫`; the stock ar-EG box reads both.
+
+kaya's numberfield guest (the door: `fmt::parse_number` after the arm's
+character filter, docs/number-field-plan.md §4.4):
+
+| typed | en-US | de-DE | ar-EG |
+|---|---|---|---|
+| `34` | 34 | 34 | 34 |
+| `3.5` | 3.5 | refused | **refused** |
+| `3,5` | refused | 3.5 | refused |
+| `٣٤` | 34 | 34 | 34 |
+| `٣٫٥` | **refused** | **refused** | 3.5 |
+| `1.234` | 1.234 | refused | refused |
+| `1,234` | refused | 1.234 | refused |
+| `1,234.5` / `1.234,5` / `١٬٢٣٤` | refused | refused | refused |
+| `12,34` | refused | 12.34 | refused |
+| `1.2.3` | refused | refused | refused |
+| `-3.5` | acc | refused | refused |
+| `-3,5` | refused | acc | refused |
+| `-٣٫٥` | refused | refused | acc |
+| `٣.٥` | refused | refused | refused |
+
+So kaya's Windows arm today is STRICTER than the stock box: it refuses
+all typed grouping, `3.5` under ar-EG and `٣٫٥` outside ar-EG, each of
+which the stock box accepts. Its digit set is any digit (`٣٤` reads in
+every locale) because the filter admits digits and `ParseDouble` reads
+them.
+
+### Windows: customised separators (measured)
+
+The test user's format set to en-US with `sDecimal` "," and `sThousand`
+"." (Region settings' "Additional settings", written to the registry),
+then restored: the International key was exported before
+(`reg export`), re-imported after, and the subkey `Set-Culture` had added
+(U+1F30E U+1F30F U+1F30D, holding `Calendar = Gregorian`) deleted; the
+key's listing before and after is identical (44 lines).
+
+- The platform follows the customisation: a default-constructed
+  `DecimalFormatter` AND one built with `["en-US"]` explicitly write
+  `-1234,5` and read `3,5` → 3.5, `1.234` → 1234, `3.5` → null. The stock
+  NumberBox answers exactly the stock de-DE column above.
+- kaya's door follows it too, with no `KAYA_LOCALE`: the guest wrote `7,0`,
+  read `3,5` and `12,34`, and refused `3.5` and `1.234`. It is still the
+  stricter set (grouping refused, `٣٫٥` refused).
+- So on Windows "the locale" is not a fixed table: the same en-US user can
+  mean `,` as the decimal, and a rule written per locale name (option B)
+  would contradict the user's own setting unless it is read from the
+  formatter rather than from the locale's name.
+
+Nothing left on the VM: no probe process before or after (`tasklist`),
+the `kaya_nfprobe` task deleted, C:\kaya\nfprobe and the probe exe
+removed.
+
+### Android (measured)
+
+The android lane's emulators (API 35, Gboard), nothing rebooted or
+reset, no setting changed. Two instruments:
+
+1. A hand-built probe app (docs/probes/number-input-2026-10-01/android/:
+   Probe.java, AndroidManifest.xml, build.sh; targetSdk 35), installed on
+   the pool tablet and uninstalled after (its package list before and after
+   identical). Two stock `EditText`s with `numberDecimal|numberSigned`: one
+   plain ("compat"), one with `setImeHintLocales(locale)` ("hinted", which
+   installs the locale-aware `DigitsKeyListener`). Each text goes in twice:
+   through the field's own `InputConnection.commitText` (the route an IME
+   such as Gboard uses) and as key events from the virtual key map (ASCII
+   only). The two routes agreed for every ASCII text except `1.2.3`
+   (below). Beside them, android.icu `NumberFormat.parse` over the same text.
+2. kaya's numberfield guest (the rusthost app the lane installed,
+   2026-10-01) under `KAYA_LOCALE`, driven by its own harness: ASCII texts
+   by `type` (key events through the activity), the others by `set_text`
+   (the Compose field has no key listener, so a committed text reaches the
+   parse unchanged either way), then `press return`
+   (docs/probes/number-input-2026-10-01/android/mkscript.py and runkaya.py,
+   which read the case list the Windows probe wrote).
+
+What the stock EditText keeps of the typed text (the field's text after
+the IME commits it; "" = every character dropped):
+
+| typed | compat (any locale) | hinted en-US | hinted de-DE | hinted ar-EG |
+|---|---|---|---|---|
+| `34` | 34 | 34 | 34 | "" |
+| `3.5` | 3.5 | 3.5 | **35** | "" |
+| `3,5` | **35** | **35** | 3,5 | "" |
+| `٣٤` | "" | "" | "" | ٣٤ |
+| `٣٫٥` | "" | "" | "" | ٣٫٥ |
+| `1.234` | 1.234 | 1.234 | 1234 | "" |
+| `1,234` | 1234 | 1234 | 1,234 | "" |
+| `1,234.5` | 1234.5 | 1234.5 | **1,2345** | "" |
+| `1.234,5` | **1.2345** | **1.2345** | 1234,5 | "" |
+| `١٬٢٣٤` | "" | "" | "" | ١٢٣٤ |
+| `12,34` | 1234 | 1234 | 12,34 | "" |
+| `1.2.3` | 12.3 (IME) / 1.23 (keys) | same | 123 | "" |
+| `-3.5` | -3.5 | -3.5 | **-35** | - |
+| `-3,5` | **-35** | **-35** | -3,5 | - |
+| `-٣٫٥` | - | - | - | -٣٫٥ |
+| `٣.٥` | . | . | "" | **٣٥** |
+
+- The stock EditText does not refuse a text: it DROPS each character its
+  listener does not accept and keeps the rest, so a separator the field
+  does not take silently merges the digits around it. `3,5` typed into a
+  plain numberDecimal field under de-DE becomes 35; with the hint locale,
+  `3.5` becomes 35. Typed key by key, the dropped key simply does nothing,
+  so the user sees it only by looking.
+- The hinted field under ar-EG drops every ASCII digit, and "." and ",";
+  it keeps only Arabic-Indic digits and `٫` (and drops `٬`).
+- Gboard (pictures not kept): for the plain field, and for kaya's Compose
+  field under ar-EG with `٧٫٠` on screen, the pad is ASCII `0-9`, `-`,
+  space, `,` and `.` in every locale. For a hinted field Gboard abandons
+  the number pad and shows the hint locale's full letter keyboard (a QWERTY letter
+  keyboard labelled DE·EN for de-DE; the Arabic letters for ar-EG, with
+  Arabic-Indic digits on the top row's long-press). So a user of kaya's
+  Android field under ar-EG can TYPE only ASCII digits and `,`/`.` from
+  the pad the field asks for.
+
+android.icu `NumberFormat.parse` over the whole text (kaya's door: grouping
+off; "lenient" = the default instance, grouping on):
+
+| typed | en-US kaya / lenient | de-DE kaya / lenient | ar-EG kaya / lenient |
+|---|---|---|---|
+| `3.5` | 3.5 / 3.5 | null / null | null / null |
+| `3,5` | null / null | 3.5 / 3.5 | **3.5 / 3.5** |
+| `٣٤` | 34 / 34 | 34 / 34 | 34 / 34 |
+| `٣٫٥` | null / null | **3.5 / 3.5** | 3.5 / 3.5 |
+| `٣.٥` | **3.5 / 3.5** | null / null | null / null |
+| `1.234` | 1.234 / 1.234 | null / 1234 | null / 1234 |
+| `1,234` | null / 1234 | 1.234 / 1.234 | **1.234 / 1.234** |
+| `1,234.5` | null / 1234.5 | null / null | null / null |
+| `1.234,5` | null / null | null / 1234.5 | null / 1234.5 |
+| `١٬٢٣٤` | null / 1234 | null / 1234 | null / 1234 |
+| `12,34` | null / 1234 | 12.34 / 12.34 | 12.34 / 12.34 |
+| `-3.5` / `-3,5` / `-٣٫٥` | -3.5 / null / null | null / -3.5 / -3.5 | null / -3.5 / -3.5 |
+
+(The lenient instance accepts `12,34` under en-US as 1234: ICU's lenient
+grouping does not check positions. `NumberFormat.parse(String)` without a
+position commits the PREFIX: `3.5` → 3 under de-DE and ar-EG.)
+
+kaya's numberfield guest committed exactly the "kaya" half of each cell
+(0..100 field; a refused text left the sentinel): en-US read `34`, `3.5`,
+`٣٤`, `1.234` (→ 1.2 at the step's digits), `٣.٥` and `-3.5` and refused
+the rest; de-DE and ar-EG gave IDENTICAL answers to each other, reading
+`34`, `3,5`, `٣٤`, `٣٫٥`, `1,234` (as 1.234), `12,34` (as 12.34),
+`-3,5` and `-٣٫٥`, and refusing `3.5`, `1.234`, all grouping and `٣.٥`.
+
+- Under ar-EG, ICU (and so kaya's Android door) treats `,` as the
+  decimal, because `٫` is in ICU's comma class: an Egyptian typing on the
+  ASCII pad gets `3,5` → 3.5 and `1,234` → 1.234, and `3.5` reverts. The
+  Windows stock box under ar-EG reads the same `1,234` as 1234 and `3.5`
+  as 3.5. Same text, same locale, two platforms, two values.
+- Under en-US, `٣.٥` (Arabic-Indic digits, Latin point) reads 3.5 on
+  Android and Apple (ICU) and is refused on Windows; `٣٫٥` is refused on
+  Android and read on Windows.
+- Android exposes no user setting for the decimal or group separator
+  (Android 14's regional preferences cover temperature, calendar, first
+  day and numbering system; read from Android's documentation, not
+  measured), so §4's customisation has no Android column.
+
+### Apple: customised separators (measured on the mac, process-local)
+
+The host's own settings were only read (`defaults read -g`: `AppleLocale`
+en_US, no `AppleICUNumberSymbols`), never written. The probe
+(docs/probes/number-input-2026-10-01/apple/custom-separators.swift) is run
+with the customisation in its own ARGUMENT domain, `-AppleLocale <id>
+-AppleICUNumberSymbols '{0 = <decimal>; 1 = <group>; 10 = …; 17 = …;}'`,
+which is the key Apple's Number format setting has written to the global
+domain (that macOS 26's Settings writes this same key was not checked,
+since the host's settings are off limits). It asks three readers: a
+default `NumberFormatter` (the current locale), Swift's
+`Double(_:format: .number)` (the `FormatStyle` parse that
+`TextField(value:format:)` uses), and kaya's own parse, a line-for-line
+copy of fmt.rs `parse_in` over `CFLocaleCopyCurrent()`.
+
+| typed | en_US NF / FS / kaya | en_US, decimal "," group "." NF / FS / kaya | de_DE, decimal "." group "'" NF / FS / kaya |
+|---|---|---|---|
+| `3.5` | 3.5 / 3.5 / 3.5 | nil / **3.5** / nil | 3.5 / **3** / 3.5 |
+| `3,5` | nil / **3** / nil | 3.5 / **3** / 3.5 | nil / **3.5** / nil |
+| `1.234` | 1.234 / 1.234 / 1.234 | 1234 / **1.234** / nil | 1.234 / **1234** / 1.234 |
+| `1,234` | 1234 / 1234 / nil | 1.234 / **1234** / 1.234 | nil / **1.234** / nil |
+| `1,234.5` | 1234.5 / 1234.5 / nil | nil / **1234.5** / nil | nil / **1.234** / nil |
+| `12,34` | nil / **1234** / nil | 12.34 / **1234** / 12.34 | nil / **12.34** / nil |
+| `٣٫٥` | nil / **3** / nil | 3.5 / **3** / 3.5 | nil / **3.5** / nil |
+
+- `NumberFormatter` and the CoreFoundation formatter follow the
+  customisation (they write `1.234,5` and `12,5`), and so kaya's Apple
+  door follows it today when `KAYA_LOCALE` is unset. (With `KAYA_LOCALE`
+  set, fmt.rs replaces the whole argument domain with the knob's locale,
+  so the customisation is dropped.)
+- Swift's `FormatStyle` parse IGNORES it: it parses with the base
+  locale's symbols (en_US's `.`, de_DE's `,`) whatever the user chose, and
+  still takes the prefix. A SwiftUI `TextField(value:format: .number)`
+  under a customised format therefore reads `1.234` as 1.234 for a user
+  whose decimal is "," (what that style WRITES under the customisation was
+  not measured). Also measured: under plain en_US it reads `12,34` as 1234 (no
+  grouping-position check).
+
+### iOS simulator (measured)
+
+One lane simulator (kaya-sim-0, iPhone, iOS 26), nothing erased or
+rebooted. kaya's numberfield Swift guest run by tools/ios/run-sim.py from a
+scratch worktree (docs/probes/number-input-2026-10-01/ios/runner.diff: one
+simulator, the picker admission skipped since it can erase a device, a
+longer leg ceiling, and a hook for launch arguments), with the two
+numberfield scenes replaced by ios/probe-en.steps, probe-de.steps and
+probe-ar.steps. Every text is TYPED by the lane's XCUITest driver
+(`typeText`, real key events through the simulator's keyboard), then
+Return; each case sits between sentinel commits and asserts the value the
+field then holds, so a leg that PASSES has confirmed every cell below.
+The field is the scene's `.decimalPad` field (0..100, step 0.5).
+
+kaya's Apple door (CFNumberFormatter over the whole text, grouping off):
+
+| typed | en-US | de-DE, ar-EG and customised en-US (identical) |
+|---|---|---|
+| `34` | 34 | 34 |
+| `3.5` | 3.5 | refused |
+| `3,5` | refused | 3.5 |
+| `٣٤` | 34 | 34 |
+| `٣٫٥` | refused | 3.5 |
+| `٣.٥` | 3.5 | refused |
+| `1.234` | 1.234 (→ 1.2) | refused |
+| `1,234` | refused | 1.234 (→ 1.2) |
+| `1,234.5` / `1.234,5` / `١٬٢٣٤` / `1.2.3` | refused | refused |
+| `12,34` | refused | 12.34 (→ 12.3) |
+| `-3.5` | acc (negative) | refused |
+| `-3,5` / `-٣٫٥` | refused | acc (negative) |
+
+All four legs PASSED with these as their assertions (en-US, de-DE, and a
+second run with the second leg under ar-EG and the first, with no
+`KAYA_LOCALE`, launched with `-AppleICUNumberSymbols '{0 = ","; 1 = ".";
+…}'`, the customisation in the app's own argument domain; ~80s each).
+ar-EG answered exactly as de-DE, through ICU's comma class: `3,5` and
+`٣٫٥` read 3.5, `1,234` reads 1.234, and `3.5` reverts. This is the mac
+Foundation table of §3 with grouping off, case for case.
+
+Customised separators on iOS: the guest launched with the customisation
+drew its value as `8,0` and read every text as the de-DE column, so kaya's
+Apple door follows a user's custom number format today (when
+`KAYA_LOCALE` is unset; the knob replaces the argument domain).
+
+What the keyboard offers (pictures taken mid-leg, viewed, not kept): the
+`.decimalPad` has ASCII digits in all three locales and ONE separator key:
+`,` under de-DE, `,` under the customised en-US (so the pad follows the
+custom format), and under ar-EG a key drawn as a centred dot, not `٫`;
+which character that key inserts was not measured. The pad has no minus.
+Under ar-EG, then, the phone user's pad offers ASCII digits and (as drawn)
+`.`, and kaya's iOS door refuses `3.5`. The `3.5` rows under de-DE and the
+`1,234.5` rows are reachable only from a hardware keyboard or a paste
+(XCTest synthesizes the key, so the driver reaches them).
+
+### The three options, filled
+
+What each option commits, per platform, for the cases typed above.
+"Meant" is what the user most plausibly meant; where the text itself is
+ambiguous the row says so. **MISREAD** marks a cell where the field
+commits a number the user did not mean, with no refusal. Sources: Windows,
+Android and iOS from this section; macOS from §3 and the custom probe
+above; the iOS column is that same Foundation table, since the iOS legs
+measured kaya's grouping-off door and it matched the mac's answers
+wherever grouping does not enter. Linux is GtkSpinButton's default from
+§3 (glibc, measured in the lane image), except en-US `٣.٥` and `12,34`,
+which follow from its mechanism and were not run. "ref" = the text reverts. Minus rows are left out: every
+platform and every option read `-3.5` in en-US, and the only minus
+divergence is the locale's own (de-DE `-3.5` refused where `3.5` is).
+
+**A. Each platform's own parsing, exactly** (Windows: the stock
+NumberBox; Android: android.icu `NumberFormat` over the whole text, the
+default lenient instance; Apple: `NumberFormatter`, whole text; Linux:
+GtkSpinButton's default `g_strtod` input):
+
+| case (locale, typed, meant) | Windows | Android | iOS | macOS | Linux |
+|---|---|---|---|---|---|
+| ar-EG `34` (34) | 34 | 34 | 34 | 34 | 34 |
+| ar-EG `٣٫٥` (3.5) | 3.5 | 3.5 | 3.5 | 3.5 | ref |
+| en-US `٣٤` (34) | 34 | 34 | 34 | 34 | 34 |
+| en-US `٣.٥` (3.5) | ref | 3.5 | 3.5 | 3.5 | ref |
+| de-DE `3,5` (3.5) | 3.5 | 3.5 | 3.5 | 3.5 | 3.5 |
+| de-DE `3.5` (3.5, Latin habit) | ref | ref | ref | ref | 3.5 |
+| ar-EG `3.5` (3.5) | 3.5 | ref | ref | ref | 3.5 |
+| ar-EG `3,5` (ambiguous: 3.5 or 35) | ref | 3.5 | 3.5 | 3.5 | ref |
+| de-DE `1.234` (1234) | 1234 | 1234 | 1234 | 1234 | **MISREAD 1.234** |
+| en-US `1,234` (1234) | 1234 | 1234 | 1234 | 1234 | ref |
+| ar-EG `1,234` (1234, Latin convention) | 1234 | **MISREAD 1.234** | **MISREAD 1.234** | **MISREAD 1.234** | ref |
+| en-US `12,34` (misplaced group) | ref | **MISREAD 1234** | ref | ref | ref |
+| de-DE `1.234,5` (1234.5) | 1234.5 | 1234.5 | 1234.5 | 1234.5 | ref |
+| en-US user who chose decimal `,`, `1.234` (1234) | 1234 | n/a (no such setting) | 1234 | 1234 | not measured |
+
+Under A the same text in the same locale commits different numbers on
+different platforms (ar-EG `1,234`: 1234 on Windows, 1.234 on the ICU
+platforms; de-DE `1.234`: 1234 everywhere but Linux), and Android's
+default instance does not check where a group separator sits.
+
+**B. One kaya rule** (any digit system; the locale's decimal mark, and
+"." where "." has no other meaning; the locale's grouping only in correct
+positions; enforced by kaya over the platform parse). The answer is the
+same on all five by construction:
+
+| case | all five |
+|---|---|
+| ar-EG `34` / `٣٫٥` | 34 / 3.5 |
+| en-US `٣٤` / `٣.٥` | 34 / 3.5 |
+| de-DE `3,5` / `3.5` | 3.5 / ref (`.` is de-DE's group, misplaced) |
+| ar-EG `3.5` / `3,5` | 3.5 / ref (`,` is neither ar-EG mark) |
+| de-DE `1.234` | 1234 |
+| en-US `1,234` / `12,34` | 1234 / ref |
+| ar-EG `1,234` | ref |
+| de-DE `1.234,5` | 1234.5 |
+| en-US user who chose decimal `,`: `1.234` | 1234 if "the locale's marks" are read from the platform's formatter (which follows the user on Windows and Apple, measured); **MISREAD 1.234** if read from the locale's name |
+
+No MISREAD cell under B as long as the marks come from the platform's
+own formatter. Its costs, measured: Windows' stock box and Linux accept
+ar-EG `3.5` today and B keeps that, while the ICU platforms' own parsers
+(and kaya's Android and Apple arms today) refuse it; ar-EG `3,5`, which
+three platforms read as 3.5, reverts; and on the phones B can only refuse
+what the keyboard offers: Android's pad offers ASCII digits, `,` and `.`
+in every locale (so under ar-EG `,` reverts and `.` reads), and iOS's
+offers one separator key per locale.
+
+**C. The platform's own parsing, kaya refusing only where a misread is
+possible or the platforms disagree** (A's cells, with a cell refused when
+another platform commits a different value for the same text in the same
+locale, or when the text is one of the measured misread shapes: `.`
+where it groups, a group separator in a wrong place, `,` under ar-EG):
+
+| case | Windows | Android | iOS | macOS | Linux |
+|---|---|---|---|---|---|
+| ar-EG `34` | 34 | 34 | 34 | 34 | 34 |
+| ar-EG `٣٫٥` | 3.5 | 3.5 | 3.5 | 3.5 | ref |
+| en-US `٣٤` | 34 | 34 | 34 | 34 | 34 |
+| en-US `٣.٥` | ref | 3.5 | 3.5 | 3.5 | ref |
+| de-DE `3,5` | 3.5 | 3.5 | 3.5 | 3.5 | 3.5 |
+| de-DE `3.5` | ref | ref | ref | ref | ref (Linux would read 3.5) |
+| ar-EG `3.5` | 3.5 | ref | ref | ref | 3.5 |
+| ar-EG `3,5` | ref | ref | ref | ref | ref |
+| de-DE `1.234` | ref (platforms disagree) | ref | ref | ref | ref |
+| en-US `1,234` | 1234 | 1234 | 1234 | 1234 | ref |
+| ar-EG `1,234` | ref (platforms disagree) | ref | ref | ref | ref |
+| en-US `12,34` | ref | ref | ref | ref | ref |
+| de-DE `1.234,5` | 1234.5 | 1234.5 | 1234.5 | 1234.5 | ref |
+
+No MISREAD cell under C either, but it is not one behaviour: the same
+text still commits on some platforms and reverts on others (ar-EG `3.5`,
+ar-EG `٣٫٥`, en-US `٣.٥`, en-US `1,234`), and "the platforms disagree" is
+only decidable if kaya carries every other platform's answers, which is a
+kaya rule written as a table of exceptions. It also refuses de-DE
+`1.234`, which every platform but Linux reads correctly, because Linux
+does not.
+
+kaya today, for comparison (the four arms as measured above and §3 for
+glibc): Windows refuses all grouping, ar-EG `3.5` and `٣٫٥` outside ar-EG;
+Android and Apple refuse grouping and read ar-EG `1,234` as **1.234** and
+ar-EG `3,5` as 3.5 (the one MISREAD the current arms carry, through ICU's
+comma class); Linux reads only ASCII digits and glibc's two separators.
+
+### Not settled by these measurements
+
+- Which character the iOS `.decimalPad`'s separator key inserts under
+  ar-EG (drawn as a centred dot): if it is `.`, kaya's iOS door refuses
+  the only separator the user's pad offers.
+- Whether macOS 26's own Number format setting writes
+  `AppleICUNumberSymbols` (the probe used the argument domain, and the
+  host's settings were not touched).
+- Real keyboards: the Windows typing used `KEYEVENTF_UNICODE` (an IME's
+  route); what Windows' Arabic keyboard layout types for the digit row
+  was not measured.
+- What "meant" is for ar-EG `3,5` and de-DE `3.5` is a judgement about
+  users, not a measurement.
+
+### Cleanup, 2026-10-02
+
+Windows: the International key restored and its listing identical to
+before (44 lines), `kaya_nfprobe` deleted, no probe process in
+`tasklist`, C:\kaya\nfprobe and the probe exe removed. Android: the
+probe package uninstalled (package list identical), no kaya or probe
+process on the four pool devices, locales and IME unchanged. iOS: the
+pool still booted, the runner reported "xcui drivers stopped (2); runner
+processes left: none", and the two probe-built apps uninstalled from
+kaya-sim-0 (the lane installs its own on every run).

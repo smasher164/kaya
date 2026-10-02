@@ -1,0 +1,73 @@
+diff --git a/crates/kaya/src/harness.rs b/crates/kaya/src/harness.rs
+index fa29cafb..cb05cd62 100644
+--- a/crates/kaya/src/harness.rs
++++ b/crates/kaya/src/harness.rs
+@@ -3448,7 +3448,7 @@ fn check_typing(text: &str) -> Result<(), String> {
+         return Err("type wants some text to type".to_owned());
+     }
+     for c in text.chars() {
+-        if !matches!(c, ' '..='~') {
++        if c.is_control() && c != '\u{200f}' && c != '\u{61c}' {
+             return Err(format!(
+                 "type {text:?} carries {c:?}, which is not printable ASCII — a \
+                  keystroke needs one keycode per character, and that mapping is \
+diff --git a/crates/kaya/src/winui/mod.rs b/crates/kaya/src/winui/mod.rs
+index f6f3735b..36a74ea7 100644
+--- a/crates/kaya/src/winui/mod.rs
++++ b/crates/kaya/src/winui/mod.rs
+@@ -18661,6 +18661,7 @@ unsafe extern "system" {
+     /// (WM_CLIPBOARDUPDATE to every registered listener).
+     fn AddClipboardFormatListener(hwnd: isize) -> i32;
+     fn keybd_event(vk: u8, scan: u8, flags: u32, extra: usize);
++    fn SendInput(n: u32, inputs: *const ProbeKbInput, size: i32) -> u32;
+     /// The `type` verb's character-to-keystroke mapping, asked of the ACTIVE
+     /// KEYBOARD LAYOUT rather than hard-coded: the low byte is the virtual
+     /// key, the high byte the shift state (bit 0 shift, bit 1 control, bit 2
+@@ -23015,6 +23016,17 @@ impl crate::harness::Stage for WinUiStage {
+             // refuse the newline `type` admits (crates/kaya/src/harness.rs
+             // check_typing). VK_RETURN rides the same injection sequence as the
+             // letters, so the control sees a real keystroke.
++            if !matches!(ch, ' '..='~' | '\n') {
++                let mut units = [0u16; 2];
++                for &u in ch.encode_utf16(&mut units).iter() {
++                    for flags in [4u32, 4 | KEYEVENTF_KEYUP] {
++                        let input = ProbeKbInput { ty: 1, _pad: 0, vk: 0, scan: u, flags, time: 0, _pad2: 0, extra: 0, _pad3: [0; 8] };
++                        let sent = unsafe { SendInput(1, &input, std::mem::size_of::<ProbeKbInput>() as i32) };
++                        crate::vtrace::note("probe.unicode", format_args!("U+{u:04X} flags={flags} sent={sent}"));
++                    }
++                }
++                continue;
++            }
+             let (vk, shifts) = if ch == '\n' {
+                 (0x0d_u8, 0_i16)
+             } else {
+@@ -27486,6 +27498,10 @@ impl NumberCell {
+     }
+ }
+ 
++#[repr(C)]
++struct ProbeKbInput { ty: u32, _pad: u32, vk: u16, scan: u16, flags: u32, time: u32, _pad2: u32, extra: usize, _pad3: [u8; 8] }
++const _: () = assert!(std::mem::size_of::<ProbeKbInput>() == 40);
++
+ /// THE BOX'S TEXT IS KAYA'S (docs/number-field-plan.md §3 rule 5): NumberBox
+ /// formats through its NumberFormatter and parses through the same object
+ /// cast to INumberParser, so this is the only reader and writer of the text
+@@ -27564,6 +27580,9 @@ fn winui_number_shape(
+         field.SetSmallChange(step)?;
+         field.SetLargeChange(step * 10.0)?;
+         field.SetValue(SliderCell::get(&cell.committed).clamp(min, max))?;
++        if std::env::var_os("KAYA_PROBE_STOCK_NUMBERBOX").is_some() {
++            return Ok(());
++        }
+         let text: bindings::Windows::Globalization::NumberFormatting::INumberFormatter2 =
+             KayaNumberText { cell: cell.clone() }.into();
+         field.SetNumberFormatter(&text)
+@@ -27599,7 +27618,7 @@ fn winui_number_settle(
+     };
+     #[cfg(feature = "harness")]
+     crate::vtrace::note("number.settle", format_args!(
+-        "read={read} committed={committed} answer={answer:?}"
++        "read={read} committed={committed} answer={answer:?} box_text={:?}", field.Text().map(|t| t.to_string())
+     ));
+     if shown.to_bits() != read.to_bits() {
+         field.SetValue(shown)?;

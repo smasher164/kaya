@@ -1,0 +1,41 @@
+diff --git a/tools/ios/run-sim.py b/tools/ios/run-sim.py
+index c4376db4..1f9003fa 100755
+--- a/tools/ios/run-sim.py
++++ b/tools/ios/run-sim.py
+@@ -1302,6 +1302,8 @@ def photo_library_stage(udid):
+ 
+ 
+ def picker_prepare(udid):
++    if os.environ.get("KAYA_PROBE_NO_PICKER"):
++        return 0
+     if not photo_library_stage(udid):
+         return 1
+     if not picker_cleanup(udid):
+@@ -1875,11 +1877,11 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
+     # it a sheet that never comes is spent one 45s wait at a time and the
+     # leg dies unread.
+     if drive_dir.is_dir():
+-        (drive_dir / "deadline").write_text(f"{time.time() + 100:.3f}\n",
++        (drive_dir / "deadline").write_text(f"{time.time() + 400:.3f}\n",
+                                             encoding="utf-8")
+     got = subprocess.run(
+-        ["timeout", "120", "xcrun", "simctl", "launch", "--console-pty",
+-         udid, bundle_id],
++        ["timeout", "420", "xcrun", "simctl", "launch", "--console-pty",
++         udid, bundle_id, *os.environ.get("KAYA_PROBE_LAUNCH_ARGS", "").split("|")[:-1]],
+         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env,
+         check=False, **TEXT)
+     out = got.stdout
+diff --git a/tools/lib/lanes/ios.py b/tools/lib/lanes/ios.py
+index 96d7b6d0..338d5d0c 100644
+--- a/tools/lib/lanes/ios.py
++++ b/tools/lib/lanes/ios.py
+@@ -349,7 +349,7 @@ SESSION_SCENES = ("media_formats", "media_delivery", "media_session",
+ # The locale a scene runs under, the knob the leg carries
+ # (docs/compliance-plan.md §4); the reads ask the platform, never this.
+ SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG",
+-                "scrollrtl": "ar-EG", "numberfieldde": "de-DE", "rangertl": "ar-EG"}
++                "scrollrtl": "ar-EG", "numberfieldde": "ar-EG", "rangertl": "ar-EG"}
+ 
+ # The text-scale knob a scene carries (docs/compliance-plan.md §2.1): the
+ # window's content size category nearest the factor.

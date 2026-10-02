@@ -1,0 +1,165 @@
+# nfprobe (scratch)
+click number_field@amount
+expect_focused number_field@amount
+click number_field@amount
+set_text number_field@amount ""
+type "7"
+press return
+expect_value number_field@amount "7"
+click number_field@amount
+set_text number_field@amount ""
+type "34"
+press return
+expect_value number_field@amount "34"
+click number_field@amount
+set_text number_field@amount ""
+type "8"
+press return
+expect_value number_field@amount "8"
+click number_field@amount
+set_text number_field@amount ""
+type "3.5"
+press return
+expect_value number_field@amount "3.5"
+click number_field@amount
+set_text number_field@amount ""
+type "7"
+press return
+expect_value number_field@amount "7"
+click number_field@amount
+set_text number_field@amount ""
+type "3,5"
+press return
+expect_value number_field@amount "7"
+click number_field@amount
+set_text number_field@amount ""
+type "8"
+press return
+expect_value number_field@amount "8"
+click number_field@amount
+set_text number_field@amount ""
+type "٣٤"
+press return
+expect_value number_field@amount "34"
+click number_field@amount
+set_text number_field@amount ""
+type "7"
+press return
+expect_value number_field@amount "7"
+click number_field@amount
+set_text number_field@amount ""
+type "٣٫٥"
+press return
+expect_value number_field@amount "7"
+click number_field@amount
+set_text number_field@amount ""
+type "8"
+press return
+expect_value number_field@amount "8"
+click number_field@amount
+set_text number_field@amount ""
+type "1.234"
+press return
+expect_value number_field@amount "1.2"
+click number_field@amount
+set_text number_field@amount ""
+type "7"
+press return
+expect_value number_field@amount "7"
+click number_field@amount
+set_text number_field@amount ""
+type "1,234"
+press return
+expect_value number_field@amount "7"
+click number_field@amount
+set_text number_field@amount ""
+type "8"
+press return
+expect_value number_field@amount "8"
+click number_field@amount
+set_text number_field@amount ""
+type "1,234.5"
+press return
+expect_value number_field@amount "8"
+click number_field@amount
+set_text number_field@amount ""
+type "7"
+press return
+expect_value number_field@amount "7"
+click number_field@amount
+set_text number_field@amount ""
+type "1.234,5"
+press return
+expect_value number_field@amount "7"
+click number_field@amount
+set_text number_field@amount ""
+type "8"
+press return
+expect_value number_field@amount "8"
+click number_field@amount
+set_text number_field@amount ""
+type "١٬٢٣٤"
+press return
+expect_value number_field@amount "8"
+click number_field@amount
+set_text number_field@amount ""
+type "7"
+press return
+expect_value number_field@amount "7"
+click number_field@amount
+set_text number_field@amount ""
+type "12,34"
+press return
+expect_value number_field@amount "7"
+click number_field@amount
+set_text number_field@amount ""
+type "8"
+press return
+expect_value number_field@amount "8"
+click number_field@amount
+set_text number_field@amount ""
+type "1.2.3"
+press return
+expect_value number_field@amount "8"
+click number_field@amount
+set_text number_field@amount ""
+type "7"
+press return
+expect_value number_field@amount "7"
+click number_field@amount
+set_text number_field@amount ""
+type "-3.5"
+press return
+expect_value number_field@amount "0"
+click number_field@amount
+set_text number_field@amount ""
+type "8"
+press return
+expect_value number_field@amount "8"
+click number_field@amount
+set_text number_field@amount ""
+type "-3,5"
+press return
+expect_value number_field@amount "8"
+click number_field@amount
+set_text number_field@amount ""
+type "7"
+press return
+expect_value number_field@amount "7"
+click number_field@amount
+set_text number_field@amount ""
+type "-٣٫٥"
+press return
+expect_value number_field@amount "7"
+click number_field@amount
+set_text number_field@amount ""
+type "8"
+press return
+expect_value number_field@amount "8"
+click number_field@amount
+set_text number_field@amount ""
+type "٣.٥"
+press return
+expect_value number_field@amount "3.5"
+expect_ax number_field@amount "field/Amount"
+nudge number_field@amount up
