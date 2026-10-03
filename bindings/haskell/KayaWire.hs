@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x6d398768b7d3b5d6
+specHash = 0xc00e7dc840e57f41
 
 valueBool :: Word32
 valueBool = 1
@@ -254,6 +254,8 @@ propFit :: Word32
 propFit = 51
 propPlayer :: Word32
 propPlayer = 52
+propCapture :: Word32
+propCapture = 53
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -574,6 +576,74 @@ readOutcomeCancelled :: Word32
 readOutcomeCancelled = 1
 readOutcomeFailed :: Word32
 readOutcomeFailed = 2
+captureStateIdle :: Word32
+captureStateIdle = 0
+captureStateStarting :: Word32
+captureStateStarting = 1
+captureStateRunning :: Word32
+captureStateRunning = 2
+captureStateInterrupted :: Word32
+captureStateInterrupted = 3
+captureStateFailed :: Word32
+captureStateFailed = 4
+captureFailureNone :: Word32
+captureFailureNone = 0
+captureFailureDenied :: Word32
+captureFailureDenied = 1
+captureFailureNotFound :: Word32
+captureFailureNotFound = 2
+captureFailureInUse :: Word32
+captureFailureInUse = 3
+captureFailureDisconnected :: Word32
+captureFailureDisconnected = 4
+captureFailureUnsupported :: Word32
+captureFailureUnsupported = 5
+captureFailureHardwareError :: Word32
+captureFailureHardwareError = 6
+captureFailureTimeout :: Word32
+captureFailureTimeout = 7
+captureInterruptionNone :: Word32
+captureInterruptionNone = 0
+captureInterruptionBackground :: Word32
+captureInterruptionBackground = 1
+captureInterruptionAnotherApp :: Word32
+captureInterruptionAnotherApp = 2
+captureInterruptionSystemPressure :: Word32
+captureInterruptionSystemPressure = 3
+captureKindCamera :: Word32
+captureKindCamera = 0
+captureKindMicrophone :: Word32
+captureKindMicrophone = 1
+permissionPrompt :: Word32
+permissionPrompt = 0
+permissionGranted :: Word32
+permissionGranted = 1
+permissionDenied :: Word32
+permissionDenied = 2
+cameraFacingUnknown :: Word32
+cameraFacingUnknown = 0
+cameraFacingFront :: Word32
+cameraFacingFront = 1
+cameraFacingBack :: Word32
+cameraFacingBack = 2
+cameraFacingExternal :: Word32
+cameraFacingExternal = 3
+captureCommandStart :: Word32
+captureCommandStart = 1
+captureCommandStop :: Word32
+captureCommandStop = 2
+cpropCamera :: Word32
+cpropCamera = 1
+cpropMicrophone :: Word32
+cpropMicrophone = 2
+cpropWidth :: Word32
+cpropWidth = 3
+cpropHeight :: Word32
+cpropHeight = 4
+cpropFrameRate :: Word32
+cpropFrameRate = 5
+cpropMuted :: Word32
+cpropMuted = 6
 sessionActionPlay :: Word32
 sessionActionPlay = 1
 sessionActionPause :: Word32
@@ -776,6 +846,18 @@ txKindLoadImage :: Word16
 txKindLoadImage = 74
 txKindReleaseImage :: Word16
 txKindReleaseImage = 75
+txKindCreateCapture :: Word16
+txKindCreateCapture = 76
+txKindSetCaptureProp :: Word16
+txKindSetCaptureProp = 77
+txKindCaptureCommand :: Word16
+txKindCaptureCommand = 78
+txKindReleaseCapture :: Word16
+txKindReleaseCapture = 79
+txKindRequestPermission :: Word16
+txKindRequestPermission = 80
+txKindWatchCaptureDevices :: Word16
+txKindWatchCaptureDevices = 81
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -898,6 +980,20 @@ applyKindCancelRead :: Word16
 applyKindCancelRead = 62
 applyKindCloseReader :: Word16
 applyKindCloseReader = 63
+applyKindCreateCapture :: Word16
+applyKindCreateCapture = 64
+applyKindSetCaptureProp :: Word16
+applyKindSetCaptureProp = 65
+applyKindCaptureCommand :: Word16
+applyKindCaptureCommand = 66
+applyKindReleaseCapture :: Word16
+applyKindReleaseCapture = 67
+applyKindRequestPermission :: Word16
+applyKindRequestPermission = 68
+applyKindWatchCaptureDevices :: Word16
+applyKindWatchCaptureDevices = 69
+applyKindSetVideoCapture :: Word16
+applyKindSetVideoCapture = 70
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
@@ -998,6 +1094,14 @@ occKindReaderDone :: Word16
 occKindReaderDone = 49
 occKindImageLoaded :: Word16
 occKindImageLoaded = 50
+occKindCaptureChanged :: Word16
+occKindCaptureChanged = 51
+occKindCapturePermission :: Word16
+occKindCapturePermission = 52
+occKindCaptureDevices :: Word16
+occKindCaptureDevices = 53
+occKindCaptureOverrun :: Word16
+occKindCaptureOverrun = 54
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -1329,6 +1433,30 @@ txLoadImage image source = wireRecord txKindLoadImage (word64LE image <> encodeV
 -- Forget a core-held image. A drawing declared before keeps showing it until it is declared again; a drawing declared after that names it is refused.
 txReleaseImage :: Word64 -> Builder
 txReleaseImage image = wireRecord txKindReleaseImage (word64LE image)
+
+-- Create a CAPTURE (docs/capture-plan.md §2): an app-held object with no place in the layout that holds at most one camera and one microphone, its id guest-chosen in its own space. It starts `idle` with neither device; a video view previews it through its `capture` prop. A second create of a live id is a scene error.
+txCreateCapture :: Word64 -> Builder
+txCreateCapture capture = wireRecord txKindCreateCapture (word64LE capture)
+
+-- Write a capture property (CAPTURE_PROPS) once, as a player's are written. A device change while running reopens that device; `camera` set to "" closes the camera and puts its indicator out.
+txSetCaptureProp :: Word64 -> Word32 -> Value -> Builder
+txSetCaptureProp capture prop value = wireRecord txKindSetCaptureProp (word64LE capture <> word32LE prop <> word32LE 0 <> encodeValue value)
+
+-- start or stop (CAPTURE_COMMAND). `start` asks for each kind's permission still at `prompt`, as getUserMedia does, and fails `denied` when either kind it opens is denied; the answer is capture_changed, never an echo of the command.
+txCaptureCommand :: Word64 -> Word32 -> Builder
+txCaptureCommand capture command = wireRecord txKindCaptureCommand (word64LE capture <> word32LE command <> word32LE 0)
+
+-- Stop and forget a capture: its devices close, a video view previewing it goes blank, its frame and sample callbacks are dropped and no occurrence of its follows.
+txReleaseCapture :: Word64 -> Builder
+txReleaseCapture capture = wireRecord txKindReleaseCapture (word64LE capture)
+
+-- Ask the user for a CAPTURE_KIND's permission before any capture starts (a call screen asking early); answered by capture_permission. A kind already decided is answered with its decision and nothing is asked.
+txRequestPermission :: Word32 -> Builder
+txRequestPermission kind = wireRecord txKindRequestPermission (word32LE kind <> word32LE 0)
+
+-- 1: list the cameras and microphones now (capture_devices), report each kind's permission as it stands (capture_permission), and list again whenever a device comes or goes; 0: stop. Listing asks for no permission.
+txWatchCaptureDevices :: Word32 -> Builder
+txWatchCaptureDevices on = wireRecord txKindWatchCaptureDevices (word32LE on <> word32LE 0)
 
 -- A civil date as the wire's I64: year * 10000 + month * 100 + day.
 packDate :: Int -> Int -> Int -> Int64
@@ -2348,6 +2476,25 @@ txBindPlayerElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propPlayer <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
+-- set_property with a constant capture value.
+txSetCapture :: Word64 -> Int64 -> Builder
+txSetCapture widgetId capture = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propCapture <> word32LE sourceConst
+    <> encodeValue (VI64 capture))
+
+-- set_property with a signal-bound capture value.
+txBindCapture :: Word64 -> Word64 -> Builder
+txBindCapture widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propCapture <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindCaptureElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindCaptureElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propCapture <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
 -- set_window_prop with a constant title value (window 0, the primary surface).
 txSetWindowTitle :: Word64 -> String -> Builder
 txSetWindowTitle window title = wireRecord txKindSetWindowProp
@@ -2824,7 +2971,7 @@ parseOccurrence ::
   IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues, Maybe DropValues, [Value]))
 parseOccurrence redeem rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted && kind /= occKindSheetDismissed && kind /= occKindDismissRequested && kind /= occKindSubmitted && kind /= occKindNotificationReplied && kind /= occKindFullscreenChanged && kind /= occKindColorChanged && kind /= occKindRangeChanged && kind /= occKindRangeCommitted && kind /= occKindPlayerChanged && kind /= occKindPlayerPosition && kind /= occKindSeekCompleted && kind /= occKindSessionAction && kind /= occKindPlayerTracks && kind /= occKindCaptionCue && kind /= occKindVideoVisibility && kind /= occKindReaderFrame && kind /= occKindReaderProgress && kind /= occKindReaderPeaks && kind /= occKindReaderDone && kind /= occKindImageLoaded
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted && kind /= occKindSheetDismissed && kind /= occKindDismissRequested && kind /= occKindSubmitted && kind /= occKindNotificationReplied && kind /= occKindFullscreenChanged && kind /= occKindColorChanged && kind /= occKindRangeChanged && kind /= occKindRangeCommitted && kind /= occKindPlayerChanged && kind /= occKindPlayerPosition && kind /= occKindSeekCompleted && kind /= occKindSessionAction && kind /= occKindPlayerTracks && kind /= occKindCaptionCue && kind /= occKindVideoVisibility && kind /= occKindReaderFrame && kind /= occKindReaderProgress && kind /= occKindReaderPeaks && kind /= occKindReaderDone && kind /= occKindImageLoaded && kind /= occKindCaptureChanged && kind /= occKindCapturePermission && kind /= occKindCaptureDevices && kind /= occKindCaptureOverrun
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64
@@ -2963,6 +3110,45 @@ parseOccurrence redeem rec = do
           let at4 = at3 + 4
           (v4, _) <- parseValue rec at4
           return (Just (kind, ident, [], Nothing, Nothing, Nothing, concat [[VI64 (fromIntegral w0)], [VI64 (fromIntegral w1)], [VI64 (fromIntegral w2)], [v4]]))
+      else if kind == occKindCaptureChanged
+        then do
+          -- A flat record: its fields in order, into the tail.
+          let at0 = 16 :: Int
+          w0 <- peekByteOff rec at0 :: IO Word32
+          let at1 = at0 + 4
+          w1 <- peekByteOff rec at1 :: IO Word32
+          let at2 = at1 + 4
+          w2 <- peekByteOff rec at2 :: IO Word32
+          let at3 = at2 + 4
+          w3 <- peekByteOff rec at3 :: IO Word32
+          let at4 = at3 + 4
+          w4 <- peekByteOff rec at4 :: IO Word32
+          let at5 = at4 + 4
+          w5 <- peekByteOff rec at5 :: IO Word32
+          let at6 = at5 + 4
+          (v6, _) <- parseValue rec at6
+          return (Just (kind, ident, [], Nothing, Nothing, Nothing, concat [[VI64 (fromIntegral w0)], [VI64 (fromIntegral w1)], [VI64 (fromIntegral w2)], [VI64 (fromIntegral w3)], [VI64 (fromIntegral w4)], [VI64 (fromIntegral w5)], [v6]]))
+      else if kind == occKindCapturePermission
+        then do
+          -- A flat record: its fields in order, into the tail.
+          let at0 = 8 :: Int
+          w0 <- peekByteOff rec at0 :: IO Word32
+          let at1 = at0 + 4
+          w1 <- peekByteOff rec at1 :: IO Word32
+          let at2 = at1 + 4
+          (v2, _) <- parseValue rec at2
+          return (Just (kind, 0, [], Nothing, Nothing, Nothing, concat [[VI64 (fromIntegral w0)], [VI64 (fromIntegral w1)], [v2]]))
+      else if kind == occKindCaptureDevices
+        then do
+          -- A flat record: its fields in order, into the tail.
+          let readN 0 at acc = return (reverse acc, at)
+              readN n at acc = do
+                (v, next) <- parseValue rec at
+                readN (n - 1 :: Int) next (v : acc)
+          let at0 = 8 :: Int
+          n0 <- peekByteOff rec at0 :: IO Word32
+          (vs0, _) <- readN (fromIntegral n0) (at0 + 8) []
+          return (Just (kind, 0, [], Nothing, Nothing, Nothing, concat [[VI64 (fromIntegral n0)], vs0]))
       else if kind == occKindFileDialogResult
         then do
           -- id, a count, then three Values per file (handle,
@@ -2995,7 +3181,7 @@ parseOccurrence redeem rec = do
           then return (Just (kind, ident, [], Nothing, Nothing, Nothing, []))
         -- Surface-pair records (window, section): the SECOND id
         -- keys the handler; the first rides as the payload.
-        else if kind == occKindSectionSelected || kind == occKindPlayerPosition || kind == occKindSeekCompleted
+        else if kind == occKindSectionSelected || kind == occKindPlayerPosition || kind == occKindSeekCompleted || kind == occKindCaptureOverrun
           then do
             second <- peekByteOff rec 16 :: IO Word64
             return (Just (kind, second, [], Just (VI64 (fromIntegral ident)), Nothing, Nothing, []))

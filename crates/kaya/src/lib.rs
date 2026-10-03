@@ -53,6 +53,9 @@ mod media;
 mod captions;
 // The media reader and the canvas's core-held images (docs/media-plan.md §8).
 mod reader;
+// The camera and the microphone (docs/capture-plan.md): the scene's state
+// machine, the synthetic devices, and the pipe frames and samples take.
+mod capture;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 mod edit_list;
 // docs/number-field-plan.md; the SwiftUI arm is its caller until the
@@ -137,7 +140,12 @@ pub use app::{
     can_play, MediaSource, PlayerKind, PlayerReading, PlayerRef, SessionRef,
     // docs/media-plan.md §8: the reader's answers.
     Frame, ReadError,
+    // docs/capture-plan.md: the capture's readings and handle.
+    CaptureReading, CaptureRef,
 };
+
+/// A captured frame as the app's callback is handed it (docs/capture-plan.md §4).
+pub use capture::CaptureFrame;
 
 /// The canvas surface (docs/canvas-plan.md §2.2).
 pub use app::{Draw, FillRule, Paint, TextAlign, TextBaseline, Viewbox};
@@ -155,6 +163,8 @@ pub use protocol::{
     Fit, MediaFailure, PlaybackState, PlayerId, PlayerState, PlayerTracks, SessionAction, SessionActionKind,
     TrackKind,
     FrameAccuracy, ImageId, Peaks, ReadId, ReadOutcome, ReaderId,
+    CameraFacing, CaptureCommand, CaptureDevice, CaptureFailure, CaptureId, CaptureInterruption, CaptureKind,
+    CaptureProp, CaptureState, Permission,
 };
 
 #[cfg(target_os = "windows")]

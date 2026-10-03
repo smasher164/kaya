@@ -1,0 +1,11 @@
+# The capture's denied prompt (docs/capture-plan.md §2 rule 1): the user
+# answers the camera's prompt no, and a start that needs the camera fails
+# `denied` while the microphone's own answer stands. Its own scene because a
+# prompt is answered once per process.
+expect label#1 "camera prompt, microphone prompt"
+answer_permission camera denied
+click button#1
+expect label#1 "camera denied, microphone granted"
+expect label#2 "failed denied"
+expect_capture 0 "frames none, samples none"
+expect_display_awake no

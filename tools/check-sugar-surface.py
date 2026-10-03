@@ -10693,6 +10693,84 @@ if _rust_reader:
                   f"for {', '.join(_rust_reader)} — its patterns no longer match the "
                   f"binding they were calibrated against")
 
+# --- THE CAPTURE, in all nine (docs/capture-plan.md §2-§4) -------------
+# The capture's six records and the video view's `capture` prop reach every
+# binding through the generator whether or not an app can spell them, and
+# the frame and sample callbacks are C entry points no generator writes. So
+# each row reads the binding's hand-written surface: the generated writer
+# called for each record, the prop named where the video view previews a
+# capture, and the two callback registrations. Red by design in the eight
+# bindings the depth slice did not build (docs/deferred.md, the capture
+# BUILD entry); Rust is the reference row, and the eight rows are a first
+# calibration the breadth slice moves to wherever each binding's capture
+# surface lands.
+_CAPTURE_RECORDS = ("create_capture", "set_capture_prop", "capture_command", "release_capture",
+                    "request_permission", "watch_capture_devices")
+_CAPTURE_CALLBACKS = ("kaya_capture_on_frame", "kaya_capture_on_samples")
+
+
+def _capture_row(rel, record_template, record_name, prop_template, prop_name):
+    return ([(rel, record_template, record_name(r)) for r in _CAPTURE_RECORDS]
+            + [(rel, prop_template, prop_name)]
+            + [(rel, r"\b{}\b", c) for c in _CAPTURE_CALLBACKS])
+
+
+CAPTURE_SURFACES = [
+    ("rust", [("crates/kaya/src/app/capture.rs", r"TxOp::{} \{{", _pascal(r))
+              for r in _CAPTURE_RECORDS]
+     + [("crates/kaya/src/app/capture.rs", r"Prop::{}\b", "Capture")]
+     + [("crates/kaya/src/app/capture.rs", r"crate::capture::{}\(", s)
+        for s in ("set_frame_sink", "set_sample_sink")]),
+    ("python", _capture_row("bindings/python/kaya/__init__.py", r"wire\.{}\(", lambda r: "tx_" + r,
+                            r"wire\.{}\b", "PROP_CAPTURE")),
+    ("go", _capture_row("bindings/go/media.go", r"\b{}\(", lambda r: "Tx" + _pascal(r),
+                        r"\b{}\b", "PropCapture")),
+    ("csharp", _capture_row("bindings/csharp/KayaApp.cs", r"KayaWire\.{}\(",
+                            lambda r: "Tx" + _pascal(r),
+                            r"KayaWire\.{}\b", "PropCapture")),
+    ("java", _capture_row("bindings/java/dev/kaya/KayaApp.java", r"KayaWire\.{}\(",
+                          lambda r: "tx" + _pascal(r), r"KayaWire\.{}\b", "PROP_CAPTURE")),
+    ("swift", _capture_row("bindings/swift/KayaMedia.swift", r"tx\.{}\(", _camel,
+                           r"\b{}\b", "KAYA_PROP_CAPTURE")),
+    ("haskell", _capture_row("bindings/haskell/KayaApp.hs", r"W\.{}\b", lambda r: "tx" + _pascal(r),
+                             r"W\.{}\b", "propCapture")),
+    ("ocaml", _capture_row("bindings/ocaml/kaya_app.ml", r"Kaya_wire\.{}\b", lambda r: "tx_" + r,
+                           r"Kaya_wire\.{}\b", "prop_capture")),
+    ("js", _capture_row("bindings/js/kaya/index.ts", r"wire\.{}\(", lambda r: "tx_" + r,
+                        r"wire\.{}\b", "PROP_CAPTURE")),
+]
+
+
+def check_capture_surfaces(fake_name=None, findings=None):
+    global status
+    for lang, patterns in CAPTURE_SURFACES:
+        for rel, template, name in patterns:
+            pat = template.format(fake_name or name)
+            if not grep_file(pat, rel):
+                msg = (f"check-sugar-surface: {lang} lacks the capture's surface "
+                       f"(wanted /{pat}/ in {rel})")
+                if findings is None:
+                    print(msg)
+                    status = 1
+                else:
+                    findings.append(msg)
+
+
+check_capture_surfaces()
+_capture_fake = []
+check_capture_surfaces("KayaFakeCaptureSurface", findings=_capture_fake)
+_capture_want = sum(len(p) for _, p in CAPTURE_SURFACES)
+print(f"check-sugar-surface: fake capture surfaces fired {len(_capture_fake)}/{_capture_want}")
+if len(_capture_fake) != _capture_want:
+    selftest_exit(f"check-sugar-surface: self-test failed ({len(_capture_fake)}/{_capture_want} "
+                  f"capture-surface patterns fired for names that exist nowhere)")
+_rust_capture = [name for rel, template, name in CAPTURE_SURFACES[0][1]
+                 if not grep_file(template.format(name), rel)]
+if _rust_capture:
+    selftest_exit(f"check-sugar-surface: the capture's reference row, Rust, reads nothing for "
+                  f"{', '.join(_rust_capture)} — its patterns no longer match the binding they "
+                  f"were calibrated against")
+
 check_scene_sugar()
 
 if status != 0:

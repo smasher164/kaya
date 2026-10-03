@@ -22,7 +22,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x6d398768b7d3b5d6
+let kayaSpecHash: UInt64 = 0xc00e7dc840e57f41
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -92,6 +92,14 @@ private let applyReadFrames: UInt16 = 60
 private let applyReadPeaks: UInt16 = 61
 private let applyCancelRead: UInt16 = 62
 private let applyCloseReader: UInt16 = 63
+/// docs/capture-plan.md §2, §3: the capture and the view previewing one.
+private let applyCreateCapture: UInt16 = 64
+private let applySetCaptureProp: UInt16 = 65
+private let applyCaptureCommand: UInt16 = 66
+private let applyReleaseCapture: UInt16 = 67
+private let applyRequestPermission: UInt16 = 68
+private let applyWatchCaptureDevices: UInt16 = 69
+private let applySetVideoCapture: UInt16 = 70
 /// What a drop settles on (the wire's drag_op).
 let kayaDragOpNone: UInt32 = 0
 let kayaDragOpCopy: UInt32 = 1
@@ -308,6 +316,7 @@ private let propLowLabel: UInt32 = 49
 private let propHighLabel: UInt32 = 50
 private let propFit: UInt32 = 51
 private let propPlayer: UInt32 = 52
+private let propCapture: UInt32 = 53
 private let fileContentImages: UInt32 = 1
 private let tintAccent: Int64 = 1
 private let tintSuccess: Int64 = 2
@@ -786,6 +795,8 @@ final class KayaNode: Identifiable {
     var videoPlayer: UInt64 = 0
     var fit: Int64 = 0
     var videoSeq = 0
+    /// docs/capture-plan.md §3: the capture a video view previews (0 none).
+    var videoCapture: UInt64 = 0
     // The decoded native image (nil is the placeholder class) and its size
     // as the harness's "WxH" observation ("0x0" before a source lands or
     // after a failed decode).
@@ -6232,6 +6243,8 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaScene.nodes[id]!.fit = raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
                 case (propPlayer, _):
                     fatalError("kaya: a video view's player arrives as set_video_player; the core never forwards the player prop")
+                case (propCapture, _):
+                    fatalError("kaya: a video view's capture arrives as set_video_capture; the core never forwards the capture prop")
                 case (propGrow, valueF64):
                     kayaScene.nodes[id]!.grow =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
@@ -6796,6 +6809,39 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self), tearDown: true)
             case applyCloseReader:
                 kayaReaders.removeValue(forKey: raw.loadUnaligned(fromByteOffset: body, as: UInt64.self))?.close()
+            case applyCreateCapture:
+                let cid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                kayaCaptures[cid] = KayaCapture(id: cid)
+            case applySetCaptureProp:
+                // { u64 capture; u32 cprop; u32 reserved; value }.
+                kayaCaptures[raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)]?.set(
+                    raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self), raw, body + 16)
+            case applyCaptureCommand:
+                let cid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                if raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self) == UInt32(KAYA_CAPTURE_COMMAND_START) {
+                    kayaCaptures[cid]?.start()
+                } else {
+                    kayaCaptures[cid]?.stop()
+                }
+                kayaFollowCaptureAwake()
+            case applyReleaseCapture:
+                let cid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                kayaCaptures.removeValue(forKey: cid)?.stop()
+                for node in kayaScene.videos where node.videoCapture == cid {
+                    node.videoCapture = 0
+                    node.videoSeq += 1
+                }
+                kayaFollowCaptureAwake()
+            case applyRequestPermission:
+                kayaCaptureRequestPermission(raw.loadUnaligned(fromByteOffset: body, as: UInt32.self))
+            case applyWatchCaptureDevices:
+                kayaCaptureWatchDevices(raw.loadUnaligned(fromByteOffset: body, as: UInt32.self) != 0)
+            case applySetVideoCapture:
+                let vid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let node = kayaScene.nodes[vid]!
+                node.videoCapture = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                node.videoSeq += 1
+                kayaFollowCaptureAwake()
             case applyScrollToRow:
                 // { u64 container; u64 copy (0 = unrealized); u32 index; u32 pad }.
                 // A REQUEST held on the container until its tier can scroll
@@ -10438,6 +10484,16 @@ private func kayaRunScript(_ script: String) {
                         failures.append("video ink \(got), wanted \(want) within \(kayaVideoInkTolerance) per channel")
                     }
                 #endif
+            case "expect_capture":
+                // docs/capture-plan.md §7: the core's own statistics of what
+                // passed through the capture, never the app's word.
+                let (ok, sentence) = kayaCaptureHarness(0, UInt32(parts[1]) ?? UInt32.max, kayaQuoted(Array(parts[2...])))
+                if ok { observed.append(sentence) } else { failures.append(sentence) }
+            case "answer_permission":
+                // What the synthetic prompt answers (docs/capture-plan.md §7).
+                let kind: UInt32 = parts[1] == "camera" ? 0 : parts[1] == "microphone" ? 1 : UInt32.max
+                let (ok, sentence) = kayaCaptureHarness(1, kind, parts.count > 2 ? String(parts[2]) : "")
+                if ok { observed.append(sentence) } else { failures.append(sentence) }
             case "expect_caption":
                 // docs/media-plan.md §3: the text the view shows, never its look.
                 let want = kayaQuoted(Array(parts[2...]))
@@ -19703,16 +19759,27 @@ struct KayaRender: View {
             // picture to an assistive reader, with play and pause as actions.
             let natural = kayaVideoNatural(node)
             let actions = kayaVideoActions(node)
-            KayaVideoSurface(node: node)
-                .overlay { KayaCaptionOverlay(node: node) }
-                .frame(
-                    idealWidth: natural.width, maxWidth: node.grow > 0 ? .infinity : natural.width,
-                    idealHeight: natural.height, maxHeight: natural.height)
-                .background(KayaVideoVisibility(node: node))
-                .accessibilityElement(children: .ignore)
-                .accessibilityAddTraits(.isImage)
-                .accessibilityAction(named: actions[0].0, actions[0].1)
-                .accessibilityAction(named: actions[1].0, actions[1].1)
+            if node.videoCapture != 0 {
+                // docs/capture-plan.md §3: a self-view has no play or pause.
+                KayaVideoSurface(node: node)
+                    .frame(
+                        idealWidth: natural.width, maxWidth: node.grow > 0 ? .infinity : natural.width,
+                        idealHeight: natural.height, maxHeight: natural.height)
+                    .background(KayaVideoVisibility(node: node))
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityAddTraits(.isImage)
+            } else {
+                KayaVideoSurface(node: node)
+                    .overlay { KayaCaptionOverlay(node: node) }
+                    .frame(
+                        idealWidth: natural.width, maxWidth: node.grow > 0 ? .infinity : natural.width,
+                        idealHeight: natural.height, maxHeight: natural.height)
+                    .background(KayaVideoVisibility(node: node))
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityAddTraits(.isImage)
+                    .accessibilityAction(named: actions[0].0, actions[0].1)
+                    .accessibilityAction(named: actions[1].0, actions[1].1)
+            }
         case kindDatePicker:
             // The platform's own control, hosted (docs/datetime-plan.md D6):
             // the compact field that opens the calendar. Its action is the
@@ -27198,6 +27265,827 @@ func kayaPublishNowPlaying() {
     center.nowPlayingInfo = info
 }
 
+// MARK: - Capture (docs/capture-plan.md)
+
+/// Every live capture by id.
+nonisolated(unsafe) var kayaCaptures: [UInt64: KayaCapture] = [:]
+nonisolated(unsafe) var kayaCaptureWatching = false
+nonisolated(unsafe) var kayaCaptureObservers: [NSObjectProtocol] = []
+
+/// Whether this process runs under the harness: then the synthetic devices
+/// are the only devices (docs/capture-plan.md §7, THE WALL).
+let kayaCaptureUnderHarness = ProcessInfo.processInfo.environment["KAYA_SELFTEST"] != nil
+
+/// THE WALL (docs/capture-plan.md §7): a lane's guest inherits its terminal's
+/// camera and microphone grant, so reaching a real device under the harness
+/// would open the maintainer's camera with no prompt at all. Every entry
+/// into KayaRealCapture calls this first; tools/check-verbs.py holds it.
+func kayaCaptureWall(_ what: String) {
+    if kayaCaptureUnderHarness {
+        fatalError(
+            "kaya: \(what) reaches a real camera or microphone under the harness (KAYA_SELFTEST is set); "
+                + "a lane opens kaya's synthetic devices only (docs/capture-plan.md §7)")
+    }
+}
+
+/// One device as a backend lists it.
+struct KayaCaptureDeviceInfo {
+    let id: String
+    let name: String
+    let kind: UInt32
+    let facing: UInt32
+    let preferred: Bool
+    /// A synthetic device's colour (0xRRGGBB) or tone (Hz); 0 for a real one.
+    let content: UInt32
+}
+
+/// The core's one definition of the synthetic devices.
+let kayaSyntheticDevices: [KayaCaptureDeviceInfo] = {
+    var out: [KayaCaptureDeviceInfo] = []
+    var index: UInt32 = 0
+    while true {
+        var id = [UInt8](repeating: 0, count: 128)
+        var name = [UInt8](repeating: 0, count: 128)
+        var kind: UInt32 = 0
+        var facing: UInt32 = 0
+        var preferred: UInt32 = 0
+        var content: UInt32 = 0
+        let found = id.withUnsafeMutableBufferPointer { idBuf in
+            name.withUnsafeMutableBufferPointer { nameBuf in
+                KayaHost.api.capture_synthetic(
+                    index, idBuf.baseAddress, UInt(idBuf.count), nameBuf.baseAddress, UInt(nameBuf.count), &kind,
+                    &facing, &preferred, &content)
+            }
+        }
+        guard found == 1 else { break }
+        out.append(
+            KayaCaptureDeviceInfo(
+                id: String(decoding: id.prefix { $0 != 0 }, as: UTF8.self),
+                name: String(decoding: name.prefix { $0 != 0 }, as: UTF8.self), kind: kind, facing: facing,
+                preferred: preferred != 0, content: content))
+        index += 1
+    }
+    return out
+}()
+
+func kayaReportCaptureState(_ id: UInt64, _ state: Int32, _ reason: Int32, _ size: (UInt32, UInt32, UInt32), _ detail: String) {
+    let bytes = Array(detail.utf8)
+    bytes.withUnsafeBufferPointer { d in
+        KayaHost.api.capture_state(
+            id, UInt32(state), UInt32(reason), size.0, size.1, size.2, d.baseAddress, UInt(d.count))
+    }
+}
+
+func kayaReportPermission(_ kind: UInt32, _ permission: UInt32, _ detail: String = "") {
+    let bytes = Array(detail.utf8)
+    bytes.withUnsafeBufferPointer { d in KayaHost.api.capture_permission(kind, permission, d.baseAddress, UInt(d.count)) }
+}
+
+func kayaReportDevices(_ devices: [KayaCaptureDeviceInfo]) {
+    KayaHost.api.capture_devices_begin()
+    for d in devices {
+        let id = Array(d.id.utf8)
+        let name = Array(d.name.utf8)
+        id.withUnsafeBufferPointer { i in
+            name.withUnsafeBufferPointer { n in
+                KayaHost.api.capture_device(
+                    i.baseAddress, UInt(i.count), n.baseAddress, UInt(n.count), d.kind, d.facing, d.preferred ? 1 : 0)
+            }
+        }
+    }
+    KayaHost.api.capture_devices_end()
+}
+
+/// request_permission: the synthetic prompt under the harness, the
+/// platform's own otherwise; answered either way.
+func kayaCaptureRequestPermission(_ kind: UInt32) {
+    if kayaCaptureUnderHarness {
+        let answer = KayaHost.api.capture_synthetic_permission(kind, 1)
+        DispatchQueue.main.async { kayaReportPermission(kind, answer) }
+        return
+    }
+    KayaRealCapture.request(kind) { answer, detail in kayaReportPermission(kind, answer, detail) }
+}
+
+func kayaCaptureWatchDevices(_ on: Bool) {
+    kayaCaptureWatching = on
+    if kayaCaptureUnderHarness {
+        guard on else { return }
+        let standing = [UInt32(KAYA_CAPTURE_KIND_CAMERA), UInt32(KAYA_CAPTURE_KIND_MICROPHONE)].map {
+            ($0, KayaHost.api.capture_synthetic_permission($0, 0))
+        }
+        DispatchQueue.main.async {
+            for (kind, permission) in standing { kayaReportPermission(kind, permission) }
+            kayaReportDevices(kayaSyntheticDevices)
+        }
+        return
+    }
+    KayaRealCapture.watch(on)
+}
+
+/// Rule 5 (docs/capture-plan.md §2, the player's rule): a running capture
+/// whose preview is in a video view keeps the display awake.
+#if os(macOS)
+    nonisolated(unsafe) var kayaCaptureAwakeAssertion: IOPMAssertionID?
+
+    func kayaFollowCaptureAwake() {
+        let wanted = kayaCaptures.values.contains { c in
+            c.source?.previewLayer != nil && kayaScene.videos.contains { $0.videoCapture == c.id }
+        }
+        if wanted, kayaCaptureAwakeAssertion == nil {
+            var assertion = IOPMAssertionID(0)
+            if IOPMAssertionCreateWithName(
+                kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString, IOPMAssertionLevel(kIOPMAssertionLevelOn),
+                "kaya capture preview" as CFString, &assertion) == kIOReturnSuccess
+            {
+                kayaCaptureAwakeAssertion = assertion
+            }
+        } else if !wanted, let assertion = kayaCaptureAwakeAssertion {
+            IOPMAssertionRelease(assertion)
+            kayaCaptureAwakeAssertion = nil
+        }
+    }
+#else
+    func kayaFollowCaptureAwake() {
+        UIApplication.shared.isIdleTimerDisabled = kayaCaptures.values.contains { c in
+            c.source?.previewLayer != nil && kayaScene.videos.contains { $0.videoCapture == c.id }
+        }
+    }
+#endif
+
+/// The harness's two capture verbs, answered by the core.
+func kayaCaptureHarness(_ verb: UInt32, _ index: UInt32, _ text: String) -> (Bool, String) {
+    var buffer = [UInt8](repeating: 0, count: 1024)
+    var ok: UInt8 = 0
+    let bytes = Array(text.utf8)
+    let n = bytes.withUnsafeBufferPointer { t in
+        buffer.withUnsafeMutableBufferPointer { out in
+            KayaHost.api.capture_harness(verb, index, t.baseAddress, UInt(t.count), out.baseAddress, UInt(out.count), &ok)
+        }
+    }
+    return (ok == 1, String(decoding: buffer.prefix(min(Int(n), buffer.count)), as: UTF8.self))
+}
+
+/// What a capture's devices produce: a running platform session or the
+/// synthetic device, either way a layer to preview and a stop.
+protocol KayaCaptureSource: AnyObject {
+    var previewLayer: CALayer? { get }
+    var format: (UInt32, UInt32, UInt32) { get }
+    /// The view's fit on the preview, as the player's layer takes it.
+    func fit(_ gravity: AVLayerVideoGravity)
+    func stop()
+}
+
+/// A capture: the app's devices and wishes, the source opened from them,
+/// and kaya's capture thread their frames and samples arrive on.
+final class KayaCapture {
+    let id: UInt64
+    var camera = ""
+    var microphone = ""
+    var wish: (Double, Double, Double) = (0, 0, 0)
+    var running = false
+    var source: KayaCaptureSource?
+    var generation = 0
+    let queue: DispatchQueue
+
+    init(id: UInt64) {
+        self.id = id
+        queue = DispatchQueue(label: "dev.kaya.capture.\(id)")
+    }
+
+    /// The app asked for a camera, whether or not one is open.
+    var hasCamera: Bool { !camera.isEmpty }
+
+    func set(_ prop: UInt32, _ raw: UnsafeRawBufferPointer, _ at: Int) {
+        let type = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)
+        switch (Int32(prop), type) {
+        case (KAYA_CPROP_CAMERA, valueStr):
+            var cursor = at
+            camera = kayaReadStrValue(raw, &cursor)
+        case (KAYA_CPROP_MICROPHONE, valueStr):
+            var cursor = at
+            microphone = kayaReadStrValue(raw, &cursor)
+        case (KAYA_CPROP_WIDTH, valueF64): wish.0 = raw.loadUnaligned(fromByteOffset: at + 8, as: Double.self)
+        case (KAYA_CPROP_HEIGHT, valueF64): wish.1 = raw.loadUnaligned(fromByteOffset: at + 8, as: Double.self)
+        case (KAYA_CPROP_FRAME_RATE, valueF64): wish.2 = raw.loadUnaligned(fromByteOffset: at + 8, as: Double.self)
+        // The core keeps the microphone open and delivers the silence.
+        case (KAYA_CPROP_MUTED, valueBool): return
+        default: fatalError("kaya: bad capture prop \(prop) value type \(type)")
+        }
+        // A device change while running reopens (docs/capture-plan.md §2).
+        if running, Int32(prop) != KAYA_CPROP_MUTED {
+            open()
+        }
+    }
+
+    func start() {
+        guard !running else { return }
+        running = true
+        open()
+        // docs/media-plan.md §7c's bound for a start the platform never answers.
+        let generation = self.generation
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(Int(KAYA_MEDIA_TIMEOUT_MS))) { [weak self] in
+            guard let self, self.generation == generation, self.running else { return }
+            if KayaHost.api.capture_overdue(self.id) == 1 { self.close() }
+        }
+    }
+
+    func stop() {
+        running = false
+        close()
+    }
+
+    private func close() {
+        generation += 1
+        source?.stop()
+        source = nil
+        for node in kayaScene.videos where node.videoCapture == id { node.videoSeq += 1 }
+        kayaFollowCaptureAwake()
+    }
+
+    /// The one device-open function: synthetic devices under the harness,
+    /// the platform's otherwise, each kind's permission asked first.
+    private func open() {
+        close()
+        let generation = self.generation
+        let kinds = (hasCamera ? [UInt32(KAYA_CAPTURE_KIND_CAMERA)] : [])
+            + (microphone.isEmpty ? [] : [UInt32(KAYA_CAPTURE_KIND_MICROPHONE)])
+        let id = self.id
+        let finish = { [weak self] (answers: [UInt32]) in
+            guard let self, self.generation == generation, self.running else { return }
+            if answers.contains(UInt32(KAYA_PERMISSION_DENIED)) {
+                kayaReportCaptureState(id, KAYA_CAPTURE_STATE_FAILED, KAYA_CAPTURE_FAILURE_DENIED, (0, 0, 0),
+                    "the user denied this app the camera or the microphone")
+                return
+            }
+            if kayaCaptureUnderHarness {
+                let camera = kayaSyntheticDevices.first { $0.id == self.camera && $0.kind == UInt32(KAYA_CAPTURE_KIND_CAMERA) }
+                let microphone = kayaSyntheticDevices.first {
+                    $0.id == self.microphone && $0.kind == UInt32(KAYA_CAPTURE_KIND_MICROPHONE)
+                }
+                if (self.hasCamera && camera == nil) || (!self.microphone.isEmpty && microphone == nil) {
+                    let missing = self.hasCamera && camera == nil ? self.camera : self.microphone
+                    kayaReportCaptureState(id, KAYA_CAPTURE_STATE_FAILED, KAYA_CAPTURE_FAILURE_NOT_FOUND, (0, 0, 0),
+                        "no device \(missing.debugDescription): under the harness only kaya's synthetic devices exist")
+                    return
+                }
+                let source = KayaSyntheticSource(
+                    capture: id, camera: camera, microphone: microphone, wish: self.wish, queue: self.queue)
+                self.source = source
+                kayaReportCaptureState(id, KAYA_CAPTURE_STATE_RUNNING, 0, source.format, "")
+            } else {
+                switch KayaRealCapture.open(
+                    capture: id, camera: self.camera, microphone: self.microphone, wish: self.wish, queue: self.queue)
+                {
+                case .success(let source): self.source = source
+                case .failure(let why):
+                    kayaReportCaptureState(id, KAYA_CAPTURE_STATE_FAILED, why.reason, (0, 0, 0), why.detail)
+                }
+            }
+            for node in kayaScene.videos where node.videoCapture == id { node.videoSeq += 1 }
+            kayaFollowCaptureAwake()
+        }
+        kayaCaptureAsk(kinds, [], finish)
+    }
+}
+
+struct KayaCaptureFailure: Error {
+    let reason: Int32
+    let detail: String
+}
+
+/// Each kind's permission in turn, the prompt shown for one still at prompt.
+func kayaCaptureAsk(_ kinds: [UInt32], _ answers: [UInt32], _ done: @escaping ([UInt32]) -> Void) {
+    guard let kind = kinds.first else {
+        DispatchQueue.main.async { done(answers) }
+        return
+    }
+    let rest = Array(kinds.dropFirst())
+    if kayaCaptureUnderHarness {
+        let before = KayaHost.api.capture_synthetic_permission(kind, 0)
+        let answer = KayaHost.api.capture_synthetic_permission(kind, 1)
+        DispatchQueue.main.async {
+            if before != answer { kayaReportPermission(kind, answer) }
+            kayaCaptureAsk(rest, answers + [answer], done)
+        }
+        return
+    }
+    KayaRealCapture.ask(kind) { answer, detail in
+        kayaReportPermission(kind, answer, detail)
+        kayaCaptureAsk(rest, answers + [answer], done)
+    }
+}
+
+/// kaya's synthetic device (docs/capture-plan.md §7): a flat colour as 420v
+/// pixel buffers at the chosen format, into a sample-buffer layer for the
+/// preview and the core for the app, and a tone as 44.1 kHz stereo float in
+/// 512-frame buffers, a platform's own shape, so the core's conversion runs.
+final class KayaSyntheticSource: KayaCaptureSource {
+    static let formats: [(UInt32, UInt32)] = [(640, 480), (1280, 720)]
+    static let rates: [UInt32] = [15, 30]
+
+    let capture: UInt64
+    let display: AVSampleBufferDisplayLayer?
+    let format: (UInt32, UInt32, UInt32)
+    private var videoTimer: DispatchSourceTimer?
+    private var audioTimer: DispatchSourceTimer?
+    private var pixels: CVPixelBuffer?
+    private var description: CMVideoFormatDescription?
+    private var started = DispatchTime.now()
+    private var produced = 0
+    private var phase = 0.0
+    private let rate = 44_100.0
+
+    var previewLayer: CALayer? { display }
+
+    func fit(_ gravity: AVLayerVideoGravity) { display?.videoGravity = gravity }
+
+    init(
+        capture: UInt64, camera: KayaCaptureDeviceInfo?, microphone: KayaCaptureDeviceInfo?,
+        wish: (Double, Double, Double), queue: DispatchQueue
+    ) {
+        self.capture = capture
+        if let camera {
+            let size = KayaSyntheticSource.formats.min { a, b in
+                KayaSyntheticSource.distance(a, wish) < KayaSyntheticSource.distance(b, wish)
+            }!
+            let fps = wish.2 > 0
+                ? KayaSyntheticSource.rates.min { abs(Double($0) - wish.2) < abs(Double($1) - wish.2) }!
+                : 30
+            format = (size.0, size.1, fps)
+            let layer = AVSampleBufferDisplayLayer()
+            layer.videoGravity = .resizeAspect
+            // Rule 4: a front or desktop camera's self-view is mirrored, its
+            // frames never.
+            if camera.facing == UInt32(KAYA_CAMERA_FACING_FRONT) || camera.facing == UInt32(KAYA_CAMERA_FACING_EXTERNAL) {
+                layer.setAffineTransform(CGAffineTransform(scaleX: -1, y: 1))
+            }
+            display = layer
+            pixels = KayaSyntheticSource.flat(Int(size.0), Int(size.1), camera.content)
+            if let pixels {
+                CMVideoFormatDescriptionCreateForImageBuffer(
+                    allocator: kCFAllocatorDefault, imageBuffer: pixels, formatDescriptionOut: &description)
+            }
+            let timer = DispatchSource.makeTimerSource(queue: queue)
+            timer.schedule(deadline: .now(), repeating: .nanoseconds(1_000_000_000 / Int(fps)), leeway: .milliseconds(2))
+            timer.setEventHandler { [weak self] in self?.frame() }
+            videoTimer = timer
+        } else {
+            format = (0, 0, 0)
+            display = nil
+        }
+        if let microphone {
+            let hz = Double(microphone.content)
+            let timer = DispatchSource.makeTimerSource(queue: queue)
+            timer.schedule(deadline: .now(), repeating: .nanoseconds(Int(512.0 / rate * 1e9)), leeway: .milliseconds(1))
+            timer.setEventHandler { [weak self] in self?.samples(hz) }
+            audioTimer = timer
+        }
+        started = DispatchTime.now()
+        videoTimer?.resume()
+        audioTimer?.resume()
+    }
+
+    static func distance(_ size: (UInt32, UInt32), _ wish: (Double, Double, Double)) -> Double {
+        let w = wish.0 > 0 ? wish.0 : 640
+        let h = wish.1 > 0 ? wish.1 : 480
+        return abs(Double(size.0) - w) + abs(Double(size.1) - h)
+    }
+
+    /// A 420v buffer of one colour: video-range BT.601, the camera's own
+    /// native layout.
+    static func flat(_ width: Int, _ height: Int, _ rgb: UInt32) -> CVPixelBuffer? {
+        var buffer: CVPixelBuffer?
+        let attrs = [kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any]()] as CFDictionary
+        guard CVPixelBufferCreate(
+            kCFAllocatorDefault, width, height, kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, attrs, &buffer)
+            == kCVReturnSuccess, let buffer
+        else { return nil }
+        let r = Double((rgb >> 16) & 0xFF), g = Double((rgb >> 8) & 0xFF), b = Double(rgb & 0xFF)
+        let y = UInt8((16 + 0.257 * r + 0.504 * g + 0.098 * b).rounded())
+        let u = UInt8((128 - 0.148 * r - 0.291 * g + 0.439 * b).rounded())
+        let v = UInt8((128 + 0.439 * r - 0.368 * g - 0.071 * b).rounded())
+        CVPixelBufferLockBaseAddress(buffer, [])
+        let luma = CVPixelBufferGetBaseAddressOfPlane(buffer, 0)!
+        memset(luma, Int32(y), CVPixelBufferGetBytesPerRowOfPlane(buffer, 0) * height)
+        let chroma = CVPixelBufferGetBaseAddressOfPlane(buffer, 1)!.assumingMemoryBound(to: UInt8.self)
+        let stride = CVPixelBufferGetBytesPerRowOfPlane(buffer, 1)
+        for row in 0..<CVPixelBufferGetHeightOfPlane(buffer, 1) {
+            for col in 0..<CVPixelBufferGetWidthOfPlane(buffer, 1) {
+                chroma[row * stride + col * 2] = u
+                chroma[row * stride + col * 2 + 1] = v
+            }
+        }
+        CVPixelBufferUnlockBaseAddress(buffer, [])
+        // The samples' own colour: the BT.601 matrix they were made with, and
+        // sRGB primaries and transfer, so the layer composites C83C1E as
+        // C83C1E (untagged it read DB2900; tools/gen-media.py's sRGB transfer
+        // note is the same measurement on the player).
+        CVBufferSetAttachment(buffer, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_601_4, .shouldPropagate)
+        CVBufferSetAttachment(buffer, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2, .shouldPropagate)
+        CVBufferSetAttachment(buffer, kCVImageBufferTransferFunctionKey, kCVImageBufferTransferFunction_sRGB, .shouldPropagate)
+        return buffer
+    }
+
+    private func frame() {
+        guard let pixels, let description else { return }
+        let now = DispatchTime.now().uptimeNanoseconds
+        kayaCaptureHandFrame(capture, pixels, now)
+        var timing = CMSampleTimingInfo(
+            duration: .invalid, presentationTimeStamp: CMClockGetTime(CMClockGetHostTimeClock()), decodeTimeStamp: .invalid)
+        var sample: CMSampleBuffer?
+        CMSampleBufferCreateReadyWithImageBuffer(
+            allocator: kCFAllocatorDefault, imageBuffer: pixels, formatDescription: description, sampleTiming: &timing,
+            sampleBufferOut: &sample)
+        guard let sample, let display else { return }
+        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true),
+            CFArrayGetCount(attachments) > 0
+        {
+            let first = unsafeBitCast(CFArrayGetValueAtIndex(attachments, 0), to: CFMutableDictionary.self)
+            CFDictionarySetValue(
+                first, Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),
+                Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
+        }
+        let renderer = display.sampleBufferRenderer
+        if renderer.status == .failed { renderer.flush() }
+        renderer.enqueue(sample)
+    }
+
+    /// The samples due since the start, in 512-frame buffers.
+    private func samples(_ hz: Double) {
+        let due = Int(Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1e9 * rate)
+        while produced + 512 <= due {
+            var buffer = [Float](repeating: 0, count: 1024)
+            for i in 0..<512 {
+                let x = Float(sin(phase) * 0.5)
+                buffer[i * 2] = x
+                buffer[i * 2 + 1] = x
+                phase += 2 * Double.pi * hz / rate
+                if phase > 2 * Double.pi { phase -= 2 * Double.pi }
+            }
+            let at = started.uptimeNanoseconds + UInt64(Double(produced) / rate * 1e9)
+            buffer.withUnsafeBufferPointer { b in
+                KayaHost.api.capture_samples(capture, 2, UInt32(rate), b.baseAddress, UInt(b.count), at)
+            }
+            produced += 512
+        }
+    }
+
+    func stop() {
+        videoTimer?.cancel()
+        audioTimer?.cancel()
+        videoTimer = nil
+        audioTimer = nil
+        display?.sampleBufferRenderer.flush(removingDisplayedImage: true, completionHandler: nil)
+    }
+}
+
+/// A 420v/420f buffer's two planes to the core, on the capture thread.
+func kayaCaptureHandFrame(_ capture: UInt64, _ pixels: CVPixelBuffer, _ at: UInt64) {
+    CVPixelBufferLockBaseAddress(pixels, .readOnly)
+    defer { CVPixelBufferUnlockBaseAddress(pixels, .readOnly) }
+    guard CVPixelBufferGetPlaneCount(pixels) == 2,
+        let luma = CVPixelBufferGetBaseAddressOfPlane(pixels, 0),
+        let chroma = CVPixelBufferGetBaseAddressOfPlane(pixels, 1)
+    else { return }
+    _ = KayaHost.api.capture_frame(
+        capture, UInt32(CVPixelBufferGetWidth(pixels)), UInt32(CVPixelBufferGetHeight(pixels)),
+        luma.assumingMemoryBound(to: UInt8.self), UInt32(CVPixelBufferGetBytesPerRowOfPlane(pixels, 0)),
+        chroma.assumingMemoryBound(to: UInt8.self), UInt32(CVPixelBufferGetBytesPerRowOfPlane(pixels, 1)), at, 0)
+}
+
+/// EVERY REAL CAMERA AND MICROPHONE IS REACHED HERE AND NOWHERE ELSE
+/// (docs/capture-plan.md §7): AVFoundation's capture classes and its
+/// permission calls are named only inside this type, and each entry calls
+/// kayaCaptureWall first. Under the harness nothing routes here; the wall
+/// is what holds that if a route ever does. tools/check-verbs.py reads it.
+enum KayaRealCapture {
+    static func permission(_ kind: UInt32) -> (UInt32, String) {
+        kayaCaptureWall("reading a capture permission")
+        let media: AVMediaType = kind == UInt32(KAYA_CAPTURE_KIND_CAMERA) ? .video : .audio
+        switch AVCaptureDevice.authorizationStatus(for: media) {
+        case .authorized: return (UInt32(KAYA_PERMISSION_GRANTED), "")
+        case .notDetermined: return (UInt32(KAYA_PERMISSION_PROMPT), "")
+        case .restricted:
+            return (UInt32(KAYA_PERMISSION_DENIED), "restricted: a profile or parental control forbids this device")
+        default: return (UInt32(KAYA_PERMISSION_DENIED), "")
+        }
+    }
+
+    /// request_permission: the platform's prompt for a kind still at prompt.
+    static func request(_ kind: UInt32, _ done: @escaping (UInt32, String) -> Void) {
+        kayaCaptureWall("asking for a capture permission")
+        ask(kind, done)
+    }
+
+    static func ask(_ kind: UInt32, _ done: @escaping (UInt32, String) -> Void) {
+        kayaCaptureWall("asking for a capture permission")
+        let now = permission(kind)
+        guard now.0 == UInt32(KAYA_PERMISSION_PROMPT) else {
+            DispatchQueue.main.async { done(now.0, now.1) }
+            return
+        }
+        let media: AVMediaType = kind == UInt32(KAYA_CAPTURE_KIND_CAMERA) ? .video : .audio
+        AVCaptureDevice.requestAccess(for: media) { granted in
+            DispatchQueue.main.async {
+                done(UInt32(granted ? KAYA_PERMISSION_GRANTED : KAYA_PERMISSION_DENIED), "")
+            }
+        }
+    }
+
+    static func devices() -> [KayaCaptureDeviceInfo] {
+        kayaCaptureWall("listing the cameras and microphones")
+        var types: [AVCaptureDevice.DeviceType] = [.builtInWideAngleCamera]
+        if #available(macOS 14, iOS 17, *) {
+            types += [.external, .continuityCamera, .microphone]
+        } else {
+            #if os(macOS)
+                types += [.externalUnknown, .builtInMicrophone]
+            #else
+                types += [.builtInMicrophone]
+            #endif
+        }
+        let found = AVCaptureDevice.DiscoverySession(deviceTypes: types, mediaType: nil, position: .unspecified).devices
+        var preferredCamera: AVCaptureDevice? = AVCaptureDevice.default(for: .video)
+        if #available(macOS 13, iOS 17, *) { preferredCamera = AVCaptureDevice.systemPreferredCamera }
+        let preferredMicrophone = AVCaptureDevice.default(for: .audio)
+        return found.map { d in
+            let camera = d.hasMediaType(.video)
+            var facing = UInt32(KAYA_CAMERA_FACING_UNKNOWN)
+            if camera {
+                switch d.position {
+                case .front: facing = UInt32(KAYA_CAMERA_FACING_FRONT)
+                case .back: facing = UInt32(KAYA_CAMERA_FACING_BACK)
+                default: facing = d.deviceType == .builtInWideAngleCamera ? UInt32(KAYA_CAMERA_FACING_FRONT)
+                    : UInt32(KAYA_CAMERA_FACING_EXTERNAL)
+                }
+            }
+            let preferred = camera ? d == preferredCamera : d == preferredMicrophone
+            return KayaCaptureDeviceInfo(
+                id: d.uniqueID, name: d.localizedName,
+                kind: UInt32(camera ? KAYA_CAPTURE_KIND_CAMERA : KAYA_CAPTURE_KIND_MICROPHONE), facing: facing,
+                preferred: preferred, content: 0)
+        }
+    }
+
+    /// watch_capture_devices: the list now and on every connect and
+    /// disconnect.
+    static func watch(_ on: Bool) {
+        kayaCaptureWall("watching the cameras and microphones")
+        for o in kayaCaptureObservers { NotificationCenter.default.removeObserver(o) }
+        kayaCaptureObservers = []
+        guard on else { return }
+        for kind in [UInt32(KAYA_CAPTURE_KIND_CAMERA), UInt32(KAYA_CAPTURE_KIND_MICROPHONE)] {
+            let (now, detail) = permission(kind)
+            kayaReportPermission(kind, now, detail)
+        }
+        kayaReportDevices(devices())
+        for name in [AVCaptureDevice.wasConnectedNotification, AVCaptureDevice.wasDisconnectedNotification] {
+            kayaCaptureObservers.append(
+                NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
+                    if kayaCaptureWatching { kayaReportDevices(devices()) }
+                })
+        }
+    }
+
+    static func open(
+        capture: UInt64, camera: String, microphone: String, wish: (Double, Double, Double), queue: DispatchQueue
+    ) -> Result<KayaCaptureSource, KayaCaptureFailure> {
+        kayaCaptureWall("opening a camera or a microphone")
+        return Source.make(capture: capture, camera: camera, microphone: microphone, wish: wish, queue: queue)
+    }
+
+    /// AVFoundation's errors in the closed vocabulary (rule 2).
+    static func reason(_ error: Error) -> Int32 {
+        kayaCaptureWall("reading a capture error")
+        guard let e = error as? AVError else { return KAYA_CAPTURE_FAILURE_HARDWARE_ERROR }
+        switch e.code {
+        case .applicationIsNotAuthorizedToUseDevice: return KAYA_CAPTURE_FAILURE_DENIED
+        case .deviceNotConnected: return KAYA_CAPTURE_FAILURE_DISCONNECTED
+        case .deviceInUseByAnotherApplication: return KAYA_CAPTURE_FAILURE_IN_USE
+        case .unsupportedDeviceActiveFormat, .noCompatibleAlternatesForExternalDisplay:
+            return KAYA_CAPTURE_FAILURE_UNSUPPORTED
+        default: return KAYA_CAPTURE_FAILURE_HARDWARE_ERROR
+        }
+    }
+
+    final class Source: NSObject, KayaCaptureSource, AVCaptureVideoDataOutputSampleBufferDelegate,
+        AVCaptureAudioDataOutputSampleBufferDelegate
+    {
+        let capture: UInt64
+        let session = AVCaptureSession()
+        let preview: AVCaptureVideoPreviewLayer?
+        var format: (UInt32, UInt32, UInt32) = (0, 0, 0)
+        private var observers: [NSObjectProtocol] = []
+        private var cameraDevice: AVCaptureDevice?
+        private var microphoneDevice: AVCaptureDevice?
+
+        var previewLayer: CALayer? { preview }
+
+        func fit(_ gravity: AVLayerVideoGravity) { preview?.videoGravity = gravity }
+
+        private init(capture: UInt64, hasCamera: Bool) {
+            self.capture = capture
+            preview = hasCamera ? AVCaptureVideoPreviewLayer(sessionWithNoConnection: session) : nil
+            super.init()
+        }
+
+        static func make(
+            capture: UInt64, camera: String, microphone: String, wish: (Double, Double, Double), queue: DispatchQueue
+        ) -> Result<KayaCaptureSource, KayaCaptureFailure> {
+            kayaCaptureWall("opening a camera or a microphone")
+            let source = Source(capture: capture, hasCamera: !camera.isEmpty)
+            if let failure = source.configure(camera: camera, microphone: microphone, wish: wish, queue: queue) {
+                return .failure(failure)
+            }
+            source.watch()
+            queue.async {
+                source.session.startRunning()
+                let format = source.format
+                DispatchQueue.main.async {
+                    if source.session.isRunning {
+                        kayaReportCaptureState(capture, KAYA_CAPTURE_STATE_RUNNING, 0, format, "")
+                    }
+                }
+            }
+            return .success(source)
+        }
+
+        private func configure(
+            camera: String, microphone: String, wish: (Double, Double, Double), queue: DispatchQueue
+        ) -> KayaCaptureFailure? {
+            session.beginConfiguration()
+            defer { session.commitConfiguration() }
+            if !camera.isEmpty {
+                guard let device = AVCaptureDevice(uniqueID: camera) else {
+                    return KayaCaptureFailure(reason: KAYA_CAPTURE_FAILURE_NOT_FOUND, detail: "no camera \(camera.debugDescription)")
+                }
+                cameraDevice = device
+                do {
+                    let input = try AVCaptureDeviceInput(device: device)
+                    guard session.canAddInput(input) else {
+                        return KayaCaptureFailure(reason: KAYA_CAPTURE_FAILURE_IN_USE, detail: "the session refused the camera")
+                    }
+                    session.addInputWithNoConnections(input)
+                    choose(device, wish)
+                    let output = AVCaptureVideoDataOutput()
+                    output.videoSettings = [
+                        kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+                    ]
+                    output.alwaysDiscardsLateVideoFrames = true
+                    output.setSampleBufferDelegate(self, queue: queue)
+                    session.addOutputWithNoConnections(output)
+                    guard let port = input.ports.first(where: { $0.mediaType == .video }) else {
+                        return KayaCaptureFailure(reason: KAYA_CAPTURE_FAILURE_UNSUPPORTED, detail: "the camera has no video port")
+                    }
+                    let data = AVCaptureConnection(inputPorts: [port], output: output)
+                    if session.canAddConnection(data) { session.addConnection(data) }
+                    if let preview {
+                        let shown = AVCaptureConnection(inputPort: port, videoPreviewLayer: preview)
+                        if session.canAddConnection(shown) { session.addConnection(shown) }
+                    }
+                } catch {
+                    return KayaCaptureFailure(reason: KayaRealCapture.reason(error), detail: error.localizedDescription)
+                }
+            }
+            if !microphone.isEmpty {
+                guard let device = AVCaptureDevice(uniqueID: microphone) else {
+                    return KayaCaptureFailure(
+                        reason: KAYA_CAPTURE_FAILURE_NOT_FOUND, detail: "no microphone \(microphone.debugDescription)")
+                }
+                microphoneDevice = device
+                do {
+                    let input = try AVCaptureDeviceInput(device: device)
+                    guard session.canAddInput(input) else {
+                        return KayaCaptureFailure(reason: KAYA_CAPTURE_FAILURE_IN_USE, detail: "the session refused the microphone")
+                    }
+                    session.addInput(input)
+                    let output = AVCaptureAudioDataOutput()
+                    #if os(macOS)
+                        output.audioSettings = [
+                            AVFormatIDKey: kAudioFormatLinearPCM, AVLinearPCMIsFloatKey: true,
+                            AVLinearPCMBitDepthKey: 32, AVLinearPCMIsNonInterleaved: false,
+                        ]
+                    #endif
+                    output.setSampleBufferDelegate(self, queue: queue)
+                    if session.canAddOutput(output) { session.addOutput(output) }
+                } catch {
+                    return KayaCaptureFailure(reason: KayaRealCapture.reason(error), detail: error.localizedDescription)
+                }
+            }
+            return nil
+        }
+
+        /// The device format nearest the wish (the web's `ideal`).
+        private func choose(_ device: AVCaptureDevice, _ wish: (Double, Double, Double)) {
+            var best: (AVCaptureDevice.Format, Double)?
+            for f in device.formats {
+                let d = CMVideoFormatDescriptionGetDimensions(f.formatDescription)
+                let w = wish.0 > 0 ? wish.0 : 640
+                let h = wish.1 > 0 ? wish.1 : 480
+                let distance = abs(Double(d.width) - w) + abs(Double(d.height) - h)
+                if best == nil || distance < best!.1 { best = (f, distance) }
+            }
+            guard let (chosen, _) = best, (try? device.lockForConfiguration()) != nil else { return }
+            device.activeFormat = chosen
+            let fps = wish.2 > 0 ? wish.2 : 30
+            if let range = chosen.videoSupportedFrameRateRanges.min(by: {
+                abs($0.maxFrameRate - fps) < abs($1.maxFrameRate - fps)
+            }) {
+                let rate = min(max(fps, range.minFrameRate), range.maxFrameRate)
+                device.activeVideoMinFrameDuration = CMTime(value: 1, timescale: CMTimeScale(rate))
+                device.activeVideoMaxFrameDuration = CMTime(value: 1, timescale: CMTimeScale(rate))
+                let d = CMVideoFormatDescriptionGetDimensions(chosen.formatDescription)
+                format = (UInt32(d.width), UInt32(d.height), UInt32(rate.rounded()))
+            }
+            device.unlockForConfiguration()
+        }
+
+        private func watch() {
+            let id = capture
+            observers.append(
+                NotificationCenter.default.addObserver(
+                    forName: AVCaptureSession.runtimeErrorNotification, object: session, queue: .main
+                ) { note in
+                    let error = note.userInfo?[AVCaptureSessionErrorKey] as? Error
+                    kayaReportCaptureState(id, KAYA_CAPTURE_STATE_FAILED,
+                        error.map(KayaRealCapture.reason) ?? KAYA_CAPTURE_FAILURE_HARDWARE_ERROR, (0, 0, 0),
+                        error?.localizedDescription ?? "")
+                })
+            observers.append(
+                NotificationCenter.default.addObserver(
+                    forName: AVCaptureDevice.wasDisconnectedNotification, object: nil, queue: .main
+                ) { [weak self] note in
+                    guard let self, let gone = note.object as? AVCaptureDevice,
+                        gone == self.cameraDevice || gone == self.microphoneDevice
+                    else { return }
+                    kayaReportCaptureState(id, KAYA_CAPTURE_STATE_FAILED, KAYA_CAPTURE_FAILURE_DISCONNECTED, (0, 0, 0),
+                        "\(gone.localizedName) was disconnected")
+                })
+            #if os(iOS)
+                observers.append(
+                    NotificationCenter.default.addObserver(
+                        forName: AVCaptureSession.wasInterruptedNotification, object: session, queue: .main
+                    ) { note in
+                        let raw = note.userInfo?[AVCaptureSessionInterruptionReasonKey] as? Int ?? 0
+                        let why: Int32
+                        switch AVCaptureSession.InterruptionReason(rawValue: raw) {
+                        case .videoDeviceNotAvailableInBackground: why = KAYA_CAPTURE_INTERRUPTION_BACKGROUND
+                        case .videoDeviceNotAvailableDueToSystemPressure: why = KAYA_CAPTURE_INTERRUPTION_SYSTEM_PRESSURE
+                        default: why = KAYA_CAPTURE_INTERRUPTION_ANOTHER_APP
+                        }
+                        kayaReportCaptureState(id, KAYA_CAPTURE_STATE_INTERRUPTED, why, (0, 0, 0), "")
+                    })
+                observers.append(
+                    NotificationCenter.default.addObserver(
+                        forName: AVCaptureSession.interruptionEndedNotification, object: session, queue: .main
+                    ) { [weak self] _ in
+                        guard let self else { return }
+                        kayaReportCaptureState(id, KAYA_CAPTURE_STATE_RUNNING, 0, self.format, "")
+                    })
+            #endif
+        }
+
+        func captureOutput(_ output: AVCaptureOutput, didOutput sample: CMSampleBuffer, from _: AVCaptureConnection) {
+            let at = UInt64(max(0, CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sample))) * 1e9)
+            if output is AVCaptureVideoDataOutput {
+                if let pixels = CMSampleBufferGetImageBuffer(sample) { kayaCaptureHandFrame(capture, pixels, at) }
+                return
+            }
+            guard let description = CMSampleBufferGetFormatDescription(sample),
+                let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(description)?.pointee
+            else { return }
+            var list = AudioBufferList()
+            var block: CMBlockBuffer?
+            guard CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+                sample, bufferListSizeNeededOut: nil, bufferListOut: &list, bufferListSize: MemoryLayout<AudioBufferList>.size,
+                blockBufferAllocator: nil, blockBufferMemoryAllocator: nil, flags: 0, blockBufferOut: &block) == noErr,
+                let data = list.mBuffers.mData
+            else { return }
+            let channels = max(1, asbd.mChannelsPerFrame)
+            let bytes = Int(list.mBuffers.mDataByteSize)
+            if asbd.mFormatFlags & kAudioFormatFlagIsFloat != 0 {
+                KayaHost.api.capture_samples(
+                    capture, channels, UInt32(asbd.mSampleRate), data.assumingMemoryBound(to: Float.self),
+                    UInt(bytes / 4), at)
+            } else {
+                let ints = data.assumingMemoryBound(to: Int16.self)
+                let floats = (0..<(bytes / 2)).map { Float(ints[$0]) / 32768 }
+                floats.withUnsafeBufferPointer { f in
+                    KayaHost.api.capture_samples(capture, channels, UInt32(asbd.mSampleRate), f.baseAddress, UInt(f.count), at)
+                }
+            }
+        }
+
+        func stop() {
+            for o in observers { NotificationCenter.default.removeObserver(o) }
+            observers = []
+            let session = self.session
+            DispatchQueue.global().async { session.stopRunning() }
+        }
+    }
+}
+
 // MARK: The video view (docs/media-plan.md §3)
 
 /// The views on screen by node, for the harness's reads.
@@ -27216,6 +28104,9 @@ func kayaVideoGravity(_ fit: Int64) -> AVLayerVideoGravity {
     /// Playing session of its own.
     final class KayaVideoView: NSView {
         let playerLayer = AVPlayerLayer()
+        /// docs/capture-plan.md §3: a capture's preview, over the player's
+        /// layer, which then holds no player.
+        var captureLayer: CALayer?
 
         override init(frame: NSRect) {
             super.init(frame: frame)
@@ -27226,6 +28117,23 @@ func kayaVideoGravity(_ fit: Int64) -> AVLayerVideoGravity {
 
         override func makeBackingLayer() -> CALayer { playerLayer }
         override var acceptsFirstResponder: Bool { false }
+
+        override func layout() {
+            super.layout()
+            captureLayer?.frame = bounds
+        }
+
+        func preview(_ layer: CALayer?, _ fit: Int64) {
+            if captureLayer !== layer {
+                captureLayer?.removeFromSuperlayer()
+                captureLayer = layer
+                if let layer {
+                    layer.frame = bounds
+                    playerLayer.addSublayer(layer)
+                }
+            }
+            kayaCaptures.values.first { $0.source?.previewLayer === layer }?.source?.fit(kayaVideoGravity(fit))
+        }
     }
 
     struct KayaVideoSurface: NSViewRepresentable {
@@ -27245,17 +28153,37 @@ func kayaVideoGravity(_ fit: Int64) -> AVLayerVideoGravity {
             let player = kayaPlayers[node.videoPlayer]?.player
             if view.playerLayer.player !== player { view.playerLayer.player = player }
             view.playerLayer.videoGravity = kayaVideoGravity(node.fit)
+            view.preview(kayaCaptures[node.videoCapture]?.source?.previewLayer, node.fit)
         }
 
         static func dismantleNSView(_ view: KayaVideoView, coordinator: ()) {
             for (id, held) in kayaVideoViews where held === view { kayaVideoViews.removeValue(forKey: id) }
             view.playerLayer.player = nil
+            view.preview(nil, 0)
         }
     }
 #else
     final class KayaVideoView: UIView {
         override class var layerClass: AnyClass { AVPlayerLayer.self }
         var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+        var captureLayer: CALayer?
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            captureLayer?.frame = bounds
+        }
+
+        func preview(_ layer: CALayer?, _ fit: Int64) {
+            if captureLayer !== layer {
+                captureLayer?.removeFromSuperlayer()
+                captureLayer = layer
+                if let layer {
+                    layer.frame = bounds
+                    playerLayer.addSublayer(layer)
+                }
+            }
+            kayaCaptures.values.first { $0.source?.previewLayer === layer }?.source?.fit(kayaVideoGravity(fit))
+        }
     }
 
     struct KayaVideoSurface: UIViewRepresentable {
@@ -27275,11 +28203,13 @@ func kayaVideoGravity(_ fit: Int64) -> AVLayerVideoGravity {
             let player = kayaPlayers[node.videoPlayer]?.player
             if view.playerLayer.player !== player { view.playerLayer.player = player }
             view.playerLayer.videoGravity = kayaVideoGravity(node.fit)
+            view.preview(kayaCaptures[node.videoCapture]?.source?.previewLayer, node.fit)
         }
 
         static func dismantleUIView(_ view: KayaVideoView, coordinator: ()) {
             for (id, held) in kayaVideoViews where held === view { kayaVideoViews.removeValue(forKey: id) }
             view.playerLayer.player = nil
+            view.preview(nil, 0)
         }
     }
 #endif
@@ -27404,6 +28334,10 @@ func kayaShownFraction(_ node: KayaNode, _ frame: CGRect) -> Double {
 /// The video view's natural size: its picture's, 320x180 until one is known.
 func kayaVideoNatural(_ node: KayaNode) -> CGSize {
     _ = node.videoSeq
+    if node.videoCapture != 0 {
+        let format = kayaCaptures[node.videoCapture]?.source?.format ?? (0, 0, 0)
+        return format.0 == 0 ? CGSize(width: 320, height: 240) : CGSize(width: Int(format.0) / 2, height: Int(format.1) / 2)
+    }
     let size = kayaPlayers[node.videoPlayer]?.mediaSize ?? .zero
     return size == .zero ? CGSize(width: 320, height: 180) : size
 }
@@ -27640,9 +28574,10 @@ func kayaMediaRefusal(_ item: String) -> String? {
     /// playing.
     func kayaDisplayAwake() -> Bool {
         DispatchQueue.main.sync {
-            kayaPlayers.values.contains {
-                $0.player.preventsDisplaySleepDuringVideoPlayback && $0.player.timeControlStatus == .playing
-            }
+            UIApplication.shared.isIdleTimerDisabled
+                || kayaPlayers.values.contains {
+                    $0.player.preventsDisplaySleepDuringVideoPlayback && $0.player.timeControlStatus == .playing
+                }
         }
     }
 #endif

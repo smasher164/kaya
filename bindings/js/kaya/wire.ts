@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x6d398768b7d3b5d6n;
+export const SPEC_HASH = 0xc00e7dc840e57f41n;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -123,6 +123,7 @@ export const PROP_LOW_LABEL = 49;
 export const PROP_HIGH_LABEL = 50;
 export const PROP_FIT = 51;
 export const PROP_PLAYER = 52;
+export const PROP_CAPTURE = 53;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -283,6 +284,40 @@ export const FRAME_ACCURACY_EXACT = 1;
 export const READ_OUTCOME_COMPLETED = 0;
 export const READ_OUTCOME_CANCELLED = 1;
 export const READ_OUTCOME_FAILED = 2;
+export const CAPTURE_STATE_IDLE = 0;
+export const CAPTURE_STATE_STARTING = 1;
+export const CAPTURE_STATE_RUNNING = 2;
+export const CAPTURE_STATE_INTERRUPTED = 3;
+export const CAPTURE_STATE_FAILED = 4;
+export const CAPTURE_FAILURE_NONE = 0;
+export const CAPTURE_FAILURE_DENIED = 1;
+export const CAPTURE_FAILURE_NOT_FOUND = 2;
+export const CAPTURE_FAILURE_IN_USE = 3;
+export const CAPTURE_FAILURE_DISCONNECTED = 4;
+export const CAPTURE_FAILURE_UNSUPPORTED = 5;
+export const CAPTURE_FAILURE_HARDWARE_ERROR = 6;
+export const CAPTURE_FAILURE_TIMEOUT = 7;
+export const CAPTURE_INTERRUPTION_NONE = 0;
+export const CAPTURE_INTERRUPTION_BACKGROUND = 1;
+export const CAPTURE_INTERRUPTION_ANOTHER_APP = 2;
+export const CAPTURE_INTERRUPTION_SYSTEM_PRESSURE = 3;
+export const CAPTURE_KIND_CAMERA = 0;
+export const CAPTURE_KIND_MICROPHONE = 1;
+export const PERMISSION_PROMPT = 0;
+export const PERMISSION_GRANTED = 1;
+export const PERMISSION_DENIED = 2;
+export const CAMERA_FACING_UNKNOWN = 0;
+export const CAMERA_FACING_FRONT = 1;
+export const CAMERA_FACING_BACK = 2;
+export const CAMERA_FACING_EXTERNAL = 3;
+export const CAPTURE_COMMAND_START = 1;
+export const CAPTURE_COMMAND_STOP = 2;
+export const CPROP_CAMERA = 1;
+export const CPROP_MICROPHONE = 2;
+export const CPROP_WIDTH = 3;
+export const CPROP_HEIGHT = 4;
+export const CPROP_FRAME_RATE = 5;
+export const CPROP_MUTED = 6;
 export const SESSION_ACTION_PLAY = 1;
 export const SESSION_ACTION_PAUSE = 2;
 export const SESSION_ACTION_STOP = 3;
@@ -385,6 +420,12 @@ export const TX_CANCEL_READ = 72;
 export const TX_CLOSE_READER = 73;
 export const TX_LOAD_IMAGE = 74;
 export const TX_RELEASE_IMAGE = 75;
+export const TX_CREATE_CAPTURE = 76;
+export const TX_SET_CAPTURE_PROP = 77;
+export const TX_CAPTURE_COMMAND = 78;
+export const TX_RELEASE_CAPTURE = 79;
+export const TX_REQUEST_PERMISSION = 80;
+export const TX_WATCH_CAPTURE_DEVICES = 81;
 export const APPLY_CREATE = 1;
 export const APPLY_SET_PROP = 2;
 export const APPLY_ADD_CHILD = 3;
@@ -446,6 +487,13 @@ export const APPLY_READ_FRAMES = 60;
 export const APPLY_READ_PEAKS = 61;
 export const APPLY_CANCEL_READ = 62;
 export const APPLY_CLOSE_READER = 63;
+export const APPLY_CREATE_CAPTURE = 64;
+export const APPLY_SET_CAPTURE_PROP = 65;
+export const APPLY_CAPTURE_COMMAND = 66;
+export const APPLY_RELEASE_CAPTURE = 67;
+export const APPLY_REQUEST_PERMISSION = 68;
+export const APPLY_WATCH_CAPTURE_DEVICES = 69;
+export const APPLY_SET_VIDEO_CAPTURE = 70;
 export const OCC_BUTTON_CLICKED = 1;
 export const OCC_TEXT_CHANGED = 2;
 export const OCC_TOGGLED = 3;
@@ -496,6 +544,10 @@ export const OCC_READER_PROGRESS = 47;
 export const OCC_READER_PEAKS = 48;
 export const OCC_READER_DONE = 49;
 export const OCC_IMAGE_LOADED = 50;
+export const OCC_CAPTURE_CHANGED = 51;
+export const OCC_CAPTURE_PERMISSION = 52;
+export const OCC_CAPTURE_DEVICES = 53;
+export const OCC_CAPTURE_OVERRUN = 54;
 
 const text_encoder = new TextEncoder();
 const text_decoder = new TextDecoder("utf-8", { fatal: true });
@@ -1306,6 +1358,55 @@ export function tx_release_image(image: number): Uint8Array {
   enc.begin();
   enc.u64(image);
   return enc.end(TX_RELEASE_IMAGE);
+}
+
+/** Create a CAPTURE (docs/capture-plan.md §2): an app-held object with no place in the layout that holds at most one camera and one microphone, its id guest-chosen in its own space. It starts `idle` with neither device; a video view previews it through its `capture` prop. A second create of a live id is a scene error. */
+export function tx_create_capture(capture: number): Uint8Array {
+  enc.begin();
+  enc.u64(capture);
+  return enc.end(TX_CREATE_CAPTURE);
+}
+
+/** Write a capture property (CAPTURE_PROPS) once, as a player's are written. A device change while running reopens that device; `camera` set to "" closes the camera and puts its indicator out. */
+export function tx_set_capture_prop(capture: number, prop: number, value: WireValue): Uint8Array {
+  enc.begin();
+  enc.u64(capture);
+  enc.u32(prop);
+  enc.u32(0);
+  enc.value(value);
+  return enc.end(TX_SET_CAPTURE_PROP);
+}
+
+/** start or stop (CAPTURE_COMMAND). `start` asks for each kind's permission still at `prompt`, as getUserMedia does, and fails `denied` when either kind it opens is denied; the answer is capture_changed, never an echo of the command. */
+export function tx_capture_command(capture: number, command: number): Uint8Array {
+  enc.begin();
+  enc.u64(capture);
+  enc.u32(command);
+  enc.u32(0);
+  return enc.end(TX_CAPTURE_COMMAND);
+}
+
+/** Stop and forget a capture: its devices close, a video view previewing it goes blank, its frame and sample callbacks are dropped and no occurrence of its follows. */
+export function tx_release_capture(capture: number): Uint8Array {
+  enc.begin();
+  enc.u64(capture);
+  return enc.end(TX_RELEASE_CAPTURE);
+}
+
+/** Ask the user for a CAPTURE_KIND's permission before any capture starts (a call screen asking early); answered by capture_permission. A kind already decided is answered with its decision and nothing is asked. */
+export function tx_request_permission(kind: number): Uint8Array {
+  enc.begin();
+  enc.u32(kind);
+  enc.u32(0);
+  return enc.end(TX_REQUEST_PERMISSION);
+}
+
+/** 1: list the cameras and microphones now (capture_devices), report each kind's permission as it stands (capture_permission), and list again whenever a device comes or goes; 0: stop. Listing asks for no permission. */
+export function tx_watch_capture_devices(on: number): Uint8Array {
+  enc.begin();
+  enc.u32(on);
+  enc.u32(0);
+  return enc.end(TX_WATCH_CAPTURE_DEVICES);
 }
 
 /** A civil date as the wire's I64: year * 10000 + month * 100 + day. */
@@ -2274,6 +2375,24 @@ export function tx_bind_player_element(widget_id: number, level = 0, field = 0):
   return enc.end(TX_SET_PROPERTY);
 }
 
+/** set_property with a constant capture value. */
+export function tx_set_capture(widget_id: number, capture: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_CAPTURE); enc.u32(SOURCE_CONST); enc.value(new I64(capture));
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound capture value. */
+export function tx_bind_capture(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_CAPTURE); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_capture_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_CAPTURE); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
 /** set_window_prop with a constant title value; window 0, the primary surface. */
 export function tx_set_window_title(window: number, title: string): Uint8Array {
   enc.begin(); enc.u64(window); enc.u32(WPROP_TITLE); enc.u32(SOURCE_CONST); enc.value(title);
@@ -2720,7 +2839,7 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const size = view.getUint32(0, true);
   const kind = view.getUint16(4, true);
-  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED].includes(kind)) return { kind, id: null, keys: [], payload: null };
+  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED, OCC_CAPTURE_CHANGED, OCC_CAPTURE_PERMISSION, OCC_CAPTURE_DEVICES, OCC_CAPTURE_OVERRUN].includes(kind)) return { kind, id: null, keys: [], payload: null };
   if (kind === OCC_ALERT_RESULT) {
     // A request's one answer: id + the u32 code.
     return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };
@@ -2897,6 +3016,61 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
     }
     return { kind, id: read_u64(buf, 8), keys: [], payload: tail };
   }
+  if (kind === OCC_CAPTURE_CHANGED) {
+    // A flat record: its fields in order, into the tail.
+    let at = 8;
+    const tail: Decoded[] = [];
+    at += 8;
+    tail.push(read_u32(buf, at));
+    at += 4;
+    tail.push(read_u32(buf, at));
+    at += 4;
+    tail.push(read_u32(buf, at));
+    at += 4;
+    tail.push(read_u32(buf, at));
+    at += 4;
+    tail.push(read_u32(buf, at));
+    at += 4;
+    tail.push(read_u32(buf, at));
+    at += 4;
+    {
+      let value: Decoded;
+      [value, at] = parse_value(buf, at);
+      tail.push(value);
+    }
+    return { kind, id: read_u64(buf, 8), keys: [], payload: tail };
+  }
+  if (kind === OCC_CAPTURE_PERMISSION) {
+    // A flat record: its fields in order, into the tail.
+    let at = 8;
+    const tail: Decoded[] = [];
+    tail.push(read_u32(buf, at));
+    at += 4;
+    tail.push(read_u32(buf, at));
+    at += 4;
+    {
+      let value: Decoded;
+      [value, at] = parse_value(buf, at);
+      tail.push(value);
+    }
+    return { kind, id: 0, keys: [], payload: tail };
+  }
+  if (kind === OCC_CAPTURE_DEVICES) {
+    // A flat record: its fields in order, into the tail.
+    let at = 8;
+    const tail: Decoded[] = [];
+    {
+      const count = read_u32(buf, at);
+      at += 8;
+      tail.push(count);
+      for (let i = 0; i < count; i++) {
+        let value: Decoded;
+        [value, at] = parse_value(buf, at);
+        tail.push(value);
+      }
+    }
+    return { kind, id: 0, keys: [], payload: tail };
+  }
   if (kind === OCC_FILE_DIALOG_RESULT) {
     const dialog = read_u64(buf, 8);
     const count = read_u32(buf, 16);
@@ -2934,7 +3108,7 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
     // Surface lifecycle records carry the surface id alone.
     return { kind, id: read_u64(buf, 8), keys: [], payload: null };
   }
-  if ([OCC_SECTION_SELECTED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED].includes(kind)) {
+  if ([OCC_SECTION_SELECTED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_CAPTURE_OVERRUN].includes(kind)) {
     // Surface-pair records (window, section): the SECOND id keys the
     // handler; the first rides as the payload.
     return { kind, id: read_u64(buf, 16), keys: [], payload: read_u64(buf, 8) };

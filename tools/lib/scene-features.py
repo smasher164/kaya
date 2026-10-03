@@ -133,6 +133,10 @@ VERB_FEATURE = {
     "expect_now_playing": "media_formats",
     "expect_display_awake": "media_formats",
     "expect_caption": "media_formats",
+    # docs/capture-plan.md §7, the same reasoning: the denied prompt is the
+    # capture's scene under another name.
+    "expect_capture": "capture",
+    "answer_permission": "capture",
     # docs/range-plan.md §5, the same reasoning.
     "expect_thumb": "range",
     "expect_press_takes": "range",

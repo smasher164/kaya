@@ -4212,6 +4212,106 @@ for pattern, repl, label in (
     if not found:
         fail(f"check-verbs SELF-TEST: the WinUI frame passed with {label}")
 
+# --- THE CAPTURE WALL (docs/capture-plan.md §7) ---------------------------
+# A lane's guest inherits its terminal's camera and microphone grant, so a
+# leg reaching a real device would open the maintainer's camera with NO
+# PROMPT, and every capture scene stays green whichever device answered:
+# the synthetic devices are what the scenes assert, and a real camera that
+# happened to show C83C1E is not a thing the scene can tell from one that
+# was never opened. So the rule is held here, where no scene can see it:
+# every name that reaches a real device lives inside `enum
+# KayaRealCapture`, each of its static entry points begins with the wall,
+# the wall is fatal under KAYA_SELFTEST, and every route into the type
+# from outside it sits behind the harness check.
+CAPTURE_REAL = ("AVCaptureDevice", "AVCaptureSession", "AVCaptureDeviceInput",
+                "AVCaptureVideoDataOutput", "AVCaptureAudioDataOutput",
+                "AVCaptureVideoPreviewLayer", "AVCaptureConnection",
+                "requestAccess(", "authorizationStatus(")
+CAPTURE_WALL_HEAD = "enum KayaRealCapture {"
+
+
+def capture_wall(text=None):
+    code = re.sub(r"//[^\n]*", "", text if text is not None else real(SWIFT))
+    bad = []
+    at = code.find(CAPTURE_WALL_HEAD)
+    body = brace_body(code, CAPTURE_WALL_HEAD)
+    if at < 0 or body is None:
+        return [f"SwiftUI ({SWIFT}): no `{CAPTURE_WALL_HEAD}` — the capture wall "
+                f"reads nothing and would agree with everything"]
+    lo = code.find("{", at)
+    hi = lo + len(body)
+    seen = 0
+    for token in CAPTURE_REAL:
+        for m in re.finditer(re.escape(token), code):
+            seen += 1
+            if not lo <= m.start() < hi:
+                line = code.count("\n", 0, m.start()) + 1
+                bad.append(f"SwiftUI ({SWIFT}): `{token}` at line {line} is outside "
+                           f"KayaRealCapture — a real camera or microphone reached "
+                           f"past the wall (docs/capture-plan.md §7)")
+    if seen < 12:
+        bad.append(f"SwiftUI ({SWIFT}): only {seen} real-capture names read — the "
+                   f"wall's census reads too little to agree with anything")
+    statics = list(re.finditer(r"static func (\w+)\([^{]*\{", body))
+    if len(statics) < 6:
+        bad.append(f"SwiftUI ({SWIFT}): only {len(statics)} entry points read in "
+                   f"KayaRealCapture — the wall's census reads too little")
+    for m in statics:
+        if not body[m.end():].lstrip().startswith("kayaCaptureWall("):
+            bad.append(f"SwiftUI ({SWIFT}): KayaRealCapture.{m.group(1)} does not begin "
+                       f"with kayaCaptureWall( — an entry into the real devices with "
+                       f"nothing refusing it under the harness")
+    if "private init(" not in body:
+        bad.append(f"SwiftUI ({SWIFT}): KayaRealCapture's source has no private init — "
+                   f"it can be made without passing a walled entry")
+    for m in re.finditer(r"KayaRealCapture\.", code):
+        if lo <= m.start() < hi:
+            continue
+        fn = code.rfind("func ", 0, m.start())
+        if "kayaCaptureUnderHarness" not in code[fn:m.start()]:
+            line = code.count("\n", 0, m.start()) + 1
+            bad.append(f"SwiftUI ({SWIFT}): the route into KayaRealCapture at line {line} "
+                       f"is not behind kayaCaptureUnderHarness in its function — under "
+                       f"the harness it would reach the wall instead of a synthetic device")
+    wall = brace_body(code, "func kayaCaptureWall(")
+    if wall is None or "if kayaCaptureUnderHarness" not in wall or "fatalError(" not in wall:
+        bad.append(f"SwiftUI ({SWIFT}): kayaCaptureWall is not fatal under the harness — "
+                   f"the wall refuses nothing")
+    if not re.search(r'let kayaCaptureUnderHarness = ProcessInfo\.processInfo\.environment'
+                     r'\["KAYA_SELFTEST"\] != nil', code):
+        bad.append(f"SwiftUI ({SWIFT}): kayaCaptureUnderHarness no longer reads "
+                   f"KAYA_SELFTEST — the wall and the routing ask the wrong question")
+    return bad
+
+
+capture_out = capture_wall()
+capture_status = 0
+if capture_out:
+    print("check-verbs: the capture wall is breached:", file=sys.stderr)
+    print("\n".join(capture_out), file=sys.stderr)
+    capture_status = 1
+print(f"check-verbs: the capture wall read ({len(CAPTURE_REAL)} names, the type's entry points, "
+      f"the routes into it)")
+for pattern, repl, label in (
+    (r"(func kayaCaptureRequestPermission\(_ kind: UInt32\) \{\n)",
+     r"\1    _ = AVCaptureDevice.authorizationStatus(for: .video)\n",
+     "a real device named outside the type"),
+    (r"(static func devices\(\) -> \[KayaCaptureDeviceInfo\] \{\n)\s*kayaCaptureWall\([^\n]*\n",
+     r"\1", "the wall cut from an entry point"),
+    (r"(if kayaCaptureUnderHarness \{\n\s*)fatalError\(",
+     r"\1print(", "the wall made non-fatal"),
+    (r"(func kayaCaptureWatchDevices\(_ on: Bool\) \{\n\s*kayaCaptureWatching = on\n\s*)"
+     r"if kayaCaptureUnderHarness \{",
+     r"\1if false {", "a route into the type no longer behind the harness check"),
+    (r'(let kayaCaptureUnderHarness = ProcessInfo\.processInfo\.environment\[)"KAYA_SELFTEST"',
+     r'\1"KAYA_SELFTEST_X"', "the harness check asking another variable"),
+):
+    cut = g.doctor(f"the capture wall: {label}", real(SWIFT), pattern, repl)
+    found = [f for f in capture_wall(cut) if f not in capture_out]
+    print(f"check-verbs: the capture wall negative ({label}): {len(found)} finding(s)")
+    if not found:
+        fail(f"check-verbs SELF-TEST: the capture wall passed with {label}")
+
 # clip_mirrors() ran first and printed its own findings; its verdict
 # is read here so there is exactly ONE verdict line.
 if (clip_status or window_status or ink_status or ax_status
@@ -4220,7 +4320,8 @@ if (clip_status or window_status or ink_status or ax_status
         or vtrace_status or norm_status or ind_status
         or answer_status or seed_focus_status or notify_auth_status
         or pump_status or immersive_status or kind_status
-        or range_status or media_status or timeout_status or frame_status):
+        or range_status or media_status or timeout_status or frame_status
+        or capture_status):
     raise SystemExit(1)
 g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"({len(canvas_rows)} of them the canvas vocabularies) + "
@@ -4249,4 +4350,5 @@ g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"+ the GTK media arm (GtkPicture over the sink, one door, raw facts, decodability) "
           f"+ the Android video read (the device's screencap, its tolerance, no decoder moved "
           f"between surfaces, no picture no SurfaceView) "
+          f"+ the capture wall (real devices behind KAYA_SELFTEST) "
           f"+ spec hash against 2 interpreters")

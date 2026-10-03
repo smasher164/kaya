@@ -146,6 +146,16 @@ pub const KAYA_OCCURRENCE_READER_PROGRESS: u16 = 47;
 pub const KAYA_OCCURRENCE_READER_PEAKS: u16 = 48;
 pub const KAYA_OCCURRENCE_READER_DONE: u16 = 49;
 pub const KAYA_OCCURRENCE_IMAGE_LOADED: u16 = 50;
+/// The capture's (docs/capture-plan.md §2): CAPTURE_CHANGED { u64 capture;
+/// u32 state; u32 failure; u32 interruption; u32 width; u32 height; u32
+/// frame_rate; Str detail }; CAPTURE_PERMISSION { u32 kind; u32 permission;
+/// Str detail }; CAPTURE_DEVICES { Values: per device Str id, Str name, I64
+/// kind, I64 facing, Bool preferred }; CAPTURE_OVERRUN { u64 capture; u64
+/// behind_ms }.
+pub const KAYA_OCCURRENCE_CAPTURE_CHANGED: u16 = 51;
+pub const KAYA_OCCURRENCE_CAPTURE_PERMISSION: u16 = 52;
+pub const KAYA_OCCURRENCE_CAPTURE_DEVICES: u16 = 53;
+pub const KAYA_OCCURRENCE_CAPTURE_OVERRUN: u16 = 54;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -177,6 +187,10 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_READER_PEAKS == ring::REC_READER_PEAKS
         && KAYA_OCCURRENCE_READER_DONE == ring::REC_READER_DONE
         && KAYA_OCCURRENCE_IMAGE_LOADED == ring::REC_IMAGE_LOADED
+        && KAYA_OCCURRENCE_CAPTURE_CHANGED == ring::REC_CAPTURE_CHANGED
+        && KAYA_OCCURRENCE_CAPTURE_PERMISSION == ring::REC_CAPTURE_PERMISSION
+        && KAYA_OCCURRENCE_CAPTURE_DEVICES == ring::REC_CAPTURE_DEVICES
+        && KAYA_OCCURRENCE_CAPTURE_OVERRUN == ring::REC_CAPTURE_OVERRUN
         && KAYA_OCCURRENCE_SECTION_SELECTED == ring::REC_SECTION_SELECTED
         && KAYA_OCCURRENCE_MENU_ACTIVATED == ring::REC_MENU_ACTIVATED
         && KAYA_OCCURRENCE_MENU_TOGGLED == ring::REC_MENU_TOGGLED
@@ -299,6 +313,17 @@ pub const KAYA_TX_CANCEL_READ: u16 = 72;
 pub const KAYA_TX_CLOSE_READER: u16 = 73;
 pub const KAYA_TX_LOAD_IMAGE: u16 = 74;
 pub const KAYA_TX_RELEASE_IMAGE: u16 = 75;
+/// The capture (docs/capture-plan.md §2): CREATE_CAPTURE, RELEASE_CAPTURE {
+/// u64 capture }; SET_CAPTURE_PROP { u64 capture; u32 cprop; u32 reserved;
+/// Value value }; CAPTURE_COMMAND { u64 capture; u32 command; u32 reserved };
+/// REQUEST_PERMISSION { u32 kind; u32 reserved }; WATCH_CAPTURE_DEVICES {
+/// u32 on; u32 reserved }.
+pub const KAYA_TX_CREATE_CAPTURE: u16 = 76;
+pub const KAYA_TX_SET_CAPTURE_PROP: u16 = 77;
+pub const KAYA_TX_CAPTURE_COMMAND: u16 = 78;
+pub const KAYA_TX_RELEASE_CAPTURE: u16 = 79;
+pub const KAYA_TX_REQUEST_PERMISSION: u16 = 80;
+pub const KAYA_TX_WATCH_CAPTURE_DEVICES: u16 = 81;
 pub const KAYA_TX_ADD_SECTION: u16 = 25;
 pub const KAYA_TX_SELECT_SECTION: u16 = 26;
 pub const KAYA_TX_SET_SECTION_PROP: u16 = 27;
@@ -617,6 +642,12 @@ const _: () = assert!(
         && KAYA_TX_CLOSE_READER == wire::TX_CLOSE_READER
         && KAYA_TX_LOAD_IMAGE == wire::TX_LOAD_IMAGE
         && KAYA_TX_RELEASE_IMAGE == wire::TX_RELEASE_IMAGE
+        && KAYA_TX_CREATE_CAPTURE == wire::TX_CREATE_CAPTURE
+        && KAYA_TX_SET_CAPTURE_PROP == wire::TX_SET_CAPTURE_PROP
+        && KAYA_TX_CAPTURE_COMMAND == wire::TX_CAPTURE_COMMAND
+        && KAYA_TX_RELEASE_CAPTURE == wire::TX_RELEASE_CAPTURE
+        && KAYA_TX_REQUEST_PERMISSION == wire::TX_REQUEST_PERMISSION
+        && KAYA_TX_WATCH_CAPTURE_DEVICES == wire::TX_WATCH_CAPTURE_DEVICES
         && KAYA_TX_ADD_SECTION == wire::TX_ADD_SECTION
         && KAYA_TX_SELECT_SECTION == wire::TX_SELECT_SECTION
         && KAYA_TX_SET_SECTION_PROP == wire::TX_SET_SECTION_PROP
@@ -704,6 +735,15 @@ pub const KAYA_APPLY_READ_FRAMES: u16 = 60;
 pub const KAYA_APPLY_READ_PEAKS: u16 = 61;
 pub const KAYA_APPLY_CANCEL_READ: u16 = 62;
 pub const KAYA_APPLY_CLOSE_READER: u16 = 63;
+/// The capture's tx records' twins, and SET_VIDEO_CAPTURE { u64 widget;
+/// u64 capture } (docs/capture-plan.md §2, §3).
+pub const KAYA_APPLY_CREATE_CAPTURE: u16 = 64;
+pub const KAYA_APPLY_SET_CAPTURE_PROP: u16 = 65;
+pub const KAYA_APPLY_CAPTURE_COMMAND: u16 = 66;
+pub const KAYA_APPLY_RELEASE_CAPTURE: u16 = 67;
+pub const KAYA_APPLY_REQUEST_PERMISSION: u16 = 68;
+pub const KAYA_APPLY_WATCH_CAPTURE_DEVICES: u16 = 69;
+pub const KAYA_APPLY_SET_VIDEO_CAPTURE: u16 = 70;
 pub const KAYA_APPLY_ADD_SECTION: u16 = 15;
 pub const KAYA_APPLY_SELECT_SECTION: u16 = 16;
 pub const KAYA_APPLY_SET_SECTION_PROP: u16 = 17;
@@ -839,6 +879,13 @@ const _: () = assert!(
         && KAYA_APPLY_READ_PEAKS == wire::APPLY_READ_PEAKS
         && KAYA_APPLY_CANCEL_READ == wire::APPLY_CANCEL_READ
         && KAYA_APPLY_CLOSE_READER == wire::APPLY_CLOSE_READER
+        && KAYA_APPLY_CREATE_CAPTURE == wire::APPLY_CREATE_CAPTURE
+        && KAYA_APPLY_SET_CAPTURE_PROP == wire::APPLY_SET_CAPTURE_PROP
+        && KAYA_APPLY_CAPTURE_COMMAND == wire::APPLY_CAPTURE_COMMAND
+        && KAYA_APPLY_RELEASE_CAPTURE == wire::APPLY_RELEASE_CAPTURE
+        && KAYA_APPLY_REQUEST_PERMISSION == wire::APPLY_REQUEST_PERMISSION
+        && KAYA_APPLY_WATCH_CAPTURE_DEVICES == wire::APPLY_WATCH_CAPTURE_DEVICES
+        && KAYA_APPLY_SET_VIDEO_CAPTURE == wire::APPLY_SET_VIDEO_CAPTURE
         && KAYA_APPLY_ADD_SECTION == wire::APPLY_ADD_SECTION
         && KAYA_APPLY_SELECT_SECTION == wire::APPLY_SELECT_SECTION
         && KAYA_APPLY_SET_SECTION_PROP == wire::APPLY_SET_SECTION_PROP
@@ -1045,6 +1092,8 @@ pub const KAYA_PROP_HIGH_LABEL: u32 = 50;
 pub const KAYA_PROP_FIT: u32 = 51;
 /// A video view's player (docs/media-plan.md §7b): an I64 id, 0 none.
 pub const KAYA_PROP_PLAYER: u32 = 52;
+/// A video view's capture (docs/capture-plan.md §3): an I64 id, 0 none.
+pub const KAYA_PROP_CAPTURE: u32 = 53;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -1210,7 +1259,7 @@ const _: () = assert!(
 // Completeness for the occurrence exports (docs/traps.md): a new spec
 // occurrence trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 50,
+    crate::spec::SPEC.occurrence.len() == 54,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -1293,6 +1342,7 @@ const _: () = assert!(
         && KAYA_PROP_HIGH_LABEL == wire::PROP_HIGH_LABEL
         && KAYA_PROP_FIT == wire::PROP_FIT
         && KAYA_PROP_PLAYER == wire::PROP_PLAYER
+        && KAYA_PROP_CAPTURE == wire::PROP_CAPTURE
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -1622,6 +1672,51 @@ pub const KAYA_FRAME_ACCURACY_EXACT: u32 = 1;
 pub const KAYA_READ_OUTCOME_COMPLETED: u32 = 0;
 pub const KAYA_READ_OUTCOME_CANCELLED: u32 = 1;
 pub const KAYA_READ_OUTCOME_FAILED: u32 = 2;
+/// The capture's vocabularies (docs/capture-plan.md §2).
+pub const KAYA_CAPTURE_STATE_IDLE: u32 = 0;
+pub const KAYA_CAPTURE_STATE_STARTING: u32 = 1;
+pub const KAYA_CAPTURE_STATE_RUNNING: u32 = 2;
+pub const KAYA_CAPTURE_STATE_INTERRUPTED: u32 = 3;
+pub const KAYA_CAPTURE_STATE_FAILED: u32 = 4;
+pub const KAYA_CAPTURE_FAILURE_NONE: u32 = 0;
+pub const KAYA_CAPTURE_FAILURE_DENIED: u32 = 1;
+pub const KAYA_CAPTURE_FAILURE_NOT_FOUND: u32 = 2;
+pub const KAYA_CAPTURE_FAILURE_IN_USE: u32 = 3;
+pub const KAYA_CAPTURE_FAILURE_DISCONNECTED: u32 = 4;
+pub const KAYA_CAPTURE_FAILURE_UNSUPPORTED: u32 = 5;
+pub const KAYA_CAPTURE_FAILURE_HARDWARE_ERROR: u32 = 6;
+pub const KAYA_CAPTURE_FAILURE_TIMEOUT: u32 = 7;
+pub const KAYA_CAPTURE_INTERRUPTION_NONE: u32 = 0;
+pub const KAYA_CAPTURE_INTERRUPTION_BACKGROUND: u32 = 1;
+pub const KAYA_CAPTURE_INTERRUPTION_ANOTHER_APP: u32 = 2;
+pub const KAYA_CAPTURE_INTERRUPTION_SYSTEM_PRESSURE: u32 = 3;
+pub const KAYA_CAPTURE_KIND_CAMERA: u32 = 0;
+pub const KAYA_CAPTURE_KIND_MICROPHONE: u32 = 1;
+pub const KAYA_PERMISSION_PROMPT: u32 = 0;
+pub const KAYA_PERMISSION_GRANTED: u32 = 1;
+pub const KAYA_PERMISSION_DENIED: u32 = 2;
+pub const KAYA_CAMERA_FACING_UNKNOWN: u32 = 0;
+pub const KAYA_CAMERA_FACING_FRONT: u32 = 1;
+pub const KAYA_CAMERA_FACING_BACK: u32 = 2;
+pub const KAYA_CAMERA_FACING_EXTERNAL: u32 = 3;
+pub const KAYA_CAPTURE_COMMAND_START: u32 = 1;
+pub const KAYA_CAPTURE_COMMAND_STOP: u32 = 2;
+pub const KAYA_CPROP_CAMERA: u32 = 1;
+pub const KAYA_CPROP_MICROPHONE: u32 = 2;
+pub const KAYA_CPROP_WIDTH: u32 = 3;
+pub const KAYA_CPROP_HEIGHT: u32 = 4;
+pub const KAYA_CPROP_FRAME_RATE: u32 = 5;
+pub const KAYA_CPROP_MUTED: u32 = 6;
+/// How far behind its microphone an app's sample callback falls before
+/// capture_overrun tells it; the samples every callback is handed.
+pub const KAYA_CAPTURE_OVERRUN_MS: u64 = 200;
+pub const KAYA_CAPTURE_SAMPLE_RATE: u32 = 48_000;
+pub const KAYA_CAPTURE_CHUNK: u32 = 480;
+const _: () = assert!(
+    KAYA_CAPTURE_OVERRUN_MS == crate::capture::OVERRUN_MS
+        && KAYA_CAPTURE_SAMPLE_RATE == crate::capture::SAMPLE_RATE
+        && KAYA_CAPTURE_CHUNK as usize == crate::capture::CHUNK
+);
 /// How often a playing player's position ticks, and how long an open or an
 /// app's seek may go unanswered before the core fails the player `timeout`
 /// (crate::media).
@@ -1688,6 +1783,40 @@ const _: () = assert!(
         && vocab_is(wire::READ_OUTCOMES, "completed", KAYA_READ_OUTCOME_COMPLETED)
         && vocab_is(wire::READ_OUTCOMES, "cancelled", KAYA_READ_OUTCOME_CANCELLED)
         && vocab_is(wire::READ_OUTCOMES, "failed", KAYA_READ_OUTCOME_FAILED)
+        && vocab_is(wire::CAPTURE_STATES, "idle", KAYA_CAPTURE_STATE_IDLE)
+        && vocab_is(wire::CAPTURE_STATES, "starting", KAYA_CAPTURE_STATE_STARTING)
+        && vocab_is(wire::CAPTURE_STATES, "running", KAYA_CAPTURE_STATE_RUNNING)
+        && vocab_is(wire::CAPTURE_STATES, "interrupted", KAYA_CAPTURE_STATE_INTERRUPTED)
+        && vocab_is(wire::CAPTURE_STATES, "failed", KAYA_CAPTURE_STATE_FAILED)
+        && vocab_is(wire::CAPTURE_FAILURES, "none", KAYA_CAPTURE_FAILURE_NONE)
+        && vocab_is(wire::CAPTURE_FAILURES, "denied", KAYA_CAPTURE_FAILURE_DENIED)
+        && vocab_is(wire::CAPTURE_FAILURES, "not_found", KAYA_CAPTURE_FAILURE_NOT_FOUND)
+        && vocab_is(wire::CAPTURE_FAILURES, "in_use", KAYA_CAPTURE_FAILURE_IN_USE)
+        && vocab_is(wire::CAPTURE_FAILURES, "disconnected", KAYA_CAPTURE_FAILURE_DISCONNECTED)
+        && vocab_is(wire::CAPTURE_FAILURES, "unsupported", KAYA_CAPTURE_FAILURE_UNSUPPORTED)
+        && vocab_is(wire::CAPTURE_FAILURES, "hardware_error", KAYA_CAPTURE_FAILURE_HARDWARE_ERROR)
+        && vocab_is(wire::CAPTURE_FAILURES, "timeout", KAYA_CAPTURE_FAILURE_TIMEOUT)
+        && vocab_is(wire::CAPTURE_INTERRUPTIONS, "none", KAYA_CAPTURE_INTERRUPTION_NONE)
+        && vocab_is(wire::CAPTURE_INTERRUPTIONS, "background", KAYA_CAPTURE_INTERRUPTION_BACKGROUND)
+        && vocab_is(wire::CAPTURE_INTERRUPTIONS, "another_app", KAYA_CAPTURE_INTERRUPTION_ANOTHER_APP)
+        && vocab_is(wire::CAPTURE_INTERRUPTIONS, "system_pressure", KAYA_CAPTURE_INTERRUPTION_SYSTEM_PRESSURE)
+        && vocab_is(wire::CAPTURE_KINDS, "camera", KAYA_CAPTURE_KIND_CAMERA)
+        && vocab_is(wire::CAPTURE_KINDS, "microphone", KAYA_CAPTURE_KIND_MICROPHONE)
+        && vocab_is(wire::PERMISSIONS, "prompt", KAYA_PERMISSION_PROMPT)
+        && vocab_is(wire::PERMISSIONS, "granted", KAYA_PERMISSION_GRANTED)
+        && vocab_is(wire::PERMISSIONS, "denied", KAYA_PERMISSION_DENIED)
+        && vocab_is(wire::CAMERA_FACINGS, "unknown", KAYA_CAMERA_FACING_UNKNOWN)
+        && vocab_is(wire::CAMERA_FACINGS, "front", KAYA_CAMERA_FACING_FRONT)
+        && vocab_is(wire::CAMERA_FACINGS, "back", KAYA_CAMERA_FACING_BACK)
+        && vocab_is(wire::CAMERA_FACINGS, "external", KAYA_CAMERA_FACING_EXTERNAL)
+        && vocab_is(wire::CAPTURE_COMMANDS, "start", KAYA_CAPTURE_COMMAND_START)
+        && vocab_is(wire::CAPTURE_COMMANDS, "stop", KAYA_CAPTURE_COMMAND_STOP)
+        && vocab_is(wire::CPROPS, "camera", KAYA_CPROP_CAMERA)
+        && vocab_is(wire::CPROPS, "microphone", KAYA_CPROP_MICROPHONE)
+        && vocab_is(wire::CPROPS, "width", KAYA_CPROP_WIDTH)
+        && vocab_is(wire::CPROPS, "height", KAYA_CPROP_HEIGHT)
+        && vocab_is(wire::CPROPS, "frame_rate", KAYA_CPROP_FRAME_RATE)
+        && vocab_is(wire::CPROPS, "muted", KAYA_CPROP_MUTED)
 );
 const _: () = {
     assert!(spec_enum_variants("pprop") == 7, "the spec pprop enum grew: export KAYA_PPROP_*");
@@ -1721,11 +1850,19 @@ const _: () = {
         "the spec playback_state enum grew: export KAYA_PLAYBACK_STATE_*"
     );
     assert!(spec_enum_variants("fit") == 3, "the spec fit enum grew: export KAYA_FIT_*");
+    assert!(spec_enum_variants("capture_state") == 5, "the spec capture_state enum grew: export KAYA_CAPTURE_STATE_*");
+    assert!(spec_enum_variants("capture_failure") == 8, "the spec capture_failure enum grew: export KAYA_CAPTURE_FAILURE_*");
+    assert!(spec_enum_variants("capture_interruption") == 4, "the spec capture_interruption enum grew: export KAYA_CAPTURE_INTERRUPTION_*");
+    assert!(spec_enum_variants("capture_kind") == 2, "the spec capture_kind enum grew: export KAYA_CAPTURE_KIND_*");
+    assert!(spec_enum_variants("permission") == 3, "the spec permission enum grew: export KAYA_PERMISSION_*");
+    assert!(spec_enum_variants("camera_facing") == 4, "the spec camera_facing enum grew: export KAYA_CAMERA_FACING_*");
+    assert!(spec_enum_variants("capture_command") == 2, "the spec capture_command enum grew: export KAYA_CAPTURE_COMMAND_*");
+    assert!(spec_enum_variants("cprop") == 6, "the spec cprop enum grew: export KAYA_CPROP_*");
 };
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 52,
+    crate::spec::PROPS.len() == 53,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(
@@ -4857,6 +4994,390 @@ pub unsafe extern "C" fn kaya_image_pixels(
 }
 
 
+// ---------------------------------------------------------------------
+// The capture (docs/capture-plan.md): a backend's reports, its frames and
+// samples, the synthetic devices, and the app's callbacks.
+// ---------------------------------------------------------------------
+
+fn capture_report(capture: u64, report: crate::capture::Report) -> Vec<crate::protocol::Occurrence> {
+    let mut scene_slot = PRESENTATION_SCENE.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(scene) = scene_slot.as_mut() else { return Vec::new() };
+    let published = scene.capture_report(crate::protocol::CaptureId(capture), report);
+    drop(scene_slot);
+    published
+}
+
+/// Presentation side: a capture is running at `width` x `height` and
+/// `frame_rate` (0x0 at 0 with no camera), is interrupted (`reason` a
+/// KAYA_CAPTURE_INTERRUPTION_*), or failed (`reason` a
+/// KAYA_CAPTURE_FAILURE_*, `detail` the platform's sentence). `state` is the
+/// KAYA_CAPTURE_STATE_* reached; a backend reports neither idle nor
+/// starting, which are the app's own commands.
+///
+/// # Safety
+/// `detail` must describe `detail_len` readable UTF-8 bytes, or be NULL with 0.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn kaya_capture_state(
+    capture: u64,
+    state: u32,
+    reason: u32,
+    width: u32,
+    height: u32,
+    frame_rate: u32,
+    detail: *const u8,
+    detail_len: usize,
+) {
+    let detail = unsafe { lossy(detail, detail_len) };
+    let report = match crate::wire::capture_state_from(state) {
+        Some(crate::protocol::CaptureState::Running) => crate::capture::Report::Running { width, height, frame_rate },
+        Some(crate::protocol::CaptureState::Interrupted) => crate::capture::Report::Interrupted(
+            crate::wire::capture_interruption_from(reason)
+                .unwrap_or_else(|| panic!("kaya_capture_state: interruption {reason} is not a KAYA_CAPTURE_INTERRUPTION_*")),
+        ),
+        Some(crate::protocol::CaptureState::Failed) => crate::capture::Report::Failed(
+            crate::wire::capture_failure_from(reason)
+                .unwrap_or_else(|| panic!("kaya_capture_state: failure {reason} is not a KAYA_CAPTURE_FAILURE_* but none")),
+            detail,
+        ),
+        _ => panic!("kaya_capture_state: a backend reports running, interrupted or failed, got state {state}"),
+    };
+    send_occurrences(capture_report(capture, report));
+}
+
+/// Presentation side: KAYA_MEDIA_TIMEOUT_MS passed since the backend was
+/// handed a start. Answers 1 when the core's own clock failed the capture
+/// `timeout`, so the backend tears its start down, else 0.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_capture_overdue(capture: u64) -> u32 {
+    let published = capture_report(capture, crate::capture::Report::Overdue);
+    let failed = crate::capture::timed_out(&published);
+    send_occurrences(published);
+    u32::from(failed)
+}
+
+/// Presentation side: a KAYA_CAPTURE_KIND_*'s KAYA_PERMISSION_*, as it
+/// moved or in answer to a request.
+///
+/// # Safety
+/// `detail` must describe `detail_len` readable UTF-8 bytes, or be NULL with 0.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_capture_permission(kind: u32, permission: u32, detail: *const u8, detail_len: usize) {
+    let detail = unsafe { lossy(detail, detail_len) };
+    let kind = crate::wire::capture_kind_from(kind)
+        .unwrap_or_else(|| panic!("kaya_capture_permission: kind {kind} is not a KAYA_CAPTURE_KIND_*"));
+    let permission = crate::wire::permission_from(permission)
+        .unwrap_or_else(|| panic!("kaya_capture_permission: {permission} is not a KAYA_PERMISSION_*"));
+    let mut scene_slot = PRESENTATION_SCENE.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(scene) = scene_slot.as_mut() else { return };
+    let published = scene.capture_permission(kind, permission, detail);
+    drop(scene_slot);
+    send_occurrences(published);
+}
+
+/// Presentation side: a device list starts.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_capture_devices_begin() {
+    let mut scene_slot = PRESENTATION_SCENE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(scene) = scene_slot.as_mut() {
+        scene.capture_devices_begin();
+    }
+}
+
+/// Presentation side: one device of the list, its KAYA_CAPTURE_KIND_*, its
+/// KAYA_CAMERA_FACING_* and whether it is the platform's preferred one.
+///
+/// # Safety
+/// `id` and `name` must each describe readable UTF-8 bytes of their lengths.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn kaya_capture_device(
+    id: *const u8,
+    id_len: usize,
+    name: *const u8,
+    name_len: usize,
+    kind: u32,
+    facing: u32,
+    preferred: u32,
+) {
+    let device = crate::protocol::CaptureDevice {
+        id: unsafe { lossy(id, id_len) },
+        name: unsafe { lossy(name, name_len) },
+        kind: crate::wire::capture_kind_from(kind)
+            .unwrap_or_else(|| panic!("kaya_capture_device: kind {kind} is not a KAYA_CAPTURE_KIND_*")),
+        facing: crate::wire::camera_facing_from(i64::from(facing))
+            .unwrap_or_else(|| panic!("kaya_capture_device: facing {facing} is not a KAYA_CAMERA_FACING_*")),
+        preferred: preferred != 0,
+    };
+    let mut scene_slot = PRESENTATION_SCENE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(scene) = scene_slot.as_mut() {
+        scene.capture_device(device);
+    }
+}
+
+/// Presentation side: the list is whole; the app hears it.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_capture_devices_end() {
+    let mut scene_slot = PRESENTATION_SCENE.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(scene) = scene_slot.as_mut() else { return };
+    let published = scene.capture_devices_end();
+    drop(scene_slot);
+    send_occurrences(published);
+}
+
+/// Presentation side, ON THE CAPTURE THREAD: one NV12 frame (video-range
+/// BT.601; the Y plane `y_stride` bytes a row, the interleaved UV plane at
+/// half resolution `uv_stride` bytes a row), its time on the capture's
+/// monotonic clock and the rotation that stands it upright. The core keeps
+/// what the harness reads and hands it to the app's callback; answers 1
+/// while the capture is live, 0 once released.
+///
+/// # Safety
+/// `y` must describe `y_stride * height` readable bytes and `uv`
+/// `uv_stride * ((height + 1) / 2)`.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn kaya_capture_frame(
+    capture: u64,
+    width: u32,
+    height: u32,
+    y: *const u8,
+    y_stride: u32,
+    uv: *const u8,
+    uv_stride: u32,
+    timestamp_ns: u64,
+    rotation: u32,
+) -> u32 {
+    if y.is_null() || uv.is_null() || width == 0 || height == 0 {
+        return 1;
+    }
+    let frame = crate::capture::CaptureFrame {
+        width,
+        height,
+        y: unsafe { std::slice::from_raw_parts(y, y_stride as usize * height as usize) },
+        y_stride,
+        uv: unsafe { std::slice::from_raw_parts(uv, uv_stride as usize * height.div_ceil(2) as usize) },
+        uv_stride,
+        timestamp_ns,
+        rotation,
+    };
+    u32::from(crate::capture::frame(crate::protocol::CaptureId(capture), &frame))
+}
+
+/// Presentation side, ON THE CAPTURE THREAD: `count` interleaved float
+/// samples at their own `channels` and `sample_rate`, the first at
+/// `timestamp_ns` on the capture's clock. The core turns them into 48 kHz
+/// mono s16 chunks of 480 for the app's callback.
+///
+/// # Safety
+/// `samples` must describe `count` readable floats.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_capture_samples(
+    capture: u64,
+    channels: u32,
+    sample_rate: u32,
+    samples: *const f32,
+    count: usize,
+    timestamp_ns: u64,
+) {
+    if samples.is_null() || count == 0 {
+        return;
+    }
+    let samples = unsafe { std::slice::from_raw_parts(samples, count) };
+    send_occurrences(crate::capture::samples(
+        crate::protocol::CaptureId(capture),
+        channels,
+        sample_rate,
+        samples,
+        timestamp_ns,
+    ));
+}
+
+/// Presentation side: the `index`th synthetic device (docs/capture-plan.md
+/// §7), its id and name NUL-terminated into the two buffers, its kind,
+/// facing, whether preferred, and its content (0xRRGGBB for a camera, Hz
+/// for a microphone). Answers 0 past the last.
+///
+/// # Safety
+/// The buffers must be writable for their caps; the out pointers writable.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn kaya_capture_synthetic(
+    index: u32,
+    id: *mut u8,
+    id_cap: usize,
+    name: *mut u8,
+    name_cap: usize,
+    kind: *mut u32,
+    facing: *mut u32,
+    preferred: *mut u32,
+    content: *mut u32,
+) -> u32 {
+    let Some(d) = crate::capture::SYNTHETIC.get(index as usize) else { return 0 };
+    unsafe {
+        write_cstr(id, id_cap, d.id);
+        write_cstr(name, name_cap, d.name);
+        *kind = crate::wire::capture_kind_raw(d.kind);
+        *facing = crate::wire::camera_facing_raw(d.facing) as u32;
+        *preferred = u32::from(d.preferred);
+        *content = d.content;
+    }
+    1
+}
+
+unsafe fn write_cstr(out: *mut u8, cap: usize, text: &str) {
+    if out.is_null() || cap == 0 {
+        return;
+    }
+    let n = text.len().min(cap - 1);
+    unsafe {
+        std::ptr::copy_nonoverlapping(text.as_ptr(), out, n);
+        *out.add(n) = 0;
+    }
+}
+
+/// Presentation side: the synthetic permission of a KAYA_CAPTURE_KIND_*,
+/// and the synthetic prompt that decides one still at prompt (the
+/// harness's arranged answer, granted unless answer_permission said else).
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_capture_synthetic_permission(kind: u32, ask: u32) -> u32 {
+    let kind = crate::wire::capture_kind_from(kind)
+        .unwrap_or_else(|| panic!("kaya_capture_synthetic_permission: kind {kind} is not a KAYA_CAPTURE_KIND_*"));
+    let p = if ask != 0 { crate::capture::synthetic_ask(kind) } else { crate::capture::synthetic_permission(kind) };
+    crate::wire::permission_raw(p)
+}
+
+/// The harness's two capture verbs for an interpreter: `expect_capture`
+/// (`verb` 0, `index` the capture and `text` the wanted reading) and
+/// `answer_permission` (`verb` 1, `index` the KAYA_CAPTURE_KIND_* and `text`
+/// "granted" or "denied"). The sentence to record or fail with goes into
+/// `out`; `ok` says which.
+///
+/// # Safety
+/// `text` must describe `len` readable UTF-8 bytes; `out` writable for `cap`
+/// bytes; `ok` writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_capture_harness(
+    verb: u32,
+    index: u32,
+    text: *const u8,
+    len: usize,
+    out: *mut u8,
+    cap: usize,
+    ok: *mut u8,
+) -> usize {
+    let text = unsafe { lossy(text, len) };
+    let answer = match verb {
+        0 => crate::capture::expect(index as usize, &text),
+        _ => match (crate::wire::capture_kind_from(index), text.as_str()) {
+            (Some(kind), "granted" | "denied") => {
+                let answer = if text == "granted" {
+                    crate::protocol::Permission::Granted
+                } else {
+                    crate::protocol::Permission::Denied
+                };
+                crate::capture::answer_permission(kind, answer)
+                    .map(|()| format!("answer_permission {} {text}", kind.name()))
+            }
+            _ => Err(format!("answer_permission wants camera|microphone and granted|denied, got {index} {text:?}")),
+        },
+    };
+    let (good, sentence) = match answer {
+        Ok(s) => (1, s),
+        Err(s) => (0, s),
+    };
+    if !ok.is_null() {
+        unsafe { *ok = good };
+    }
+    let n = sentence.len().min(cap);
+    if n > 0 && !out.is_null() {
+        unsafe { std::ptr::copy_nonoverlapping(sentence.as_ptr(), out, n) };
+    }
+    sentence.len()
+}
+
+/// A frame as a guest's callback is handed it (docs/capture-plan.md §4):
+/// NV12, video-range BT.601, borrowed until the callback returns.
+#[repr(C)]
+pub struct KayaCaptureFrame {
+    pub width: u32,
+    pub height: u32,
+    pub y: *const u8,
+    pub uv: *const u8,
+    pub y_stride: u32,
+    pub uv_stride: u32,
+    pub timestamp_ns: u64,
+    pub rotation: u32,
+    pub reserved: u32,
+}
+
+/// A guest's frame callback: its context and the borrowed frame.
+pub type KayaCaptureFrameFn = Option<unsafe extern "C" fn(*mut std::ffi::c_void, *const KayaCaptureFrame)>;
+/// A guest's sample callback: its context, KAYA_CAPTURE_CHUNK samples of
+/// 48 kHz mono s16, their count and the first one's time.
+pub type KayaCaptureSamplesFn = Option<unsafe extern "C" fn(*mut std::ffi::c_void, *const i16, usize, u64)>;
+
+struct GuestContext(*mut std::ffi::c_void);
+// SAFETY: the guest hands a context its callback reads from kaya's capture
+// thread, which kaya_capture_on_frame's contract states.
+unsafe impl Send for GuestContext {}
+unsafe impl Sync for GuestContext {}
+
+impl GuestContext {
+    fn ptr(&self) -> *mut std::ffi::c_void {
+        self.0
+    }
+}
+
+/// Guest side: run `callback(ctx, frame)` on KAYA'S CAPTURE THREAD for each
+/// frame of `capture`, the next frame dropped while it still runs; NULL
+/// drops it. The callback holds no transaction: to touch the scene it posts.
+///
+/// # Safety
+/// `ctx` must stay valid, and usable from another thread, until the
+/// callback is replaced or the capture released.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_capture_on_frame(capture: u64, callback: KayaCaptureFrameFn, ctx: *mut std::ffi::c_void) {
+    let sink = callback.map(|cb| {
+        let ctx = GuestContext(ctx);
+        std::sync::Arc::new(move |f: &crate::capture::CaptureFrame<'_>| {
+            let frame = KayaCaptureFrame {
+                width: f.width,
+                height: f.height,
+                y: f.y.as_ptr(),
+                uv: f.uv.as_ptr(),
+                y_stride: f.y_stride,
+                uv_stride: f.uv_stride,
+                timestamp_ns: f.timestamp_ns,
+                rotation: f.rotation,
+                reserved: 0,
+            };
+            unsafe { cb(ctx.ptr(), &frame) };
+        }) as crate::capture::FrameSink
+    });
+    crate::capture::set_frame_sink(crate::protocol::CaptureId(capture), sink);
+}
+
+/// Guest side: run `callback(ctx, samples, count, timestamp_ns)` on kaya's
+/// capture thread for every chunk of `capture`'s microphone, none dropped;
+/// a callback slower than the microphone is told by capture_overrun.
+///
+/// # Safety
+/// As kaya_capture_on_frame.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_capture_on_samples(
+    capture: u64,
+    callback: KayaCaptureSamplesFn,
+    ctx: *mut std::ffi::c_void,
+) {
+    let sink = callback.map(|cb| {
+        let ctx = GuestContext(ctx);
+        std::sync::Arc::new(move |chunk: &[i16], at: u64| unsafe { cb(ctx.ptr(), chunk.as_ptr(), chunk.len(), at) })
+            as crate::capture::SampleSink
+    });
+    crate::capture::set_sample_sink(crate::protocol::CaptureId(capture), sink);
+}
+
 /// Presentation side: the system's media controls sent a SESSION_ACTION
 /// (`at_ms` for seek_to). THE CORE ROUTES IT (docs/media-plan.md §5): 0
 /// the app handles it and has been told, 1 play, 2 pause and 3 seek to
@@ -5748,7 +6269,11 @@ fn send_occurrences(occurrences: Vec<crate::protocol::Occurrence>) {
             | crate::protocol::Occurrence::ReaderProgress { .. }
             | crate::protocol::Occurrence::ReaderPeaks { .. }
             | crate::protocol::Occurrence::ReaderDone { .. }
-            | crate::protocol::Occurrence::ImageLoaded { .. }) => {
+            | crate::protocol::Occurrence::ImageLoaded { .. }
+            | crate::protocol::Occurrence::CaptureChanged { .. }
+            | crate::protocol::Occurrence::CapturePermission { .. }
+            | crate::protocol::Occurrence::CaptureDevices { .. }
+            | crate::protocol::Occurrence::CaptureOverrun { .. }) => {
                 crate::protocol::OccSink::Ring(state.ring.clone()).send(other)
             }
             other => unreachable!(
@@ -6383,6 +6908,12 @@ mod tests {
             ("close_reader", KAYA_TX_CLOSE_READER),
             ("load_image", KAYA_TX_LOAD_IMAGE),
             ("release_image", KAYA_TX_RELEASE_IMAGE),
+            ("create_capture", KAYA_TX_CREATE_CAPTURE),
+            ("set_capture_prop", KAYA_TX_SET_CAPTURE_PROP),
+            ("capture_command", KAYA_TX_CAPTURE_COMMAND),
+            ("release_capture", KAYA_TX_RELEASE_CAPTURE),
+            ("request_permission", KAYA_TX_REQUEST_PERMISSION),
+            ("watch_capture_devices", KAYA_TX_WATCH_CAPTURE_DEVICES),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -6446,6 +6977,13 @@ mod tests {
             ("read_peaks", KAYA_APPLY_READ_PEAKS),
             ("cancel_read", KAYA_APPLY_CANCEL_READ),
             ("close_reader", KAYA_APPLY_CLOSE_READER),
+            ("create_capture", KAYA_APPLY_CREATE_CAPTURE),
+            ("set_capture_prop", KAYA_APPLY_SET_CAPTURE_PROP),
+            ("capture_command", KAYA_APPLY_CAPTURE_COMMAND),
+            ("release_capture", KAYA_APPLY_RELEASE_CAPTURE),
+            ("request_permission", KAYA_APPLY_REQUEST_PERMISSION),
+            ("watch_capture_devices", KAYA_APPLY_WATCH_CAPTURE_DEVICES),
+            ("set_video_capture", KAYA_APPLY_SET_VIDEO_CAPTURE),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

@@ -2117,7 +2117,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0x6d398768b7d3b5d6uL
+    private const val SPEC_HASH: ULong = 0xc00e7dc840e57f41uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -2190,6 +2190,14 @@ object KayaCompose {
     private const val APPLY_READ_PEAKS = 61
     private const val APPLY_CANCEL_READ = 62
     private const val APPLY_CLOSE_READER = 63
+    /** docs/capture-plan.md §2, §3: the capture, a depth slice on the mac. */
+    private const val APPLY_CREATE_CAPTURE = 64
+    private const val APPLY_SET_CAPTURE_PROP = 65
+    private const val APPLY_CAPTURE_COMMAND = 66
+    private const val APPLY_RELEASE_CAPTURE = 67
+    private const val APPLY_REQUEST_PERMISSION = 68
+    private const val APPLY_WATCH_CAPTURE_DEVICES = 69
+    private const val APPLY_SET_VIDEO_CAPTURE = 70
     private const val FRAME_ACCURACY_EXACT = 1
     /** The rich-text pair (docs/rich-text-plan.md §4); the arm is a depth slice. */
     private const val APPLY_SET_RICH_TEXT = 43
@@ -2409,6 +2417,7 @@ object KayaCompose {
     private const val PROP_HIGH_LABEL = 50
     private const val PROP_FIT = 51
     private const val PROP_PLAYER = 52
+    private const val PROP_CAPTURE = 53
     private const val FILE_CONTENT_IMAGES = 1
     private const val PROP_COLUMNS = 11
     // The accessibility identifier (never spoken) and label (spoken).
@@ -3410,6 +3419,7 @@ object KayaCompose {
                         PROP_HIGH_LABEL -> KayaSceneModel.nodes[id]!!.highLabel = readString(b)
                         PROP_FIT -> KayaSceneModel.nodes[id]!!.fit = readI64(b)
                         PROP_PLAYER -> error("kaya: a video view's player arrives as set_video_player; the core never forwards the player prop")
+                        PROP_CAPTURE -> error("kaya: a video view's capture arrives as set_video_capture; the core never forwards the capture prop")
                         // docs/rich-text-plan.md §14: this platform's lever
                         // is `clearHistory()`, so taking ownership drops what
                         // the field had banked.
@@ -3845,6 +3855,8 @@ object KayaCompose {
                     kayaReaders[rid]?.stop(b.long)
                 }
                 APPLY_CLOSE_READER -> kayaReaderClose(b.long)
+                APPLY_CREATE_CAPTURE, APPLY_SET_CAPTURE_PROP, APPLY_CAPTURE_COMMAND, APPLY_RELEASE_CAPTURE,
+                APPLY_REQUEST_PERMISSION, APPLY_WATCH_CAPTURE_DEVICES, APPLY_SET_VIDEO_CAPTURE -> depthStub("capture")
                 APPLY_SET_BADGE -> {
                     // { u32 count; u32 reserved } (docs/app-badge-plan.md §3).
                     val count = b.int
@@ -8872,6 +8884,7 @@ object KayaCompose {
                             else -> failures.add("${parts[1]} is drawn $got, wanted $want")
                         }
                     }
+                    "expect_capture", "answer_permission" -> depthStub("capture")
                     "copy_asset" -> {
                         // The scene's fixture file, the core's own body
                         // (docs/photo-attach-plan.md §5).

@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x6d398768b7d3b5d6L
+let spec_hash = 0xc00e7dc840e57f41L
 
 let value_bool = 1
 let value_i64 = 2
@@ -146,6 +146,7 @@ let prop_low_label = 49
 let prop_high_label = 50
 let prop_fit = 51
 let prop_player = 52
+let prop_capture = 53
 let wprop_title = 1
 let wprop_width = 2
 let wprop_height = 3
@@ -306,6 +307,40 @@ let frame_accuracy_exact = 1
 let read_outcome_completed = 0
 let read_outcome_cancelled = 1
 let read_outcome_failed = 2
+let capture_state_idle = 0
+let capture_state_starting = 1
+let capture_state_running = 2
+let capture_state_interrupted = 3
+let capture_state_failed = 4
+let capture_failure_none = 0
+let capture_failure_denied = 1
+let capture_failure_not_found = 2
+let capture_failure_in_use = 3
+let capture_failure_disconnected = 4
+let capture_failure_unsupported = 5
+let capture_failure_hardware_error = 6
+let capture_failure_timeout = 7
+let capture_interruption_none = 0
+let capture_interruption_background = 1
+let capture_interruption_another_app = 2
+let capture_interruption_system_pressure = 3
+let capture_kind_camera = 0
+let capture_kind_microphone = 1
+let permission_prompt = 0
+let permission_granted = 1
+let permission_denied = 2
+let camera_facing_unknown = 0
+let camera_facing_front = 1
+let camera_facing_back = 2
+let camera_facing_external = 3
+let capture_command_start = 1
+let capture_command_stop = 2
+let cprop_camera = 1
+let cprop_microphone = 2
+let cprop_width = 3
+let cprop_height = 4
+let cprop_frame_rate = 5
+let cprop_muted = 6
 let session_action_play = 1
 let session_action_pause = 2
 let session_action_stop = 3
@@ -407,6 +442,12 @@ let tx_kind_cancel_read = 72
 let tx_kind_close_reader = 73
 let tx_kind_load_image = 74
 let tx_kind_release_image = 75
+let tx_kind_create_capture = 76
+let tx_kind_set_capture_prop = 77
+let tx_kind_capture_command = 78
+let tx_kind_release_capture = 79
+let tx_kind_request_permission = 80
+let tx_kind_watch_capture_devices = 81
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -468,6 +509,13 @@ let apply_kind_read_frames = 60
 let apply_kind_read_peaks = 61
 let apply_kind_cancel_read = 62
 let apply_kind_close_reader = 63
+let apply_kind_create_capture = 64
+let apply_kind_set_capture_prop = 65
+let apply_kind_capture_command = 66
+let apply_kind_release_capture = 67
+let apply_kind_request_permission = 68
+let apply_kind_watch_capture_devices = 69
+let apply_kind_set_video_capture = 70
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
@@ -518,6 +566,10 @@ let occ_kind_reader_progress = 47
 let occ_kind_reader_peaks = 48
 let occ_kind_reader_done = 49
 let occ_kind_image_loaded = 50
+let occ_kind_capture_changed = 51
+let occ_kind_capture_permission = 52
+let occ_kind_capture_devices = 53
+let occ_kind_capture_overrun = 54
 
 let pad8 b =
   while Buffer.length b mod 8 <> 0 do
@@ -1108,6 +1160,43 @@ let tx_load_image image source =
 let tx_release_image image =
   finish tx_kind_release_image (fun b ->
       Buffer.add_int64_le b image)
+
+(* Create a CAPTURE (docs/capture-plan.md §2): an app-held object with no place in the layout that holds at most one camera and one microphone, its id guest-chosen in its own space. It starts `idle` with neither device; a video view previews it through its `capture` prop. A second create of a live id is a scene error. *)
+let tx_create_capture capture =
+  finish tx_kind_create_capture (fun b ->
+      Buffer.add_int64_le b capture)
+
+(* Write a capture property (CAPTURE_PROPS) once, as a player's are written. A device change while running reopens that device; `camera` set to "" closes the camera and puts its indicator out. *)
+let tx_set_capture_prop capture prop value =
+  finish tx_kind_set_capture_prop (fun b ->
+      Buffer.add_int64_le b capture;
+      Buffer.add_int32_le b (Int32.of_int prop);
+      Buffer.add_int32_le b 0l;
+      encode_value b value)
+
+(* start or stop (CAPTURE_COMMAND). `start` asks for each kind's permission still at `prompt`, as getUserMedia does, and fails `denied` when either kind it opens is denied; the answer is capture_changed, never an echo of the command. *)
+let tx_capture_command capture command =
+  finish tx_kind_capture_command (fun b ->
+      Buffer.add_int64_le b capture;
+      Buffer.add_int32_le b (Int32.of_int command);
+      Buffer.add_int32_le b 0l)
+
+(* Stop and forget a capture: its devices close, a video view previewing it goes blank, its frame and sample callbacks are dropped and no occurrence of its follows. *)
+let tx_release_capture capture =
+  finish tx_kind_release_capture (fun b ->
+      Buffer.add_int64_le b capture)
+
+(* Ask the user for a CAPTURE_KIND's permission before any capture starts (a call screen asking early); answered by capture_permission. A kind already decided is answered with its decision and nothing is asked. *)
+let tx_request_permission kind =
+  finish tx_kind_request_permission (fun b ->
+      Buffer.add_int32_le b (Int32.of_int kind);
+      Buffer.add_int32_le b 0l)
+
+(* 1: list the cameras and microphones now (capture_devices), report each kind's permission as it stands (capture_permission), and list again whenever a device comes or goes; 0: stop. Listing asks for no permission. *)
+let tx_watch_capture_devices on =
+  finish tx_kind_watch_capture_devices (fun b ->
+      Buffer.add_int32_le b (Int32.of_int on);
+      Buffer.add_int32_le b 0l)
 
 (* A civil date as the wire's I64: year * 10000 + month * 100 + day. *)
 let pack_date year month day =
@@ -2487,6 +2576,32 @@ let tx_bind_player_element ?(level = 0) ?(field = 0) widget_id =
       Buffer.add_int32_le b (Int32.of_int level);
       Buffer.add_int32_le b (Int32.of_int field))
 
+(* set_property with a constant capture value. *)
+let tx_set_capture widget_id capture =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_capture);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (I64 capture))
+
+(* set_property with a signal-bound capture value. *)
+let tx_bind_capture widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_capture);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_capture_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_capture);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
 (* set_window_prop with a constant title value (window 0, the primary surface). *)
 let tx_set_window_title window title =
   finish tx_kind_set_window_prop (fun b ->
@@ -3042,7 +3157,7 @@ let parse_clip byte at =
    value), None for clicks. None for pad/unknown kinds. *)
 let parse_occurrence byte =
   let kind = u16_at byte 4 in
-  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended && kind <> occ_kind_date_changed && kind <> occ_kind_time_changed && kind <> occ_kind_value_committed && kind <> occ_kind_notification_result && kind <> occ_kind_link_opened && kind <> occ_kind_text_edited && kind <> occ_kind_text_formatted && kind <> occ_kind_sheet_dismissed && kind <> occ_kind_dismiss_requested && kind <> occ_kind_submitted && kind <> occ_kind_notification_replied && kind <> occ_kind_fullscreen_changed && kind <> occ_kind_color_changed && kind <> occ_kind_range_changed && kind <> occ_kind_range_committed && kind <> occ_kind_player_changed && kind <> occ_kind_player_position && kind <> occ_kind_seek_completed && kind <> occ_kind_session_action && kind <> occ_kind_player_tracks && kind <> occ_kind_caption_cue && kind <> occ_kind_video_visibility && kind <> occ_kind_reader_frame && kind <> occ_kind_reader_progress && kind <> occ_kind_reader_peaks && kind <> occ_kind_reader_done && kind <> occ_kind_image_loaded then None
+  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended && kind <> occ_kind_date_changed && kind <> occ_kind_time_changed && kind <> occ_kind_value_committed && kind <> occ_kind_notification_result && kind <> occ_kind_link_opened && kind <> occ_kind_text_edited && kind <> occ_kind_text_formatted && kind <> occ_kind_sheet_dismissed && kind <> occ_kind_dismiss_requested && kind <> occ_kind_submitted && kind <> occ_kind_notification_replied && kind <> occ_kind_fullscreen_changed && kind <> occ_kind_color_changed && kind <> occ_kind_range_changed && kind <> occ_kind_range_committed && kind <> occ_kind_player_changed && kind <> occ_kind_player_position && kind <> occ_kind_seek_completed && kind <> occ_kind_session_action && kind <> occ_kind_player_tracks && kind <> occ_kind_caption_cue && kind <> occ_kind_video_visibility && kind <> occ_kind_reader_frame && kind <> occ_kind_reader_progress && kind <> occ_kind_reader_peaks && kind <> occ_kind_reader_done && kind <> occ_kind_image_loaded && kind <> occ_kind_capture_changed && kind <> occ_kind_capture_permission && kind <> occ_kind_capture_devices && kind <> occ_kind_capture_overrun then None
   else begin
     (* ids are guest-allocated and small; the low u32 is the story. *)
     let id = u32_at byte 8 in
@@ -3234,6 +3349,58 @@ let parse_occurrence byte =
        at := next);
       Some (kind, Int64.of_int id, [], None, None, None, List.rev !out)
     end
+    else if kind = occ_kind_capture_changed
+    then begin
+      (* A flat record: its fields in order, into the tail. *)
+      let at = ref 8 in
+      let out = ref [] in
+      at := !at + 8;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      (let v, next = parse_value byte !at in
+       out := v :: !out;
+       at := next);
+      Some (kind, Int64.of_int id, [], None, None, None, List.rev !out)
+    end
+    else if kind = occ_kind_capture_permission
+    then begin
+      (* A flat record: its fields in order, into the tail. *)
+      let at = ref 8 in
+      let out = ref [] in
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      (let v, next = parse_value byte !at in
+       out := v :: !out;
+       at := next);
+      Some (kind, 0L, [], None, None, None, List.rev !out)
+    end
+    else if kind = occ_kind_capture_devices
+    then begin
+      (* A flat record: its fields in order, into the tail. *)
+      let at = ref 8 in
+      let out = ref [] in
+      (let count = u32_at byte !at in
+       at := !at + 8;
+       out := I64 (Int64.of_int count) :: !out;
+       for _ = 1 to count do
+         let v, next = parse_value byte !at in
+         out := v :: !out;
+         at := next
+       done);
+      Some (kind, 0L, [], None, None, None, List.rev !out)
+    end
     else if kind = occ_kind_file_dialog_result
     then begin
       (* id, a count, then three Values per file (handle, name,
@@ -3273,7 +3440,7 @@ let parse_occurrence byte =
     then Some (kind, Int64.of_int id, [], None, None, None, [])
     (* Surface-pair records (window, section): the SECOND id
        keys the handler; the first rides as the payload. *)
-    else if kind = occ_kind_section_selected || kind = occ_kind_player_position || kind = occ_kind_seek_completed
+    else if kind = occ_kind_section_selected || kind = occ_kind_player_position || kind = occ_kind_seek_completed || kind = occ_kind_capture_overrun
     then
       Some
         ( kind,

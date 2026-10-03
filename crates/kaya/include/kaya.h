@@ -219,6 +219,22 @@
 #define KAYA_OCCURRENCE_IMAGE_LOADED 50
 
 /**
+ * The capture's (docs/capture-plan.md §2): CAPTURE_CHANGED { u64 capture;
+ * u32 state; u32 failure; u32 interruption; u32 width; u32 height; u32
+ * frame_rate; Str detail }; CAPTURE_PERMISSION { u32 kind; u32 permission;
+ * Str detail }; CAPTURE_DEVICES { Values: per device Str id, Str name, I64
+ * kind, I64 facing, Bool preferred }; CAPTURE_OVERRUN { u64 capture; u64
+ * behind_ms }.
+ */
+#define KAYA_OCCURRENCE_CAPTURE_CHANGED 51
+
+#define KAYA_OCCURRENCE_CAPTURE_PERMISSION 52
+
+#define KAYA_OCCURRENCE_CAPTURE_DEVICES 53
+
+#define KAYA_OCCURRENCE_CAPTURE_OVERRUN 54
+
+/**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
  *   CREATE_SIGNAL:     u64 signal_id, value
@@ -374,6 +390,25 @@
 #define KAYA_TX_LOAD_IMAGE 74
 
 #define KAYA_TX_RELEASE_IMAGE 75
+
+/**
+ * The capture (docs/capture-plan.md §2): CREATE_CAPTURE, RELEASE_CAPTURE {
+ * u64 capture }; SET_CAPTURE_PROP { u64 capture; u32 cprop; u32 reserved;
+ * Value value }; CAPTURE_COMMAND { u64 capture; u32 command; u32 reserved };
+ * REQUEST_PERMISSION { u32 kind; u32 reserved }; WATCH_CAPTURE_DEVICES {
+ * u32 on; u32 reserved }.
+ */
+#define KAYA_TX_CREATE_CAPTURE 76
+
+#define KAYA_TX_SET_CAPTURE_PROP 77
+
+#define KAYA_TX_CAPTURE_COMMAND 78
+
+#define KAYA_TX_RELEASE_CAPTURE 79
+
+#define KAYA_TX_REQUEST_PERMISSION 80
+
+#define KAYA_TX_WATCH_CAPTURE_DEVICES 81
 
 #define KAYA_TX_ADD_SECTION 25
 
@@ -754,6 +789,24 @@
 
 #define KAYA_APPLY_CLOSE_READER 63
 
+/**
+ * The capture's tx records' twins, and SET_VIDEO_CAPTURE { u64 widget;
+ * u64 capture } (docs/capture-plan.md §2, §3).
+ */
+#define KAYA_APPLY_CREATE_CAPTURE 64
+
+#define KAYA_APPLY_SET_CAPTURE_PROP 65
+
+#define KAYA_APPLY_CAPTURE_COMMAND 66
+
+#define KAYA_APPLY_RELEASE_CAPTURE 67
+
+#define KAYA_APPLY_REQUEST_PERMISSION 68
+
+#define KAYA_APPLY_WATCH_CAPTURE_DEVICES 69
+
+#define KAYA_APPLY_SET_VIDEO_CAPTURE 70
+
 #define KAYA_APPLY_ADD_SECTION 15
 
 #define KAYA_APPLY_SELECT_SECTION 16
@@ -1121,6 +1174,11 @@
  * A video view's player (docs/media-plan.md §7b): an I64 id, 0 none.
  */
 #define KAYA_PROP_PLAYER 52
+
+/**
+ * A video view's capture (docs/capture-plan.md §3): an I64 id, 0 none.
+ */
+#define KAYA_PROP_CAPTURE 53
 
 /**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
@@ -1619,6 +1677,87 @@
 #define KAYA_READ_OUTCOME_FAILED 2
 
 /**
+ * The capture's vocabularies (docs/capture-plan.md §2).
+ */
+#define KAYA_CAPTURE_STATE_IDLE 0
+
+#define KAYA_CAPTURE_STATE_STARTING 1
+
+#define KAYA_CAPTURE_STATE_RUNNING 2
+
+#define KAYA_CAPTURE_STATE_INTERRUPTED 3
+
+#define KAYA_CAPTURE_STATE_FAILED 4
+
+#define KAYA_CAPTURE_FAILURE_NONE 0
+
+#define KAYA_CAPTURE_FAILURE_DENIED 1
+
+#define KAYA_CAPTURE_FAILURE_NOT_FOUND 2
+
+#define KAYA_CAPTURE_FAILURE_IN_USE 3
+
+#define KAYA_CAPTURE_FAILURE_DISCONNECTED 4
+
+#define KAYA_CAPTURE_FAILURE_UNSUPPORTED 5
+
+#define KAYA_CAPTURE_FAILURE_HARDWARE_ERROR 6
+
+#define KAYA_CAPTURE_FAILURE_TIMEOUT 7
+
+#define KAYA_CAPTURE_INTERRUPTION_NONE 0
+
+#define KAYA_CAPTURE_INTERRUPTION_BACKGROUND 1
+
+#define KAYA_CAPTURE_INTERRUPTION_ANOTHER_APP 2
+
+#define KAYA_CAPTURE_INTERRUPTION_SYSTEM_PRESSURE 3
+
+#define KAYA_CAPTURE_KIND_CAMERA 0
+
+#define KAYA_CAPTURE_KIND_MICROPHONE 1
+
+#define KAYA_PERMISSION_PROMPT 0
+
+#define KAYA_PERMISSION_GRANTED 1
+
+#define KAYA_PERMISSION_DENIED 2
+
+#define KAYA_CAMERA_FACING_UNKNOWN 0
+
+#define KAYA_CAMERA_FACING_FRONT 1
+
+#define KAYA_CAMERA_FACING_BACK 2
+
+#define KAYA_CAMERA_FACING_EXTERNAL 3
+
+#define KAYA_CAPTURE_COMMAND_START 1
+
+#define KAYA_CAPTURE_COMMAND_STOP 2
+
+#define KAYA_CPROP_CAMERA 1
+
+#define KAYA_CPROP_MICROPHONE 2
+
+#define KAYA_CPROP_WIDTH 3
+
+#define KAYA_CPROP_HEIGHT 4
+
+#define KAYA_CPROP_FRAME_RATE 5
+
+#define KAYA_CPROP_MUTED 6
+
+/**
+ * How far behind its microphone an app's sample callback falls before
+ * capture_overrun tells it; the samples every callback is handed.
+ */
+#define KAYA_CAPTURE_OVERRUN_MS 200
+
+#define KAYA_CAPTURE_SAMPLE_RATE 48000
+
+#define KAYA_CAPTURE_CHUNK 480
+
+/**
  * How often a playing player's position ticks, and how long an open or an
  * app's seek may go unanswered before the core fails the player `timeout`
  * (crate::media).
@@ -1782,6 +1921,33 @@ typedef struct KayaRepresentation {
   const char *const *names;
   uintptr_t count;
 } KayaRepresentation;
+
+/**
+ * A frame as a guest's callback is handed it (docs/capture-plan.md §4):
+ * NV12, video-range BT.601, borrowed until the callback returns.
+ */
+typedef struct KayaCaptureFrame {
+  uint32_t width;
+  uint32_t height;
+  const uint8_t *y;
+  const uint8_t *uv;
+  uint32_t y_stride;
+  uint32_t uv_stride;
+  uint64_t timestamp_ns;
+  uint32_t rotation;
+  uint32_t reserved;
+} KayaCaptureFrame;
+
+/**
+ * A guest's frame callback: its context and the borrowed frame.
+ */
+typedef void (*KayaCaptureFrameFn)(void*, const struct KayaCaptureFrame*);
+
+/**
+ * A guest's sample callback: its context, KAYA_CAPTURE_CHUNK samples of
+ * 48 kHz mono s16, their count and the first one's time.
+ */
+typedef void (*KayaCaptureSamplesFn)(void*, const int16_t*, uintptr_t, uint64_t);
 
 /**
  * One windowed For's geometry, as a backend lays it out. `first`/`count`
@@ -2226,6 +2392,56 @@ typedef struct KayaHostApi {
                         const uint8_t*,
                         uintptr_t);
   uint32_t (*reader_overdue)(uint64_t, uint64_t);
+  /**
+   * docs/capture-plan.md: a capture's reports, its frames and samples on
+   * the capture thread, the synthetic devices and the harness's verbs.
+   */
+  void (*capture_state)(uint64_t,
+                        uint32_t,
+                        uint32_t,
+                        uint32_t,
+                        uint32_t,
+                        uint32_t,
+                        const uint8_t*,
+                        uintptr_t);
+  uint32_t (*capture_overdue)(uint64_t);
+  void (*capture_permission)(uint32_t, uint32_t, const uint8_t*, uintptr_t);
+  void (*capture_devices_begin)(void);
+  void (*capture_device)(const uint8_t*,
+                         uintptr_t,
+                         const uint8_t*,
+                         uintptr_t,
+                         uint32_t,
+                         uint32_t,
+                         uint32_t);
+  void (*capture_devices_end)(void);
+  uint32_t (*capture_frame)(uint64_t,
+                            uint32_t,
+                            uint32_t,
+                            const uint8_t*,
+                            uint32_t,
+                            const uint8_t*,
+                            uint32_t,
+                            uint64_t,
+                            uint32_t);
+  void (*capture_samples)(uint64_t, uint32_t, uint32_t, const float*, uintptr_t, uint64_t);
+  uint32_t (*capture_synthetic)(uint32_t,
+                                uint8_t*,
+                                uintptr_t,
+                                uint8_t*,
+                                uintptr_t,
+                                uint32_t*,
+                                uint32_t*,
+                                uint32_t*,
+                                uint32_t*);
+  uint32_t (*capture_synthetic_permission)(uint32_t, uint32_t);
+  uintptr_t (*capture_harness)(uint32_t,
+                               uint32_t,
+                               const uint8_t*,
+                               uintptr_t,
+                               uint8_t*,
+                               uintptr_t,
+                               uint8_t*);
   void (*reader_no_track)(uint64_t, uint64_t, const uint8_t*, uintptr_t);
 } KayaHostApi;
 
@@ -3254,6 +3470,174 @@ uintptr_t kaya_image_pixels(uint64_t image,
                             uintptr_t cap,
                             uint32_t *width,
                             uint32_t *height);
+
+/**
+ * Presentation side: a capture is running at `width` x `height` and
+ * `frame_rate` (0x0 at 0 with no camera), is interrupted (`reason` a
+ * KAYA_CAPTURE_INTERRUPTION_*), or failed (`reason` a
+ * KAYA_CAPTURE_FAILURE_*, `detail` the platform's sentence). `state` is the
+ * KAYA_CAPTURE_STATE_* reached; a backend reports neither idle nor
+ * starting, which are the app's own commands.
+ *
+ * # Safety
+ * `detail` must describe `detail_len` readable UTF-8 bytes, or be NULL with 0.
+ */
+void kaya_capture_state(uint64_t capture,
+                        uint32_t state,
+                        uint32_t reason,
+                        uint32_t width,
+                        uint32_t height,
+                        uint32_t frame_rate,
+                        const uint8_t *detail,
+                        uintptr_t detail_len);
+
+/**
+ * Presentation side: KAYA_MEDIA_TIMEOUT_MS passed since the backend was
+ * handed a start. Answers 1 when the core's own clock failed the capture
+ * `timeout`, so the backend tears its start down, else 0.
+ */
+uint32_t kaya_capture_overdue(uint64_t capture);
+
+/**
+ * Presentation side: a KAYA_CAPTURE_KIND_*'s KAYA_PERMISSION_*, as it
+ * moved or in answer to a request.
+ *
+ * # Safety
+ * `detail` must describe `detail_len` readable UTF-8 bytes, or be NULL with 0.
+ */
+void kaya_capture_permission(uint32_t kind,
+                             uint32_t permission,
+                             const uint8_t *detail,
+                             uintptr_t detail_len);
+
+/**
+ * Presentation side: a device list starts.
+ */
+void kaya_capture_devices_begin(void);
+
+/**
+ * Presentation side: one device of the list, its KAYA_CAPTURE_KIND_*, its
+ * KAYA_CAMERA_FACING_* and whether it is the platform's preferred one.
+ *
+ * # Safety
+ * `id` and `name` must each describe readable UTF-8 bytes of their lengths.
+ */
+void kaya_capture_device(const uint8_t *id,
+                         uintptr_t id_len,
+                         const uint8_t *name,
+                         uintptr_t name_len,
+                         uint32_t kind,
+                         uint32_t facing,
+                         uint32_t preferred);
+
+/**
+ * Presentation side: the list is whole; the app hears it.
+ */
+void kaya_capture_devices_end(void);
+
+/**
+ * Presentation side, ON THE CAPTURE THREAD: one NV12 frame (video-range
+ * BT.601; the Y plane `y_stride` bytes a row, the interleaved UV plane at
+ * half resolution `uv_stride` bytes a row), its time on the capture's
+ * monotonic clock and the rotation that stands it upright. The core keeps
+ * what the harness reads and hands it to the app's callback; answers 1
+ * while the capture is live, 0 once released.
+ *
+ * # Safety
+ * `y` must describe `y_stride * height` readable bytes and `uv`
+ * `uv_stride * ((height + 1) / 2)`.
+ */
+uint32_t kaya_capture_frame(uint64_t capture,
+                            uint32_t width,
+                            uint32_t height,
+                            const uint8_t *y,
+                            uint32_t y_stride,
+                            const uint8_t *uv,
+                            uint32_t uv_stride,
+                            uint64_t timestamp_ns,
+                            uint32_t rotation);
+
+/**
+ * Presentation side, ON THE CAPTURE THREAD: `count` interleaved float
+ * samples at their own `channels` and `sample_rate`, the first at
+ * `timestamp_ns` on the capture's clock. The core turns them into 48 kHz
+ * mono s16 chunks of 480 for the app's callback.
+ *
+ * # Safety
+ * `samples` must describe `count` readable floats.
+ */
+void kaya_capture_samples(uint64_t capture,
+                          uint32_t channels,
+                          uint32_t sample_rate,
+                          const float *samples,
+                          uintptr_t count,
+                          uint64_t timestamp_ns);
+
+/**
+ * Presentation side: the `index`th synthetic device (docs/capture-plan.md
+ * §7), its id and name NUL-terminated into the two buffers, its kind,
+ * facing, whether preferred, and its content (0xRRGGBB for a camera, Hz
+ * for a microphone). Answers 0 past the last.
+ *
+ * # Safety
+ * The buffers must be writable for their caps; the out pointers writable.
+ */
+uint32_t kaya_capture_synthetic(uint32_t index,
+                                uint8_t *id,
+                                uintptr_t id_cap,
+                                uint8_t *name,
+                                uintptr_t name_cap,
+                                uint32_t *kind,
+                                uint32_t *facing,
+                                uint32_t *preferred,
+                                uint32_t *content);
+
+/**
+ * Presentation side: the synthetic permission of a KAYA_CAPTURE_KIND_*,
+ * and the synthetic prompt that decides one still at prompt (the
+ * harness's arranged answer, granted unless answer_permission said else).
+ */
+uint32_t kaya_capture_synthetic_permission(uint32_t kind, uint32_t ask);
+
+/**
+ * The harness's two capture verbs for an interpreter: `expect_capture`
+ * (`verb` 0, `index` the capture and `text` the wanted reading) and
+ * `answer_permission` (`verb` 1, `index` the KAYA_CAPTURE_KIND_* and `text`
+ * "granted" or "denied"). The sentence to record or fail with goes into
+ * `out`; `ok` says which.
+ *
+ * # Safety
+ * `text` must describe `len` readable UTF-8 bytes; `out` writable for `cap`
+ * bytes; `ok` writable.
+ */
+uintptr_t kaya_capture_harness(uint32_t verb,
+                               uint32_t index,
+                               const uint8_t *text,
+                               uintptr_t len,
+                               uint8_t *out,
+                               uintptr_t cap,
+                               uint8_t *ok);
+
+/**
+ * Guest side: run `callback(ctx, frame)` on KAYA'S CAPTURE THREAD for each
+ * frame of `capture`, the next frame dropped while it still runs; NULL
+ * drops it. The callback holds no transaction: to touch the scene it posts.
+ *
+ * # Safety
+ * `ctx` must stay valid, and usable from another thread, until the
+ * callback is replaced or the capture released.
+ */
+void kaya_capture_on_frame(uint64_t capture, KayaCaptureFrameFn callback, void *ctx);
+
+/**
+ * Guest side: run `callback(ctx, samples, count, timestamp_ns)` on kaya's
+ * capture thread for every chunk of `capture`'s microphone, none dropped;
+ * a callback slower than the microphone is told by capture_overrun.
+ *
+ * # Safety
+ * As kaya_capture_on_frame.
+ */
+void kaya_capture_on_samples(uint64_t capture, KayaCaptureSamplesFn callback, void *ctx);
 
 /**
  * Presentation side: the system's media controls sent a SESSION_ACTION

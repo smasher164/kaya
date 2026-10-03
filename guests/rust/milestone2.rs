@@ -120,6 +120,10 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             | Occurrence::ReaderPeaks { .. }
             | Occurrence::ReaderDone { .. }
             | Occurrence::ImageLoaded { .. }
+            | Occurrence::CaptureChanged { .. }
+            | Occurrence::CapturePermission { .. }
+            | Occurrence::CaptureDevices { .. }
+            | Occurrence::CaptureOverrun { .. }
             | Occurrence::Pasted { .. }
             | Occurrence::InstancePasted { .. }
             | Occurrence::Dropped { .. }

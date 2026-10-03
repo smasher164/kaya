@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x6d398768b7d3b5d6ULL
+#define KAYA_SPEC_HASH 0xc00e7dc840e57f41ULL
 
 
 /* Create a signal holding `initial`. */
@@ -883,6 +883,55 @@ static inline void kaya_tx_load_image(KayaTx *tx, uint64_t image, KayaVal source
 static inline void kaya_tx_release_image(KayaTx *tx, uint64_t image) {
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_RELEASE_IMAGE);
     kaya_wire_u64(tx, image);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Create a CAPTURE (docs/capture-plan.md §2): an app-held object with no place in the layout that holds at most one camera and one microphone, its id guest-chosen in its own space. It starts `idle` with neither device; a video view previews it through its `capture` prop. A second create of a live id is a scene error. */
+static inline void kaya_tx_create_capture(KayaTx *tx, uint64_t capture) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_CREATE_CAPTURE);
+    kaya_wire_u64(tx, capture);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Write a capture property (CAPTURE_PROPS) once, as a player's are written. A device change while running reopens that device; `camera` set to "" closes the camera and puts its indicator out. */
+static inline void kaya_tx_set_capture_prop(KayaTx *tx, uint64_t capture, uint32_t prop, KayaVal value) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_CAPTURE_PROP);
+    kaya_wire_u64(tx, capture);
+    kaya_wire_u32(tx, prop);
+    kaya_wire_u32(tx, 0);
+    kaya_wire_value(tx, value);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* start or stop (CAPTURE_COMMAND). `start` asks for each kind's permission still at `prompt`, as getUserMedia does, and fails `denied` when either kind it opens is denied; the answer is capture_changed, never an echo of the command. */
+static inline void kaya_tx_capture_command(KayaTx *tx, uint64_t capture, uint32_t command) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_CAPTURE_COMMAND);
+    kaya_wire_u64(tx, capture);
+    kaya_wire_u32(tx, command);
+    kaya_wire_u32(tx, 0);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Stop and forget a capture: its devices close, a video view previewing it goes blank, its frame and sample callbacks are dropped and no occurrence of its follows. */
+static inline void kaya_tx_release_capture(KayaTx *tx, uint64_t capture) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_RELEASE_CAPTURE);
+    kaya_wire_u64(tx, capture);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Ask the user for a CAPTURE_KIND's permission before any capture starts (a call screen asking early); answered by capture_permission. A kind already decided is answered with its decision and nothing is asked. */
+static inline void kaya_tx_request_permission(KayaTx *tx, uint32_t kind) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_REQUEST_PERMISSION);
+    kaya_wire_u32(tx, kind);
+    kaya_wire_u32(tx, 0);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* 1: list the cameras and microphones now (capture_devices), report each kind's permission as it stands (capture_permission), and list again whenever a device comes or goes; 0: stop. Listing asks for no permission. */
+static inline void kaya_tx_watch_capture_devices(KayaTx *tx, uint32_t on) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_WATCH_CAPTURE_DEVICES);
+    kaya_wire_u32(tx, on);
+    kaya_wire_u32(tx, 0);
     kaya_wire_end(tx, kaya_at);
 }
 
@@ -2582,6 +2631,38 @@ static inline void kaya_tx_bind_player_element(KayaTx *tx, uint64_t widget_id, u
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_PLAYER);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a constant capture value. */
+static inline void kaya_tx_set_capture(KayaTx *tx, uint64_t widget_id, int64_t capture) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_CAPTURE);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_i64(capture));
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a signal-bound capture value. */
+static inline void kaya_tx_bind_capture(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_CAPTURE);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_capture_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_CAPTURE);
     kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
     kaya_wire_u32(tx, level);
     kaya_wire_u32(tx, field);

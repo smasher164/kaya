@@ -24,7 +24,7 @@ public enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x6d398768b7d3b5d6
+let kayaSpecHash: UInt64 = 0xc00e7dc840e57f41
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
 func kayaPackDate(_ year: Int, _ month: Int, _ day: Int) -> Int64 {
@@ -815,6 +815,55 @@ struct KayaTx {
     mutating func releaseImage(_ image: UInt64) {
         let kayaAt = self.begin(UInt16(KAYA_TX_RELEASE_IMAGE))
         self.u64(image)
+        self.end(kayaAt)
+    }
+
+    /// Create a CAPTURE (docs/capture-plan.md §2): an app-held object with no place in the layout that holds at most one camera and one microphone, its id guest-chosen in its own space. It starts `idle` with neither device; a video view previews it through its `capture` prop. A second create of a live id is a scene error.
+    mutating func createCapture(_ capture: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_CREATE_CAPTURE))
+        self.u64(capture)
+        self.end(kayaAt)
+    }
+
+    /// Write a capture property (CAPTURE_PROPS) once, as a player's are written. A device change while running reopens that device; `camera` set to "" closes the camera and puts its indicator out.
+    mutating func setCaptureProp(_ capture: UInt64, _ prop: UInt32, _ value: KayaValue) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_CAPTURE_PROP))
+        self.u64(capture)
+        self.u32(prop)
+        self.u32(0)
+        self.value(value)
+        self.end(kayaAt)
+    }
+
+    /// start or stop (CAPTURE_COMMAND). `start` asks for each kind's permission still at `prompt`, as getUserMedia does, and fails `denied` when either kind it opens is denied; the answer is capture_changed, never an echo of the command.
+    mutating func captureCommand(_ capture: UInt64, _ command: UInt32) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_CAPTURE_COMMAND))
+        self.u64(capture)
+        self.u32(command)
+        self.u32(0)
+        self.end(kayaAt)
+    }
+
+    /// Stop and forget a capture: its devices close, a video view previewing it goes blank, its frame and sample callbacks are dropped and no occurrence of its follows.
+    mutating func releaseCapture(_ capture: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_RELEASE_CAPTURE))
+        self.u64(capture)
+        self.end(kayaAt)
+    }
+
+    /// Ask the user for a CAPTURE_KIND's permission before any capture starts (a call screen asking early); answered by capture_permission. A kind already decided is answered with its decision and nothing is asked.
+    mutating func requestPermission(_ kind: UInt32) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_REQUEST_PERMISSION))
+        self.u32(kind)
+        self.u32(0)
+        self.end(kayaAt)
+    }
+
+    /// 1: list the cameras and microphones now (capture_devices), report each kind's permission as it stands (capture_permission), and list again whenever a device comes or goes; 0: stop. Listing asks for no permission.
+    mutating func watchCaptureDevices(_ on: UInt32) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_WATCH_CAPTURE_DEVICES))
+        self.u32(on)
+        self.u32(0)
         self.end(kayaAt)
     }
 
@@ -2482,6 +2531,38 @@ struct KayaTx {
         self.end(kayaAt)
     }
 
+    /// set_property with a constant capture value.
+    mutating func setCapture(_ widgetId: UInt64, _ capture: Int64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_CAPTURE))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.i64(capture))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound capture value.
+    mutating func bindCapture(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_CAPTURE))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindCaptureElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_CAPTURE))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
     /// set_window_prop with a constant title value (window 0, the primary surface).
     mutating func setWindowTitle(_ window: UInt64, _ title: String) {
         let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
@@ -3225,6 +3306,10 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             || kind == UInt16(KAYA_OCCURRENCE_READER_PEAKS)
             || kind == UInt16(KAYA_OCCURRENCE_READER_DONE)
             || kind == UInt16(KAYA_OCCURRENCE_IMAGE_LOADED)
+            || kind == UInt16(KAYA_OCCURRENCE_CAPTURE_CHANGED)
+            || kind == UInt16(KAYA_OCCURRENCE_CAPTURE_PERMISSION)
+            || kind == UInt16(KAYA_OCCURRENCE_CAPTURE_DEVICES)
+            || kind == UInt16(KAYA_OCCURRENCE_CAPTURE_OVERRUN)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {
@@ -3533,6 +3618,91 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             tail.append(value())
             return (kind, id, [], nil, [], nil, nil, tail)
         }
+        if kind == UInt16(KAYA_OCCURRENCE_CAPTURE_CHANGED) {
+            // A flat record: its fields in order, into the tail.
+            var at = 8
+            var tail: [KayaValue] = []
+            func value() -> KayaValue {
+                let vtype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)
+                let vlen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))
+                defer { at += 8 + ((vlen + 7) & ~7) }
+                switch vtype {
+                case UInt32(KAYA_VALUE_BOOL): return .bool(raw[at + 8] != 0)
+                case UInt32(KAYA_VALUE_I64):
+                    return .i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                case UInt32(KAYA_VALUE_F64):
+                    return .f64(Double(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                default:
+                    return .str(String(decoding: raw[(at + 8)..<(at + 8 + vlen)], as: UTF8.self))
+                }
+            }
+            at += 8
+            tail.append(.i64(Int64(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))))
+            at += 4
+            tail.append(.i64(Int64(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))))
+            at += 4
+            tail.append(.i64(Int64(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))))
+            at += 4
+            tail.append(.i64(Int64(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))))
+            at += 4
+            tail.append(.i64(Int64(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))))
+            at += 4
+            tail.append(.i64(Int64(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))))
+            at += 4
+            tail.append(value())
+            return (kind, id, [], nil, [], nil, nil, tail)
+        }
+        if kind == UInt16(KAYA_OCCURRENCE_CAPTURE_PERMISSION) {
+            // A flat record: its fields in order, into the tail.
+            var at = 8
+            var tail: [KayaValue] = []
+            func value() -> KayaValue {
+                let vtype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)
+                let vlen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))
+                defer { at += 8 + ((vlen + 7) & ~7) }
+                switch vtype {
+                case UInt32(KAYA_VALUE_BOOL): return .bool(raw[at + 8] != 0)
+                case UInt32(KAYA_VALUE_I64):
+                    return .i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                case UInt32(KAYA_VALUE_F64):
+                    return .f64(Double(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                default:
+                    return .str(String(decoding: raw[(at + 8)..<(at + 8 + vlen)], as: UTF8.self))
+                }
+            }
+            tail.append(.i64(Int64(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))))
+            at += 4
+            tail.append(.i64(Int64(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))))
+            at += 4
+            tail.append(value())
+            return (kind, 0, [], nil, [], nil, nil, tail)
+        }
+        if kind == UInt16(KAYA_OCCURRENCE_CAPTURE_DEVICES) {
+            // A flat record: its fields in order, into the tail.
+            var at = 8
+            var tail: [KayaValue] = []
+            func value() -> KayaValue {
+                let vtype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)
+                let vlen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))
+                defer { at += 8 + ((vlen + 7) & ~7) }
+                switch vtype {
+                case UInt32(KAYA_VALUE_BOOL): return .bool(raw[at + 8] != 0)
+                case UInt32(KAYA_VALUE_I64):
+                    return .i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                case UInt32(KAYA_VALUE_F64):
+                    return .f64(Double(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                default:
+                    return .str(String(decoding: raw[(at + 8)..<(at + 8 + vlen)], as: UTF8.self))
+                }
+            }
+            do {
+                let count = Int(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))
+                at += 8
+                tail.append(.i64(Int64(count)))
+                for _ in 0..<count { tail.append(value()) }
+            }
+            return (kind, 0, [], nil, [], nil, nil, tail)
+        }
         if kind == UInt16(KAYA_OCCURRENCE_FILE_DIALOG_RESULT) {
             // id, a count, then three Values per file
             // (handle, name, local_path). EMPTY IS CANCEL.
@@ -3590,6 +3760,7 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
         if kind == UInt16(KAYA_OCCURRENCE_SECTION_SELECTED)
             || kind == UInt16(KAYA_OCCURRENCE_PLAYER_POSITION)
             || kind == UInt16(KAYA_OCCURRENCE_SEEK_COMPLETED)
+            || kind == UInt16(KAYA_OCCURRENCE_CAPTURE_OVERRUN)
         {
             let section = raw.loadUnaligned(fromByteOffset: 16, as: UInt64.self)
             return (kind, section, [], .i64(Int64(bitPattern: id)), [], nil, nil, [])

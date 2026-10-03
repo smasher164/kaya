@@ -31,7 +31,7 @@ fn value_expr(kind: &PropKind, prop: &str) -> (String, String) {
         PropKind::Str => (format!("{prop}: string"), format!("enc.value({prop})")),
         PropKind::Bool => (format!("{prop}: boolean"), format!("enc.value({prop})")),
         PropKind::F64 => (format!("{prop}: number"), format!("enc.value({prop})")),
-        PropKind::Enum(_) | PropKind::Player => (
+        PropKind::Enum(_) | PropKind::Player | PropKind::Capture => (
             format!("{prop}: number"),
             format!("enc.value(new I64({prop}))"),
         ),

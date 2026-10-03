@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x6d398768b7d3b5d6L;
+    public static final long SPEC_HASH = 0xc00e7dc840e57f41L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -129,6 +129,7 @@ public final class KayaWire {
     public static final int PROP_HIGH_LABEL = 50;
     public static final int PROP_FIT = 51;
     public static final int PROP_PLAYER = 52;
+    public static final int PROP_CAPTURE = 53;
     public static final int WPROP_TITLE = 1;
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
@@ -289,6 +290,40 @@ public final class KayaWire {
     public static final int READ_OUTCOME_COMPLETED = 0;
     public static final int READ_OUTCOME_CANCELLED = 1;
     public static final int READ_OUTCOME_FAILED = 2;
+    public static final int CAPTURE_STATE_IDLE = 0;
+    public static final int CAPTURE_STATE_STARTING = 1;
+    public static final int CAPTURE_STATE_RUNNING = 2;
+    public static final int CAPTURE_STATE_INTERRUPTED = 3;
+    public static final int CAPTURE_STATE_FAILED = 4;
+    public static final int CAPTURE_FAILURE_NONE = 0;
+    public static final int CAPTURE_FAILURE_DENIED = 1;
+    public static final int CAPTURE_FAILURE_NOT_FOUND = 2;
+    public static final int CAPTURE_FAILURE_IN_USE = 3;
+    public static final int CAPTURE_FAILURE_DISCONNECTED = 4;
+    public static final int CAPTURE_FAILURE_UNSUPPORTED = 5;
+    public static final int CAPTURE_FAILURE_HARDWARE_ERROR = 6;
+    public static final int CAPTURE_FAILURE_TIMEOUT = 7;
+    public static final int CAPTURE_INTERRUPTION_NONE = 0;
+    public static final int CAPTURE_INTERRUPTION_BACKGROUND = 1;
+    public static final int CAPTURE_INTERRUPTION_ANOTHER_APP = 2;
+    public static final int CAPTURE_INTERRUPTION_SYSTEM_PRESSURE = 3;
+    public static final int CAPTURE_KIND_CAMERA = 0;
+    public static final int CAPTURE_KIND_MICROPHONE = 1;
+    public static final int PERMISSION_PROMPT = 0;
+    public static final int PERMISSION_GRANTED = 1;
+    public static final int PERMISSION_DENIED = 2;
+    public static final int CAMERA_FACING_UNKNOWN = 0;
+    public static final int CAMERA_FACING_FRONT = 1;
+    public static final int CAMERA_FACING_BACK = 2;
+    public static final int CAMERA_FACING_EXTERNAL = 3;
+    public static final int CAPTURE_COMMAND_START = 1;
+    public static final int CAPTURE_COMMAND_STOP = 2;
+    public static final int CPROP_CAMERA = 1;
+    public static final int CPROP_MICROPHONE = 2;
+    public static final int CPROP_WIDTH = 3;
+    public static final int CPROP_HEIGHT = 4;
+    public static final int CPROP_FRAME_RATE = 5;
+    public static final int CPROP_MUTED = 6;
     public static final int SESSION_ACTION_PLAY = 1;
     public static final int SESSION_ACTION_PAUSE = 2;
     public static final int SESSION_ACTION_STOP = 3;
@@ -390,6 +425,12 @@ public final class KayaWire {
     public static final short TX_KIND_CLOSE_READER = 73;
     public static final short TX_KIND_LOAD_IMAGE = 74;
     public static final short TX_KIND_RELEASE_IMAGE = 75;
+    public static final short TX_KIND_CREATE_CAPTURE = 76;
+    public static final short TX_KIND_SET_CAPTURE_PROP = 77;
+    public static final short TX_KIND_CAPTURE_COMMAND = 78;
+    public static final short TX_KIND_RELEASE_CAPTURE = 79;
+    public static final short TX_KIND_REQUEST_PERMISSION = 80;
+    public static final short TX_KIND_WATCH_CAPTURE_DEVICES = 81;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -451,6 +492,13 @@ public final class KayaWire {
     public static final short APPLY_KIND_READ_PEAKS = 61;
     public static final short APPLY_KIND_CANCEL_READ = 62;
     public static final short APPLY_KIND_CLOSE_READER = 63;
+    public static final short APPLY_KIND_CREATE_CAPTURE = 64;
+    public static final short APPLY_KIND_SET_CAPTURE_PROP = 65;
+    public static final short APPLY_KIND_CAPTURE_COMMAND = 66;
+    public static final short APPLY_KIND_RELEASE_CAPTURE = 67;
+    public static final short APPLY_KIND_REQUEST_PERMISSION = 68;
+    public static final short APPLY_KIND_WATCH_CAPTURE_DEVICES = 69;
+    public static final short APPLY_KIND_SET_VIDEO_CAPTURE = 70;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
@@ -501,6 +549,10 @@ public final class KayaWire {
     public static final short OCC_KIND_READER_PEAKS = 48;
     public static final short OCC_KIND_READER_DONE = 49;
     public static final short OCC_KIND_IMAGE_LOADED = 50;
+    public static final short OCC_KIND_CAPTURE_CHANGED = 51;
+    public static final short OCC_KIND_CAPTURE_PERMISSION = 52;
+    public static final short OCC_KIND_CAPTURE_DEVICES = 53;
+    public static final short OCC_KIND_CAPTURE_OVERRUN = 54;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -1285,6 +1337,55 @@ public final class KayaWire {
     public static byte[] txReleaseImage(long image) {
         Enc b = begin(TX_KIND_RELEASE_IMAGE);
         b.putLong(image);
+        return finish(b);
+    }
+
+    /** Create a CAPTURE (docs/capture-plan.md §2): an app-held object with no place in the layout that holds at most one camera and one microphone, its id guest-chosen in its own space. It starts `idle` with neither device; a video view previews it through its `capture` prop. A second create of a live id is a scene error. */
+    public static byte[] txCreateCapture(long capture) {
+        Enc b = begin(TX_KIND_CREATE_CAPTURE);
+        b.putLong(capture);
+        return finish(b);
+    }
+
+    /** Write a capture property (CAPTURE_PROPS) once, as a player's are written. A device change while running reopens that device; `camera` set to "" closes the camera and puts its indicator out. */
+    public static byte[] txSetCaptureProp(long capture, int prop, Object value) {
+        Enc b = begin(TX_KIND_SET_CAPTURE_PROP);
+        b.putLong(capture);
+        b.putInt(prop);
+        b.putInt(0);
+        encodeValue(b, value);
+        return finish(b);
+    }
+
+    /** start or stop (CAPTURE_COMMAND). `start` asks for each kind's permission still at `prompt`, as getUserMedia does, and fails `denied` when either kind it opens is denied; the answer is capture_changed, never an echo of the command. */
+    public static byte[] txCaptureCommand(long capture, int command) {
+        Enc b = begin(TX_KIND_CAPTURE_COMMAND);
+        b.putLong(capture);
+        b.putInt(command);
+        b.putInt(0);
+        return finish(b);
+    }
+
+    /** Stop and forget a capture: its devices close, a video view previewing it goes blank, its frame and sample callbacks are dropped and no occurrence of its follows. */
+    public static byte[] txReleaseCapture(long capture) {
+        Enc b = begin(TX_KIND_RELEASE_CAPTURE);
+        b.putLong(capture);
+        return finish(b);
+    }
+
+    /** Ask the user for a CAPTURE_KIND's permission before any capture starts (a call screen asking early); answered by capture_permission. A kind already decided is answered with its decision and nothing is asked. */
+    public static byte[] txRequestPermission(int kind) {
+        Enc b = begin(TX_KIND_REQUEST_PERMISSION);
+        b.putInt(kind);
+        b.putInt(0);
+        return finish(b);
+    }
+
+    /** 1: list the cameras and microphones now (capture_devices), report each kind's permission as it stands (capture_permission), and list again whenever a device comes or goes; 0: stop. Listing asks for no permission. */
+    public static byte[] txWatchCaptureDevices(int on) {
+        Enc b = begin(TX_KIND_WATCH_CAPTURE_DEVICES);
+        b.putInt(on);
+        b.putInt(0);
         return finish(b);
     }
 
@@ -2525,6 +2626,29 @@ public final class KayaWire {
         return finish(b);
     }
 
+    /** set_property with a constant capture value. */
+    public static byte[] txSetCapture(long widgetId, long capture) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_CAPTURE).putInt(SOURCE_CONST);
+        encodeValue(b, capture);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound capture value. */
+    public static byte[] txBindCapture(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_CAPTURE).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindCaptureElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_CAPTURE).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
     /** set_window_prop with a constant title value (window 0, the primary surface). */
     public static byte[] txSetWindowTitle(long window, String title) {
         Enc b = begin(TX_KIND_SET_WINDOW_PROP);
@@ -3194,7 +3318,7 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED && kind != OCC_KIND_FULLSCREEN_CHANGED && kind != OCC_KIND_COLOR_CHANGED && kind != OCC_KIND_RANGE_CHANGED && kind != OCC_KIND_RANGE_COMMITTED && kind != OCC_KIND_PLAYER_CHANGED && kind != OCC_KIND_PLAYER_POSITION && kind != OCC_KIND_SEEK_COMPLETED && kind != OCC_KIND_SESSION_ACTION && kind != OCC_KIND_PLAYER_TRACKS && kind != OCC_KIND_CAPTION_CUE && kind != OCC_KIND_VIDEO_VISIBILITY && kind != OCC_KIND_READER_FRAME && kind != OCC_KIND_READER_PROGRESS && kind != OCC_KIND_READER_PEAKS && kind != OCC_KIND_READER_DONE && kind != OCC_KIND_IMAGE_LOADED) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED && kind != OCC_KIND_FULLSCREEN_CHANGED && kind != OCC_KIND_COLOR_CHANGED && kind != OCC_KIND_RANGE_CHANGED && kind != OCC_KIND_RANGE_COMMITTED && kind != OCC_KIND_PLAYER_CHANGED && kind != OCC_KIND_PLAYER_POSITION && kind != OCC_KIND_SEEK_COMPLETED && kind != OCC_KIND_SESSION_ACTION && kind != OCC_KIND_PLAYER_TRACKS && kind != OCC_KIND_CAPTION_CUE && kind != OCC_KIND_VIDEO_VISIBILITY && kind != OCC_KIND_READER_FRAME && kind != OCC_KIND_READER_PROGRESS && kind != OCC_KIND_READER_PEAKS && kind != OCC_KIND_READER_DONE && kind != OCC_KIND_IMAGE_LOADED && kind != OCC_KIND_CAPTURE_CHANGED && kind != OCC_KIND_CAPTURE_PERMISSION && kind != OCC_KIND_CAPTURE_DEVICES && kind != OCC_KIND_CAPTURE_OVERRUN) {
             return null;
         }
         long id = b.getLong(8);
@@ -3357,6 +3481,51 @@ public final class KayaWire {
             tail.add(parseValue(rec, b, at));
             return new Occ(kind, id, java.util.List.of(), tail);
         }
+        if (kind == OCC_KIND_CAPTURE_CHANGED) {
+            // A flat record: its fields in order, into the tail.
+            int[] at = {8};
+            java.util.List<Object> tail = new java.util.ArrayList<>();
+            at[0] += 8;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            tail.add(parseValue(rec, b, at));
+            return new Occ(kind, id, java.util.List.of(), tail);
+        }
+        if (kind == OCC_KIND_CAPTURE_PERMISSION) {
+            // A flat record: its fields in order, into the tail.
+            int[] at = {8};
+            java.util.List<Object> tail = new java.util.ArrayList<>();
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            tail.add(parseValue(rec, b, at));
+            return new Occ(kind, 0L, java.util.List.of(), tail);
+        }
+        if (kind == OCC_KIND_CAPTURE_DEVICES) {
+            // A flat record: its fields in order, into the tail.
+            int[] at = {8};
+            java.util.List<Object> tail = new java.util.ArrayList<>();
+            {
+                int count = b.getInt(at[0]);
+                at[0] += 8;
+                tail.add((long) count);
+                for (int i = 0; i < count; i++) {
+                    tail.add(parseValue(rec, b, at));
+                }
+            }
+            return new Occ(kind, 0L, java.util.List.of(), tail);
+        }
         if (kind == OCC_KIND_FILE_DIALOG_RESULT) {
             // id, a count, then three Values per file
             // (handle, name, local_path). EMPTY IS CANCEL.
@@ -3405,7 +3574,7 @@ public final class KayaWire {
         }
         // Surface-pair records (window, section): the SECOND id
         // keys the handler; the first rides as the payload.
-        if (kind == OCC_KIND_SECTION_SELECTED || kind == OCC_KIND_PLAYER_POSITION || kind == OCC_KIND_SEEK_COMPLETED) {
+        if (kind == OCC_KIND_SECTION_SELECTED || kind == OCC_KIND_PLAYER_POSITION || kind == OCC_KIND_SEEK_COMPLETED || kind == OCC_KIND_CAPTURE_OVERRUN) {
             return new Occ(kind, b.getLong(16), java.util.List.of(), id);
         }
         if (kind == OCC_KIND_UNDONE || kind == OCC_KIND_REDONE) {

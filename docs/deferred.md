@@ -9,6 +9,59 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
+## BUILD — camera and microphone capture (docs/capture-plan.md), depth on the mac (2026-10-02); the GTK, WinUI and Compose arms, the iOS legs, the other eight bindings and the C floor are the breadth slice
+KEY: capture, CaptureId, CaptureRef, CaptureReading, CaptureFrame, create_capture, set_capture_prop, capture_command, release_capture, request_permission, watch_capture_devices, set_video_capture, capture_changed, capture_permission, capture_devices, capture_overrun, cprop, capture_state, capture_failure, capture_interruption, capture_kind, camera_facing, PropKind::Capture, PROP_CAPTURE, kaya_capture_state, kaya_capture_frame, kaya_capture_samples, kaya_capture_on_frame, kaya_capture_on_samples, kaya_capture_synthetic, kaya_capture_harness, crates/kaya/src/capture.rs, KayaRealCapture, kayaCaptureWall, expect_capture, answer_permission, DEPTH STUB capture, CAPTURE_SURFACES, capture_denied
+
+The depth slice: the spec's six transaction, seven apply and four occurrence
+records, the video view's `capture` prop, the core (crates/kaya/src/capture.rs:
+the state machine with the media bound on a start, the synthetic devices and
+their permission store, the pipe that keeps the harness's statistics and turns
+any platform's float samples into 48 kHz mono s16 chunks of 480 for the app's
+callback, keep-only-latest frames, the overrun account), the Rust binding
+(crates/kaya/src/app/capture.rs, callbacks `Send + Sync` on kaya's capture
+thread), the SwiftUI arm (the synthetic source as 420v pixel buffers into an
+AVSampleBufferDisplayLayer and 44.1 kHz stereo float; the real AVCaptureSession
+path in `enum KayaRealCapture`, compiled for macOS and iOS, run by no lane) and
+the `capture` and `capture_denied` scenes on the mac lane. What breadth owes:
+
+  - **DEPTH STUB: capture on gtk** — GStreamer beside GTK: the camera portal
+    first and PipeWire directly when no portal answers (§9 ruling 5), the
+    preview a GtkPicture over gtk4paintablesink on a tee, appsink frames and
+    samples into kaya_capture_frame/kaya_capture_samples; the lane's PipeWire
+    daemon per session with videotestsrc/audiotestsrc nodes is measured first
+    (docs/capture-plan.md §7 item 2).
+  - **DEPTH STUB: capture on winui** — MediaCapture and MediaFrameReader, the
+    preview a MediaPlayerElement over the frame source, the unpackaged
+    E_ACCESSDENIED read as `denied`; the VM's virtual camera DLL and loopback
+    driver installed once by admin (§9, ruled) and measured first (§7 item 3).
+  - **DEPTH STUB: capture on compose** — CameraX Preview, ImageAnalysis and
+    AudioRecord on the emulator's videofile camera and injectAudio tone,
+    measured first over the read-only snapshot (§7 item 1); the runner refuses
+    a host-audio flag and a webcam camera mode, the wall's Android half.
+  - The iOS legs: the arm is the shared interpreter's and compiles; both scenes
+    are in tools/lib/lanes/ios.py's UNWIRED_SCENES until the simulator's lack
+    of a camera and the in-process source keeping the host's microphone closed
+    are measured (§7 item 4). Rule 7's audio session category is unbuilt.
+  - The other eight bindings and the C floor: tools/check-sugar-surface.py's
+    capture census is red by design (72 findings, nine parts in each), its
+    eight rows a first calibration to move with each binding's capture surface;
+    each binding copies a frame or a chunk into its own buffer before the call
+    where it has a collector (§4), and its wrong-thread refusal is what keeps a
+    callback from writing the scene.
+  - Each lane's synthetic device sits in its platform's own path (§9 ruling 3);
+    the mac's and the iOS simulator's are kaya's in-process source, behind the
+    wall tools/check-verbs.py holds (every real-device name inside
+    `KayaRealCapture`, each entry walled, every route behind KAYA_SELFTEST).
+  - Not built at depth, each with its plan section: §5's surface frames and
+    voice output (and with them the `voice` prop), the opt-in real-device leg
+    (§7a), rule 6's background capture, `systemPreferredCamera` followed live
+    (it is read when the list is reported), the self-view's mirroring asserted
+    (it is applied for a front or desktop camera, but a flat synthetic colour
+    cannot show it), and an Info.plist with the camera and microphone usage
+    strings for a guest the maintainer runs by hand (an unbundled guest is
+    attributed to its terminal, and macOS ends a process that asks with no
+    usage string).
+
 ## RULING — a media reader's read for a track its source lacks answers `decode_error` (found 2026-10-02, the reader's depth slice)
 KEY: NO_TRACK, Report::NoTrack, kaya_reader_no_track, reader_no_track, readerNoTrack, no_track, noTrack, h264_noaudio.mp4, media_reader label#5
 

@@ -385,6 +385,20 @@ pub struct KayaHostApi {
     pub reader_finished: extern "C" fn(u64, u64),
     pub reader_failed: unsafe extern "C" fn(u64, u64, *const u8, usize, i64, i64, *const u8, usize),
     pub reader_overdue: extern "C" fn(u64, u64) -> u32,
+    /// docs/capture-plan.md: a capture's reports, its frames and samples on
+    /// the capture thread, the synthetic devices and the harness's verbs.
+    pub capture_state: unsafe extern "C" fn(u64, u32, u32, u32, u32, u32, *const u8, usize),
+    pub capture_overdue: extern "C" fn(u64) -> u32,
+    pub capture_permission: unsafe extern "C" fn(u32, u32, *const u8, usize),
+    pub capture_devices_begin: extern "C" fn(),
+    pub capture_device: unsafe extern "C" fn(*const u8, usize, *const u8, usize, u32, u32, u32),
+    pub capture_devices_end: extern "C" fn(),
+    pub capture_frame: unsafe extern "C" fn(u64, u32, u32, *const u8, u32, *const u8, u32, u64, u32) -> u32,
+    pub capture_samples: unsafe extern "C" fn(u64, u32, u32, *const f32, usize, u64),
+    pub capture_synthetic:
+        unsafe extern "C" fn(u32, *mut u8, usize, *mut u8, usize, *mut u32, *mut u32, *mut u32, *mut u32) -> u32,
+    pub capture_synthetic_permission: extern "C" fn(u32, u32) -> u32,
+    pub capture_harness: unsafe extern "C" fn(u32, u32, *const u8, usize, *mut u8, usize, *mut u8) -> usize,
     pub reader_no_track: unsafe extern "C" fn(u64, u64, *const u8, usize),
 }
 
@@ -651,6 +665,17 @@ pub(crate) fn run() -> i32 {
         reader_finished: crate::capi::kaya_reader_finished,
         reader_failed: crate::capi::kaya_reader_failed,
         reader_overdue: crate::capi::kaya_reader_overdue,
+        capture_state: crate::capi::kaya_capture_state,
+        capture_overdue: crate::capi::kaya_capture_overdue,
+        capture_permission: crate::capi::kaya_capture_permission,
+        capture_devices_begin: crate::capi::kaya_capture_devices_begin,
+        capture_device: crate::capi::kaya_capture_device,
+        capture_devices_end: crate::capi::kaya_capture_devices_end,
+        capture_frame: crate::capi::kaya_capture_frame,
+        capture_samples: crate::capi::kaya_capture_samples,
+        capture_synthetic: crate::capi::kaya_capture_synthetic,
+        capture_synthetic_permission: crate::capi::kaya_capture_synthetic_permission,
+        capture_harness: crate::capi::kaya_capture_harness,
         reader_no_track: crate::capi::kaya_reader_no_track,
     };
     // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the declares-windowing

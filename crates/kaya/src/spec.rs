@@ -109,6 +109,11 @@ pub enum PropKind {
     /// into a setter taking the binding's player handle, and the type a
     /// collection row's player field has.
     Player,
+    /// A capture's id (docs/capture-plan.md §3), riding the wire as an I64,
+    /// 0 for none: the player's label one source over, the setter a
+    /// generator turns into one taking the binding's capture handle. Live
+    /// zone only: no row field holds one.
+    Capture,
 }
 
 /// Properties with their wire ids and value kinds; kept in lockstep
@@ -264,6 +269,10 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // docs/media-plan.md §7b: the player a video view shows, a constant or
     // a row's player field; a player is shown by one view at a time.
     ("player", 52, PropKind::Player),
+    // docs/capture-plan.md §3: the capture a video view previews, the
+    // player's prop one source over (§9 ruling 1); a view shows a player or
+    // a capture, and a capture is shown by one view at a time.
+    ("capture", 53, PropKind::Capture),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -386,6 +395,21 @@ pub const PLAYER_PROPS: &[(&'static str, u32, PropKind)] = &[
     ("captions_language", 7, PropKind::Str),
 ];
 
+/// Capture properties (docs/capture-plan.md §2): what a capture opens and
+/// the format it wishes for. `camera` and `microphone` are a device's id
+/// from capture_devices, "" for none; `width`, `height` and `frame_rate`
+/// are wishes the platform meets with its nearest format (0: the
+/// platform's own choice), the chosen one read back in capture_changed;
+/// `muted` keeps the microphone open and delivers silence.
+pub const CAPTURE_PROPS: &[(&'static str, u32, PropKind)] = &[
+    ("camera", 1, PropKind::Str),
+    ("microphone", 2, PropKind::Str),
+    ("width", 3, PropKind::F64),
+    ("height", 4, PropKind::F64),
+    ("frame_rate", 5, PropKind::F64),
+    ("muted", 6, PropKind::Bool),
+];
+
 /// The variable tail of SET_PROPERTY, after `source`. The one record
 /// whose layout depends on a discriminant; generators emit one helper
 /// per source rather than a union type.
@@ -473,6 +497,12 @@ pub fn hash() -> u64 {
     }
     eat(b"player_props");
     for (name, id, kind) in PLAYER_PROPS {
+        eat(name.as_bytes());
+        eat(&id.to_le_bytes());
+        eat(format!("{kind:?}").as_bytes());
+    }
+    eat(b"capture_props");
+    for (name, id, kind) in CAPTURE_PROPS {
         eat(name.as_bytes());
         eat(&id.to_le_bytes());
         eat(format!("{kind:?}").as_bytes());
@@ -1927,6 +1957,72 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   showing it until it is declared again; a drawing declared \
                   after that names it is refused.",
         },
+        Record {
+            kind: 76,
+            name: "create_capture",
+            fields: &[f("capture", FieldTy::U64)],
+            payload: None,
+            doc: "Create a CAPTURE (docs/capture-plan.md §2): an app-held object \
+                  with no place in the layout that holds at most one camera \
+                  and one microphone, its id guest-chosen in its own space. It \
+                  starts `idle` with neither device; a video view previews it \
+                  through its `capture` prop. A second create of a live id is \
+                  a scene error.",
+        },
+        Record {
+            kind: 77,
+            name: "set_capture_prop",
+            fields: &[
+                f("capture", FieldTy::U64),
+                f("prop", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("value", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "Write a capture property (CAPTURE_PROPS) once, as a player's \
+                  are written. A device change while running reopens that \
+                  device; `camera` set to \"\" closes the camera and puts its \
+                  indicator out.",
+        },
+        Record {
+            kind: 78,
+            name: "capture_command",
+            fields: &[f("capture", FieldTy::U64), f("command", FieldTy::U32), f("reserved", FieldTy::U32)],
+            payload: None,
+            doc: "start or stop (CAPTURE_COMMAND). `start` asks for each kind's \
+                  permission still at `prompt`, as getUserMedia does, and \
+                  fails `denied` when either kind it opens is denied; the \
+                  answer is capture_changed, never an echo of the command.",
+        },
+        Record {
+            kind: 79,
+            name: "release_capture",
+            fields: &[f("capture", FieldTy::U64)],
+            payload: None,
+            doc: "Stop and forget a capture: its devices close, a video view \
+                  previewing it goes blank, its frame and sample callbacks are \
+                  dropped and no occurrence of its follows.",
+        },
+        Record {
+            kind: 80,
+            name: "request_permission",
+            fields: &[f("kind", FieldTy::U32), f("reserved", FieldTy::U32)],
+            payload: None,
+            doc: "Ask the user for a CAPTURE_KIND's permission before any \
+                  capture starts (a call screen asking early); answered by \
+                  capture_permission. A kind already decided is answered \
+                  with its decision and nothing is asked.",
+        },
+        Record {
+            kind: 81,
+            name: "watch_capture_devices",
+            fields: &[f("on", FieldTy::U32), f("reserved", FieldTy::U32)],
+            payload: None,
+            doc: "1: list the cameras and microphones now (capture_devices), \
+                  report each kind's permission as it stands \
+                  (capture_permission), and list again whenever a device \
+                  comes or goes; 0: stop. Listing asks for no permission.",
+        },
     ],
     apply: &[
         Record {
@@ -2852,6 +2948,68 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             payload: None,
             doc: "Stop any read and drop the platform reader.",
         },
+        Record {
+            kind: 64,
+            name: "create_capture",
+            fields: &[f("capture", FieldTy::U64)],
+            payload: None,
+            doc: "Make a platform capture for `capture`, idle, no device \
+                  (docs/capture-plan.md §2).",
+        },
+        Record {
+            kind: 65,
+            name: "set_capture_prop",
+            fields: &[
+                f("capture", FieldTy::U64),
+                f("prop", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("value", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "One capture property as written (CAPTURE_PROPS).",
+        },
+        Record {
+            kind: 66,
+            name: "capture_command",
+            fields: &[f("capture", FieldTy::U64), f("command", FieldTy::U32), f("reserved", FieldTy::U32)],
+            payload: None,
+            doc: "start or stop the platform capture; its states report \
+                  through kaya_capture_state, its frames through \
+                  kaya_capture_frame and its samples through \
+                  kaya_capture_samples.",
+        },
+        Record {
+            kind: 67,
+            name: "release_capture",
+            fields: &[f("capture", FieldTy::U64)],
+            payload: None,
+            doc: "Stop the platform capture, close its devices and drop it.",
+        },
+        Record {
+            kind: 68,
+            name: "request_permission",
+            fields: &[f("kind", FieldTy::U32), f("reserved", FieldTy::U32)],
+            payload: None,
+            doc: "Ask the platform for a CAPTURE_KIND's permission; the answer \
+                  reports through kaya_capture_permission.",
+        },
+        Record {
+            kind: 69,
+            name: "watch_capture_devices",
+            fields: &[f("on", FieldTy::U32), f("reserved", FieldTy::U32)],
+            payload: None,
+            doc: "1: report the device list through kaya_capture_devices_* \
+                  now and on every change; 0: stop.",
+        },
+        Record {
+            kind: 70,
+            name: "set_video_capture",
+            fields: &[f("widget_id", FieldTy::U64), f("capture", FieldTy::U64)],
+            payload: None,
+            doc: "The video view `widget_id` previews `capture` (0: none), \
+                  mirrored for a front or desktop camera (docs/capture-plan.md \
+                  §2 rule 4).",
+        },
     ],
     occurrence: &[
         Record {
@@ -3751,6 +3909,61 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   PNG nor JPEG, decode_error) and the decoder's sentence; a \
                   drawing naming a failed image is refused.",
         },
+        Record {
+            kind: 51,
+            name: "capture_changed",
+            fields: &[
+                f("capture", FieldTy::U64),
+                f("state", FieldTy::U32),
+                f("failure", FieldTy::U32),
+                f("interruption", FieldTy::U32),
+                f("width", FieldTy::U32),
+                f("height", FieldTy::U32),
+                f("frame_rate", FieldTy::U32),
+                f("detail", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "A capture's state moved (CAPTURE_STATE) with the format the \
+                  platform chose (0x0 at 0 fps with no camera running). \
+                  `failure` is CAPTURE_FAILURE, `none` unless failed; \
+                  `interruption` CAPTURE_INTERRUPTION, `none` unless \
+                  interrupted, an interruption being a state that ends by \
+                  itself (docs/capture-plan.md §2 rules 2 and 3). `detail` is \
+                  the platform's own sentence as a Str.",
+        },
+        Record {
+            kind: 52,
+            name: "capture_permission",
+            fields: &[f("kind", FieldTy::U32), f("permission", FieldTy::U32), f("detail", FieldTy::Value)],
+            payload: None,
+            doc: "A CAPTURE_KIND's PERMISSION, the web's three: prompt, granted, \
+                  denied, Apple's `restricted` being denied with the \
+                  platform's sentence as a Str `detail`. Sent when it moves \
+                  and in answer to request_permission.",
+        },
+        Record {
+            kind: 53,
+            name: "capture_devices",
+            fields: &[f("devices", FieldTy::Values)],
+            payload: None,
+            doc: "Every camera and microphone, five values a device: its \
+                  platform id (Str, stable across launches), its localized \
+                  name (Str), its CAPTURE_KIND (I64), its CAMERA_FACING (I64, \
+                  unknown for a microphone) and whether it is the platform's \
+                  preferred device of its kind (Bool). Sent when watching \
+                  starts and when one comes or goes.",
+        },
+        Record {
+            kind: 54,
+            name: "capture_overrun",
+            fields: &[f("capture", FieldTy::U64), f("behind_ms", FieldTy::U64)],
+            payload: None,
+            doc: "The app's sample callback has fallen `behind_ms` behind the \
+                  microphone (docs/capture-plan.md §4): samples are never \
+                  dropped, so a slow callback is told. Sent once as it falls \
+                  behind by more than KAYA_CAPTURE_OVERRUN_MS, and again only \
+                  after it has caught up.",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -3927,6 +4140,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("high_label", 50),
                 ("fit", 51),
                 ("player", 52),
+                ("capture", 53),
             ],
         },
         EnumSpec {
@@ -4240,6 +4454,60 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             variants: &[("completed", 0), ("cancelled", 1), ("failed", 2)],
         },
         EnumSpec {
+            // docs/capture-plan.md §2: a capture's states; an interruption
+            // ends by itself, a failure does not.
+            name: "capture_state",
+            variants: &[("idle", 0), ("starting", 1), ("running", 2), ("interrupted", 3), ("failed", 4)],
+        },
+        EnumSpec {
+            // docs/capture-plan.md §2 rule 2: CLOSED, one vocabulary in nine
+            // bindings; the platform's sentence rides beside it as `detail`.
+            name: "capture_failure",
+            variants: &[
+                ("none", 0),
+                ("denied", 1),
+                ("not_found", 2),
+                ("in_use", 3),
+                ("disconnected", 4),
+                ("unsupported", 5),
+                ("hardware_error", 6),
+                ("timeout", 7),
+            ],
+        },
+        EnumSpec {
+            // docs/capture-plan.md §2 rule 3.
+            name: "capture_interruption",
+            variants: &[("none", 0), ("background", 1), ("another_app", 2), ("system_pressure", 3)],
+        },
+        EnumSpec {
+            name: "capture_kind",
+            variants: &[("camera", 0), ("microphone", 1)],
+        },
+        EnumSpec {
+            // The web's three PermissionState names.
+            name: "permission",
+            variants: &[("prompt", 0), ("granted", 1), ("denied", 2)],
+        },
+        EnumSpec {
+            name: "camera_facing",
+            variants: &[("unknown", 0), ("front", 1), ("back", 2), ("external", 3)],
+        },
+        EnumSpec {
+            name: "capture_command",
+            variants: &[("start", 1), ("stop", 2)],
+        },
+        EnumSpec {
+            name: "cprop",
+            variants: &[
+                ("camera", 1),
+                ("microphone", 2),
+                ("width", 3),
+                ("height", 4),
+                ("frame_rate", 5),
+                ("muted", 6),
+            ],
+        },
+        EnumSpec {
             // docs/media-plan.md §5, the web's MediaSessionAction names. A
             // session's `actions` mask is 1 << value.
             name: "session_action",
@@ -4471,6 +4739,12 @@ mod tests {
             ("close_reader", wire::TX_CLOSE_READER),
             ("load_image", wire::TX_LOAD_IMAGE),
             ("release_image", wire::TX_RELEASE_IMAGE),
+            ("create_capture", wire::TX_CREATE_CAPTURE),
+            ("set_capture_prop", wire::TX_SET_CAPTURE_PROP),
+            ("capture_command", wire::TX_CAPTURE_COMMAND),
+            ("release_capture", wire::TX_RELEASE_CAPTURE),
+            ("request_permission", wire::TX_REQUEST_PERMISSION),
+            ("watch_capture_devices", wire::TX_WATCH_CAPTURE_DEVICES),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -4545,6 +4819,13 @@ mod tests {
                 ("read_peaks", wire::APPLY_READ_PEAKS),
                 ("cancel_read", wire::APPLY_CANCEL_READ),
                 ("close_reader", wire::APPLY_CLOSE_READER),
+                ("create_capture", wire::APPLY_CREATE_CAPTURE),
+                ("set_capture_prop", wire::APPLY_SET_CAPTURE_PROP),
+                ("capture_command", wire::APPLY_CAPTURE_COMMAND),
+                ("release_capture", wire::APPLY_RELEASE_CAPTURE),
+                ("request_permission", wire::APPLY_REQUEST_PERMISSION),
+                ("watch_capture_devices", wire::APPLY_WATCH_CAPTURE_DEVICES),
+                ("set_video_capture", wire::APPLY_SET_VIDEO_CAPTURE),
             ]
         );
         // The WHOLE list, not indexed asserts: an indexed pin says
@@ -4604,6 +4885,10 @@ mod tests {
                 ("reader_peaks", crate::ring::REC_READER_PEAKS),
                 ("reader_done", crate::ring::REC_READER_DONE),
                 ("image_loaded", crate::ring::REC_IMAGE_LOADED),
+                ("capture_changed", crate::ring::REC_CAPTURE_CHANGED),
+                ("capture_permission", crate::ring::REC_CAPTURE_PERMISSION),
+                ("capture_devices", crate::ring::REC_CAPTURE_DEVICES),
+                ("capture_overrun", crate::ring::REC_CAPTURE_OVERRUN),
             ]
         );
     }
@@ -4791,6 +5076,16 @@ mod tests {
             assert_eq!(name, ename);
             assert_eq!(id, eid);
         }
+        let cprop_enum = SPEC
+            .enums
+            .iter()
+            .find(|e| e.name == "cprop")
+            .expect("spec has a cprop enum");
+        assert_eq!(CAPTURE_PROPS.len(), cprop_enum.variants.len());
+        for ((name, id, _), (ename, eid)) in CAPTURE_PROPS.iter().zip(cprop_enum.variants) {
+            assert_eq!(name, ename);
+            assert_eq!(id, eid);
+        }
         let mprop_enum = SPEC
             .enums
             .iter()
@@ -4846,6 +5141,14 @@ mod tests {
                     ("track_kind", _) => canvas_pin(wire::TRACK_KINDS, name),
                     ("frame_accuracy", _) => canvas_pin(wire::FRAME_ACCURACIES, name),
                     ("read_outcome", _) => canvas_pin(wire::READ_OUTCOMES, name),
+                    ("capture_state", _) => canvas_pin(wire::CAPTURE_STATES, name),
+                    ("capture_failure", _) => canvas_pin(wire::CAPTURE_FAILURES, name),
+                    ("capture_interruption", _) => canvas_pin(wire::CAPTURE_INTERRUPTIONS, name),
+                    ("capture_kind", _) => canvas_pin(wire::CAPTURE_KINDS, name),
+                    ("permission", _) => canvas_pin(wire::PERMISSIONS, name),
+                    ("camera_facing", _) => canvas_pin(wire::CAMERA_FACINGS, name),
+                    ("capture_command", _) => canvas_pin(wire::CAPTURE_COMMANDS, name),
+                    ("cprop", _) => canvas_pin(wire::CPROPS, name),
                     ("draw_op", _) => canvas_pin(wire::DRAW_OPS, name),
                     ("paint", _) => canvas_pin(wire::PAINTS, name),
                     ("fill_rule", _) => canvas_pin(wire::FILL_RULES, name),
@@ -4907,6 +5210,7 @@ mod tests {
                     ("prop", "high_label") => wire::PROP_HIGH_LABEL,
                     ("prop", "fit") => wire::PROP_FIT,
                     ("prop", "player") => wire::PROP_PLAYER,
+                    ("prop", "capture") => wire::PROP_CAPTURE,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,
@@ -5084,6 +5388,14 @@ mod tests {
             ("track_kind", wire::TRACK_KINDS),
             ("frame_accuracy", wire::FRAME_ACCURACIES),
             ("read_outcome", wire::READ_OUTCOMES),
+            ("capture_state", wire::CAPTURE_STATES),
+            ("capture_failure", wire::CAPTURE_FAILURES),
+            ("capture_interruption", wire::CAPTURE_INTERRUPTIONS),
+            ("capture_kind", wire::CAPTURE_KINDS),
+            ("permission", wire::PERMISSIONS),
+            ("camera_facing", wire::CAMERA_FACINGS),
+            ("capture_command", wire::CAPTURE_COMMANDS),
+            ("cprop", wire::CPROPS),
         ];
         for (enum_name, table) in pairs {
             let e = SPEC
@@ -5209,6 +5521,48 @@ mod tests {
             TxOp::CloseReader { reader: ReaderId(2) },
             TxOp::LoadImage { image: ImageId(7), source: Value::I64(3) },
             TxOp::ReleaseImage { image: ImageId(7) },
+        ];
+        let decoded = wire::decode_transaction(&w.buf);
+        assert_eq!(format!("{decoded:?}"), format!("{want:?}"));
+        let mut ours = wire::Writer::new();
+        for op in &want {
+            ours.tx_op(op);
+        }
+        assert_eq!(ours.into_bytes(), w.buf, "the core's encoder and the spec's disagree");
+    }
+
+    /// The capture's records (docs/capture-plan.md §2), the reader's round
+    /// trip one feature over.
+    #[test]
+    fn capture_records_round_trip_through_wire() {
+        use crate::protocol::{CaptureCommand, CaptureId, CaptureKind, CaptureProp};
+        let mut w = GenericWriter { buf: Vec::new(), blobs: Vec::new() };
+        w.record(tx_record("create_capture"), &[Arg::U64(3)]);
+        w.record(
+            tx_record("set_capture_prop"),
+            &[Arg::U64(3), Arg::U32(1), Arg::U32(0), Arg::Value(Value::from("kaya-synthetic-camera-1"))],
+        );
+        w.record(tx_record("set_capture_prop"), &[Arg::U64(3), Arg::U32(5), Arg::U32(0), Arg::Value(Value::F64(30.0))]);
+        w.record(tx_record("set_capture_prop"), &[Arg::U64(3), Arg::U32(6), Arg::U32(0), Arg::Value(Value::Bool(true))]);
+        w.record(tx_record("capture_command"), &[Arg::U64(3), Arg::U32(1), Arg::U32(0)]);
+        w.record(tx_record("capture_command"), &[Arg::U64(3), Arg::U32(2), Arg::U32(0)]);
+        w.record(tx_record("request_permission"), &[Arg::U32(1), Arg::U32(0)]);
+        w.record(tx_record("watch_capture_devices"), &[Arg::U32(1), Arg::U32(0)]);
+        w.record(tx_record("release_capture"), &[Arg::U64(3)]);
+        let want = vec![
+            TxOp::CreateCapture { capture: CaptureId(3) },
+            TxOp::SetCaptureProp {
+                capture: CaptureId(3),
+                prop: CaptureProp::Camera,
+                value: Value::from("kaya-synthetic-camera-1"),
+            },
+            TxOp::SetCaptureProp { capture: CaptureId(3), prop: CaptureProp::FrameRate, value: Value::F64(30.0) },
+            TxOp::SetCaptureProp { capture: CaptureId(3), prop: CaptureProp::Muted, value: Value::Bool(true) },
+            TxOp::CaptureCommand { capture: CaptureId(3), command: CaptureCommand::Start },
+            TxOp::CaptureCommand { capture: CaptureId(3), command: CaptureCommand::Stop },
+            TxOp::RequestPermission { kind: CaptureKind::Microphone },
+            TxOp::WatchCaptureDevices { on: true },
+            TxOp::ReleaseCapture { capture: CaptureId(3) },
         ];
         let decoded = wire::decode_transaction(&w.buf);
         assert_eq!(format!("{decoded:?}"), format!("{want:?}"));

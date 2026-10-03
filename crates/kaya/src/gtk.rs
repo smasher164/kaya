@@ -14168,6 +14168,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
         ApplyOp::ReadPeaks { reader, read } => gtk_reader::peaks(reader.0, read.0),
         ApplyOp::CancelRead { reader, read } => gtk_reader::cancel(reader.0, read.0),
         ApplyOp::CloseReader(reader) => gtk_reader::close(reader.0),
+        // docs/capture-plan.md §8: the capture is a depth slice on the mac.
+        ApplyOp::CreateCapture(_)
+        | ApplyOp::SetCaptureProp { .. }
+        | ApplyOp::CaptureCommand { .. }
+        | ApplyOp::ReleaseCapture(_)
+        | ApplyOp::RequestPermission(_)
+        | ApplyOp::WatchCaptureDevices(_)
+        | ApplyOp::SetVideoCapture { .. } => crate::depth_stub("capture"),
         ApplyOp::SetSession { player, offered, playback_state: _, title, artist, album, artwork } => {
             gtk_media::set_session(
                 core,

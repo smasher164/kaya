@@ -68,6 +68,169 @@ pub struct ReadId(pub u64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ImageId(pub u64);
 
+/// A capture's id (docs/capture-plan.md §2): guest-chosen, its own space,
+/// live from create_capture to release_capture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CaptureId(pub u64);
+
+/// Capture property keys (spec::CAPTURE_PROPS).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CaptureProp {
+    /// A camera's device id (Str), "" for none.
+    Camera,
+    /// A microphone's device id (Str), "" for none.
+    Microphone,
+    /// Wishes the platform meets with its nearest format (F64, 0 the
+    /// platform's own choice).
+    Width,
+    Height,
+    FrameRate,
+    /// The microphone stays open and delivers silence (Bool).
+    Muted,
+}
+
+/// A command the app aims at a capture (spec enum "capture_command").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CaptureCommand {
+    Start,
+    Stop,
+}
+
+/// Which device kind (spec enum "capture_kind").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CaptureKind {
+    Camera,
+    Microphone,
+}
+
+impl CaptureKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            CaptureKind::Camera => "camera",
+            CaptureKind::Microphone => "microphone",
+        }
+    }
+}
+
+/// A kind's permission, the web's three (spec enum "permission").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Permission {
+    Prompt,
+    Granted,
+    Denied,
+}
+
+impl Permission {
+    pub fn name(self) -> &'static str {
+        match self {
+            Permission::Prompt => "prompt",
+            Permission::Granted => "granted",
+            Permission::Denied => "denied",
+        }
+    }
+}
+
+/// Which way a camera faces (spec enum "camera_facing").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CameraFacing {
+    Unknown,
+    Front,
+    Back,
+    External,
+}
+
+impl CameraFacing {
+    pub fn name(self) -> &'static str {
+        match self {
+            CameraFacing::Unknown => "unknown",
+            CameraFacing::Front => "front",
+            CameraFacing::Back => "back",
+            CameraFacing::External => "external",
+        }
+    }
+}
+
+/// What a capture reads (spec enum "capture_state").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CaptureState {
+    Idle,
+    Starting,
+    Running,
+    /// Paused by the platform and back to running by itself.
+    Interrupted,
+    Failed,
+}
+
+impl CaptureState {
+    pub fn name(self) -> &'static str {
+        match self {
+            CaptureState::Idle => "idle",
+            CaptureState::Starting => "starting",
+            CaptureState::Running => "running",
+            CaptureState::Interrupted => "interrupted",
+            CaptureState::Failed => "failed",
+        }
+    }
+}
+
+/// Why a capture failed (spec enum "capture_failure"), closed
+/// (docs/capture-plan.md §2 rule 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CaptureFailure {
+    Denied,
+    NotFound,
+    InUse,
+    Disconnected,
+    Unsupported,
+    HardwareError,
+    Timeout,
+}
+
+impl CaptureFailure {
+    pub fn name(self) -> &'static str {
+        match self {
+            CaptureFailure::Denied => "denied",
+            CaptureFailure::NotFound => "not_found",
+            CaptureFailure::InUse => "in_use",
+            CaptureFailure::Disconnected => "disconnected",
+            CaptureFailure::Unsupported => "unsupported",
+            CaptureFailure::HardwareError => "hardware_error",
+            CaptureFailure::Timeout => "timeout",
+        }
+    }
+}
+
+/// Why a running capture paused (spec enum "capture_interruption").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CaptureInterruption {
+    Background,
+    AnotherApp,
+    SystemPressure,
+}
+
+impl CaptureInterruption {
+    pub fn name(self) -> &'static str {
+        match self {
+            CaptureInterruption::Background => "background",
+            CaptureInterruption::AnotherApp => "another_app",
+            CaptureInterruption::SystemPressure => "system_pressure",
+        }
+    }
+}
+
+/// One camera or microphone as the platform lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CaptureDevice {
+    /// The platform's own id, stable across launches.
+    pub id: String,
+    /// The platform's localized name.
+    pub name: String,
+    pub kind: CaptureKind,
+    pub facing: CameraFacing,
+    /// The platform's preferred device of its kind.
+    pub preferred: bool,
+}
+
 /// Which frame a time answers with (spec enum "frame_accuracy").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FrameAccuracy {
@@ -1002,6 +1165,26 @@ pub enum Occurrence {
     ReaderDone { reader: ReaderId, read: ReadId, outcome: ReadOutcome },
     /// A load_image's answer: its size, or why it holds no picture.
     ImageLoaded { image: ImageId, width: u32, height: u32, failure: Option<(MediaFailure, String)> },
+    /// A capture's state moved, with the format the platform chose
+    /// (docs/capture-plan.md §2): the closed failure when failed, the
+    /// interruption when interrupted, and the platform's sentence.
+    CaptureChanged {
+        capture: CaptureId,
+        state: CaptureState,
+        failure: Option<CaptureFailure>,
+        interruption: Option<CaptureInterruption>,
+        width: u32,
+        height: u32,
+        frame_rate: u32,
+        detail: String,
+    },
+    /// A kind's permission moved or was asked about.
+    CapturePermission { kind: CaptureKind, permission: Permission, detail: String },
+    /// Every camera and microphone, as watching starts and when one comes
+    /// or goes.
+    CaptureDevices { devices: Vec<CaptureDevice> },
+    /// The app's sample callback has fallen this far behind the microphone.
+    CaptureOverrun { capture: CaptureId, behind_ms: u64 },
     /// A menu action fired — clicked OR invoked through its shortcut:
     /// ONE occurrence, one dispatch path (DESIGN.md, Menus).
     MenuActivated { item: MenuItemId },
@@ -1923,6 +2106,9 @@ pub enum Prop {
     /// The player a video view shows (PropKind::Player, an I64 id, 0 none;
     /// docs/media-plan.md §7b). The core lowers it to SetVideoPlayer.
     Player,
+    /// The capture a video view previews (PropKind::Capture, an I64 id, 0
+    /// none; docs/capture-plan.md §3). The core lowers it to SetVideoCapture.
+    Capture,
     /// The app owns a rich textarea's undo (Bool-valued; docs/rich-text-plan.md
     /// R6, §14): the native stack is off, the ledger never banks it, and
     /// Edit>Undo/Redo reach the app through the role item's own activation.
@@ -2325,6 +2511,14 @@ pub enum TxOp {
     /// (I64), answered by ImageLoaded; and its release.
     LoadImage { image: ImageId, source: Value },
     ReleaseImage { image: ImageId },
+    /// docs/capture-plan.md §2: a capture's lifetime, its props and
+    /// commands, the app's permission asks and its device watch.
+    CreateCapture { capture: CaptureId },
+    SetCaptureProp { capture: CaptureId, prop: CaptureProp, value: Value },
+    CaptureCommand { capture: CaptureId, command: CaptureCommand },
+    ReleaseCapture { capture: CaptureId },
+    RequestPermission { kind: CaptureKind },
+    WatchCaptureDevices { on: bool },
     /// Declare one app-link route (docs/app-links-plan.md §4). The core
     /// keeps the table and does the one match; a malformed or repeated
     /// pattern faults here, like every other declaration refusal.
@@ -2618,6 +2812,15 @@ pub enum ApplyOp {
     ReadPeaks { reader: ReaderId, read: ReadId },
     CancelRead { reader: ReaderId, read: ReadId },
     CloseReader(ReaderId),
+    /// docs/capture-plan.md §2, §3: the capture on the platform, and the
+    /// video view previewing one.
+    CreateCapture(CaptureId),
+    SetCaptureProp { capture: CaptureId, prop: CaptureProp, value: Value },
+    CaptureCommand { capture: CaptureId, command: CaptureCommand },
+    ReleaseCapture(CaptureId),
+    RequestPermission(CaptureKind),
+    WatchCaptureDevices(bool),
+    SetVideoCapture { widget: WidgetId, capture: Option<CaptureId> },
     /// The PLATFORM's track, counting from 1 in its own listing; 0 turns
     /// its captions off.
     SelectTrack { player: PlayerId, kind: TrackKind, index: u32 },
@@ -3106,6 +3309,34 @@ impl OccSink {
                     ring.push_record(
                         crate::ring::REC_IMAGE_LOADED,
                         &crate::wire::image_loaded_body(image, (width, height), failure.as_ref()),
+                    );
+                }
+                Occurrence::CaptureChanged { capture, state, failure, interruption, width, height, frame_rate, detail } => {
+                    ring.push_record(
+                        crate::ring::REC_CAPTURE_CHANGED,
+                        &crate::wire::capture_changed_body(
+                            capture,
+                            state,
+                            failure,
+                            interruption,
+                            (width, height, frame_rate),
+                            &detail,
+                        ),
+                    );
+                }
+                Occurrence::CapturePermission { kind, permission, detail } => {
+                    ring.push_record(
+                        crate::ring::REC_CAPTURE_PERMISSION,
+                        &crate::wire::capture_permission_body(kind, permission, &detail),
+                    );
+                }
+                Occurrence::CaptureDevices { devices } => {
+                    ring.push_record(crate::ring::REC_CAPTURE_DEVICES, &crate::wire::capture_devices_body(&devices));
+                }
+                Occurrence::CaptureOverrun { capture, behind_ms } => {
+                    ring.push_record(
+                        crate::ring::REC_CAPTURE_OVERRUN,
+                        &crate::wire::capture_overrun_body(capture, behind_ms),
                     );
                 }
                 Occurrence::FullscreenChanged { window, on } => {

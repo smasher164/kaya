@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x6d398768b7d3b5d6;
+    public const ulong SpecHash = 0xc00e7dc840e57f41;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -128,6 +128,7 @@ static class KayaWire
     public const uint PropHighLabel = 50;
     public const uint PropFit = 51;
     public const uint PropPlayer = 52;
+    public const uint PropCapture = 53;
     public const uint WpropTitle = 1;
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
@@ -288,6 +289,40 @@ static class KayaWire
     public const uint ReadOutcomeCompleted = 0;
     public const uint ReadOutcomeCancelled = 1;
     public const uint ReadOutcomeFailed = 2;
+    public const uint CaptureStateIdle = 0;
+    public const uint CaptureStateStarting = 1;
+    public const uint CaptureStateRunning = 2;
+    public const uint CaptureStateInterrupted = 3;
+    public const uint CaptureStateFailed = 4;
+    public const uint CaptureFailureNone = 0;
+    public const uint CaptureFailureDenied = 1;
+    public const uint CaptureFailureNotFound = 2;
+    public const uint CaptureFailureInUse = 3;
+    public const uint CaptureFailureDisconnected = 4;
+    public const uint CaptureFailureUnsupported = 5;
+    public const uint CaptureFailureHardwareError = 6;
+    public const uint CaptureFailureTimeout = 7;
+    public const uint CaptureInterruptionNone = 0;
+    public const uint CaptureInterruptionBackground = 1;
+    public const uint CaptureInterruptionAnotherApp = 2;
+    public const uint CaptureInterruptionSystemPressure = 3;
+    public const uint CaptureKindCamera = 0;
+    public const uint CaptureKindMicrophone = 1;
+    public const uint PermissionPrompt = 0;
+    public const uint PermissionGranted = 1;
+    public const uint PermissionDenied = 2;
+    public const uint CameraFacingUnknown = 0;
+    public const uint CameraFacingFront = 1;
+    public const uint CameraFacingBack = 2;
+    public const uint CameraFacingExternal = 3;
+    public const uint CaptureCommandStart = 1;
+    public const uint CaptureCommandStop = 2;
+    public const uint CpropCamera = 1;
+    public const uint CpropMicrophone = 2;
+    public const uint CpropWidth = 3;
+    public const uint CpropHeight = 4;
+    public const uint CpropFrameRate = 5;
+    public const uint CpropMuted = 6;
     public const uint SessionActionPlay = 1;
     public const uint SessionActionPause = 2;
     public const uint SessionActionStop = 3;
@@ -389,6 +424,12 @@ static class KayaWire
     public const ushort TxKindCloseReader = 73;
     public const ushort TxKindLoadImage = 74;
     public const ushort TxKindReleaseImage = 75;
+    public const ushort TxKindCreateCapture = 76;
+    public const ushort TxKindSetCaptureProp = 77;
+    public const ushort TxKindCaptureCommand = 78;
+    public const ushort TxKindReleaseCapture = 79;
+    public const ushort TxKindRequestPermission = 80;
+    public const ushort TxKindWatchCaptureDevices = 81;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -450,6 +491,13 @@ static class KayaWire
     public const ushort ApplyKindReadPeaks = 61;
     public const ushort ApplyKindCancelRead = 62;
     public const ushort ApplyKindCloseReader = 63;
+    public const ushort ApplyKindCreateCapture = 64;
+    public const ushort ApplyKindSetCaptureProp = 65;
+    public const ushort ApplyKindCaptureCommand = 66;
+    public const ushort ApplyKindReleaseCapture = 67;
+    public const ushort ApplyKindRequestPermission = 68;
+    public const ushort ApplyKindWatchCaptureDevices = 69;
+    public const ushort ApplyKindSetVideoCapture = 70;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
@@ -500,6 +548,10 @@ static class KayaWire
     public const ushort OccKindReaderPeaks = 48;
     public const ushort OccKindReaderDone = 49;
     public const ushort OccKindImageLoaded = 50;
+    public const ushort OccKindCaptureChanged = 51;
+    public const ushort OccKindCapturePermission = 52;
+    public const ushort OccKindCaptureDevices = 53;
+    public const ushort OccKindCaptureOverrun = 54;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -1333,6 +1385,61 @@ static class KayaWire
         var w = Begin(out var stream);
         w.Write(image);
         return Finish(stream, w, TxKindReleaseImage);
+    }
+
+    /// Create a CAPTURE (docs/capture-plan.md §2): an app-held object with no place in the layout that holds at most one camera and one microphone, its id guest-chosen in its own space. It starts `idle` with neither device; a video view previews it through its `capture` prop. A second create of a live id is a scene error.
+    public static byte[] TxCreateCapture(ulong capture)
+    {
+        var w = Begin(out var stream);
+        w.Write(capture);
+        return Finish(stream, w, TxKindCreateCapture);
+    }
+
+    /// Write a capture property (CAPTURE_PROPS) once, as a player's are written. A device change while running reopens that device; `camera` set to "" closes the camera and puts its indicator out.
+    public static byte[] TxSetCaptureProp(ulong capture, uint prop, object value)
+    {
+        var w = Begin(out var stream);
+        w.Write(capture);
+        w.Write(prop);
+        w.Write(0u);
+        EncodeValue(w, value);
+        return Finish(stream, w, TxKindSetCaptureProp);
+    }
+
+    /// start or stop (CAPTURE_COMMAND). `start` asks for each kind's permission still at `prompt`, as getUserMedia does, and fails `denied` when either kind it opens is denied; the answer is capture_changed, never an echo of the command.
+    public static byte[] TxCaptureCommand(ulong capture, uint command)
+    {
+        var w = Begin(out var stream);
+        w.Write(capture);
+        w.Write(command);
+        w.Write(0u);
+        return Finish(stream, w, TxKindCaptureCommand);
+    }
+
+    /// Stop and forget a capture: its devices close, a video view previewing it goes blank, its frame and sample callbacks are dropped and no occurrence of its follows.
+    public static byte[] TxReleaseCapture(ulong capture)
+    {
+        var w = Begin(out var stream);
+        w.Write(capture);
+        return Finish(stream, w, TxKindReleaseCapture);
+    }
+
+    /// Ask the user for a CAPTURE_KIND's permission before any capture starts (a call screen asking early); answered by capture_permission. A kind already decided is answered with its decision and nothing is asked.
+    public static byte[] TxRequestPermission(uint kind)
+    {
+        var w = Begin(out var stream);
+        w.Write(kind);
+        w.Write(0u);
+        return Finish(stream, w, TxKindRequestPermission);
+    }
+
+    /// 1: list the cameras and microphones now (capture_devices), report each kind's permission as it stands (capture_permission), and list again whenever a device comes or goes; 0: stop. Listing asks for no permission.
+    public static byte[] TxWatchCaptureDevices(uint on)
+    {
+        var w = Begin(out var stream);
+        w.Write(on);
+        w.Write(0u);
+        return Finish(stream, w, TxKindWatchCaptureDevices);
     }
 
     /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
@@ -2671,6 +2778,31 @@ static class KayaWire
         return Finish(stream, w, TxKindSetProperty);
     }
 
+    /// set_property with a constant capture value.
+    public static byte[] TxSetCapture(ulong widgetId, long capture)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropCapture); w.Write(SourceConst);
+        EncodeValue(w, capture);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound capture value.
+    public static byte[] TxBindCapture(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropCapture); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindCaptureElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropCapture); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
     /// set_window_prop with a constant title value (window 0, the primary surface).
     public static byte[] TxSetWindowTitle(ulong window, string title)
     {
@@ -3243,7 +3375,7 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted && kind != OccKindSheetDismissed && kind != OccKindDismissRequested && kind != OccKindSubmitted && kind != OccKindNotificationReplied && kind != OccKindFullscreenChanged && kind != OccKindColorChanged && kind != OccKindRangeChanged && kind != OccKindRangeCommitted && kind != OccKindPlayerChanged && kind != OccKindPlayerPosition && kind != OccKindSeekCompleted && kind != OccKindSessionAction && kind != OccKindPlayerTracks && kind != OccKindCaptionCue && kind != OccKindVideoVisibility && kind != OccKindReaderFrame && kind != OccKindReaderProgress && kind != OccKindReaderPeaks && kind != OccKindReaderDone && kind != OccKindImageLoaded)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted && kind != OccKindSheetDismissed && kind != OccKindDismissRequested && kind != OccKindSubmitted && kind != OccKindNotificationReplied && kind != OccKindFullscreenChanged && kind != OccKindColorChanged && kind != OccKindRangeChanged && kind != OccKindRangeCommitted && kind != OccKindPlayerChanged && kind != OccKindPlayerPosition && kind != OccKindSeekCompleted && kind != OccKindSessionAction && kind != OccKindPlayerTracks && kind != OccKindCaptionCue && kind != OccKindVideoVisibility && kind != OccKindReaderFrame && kind != OccKindReaderProgress && kind != OccKindReaderPeaks && kind != OccKindReaderDone && kind != OccKindImageLoaded && kind != OccKindCaptureChanged && kind != OccKindCapturePermission && kind != OccKindCaptureDevices && kind != OccKindCaptureOverrun)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         if (kind == OccKindAlertResult)
@@ -3507,6 +3639,91 @@ static class KayaWire
             payload = tail;
             return true;
         }
+        if (kind == OccKindCaptureChanged)
+        {
+            // A flat record: its fields in order, into the tail.
+            int flatAt = 8;
+            var tail = new List<object>();
+            flatAt += 8;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            {
+                uint vtype = BitConverter.ToUInt32(rec, flatAt);
+                int vlen = (int)BitConverter.ToUInt32(rec, flatAt + 4);
+                switch (vtype)
+                {
+                    case ValueBool: tail.Add(rec[flatAt + 8] != 0); break;
+                    case ValueI64: tail.Add(BitConverter.ToInt64(rec, flatAt + 8)); break;
+                    case ValueF64: tail.Add(BitConverter.ToDouble(rec, flatAt + 8)); break;
+                    default: tail.Add(Encoding.UTF8.GetString(rec, flatAt + 8, vlen)); break;
+                }
+                flatAt += 8 + ((vlen + 7) & ~7);
+            }
+            payload = tail;
+            return true;
+        }
+        if (kind == OccKindCapturePermission)
+        {
+            // A flat record: its fields in order, into the tail.
+            int flatAt = 8;
+            var tail = new List<object>();
+            id = 0;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            {
+                uint vtype = BitConverter.ToUInt32(rec, flatAt);
+                int vlen = (int)BitConverter.ToUInt32(rec, flatAt + 4);
+                switch (vtype)
+                {
+                    case ValueBool: tail.Add(rec[flatAt + 8] != 0); break;
+                    case ValueI64: tail.Add(BitConverter.ToInt64(rec, flatAt + 8)); break;
+                    case ValueF64: tail.Add(BitConverter.ToDouble(rec, flatAt + 8)); break;
+                    default: tail.Add(Encoding.UTF8.GetString(rec, flatAt + 8, vlen)); break;
+                }
+                flatAt += 8 + ((vlen + 7) & ~7);
+            }
+            payload = tail;
+            return true;
+        }
+        if (kind == OccKindCaptureDevices)
+        {
+            // A flat record: its fields in order, into the tail.
+            int flatAt = 8;
+            var tail = new List<object>();
+            id = 0;
+            {
+                int count = (int)BitConverter.ToUInt32(rec, flatAt);
+                flatAt += 8;
+                tail.Add((long)count);
+                for (int i = 0; i < count; i++)
+                {
+                    uint vtype = BitConverter.ToUInt32(rec, flatAt);
+                    int vlen = (int)BitConverter.ToUInt32(rec, flatAt + 4);
+                    switch (vtype)
+                    {
+                        case ValueBool: tail.Add(rec[flatAt + 8] != 0); break;
+                        case ValueI64: tail.Add(BitConverter.ToInt64(rec, flatAt + 8)); break;
+                        case ValueF64: tail.Add(BitConverter.ToDouble(rec, flatAt + 8)); break;
+                        default: tail.Add(Encoding.UTF8.GetString(rec, flatAt + 8, vlen)); break;
+                    }
+                    flatAt += 8 + ((vlen + 7) & ~7);
+                }
+            }
+            payload = tail;
+            return true;
+        }
         if (kind == OccKindFileDialogResult)
         {
             // id, a count, then three Values per file
@@ -3556,7 +3773,7 @@ static class KayaWire
             return true;
         // Surface-pair records (window, section): the SECOND id
         // keys the handler; the first rides as the payload.
-        if (kind == OccKindSectionSelected || kind == OccKindPlayerPosition || kind == OccKindSeekCompleted)
+        if (kind == OccKindSectionSelected || kind == OccKindPlayerPosition || kind == OccKindSeekCompleted || kind == OccKindCaptureOverrun)
         {
             payload = id;
             id = BitConverter.ToUInt64(rec, 16);

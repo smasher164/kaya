@@ -507,6 +507,16 @@ pub enum Step {
     /// written through the core's one resolver to a path ($TMP/$PID
     /// expanded), its directory created (docs/photo-attach-plan.md §5).
     CopyAsset(String, String),
+    /// `expect_capture <n> "frames WxH RRGGBB, samples F Hz"`: the core's
+    /// own statistics of the `n`th live capture (docs/capture-plan.md §7) —
+    /// the last second's frame size and centre colour and its dominant
+    /// tone, `none` for nothing in that second and `silent` for silence —
+    /// so no app reports its own evidence.
+    ExpectCapture(u32, String),
+    /// `answer_permission <camera|microphone> <granted|denied>`: what the
+    /// synthetic prompt for that kind answers when the app first asks
+    /// (docs/capture-plan.md §7), legal while the kind is still `prompt`.
+    AnswerPermission(crate::protocol::CaptureKind, crate::protocol::Permission),
     /// `swipe_action <row> "<item>"`: run the row's context item through the
     /// swipe that runs it (docs/swipe-actions-plan.md §4) — the platform's
     /// own swipe where the backend lowers one, the context menu where it
@@ -904,6 +914,8 @@ impl Step {
             | Step::FileChoose(..)
             | Step::FileDialogGoto(..)
             | Step::CopyAsset(..)
+            | Step::ExpectCapture(..)
+            | Step::AnswerPermission(..)
             | Step::ExpectSaveDialog(..)
             | Step::FileDialogName(..)
             | Step::FileSave(..)
@@ -1037,6 +1049,8 @@ impl Step {
             Step::FileChoose(..) => false,
             Step::FileDialogGoto(..) => false,
             Step::CopyAsset(..) => false,
+            Step::ExpectCapture(..) => true,
+            Step::AnswerPermission(..) => false,
             Step::SwipeAction(..) => false,
             Step::ExpectSwipeActions(..) => true,
             Step::ExpectImageSize(..) => true,
@@ -2654,6 +2668,29 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     format!("expect_image_size wants an image and a WxH string: {line:?}")
                 })?;
                 Step::ExpectImageSize(parse_target(target)?, parse_string(text)?)
+            }
+            "expect_capture" => {
+                let (index, text) = rest.trim().split_once(' ').ok_or_else(|| {
+                    format!("expect_capture wants a capture's index and a quoted reading: {line:?}")
+                })?;
+                let index: u32 = index
+                    .parse()
+                    .map_err(|_| format!("expect_capture's capture is an index from 0, got {index:?}: {line:?}"))?;
+                Step::ExpectCapture(index, parse_string(text)?)
+            }
+            "answer_permission" => {
+                let mut words = rest.split_whitespace();
+                let kind = match words.next() {
+                    Some("camera") => crate::protocol::CaptureKind::Camera,
+                    Some("microphone") => crate::protocol::CaptureKind::Microphone,
+                    _ => return Err(format!("answer_permission wants camera or microphone: {line:?}")),
+                };
+                let answer = match (words.next(), words.next()) {
+                    (Some("granted"), None) => crate::protocol::Permission::Granted,
+                    (Some("denied"), None) => crate::protocol::Permission::Denied,
+                    _ => return Err(format!("answer_permission answers granted or denied: {line:?}")),
+                };
+                Step::AnswerPermission(kind, answer)
             }
             "copy_asset" => {
                 let mut words = rest.split_whitespace().map(str::to_owned);
@@ -4819,6 +4856,11 @@ fn run_with_log(
                 }
             })),
             Step::CopyAsset(name, path) => Some(crate::assets::copy_asset(name, &expand_path(path))),
+            Step::ExpectCapture(index, want) => Some(poll(|| crate::capture::expect(*index as usize, want))),
+            Step::AnswerPermission(kind, answer) => Some(
+                crate::capture::answer_permission(*kind, *answer)
+                    .map(|()| format!("answer_permission {} {}", kind.name(), answer.name())),
+            ),
             Step::ExpectVideoInk(t, want) if want == VIDEO_INK_NONE => Some(poll(|| {
                 let got = stage.video_ink(*t);
                 let ground = stage.video_ground(*t);
@@ -7249,6 +7291,17 @@ mod tests {
             [Step::ExpectVideoInk(t, w)] if *t == video && w == "C83C1E"
         ));
         assert!(parse("expect_video_ink label#0 \"C83C1E\"").is_err());
+        assert!(matches!(
+            parse("expect_capture 0 \"frames 640x480 C83C1E, samples 440 Hz\"").unwrap().as_slice(),
+            [Step::ExpectCapture(0, w)] if w == "frames 640x480 C83C1E, samples 440 Hz"
+        ));
+        assert!(parse("expect_capture video#0 \"frames none, samples none\"").is_err());
+        assert!(matches!(
+            parse("answer_permission microphone denied").unwrap().as_slice(),
+            [Step::AnswerPermission(crate::protocol::CaptureKind::Microphone, crate::protocol::Permission::Denied)]
+        ));
+        assert!(parse("answer_permission microphone prompt").is_err());
+        assert!(parse("answer_permission screen granted").is_err());
         assert!(parse("expect_video_ink video#0 \"c83c1e\"").is_err());
         assert!(parse("expect_video_ink video#0 \"C83C1\"").is_err());
         assert!(matches!(

@@ -611,7 +611,14 @@ in docs/deferred.md.
    (docs/media-plan.md §8 rulings 3 and 4): each binding's hand-written
    surface calling the reader's seven generated record writers and naming
    the `image` draw op, Rust the reference row, green in all nine since the
-   breadth slice, a fake-name census firing every row, counts printed),
+   breadth slice, a fake-name census firing every row, counts printed.
+   AND THE CAPTURE SINCE 2026-10-02 (docs/capture-plan.md §2-§4): each
+   binding's hand-written surface calling the capture's six generated
+   record writers, naming the video view's `capture` prop and registering
+   the frame and sample callbacks (kaya_capture_on_frame,
+   kaya_capture_on_samples), Rust the reference row; red by design in the
+   eight bindings the depth slice did not build (docs/deferred.md's capture
+   BUILD entry), a fake-name census firing every row, counts printed),
    `tools/check-universal-props.py` (the lowering-side sibling: every
    backend applies the universal a11y props to every kind — Compose
    per-arm, SwiftUI's one wrapper unbypassed, GTK/WinUI's apply arm
@@ -1424,7 +1431,18 @@ in docs/deferred.md.
    Media Foundation ignores, Compose's keyframe taken from the sync samples,
    each arm's one report door, and ONE site per backend reporting a missing
    track, so the reason a ruling names is one line (docs/deferred.md's
-   missing-track RULING). Five more watched negatives, counts printed),
+   missing-track RULING). Five more watched negatives, counts printed.
+   AND THE CAPTURE WALL SINCE 2026-10-02 (docs/capture-plan.md §7): a
+   lane's guest inherits its terminal's camera and microphone grant, so a
+   leg reaching a real device opens the maintainer's camera with no prompt,
+   and no scene can tell: the synthetic devices are what the scenes assert.
+   Every name that reaches a real device (AVCaptureDevice, its session,
+   inputs, outputs and preview layer, requestAccess, authorizationStatus)
+   lives inside `enum KayaRealCapture`, each of its static entry points
+   begins with `kayaCaptureWall(`, which is fatal under KAYA_SELFTEST, its
+   source has only a private init, and every route into the type from
+   outside sits behind `kayaCaptureUnderHarness` in its function. Five
+   watched negatives, counts printed),
    `tools/check-file-modes.py` (the file-mode NUMBERS agree with the
    spec's wherever they are written down. `kaya_open_picked` takes an
    integer, crates/kaya/src/spec.rs decides what it means, and five

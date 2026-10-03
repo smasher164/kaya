@@ -16275,6 +16275,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
         ApplyOp::ReadPeaks { reader, read } => reader::peaks(reader.0, read.0),
         ApplyOp::CancelRead { reader, read } => reader::cancel(reader.0, read.0),
         ApplyOp::CloseReader(reader) => reader::close(reader.0),
+        // docs/capture-plan.md §8: the capture is a depth slice on the mac.
+        ApplyOp::CreateCapture(_)
+        | ApplyOp::SetCaptureProp { .. }
+        | ApplyOp::CaptureCommand { .. }
+        | ApplyOp::ReleaseCapture(_)
+        | ApplyOp::RequestPermission(_)
+        | ApplyOp::WatchCaptureDevices(_)
+        | ApplyOp::SetVideoCapture { .. } => crate::depth_stub("capture"),
         ApplyOp::SetSession { player, offered, playback_state, title, artist, album, artwork } => {
             media::set_session(
                 core,

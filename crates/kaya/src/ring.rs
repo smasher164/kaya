@@ -90,6 +90,11 @@ pub(crate) const REC_READER_PROGRESS: u16 = 47;
 pub(crate) const REC_READER_PEAKS: u16 = 48;
 pub(crate) const REC_READER_DONE: u16 = 49;
 pub(crate) const REC_IMAGE_LOADED: u16 = 50;
+/// docs/capture-plan.md §2.
+pub(crate) const REC_CAPTURE_CHANGED: u16 = 51;
+pub(crate) const REC_CAPTURE_PERMISSION: u16 = 52;
+pub(crate) const REC_CAPTURE_DEVICES: u16 = 53;
+pub(crate) const REC_CAPTURE_OVERRUN: u16 = 54;
 
 /// Wire framing of every record, exported through the C header so direct
 /// consumers cast a pointer instead of bit-twiddling. Little-endian;

@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x6d398768b7d3b5d6
+SPEC_HASH = 0xc00e7dc840e57f41
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -130,6 +130,7 @@ PROP_LOW_LABEL = 49
 PROP_HIGH_LABEL = 50
 PROP_FIT = 51
 PROP_PLAYER = 52
+PROP_CAPTURE = 53
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -290,6 +291,40 @@ FRAME_ACCURACY_EXACT = 1
 READ_OUTCOME_COMPLETED = 0
 READ_OUTCOME_CANCELLED = 1
 READ_OUTCOME_FAILED = 2
+CAPTURE_STATE_IDLE = 0
+CAPTURE_STATE_STARTING = 1
+CAPTURE_STATE_RUNNING = 2
+CAPTURE_STATE_INTERRUPTED = 3
+CAPTURE_STATE_FAILED = 4
+CAPTURE_FAILURE_NONE = 0
+CAPTURE_FAILURE_DENIED = 1
+CAPTURE_FAILURE_NOT_FOUND = 2
+CAPTURE_FAILURE_IN_USE = 3
+CAPTURE_FAILURE_DISCONNECTED = 4
+CAPTURE_FAILURE_UNSUPPORTED = 5
+CAPTURE_FAILURE_HARDWARE_ERROR = 6
+CAPTURE_FAILURE_TIMEOUT = 7
+CAPTURE_INTERRUPTION_NONE = 0
+CAPTURE_INTERRUPTION_BACKGROUND = 1
+CAPTURE_INTERRUPTION_ANOTHER_APP = 2
+CAPTURE_INTERRUPTION_SYSTEM_PRESSURE = 3
+CAPTURE_KIND_CAMERA = 0
+CAPTURE_KIND_MICROPHONE = 1
+PERMISSION_PROMPT = 0
+PERMISSION_GRANTED = 1
+PERMISSION_DENIED = 2
+CAMERA_FACING_UNKNOWN = 0
+CAMERA_FACING_FRONT = 1
+CAMERA_FACING_BACK = 2
+CAMERA_FACING_EXTERNAL = 3
+CAPTURE_COMMAND_START = 1
+CAPTURE_COMMAND_STOP = 2
+CPROP_CAMERA = 1
+CPROP_MICROPHONE = 2
+CPROP_WIDTH = 3
+CPROP_HEIGHT = 4
+CPROP_FRAME_RATE = 5
+CPROP_MUTED = 6
 SESSION_ACTION_PLAY = 1
 SESSION_ACTION_PAUSE = 2
 SESSION_ACTION_STOP = 3
@@ -392,6 +427,12 @@ TX_CANCEL_READ = 72
 TX_CLOSE_READER = 73
 TX_LOAD_IMAGE = 74
 TX_RELEASE_IMAGE = 75
+TX_CREATE_CAPTURE = 76
+TX_SET_CAPTURE_PROP = 77
+TX_CAPTURE_COMMAND = 78
+TX_RELEASE_CAPTURE = 79
+TX_REQUEST_PERMISSION = 80
+TX_WATCH_CAPTURE_DEVICES = 81
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -453,6 +494,13 @@ APPLY_READ_FRAMES = 60
 APPLY_READ_PEAKS = 61
 APPLY_CANCEL_READ = 62
 APPLY_CLOSE_READER = 63
+APPLY_CREATE_CAPTURE = 64
+APPLY_SET_CAPTURE_PROP = 65
+APPLY_CAPTURE_COMMAND = 66
+APPLY_RELEASE_CAPTURE = 67
+APPLY_REQUEST_PERMISSION = 68
+APPLY_WATCH_CAPTURE_DEVICES = 69
+APPLY_SET_VIDEO_CAPTURE = 70
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
@@ -503,6 +551,10 @@ OCC_READER_PROGRESS = 47
 OCC_READER_PEAKS = 48
 OCC_READER_DONE = 49
 OCC_IMAGE_LOADED = 50
+OCC_CAPTURE_CHANGED = 51
+OCC_CAPTURE_PERMISSION = 52
+OCC_CAPTURE_DEVICES = 53
+OCC_CAPTURE_OVERRUN = 54
 
 
 def _pad(b: bytes) -> bytes:
@@ -885,6 +937,30 @@ def tx_load_image(image: int, source: Value) -> bytes:
 def tx_release_image(image: int) -> bytes:
     """Forget a core-held image. A drawing declared before keeps showing it until it is declared again; a drawing declared after that names it is refused."""
     return record(TX_RELEASE_IMAGE, struct.pack("<Q", image))
+
+def tx_create_capture(capture: int) -> bytes:
+    """Create a CAPTURE (docs/capture-plan.md §2): an app-held object with no place in the layout that holds at most one camera and one microphone, its id guest-chosen in its own space. It starts `idle` with neither device; a video view previews it through its `capture` prop. A second create of a live id is a scene error."""
+    return record(TX_CREATE_CAPTURE, struct.pack("<Q", capture))
+
+def tx_set_capture_prop(capture: int, prop: int, value: Value) -> bytes:
+    """Write a capture property (CAPTURE_PROPS) once, as a player's are written. A device change while running reopens that device; `camera` set to "" closes the camera and puts its indicator out."""
+    return record(TX_SET_CAPTURE_PROP, struct.pack("<Q", capture) + struct.pack("<I", prop) + struct.pack("<I", 0) + _enc.value(value))
+
+def tx_capture_command(capture: int, command: int) -> bytes:
+    """start or stop (CAPTURE_COMMAND). `start` asks for each kind's permission still at `prompt`, as getUserMedia does, and fails `denied` when either kind it opens is denied; the answer is capture_changed, never an echo of the command."""
+    return record(TX_CAPTURE_COMMAND, struct.pack("<Q", capture) + struct.pack("<I", command) + struct.pack("<I", 0))
+
+def tx_release_capture(capture: int) -> bytes:
+    """Stop and forget a capture: its devices close, a video view previewing it goes blank, its frame and sample callbacks are dropped and no occurrence of its follows."""
+    return record(TX_RELEASE_CAPTURE, struct.pack("<Q", capture))
+
+def tx_request_permission(kind: int) -> bytes:
+    """Ask the user for a CAPTURE_KIND's permission before any capture starts (a call screen asking early); answered by capture_permission. A kind already decided is answered with its decision and nothing is asked."""
+    return record(TX_REQUEST_PERMISSION, struct.pack("<I", kind) + struct.pack("<I", 0))
+
+def tx_watch_capture_devices(on: int) -> bytes:
+    """1: list the cameras and microphones now (capture_devices), report each kind's permission as it stands (capture_permission), and list again whenever a device comes or goes; 0: stop. Listing asks for no permission."""
+    return record(TX_WATCH_CAPTURE_DEVICES, struct.pack("<I", on) + struct.pack("<I", 0))
 
 
 def tx_set_text(widget_id: int, text: str) -> bytes:
@@ -1667,6 +1743,21 @@ def tx_bind_player_element(widget_id: int, level: int = 0, field: int = 0) -> by
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_PLAYER, SOURCE_ELEMENT, level, field))
 
 
+def tx_set_capture(widget_id: int, capture: int) -> bytes:
+    """set_property with a constant capture value (int)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_CAPTURE, SOURCE_CONST) + _enc.value(int(capture)))
+
+
+def tx_bind_capture(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound capture value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_CAPTURE, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_capture_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_CAPTURE, SOURCE_ELEMENT, level, field))
+
+
 def tx_set_window_title(window: int, title: str) -> bytes:
     """set_window_prop with a constant title value (str); window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_TITLE, SOURCE_CONST) + _enc.value(title))
@@ -2037,7 +2128,7 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
     value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED, OCC_CAPTURE_CHANGED, OCC_CAPTURE_PERMISSION, OCC_CAPTURE_DEVICES, OCC_CAPTURE_OVERRUN):
         return kind, None, [], None
     if kind == OCC_ALERT_RESULT:
         # A request's one answer: id + the u32 code.
@@ -2198,6 +2289,51 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
         value, at = parse_value(buf, at)
         tail.append(value)
         return kind, flat_id, [], tail
+    if kind == OCC_CAPTURE_CHANGED:
+        # A flat record: its fields in order, into the tail.
+        at = 8
+        tail = []
+        flat_id = struct.unpack_from("<Q", buf, 8)[0]
+        at += 8
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        value, at = parse_value(buf, at)
+        tail.append(value)
+        return kind, flat_id, [], tail
+    if kind == OCC_CAPTURE_PERMISSION:
+        # A flat record: its fields in order, into the tail.
+        at = 8
+        tail = []
+        flat_id = 0
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        value, at = parse_value(buf, at)
+        tail.append(value)
+        return kind, flat_id, [], tail
+    if kind == OCC_CAPTURE_DEVICES:
+        # A flat record: its fields in order, into the tail.
+        at = 8
+        tail = []
+        flat_id = 0
+        count = struct.unpack_from("<I", buf, at)[0]
+        at += 8
+        tail.append(count)
+        for _ in range(count):
+            value, at = parse_value(buf, at)
+            tail.append(value)
+        return kind, flat_id, [], tail
     if kind == OCC_FILE_DIALOG_RESULT:
         dialog, count = struct.unpack_from("<QI", buf, 8)
         at = 32  # past dialog, count, pad, values count, reserved
@@ -2227,7 +2363,7 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
         # no key path, no payload (derived from the record shapes).
         (surface_id,) = struct.unpack_from("<Q", buf, 8)
         return kind, surface_id, [], None
-    if kind in (OCC_SECTION_SELECTED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED,):
+    if kind in (OCC_SECTION_SELECTED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_CAPTURE_OVERRUN,):
         # Surface-pair records (window, section): the SECOND id
         # keys the handler (they scope to the section); the
         # first rides as the payload.

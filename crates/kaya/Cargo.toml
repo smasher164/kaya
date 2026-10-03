@@ -410,6 +410,10 @@ name = "media"
 path = "../../guests/rust/media.rs"
 
 [[example]]
+name = "capture"
+path = "../../guests/rust/capture.rs"
+
+[[example]]
 name = "sliders"
 path = "../../guests/rust/sliders.rs"
 

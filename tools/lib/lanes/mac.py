@@ -53,7 +53,9 @@ SCENES = [
 # has not landed — built and run rust-only until their guests arrive,
 # when they move into SCENES.
 DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows",
-                "format", "flexshrink", "listrow", "tints", "badge", "emoji", "media"]
+                "format", "flexshrink", "listrow", "tints", "badge", "emoji", "media",
+                # The capture (docs/capture-plan.md §8), rust-only at depth.
+                "capture"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -81,7 +83,7 @@ GUEST_STEM = {"listdetail": "split", "taskspersist": "tasks",
               "media_formats": "media", "media_delivery": "media",
               "media_session": "media", "media_tracks": "media", "media_feed": "media",
               "media_picked": "media", "media_timeout": "media",
-              "media_reader": "media"}
+              "media_reader": "media", "capture_denied": "capture"}
 
 # THE LOCALE A SCENE RUNS UNDER (docs/compliance-plan.md §4): the knob the
 # leg carries, so the same guest is read under German and Arabic; the
@@ -146,7 +148,10 @@ HAND_QUEUED = {"editor": "go", "chat": "go", "portfolio": "python", "varied": "p
                # A picked clip played (docs/media-plan.md §2): rust-only.
                "media_picked": "rust",
                # The bound (docs/media-plan.md §7c): rust-only, one 30 s wait.
-               "media_timeout": "rust"}
+               "media_timeout": "rust",
+               # The capture's denied prompt, one prompt per process
+               # (docs/capture-plan.md §2), rust-only at depth.
+               "capture_denied": "rust"}
 
 # The queue, in run order. Entries:
 #   (scene, (lang, ...))    a group: script export + one leg per lang
@@ -281,6 +286,8 @@ ORDER = [
     ("media_feed", LANGS),
     ("media_timeout", ("rust",)),
     ("media_reader", LANGS),
+    ("capture", ("rust",)),
+    ("capture_denied", ("rust",)),
     ("richtext", ("rust", "python", "js", "go", "csharp", "java", "swift",
                   "ocaml", "haskell")),
     ("ownundo", ("rust", "python", "js", "go", "csharp", "java", "swift",

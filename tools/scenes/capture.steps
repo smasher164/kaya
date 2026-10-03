@@ -1,0 +1,43 @@
+# The capture (docs/capture-plan.md): one camera and one microphone in an
+# object the app holds, previewed by a video view, its frames and samples
+# handed to the app's code on kaya's capture thread. The devices are kaya's
+# synthetic ones (§7): camera 1 a flat C83C1E, camera 2 1E5AC8, microphone 1
+# a 440 Hz tone, microphone 2 660 Hz. expect_capture reads the core's own
+# statistics of the last second, never the app's word.
+expect label#0 "camera kaya-synthetic-camera-1 front preferred; camera kaya-synthetic-camera-2 external; microphone kaya-synthetic-microphone-1 preferred; microphone kaya-synthetic-microphone-2"
+expect label#1 "camera prompt, microphone prompt"
+expect label#2 "idle"
+expect_capture 0 "frames none, samples none"
+# Asked before the call: the camera alone.
+click button#0
+expect label#1 "camera granted, microphone prompt"
+# start asks for the kind still at prompt, as getUserMedia does; the wish of
+# 600x400 meets its nearest format.
+click button#1
+expect label#1 "camera granted, microphone granted"
+expect label#2 "running 640x480@30"
+expect_capture 0 "frames 640x480 C83C1E, samples 440 Hz"
+expect_video_ink video#0 "C83C1E"
+expect label#3 "app frames 640x480, app chunks of 480"
+expect_display_awake yes
+# The other devices while running, and a new wish.
+click button#2
+expect label#2 "running 1280x720@15"
+expect_capture 0 "frames 1280x720 1E5AC8, samples 660 Hz"
+expect_video_ink video#0 "1E5AC8"
+expect label#3 "app frames 1280x720, app chunks of 480"
+# Mute keeps the microphone open and delivers silence.
+click button#3
+expect_capture 0 "frames 1280x720 1E5AC8, samples silent"
+# Camera off closes the camera: no frames, no picture, nothing kept awake.
+click button#4
+expect label#2 "running 0x0@0"
+expect_capture 0 "frames none, samples silent"
+expect_video_ink video#0 "none"
+expect_display_awake no
+click button#5
+expect label#2 "idle"
+expect_capture 0 "frames none, samples none"
+# A device that is not there fails with the closed reason.
+click button#6
+expect label#4 "failed not_found"

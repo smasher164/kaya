@@ -15,6 +15,8 @@ use std::sync::{Arc, Mutex};
 
 mod tasks;
 mod media;
+mod capture;
+pub use capture::{CaptureReading, CaptureRef};
 pub use media::{can_play, Frame, MediaSource, PlayerReading, PlayerRef, ReadError, SessionRef};
 pub use tasks::{AlertFutureRef, ClipboardFutureRef, DialogFuture, FileFutureRef, SaveFutureRef, TaskOutcome, TaskScope};
 
@@ -1154,6 +1156,12 @@ pub struct AppCtx {
     abandoned_reads: RefCell<std::collections::HashSet<u64>>,
     pending_ops: RefCell<Vec<TxOp>>,
     read_replies: RefCell<HashMap<u64, media::ReadReplyCell>>,
+    /// docs/capture-plan.md: captures in their own id space, each one's
+    /// readings, each kind's permission and the device list as last heard.
+    next_capture: Cell<u64>,
+    captures: RefCell<HashMap<u64, CaptureReading>>,
+    capture_permissions: RefCell<HashMap<crate::protocol::CaptureKind, crate::protocol::Permission>>,
+    capture_devices: RefCell<Vec<crate::protocol::CaptureDevice>>,
 }
 
 impl AppCtx {
@@ -1195,6 +1203,10 @@ impl AppCtx {
             abandoned_reads: RefCell::new(std::collections::HashSet::new()),
             pending_ops: RefCell::new(Vec::new()),
             read_replies: RefCell::new(HashMap::new()),
+            next_capture: Cell::new(1),
+            captures: RefCell::new(HashMap::new()),
+            capture_permissions: RefCell::new(HashMap::new()),
+            capture_devices: RefCell::new(Vec::new()),
         }
     }
 
@@ -1268,6 +1280,9 @@ impl AppCtx {
                         | Occurrence::SeekCompleted { .. }
                         | Occurrence::PlayerTracks { .. }
                         | Occurrence::CaptionCue { .. } => self.absorb_player(&occ),
+                        Occurrence::CaptureChanged { .. }
+                        | Occurrence::CapturePermission { .. }
+                        | Occurrence::CaptureDevices { .. } => self.absorb_capture(&occ),
                         _ => {}
                     }
                     return occ;
@@ -4985,6 +5000,13 @@ pub struct Messages<M> {
     /// with its reader_done, a load's with its image_loaded.
     reads: RefCell<HashMap<u64, Vec<Mapper<M>>>>,
     image_loads: RefCell<HashMap<u64, Vec<Mapper<M>>>>,
+    /// docs/capture-plan.md: per capture, and the process-level permission
+    /// and device-list handlers.
+    captures: RefCell<HashMap<u64, Vec<Mapper<M>>>>,
+    #[allow(clippy::type_complexity)]
+    permission: RefCell<Option<Box<dyn Fn(crate::protocol::CaptureKind, crate::protocol::Permission) -> M>>>,
+    #[allow(clippy::type_complexity)]
+    capture_devices: RefCell<Option<Box<dyn Fn(&[crate::protocol::CaptureDevice]) -> M>>>,
     /// THE CANVAS'S DRAWING-AS-A-FUNCTION-OF-SIZE (docs/canvas-plan.md
     /// §3.2.1). Not a Mapper: these produce a DRAWING, not a message, so
     /// [`Messages::next`] answers them itself and keeps looping rather
@@ -5114,6 +5136,9 @@ impl<M> Messages<M> {
             session: RefCell::new(None),
             reads: RefCell::new(HashMap::new()),
             image_loads: RefCell::new(HashMap::new()),
+            captures: RefCell::new(HashMap::new()),
+            permission: RefCell::new(None),
+            capture_devices: RefCell::new(None),
         }
     }
 
@@ -6015,6 +6040,10 @@ impl<M> Messages<M> {
                 | Occurrence::ReaderPeaks { .. }
                 | Occurrence::ReaderDone { .. }
                 | Occurrence::ImageLoaded { .. } => self.dispatch_reader(&occ),
+                Occurrence::CaptureChanged { .. }
+                | Occurrence::CapturePermission { .. }
+                | Occurrence::CaptureDevices { .. }
+                | Occurrence::CaptureOverrun { .. } => self.dispatch_capture(&occ),
                 // Menu occurrences key the menu-item table — their own id
                 // space. Direct and node-anchored variants share it: an
                 // item has exactly one anchor, so its registered mapper
@@ -9600,7 +9629,11 @@ mod tests {
                     | Occurrence::ReaderProgress { .. }
                     | Occurrence::ReaderPeaks { .. }
                     | Occurrence::ReaderDone { .. }
-                    | Occurrence::ImageLoaded { .. } => {}
+                    | Occurrence::ImageLoaded { .. }
+                    | Occurrence::CaptureChanged { .. }
+                    | Occurrence::CapturePermission { .. }
+                    | Occurrence::CaptureDevices { .. }
+                    | Occurrence::CaptureOverrun { .. } => {}
                     Occurrence::LinkOpened { .. } => {}
                     Occurrence::Shutdown => break,
                 }

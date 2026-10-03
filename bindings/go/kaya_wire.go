@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x6d398768b7d3b5d6
+	SpecHash uint64 = 0xc00e7dc840e57f41
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -130,6 +130,7 @@ const (
 	PropHighLabel = 50
 	PropFit = 51
 	PropPlayer = 52
+	PropCapture = 53
 	WpropTitle = 1
 	WpropWidth = 2
 	WpropHeight = 3
@@ -290,6 +291,40 @@ const (
 	ReadOutcomeCompleted = 0
 	ReadOutcomeCancelled = 1
 	ReadOutcomeFailed = 2
+	CaptureStateIdle = 0
+	CaptureStateStarting = 1
+	CaptureStateRunning = 2
+	CaptureStateInterrupted = 3
+	CaptureStateFailed = 4
+	CaptureFailureNone = 0
+	CaptureFailureDenied = 1
+	CaptureFailureNotFound = 2
+	CaptureFailureInUse = 3
+	CaptureFailureDisconnected = 4
+	CaptureFailureUnsupported = 5
+	CaptureFailureHardwareError = 6
+	CaptureFailureTimeout = 7
+	CaptureInterruptionNone = 0
+	CaptureInterruptionBackground = 1
+	CaptureInterruptionAnotherApp = 2
+	CaptureInterruptionSystemPressure = 3
+	CaptureKindCamera = 0
+	CaptureKindMicrophone = 1
+	PermissionPrompt = 0
+	PermissionGranted = 1
+	PermissionDenied = 2
+	CameraFacingUnknown = 0
+	CameraFacingFront = 1
+	CameraFacingBack = 2
+	CameraFacingExternal = 3
+	CaptureCommandStart = 1
+	CaptureCommandStop = 2
+	CpropCamera = 1
+	CpropMicrophone = 2
+	CpropWidth = 3
+	CpropHeight = 4
+	CpropFrameRate = 5
+	CpropMuted = 6
 	SessionActionPlay SessionActionKind = 1
 	SessionActionPause SessionActionKind = 2
 	SessionActionStop SessionActionKind = 3
@@ -391,6 +426,12 @@ const (
 	txCloseReader = 73
 	txLoadImage = 74
 	txReleaseImage = 75
+	txCreateCapture = 76
+	txSetCaptureProp = 77
+	txCaptureCommand = 78
+	txReleaseCapture = 79
+	txRequestPermission = 80
+	txWatchCaptureDevices = 81
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -452,6 +493,13 @@ const (
 	applyReadPeaks = 61
 	applyCancelRead = 62
 	applyCloseReader = 63
+	applyCreateCapture = 64
+	applySetCaptureProp = 65
+	applyCaptureCommand = 66
+	applyReleaseCapture = 67
+	applyRequestPermission = 68
+	applyWatchCaptureDevices = 69
+	applySetVideoCapture = 70
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3
@@ -502,6 +550,10 @@ const (
 	occReaderPeaks = 48
 	occReaderDone = 49
 	occImageLoaded = 50
+	occCaptureChanged = 51
+	occCapturePermission = 52
+	occCaptureDevices = 53
+	occCaptureOverrun = 54
 )
 
 func (d Detent) String() string {
@@ -1551,6 +1603,55 @@ func TxLoadImage(image uint64, source any) []byte {
 func TxReleaseImage(image uint64) []byte {
 	b := beginRecord(txReleaseImage)
 	b = binary.LittleEndian.AppendUint64(b, image)
+	return endRecord(b)
+}
+
+// TxCreateCapture: Create a CAPTURE (docs/capture-plan.md §2): an app-held object with no place in the layout that holds at most one camera and one microphone, its id guest-chosen in its own space. It starts `idle` with neither device; a video view previews it through its `capture` prop. A second create of a live id is a scene error.
+func TxCreateCapture(capture uint64) []byte {
+	b := beginRecord(txCreateCapture)
+	b = binary.LittleEndian.AppendUint64(b, capture)
+	return endRecord(b)
+}
+
+// TxSetCaptureProp: Write a capture property (CAPTURE_PROPS) once, as a player's are written. A device change while running reopens that device; `camera` set to "" closes the camera and puts its indicator out.
+func TxSetCaptureProp(capture uint64, prop uint32, value any) []byte {
+	b := beginRecord(txSetCaptureProp)
+	b = binary.LittleEndian.AppendUint64(b, capture)
+	b = binary.LittleEndian.AppendUint32(b, prop)
+	b = binary.LittleEndian.AppendUint32(b, 0)
+	b = encodeValue(b, value)
+	return endRecord(b)
+}
+
+// TxCaptureCommand: start or stop (CAPTURE_COMMAND). `start` asks for each kind's permission still at `prompt`, as getUserMedia does, and fails `denied` when either kind it opens is denied; the answer is capture_changed, never an echo of the command.
+func TxCaptureCommand(capture uint64, command uint32) []byte {
+	b := beginRecord(txCaptureCommand)
+	b = binary.LittleEndian.AppendUint64(b, capture)
+	b = binary.LittleEndian.AppendUint32(b, command)
+	b = binary.LittleEndian.AppendUint32(b, 0)
+	return endRecord(b)
+}
+
+// TxReleaseCapture: Stop and forget a capture: its devices close, a video view previewing it goes blank, its frame and sample callbacks are dropped and no occurrence of its follows.
+func TxReleaseCapture(capture uint64) []byte {
+	b := beginRecord(txReleaseCapture)
+	b = binary.LittleEndian.AppendUint64(b, capture)
+	return endRecord(b)
+}
+
+// TxRequestPermission: Ask the user for a CAPTURE_KIND's permission before any capture starts (a call screen asking early); answered by capture_permission. A kind already decided is answered with its decision and nothing is asked.
+func TxRequestPermission(kind uint32) []byte {
+	b := beginRecord(txRequestPermission)
+	b = binary.LittleEndian.AppendUint32(b, kind)
+	b = binary.LittleEndian.AppendUint32(b, 0)
+	return endRecord(b)
+}
+
+// TxWatchCaptureDevices: 1: list the cameras and microphones now (capture_devices), report each kind's permission as it stands (capture_permission), and list again whenever a device comes or goes; 0: stop. Listing asks for no permission.
+func TxWatchCaptureDevices(on uint32) []byte {
+	b := beginRecord(txWatchCaptureDevices)
+	b = binary.LittleEndian.AppendUint32(b, on)
+	b = binary.LittleEndian.AppendUint32(b, 0)
 	return endRecord(b)
 }
 
@@ -3248,6 +3349,38 @@ func TxBindPlayerElement(widgetID uint64, level uint32, field uint32) []byte {
 	return endRecord(b)
 }
 
+// TxSetCapture: set_property with a constant capture value.
+func TxSetCapture(widgetID uint64, capture int64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropCapture)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, capture)
+	return endRecord(b)
+}
+
+// TxBindCapture: set_property with a signal-bound capture value.
+func TxBindCapture(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropCapture)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindCaptureElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindCaptureElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropCapture)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
 // TxSetWindowTitle: set_window_prop with a constant title value (window 0, the primary surface).
 func TxSetWindowTitle(window uint64, title string) []byte {
 	b := beginRecord(txSetWindowProp)
@@ -3934,7 +4067,7 @@ func parseValue(rec []byte, at int) (any, int) {
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted && kind != occSheetDismissed && kind != occDismissRequested && kind != occSubmitted && kind != occNotificationReplied && kind != occFullscreenChanged && kind != occColorChanged && kind != occRangeChanged && kind != occRangeCommitted && kind != occPlayerChanged && kind != occPlayerPosition && kind != occSeekCompleted && kind != occSessionAction && kind != occPlayerTracks && kind != occCaptionCue && kind != occVideoVisibility && kind != occReaderFrame && kind != occReaderProgress && kind != occReaderPeaks && kind != occReaderDone && kind != occImageLoaded {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted && kind != occSheetDismissed && kind != occDismissRequested && kind != occSubmitted && kind != occNotificationReplied && kind != occFullscreenChanged && kind != occColorChanged && kind != occRangeChanged && kind != occRangeCommitted && kind != occPlayerChanged && kind != occPlayerPosition && kind != occSeekCompleted && kind != occSessionAction && kind != occPlayerTracks && kind != occCaptionCue && kind != occVideoVisibility && kind != occReaderFrame && kind != occReaderProgress && kind != occReaderPeaks && kind != occReaderDone && kind != occImageLoaded && kind != occCaptureChanged && kind != occCapturePermission && kind != occCaptureDevices && kind != occCaptureOverrun {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])
@@ -4123,6 +4256,66 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 		_ = at
 		return kind, id, nil, tail, true
 	}
+	if kind == occCaptureChanged {
+		// A flat record: its fields in order, into the tail.
+		at := 8
+		tail := []any{}
+		at += 8
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		{
+			var v any
+			v, at = parseValue(rec, at)
+			tail = append(tail, v)
+		}
+		_ = at
+		return kind, id, nil, tail, true
+	}
+	if kind == occCapturePermission {
+		// A flat record: its fields in order, into the tail.
+		at := 8
+		tail := []any{}
+		id = 0
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		{
+			var v any
+			v, at = parseValue(rec, at)
+			tail = append(tail, v)
+		}
+		_ = at
+		return kind, id, nil, tail, true
+	}
+	if kind == occCaptureDevices {
+		// A flat record: its fields in order, into the tail.
+		at := 8
+		tail := []any{}
+		id = 0
+		{
+			count := int(binary.LittleEndian.Uint32(rec[at:]))
+			at += 8
+			tail = append(tail, int64(count))
+			for i := 0; i < count; i++ {
+				var v any
+				v, at = parseValue(rec, at)
+				tail = append(tail, v)
+			}
+		}
+		_ = at
+		return kind, id, nil, tail, true
+	}
 	if kind == occFileDialogResult {
 		// The picker's answer: id, a count, then three Values
 		// per file (handle, name, local_path). EMPTY IS CANCEL.
@@ -4259,7 +4452,7 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 		// no key path, no payload (derived from the record shapes).
 		return kind, id, nil, nil, true
 	}
-	if kind == occSectionSelected || kind == occPlayerPosition || kind == occSeekCompleted {
+	if kind == occSectionSelected || kind == occPlayerPosition || kind == occSeekCompleted || kind == occCaptureOverrun {
 		// Surface-pair records (window, section): the SECOND id
 		// keys the handler; the first rides as the payload.
 		return kind, binary.LittleEndian.Uint64(rec[16:]), nil, id, true

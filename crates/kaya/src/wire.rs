@@ -64,6 +64,13 @@ pub(crate) const TX_CANCEL_READ: u16 = 72;
 pub(crate) const TX_CLOSE_READER: u16 = 73;
 pub(crate) const TX_LOAD_IMAGE: u16 = 74;
 pub(crate) const TX_RELEASE_IMAGE: u16 = 75;
+/// The capture (docs/capture-plan.md §2).
+pub(crate) const TX_CREATE_CAPTURE: u16 = 76;
+pub(crate) const TX_SET_CAPTURE_PROP: u16 = 77;
+pub(crate) const TX_CAPTURE_COMMAND: u16 = 78;
+pub(crate) const TX_RELEASE_CAPTURE: u16 = 79;
+pub(crate) const TX_REQUEST_PERMISSION: u16 = 80;
+pub(crate) const TX_WATCH_CAPTURE_DEVICES: u16 = 81;
 pub(crate) const TX_ADD_SECTION: u16 = 25;
 pub(crate) const TX_SELECT_SECTION: u16 = 26;
 pub(crate) const TX_SET_SECTION_PROP: u16 = 27;
@@ -175,6 +182,13 @@ pub(crate) const APPLY_READ_FRAMES: u16 = 60;
 pub(crate) const APPLY_READ_PEAKS: u16 = 61;
 pub(crate) const APPLY_CANCEL_READ: u16 = 62;
 pub(crate) const APPLY_CLOSE_READER: u16 = 63;
+pub(crate) const APPLY_CREATE_CAPTURE: u16 = 64;
+pub(crate) const APPLY_SET_CAPTURE_PROP: u16 = 65;
+pub(crate) const APPLY_CAPTURE_COMMAND: u16 = 66;
+pub(crate) const APPLY_RELEASE_CAPTURE: u16 = 67;
+pub(crate) const APPLY_REQUEST_PERMISSION: u16 = 68;
+pub(crate) const APPLY_WATCH_CAPTURE_DEVICES: u16 = 69;
+pub(crate) const APPLY_SET_VIDEO_CAPTURE: u16 = 70;
 pub(crate) const APPLY_ADD_SECTION: u16 = 15;
 pub(crate) const APPLY_SELECT_SECTION: u16 = 16;
 pub(crate) const APPLY_SET_SECTION_PROP: u16 = 17;
@@ -394,6 +408,209 @@ pub(crate) const TRACK_KINDS: &[(i64, &str)] = &[(0, "audio"), (1, "caption")];
 pub(crate) const FRAME_ACCURACIES: &[(i64, &str)] = &[(0, "keyframe"), (1, "exact")];
 
 pub(crate) const READ_OUTCOMES: &[(i64, &str)] = &[(0, "completed"), (1, "cancelled"), (2, "failed")];
+
+/// The capture's vocabularies (docs/capture-plan.md §2), pinned to the
+/// spec's enums by spec::tests.
+pub(crate) const CAPTURE_STATES: &[(i64, &str)] =
+    &[(0, "idle"), (1, "starting"), (2, "running"), (3, "interrupted"), (4, "failed")];
+
+pub(crate) const CAPTURE_FAILURES: &[(i64, &str)] = &[
+    (0, "none"),
+    (1, "denied"),
+    (2, "not_found"),
+    (3, "in_use"),
+    (4, "disconnected"),
+    (5, "unsupported"),
+    (6, "hardware_error"),
+    (7, "timeout"),
+];
+
+pub(crate) const CAPTURE_INTERRUPTIONS: &[(i64, &str)] =
+    &[(0, "none"), (1, "background"), (2, "another_app"), (3, "system_pressure")];
+
+pub(crate) const CAPTURE_KINDS: &[(i64, &str)] = &[(0, "camera"), (1, "microphone")];
+
+pub(crate) const PERMISSIONS: &[(i64, &str)] = &[(0, "prompt"), (1, "granted"), (2, "denied")];
+
+pub(crate) const CAMERA_FACINGS: &[(i64, &str)] = &[(0, "unknown"), (1, "front"), (2, "back"), (3, "external")];
+
+pub(crate) const CAPTURE_COMMANDS: &[(i64, &str)] = &[(1, "start"), (2, "stop")];
+
+pub(crate) const CPROPS: &[(i64, &str)] = &[
+    (1, "camera"),
+    (2, "microphone"),
+    (3, "width"),
+    (4, "height"),
+    (5, "frame_rate"),
+    (6, "muted"),
+];
+
+pub(crate) fn capture_state_raw(state: crate::protocol::CaptureState) -> u32 {
+    use crate::protocol::CaptureState as S;
+    match state {
+        S::Idle => 0,
+        S::Starting => 1,
+        S::Running => 2,
+        S::Interrupted => 3,
+        S::Failed => 4,
+    }
+}
+
+pub(crate) fn capture_state_from(raw: u32) -> Option<crate::protocol::CaptureState> {
+    use crate::protocol::CaptureState as S;
+    Some(match raw {
+        0 => S::Idle,
+        1 => S::Starting,
+        2 => S::Running,
+        3 => S::Interrupted,
+        4 => S::Failed,
+        _ => return None,
+    })
+}
+
+pub(crate) fn capture_failure_raw(failure: Option<crate::protocol::CaptureFailure>) -> u32 {
+    use crate::protocol::CaptureFailure as F;
+    match failure {
+        None => 0,
+        Some(F::Denied) => 1,
+        Some(F::NotFound) => 2,
+        Some(F::InUse) => 3,
+        Some(F::Disconnected) => 4,
+        Some(F::Unsupported) => 5,
+        Some(F::HardwareError) => 6,
+        Some(F::Timeout) => 7,
+    }
+}
+
+pub(crate) fn capture_failure_from(raw: u32) -> Option<crate::protocol::CaptureFailure> {
+    use crate::protocol::CaptureFailure as F;
+    match raw {
+        1 => Some(F::Denied),
+        2 => Some(F::NotFound),
+        3 => Some(F::InUse),
+        4 => Some(F::Disconnected),
+        5 => Some(F::Unsupported),
+        6 => Some(F::HardwareError),
+        7 => Some(F::Timeout),
+        _ => None,
+    }
+}
+
+pub(crate) fn capture_interruption_raw(why: Option<crate::protocol::CaptureInterruption>) -> u32 {
+    use crate::protocol::CaptureInterruption as I;
+    match why {
+        None => 0,
+        Some(I::Background) => 1,
+        Some(I::AnotherApp) => 2,
+        Some(I::SystemPressure) => 3,
+    }
+}
+
+pub(crate) fn capture_interruption_from(raw: u32) -> Option<crate::protocol::CaptureInterruption> {
+    use crate::protocol::CaptureInterruption as I;
+    match raw {
+        1 => Some(I::Background),
+        2 => Some(I::AnotherApp),
+        3 => Some(I::SystemPressure),
+        _ => None,
+    }
+}
+
+pub(crate) fn capture_kind_raw(kind: crate::protocol::CaptureKind) -> u32 {
+    match kind {
+        crate::protocol::CaptureKind::Camera => 0,
+        crate::protocol::CaptureKind::Microphone => 1,
+    }
+}
+
+pub(crate) fn capture_kind_from(raw: u32) -> Option<crate::protocol::CaptureKind> {
+    match raw {
+        0 => Some(crate::protocol::CaptureKind::Camera),
+        1 => Some(crate::protocol::CaptureKind::Microphone),
+        _ => None,
+    }
+}
+
+fn capture_kind(raw: u32, what: &str) -> crate::protocol::CaptureKind {
+    capture_kind_from(raw)
+        .unwrap_or_else(|| panic!("kaya: {what}'s kind {raw} is not a capture_kind (camera=0, microphone=1)"))
+}
+
+pub(crate) fn permission_raw(permission: crate::protocol::Permission) -> u32 {
+    match permission {
+        crate::protocol::Permission::Prompt => 0,
+        crate::protocol::Permission::Granted => 1,
+        crate::protocol::Permission::Denied => 2,
+    }
+}
+
+pub(crate) fn permission_from(raw: u32) -> Option<crate::protocol::Permission> {
+    match raw {
+        0 => Some(crate::protocol::Permission::Prompt),
+        1 => Some(crate::protocol::Permission::Granted),
+        2 => Some(crate::protocol::Permission::Denied),
+        _ => None,
+    }
+}
+
+pub(crate) fn camera_facing_raw(facing: crate::protocol::CameraFacing) -> i64 {
+    match facing {
+        crate::protocol::CameraFacing::Unknown => 0,
+        crate::protocol::CameraFacing::Front => 1,
+        crate::protocol::CameraFacing::Back => 2,
+        crate::protocol::CameraFacing::External => 3,
+    }
+}
+
+pub(crate) fn camera_facing_from(raw: i64) -> Option<crate::protocol::CameraFacing> {
+    match raw {
+        0 => Some(crate::protocol::CameraFacing::Unknown),
+        1 => Some(crate::protocol::CameraFacing::Front),
+        2 => Some(crate::protocol::CameraFacing::Back),
+        3 => Some(crate::protocol::CameraFacing::External),
+        _ => None,
+    }
+}
+
+pub(crate) fn capture_command_raw(command: crate::protocol::CaptureCommand) -> u32 {
+    match command {
+        crate::protocol::CaptureCommand::Start => 1,
+        crate::protocol::CaptureCommand::Stop => 2,
+    }
+}
+
+fn capture_command(raw: u32) -> crate::protocol::CaptureCommand {
+    match raw {
+        1 => crate::protocol::CaptureCommand::Start,
+        2 => crate::protocol::CaptureCommand::Stop,
+        other => panic!("kaya: capture_command {other} is not start (1) or stop (2)"),
+    }
+}
+
+fn capture_prop(raw: u32) -> crate::protocol::CaptureProp {
+    use crate::protocol::CaptureProp as P;
+    match raw {
+        1 => P::Camera,
+        2 => P::Microphone,
+        3 => P::Width,
+        4 => P::Height,
+        5 => P::FrameRate,
+        6 => P::Muted,
+        other => panic!("kaya: unknown capture property {other}"),
+    }
+}
+
+pub(crate) fn capture_prop_raw(prop: crate::protocol::CaptureProp) -> u32 {
+    use crate::protocol::CaptureProp as P;
+    match prop {
+        P::Camera => 1,
+        P::Microphone => 2,
+        P::Width => 3,
+        P::Height => 4,
+        P::FrameRate => 5,
+        P::Muted => 6,
+    }
+}
 
 pub(crate) fn frame_accuracy_raw(accuracy: crate::protocol::FrameAccuracy) -> u32 {
     match accuracy {
@@ -706,6 +923,72 @@ pub(crate) fn reader_done_body(
     b
 }
 
+/// CAPTURE_CHANGED { u64 capture; u32 state; u32 failure; u32
+/// interruption; u32 width; u32 height; u32 frame_rate; Str detail }.
+pub(crate) fn capture_changed_body(
+    capture: crate::protocol::CaptureId,
+    state: crate::protocol::CaptureState,
+    failure: Option<crate::protocol::CaptureFailure>,
+    interruption: Option<crate::protocol::CaptureInterruption>,
+    format: (u32, u32, u32),
+    detail: &str,
+) -> Vec<u8> {
+    let mut b = Vec::new();
+    b.extend_from_slice(&capture.0.to_le_bytes());
+    b.extend_from_slice(&capture_state_raw(state).to_le_bytes());
+    b.extend_from_slice(&capture_failure_raw(failure).to_le_bytes());
+    b.extend_from_slice(&capture_interruption_raw(interruption).to_le_bytes());
+    b.extend_from_slice(&format.0.to_le_bytes());
+    b.extend_from_slice(&format.1.to_le_bytes());
+    b.extend_from_slice(&format.2.to_le_bytes());
+    write_value(&mut b, &Value::Str(detail.to_owned()), &mut Vec::new());
+    b
+}
+
+/// CAPTURE_PERMISSION { u32 kind; u32 permission; Str detail }.
+pub(crate) fn capture_permission_body(
+    kind: crate::protocol::CaptureKind,
+    permission: crate::protocol::Permission,
+    detail: &str,
+) -> Vec<u8> {
+    let mut b = Vec::new();
+    b.extend_from_slice(&capture_kind_raw(kind).to_le_bytes());
+    b.extend_from_slice(&permission_raw(permission).to_le_bytes());
+    write_value(&mut b, &Value::Str(detail.to_owned()), &mut Vec::new());
+    b
+}
+
+/// The five values a device rides as in capture_devices.
+pub(crate) fn capture_device_values(devices: &[crate::protocol::CaptureDevice]) -> Vec<Value> {
+    devices
+        .iter()
+        .flat_map(|d| {
+            [
+                Value::Str(d.id.clone()),
+                Value::Str(d.name.clone()),
+                Value::I64(i64::from(capture_kind_raw(d.kind))),
+                Value::I64(camera_facing_raw(d.facing)),
+                Value::Bool(d.preferred),
+            ]
+        })
+        .collect()
+}
+
+/// CAPTURE_DEVICES { Values devices }.
+pub(crate) fn capture_devices_body(devices: &[crate::protocol::CaptureDevice]) -> Vec<u8> {
+    let mut b = Vec::new();
+    write_values(&mut b, &capture_device_values(devices), &mut Vec::new());
+    b
+}
+
+/// CAPTURE_OVERRUN { u64 capture; u64 behind_ms }.
+pub(crate) fn capture_overrun_body(capture: crate::protocol::CaptureId, behind_ms: u64) -> [u8; 16] {
+    let mut b = [0u8; 16];
+    b[..8].copy_from_slice(&capture.0.to_le_bytes());
+    b[8..].copy_from_slice(&behind_ms.to_le_bytes());
+    b
+}
+
 /// IMAGE_LOADED { u64 image; u32 width; u32 height; u32 failure; u32
 /// reserved; Str detail }.
 pub(crate) fn image_loaded_body(
@@ -879,6 +1162,7 @@ pub(crate) const PROP_LOW_LABEL: u32 = 49;
 pub(crate) const PROP_HIGH_LABEL: u32 = 50;
 pub(crate) const PROP_FIT: u32 = 51;
 pub(crate) const PROP_PLAYER: u32 = 52;
+pub(crate) const PROP_CAPTURE: u32 = 53;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
@@ -1426,6 +1710,7 @@ fn prop(raw: u32) -> Prop {
         PROP_HIGH_LABEL => Prop::HighLabel,
         PROP_FIT => Prop::Fit,
         PROP_PLAYER => Prop::Player,
+        PROP_CAPTURE => Prop::Capture,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -1888,6 +2173,34 @@ pub fn decode_transaction_with_blobs(
             TX_CLOSE_READER => TxOp::CloseReader { reader: crate::protocol::ReaderId(r.u64()) },
             TX_LOAD_IMAGE => TxOp::LoadImage { image: crate::protocol::ImageId(r.u64()), source: r.value() },
             TX_RELEASE_IMAGE => TxOp::ReleaseImage { image: crate::protocol::ImageId(r.u64()) },
+            TX_CREATE_CAPTURE => TxOp::CreateCapture { capture: crate::protocol::CaptureId(r.u64()) },
+            TX_SET_CAPTURE_PROP => {
+                let capture = crate::protocol::CaptureId(r.u64());
+                let prop = capture_prop(r.u32());
+                let _reserved = r.u32();
+                TxOp::SetCaptureProp { capture, prop, value: r.value() }
+            }
+            TX_CAPTURE_COMMAND => {
+                let capture = crate::protocol::CaptureId(r.u64());
+                let command = capture_command(r.u32());
+                let _reserved = r.u32();
+                TxOp::CaptureCommand { capture, command }
+            }
+            TX_RELEASE_CAPTURE => TxOp::ReleaseCapture { capture: crate::protocol::CaptureId(r.u64()) },
+            TX_REQUEST_PERMISSION => {
+                let kind = capture_kind(r.u32(), "request_permission");
+                let _reserved = r.u32();
+                TxOp::RequestPermission { kind }
+            }
+            TX_WATCH_CAPTURE_DEVICES => {
+                let on = match r.u32() {
+                    0 => false,
+                    1 => true,
+                    other => panic!("kaya: watch_capture_devices takes 1 (watch) or 0 (stop), got {other}"),
+                };
+                let _reserved = r.u32();
+                TxOp::WatchCaptureDevices { on }
+            }
             TX_SET_RICH_TEXT => {
                 let widget = WidgetId(r.u64());
                 let count = r.u32() as usize;
@@ -3995,6 +4308,35 @@ impl Writer {
                 b.extend_from_slice(&reader.0.to_le_bytes());
                 b.extend_from_slice(&read.0.to_le_bytes());
             }),
+            ApplyOp::CreateCapture(capture) => self.record(APPLY_CREATE_CAPTURE, |b, _| {
+                b.extend_from_slice(&capture.0.to_le_bytes());
+            }),
+            ApplyOp::SetCaptureProp { capture, prop, value } => self.record(APPLY_SET_CAPTURE_PROP, |b, blobs| {
+                b.extend_from_slice(&capture.0.to_le_bytes());
+                b.extend_from_slice(&capture_prop_raw(*prop).to_le_bytes());
+                b.extend_from_slice(&0u32.to_le_bytes());
+                write_value(b, value, blobs);
+            }),
+            ApplyOp::CaptureCommand { capture, command } => self.record(APPLY_CAPTURE_COMMAND, |b, _| {
+                b.extend_from_slice(&capture.0.to_le_bytes());
+                b.extend_from_slice(&capture_command_raw(*command).to_le_bytes());
+                b.extend_from_slice(&0u32.to_le_bytes());
+            }),
+            ApplyOp::ReleaseCapture(capture) => self.record(APPLY_RELEASE_CAPTURE, |b, _| {
+                b.extend_from_slice(&capture.0.to_le_bytes());
+            }),
+            ApplyOp::RequestPermission(kind) => self.record(APPLY_REQUEST_PERMISSION, |b, _| {
+                b.extend_from_slice(&capture_kind_raw(*kind).to_le_bytes());
+                b.extend_from_slice(&0u32.to_le_bytes());
+            }),
+            ApplyOp::WatchCaptureDevices(on) => self.record(APPLY_WATCH_CAPTURE_DEVICES, |b, _| {
+                b.extend_from_slice(&u32::from(*on).to_le_bytes());
+                b.extend_from_slice(&0u32.to_le_bytes());
+            }),
+            ApplyOp::SetVideoCapture { widget, capture } => self.record(APPLY_SET_VIDEO_CAPTURE, |b, _| {
+                b.extend_from_slice(&widget.0.to_le_bytes());
+                b.extend_from_slice(&capture.map_or(0, |c| c.0).to_le_bytes());
+            }),
             ApplyOp::CloseReader(reader) => self.record(APPLY_CLOSE_READER, |b, _| {
                 b.extend_from_slice(&reader.0.to_le_bytes());
             }),
@@ -4652,6 +4994,31 @@ impl Writer {
                 b.extend_from_slice(&image.0.to_le_bytes());
                 write_value(b, source, blobs);
             }),
+            TxOp::CreateCapture { capture } => self.record(TX_CREATE_CAPTURE, |b, _| {
+                b.extend_from_slice(&capture.0.to_le_bytes());
+            }),
+            TxOp::SetCaptureProp { capture, prop, value } => self.record(TX_SET_CAPTURE_PROP, |b, blobs| {
+                b.extend_from_slice(&capture.0.to_le_bytes());
+                b.extend_from_slice(&capture_prop_raw(*prop).to_le_bytes());
+                b.extend_from_slice(&0u32.to_le_bytes());
+                write_value(b, value, blobs);
+            }),
+            TxOp::CaptureCommand { capture, command } => self.record(TX_CAPTURE_COMMAND, |b, _| {
+                b.extend_from_slice(&capture.0.to_le_bytes());
+                b.extend_from_slice(&capture_command_raw(*command).to_le_bytes());
+                b.extend_from_slice(&0u32.to_le_bytes());
+            }),
+            TxOp::ReleaseCapture { capture } => self.record(TX_RELEASE_CAPTURE, |b, _| {
+                b.extend_from_slice(&capture.0.to_le_bytes());
+            }),
+            TxOp::RequestPermission { kind } => self.record(TX_REQUEST_PERMISSION, |b, _| {
+                b.extend_from_slice(&capture_kind_raw(*kind).to_le_bytes());
+                b.extend_from_slice(&0u32.to_le_bytes());
+            }),
+            TxOp::WatchCaptureDevices { on } => self.record(TX_WATCH_CAPTURE_DEVICES, |b, _| {
+                b.extend_from_slice(&u32::from(*on).to_le_bytes());
+                b.extend_from_slice(&0u32.to_le_bytes());
+            }),
             TxOp::ReleaseImage { image } => self.record(TX_RELEASE_IMAGE, |b, _| {
                 b.extend_from_slice(&image.0.to_le_bytes());
             }),
@@ -5147,6 +5514,7 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::HighLabel => PROP_HIGH_LABEL,
         Prop::Fit => PROP_FIT,
         Prop::Player => PROP_PLAYER,
+        Prop::Capture => PROP_CAPTURE,
     }
 }
 

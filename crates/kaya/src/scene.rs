@@ -674,6 +674,12 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         TxOp::CloseReader { .. } => UndoVerdict::Refused("close_reader"),
         TxOp::LoadImage { .. } => UndoVerdict::Refused("load_image"),
         TxOp::ReleaseImage { .. } => UndoVerdict::Refused("release_image"),
+        TxOp::CreateCapture { .. } => UndoVerdict::Refused("create_capture"),
+        TxOp::SetCaptureProp { .. } => UndoVerdict::Refused("set_capture_prop"),
+        TxOp::CaptureCommand { .. } => UndoVerdict::Refused("capture_command"),
+        TxOp::ReleaseCapture { .. } => UndoVerdict::Refused("release_capture"),
+        TxOp::RequestPermission { .. } => UndoVerdict::Refused("request_permission"),
+        TxOp::WatchCaptureDevices { .. } => UndoVerdict::Refused("watch_capture_devices"),
         TxOp::DeclareLinkRoute { .. } => UndoVerdict::Refused("declare_link_route"),
         TxOp::ShowFileDialog(_) => UndoVerdict::Refused("show_file_dialog"),
         TxOp::ShowSaveDialog(_) => UndoVerdict::Refused("show_save_dialog"),
@@ -946,6 +952,12 @@ pub(crate) struct Scene {
     /// a drawing's `image` op is validated against; their occurrences leave
     /// through `asks` too.
     readers: crate::reader::Readers,
+    /// docs/capture-plan.md §2: every capture's state machine; its
+    /// occurrences leave through `asks`.
+    captures: crate::capture::Captures,
+    /// docs/capture-plan.md §3: the capture each video view previews, at
+    /// most one view per capture, and never a view that shows a player.
+    video_previews: HashMap<WidgetId, crate::protocol::CaptureId>,
     /// docs/media-plan.md §7b: every video view the backend holds, the player
     /// each shows (at most one view per player), the core's coalescing of
     /// their visibility, and how the app names each (a stamped copy by its
@@ -1116,7 +1128,7 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // docs/color-picker-plan.md §2.
         Prop::Color | Prop::Alpha => matches!(kind, WidgetKind::ColorPicker),
         // docs/media-plan.md §3.
-        Prop::Fit | Prop::Player => matches!(kind, WidgetKind::Video),
+        Prop::Fit | Prop::Player | Prop::Capture => matches!(kind, WidgetKind::Video),
         Prop::Indeterminate => matches!(kind, WidgetKind::Progress),
         Prop::Source => matches!(kind, WidgetKind::Image),
         // Layout weight is kind-agnostic: any child of a row/column may
@@ -1709,7 +1721,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::MaxLines => ValueType::F64,
         Prop::MaxWidth | Prop::MaxHeight => ValueType::F64,
         Prop::Axis => ValueType::I64,
-        Prop::Fit | Prop::Player => ValueType::I64,
+        Prop::Fit | Prop::Player | Prop::Capture => ValueType::I64,
         Prop::Role => ValueType::I64,
         Prop::Symbol => ValueType::I64,
         Prop::Indeterminate | Prop::Fill | Prop::Wrap | Prop::Rich | Prop::Submits => ValueType::Bool,
@@ -2494,6 +2506,9 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
     if let (Prop::Player, Value::I64(player)) = (prop, value) {
         assert!(*player >= 0, "kaya: a video view's player is a player id, 0 for none, got {player}");
     }
+    if let (Prop::Capture, Value::I64(capture)) = (prop, value) {
+        assert!(*capture >= 0, "kaya: a video view's capture is a capture id, 0 for none, got {capture}");
+    }
     if let (Prop::Fit, Value::I64(fit)) = (prop, value) {
         assert!(
             crate::wire::vocab_name(crate::wire::FITS, *fit).is_some(),
@@ -3155,6 +3170,8 @@ impl Scene {
                             }
                             if prop == Prop::Player {
                                 out.push(self.video_op(widget, &v));
+                            } else if prop == Prop::Capture {
+                                out.push(self.video_capture_op(widget, &v));
                             } else {
                                 out.push(ApplyOp::SetProp {
                                     id: widget,
@@ -3168,6 +3185,11 @@ impl Scene {
                                 prop != Prop::Player,
                                 "kaya: a video view's player is a constant or a row's player field, \
                                  never a signal (docs/media-plan.md §7b)"
+                            );
+                            assert!(
+                                prop != Prop::Capture,
+                                "kaya: a video view's capture is a constant, never a signal \
+                                 (docs/capture-plan.md §3)"
                             );
                             let current = self
                                 .signals
@@ -3425,6 +3447,16 @@ impl Scene {
                 TxOp::CloseReader { reader } => self.readers.close(reader, &mut out, &mut self.asks),
                 TxOp::LoadImage { image, source } => self.readers.load_image(image, source, &mut self.asks),
                 TxOp::ReleaseImage { image } => self.readers.release_image(image),
+                TxOp::CreateCapture { capture } => self.captures.create(capture, &mut out),
+                TxOp::SetCaptureProp { capture, prop, value } => {
+                    self.captures.set_prop(capture, prop, value, &mut out)
+                }
+                TxOp::CaptureCommand { capture, command } => {
+                    self.captures.command(capture, command, &mut out, &mut self.asks)
+                }
+                TxOp::ReleaseCapture { capture } => self.captures.release(capture, &mut out),
+                TxOp::RequestPermission { kind } => out.push(ApplyOp::RequestPermission(kind)),
+                TxOp::WatchCaptureDevices { on } => out.push(ApplyOp::WatchCaptureDevices(on)),
                 TxOp::DeclareLinkRoute { route, pattern } => {
                     // NOTHING REACHES THE BACKENDS: the route table is the
                     // core's, and the platform arms hand it URLs
@@ -6389,6 +6421,31 @@ impl Scene {
         ApplyOp::SetVideoPlayer { widget, player }
     }
 
+    /// The video view previewing a capture (docs/capture-plan.md §3): a
+    /// live capture, or a released one's view going blank.
+    fn video_capture_op(&self, widget: WidgetId, value: &Value) -> ApplyOp {
+        let Value::I64(raw) = value else {
+            panic!("kaya: a video view's capture is an I64 capture id, got {value:?}");
+        };
+        let capture = match *raw {
+            0 => None,
+            n => {
+                let c = crate::protocol::CaptureId(n as u64);
+                if self.captures.is_live(c) {
+                    Some(c)
+                } else {
+                    assert!(
+                        self.captures.was_released(c),
+                        "kaya: {} previews capture {n}, which was never created — create_capture first",
+                        self.video_noun(widget)
+                    );
+                    None
+                }
+            }
+        };
+        ApplyOp::SetVideoCapture { widget, capture }
+    }
+
     /// How the app names a video view: a live one by its id, a stamped copy
     /// by its template node and keys.
     fn video_noun(&self, widget: WidgetId) -> String {
@@ -6413,6 +6470,7 @@ impl Scene {
                 ApplyOp::Destroy { id } => {
                     self.videos.remove(id);
                     self.video_shows.remove(id);
+                    self.video_previews.remove(id);
                     let addr = self.video_addr.remove(id);
                     if self.visibility.gone(*id) {
                         self.asks.push(visibility_occurrence(*id, addr.flatten(), 0.0));
@@ -6427,7 +6485,39 @@ impl Scene {
                     }
                 },
                 ApplyOp::ReleasePlayer(p) => self.video_shows.retain(|_, shown| shown != p),
+                ApplyOp::SetVideoCapture { widget, capture } => match capture {
+                    Some(c) => {
+                        self.video_previews.insert(*widget, *c);
+                    }
+                    None => {
+                        self.video_previews.remove(widget);
+                    }
+                },
+                ApplyOp::ReleaseCapture(c) => self.video_previews.retain(|_, shown| shown != c),
                 _ => {}
+            }
+        }
+        let mut by_capture: HashMap<crate::protocol::CaptureId, WidgetId> = HashMap::new();
+        let mut previews: Vec<(&WidgetId, &crate::protocol::CaptureId)> = self.video_previews.iter().collect();
+        previews.sort_by_key(|(w, _)| w.0);
+        for (widget, capture) in previews {
+            if let Some(player) = self.video_shows.get(widget) {
+                panic!(
+                    "kaya: {} shows player {} and previews capture {} — a video view shows one source; \
+                     set its player to 0 first (docs/capture-plan.md §3)",
+                    self.video_noun(*widget),
+                    player.0,
+                    capture.0
+                );
+            }
+            if let Some(first) = by_capture.insert(*capture, *widget) {
+                panic!(
+                    "kaya: capture {} is previewed by {} and by {} — a capture is previewed by one video \
+                     view at a time (docs/capture-plan.md §3)",
+                    capture.0,
+                    self.video_noun(first),
+                    self.video_noun(*widget)
+                );
             }
         }
         let mut by_player: HashMap<crate::protocol::PlayerId, WidgetId> = HashMap::new();
@@ -7011,6 +7101,12 @@ impl Scene {
                 );
                 let node_kind = self.template_nodes[&widget.0];
                 check_prop(node_kind, prop);
+                assert!(
+                    prop != Prop::Capture,
+                    "kaya: template node {} previews a capture — a capture is shown by a live video \
+                     view only, never a row's (docs/capture-plan.md §3)",
+                    widget.0
+                );
                 match &value {
                     PropValue::Const(v) => {
                         check_prop_value(node_kind, prop, v);
@@ -8788,6 +8884,38 @@ impl Scene {
     /// This scene's images and peaks answer the guest-side pulls.
     pub(crate) fn serve_reader_pulls(&self) {
         self.readers.serve_pulls();
+    }
+
+
+    /// A backend's report about one capture (docs/capture-plan.md §2): what
+    /// the app hears.
+    pub(crate) fn capture_report(
+        &mut self,
+        capture: crate::protocol::CaptureId,
+        report: crate::capture::Report,
+    ) -> Vec<Occurrence> {
+        self.captures.report(capture, report)
+    }
+
+    pub(crate) fn capture_permission(
+        &mut self,
+        kind: crate::protocol::CaptureKind,
+        permission: crate::protocol::Permission,
+        detail: String,
+    ) -> Vec<Occurrence> {
+        self.captures.permission(kind, permission, detail)
+    }
+
+    pub(crate) fn capture_devices_begin(&mut self) {
+        self.captures.devices_begin();
+    }
+
+    pub(crate) fn capture_device(&mut self, device: crate::protocol::CaptureDevice) {
+        self.captures.device(device);
+    }
+
+    pub(crate) fn capture_devices_end(&mut self) -> Vec<Occurrence> {
+        self.captures.devices_end()
     }
 
     pub(crate) fn media_route(&self, action: crate::protocol::SessionAction) -> crate::media::Route {
