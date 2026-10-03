@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x39c348180962e0db
+specHash = 0x6d398768b7d3b5d6
 
 valueBool :: Word32
 valueBool = 1
@@ -112,6 +112,8 @@ drawOpFont :: Word32
 drawOpFont = 6
 drawOpText :: Word32
 drawOpText = 7
+drawOpImage :: Word32
+drawOpImage = 8
 paintSeries :: Word32
 paintSeries = 1
 paintSeriesFill :: Word32
@@ -562,6 +564,16 @@ playerCommandPause :: Word32
 playerCommandPause = 2
 playerCommandSeek :: Word32
 playerCommandSeek = 3
+frameAccuracyKeyframe :: Word32
+frameAccuracyKeyframe = 0
+frameAccuracyExact :: Word32
+frameAccuracyExact = 1
+readOutcomeCompleted :: Word32
+readOutcomeCompleted = 0
+readOutcomeCancelled :: Word32
+readOutcomeCancelled = 1
+readOutcomeFailed :: Word32
+readOutcomeFailed = 2
 sessionActionPlay :: Word32
 sessionActionPlay = 1
 sessionActionPause :: Word32
@@ -750,6 +762,20 @@ txKindSelectTrack :: Word16
 txKindSelectTrack = 67
 txKindSetSession :: Word16
 txKindSetSession = 68
+txKindOpenReader :: Word16
+txKindOpenReader = 69
+txKindReadFrames :: Word16
+txKindReadFrames = 70
+txKindReadPeaks :: Word16
+txKindReadPeaks = 71
+txKindCancelRead :: Word16
+txKindCancelRead = 72
+txKindCloseReader :: Word16
+txKindCloseReader = 73
+txKindLoadImage :: Word16
+txKindLoadImage = 74
+txKindReleaseImage :: Word16
+txKindReleaseImage = 75
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -862,6 +888,16 @@ applyKindSelectTrack :: Word16
 applyKindSelectTrack = 57
 applyKindCaptionTimes :: Word16
 applyKindCaptionTimes = 58
+applyKindOpenReader :: Word16
+applyKindOpenReader = 59
+applyKindReadFrames :: Word16
+applyKindReadFrames = 60
+applyKindReadPeaks :: Word16
+applyKindReadPeaks = 61
+applyKindCancelRead :: Word16
+applyKindCancelRead = 62
+applyKindCloseReader :: Word16
+applyKindCloseReader = 63
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
@@ -952,6 +988,16 @@ occKindCaptionCue :: Word16
 occKindCaptionCue = 44
 occKindVideoVisibility :: Word16
 occKindVideoVisibility = 45
+occKindReaderFrame :: Word16
+occKindReaderFrame = 46
+occKindReaderProgress :: Word16
+occKindReaderProgress = 47
+occKindReaderPeaks :: Word16
+occKindReaderPeaks = 48
+occKindReaderDone :: Word16
+occKindReaderDone = 49
+occKindImageLoaded :: Word16
+occKindImageLoaded = 50
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -1255,6 +1301,34 @@ txSelectTrack player kind index = wireRecord txKindSelectTrack (word64LE player 
 -- Declare the app's ONE media session (docs/media-plan.md §5), replacing the last declaration: the attached `player` (0 attaches none and withdraws the app from the system's controls), `actions` a mask of 1 << SESSION_ACTION for the actions the app handles itself, `playback_state` the PLAYBACK_STATE the app states while no player is attached, and the metadata as Str values, `artwork` an asset name or empty. With a player attached, play, pause and seek_to the app does not handle apply to that player.
 txSetSession :: Word64 -> Word32 -> Word32 -> Value -> Value -> Value -> Value -> Builder
 txSetSession player actions playbackState title artist album artwork = wireRecord txKindSetSession (word64LE player <> word32LE actions <> word32LE playbackState <> encodeValue title <> encodeValue artist <> encodeValue album <> encodeValue artwork)
+
+-- Open a media READER (docs/media-plan.md §8 ruling 4): an object separate from any player that extracts frames and peaks, its id guest-chosen in its own space. `source` is the player's: an asset name or http(s) URL as Str, or a picked file's handle as I64. A local source that is not there fails every read not_found without reaching the platform. A second open of a live id is a scene error.
+txOpenReader :: Word64 -> Value -> Builder
+txOpenReader reader source = wireRecord txKindOpenReader (word64LE reader <> encodeValue source)
+
+-- Ask for one picture per time (`times`, I64 milliseconds), each answered by reader_frame with the time of the picture the platform returned and a core-held image, then one reader_done. FRAME_ACCURACY keyframe is the keyframe AT OR BEFORE the time on every platform, exact the frame shown at it. `max_width`/`max_height` bound the picture, aspect kept, 0 for no bound on that axis. Frame i becomes image `first_image + i`, ids that must not be live. ONE READ IN FLIGHT PER READER: a second while one runs is a scene error, and nothing is cancelled implicitly.
+txReadFrames :: Word64 -> Word64 -> Word64 -> Word32 -> Word32 -> Word32 -> [Value] -> Builder
+txReadFrames reader read firstImage accuracy maxWidth maxHeight times = wireRecord txKindReadFrames (word64LE reader <> word64LE read <> word64LE firstImage <> word32LE accuracy <> word32LE maxWidth <> word32LE maxHeight <> word32LE 0 <> encodeValues times)
+
+-- Decode the first audio track on the platform and reduce it IN THE CORE to a min/max pair per channel per `samples_per_pair` frames (audiowaveform's .dat shape), answered by reader_progress, reader_peaks and reader_done.
+txReadPeaks :: Word64 -> Word64 -> Word32 -> Builder
+txReadPeaks reader read samplesPerPair = wireRecord txKindReadPeaks (word64LE reader <> word64LE read <> word32LE samplesPerPair <> word32LE 0)
+
+-- Stop a read in flight: reader_done(cancelled) follows at once and nothing of the read after it. A read already done is not an error, since an app races its own answers.
+txCancelRead :: Word64 -> Word64 -> Builder
+txCancelRead reader read = wireRecord txKindCancelRead (word64LE reader <> word64LE read)
+
+-- Forget a reader, cancelling its read in flight. The images it answered with stay the app's.
+txCloseReader :: Word64 -> Builder
+txCloseReader reader = wireRecord txKindCloseReader (word64LE reader)
+
+-- Decode an image IN THE CORE (PNG or JPEG) from an asset name (Str) or a picked file's handle (I64) into a core-held premultiplied RGBA8 image, answered by image_loaded. One decoder on every platform is what keeps a drawing that names it one canonical hash (docs/canvas-plan.md §7.1).
+txLoadImage :: Word64 -> Value -> Builder
+txLoadImage image source = wireRecord txKindLoadImage (word64LE image <> encodeValue source)
+
+-- Forget a core-held image. A drawing declared before keeps showing it until it is declared again; a drawing declared after that names it is refused.
+txReleaseImage :: Word64 -> Builder
+txReleaseImage image = wireRecord txKindReleaseImage (word64LE image)
 
 -- A civil date as the wire's I64: year * 10000 + month * 100 + day.
 packDate :: Int -> Int -> Int -> Int64
@@ -2750,7 +2824,7 @@ parseOccurrence ::
   IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues, Maybe DropValues, [Value]))
 parseOccurrence redeem rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted && kind /= occKindSheetDismissed && kind /= occKindDismissRequested && kind /= occKindSubmitted && kind /= occKindNotificationReplied && kind /= occKindFullscreenChanged && kind /= occKindColorChanged && kind /= occKindRangeChanged && kind /= occKindRangeCommitted && kind /= occKindPlayerChanged && kind /= occKindPlayerPosition && kind /= occKindSeekCompleted && kind /= occKindSessionAction && kind /= occKindPlayerTracks && kind /= occKindCaptionCue && kind /= occKindVideoVisibility
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted && kind /= occKindSheetDismissed && kind /= occKindDismissRequested && kind /= occKindSubmitted && kind /= occKindNotificationReplied && kind /= occKindFullscreenChanged && kind /= occKindColorChanged && kind /= occKindRangeChanged && kind /= occKindRangeCommitted && kind /= occKindPlayerChanged && kind /= occKindPlayerPosition && kind /= occKindSeekCompleted && kind /= occKindSessionAction && kind /= occKindPlayerTracks && kind /= occKindCaptionCue && kind /= occKindVideoVisibility && kind /= occKindReaderFrame && kind /= occKindReaderProgress && kind /= occKindReaderPeaks && kind /= occKindReaderDone && kind /= occKindImageLoaded
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64
@@ -2821,6 +2895,74 @@ parseOccurrence redeem rec = do
           n3 <- peekByteOff rec at3 :: IO Word32
           (vs3, _) <- readN (fromIntegral n3) (at3 + 8) []
           return (Just (kind, ident, [], Nothing, Nothing, Nothing, concat [[VI64 (fromIntegral w0)], [VI64 (fromIntegral w1)], [VI64 (fromIntegral n2)], vs2, [VI64 (fromIntegral n3)], vs3]))
+      else if kind == occKindReaderFrame
+        then do
+          -- A flat record: its fields in order, into the tail.
+          let at0 = 16 :: Int
+          w0 <- peekByteOff rec at0 :: IO Word64
+          let at1 = at0 + 8
+          w1 <- peekByteOff rec at1 :: IO Word64
+          let at2 = at1 + 8
+          w2 <- peekByteOff rec at2 :: IO Word32
+          let at3 = at2 + 4
+          w3 <- peekByteOff rec at3 :: IO Word32
+          let at4 = at3 + 4
+          w4 <- peekByteOff rec at4 :: IO Word32
+          let at5 = at4 + 4
+          let at6 = at5 + 4
+          w6 <- peekByteOff rec at6 :: IO Word64
+          let at7 = at6 + 8
+          w7 <- peekByteOff rec at7 :: IO Word64
+          return (Just (kind, ident, [], Nothing, Nothing, Nothing, concat [[VI64 (fromIntegral w0)], [VI64 (fromIntegral w1)], [VI64 (fromIntegral w2)], [VI64 (fromIntegral w3)], [VI64 (fromIntegral w4)], [VI64 (fromIntegral w6)], [VI64 (fromIntegral w7)]]))
+      else if kind == occKindReaderProgress
+        then do
+          -- A flat record: its fields in order, into the tail.
+          let at0 = 16 :: Int
+          w0 <- peekByteOff rec at0 :: IO Word64
+          let at1 = at0 + 8
+          w1 <- peekByteOff rec at1 :: IO Word64
+          let at2 = at1 + 8
+          w2 <- peekByteOff rec at2 :: IO Word64
+          return (Just (kind, ident, [], Nothing, Nothing, Nothing, concat [[VI64 (fromIntegral w0)], [VI64 (fromIntegral w1)], [VI64 (fromIntegral w2)]]))
+      else if kind == occKindReaderPeaks
+        then do
+          -- A flat record: its fields in order, into the tail.
+          let at0 = 16 :: Int
+          w0 <- peekByteOff rec at0 :: IO Word64
+          let at1 = at0 + 8
+          w1 <- peekByteOff rec at1 :: IO Word32
+          let at2 = at1 + 4
+          w2 <- peekByteOff rec at2 :: IO Word32
+          let at3 = at2 + 4
+          w3 <- peekByteOff rec at3 :: IO Word32
+          let at4 = at3 + 4
+          w4 <- peekByteOff rec at4 :: IO Word32
+          return (Just (kind, ident, [], Nothing, Nothing, Nothing, concat [[VI64 (fromIntegral w0)], [VI64 (fromIntegral w1)], [VI64 (fromIntegral w2)], [VI64 (fromIntegral w3)], [VI64 (fromIntegral w4)]]))
+      else if kind == occKindReaderDone
+        then do
+          -- A flat record: its fields in order, into the tail.
+          let at0 = 16 :: Int
+          w0 <- peekByteOff rec at0 :: IO Word64
+          let at1 = at0 + 8
+          w1 <- peekByteOff rec at1 :: IO Word32
+          let at2 = at1 + 4
+          w2 <- peekByteOff rec at2 :: IO Word32
+          let at3 = at2 + 4
+          (v3, _) <- parseValue rec at3
+          return (Just (kind, ident, [], Nothing, Nothing, Nothing, concat [[VI64 (fromIntegral w0)], [VI64 (fromIntegral w1)], [VI64 (fromIntegral w2)], [v3]]))
+      else if kind == occKindImageLoaded
+        then do
+          -- A flat record: its fields in order, into the tail.
+          let at0 = 16 :: Int
+          w0 <- peekByteOff rec at0 :: IO Word32
+          let at1 = at0 + 4
+          w1 <- peekByteOff rec at1 :: IO Word32
+          let at2 = at1 + 4
+          w2 <- peekByteOff rec at2 :: IO Word32
+          let at3 = at2 + 4
+          let at4 = at3 + 4
+          (v4, _) <- parseValue rec at4
+          return (Just (kind, ident, [], Nothing, Nothing, Nothing, concat [[VI64 (fromIntegral w0)], [VI64 (fromIntegral w1)], [VI64 (fromIntegral w2)], [v4]]))
       else if kind == occKindFileDialogResult
         then do
           -- id, a count, then three Values per file (handle,

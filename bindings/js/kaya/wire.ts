@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x39c348180962e0dbn;
+export const SPEC_HASH = 0x6d398768b7d3b5d6n;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -52,6 +52,7 @@ export const DRAW_OP_STROKE = 4;
 export const DRAW_OP_FILL = 5;
 export const DRAW_OP_FONT = 6;
 export const DRAW_OP_TEXT = 7;
+export const DRAW_OP_IMAGE = 8;
 export const PAINT_SERIES = 1;
 export const PAINT_SERIES_FILL = 2;
 export const PAINT_GRID = 3;
@@ -277,6 +278,11 @@ export const MEDIA_FAILURE_TIMEOUT = 7;
 export const PLAYER_COMMAND_PLAY = 1;
 export const PLAYER_COMMAND_PAUSE = 2;
 export const PLAYER_COMMAND_SEEK = 3;
+export const FRAME_ACCURACY_KEYFRAME = 0;
+export const FRAME_ACCURACY_EXACT = 1;
+export const READ_OUTCOME_COMPLETED = 0;
+export const READ_OUTCOME_CANCELLED = 1;
+export const READ_OUTCOME_FAILED = 2;
 export const SESSION_ACTION_PLAY = 1;
 export const SESSION_ACTION_PAUSE = 2;
 export const SESSION_ACTION_STOP = 3;
@@ -372,6 +378,13 @@ export const TX_PLAYER_COMMAND = 65;
 export const TX_RELEASE_PLAYER = 66;
 export const TX_SELECT_TRACK = 67;
 export const TX_SET_SESSION = 68;
+export const TX_OPEN_READER = 69;
+export const TX_READ_FRAMES = 70;
+export const TX_READ_PEAKS = 71;
+export const TX_CANCEL_READ = 72;
+export const TX_CLOSE_READER = 73;
+export const TX_LOAD_IMAGE = 74;
+export const TX_RELEASE_IMAGE = 75;
 export const APPLY_CREATE = 1;
 export const APPLY_SET_PROP = 2;
 export const APPLY_ADD_CHILD = 3;
@@ -428,6 +441,11 @@ export const APPLY_SET_VIDEO_PLAYER = 55;
 export const APPLY_SET_SESSION = 56;
 export const APPLY_SELECT_TRACK = 57;
 export const APPLY_CAPTION_TIMES = 58;
+export const APPLY_OPEN_READER = 59;
+export const APPLY_READ_FRAMES = 60;
+export const APPLY_READ_PEAKS = 61;
+export const APPLY_CANCEL_READ = 62;
+export const APPLY_CLOSE_READER = 63;
 export const OCC_BUTTON_CLICKED = 1;
 export const OCC_TEXT_CHANGED = 2;
 export const OCC_TOGGLED = 3;
@@ -473,6 +491,11 @@ export const OCC_SESSION_ACTION = 42;
 export const OCC_PLAYER_TRACKS = 43;
 export const OCC_CAPTION_CUE = 44;
 export const OCC_VIDEO_VISIBILITY = 45;
+export const OCC_READER_FRAME = 46;
+export const OCC_READER_PROGRESS = 47;
+export const OCC_READER_PEAKS = 48;
+export const OCC_READER_DONE = 49;
+export const OCC_IMAGE_LOADED = 50;
 
 const text_encoder = new TextEncoder();
 const text_decoder = new TextDecoder("utf-8", { fatal: true });
@@ -1221,6 +1244,68 @@ export function tx_set_session(player: number, actions: number, playback_state: 
   enc.value(album);
   enc.value(artwork);
   return enc.end(TX_SET_SESSION);
+}
+
+/** Open a media READER (docs/media-plan.md §8 ruling 4): an object separate from any player that extracts frames and peaks, its id guest-chosen in its own space. `source` is the player's: an asset name or http(s) URL as Str, or a picked file's handle as I64. A local source that is not there fails every read not_found without reaching the platform. A second open of a live id is a scene error. */
+export function tx_open_reader(reader: number, source: WireValue): Uint8Array {
+  enc.begin();
+  enc.u64(reader);
+  enc.value(source);
+  return enc.end(TX_OPEN_READER);
+}
+
+/** Ask for one picture per time (`times`, I64 milliseconds), each answered by reader_frame with the time of the picture the platform returned and a core-held image, then one reader_done. FRAME_ACCURACY keyframe is the keyframe AT OR BEFORE the time on every platform, exact the frame shown at it. `max_width`/`max_height` bound the picture, aspect kept, 0 for no bound on that axis. Frame i becomes image `first_image + i`, ids that must not be live. ONE READ IN FLIGHT PER READER: a second while one runs is a scene error, and nothing is cancelled implicitly. */
+export function tx_read_frames(reader: number, read: number, first_image: number, accuracy: number, max_width: number, max_height: number, times: readonly WireValue[]): Uint8Array {
+  enc.begin();
+  enc.u64(reader);
+  enc.u64(read);
+  enc.u64(first_image);
+  enc.u32(accuracy);
+  enc.u32(max_width);
+  enc.u32(max_height);
+  enc.u32(0);
+  enc.values(times);
+  return enc.end(TX_READ_FRAMES);
+}
+
+/** Decode the first audio track on the platform and reduce it IN THE CORE to a min/max pair per channel per `samples_per_pair` frames (audiowaveform's .dat shape), answered by reader_progress, reader_peaks and reader_done. */
+export function tx_read_peaks(reader: number, read: number, samples_per_pair: number): Uint8Array {
+  enc.begin();
+  enc.u64(reader);
+  enc.u64(read);
+  enc.u32(samples_per_pair);
+  enc.u32(0);
+  return enc.end(TX_READ_PEAKS);
+}
+
+/** Stop a read in flight: reader_done(cancelled) follows at once and nothing of the read after it. A read already done is not an error, since an app races its own answers. */
+export function tx_cancel_read(reader: number, read: number): Uint8Array {
+  enc.begin();
+  enc.u64(reader);
+  enc.u64(read);
+  return enc.end(TX_CANCEL_READ);
+}
+
+/** Forget a reader, cancelling its read in flight. The images it answered with stay the app's. */
+export function tx_close_reader(reader: number): Uint8Array {
+  enc.begin();
+  enc.u64(reader);
+  return enc.end(TX_CLOSE_READER);
+}
+
+/** Decode an image IN THE CORE (PNG or JPEG) from an asset name (Str) or a picked file's handle (I64) into a core-held premultiplied RGBA8 image, answered by image_loaded. One decoder on every platform is what keeps a drawing that names it one canonical hash (docs/canvas-plan.md §7.1). */
+export function tx_load_image(image: number, source: WireValue): Uint8Array {
+  enc.begin();
+  enc.u64(image);
+  enc.value(source);
+  return enc.end(TX_LOAD_IMAGE);
+}
+
+/** Forget a core-held image. A drawing declared before keeps showing it until it is declared again; a drawing declared after that names it is refused. */
+export function tx_release_image(image: number): Uint8Array {
+  enc.begin();
+  enc.u64(image);
+  return enc.end(TX_RELEASE_IMAGE);
 }
 
 /** A civil date as the wire's I64: year * 10000 + month * 100 + day. */
@@ -2635,7 +2720,7 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const size = view.getUint32(0, true);
   const kind = view.getUint16(4, true);
-  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY].includes(kind)) return { kind, id: null, keys: [], payload: null };
+  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED].includes(kind)) return { kind, id: null, keys: [], payload: null };
   if (kind === OCC_ALERT_RESULT) {
     // A request's one answer: id + the u32 code.
     return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };
@@ -2720,6 +2805,95 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
         [value, at] = parse_value(buf, at);
         tail.push(value);
       }
+    }
+    return { kind, id: read_u64(buf, 8), keys: [], payload: tail };
+  }
+  if (kind === OCC_READER_FRAME) {
+    // A flat record: its fields in order, into the tail.
+    let at = 8;
+    const tail: Decoded[] = [];
+    at += 8;
+    tail.push(read_u64(buf, at));
+    at += 8;
+    tail.push(read_u64(buf, at));
+    at += 8;
+    tail.push(read_u32(buf, at));
+    at += 4;
+    tail.push(read_u32(buf, at));
+    at += 4;
+    tail.push(read_u32(buf, at));
+    at += 4;
+    at += 4;
+    tail.push(read_u64(buf, at));
+    at += 8;
+    tail.push(read_u64(buf, at));
+    at += 8;
+    return { kind, id: read_u64(buf, 8), keys: [], payload: tail };
+  }
+  if (kind === OCC_READER_PROGRESS) {
+    // A flat record: its fields in order, into the tail.
+    let at = 8;
+    const tail: Decoded[] = [];
+    at += 8;
+    tail.push(read_u64(buf, at));
+    at += 8;
+    tail.push(read_u64(buf, at));
+    at += 8;
+    tail.push(read_u64(buf, at));
+    at += 8;
+    return { kind, id: read_u64(buf, 8), keys: [], payload: tail };
+  }
+  if (kind === OCC_READER_PEAKS) {
+    // A flat record: its fields in order, into the tail.
+    let at = 8;
+    const tail: Decoded[] = [];
+    at += 8;
+    tail.push(read_u64(buf, at));
+    at += 8;
+    tail.push(read_u32(buf, at));
+    at += 4;
+    tail.push(read_u32(buf, at));
+    at += 4;
+    tail.push(read_u32(buf, at));
+    at += 4;
+    tail.push(read_u32(buf, at));
+    at += 4;
+    return { kind, id: read_u64(buf, 8), keys: [], payload: tail };
+  }
+  if (kind === OCC_READER_DONE) {
+    // A flat record: its fields in order, into the tail.
+    let at = 8;
+    const tail: Decoded[] = [];
+    at += 8;
+    tail.push(read_u64(buf, at));
+    at += 8;
+    tail.push(read_u32(buf, at));
+    at += 4;
+    tail.push(read_u32(buf, at));
+    at += 4;
+    {
+      let value: Decoded;
+      [value, at] = parse_value(buf, at);
+      tail.push(value);
+    }
+    return { kind, id: read_u64(buf, 8), keys: [], payload: tail };
+  }
+  if (kind === OCC_IMAGE_LOADED) {
+    // A flat record: its fields in order, into the tail.
+    let at = 8;
+    const tail: Decoded[] = [];
+    at += 8;
+    tail.push(read_u32(buf, at));
+    at += 4;
+    tail.push(read_u32(buf, at));
+    at += 4;
+    tail.push(read_u32(buf, at));
+    at += 4;
+    at += 4;
+    {
+      let value: Decoded;
+      [value, at] = parse_value(buf, at);
+      tail.push(value);
     }
     return { kind, id: read_u64(buf, 8), keys: [], payload: tail };
   }

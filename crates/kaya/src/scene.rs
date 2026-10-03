@@ -667,6 +667,13 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         TxOp::ReleasePlayer { .. } => UndoVerdict::Refused("release_player"),
         TxOp::SelectTrack { .. } => UndoVerdict::Refused("select_track"),
         TxOp::SetSession(_) => UndoVerdict::Refused("set_session"),
+        TxOp::OpenReader { .. } => UndoVerdict::Refused("open_reader"),
+        TxOp::ReadFrames { .. } => UndoVerdict::Refused("read_frames"),
+        TxOp::ReadPeaks { .. } => UndoVerdict::Refused("read_peaks"),
+        TxOp::CancelRead { .. } => UndoVerdict::Refused("cancel_read"),
+        TxOp::CloseReader { .. } => UndoVerdict::Refused("close_reader"),
+        TxOp::LoadImage { .. } => UndoVerdict::Refused("load_image"),
+        TxOp::ReleaseImage { .. } => UndoVerdict::Refused("release_image"),
         TxOp::DeclareLinkRoute { .. } => UndoVerdict::Refused("declare_link_route"),
         TxOp::ShowFileDialog(_) => UndoVerdict::Refused("show_file_dialog"),
         TxOp::ShowSaveDialog(_) => UndoVerdict::Refused("show_save_dialog"),
@@ -935,6 +942,10 @@ pub(crate) struct Scene {
     /// Every player and the one session (docs/media-plan.md): their
     /// occurrences leave through `asks`, the core's own outbox.
     media: crate::media::Media,
+    /// docs/media-plan.md §8: every reader, its reads, and the image table
+    /// a drawing's `image` op is validated against; their occurrences leave
+    /// through `asks` too.
+    readers: crate::reader::Readers,
     /// docs/media-plan.md §7b: every video view the backend holds, the player
     /// each shows (at most one view per player), the core's coalescing of
     /// their visibility, and how the app names each (a stamped copy by its
@@ -3396,6 +3407,24 @@ impl Scene {
                     self.media.select(player, kind, index, &mut out, &mut self.asks)
                 }
                 TxOp::SetSession(spec) => self.media.set_session(spec, &mut out),
+                TxOp::OpenReader { reader, source } => self.readers.open(reader, source, &mut out),
+                TxOp::ReadFrames { reader, read, first_image, accuracy, max_size, times_ms } => self.readers.frames(
+                    reader,
+                    read,
+                    first_image,
+                    accuracy,
+                    max_size,
+                    times_ms,
+                    &mut out,
+                    &mut self.asks,
+                ),
+                TxOp::ReadPeaks { reader, read, samples_per_pair } => {
+                    self.readers.peaks(reader, read, samples_per_pair, &mut out, &mut self.asks)
+                }
+                TxOp::CancelRead { reader, read } => self.readers.cancel(reader, read, &mut out, &mut self.asks),
+                TxOp::CloseReader { reader } => self.readers.close(reader, &mut out, &mut self.asks),
+                TxOp::LoadImage { image, source } => self.readers.load_image(image, source, &mut self.asks),
+                TxOp::ReleaseImage { image } => self.readers.release_image(image),
                 TxOp::DeclareLinkRoute { route, pattern } => {
                     // NOTHING REACHES THE BACKENDS: the route table is the
                     // core's, and the platform arms hand it URLs
@@ -4390,10 +4419,11 @@ impl Scene {
                     // plus keys for ONE copy. THE VALIDATION IS FIRST AND
                     // IS THE SAME CALL for all three — one place draws, so
                     // one place refuses (§3.5).
-                    let drawing = match crate::canvas::validate(viewbox, &ops) {
-                        Ok(d) => d,
-                        Err(why) => panic!("{why}"),
-                    };
+                    let drawing =
+                        match crate::canvas::validate_with(viewbox, &ops, &|id| self.readers.lookup(id)) {
+                            Ok(d) => d,
+                            Err(why) => panic!("{why}"),
+                        };
                     let live = path.is_empty()
                         && self.widgets.get(&widget) == Some(&WidgetKind::Canvas);
                     if live {
@@ -7349,7 +7379,7 @@ impl Scene {
                      this template scope",
                     widget.0
                 );
-                let drawing = match crate::canvas::validate(viewbox, &ops) {
+                let drawing = match crate::canvas::validate_with(viewbox, &ops, &|id| self.readers.lookup(id)) {
                     Ok(d) => d,
                     Err(why) => panic!("{why}"),
                 };
@@ -8742,6 +8772,29 @@ impl Scene {
     ) -> (Vec<Occurrence>, Option<crate::protocol::PlayerState>) {
         let published = self.media.report(player, report);
         (published, self.media.state(player))
+    }
+
+    /// A backend's report about one read (docs/media-plan.md §8 ruling 4):
+    /// what the app hears, and the core's answer to the backend.
+    pub(crate) fn reader_report(
+        &mut self,
+        reader: crate::protocol::ReaderId,
+        read: crate::protocol::ReadId,
+        report: crate::reader::Report<'_>,
+    ) -> (Vec<Occurrence>, bool) {
+        self.readers.report(reader, read, report)
+    }
+
+    pub(crate) fn reader_peaks(
+        &self,
+        reader: crate::protocol::ReaderId,
+        read: crate::protocol::ReadId,
+    ) -> Option<&crate::protocol::Peaks> {
+        self.readers.peaks_of(reader, read)
+    }
+
+    pub(crate) fn image_pixels(&self, image: crate::protocol::ImageId) -> Option<(u32, u32, Vec<u8>)> {
+        self.readers.pixels(image)
     }
 
     pub(crate) fn media_route(&self, action: crate::protocol::SessionAction) -> crate::media::Route {

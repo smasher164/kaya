@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x39c348180962e0dbL;
+    public static final long SPEC_HASH = 0x6d398768b7d3b5d6L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -58,6 +58,7 @@ public final class KayaWire {
     public static final int DRAW_OP_FILL = 5;
     public static final int DRAW_OP_FONT = 6;
     public static final int DRAW_OP_TEXT = 7;
+    public static final int DRAW_OP_IMAGE = 8;
     public static final int PAINT_SERIES = 1;
     public static final int PAINT_SERIES_FILL = 2;
     public static final int PAINT_GRID = 3;
@@ -283,6 +284,11 @@ public final class KayaWire {
     public static final int PLAYER_COMMAND_PLAY = 1;
     public static final int PLAYER_COMMAND_PAUSE = 2;
     public static final int PLAYER_COMMAND_SEEK = 3;
+    public static final int FRAME_ACCURACY_KEYFRAME = 0;
+    public static final int FRAME_ACCURACY_EXACT = 1;
+    public static final int READ_OUTCOME_COMPLETED = 0;
+    public static final int READ_OUTCOME_CANCELLED = 1;
+    public static final int READ_OUTCOME_FAILED = 2;
     public static final int SESSION_ACTION_PLAY = 1;
     public static final int SESSION_ACTION_PAUSE = 2;
     public static final int SESSION_ACTION_STOP = 3;
@@ -377,6 +383,13 @@ public final class KayaWire {
     public static final short TX_KIND_RELEASE_PLAYER = 66;
     public static final short TX_KIND_SELECT_TRACK = 67;
     public static final short TX_KIND_SET_SESSION = 68;
+    public static final short TX_KIND_OPEN_READER = 69;
+    public static final short TX_KIND_READ_FRAMES = 70;
+    public static final short TX_KIND_READ_PEAKS = 71;
+    public static final short TX_KIND_CANCEL_READ = 72;
+    public static final short TX_KIND_CLOSE_READER = 73;
+    public static final short TX_KIND_LOAD_IMAGE = 74;
+    public static final short TX_KIND_RELEASE_IMAGE = 75;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -433,6 +446,11 @@ public final class KayaWire {
     public static final short APPLY_KIND_SET_SESSION = 56;
     public static final short APPLY_KIND_SELECT_TRACK = 57;
     public static final short APPLY_KIND_CAPTION_TIMES = 58;
+    public static final short APPLY_KIND_OPEN_READER = 59;
+    public static final short APPLY_KIND_READ_FRAMES = 60;
+    public static final short APPLY_KIND_READ_PEAKS = 61;
+    public static final short APPLY_KIND_CANCEL_READ = 62;
+    public static final short APPLY_KIND_CLOSE_READER = 63;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
@@ -478,6 +496,11 @@ public final class KayaWire {
     public static final short OCC_KIND_PLAYER_TRACKS = 43;
     public static final short OCC_KIND_CAPTION_CUE = 44;
     public static final short OCC_KIND_VIDEO_VISIBILITY = 45;
+    public static final short OCC_KIND_READER_FRAME = 46;
+    public static final short OCC_KIND_READER_PROGRESS = 47;
+    public static final short OCC_KIND_READER_PEAKS = 48;
+    public static final short OCC_KIND_READER_DONE = 49;
+    public static final short OCC_KIND_IMAGE_LOADED = 50;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -1200,6 +1223,68 @@ public final class KayaWire {
         encodeValue(b, artist);
         encodeValue(b, album);
         encodeValue(b, artwork);
+        return finish(b);
+    }
+
+    /** Open a media READER (docs/media-plan.md §8 ruling 4): an object separate from any player that extracts frames and peaks, its id guest-chosen in its own space. `source` is the player's: an asset name or http(s) URL as Str, or a picked file's handle as I64. A local source that is not there fails every read not_found without reaching the platform. A second open of a live id is a scene error. */
+    public static byte[] txOpenReader(long reader, Object source) {
+        Enc b = begin(TX_KIND_OPEN_READER);
+        b.putLong(reader);
+        encodeValue(b, source);
+        return finish(b);
+    }
+
+    /** Ask for one picture per time (`times`, I64 milliseconds), each answered by reader_frame with the time of the picture the platform returned and a core-held image, then one reader_done. FRAME_ACCURACY keyframe is the keyframe AT OR BEFORE the time on every platform, exact the frame shown at it. `max_width`/`max_height` bound the picture, aspect kept, 0 for no bound on that axis. Frame i becomes image `first_image + i`, ids that must not be live. ONE READ IN FLIGHT PER READER: a second while one runs is a scene error, and nothing is cancelled implicitly. */
+    public static byte[] txReadFrames(long reader, long read, long firstImage, int accuracy, int maxWidth, int maxHeight, Object[] times) {
+        Enc b = begin(TX_KIND_READ_FRAMES);
+        b.putLong(reader);
+        b.putLong(read);
+        b.putLong(firstImage);
+        b.putInt(accuracy);
+        b.putInt(maxWidth);
+        b.putInt(maxHeight);
+        b.putInt(0);
+        encodeValues(b, times);
+        return finish(b);
+    }
+
+    /** Decode the first audio track on the platform and reduce it IN THE CORE to a min/max pair per channel per `samples_per_pair` frames (audiowaveform's .dat shape), answered by reader_progress, reader_peaks and reader_done. */
+    public static byte[] txReadPeaks(long reader, long read, int samplesPerPair) {
+        Enc b = begin(TX_KIND_READ_PEAKS);
+        b.putLong(reader);
+        b.putLong(read);
+        b.putInt(samplesPerPair);
+        b.putInt(0);
+        return finish(b);
+    }
+
+    /** Stop a read in flight: reader_done(cancelled) follows at once and nothing of the read after it. A read already done is not an error, since an app races its own answers. */
+    public static byte[] txCancelRead(long reader, long read) {
+        Enc b = begin(TX_KIND_CANCEL_READ);
+        b.putLong(reader);
+        b.putLong(read);
+        return finish(b);
+    }
+
+    /** Forget a reader, cancelling its read in flight. The images it answered with stay the app's. */
+    public static byte[] txCloseReader(long reader) {
+        Enc b = begin(TX_KIND_CLOSE_READER);
+        b.putLong(reader);
+        return finish(b);
+    }
+
+    /** Decode an image IN THE CORE (PNG or JPEG) from an asset name (Str) or a picked file's handle (I64) into a core-held premultiplied RGBA8 image, answered by image_loaded. One decoder on every platform is what keeps a drawing that names it one canonical hash (docs/canvas-plan.md §7.1). */
+    public static byte[] txLoadImage(long image, Object source) {
+        Enc b = begin(TX_KIND_LOAD_IMAGE);
+        b.putLong(image);
+        encodeValue(b, source);
+        return finish(b);
+    }
+
+    /** Forget a core-held image. A drawing declared before keeps showing it until it is declared again; a drawing declared after that names it is refused. */
+    public static byte[] txReleaseImage(long image) {
+        Enc b = begin(TX_KIND_RELEASE_IMAGE);
+        b.putLong(image);
         return finish(b);
     }
 
@@ -3109,7 +3194,7 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED && kind != OCC_KIND_FULLSCREEN_CHANGED && kind != OCC_KIND_COLOR_CHANGED && kind != OCC_KIND_RANGE_CHANGED && kind != OCC_KIND_RANGE_COMMITTED && kind != OCC_KIND_PLAYER_CHANGED && kind != OCC_KIND_PLAYER_POSITION && kind != OCC_KIND_SEEK_COMPLETED && kind != OCC_KIND_SESSION_ACTION && kind != OCC_KIND_PLAYER_TRACKS && kind != OCC_KIND_CAPTION_CUE && kind != OCC_KIND_VIDEO_VISIBILITY) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED && kind != OCC_KIND_FULLSCREEN_CHANGED && kind != OCC_KIND_COLOR_CHANGED && kind != OCC_KIND_RANGE_CHANGED && kind != OCC_KIND_RANGE_COMMITTED && kind != OCC_KIND_PLAYER_CHANGED && kind != OCC_KIND_PLAYER_POSITION && kind != OCC_KIND_SEEK_COMPLETED && kind != OCC_KIND_SESSION_ACTION && kind != OCC_KIND_PLAYER_TRACKS && kind != OCC_KIND_CAPTION_CUE && kind != OCC_KIND_VIDEO_VISIBILITY && kind != OCC_KIND_READER_FRAME && kind != OCC_KIND_READER_PROGRESS && kind != OCC_KIND_READER_PEAKS && kind != OCC_KIND_READER_DONE && kind != OCC_KIND_IMAGE_LOADED) {
             return null;
         }
         long id = b.getLong(8);
@@ -3189,6 +3274,87 @@ public final class KayaWire {
                     tail.add(parseValue(rec, b, at));
                 }
             }
+            return new Occ(kind, id, java.util.List.of(), tail);
+        }
+        if (kind == OCC_KIND_READER_FRAME) {
+            // A flat record: its fields in order, into the tail.
+            int[] at = {8};
+            java.util.List<Object> tail = new java.util.ArrayList<>();
+            at[0] += 8;
+            tail.add(b.getLong(at[0]));
+            at[0] += 8;
+            tail.add(b.getLong(at[0]));
+            at[0] += 8;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            at[0] += 4;
+            tail.add(b.getLong(at[0]));
+            at[0] += 8;
+            tail.add(b.getLong(at[0]));
+            at[0] += 8;
+            return new Occ(kind, id, java.util.List.of(), tail);
+        }
+        if (kind == OCC_KIND_READER_PROGRESS) {
+            // A flat record: its fields in order, into the tail.
+            int[] at = {8};
+            java.util.List<Object> tail = new java.util.ArrayList<>();
+            at[0] += 8;
+            tail.add(b.getLong(at[0]));
+            at[0] += 8;
+            tail.add(b.getLong(at[0]));
+            at[0] += 8;
+            tail.add(b.getLong(at[0]));
+            at[0] += 8;
+            return new Occ(kind, id, java.util.List.of(), tail);
+        }
+        if (kind == OCC_KIND_READER_PEAKS) {
+            // A flat record: its fields in order, into the tail.
+            int[] at = {8};
+            java.util.List<Object> tail = new java.util.ArrayList<>();
+            at[0] += 8;
+            tail.add(b.getLong(at[0]));
+            at[0] += 8;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            return new Occ(kind, id, java.util.List.of(), tail);
+        }
+        if (kind == OCC_KIND_READER_DONE) {
+            // A flat record: its fields in order, into the tail.
+            int[] at = {8};
+            java.util.List<Object> tail = new java.util.ArrayList<>();
+            at[0] += 8;
+            tail.add(b.getLong(at[0]));
+            at[0] += 8;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            tail.add(parseValue(rec, b, at));
+            return new Occ(kind, id, java.util.List.of(), tail);
+        }
+        if (kind == OCC_KIND_IMAGE_LOADED) {
+            // A flat record: its fields in order, into the tail.
+            int[] at = {8};
+            java.util.List<Object> tail = new java.util.ArrayList<>();
+            at[0] += 8;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            at[0] += 4;
+            tail.add(parseValue(rec, b, at));
             return new Occ(kind, id, java.util.List.of(), tail);
         }
         if (kind == OCC_KIND_FILE_DIALOG_RESULT) {

@@ -13628,3 +13628,20 @@ with the toolbar in the caption. Watched red with the mirroring cut ("rtl
 content in an ltr frame" on formatar) and with the drag regions left to the
 control (no point answers HTCLOSE on tasksrtl); check-verbs holds both window
 births, the drag regions, the client origin and the reader, four cuts.
+
+## AVFoundation's reader answers: a WebVTT file is media, a cancelled asset answers nothing more (measured 2026-10-02)
+For the media reader (docs/media-plan.md §8 ruling 4), measured on this Mac
+with AVAssetImageGenerator over guests/assets: a WebVTT file is a media asset
+to AVFoundation (one text track, `isPlayable` false), so a frames read on it
+fails -11869 (AVErrorNoSourceTrack, under -12430), exactly as tone.mp3 does,
+and not -11828; a file that is not media at all (a TOML, a licence text, a
+JPEG) fails -11828 under -12847 (unsupported_container); a missing file fails
+-11800 under -17913, which names nothing, and the core answers not_found
+before the platform sees it. -11869 falls to the failure table's default,
+`decode_error` (the ruling question in docs/deferred.md's reader BUILD entry).
+And `AVURLAsset.cancelLoading()` leaves the asset unable to answer a LATER
+read: with it in the stop after every read, media_reader's keyframe read,
+asked after its exact read on the same reader, never answered. So the
+SwiftUI arm tears an asset's loading down only on a read given up on
+(cancelled, past the bound, its reader closed) and opens a fresh asset for
+the reader's next read; check-verbs holds the stop's shape.

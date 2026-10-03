@@ -56,6 +56,14 @@ pub(crate) const TX_PLAYER_COMMAND: u16 = 65;
 pub(crate) const TX_RELEASE_PLAYER: u16 = 66;
 pub(crate) const TX_SELECT_TRACK: u16 = 67;
 pub(crate) const TX_SET_SESSION: u16 = 68;
+/// The media reader and the core-held images (docs/media-plan.md §8 ruling 4).
+pub(crate) const TX_OPEN_READER: u16 = 69;
+pub(crate) const TX_READ_FRAMES: u16 = 70;
+pub(crate) const TX_READ_PEAKS: u16 = 71;
+pub(crate) const TX_CANCEL_READ: u16 = 72;
+pub(crate) const TX_CLOSE_READER: u16 = 73;
+pub(crate) const TX_LOAD_IMAGE: u16 = 74;
+pub(crate) const TX_RELEASE_IMAGE: u16 = 75;
 pub(crate) const TX_ADD_SECTION: u16 = 25;
 pub(crate) const TX_SELECT_SECTION: u16 = 26;
 pub(crate) const TX_SET_SECTION_PROP: u16 = 27;
@@ -162,6 +170,11 @@ pub(crate) const APPLY_SET_VIDEO_PLAYER: u16 = 55;
 pub(crate) const APPLY_SET_SESSION: u16 = 56;
 pub(crate) const APPLY_SELECT_TRACK: u16 = 57;
 pub(crate) const APPLY_CAPTION_TIMES: u16 = 58;
+pub(crate) const APPLY_OPEN_READER: u16 = 59;
+pub(crate) const APPLY_READ_FRAMES: u16 = 60;
+pub(crate) const APPLY_READ_PEAKS: u16 = 61;
+pub(crate) const APPLY_CANCEL_READ: u16 = 62;
+pub(crate) const APPLY_CLOSE_READER: u16 = 63;
 pub(crate) const APPLY_ADD_SECTION: u16 = 15;
 pub(crate) const APPLY_SELECT_SECTION: u16 = 16;
 pub(crate) const APPLY_SET_SECTION_PROP: u16 = 17;
@@ -260,6 +273,7 @@ pub(crate) const DRAW_STROKE: i64 = 4;
 pub(crate) const DRAW_FILL: i64 = 5;
 pub(crate) const DRAW_FONT: i64 = 6;
 pub(crate) const DRAW_TEXT: i64 = 7;
+pub(crate) const DRAW_IMAGE: i64 = 8;
 
 // Paint roles (§3.4). Resolved in the core, per appearance.
 pub(crate) const PAINT_SERIES: i64 = 1;
@@ -301,6 +315,7 @@ pub(crate) const DRAW_OPS: &[(i64, &str)] = &[
     (DRAW_FILL, "fill"),
     (DRAW_FONT, "font"),
     (DRAW_TEXT, "text"),
+    (DRAW_IMAGE, "image"),
 ];
 
 pub(crate) const PAINTS: &[(i64, &str)] = &[
@@ -375,6 +390,35 @@ pub(crate) const PPROPS: &[(i64, &str)] = &[
 ];
 
 pub(crate) const TRACK_KINDS: &[(i64, &str)] = &[(0, "audio"), (1, "caption")];
+
+pub(crate) const FRAME_ACCURACIES: &[(i64, &str)] = &[(0, "keyframe"), (1, "exact")];
+
+pub(crate) const READ_OUTCOMES: &[(i64, &str)] = &[(0, "completed"), (1, "cancelled"), (2, "failed")];
+
+pub(crate) fn frame_accuracy_raw(accuracy: crate::protocol::FrameAccuracy) -> u32 {
+    match accuracy {
+        crate::protocol::FrameAccuracy::Keyframe => 0,
+        crate::protocol::FrameAccuracy::Exact => 1,
+    }
+}
+
+fn frame_accuracy(raw: u32) -> crate::protocol::FrameAccuracy {
+    match raw {
+        0 => crate::protocol::FrameAccuracy::Keyframe,
+        1 => crate::protocol::FrameAccuracy::Exact,
+        other => panic!("kaya: read_frames' accuracy {other} is not a frame_accuracy (keyframe=0, exact=1)"),
+    }
+}
+
+/// READ_OUTCOME and MEDIA_FAILURE for a reader_done.
+pub(crate) fn read_outcome_raw(outcome: &crate::protocol::ReadOutcome) -> (u32, u32) {
+    use crate::protocol::ReadOutcome as O;
+    match outcome {
+        O::Completed => (0, 0),
+        O::Cancelled => (1, 0),
+        O::Failed(why, _) => (2, media_failure_raw(Some(*why))),
+    }
+}
 
 pub(crate) fn track_kind_raw(kind: crate::protocol::TrackKind) -> u32 {
     match kind {
@@ -581,6 +625,102 @@ pub(crate) fn player_tracks_body(player: crate::protocol::PlayerId, tracks: &cra
         let values: Vec<Value> = list.iter().map(|s| Value::Str(s.clone())).collect();
         write_values(&mut b, &values, &mut blobs);
     }
+    b
+}
+
+/// READER_FRAME { u64 reader; u64 read; u64 image; u32 index; u32 width;
+/// u32 height; u32 reserved; u64 requested_ms; u64 actual_ms }.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn reader_frame_body(
+    reader: crate::protocol::ReaderId,
+    read: crate::protocol::ReadId,
+    image: crate::protocol::ImageId,
+    index: u32,
+    size: (u32, u32),
+    requested_ms: u64,
+    actual_ms: u64,
+) -> Vec<u8> {
+    let mut b = Vec::with_capacity(56);
+    b.extend_from_slice(&reader.0.to_le_bytes());
+    b.extend_from_slice(&read.0.to_le_bytes());
+    b.extend_from_slice(&image.0.to_le_bytes());
+    b.extend_from_slice(&index.to_le_bytes());
+    b.extend_from_slice(&size.0.to_le_bytes());
+    b.extend_from_slice(&size.1.to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    b.extend_from_slice(&requested_ms.to_le_bytes());
+    b.extend_from_slice(&actual_ms.to_le_bytes());
+    b
+}
+
+/// READER_PROGRESS { u64 reader; u64 read; u64 done_ms; u64 total_ms }.
+pub(crate) fn reader_progress_body(
+    reader: crate::protocol::ReaderId,
+    read: crate::protocol::ReadId,
+    done_ms: u64,
+    total_ms: u64,
+) -> [u8; 32] {
+    let mut b = [0u8; 32];
+    b[..8].copy_from_slice(&reader.0.to_le_bytes());
+    b[8..16].copy_from_slice(&read.0.to_le_bytes());
+    b[16..24].copy_from_slice(&done_ms.to_le_bytes());
+    b[24..].copy_from_slice(&total_ms.to_le_bytes());
+    b
+}
+
+/// READER_PEAKS { u64 reader; u64 read; u32 sample_rate; u32
+/// samples_per_pair; u32 channels; u32 length }: the header alone, the
+/// pairs read through kaya_reader_peaks.
+pub(crate) fn reader_peaks_body(
+    reader: crate::protocol::ReaderId,
+    read: crate::protocol::ReadId,
+    peaks: &crate::protocol::Peaks,
+) -> [u8; 32] {
+    let mut b = [0u8; 32];
+    b[..8].copy_from_slice(&reader.0.to_le_bytes());
+    b[8..16].copy_from_slice(&read.0.to_le_bytes());
+    b[16..20].copy_from_slice(&peaks.sample_rate.to_le_bytes());
+    b[20..24].copy_from_slice(&peaks.samples_per_pair.to_le_bytes());
+    b[24..28].copy_from_slice(&peaks.channels.to_le_bytes());
+    b[28..].copy_from_slice(&(peaks.len() as u32).to_le_bytes());
+    b
+}
+
+/// READER_DONE { u64 reader; u64 read; u32 outcome; u32 failure; Str detail }.
+pub(crate) fn reader_done_body(
+    reader: crate::protocol::ReaderId,
+    read: crate::protocol::ReadId,
+    outcome: &crate::protocol::ReadOutcome,
+) -> Vec<u8> {
+    let (raw, failure) = read_outcome_raw(outcome);
+    let detail = match outcome {
+        crate::protocol::ReadOutcome::Failed(_, detail) => detail.clone(),
+        _ => String::new(),
+    };
+    let mut b = Vec::new();
+    b.extend_from_slice(&reader.0.to_le_bytes());
+    b.extend_from_slice(&read.0.to_le_bytes());
+    b.extend_from_slice(&raw.to_le_bytes());
+    b.extend_from_slice(&failure.to_le_bytes());
+    write_value(&mut b, &Value::Str(detail), &mut Vec::new());
+    b
+}
+
+/// IMAGE_LOADED { u64 image; u32 width; u32 height; u32 failure; u32
+/// reserved; Str detail }.
+pub(crate) fn image_loaded_body(
+    image: crate::protocol::ImageId,
+    size: (u32, u32),
+    failure: Option<&(crate::protocol::MediaFailure, String)>,
+) -> Vec<u8> {
+    let mut b = Vec::new();
+    b.extend_from_slice(&image.0.to_le_bytes());
+    b.extend_from_slice(&size.0.to_le_bytes());
+    b.extend_from_slice(&size.1.to_le_bytes());
+    b.extend_from_slice(&media_failure_raw(failure.map(|f| f.0)).to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    let detail = failure.map_or(String::new(), |f| f.1.clone());
+    write_value(&mut b, &Value::Str(detail), &mut Vec::new());
     b
 }
 
@@ -1711,6 +1851,43 @@ pub fn decode_transaction_with_blobs(
                     artwork: media_str(r.value(), "set_session's artwork"),
                 })
             }
+            TX_OPEN_READER => TxOp::OpenReader {
+                reader: crate::protocol::ReaderId(r.u64()),
+                source: r.value(),
+            },
+            TX_READ_FRAMES => {
+                let reader = crate::protocol::ReaderId(r.u64());
+                let read = crate::protocol::ReadId(r.u64());
+                let first_image = crate::protocol::ImageId(r.u64());
+                let accuracy = frame_accuracy(r.u32());
+                let max_size = (r.u32(), r.u32());
+                let _reserved = r.u32();
+                let times_ms = r
+                    .record()
+                    .into_iter()
+                    .map(|v| match v {
+                        Value::I64(ms) if ms >= 0 => ms as u64,
+                        other => panic!(
+                            "kaya: read_frames' times are I64 milliseconds from the start, got {other:?}"
+                        ),
+                    })
+                    .collect();
+                TxOp::ReadFrames { reader, read, first_image, accuracy, max_size, times_ms }
+            }
+            TX_READ_PEAKS => {
+                let reader = crate::protocol::ReaderId(r.u64());
+                let read = crate::protocol::ReadId(r.u64());
+                let samples_per_pair = r.u32();
+                let _reserved = r.u32();
+                TxOp::ReadPeaks { reader, read, samples_per_pair }
+            }
+            TX_CANCEL_READ => TxOp::CancelRead {
+                reader: crate::protocol::ReaderId(r.u64()),
+                read: crate::protocol::ReadId(r.u64()),
+            },
+            TX_CLOSE_READER => TxOp::CloseReader { reader: crate::protocol::ReaderId(r.u64()) },
+            TX_LOAD_IMAGE => TxOp::LoadImage { image: crate::protocol::ImageId(r.u64()), source: r.value() },
+            TX_RELEASE_IMAGE => TxOp::ReleaseImage { image: crate::protocol::ImageId(r.u64()) },
             TX_SET_RICH_TEXT => {
                 let widget = WidgetId(r.u64());
                 let count = r.u32() as usize;
@@ -3794,6 +3971,33 @@ impl Writer {
                 let values: Vec<Value> = times.iter().map(|t| Value::I64(*t as i64)).collect();
                 write_values(b, &values, blobs);
             }),
+            ApplyOp::OpenReader { reader, url } => self.record(APPLY_OPEN_READER, |b, blobs| {
+                b.extend_from_slice(&reader.0.to_le_bytes());
+                write_value(b, &Value::Str(url.clone()), blobs);
+            }),
+            ApplyOp::ReadFrames { reader, read, accuracy, max_size, times_ms } => {
+                self.record(APPLY_READ_FRAMES, |b, blobs| {
+                    b.extend_from_slice(&reader.0.to_le_bytes());
+                    b.extend_from_slice(&read.0.to_le_bytes());
+                    b.extend_from_slice(&frame_accuracy_raw(*accuracy).to_le_bytes());
+                    b.extend_from_slice(&max_size.0.to_le_bytes());
+                    b.extend_from_slice(&max_size.1.to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    let values: Vec<Value> = times_ms.iter().map(|t| Value::I64(*t as i64)).collect();
+                    write_values(b, &values, blobs);
+                })
+            }
+            ApplyOp::ReadPeaks { reader, read } => self.record(APPLY_READ_PEAKS, |b, _| {
+                b.extend_from_slice(&reader.0.to_le_bytes());
+                b.extend_from_slice(&read.0.to_le_bytes());
+            }),
+            ApplyOp::CancelRead { reader, read } => self.record(APPLY_CANCEL_READ, |b, _| {
+                b.extend_from_slice(&reader.0.to_le_bytes());
+                b.extend_from_slice(&read.0.to_le_bytes());
+            }),
+            ApplyOp::CloseReader(reader) => self.record(APPLY_CLOSE_READER, |b, _| {
+                b.extend_from_slice(&reader.0.to_le_bytes());
+            }),
             ApplyOp::SetSession { player, offered, playback_state, title, artist, album, artwork } => {
                 self.record(APPLY_SET_SESSION, |b, blobs| {
                     b.extend_from_slice(&player.map_or(0, |p| p.0).to_le_bytes());
@@ -4413,6 +4617,43 @@ impl Writer {
                 for s in [&spec.title, &spec.artist, &spec.album, &spec.artwork] {
                     write_value(b, &Value::Str(s.clone()), blobs);
                 }
+            }),
+            TxOp::OpenReader { reader, source } => self.record(TX_OPEN_READER, |b, blobs| {
+                b.extend_from_slice(&reader.0.to_le_bytes());
+                write_value(b, source, blobs);
+            }),
+            TxOp::ReadFrames { reader, read, first_image, accuracy, max_size, times_ms } => {
+                self.record(TX_READ_FRAMES, |b, blobs| {
+                    b.extend_from_slice(&reader.0.to_le_bytes());
+                    b.extend_from_slice(&read.0.to_le_bytes());
+                    b.extend_from_slice(&first_image.0.to_le_bytes());
+                    b.extend_from_slice(&frame_accuracy_raw(*accuracy).to_le_bytes());
+                    b.extend_from_slice(&max_size.0.to_le_bytes());
+                    b.extend_from_slice(&max_size.1.to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    let values: Vec<Value> = times_ms.iter().map(|t| Value::I64(*t as i64)).collect();
+                    write_values(b, &values, blobs);
+                })
+            }
+            TxOp::ReadPeaks { reader, read, samples_per_pair } => self.record(TX_READ_PEAKS, |b, _| {
+                b.extend_from_slice(&reader.0.to_le_bytes());
+                b.extend_from_slice(&read.0.to_le_bytes());
+                b.extend_from_slice(&samples_per_pair.to_le_bytes());
+                b.extend_from_slice(&0u32.to_le_bytes());
+            }),
+            TxOp::CancelRead { reader, read } => self.record(TX_CANCEL_READ, |b, _| {
+                b.extend_from_slice(&reader.0.to_le_bytes());
+                b.extend_from_slice(&read.0.to_le_bytes());
+            }),
+            TxOp::CloseReader { reader } => self.record(TX_CLOSE_READER, |b, _| {
+                b.extend_from_slice(&reader.0.to_le_bytes());
+            }),
+            TxOp::LoadImage { image, source } => self.record(TX_LOAD_IMAGE, |b, blobs| {
+                b.extend_from_slice(&image.0.to_le_bytes());
+                write_value(b, source, blobs);
+            }),
+            TxOp::ReleaseImage { image } => self.record(TX_RELEASE_IMAGE, |b, _| {
+                b.extend_from_slice(&image.0.to_le_bytes());
             }),
             TxOp::ScrollToRow { widget, key } => self.record(TX_SCROLL_TO_ROW, |b, blobs| {
                 b.extend_from_slice(&widget.0.to_le_bytes());

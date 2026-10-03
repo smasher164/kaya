@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x39c348180962e0dbULL
+#define KAYA_SPEC_HASH 0x6d398768b7d3b5d6ULL
 
 
 /* Create a signal holding `initial`. */
@@ -821,6 +821,68 @@ static inline void kaya_tx_set_session(KayaTx *tx, uint64_t player, uint32_t act
     kaya_wire_value(tx, artist);
     kaya_wire_value(tx, album);
     kaya_wire_value(tx, artwork);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Open a media READER (docs/media-plan.md §8 ruling 4): an object separate from any player that extracts frames and peaks, its id guest-chosen in its own space. `source` is the player's: an asset name or http(s) URL as Str, or a picked file's handle as I64. A local source that is not there fails every read not_found without reaching the platform. A second open of a live id is a scene error. */
+static inline void kaya_tx_open_reader(KayaTx *tx, uint64_t reader, KayaVal source) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_OPEN_READER);
+    kaya_wire_u64(tx, reader);
+    kaya_wire_value(tx, source);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Ask for one picture per time (`times`, I64 milliseconds), each answered by reader_frame with the time of the picture the platform returned and a core-held image, then one reader_done. FRAME_ACCURACY keyframe is the keyframe AT OR BEFORE the time on every platform, exact the frame shown at it. `max_width`/`max_height` bound the picture, aspect kept, 0 for no bound on that axis. Frame i becomes image `first_image + i`, ids that must not be live. ONE READ IN FLIGHT PER READER: a second while one runs is a scene error, and nothing is cancelled implicitly. */
+static inline void kaya_tx_read_frames(KayaTx *tx, uint64_t reader, uint64_t read, uint64_t first_image, uint32_t accuracy, uint32_t max_width, uint32_t max_height, const KayaVal *times, uint32_t times_len) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_READ_FRAMES);
+    kaya_wire_u64(tx, reader);
+    kaya_wire_u64(tx, read);
+    kaya_wire_u64(tx, first_image);
+    kaya_wire_u32(tx, accuracy);
+    kaya_wire_u32(tx, max_width);
+    kaya_wire_u32(tx, max_height);
+    kaya_wire_u32(tx, 0);
+    kaya_wire_values(tx, times, times_len);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Decode the first audio track on the platform and reduce it IN THE CORE to a min/max pair per channel per `samples_per_pair` frames (audiowaveform's .dat shape), answered by reader_progress, reader_peaks and reader_done. */
+static inline void kaya_tx_read_peaks(KayaTx *tx, uint64_t reader, uint64_t read, uint32_t samples_per_pair) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_READ_PEAKS);
+    kaya_wire_u64(tx, reader);
+    kaya_wire_u64(tx, read);
+    kaya_wire_u32(tx, samples_per_pair);
+    kaya_wire_u32(tx, 0);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Stop a read in flight: reader_done(cancelled) follows at once and nothing of the read after it. A read already done is not an error, since an app races its own answers. */
+static inline void kaya_tx_cancel_read(KayaTx *tx, uint64_t reader, uint64_t read) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_CANCEL_READ);
+    kaya_wire_u64(tx, reader);
+    kaya_wire_u64(tx, read);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Forget a reader, cancelling its read in flight. The images it answered with stay the app's. */
+static inline void kaya_tx_close_reader(KayaTx *tx, uint64_t reader) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_CLOSE_READER);
+    kaya_wire_u64(tx, reader);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Decode an image IN THE CORE (PNG or JPEG) from an asset name (Str) or a picked file's handle (I64) into a core-held premultiplied RGBA8 image, answered by image_loaded. One decoder on every platform is what keeps a drawing that names it one canonical hash (docs/canvas-plan.md §7.1). */
+static inline void kaya_tx_load_image(KayaTx *tx, uint64_t image, KayaVal source) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_LOAD_IMAGE);
+    kaya_wire_u64(tx, image);
+    kaya_wire_value(tx, source);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Forget a core-held image. A drawing declared before keeps showing it until it is declared again; a drawing declared after that names it is refused. */
+static inline void kaya_tx_release_image(KayaTx *tx, uint64_t image) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_RELEASE_IMAGE);
+    kaya_wire_u64(tx, image);
     kaya_wire_end(tx, kaya_at);
 }
 

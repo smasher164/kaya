@@ -377,6 +377,14 @@ pub struct KayaHostApi {
     pub number_text: unsafe extern "C" fn(f64, f64, *mut u8, usize) -> usize,
     pub number_commit: unsafe extern "C" fn(*const u8, usize, f64, f64, f64, f64, *mut f64) -> u32,
     pub number_step: unsafe extern "C" fn(f64, i32, f64, f64, f64, *mut f64) -> u32,
+    /// docs/media-plan.md §8 ruling 4: a reader's reports, through the core;
+    /// frame and pcm answer 1 while the read is still wanted, overdue 1 when
+    /// the core failed it `timeout`.
+    pub reader_frame: unsafe extern "C" fn(u64, u64, u32, u64, u32, u32, *const u8, usize) -> u32,
+    pub reader_pcm: unsafe extern "C" fn(u64, u64, u32, u32, *const f32, usize, u64) -> u32,
+    pub reader_finished: extern "C" fn(u64, u64),
+    pub reader_failed: unsafe extern "C" fn(u64, u64, *const u8, usize, i64, i64, *const u8, usize),
+    pub reader_overdue: extern "C" fn(u64, u64) -> u32,
 }
 
 /// # Safety
@@ -637,6 +645,11 @@ pub(crate) fn run() -> i32 {
         number_text,
         number_commit,
         number_step,
+        reader_frame: crate::capi::kaya_reader_frame,
+        reader_pcm: crate::capi::kaya_reader_pcm,
+        reader_finished: crate::capi::kaya_reader_finished,
+        reader_failed: crate::capi::kaya_reader_failed,
+        reader_overdue: crate::capi::kaya_reader_overdue,
     };
     // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the declares-windowing
     // entry), and the declaration has to beat the first transaction rather

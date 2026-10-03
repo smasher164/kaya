@@ -721,6 +721,29 @@ pass.
    and computes min/max pairs in the core; cancellation through the
    binding's own async cancel or closing the reader; failures from the
    player's closed vocabulary.
+   **Built at depth (2026-10-02, docs/deferred.md's reader BUILD entry).** The
+   op is the draw_op enum's `image` (8; every member of that enum is a draw
+   op), `i64 image, f64 x, f64 y, f64 w, f64 h` in the viewbox, rasterized by
+   the core into the canonical raster like every other op. An image is a
+   core-held premultiplied RGBA8 picture with a guest-chosen id: a
+   `read_frames` reserves one per time (`first_image + i`), and `load_image`
+   decodes an asset or a picked file IN THE CORE (PNG and JPEG), because one
+   decoder on five platforms is what keeps a drawing naming it one hash; a
+   load that fails answers `image_loaded` with a reason, never a refusal, so a
+   user's file cannot crash the app. `release_image` frees the id; a drawing
+   declared earlier keeps its pixels until it is declared again, and a drawing
+   naming a released, failed, still-pending or unknown image is refused with
+   the sentence for which. The bound (§7c) runs from the ask or the latest
+   answer, so a long exact read is not cut off while it answers. The peaks'
+   pairs are pulled with `kaya_reader_peaks` (a ring record holds 32 KB; ten
+   minutes of stereo at 480 samples a pair is 240 KB). After a cancel or a
+   close the app hears only `reader_done(cancelled)`: the core drops later
+   reports and the binding drops answers already in its channel, releasing
+   the images they carried. On Apple the frames come from
+   `generateCGImagesAsynchronously` with tolerance-after zero for `keyframe`
+   (the default is the nearest, measured), the PCM from AVAssetReader at the
+   track's own channel count. tools/scenes/media_reader.steps draws a
+   filmstrip and a waveform; the waveform's hash is derived from the core.
 5. **The one test clip.** RULED 2026-09-29, as recommended: one short H.264/AAC MP4, a flat
    asymmetric colour with an audio track (Android's media keys need one),
    shared by all five lanes under guests/assets, after checking the

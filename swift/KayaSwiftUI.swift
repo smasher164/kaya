@@ -22,7 +22,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x39c348180962e0db
+let kayaSpecHash: UInt64 = 0x6d398768b7d3b5d6
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -86,6 +86,12 @@ private let applySetVideoPlayer: UInt16 = 55
 private let applySetSession: UInt16 = 56
 private let applySelectTrack: UInt16 = 57
 private let applyCaptionTimes: UInt16 = 58
+/// docs/media-plan.md §8 ruling 4: the reader, separate from any player.
+private let applyOpenReader: UInt16 = 59
+private let applyReadFrames: UInt16 = 60
+private let applyReadPeaks: UInt16 = 61
+private let applyCancelRead: UInt16 = 62
+private let applyCloseReader: UInt16 = 63
 /// What a drop settles on (the wire's drag_op).
 let kayaDragOpNone: UInt32 = 0
 let kayaDragOpCopy: UInt32 = 1
@@ -346,6 +352,7 @@ private let drawStroke: Int64 = 4
 private let drawFill: Int64 = 5
 private let drawFont: Int64 = 6
 private let drawText: Int64 = 7
+private let drawImage: Int64 = 8
 private let paintSeries: Int64 = 1
 private let paintSeriesFill: Int64 = 2
 private let paintGrid: Int64 = 3
@@ -363,7 +370,7 @@ private let textBaselineBottom: Int64 = 3
 /// Named once so the compiler does not report the vocabulary above
 /// unused; nothing reads this array.
 let kayaCanvasVocabulary: [Int64] = [
-    drawMoveTo, drawLineTo, drawClose, drawStroke, drawFill, drawFont, drawText,
+    drawMoveTo, drawLineTo, drawClose, drawStroke, drawFill, drawFont, drawText, drawImage,
     paintSeries, paintSeriesFill, paintGrid, paintAxis, paintGround,
     fillNonzero, fillEvenOdd,
     textAlignStart, textAlignMiddle, textAlignEnd,
@@ -6762,6 +6769,33 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 var times: [UInt64] = []
                 for _ in 0..<count { times.append(UInt64(max(0, kayaReadI64Value(raw, &at)))) }
                 kayaPlayers[pid]?.setCaptionTimes(times)
+            case applyOpenReader:
+                // { u64 reader; Str url }, resolved by the core as a player's source is.
+                let rid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                var at = body + 8
+                kayaReaders[rid] = KayaReader(id: rid, locator: kayaReadStrValue(raw, &at))
+            case applyReadFrames:
+                // { u64 reader; u64 read; u32 accuracy; u32 max_width; u32
+                //   max_height; u32 reserved; Values: I64 ms }.
+                let rid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let read = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                let accuracy = raw.loadUnaligned(fromByteOffset: body + 16, as: UInt32.self)
+                let maxW = raw.loadUnaligned(fromByteOffset: body + 20, as: UInt32.self)
+                let maxH = raw.loadUnaligned(fromByteOffset: body + 24, as: UInt32.self)
+                let count = Int(raw.loadUnaligned(fromByteOffset: body + 32, as: UInt32.self))
+                var at = body + 40
+                var times: [UInt64] = []
+                for _ in 0..<count { times.append(UInt64(max(0, kayaReadI64Value(raw, &at)))) }
+                kayaReaders[rid]?.frames(read, exact: Int32(accuracy) == KAYA_FRAME_ACCURACY_EXACT,
+                                         maxSize: CGSize(width: Int(maxW), height: Int(maxH)), times: times)
+            case applyReadPeaks:
+                kayaReaders[raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)]?.peaks(
+                    raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self))
+            case applyCancelRead:
+                kayaReaders[raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)]?.stop(
+                    raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self), tearDown: true)
+            case applyCloseReader:
+                kayaReaders.removeValue(forKey: raw.loadUnaligned(fromByteOffset: body, as: UInt64.self))?.close()
             case applyScrollToRow:
                 // { u64 container; u64 copy (0 = unrealized); u32 index; u32 pad }.
                 // A REQUEST held on the container until its tier can scroll
@@ -26741,6 +26775,271 @@ func kayaApplyPlayerCommand(_ id: UInt64, _ command: UInt32, _ atMs: UInt64) {
     case KAYA_PLAYER_COMMAND_SEEK: p.seek(atMs, report: true)
     default: fatalError("kaya: bad player command \(command)")
     }
+}
+
+// MARK: The reader (docs/media-plan.md §8 ruling 4)
+//
+// Frames through AVAssetImageGenerator, PCM through AVAssetReader at the
+// track's own channel count; the core reduces the peaks, keeps the images
+// and owns the bound (docs/probes/media-extraction-2026-10-01.md). Every
+// report reaches the core on the main thread, the ring's one producer.
+
+final class KayaReader {
+    let id: UInt64
+    private let url: URL?
+    /// Made again for the next read after a stop that tore its loading down.
+    private var loaded: AVURLAsset?
+    private var generator: AVAssetImageGenerator?
+    private var pcm: AVAssetReader?
+    /// The read in flight, 0 for none; a report for any other is dropped.
+    private var read: UInt64 = 0
+    /// Bumped at every answer, so only the latest timer asks the core.
+    private var answers = 0
+    private var scoped: URL?
+
+    init(id: UInt64, locator: String) {
+        self.id = id
+        #if os(macOS)
+            let url = URL(string: locator)
+        #else
+            let url = kayaPickedURLs[locator] ?? URL(string: locator)
+            if let picked = kayaPickedURLs[locator], picked.startAccessingSecurityScopedResource() {
+                scoped = picked
+            }
+        #endif
+        self.url = url
+    }
+
+    private var asset: AVURLAsset? {
+        if loaded == nil, let url { loaded = AVURLAsset(url: url) }
+        return loaded
+    }
+
+    /// The bound (docs/media-plan.md §7c) from the ask or the latest answer:
+    /// the core's clock decides, and a read it failed `timeout` is stopped.
+    private func answered(_ read: UInt64) {
+        answers += 1
+        let seen = answers
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(Int(KAYA_MEDIA_TIMEOUT_MS))) {
+            [weak self] in
+            guard let self, self.read == read, self.answers == seen else { return }
+            if KayaHost.api.reader_overdue(self.id, read) == 1 { self.stop(read, tearDown: true) }
+        }
+    }
+
+    private func failed(_ read: UInt64, _ error: Error?, _ fallback: String) {
+        let ns = error as NSError?
+        let domain = Array((ns?.domain ?? "kaya").utf8)
+        let code = ns?.code ?? Int(KAYA_MEDIA_FAILURE_DECODE_ERROR)
+        let underlying = (ns?.userInfo[NSUnderlyingErrorKey] as? NSError)?.code ?? 0
+        let sentence = ns.map { $0.localizedFailureReason ?? $0.localizedDescription } ?? fallback
+        kayaDiag("reader \(id) read \(read) failed: \(ns?.domain ?? "kaya") \(code) under \(underlying): \(sentence)")
+        let detail = Array(sentence.utf8)
+        domain.withUnsafeBufferPointer { dp in
+            detail.withUnsafeBufferPointer { tp in
+                KayaHost.api.reader_failed(
+                    id, read, dp.baseAddress, UInt(dp.count), Int64(code), Int64(underlying), tp.baseAddress,
+                    UInt(tp.count))
+            }
+        }
+        stop(read)
+    }
+
+    /// `exact` asks for the frame shown at each time; otherwise the keyframe
+    /// AT OR BEFORE it, which is tolerance-after zero (measured: the default
+    /// is the NEAREST keyframe, either side).
+    func frames(_ read: UInt64, exact: Bool, maxSize: CGSize, times: [UInt64]) {
+        guard let asset else {
+            failed(read, nil, "kaya: the reader's locator is not a URL")
+            return
+        }
+        self.read = read
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = maxSize
+        generator.requestedTimeToleranceAfter = .zero
+        generator.requestedTimeToleranceBefore = exact ? .zero : .positiveInfinity
+        self.generator = generator
+        var index: [Int64: [UInt32]] = [:]
+        for (i, t) in times.enumerated() { index[Int64(t), default: []].append(UInt32(i)) }
+        let asked = times.map { NSValue(time: CMTime(value: CMTimeValue($0), timescale: 1000)) }
+        answered(read)
+        generator.generateCGImagesAsynchronously(forTimes: asked) { [weak self] requested, image, actual, result, error in
+            let ms = requested.convertScale(1000, method: .roundHalfAwayFromZero).value
+            let pixels = image.flatMap(kayaPremultipliedRGBA)
+            let actualMs = UInt64(max(0, actual.convertScale(1000, method: .roundHalfAwayFromZero).value))
+            DispatchQueue.main.async {
+                guard let self, self.read == read else { return }
+                switch result {
+                case .succeeded:
+                    guard let (w, h, bytes) = pixels, let i = index[ms]?.first else {
+                        self.failed(read, nil, "kaya: the platform answered \(ms) ms with no picture it could copy")
+                        return
+                    }
+                    index[ms]?.removeFirst()
+                    let live = bytes.withUnsafeBufferPointer {
+                        KayaHost.api.reader_frame(self.id, read, i, actualMs, w, h, $0.baseAddress, UInt($0.count))
+                    }
+                    if live == 0 { self.stop(read) } else { self.answered(read) }
+                case .failed:
+                    self.failed(read, error, "kaya: the platform failed the frame at \(ms) ms")
+                default:
+                    break
+                }
+            }
+        }
+    }
+
+    /// The first audio track as float PCM at its own channel count (asking
+    /// for one channel makes the reader downmix, +3 dB, measured), handed to
+    /// the core a buffer at a time on the main thread.
+    func peaks(_ read: UInt64) {
+        guard let asset else {
+            failed(read, nil, "kaya: the reader's locator is not a URL")
+            return
+        }
+        self.read = read
+        answered(read)
+        Task { @MainActor in
+            do {
+                let tracks = try await asset.loadTracks(withMediaType: .audio)
+                let duration = try await asset.load(.duration)
+                guard self.read == read else { return }
+                guard let track = tracks.first else {
+                    self.failed(read, nil, "kaya: the source has no audio track to read peaks from")
+                    return
+                }
+                let reader = try AVAssetReader(asset: asset)
+                let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
+                    AVFormatIDKey: kAudioFormatLinearPCM, AVLinearPCMBitDepthKey: 32,
+                    AVLinearPCMIsFloatKey: true, AVLinearPCMIsNonInterleaved: false,
+                    AVLinearPCMIsBigEndianKey: false,
+                ])
+                reader.add(output)
+                guard reader.startReading() else {
+                    self.failed(read, reader.error, "kaya: the platform would not start reading the audio")
+                    return
+                }
+                self.pcm = reader
+                let totalMs = UInt64(max(0, duration.isNumeric ? (duration.seconds * 1000).rounded() : 0))
+                let id = self.id
+                let pump = KayaPCMPump(reader: reader, output: output)
+                DispatchQueue.global(qos: .userInitiated).async {
+                    kayaPumpPCM(id, read, pump, totalMs)
+                }
+            } catch {
+                guard self.read == read else { return }
+                self.failed(read, error, "kaya: the platform would not open the audio")
+            }
+        }
+    }
+
+    /// One PCM buffer's report, on the main thread: false once the read is
+    /// no longer this reader's or the core stopped wanting it.
+    func pcmArrived(_ read: UInt64, channels: UInt32, rate: UInt32, samples: [Float], totalMs: UInt64) -> Bool {
+        guard self.read == read else { return false }
+        let live = samples.withUnsafeBufferPointer {
+            KayaHost.api.reader_pcm(id, read, channels, rate, $0.baseAddress, UInt($0.count), totalMs)
+        }
+        if live == 0 {
+            stop(read)
+            return false
+        }
+        answered(read)
+        return true
+    }
+
+    func pcmEnded(_ read: UInt64, _ reader: AVAssetReader) {
+        guard self.read == read else { return }
+        if reader.status == .failed {
+            failed(read, reader.error, "kaya: the platform failed reading the audio")
+        } else {
+            KayaHost.api.reader_finished(id, read)
+            stop(read)
+        }
+    }
+
+    /// Stop the read's platform work: the generator's batch and the PCM
+    /// reader. A read given up on (cancelled, past the bound, its reader
+    /// closed) also TEARS DOWN the asset's loading, since AVFoundation opens
+    /// nothing more on a host while one load hangs there (docs/traps.md, the
+    /// media timeout's teardown); a cancelled asset answers no later read, so
+    /// the next one opens a fresh asset.
+    func stop(_ read: UInt64, tearDown: Bool = false) {
+        guard self.read == read else { return }
+        self.read = 0
+        generator?.cancelAllCGImageGeneration()
+        generator = nil
+        pcm?.cancelReading()
+        pcm = nil
+        if tearDown {
+            loaded?.cancelLoading()
+            loaded = nil
+        }
+    }
+
+    func close() {
+        stop(read, tearDown: true)
+        scoped?.stopAccessingSecurityScopedResource()
+        scoped = nil
+    }
+}
+
+nonisolated(unsafe) var kayaReaders: [UInt64: KayaReader] = [:]
+
+/// The PCM reader handed to its one background loop; the main thread only
+/// cancels it, which AVAssetReader allows from any thread.
+final class KayaPCMPump: @unchecked Sendable {
+    let reader: AVAssetReader
+    let output: AVAssetReaderTrackOutput
+
+    init(reader: AVAssetReader, output: AVAssetReaderTrackOutput) {
+        self.reader = reader
+        self.output = output
+    }
+}
+
+/// The reader's PCM loop, off the main thread; each buffer goes to the core
+/// on the main thread and the loop waits for it, so a slow consumer slows
+/// the decode instead of queueing the whole track.
+func kayaPumpPCM(_ id: UInt64, _ read: UInt64, _ pump: KayaPCMPump, _ totalMs: UInt64) {
+    while let buffer = pump.output.copyNextSampleBuffer() {
+        guard let format = CMSampleBufferGetFormatDescription(buffer),
+            let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format)?.pointee,
+            let block = CMSampleBufferGetDataBuffer(buffer)
+        else { continue }
+        let length = CMBlockBufferGetDataLength(block)
+        guard length >= MemoryLayout<Float>.size else { continue }
+        var samples = [Float](repeating: 0, count: length / MemoryLayout<Float>.size)
+        let copied = samples.withUnsafeMutableBytes {
+            CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: $0.count, destination: $0.baseAddress!)
+        }
+        guard copied == kCMBlockBufferNoErr else { continue }
+        let channels = asbd.mChannelsPerFrame
+        let rate = UInt32(asbd.mSampleRate.rounded())
+        let wanted = DispatchQueue.main.sync {
+            kayaReaders[id]?.pcmArrived(read, channels: channels, rate: rate, samples: samples, totalMs: totalMs) ?? false
+        }
+        if !wanted { return }
+    }
+    DispatchQueue.main.sync { kayaReaders[id]?.pcmEnded(read, pump.reader) }
+}
+
+/// A CGImage as the canvas's pixels: premultiplied RGBA8 in sRGB, through
+/// one CGContext draw (the same format the canvas blit declares).
+func kayaPremultipliedRGBA(_ image: CGImage) -> (UInt32, UInt32, [UInt8])? {
+    let (w, h) = (image.width, image.height)
+    guard w > 0, h > 0, let space = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
+    var bytes = [UInt8](repeating: 0, count: w * h * 4)
+    let drawn: Bool = bytes.withUnsafeMutableBytes { raw in
+        guard let ctx = CGContext(
+            data: raw.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4, space: space,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)
+        else { return false }
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        return true
+    }
+    return drawn ? (UInt32(w), UInt32(h), bytes) : nil
 }
 
 // MARK: The session (docs/media-plan.md §5)

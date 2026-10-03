@@ -1564,7 +1564,7 @@ rows = re.findall(r"pub(?:\(crate\))? const ((?:APPLY|KIND|PROP|COMMAND|VALUE|"
 canvas_rows = re.findall(
     r"pub(?:\(crate\))? const ((?:DRAW|PAINT|FILL|TEXT_ALIGN|TEXT_BASELINE)"
     r"_[A-Z_0-9]+): i64 = (\d+);", wire)
-if len(canvas_rows) < 21:
+if len(canvas_rows) < 22:
     fail(f"only {len(canvas_rows)} canvas constants found in wire.rs — "
          f"the sweep reads nothing and would agree with everything")
 rows += canvas_rows
@@ -3995,6 +3995,67 @@ for path, pattern, repl, label in (
     if not found:
         fail(f"check-verbs SELF-TEST: the bound's arms passed with {label}")
 
+# --- THE READER'S ARM (docs/media-plan.md §8 ruling 4) ---------------------
+# What tools/scenes/media_reader.steps cannot see: h264_frames.mp4 has ONE
+# keyframe, so the nearest keyframe and the one at or before answer every
+# keyframe time alike, and AVFoundation's default is the nearest (measured,
+# docs/probes/media-extraction-2026-10-01.md); the bound runs from the latest
+# answer and no scene's read is slow; and a stop that leaves the generator
+# or the PCM reader running is invisible once the core drops the answers.
+READER_ARMS = (
+    ("private func answered(",
+     ("KAYA_MEDIA_TIMEOUT_MS", "reader_overdue(", "self.stop(read, tearDown: true)")),
+    ("    func frames(_ read: UInt64", ("requestedTimeToleranceAfter = .zero",
+                                       "exact ? .zero : .positiveInfinity",
+                                       "DispatchQueue.main.async", "self.answered(read)")),
+    ("    func pcmArrived(", ("answered(read)", "stop(read)")),
+    ("    func stop(_ read: UInt64, tearDown: Bool",
+     ("cancelAllCGImageGeneration()", "cancelReading()", "if tearDown", "cancelLoading()")),
+    ("    func close()", ("tearDown: true",)),
+    ("func kayaPumpPCM(", ("DispatchQueue.main.sync",)),
+)
+
+
+def reader_arms(text=None):
+    code = re.sub(r"//[^\n]*", "", text if text is not None else real(SWIFT))
+    bad = []
+    for head, needs in READER_ARMS:
+        body = brace_body(code, head)
+        if body is None:
+            bad.append(f"SwiftUI ({SWIFT}): no `{head.strip()}` to read — the reader census "
+                       f"reads too little to agree with anything")
+            continue
+        for need in needs:
+            if need not in body:
+                bad.append(f"SwiftUI ({SWIFT}): `{head.strip()}` lacks `{need}` — the "
+                           f"reader's keyframe rule, its bound, its stop or its one "
+                           f"reporting thread is gone (docs/media-plan.md §8 ruling 4)")
+    return bad
+
+
+reader_out = reader_arms()
+if reader_out:
+    print("check-verbs: the reader's arm broke a rule no scene can see:", file=sys.stderr)
+    print("\n".join(reader_out), file=sys.stderr)
+    timeout_status = 1
+print(f"check-verbs: the reader's arm read ({len(READER_ARMS)} bodies)")
+for pattern, label in (
+    (r"(\n +)generator\.requestedTimeToleranceAfter = \.zero",
+     "the keyframe's tolerance-after cut"),
+    (r"(\n +)if live == 0 \{ self\.stop\(read\) \} else \{ self\.answered\(read\) \}",
+     "the frame's bound restart cut"),
+    (r"(\n +)generator\?\.cancelAllCGImageGeneration\(\)",
+     "the stop leaving the generator running"),
+    (r"(\n +)if KayaHost\.api\.reader_overdue\(self\.id, read\) == 1 "
+     r"\{ self\.stop\(read, tearDown: true\) \}",
+     "the overdue teardown cut"),
+):
+    cut = g.doctor(f"the reader: {label}", real(SWIFT), pattern, lambda m: m.group(1))
+    found = [f for f in reader_arms(cut) if f not in reader_out]
+    print(f"check-verbs: the reader negative ({label}): {len(found)} finding(s)")
+    if not found:
+        fail(f"check-verbs SELF-TEST: the reader's arm passed with {label}")
+
 # --- THE WINUI FRAME UNDER RIGHT TO LEFT (docs/traps.md) ------------------
 # Every window is mirrored at birth, a mirrored caption's drag regions are
 # kaya's own, and expect_direction reads the frame. tasksrtl and formatar
@@ -4087,6 +4148,7 @@ g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"+ the range's arms in both interpreters "
           f"+ the media arms (a bare layer, one report door, playbackState first) "
           f"+ the bound's wake and teardown on 4 arms "
+          f"+ the reader's keyframe rule, bound, stop and reporting thread "
           f"+ the WinUI frame mirrored under right to left "
           f"+ the Compose media arm (PlayerSurface, one door, raw facts, decodability) "
           f"+ the GTK media arm (GtkPicture over the sink, one door, raw facts, decodability) "

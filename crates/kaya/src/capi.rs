@@ -133,6 +133,19 @@ pub const KAYA_OCCURRENCE_SESSION_ACTION: u16 = 42;
 pub const KAYA_OCCURRENCE_PLAYER_TRACKS: u16 = 43;
 pub const KAYA_OCCURRENCE_CAPTION_CUE: u16 = 44;
 pub const KAYA_OCCURRENCE_VIDEO_VISIBILITY: u16 = 45;
+/// The reader's answers (docs/media-plan.md §8 ruling 4): READER_FRAME { u64
+/// reader; u64 read; u64 image; u32 index; u32 width; u32 height; u32
+/// reserved; u64 requested_ms; u64 actual_ms }; READER_PROGRESS { u64 reader;
+/// u64 read; u64 done_ms; u64 total_ms }; READER_PEAKS { u64 reader; u64 read;
+/// u32 sample_rate; u32 samples_per_pair; u32 channels; u32 length }, the
+/// pairs read with kaya_reader_peaks; READER_DONE { u64 reader; u64 read; u32
+/// outcome; u32 failure; Str detail }; IMAGE_LOADED { u64 image; u32 width;
+/// u32 height; u32 failure; u32 reserved; Str detail }.
+pub const KAYA_OCCURRENCE_READER_FRAME: u16 = 46;
+pub const KAYA_OCCURRENCE_READER_PROGRESS: u16 = 47;
+pub const KAYA_OCCURRENCE_READER_PEAKS: u16 = 48;
+pub const KAYA_OCCURRENCE_READER_DONE: u16 = 49;
+pub const KAYA_OCCURRENCE_IMAGE_LOADED: u16 = 50;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -159,6 +172,11 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_PLAYER_TRACKS == ring::REC_PLAYER_TRACKS
         && KAYA_OCCURRENCE_CAPTION_CUE == ring::REC_CAPTION_CUE
         && KAYA_OCCURRENCE_VIDEO_VISIBILITY == ring::REC_VIDEO_VISIBILITY
+        && KAYA_OCCURRENCE_READER_FRAME == ring::REC_READER_FRAME
+        && KAYA_OCCURRENCE_READER_PROGRESS == ring::REC_READER_PROGRESS
+        && KAYA_OCCURRENCE_READER_PEAKS == ring::REC_READER_PEAKS
+        && KAYA_OCCURRENCE_READER_DONE == ring::REC_READER_DONE
+        && KAYA_OCCURRENCE_IMAGE_LOADED == ring::REC_IMAGE_LOADED
         && KAYA_OCCURRENCE_SECTION_SELECTED == ring::REC_SECTION_SELECTED
         && KAYA_OCCURRENCE_MENU_ACTIVATED == ring::REC_MENU_ACTIVATED
         && KAYA_OCCURRENCE_MENU_TOGGLED == ring::REC_MENU_TOGGLED
@@ -267,6 +285,20 @@ pub const KAYA_TX_PLAYER_COMMAND: u16 = 65;
 pub const KAYA_TX_RELEASE_PLAYER: u16 = 66;
 pub const KAYA_TX_SELECT_TRACK: u16 = 67;
 pub const KAYA_TX_SET_SESSION: u16 = 68;
+/// The reader and the core-held images (docs/media-plan.md §8 ruling 4):
+/// OPEN_READER { u64 reader; Value source }; READ_FRAMES { u64 reader; u64
+/// read; u64 first_image; u32 accuracy; u32 max_width; u32 max_height; u32
+/// reserved; Values times (I64 ms) }; READ_PEAKS { u64 reader; u64 read; u32
+/// samples_per_pair; u32 reserved }; CANCEL_READ { u64 reader; u64 read };
+/// CLOSE_READER { u64 reader }; LOAD_IMAGE { u64 image; Value source };
+/// RELEASE_IMAGE { u64 image }.
+pub const KAYA_TX_OPEN_READER: u16 = 69;
+pub const KAYA_TX_READ_FRAMES: u16 = 70;
+pub const KAYA_TX_READ_PEAKS: u16 = 71;
+pub const KAYA_TX_CANCEL_READ: u16 = 72;
+pub const KAYA_TX_CLOSE_READER: u16 = 73;
+pub const KAYA_TX_LOAD_IMAGE: u16 = 74;
+pub const KAYA_TX_RELEASE_IMAGE: u16 = 75;
 pub const KAYA_TX_ADD_SECTION: u16 = 25;
 pub const KAYA_TX_SELECT_SECTION: u16 = 26;
 pub const KAYA_TX_SET_SECTION_PROP: u16 = 27;
@@ -578,6 +610,13 @@ const _: () = assert!(
         && KAYA_TX_RELEASE_PLAYER == wire::TX_RELEASE_PLAYER
         && KAYA_TX_SELECT_TRACK == wire::TX_SELECT_TRACK
         && KAYA_TX_SET_SESSION == wire::TX_SET_SESSION
+        && KAYA_TX_OPEN_READER == wire::TX_OPEN_READER
+        && KAYA_TX_READ_FRAMES == wire::TX_READ_FRAMES
+        && KAYA_TX_READ_PEAKS == wire::TX_READ_PEAKS
+        && KAYA_TX_CANCEL_READ == wire::TX_CANCEL_READ
+        && KAYA_TX_CLOSE_READER == wire::TX_CLOSE_READER
+        && KAYA_TX_LOAD_IMAGE == wire::TX_LOAD_IMAGE
+        && KAYA_TX_RELEASE_IMAGE == wire::TX_RELEASE_IMAGE
         && KAYA_TX_ADD_SECTION == wire::TX_ADD_SECTION
         && KAYA_TX_SELECT_SECTION == wire::TX_SELECT_SECTION
         && KAYA_TX_SET_SECTION_PROP == wire::TX_SET_SECTION_PROP
@@ -656,6 +695,15 @@ pub const KAYA_APPLY_SET_SESSION: u16 = 56;
 /// the kaya-drawn cues' boundaries as I64 ms values.
 pub const KAYA_APPLY_SELECT_TRACK: u16 = 57;
 pub const KAYA_APPLY_CAPTION_TIMES: u16 = 58;
+/// OPEN_READER { u64 reader; Str url }; READ_FRAMES { u64 reader; u64 read;
+/// u32 accuracy; u32 max_width; u32 max_height; u32 reserved; Values times };
+/// READ_PEAKS, CANCEL_READ { u64 reader; u64 read }; CLOSE_READER { u64
+/// reader } (docs/media-plan.md §8 ruling 4).
+pub const KAYA_APPLY_OPEN_READER: u16 = 59;
+pub const KAYA_APPLY_READ_FRAMES: u16 = 60;
+pub const KAYA_APPLY_READ_PEAKS: u16 = 61;
+pub const KAYA_APPLY_CANCEL_READ: u16 = 62;
+pub const KAYA_APPLY_CLOSE_READER: u16 = 63;
 pub const KAYA_APPLY_ADD_SECTION: u16 = 15;
 pub const KAYA_APPLY_SELECT_SECTION: u16 = 16;
 pub const KAYA_APPLY_SET_SECTION_PROP: u16 = 17;
@@ -786,6 +834,11 @@ const _: () = assert!(
         && KAYA_APPLY_SET_SESSION == wire::APPLY_SET_SESSION
         && KAYA_APPLY_SELECT_TRACK == wire::APPLY_SELECT_TRACK
         && KAYA_APPLY_CAPTION_TIMES == wire::APPLY_CAPTION_TIMES
+        && KAYA_APPLY_OPEN_READER == wire::APPLY_OPEN_READER
+        && KAYA_APPLY_READ_FRAMES == wire::APPLY_READ_FRAMES
+        && KAYA_APPLY_READ_PEAKS == wire::APPLY_READ_PEAKS
+        && KAYA_APPLY_CANCEL_READ == wire::APPLY_CANCEL_READ
+        && KAYA_APPLY_CLOSE_READER == wire::APPLY_CLOSE_READER
         && KAYA_APPLY_ADD_SECTION == wire::APPLY_ADD_SECTION
         && KAYA_APPLY_SELECT_SECTION == wire::APPLY_SELECT_SECTION
         && KAYA_APPLY_SET_SECTION_PROP == wire::APPLY_SET_SECTION_PROP
@@ -1157,7 +1210,7 @@ const _: () = assert!(
 // Completeness for the occurrence exports (docs/traps.md): a new spec
 // occurrence trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 45,
+    crate::spec::SPEC.occurrence.len() == 50,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -1286,6 +1339,7 @@ pub const KAYA_DRAW_STROKE: i64 = 4;
 pub const KAYA_DRAW_FILL: i64 = 5;
 pub const KAYA_DRAW_FONT: i64 = 6;
 pub const KAYA_DRAW_TEXT: i64 = 7;
+pub const KAYA_DRAW_IMAGE: i64 = 8;
 pub const KAYA_PAINT_SERIES: i64 = 1;
 pub const KAYA_PAINT_SERIES_FILL: i64 = 2;
 pub const KAYA_PAINT_GRID: i64 = 3;
@@ -1308,6 +1362,7 @@ const _: () = assert!(
         && KAYA_DRAW_FILL == wire::DRAW_FILL
         && KAYA_DRAW_FONT == wire::DRAW_FONT
         && KAYA_DRAW_TEXT == wire::DRAW_TEXT
+        && KAYA_DRAW_IMAGE == wire::DRAW_IMAGE
         && KAYA_PAINT_SERIES == wire::PAINT_SERIES
         && KAYA_PAINT_SERIES_FILL == wire::PAINT_SERIES_FILL
         && KAYA_PAINT_GRID == wire::PAINT_GRID
@@ -1322,6 +1377,10 @@ const _: () = assert!(
         && KAYA_TEXT_BASELINE_MIDDLE == wire::TEXT_BASELINE_MIDDLE
         && KAYA_TEXT_BASELINE_TOP == wire::TEXT_BASELINE_TOP
         && KAYA_TEXT_BASELINE_BOTTOM == wire::TEXT_BASELINE_BOTTOM
+);
+const _: () = assert!(
+    spec_enum_variants("draw_op") == 8,
+    "the spec draw_op enum grew: export the new KAYA_DRAW_* above, extend the pin, and bump this count"
 );
 
 /// The role enum's values (spec enum "role"): semantic emphasis, a
@@ -1557,6 +1616,12 @@ pub const KAYA_PLAYBACK_STATE_PAUSED: u32 = 2;
 pub const KAYA_FIT_CONTAIN: u32 = 0;
 pub const KAYA_FIT_COVER: u32 = 1;
 pub const KAYA_FIT_FILL: u32 = 2;
+/// The reader's two vocabularies (docs/media-plan.md §8 ruling 4).
+pub const KAYA_FRAME_ACCURACY_KEYFRAME: u32 = 0;
+pub const KAYA_FRAME_ACCURACY_EXACT: u32 = 1;
+pub const KAYA_READ_OUTCOME_COMPLETED: u32 = 0;
+pub const KAYA_READ_OUTCOME_CANCELLED: u32 = 1;
+pub const KAYA_READ_OUTCOME_FAILED: u32 = 2;
 /// How often a playing player's position ticks, and how long an open or an
 /// app's seek may go unanswered before the core fails the player `timeout`
 /// (crate::media).
@@ -1618,10 +1683,23 @@ const _: () = assert!(
         && vocab_is(wire::FITS, "contain", KAYA_FIT_CONTAIN)
         && vocab_is(wire::FITS, "cover", KAYA_FIT_COVER)
         && vocab_is(wire::FITS, "fill", KAYA_FIT_FILL)
+        && vocab_is(wire::FRAME_ACCURACIES, "keyframe", KAYA_FRAME_ACCURACY_KEYFRAME)
+        && vocab_is(wire::FRAME_ACCURACIES, "exact", KAYA_FRAME_ACCURACY_EXACT)
+        && vocab_is(wire::READ_OUTCOMES, "completed", KAYA_READ_OUTCOME_COMPLETED)
+        && vocab_is(wire::READ_OUTCOMES, "cancelled", KAYA_READ_OUTCOME_CANCELLED)
+        && vocab_is(wire::READ_OUTCOMES, "failed", KAYA_READ_OUTCOME_FAILED)
 );
 const _: () = {
     assert!(spec_enum_variants("pprop") == 7, "the spec pprop enum grew: export KAYA_PPROP_*");
     assert!(spec_enum_variants("track_kind") == 2, "the spec track_kind enum grew: export KAYA_TRACK_KIND_*");
+    assert!(
+        spec_enum_variants("frame_accuracy") == 2,
+        "the spec frame_accuracy enum grew: export KAYA_FRAME_ACCURACY_*"
+    );
+    assert!(
+        spec_enum_variants("read_outcome") == 3,
+        "the spec read_outcome enum grew: export KAYA_READ_OUTCOME_*"
+    );
     assert!(
         spec_enum_variants("player_state") == 7,
         "the spec player_state enum grew: export KAYA_PLAYER_STATE_*"
@@ -4624,6 +4702,155 @@ pub extern "C" fn kaya_video_visible(widget: u64, shown: f64) {
     send_occurrences(published);
 }
 
+/// One reader report through the core (docs/media-plan.md §8 ruling 4):
+/// what the app hears is published here, and the answer is the core's.
+fn reader_report(reader: u64, read: u64, report: crate::reader::Report<'_>) -> u32 {
+    let mut scene_slot = PRESENTATION_SCENE.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(scene) = scene_slot.as_mut() else { return 0 };
+    let (published, answer) =
+        scene.reader_report(crate::protocol::ReaderId(reader), crate::protocol::ReadId(read), report);
+    drop(scene_slot);
+    send_occurrences(published);
+    u32::from(answer)
+}
+
+/// Presentation side: time `index` of a read_frames answered with the
+/// picture shown at `actual_ms`, `width` x `height` premultiplied RGBA8 in
+/// `pixels`, which the core copies. Answers 1 while the read is still
+/// wanted, 0 once it was cancelled, closed, failed or completed — stop then.
+///
+/// # Safety
+/// `pixels` must describe `len` readable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_reader_frame(
+    reader: u64,
+    read: u64,
+    index: u32,
+    actual_ms: u64,
+    width: u32,
+    height: u32,
+    pixels: *const u8,
+    len: usize,
+) -> u32 {
+    let pixels = if pixels.is_null() || len == 0 { &[][..] } else { unsafe { std::slice::from_raw_parts(pixels, len) } };
+    reader_report(reader, read, crate::reader::Report::Frame { index, actual_ms, width, height, pixels })
+}
+
+/// Presentation side: `count` interleaved float samples of a read_peaks'
+/// audio at its own `channels` and `sample_rate`; `total_ms` the track's
+/// duration, 0 if unknown. Answers as kaya_reader_frame does.
+///
+/// # Safety
+/// `samples` must describe `count` readable floats.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_reader_pcm(
+    reader: u64,
+    read: u64,
+    channels: u32,
+    sample_rate: u32,
+    samples: *const f32,
+    count: usize,
+    total_ms: u64,
+) -> u32 {
+    let samples =
+        if samples.is_null() || count == 0 { &[][..] } else { unsafe { std::slice::from_raw_parts(samples, count) } };
+    reader_report(reader, read, crate::reader::Report::Pcm { channels, sample_rate, samples, total_ms })
+}
+
+/// Presentation side: the platform has nothing more for this read.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_reader_finished(reader: u64, read: u64) {
+    reader_report(reader, read, crate::reader::Report::Finished);
+}
+
+/// Presentation side: the platform's error for a read, as its domain and
+/// codes; the core maps them with the player's failure table.
+///
+/// # Safety
+/// `domain` and `detail` must each describe readable UTF-8 bytes of their
+/// lengths, or be NULL with length 0.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_reader_failed(
+    reader: u64,
+    read: u64,
+    domain: *const u8,
+    domain_len: usize,
+    code: i64,
+    underlying: i64,
+    detail: *const u8,
+    detail_len: usize,
+) {
+    let domain = unsafe { lossy(domain, domain_len) };
+    let detail = unsafe { lossy(detail, detail_len) };
+    reader_report(reader, read, crate::reader::Report::Failed { domain, code, underlying, detail });
+}
+
+/// Presentation side: KAYA_MEDIA_TIMEOUT_MS passed since the backend handed
+/// a read over or last answered it. Answers 1 when the core's own clock
+/// failed it `timeout`, so the backend stops it, else 0.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_reader_overdue(reader: u64, read: u64) -> u32 {
+    reader_report(reader, read, crate::reader::Report::Overdue)
+}
+
+/// Guest side: a read_peaks' pairs, `length * channels * 2` i16 pair-major
+/// (min then max), into `out`. Writes at most `cap` and answers the whole
+/// count, 0 when the reader has no such peaks; held until the reader's next
+/// read or its close.
+///
+/// # Safety
+/// `out` must be writable for `cap` i16, or NULL with `cap` 0.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_reader_peaks(reader: u64, read: u64, out: *mut i16, cap: usize) -> usize {
+    let scene_slot = PRESENTATION_SCENE.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(peaks) = scene_slot
+        .as_ref()
+        .and_then(|s| s.reader_peaks(crate::protocol::ReaderId(reader), crate::protocol::ReadId(read)))
+    else {
+        return 0;
+    };
+    let n = peaks.data.len().min(cap);
+    if n > 0 && !out.is_null() {
+        unsafe { std::ptr::copy_nonoverlapping(peaks.data.as_ptr(), out, n) };
+    }
+    peaks.data.len()
+}
+
+/// Guest side: a core-held image's premultiplied RGBA8 bytes into `out`
+/// and its size through `width` and `height`. Writes at most `cap` and
+/// answers the whole length, 0 for an image holding no picture.
+///
+/// # Safety
+/// `out` must be writable for `cap` bytes or NULL with `cap` 0; `width` and
+/// `height` writable or NULL.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_image_pixels(
+    image: u64,
+    out: *mut u8,
+    cap: usize,
+    width: *mut u32,
+    height: *mut u32,
+) -> usize {
+    let Some((w, h, bytes)) = image_pixels(crate::protocol::ImageId(image)) else { return 0 };
+    if !width.is_null() {
+        unsafe { *width = w };
+    }
+    if !height.is_null() {
+        unsafe { *height = h };
+    }
+    let n = bytes.len().min(cap);
+    if n > 0 && !out.is_null() {
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, n) };
+    }
+    bytes.len()
+}
+
+/// A core-held image's size and bytes, where the scene is this process's.
+pub(crate) fn image_pixels(image: crate::protocol::ImageId) -> Option<(u32, u32, Vec<u8>)> {
+    let scene_slot = PRESENTATION_SCENE.lock().unwrap_or_else(|e| e.into_inner());
+    scene_slot.as_ref().and_then(|s| s.image_pixels(image))
+}
+
 /// Presentation side: the system's media controls sent a SESSION_ACTION
 /// (`at_ms` for seek_to). THE CORE ROUTES IT (docs/media-plan.md §5): 0
 /// the app handles it and has been told, 1 play, 2 pause and 3 seek to
@@ -5510,7 +5737,12 @@ fn send_occurrences(occurrences: Vec<crate::protocol::Occurrence>) {
             | crate::protocol::Occurrence::CaptionCue { .. }
             | crate::protocol::Occurrence::VideoVisibility { .. }
             | crate::protocol::Occurrence::InstanceVideoVisibility { .. }
-            | crate::protocol::Occurrence::SessionAction { .. }) => {
+            | crate::protocol::Occurrence::SessionAction { .. }
+            | crate::protocol::Occurrence::ReaderFrame { .. }
+            | crate::protocol::Occurrence::ReaderProgress { .. }
+            | crate::protocol::Occurrence::ReaderPeaks { .. }
+            | crate::protocol::Occurrence::ReaderDone { .. }
+            | crate::protocol::Occurrence::ImageLoaded { .. }) => {
                 crate::protocol::OccSink::Ring(state.ring.clone()).send(other)
             }
             other => unreachable!(
@@ -6138,6 +6370,13 @@ mod tests {
             ("release_player", KAYA_TX_RELEASE_PLAYER),
             ("select_track", KAYA_TX_SELECT_TRACK),
             ("set_session", KAYA_TX_SET_SESSION),
+            ("open_reader", KAYA_TX_OPEN_READER),
+            ("read_frames", KAYA_TX_READ_FRAMES),
+            ("read_peaks", KAYA_TX_READ_PEAKS),
+            ("cancel_read", KAYA_TX_CANCEL_READ),
+            ("close_reader", KAYA_TX_CLOSE_READER),
+            ("load_image", KAYA_TX_LOAD_IMAGE),
+            ("release_image", KAYA_TX_RELEASE_IMAGE),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -6196,6 +6435,11 @@ mod tests {
             ("set_session", KAYA_APPLY_SET_SESSION),
             ("select_track", KAYA_APPLY_SELECT_TRACK),
             ("caption_times", KAYA_APPLY_CAPTION_TIMES),
+            ("open_reader", KAYA_APPLY_OPEN_READER),
+            ("read_frames", KAYA_APPLY_READ_FRAMES),
+            ("read_peaks", KAYA_APPLY_READ_PEAKS),
+            ("cancel_read", KAYA_APPLY_CANCEL_READ),
+            ("close_reader", KAYA_APPLY_CLOSE_READER),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

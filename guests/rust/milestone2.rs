@@ -115,6 +115,11 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             | Occurrence::CaptionCue { .. }
             | Occurrence::VideoVisibility { .. }
             | Occurrence::InstanceVideoVisibility { .. }
+            | Occurrence::ReaderFrame { .. }
+            | Occurrence::ReaderProgress { .. }
+            | Occurrence::ReaderPeaks { .. }
+            | Occurrence::ReaderDone { .. }
+            | Occurrence::ImageLoaded { .. }
             | Occurrence::Pasted { .. }
             | Occurrence::InstancePasted { .. }
             | Occurrence::Dropped { .. }

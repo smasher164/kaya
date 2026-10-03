@@ -10612,6 +10612,87 @@ if submit_renames < submit_rows_total:
     status = 1
 
 
+# --- THE MEDIA READER AND THE CANVAS'S IMAGE OP, in all nine ----------
+# (docs/media-plan.md §8 rulings 3 and 4): the reader's seven records and
+# the image op reach every binding through the generator whether or not an
+# app can spell one, so each row reads the binding's hand-written surface
+# calling the generated writer. Red by design in the eight bindings the
+# depth slice did not build; Rust is the reference row. Same (template,
+# name) shape as the photo surfaces above.
+_READER_RECORDS = ("open_reader", "read_frames", "read_peaks", "cancel_read",
+                   "close_reader", "load_image", "release_image")
+
+
+def _pascal(snake):
+    return "".join(w.capitalize() for w in snake.split("_"))
+
+
+def _camel(snake):
+    p = _pascal(snake)
+    return p[0].lower() + p[1:]
+
+
+READER_SURFACES = [
+    ("rust", [("crates/kaya/src/app/media.rs", r"TxOp::{} \{{", _pascal(r))
+              for r in _READER_RECORDS]
+     + [("crates/kaya/src/app.rs", r"crate::wire::{}\)", "DRAW_IMAGE")]),
+    ("python", [("bindings/python/kaya/__init__.py", r"wire\.{}\(", "tx_" + r)
+                for r in _READER_RECORDS]
+     + [("bindings/python/kaya/__init__.py", r"wire\.{}\b", "DRAW_OP_IMAGE")]),
+    ("go", [("bindings/go/media.go", r"\b{}\(", "Tx" + _pascal(r)) for r in _READER_RECORDS]
+     + [("bindings/go/app.go", r"d\.op\({},", "DrawOpImage")]),
+    ("csharp", [("bindings/csharp/KayaApp.cs", r"KayaWire\.{}\(", "Tx" + _pascal(r))
+                for r in _READER_RECORDS]
+     + [("bindings/csharp/KayaApp.cs", r"KayaWire\.{}\b", "DrawOpImage")]),
+    ("java", [("bindings/java/dev/kaya/KayaApp.java", r"KayaWire\.{}\(", "tx" + _pascal(r))
+              for r in _READER_RECORDS]
+     + [("bindings/java/dev/kaya/KayaApp.java", r"KayaWire\.{}\b", "DRAW_OP_IMAGE")]),
+    ("swift", [("bindings/swift/KayaMedia.swift", r"tx\.{}\(", _camel(r))
+               for r in _READER_RECORDS]
+     + [("bindings/swift/KayaApp.swift", r"\b{}\b", "KAYA_DRAW_IMAGE")]),
+    ("haskell", [("bindings/haskell/KayaApp.hs", r"W\.{}\b", "tx" + _pascal(r))
+                 for r in _READER_RECORDS]
+     + [("bindings/haskell/KayaApp.hs", r"W\.{}\b", "drawOpImage")]),
+    ("ocaml", [("bindings/ocaml/kaya_app.ml", r"Kaya_wire\.{}\b", "tx_" + r)
+               for r in _READER_RECORDS]
+     + [("bindings/ocaml/kaya_app.ml", r"Kaya_wire\.{}\b", "draw_op_image")]),
+    ("js", [("bindings/js/kaya/index.ts", r"wire\.{}\(", "tx_" + r) for r in _READER_RECORDS]
+     + [("bindings/js/kaya/index.ts", r"wire\.{}\b", "DRAW_OP_IMAGE")]),
+]
+
+
+def check_reader_surfaces(fake_name=None, findings=None):
+    global status
+    for lang, patterns in READER_SURFACES:
+        for rel, template, name in patterns:
+            pat = template.format(fake_name or name)
+            if not grep_file(pat, rel):
+                msg = (f"check-sugar-surface: {lang} lacks the media reader's or the "
+                       f"image op's surface (wanted /{pat}/ in {rel})")
+                if findings is None:
+                    print(msg)
+                    status = 1
+                else:
+                    findings.append(msg)
+
+
+check_reader_surfaces()
+fake = []
+check_reader_surfaces("KayaFakeReaderSurface", findings=fake)
+want_fake = sum(len(p) for _, p in READER_SURFACES)
+print(f"check-sugar-surface: fake reader surfaces fired {len(fake)}/{want_fake}")
+if len(fake) != want_fake:
+    selftest_exit(f"check-sugar-surface: self-test failed ({len(fake)}/{want_fake} "
+                  f"reader-surface patterns fired for names that exist nowhere)")
+_rust_reader = []
+for _rel, _template, _name in READER_SURFACES[0][1]:
+    if not grep_file(_template.format(_name), _rel):
+        _rust_reader.append(_name)
+if _rust_reader:
+    selftest_exit(f"check-sugar-surface: the reader's reference row, Rust, reads nothing "
+                  f"for {', '.join(_rust_reader)} — its patterns no longer match the "
+                  f"binding they were calibrated against")
+
 check_scene_sugar()
 
 if status != 0:

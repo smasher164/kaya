@@ -9,6 +9,43 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
+## BUILD — the media reader and the canvas's image op (docs/media-plan.md §8 rulings 3 and 4), depth on the mac (2026-10-02); the GTK, WinUI and Compose arms, the iOS legs and the other eight bindings are the breadth slice
+KEY: media reader, ReaderId, ReadId, ImageId, open_reader, read_frames, read_peaks, cancel_read, close_reader, load_image, release_image, reader_frame, reader_progress, reader_peaks, reader_done, image_loaded, frame_accuracy, read_outcome, DRAW_IMAGE, KAYA_DRAW_IMAGE, kaya_reader_frame, kaya_reader_pcm, kaya_reader_finished, kaya_reader_failed, kaya_reader_overdue, kaya_reader_peaks, kaya_image_pixels, crates/kaya/src/reader.rs, media_reader, DEPTH STUB media_reader, READER_SURFACES, READER_ARMS
+
+The depth slice: the spec's seven transaction, five apply and five occurrence
+records and the `image` draw op (8), the core's reader (crates/kaya/src/reader.rs:
+the reads and their bound, the peaks reduction, the image table, PNG and JPEG
+decoded in the core), the canvas's `image` op rasterized by the core, the Rust
+binding (a message tier and an awaited tier whose dropped future cancels), the
+SwiftUI arm (AVAssetImageGenerator and AVAssetReader; iOS compiled) and the
+media_reader scene on the mac lane. What breadth owes:
+
+  - **DEPTH STUB: media_reader on gtk** — a decodebin3 + appsink pipeline per
+    read (`KEY_UNIT|SNAP_BEFORE` for keyframe, `ACCURATE` for exact, the actual
+    time through the segment) and an audio-only one for the PCM, the stream
+    selected before the decoder (docs/probes/media-extraction-2026-10-01.md:
+    7.7 s for a waveform otherwise). Its scene also needs the guest-side pulls
+    (kaya_reader_peaks, kaya_image_pixels), which read the interpreters' scene
+    today.
+  - **DEPTH STUB: media_reader on winui** — IMFSourceReader converting only the
+    frames kept, its times shifted by the edit list (crates/kaya/src/edit_list.rs),
+    measured against MediaComposition's 12.4 s before it is chosen; the pulls as
+    on gtk.
+  - **DEPTH STUB: media_reader on compose** — media3's FrameExtractor (whether
+    it keeps one decoder across frames is the first measurement) and
+    MediaExtractor + MediaCodec for the PCM, 17-19 s for ten minutes on the
+    emulator, so the progress occurrences are what an app shows.
+  - The iOS legs: the arm is the shared interpreter's and compiles; the scene
+    is in tools/lib/lanes/ios.py's UNWIRED_SCENES until it is measured.
+  - The other eight bindings: tools/check-sugar-surface.py's reader census is
+    red by design (64 findings, eight parts in each), and each must keep the
+    Rust binding's rule that answers of a read the app cancelled or closed are
+    not heard and the images they carried are released.
+  - FOUND FOR A RULING: a read asking for a track the source lacks (frames from
+    tone.mp3, peaks from a video with no audio) answers `decode_error`: no
+    reason in the closed vocabulary names it, and AVFoundation's -11869
+    (AVErrorNoSourceTrack) falls to the failure table's default.
+
 ## ~~RULING — which player a stamped video view shows (found 2026-09-30, the media depth slice)~~ CLOSED 2026-09-30, ruled by the maintainer: option (a), a row binds a player through a player-valued field; a player is shown by at most ONE video view at a time on every platform (the root refuses a second, naming both views), so the platforms that render one surface per player hold by the rule rather than by accident; the video view gains a visibility occurrence (entering and leaving view, and how much of it shows) so an app keeps players only for rows on screen and plays the most visible one; and running out of hardware decoders is a failure with its own reason, `resources`. BUILT at depth on the mac 2026-09-30 (the player prop and the Rust player field, the one-view rule, the visibility occurrence, `resources`; docs/media-plan.md §7b); tools/tpl-surfaces.py's LIVE_ONLY is gone and `video` is held in both zones like every kind
 KEY: video, template zone, Tpl video, LIVE_ONLY, tpl-surfaces, set_video_player
 

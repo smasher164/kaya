@@ -42,6 +42,12 @@ skrifa = "0.46.2"
 fluent-bundle = "0.16.0"
 unic-langid = "0.9.6"
 intl-memoizer = "0.5.3"
+# The canvas's draw_image decodes an asset or picked image IN THE CORE
+# (docs/media-plan.md §8 ruling 3): one decoder on five platforms keeps the
+# canonical hash one string. zune-jpeg without its SIMD features, so the
+# IDCT is the same scalar arithmetic on every ISA.
+png = "0.18.1"
+zune-jpeg = { version = "0.5.15", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 # THE EXAMPLES' DEPENDENCIES, never the library's. The task manager's

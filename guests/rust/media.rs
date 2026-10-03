@@ -7,7 +7,9 @@
 //! each showing its row's own player, and reads their visibility (§7b);
 //! `media_picked` plays a clip the user picked through the platform's own
 //! picker (§2); `media_timeout` loads a source the server sends a byte at a time,
-//! hears `failed timeout`, and plays the next item on the same player (§7c).
+//! hears `failed timeout`, and plays the next item on the same player (§7c);
+//! `media_reader` draws a filmstrip and a waveform on canvases from a reader
+//! with no player (§8 rulings 3 and 4).
 
 use kaya::{MediaFailure, MediaSource, PathKey, PlayerId, PlayerState, PlayerTracks, SessionAction, SessionActionKind};
 
@@ -111,6 +113,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         "media_tracks" => return tracks_app(ctx),
         "media_feed" => return feed_app(ctx),
         "media_picked" => return picked_app(ctx),
+        "media_reader" => return reader_app(ctx),
         _ => {}
     }
     let session = scene == "media_session";
@@ -520,6 +523,176 @@ fn feed_app(ctx: kaya::AppCtx) {
                         tx.write(last, format!("r{row} {word}"));
                     }
                 });
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+enum ReadMsg {
+    Exact(kaya::Frame),
+    Keyframe(kaya::Frame),
+    Done(&'static str, kaya::ReadOutcome),
+    Peaks(kaya::Peaks),
+    Start,
+    Cancel,
+}
+
+/// The answered times as the labels spell them: each time asked, then the
+/// time of the picture the platform returned, in ms.
+fn frame_line(what: &str, frames: &[kaya::Frame], outcome: &kaya::ReadOutcome) -> String {
+    let mut sorted = frames.to_vec();
+    sorted.sort_by_key(|f| f.index);
+    let times: Vec<String> = sorted.iter().map(|f| format!("{}@{}", f.requested_ms, f.actual_ms)).collect();
+    format!("{what} {} {}", times.join(" "), outcome_word(outcome))
+}
+
+fn outcome_word(outcome: &kaya::ReadOutcome) -> String {
+    match outcome {
+        kaya::ReadOutcome::Completed => "completed".to_owned(),
+        kaya::ReadOutcome::Cancelled => "cancelled".to_owned(),
+        kaya::ReadOutcome::Failed(why, _) => format!("failed {}", why.name()),
+    }
+}
+
+const STRIP: kaya::Viewbox = kaya::Viewbox(320.0, 45.0);
+const WAVE: kaya::Viewbox = kaya::Viewbox(200.0, 60.0);
+/// h264_frames.mp4's grey bands: frame 12 (0x505050) and frame 37
+/// (0xA0A0A0) at 25 fps, its one keyframe at 0 (tools/gen-media.py).
+const BANDS: [u64; 2] = [480, 1480];
+
+/// media_reader (docs/media-plan.md §8 rulings 3 and 4): a reader with no
+/// player draws a filmstrip of h264_frames.mp4's exact and keyframe
+/// pictures and a waveform of tone.wav's peaks beside two loaded images; a
+/// read the server never finishes is cancelled and another is closed under
+/// its reader; a file that is not media and a missing file fail.
+fn reader_app(ctx: kaya::AppCtx) {
+    use kaya::{FillRule, FrameAccuracy, Paint, ReadOutcome};
+    let base = media_url();
+    let msgs = kaya::Messages::<ReadMsg>::new();
+    let (labels, strip, wave, clip, logo, photo) = ctx.apply(|tx| {
+        tx.window(kaya::DEFAULT_WINDOW).title("media reader");
+        let labels: Vec<_> =
+            ["exact", "keyframe", "peaks", "cancel", "failures"].into_iter().map(|s| tx.signal(s)).collect();
+        let mut canvases = None;
+        let root = tx
+            .column(|tx| {
+                for label in &labels {
+                    tx.label(*label); // label#0..#4
+                }
+                let strip = tx.canvas(STRIP).a11y_id("strip").a11y_label("Filmstrip").id();
+                let wave = tx.canvas(WAVE).a11y_id("wave").a11y_label("Waveform").id();
+                let start = tx.button("start").id(); // button#0
+                msgs.on_click(start, ReadMsg::Start);
+                let cancel = tx.button("cancel").id(); // button#1
+                msgs.on_click(cancel, ReadMsg::Cancel);
+                canvases = Some((strip, wave));
+            })
+            .id();
+        tx.mount(root);
+        let (strip, wave) = canvases.expect("the column declared its canvases");
+
+        let clip = tx.reader(&MediaSource::asset("media/h264_frames.mp4"));
+        let exact = tx.read_frames(clip, &BANDS, (80, 45), FrameAccuracy::Exact);
+        msgs.on_frame(exact, ReadMsg::Exact);
+        msgs.on_read_done(exact, |o| ReadMsg::Done("exact", o));
+
+        let tone = tx.reader(&MediaSource::asset("media/tone.wav"));
+        let peaks = tx.read_peaks(tone, 4800);
+        msgs.on_peaks(peaks, |p| ReadMsg::Peaks(p.clone()));
+        msgs.on_read_done(peaks, |o| ReadMsg::Done("peaks", o));
+
+        for (what, source) in [("OFL.txt", "fonts/OFL.txt"), ("missing.mp4", "media/missing.mp4")] {
+            let reader = tx.reader(&MediaSource::asset(source));
+            let read = tx.read_frames(reader, &[0], (80, 45), FrameAccuracy::Exact);
+            msgs.on_read_done(read, move |o| ReadMsg::Done(what, o));
+        }
+
+        let logo = tx.load_image(&MediaSource::asset("images/a11y-logo.png"));
+        let photo = tx.load_image(&MediaSource::asset("images/photo.jpg"));
+        (labels, strip, wave, clip, logo, photo)
+    });
+
+    let mut exact = Vec::new();
+    let mut keyframe = Vec::new();
+    let mut failures: Vec<String> = Vec::new();
+    let mut cancels: Vec<String> = Vec::new();
+    let mut trickling = None;
+    while let Some(msg) = msgs.next(&ctx) {
+        match msg {
+            ReadMsg::Exact(f) => exact.push(f),
+            ReadMsg::Keyframe(f) => keyframe.push(f),
+            ReadMsg::Done("exact", outcome) => ctx.apply(|tx| {
+                tx.write(labels[0], frame_line("exact", &exact, &outcome));
+                let read = tx.read_frames(clip, &BANDS, (80, 45), FrameAccuracy::Keyframe);
+                msgs.on_frame(read, ReadMsg::Keyframe);
+                msgs.on_read_done(read, |o| ReadMsg::Done("keyframe", o));
+            }),
+            ReadMsg::Done("keyframe", outcome) => ctx.apply(|tx| {
+                tx.write(labels[1], frame_line("keyframe", &keyframe, &outcome));
+                exact.sort_by_key(|f: &kaya::Frame| f.index);
+                keyframe.sort_by_key(|f: &kaya::Frame| f.index);
+                let tiles: Vec<kaya::ImageId> = exact.iter().chain(&keyframe).map(|f| f.image).collect();
+                tx.draw(strip, |d| {
+                    for (i, image) in tiles.iter().enumerate() {
+                        d.image(*image, 80.0 * i as f64, 0.0, 80.0, 45.0);
+                    }
+                });
+            }),
+            ReadMsg::Peaks(p) => ctx.apply(|tx| {
+                let lows = (0..p.len()).map(|i| p.pair(i, 0).0).min().unwrap_or(0);
+                let highs = (0..p.len()).map(|i| p.pair(i, 0).1).max().unwrap_or(0);
+                tx.write(
+                    labels[2],
+                    format!(
+                        "peaks {} Hz, {} ch, {} pairs of {}, {lows}..{highs}",
+                        p.sample_rate,
+                        p.channels,
+                        p.len(),
+                        p.samples_per_pair
+                    ),
+                );
+                tx.draw(wave, |d| {
+                    let y = |v: i16| 30.0 - f64::from(v) * 25.0 / 8192.0;
+                    for i in 0..p.len() {
+                        let (lo, hi) = p.pair(i, 0);
+                        let x = 8.0 + 7.0 * i as f64;
+                        d.move_to(x, y(hi)).line_to(x + 5.0, y(hi)).line_to(x + 5.0, y(lo)).line_to(x, y(lo)).close();
+                        d.fill(Paint::Series, FillRule::Nonzero);
+                    }
+                    d.image(logo, 150.0, 4.0, 20.0, 20.0);
+                    d.image(photo, 150.0, 30.0, 40.0, 30.0);
+                });
+            }),
+            ReadMsg::Done("peaks", ReadOutcome::Completed) => {}
+            ReadMsg::Done("peaks", outcome) => {
+                ctx.apply(|tx| tx.write(labels[2], format!("peaks {}", outcome_word(&outcome))))
+            }
+            ReadMsg::Done(what @ ("OFL.txt" | "missing.mp4"), outcome) => {
+                failures.push(format!("{what} {}", outcome_word(&outcome)));
+                failures.sort();
+                ctx.apply(|tx| tx.write(labels[4], failures.join("; ")));
+            }
+            ReadMsg::Start => ctx.apply(|tx| {
+                let trickle = tx.reader(&MediaSource::url(format!("{base}/trickle/h264_frames.mp4")));
+                let read = tx.read_frames(trickle, &[0], (80, 45), FrameAccuracy::Exact);
+                msgs.on_read_done(read, |o| ReadMsg::Done("trickle", o));
+                let closing = tx.reader(&MediaSource::url(format!("{base}/trickle/h264_aac.mp4")));
+                let closing_read = tx.read_frames(closing, &[0], (80, 45), FrameAccuracy::Exact);
+                msgs.on_read_done(closing_read, |o| ReadMsg::Done("closed", o));
+                trickling = Some((trickle, read, closing));
+                tx.write(labels[3], "reading");
+            }),
+            ReadMsg::Cancel => ctx.apply(|tx| {
+                if let Some((trickle, read, closing)) = trickling.take() {
+                    tx.cancel_read(trickle, read);
+                    tx.close_reader(closing);
+                }
+            }),
+            ReadMsg::Done(what, outcome) => {
+                cancels.push(format!("{what} {}", outcome_word(&outcome)));
+                cancels.sort();
+                ctx.apply(|tx| tx.write(labels[3], cancels.join("; ")));
             }
         }
     }

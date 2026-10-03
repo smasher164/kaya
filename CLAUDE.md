@@ -606,7 +606,13 @@ in docs/deferred.md.
    AND THE RANGE SINCE 2026-09-29 (docs/range-plan.md §7): `range` in both
    zones with its props, thumb labels bound from a row field, `on_change` and
    `on_commit` where each binding spells the slider's, and `axis` on a slider
-   in all nine; fake-name negatives firing every row, counts printed),
+   in all nine; fake-name negatives firing every row, counts printed.
+   AND THE MEDIA READER AND THE CANVAS'S IMAGE OP SINCE 2026-10-02
+   (docs/media-plan.md §8 rulings 3 and 4): each binding's hand-written
+   surface calling the reader's seven generated record writers and naming
+   the `image` draw op, Rust the reference row; red by design in the eight
+   bindings the depth slice did not build (docs/deferred.md's reader BUILD
+   entry), a fake-name census firing every row, counts printed),
    `tools/check-universal-props.py` (the lowering-side sibling: every
    backend applies the universal a11y props to every kind — Compose
    per-arm, SwiftUI's one wrapper unbypassed, GTK/WinUI's apply arm
@@ -1123,7 +1129,13 @@ in docs/deferred.md.
    SIZE (`screen_threads(pixels)` over `SCREEN_THREADS_ABOVE`, the
    measured crossover on a kept context) — a screen raster hard-coded
    back to one thread is green on every lane and puts a phone's heavy
-   frame over budget. Six more watched negatives, counts printed),
+   frame over budget. Six more watched negatives, counts printed.
+   AND THE IMAGE OP SINCE 2026-10-02 (docs/media-plan.md §8 ruling 3): the
+   `image` op is in the vocabulary no backend may consult, since the core
+   rasterizes it like every other op, and the reader's frame conversion is
+   held to the premultiplied RGBA8 the core keeps — straight alpha or BGRA
+   read identically on the opaque greys a scene probes. Two more watched
+   negatives),
    `tools/check-appearance.py` (THE APPEARANCE OVERRIDE IS INERT UNLESS
    ASKED FOR, AND HONEST WHEN IT IS. `KAYA_APPEARANCE=light|dark` makes ONE
    PROCESS adopt an appearance through each platform's own supported
@@ -1401,7 +1413,13 @@ in docs/deferred.md.
    emulator's measured 14, the report kept as its diagnostic line; the
    video renderer never moves a decoder between surfaces, the black rows'
    cause; and a player with no picture composes no SurfaceView. Five
-   watched negatives, counts printed),
+   watched negatives, counts printed. AND THE READER'S ARM SINCE 2026-10-02
+   (docs/media-plan.md §8 ruling 4), what media_reader cannot see: the test
+   clip has one keyframe, so the nearest keyframe and the one at or before
+   answer alike, and AVFoundation's default is the nearest — the arm is held
+   to tolerance-after zero; the bound restarted at every answer; a stop that
+   cancels the generator and the PCM reader; and every report on the main
+   thread. Four watched negatives, counts printed),
    `tools/check-file-modes.py` (the file-mode NUMBERS agree with the
    spec's wherever they are written down. `kaya_open_picked` takes an
    integer, crates/kaya/src/spec.rs decides what it means, and five

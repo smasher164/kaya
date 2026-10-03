@@ -722,6 +722,7 @@ Five geometry ops and two text ops.
 | `fill` | `i64 paint, i64 rule` | fill it (nonzero or even-odd), then clear it |
 | `font` | `str asset, f64 size, i64 weight` | select the face for subsequent text ops; `""` means `kaya/default-font` |
 | `text` | `f64 x, f64 y, i64 paint, i64 align, i64 baseline, str s` | draw ONE LINE with its anchor at (x, y) |
+| `image` | `i64 image, f64 x, f64 y, f64 w, f64 h` | draw a core-held image into the rectangle (added 2026-10-02, docs/media-plan.md §8 ruling 3) |
 
 Path-then-paint is the shape a path rasterizer natively has. The
 anchoring vocabulary is SVG's (`align` = start/middle/end is
@@ -753,7 +754,7 @@ should be bought with an artifact.
 | blend modes | a per-primitive blend vocabulary is a large surface with no artifact asking for it |
 | gradients | interpolation colour space is a real decision. If gradients arrive they must be pre-sampled into many stops in ONE nominated space |
 | antialiasing control | the buffer is antialiased, always, by one rasterizer. A switch would be a second raster path to keep byte-identical — ~~and that is the objection~~ AMENDED 2026-08-26 (ruling 14): the objection does not survive the knob being PER CANVAS and DECLARED, since a declared knob rides the op stream and is therefore the same on every platform, and the buffer stays byte-identical per canvas. Still out of v1; now named as animation lever (ii) rather than refused (§15) |
-| images inside a drawing | the Image widget exists; a canvas that composites blobs is a second asset story |
+| ~~images inside a drawing~~ | ~~the Image widget exists; a canvas that composites blobs is a second asset story~~ RULED IN 2026-09-29 (docs/media-plan.md §8 ruling 3) and built 2026-10-02 as the `image` op over core-held images, never blobs |
 
 ### §3.4 Paint: a role vocabulary over a literal floor
 

@@ -24,7 +24,7 @@ public enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x39c348180962e0db
+let kayaSpecHash: UInt64 = 0x6d398768b7d3b5d6
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
 func kayaPackDate(_ year: Int, _ month: Int, _ day: Int) -> Int64 {
@@ -753,6 +753,68 @@ struct KayaTx {
         self.value(artist)
         self.value(album)
         self.value(artwork)
+        self.end(kayaAt)
+    }
+
+    /// Open a media READER (docs/media-plan.md §8 ruling 4): an object separate from any player that extracts frames and peaks, its id guest-chosen in its own space. `source` is the player's: an asset name or http(s) URL as Str, or a picked file's handle as I64. A local source that is not there fails every read not_found without reaching the platform. A second open of a live id is a scene error.
+    mutating func openReader(_ reader: UInt64, _ source: KayaValue) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_OPEN_READER))
+        self.u64(reader)
+        self.value(source)
+        self.end(kayaAt)
+    }
+
+    /// Ask for one picture per time (`times`, I64 milliseconds), each answered by reader_frame with the time of the picture the platform returned and a core-held image, then one reader_done. FRAME_ACCURACY keyframe is the keyframe AT OR BEFORE the time on every platform, exact the frame shown at it. `max_width`/`max_height` bound the picture, aspect kept, 0 for no bound on that axis. Frame i becomes image `first_image + i`, ids that must not be live. ONE READ IN FLIGHT PER READER: a second while one runs is a scene error, and nothing is cancelled implicitly.
+    mutating func readFrames(_ reader: UInt64, _ read: UInt64, _ firstImage: UInt64, _ accuracy: UInt32, _ maxWidth: UInt32, _ maxHeight: UInt32, _ times: [KayaValue]) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_READ_FRAMES))
+        self.u64(reader)
+        self.u64(read)
+        self.u64(firstImage)
+        self.u32(accuracy)
+        self.u32(maxWidth)
+        self.u32(maxHeight)
+        self.u32(0)
+        self.values(times)
+        self.end(kayaAt)
+    }
+
+    /// Decode the first audio track on the platform and reduce it IN THE CORE to a min/max pair per channel per `samples_per_pair` frames (audiowaveform's .dat shape), answered by reader_progress, reader_peaks and reader_done.
+    mutating func readPeaks(_ reader: UInt64, _ read: UInt64, _ samplesPerPair: UInt32) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_READ_PEAKS))
+        self.u64(reader)
+        self.u64(read)
+        self.u32(samplesPerPair)
+        self.u32(0)
+        self.end(kayaAt)
+    }
+
+    /// Stop a read in flight: reader_done(cancelled) follows at once and nothing of the read after it. A read already done is not an error, since an app races its own answers.
+    mutating func cancelRead(_ reader: UInt64, _ read: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_CANCEL_READ))
+        self.u64(reader)
+        self.u64(read)
+        self.end(kayaAt)
+    }
+
+    /// Forget a reader, cancelling its read in flight. The images it answered with stay the app's.
+    mutating func closeReader(_ reader: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_CLOSE_READER))
+        self.u64(reader)
+        self.end(kayaAt)
+    }
+
+    /// Decode an image IN THE CORE (PNG or JPEG) from an asset name (Str) or a picked file's handle (I64) into a core-held premultiplied RGBA8 image, answered by image_loaded. One decoder on every platform is what keeps a drawing that names it one canonical hash (docs/canvas-plan.md §7.1).
+    mutating func loadImage(_ image: UInt64, _ source: KayaValue) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_LOAD_IMAGE))
+        self.u64(image)
+        self.value(source)
+        self.end(kayaAt)
+    }
+
+    /// Forget a core-held image. A drawing declared before keeps showing it until it is declared again; a drawing declared after that names it is refused.
+    mutating func releaseImage(_ image: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_RELEASE_IMAGE))
+        self.u64(image)
         self.end(kayaAt)
     }
 
@@ -3158,6 +3220,11 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             || kind == UInt16(KAYA_OCCURRENCE_PLAYER_TRACKS)
             || kind == UInt16(KAYA_OCCURRENCE_CAPTION_CUE)
             || kind == UInt16(KAYA_OCCURRENCE_VIDEO_VISIBILITY)
+            || kind == UInt16(KAYA_OCCURRENCE_READER_FRAME)
+            || kind == UInt16(KAYA_OCCURRENCE_READER_PROGRESS)
+            || kind == UInt16(KAYA_OCCURRENCE_READER_PEAKS)
+            || kind == UInt16(KAYA_OCCURRENCE_READER_DONE)
+            || kind == UInt16(KAYA_OCCURRENCE_IMAGE_LOADED)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {
@@ -3313,6 +3380,157 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
                 tail.append(.i64(Int64(count)))
                 for _ in 0..<count { tail.append(value()) }
             }
+            return (kind, id, [], nil, [], nil, nil, tail)
+        }
+        if kind == UInt16(KAYA_OCCURRENCE_READER_FRAME) {
+            // A flat record: its fields in order, into the tail.
+            var at = 8
+            var tail: [KayaValue] = []
+            func value() -> KayaValue {
+                let vtype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)
+                let vlen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))
+                defer { at += 8 + ((vlen + 7) & ~7) }
+                switch vtype {
+                case UInt32(KAYA_VALUE_BOOL): return .bool(raw[at + 8] != 0)
+                case UInt32(KAYA_VALUE_I64):
+                    return .i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                case UInt32(KAYA_VALUE_F64):
+                    return .f64(Double(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                default:
+                    return .str(String(decoding: raw[(at + 8)..<(at + 8 + vlen)], as: UTF8.self))
+                }
+            }
+            at += 8
+            tail.append(.i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at, as: UInt64.self))))
+            at += 8
+            tail.append(.i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at, as: UInt64.self))))
+            at += 8
+            tail.append(.i64(Int64(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))))
+            at += 4
+            tail.append(.i64(Int64(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))))
+            at += 4
+            tail.append(.i64(Int64(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))))
+            at += 4
+            at += 4
+            tail.append(.i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at, as: UInt64.self))))
+            at += 8
+            tail.append(.i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at, as: UInt64.self))))
+            at += 8
+            return (kind, id, [], nil, [], nil, nil, tail)
+        }
+        if kind == UInt16(KAYA_OCCURRENCE_READER_PROGRESS) {
+            // A flat record: its fields in order, into the tail.
+            var at = 8
+            var tail: [KayaValue] = []
+            func value() -> KayaValue {
+                let vtype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)
+                let vlen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))
+                defer { at += 8 + ((vlen + 7) & ~7) }
+                switch vtype {
+                case UInt32(KAYA_VALUE_BOOL): return .bool(raw[at + 8] != 0)
+                case UInt32(KAYA_VALUE_I64):
+                    return .i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                case UInt32(KAYA_VALUE_F64):
+                    return .f64(Double(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                default:
+                    return .str(String(decoding: raw[(at + 8)..<(at + 8 + vlen)], as: UTF8.self))
+                }
+            }
+            at += 8
+            tail.append(.i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at, as: UInt64.self))))
+            at += 8
+            tail.append(.i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at, as: UInt64.self))))
+            at += 8
+            tail.append(.i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at, as: UInt64.self))))
+            at += 8
+            return (kind, id, [], nil, [], nil, nil, tail)
+        }
+        if kind == UInt16(KAYA_OCCURRENCE_READER_PEAKS) {
+            // A flat record: its fields in order, into the tail.
+            var at = 8
+            var tail: [KayaValue] = []
+            func value() -> KayaValue {
+                let vtype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)
+                let vlen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))
+                defer { at += 8 + ((vlen + 7) & ~7) }
+                switch vtype {
+                case UInt32(KAYA_VALUE_BOOL): return .bool(raw[at + 8] != 0)
+                case UInt32(KAYA_VALUE_I64):
+                    return .i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                case UInt32(KAYA_VALUE_F64):
+                    return .f64(Double(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                default:
+                    return .str(String(decoding: raw[(at + 8)..<(at + 8 + vlen)], as: UTF8.self))
+                }
+            }
+            at += 8
+            tail.append(.i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at, as: UInt64.self))))
+            at += 8
+            tail.append(.i64(Int64(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))))
+            at += 4
+            tail.append(.i64(Int64(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))))
+            at += 4
+            tail.append(.i64(Int64(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))))
+            at += 4
+            tail.append(.i64(Int64(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))))
+            at += 4
+            return (kind, id, [], nil, [], nil, nil, tail)
+        }
+        if kind == UInt16(KAYA_OCCURRENCE_READER_DONE) {
+            // A flat record: its fields in order, into the tail.
+            var at = 8
+            var tail: [KayaValue] = []
+            func value() -> KayaValue {
+                let vtype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)
+                let vlen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))
+                defer { at += 8 + ((vlen + 7) & ~7) }
+                switch vtype {
+                case UInt32(KAYA_VALUE_BOOL): return .bool(raw[at + 8] != 0)
+                case UInt32(KAYA_VALUE_I64):
+                    return .i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                case UInt32(KAYA_VALUE_F64):
+                    return .f64(Double(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                default:
+                    return .str(String(decoding: raw[(at + 8)..<(at + 8 + vlen)], as: UTF8.self))
+                }
+            }
+            at += 8
+            tail.append(.i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at, as: UInt64.self))))
+            at += 8
+            tail.append(.i64(Int64(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))))
+            at += 4
+            tail.append(.i64(Int64(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))))
+            at += 4
+            tail.append(value())
+            return (kind, id, [], nil, [], nil, nil, tail)
+        }
+        if kind == UInt16(KAYA_OCCURRENCE_IMAGE_LOADED) {
+            // A flat record: its fields in order, into the tail.
+            var at = 8
+            var tail: [KayaValue] = []
+            func value() -> KayaValue {
+                let vtype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)
+                let vlen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))
+                defer { at += 8 + ((vlen + 7) & ~7) }
+                switch vtype {
+                case UInt32(KAYA_VALUE_BOOL): return .bool(raw[at + 8] != 0)
+                case UInt32(KAYA_VALUE_I64):
+                    return .i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                case UInt32(KAYA_VALUE_F64):
+                    return .f64(Double(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                default:
+                    return .str(String(decoding: raw[(at + 8)..<(at + 8 + vlen)], as: UTF8.self))
+                }
+            }
+            at += 8
+            tail.append(.i64(Int64(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))))
+            at += 4
+            tail.append(.i64(Int64(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))))
+            at += 4
+            tail.append(.i64(Int64(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))))
+            at += 4
+            at += 4
+            tail.append(value())
             return (kind, id, [], nil, [], nil, nil, tail)
         }
         if kind == UInt16(KAYA_OCCURRENCE_FILE_DIALOG_RESULT) {

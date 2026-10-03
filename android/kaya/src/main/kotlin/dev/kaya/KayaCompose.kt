@@ -2117,7 +2117,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0x39c348180962e0dbuL
+    private const val SPEC_HASH: ULong = 0x6d398768b7d3b5d6uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -2184,6 +2184,12 @@ object KayaCompose {
     private const val APPLY_SET_SESSION = 56
     private const val APPLY_SELECT_TRACK = 57
     private const val APPLY_CAPTION_TIMES = 58
+    /** docs/media-plan.md §8 ruling 4: the reader, a depth slice on the mac. */
+    private const val APPLY_OPEN_READER = 59
+    private const val APPLY_READ_FRAMES = 60
+    private const val APPLY_READ_PEAKS = 61
+    private const val APPLY_CANCEL_READ = 62
+    private const val APPLY_CLOSE_READER = 63
     /** The rich-text pair (docs/rich-text-plan.md §4); the arm is a depth slice. */
     private const val APPLY_SET_RICH_TEXT = 43
     private const val APPLY_APPLY_EDIT = 44
@@ -2541,6 +2547,7 @@ object KayaCompose {
     private const val DRAW_FILL = 5L
     private const val DRAW_FONT = 6L
     private const val DRAW_TEXT = 7L
+    private const val DRAW_IMAGE = 8L
     private const val PAINT_SERIES = 1L
     private const val PAINT_SERIES_FILL = 2L
     private const val PAINT_GRID = 3L
@@ -2564,7 +2571,7 @@ object KayaCompose {
      */
     val CANVAS_VOCABULARY: List<Long> = listOf(
         APPLY_SET_DRAWING.toLong(),
-        DRAW_MOVE_TO, DRAW_LINE_TO, DRAW_CLOSE, DRAW_STROKE, DRAW_FILL, DRAW_FONT, DRAW_TEXT,
+        DRAW_MOVE_TO, DRAW_LINE_TO, DRAW_CLOSE, DRAW_STROKE, DRAW_FILL, DRAW_FONT, DRAW_TEXT, DRAW_IMAGE,
         PAINT_SERIES, PAINT_SERIES_FILL, PAINT_GRID, PAINT_AXIS, PAINT_GROUND,
         FILL_NONZERO, FILL_EVEN_ODD,
         TEXT_ALIGN_START, TEXT_ALIGN_MIDDLE, TEXT_ALIGN_END,
@@ -3808,6 +3815,8 @@ object KayaCompose {
                     val times = List(count) { readI64(b) }
                     kayaPlayers[pid]?.setCaptionTimes(times)
                 }
+                APPLY_OPEN_READER, APPLY_READ_FRAMES, APPLY_READ_PEAKS, APPLY_CANCEL_READ,
+                APPLY_CLOSE_READER -> depthStub("media_reader")
                 APPLY_SET_BADGE -> {
                     // { u32 count; u32 reserved } (docs/app-badge-plan.md §3).
                     val count = b.int

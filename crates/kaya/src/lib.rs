@@ -51,6 +51,8 @@ mod links;
 mod media;
 // kaya's caption renderer's parser and cue timing (docs/media-plan.md §3).
 mod captions;
+// The media reader and the canvas's core-held images (docs/media-plan.md §8).
+mod reader;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 mod edit_list;
 // docs/number-field-plan.md; the SwiftUI arm is its caller until the
@@ -133,6 +135,8 @@ pub use app::{
     AlertFutureRef, ClipboardFutureRef, DialogFuture, FileFutureRef, SaveFutureRef, TaskOutcome, TaskScope,
     // docs/media-plan.md: the player, the video view and the session.
     can_play, MediaSource, PlayerKind, PlayerReading, PlayerRef, SessionRef,
+    // docs/media-plan.md §8: the reader's answers.
+    Frame, ReadError,
 };
 
 /// The canvas surface (docs/canvas-plan.md §2.2).
@@ -150,6 +154,7 @@ pub use protocol::{
     ValueType, WidgetId, WidgetKind, WindowId,
     Fit, MediaFailure, PlaybackState, PlayerId, PlayerState, PlayerTracks, SessionAction, SessionActionKind,
     TrackKind,
+    FrameAccuracy, ImageId, Peaks, ReadId, ReadOutcome, ReaderId,
 };
 
 #[cfg(target_os = "windows")]

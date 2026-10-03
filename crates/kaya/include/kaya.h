@@ -199,6 +199,26 @@
 #define KAYA_OCCURRENCE_VIDEO_VISIBILITY 45
 
 /**
+ * The reader's answers (docs/media-plan.md §8 ruling 4): READER_FRAME { u64
+ * reader; u64 read; u64 image; u32 index; u32 width; u32 height; u32
+ * reserved; u64 requested_ms; u64 actual_ms }; READER_PROGRESS { u64 reader;
+ * u64 read; u64 done_ms; u64 total_ms }; READER_PEAKS { u64 reader; u64 read;
+ * u32 sample_rate; u32 samples_per_pair; u32 channels; u32 length }, the
+ * pairs read with kaya_reader_peaks; READER_DONE { u64 reader; u64 read; u32
+ * outcome; u32 failure; Str detail }; IMAGE_LOADED { u64 image; u32 width;
+ * u32 height; u32 failure; u32 reserved; Str detail }.
+ */
+#define KAYA_OCCURRENCE_READER_FRAME 46
+
+#define KAYA_OCCURRENCE_READER_PROGRESS 47
+
+#define KAYA_OCCURRENCE_READER_PEAKS 48
+
+#define KAYA_OCCURRENCE_READER_DONE 49
+
+#define KAYA_OCCURRENCE_IMAGE_LOADED 50
+
+/**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
  *   CREATE_SIGNAL:     u64 signal_id, value
@@ -331,6 +351,29 @@
 #define KAYA_TX_SELECT_TRACK 67
 
 #define KAYA_TX_SET_SESSION 68
+
+/**
+ * The reader and the core-held images (docs/media-plan.md §8 ruling 4):
+ * OPEN_READER { u64 reader; Value source }; READ_FRAMES { u64 reader; u64
+ * read; u64 first_image; u32 accuracy; u32 max_width; u32 max_height; u32
+ * reserved; Values times (I64 ms) }; READ_PEAKS { u64 reader; u64 read; u32
+ * samples_per_pair; u32 reserved }; CANCEL_READ { u64 reader; u64 read };
+ * CLOSE_READER { u64 reader }; LOAD_IMAGE { u64 image; Value source };
+ * RELEASE_IMAGE { u64 image }.
+ */
+#define KAYA_TX_OPEN_READER 69
+
+#define KAYA_TX_READ_FRAMES 70
+
+#define KAYA_TX_READ_PEAKS 71
+
+#define KAYA_TX_CANCEL_READ 72
+
+#define KAYA_TX_CLOSE_READER 73
+
+#define KAYA_TX_LOAD_IMAGE 74
+
+#define KAYA_TX_RELEASE_IMAGE 75
 
 #define KAYA_TX_ADD_SECTION 25
 
@@ -694,6 +737,22 @@
 #define KAYA_APPLY_SELECT_TRACK 57
 
 #define KAYA_APPLY_CAPTION_TIMES 58
+
+/**
+ * OPEN_READER { u64 reader; Str url }; READ_FRAMES { u64 reader; u64 read;
+ * u32 accuracy; u32 max_width; u32 max_height; u32 reserved; Values times };
+ * READ_PEAKS, CANCEL_READ { u64 reader; u64 read }; CLOSE_READER { u64
+ * reader } (docs/media-plan.md §8 ruling 4).
+ */
+#define KAYA_APPLY_OPEN_READER 59
+
+#define KAYA_APPLY_READ_FRAMES 60
+
+#define KAYA_APPLY_READ_PEAKS 61
+
+#define KAYA_APPLY_CANCEL_READ 62
+
+#define KAYA_APPLY_CLOSE_READER 63
 
 #define KAYA_APPLY_ADD_SECTION 15
 
@@ -1287,6 +1346,8 @@
 
 #define KAYA_DRAW_TEXT 7
 
+#define KAYA_DRAW_IMAGE 8
+
 #define KAYA_PAINT_SERIES 1
 
 #define KAYA_PAINT_SERIES_FILL 2
@@ -1543,6 +1604,19 @@
 #define KAYA_FIT_COVER 1
 
 #define KAYA_FIT_FILL 2
+
+/**
+ * The reader's two vocabularies (docs/media-plan.md §8 ruling 4).
+ */
+#define KAYA_FRAME_ACCURACY_KEYFRAME 0
+
+#define KAYA_FRAME_ACCURACY_EXACT 1
+
+#define KAYA_READ_OUTCOME_COMPLETED 0
+
+#define KAYA_READ_OUTCOME_CANCELLED 1
+
+#define KAYA_READ_OUTCOME_FAILED 2
 
 /**
  * How often a playing player's position ticks, and how long an open or an
@@ -2128,6 +2202,30 @@ typedef struct KayaHostApi {
   uintptr_t (*number_text)(double, double, uint8_t*, uintptr_t);
   uint32_t (*number_commit)(const uint8_t*, uintptr_t, double, double, double, double, double*);
   uint32_t (*number_step)(double, int32_t, double, double, double, double*);
+  /**
+   * docs/media-plan.md §8 ruling 4: a reader's reports, through the core;
+   * frame and pcm answer 1 while the read is still wanted, overdue 1 when
+   * the core failed it `timeout`.
+   */
+  uint32_t (*reader_frame)(uint64_t,
+                           uint64_t,
+                           uint32_t,
+                           uint64_t,
+                           uint32_t,
+                           uint32_t,
+                           const uint8_t*,
+                           uintptr_t);
+  uint32_t (*reader_pcm)(uint64_t, uint64_t, uint32_t, uint32_t, const float*, uintptr_t, uint64_t);
+  void (*reader_finished)(uint64_t, uint64_t);
+  void (*reader_failed)(uint64_t,
+                        uint64_t,
+                        const uint8_t*,
+                        uintptr_t,
+                        int64_t,
+                        int64_t,
+                        const uint8_t*,
+                        uintptr_t);
+  uint32_t (*reader_overdue)(uint64_t, uint64_t);
 } KayaHostApi;
 
 
@@ -3052,6 +3150,95 @@ uintptr_t kaya_caption_at(uint64_t player, uint64_t t_ms, uint8_t *out, uintptr_
  * (docs/media-plan.md §7b).
  */
 void kaya_video_visible(uint64_t widget, double shown);
+
+/**
+ * Presentation side: time `index` of a read_frames answered with the
+ * picture shown at `actual_ms`, `width` x `height` premultiplied RGBA8 in
+ * `pixels`, which the core copies. Answers 1 while the read is still
+ * wanted, 0 once it was cancelled, closed, failed or completed — stop then.
+ *
+ * # Safety
+ * `pixels` must describe `len` readable bytes.
+ */
+uint32_t kaya_reader_frame(uint64_t reader,
+                           uint64_t read,
+                           uint32_t index,
+                           uint64_t actual_ms,
+                           uint32_t width,
+                           uint32_t height,
+                           const uint8_t *pixels,
+                           uintptr_t len);
+
+/**
+ * Presentation side: `count` interleaved float samples of a read_peaks'
+ * audio at its own `channels` and `sample_rate`; `total_ms` the track's
+ * duration, 0 if unknown. Answers as kaya_reader_frame does.
+ *
+ * # Safety
+ * `samples` must describe `count` readable floats.
+ */
+uint32_t kaya_reader_pcm(uint64_t reader,
+                         uint64_t read,
+                         uint32_t channels,
+                         uint32_t sample_rate,
+                         const float *samples,
+                         uintptr_t count,
+                         uint64_t total_ms);
+
+/**
+ * Presentation side: the platform has nothing more for this read.
+ */
+void kaya_reader_finished(uint64_t reader, uint64_t read);
+
+/**
+ * Presentation side: the platform's error for a read, as its domain and
+ * codes; the core maps them with the player's failure table.
+ *
+ * # Safety
+ * `domain` and `detail` must each describe readable UTF-8 bytes of their
+ * lengths, or be NULL with length 0.
+ */
+void kaya_reader_failed(uint64_t reader,
+                        uint64_t read,
+                        const uint8_t *domain,
+                        uintptr_t domain_len,
+                        int64_t code,
+                        int64_t underlying,
+                        const uint8_t *detail,
+                        uintptr_t detail_len);
+
+/**
+ * Presentation side: KAYA_MEDIA_TIMEOUT_MS passed since the backend handed
+ * a read over or last answered it. Answers 1 when the core's own clock
+ * failed it `timeout`, so the backend stops it, else 0.
+ */
+uint32_t kaya_reader_overdue(uint64_t reader, uint64_t read);
+
+/**
+ * Guest side: a read_peaks' pairs, `length * channels * 2` i16 pair-major
+ * (min then max), into `out`. Writes at most `cap` and answers the whole
+ * count, 0 when the reader has no such peaks; held until the reader's next
+ * read or its close.
+ *
+ * # Safety
+ * `out` must be writable for `cap` i16, or NULL with `cap` 0.
+ */
+uintptr_t kaya_reader_peaks(uint64_t reader, uint64_t read, int16_t *out, uintptr_t cap);
+
+/**
+ * Guest side: a core-held image's premultiplied RGBA8 bytes into `out`
+ * and its size through `width` and `height`. Writes at most `cap` and
+ * answers the whole length, 0 for an image holding no picture.
+ *
+ * # Safety
+ * `out` must be writable for `cap` bytes or NULL with `cap` 0; `width` and
+ * `height` writable or NULL.
+ */
+uintptr_t kaya_image_pixels(uint64_t image,
+                            uint8_t *out,
+                            uintptr_t cap,
+                            uint32_t *width,
+                            uint32_t *height);
 
 /**
  * Presentation side: the system's media controls sent a SESSION_ACTION

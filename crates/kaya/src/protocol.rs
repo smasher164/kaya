@@ -54,6 +54,66 @@ pub enum NotificationOutcome {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PlayerId(pub u64);
 
+/// A media reader's id (docs/media-plan.md §8 ruling 4): guest-chosen, its
+/// own space, live from open_reader to close_reader.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ReaderId(pub u64);
+
+/// One request on a reader, guest-chosen; it retires with its reader_done.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ReadId(pub u64);
+
+/// A core-held image (premultiplied RGBA8), guest-chosen like a player: a
+/// load_image names one, a read_frames reserves a run of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ImageId(pub u64);
+
+/// Which frame a time answers with (spec enum "frame_accuracy").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FrameAccuracy {
+    /// The keyframe at or before the time, on every platform.
+    Keyframe,
+    /// The frame shown at the time.
+    Exact,
+}
+
+/// How a read ended (spec enum "read_outcome"), with the failure's closed
+/// reason and the platform's sentence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReadOutcome {
+    Completed,
+    Cancelled,
+    Failed(MediaFailure, String),
+}
+
+/// A waveform's peaks in audiowaveform's `.dat` shape: per pair of
+/// `samples_per_pair` frames, per channel, the 16-bit min then max, laid
+/// out pair-major (`data[(pair * channels + channel) * 2]` is the min).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Peaks {
+    pub sample_rate: u32,
+    pub samples_per_pair: u32,
+    pub channels: u32,
+    pub data: Vec<i16>,
+}
+
+impl Peaks {
+    /// How many pairs per channel.
+    pub fn len(&self) -> usize {
+        if self.channels == 0 { 0 } else { self.data.len() / (2 * self.channels as usize) }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// One pair's (min, max) on one channel.
+    pub fn pair(&self, pair: usize, channel: usize) -> (i16, i16) {
+        let at = (pair * self.channels as usize + channel) * 2;
+        (self.data[at], self.data[at + 1])
+    }
+}
+
 /// Player property keys (spec::PLAYER_PROPS).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PlayerProp {
@@ -921,6 +981,27 @@ pub enum Occurrence {
     /// (docs/media-plan.md §7b).
     VideoVisibility { id: WidgetId, shown: f64 },
     InstanceVideoVisibility { node: TemplateNodeId, path: Path, shown: f64 },
+    /// One requested time answered (docs/media-plan.md §8 ruling 4): the
+    /// time asked, the time of the picture the platform returned, and the
+    /// core-held image it now lives in.
+    ReaderFrame {
+        reader: ReaderId,
+        read: ReadId,
+        index: u32,
+        image: ImageId,
+        width: u32,
+        height: u32,
+        requested_ms: u64,
+        actual_ms: u64,
+    },
+    /// How far a peaks read has decoded, each tenth of the duration.
+    ReaderProgress { reader: ReaderId, read: ReadId, done_ms: u64, total_ms: u64 },
+    /// A peaks read's whole answer, published just before its ReaderDone.
+    ReaderPeaks { reader: ReaderId, read: ReadId, peaks: Peaks },
+    /// The read's last occurrence: completed, cancelled or failed.
+    ReaderDone { reader: ReaderId, read: ReadId, outcome: ReadOutcome },
+    /// A load_image's answer: its size, or why it holds no picture.
+    ImageLoaded { image: ImageId, width: u32, height: u32, failure: Option<(MediaFailure, String)> },
     /// A menu action fired — clicked OR invoked through its shortcut:
     /// ONE occurrence, one dispatch path (DESIGN.md, Menus).
     MenuActivated { item: MenuItemId },
@@ -2224,6 +2305,26 @@ pub enum TxOp {
     SelectTrack { player: PlayerId, kind: TrackKind, index: u32 },
     /// docs/media-plan.md §5: the app's one session, replaced whole.
     SetSession(SessionSpec),
+    /// docs/media-plan.md §8 ruling 4: a reader's lifetime and its reads.
+    /// `source` is the player's: an asset, an http(s) URL (Str), or a
+    /// picked file's handle (I64). Frame i of a read_frames becomes image
+    /// `first_image + i`.
+    OpenReader { reader: ReaderId, source: Value },
+    ReadFrames {
+        reader: ReaderId,
+        read: ReadId,
+        first_image: ImageId,
+        accuracy: FrameAccuracy,
+        max_size: (u32, u32),
+        times_ms: Vec<u64>,
+    },
+    ReadPeaks { reader: ReaderId, read: ReadId, samples_per_pair: u32 },
+    CancelRead { reader: ReaderId, read: ReadId },
+    CloseReader { reader: ReaderId },
+    /// An image decoded by the core from an asset (Str) or a picked file
+    /// (I64), answered by ImageLoaded; and its release.
+    LoadImage { image: ImageId, source: Value },
+    ReleaseImage { image: ImageId },
     /// Declare one app-link route (docs/app-links-plan.md §4). The core
     /// keeps the table and does the one match; a malformed or repeated
     /// pattern faults here, like every other declaration refusal.
@@ -2509,6 +2610,14 @@ pub enum ApplyOp {
     PlayerCommand { player: PlayerId, command: PlayerCommand },
     ReleasePlayer(PlayerId),
     SetVideoPlayer { widget: WidgetId, player: Option<PlayerId> },
+    /// docs/media-plan.md §8 ruling 4: a reader on a RESOLVED source (the
+    /// player's resolution), and its reads. A refused source never reaches
+    /// a backend: the core answers its reads itself.
+    OpenReader { reader: ReaderId, url: String },
+    ReadFrames { reader: ReaderId, read: ReadId, accuracy: FrameAccuracy, max_size: (u32, u32), times_ms: Vec<u64> },
+    ReadPeaks { reader: ReaderId, read: ReadId },
+    CancelRead { reader: ReaderId, read: ReadId },
+    CloseReader(ReaderId),
     /// The PLATFORM's track, counting from 1 in its own listing; 0 turns
     /// its captions off.
     SelectTrack { player: PlayerId, kind: TrackKind, index: u32 },
@@ -2959,6 +3068,44 @@ impl OccSink {
                     ring.push_record(
                         crate::ring::REC_VIDEO_VISIBILITY,
                         &crate::wire::video_visibility_body(node.0, &path, shown),
+                    );
+                }
+                Occurrence::ReaderFrame { reader, read, index, image, width, height, requested_ms, actual_ms } => {
+                    ring.push_record(
+                        crate::ring::REC_READER_FRAME,
+                        &crate::wire::reader_frame_body(
+                            reader,
+                            read,
+                            image,
+                            index,
+                            (width, height),
+                            requested_ms,
+                            actual_ms,
+                        ),
+                    );
+                }
+                Occurrence::ReaderProgress { reader, read, done_ms, total_ms } => {
+                    ring.push_record(
+                        crate::ring::REC_READER_PROGRESS,
+                        &crate::wire::reader_progress_body(reader, read, done_ms, total_ms),
+                    );
+                }
+                Occurrence::ReaderPeaks { reader, read, peaks } => {
+                    ring.push_record(
+                        crate::ring::REC_READER_PEAKS,
+                        &crate::wire::reader_peaks_body(reader, read, &peaks),
+                    );
+                }
+                Occurrence::ReaderDone { reader, read, outcome } => {
+                    ring.push_record(
+                        crate::ring::REC_READER_DONE,
+                        &crate::wire::reader_done_body(reader, read, &outcome),
+                    );
+                }
+                Occurrence::ImageLoaded { image, width, height, failure } => {
+                    ring.push_record(
+                        crate::ring::REC_IMAGE_LOADED,
+                        &crate::wire::image_loaded_body(image, (width, height), failure.as_ref()),
                     );
                 }
                 Occurrence::FullscreenChanged { window, on } => {

@@ -335,7 +335,7 @@ impl AppCtx {
         }
     }
 
-    fn check_async_request(&self) {
+    pub(super) fn check_async_request(&self) {
         assert!(
             self.tasks_active.get() && !self.shutdown.get(),
             "kaya: async dialogs require a live task scope"

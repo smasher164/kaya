@@ -13,8 +13,9 @@ use skrifa::outline::{DrawSettings, OutlinePen};
 use skrifa::raw::FontRef;
 use vello_cpu::color::{AlphaColor, Srgb};
 use vello_cpu::kurbo::{BezPath, Cap, Join, Point, Stroke};
-use vello_cpu::peniko::Fill;
-use vello_cpu::{Level, PixmapMut, RenderContext, RenderSettings, Resources};
+use vello_cpu::kurbo::{Affine, Rect};
+use vello_cpu::peniko::{Fill, ImageQuality, ImageSampler};
+use vello_cpu::{Image, ImageSource, Level, Pixmap, PixmapMut, RenderContext, RenderSettings, Resources};
 
 /// Which palette a raster resolves its paint roles against. The ONLY
 /// thing a platform contributes to a drawing (§6).
@@ -165,6 +166,28 @@ enum Op {
     Fill { paint: i64, even_odd: bool },
     Font { asset: String, size: f64, weight: f64 },
     Text { x: f64, y: f64, paint: i64, align: i64, baseline: i64, text: String },
+    Image { image: Held, x: f64, y: f64, w: f64, h: f64 },
+}
+
+/// A core-held image as a drawing holds it: its id and its pixels, so a
+/// drawing keeps showing what it was declared with after the app releases
+/// the id (docs/media-plan.md §8 ruling 3).
+#[derive(Clone)]
+struct Held {
+    id: i64,
+    pixmap: std::sync::Arc<Pixmap>,
+}
+
+impl PartialEq for Held {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id && std::sync::Arc::ptr_eq(&self.pixmap, &other.pixmap)
+    }
+}
+
+impl std::fmt::Debug for Held {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "image {} ({}x{})", self.id, self.pixmap.width(), self.pixmap.height())
+    }
 }
 
 /// What one canvas rasterized to. `pixels` is premultiplied RGBA8, the
@@ -191,12 +214,28 @@ pub struct Probe {
 // Validation (§3.5)
 // ---------------------------------------------------------------------
 
+/// [`validate_with`] with no image table, for the tests' drawings.
+#[cfg(test)]
+pub fn validate(viewbox: (f64, f64), stream: &[Value]) -> Result<Drawing, String> {
+    validate_with(viewbox, stream, &|id| {
+        Err(format!(
+            "kaya: the canvas op `image` names image {id}, and this drawing has no image table to \
+             read it from"
+        ))
+    })
+}
+
 /// Read the guest's flat op stream, refusing before anything draws. The
 /// `Err` carries the whole sentence: the caller does not compose prose,
 /// and a font asset the resolver cannot answer for raises the
 /// RESOLVER'S OWN sentence rather than a second vocabulary for the same
-/// failure (§3.5).
-pub fn validate(viewbox: (f64, f64), stream: &[Value]) -> Result<Drawing, String> {
+/// failure (§3.5). `images` is the scene's image table: an `image` op's id
+/// answered with its pixels or the sentence refusing it.
+pub fn validate_with(
+    viewbox: (f64, f64),
+    stream: &[Value],
+    images: &dyn Fn(i64) -> Result<std::sync::Arc<Pixmap>, String>,
+) -> Result<Drawing, String> {
     let (vb_w, vb_h) = viewbox;
     for (which, n) in [("width", vb_w), ("height", vb_h)] {
         if !n.is_finite() || n <= 0.0 {
@@ -241,6 +280,7 @@ pub fn validate(viewbox: (f64, f64), stream: &[Value]) -> Result<Drawing, String
             wire::DRAW_FILL => 2,
             wire::DRAW_FONT => 3,
             wire::DRAW_TEXT => 6,
+            wire::DRAW_IMAGE => 5,
             _ => unreachable!("draw_op_name answered for {code}"),
         };
         if at + arity >= stream.len() {
@@ -367,6 +407,29 @@ pub fn validate(viewbox: (f64, f64), stream: &[Value]) -> Result<Drawing, String
                     ));
                 }
                 ops.push(Op::Text { x, y, paint, align, baseline, text });
+            }
+            wire::DRAW_IMAGE => {
+                let id = match &operands[0] {
+                    Value::I64(n) => *n,
+                    other => {
+                        return Err(format!(
+                            "kaya: the canvas op `image`'s image is {}, wanted an image id",
+                            shown(other)
+                        ));
+                    }
+                };
+                let x = coord(name, "x", &operands[1])?;
+                let y = coord(name, "y", &operands[2])?;
+                let w = coord(name, "width", &operands[3])?;
+                let h = coord(name, "height", &operands[4])?;
+                if w <= 0.0 || h <= 0.0 {
+                    return Err(format!(
+                        "kaya: the canvas op `image` draws image {id} into {w} x {h}; a destination \
+                         rectangle has a positive width and height"
+                    ));
+                }
+                let pixmap = images(id)?;
+                ops.push(Op::Image { image: Held { id, pixmap }, x, y, w, h });
             }
             _ => unreachable!("draw_op_name answered for {code}"),
         }
@@ -632,6 +695,25 @@ fn draw(ctx: &mut RenderContext, drawing: &Drawing, track: (f64, f64), p: Presen
                     ctx.fill_path(&line);
                 }
             }
+            Op::Image { image, x, y, w, h } => {
+                // THE IMAGE'S PIXEL SPACE MAPPED ONTO THE DESTINATION, under
+                // the drawing's own fit and scale, bilinear and padded at the
+                // edges; the paint transform resets so a later fill is
+                // untouched.
+                let (iw, ih) = (f64::from(image.pixmap.width()), f64::from(image.pixmap.height()));
+                let (left, top) = (x * s + dx, y * s + dy);
+                let (right, bottom) = ((x + w) * s + dx, (y + h) * s + dy);
+                ctx.set_paint(Image {
+                    image: ImageSource::Pixmap(image.pixmap.clone()),
+                    sampler: ImageSampler::new().with_quality(ImageQuality::Medium),
+                });
+                ctx.set_paint_transform(
+                    Affine::translate((left, top)) * Affine::scale_non_uniform((right - left) / iw, (bottom - top) / ih),
+                );
+                ctx.set_fill_rule(Fill::NonZero);
+                ctx.fill_rect(&Rect::new(left, top, right, bottom));
+                ctx.reset_paint_transform();
+            }
         }
     }
 
@@ -689,6 +771,18 @@ pub fn probe(drawing: &Drawing) -> Probe {
         Context::Fresh,
     );
     Probe { hash: hash(&raster), ops: drawing.op_count(), ink: ink(&raster) }
+}
+
+/// The canonical raster itself, for a test that reads its pixels.
+#[cfg(test)]
+pub fn canonical_raster(drawing: &Drawing) -> Raster {
+    raster(
+        drawing,
+        drawing.viewbox,
+        Presentation { scale: CANONICAL_SCALE, mode: CANONICAL_MODE },
+        CANONICAL_SETTINGS,
+        Context::Fresh,
+    )
 }
 
 /// FNV-1a over the buffer's dimensions and its bytes — a change detector
@@ -1674,5 +1768,73 @@ mod tests {
                 assert_eq!(r.pixels[(y * w + x) * 4 + 3], 0, "margin ink at {x},{y}");
             }
         }
+    }
+
+    /// A 2x2 image, red green over blue white, as the image table would
+    /// hand it: premultiplied RGBA8.
+    fn quad() -> std::sync::Arc<Pixmap> {
+        let rgba = [255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255];
+        std::sync::Arc::new(crate::reader::pixmap(2, 2, &rgba).unwrap())
+    }
+
+    fn image_op(id: i64, x: f64, y: f64, w: f64, h: f64) -> Vec<Value> {
+        vec![op(wire::DRAW_IMAGE), Value::I64(id), n(x), n(y), n(w), n(h)]
+    }
+
+    fn table(id: i64) -> Result<std::sync::Arc<Pixmap>, String> {
+        if id == 4 { Ok(quad()) } else { Err(format!("no image {id}")) }
+    }
+
+    fn pixel(r: &Raster, x: usize, y: usize) -> [u8; 4] {
+        let at = (y * r.width as usize + x) * 4;
+        [r.pixels[at], r.pixels[at + 1], r.pixels[at + 2], r.pixels[at + 3]]
+    }
+
+    /// THE IMAGE OP IS RASTERIZED BY THE CORE into the canonical raster
+    /// (docs/media-plan.md §8 ruling 3): the corners of each quadrant are
+    /// the image's own pixels, the outside of the rectangle is untouched,
+    /// and the hash moves with the pixels.
+    #[test]
+    fn an_image_lands_in_its_rectangle_in_the_canonical_raster() {
+        let d = validate_with((40.0, 40.0), &image_op(4, 10.0, 10.0, 20.0, 20.0), &table).unwrap();
+        let r = raster(&d, (40.0, 40.0), Presentation::default(), CANONICAL_SETTINGS, Context::Fresh);
+        assert_eq!(pixel(&r, 11, 11), [255, 0, 0, 255]);
+        assert_eq!(pixel(&r, 28, 11), [0, 255, 0, 255]);
+        assert_eq!(pixel(&r, 11, 28), [0, 0, 255, 255]);
+        assert_eq!(pixel(&r, 28, 28), [255, 255, 255, 255]);
+        assert_eq!(pixel(&r, 9, 20)[3], 0, "left of the rectangle");
+        assert_eq!(pixel(&r, 30, 20)[3], 0, "right of the rectangle");
+        assert_eq!(pixel(&r, 20, 9)[3], 0, "above the rectangle");
+        assert_eq!(ink(&r), Some((25, 25, 75, 75)));
+        let other = |_: i64| -> Result<std::sync::Arc<Pixmap>, String> {
+            let rgba = [255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 0, 0, 0, 255];
+            Ok(std::sync::Arc::new(crate::reader::pixmap(2, 2, &rgba).unwrap()))
+        };
+        let e = validate_with((40.0, 40.0), &image_op(4, 10.0, 10.0, 20.0, 20.0), &other).unwrap();
+        assert_ne!(probe(&d).hash, probe(&e).hash, "the hash covers the image's pixels");
+    }
+
+    /// The image follows the drawing's uniform fit like every other op.
+    #[test]
+    fn an_image_scales_with_the_drawings_fit() {
+        let d = validate_with((40.0, 40.0), &image_op(4, 10.0, 10.0, 20.0, 20.0), &table).unwrap();
+        let r = rasterize(&d, (80.0, 80.0), Presentation::default());
+        assert_eq!((r.width, r.height), (80, 80));
+        assert_eq!(pixel(&r, 22, 22), [255, 0, 0, 255]);
+        assert_eq!(pixel(&r, 57, 57), [255, 255, 255, 255]);
+        assert_eq!(pixel(&r, 19, 40)[3], 0);
+    }
+
+    #[test]
+    fn the_image_op_refuses_what_it_cannot_draw() {
+        let refusal = |stream: Vec<Value>| validate_with((40.0, 40.0), &stream, &table).unwrap_err();
+        assert_eq!(refusal(image_op(9, 0.0, 0.0, 1.0, 1.0)), "no image 9", "the table's own sentence");
+        assert!(refusal(image_op(4, 0.0, 0.0, 0.0, 1.0)).contains("positive width and height"));
+        assert!(refusal(image_op(4, 0.0, 0.0, 3.0, -1.0)).contains("positive width and height"));
+        assert!(refusal(image_op(4, f64::NAN, 0.0, 3.0, 1.0)).contains("not finite"));
+        let mut by_name = image_op(4, 0.0, 0.0, 1.0, 1.0);
+        by_name[1] = s("logo");
+        assert!(refusal(by_name).contains("wanted an image id"));
+        assert!(validate((40.0, 40.0), &image_op(4, 0.0, 0.0, 1.0, 1.0)).unwrap_err().contains("no image table"));
     }
 }

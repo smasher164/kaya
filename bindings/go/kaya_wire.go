@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x39c348180962e0db
+	SpecHash uint64 = 0x6d398768b7d3b5d6
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -59,6 +59,7 @@ const (
 	DrawOpFill = 5
 	DrawOpFont = 6
 	DrawOpText = 7
+	DrawOpImage = 8
 	PaintSeries = 1
 	PaintSeriesFill = 2
 	PaintGrid = 3
@@ -284,6 +285,11 @@ const (
 	PlayerCommandPlay = 1
 	PlayerCommandPause = 2
 	PlayerCommandSeek = 3
+	FrameAccuracyKeyframe = 0
+	FrameAccuracyExact = 1
+	ReadOutcomeCompleted = 0
+	ReadOutcomeCancelled = 1
+	ReadOutcomeFailed = 2
 	SessionActionPlay SessionActionKind = 1
 	SessionActionPause SessionActionKind = 2
 	SessionActionStop SessionActionKind = 3
@@ -378,6 +384,13 @@ const (
 	txReleasePlayer = 66
 	txSelectTrack = 67
 	txSetSession = 68
+	txOpenReader = 69
+	txReadFrames = 70
+	txReadPeaks = 71
+	txCancelRead = 72
+	txCloseReader = 73
+	txLoadImage = 74
+	txReleaseImage = 75
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -434,6 +447,11 @@ const (
 	applySetSession = 56
 	applySelectTrack = 57
 	applyCaptionTimes = 58
+	applyOpenReader = 59
+	applyReadFrames = 60
+	applyReadPeaks = 61
+	applyCancelRead = 62
+	applyCloseReader = 63
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3
@@ -479,6 +497,11 @@ const (
 	occPlayerTracks = 43
 	occCaptionCue = 44
 	occVideoVisibility = 45
+	occReaderFrame = 46
+	occReaderProgress = 47
+	occReaderPeaks = 48
+	occReaderDone = 49
+	occImageLoaded = 50
 )
 
 func (d Detent) String() string {
@@ -1466,6 +1489,68 @@ func TxSetSession(player uint64, actions uint32, playbackState uint32, title any
 	b = encodeValue(b, artist)
 	b = encodeValue(b, album)
 	b = encodeValue(b, artwork)
+	return endRecord(b)
+}
+
+// TxOpenReader: Open a media READER (docs/media-plan.md §8 ruling 4): an object separate from any player that extracts frames and peaks, its id guest-chosen in its own space. `source` is the player's: an asset name or http(s) URL as Str, or a picked file's handle as I64. A local source that is not there fails every read not_found without reaching the platform. A second open of a live id is a scene error.
+func TxOpenReader(reader uint64, source any) []byte {
+	b := beginRecord(txOpenReader)
+	b = binary.LittleEndian.AppendUint64(b, reader)
+	b = encodeValue(b, source)
+	return endRecord(b)
+}
+
+// TxReadFrames: Ask for one picture per time (`times`, I64 milliseconds), each answered by reader_frame with the time of the picture the platform returned and a core-held image, then one reader_done. FRAME_ACCURACY keyframe is the keyframe AT OR BEFORE the time on every platform, exact the frame shown at it. `max_width`/`max_height` bound the picture, aspect kept, 0 for no bound on that axis. Frame i becomes image `first_image + i`, ids that must not be live. ONE READ IN FLIGHT PER READER: a second while one runs is a scene error, and nothing is cancelled implicitly.
+func TxReadFrames(reader uint64, read uint64, firstImage uint64, accuracy uint32, maxWidth uint32, maxHeight uint32, times []any) []byte {
+	b := beginRecord(txReadFrames)
+	b = binary.LittleEndian.AppendUint64(b, reader)
+	b = binary.LittleEndian.AppendUint64(b, read)
+	b = binary.LittleEndian.AppendUint64(b, firstImage)
+	b = binary.LittleEndian.AppendUint32(b, accuracy)
+	b = binary.LittleEndian.AppendUint32(b, maxWidth)
+	b = binary.LittleEndian.AppendUint32(b, maxHeight)
+	b = binary.LittleEndian.AppendUint32(b, 0)
+	b = encodeValues(b, times)
+	return endRecord(b)
+}
+
+// TxReadPeaks: Decode the first audio track on the platform and reduce it IN THE CORE to a min/max pair per channel per `samples_per_pair` frames (audiowaveform's .dat shape), answered by reader_progress, reader_peaks and reader_done.
+func TxReadPeaks(reader uint64, read uint64, samplesPerPair uint32) []byte {
+	b := beginRecord(txReadPeaks)
+	b = binary.LittleEndian.AppendUint64(b, reader)
+	b = binary.LittleEndian.AppendUint64(b, read)
+	b = binary.LittleEndian.AppendUint32(b, samplesPerPair)
+	b = binary.LittleEndian.AppendUint32(b, 0)
+	return endRecord(b)
+}
+
+// TxCancelRead: Stop a read in flight: reader_done(cancelled) follows at once and nothing of the read after it. A read already done is not an error, since an app races its own answers.
+func TxCancelRead(reader uint64, read uint64) []byte {
+	b := beginRecord(txCancelRead)
+	b = binary.LittleEndian.AppendUint64(b, reader)
+	b = binary.LittleEndian.AppendUint64(b, read)
+	return endRecord(b)
+}
+
+// TxCloseReader: Forget a reader, cancelling its read in flight. The images it answered with stay the app's.
+func TxCloseReader(reader uint64) []byte {
+	b := beginRecord(txCloseReader)
+	b = binary.LittleEndian.AppendUint64(b, reader)
+	return endRecord(b)
+}
+
+// TxLoadImage: Decode an image IN THE CORE (PNG or JPEG) from an asset name (Str) or a picked file's handle (I64) into a core-held premultiplied RGBA8 image, answered by image_loaded. One decoder on every platform is what keeps a drawing that names it one canonical hash (docs/canvas-plan.md §7.1).
+func TxLoadImage(image uint64, source any) []byte {
+	b := beginRecord(txLoadImage)
+	b = binary.LittleEndian.AppendUint64(b, image)
+	b = encodeValue(b, source)
+	return endRecord(b)
+}
+
+// TxReleaseImage: Forget a core-held image. A drawing declared before keeps showing it until it is declared again; a drawing declared after that names it is refused.
+func TxReleaseImage(image uint64) []byte {
+	b := beginRecord(txReleaseImage)
+	b = binary.LittleEndian.AppendUint64(b, image)
 	return endRecord(b)
 }
 
@@ -3849,7 +3934,7 @@ func parseValue(rec []byte, at int) (any, int) {
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted && kind != occSheetDismissed && kind != occDismissRequested && kind != occSubmitted && kind != occNotificationReplied && kind != occFullscreenChanged && kind != occColorChanged && kind != occRangeChanged && kind != occRangeCommitted && kind != occPlayerChanged && kind != occPlayerPosition && kind != occSeekCompleted && kind != occSessionAction && kind != occPlayerTracks && kind != occCaptionCue && kind != occVideoVisibility {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted && kind != occSheetDismissed && kind != occDismissRequested && kind != occSubmitted && kind != occNotificationReplied && kind != occFullscreenChanged && kind != occColorChanged && kind != occRangeChanged && kind != occRangeCommitted && kind != occPlayerChanged && kind != occPlayerPosition && kind != occSeekCompleted && kind != occSessionAction && kind != occPlayerTracks && kind != occCaptionCue && kind != occVideoVisibility && kind != occReaderFrame && kind != occReaderProgress && kind != occReaderPeaks && kind != occReaderDone && kind != occImageLoaded {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])
@@ -3940,6 +4025,100 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 				v, at = parseValue(rec, at)
 				tail = append(tail, v)
 			}
+		}
+		_ = at
+		return kind, id, nil, tail, true
+	}
+	if kind == occReaderFrame {
+		// A flat record: its fields in order, into the tail.
+		at := 8
+		tail := []any{}
+		at += 8
+		tail = append(tail, int64(binary.LittleEndian.Uint64(rec[at:])))
+		at += 8
+		tail = append(tail, int64(binary.LittleEndian.Uint64(rec[at:])))
+		at += 8
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		at += 4
+		tail = append(tail, int64(binary.LittleEndian.Uint64(rec[at:])))
+		at += 8
+		tail = append(tail, int64(binary.LittleEndian.Uint64(rec[at:])))
+		at += 8
+		_ = at
+		return kind, id, nil, tail, true
+	}
+	if kind == occReaderProgress {
+		// A flat record: its fields in order, into the tail.
+		at := 8
+		tail := []any{}
+		at += 8
+		tail = append(tail, int64(binary.LittleEndian.Uint64(rec[at:])))
+		at += 8
+		tail = append(tail, int64(binary.LittleEndian.Uint64(rec[at:])))
+		at += 8
+		tail = append(tail, int64(binary.LittleEndian.Uint64(rec[at:])))
+		at += 8
+		_ = at
+		return kind, id, nil, tail, true
+	}
+	if kind == occReaderPeaks {
+		// A flat record: its fields in order, into the tail.
+		at := 8
+		tail := []any{}
+		at += 8
+		tail = append(tail, int64(binary.LittleEndian.Uint64(rec[at:])))
+		at += 8
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		_ = at
+		return kind, id, nil, tail, true
+	}
+	if kind == occReaderDone {
+		// A flat record: its fields in order, into the tail.
+		at := 8
+		tail := []any{}
+		at += 8
+		tail = append(tail, int64(binary.LittleEndian.Uint64(rec[at:])))
+		at += 8
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		{
+			var v any
+			v, at = parseValue(rec, at)
+			tail = append(tail, v)
+		}
+		_ = at
+		return kind, id, nil, tail, true
+	}
+	if kind == occImageLoaded {
+		// A flat record: its fields in order, into the tail.
+		at := 8
+		tail := []any{}
+		at += 8
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		at += 4
+		{
+			var v any
+			v, at = parseValue(rec, at)
+			tail = append(tail, v)
 		}
 		_ = at
 		return kind, id, nil, tail, true

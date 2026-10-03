@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 
 mod tasks;
 mod media;
-pub use media::{can_play, MediaSource, PlayerReading, PlayerRef, SessionRef};
+pub use media::{can_play, Frame, MediaSource, PlayerReading, PlayerRef, ReadError, SessionRef};
 pub use tasks::{AlertFutureRef, ClipboardFutureRef, DialogFuture, FileFutureRef, SaveFutureRef, TaskOutcome, TaskScope};
 
 use crate::protocol::{
@@ -1143,6 +1143,17 @@ pub struct AppCtx {
     players: RefCell<HashMap<u64, PlayerReading>>,
     /// Each player's tracks and current cue (docs/media-plan.md §3).
     player_tracks: RefCell<HashMap<u64, (crate::protocol::PlayerTracks, String)>>,
+    /// docs/media-plan.md §8: readers, reads and images, each its own id
+    /// space; the read each reader has in flight; the reads the app gave
+    /// up, whose answers still in the channel it must not hear; and the
+    /// images those answers carried, released by the next commit.
+    next_reader: Cell<u64>,
+    next_read: Cell<u64>,
+    next_image: Cell<u64>,
+    reads_in_flight: RefCell<HashMap<u64, u64>>,
+    abandoned_reads: RefCell<std::collections::HashSet<u64>>,
+    pending_ops: RefCell<Vec<TxOp>>,
+    read_replies: RefCell<HashMap<u64, media::ReadReplyCell>>,
 }
 
 impl AppCtx {
@@ -1177,6 +1188,13 @@ impl AppCtx {
             next_player: Cell::new(1),
             players: RefCell::new(HashMap::new()),
             player_tracks: RefCell::new(HashMap::new()),
+            next_reader: Cell::new(1),
+            next_read: Cell::new(1),
+            next_image: Cell::new(1),
+            reads_in_flight: RefCell::new(HashMap::new()),
+            abandoned_reads: RefCell::new(std::collections::HashSet::new()),
+            pending_ops: RefCell::new(Vec::new()),
+            read_replies: RefCell::new(HashMap::new()),
         }
     }
 
@@ -1216,6 +1234,9 @@ impl AppCtx {
                     // going unclaimed.
                     crate::stall::taken();
                     if self.resolve_reply(&occ) {
+                        continue;
+                    }
+                    if self.absorb_read(&occ) {
                         continue;
                     }
                     // An undo moved core state with no transaction, so the
@@ -4140,6 +4161,7 @@ impl<'a> Tx<'a> {
         }
         self.committed = true;
         let mut ops = take_pending_routes();
+        ops.append(&mut self.ctx.pending_ops.borrow_mut());
         if ops.is_empty() {
             ops = std::mem::take(&mut self.ops);
         } else {
@@ -4446,6 +4468,16 @@ impl Draw {
         }));
         self.ops.push(Value::Str(s.to_owned()));
         self
+    }
+
+    /// Draw a core-held image (a reader's frame, a loaded image) into the
+    /// rectangle at (x, y), `w` by `h` (docs/media-plan.md §8 ruling 3).
+    /// kaya rasterizes it with the rest of the drawing; an image that holds
+    /// no picture, or was released, is refused.
+    pub fn image(&mut self, image: crate::protocol::ImageId, x: f64, y: f64, w: f64, h: f64) -> &mut Self {
+        self.op(crate::wire::DRAW_IMAGE);
+        self.ops.push(Value::I64(image.0 as i64));
+        self.xy(x, y).xy(w, h)
     }
 }
 
@@ -4949,6 +4981,10 @@ pub struct Messages<M> {
     /// PROCESS-LEVEL: the app's one session (docs/media-plan.md §5).
     #[allow(clippy::type_complexity)]
     session: RefCell<Option<Box<dyn Fn(crate::protocol::SessionAction) -> M>>>,
+    /// Per read and per image load, one-shot: a read's registrations retire
+    /// with its reader_done, a load's with its image_loaded.
+    reads: RefCell<HashMap<u64, Vec<Mapper<M>>>>,
+    image_loads: RefCell<HashMap<u64, Vec<Mapper<M>>>>,
     /// THE CANVAS'S DRAWING-AS-A-FUNCTION-OF-SIZE (docs/canvas-plan.md
     /// §3.2.1). Not a Mapper: these produce a DRAWING, not a message, so
     /// [`Messages::next`] answers them itself and keeps looping rather
@@ -5076,6 +5112,8 @@ impl<M> Messages<M> {
             draws: RefCell::new(HashMap::new()),
             players: RefCell::new(HashMap::new()),
             session: RefCell::new(None),
+            reads: RefCell::new(HashMap::new()),
+            image_loads: RefCell::new(HashMap::new()),
         }
     }
 
@@ -5972,6 +6010,11 @@ impl<M> Messages<M> {
                 | Occurrence::PlayerTracks { .. }
                 | Occurrence::CaptionCue { .. }
                 | Occurrence::SessionAction { .. } => self.dispatch_media(&occ),
+                Occurrence::ReaderFrame { .. }
+                | Occurrence::ReaderProgress { .. }
+                | Occurrence::ReaderPeaks { .. }
+                | Occurrence::ReaderDone { .. }
+                | Occurrence::ImageLoaded { .. } => self.dispatch_reader(&occ),
                 // Menu occurrences key the menu-item table — their own id
                 // space. Direct and node-anchored variants share it: an
                 // item has exactly one anchor, so its registered mapper
@@ -9552,7 +9595,12 @@ mod tests {
                     | Occurrence::CaptionCue { .. }
                     | Occurrence::VideoVisibility { .. }
                     | Occurrence::InstanceVideoVisibility { .. }
-                    | Occurrence::SessionAction { .. } => {}
+                    | Occurrence::SessionAction { .. }
+                    | Occurrence::ReaderFrame { .. }
+                    | Occurrence::ReaderProgress { .. }
+                    | Occurrence::ReaderPeaks { .. }
+                    | Occurrence::ReaderDone { .. }
+                    | Occurrence::ImageLoaded { .. } => {}
                     Occurrence::LinkOpened { .. } => {}
                     Occurrence::Shutdown => break,
                 }

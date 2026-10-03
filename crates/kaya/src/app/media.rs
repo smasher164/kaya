@@ -446,3 +446,536 @@ impl<M> Messages<M> {
         }
     }
 }
+
+// ---------------------------------------------------------------------
+// The reader and the core-held images (docs/media-plan.md §8 rulings 3, 4)
+// ---------------------------------------------------------------------
+
+use crate::protocol::{FrameAccuracy, ImageId, Peaks, ReadId, ReadOutcome, ReaderId};
+
+/// One requested time answered: which of the times it is, the time asked,
+/// the time of the picture the platform returned, and the core-held image
+/// the canvas's [`super::Draw::image`] draws. The image is the app's until
+/// it releases it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Frame {
+    pub index: usize,
+    pub requested_ms: u64,
+    pub actual_ms: u64,
+    pub image: ImageId,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Why an awaited read gave no answer: the reader was closed under it, or
+/// the platform failed it with the player's closed reason.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReadError {
+    Cancelled,
+    Failed(MediaFailure, String),
+}
+
+impl super::AppCtx {
+    pub(super) fn alloc_reader(&self) -> ReaderId {
+        let id = self.next_reader.get();
+        self.next_reader.set(id + 1);
+        ReaderId(id)
+    }
+
+    pub(super) fn alloc_read(&self, reader: ReaderId) -> ReadId {
+        let id = self.next_read.get();
+        self.next_read.set(id + 1);
+        self.reads_in_flight.borrow_mut().insert(reader.0, id);
+        ReadId(id)
+    }
+
+    pub(super) fn alloc_images(&self, n: usize) -> ImageId {
+        let first = self.next_image.get();
+        self.next_image.set(first + n as u64);
+        ImageId(first)
+    }
+
+    /// The app gave up on `read`: answers of it still in the channel are
+    /// not heard, and the images they carry are released by the next commit.
+    fn abandon(&self, read: u64) {
+        self.abandoned_reads.borrow_mut().insert(read);
+        self.reads_in_flight.borrow_mut().retain(|_, r| *r != read);
+    }
+
+    /// An image's premultiplied RGBA8 bytes and size, for an app that keeps
+    /// its pictures; None for an image holding none.
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+    pub fn image_pixels(&self, image: ImageId) -> Option<(u32, u32, Vec<u8>)> {
+        crate::capi::image_pixels(image)
+    }
+
+    /// The occurrence half of the reader: an abandoned read's answers
+    /// dropped, an awaited read's taken by its future. True when consumed.
+    pub(super) fn absorb_read(&self, occ: &Occurrence) -> bool {
+        let read = match occ {
+            Occurrence::ReaderFrame { read, .. }
+            | Occurrence::ReaderProgress { read, .. }
+            | Occurrence::ReaderPeaks { read, .. }
+            | Occurrence::ReaderDone { read, .. } => read.0,
+            _ => return false,
+        };
+        if let Occurrence::ReaderDone { reader, .. } = occ {
+            let mut flight = self.reads_in_flight.borrow_mut();
+            if flight.get(&reader.0) == Some(&read) {
+                flight.remove(&reader.0);
+            }
+        }
+        if self.abandoned_reads.borrow().contains(&read) {
+            match occ {
+                Occurrence::ReaderFrame { image, .. } => {
+                    self.pending_ops.borrow_mut().push(TxOp::ReleaseImage { image: *image })
+                }
+                Occurrence::ReaderDone { .. } => {
+                    self.abandoned_reads.borrow_mut().remove(&read);
+                    return self.read_replies.borrow_mut().remove(&read).is_some();
+                }
+                _ => {}
+            }
+            return true;
+        }
+        let Some(cell) = self.read_replies.borrow().get(&read).cloned() else { return false };
+        let mut reply = cell.lock().unwrap();
+        match occ {
+            Occurrence::ReaderFrame { index, image, width, height, requested_ms, actual_ms, .. } => {
+                reply.frames.push(Frame {
+                    index: *index as usize,
+                    requested_ms: *requested_ms,
+                    actual_ms: *actual_ms,
+                    image: *image,
+                    width: *width,
+                    height: *height,
+                });
+            }
+            Occurrence::ReaderPeaks { peaks, .. } => reply.peaks = Some(peaks.clone()),
+            Occurrence::ReaderDone { outcome, .. } => {
+                if !matches!(outcome, ReadOutcome::Completed) {
+                    let mut pending = self.pending_ops.borrow_mut();
+                    for f in reply.frames.drain(..) {
+                        pending.push(TxOp::ReleaseImage { image: f.image });
+                    }
+                }
+                reply.done = Some(outcome.clone());
+                if let Some(waker) = reply.waker.take() {
+                    waker.wake();
+                }
+                drop(reply);
+                self.read_replies.borrow_mut().remove(&read);
+            }
+            _ => {}
+        }
+        true
+    }
+
+    fn await_read(&self, reader: ReaderId, op: impl FnOnce(&mut Tx<'_>) -> ReadId) -> ReadFuture<'_> {
+        self.check_async_request();
+        let reply: ReadReplyCell = std::sync::Arc::new(std::sync::Mutex::new(ReadReply::default()));
+        let read = self.apply(|tx| op(tx));
+        self.read_replies.borrow_mut().insert(read.0, reply.clone());
+        ReadFuture { ctx: self, reader, read, reply }
+    }
+
+    /// The frames at `times_ms` as one awaited read (the binding's async
+    /// tier, docs/async-dialogs-plan.md §2.4): dropping the future cancels
+    /// the read and releases whatever images it had carried.
+    pub fn frames(
+        &self,
+        reader: ReaderId,
+        times_ms: &[u64],
+        max_size: (u32, u32),
+        accuracy: FrameAccuracy,
+    ) -> impl std::future::Future<Output = Result<Vec<Frame>, ReadError>> + '_ {
+        let future = self.await_read(reader, |tx| tx.read_frames(reader, times_ms, max_size, accuracy));
+        async move {
+            let mut answer = future.await?;
+            answer.frames.sort_by_key(|f| f.index);
+            Ok(answer.frames)
+        }
+    }
+
+    /// The reader's peaks as one awaited read.
+    pub fn peaks(
+        &self,
+        reader: ReaderId,
+        samples_per_pair: u32,
+    ) -> impl std::future::Future<Output = Result<Peaks, ReadError>> + '_ {
+        let future = self.await_read(reader, |tx| tx.read_peaks(reader, samples_per_pair));
+        async move { Ok(future.await?.peaks.unwrap_or_default()) }
+    }
+}
+
+#[derive(Default)]
+pub(super) struct ReadReply {
+    frames: Vec<Frame>,
+    peaks: Option<Peaks>,
+    done: Option<ReadOutcome>,
+    waker: Option<std::task::Waker>,
+}
+
+pub(super) type ReadReplyCell = std::sync::Arc<std::sync::Mutex<ReadReply>>;
+
+struct ReadFuture<'a> {
+    ctx: &'a super::AppCtx,
+    reader: ReaderId,
+    read: ReadId,
+    reply: ReadReplyCell,
+}
+
+impl std::future::Future for ReadFuture<'_> {
+    type Output = Result<ReadReply, ReadError>;
+
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+        let mut reply = self.reply.lock().unwrap();
+        match reply.done.take() {
+            Some(ReadOutcome::Completed) => std::task::Poll::Ready(Ok(std::mem::take(&mut *reply))),
+            Some(ReadOutcome::Cancelled) => std::task::Poll::Ready(Err(ReadError::Cancelled)),
+            Some(ReadOutcome::Failed(why, detail)) => std::task::Poll::Ready(Err(ReadError::Failed(why, detail))),
+            None => {
+                reply.waker = Some(cx.waker().clone());
+                std::task::Poll::Pending
+            }
+        }
+    }
+}
+
+impl Drop for ReadFuture<'_> {
+    /// A future dropped before its answer: the read is cancelled, its
+    /// answers are not heard, and the images it already carried go back.
+    fn drop(&mut self) {
+        let mut reply = self.reply.lock().unwrap();
+        if reply.done.is_some() || self.ctx.read_replies.borrow().get(&self.read.0).is_none() {
+            return;
+        }
+        self.ctx.read_replies.borrow_mut().remove(&self.read.0);
+        let mut ops: Vec<TxOp> =
+            reply.frames.drain(..).map(|f| TxOp::ReleaseImage { image: f.image }).collect();
+        drop(reply);
+        self.ctx.abandon(self.read.0);
+        ops.push(TxOp::CancelRead { reader: self.reader, read: self.read });
+        self.ctx.pending_ops.borrow_mut().extend(ops);
+        if self.ctx.open_transactions.get() == 0 && !self.ctx.shutdown.get() {
+            self.ctx.apply(|_| {});
+        }
+    }
+}
+
+impl<'a> Tx<'a> {
+    /// A media reader on `source` (docs/media-plan.md §8 ruling 4): frames
+    /// and peaks without a player.
+    pub fn reader(&mut self, source: &MediaSource) -> ReaderId {
+        let reader = self.ctx.alloc_reader();
+        self.ops.push(TxOp::OpenReader { reader, source: source.value() });
+        reader
+    }
+
+    /// One picture per time in `times_ms`, each heard through
+    /// [`Messages::on_frame`] and the read's end through
+    /// [`Messages::on_read_done`]. `max_size` bounds the picture, aspect
+    /// kept, 0 for no bound on that axis. One read in flight per reader.
+    pub fn read_frames(
+        &mut self,
+        reader: ReaderId,
+        times_ms: &[u64],
+        max_size: (u32, u32),
+        accuracy: FrameAccuracy,
+    ) -> ReadId {
+        let read = self.ctx.alloc_read(reader);
+        let first_image = self.ctx.alloc_images(times_ms.len());
+        self.ops.push(TxOp::ReadFrames {
+            reader,
+            read,
+            first_image,
+            accuracy,
+            max_size,
+            times_ms: times_ms.to_vec(),
+        });
+        read
+    }
+
+    /// The first audio track's peaks, a min/max pair per channel per
+    /// `samples_per_pair` frames, heard through [`Messages::on_peaks`].
+    pub fn read_peaks(&mut self, reader: ReaderId, samples_per_pair: u32) -> ReadId {
+        let read = self.ctx.alloc_read(reader);
+        self.ops.push(TxOp::ReadPeaks { reader, read, samples_per_pair });
+        read
+    }
+
+    /// Stop a read: it ends cancelled, and nothing else of it is heard.
+    pub fn cancel_read(&mut self, reader: ReaderId, read: ReadId) {
+        self.ctx.abandon(read.0);
+        self.ops.push(TxOp::CancelRead { reader, read });
+    }
+
+    /// Forget a reader, cancelling its read in flight. The images it
+    /// answered with stay the app's.
+    pub fn close_reader(&mut self, reader: ReaderId) {
+        let in_flight = self.ctx.reads_in_flight.borrow().get(&reader.0).copied();
+        if let Some(read) = in_flight {
+            self.ctx.abandon(read);
+        }
+        self.ops.push(TxOp::CloseReader { reader });
+    }
+
+    /// An image decoded by kaya from an asset or a picked file, heard
+    /// through [`Messages::on_image_loaded`]; a drawing may name it in the
+    /// same transaction.
+    pub fn load_image(&mut self, source: &MediaSource) -> ImageId {
+        let image = self.ctx.alloc_images(1);
+        self.ops.push(TxOp::LoadImage { image, source: source.value() });
+        image
+    }
+
+    pub fn release_image(&mut self, image: ImageId) {
+        self.ops.push(TxOp::ReleaseImage { image });
+    }
+}
+
+impl<M> Messages<M> {
+    fn on_read_occ(&self, read: ReadId, f: impl Fn(&Occurrence) -> Option<M> + 'static) {
+        self.reads.borrow_mut().entry(read.0).or_default().push(Box::new(f));
+    }
+
+    /// Each time of a read_frames as it is answered, in the platform's order.
+    pub fn on_frame(&self, read: ReadId, f: impl Fn(Frame) -> M + 'static) {
+        self.on_read_occ(read, move |occ| match occ {
+            Occurrence::ReaderFrame { index, image, width, height, requested_ms, actual_ms, .. } => Some(f(Frame {
+                index: *index as usize,
+                requested_ms: *requested_ms,
+                actual_ms: *actual_ms,
+                image: *image,
+                width: *width,
+                height: *height,
+            })),
+            _ => None,
+        });
+    }
+
+    /// A peaks read's progress: milliseconds decoded of the total.
+    pub fn on_read_progress(&self, read: ReadId, f: impl Fn(u64, u64) -> M + 'static) {
+        self.on_read_occ(read, move |occ| match occ {
+            Occurrence::ReaderProgress { done_ms, total_ms, .. } => Some(f(*done_ms, *total_ms)),
+            _ => None,
+        });
+    }
+
+    /// A peaks read's answer, just before its end.
+    pub fn on_peaks(&self, read: ReadId, f: impl Fn(&Peaks) -> M + 'static) {
+        self.on_read_occ(read, move |occ| match occ {
+            Occurrence::ReaderPeaks { peaks, .. } => Some(f(peaks)),
+            _ => None,
+        });
+    }
+
+    /// The read's end: completed, cancelled or failed. Its registrations
+    /// retire with it.
+    pub fn on_read_done(&self, read: ReadId, f: impl Fn(ReadOutcome) -> M + 'static) {
+        self.on_read_occ(read, move |occ| match occ {
+            Occurrence::ReaderDone { outcome, .. } => Some(f(outcome.clone())),
+            _ => None,
+        });
+    }
+
+    /// A load_image's answer: the size, or the reason and the decoder's sentence.
+    pub fn on_image_loaded(
+        &self,
+        image: ImageId,
+        f: impl Fn(Result<(u32, u32), (MediaFailure, String)>) -> M + 'static,
+    ) {
+        self.image_loads.borrow_mut().entry(image.0).or_default().push(Box::new(move |occ| match occ {
+            Occurrence::ImageLoaded { width, height, failure: None, .. } => Some(f(Ok((*width, *height)))),
+            Occurrence::ImageLoaded { failure: Some(why), .. } => Some(f(Err(why.clone()))),
+            _ => None,
+        }));
+    }
+
+    pub(super) fn dispatch_reader(&self, occ: &Occurrence) -> Option<M> {
+        match occ {
+            Occurrence::ReaderFrame { read, .. }
+            | Occurrence::ReaderProgress { read, .. }
+            | Occurrence::ReaderPeaks { read, .. } => {
+                self.reads.borrow().get(&read.0).and_then(|fs| fs.iter().rev().find_map(|f| f(occ)))
+            }
+            Occurrence::ReaderDone { read, .. } => {
+                let fs = self.reads.borrow_mut().remove(&read.0)?;
+                fs.iter().rev().find_map(|f| f(occ))
+            }
+            Occurrence::ImageLoaded { image, .. } => {
+                let fs = self.image_loads.borrow_mut().remove(&image.0)?;
+                fs.iter().rev().find_map(|f| f(occ))
+            }
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::{Inbox, Transaction};
+    use std::future::Future;
+    use std::sync::mpsc::{self, Receiver, Sender};
+
+    fn context() -> (super::super::AppCtx, Receiver<Transaction>, Sender<Inbox>) {
+        let (send, receive) = mpsc::channel();
+        let (transactions, batches) = mpsc::channel();
+        (super::super::AppCtx::new(receive, transactions, send.clone()), batches, send)
+    }
+
+    fn frame(reader: ReaderId, read: ReadId, index: u32, image: u64) -> Occurrence {
+        Occurrence::ReaderFrame {
+            reader,
+            read,
+            index,
+            image: ImageId(image),
+            width: 2,
+            height: 1,
+            requested_ms: 40 * u64::from(index),
+            actual_ms: 40 * u64::from(index),
+        }
+    }
+
+    fn done(reader: ReaderId, read: ReadId, outcome: ReadOutcome) -> Occurrence {
+        Occurrence::ReaderDone { reader, read, outcome }
+    }
+
+    fn released(batch: &Transaction) -> Vec<u64> {
+        batch.iter().filter_map(|op| if let TxOp::ReleaseImage { image } = op { Some(image.0) } else { None }).collect()
+    }
+
+    #[derive(Debug, PartialEq)]
+    enum Msg {
+        Frame(usize),
+        Done(ReadOutcome),
+    }
+
+    /// AFTER A CANCEL THE APP HEARS ONLY THE END: answers already in the
+    /// channel are dropped, and the images they carried go back with the
+    /// next commit, since the app never learned their ids.
+    #[test]
+    fn a_cancelled_read_is_not_heard_and_its_late_images_go_back() {
+        let (ctx, batches, send) = context();
+        let msgs = Messages::<Msg>::new();
+        let (reader, read) = ctx.apply(|tx| {
+            let reader = tx.reader(&MediaSource::asset("media/h264_frames.mp4"));
+            (reader, tx.read_frames(reader, &[0, 40], (0, 0), FrameAccuracy::Exact))
+        });
+        msgs.on_frame(read, |f| Msg::Frame(f.index));
+        msgs.on_read_done(read, Msg::Done);
+        batches.recv().unwrap();
+        ctx.apply(|tx| tx.cancel_read(reader, read));
+        batches.recv().unwrap();
+        send.send(Inbox::Occ(frame(reader, read, 0, 1))).unwrap();
+        send.send(Inbox::Occ(done(reader, read, ReadOutcome::Cancelled))).unwrap();
+        assert_eq!(msgs.next(&ctx), Some(Msg::Done(ReadOutcome::Cancelled)));
+        ctx.apply(|_| {});
+        assert_eq!(released(&batches.recv().unwrap()), vec![1]);
+    }
+
+    /// Closing a reader gives up its read in flight the same way.
+    #[test]
+    fn closing_a_reader_gives_up_its_read() {
+        let (ctx, batches, send) = context();
+        let msgs = Messages::<Msg>::new();
+        let (reader, read) = ctx.apply(|tx| {
+            let reader = tx.reader(&MediaSource::asset("media/h264_frames.mp4"));
+            (reader, tx.read_frames(reader, &[0], (0, 0), FrameAccuracy::Exact))
+        });
+        msgs.on_frame(read, |f| Msg::Frame(f.index));
+        msgs.on_read_done(read, Msg::Done);
+        batches.recv().unwrap();
+        ctx.apply(|tx| tx.close_reader(reader));
+        assert!(matches!(batches.recv().unwrap().as_slice(), [TxOp::CloseReader { .. }]));
+        send.send(Inbox::Occ(frame(reader, read, 0, 1))).unwrap();
+        send.send(Inbox::Occ(done(reader, read, ReadOutcome::Cancelled))).unwrap();
+        assert_eq!(msgs.next(&ctx), Some(Msg::Done(ReadOutcome::Cancelled)));
+        ctx.apply(|_| {});
+        assert_eq!(released(&batches.recv().unwrap()), vec![1]);
+    }
+
+    #[test]
+    fn a_read_in_flight_is_heard_frame_by_frame() {
+        let (ctx, _batches, send) = context();
+        let msgs = Messages::<Msg>::new();
+        let (reader, read) = ctx.apply(|tx| {
+            let reader = tx.reader(&MediaSource::asset("media/h264_frames.mp4"));
+            (reader, tx.read_frames(reader, &[0, 40], (0, 0), FrameAccuracy::Exact))
+        });
+        msgs.on_frame(read, |f| Msg::Frame(f.index));
+        msgs.on_read_done(read, Msg::Done);
+        send.send(Inbox::Occ(frame(reader, read, 1, 2))).unwrap();
+        send.send(Inbox::Occ(frame(reader, read, 0, 1))).unwrap();
+        send.send(Inbox::Occ(done(reader, read, ReadOutcome::Completed))).unwrap();
+        assert_eq!(msgs.next(&ctx), Some(Msg::Frame(1)));
+        assert_eq!(msgs.next(&ctx), Some(Msg::Frame(0)));
+        assert_eq!(msgs.next(&ctx), Some(Msg::Done(ReadOutcome::Completed)));
+        assert!(msgs.reads.borrow().is_empty(), "the read's registrations retired with its end");
+    }
+
+    fn poll<F: Future>(fut: std::pin::Pin<&mut F>) -> std::task::Poll<F::Output> {
+        fut.poll(&mut std::task::Context::from_waker(std::task::Waker::noop()))
+    }
+
+    /// The async tier: the answers in index order, and a future dropped
+    /// before its end cancels the read and gives its images back.
+    #[test]
+    fn an_awaited_read_answers_in_order_and_a_dropped_one_cancels() {
+        let (ctx, batches, _send) = context();
+        let _tasks = ctx.tasks();
+        let reader = ctx.apply(|tx| tx.reader(&MediaSource::asset("media/h264_frames.mp4")));
+        batches.recv().unwrap();
+
+        let mut fut = Box::pin(ctx.frames(reader, &[0, 40], (0, 0), FrameAccuracy::Keyframe));
+        let read = ReadId(1);
+        assert!(matches!(batches.recv().unwrap().as_slice(), [TxOp::ReadFrames { .. }]));
+        assert!(poll(fut.as_mut()).is_pending());
+        assert!(ctx.absorb_read(&frame(reader, read, 1, 2)));
+        assert!(ctx.absorb_read(&frame(reader, read, 0, 1)));
+        assert!(ctx.absorb_read(&done(reader, read, ReadOutcome::Completed)));
+        match poll(fut.as_mut()) {
+            std::task::Poll::Ready(Ok(frames)) => {
+                assert_eq!(frames.iter().map(|f| f.index).collect::<Vec<_>>(), vec![0, 1])
+            }
+            other => panic!("{other:?}"),
+        }
+        drop(fut);
+
+        let mut fut = Box::pin(ctx.frames(reader, &[0, 40], (0, 0), FrameAccuracy::Keyframe));
+        let read = ReadId(2);
+        batches.recv().unwrap();
+        assert!(poll(fut.as_mut()).is_pending());
+        assert!(ctx.absorb_read(&frame(reader, read, 0, 3)));
+        drop(fut);
+        let batch = batches.recv().unwrap();
+        assert!(batch.iter().any(|op| matches!(op, TxOp::CancelRead { read: ReadId(2), .. })));
+        assert_eq!(released(&batch), vec![3]);
+        assert!(ctx.absorb_read(&frame(reader, read, 1, 4)), "a late answer is not heard");
+        assert!(!ctx.absorb_read(&done(reader, read, ReadOutcome::Cancelled)));
+        ctx.apply(|_| {});
+        assert_eq!(released(&batches.recv().unwrap()), vec![4]);
+    }
+
+    /// A read that fails hands back nothing, and what it had carried goes back.
+    #[test]
+    fn an_awaited_read_that_fails_releases_its_images() {
+        let (ctx, batches, _send) = context();
+        let _tasks = ctx.tasks();
+        let reader = ctx.apply(|tx| tx.reader(&MediaSource::asset("media/h264_frames.mp4")));
+        batches.recv().unwrap();
+        let mut fut = Box::pin(ctx.frames(reader, &[0, 40], (0, 0), FrameAccuracy::Exact));
+        batches.recv().unwrap();
+        assert!(poll(fut.as_mut()).is_pending());
+        let read = ReadId(1);
+        ctx.absorb_read(&frame(reader, read, 0, 1));
+        ctx.absorb_read(&done(reader, read, ReadOutcome::Failed(MediaFailure::DecodeError, "x".into())));
+        assert!(matches!(
+            poll(fut.as_mut()),
+            std::task::Poll::Ready(Err(ReadError::Failed(MediaFailure::DecodeError, _)))
+        ));
+        ctx.apply(|_| {});
+        assert_eq!(released(&batches.recv().unwrap()), vec![1]);
+    }
+}

@@ -173,7 +173,9 @@ DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes"]
 # tooltips with its own (docs/tooltip-plan.md §5) — the iOS arm is the
 # shared interpreter's `.help`, which lands on the accessibility hint,
 # and expect_help reads it there.
-UNWIRED_SCENES = []
+# The reader's iOS arm is the shared interpreter's, compiled; its legs are
+# the breadth slice's to measure (docs/media-plan.md §8 ruling 4).
+UNWIRED_SCENES = ["media_reader"]
 
 # The fullscreen scene's app-only way back after the cut, the same steps as
 # tools/lib/lanes/android.py's FULLSCREEN_APP_TAIL: no user change arrives.

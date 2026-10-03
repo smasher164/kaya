@@ -14157,6 +14157,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
         }
         ApplyOp::SelectTrack { player, kind, index } => gtk_media::select_track(player.0, kind, index),
         ApplyOp::CaptionTimes { player, times } => gtk_media::caption_times(player.0, times),
+        // docs/media-plan.md §8 ruling 4: the reader is a depth slice on the mac.
+        ApplyOp::OpenReader { .. }
+        | ApplyOp::ReadFrames { .. }
+        | ApplyOp::ReadPeaks { .. }
+        | ApplyOp::CancelRead { .. }
+        | ApplyOp::CloseReader(_) => crate::depth_stub("media_reader"),
         ApplyOp::SetSession { player, offered, playback_state: _, title, artist, album, artwork } => {
             gtk_media::set_session(
                 core,

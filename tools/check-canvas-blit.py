@@ -18,7 +18,8 @@ dev_shell_or_die()
 #    one twice: at its definition, and in the one vocabulary list.
 # 2. A WRONG PIXEL FORMAT SURVIVES A SYMMETRIC SAMPLE — canvas.steps
 #    catches a channel swap only where the probe colour is asymmetric —
-#    so each backend's declared format is held here by name.
+#    so each backend's declared format is held here by name, and the
+#    reader's frame conversion with it (docs/media-plan.md §8 ruling 4).
 # 3. THE SCALE MUST BE THE TRUE ONE AND REPORTED AT ALL: every lane is
 #    at 1.0 or at a scale the platform states exactly, so a rounded or
 #    missing scale is invisible to all five. GTK is where it bites —
@@ -91,12 +92,12 @@ def strip_comments(text):
 # finding. The interpreters define them privately and name them once.
 VOCAB = re.compile(
     r"\b("
-    r"draw(MoveTo|LineTo|Close|Stroke|Fill|Font|Text)"
+    r"draw(MoveTo|LineTo|Close|Stroke|Fill|Font|Text|Image)"
     r"|paint(Series|SeriesFill|Grid|Axis|Ground)"
     r"|fill(Nonzero|EvenOdd)"
     r"|textAlign(Start|Middle|End)"
     r"|textBaseline(Alphabetic|Middle|Top|Bottom)"
-    r"|DRAW_(MOVE_TO|LINE_TO|CLOSE|STROKE|FILL|FONT|TEXT)"
+    r"|DRAW_(MOVE_TO|LINE_TO|CLOSE|STROKE|FILL|FONT|TEXT|IMAGE)"
     r"|PAINT_(SERIES|SERIES_FILL|GRID|AXIS|GROUND)"
     r"|FILL_(NONZERO|EVEN_ODD)"
     r"|TEXT_ALIGN_(START|MIDDLE|END)"
@@ -206,14 +207,43 @@ def check(gtk, winui, swiftui, compose):
          "own kN32 layout) and premultiplied by default, so the "
          "Compose arm swizzles nothing"),
     ]
+    # The reader's own conversion declares the same format and is held
+    # below; it is cut out here so it cannot stand in for the blit's.
+    reader_conv = "func kayaPremultipliedRGBA(_ image: CGImage) -> (UInt32, UInt32, [UInt8])? {"
     for key, token, why in FORMATS:
-        if re.search(token, read(key)) is None:
+        text = read(key)
+        if key == "swiftui":
+            text = without_block(text, reader_conv) or text
+        if re.search(token, text) is None:
             bad.append(
                 f"{paths[key]}: the canvas blit no longer names the "
                 f"pixel format it hands the platform ({token}). {why}. "
                 f"tools/scenes/canvas.steps can only catch a channel "
                 f"swap at a probe point whose colour is ASYMMETRIC, so "
                 f"this is the wall for the rest")
+
+    # THE READER'S FRAMES ENTER THE CORE IN THE CANVAS'S OWN FORMAT
+    # (docs/media-plan.md §8 ruling 4): the core keeps them as the
+    # premultiplied RGBA8 its `image` op draws, and copies what it is
+    # handed. A frame handed over straight-alpha or BGRA reads the same on
+    # every opaque grey a scene probes, so the conversion is held by name.
+    conv = re.search(r"func kayaPremultipliedRGBA\(.*?\n\}", read("swiftui"),
+                     flags=re.S)
+    if conv is None:
+        bad.append(
+            f"{paths['swiftui']}: kayaPremultipliedRGBA, the reader's frame "
+            f"conversion, is not where this gate looks, so the clause "
+            f"holding its format reports a clean bill about nothing")
+    else:
+        for token in (r"CGImageAlphaInfo\.premultipliedLast\.rawValue",
+                      r"CGBitmapInfo\.byteOrder32Big\.rawValue"):
+            if re.search(token, conv.group(0)) is None:
+                bad.append(
+                    f"{paths['swiftui']}: the reader's frame conversion no "
+                    f"longer names {token}. The core holds a frame as the "
+                    f"premultiplied RGBA8 its `image` op draws and copies "
+                    f"what it is handed; straight alpha or BGRA reads "
+                    f"identically on the opaque greys a scene probes")
 
     # THE ONE ARM THAT SWIZZLES, and the three index-shifted writes
     # that ARE the swizzle. WriteableBitmap.PixelBuffer is
@@ -578,6 +608,28 @@ def negatives():
                lambda p=s: check(GTK, WINUI, str(p), COMPOSE),
                want="vocabulary list this gate reads is gone")
 
+    # N1d: THE IMAGE OP INTERPRETED BY AN INTERPRETER: the reader's
+    # section consulting the op it never draws.
+    s = g.perturb("N1d (a SwiftUI arm that consults the image op)", SWIFTUI,
+                  r"final class KayaReader \{",
+                  "let kayaDrawsImages = drawImage == 8\nfinal class KayaReader {",
+                  flags=re.S)
+    g.negative("an interpreter that switches on the image op",
+               lambda p=s: check(GTK, WINUI, str(p), COMPOSE),
+               want="consults the canvas vocabulary (drawImage)")
+
+    # N2d: THE READER'S FRAMES HANDED OVER STRAIGHT-ALPHA, which no opaque
+    # probe tells apart.
+    s = g.perturb("N2d (the reader's frames converted straight-alpha)",
+                  SWIFTUI, r"CGImageAlphaInfo\.premultipliedLast\.rawValue \| "
+                  r"CGBitmapInfo\.byteOrder32Big\.rawValue\)\n        else \{ return false \}",
+                  "CGImageAlphaInfo.last.rawValue | "
+                  "CGBitmapInfo.byteOrder32Big.rawValue)\n        else { return false }",
+                  flags=re.S)
+    g.negative("a reader handing over straight alpha",
+               lambda p=s: check(GTK, WINUI, str(p), COMPOSE),
+               want="the reader's frame conversion no longer names")
+
     # N2: THE PIXEL FORMAT, changed to the other plausible one. This
     # is the perturbation a scene sampling a grey would pass.
     s = g.perturb("N2 (the GTK texture format swapped to BGRA)", GTK,
@@ -786,7 +838,7 @@ def negatives():
                lambda p=s: check_canonical(str(p), CARGO),
                want="no longer switches threads on by size")
 
-    g.negatives_ran(25)
+    g.negatives_ran(27)
 
 
 negatives()
@@ -839,7 +891,8 @@ if offenders:
     print("\n".join(offenders))
     print("check-canvas-blit: FAIL")
     raise SystemExit(1)
-g.verdict("4 backends: the one rule, the four pixel formats, the one "
+g.verdict("4 backends: the one rule (the image op included), the four pixel "
+          "formats and the reader's frame format, the one "
           "swizzle, the true scale reported, the 1:1 blit and its "
           "track report, the GTK canvas's own 1:1 snapshot, both "
           "ink modes compared, and the canonical raster's pinned "

@@ -16263,6 +16263,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
         ApplyOp::SetVideoPlayer { widget, player } => media::set_video_player(core, widget.0, player.map(|p| p.0))?,
         ApplyOp::SelectTrack { player, kind, index } => media::select_track(core, player.0, kind, index)?,
         ApplyOp::CaptionTimes { player, times } => media::caption_times(core, player.0, times),
+        // docs/media-plan.md §8 ruling 4: the reader is a depth slice on the mac.
+        ApplyOp::OpenReader { .. }
+        | ApplyOp::ReadFrames { .. }
+        | ApplyOp::ReadPeaks { .. }
+        | ApplyOp::CancelRead { .. }
+        | ApplyOp::CloseReader(_) => crate::depth_stub("media_reader"),
         ApplyOp::SetSession { player, offered, playback_state, title, artist, album, artwork } => {
             media::set_session(
                 core,

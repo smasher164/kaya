@@ -21,7 +21,7 @@ pub(crate) const TIMEOUT_MS: u64 = 30_000;
 
 /// A backend's wake-up timer and the core's clock are two clocks; a wake this
 /// close to the bound counts as past it.
-const TIMEOUT_SLACK_MS: u64 = 250;
+pub(crate) const TIMEOUT_SLACK_MS: u64 = 250;
 
 /// What a backend reports about one player, in its platform's own terms.
 #[derive(Debug, Clone, PartialEq)]
@@ -245,7 +245,7 @@ impl Media {
         match (prop, value) {
             (PlayerProp::Source, value @ (Value::Str(_) | Value::I64(_))) => {
                 let resolved = match value {
-                    Value::I64(handle) => resolve_picked(player, handle),
+                    Value::I64(handle) => resolve_picked(&format!("player {}", player.0), handle),
                     Value::Str(source) => resolve_source(&source),
                     _ => unreachable!(),
                 };
@@ -827,8 +827,8 @@ pub(crate) fn resolve_source(source: &str) -> Resolved {
 /// the platform hands back a path, the path's own check; where it hands back
 /// only its own reference (an Android `content://` URI, an iOS URL), that
 /// reference as written, for the platform's player to open or fail on.
-fn resolve_picked(player: PlayerId, handle: i64) -> Resolved {
-    let source = picked(player, "source", handle);
+pub(crate) fn resolve_picked(who: &str, handle: i64) -> Resolved {
+    let source = picked(who, "source", handle);
     let local = crate::protocol::PickedSource::local_path(&*source);
     if local.is_empty() {
         Resolved::Url { url: crate::protocol::PickedSource::locator(&*source).to_owned() }
@@ -837,12 +837,11 @@ fn resolve_picked(player: PlayerId, handle: i64) -> Resolved {
     }
 }
 
-fn picked(player: PlayerId, what: &str, handle: i64) -> std::sync::Arc<dyn crate::protocol::PickedSource> {
+pub(crate) fn picked(who: &str, what: &str, handle: i64) -> std::sync::Arc<dyn crate::protocol::PickedSource> {
     crate::capi::picked_source(crate::protocol::PickedId(handle as u64)).unwrap_or_else(|| {
         panic!(
-            "kaya: player {} {what} names picked file {handle}, which was never minted — a file \
-             handle comes from a picker result",
-            player.0
+            "kaya: {who} {what} names picked file {handle}, which was never minted — a file \
+             handle comes from a picker result"
         )
     })
 }
@@ -851,7 +850,7 @@ fn picked(player: PlayerId, what: &str, handle: i64) -> std::sync::Arc<dyn crate
 /// platform's reference answers.
 fn read_picked_sidecar(player: PlayerId, handle: i64) -> Captions {
     use std::io::Read;
-    let source = picked(player, "captions", handle);
+    let source = picked(&format!("player {}", player.0), "captions", handle);
     let name = crate::protocol::PickedSource::name(&*source).to_owned();
     let mut bytes = Vec::new();
     source

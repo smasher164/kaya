@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x39c348180962e0db
+SPEC_HASH = 0x6d398768b7d3b5d6
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -59,6 +59,7 @@ DRAW_OP_STROKE = 4
 DRAW_OP_FILL = 5
 DRAW_OP_FONT = 6
 DRAW_OP_TEXT = 7
+DRAW_OP_IMAGE = 8
 PAINT_SERIES = 1
 PAINT_SERIES_FILL = 2
 PAINT_GRID = 3
@@ -284,6 +285,11 @@ MEDIA_FAILURE_TIMEOUT = 7
 PLAYER_COMMAND_PLAY = 1
 PLAYER_COMMAND_PAUSE = 2
 PLAYER_COMMAND_SEEK = 3
+FRAME_ACCURACY_KEYFRAME = 0
+FRAME_ACCURACY_EXACT = 1
+READ_OUTCOME_COMPLETED = 0
+READ_OUTCOME_CANCELLED = 1
+READ_OUTCOME_FAILED = 2
 SESSION_ACTION_PLAY = 1
 SESSION_ACTION_PAUSE = 2
 SESSION_ACTION_STOP = 3
@@ -379,6 +385,13 @@ TX_PLAYER_COMMAND = 65
 TX_RELEASE_PLAYER = 66
 TX_SELECT_TRACK = 67
 TX_SET_SESSION = 68
+TX_OPEN_READER = 69
+TX_READ_FRAMES = 70
+TX_READ_PEAKS = 71
+TX_CANCEL_READ = 72
+TX_CLOSE_READER = 73
+TX_LOAD_IMAGE = 74
+TX_RELEASE_IMAGE = 75
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -435,6 +448,11 @@ APPLY_SET_VIDEO_PLAYER = 55
 APPLY_SET_SESSION = 56
 APPLY_SELECT_TRACK = 57
 APPLY_CAPTION_TIMES = 58
+APPLY_OPEN_READER = 59
+APPLY_READ_FRAMES = 60
+APPLY_READ_PEAKS = 61
+APPLY_CANCEL_READ = 62
+APPLY_CLOSE_READER = 63
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
@@ -480,6 +498,11 @@ OCC_SESSION_ACTION = 42
 OCC_PLAYER_TRACKS = 43
 OCC_CAPTION_CUE = 44
 OCC_VIDEO_VISIBILITY = 45
+OCC_READER_FRAME = 46
+OCC_READER_PROGRESS = 47
+OCC_READER_PEAKS = 48
+OCC_READER_DONE = 49
+OCC_IMAGE_LOADED = 50
 
 
 def _pad(b: bytes) -> bytes:
@@ -834,6 +857,34 @@ def tx_select_track(player: int, kind: int, index: int) -> bytes:
 def tx_set_session(player: int, actions: int, playback_state: int, title: Value, artist: Value, album: Value, artwork: Value) -> bytes:
     """Declare the app's ONE media session (docs/media-plan.md §5), replacing the last declaration: the attached `player` (0 attaches none and withdraws the app from the system's controls), `actions` a mask of 1 << SESSION_ACTION for the actions the app handles itself, `playback_state` the PLAYBACK_STATE the app states while no player is attached, and the metadata as Str values, `artwork` an asset name or empty. With a player attached, play, pause and seek_to the app does not handle apply to that player."""
     return record(TX_SET_SESSION, struct.pack("<Q", player) + struct.pack("<I", actions) + struct.pack("<I", playback_state) + _enc.value(title) + _enc.value(artist) + _enc.value(album) + _enc.value(artwork))
+
+def tx_open_reader(reader: int, source: Value) -> bytes:
+    """Open a media READER (docs/media-plan.md §8 ruling 4): an object separate from any player that extracts frames and peaks, its id guest-chosen in its own space. `source` is the player's: an asset name or http(s) URL as Str, or a picked file's handle as I64. A local source that is not there fails every read not_found without reaching the platform. A second open of a live id is a scene error."""
+    return record(TX_OPEN_READER, struct.pack("<Q", reader) + _enc.value(source))
+
+def tx_read_frames(reader: int, read: int, first_image: int, accuracy: int, max_width: int, max_height: int, times: Sequence[Value]) -> bytes:
+    """Ask for one picture per time (`times`, I64 milliseconds), each answered by reader_frame with the time of the picture the platform returned and a core-held image, then one reader_done. FRAME_ACCURACY keyframe is the keyframe AT OR BEFORE the time on every platform, exact the frame shown at it. `max_width`/`max_height` bound the picture, aspect kept, 0 for no bound on that axis. Frame i becomes image `first_image + i`, ids that must not be live. ONE READ IN FLIGHT PER READER: a second while one runs is a scene error, and nothing is cancelled implicitly."""
+    return record(TX_READ_FRAMES, struct.pack("<Q", reader) + struct.pack("<Q", read) + struct.pack("<Q", first_image) + struct.pack("<I", accuracy) + struct.pack("<I", max_width) + struct.pack("<I", max_height) + struct.pack("<I", 0) + _enc.values(times))
+
+def tx_read_peaks(reader: int, read: int, samples_per_pair: int) -> bytes:
+    """Decode the first audio track on the platform and reduce it IN THE CORE to a min/max pair per channel per `samples_per_pair` frames (audiowaveform's .dat shape), answered by reader_progress, reader_peaks and reader_done."""
+    return record(TX_READ_PEAKS, struct.pack("<Q", reader) + struct.pack("<Q", read) + struct.pack("<I", samples_per_pair) + struct.pack("<I", 0))
+
+def tx_cancel_read(reader: int, read: int) -> bytes:
+    """Stop a read in flight: reader_done(cancelled) follows at once and nothing of the read after it. A read already done is not an error, since an app races its own answers."""
+    return record(TX_CANCEL_READ, struct.pack("<Q", reader) + struct.pack("<Q", read))
+
+def tx_close_reader(reader: int) -> bytes:
+    """Forget a reader, cancelling its read in flight. The images it answered with stay the app's."""
+    return record(TX_CLOSE_READER, struct.pack("<Q", reader))
+
+def tx_load_image(image: int, source: Value) -> bytes:
+    """Decode an image IN THE CORE (PNG or JPEG) from an asset name (Str) or a picked file's handle (I64) into a core-held premultiplied RGBA8 image, answered by image_loaded. One decoder on every platform is what keeps a drawing that names it one canonical hash (docs/canvas-plan.md §7.1)."""
+    return record(TX_LOAD_IMAGE, struct.pack("<Q", image) + _enc.value(source))
+
+def tx_release_image(image: int) -> bytes:
+    """Forget a core-held image. A drawing declared before keeps showing it until it is declared again; a drawing declared after that names it is refused."""
+    return record(TX_RELEASE_IMAGE, struct.pack("<Q", image))
 
 
 def tx_set_text(widget_id: int, text: str) -> bytes:
@@ -1986,7 +2037,7 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
     value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED):
         return kind, None, [], None
     if kind == OCC_ALERT_RESULT:
         # A request's one answer: id + the u32 code.
@@ -2063,6 +2114,89 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
         for _ in range(count):
             value, at = parse_value(buf, at)
             tail.append(value)
+        return kind, flat_id, [], tail
+    if kind == OCC_READER_FRAME:
+        # A flat record: its fields in order, into the tail.
+        at = 8
+        tail = []
+        flat_id = struct.unpack_from("<Q", buf, 8)[0]
+        at += 8
+        tail.append(struct.unpack_from("<Q", buf, at)[0])
+        at += 8
+        tail.append(struct.unpack_from("<Q", buf, at)[0])
+        at += 8
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        at += 4
+        tail.append(struct.unpack_from("<Q", buf, at)[0])
+        at += 8
+        tail.append(struct.unpack_from("<Q", buf, at)[0])
+        at += 8
+        return kind, flat_id, [], tail
+    if kind == OCC_READER_PROGRESS:
+        # A flat record: its fields in order, into the tail.
+        at = 8
+        tail = []
+        flat_id = struct.unpack_from("<Q", buf, 8)[0]
+        at += 8
+        tail.append(struct.unpack_from("<Q", buf, at)[0])
+        at += 8
+        tail.append(struct.unpack_from("<Q", buf, at)[0])
+        at += 8
+        tail.append(struct.unpack_from("<Q", buf, at)[0])
+        at += 8
+        return kind, flat_id, [], tail
+    if kind == OCC_READER_PEAKS:
+        # A flat record: its fields in order, into the tail.
+        at = 8
+        tail = []
+        flat_id = struct.unpack_from("<Q", buf, 8)[0]
+        at += 8
+        tail.append(struct.unpack_from("<Q", buf, at)[0])
+        at += 8
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        return kind, flat_id, [], tail
+    if kind == OCC_READER_DONE:
+        # A flat record: its fields in order, into the tail.
+        at = 8
+        tail = []
+        flat_id = struct.unpack_from("<Q", buf, 8)[0]
+        at += 8
+        tail.append(struct.unpack_from("<Q", buf, at)[0])
+        at += 8
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        value, at = parse_value(buf, at)
+        tail.append(value)
+        return kind, flat_id, [], tail
+    if kind == OCC_IMAGE_LOADED:
+        # A flat record: its fields in order, into the tail.
+        at = 8
+        tail = []
+        flat_id = struct.unpack_from("<Q", buf, 8)[0]
+        at += 8
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        at += 4
+        value, at = parse_value(buf, at)
+        tail.append(value)
         return kind, flat_id, [], tail
     if kind == OCC_FILE_DIALOG_RESULT:
         dialog, count = struct.unpack_from("<QI", buf, 8)

@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x39c348180962e0db;
+    public const ulong SpecHash = 0x6d398768b7d3b5d6;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -57,6 +57,7 @@ static class KayaWire
     public const uint DrawOpFill = 5;
     public const uint DrawOpFont = 6;
     public const uint DrawOpText = 7;
+    public const uint DrawOpImage = 8;
     public const uint PaintSeries = 1;
     public const uint PaintSeriesFill = 2;
     public const uint PaintGrid = 3;
@@ -282,6 +283,11 @@ static class KayaWire
     public const uint PlayerCommandPlay = 1;
     public const uint PlayerCommandPause = 2;
     public const uint PlayerCommandSeek = 3;
+    public const uint FrameAccuracyKeyframe = 0;
+    public const uint FrameAccuracyExact = 1;
+    public const uint ReadOutcomeCompleted = 0;
+    public const uint ReadOutcomeCancelled = 1;
+    public const uint ReadOutcomeFailed = 2;
     public const uint SessionActionPlay = 1;
     public const uint SessionActionPause = 2;
     public const uint SessionActionStop = 3;
@@ -376,6 +382,13 @@ static class KayaWire
     public const ushort TxKindReleasePlayer = 66;
     public const ushort TxKindSelectTrack = 67;
     public const ushort TxKindSetSession = 68;
+    public const ushort TxKindOpenReader = 69;
+    public const ushort TxKindReadFrames = 70;
+    public const ushort TxKindReadPeaks = 71;
+    public const ushort TxKindCancelRead = 72;
+    public const ushort TxKindCloseReader = 73;
+    public const ushort TxKindLoadImage = 74;
+    public const ushort TxKindReleaseImage = 75;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -432,6 +445,11 @@ static class KayaWire
     public const ushort ApplyKindSetSession = 56;
     public const ushort ApplyKindSelectTrack = 57;
     public const ushort ApplyKindCaptionTimes = 58;
+    public const ushort ApplyKindOpenReader = 59;
+    public const ushort ApplyKindReadFrames = 60;
+    public const ushort ApplyKindReadPeaks = 61;
+    public const ushort ApplyKindCancelRead = 62;
+    public const ushort ApplyKindCloseReader = 63;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
@@ -477,6 +495,11 @@ static class KayaWire
     public const ushort OccKindPlayerTracks = 43;
     public const ushort OccKindCaptionCue = 44;
     public const ushort OccKindVideoVisibility = 45;
+    public const ushort OccKindReaderFrame = 46;
+    public const ushort OccKindReaderProgress = 47;
+    public const ushort OccKindReaderPeaks = 48;
+    public const ushort OccKindReaderDone = 49;
+    public const ushort OccKindImageLoaded = 50;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -1241,6 +1264,75 @@ static class KayaWire
         EncodeValue(w, album);
         EncodeValue(w, artwork);
         return Finish(stream, w, TxKindSetSession);
+    }
+
+    /// Open a media READER (docs/media-plan.md §8 ruling 4): an object separate from any player that extracts frames and peaks, its id guest-chosen in its own space. `source` is the player's: an asset name or http(s) URL as Str, or a picked file's handle as I64. A local source that is not there fails every read not_found without reaching the platform. A second open of a live id is a scene error.
+    public static byte[] TxOpenReader(ulong reader, object source)
+    {
+        var w = Begin(out var stream);
+        w.Write(reader);
+        EncodeValue(w, source);
+        return Finish(stream, w, TxKindOpenReader);
+    }
+
+    /// Ask for one picture per time (`times`, I64 milliseconds), each answered by reader_frame with the time of the picture the platform returned and a core-held image, then one reader_done. FRAME_ACCURACY keyframe is the keyframe AT OR BEFORE the time on every platform, exact the frame shown at it. `max_width`/`max_height` bound the picture, aspect kept, 0 for no bound on that axis. Frame i becomes image `first_image + i`, ids that must not be live. ONE READ IN FLIGHT PER READER: a second while one runs is a scene error, and nothing is cancelled implicitly.
+    public static byte[] TxReadFrames(ulong reader, ulong read, ulong firstImage, uint accuracy, uint maxWidth, uint maxHeight, object[] times)
+    {
+        var w = Begin(out var stream);
+        w.Write(reader);
+        w.Write(read);
+        w.Write(firstImage);
+        w.Write(accuracy);
+        w.Write(maxWidth);
+        w.Write(maxHeight);
+        w.Write(0u);
+        EncodeValues(w, times);
+        return Finish(stream, w, TxKindReadFrames);
+    }
+
+    /// Decode the first audio track on the platform and reduce it IN THE CORE to a min/max pair per channel per `samples_per_pair` frames (audiowaveform's .dat shape), answered by reader_progress, reader_peaks and reader_done.
+    public static byte[] TxReadPeaks(ulong reader, ulong read, uint samplesPerPair)
+    {
+        var w = Begin(out var stream);
+        w.Write(reader);
+        w.Write(read);
+        w.Write(samplesPerPair);
+        w.Write(0u);
+        return Finish(stream, w, TxKindReadPeaks);
+    }
+
+    /// Stop a read in flight: reader_done(cancelled) follows at once and nothing of the read after it. A read already done is not an error, since an app races its own answers.
+    public static byte[] TxCancelRead(ulong reader, ulong read)
+    {
+        var w = Begin(out var stream);
+        w.Write(reader);
+        w.Write(read);
+        return Finish(stream, w, TxKindCancelRead);
+    }
+
+    /// Forget a reader, cancelling its read in flight. The images it answered with stay the app's.
+    public static byte[] TxCloseReader(ulong reader)
+    {
+        var w = Begin(out var stream);
+        w.Write(reader);
+        return Finish(stream, w, TxKindCloseReader);
+    }
+
+    /// Decode an image IN THE CORE (PNG or JPEG) from an asset name (Str) or a picked file's handle (I64) into a core-held premultiplied RGBA8 image, answered by image_loaded. One decoder on every platform is what keeps a drawing that names it one canonical hash (docs/canvas-plan.md §7.1).
+    public static byte[] TxLoadImage(ulong image, object source)
+    {
+        var w = Begin(out var stream);
+        w.Write(image);
+        EncodeValue(w, source);
+        return Finish(stream, w, TxKindLoadImage);
+    }
+
+    /// Forget a core-held image. A drawing declared before keeps showing it until it is declared again; a drawing declared after that names it is refused.
+    public static byte[] TxReleaseImage(ulong image)
+    {
+        var w = Begin(out var stream);
+        w.Write(image);
+        return Finish(stream, w, TxKindReleaseImage);
     }
 
     /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
@@ -3151,7 +3243,7 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted && kind != OccKindSheetDismissed && kind != OccKindDismissRequested && kind != OccKindSubmitted && kind != OccKindNotificationReplied && kind != OccKindFullscreenChanged && kind != OccKindColorChanged && kind != OccKindRangeChanged && kind != OccKindRangeCommitted && kind != OccKindPlayerChanged && kind != OccKindPlayerPosition && kind != OccKindSeekCompleted && kind != OccKindSessionAction && kind != OccKindPlayerTracks && kind != OccKindCaptionCue && kind != OccKindVideoVisibility)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted && kind != OccKindSheetDismissed && kind != OccKindDismissRequested && kind != OccKindSubmitted && kind != OccKindNotificationReplied && kind != OccKindFullscreenChanged && kind != OccKindColorChanged && kind != OccKindRangeChanged && kind != OccKindRangeCommitted && kind != OccKindPlayerChanged && kind != OccKindPlayerPosition && kind != OccKindSeekCompleted && kind != OccKindSessionAction && kind != OccKindPlayerTracks && kind != OccKindCaptionCue && kind != OccKindVideoVisibility && kind != OccKindReaderFrame && kind != OccKindReaderProgress && kind != OccKindReaderPeaks && kind != OccKindReaderDone && kind != OccKindImageLoaded)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         if (kind == OccKindAlertResult)
@@ -3298,6 +3390,119 @@ static class KayaWire
                     }
                     flatAt += 8 + ((vlen + 7) & ~7);
                 }
+            }
+            payload = tail;
+            return true;
+        }
+        if (kind == OccKindReaderFrame)
+        {
+            // A flat record: its fields in order, into the tail.
+            int flatAt = 8;
+            var tail = new List<object>();
+            flatAt += 8;
+            tail.Add(BitConverter.ToInt64(rec, flatAt));
+            flatAt += 8;
+            tail.Add(BitConverter.ToInt64(rec, flatAt));
+            flatAt += 8;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            flatAt += 4;
+            tail.Add(BitConverter.ToInt64(rec, flatAt));
+            flatAt += 8;
+            tail.Add(BitConverter.ToInt64(rec, flatAt));
+            flatAt += 8;
+            payload = tail;
+            return true;
+        }
+        if (kind == OccKindReaderProgress)
+        {
+            // A flat record: its fields in order, into the tail.
+            int flatAt = 8;
+            var tail = new List<object>();
+            flatAt += 8;
+            tail.Add(BitConverter.ToInt64(rec, flatAt));
+            flatAt += 8;
+            tail.Add(BitConverter.ToInt64(rec, flatAt));
+            flatAt += 8;
+            tail.Add(BitConverter.ToInt64(rec, flatAt));
+            flatAt += 8;
+            payload = tail;
+            return true;
+        }
+        if (kind == OccKindReaderPeaks)
+        {
+            // A flat record: its fields in order, into the tail.
+            int flatAt = 8;
+            var tail = new List<object>();
+            flatAt += 8;
+            tail.Add(BitConverter.ToInt64(rec, flatAt));
+            flatAt += 8;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            payload = tail;
+            return true;
+        }
+        if (kind == OccKindReaderDone)
+        {
+            // A flat record: its fields in order, into the tail.
+            int flatAt = 8;
+            var tail = new List<object>();
+            flatAt += 8;
+            tail.Add(BitConverter.ToInt64(rec, flatAt));
+            flatAt += 8;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            {
+                uint vtype = BitConverter.ToUInt32(rec, flatAt);
+                int vlen = (int)BitConverter.ToUInt32(rec, flatAt + 4);
+                switch (vtype)
+                {
+                    case ValueBool: tail.Add(rec[flatAt + 8] != 0); break;
+                    case ValueI64: tail.Add(BitConverter.ToInt64(rec, flatAt + 8)); break;
+                    case ValueF64: tail.Add(BitConverter.ToDouble(rec, flatAt + 8)); break;
+                    default: tail.Add(Encoding.UTF8.GetString(rec, flatAt + 8, vlen)); break;
+                }
+                flatAt += 8 + ((vlen + 7) & ~7);
+            }
+            payload = tail;
+            return true;
+        }
+        if (kind == OccKindImageLoaded)
+        {
+            // A flat record: its fields in order, into the tail.
+            int flatAt = 8;
+            var tail = new List<object>();
+            flatAt += 8;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            flatAt += 4;
+            {
+                uint vtype = BitConverter.ToUInt32(rec, flatAt);
+                int vlen = (int)BitConverter.ToUInt32(rec, flatAt + 4);
+                switch (vtype)
+                {
+                    case ValueBool: tail.Add(rec[flatAt + 8] != 0); break;
+                    case ValueI64: tail.Add(BitConverter.ToInt64(rec, flatAt + 8)); break;
+                    case ValueF64: tail.Add(BitConverter.ToDouble(rec, flatAt + 8)); break;
+                    default: tail.Add(Encoding.UTF8.GetString(rec, flatAt + 8, vlen)); break;
+                }
+                flatAt += 8 + ((vlen + 7) & ~7);
             }
             payload = tail;
             return true;

@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x39c348180962e0dbL
+let spec_hash = 0x6d398768b7d3b5d6L
 
 let value_bool = 1
 let value_i64 = 2
@@ -75,6 +75,7 @@ let draw_op_stroke = 4
 let draw_op_fill = 5
 let draw_op_font = 6
 let draw_op_text = 7
+let draw_op_image = 8
 let paint_series = 1
 let paint_series_fill = 2
 let paint_grid = 3
@@ -300,6 +301,11 @@ let media_failure_timeout = 7
 let player_command_play = 1
 let player_command_pause = 2
 let player_command_seek = 3
+let frame_accuracy_keyframe = 0
+let frame_accuracy_exact = 1
+let read_outcome_completed = 0
+let read_outcome_cancelled = 1
+let read_outcome_failed = 2
 let session_action_play = 1
 let session_action_pause = 2
 let session_action_stop = 3
@@ -394,6 +400,13 @@ let tx_kind_player_command = 65
 let tx_kind_release_player = 66
 let tx_kind_select_track = 67
 let tx_kind_set_session = 68
+let tx_kind_open_reader = 69
+let tx_kind_read_frames = 70
+let tx_kind_read_peaks = 71
+let tx_kind_cancel_read = 72
+let tx_kind_close_reader = 73
+let tx_kind_load_image = 74
+let tx_kind_release_image = 75
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -450,6 +463,11 @@ let apply_kind_set_video_player = 55
 let apply_kind_set_session = 56
 let apply_kind_select_track = 57
 let apply_kind_caption_times = 58
+let apply_kind_open_reader = 59
+let apply_kind_read_frames = 60
+let apply_kind_read_peaks = 61
+let apply_kind_cancel_read = 62
+let apply_kind_close_reader = 63
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
@@ -495,6 +513,11 @@ let occ_kind_session_action = 42
 let occ_kind_player_tracks = 43
 let occ_kind_caption_cue = 44
 let occ_kind_video_visibility = 45
+let occ_kind_reader_frame = 46
+let occ_kind_reader_progress = 47
+let occ_kind_reader_peaks = 48
+let occ_kind_reader_done = 49
+let occ_kind_image_loaded = 50
 
 let pad8 b =
   while Buffer.length b mod 8 <> 0 do
@@ -1037,6 +1060,54 @@ let tx_set_session player actions playback_state title artist album artwork =
       encode_value b artist;
       encode_value b album;
       encode_value b artwork)
+
+(* Open a media READER (docs/media-plan.md §8 ruling 4): an object separate from any player that extracts frames and peaks, its id guest-chosen in its own space. `source` is the player's: an asset name or http(s) URL as Str, or a picked file's handle as I64. A local source that is not there fails every read not_found without reaching the platform. A second open of a live id is a scene error. *)
+let tx_open_reader reader source =
+  finish tx_kind_open_reader (fun b ->
+      Buffer.add_int64_le b reader;
+      encode_value b source)
+
+(* Ask for one picture per time (`times`, I64 milliseconds), each answered by reader_frame with the time of the picture the platform returned and a core-held image, then one reader_done. FRAME_ACCURACY keyframe is the keyframe AT OR BEFORE the time on every platform, exact the frame shown at it. `max_width`/`max_height` bound the picture, aspect kept, 0 for no bound on that axis. Frame i becomes image `first_image + i`, ids that must not be live. ONE READ IN FLIGHT PER READER: a second while one runs is a scene error, and nothing is cancelled implicitly. *)
+let tx_read_frames reader read first_image accuracy max_width max_height times =
+  finish tx_kind_read_frames (fun b ->
+      Buffer.add_int64_le b reader;
+      Buffer.add_int64_le b read;
+      Buffer.add_int64_le b first_image;
+      Buffer.add_int32_le b (Int32.of_int accuracy);
+      Buffer.add_int32_le b (Int32.of_int max_width);
+      Buffer.add_int32_le b (Int32.of_int max_height);
+      Buffer.add_int32_le b 0l;
+      encode_values b times)
+
+(* Decode the first audio track on the platform and reduce it IN THE CORE to a min/max pair per channel per `samples_per_pair` frames (audiowaveform's .dat shape), answered by reader_progress, reader_peaks and reader_done. *)
+let tx_read_peaks reader read samples_per_pair =
+  finish tx_kind_read_peaks (fun b ->
+      Buffer.add_int64_le b reader;
+      Buffer.add_int64_le b read;
+      Buffer.add_int32_le b (Int32.of_int samples_per_pair);
+      Buffer.add_int32_le b 0l)
+
+(* Stop a read in flight: reader_done(cancelled) follows at once and nothing of the read after it. A read already done is not an error, since an app races its own answers. *)
+let tx_cancel_read reader read =
+  finish tx_kind_cancel_read (fun b ->
+      Buffer.add_int64_le b reader;
+      Buffer.add_int64_le b read)
+
+(* Forget a reader, cancelling its read in flight. The images it answered with stay the app's. *)
+let tx_close_reader reader =
+  finish tx_kind_close_reader (fun b ->
+      Buffer.add_int64_le b reader)
+
+(* Decode an image IN THE CORE (PNG or JPEG) from an asset name (Str) or a picked file's handle (I64) into a core-held premultiplied RGBA8 image, answered by image_loaded. One decoder on every platform is what keeps a drawing that names it one canonical hash (docs/canvas-plan.md §7.1). *)
+let tx_load_image image source =
+  finish tx_kind_load_image (fun b ->
+      Buffer.add_int64_le b image;
+      encode_value b source)
+
+(* Forget a core-held image. A drawing declared before keeps showing it until it is declared again; a drawing declared after that names it is refused. *)
+let tx_release_image image =
+  finish tx_kind_release_image (fun b ->
+      Buffer.add_int64_le b image)
 
 (* A civil date as the wire's I64: year * 10000 + month * 100 + day. *)
 let pack_date year month day =
@@ -2971,7 +3042,7 @@ let parse_clip byte at =
    value), None for clicks. None for pad/unknown kinds. *)
 let parse_occurrence byte =
   let kind = u16_at byte 4 in
-  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended && kind <> occ_kind_date_changed && kind <> occ_kind_time_changed && kind <> occ_kind_value_committed && kind <> occ_kind_notification_result && kind <> occ_kind_link_opened && kind <> occ_kind_text_edited && kind <> occ_kind_text_formatted && kind <> occ_kind_sheet_dismissed && kind <> occ_kind_dismiss_requested && kind <> occ_kind_submitted && kind <> occ_kind_notification_replied && kind <> occ_kind_fullscreen_changed && kind <> occ_kind_color_changed && kind <> occ_kind_range_changed && kind <> occ_kind_range_committed && kind <> occ_kind_player_changed && kind <> occ_kind_player_position && kind <> occ_kind_seek_completed && kind <> occ_kind_session_action && kind <> occ_kind_player_tracks && kind <> occ_kind_caption_cue && kind <> occ_kind_video_visibility then None
+  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended && kind <> occ_kind_date_changed && kind <> occ_kind_time_changed && kind <> occ_kind_value_committed && kind <> occ_kind_notification_result && kind <> occ_kind_link_opened && kind <> occ_kind_text_edited && kind <> occ_kind_text_formatted && kind <> occ_kind_sheet_dismissed && kind <> occ_kind_dismiss_requested && kind <> occ_kind_submitted && kind <> occ_kind_notification_replied && kind <> occ_kind_fullscreen_changed && kind <> occ_kind_color_changed && kind <> occ_kind_range_changed && kind <> occ_kind_range_committed && kind <> occ_kind_player_changed && kind <> occ_kind_player_position && kind <> occ_kind_seek_completed && kind <> occ_kind_session_action && kind <> occ_kind_player_tracks && kind <> occ_kind_caption_cue && kind <> occ_kind_video_visibility && kind <> occ_kind_reader_frame && kind <> occ_kind_reader_progress && kind <> occ_kind_reader_peaks && kind <> occ_kind_reader_done && kind <> occ_kind_image_loaded then None
   else begin
     (* ids are guest-allocated and small; the low u32 is the story. *)
     let id = u32_at byte 8 in
@@ -3062,6 +3133,105 @@ let parse_occurrence byte =
          out := v :: !out;
          at := next
        done);
+      Some (kind, Int64.of_int id, [], None, None, None, List.rev !out)
+    end
+    else if kind = occ_kind_reader_frame
+    then begin
+      (* A flat record: its fields in order, into the tail. *)
+      let at = ref 8 in
+      let out = ref [] in
+      at := !at + 8;
+      out := I64 (Int64.logor (Int64.of_int (u32_at byte !at))
+        (Int64.shift_left (Int64.of_int (u32_at byte (!at + 4))) 32)) :: !out;
+      at := !at + 8;
+      out := I64 (Int64.logor (Int64.of_int (u32_at byte !at))
+        (Int64.shift_left (Int64.of_int (u32_at byte (!at + 4))) 32)) :: !out;
+      at := !at + 8;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      at := !at + 4;
+      out := I64 (Int64.logor (Int64.of_int (u32_at byte !at))
+        (Int64.shift_left (Int64.of_int (u32_at byte (!at + 4))) 32)) :: !out;
+      at := !at + 8;
+      out := I64 (Int64.logor (Int64.of_int (u32_at byte !at))
+        (Int64.shift_left (Int64.of_int (u32_at byte (!at + 4))) 32)) :: !out;
+      at := !at + 8;
+      Some (kind, Int64.of_int id, [], None, None, None, List.rev !out)
+    end
+    else if kind = occ_kind_reader_progress
+    then begin
+      (* A flat record: its fields in order, into the tail. *)
+      let at = ref 8 in
+      let out = ref [] in
+      at := !at + 8;
+      out := I64 (Int64.logor (Int64.of_int (u32_at byte !at))
+        (Int64.shift_left (Int64.of_int (u32_at byte (!at + 4))) 32)) :: !out;
+      at := !at + 8;
+      out := I64 (Int64.logor (Int64.of_int (u32_at byte !at))
+        (Int64.shift_left (Int64.of_int (u32_at byte (!at + 4))) 32)) :: !out;
+      at := !at + 8;
+      out := I64 (Int64.logor (Int64.of_int (u32_at byte !at))
+        (Int64.shift_left (Int64.of_int (u32_at byte (!at + 4))) 32)) :: !out;
+      at := !at + 8;
+      Some (kind, Int64.of_int id, [], None, None, None, List.rev !out)
+    end
+    else if kind = occ_kind_reader_peaks
+    then begin
+      (* A flat record: its fields in order, into the tail. *)
+      let at = ref 8 in
+      let out = ref [] in
+      at := !at + 8;
+      out := I64 (Int64.logor (Int64.of_int (u32_at byte !at))
+        (Int64.shift_left (Int64.of_int (u32_at byte (!at + 4))) 32)) :: !out;
+      at := !at + 8;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      Some (kind, Int64.of_int id, [], None, None, None, List.rev !out)
+    end
+    else if kind = occ_kind_reader_done
+    then begin
+      (* A flat record: its fields in order, into the tail. *)
+      let at = ref 8 in
+      let out = ref [] in
+      at := !at + 8;
+      out := I64 (Int64.logor (Int64.of_int (u32_at byte !at))
+        (Int64.shift_left (Int64.of_int (u32_at byte (!at + 4))) 32)) :: !out;
+      at := !at + 8;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      (let v, next = parse_value byte !at in
+       out := v :: !out;
+       at := next);
+      Some (kind, Int64.of_int id, [], None, None, None, List.rev !out)
+    end
+    else if kind = occ_kind_image_loaded
+    then begin
+      (* A flat record: its fields in order, into the tail. *)
+      let at = ref 8 in
+      let out = ref [] in
+      at := !at + 8;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      at := !at + 4;
+      (let v, next = parse_value byte !at in
+       out := v :: !out;
+       at := next);
       Some (kind, Int64.of_int id, [], None, None, None, List.rev !out)
     end
     else if kind = occ_kind_file_dialog_result

@@ -1837,6 +1837,96 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   or empty. With a player attached, play, pause and seek_to \
                   the app does not handle apply to that player.",
         },
+        Record {
+            kind: 69,
+            name: "open_reader",
+            fields: &[f("reader", FieldTy::U64), f("source", FieldTy::Value)],
+            payload: None,
+            doc: "Open a media READER (docs/media-plan.md §8 ruling 4): an \
+                  object separate from any player that extracts frames and \
+                  peaks, its id guest-chosen in its own space. `source` is the \
+                  player's: an asset name or http(s) URL as Str, or a picked \
+                  file's handle as I64. A local source that is not there \
+                  fails every read not_found without reaching the platform. A \
+                  second open of a live id is a scene error.",
+        },
+        Record {
+            kind: 70,
+            name: "read_frames",
+            fields: &[
+                f("reader", FieldTy::U64),
+                f("read", FieldTy::U64),
+                f("first_image", FieldTy::U64),
+                f("accuracy", FieldTy::U32),
+                f("max_width", FieldTy::U32),
+                f("max_height", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("times", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "Ask for one picture per time (`times`, I64 milliseconds), \
+                  each answered by reader_frame with the time of the picture \
+                  the platform returned and a core-held image, then one \
+                  reader_done. FRAME_ACCURACY keyframe is the keyframe AT OR \
+                  BEFORE the time on every platform, exact the frame shown at \
+                  it. `max_width`/`max_height` bound the picture, aspect kept, \
+                  0 for no bound on that axis. Frame i becomes image \
+                  `first_image + i`, ids that must not be live. ONE READ IN \
+                  FLIGHT PER READER: a second while one runs is a scene error, \
+                  and nothing is cancelled implicitly.",
+        },
+        Record {
+            kind: 71,
+            name: "read_peaks",
+            fields: &[
+                f("reader", FieldTy::U64),
+                f("read", FieldTy::U64),
+                f("samples_per_pair", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "Decode the first audio track on the platform and reduce it \
+                  IN THE CORE to a min/max pair per channel per \
+                  `samples_per_pair` frames (audiowaveform's .dat shape), \
+                  answered by reader_progress, reader_peaks and reader_done.",
+        },
+        Record {
+            kind: 72,
+            name: "cancel_read",
+            fields: &[f("reader", FieldTy::U64), f("read", FieldTy::U64)],
+            payload: None,
+            doc: "Stop a read in flight: reader_done(cancelled) follows at once \
+                  and nothing of the read after it. A read already done is not \
+                  an error, since an app races its own answers.",
+        },
+        Record {
+            kind: 73,
+            name: "close_reader",
+            fields: &[f("reader", FieldTy::U64)],
+            payload: None,
+            doc: "Forget a reader, cancelling its read in flight. The images it \
+                  answered with stay the app's.",
+        },
+        Record {
+            kind: 74,
+            name: "load_image",
+            fields: &[f("image", FieldTy::U64), f("source", FieldTy::Value)],
+            payload: None,
+            doc: "Decode an image IN THE CORE (PNG or JPEG) from an asset name \
+                  (Str) or a picked file's handle (I64) into a core-held \
+                  premultiplied RGBA8 image, answered by image_loaded. One \
+                  decoder on every platform is what keeps a drawing that names \
+                  it one canonical hash (docs/canvas-plan.md §7.1).",
+        },
+        Record {
+            kind: 75,
+            name: "release_image",
+            fields: &[f("image", FieldTy::U64)],
+            payload: None,
+            doc: "Forget a core-held image. A drawing declared before keeps \
+                  showing it until it is declared again; a drawing declared \
+                  after that names it is refused.",
+        },
     ],
     apply: &[
         Record {
@@ -2712,6 +2802,56 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   and after every seek and load, and draws the text it is \
                   answered over each video view showing the player.",
         },
+        Record {
+            kind: 59,
+            name: "open_reader",
+            fields: &[f("reader", FieldTy::U64), f("url", FieldTy::Value)],
+            payload: None,
+            doc: "Make a platform reader on `url`, resolved as a player's \
+                  source is (docs/media-plan.md §8 ruling 4). Its reads report \
+                  through kaya_reader_frame, kaya_reader_pcm, \
+                  kaya_reader_finished and kaya_reader_failed.",
+        },
+        Record {
+            kind: 60,
+            name: "read_frames",
+            fields: &[
+                f("reader", FieldTy::U64),
+                f("read", FieldTy::U64),
+                f("accuracy", FieldTy::U32),
+                f("max_width", FieldTy::U32),
+                f("max_height", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("times", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "Extract one picture per time, I64 ms, answering each through \
+                  kaya_reader_frame by its index as premultiplied RGBA8.",
+        },
+        Record {
+            kind: 61,
+            name: "read_peaks",
+            fields: &[f("reader", FieldTy::U64), f("read", FieldTy::U64)],
+            payload: None,
+            doc: "Decode the first audio track to float PCM at its own channel \
+                  count, handing it over through kaya_reader_pcm, then \
+                  kaya_reader_finished; the core reduces it.",
+        },
+        Record {
+            kind: 62,
+            name: "cancel_read",
+            fields: &[f("reader", FieldTy::U64), f("read", FieldTy::U64)],
+            payload: None,
+            doc: "Stop the read: the core has already answered it cancelled \
+                  and drops whatever arrives for it after this.",
+        },
+        Record {
+            kind: 63,
+            name: "close_reader",
+            fields: &[f("reader", FieldTy::U64)],
+            payload: None,
+            doc: "Stop any read and drop the platform reader.",
+        },
     ],
     occurrence: &[
         Record {
@@ -3525,6 +3665,92 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   and when it shows whole; a copy torn down while shown \
                   sends 0.",
         },
+        Record {
+            kind: 46,
+            name: "reader_frame",
+            fields: &[
+                f("reader", FieldTy::U64),
+                f("read", FieldTy::U64),
+                f("image", FieldTy::U64),
+                f("index", FieldTy::U32),
+                f("width", FieldTy::U32),
+                f("height", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("requested_ms", FieldTy::U64),
+                f("actual_ms", FieldTy::U64),
+            ],
+            payload: None,
+            doc: "One time of a read_frames answered (docs/media-plan.md §8 \
+                  ruling 4): `index` into its times, the time asked and the \
+                  ACTUAL time of the picture the platform returned, and the \
+                  core-held image, `width` x `height` pixels, the canvas's \
+                  draw_image draws. In the platform's order, not the times'.",
+        },
+        Record {
+            kind: 47,
+            name: "reader_progress",
+            fields: &[
+                f("reader", FieldTy::U64),
+                f("read", FieldTy::U64),
+                f("done_ms", FieldTy::U64),
+                f("total_ms", FieldTy::U64),
+            ],
+            payload: None,
+            doc: "How far a read_peaks has decoded, sent as each tenth of the \
+                  duration passes.",
+        },
+        Record {
+            kind: 48,
+            name: "reader_peaks",
+            fields: &[
+                f("reader", FieldTy::U64),
+                f("read", FieldTy::U64),
+                f("sample_rate", FieldTy::U32),
+                f("samples_per_pair", FieldTy::U32),
+                f("channels", FieldTy::U32),
+                f("length", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "A read_peaks' answer, just before its reader_done: \
+                  audiowaveform's .dat header. The `length` pairs per channel \
+                  are too many for one ring record, so they are read with \
+                  kaya_reader_peaks into a buffer of `length * channels * 2` \
+                  i16, pair-major, min then max, until the reader's next read \
+                  or its close.",
+        },
+        Record {
+            kind: 49,
+            name: "reader_done",
+            fields: &[
+                f("reader", FieldTy::U64),
+                f("read", FieldTy::U64),
+                f("outcome", FieldTy::U32),
+                f("failure", FieldTy::U32),
+                f("detail", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "A read's last occurrence (READ_OUTCOME): completed, \
+                  cancelled, or failed with `failure` from the player's closed \
+                  MEDIA_FAILURE vocabulary, timeout included, and the \
+                  platform's sentence as a Str `detail`.",
+        },
+        Record {
+            kind: 50,
+            name: "image_loaded",
+            fields: &[
+                f("image", FieldTy::U64),
+                f("width", FieldTy::U32),
+                f("height", FieldTy::U32),
+                f("failure", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("detail", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "A load_image's answer: the decoded size, or a MEDIA_FAILURE \
+                  (not_found, unsupported_container for bytes that are neither \
+                  PNG nor JPEG, decode_error) and the decoder's sentence; a \
+                  drawing naming a failed image is refused.",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -3586,8 +3812,8 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
         },
         EnumSpec {
             // THE DRAW OPCODES (docs/canvas-plan.md §3.3): five geometry
-            // ops and two text ops, each followed on the wire by its own
-            // operands as tagged values. Curves, dashes, joins, blends,
+            // ops, two text ops and the image op, each followed on the wire
+            // by its own operands as tagged values. Curves, dashes, joins, blends,
             // gradients and antialiasing control are refusals, not
             // omissions (§3.3). THE IDS ARE APPEND-ONLY: wire values in
             // eight bindings and three interpreter copies.
@@ -3600,6 +3826,10 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("fill", 5),
                 ("font", 6),
                 ("text", 7),
+                // The ruling's draw_image (docs/media-plan.md §8 ruling 3): a
+                // core-held image into a rectangle, `i64 image, f64 x, f64 y,
+                // f64 w, f64 h`.
+                ("image", 8),
             ],
         },
         EnumSpec {
@@ -3999,6 +4229,17 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             variants: &[("play", 1), ("pause", 2), ("seek", 3)],
         },
         EnumSpec {
+            // docs/media-plan.md §8 ruling 4: `keyframe` is the keyframe AT
+            // OR BEFORE the time on every platform (the extraction probe's
+            // measured common default).
+            name: "frame_accuracy",
+            variants: &[("keyframe", 0), ("exact", 1)],
+        },
+        EnumSpec {
+            name: "read_outcome",
+            variants: &[("completed", 0), ("cancelled", 1), ("failed", 2)],
+        },
+        EnumSpec {
             // docs/media-plan.md §5, the web's MediaSessionAction names. A
             // session's `actions` mask is 1 << value.
             name: "session_action",
@@ -4223,6 +4464,13 @@ mod tests {
             ("release_player", wire::TX_RELEASE_PLAYER),
             ("select_track", wire::TX_SELECT_TRACK),
             ("set_session", wire::TX_SET_SESSION),
+            ("open_reader", wire::TX_OPEN_READER),
+            ("read_frames", wire::TX_READ_FRAMES),
+            ("read_peaks", wire::TX_READ_PEAKS),
+            ("cancel_read", wire::TX_CANCEL_READ),
+            ("close_reader", wire::TX_CLOSE_READER),
+            ("load_image", wire::TX_LOAD_IMAGE),
+            ("release_image", wire::TX_RELEASE_IMAGE),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -4292,6 +4540,11 @@ mod tests {
                 ("set_session", wire::APPLY_SET_SESSION),
                 ("select_track", wire::APPLY_SELECT_TRACK),
                 ("caption_times", wire::APPLY_CAPTION_TIMES),
+                ("open_reader", wire::APPLY_OPEN_READER),
+                ("read_frames", wire::APPLY_READ_FRAMES),
+                ("read_peaks", wire::APPLY_READ_PEAKS),
+                ("cancel_read", wire::APPLY_CANCEL_READ),
+                ("close_reader", wire::APPLY_CLOSE_READER),
             ]
         );
         // The WHOLE list, not indexed asserts: an indexed pin says
@@ -4346,6 +4599,11 @@ mod tests {
                 ("player_tracks", crate::ring::REC_PLAYER_TRACKS),
                 ("caption_cue", crate::ring::REC_CAPTION_CUE),
                 ("video_visibility", crate::ring::REC_VIDEO_VISIBILITY),
+                ("reader_frame", crate::ring::REC_READER_FRAME),
+                ("reader_progress", crate::ring::REC_READER_PROGRESS),
+                ("reader_peaks", crate::ring::REC_READER_PEAKS),
+                ("reader_done", crate::ring::REC_READER_DONE),
+                ("image_loaded", crate::ring::REC_IMAGE_LOADED),
             ]
         );
     }
@@ -4586,6 +4844,8 @@ mod tests {
                     ("fit", _) => canvas_pin(wire::FITS, name),
                     ("pprop", _) => canvas_pin(wire::PPROPS, name),
                     ("track_kind", _) => canvas_pin(wire::TRACK_KINDS, name),
+                    ("frame_accuracy", _) => canvas_pin(wire::FRAME_ACCURACIES, name),
+                    ("read_outcome", _) => canvas_pin(wire::READ_OUTCOMES, name),
                     ("draw_op", _) => canvas_pin(wire::DRAW_OPS, name),
                     ("paint", _) => canvas_pin(wire::PAINTS, name),
                     ("fill_rule", _) => canvas_pin(wire::FILL_RULES, name),
@@ -4822,6 +5082,8 @@ mod tests {
             ("fit", wire::FITS),
             ("pprop", wire::PPROPS),
             ("track_kind", wire::TRACK_KINDS),
+            ("frame_accuracy", wire::FRAME_ACCURACIES),
+            ("read_outcome", wire::READ_OUTCOMES),
         ];
         for (enum_name, table) in pairs {
             let e = SPEC
@@ -4838,7 +5100,7 @@ mod tests {
         // Nothing outside a table resolves, including the neighbours and
         // the negative a signed wire slot can carry.
         for (table, outside) in [
-            (wire::DRAW_OPS, [0i64, 8, -1].as_slice()),
+            (wire::DRAW_OPS, [0i64, 9, -1].as_slice()),
             (wire::PAINTS, &[0, 6, -1]),
             (wire::FILL_RULES, &[-1, 2, 3]),
             (wire::TEXT_ALIGNS, &[-1, 3, 4]),
@@ -4896,6 +5158,57 @@ mod tests {
                 artwork: String::new(),
             }),
             TxOp::ReleasePlayer { player: PlayerId(4) },
+        ];
+        let decoded = wire::decode_transaction(&w.buf);
+        assert_eq!(format!("{decoded:?}"), format!("{want:?}"));
+        let mut ours = wire::Writer::new();
+        for op in &want {
+            ours.tx_op(op);
+        }
+        assert_eq!(ours.into_bytes(), w.buf, "the core's encoder and the spec's disagree");
+    }
+
+    /// The reader's and the images' records (docs/media-plan.md §8), the
+    /// media records' round trip one feature over.
+    #[test]
+    fn reader_records_round_trip_through_wire() {
+        use crate::protocol::{FrameAccuracy, ImageId, ReadId, ReaderId};
+        let mut w = GenericWriter { buf: Vec::new(), blobs: Vec::new() };
+        let ms = |v: &[i64]| Arg::Values(v.iter().map(|t| Value::I64(*t)).collect());
+        w.record(tx_record("open_reader"), &[Arg::U64(2), Arg::Value(Value::from("media/a.mp4"))]);
+        w.record(
+            tx_record("read_frames"),
+            &[
+                Arg::U64(2),
+                Arg::U64(9),
+                Arg::U64(40),
+                Arg::U32(1),
+                Arg::U32(80),
+                Arg::U32(0),
+                Arg::U32(0),
+                ms(&[480, 1480]),
+            ],
+        );
+        w.record(tx_record("read_peaks"), &[Arg::U64(2), Arg::U64(10), Arg::U32(480), Arg::U32(0)]);
+        w.record(tx_record("cancel_read"), &[Arg::U64(2), Arg::U64(10)]);
+        w.record(tx_record("close_reader"), &[Arg::U64(2)]);
+        w.record(tx_record("load_image"), &[Arg::U64(7), Arg::Value(Value::I64(3))]);
+        w.record(tx_record("release_image"), &[Arg::U64(7)]);
+        let want = vec![
+            TxOp::OpenReader { reader: ReaderId(2), source: Value::from("media/a.mp4") },
+            TxOp::ReadFrames {
+                reader: ReaderId(2),
+                read: ReadId(9),
+                first_image: ImageId(40),
+                accuracy: FrameAccuracy::Exact,
+                max_size: (80, 0),
+                times_ms: vec![480, 1480],
+            },
+            TxOp::ReadPeaks { reader: ReaderId(2), read: ReadId(10), samples_per_pair: 480 },
+            TxOp::CancelRead { reader: ReaderId(2), read: ReadId(10) },
+            TxOp::CloseReader { reader: ReaderId(2) },
+            TxOp::LoadImage { image: ImageId(7), source: Value::I64(3) },
+            TxOp::ReleaseImage { image: ImageId(7) },
         ];
         let decoded = wire::decode_transaction(&w.buf);
         assert_eq!(format!("{decoded:?}"), format!("{want:?}"));
