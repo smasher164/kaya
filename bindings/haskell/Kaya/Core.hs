@@ -1561,6 +1561,8 @@ data MediaFailure
   | MediaDecodeError
   | MediaResources
   | MediaTimeout
+  -- | A reader's read for a track its source lacks (§8 ruling 4).
+  | MediaNoTrack
   deriving (Eq, Show)
 
 -- | The vocabulary's own word: @not_found@, @network@.
@@ -1573,6 +1575,7 @@ mediaFailureName f = case f of
   MediaDecodeError -> "decode_error"
   MediaResources -> "resources"
   MediaTimeout -> "timeout"
+  MediaNoTrack -> "no_track"
 
 mediaFailureOfWire :: Word32 -> Maybe MediaFailure
 mediaFailureOfWire n
@@ -1584,6 +1587,7 @@ mediaFailureOfWire n
   | n == W.mediaFailureDecodeError = Just MediaDecodeError
   | n == W.mediaFailureResources = Just MediaResources
   | n == W.mediaFailureTimeout = Just MediaTimeout
+  | n == W.mediaFailureNoTrack = Just MediaNoTrack
   | otherwise = error ("kaya: a media failure of " <> show n <> ", which this build does not know")
 
 -- | What the system's media controls ask (docs\/media-plan.md §5);

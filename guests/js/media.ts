@@ -360,19 +360,19 @@ function readerApp(): void {
   }
 
   const { labels, strip, wave, clip, logo, photo } = app.window({ title: "media reader", width: 560, height: 560 }, () => {
-    const labels = ["exact", "keyframe", "peaks", "cancel", "failures", "no track"].map((s) => kaya.signal(s));
+    const labels = ["exact", "keyframe", "peaks", "failures", "no track", "cancel"].map((s) => kaya.signal(s));
     const { strip, wave } = kaya.column(() => {
-      for (const label of labels) kaya.label({ bind: label }); // label#0..#5
+      for (const label of labels.slice(0, 5)) kaya.label({ bind: label }); // label#0..#4
       const strip = kaya.canvas([320, 45]).a11yId("strip").a11yLabel("Filmstrip");
       const wave = kaya.canvas([200, 60]).a11yId("wave").a11yLabel("Waveform");
       kaya.button("start", {
         onClick: () => {
           const trickle = kaya.reader(kaya.MediaSource.url(`${base}/trickle/h264_frames.mp4`));
-          const read = trickle.frames([0], { maxSize: [80, 45], accuracy: "exact", onDone: into(cancels, labels[3]!, "trickle") });
+          const read = trickle.frames([0], { maxSize: [80, 45], accuracy: "exact", onDone: into(cancels, labels[5]!, "trickle") });
           const closing = kaya.reader(kaya.MediaSource.url(`${base}/trickle/h264_aac.mp4`));
-          closing.frames([0], { maxSize: [80, 45], accuracy: "exact", onDone: into(cancels, labels[3]!, "closed") });
+          closing.frames([0], { maxSize: [80, 45], accuracy: "exact", onDone: into(cancels, labels[5]!, "closed") });
           trickling = [read, closing];
-          labels[3]!.set("reading");
+          labels[5]!.set("reading");
         },
       }); // button#0
       kaya.button("cancel", {
@@ -384,6 +384,7 @@ function readerApp(): void {
           closing.close();
         },
       }); // button#1
+      kaya.label({ bind: labels[5]! }); // label#5
       return { strip, wave };
     });
 
@@ -401,11 +402,11 @@ function readerApp(): void {
       ["OFL.txt", "fonts/OFL.txt"],
       ["missing.mp4", "media/missing.mp4"],
     ] as const) {
-      kaya.reader(kaya.MediaSource.asset(source)).frames([0], { maxSize: [80, 45], accuracy: "exact", onDone: into(failures, labels[4]!, what) });
+      kaya.reader(kaya.MediaSource.asset(source)).frames([0], { maxSize: [80, 45], accuracy: "exact", onDone: into(failures, labels[3]!, what) });
     }
 
-    kaya.reader(kaya.MediaSource.asset("media/h264_noaudio.mp4")).peaks(4800, { onDone: into(missing, labels[5]!, "noaudio peaks") });
-    kaya.reader(kaya.MediaSource.asset("media/tone.mp3")).frames([0], { maxSize: [80, 45], accuracy: "exact", onDone: into(missing, labels[5]!, "mp3 frames") });
+    kaya.reader(kaya.MediaSource.asset("media/h264_noaudio.mp4")).peaks(4800, { onDone: into(missing, labels[4]!, "noaudio peaks") });
+    kaya.reader(kaya.MediaSource.asset("media/tone.mp3")).frames([0], { maxSize: [80, 45], accuracy: "exact", onDone: into(missing, labels[4]!, "mp3 frames") });
 
     const logo = kaya.loadImage(kaya.MediaSource.asset("images/a11y-logo.png"));
     const photo = kaya.loadImage(kaya.MediaSource.asset("images/photo.jpg"));

@@ -85,6 +85,8 @@ public enum KayaMediaFailure: UInt32, Sendable {
     case decodeError = 5
     case resources = 6
     case timeout = 7
+    /// A reader's read for a track its source lacks (§8 ruling 4).
+    case noTrack = 8
 
     /// The wire's own word.
     public var name: String {
@@ -96,6 +98,7 @@ public enum KayaMediaFailure: UInt32, Sendable {
         case .decodeError: return "decode_error"
         case .resources: return "resources"
         case .timeout: return "timeout"
+        case .noTrack: return "no_track"
         }
     }
 

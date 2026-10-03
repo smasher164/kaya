@@ -461,27 +461,27 @@ func readerApp() *kaya.App {
 
 	app.Build(func(tx *kaya.Tx) {
 		tx.Window(0).Title("media reader").Size(560, 560)
-		for _, s := range []string{"exact", "keyframe", "peaks", "cancel", "failures", "no track"} {
+		for _, s := range []string{"exact", "keyframe", "peaks", "failures", "no track", "cancel"} {
 			labels = append(labels, tx.Signal(s))
 		}
 		tx.Mount(tx.Column(func() {
-			for _, label := range labels {
-				tx.Label(label) // label#0..#5
+			for _, label := range labels[:5] {
+				tx.Label(label) // label#0..#4
 			}
 			strip = tx.Canvas(stripBox).A11yID("strip").A11yLabel("Filmstrip")
 			wave = tx.Canvas(waveBox).A11yID("wave").A11yLabel("Waveform")
 			tx.Button("start", func(tx *kaya.Tx) { // button#0
 				trickle := tx.Reader(kaya.MediaURL(base + "/trickle/h264_frames.mp4"))
 				read := tx.ReadFrames(trickle, []uint64{0}, 80, 45, kaya.FrameAccuracyExact).
-					OnDone(settle(&cancels, 3, "trickle")).ID()
+					OnDone(settle(&cancels, 5, "trickle")).ID()
 				closing := tx.Reader(kaya.MediaURL(base + "/trickle/h264_aac.mp4"))
 				tx.ReadFrames(closing, []uint64{0}, 80, 45, kaya.FrameAccuracyExact).
-					OnDone(settle(&cancels, 3, "closed"))
+					OnDone(settle(&cancels, 5, "closed"))
 				trickling = func(tx *kaya.Tx) {
 					tx.CancelRead(trickle, read)
 					tx.CloseReader(closing)
 				}
-				tx.Write(labels[3], "reading")
+				tx.Write(labels[5], "reading")
 			})
 			tx.Button("cancel", func(tx *kaya.Tx) { // button#1
 				if trickling != nil {
@@ -489,6 +489,7 @@ func readerApp() *kaya.App {
 					trickling = nil
 				}
 			})
+			tx.Label(labels[5]) // label#5
 		}))
 
 		clip = tx.Reader(kaya.MediaAsset("media/h264_frames.mp4"))
@@ -510,14 +511,14 @@ func readerApp() *kaya.App {
 		} {
 			reader := tx.Reader(kaya.MediaAsset(f.source))
 			tx.ReadFrames(reader, []uint64{0}, 80, 45, kaya.FrameAccuracyExact).
-				OnDone(settle(&failures, 4, f.what))
+				OnDone(settle(&failures, 3, f.what))
 		}
 
 		silent := tx.Reader(kaya.MediaAsset("media/h264_noaudio.mp4"))
-		tx.ReadPeaks(silent, 4800).OnDone(settle(&missing, 5, "noaudio peaks"))
+		tx.ReadPeaks(silent, 4800).OnDone(settle(&missing, 4, "noaudio peaks"))
 		song := tx.Reader(kaya.MediaAsset("media/tone.mp3"))
 		tx.ReadFrames(song, []uint64{0}, 80, 45, kaya.FrameAccuracyExact).
-			OnDone(settle(&missing, 5, "mp3 frames"))
+			OnDone(settle(&missing, 4, "mp3 frames"))
 
 		logo = tx.LoadImage(kaya.MediaAsset("images/a11y-logo.png")).ID()
 		photo = tx.LoadImage(kaya.MediaAsset("images/photo.jpg")).ID()

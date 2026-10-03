@@ -418,11 +418,11 @@ static class MediaScene
         {
             tx.Window(title: "media reader", width: 560.0, height: 560.0);
             labels = Array.ConvertAll(
-                new[] { "exact", "keyframe", "peaks", "cancel", "failures", "no track" },
+                new[] { "exact", "keyframe", "peaks", "failures", "no track", "cancel" },
                 s => tx.Signal(s));
             tx.Mount(tx.Column(root =>
             {
-                foreach (var label in labels) tx.Label(bind: label);   // label#0..#5
+                foreach (var label in labels[..5]) tx.Label(bind: label);   // label#0..#4
                 strip = tx.Canvas(StripBox);
                 tx.SetA11yId(strip, "strip");
                 tx.SetA11yLabel(strip, "Filmstrip");
@@ -433,22 +433,23 @@ static class MediaScene
                 {
                     var trickle = t.Reader(MediaSource.Url($"{baseUrl}/trickle/h264_frames.mp4"));
                     var read = t.ReadFrames(trickle, new ulong[] { 0 }, 80, 45, FrameAccuracy.Exact,
-                        onDone: Settle(cancels, 3, "trickle"));
+                        onDone: Settle(cancels, 5, "trickle"));
                     var closing = t.Reader(MediaSource.Url($"{baseUrl}/trickle/h264_aac.mp4"));
                     t.ReadFrames(closing, new ulong[] { 0 }, 80, 45, FrameAccuracy.Exact,
-                        onDone: Settle(cancels, 3, "closed"));
+                        onDone: Settle(cancels, 5, "closed"));
                     trickling = c =>
                     {
                         c.CancelRead(trickle, read);
                         c.CloseReader(closing);
                     };
-                    t.Write(labels[3], "reading");
+                    t.Write(labels[5], "reading");
                 });
                 tx.Button("cancel", t =>                              // button#1
                 {
                     trickling?.Invoke(t);
                     trickling = null;
                 });
+                tx.Label(bind: labels[5]);                            // label#5
                 return root;
             }));
 
@@ -467,14 +468,14 @@ static class MediaScene
             {
                 var reader = tx.Reader(MediaSource.Asset(source));
                 tx.ReadFrames(reader, new ulong[] { 0 }, 80, 45, FrameAccuracy.Exact,
-                    onDone: Settle(failures, 4, what));
+                    onDone: Settle(failures, 3, what));
             }
 
             var silent = tx.Reader(MediaSource.Asset("media/h264_noaudio.mp4"));
-            tx.ReadPeaks(silent, 4800, onDone: Settle(missing, 5, "noaudio peaks"));
+            tx.ReadPeaks(silent, 4800, onDone: Settle(missing, 4, "noaudio peaks"));
             var song = tx.Reader(MediaSource.Asset("media/tone.mp3"));
             tx.ReadFrames(song, new ulong[] { 0 }, 80, 45, FrameAccuracy.Exact,
-                onDone: Settle(missing, 5, "mp3 frames"));
+                onDone: Settle(missing, 4, "mp3 frames"));
 
             logo = tx.LoadImage(MediaSource.Asset("images/a11y-logo.png"));
             photo = tx.LoadImage(MediaSource.Asset("images/photo.jpg"));

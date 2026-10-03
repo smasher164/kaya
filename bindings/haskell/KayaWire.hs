@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xc00e7dc840e57f41
+specHash = 0xc769ec72ad1213de
 
 valueBool :: Word32
 valueBool = 1
@@ -560,6 +560,8 @@ mediaFailureResources :: Word32
 mediaFailureResources = 6
 mediaFailureTimeout :: Word32
 mediaFailureTimeout = 7
+mediaFailureNoTrack :: Word32
+mediaFailureNoTrack = 8
 playerCommandPlay :: Word32
 playerCommandPlay = 1
 playerCommandPause :: Word32

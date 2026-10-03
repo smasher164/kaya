@@ -26218,8 +26218,8 @@ mod gtk_reader {
         }
 
         /// THE ONE SITE a read for a track the source lacks is reported
-        /// from; the core decides its reason (docs/deferred.md, the missing-track
-        /// RULING).
+        /// from; the core decides its reason, no_track (docs/media-plan.md §8
+        /// ruling 4).
         fn no_track(&self, kind: &str) {
             self.send(Msg::NoTrack(format!("kaya: the source has no {kind} track")));
         }

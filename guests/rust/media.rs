@@ -573,12 +573,12 @@ fn reader_app(ctx: kaya::AppCtx) {
     let (labels, strip, wave, clip, logo, photo) = ctx.apply(|tx| {
         tx.window(kaya::DEFAULT_WINDOW).title("media reader").size(560.0, 560.0);
         let labels: Vec<_> =
-            ["exact", "keyframe", "peaks", "cancel", "failures", "no track"].into_iter().map(|s| tx.signal(s)).collect();
+            ["exact", "keyframe", "peaks", "failures", "no track", "cancel"].into_iter().map(|s| tx.signal(s)).collect();
         let mut canvases = None;
         let root = tx
             .column(|tx| {
-                for label in &labels {
-                    tx.label(*label); // label#0..#5
+                for label in &labels[..5] {
+                    tx.label(*label); // label#0..#4
                 }
                 let strip = tx.canvas(STRIP).a11y_id("strip").a11y_label("Filmstrip").id();
                 let wave = tx.canvas(WAVE).a11y_id("wave").a11y_label("Waveform").id();
@@ -586,6 +586,7 @@ fn reader_app(ctx: kaya::AppCtx) {
                 msgs.on_click(start, ReadMsg::Start);
                 let cancel = tx.button("cancel").id(); // button#1
                 msgs.on_click(cancel, ReadMsg::Cancel);
+                tx.label(labels[5]); // label#5
                 canvases = Some((strip, wave));
             })
             .id();
@@ -679,12 +680,12 @@ fn reader_app(ctx: kaya::AppCtx) {
             ReadMsg::Done(what @ ("OFL.txt" | "missing.mp4"), outcome) => {
                 failures.push(format!("{what} {}", outcome_word(&outcome)));
                 failures.sort();
-                ctx.apply(|tx| tx.write(labels[4], failures.join("; ")));
+                ctx.apply(|tx| tx.write(labels[3], failures.join("; ")));
             }
             ReadMsg::Done(what @ ("noaudio peaks" | "mp3 frames"), outcome) => {
                 missing.push(format!("{what} {}", outcome_word(&outcome)));
                 missing.sort();
-                ctx.apply(|tx| tx.write(labels[5], missing.join("; ")));
+                ctx.apply(|tx| tx.write(labels[4], missing.join("; ")));
             }
             ReadMsg::Start => ctx.apply(|tx| {
                 let trickle = tx.reader(&MediaSource::url(format!("{base}/trickle/h264_frames.mp4")));
@@ -694,7 +695,7 @@ fn reader_app(ctx: kaya::AppCtx) {
                 let closing_read = tx.read_frames(closing, &[0], (80, 45), FrameAccuracy::Exact);
                 msgs.on_read_done(closing_read, |o| ReadMsg::Done("closed", o));
                 trickling = Some((trickle, read, closing));
-                tx.write(labels[3], "reading");
+                tx.write(labels[5], "reading");
             }),
             ReadMsg::Cancel => ctx.apply(|tx| {
                 if let Some((trickle, read, closing)) = trickling.take() {
@@ -705,7 +706,7 @@ fn reader_app(ctx: kaya::AppCtx) {
             ReadMsg::Done(what, outcome) => {
                 cancels.push(format!("{what} {}", outcome_word(&outcome)));
                 cancels.sort();
-                ctx.apply(|tx| tx.write(labels[3], cancels.join("; ")));
+                ctx.apply(|tx| tx.write(labels[5], cancels.join("; ")));
             }
         }
     }

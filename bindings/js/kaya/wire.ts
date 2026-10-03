@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0xc00e7dc840e57f41n;
+export const SPEC_HASH = 0xc769ec72ad1213den;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -276,6 +276,7 @@ export const MEDIA_FAILURE_NETWORK = 4;
 export const MEDIA_FAILURE_DECODE_ERROR = 5;
 export const MEDIA_FAILURE_RESOURCES = 6;
 export const MEDIA_FAILURE_TIMEOUT = 7;
+export const MEDIA_FAILURE_NO_TRACK = 8;
 export const PLAYER_COMMAND_PLAY = 1;
 export const PLAYER_COMMAND_PAUSE = 2;
 export const PLAYER_COMMAND_SEEK = 3;

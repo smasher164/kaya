@@ -16,10 +16,9 @@ use crate::protocol::{
     ApplyOp, FrameAccuracy, ImageId, MediaFailure, Occurrence, Peaks, ReadId, ReadOutcome, ReaderId, Value,
 };
 
-/// What a read for a track its source lacks answers: no reason in the
-/// closed vocabulary names it yet, so `decode_error` (docs/deferred.md, the
-/// missing-track RULING) — the one line a new reason changes.
-const NO_TRACK: MediaFailure = MediaFailure::DecodeError;
+/// What a read for a track its source lacks answers (docs/media-plan.md §8
+/// ruling 4, RULED 2026-10-02).
+const NO_TRACK: MediaFailure = MediaFailure::NoTrack;
 
 /// The largest image side kaya holds: the canvas raster's own clamp.
 const MAX_SIDE: u32 = 16384;
@@ -1066,6 +1065,33 @@ mod tests {
         assert!(matches!(
             heard.as_slice(),
             [Occurrence::ReaderDone { outcome: ReadOutcome::Failed(MediaFailure::UnsupportedContainer, _), .. }]
+        ));
+    }
+
+    #[test]
+    fn a_missing_track_answers_no_track_and_a_decode_failure_decode_error() {
+        let (mut rs, _) = open("media/tone.mp3");
+        frames(&mut rs, 2, 7, &[0]);
+        let (heard, _) = rs.report(R, ReadId(2), Report::NoTrack { detail: "no video".to_owned() });
+        assert!(matches!(
+            heard.as_slice(),
+            [Occurrence::ReaderDone { outcome: ReadOutcome::Failed(MediaFailure::NoTrack, _), .. }]
+        ));
+        assert!(rs.lookup(7).unwrap_err().contains("failed no_track"));
+        frames(&mut rs, 3, 8, &[0]);
+        let (heard, _) = rs.report(
+            R,
+            ReadId(3),
+            Report::Failed {
+                domain: "gst-stream-error-quark".to_owned(),
+                code: 7,
+                underlying: 0,
+                detail: "Could not decode stream.".to_owned(),
+            },
+        );
+        assert!(matches!(
+            heard.as_slice(),
+            [Occurrence::ReaderDone { outcome: ReadOutcome::Failed(MediaFailure::DecodeError, _), .. }]
         ));
     }
 

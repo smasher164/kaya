@@ -339,6 +339,9 @@ pub enum MediaFailure {
     /// Neither an open nor a seek finished within the bound, and the
     /// platform said nothing (docs/media-plan.md §7c).
     Timeout,
+    /// A reader's read for a track its source lacks; a player never
+    /// reports it (docs/media-plan.md §8 ruling 4).
+    NoTrack,
 }
 
 impl MediaFailure {
@@ -352,6 +355,7 @@ impl MediaFailure {
             MediaFailure::DecodeError => "decode_error",
             MediaFailure::Resources => "resources",
             MediaFailure::Timeout => "timeout",
+            MediaFailure::NoTrack => "no_track",
         }
     }
 }

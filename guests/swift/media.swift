@@ -337,7 +337,7 @@ let bands: [UInt64] = [480, 1480]
     var photo: KayaImage?
     app.build { tx in
         tx.window(title: "media reader", width: 560, height: 560)
-        let labels = ["exact", "keyframe", "peaks", "cancel", "failures", "no track"].map {
+        let labels = ["exact", "keyframe", "peaks", "failures", "no track", "cancel"].map {
             tx.signal(.str($0))
         }
         func noted(_ list: inout [String], _ what: String, _ outcome: KayaReadOutcome, _ label: Int, _ tx: KayaAppTx) {
@@ -347,7 +347,7 @@ let bands: [UInt64] = [480, 1480]
         }
         var canvases: (KayaWidget, KayaWidget)?
         let root = tx.column { root in
-            for label in labels { tx.label(bind: label) }  // label#0..#5
+            for label in labels[..<5] { tx.label(bind: label) }  // label#0..#4
             let strip = tx.canvas(KayaViewbox(320.0, 45.0))
             tx.setA11yId(strip, "strip")
             tx.setA11yLabel(strip, "Filmstrip")
@@ -356,11 +356,11 @@ let bands: [UInt64] = [480, 1480]
             tx.setA11yLabel(wave, "Waveform")
             tx.button("start") { tx in  // button#0
                 let trickle = tx.reader(.url("\(base)/trickle/h264_frames.mp4"))
-                let read = tx.readFrames(trickle, at: [0], maxWidth: 80, maxHeight: 45, accuracy: .exact, onDone: { tx, o in noted(&cancels, "trickle", o, 3, tx) })
+                let read = tx.readFrames(trickle, at: [0], maxWidth: 80, maxHeight: 45, accuracy: .exact, onDone: { tx, o in noted(&cancels, "trickle", o, 5, tx) })
                 let closing = tx.reader(.url("\(base)/trickle/h264_aac.mp4"))
-                tx.readFrames(closing, at: [0], maxWidth: 80, maxHeight: 45, accuracy: .exact, onDone: { tx, o in noted(&cancels, "closed", o, 3, tx) })
+                tx.readFrames(closing, at: [0], maxWidth: 80, maxHeight: 45, accuracy: .exact, onDone: { tx, o in noted(&cancels, "closed", o, 5, tx) })
                 trickling = (trickle, read, closing)
-                tx.write(labels[3], .str("reading"))
+                tx.write(labels[5], .str("reading"))
             }
             tx.button("cancel") { tx in  // button#1
                 if let (trickle, read, closing) = trickling {
@@ -369,6 +369,7 @@ let bands: [UInt64] = [480, 1480]
                     tx.closeReader(closing)
                 }
             }
+            tx.label(bind: labels[5])  // label#5
             canvases = (strip, wave)
             return root
         }
@@ -423,16 +424,16 @@ let bands: [UInt64] = [480, 1480]
 
         for (what, source) in [("OFL.txt", "fonts/OFL.txt"), ("missing.mp4", "media/missing.mp4")] {
             let reader = tx.reader(.asset(source))
-            tx.readFrames(reader, at: [0], maxWidth: 80, maxHeight: 45, accuracy: .exact, onDone: { tx, o in noted(&failures, what, o, 4, tx) })
+            tx.readFrames(reader, at: [0], maxWidth: 80, maxHeight: 45, accuracy: .exact, onDone: { tx, o in noted(&failures, what, o, 3, tx) })
         }
 
         let silent = tx.reader(.asset("media/h264_noaudio.mp4"))
         tx.readPeaks(silent, samplesPerPair: 4800, onDone: { tx, o in
-            noted(&missing, "noaudio peaks", o, 5, tx)
+            noted(&missing, "noaudio peaks", o, 4, tx)
         })
         let song = tx.reader(.asset("media/tone.mp3"))
         tx.readFrames(song, at: [0], maxWidth: 80, maxHeight: 45, accuracy: .exact, onDone: { tx, o in
-            noted(&missing, "mp3 frames", o, 5, tx)
+            noted(&missing, "mp3 frames", o, 4, tx)
         })
         logo = tx.loadImage(.asset("images/a11y-logo.png"))
         photo = tx.loadImage(.asset("images/photo.jpg"))

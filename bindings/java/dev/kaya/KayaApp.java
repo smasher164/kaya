@@ -1531,7 +1531,9 @@ public final class KayaApp {
         NETWORK(KayaWire.MEDIA_FAILURE_NETWORK, "network"),
         DECODE_ERROR(KayaWire.MEDIA_FAILURE_DECODE_ERROR, "decode_error"),
         RESOURCES(KayaWire.MEDIA_FAILURE_RESOURCES, "resources"),
-        TIMEOUT(KayaWire.MEDIA_FAILURE_TIMEOUT, "timeout");
+        TIMEOUT(KayaWire.MEDIA_FAILURE_TIMEOUT, "timeout"),
+        /** A reader's read for a track its source lacks (§8 ruling 4). */
+        NO_TRACK(KayaWire.MEDIA_FAILURE_NO_TRACK, "no_track");
 
         final int wire;
         final String word;

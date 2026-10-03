@@ -62,7 +62,7 @@ the `capture` and `capture_denied` scenes on the mac lane. What breadth owes:
     attributed to its terminal, and macOS ends a process that asks with no
     usage string).
 
-## RULING — a media reader's read for a track its source lacks answers `decode_error` (found 2026-10-02, the reader's depth slice)
+## ~~RULING — a media reader's read for a track its source lacks answers `decode_error` (found 2026-10-02, the reader's depth slice)~~ RESOLVED 2026-10-02, ruled and built: a new closed reason `no_track` (spec media_failure 8) in all nine bindings, answered on all five platforms from the same one site per backend through crates/kaya/src/reader.rs's `NO_TRACK`; a genuine decode failure still answers `decode_error`, and the player never answers `no_track` (docs/media-plan.md §8 ruling 4 says why); media_reader's no-track label (label#4 since the cancel line moved below its buttons) reads `no_track`
 KEY: NO_TRACK, Report::NoTrack, kaya_reader_no_track, reader_no_track, readerNoTrack, no_track, noTrack, h264_noaudio.mp4, media_reader label#5
 
 Frames from an audio-only file (tone.mp3) and peaks from a video with no

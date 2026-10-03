@@ -436,7 +436,8 @@ CEA-608 is left out: FFmpeg has no encoder for it.
 **Failure semantics, one in nine bindings.** A player that cannot play
 publishes `failed(reason)` and reads `state` `failed`. `reason` is closed:
 `unsupported_codec`, `unsupported_container`, `not_found`, `network`,
-`decode_error`, `resources` (§7b), `timeout` (§7c); each binding spells it as its own enum, and the platform's
+`decode_error`, `resources` (§7b), `timeout` (§7c), and `no_track`, which only
+a reader's read answers (§8 ruling 4) and no player row below maps to; each binding spells it as its own enum, and the platform's
 sentence rides beside it as `detail`, which no scene compares. Rule: a track
 the platform cannot decode is `failed(unsupported_codec)` even when the
 rest plays, and a missing element is `failed` even when the pipeline only
@@ -745,9 +746,19 @@ pass.
    YCbCr and kaya converts it through the stream's own matrix and range
    (GStreamer's videoconvert read the 505050 band as 4E4E4E), and the
    frames the platform hands at full size are fitted to `max_size` by one
-   core rule. A read for a track the source lacks answers `decode_error`
-   everywhere from one site per backend, pending a ruling
-   (docs/deferred.md's missing-track RULING). After a cancel or a
+   core rule. A read for a track the source lacks (frames from tone.mp3,
+   peaks from h264_noaudio.mp4) answers `no_track`, RULED by the maintainer
+   2026-10-02: the eighth reason in the closed vocabulary, decided in the
+   core (crates/kaya/src/reader.rs's `NO_TRACK`) from the one site per
+   backend that reports the case, while a decode that fails on a track that
+   is there still answers `decode_error`. THE PLAYER NEVER ANSWERS IT: a
+   player plays whatever tracks its source has, so a video view on an
+   audio-only source shows nothing and plays the sound, and a video with no
+   audio plays silently (§7b), neither a failure; a source with no track the
+   platform can play at all is already `unsupported_codec` or
+   `unsupported_container`. So no row of §7a's table maps a platform code
+   to `no_track`, and the vocabulary stays one enum the two objects share
+   rather than two. After a cancel or a
    close the app hears only `reader_done(cancelled)`: the core drops later
    reports and the binding drops answers already in its channel, releasing
    the images they carried. On Apple the frames come from

@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0xc00e7dc840e57f41L
+let spec_hash = 0xc769ec72ad1213deL
 
 let value_bool = 1
 let value_i64 = 2
@@ -299,6 +299,7 @@ let media_failure_network = 4
 let media_failure_decode_error = 5
 let media_failure_resources = 6
 let media_failure_timeout = 7
+let media_failure_no_track = 8
 let player_command_play = 1
 let player_command_pause = 2
 let player_command_seek = 3

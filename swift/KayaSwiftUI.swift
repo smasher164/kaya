@@ -22,7 +22,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xc00e7dc840e57f41
+let kayaSpecHash: UInt64 = 0xc769ec72ad1213de
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -26913,7 +26913,7 @@ final class KayaReader {
     }
 
     /// THE ONE SITE a read for a track the source lacks is reported from;
-    /// the core decides its reason (docs/deferred.md, the missing-track RULING).
+    /// the core decides its reason, no_track (docs/media-plan.md §8 ruling 4).
     private func noTrack(_ read: UInt64, _ kind: String) {
         let detail = Array("kaya: the source has no \(kind) track".utf8)
         kayaDiag("reader \(id) read \(read): no \(kind) track")

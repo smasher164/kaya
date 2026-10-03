@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xc00e7dc840e57f41;
+    public const ulong SpecHash = 0xc769ec72ad1213de;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -281,6 +281,7 @@ static class KayaWire
     public const uint MediaFailureDecodeError = 5;
     public const uint MediaFailureResources = 6;
     public const uint MediaFailureTimeout = 7;
+    public const uint MediaFailureNoTrack = 8;
     public const uint PlayerCommandPlay = 1;
     public const uint PlayerCommandPause = 2;
     public const uint PlayerCommandSeek = 3;

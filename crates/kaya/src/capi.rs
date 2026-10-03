@@ -1649,6 +1649,7 @@ pub const KAYA_MEDIA_FAILURE_NETWORK: u32 = 4;
 pub const KAYA_MEDIA_FAILURE_DECODE_ERROR: u32 = 5;
 pub const KAYA_MEDIA_FAILURE_RESOURCES: u32 = 6;
 pub const KAYA_MEDIA_FAILURE_TIMEOUT: u32 = 7;
+pub const KAYA_MEDIA_FAILURE_NO_TRACK: u32 = 8;
 pub const KAYA_PLAYER_COMMAND_PLAY: u32 = 1;
 pub const KAYA_PLAYER_COMMAND_PAUSE: u32 = 2;
 pub const KAYA_PLAYER_COMMAND_SEEK: u32 = 3;
@@ -1761,6 +1762,7 @@ const _: () = assert!(
         && vocab_is(wire::MEDIA_FAILURES, "decode_error", KAYA_MEDIA_FAILURE_DECODE_ERROR)
         && vocab_is(wire::MEDIA_FAILURES, "resources", KAYA_MEDIA_FAILURE_RESOURCES)
         && vocab_is(wire::MEDIA_FAILURES, "timeout", KAYA_MEDIA_FAILURE_TIMEOUT)
+        && vocab_is(wire::MEDIA_FAILURES, "no_track", KAYA_MEDIA_FAILURE_NO_TRACK)
         && vocab_is(wire::PLAYER_COMMANDS, "play", KAYA_PLAYER_COMMAND_PLAY)
         && vocab_is(wire::PLAYER_COMMANDS, "pause", KAYA_PLAYER_COMMAND_PAUSE)
         && vocab_is(wire::PLAYER_COMMANDS, "seek", KAYA_PLAYER_COMMAND_SEEK)
@@ -1834,7 +1836,7 @@ const _: () = {
         "the spec player_state enum grew: export KAYA_PLAYER_STATE_*"
     );
     assert!(
-        spec_enum_variants("media_failure") == 8,
+        spec_enum_variants("media_failure") == 9,
         "the spec media_failure enum grew: export KAYA_MEDIA_FAILURE_*"
     );
     assert!(

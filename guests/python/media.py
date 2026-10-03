@@ -380,12 +380,12 @@ def reader_app():
         trickle = kaya.reader(kaya.MediaSource.url(f"{base}/trickle/h264_frames.mp4"))
         read = trickle.frames([0], max_size=(80, 45),
                               accuracy=kaya.FrameAccuracy.EXACT,
-                              on_done=into(cancels, labels[3], "trickle"))
+                              on_done=into(cancels, labels[5], "trickle"))
         closing = kaya.reader(kaya.MediaSource.url(f"{base}/trickle/h264_aac.mp4"))
         closing.frames([0], max_size=(80, 45), accuracy=kaya.FrameAccuracy.EXACT,
-                       on_done=into(cancels, labels[3], "closed"))
+                       on_done=into(cancels, labels[5], "closed"))
         trickling[:] = [read, closing]
-        labels[3].set("reading")
+        labels[5].set("reading")
 
     def on_cancel():
         if trickling:
@@ -396,14 +396,15 @@ def reader_app():
 
     with app.window("media reader", width=560.0, height=560.0):
         labels = [kaya.signal(s) for s in
-                  ("exact", "keyframe", "peaks", "cancel", "failures", "no track")]
+                  ("exact", "keyframe", "peaks", "failures", "no track", "cancel")]
         with kaya.column():
-            for label in labels:
-                kaya.label(bind=label)                              # label#0..#5
+            for label in labels[:5]:
+                kaya.label(bind=label)                              # label#0..#4
             strip = kaya.canvas((320.0, 45.0)).a11y_id("strip").a11y_label("Filmstrip")
             wave = kaya.canvas((200.0, 60.0)).a11y_id("wave").a11y_label("Waveform")
             kaya.button("start", on_click=on_start)                 # button#0
             kaya.button("cancel", on_click=on_cancel)               # button#1
+            kaya.label(bind=labels[5])                              # label#5
 
         clip = kaya.reader(kaya.MediaSource.asset("media/h264_frames.mp4"))
         clip.frames(BANDS, max_size=(80, 45), accuracy=kaya.FrameAccuracy.EXACT,
@@ -416,13 +417,13 @@ def reader_app():
                              ("missing.mp4", "media/missing.mp4")):
             kaya.reader(kaya.MediaSource.asset(source)).frames(
                 [0], max_size=(80, 45), accuracy=kaya.FrameAccuracy.EXACT,
-                on_done=into(failures, labels[4], what))
+                on_done=into(failures, labels[3], what))
 
         kaya.reader(kaya.MediaSource.asset("media/h264_noaudio.mp4")).peaks(
-            4800, on_done=into(missing, labels[5], "noaudio peaks"))
+            4800, on_done=into(missing, labels[4], "noaudio peaks"))
         kaya.reader(kaya.MediaSource.asset("media/tone.mp3")).frames(
             [0], max_size=(80, 45), accuracy=kaya.FrameAccuracy.EXACT,
-            on_done=into(missing, labels[5], "mp3 frames"))
+            on_done=into(missing, labels[4], "mp3 frames"))
 
         logo = kaya.load_image(kaya.MediaSource.asset("images/a11y-logo.png"))
         photo = kaya.load_image(kaya.MediaSource.asset("images/photo.jpg"))

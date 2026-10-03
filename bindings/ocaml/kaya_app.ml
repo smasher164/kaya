@@ -574,6 +574,7 @@ module Media_failure = struct
     | Decode_error
     | Resources
     | Timeout
+    | No_track
 
   let of_wire n =
     if n = Kaya_wire.media_failure_none then Option.none
@@ -584,6 +585,7 @@ module Media_failure = struct
     else if n = Kaya_wire.media_failure_decode_error then Some Decode_error
     else if n = Kaya_wire.media_failure_resources then Some Resources
     else if n = Kaya_wire.media_failure_timeout then Some Timeout
+    else if n = Kaya_wire.media_failure_no_track then Some No_track
     else invalid_arg (Printf.sprintf "kaya: a media failure of %d, which this build does not know" n)
 
   let name = function
@@ -594,6 +596,7 @@ module Media_failure = struct
     | Decode_error -> "decode_error"
     | Resources -> "resources"
     | Timeout -> "timeout"
+    | No_track -> "no_track"
 end
 
 module Session_action = struct

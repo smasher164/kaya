@@ -8,11 +8,10 @@ expect label#1 "keyframe 480@0 1480@0 completed"
 expect label#2 "peaks 48000 Hz, 1 ch, 20 pairs of 4800, -4095..4095"
 # A file that is not media and a file that is not there fail with the
 # player's reasons.
-expect label#4 "OFL.txt failed unsupported_container; missing.mp4 failed not_found"
+expect label#3 "OFL.txt failed unsupported_container; missing.mp4 failed not_found"
 # A read for a track the source lacks (tone.mp3's frames, h264_noaudio.mp4's
-# peaks): decode_error until a reason names it
-# (docs/deferred.md, the missing-track RULING).
-expect label#5 "mp3 frames failed decode_error; noaudio peaks failed decode_error"
+# peaks) answers no_track (docs/media-plan.md §8 ruling 4).
+expect label#4 "mp3 frames failed no_track; noaudio peaks failed no_track"
 expect_drawing canvas@strip "4/0,0,100,100"
 # The filmstrip is the PLATFORM's decode, so no hash is frozen for it: the
 # tiles' centres read the bands and the keyframe's flat colour.
@@ -26,8 +25,9 @@ expect_drawing canvas@wave "122/4,7,95,100"
 expect_drawing_hash canvas@wave "4dc19c1911f74793"
 expect_ink canvas@wave "76,10 85,92 = light FF0000/306F9A dark FF0000/306F9A"
 # Two reads the local server never finishes (its /trickle/ prefix): one
-# cancelled, one under a reader that is closed.
+# cancelled, one under a reader that is closed. Their label sits below the
+# two buttons.
 click button#0
-expect label#3 "reading"
+expect label#5 "reading"
 click button#1
-expect label#3 "closed cancelled; trickle cancelled"
+expect label#5 "closed cancelled; trickle cancelled"

@@ -3354,7 +3354,7 @@ for pattern, repl, label, rel, want in (
 KOTLIN_MEDIA = "android/kaya/src/main/kotlin/dev/kaya/KayaMedia.kt"
 KAYA_H = "crates/kaya/include/kaya.h"
 MEDIA_REASONS = ("unsupported_codec", "unsupported_container", "not_found",
-                 "network", "decode_error", "resources", "timeout")
+                 "network", "decode_error", "resources", "timeout", "no_track")
 
 
 def kotlin_code(text):

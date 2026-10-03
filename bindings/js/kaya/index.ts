@@ -4940,7 +4940,7 @@ export type BarRadioGroupOptions = RadioGroupOptions & { window?: number };
 /** What a player reads (docs/media-plan.md §2), the wire's own words. */
 export type PlayerState = "idle" | "loading" | "ready" | "playing" | "paused" | "ended" | "failed";
 /** Why a player cannot play: the closed reason (docs/media-plan.md §7a). */
-export type MediaFailure = "unsupported_codec" | "unsupported_container" | "not_found" | "network" | "decode_error" | "resources" | "timeout";
+export type MediaFailure = "unsupported_codec" | "unsupported_container" | "not_found" | "network" | "decode_error" | "resources" | "timeout" | "no_track";
 /** What the system's media controls ask of the app's session (§5). */
 export type SessionAction = "play" | "pause" | "stop" | "seek_to" | "seek_forward" | "seek_backward" | "next" | "previous";
 /** What the session states while no player is attached. */
@@ -4966,6 +4966,7 @@ const MEDIA_FAILURES: ReadonlyMap<number, MediaFailure> = new Map([
   [wire.MEDIA_FAILURE_DECODE_ERROR, "decode_error"],
   [wire.MEDIA_FAILURE_RESOURCES, "resources"],
   [wire.MEDIA_FAILURE_TIMEOUT, "timeout"],
+  [wire.MEDIA_FAILURE_NO_TRACK, "no_track"],
 ] as const);
 
 const SESSION_ACTIONS: Record<SessionAction, number> = {

@@ -320,7 +320,7 @@ readerApp app = do
       waveBox = Viewbox 200 60
   (labels, strip, wave, clip, exactRead, peaksRead, ends, logo, photo) <- buildTx app $ do
     window primary [WTitle "media reader", WSize 560 560]
-    labels <- mapM signalText ["exact", "keyframe", "peaks", "cancel", "failures", "no track"]
+    labels <- mapM signalText ["exact", "keyframe", "peaks", "failures", "no track", "cancel"]
     let line i lines what outcome = do
           modifyIORef' lines (sort . ((what <> " " <> readOutcomeName outcome) :))
           joined <- T.intercalate "; " <$> readIORef lines
@@ -331,10 +331,10 @@ readerApp app = do
             r <- readFrames trickle [0] (80, 45) Exact
             closing <- openReader (mediaUrl (base <> "/trickle/h264_aac.mp4"))
             closingRead <- readFrames closing [0] (80, 45) Exact
-            writeSignal (labels !! 3) "reading"
+            writeSignal (labels !! 5) "reading"
             return (trickle, r, closing, closingRead)
-          onReadDone app r (line 3 cancels "trickle")
-          onReadDone app closingRead (line 3 cancels "closed")
+          onReadDone app r (line 5 cancels "trickle")
+          onReadDone app closingRead (line 5 cancels "closed")
           writeIORef trickling (Just (trickle, r, closing))
         cancel = do
           t <- readIORef trickling
@@ -346,11 +346,12 @@ readerApp app = do
     wave <- canvas waveBox [] [A11yId "wave", A11yLabel "Waveform"]
     root <-
       column
-        ( map labelBound labels -- label#0..#5
+        ( map labelBound (take 5 labels) -- label#0..#4
             ++ [ pure strip,
                  pure wave,
                  buttonOn "start" start, -- button#0
-                 buttonOn "cancel" cancel -- button#1
+                 buttonOn "cancel" cancel, -- button#1
+                 labelBound (labels !! 5) -- label#5
                ]
         )
     mount root
@@ -363,7 +364,7 @@ readerApp app = do
         ( \(what, source) -> do
             r <- openReader (mediaAsset source)
             read' <- readFrames r [0] (80, 45) Exact
-            return (read', line 4 failures what)
+            return (read', line 3 failures what)
         )
         [("OFL.txt", "fonts/OFL.txt"), ("missing.mp4", "media/missing.mp4")]
     silent <- openReader (mediaAsset "media/h264_noaudio.mp4")
@@ -374,8 +375,8 @@ readerApp app = do
     photo <- loadImage (mediaAsset "images/photo.jpg")
     let ends =
           failed
-            ++ [ (silentRead, line 5 missing "noaudio peaks"),
-                 (songRead, line 5 missing "mp3 frames")
+            ++ [ (silentRead, line 4 missing "noaudio peaks"),
+                 (songRead, line 4 missing "mp3 frames")
                ]
     return (labels, strip, wave, clip, exactRead, peaksRead, ends, logo, photo)
   forM_ ends $ \(r, h) -> onReadDone app r h

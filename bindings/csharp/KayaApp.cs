@@ -848,6 +848,8 @@ enum MediaFailure : uint
     DecodeError = KayaWire.MediaFailureDecodeError,
     Resources = KayaWire.MediaFailureResources,
     Timeout = KayaWire.MediaFailureTimeout,
+    /// A reader's read for a track its source lacks (§8 ruling 4).
+    NoTrack = KayaWire.MediaFailureNoTrack,
 }
 
 enum SessionActionKind : uint
@@ -978,7 +980,9 @@ static class MediaWords
         MediaFailure.Network => "network",
         MediaFailure.DecodeError => "decode_error",
         MediaFailure.Resources => "resources",
-        _ => "timeout",
+        MediaFailure.Timeout => "timeout",
+        MediaFailure.NoTrack => "no_track",
+        _ => throw new ArgumentOutOfRangeException(nameof(f), f, "kaya: a media failure this build does not know"),
     };
 }
 

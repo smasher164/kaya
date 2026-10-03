@@ -421,6 +421,7 @@ module Media_failure : sig
     | Decode_error
     | Resources
     | Timeout
+    | No_track  (** A reader's read for a track its source lacks (§8 ruling 4). *)
 
   val name : t -> string
 end

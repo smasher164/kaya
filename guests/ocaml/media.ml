@@ -326,16 +326,16 @@ let reader_app app =
   in
   build app (fun () ->
       window ~title:"media reader" ~width:560.0 ~height:560.0 ();
-      let labels = Array.map (signal Scalar.Str) [| "exact"; "keyframe"; "peaks"; "cancel"; "failures"; "no track" |] in
+      let labels = Array.map (signal Scalar.Str) [| "exact"; "keyframe"; "peaks"; "failures"; "no track"; "cancel" |] in
       let start () =
         let trickle = reader (Media_source.url (base ^ "/trickle/h264_frames.mp4")) in
         let read = read_frames ~max_size:(80, 45) ~accuracy:Frame_accuracy.Exact trickle [ 0 ] in
-        on_read_done app read (line labels 3 cancels "trickle");
+        on_read_done app read (line labels 5 cancels "trickle");
         let closing = reader (Media_source.url (base ^ "/trickle/h264_aac.mp4")) in
         let closing_read = read_frames ~max_size:(80, 45) ~accuracy:Frame_accuracy.Exact closing [ 0 ] in
-        on_read_done app closing_read (line labels 3 cancels "closed");
+        on_read_done app closing_read (line labels 5 cancels "closed");
         trickling := Some (trickle, read, closing);
-        write labels.(3) "reading"
+        write labels.(5) "reading"
       in
       let cancel () =
         Option.iter
@@ -355,11 +355,11 @@ let reader_app app =
             label ~bind:labels.(2);
             label ~bind:labels.(3);
             label ~bind:labels.(4);
-            label ~bind:labels.(5); (* label#5 *)
             w strip;
             w wave;
             button ~text:"start" ~on_click:start; (* button#0 *)
             button ~text:"cancel" ~on_click:cancel; (* button#1 *)
+            label ~bind:labels.(5); (* label#5 *)
           ]
           ()
       in
@@ -385,15 +385,15 @@ let reader_app app =
         (fun (what, source) ->
           let r = reader (Media_source.asset source) in
           let read = read_frames ~max_size:(80, 45) ~accuracy:Frame_accuracy.Exact r [ 0 ] in
-          on_read_done app read (line labels 4 failures what))
+          on_read_done app read (line labels 3 failures what))
         [ ("OFL.txt", "fonts/OFL.txt"); ("missing.mp4", "media/missing.mp4") ];
 
       let silent = reader (Media_source.asset "media/h264_noaudio.mp4") in
       let read = read_peaks silent ~samples_per_pair:4800 in
-      on_read_done app read (line labels 5 missing "noaudio peaks");
+      on_read_done app read (line labels 4 missing "noaudio peaks");
       let song = reader (Media_source.asset "media/tone.mp3") in
       let read = read_frames ~max_size:(80, 45) ~accuracy:Frame_accuracy.Exact song [ 0 ] in
-      on_read_done app read (line labels 5 missing "mp3 frames");
+      on_read_done app read (line labels 4 missing "mp3 frames");
 
       let logo = load_image (Media_source.asset "images/a11y-logo.png") in
       let photo = load_image (Media_source.asset "images/photo.jpg") in

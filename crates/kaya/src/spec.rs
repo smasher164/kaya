@@ -4436,6 +4436,9 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("decode_error", 5),
                 ("resources", 6),
                 ("timeout", 7),
+                // A reader's read for a track its source lacks; never a
+                // player's (docs/media-plan.md §8 ruling 4).
+                ("no_track", 8),
             ],
         },
         EnumSpec {
