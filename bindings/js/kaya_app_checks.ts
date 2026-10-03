@@ -2248,6 +2248,234 @@ if (isMainThread) {
   check("a session action reaches onAction as the closed action", mdSaw(["session", "next", 0]));
   check("a stamped video's visibility passes the copy's row first", mdSaw(["shown", 3, 0.5]));
 
+  // ------------------------------------------------------------ reader
+  // (docs/media-plan.md §8 ruling 4.) AFTER A CANCEL OR A CLOSE THE APP
+  // HEARS ONLY THE END: answers of that read already queued are not
+  // delivered, and the images they carried are released by the next
+  // commit. Packed in the spec's own field order and decoded by the
+  // GENERATED decoder.
+  const packFrame = (reader: number, read: number, image: number, index: number, ms: number): Uint8Array =>
+    frame(wire.OCC_READER_FRAME, (v) => {
+      v.setBigUint64(8, BigInt(reader), true);
+      v.setBigUint64(16, BigInt(read), true);
+      v.setBigUint64(24, BigInt(image), true);
+      v.setUint32(32, index, true);
+      v.setUint32(36, 2, true);
+      v.setUint32(40, 1, true);
+      v.setBigUint64(48, BigInt(ms), true);
+      v.setBigUint64(56, BigInt(ms), true);
+    }, 56, []);
+  const packDone = (reader: number, read: number, outcome: number, failure = 0, detail = ""): Uint8Array =>
+    frame(wire.OCC_READER_DONE, (v) => {
+      v.setBigUint64(8, BigInt(reader), true);
+      v.setBigUint64(16, BigInt(read), true);
+      v.setUint32(24, outcome, true);
+      v.setUint32(28, failure, true);
+    }, 24, [valueBytes(detail)]);
+  const packPeaks = (reader: number, read: number, rate: number, perPair: number, channels: number, length: number): Uint8Array =>
+    frame(wire.OCC_READER_PEAKS, (v) => {
+      v.setBigUint64(8, BigInt(reader), true);
+      v.setBigUint64(16, BigInt(read), true);
+      v.setUint32(24, rate, true);
+      v.setUint32(28, perPair, true);
+      v.setUint32(32, channels, true);
+      v.setUint32(36, length, true);
+    }, 32, []);
+  const packLoaded = (image: number, w: number, h: number, failure = 0, detail = ""): Uint8Array =>
+    frame(wire.OCC_IMAGE_LOADED, (v) => {
+      v.setBigUint64(8, BigInt(image), true);
+      v.setUint32(16, w, true);
+      v.setUint32(20, h, true);
+      v.setUint32(24, failure, true);
+    }, 24, [valueBytes(detail)]);
+  const rdFire = (...packed: Uint8Array[]): void => {
+    for (const b of packed) fire(wire.parse_occurrence(b));
+  };
+  const rdKind = (r: Uint8Array): number => new DataView(r.buffer, r.byteOffset).getUint16(4, true);
+  const rdReleased = (from: number): number[] =>
+    shipped.slice(from).flat().filter((r) => rdKind(r) === wire.TX_RELEASE_IMAGE).map((r) => Number(new DataView(r.buffer, r.byteOffset).getBigUint64(8, true)));
+  const rdSame = (x: Uint8Array | undefined, y: Uint8Array): boolean => x !== undefined && Buffer.from(x).equals(Buffer.from(y));
+  const rdTicks = async (): Promise<void> => {
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+  };
+  const book = (app as unknown as { _readerBook: { reads: Map<number, unknown>; inFlight: Map<number, number>; abandoned: Set<number>; loads: Map<number, unknown> } })._readerBook;
+
+  for (const how of ["cancel", "close"] as const) {
+    const seen: unknown[] = [];
+    let rdr!: K.Reader;
+    let rd!: K.Read;
+    shipped.length = 0;
+    app.build(() => {
+      rdr = kaya.reader(kaya.MediaSource.asset("media/h264_frames.mp4"));
+      rd = rdr.frames([0, 40], { accuracy: "exact", onFrame: (f) => seen.push(["frame", f.index]), onDone: (o) => seen.push(["done", o.status]) });
+    });
+    const firstImage = Number(new DataView(shipped[0]![1]!.buffer, shipped[0]![1]!.byteOffset).getBigUint64(24, true));
+    check(`a frames read packs its reader, read, first image and times as I64 (${how})`,
+      rdSame(shipped[0]![1], wire.tx_read_frames(rdr.id, rd.id, firstImage, wire.FRAME_ACCURACY_EXACT, 0, 0, [new wire.I64(0), new wire.I64(40)])));
+    app.build(() => (how === "cancel" ? rd.cancel() : rdr.close()));
+    check(`the ${how} ships its record`,
+      rdSame(shipped[shipped.length - 1]![0], how === "cancel" ? wire.tx_cancel_read(rdr.id, rd.id) : wire.tx_close_reader(rdr.id)));
+    const before = shipped.length;
+    rdFire(packFrame(rdr.id, rd.id, firstImage, 0, 0), packDone(rdr.id, rd.id, wire.READ_OUTCOME_CANCELLED));
+    check(`after a ${how} the app hears only the end`, JSON.stringify(seen) === JSON.stringify([["done", "cancelled"]]));
+    check(`after a ${how} a late frame's image is released at the next commit`, JSON.stringify(rdReleased(before)) === JSON.stringify([firstImage]));
+  }
+
+  {
+    const seen: unknown[] = [];
+    let rdr!: K.Reader;
+    let rd!: K.Read;
+    app.build(() => {
+      rdr = kaya.reader(kaya.MediaSource.asset("media/h264_frames.mp4"));
+      rd = rdr.frames([0, 40], { accuracy: "keyframe", onFrame: (f) => seen.push(["frame", f.index, f.actualMs]), onDone: (o) => seen.push(["done", o.status]) });
+    });
+    const before = shipped.length;
+    rdFire(packFrame(rdr.id, rd.id, 902, 1, 40), packFrame(rdr.id, rd.id, 901, 0, 0), packDone(rdr.id, rd.id, wire.READ_OUTCOME_COMPLETED), packFrame(rdr.id, rd.id, 901, 0, 0));
+    check("a read in flight is heard frame by frame, then its end",
+      JSON.stringify(seen) === JSON.stringify([["frame", 1, 40], ["frame", 0, 0], ["done", "completed"]]));
+    check("a read's registrations retire with its end, and a heard read's images are not released",
+      !book.reads.has(rd.id) && !book.inFlight.has(rdr.id) && rdReleased(before).length === 0);
+
+    const ends: K.ReadOutcome[] = [];
+    let bad!: K.Reader;
+    let badRead!: K.Read;
+    app.build(() => {
+      bad = kaya.reader(kaya.MediaSource.asset("fonts/OFL.txt"));
+      badRead = bad.frames([0], { accuracy: "exact", onDone: (o) => ends.push(o) });
+    });
+    rdFire(packDone(bad.id, badRead.id, wire.READ_OUTCOME_FAILED, wire.MEDIA_FAILURE_UNSUPPORTED_CONTAINER, "not media"));
+    check("a failed read ends with the closed reason and the platform's sentence",
+      JSON.stringify(ends) === JSON.stringify([{ status: "failed", failure: "unsupported_container", detail: "not media" }]));
+  }
+
+  {
+    const pulls: number[][] = [];
+    runtime.hooks.readerPeaks = (reader, read) => {
+      pulls.push([reader, read]);
+      return Int16Array.from([-3, 4, -1, 2, -5, 6, 0, 1]);
+    };
+    const seen: unknown[] = [];
+    let rdr!: K.Reader;
+    let rd!: K.Read;
+    app.build(() => {
+      rdr = kaya.reader(kaya.MediaSource.asset("media/tone.wav"));
+      rd = rdr.peaks(4800, { onProgress: (d, t) => seen.push(["progress", d, t]), onPeaks: (p) => seen.push(p) });
+    });
+    rdFire(
+      frame(wire.OCC_READER_PROGRESS, (v) => {
+        v.setBigUint64(8, BigInt(rdr.id), true);
+        v.setBigUint64(16, BigInt(rd.id), true);
+        v.setBigUint64(24, 500n, true);
+        v.setBigUint64(32, 1000n, true);
+      }, 32, []),
+      packPeaks(rdr.id, rd.id, 48000, 4800, 2, 2),
+      packDone(rdr.id, rd.id, wire.READ_OUTCOME_COMPLETED),
+    );
+    const p = seen[1];
+    check("peaks are pulled when decoded and read pair-major",
+      JSON.stringify(seen[0]) === JSON.stringify(["progress", 500, 1000])
+      && JSON.stringify(pulls) === JSON.stringify([[rdr.id, rd.id]])
+      && p instanceof kaya.Peaks && p.length === 2 && p.sampleRate === 48000
+      && JSON.stringify([p.pair(0, 0), p.pair(0, 1), p.pair(1, 1)]) === JSON.stringify([[-3, 4], [-1, 2], [0, 1]]));
+    runtime.hooks.readerPeaks = null;
+  }
+
+  {
+    const seen: number[] = [];
+    let rdr!: K.Reader;
+    let rd!: K.Read;
+    app.build(() => {
+      rdr = kaya.reader(kaya.MediaSource.asset("media/h264_frames.mp4"));
+      rd = rdr.frames([0], { accuracy: "exact", onFrame: (f) => seen.push(f.index) });
+    });
+    try {
+      app.build(() => {
+        rd.cancel();
+        throw new Error("rolled back");
+      });
+    } catch {
+      // the build rethrows; its records and the book went back
+    }
+    rdFire(packFrame(rdr.id, rd.id, 1, 0, 0));
+    check("a cancel rolled back with its transaction gives nothing up", JSON.stringify(seen) === "[0]" && !book.abandoned.has(rd.id));
+  }
+
+  // THE AWAITED FORM (docs/js-plan.md §4 rule 2): no handler answers a
+  // promise; the frames in index order; a failed read rejects and gives its
+  // images back; aborting cancels the read and gives back what it carried,
+  // and a late frame of it is released too.
+  {
+    let rdr!: K.Reader;
+    let pending!: Promise<K.Frame[]>;
+    app.build(() => {
+      rdr = kaya.reader(kaya.MediaSource.asset("media/h264_frames.mp4"));
+      pending = rdr.frames([0, 40], { accuracy: "exact" });
+    });
+    const read = [...book.reads.keys()].pop()!;
+    rdFire(packFrame(rdr.id, read, 12, 1, 40), packFrame(rdr.id, read, 11, 0, 0), packDone(rdr.id, read, wire.READ_OUTCOME_COMPLETED));
+    const got = await pending;
+    check("an awaited frames read answers the frames in index order", JSON.stringify(got.map((f) => [f.index, f.image.id])) === JSON.stringify([[0, 11], [1, 12]]));
+
+    let failing!: Promise<K.Frame[]>;
+    app.build(() => {
+      failing = rdr.frames([0, 40], { accuracy: "exact" });
+    });
+    const failRead = [...book.reads.keys()].pop()!;
+    const beforeFail = shipped.length;
+    rdFire(packFrame(rdr.id, failRead, 21, 0, 0), packDone(rdr.id, failRead, wire.READ_OUTCOME_FAILED, wire.MEDIA_FAILURE_DECODE_ERROR, "x"));
+    const failure = await failing.then(() => null, (e: unknown) => e);
+    check("an awaited read that fails rejects with a ReadError and gives its images back",
+      failure instanceof kaya.ReadError && failure.outcome.status === "failed" && JSON.stringify(rdReleased(beforeFail)) === "[21]");
+
+    const abort = new AbortController();
+    let aborted!: Promise<K.Frame[]>;
+    app.build(() => {
+      aborted = rdr.frames([0, 40], { accuracy: "exact", signal: abort.signal });
+    });
+    const abortRead = [...book.reads.keys()].pop()!;
+    rdFire(packFrame(rdr.id, abortRead, 31, 0, 0));
+    const beforeAbort = shipped.length;
+    abort.abort(new Error("gone"));
+    const why = await aborted.then(() => null, (e: unknown) => e);
+    await rdTicks();
+    const abortTx = shipped.slice(beforeAbort).flat();
+    check("aborting an awaited read cancels it, gives its images back and rejects with the reason",
+      why instanceof Error && why.message === "gone"
+      && abortTx.some((r) => rdSame(r, wire.tx_cancel_read(rdr.id, abortRead)))
+      && JSON.stringify(rdReleased(beforeAbort)) === "[31]");
+    const beforeLate = shipped.length;
+    rdFire(packFrame(rdr.id, abortRead, 32, 1, 40), packDone(rdr.id, abortRead, wire.READ_OUTCOME_CANCELLED));
+    app.build(() => {});
+    check("an aborted read's late frame is not heard and its image goes back at the next commit",
+      JSON.stringify(rdReleased(beforeLate)) === "[32]" && !book.reads.has(abortRead) && !book.abandoned.has(abortRead));
+  }
+
+  {
+    const seen: unknown[] = [];
+    let ok!: K.Image;
+    let missingImage!: K.Image;
+    let cv!: K.Widget;
+    let drawn: unknown[] = [];
+    shipped.length = 0;
+    app.window(() => {
+      kaya.column(() => {
+        cv = kaya.canvas([10, 10]);
+      });
+      ok = kaya.loadImage(kaya.MediaSource.asset("images/photo.jpg"), { onLoaded: (w, h) => seen.push(["ok", w, h]) });
+      missingImage = kaya.loadImage(kaya.MediaSource.asset("images/nope.png"), { onFailed: (why, d) => seen.push(["bad", why, d]) });
+      cv.draw((d) => {
+        d.image(ok, 1, 2, 3, 4);
+        drawn = [...d._ops];
+      });
+    });
+    check("loadImage packs its image and source", shipped[0]!.some((r) => rdSame(r, wire.tx_load_image(ok.id, "images/photo.jpg"))));
+    check("Draw.image is the image op with an I64 id and its rectangle",
+      JSON.stringify(drawn) === JSON.stringify([new wire.I64(wire.DRAW_OP_IMAGE), new wire.I64(ok.id), 1, 2, 3, 4]));
+    rdFire(packLoaded(ok.id, 40, 30), packLoaded(missingImage.id, 0, 0, wire.MEDIA_FAILURE_NOT_FOUND, "no file"));
+    check("image_loaded answers the size or the reason, once",
+      JSON.stringify(seen) === JSON.stringify([["ok", 40, 30], ["bad", "not_found", "no file"]]) && book.loads.size === 0);
+  }
+
   // THE FORMATTER DOOR AND THE CATALOG (docs/compliance-plan.md §1.4): the
   // binding's own walls, each refused by name before the addon is asked —
   // a length outside the three, a Date instant where a civil date is

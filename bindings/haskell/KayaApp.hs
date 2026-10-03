@@ -312,6 +312,23 @@ module KayaApp
     onCue,
     onSession,
     canPlay,
+    openReader,
+    readFrames,
+    readPeaks,
+    cancelRead,
+    closeReader,
+    loadImage,
+    releaseImage,
+    imagePixels,
+    awaitFrames,
+    awaitPeaks,
+    askFrames,
+    askPeaks,
+    onFrame,
+    onReadProgress,
+    onPeaks,
+    onReadDone,
+    onImageLoaded,
     -- The dispatch loop's media arm, for guests/haskell/AbortCheck.hs
     -- alone; a guest calls none of it.
     mediaOccurrence,
@@ -342,6 +359,8 @@ module KayaApp
     canvas,
     canvasOf,
     drawAt,
+    draw,
+    drawImage,
     -- The size policy, LIVE CANVASES ONLY (docs/canvas-plan.md §3.2.1);
     -- `scale` is spelled by writing none of these three.
     fixed,
@@ -458,6 +477,7 @@ import Data.Int (Int32, Int64)
 import Data.IORef
 import Data.List (elemIndex)
 import Data.Maybe (fromMaybe, listToMaybe)
+import qualified Data.Sequence as Seq
 import GHC.TypeLits (ErrorMessage (..), TypeError)
 import qualified Data.Map.Strict as Map
 import qualified Data.List as List
@@ -3517,6 +3537,123 @@ declareSession attrs =
   where
     str xs = W.VStr (T.unpack (last ("" : xs)))
 
+-- THE MEDIA READER AND THE CORE-HELD IMAGES (docs\/media-plan.md §8
+-- rulings 3, 4): frames and peaks without a player.
+
+-- | A media reader on a source.
+openReader :: MediaSource -> Build Reader
+openReader src = do
+  n <- state $ \s -> let c = s.bCounters; next = c.cReader + 1 in (next, s {bCounters = c {cReader = next}})
+  emitB (W.txOpenReader n (mediaSourceValue src))
+  return (Reader n)
+
+allocRead :: Reader -> Build Word64
+allocRead (Reader r) = do
+  n <- state $ \s -> let c = s.bCounters; next = c.cRead + 1 in (next, s {bCounters = c {cRead = next}})
+  pendB (PReadStarted r n)
+  return n
+
+allocImages :: Int -> Build Word64
+allocImages count = state $ \s ->
+  let c = s.bCounters
+   in (c.cImage + 1, s {bCounters = c {cImage = c.cImage + fromIntegral count}})
+
+-- | One picture per time, heard through 'onFrame', the end through
+-- 'onReadDone'. The size bounds the picture, aspect kept, 0 for no bound
+-- on that axis. One read in flight per reader.
+readFrames :: Reader -> [Int] -> (Int, Int) -> FrameAccuracy -> Build ReadId
+readFrames r@(Reader n) times (maxW, maxH) accuracy = do
+  readId <- allocRead r
+  first <- allocImages (length times)
+  emitB
+    ( W.txReadFrames n readId first (frameAccuracyWire accuracy) (fromIntegral maxW) (fromIntegral maxH)
+        (map (W.VI64 . fromIntegral) times)
+    )
+  return (ReadId readId)
+
+-- | The first audio track's min\/max pairs per channel per
+-- @samplesPerPair@ frames, heard through 'onPeaks'.
+readPeaks :: Reader -> Int -> Build ReadId
+readPeaks r@(Reader n) spp = do
+  readId <- allocRead r
+  emitB (W.txReadPeaks n readId (fromIntegral spp))
+  return (ReadId readId)
+
+-- | Stop a read: it ends cancelled, and nothing else of it is heard.
+cancelRead :: Reader -> ReadId -> Build ()
+cancelRead (Reader n) (ReadId readId) = do
+  pendB (PReadAbandoned readId)
+  emitB (W.txCancelRead n readId)
+
+-- | Forget a reader, cancelling its read in flight; the images it
+-- answered with stay the app's.
+closeReader :: Reader -> Build ()
+closeReader (Reader n) = do
+  pendB (PReaderClosed n)
+  emitB (W.txCloseReader n)
+
+-- | An image decoded by kaya (PNG or JPEG), heard through
+-- 'onImageLoaded'; a drawing may name it in the same transaction.
+loadImage :: MediaSource -> Build Image
+loadImage src = do
+  n <- allocImages 1
+  emitB (W.txLoadImage n (mediaSourceValue src))
+  return (Image n)
+
+releaseImage :: Image -> Build ()
+releaseImage (Image n) = emitB (W.txReleaseImage n)
+
+-- | An image's size and premultiplied RGBA8 bytes; 'Nothing' for an image
+-- holding no picture.
+imagePixels :: Image -> IO (Maybe (Int, Int, BS.ByteString))
+imagePixels (Image n) = R.imagePixelsRaw n
+
+-- | A read as a question, the callback form: the frames in index order,
+-- or why not. A read that fails, or whose reader is closed under it,
+-- gives back the images it carried.
+awaitFrames :: Reader -> [Int] -> (Int, Int) -> FrameAccuracy -> (Either ReadError [Frame] -> IO ()) -> Build ()
+awaitFrames r times size accuracy k = do
+  ReadId readId <- readFrames r times size accuracy
+  pendB (PAwait readId (k . fmap (List.sortOn (.index) . fst)))
+
+awaitPeaks :: Reader -> Int -> (Either ReadError Peaks -> IO ()) -> Build ()
+awaitPeaks r spp k = do
+  ReadId readId <- readPeaks r spp
+  pendB (PAwait readId (k . fmap (fromMaybe (Peaks 0 spp 0 0 Seq.empty) . snd)))
+
+onRead :: App -> ReadId -> Text -> (ReadOcc -> IO ()) -> IO ()
+onRead app (ReadId readId) what h = modifyIORef' app.appMedia.readHandlers (Map.insert (readId, what) h)
+
+-- | Each time of a 'readFrames' as it is answered, in the platform's
+-- order. After 'cancelRead' or 'closeReader' only the end is heard.
+onFrame :: App -> ReadId -> (Frame -> IO ()) -> IO ()
+onFrame app r f = onRead app r "frame" $ \o -> case o of
+  ReadFrame fr -> f fr
+  _ -> return ()
+
+-- | A peaks read's progress: milliseconds decoded of the total.
+onReadProgress :: App -> ReadId -> (Int -> Int -> IO ()) -> IO ()
+onReadProgress app r f = onRead app r "progress" $ \o -> case o of
+  ReadProgress d t -> f d t
+  _ -> return ()
+
+-- | A peaks read's answer, just before its end.
+onPeaks :: App -> ReadId -> (Peaks -> IO ()) -> IO ()
+onPeaks app r f = onRead app r "peaks" $ \o -> case o of
+  ReadPeaks p -> f p
+  _ -> return ()
+
+-- | The read's end; every registration of the read retires with it.
+onReadDone :: App -> ReadId -> (ReadOutcome -> IO ()) -> IO ()
+onReadDone app r f = onRead app r "done" $ \o -> case o of
+  ReadDone outcome -> f outcome
+  _ -> return ()
+
+-- | A 'loadImage''s answer, once: the size, or the reason and the
+-- decoder's sentence.
+onImageLoaded :: App -> Image -> (Either (MediaFailure, Text) (Int, Int) -> IO ()) -> IO ()
+onImageLoaded app (Image n) f = modifyIORef' app.appMedia.imageLoads (Map.insert n f)
+
 -- | Whether this platform plays @mime@ with @codecs@ (an RFC 6381 list,
 -- "" for none): true exactly when loading it would not fail as
 -- unsupported_codec or unsupported_container. Any thread.
@@ -4278,6 +4415,14 @@ choiceWith kind options src = do
   bindValueSource n src
   return n
 
+-- | Re-declare a live canvas's whole drawing.
+draw :: Widget -> Viewbox -> [DrawOp] -> Build ()
+draw (Widget n) vb ops = emitB (drawingRecord n [] vb ops)
+
+-- | Draw a core-held image into the box (x, y, w, h) of the viewbox.
+drawImage :: Image -> Double -> Double -> Double -> Double -> DrawOp
+drawImage (Image n) x y w h = drawOp W.drawOpImage [W.VI64 (fromIntegral n), W.VF64 x, W.VF64 y, W.VF64 w, W.VF64 h]
+
 -- | Re-declare ONE stamped copy's drawing: the canvas template Node plus
 -- that copy's keys, outermost first. An empty key list re-declares the
 -- drawing every copy is born with, which is what 'canvasOf' spells at
@@ -4421,7 +4566,9 @@ buildTx app b = do
   -- by Tx::commit is the shape).
   routes <- readIORef (app.appPendingRoutes)
   writeIORef (app.appPendingRoutes) []
-  kayaSubmit (routes ++ [records])
+  carried <- readIORef app.appMedia.pendingOps
+  writeIORef app.appMedia.pendingOps []
+  kayaSubmit (routes ++ carried ++ [records])
   return a
 
 register :: App -> Pending -> IO ()
@@ -4468,6 +4615,17 @@ register app pending = case pending of
   PMenuToggledNode n handler -> modifyIORef' (app.appMenuToggledNode) (Map.insert n handler)
   PMenuSelected n handler -> modifyIORef' (app.appMenuSelected) (Map.insert n handler)
   PMenuSelectedNode n handler -> modifyIORef' (app.appMenuSelectedNode) (Map.insert n handler)
+  PReadStarted r readId -> modifyIORef' app.appMedia.readsInFlight (Map.insert r readId)
+  PReadAbandoned readId -> abandonRead app readId
+  PReaderClosed r -> readIORef app.appMedia.readsInFlight >>= mapM_ (abandonRead app) . Map.lookup r
+  PAwait readId k -> modifyIORef' app.appMedia.awaits (Map.insert readId (Await [] Nothing k))
+
+-- | The app gave up on a read: its answers still in the channel are not
+-- heard, and the images they carry go back with the next commit.
+abandonRead :: App -> Word64 -> IO ()
+abandonRead app readId = do
+  modifyIORef' app.appMedia.abandonedReads (Map.insert readId ())
+  modifyIORef' app.appMedia.readsInFlight (Map.filter (/= readId))
 
 -- | buildTx for handlers that keep no handles.
 submitTx :: App -> Build () -> IO ()
@@ -4717,8 +4875,89 @@ onSession app f = writeIORef app.appMedia.sessionHandler (Just f)
 -- handler reads the readings it was told about. The flat records'
 -- tails are tools/kaya-bindgen's (the fields in order, lists as a count
 -- then their values).
+-- The reader's half (docs\/media-plan.md §8 ruling 4): an abandoned
+-- read's answers are not heard and a dropped frame's image rides the next
+-- commit as release_image; an awaited read that does not complete gives
+-- back what it carried.
+readerOccurrence :: App -> Word16 -> Word64 -> [W.Value] -> IO ()
+readerOccurrence app kind r tail_ = do
+  let m = app.appMedia
+      ints = [case v of W.VI64 n -> fromIntegral n; _ -> 0 | v <- tail_] :: [Int]
+      readId = case tail_ of W.VI64 n : _ -> fromIntegral n; _ -> 0 :: Word64
+      release (Image i) = modifyIORef' m.pendingOps (++ [W.txReleaseImage i])
+      named = ["frame", "progress", "peaks", "done"] :: [Text]
+      handlers = do
+        hs <- readIORef m.readHandlers
+        return [h | what <- named, Just h <- [Map.lookup (readId, what) hs]]
+  abandoned <- Map.member readId <$> readIORef m.abandonedReads
+  occ <- case ints of
+    _ : img : ix : w : h : req : act : _
+      | kind == W.occKindReaderFrame -> return (Just (ReadFrame (Frame ix req act (Image (fromIntegral img)) w h)))
+    _ : d : t : _
+      | kind == W.occKindReaderProgress -> return (Just (ReadProgress d t))
+    _ : rate : spp : ch : len : _
+      | kind == W.occKindReaderPeaks -> do
+          pairs <- if abandoned then return [] else R.readerPeaksRaw r readId (len * ch * 2)
+          return (Just (ReadPeaks (Peaks rate spp ch len (Seq.fromList pairs))))
+    _ : outcome : failure : _
+      | kind == W.occKindReaderDone -> do
+          let detail = case tail_ of [_, _, _, W.VStr d] -> T.pack d; _ -> ""
+              o
+                | fromIntegral outcome == W.readOutcomeCompleted = ReadCompleted
+                | fromIntegral outcome == W.readOutcomeCancelled = ReadCancelled
+                | otherwise = ReadFailed (fromMaybe MediaDecodeError (mediaFailureOfWire (fromIntegral failure))) detail
+          modifyIORef' m.readsInFlight (Map.filterWithKey (\k v -> not (k == r && v == readId)))
+          return (Just (ReadDone o))
+    _ -> return Nothing
+  case occ of
+    Nothing -> return ()
+    Just (ReadFrame f) | abandoned -> release f.picture
+    Just (ReadDone o0) -> do
+      modifyIORef' m.abandonedReads (Map.delete readId)
+      let o = if abandoned then ReadCancelled else o0
+      waiting <- Map.lookup readId <$> readIORef m.awaits
+      modifyIORef' m.awaits (Map.delete readId)
+      hs <- handlers
+      modifyIORef' m.readHandlers (\t -> foldr (\what -> Map.delete (readId, what)) t named)
+      case waiting of
+        Just a -> do
+          if o == ReadCompleted then return () else mapM_ (release . (.picture)) a.awaitFrames
+          dispatch $ a.awaitAnswer $ case o of
+            ReadCompleted -> Right (a.awaitFrames, a.awaitPeaks)
+            ReadCancelled -> Left ReadErrorCancelled
+            ReadFailed why d -> Left (ReadErrorFailed why d)
+        Nothing -> return ()
+      dispatch (mapM_ ($ ReadDone o) hs)
+      left <- readIORef m.pendingOps
+      if null left then return () else dispatch (buildTx app (return ()))
+    Just _ | abandoned -> return ()
+    Just o -> do
+      waiting <- Map.lookup readId <$> readIORef m.awaits
+      case waiting of
+        Just a -> do
+          let a' = case o of
+                ReadFrame f -> a {awaitFrames = f : a.awaitFrames}
+                ReadPeaks p -> a {awaitPeaks = Just p}
+                _ -> a
+          modifyIORef' m.awaits (Map.insert readId a')
+        Nothing -> handlers >>= \hs -> dispatch (mapM_ ($ o) hs)
+
 mediaOccurrence :: App -> Word16 -> Word64 -> [W.Value] -> Maybe W.Value -> [W.Value] -> IO Bool
 mediaOccurrence app kind ident keys payload tail_
+  | kind `elem` [W.occKindReaderFrame, W.occKindReaderProgress, W.occKindReaderPeaks, W.occKindReaderDone] = do
+      readerOccurrence app kind ident tail_
+      return True
+  | kind == W.occKindImageLoaded = do
+      loads <- readIORef m.imageLoads
+      case (Map.lookup ident loads, tail_) of
+        (Just f, [W.VI64 w, W.VI64 h, W.VI64 failure, detail]) -> do
+          modifyIORef' m.imageLoads (Map.delete ident)
+          let d = case detail of W.VStr t -> T.pack t; _ -> ""
+          dispatch $ f $ case mediaFailureOfWire (fromIntegral failure) of
+            Nothing -> Right (fromIntegral w, fromIntegral h)
+            Just why -> Left (why, d)
+        _ -> return ()
+      return True
   | kind == W.occKindPlayerChanged = do
       case tail_ of
         W.VI64 st : W.VI64 fl : W.VI64 dur : W.VI64 w : W.VI64 h : detail : _ -> do
@@ -4822,7 +5061,7 @@ newApp :: IO App
 newApp =
   App
     <$> newMVar [] -- appPosted
-    <*> newIORef (Counters 0 0 0 0 0 0 0 0) -- appCounters
+    <*> newIORef (Counters 0 0 0 0 0 0 0 0 0 0 0) -- appCounters
     <*> newIORef (Map.empty, Map.empty) -- appModel
     <*> newIORef Map.empty -- appFresh
     <*> newIORef Map.empty -- appDerived
@@ -4893,6 +5132,12 @@ newApp =
             <*> newIORef Map.empty
             <*> newIORef Map.empty
             <*> newIORef Map.empty
+            <*> newIORef []
+            <*> newIORef Map.empty
+            <*> newIORef Map.empty
+            <*> newIORef Map.empty
+            <*> newIORef Map.empty
+            <*> newIORef Map.empty
             <*> newIORef Map.empty
             <*> newIORef Nothing
         ) -- appMedia
@@ -4946,7 +5191,7 @@ drainPosted app = do
 
 isMediaKind :: Word16 -> Bool
 isMediaKind kind =
-  kind `elem` [W.occKindPlayerChanged, W.occKindPlayerPosition, W.occKindSeekCompleted, W.occKindPlayerTracks, W.occKindCaptionCue, W.occKindVideoVisibility, W.occKindSessionAction]
+  kind `elem` [W.occKindPlayerChanged, W.occKindPlayerPosition, W.occKindSeekCompleted, W.occKindPlayerTracks, W.occKindCaptionCue, W.occKindVideoVisibility, W.occKindSessionAction, W.occKindReaderFrame, W.occKindReaderProgress, W.occKindReaderPeaks, W.occKindReaderDone, W.occKindImageLoaded]
 
 dispatchLoop :: App -> IO ()
 dispatchLoop app = do
@@ -5380,6 +5625,12 @@ askSaveFile name filters = askWith (saveFile name filters)
 
 askReadClipboard :: [Text] -> Ask (Maybe Representation)
 askReadClipboard kinds = askWith (readClipboard kinds)
+
+askFrames :: Reader -> [Int] -> (Int, Int) -> FrameAccuracy -> Ask (Either ReadError [Frame])
+askFrames r times size accuracy = askWith (awaitFrames r times size accuracy)
+
+askPeaks :: Reader -> Int -> Ask (Either ReadError Peaks)
+askPeaks r spp = askWith (awaitPeaks r spp)
 
 build :: Build a -> Ask a
 build b = do

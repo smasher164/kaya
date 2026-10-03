@@ -9,6 +9,10 @@ expect label#2 "peaks 48000 Hz, 1 ch, 20 pairs of 4800, -4095..4095"
 # A file that is not media and a file that is not there fail with the
 # player's reasons.
 expect label#4 "OFL.txt failed unsupported_container; missing.mp4 failed not_found"
+# A read for a track the source lacks (tone.mp3's frames, h264_noaudio.mp4's
+# peaks): decode_error until a reason names it
+# (docs/deferred.md, the missing-track RULING).
+expect label#5 "mp3 frames failed decode_error; noaudio peaks failed decode_error"
 expect_drawing canvas@strip "4/0,0,100,100"
 # The filmstrip is the PLATFORM's decode, so no hash is frozen for it: the
 # tiles' centres read the bands and the keyframe's flat colour.

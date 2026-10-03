@@ -164,6 +164,11 @@ windows = { version = "0.62", features = [
     "Globalization_NumberFormatting",
     "System_UserProfile",
     "UI_ViewManagement",
+    # THE READER'S ARM (docs/media-plan.md §8 ruling 4, winui/reader.rs):
+    # the source reader, and the PROPVARIANT its seek and duration take.
+    "Win32_Media_MediaFoundation",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
 ] }
 windows-numerics = "0.3"
 windows-collections = "0.3"

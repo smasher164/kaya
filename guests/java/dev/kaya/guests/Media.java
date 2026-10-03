@@ -9,12 +9,14 @@ import dev.kaya.KayaGen;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.OptionalInt;
 
 /**
  * The media suite from the JVM — guests/rust/media.rs,
- * tools/scenes/media_{formats,delivery,session,tracks,feed}.steps,
+ * tools/scenes/media_{formats,delivery,session,tracks,feed,reader}.steps,
  * docs/media-plan.md §7a, §7b.
  */
 public final class Media {
@@ -93,6 +95,7 @@ public final class Media {
         switch (scene) {
             case "media_tracks" -> tracksApp();
             case "media_feed" -> feedApp();
+            case "media_reader" -> readerApp();
             default -> playerApp(scene);
         }
     }
@@ -325,6 +328,170 @@ public final class Media {
             return null;
         });
         app.dispatchLoop();
+    }
+
+    /** The answered times as the labels spell them: each time asked, then
+     * the time of the picture the platform returned, in ms. */
+    private static String frameLine(String what, List<KayaApp.Frame> frames, KayaApp.ReadOutcome outcome) {
+        List<KayaApp.Frame> sorted = new ArrayList<>(frames);
+        sorted.sort(Comparator.comparingInt(KayaApp.Frame::index));
+        StringBuilder line = new StringBuilder(what);
+        for (KayaApp.Frame f : sorted) {
+            line.append(' ').append(f.requestedMs()).append('@').append(f.actualMs());
+        }
+        return line.append(' ').append(outcomeWord(outcome)).toString();
+    }
+
+    private static String outcomeWord(KayaApp.ReadOutcome outcome) {
+        return switch (outcome) {
+            case KayaApp.ReadOutcome.Completed c -> "completed";
+            case KayaApp.ReadOutcome.Cancelled c -> "cancelled";
+            case KayaApp.ReadOutcome.Failed f -> "failed " + f.reason();
+        };
+    }
+
+    private static final KayaApp.Viewbox STRIP = new KayaApp.Viewbox(320.0, 45.0);
+    private static final KayaApp.Viewbox WAVE = new KayaApp.Viewbox(200.0, 60.0);
+    /** h264_frames.mp4's grey bands: frame 12 and frame 37 at 25 fps, its
+     * one keyframe at 0 (tools/gen-media.py). */
+    private static final long[] BANDS = {480, 1480};
+
+    private static final class Reads {
+        final List<KayaApp.Frame> exact = new ArrayList<>();
+        final List<KayaApp.Frame> keyframe = new ArrayList<>();
+        final List<String> failures = new ArrayList<>();
+        final List<String> missing = new ArrayList<>();
+        final List<String> cancels = new ArrayList<>();
+        KayaApp.Reader trickle;
+        KayaApp.Read trickleRead;
+        KayaApp.Reader closing;
+    }
+
+    private static double waveY(short v) {
+        return 30.0 - v * 25.0 / 8192.0;
+    }
+
+    /** media_reader (docs/media-plan.md §8 rulings 3 and 4): a reader with
+     * no player draws a filmstrip of h264_frames.mp4's exact and keyframe
+     * pictures and a waveform of tone.wav's peaks beside two loaded images;
+     * a read the server never finishes is cancelled and another is closed
+     * under its reader; a file that is not media and a missing file fail. */
+    private static void readerApp() {
+        String base = mediaUrl();
+        KayaApp app = new KayaApp();
+        Reads w = new Reads();
+        app.build(tx -> {
+            tx.window(0).title("media reader").size(560.0, 560.0);
+            List<KayaApp.Signal<String>> labels = new ArrayList<>();
+            for (String s : List.of("exact", "keyframe", "peaks", "cancel", "failures", "no track")) {
+                labels.add(tx.signal(s));
+            }
+            KayaApp.Widget[] canvases = new KayaApp.Widget[2];
+            tx.mount(tx.column(col -> {
+                for (KayaApp.Signal<String> label : labels) {
+                    tx.label(label); // label#0..#5
+                }
+                canvases[0] = tx.canvas(STRIP).a11yId("strip").a11yLabel("Filmstrip");
+                canvases[1] = tx.canvas(WAVE).a11yId("wave").a11yLabel("Waveform");
+                tx.button("start", t -> { // button#0
+                    w.trickle = t.reader(MediaSource.url(base + "/trickle/h264_frames.mp4"));
+                    w.trickleRead = t.readFrames(w.trickle, new long[] {0}, 80, 45, KayaApp.FrameAccuracy.EXACT);
+                    app.onReadDone(w.trickleRead, (u, o) -> noted(u, labels.get(3), w.cancels, "trickle", o));
+                    w.closing = t.reader(MediaSource.url(base + "/trickle/h264_aac.mp4"));
+                    KayaApp.Read closingRead = t.readFrames(w.closing, new long[] {0}, 80, 45,
+                            KayaApp.FrameAccuracy.EXACT);
+                    app.onReadDone(closingRead, (u, o) -> noted(u, labels.get(3), w.cancels, "closed", o));
+                    t.write(labels.get(3), "reading");
+                });
+                tx.button("cancel", t -> { // button#1
+                    if (w.trickle != null) {
+                        t.cancelRead(w.trickle, w.trickleRead);
+                        t.closeReader(w.closing);
+                        w.trickle = null;
+                    }
+                });
+            }));
+            KayaApp.Widget strip = canvases[0];
+            KayaApp.Widget wave = canvases[1];
+
+            KayaApp.Reader clip = tx.reader(MediaSource.asset("media/h264_frames.mp4"));
+            KayaApp.Read exact = tx.readFrames(clip, BANDS, 80, 45, KayaApp.FrameAccuracy.EXACT);
+            app.onFrame(exact, (t, f) -> w.exact.add(f));
+            app.onReadDone(exact, (t, o) -> {
+                t.write(labels.get(0), frameLine("exact", w.exact, o));
+                KayaApp.Read keyframe = t.readFrames(clip, BANDS, 80, 45, KayaApp.FrameAccuracy.KEYFRAME);
+                app.onFrame(keyframe, (u, f) -> w.keyframe.add(f));
+                app.onReadDone(keyframe, (u, ko) -> {
+                    u.write(labels.get(1), frameLine("keyframe", w.keyframe, ko));
+                    List<KayaApp.Frame> tiles = new ArrayList<>();
+                    for (List<KayaApp.Frame> frames : List.of(w.exact, w.keyframe)) {
+                        List<KayaApp.Frame> sorted = new ArrayList<>(frames);
+                        sorted.sort(Comparator.comparingInt(KayaApp.Frame::index));
+                        tiles.addAll(sorted);
+                    }
+                    u.draw(strip, d -> {
+                        for (int i = 0; i < tiles.size(); i++) {
+                            d.image(tiles.get(i).image(), 80.0 * i, 0.0, 80.0, 45.0);
+                        }
+                    });
+                });
+            });
+
+            KayaApp.Reader tone = tx.reader(MediaSource.asset("media/tone.wav"));
+            KayaApp.Read peaks = tx.readPeaks(tone, 4800);
+            KayaApp.Image[] images = new KayaApp.Image[2];
+            app.onPeaks(peaks, (t, p) -> {
+                int lows = 0;
+                int highs = 0;
+                for (int i = 0; i < p.count(); i++) {
+                    lows = i == 0 ? p.pair(i, 0).min() : Math.min(lows, p.pair(i, 0).min());
+                    highs = i == 0 ? p.pair(i, 0).max() : Math.max(highs, p.pair(i, 0).max());
+                }
+                t.write(labels.get(2), "peaks " + p.sampleRate() + " Hz, " + p.channels() + " ch, "
+                        + p.count() + " pairs of " + p.samplesPerPair() + ", " + lows + ".." + highs);
+                t.draw(wave, d -> {
+                    for (int i = 0; i < p.count(); i++) {
+                        KayaApp.Pair pair = p.pair(i, 0);
+                        double x = 8.0 + 7.0 * i;
+                        d.moveTo(x, waveY(pair.max())).lineTo(x + 5.0, waveY(pair.max()))
+                                .lineTo(x + 5.0, waveY(pair.min())).lineTo(x, waveY(pair.min())).close();
+                        d.fill(KayaApp.Paint.SERIES, KayaApp.FillRule.NONZERO);
+                    }
+                    d.image(images[0], 150.0, 4.0, 20.0, 20.0);
+                    d.image(images[1], 150.0, 30.0, 40.0, 30.0);
+                });
+            });
+            app.onReadDone(peaks, (t, o) -> {
+                if (!(o instanceof KayaApp.ReadOutcome.Completed)) {
+                    t.write(labels.get(2), "peaks " + outcomeWord(o));
+                }
+            });
+
+            for (String[] item : new String[][] {{"OFL.txt", "fonts/OFL.txt"}, {"missing.mp4", "media/missing.mp4"}}) {
+                KayaApp.Reader reader = tx.reader(MediaSource.asset(item[1]));
+                KayaApp.Read read = tx.readFrames(reader, new long[] {0}, 80, 45, KayaApp.FrameAccuracy.EXACT);
+                app.onReadDone(read, (t, o) -> noted(t, labels.get(4), w.failures, item[0], o));
+            }
+
+            KayaApp.Reader silent = tx.reader(MediaSource.asset("media/h264_noaudio.mp4"));
+            KayaApp.Read silentRead = tx.readPeaks(silent, 4800);
+            app.onReadDone(silentRead, (t, o) -> noted(t, labels.get(5), w.missing, "noaudio peaks", o));
+            KayaApp.Reader song = tx.reader(MediaSource.asset("media/tone.mp3"));
+            KayaApp.Read songRead = tx.readFrames(song, new long[] {0}, 80, 45, KayaApp.FrameAccuracy.EXACT);
+            app.onReadDone(songRead, (t, o) -> noted(t, labels.get(5), w.missing, "mp3 frames", o));
+
+            images[0] = tx.loadImage(MediaSource.asset("images/a11y-logo.png"));
+            images[1] = tx.loadImage(MediaSource.asset("images/photo.jpg"));
+            return null;
+        });
+        app.dispatchLoop();
+    }
+
+    private static void noted(KayaApp.Tx tx, KayaApp.Signal<String> label, List<String> list, String what,
+            KayaApp.ReadOutcome outcome) {
+        list.add(what + " " + outcomeWord(outcome));
+        list.sort(null);
+        tx.write(label, String.join("; ", list));
     }
 
     private Media() {}

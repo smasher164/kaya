@@ -74,6 +74,106 @@ public final class MediaCheck {
 
     record Row(String name, KayaApp.Player player) {}
 
+    private static byte[] readerFrame(long reader, long read, long image, int index) {
+        return record(KayaWire.OCC_KIND_READER_FRAME, new Body().u64(reader).u64(read).u64(image)
+                .u32(index).u32(2).u32(1).u32(0).u64(40L * index).u64(40L * index).bytes());
+    }
+
+    private static byte[] readerDone(long reader, long read, int outcome, int failure) {
+        return record(KayaWire.OCC_KIND_READER_DONE, new Body().u64(reader).u64(read)
+                .u32(outcome).u32(failure).str("why").bytes());
+    }
+
+    private static boolean releases(KayaApp app, long... images) {
+        if (app.pendingRecords.size() != images.length) {
+            return false;
+        }
+        for (int i = 0; i < images.length; i++) {
+            if (!java.util.Arrays.equals(app.pendingRecords.get(i), KayaWire.txReleaseImage(images[i]))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** docs/media-plan.md §8 ruling 4, rule 4: after cancelRead or
+     * closeReader the app hears only the read's end, and an unheard
+     * frame's image is released by the next commit; an awaited read the
+     * same, by cancelling its future or by a failed end. */
+    private static void readerRule(KayaApp app) {
+        for (boolean closing : new boolean[] {false, true}) {
+            List<String> heard = new ArrayList<>();
+            KayaApp.Reader[] reader = new KayaApp.Reader[1];
+            KayaApp.Read[] read = new KayaApp.Read[1];
+            app.build((java.util.function.Consumer<KayaApp.Tx>) tx -> {
+                reader[0] = tx.reader(KayaApp.MediaSource.asset("media/h264_frames.mp4"));
+                read[0] = tx.readFrames(reader[0], new long[] {0, 40}, 0, 0, KayaApp.FrameAccuracy.EXACT);
+            });
+            app.onFrame(read[0], (tx, f) -> heard.add("frame " + f.index()));
+            app.onReadDone(read[0], (tx, o) -> heard.add("done " + o));
+            long r = reader[0].id();
+            long id = read[0].id();
+            long image = closing ? 910 : 900;
+            app.readerOccurrence(KayaWire.parseOccurrence(readerFrame(r, id, image, 0)));
+            app.build((java.util.function.Consumer<KayaApp.Tx>) tx -> {
+                if (closing) {
+                    tx.closeReader(reader[0]);
+                } else {
+                    tx.cancelRead(reader[0], read[0]);
+                }
+            });
+            app.readerOccurrence(KayaWire.parseOccurrence(readerFrame(r, id, image + 1, 1)));
+            check(heard.equals(List.of("frame 0")),
+                    "reader: a late answer after cancel or close was heard: " + heard);
+            check(releases(app, image + 1), "reader: the unheard frame's image was not queued for release");
+            app.readerOccurrence(KayaWire.parseOccurrence(
+                    readerDone(r, id, KayaWire.READ_OUTCOME_CANCELLED, KayaWire.MEDIA_FAILURE_NONE)));
+            check(heard.equals(List.of("frame 0", "done Cancelled[]")), "reader: the end was not heard: " + heard);
+            check(app.pendingRecords.isEmpty(), "reader: the release did not ride the next commit");
+            check(app.doneHandlers.isEmpty() && app.frameHandlers.isEmpty(),
+                    "reader: the read's handlers did not retire");
+        }
+
+        KayaApp.Reader[] clip = new KayaApp.Reader[1];
+        List<java.util.concurrent.CompletableFuture<List<KayaApp.Frame>>> futures = new ArrayList<>();
+        app.build((java.util.function.Consumer<KayaApp.Tx>) tx -> {
+            clip[0] = tx.reader(KayaApp.MediaSource.asset("media/h264_frames.mp4"));
+            futures.add(tx.framesFuture(clip[0], new long[] {0, 40}, 0, 0, KayaApp.FrameAccuracy.EXACT));
+        });
+        long r = clip[0].id();
+        long awaited = app.readWaiters.keySet().iterator().next();
+        long image = 920;
+        app.readerOccurrence(KayaWire.parseOccurrence(readerFrame(r, awaited, image, 0)));
+        futures.get(0).cancel(true);
+        app.drainAsync();
+        check(app.readWaiters.isEmpty(), "reader: the cancelled future stayed registered");
+        app.readerOccurrence(KayaWire.parseOccurrence(readerFrame(r, awaited, image + 1, 1)));
+        check(releases(app, image + 1), "reader: the cancelled future's late image was not queued for release");
+        app.readerOccurrence(KayaWire.parseOccurrence(
+                readerDone(r, awaited, KayaWire.READ_OUTCOME_CANCELLED, KayaWire.MEDIA_FAILURE_NONE)));
+        app.build((java.util.function.Consumer<KayaApp.Tx>) tx -> {});
+
+        app.build((java.util.function.Consumer<KayaApp.Tx>) tx ->
+                futures.add(tx.framesFuture(clip[0], new long[] {0, 40}, 0, 0, KayaApp.FrameAccuracy.EXACT)));
+        long failing = app.readWaiters.keySet().iterator().next();
+        long next = 930;
+        app.readerOccurrence(KayaWire.parseOccurrence(readerFrame(r, failing, next, 0)));
+        app.readerOccurrence(KayaWire.parseOccurrence(
+                readerDone(r, failing, KayaWire.READ_OUTCOME_FAILED, KayaWire.MEDIA_FAILURE_NOT_FOUND)));
+        app.drainAsync();
+        Throwable why = null;
+        try {
+            futures.get(1).getNow(null);
+        } catch (java.util.concurrent.CompletionException e) {
+            why = e.getCause();
+        }
+        check(why instanceof KayaApp.ReadException e
+                        && e.outcome().equals(new KayaApp.ReadOutcome.Failed(KayaApp.MediaFailure.NOT_FOUND, "why")),
+                "reader: a failed awaited read did not complete with its reason: " + why);
+        check(releases(app, next), "reader: a failed awaited read's image was not queued for release");
+        app.build((java.util.function.Consumer<KayaApp.Tx>) tx -> {});
+    }
+
     public static void main(String[] args) throws Exception {
         String lib = System.getenv("KAYA_LIB");
         if (lib != null) {
@@ -175,10 +275,14 @@ public final class MediaCheck {
         }
         check(found, "the template video emitted no PROP_PLAYER bound to field 1 (" + bound.size() + " records)");
 
+        readerRule(app);
+
         System.out.println("media-check: OK — player_changed, player_tracks and session_action decode"
                 + " through the generated decoder, the mirror moves before the handler, the failed"
                 + " handler hears not_found, loading resets the position, a row's player packs as"
-                + " its id and a stamped video binds PROP_PLAYER from the row's field");
+                + " its id and a stamped video binds PROP_PLAYER from the row's field; a cancelled,"
+                + " closed or failed read is heard only by its end and its unheard images are"
+                + " released by the next commit");
     }
 
     private MediaCheck() {}

@@ -489,6 +489,58 @@ module Tracks : sig
   }
 end
 
+(* The media reader and the core-held images (docs/media-plan.md §8
+   rulings 3, 4): frames and peaks without a player. *)
+type reader
+type read
+type image
+
+module Frame_accuracy : sig
+  (* [Keyframe] is the keyframe at or before the time; [Exact] the frame
+     shown at it. *)
+  type t = Keyframe | Exact
+end
+
+(* One time of a read answered: its index into the times, the time asked,
+   the time of the picture the platform returned, and the image, the
+   app's until it releases it. *)
+module Frame : sig
+  type t = {
+    index : int;
+    requested_ms : int;
+    actual_ms : int;
+    image : image;
+    width : int;
+    height : int;
+  }
+end
+
+(* A peaks read's answer: [length] pairs per channel. *)
+module Peaks : sig
+  type t = {
+    sample_rate : int;
+    samples_per_pair : int;
+    channels : int;
+    length : int;
+    data : int array;
+  }
+
+  (* Pair [i] of [channel]: (min, max). *)
+  val pair : t -> int -> int -> int * int
+end
+
+module Read_outcome : sig
+  type t = Completed | Cancelled | Failed of Media_failure.t * string
+
+  (* The vocabulary's word; a failure adds its reason's. *)
+  val name : t -> string
+end
+
+(* Why an awaited read gave no answer. *)
+module Read_error : sig
+  type t = Cancelled | Failed of Media_failure.t * string
+end
+
 (* The formatter door (docs/compliance-plan.md §1.4, the OCaml row): a
    value in, the platform's own string out, in the process locale; pure,
    any thread, no transaction. An unstated digit count is the platform's
@@ -1037,6 +1089,35 @@ val declare_session :
    for none). Any thread, no transaction. *)
 val can_play : string -> string -> bool
 
+(* A media reader on a source. *)
+val reader : Media_source.t -> reader
+
+(* One picture per time, heard through [on_frame], the end through
+   [on_read_done]. [~max_size] bounds the picture, aspect kept, 0 for no
+   bound on that axis. One read in flight per reader. *)
+val read_frames :
+  ?max_size:int * int -> accuracy:Frame_accuracy.t -> reader -> int list -> read
+
+(* The first audio track's min/max pairs per channel per
+   [~samples_per_pair] frames, heard through [on_peaks]. *)
+val read_peaks : reader -> samples_per_pair:int -> read
+
+(* Stop a read: it ends cancelled, and nothing else of it is heard. *)
+val cancel_read : reader -> read -> unit
+
+(* Forget a reader, cancelling its read in flight. *)
+val close_reader : reader -> unit
+
+(* An image decoded by kaya (PNG or JPEG), heard through
+   [on_image_loaded]. *)
+val load_image : Media_source.t -> image
+
+val release_image : image -> unit
+
+(* An image's size and premultiplied RGBA8 bytes; [None] for an image
+   holding no picture. *)
+val image_pixels : image -> (int * int * bytes) option
+
 (* A time picker over civil times: hours and minutes, no seconds.
    [~step] is the minute granularity and a pick snaps to it. *)
 val time_picker :
@@ -1080,6 +1161,9 @@ val line_to : draw -> float -> float -> unit
 val close : draw -> unit
 val fill : draw -> paint:paint -> ?rule:fill_rule -> unit -> unit
 
+(* Draw a core-held image into the box (x, y, w, h). *)
+val draw_image : draw -> image -> float -> float -> float -> float -> unit
+
 val canvas :
   ?grow:float ->
   ?fill:bool ->
@@ -1094,6 +1178,9 @@ val canvas :
   ?fixed:bool ->
   ?on_draw:(draw -> viewbox -> unit) ->
   ?on_tick:(draw -> viewbox -> float -> unit) -> unit -> widget
+
+(* Re-declare a live canvas's drawing, in its declared viewbox. *)
+val draw : widget -> (draw -> unit) -> unit
 
 val grid :
   columns:int ->
@@ -1385,6 +1472,18 @@ val dismiss_sheet : int64 -> unit
 type 'a ask = ('a -> unit) -> unit
 
 val ( let* ) : 'a ask -> ('a -> unit) -> unit
+
+(* A read as a question: the frames in index order, or the peaks, or why
+   not. A read that fails, or whose reader is closed under it, gives back
+   the images it carried. *)
+val frames :
+  ?max_size:int * int ->
+  accuracy:Frame_accuracy.t ->
+  reader ->
+  int list ->
+  (Frame.t list, Read_error.t) result ask
+
+val peaks : reader -> samples_per_pair:int -> (Peaks.t, Read_error.t) result ask
 
 val show_alert :
   ?window:int64 ->
@@ -2315,6 +2414,19 @@ val on_seek_completed : app -> player -> (int -> unit) -> unit
 val on_position : app -> player -> (int -> unit) -> unit
 val on_tracks : app -> player -> (Tracks.t -> unit) -> unit
 val on_cue : app -> player -> (string -> unit) -> unit
+
+(* A read's answers, each read's own: its frames in the platform's order,
+   a peaks read's progress (ms decoded, total ms) and peaks, then its end,
+   with which every registration of the read retires. After [cancel_read]
+   or [close_reader] only the end is heard. *)
+val on_frame : app -> read -> (Frame.t -> unit) -> unit
+val on_read_progress : app -> read -> (int -> int -> unit) -> unit
+val on_peaks : app -> read -> (Peaks.t -> unit) -> unit
+val on_read_done : app -> read -> (Read_outcome.t -> unit) -> unit
+
+(* A [load_image]'s answer, once: the size, or the reason and the
+   decoder's sentence. *)
+val on_image_loaded : app -> image -> ((int * int, Media_failure.t * string) result -> unit) -> unit
 
 (* How much of a video view shows, 0 to 1; a stamped one's keys first. *)
 val on_visibility : app -> widget -> (float -> unit) -> unit

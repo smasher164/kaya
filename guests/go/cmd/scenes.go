@@ -104,6 +104,7 @@ var scenes = map[string]func() *kaya.App{
 	"media_session":  media.App,
 	"media_tracks":   media.App,
 	"media_feed":     media.App,
+	"media_reader":   media.App,
 	"listdetail":     split.App,
 	"menus":          menus.App,
 	"nav":            nav.App,

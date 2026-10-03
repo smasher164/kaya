@@ -5,6 +5,7 @@ package media
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	kaya "dev.kaya/bindings/go"
@@ -90,13 +91,15 @@ func yesNo(b bool) string {
 	return "no"
 }
 
-// App serves the five scenes, chosen by KAYA_SELFTEST.
+// App serves the six scenes, chosen by KAYA_SELFTEST.
 func App() *kaya.App {
 	switch kaya.Env("KAYA_SELFTEST") {
 	case "media_tracks":
 		return tracksApp()
 	case "media_feed":
 		return feedApp()
+	case "media_reader":
+		return readerApp()
 	case "media_session":
 		return playerApp(true, formats())
 	case "media_delivery":
@@ -351,6 +354,173 @@ func feedApp() *kaya.App {
 				tx.Write(last, fmt.Sprintf("r%d %s", row, word))
 			}
 		})
+	})
+	return app
+}
+
+// bands are h264_frames.mp4's grey bands: frame 12 (0x505050) and frame 37
+// (0xA0A0A0) at 25 fps, its one keyframe at 0 (tools/gen-media.py).
+var bands = []uint64{480, 1480}
+
+var (
+	stripBox = kaya.Viewbox{W: 320, H: 45}
+	waveBox  = kaya.Viewbox{W: 200, H: 60}
+)
+
+// frameLine is the answered times as the labels spell them: each time
+// asked, then the time of the picture the platform returned, in ms.
+func frameLine(what string, frames []kaya.Frame, outcome kaya.ReadOutcome) string {
+	sorted := slices.Clone(frames)
+	slices.SortFunc(sorted, func(a, b kaya.Frame) int { return a.Index - b.Index })
+	times := make([]string, len(sorted))
+	for i, f := range sorted {
+		times[i] = fmt.Sprintf("%d@%d", f.RequestedMs, f.ActualMs)
+	}
+	return fmt.Sprintf("%s %s %s", what, strings.Join(times, " "), outcomeWord(outcome))
+}
+
+func outcomeWord(outcome kaya.ReadOutcome) string {
+	switch outcome.Kind {
+	case kaya.ReadOutcomeCompleted:
+		return "completed"
+	case kaya.ReadOutcomeCancelled:
+		return "cancelled"
+	}
+	return "failed " + outcome.Failure.String()
+}
+
+// readerApp is media_reader (docs/media-plan.md §8 rulings 3 and 4): a
+// reader with no player draws a filmstrip of h264_frames.mp4's exact and
+// keyframe pictures and a waveform of tone.wav's peaks beside two loaded
+// images; a read the server never finishes is cancelled and another is
+// closed under its reader; a file that is not media and a missing file fail.
+func readerApp() *kaya.App {
+	base := mediaURL()
+	app := kaya.NewApp()
+	var exact, keyframe []kaya.Frame
+	var failures, missing, cancels []string
+	var labels []kaya.Signal[string]
+	var strip, wave kaya.Widget
+	var clip kaya.Reader
+	var logo, photo kaya.Image
+	var trickling func(*kaya.Tx)
+
+	settle := func(list *[]string, label int, what string) func(*kaya.Tx, kaya.ReadOutcome) {
+		return func(tx *kaya.Tx, o kaya.ReadOutcome) {
+			*list = append(*list, what+" "+outcomeWord(o))
+			slices.Sort(*list)
+			tx.Write(labels[label], strings.Join(*list, "; "))
+		}
+	}
+
+	keyframeDone := func(tx *kaya.Tx, o kaya.ReadOutcome) {
+		tx.Write(labels[1], frameLine("keyframe", keyframe, o))
+		byIndex := func(a, b kaya.Frame) int { return a.Index - b.Index }
+		slices.SortFunc(exact, byIndex)
+		slices.SortFunc(keyframe, byIndex)
+		tiles := append(slices.Clone(exact), keyframe...)
+		tx.Draw(strip, func(d *kaya.Draw) {
+			for i, f := range tiles {
+				d.Image(f.Image, 80*float64(i), 0, 80, 45)
+			}
+		})
+	}
+
+	exactDone := func(tx *kaya.Tx, o kaya.ReadOutcome) {
+		tx.Write(labels[0], frameLine("exact", exact, o))
+		tx.ReadFrames(clip, bands, 80, 45, kaya.FrameAccuracyKeyframe).
+			OnFrame(func(_ *kaya.Tx, f kaya.Frame) { keyframe = append(keyframe, f) }).
+			OnDone(keyframeDone)
+	}
+
+	peaksHeard := func(tx *kaya.Tx, p kaya.Peaks) {
+		var lows, highs int16
+		for i := range p.Len() {
+			lo, hi := p.Pair(i, 0)
+			if i == 0 || lo < lows {
+				lows = lo
+			}
+			if i == 0 || hi > highs {
+				highs = hi
+			}
+		}
+		tx.Write(labels[2], fmt.Sprintf("peaks %d Hz, %d ch, %d pairs of %d, %d..%d",
+			p.SampleRate, p.Channels, p.Len(), p.SamplesPerPair, lows, highs))
+		tx.Draw(wave, func(d *kaya.Draw) {
+			y := func(v int16) float64 { return 30.0 - float64(v)*25.0/8192.0 }
+			for i := range p.Len() {
+				lo, hi := p.Pair(i, 0)
+				x := 8.0 + 7.0*float64(i)
+				d.MoveTo(x, y(hi)).LineTo(x+5.0, y(hi)).LineTo(x+5.0, y(lo)).LineTo(x, y(lo)).Close()
+				d.Fill(kaya.PaintSeries, kaya.FillRuleNonzero)
+			}
+			d.Image(logo, 150.0, 4.0, 20.0, 20.0)
+			d.Image(photo, 150.0, 30.0, 40.0, 30.0)
+		})
+	}
+
+	app.Build(func(tx *kaya.Tx) {
+		tx.Window(0).Title("media reader").Size(560, 560)
+		for _, s := range []string{"exact", "keyframe", "peaks", "cancel", "failures", "no track"} {
+			labels = append(labels, tx.Signal(s))
+		}
+		tx.Mount(tx.Column(func() {
+			for _, label := range labels {
+				tx.Label(label) // label#0..#5
+			}
+			strip = tx.Canvas(stripBox).A11yID("strip").A11yLabel("Filmstrip")
+			wave = tx.Canvas(waveBox).A11yID("wave").A11yLabel("Waveform")
+			tx.Button("start", func(tx *kaya.Tx) { // button#0
+				trickle := tx.Reader(kaya.MediaURL(base + "/trickle/h264_frames.mp4"))
+				read := tx.ReadFrames(trickle, []uint64{0}, 80, 45, kaya.FrameAccuracyExact).
+					OnDone(settle(&cancels, 3, "trickle")).ID()
+				closing := tx.Reader(kaya.MediaURL(base + "/trickle/h264_aac.mp4"))
+				tx.ReadFrames(closing, []uint64{0}, 80, 45, kaya.FrameAccuracyExact).
+					OnDone(settle(&cancels, 3, "closed"))
+				trickling = func(tx *kaya.Tx) {
+					tx.CancelRead(trickle, read)
+					tx.CloseReader(closing)
+				}
+				tx.Write(labels[3], "reading")
+			})
+			tx.Button("cancel", func(tx *kaya.Tx) { // button#1
+				if trickling != nil {
+					trickling(tx)
+					trickling = nil
+				}
+			})
+		}))
+
+		clip = tx.Reader(kaya.MediaAsset("media/h264_frames.mp4"))
+		tx.ReadFrames(clip, bands, 80, 45, kaya.FrameAccuracyExact).
+			OnFrame(func(_ *kaya.Tx, f kaya.Frame) { exact = append(exact, f) }).
+			OnDone(exactDone)
+
+		tone := tx.Reader(kaya.MediaAsset("media/tone.wav"))
+		tx.ReadPeaks(tone, 4800).
+			OnPeaks(peaksHeard).
+			OnDone(func(tx *kaya.Tx, o kaya.ReadOutcome) {
+				if o.Kind != kaya.ReadOutcomeCompleted {
+					tx.Write(labels[2], "peaks "+outcomeWord(o))
+				}
+			})
+
+		for _, f := range []struct{ what, source string }{
+			{"OFL.txt", "fonts/OFL.txt"}, {"missing.mp4", "media/missing.mp4"},
+		} {
+			reader := tx.Reader(kaya.MediaAsset(f.source))
+			tx.ReadFrames(reader, []uint64{0}, 80, 45, kaya.FrameAccuracyExact).
+				OnDone(settle(&failures, 4, f.what))
+		}
+
+		silent := tx.Reader(kaya.MediaAsset("media/h264_noaudio.mp4"))
+		tx.ReadPeaks(silent, 4800).OnDone(settle(&missing, 5, "noaudio peaks"))
+		song := tx.Reader(kaya.MediaAsset("media/tone.mp3"))
+		tx.ReadFrames(song, []uint64{0}, 80, 45, kaya.FrameAccuracyExact).
+			OnDone(settle(&missing, 5, "mp3 frames"))
+
+		logo = tx.LoadImage(kaya.MediaAsset("images/a11y-logo.png")).ID()
+		photo = tx.LoadImage(kaya.MediaAsset("images/photo.jpg")).ID()
 	})
 	return app
 }

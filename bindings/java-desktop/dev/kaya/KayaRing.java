@@ -153,5 +153,13 @@ public final class KayaRing {
     /** kaya_can_play (docs/media-plan.md §8 ruling 1): any thread. */
     public static native boolean canPlay(byte[] mime, byte[] codecs);
 
+    /** kaya_reader_peaks: a finished peaks read's pairs, pair-major i16
+     * (min then max per channel); null for none. */
+    public static native short[] readerPeaks(long reader, long read);
+
+    /** kaya_image_pixels: a core-held image's premultiplied RGBA8, its
+     * size into {@code size[0]} and {@code size[1]}; null for none. */
+    public static native byte[] imagePixels(long image, int[] size);
+
     private KayaRing() {}
 }

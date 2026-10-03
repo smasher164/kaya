@@ -736,7 +736,18 @@ pass.
    the sentence for which. The bound (§7c) runs from the ask or the latest
    answer, so a long exact read is not cut off while it answers. The peaks'
    pairs are pulled with `kaya_reader_peaks` (a ring record holds 32 KB; ten
-   minutes of stereo at 480 samples a pair is 240 KB). After a cancel or a
+   minutes of stereo at 480 samples a pair is 240 KB).
+   **Built on all five and in all nine bindings (2026-10-02, the breadth
+   slice).** GTK runs a playbin3 per read whose flags select the one stream
+   type before any decoder; WinUI Media Foundation's source reader with the
+   video edit list applied by kaya; Compose MediaExtractor's sample times and
+   MediaMetadataRetriever's picture. GTK and WinUI hand kaya the decoded
+   YCbCr and kaya converts it through the stream's own matrix and range
+   (GStreamer's videoconvert read the 505050 band as 4E4E4E), and the
+   frames the platform hands at full size are fitted to `max_size` by one
+   core rule. A read for a track the source lacks answers `decode_error`
+   everywhere from one site per backend, pending a ruling
+   (docs/deferred.md's missing-track RULING). After a cancel or a
    close the app hears only `reader_done(cancelled)`: the core drops later
    reports and the binding drops answers already in its channel, releasing
    the images they carried. On Apple the frames come from

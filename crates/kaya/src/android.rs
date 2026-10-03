@@ -815,6 +815,36 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 fn_ptr: present_player_captions_failed as *mut _,
             },
             NativeMethod {
+                name: "readerFrame".into(),
+                sig: "(JJIJIIII[B)I".into(),
+                fn_ptr: present_reader_frame as *mut _,
+            },
+            NativeMethod {
+                name: "readerPcm".into(),
+                sig: "(JJII[FJ)I".into(),
+                fn_ptr: present_reader_pcm as *mut _,
+            },
+            NativeMethod {
+                name: "readerFinished".into(),
+                sig: "(JJ)V".into(),
+                fn_ptr: present_reader_finished as *mut _,
+            },
+            NativeMethod {
+                name: "readerFailed".into(),
+                sig: "(JJLjava/lang/String;JJLjava/lang/String;)V".into(),
+                fn_ptr: present_reader_failed as *mut _,
+            },
+            NativeMethod {
+                name: "readerNoTrack".into(),
+                sig: "(JJLjava/lang/String;)V".into(),
+                fn_ptr: present_reader_no_track as *mut _,
+            },
+            NativeMethod {
+                name: "readerOverdue".into(),
+                sig: "(JJ)I".into(),
+                fn_ptr: present_reader_overdue as *mut _,
+            },
+            NativeMethod {
                 name: "captionAt".into(),
                 sig: "(JJ)Ljava/lang/String;".into(),
                 fn_ptr: present_caption_at as *mut _,
@@ -2332,6 +2362,106 @@ extern "system" fn present_player_position(_env: JNIEnv, _class: JClass, player:
 
 extern "system" fn present_player_seeked(_env: JNIEnv, _class: JClass, player: jlong, at: jlong) -> jint {
     crate::capi::kaya_player_seeked(player as u64, at.max(0) as u64) as jint
+}
+
+/// A reader's frame at the platform's full size, fitted to the read's
+/// bound by the core's one rule (crate::reader::fit) before it is reported.
+#[allow(clippy::too_many_arguments)]
+extern "system" fn present_reader_frame(
+    env: JNIEnv,
+    _class: JClass,
+    reader: jlong,
+    read: jlong,
+    index: jint,
+    actual_ms: jlong,
+    width: jint,
+    height: jint,
+    max_width: jint,
+    max_height: jint,
+    pixels: JByteArray,
+) -> jint {
+    let Ok(bytes) = env.convert_byte_array(&pixels) else { return 0 };
+    let bound = (max_width.max(0) as u32, max_height.max(0) as u32);
+    let (w, h, fitted) = crate::reader::fit(width.max(0) as u32, height.max(0) as u32, &bytes, bound);
+    (unsafe {
+        crate::capi::kaya_reader_frame(
+            reader as u64,
+            read as u64,
+            index.max(0) as u32,
+            actual_ms.max(0) as u64,
+            w,
+            h,
+            fitted.as_ptr(),
+            fitted.len(),
+        )
+    }) as jint
+}
+
+extern "system" fn present_reader_pcm(
+    env: JNIEnv,
+    _class: JClass,
+    reader: jlong,
+    read: jlong,
+    channels: jint,
+    rate: jint,
+    samples: jni::objects::JFloatArray,
+    total_ms: jlong,
+) -> jint {
+    let Ok(n) = env.get_array_length(&samples) else { return 0 };
+    let mut floats = vec![0f32; n.max(0) as usize];
+    if env.get_float_array_region(&samples, 0, &mut floats).is_err() {
+        return 0;
+    }
+    (unsafe {
+        crate::capi::kaya_reader_pcm(
+            reader as u64,
+            read as u64,
+            channels.max(0) as u32,
+            rate.max(0) as u32,
+            floats.as_ptr(),
+            floats.len(),
+            total_ms.max(0) as u64,
+        )
+    }) as jint
+}
+
+extern "system" fn present_reader_finished(_env: JNIEnv, _class: JClass, reader: jlong, read: jlong) {
+    crate::capi::kaya_reader_finished(reader as u64, read as u64);
+}
+
+extern "system" fn present_reader_failed(
+    mut env: JNIEnv,
+    _class: JClass,
+    reader: jlong,
+    read: jlong,
+    domain: JString,
+    code: jlong,
+    underlying: jlong,
+    detail: JString,
+) {
+    let domain = jstring_text(&mut env, &domain, "reader failure's domain");
+    let detail = jstring_text(&mut env, &detail, "reader failure's detail");
+    unsafe {
+        crate::capi::kaya_reader_failed(
+            reader as u64,
+            read as u64,
+            domain.as_ptr(),
+            domain.len(),
+            code,
+            underlying,
+            detail.as_ptr(),
+            detail.len(),
+        )
+    }
+}
+
+extern "system" fn present_reader_no_track(mut env: JNIEnv, _class: JClass, reader: jlong, read: jlong, detail: JString) {
+    let detail = jstring_text(&mut env, &detail, "reader's missing track");
+    unsafe { crate::capi::kaya_reader_no_track(reader as u64, read as u64, detail.as_ptr(), detail.len()) }
+}
+
+extern "system" fn present_reader_overdue(_env: JNIEnv, _class: JClass, reader: jlong, read: jlong) -> jint {
+    crate::capi::kaya_reader_overdue(reader as u64, read as u64) as jint
 }
 
 extern "system" fn present_player_overdue(_env: JNIEnv, _class: JClass, player: jlong) -> jint {

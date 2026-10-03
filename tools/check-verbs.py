@@ -4005,9 +4005,10 @@ for path, pattern, repl, label in (
 READER_ARMS = (
     ("private func answered(",
      ("KAYA_MEDIA_TIMEOUT_MS", "reader_overdue(", "self.stop(read, tearDown: true)")),
-    ("    func frames(_ read: UInt64", ("requestedTimeToleranceAfter = .zero",
-                                       "exact ? .zero : .positiveInfinity",
-                                       "DispatchQueue.main.async", "self.answered(read)")),
+    ("    func frames(_ read: UInt64", ("answered(read)", 'self.noTrack(read, "video")')),
+    ("    private func generate(_ read: UInt64", ("requestedTimeToleranceAfter = .zero",
+                                               "exact ? .zero : .positiveInfinity",
+                                               "DispatchQueue.main.async", "self.answered(read)")),
     ("    func pcmArrived(", ("answered(read)", "stop(read)")),
     ("    func stop(_ read: UInt64, tearDown: Bool",
      ("cancelAllCGImageGeneration()", "cancelReading()", "if tearDown", "cancelLoading()")),
@@ -4055,6 +4056,100 @@ for pattern, label in (
     print(f"check-verbs: the reader negative ({label}): {len(found)} finding(s)")
     if not found:
         fail(f"check-verbs SELF-TEST: the reader's arm passed with {label}")
+
+# --- THE READER ON THE OTHER THREE BACKENDS (docs/media-plan.md §8) ------
+# What media_reader cannot see on a one-keyframe clip: keyframe means the
+# keyframe AT OR BEFORE (the nearest answers alike here); an exact frame's
+# actual time is the picture's own (GStreamer's through the segment, Media
+# Foundation's moved by the edit list it ignores); every report goes through
+# the arm's one door to the core; and a read for a track the source lacks
+# is reported from ONE site, so the reason a ruling names is one line.
+ONE_DOOR = ("core.scene.reader_report(", "msg.then(answer)")
+READER_BACKENDS = (
+    ("GTK", GTK, "Msg::NoTrack(", (
+        ("    fn reader_report(core: &mut CoreState", ONE_DOOR),
+        ("    fn frames_read(", ("gst::SeekFlags::ACCURATE",
+                               "gst::SeekFlags::KEY_UNIT | gst::SeekFlags::SNAP_BEFORE")),
+        ("    fn frame(sample: &gst::Sample", ("to_stream_time(",)),
+        ("        fn no_track(&self", ("Msg::NoTrack(",)),
+        ("    fn pipeline(url: &str, kind: &str",
+         ('set_property_from_str("flags", kind)',)),
+    )),
+    ("WinUI", "crates/kaya/src/winui/reader.rs", "Owned::NoTrack(", (
+        ("fn reader_report(core: &mut CoreState", ONE_DOOR),
+        ("fn frames_read(",
+         ("shift_hns(url)", "target.saturating_add(shift)", "kept.hns - shift")),
+        ("    fn no_track(&self", ("Owned::NoTrack(",)),
+        ("fn open_source(", ("MF_E_INVALIDSTREAMNUMBER", "MF_SOURCE_READER_ALL_STREAMS")),
+    )),
+    ("Compose", "android/kaya/src/main/kotlin/dev/kaya/KayaReader.kt",
+     "KayaPresent.readerNoTrack(", (
+         ("    fun frames(read: Long",
+          ("SAMPLE_FLAG_SYNC", "if (exact) all else sync", "OPTION_CLOSEST_SYNC")),
+         ("    private fun noTrack(", ("KayaPresent.readerNoTrack(",)),
+         ("    private fun answered(", ("MEDIA_TIMEOUT_MS", "readerOverdue(", "stop(read)")),
+     )),
+)
+
+
+def reader_backends(texts=None):
+    bad = []
+    for name, rel, no_track, rows in READER_BACKENDS:
+        raw = (texts or {}).get(rel)
+        code = re.sub(r"//[^\n]*", "", raw if raw is not None else real(rel))
+        for head, needs in rows:
+            body = brace_body(code, head)
+            if body is None:
+                bad.append(f"{name} ({rel}): no `{head.strip()}` to read — the reader census reads "
+                           f"too little to agree with anything")
+                continue
+            for need in needs:
+                if need not in body:
+                    bad.append(f"{name} ({rel}): `{head.strip()}` lacks `{need}` — the "
+                               f"reader's keyframe rule, its picture time, its one door or "
+                               f"its one missing-track site is gone (docs/media-plan.md §8 "
+                               f"ruling 4)")
+        sites = code.count(no_track)
+        if sites != 1:
+            bad.append(f"{name} ({rel}): {sites} sites report a missing track "
+                       f"(`{no_track}`), wanted ONE — a reason a ruling names would no "
+                       f"longer be one line")
+    return bad
+
+
+backend_reader_out = reader_backends()
+if backend_reader_out:
+    print("check-verbs: a backend's reader arm broke a rule no scene can see:", file=sys.stderr)
+    print("\n".join(backend_reader_out), file=sys.stderr)
+    timeout_status = 1
+print(f"check-verbs: the backends' reader arms read "
+      f"({sum(len(r) for _, _, _, r in READER_BACKENDS)} bodies)")
+WINUI_READER = "crates/kaya/src/winui/reader.rs"
+COMPOSE_READER = "android/kaya/src/main/kotlin/dev/kaya/KayaReader.kt"
+GTK_KEYFRAME = (r"\| if exact \{ gst::SeekFlags::ACCURATE \} else "
+                r"\{ gst::SeekFlags::KEY_UNIT \| gst::SeekFlags::SNAP_BEFORE \}")
+GTK_NEAREST = ("| if exact { gst::SeekFlags::ACCURATE } else "
+               "{ gst::SeekFlags::KEY_UNIT | gst::SeekFlags::SNAP_NEAREST }")
+GTK_SEGMENT = (r"seg\.downcast_ref::<gst::ClockTime>\(\)\.and_then"
+               r"\(\|seg\| seg\.to_stream_time\(buffer\.pts\(\)\?\)\)")
+for rel, pattern, repl, label in (
+    (GTK, GTK_KEYFRAME, lambda m: GTK_NEAREST, "GTK's keyframe seek made nearest"),
+    (GTK, GTK_SEGMENT, lambda m: "Some(seg).and(buffer.pts())",
+     "GTK's picture time read off the buffer"),
+    (WINUI_READER, r"let at = PROPVARIANT::from\(target\.saturating_add\(shift\)\);",
+     lambda m: "let at = PROPVARIANT::from(target);", "WinUI's seek not moved by the edit list"),
+    (COMPOSE_READER, r"sync\.ifEmpty \{ all \}", lambda m: "all",
+     "Compose's keyframe taken from every sample"),
+    (WINUI_READER, r"(\n +)self\.send\(Owned::Failed \{",
+     lambda m: (m.group(1) + "self.send(Owned::NoTrack(String::new()));" + m.group(1)
+                + "self.send(Owned::Failed {"),
+     "WinUI's failure reported as a second missing-track site"),
+):
+    cut = g.doctor(f"the reader: {label}", real(rel), pattern, repl)
+    found = [f for f in reader_backends({rel: cut}) if f not in backend_reader_out]
+    print(f"check-verbs: the backend reader negative ({label}): {len(found)} finding(s)")
+    if not found:
+        fail(f"check-verbs SELF-TEST: the backends' reader census passed with {label}")
 
 # --- THE WINUI FRAME UNDER RIGHT TO LEFT (docs/traps.md) ------------------
 # Every window is mirrored at birth, a mirrored caption's drag regions are

@@ -5,7 +5,8 @@
 // answers `next` itself; media_tracks lists and selects each item's audio
 // and caption tracks and reads the current cue; media_feed stamps a video
 // view per row, each showing its row's own player, and reads their
-// visibility (§7b).
+// visibility (§7b); media_reader draws a filmstrip and a waveform on
+// canvases from a reader with no player (§8 rulings 3 and 4).
 //     KAYA_SELFTEST=media_formats node guests/js/media.ts
 
 import * as kaya from "kaya-gui";
@@ -285,9 +286,137 @@ function feedApp(): void {
   });
 }
 
+function outcomeWord(outcome: kaya.ReadOutcome): string {
+  return outcome.status === "failed" ? `failed ${outcome.failure}` : outcome.status;
+}
+
+// The answered times as the labels spell them: each time asked, then the
+// time of the picture the platform returned, in ms.
+function frameLine(what: string, frames: readonly kaya.Frame[], outcome: kaya.ReadOutcome): string {
+  const times = [...frames].sort((a, b) => a.index - b.index).map((f) => `${f.requestedMs}@${f.actualMs}`);
+  return `${what} ${times.join(" ")} ${outcomeWord(outcome)}`;
+}
+
+// h264_frames.mp4's grey bands: frame 12 (0x505050) and frame 37 (0xA0A0A0)
+// at 25 fps, its one keyframe at 0 (tools/gen-media.py).
+const BANDS = [480, 1480];
+
+// media_reader (docs/media-plan.md §8 rulings 3 and 4): a reader with no
+// player draws a filmstrip of h264_frames.mp4's exact and keyframe pictures
+// and a waveform of tone.wav's peaks beside two loaded images; a read the
+// server never finishes is cancelled and another is closed under its
+// reader; a file that is not media and a missing file fail.
+function readerApp(): void {
+  const base = mediaUrl();
+  const exact: kaya.Frame[] = [];
+  const keyframe: kaya.Frame[] = [];
+  const failures: string[] = [];
+  const missing: string[] = [];
+  const cancels: string[] = [];
+  let trickling: [kaya.Read, kaya.Reader] | null = null;
+
+  function into(lines: string[], label: kaya.Signal<string>, what: string): (outcome: kaya.ReadOutcome) => void {
+    return (outcome) => {
+      lines.push(`${what} ${outcomeWord(outcome)}`);
+      lines.sort();
+      label.set(lines.join("; "));
+    };
+  }
+
+  function onExactDone(outcome: kaya.ReadOutcome): void {
+    labels[0]!.set(frameLine("exact", exact, outcome));
+    clip.frames(BANDS, { maxSize: [80, 45], accuracy: "keyframe", onFrame: (f) => keyframe.push(f), onDone: onKeyframeDone });
+  }
+
+  function onKeyframeDone(outcome: kaya.ReadOutcome): void {
+    labels[1]!.set(frameLine("keyframe", keyframe, outcome));
+    const byIndex = (a: kaya.Frame, b: kaya.Frame): number => a.index - b.index;
+    const tiles = [...[...exact].sort(byIndex), ...[...keyframe].sort(byIndex)].map((f) => f.image);
+    strip.draw((d) => {
+      tiles.forEach((image, i) => d.image(image, 80 * i, 0, 80, 45));
+    });
+  }
+
+  function onPeaks(p: kaya.Peaks): void {
+    let lows = 0;
+    let highs = 0;
+    for (let i = 0; i < p.length; i++) {
+      const [lo, hi] = p.pair(i);
+      lows = i === 0 ? lo : Math.min(lows, lo);
+      highs = i === 0 ? hi : Math.max(highs, hi);
+    }
+    labels[2]!.set(`peaks ${p.sampleRate} Hz, ${p.channels} ch, ${p.length} pairs of ${p.samplesPerPair}, ${lows}..${highs}`);
+    const y = (v: number): number => 30 - (v * 25) / 8192;
+    wave.draw((d) => {
+      for (let i = 0; i < p.length; i++) {
+        const [lo, hi] = p.pair(i);
+        const x = 8 + 7 * i;
+        d.moveTo(x, y(hi)).lineTo(x + 5, y(hi)).lineTo(x + 5, y(lo)).lineTo(x, y(lo)).close();
+        d.fill("series", "nonzero");
+      }
+      d.image(logo, 150, 4, 20, 20);
+      d.image(photo, 150, 30, 40, 30);
+    });
+  }
+
+  const { labels, strip, wave, clip, logo, photo } = app.window({ title: "media reader", width: 560, height: 560 }, () => {
+    const labels = ["exact", "keyframe", "peaks", "cancel", "failures", "no track"].map((s) => kaya.signal(s));
+    const { strip, wave } = kaya.column(() => {
+      for (const label of labels) kaya.label({ bind: label }); // label#0..#5
+      const strip = kaya.canvas([320, 45]).a11yId("strip").a11yLabel("Filmstrip");
+      const wave = kaya.canvas([200, 60]).a11yId("wave").a11yLabel("Waveform");
+      kaya.button("start", {
+        onClick: () => {
+          const trickle = kaya.reader(kaya.MediaSource.url(`${base}/trickle/h264_frames.mp4`));
+          const read = trickle.frames([0], { maxSize: [80, 45], accuracy: "exact", onDone: into(cancels, labels[3]!, "trickle") });
+          const closing = kaya.reader(kaya.MediaSource.url(`${base}/trickle/h264_aac.mp4`));
+          closing.frames([0], { maxSize: [80, 45], accuracy: "exact", onDone: into(cancels, labels[3]!, "closed") });
+          trickling = [read, closing];
+          labels[3]!.set("reading");
+        },
+      }); // button#0
+      kaya.button("cancel", {
+        onClick: () => {
+          if (trickling === null) return;
+          const [read, closing] = trickling;
+          trickling = null;
+          read.cancel();
+          closing.close();
+        },
+      }); // button#1
+      return { strip, wave };
+    });
+
+    const clip = kaya.reader(kaya.MediaSource.asset("media/h264_frames.mp4"));
+    clip.frames(BANDS, { maxSize: [80, 45], accuracy: "exact", onFrame: (f) => exact.push(f), onDone: onExactDone });
+
+    kaya.reader(kaya.MediaSource.asset("media/tone.wav")).peaks(4800, {
+      onPeaks,
+      onDone: (outcome) => {
+        if (outcome.status !== "completed") labels[2]!.set(`peaks ${outcomeWord(outcome)}`);
+      },
+    });
+
+    for (const [what, source] of [
+      ["OFL.txt", "fonts/OFL.txt"],
+      ["missing.mp4", "media/missing.mp4"],
+    ] as const) {
+      kaya.reader(kaya.MediaSource.asset(source)).frames([0], { maxSize: [80, 45], accuracy: "exact", onDone: into(failures, labels[4]!, what) });
+    }
+
+    kaya.reader(kaya.MediaSource.asset("media/h264_noaudio.mp4")).peaks(4800, { onDone: into(missing, labels[5]!, "noaudio peaks") });
+    kaya.reader(kaya.MediaSource.asset("media/tone.mp3")).frames([0], { maxSize: [80, 45], accuracy: "exact", onDone: into(missing, labels[5]!, "mp3 frames") });
+
+    const logo = kaya.loadImage(kaya.MediaSource.asset("images/a11y-logo.png"));
+    const photo = kaya.loadImage(kaya.MediaSource.asset("images/photo.jpg"));
+    return { labels, strip, wave, clip, logo, photo };
+  });
+}
+
 const scene = process.env["KAYA_SELFTEST"] ?? "";
 if (scene === "media_tracks") tracksApp();
 else if (scene === "media_feed") feedApp();
+else if (scene === "media_reader") readerApp();
 else suiteApp(scene);
 
 app.run();

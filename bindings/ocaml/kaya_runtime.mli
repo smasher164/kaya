@@ -29,6 +29,12 @@ val text_scale : unit -> float
 val can_play : string -> string -> bool
 val catalog : string -> unit
 
+(* kaya_reader_peaks: a finished peaks read's [count] i16, pair-major. *)
+val reader_peaks : int64 -> int64 -> int -> int array
+
+(* kaya_image_pixels: a core-held image's size and premultiplied RGBA8. *)
+val image_pixels : int64 -> (int * int * bytes) option
+
 type tr_arg =
   | Tr_int of int64
   | Tr_float of float

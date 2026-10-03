@@ -217,6 +217,19 @@ module Kaya.Core
     Tracks (..),
     emptyTracks,
     MediaOcc (..),
+    Reader (..),
+    ReadId (..),
+    Image (..),
+    FrameAccuracy (..),
+    frameAccuracyWire,
+    Frame (..),
+    Peaks (..),
+    peaksPair,
+    ReadOutcome (..),
+    readOutcomeName,
+    ReadError (..),
+    ReadOcc (..),
+    Await (..),
     MediaState (..),
     allocP,
     recordHandle,
@@ -239,7 +252,9 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BC
 import Data.ByteString.Builder (Builder, toLazyByteString)
 import qualified Data.ByteString.Lazy as BL
-import Data.Int (Int64)
+import Data.Int (Int16, Int64)
+import Data.Sequence (Seq)
+import qualified Data.Sequence as Seq
 import Data.IORef (IORef)
 import Data.List (elemIndex)
 import qualified Data.List as List
@@ -390,7 +405,11 @@ data Counters = Counters
     cFileDialog :: !Word64,
     cClipboardRead :: !Word64,
     cMenuItem :: !Word64,
-    cPlayer :: !Word64
+    cPlayer :: !Word64,
+    -- The media reader's three id spaces (docs/media-plan.md §8 ruling 4).
+    cReader :: !Word64,
+    cRead :: !Word64,
+    cImage :: !Word64
   }
 
 -- One collection instance: the table inside the stamped copy its path
@@ -460,6 +479,12 @@ data Pending
   | PMenuToggledNode !Word64 ([Key] -> Bool -> IO ())
   | PMenuSelected !Word64 (Int -> IO ())
   | PMenuSelectedNode !Word64 ([Key] -> Int -> IO ())
+  -- The reader's bookkeeping, applied at the transaction boundary because
+  -- the tables are the App's (docs/media-plan.md §8 ruling 4).
+  | PReadStarted !Word64 !Word64
+  | PReadAbandoned !Word64
+  | PReaderClosed !Word64
+  | PAwait !Word64 (Either ReadError ([Frame], Maybe Peaks) -> IO ())
 
 modelSet :: Word64 -> [W.Value] -> W.Value -> Word32 -> [W.Value] -> Model -> Model
 modelSet cid path key variant fields model =
@@ -1708,9 +1733,96 @@ data MediaOcc
   | MediaTracks Tracks
   | MediaCue Text
 
+-- | A media reader (docs\/media-plan.md §8 ruling 4): frames and peaks
+-- without a player.
+newtype Reader = Reader Word64
+  deriving (Eq, Ord, Show)
+
+-- | One read of a reader. Not @Read@, which is the Prelude's class.
+newtype ReadId = ReadId Word64
+  deriving (Eq, Ord, Show)
+
+-- | A core-held image, the app's until it releases it.
+newtype Image = Image Word64
+  deriving (Eq, Ord, Show)
+
+-- | 'Keyframe' is the keyframe at or before the time; 'Exact' the frame
+-- shown at it.
+data FrameAccuracy = Keyframe | Exact
+  deriving (Eq, Show)
+
+frameAccuracyWire :: FrameAccuracy -> Word32
+frameAccuracyWire a = case a of
+  Keyframe -> W.frameAccuracyKeyframe
+  Exact -> W.frameAccuracyExact
+
+-- | One time of a read answered: its index into the times, the time
+-- asked, the time of the picture the platform returned, and its image.
+data Frame = Frame
+  { index :: !Int,
+    requestedMs :: !Int,
+    actualMs :: !Int,
+    -- Not @image@, which 'Clip' updates by name.
+    picture :: !Image,
+    width :: !Int,
+    height :: !Int
+  }
+  deriving (Eq, Show)
+
+-- | A peaks read's answer: 'pairCount' min\/max pairs per channel.
+data Peaks = Peaks
+  { sampleRate :: !Int,
+    samplesPerPair :: !Int,
+    channels :: !Int,
+    pairCount :: !Int,
+    samples :: !(Seq Int16)
+  }
+  deriving (Eq, Show)
+
+-- | Pair @i@ of @channel@: (min, max).
+peaksPair :: Peaks -> Int -> Int -> (Int, Int)
+peaksPair p i channel =
+  let at = (i * p.channels + channel) * 2
+   in (fromIntegral (Seq.index p.samples at), fromIntegral (Seq.index p.samples (at + 1)))
+
+data ReadOutcome = ReadCompleted | ReadCancelled | ReadFailed MediaFailure Text
+  deriving (Eq, Show)
+
+-- | The vocabulary's word; a failure adds its reason's.
+readOutcomeName :: ReadOutcome -> Text
+readOutcomeName o = case o of
+  ReadCompleted -> "completed"
+  ReadCancelled -> "cancelled"
+  ReadFailed why _ -> "failed " <> mediaFailureName why
+
+-- | Why an awaited read gave no answer.
+data ReadError = ReadErrorCancelled | ReadErrorFailed MediaFailure Text
+  deriving (Eq, Show)
+
+data ReadOcc
+  = ReadFrame Frame
+  | ReadProgress Int Int
+  | ReadPeaks Peaks
+  | ReadDone ReadOutcome
+
+-- | An awaited read: what it has carried so far, and its continuation.
+data Await = Await
+  { awaitFrames :: [Frame],
+    awaitPeaks :: Maybe Peaks,
+    awaitAnswer :: Either ReadError ([Frame], Maybe Peaks) -> IO ()
+  }
+
 -- | The binding's media mirror and handler tables, app-thread only.
 data MediaState = MediaState
-  { readings :: IORef (Map.Map Word64 PlayerReading),
+  { readsInFlight :: IORef (Map.Map Word64 Word64),
+    abandonedReads :: IORef (Map.Map Word64 ()),
+    readHandlers :: IORef (Map.Map (Word64, Text) (ReadOcc -> IO ())),
+    awaits :: IORef (Map.Map Word64 Await),
+    imageLoads :: IORef (Map.Map Word64 (Either (MediaFailure, Text) (Int, Int) -> IO ())),
+    -- Records the next transaction carries ahead of its own: the images
+    -- of an abandoned read's late answers.
+    pendingOps :: IORef [Builder],
+    readings :: IORef (Map.Map Word64 PlayerReading),
     playerTracks :: IORef (Map.Map Word64 Tracks),
     cues :: IORef (Map.Map Word64 Text),
     -- Per (player, occurrence name): the newest registration wins.

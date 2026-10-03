@@ -3,6 +3,9 @@
 // row by key: the newest before the first layout, one on a click, a key
 // no row holds, and its own send.
 
+// Its own namespace: the binding owns the bare Frame (a read's answer).
+namespace ScrollTo;
+
 [KayaGen]
 record ChatMessage(string Text);
 

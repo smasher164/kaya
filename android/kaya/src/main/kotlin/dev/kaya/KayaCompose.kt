@@ -2190,6 +2190,7 @@ object KayaCompose {
     private const val APPLY_READ_PEAKS = 61
     private const val APPLY_CANCEL_READ = 62
     private const val APPLY_CLOSE_READER = 63
+    private const val FRAME_ACCURACY_EXACT = 1
     /** The rich-text pair (docs/rich-text-plan.md §4); the arm is a depth slice. */
     private const val APPLY_SET_RICH_TEXT = 43
     private const val APPLY_APPLY_EDIT = 44
@@ -3815,8 +3816,35 @@ object KayaCompose {
                     val times = List(count) { readI64(b) }
                     kayaPlayers[pid]?.setCaptionTimes(times)
                 }
-                APPLY_OPEN_READER, APPLY_READ_FRAMES, APPLY_READ_PEAKS, APPLY_CANCEL_READ,
-                APPLY_CLOSE_READER -> depthStub("media_reader")
+                // docs/media-plan.md §8 ruling 4: the reader (KayaReader.kt).
+                APPLY_OPEN_READER -> {
+                    // { u64 reader; Str url }, resolved by the core as a player's source is.
+                    val rid = b.long
+                    kayaReaderOpen(rid, readString(b))
+                }
+                APPLY_READ_FRAMES -> {
+                    // { u64 reader; u64 read; u32 accuracy; u32 max_width; u32
+                    //   max_height; u32 reserved; u32 count; u32 reserved; count I64 ms }.
+                    val rid = b.long
+                    val read = b.long
+                    val accuracy = b.int
+                    val maxW = b.int
+                    val maxH = b.int
+                    b.int
+                    val count = b.int
+                    b.int
+                    val times = LongArray(count) { readI64(b).coerceAtLeast(0) }
+                    kayaReaders[rid]?.frames(read, accuracy == FRAME_ACCURACY_EXACT, maxW, maxH, times)
+                }
+                APPLY_READ_PEAKS -> {
+                    val rid = b.long
+                    kayaReaders[rid]?.peaks(b.long)
+                }
+                APPLY_CANCEL_READ -> {
+                    val rid = b.long
+                    kayaReaders[rid]?.stop(b.long)
+                }
+                APPLY_CLOSE_READER -> kayaReaderClose(b.long)
                 APPLY_SET_BADGE -> {
                     // { u32 count; u32 reserved } (docs/app-badge-plan.md §3).
                     val count = b.int

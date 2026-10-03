@@ -722,7 +722,82 @@ type media_occ =
   | Media_tracks of Tracks.t
   | Media_cue of string
 
+(* The media reader and the core-held images (docs/media-plan.md §8
+   rulings 3, 4): three id spaces, the app's own counters. *)
+type reader = Reader of int64
+type read = Read of int64
+type image = Image of int64
+
+module Frame_accuracy = struct
+  type t = Keyframe | Exact
+
+  let wire = function
+    | Keyframe -> Kaya_wire.frame_accuracy_keyframe
+    | Exact -> Kaya_wire.frame_accuracy_exact
+end
+
+module Frame = struct
+  type t = {
+    index : int;
+    requested_ms : int;
+    actual_ms : int;
+    image : image;
+    width : int;
+    height : int;
+  }
+end
+
+module Peaks = struct
+  type t = {
+    sample_rate : int;
+    samples_per_pair : int;
+    channels : int;
+    length : int;
+    data : int array;
+  }
+
+  let pair p i channel =
+    let at = ((i * p.channels) + channel) * 2 in
+    (p.data.(at), p.data.(at + 1))
+end
+
+module Read_outcome = struct
+  type t = Completed | Cancelled | Failed of Media_failure.t * string
+
+  let name = function
+    | Completed -> "completed"
+    | Cancelled -> "cancelled"
+    | Failed (why, _) -> "failed " ^ Media_failure.name why
+end
+
+module Read_error = struct
+  type t = Cancelled | Failed of Media_failure.t * string
+end
+
+type read_occ =
+  | Read_frame of Frame.t
+  | Read_progress of int * int
+  | Read_peaks of Peaks.t
+  | Read_done of Read_outcome.t
+
+type read_reply = {
+  mutable carried : Frame.t list;
+  mutable answered_peaks : Peaks.t option;
+  answer : read_occ -> unit;
+}
+
 type media = {
+  mutable next_reader : int64;
+  mutable next_read : int64;
+  mutable next_image : int64;
+  reads_in_flight : (int64, int64) Hashtbl.t;
+  abandoned_reads : (int64, unit) Hashtbl.t;
+  read_handlers : (int64 * string, read_occ -> unit) Hashtbl.t;
+  read_replies : (int64, read_reply) Hashtbl.t;
+  image_loads : (int64, (int * int, Media_failure.t * string) result -> unit) Hashtbl.t;
+  (* Records the next transaction carries ahead of its own: the images of
+     an abandoned read's late answers (rule 4). *)
+  mutable pending_ops : string list;
   mutable next_player : int64;
   readings : (int64, Player_reading.t) Hashtbl.t;
   player_tracks : (int64, Tracks.t) Hashtbl.t;
@@ -959,6 +1034,15 @@ let create () =
   {
     media =
       {
+        next_reader = 1L;
+        next_read = 1L;
+        next_image = 1L;
+        reads_in_flight = Hashtbl.create 8;
+        abandoned_reads = Hashtbl.create 8;
+        read_handlers = Hashtbl.create 8;
+        read_replies = Hashtbl.create 8;
+        image_loads = Hashtbl.create 8;
+        pending_ops = [];
         next_player = 1L;
         readings = Hashtbl.create 8;
         player_tracks = Hashtbl.create 8;
@@ -1172,8 +1256,10 @@ let recompute_derived tx cid path =
    atomically. *)
 let build app (program : unit -> 'a) =
   require_app_thread ();
+  let carried = app.media.pending_ops in
+  app.media.pending_ops <- [];
   let tx =
-    { app; records = []; undo_group = None; journal = []; pending_derived = [] }
+    { app; records = List.rev carried; undo_group = None; journal = []; pending_derived = [] }
   in
   let outer = !ambient_tx in
   ambient_tx := Some tx;
@@ -1204,6 +1290,7 @@ let build app (program : unit -> 'a) =
       result
   | exception e ->
       restore ();
+      app.media.pending_ops <- carried @ app.media.pending_ops;
       List.iter (fun (cid, saved) -> Hashtbl.replace app.model cid saved) tx.journal;
       raise e
 
@@ -2575,6 +2662,73 @@ let declare_session ?player ?(title = "") ?(artist = "") ?(album = "") ?(artwork
    unsupported_codec or unsupported_container. Any thread. *)
 let can_play mime codecs = Kaya_runtime.can_play mime codecs
 
+let reader source =
+  let tx = the_tx () in
+  let m = tx.app.media in
+  let id = m.next_reader in
+  m.next_reader <- Int64.succ id;
+  emit tx (Kaya_wire.tx_open_reader id (Media_source.value source));
+  Reader id
+
+let alloc_read m reader =
+  let read = m.next_read in
+  m.next_read <- Int64.succ read;
+  Hashtbl.replace m.reads_in_flight reader read;
+  read
+
+(* One picture per time, heard through [on_frame] and the read's end
+   through [on_read_done]; [~max_size] bounds it, aspect kept, 0 for no
+   bound on that axis. One read in flight per reader. *)
+let read_frames ?(max_size = (0, 0)) ~accuracy (Reader reader) times_ms =
+  let tx = the_tx () in
+  let m = tx.app.media in
+  let read = alloc_read m reader in
+  let first_image = m.next_image in
+  m.next_image <- Int64.add first_image (Int64.of_int (List.length times_ms));
+  let max_w, max_h = max_size in
+  emit tx
+    (Kaya_wire.tx_read_frames reader read first_image (Frame_accuracy.wire accuracy) max_w max_h
+       (List.map (fun ms -> Kaya_wire.I64 (Int64.of_int ms)) times_ms));
+  Read read
+
+let read_peaks (Reader reader) ~samples_per_pair =
+  let tx = the_tx () in
+  let read = alloc_read tx.app.media reader in
+  emit tx (Kaya_wire.tx_read_peaks reader read samples_per_pair);
+  Read read
+
+let abandon m read =
+  Hashtbl.replace m.abandoned_reads read ();
+  Hashtbl.filter_map_inplace (fun _ r -> if r = read then None else Some r) m.reads_in_flight
+
+(* Stop a read: it ends cancelled, and nothing else of it is heard. *)
+let cancel_read (Reader reader) (Read read) =
+  let tx = the_tx () in
+  abandon tx.app.media read;
+  emit tx (Kaya_wire.tx_cancel_read reader read)
+
+(* Forget a reader, cancelling its read in flight; the images it answered
+   with stay the app's. *)
+let close_reader (Reader reader) =
+  let tx = the_tx () in
+  let m = tx.app.media in
+  Option.iter (abandon m) (Hashtbl.find_opt m.reads_in_flight reader);
+  emit tx (Kaya_wire.tx_close_reader reader)
+
+(* An image decoded by kaya, heard through [on_image_loaded]; a drawing
+   may name it in the same transaction. *)
+let load_image source =
+  let tx = the_tx () in
+  let m = tx.app.media in
+  let image = m.next_image in
+  m.next_image <- Int64.succ image;
+  emit tx (Kaya_wire.tx_load_image image (Media_source.value source));
+  Image image
+
+let release_image (Image image) = emit (the_tx ()) (Kaya_wire.tx_release_image image)
+
+let image_pixels (Image image) = Kaya_runtime.image_pixels image
+
 (* A time picker over civil times: hours and minutes, no seconds.
    [~step] is the minute granularity (1, 5, 10, 15 or 30) and a pick
    snaps to it. *)
@@ -2662,6 +2816,11 @@ let fill d ~paint ?(rule = Nonzero) () =
   draw_op d Kaya_wire.draw_op_fill
     [ Kaya_wire.I64 (paint_wire paint); Kaya_wire.I64 (fill_rule_wire rule) ]
 
+(* Draw a core-held image into the box (x, y, w, h) of the viewbox. *)
+let draw_image d (Image image) x y w h =
+  draw_op d Kaya_wire.draw_op_image
+    [ Kaya_wire.I64 image; Kaya_wire.F64 x; Kaya_wire.F64 y; Kaya_wire.F64 w; Kaya_wire.F64 h ]
+
 (* One drawing, recorded and framed: keys FIRST, then the op stream —
    TX 46's Values order (docs/canvas-plan.md §3.1). *)
 let drawing_record id keys ((vb_w, vb_h) as vb) body =
@@ -2720,6 +2879,13 @@ let canvas ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help
     on_tick;
   Option.iter (fun body -> emit tx (drawing_record id [] viewbox body)) draw;
   w
+
+(* Re-declare a live canvas's drawing in its declared viewbox. *)
+let draw (Widget id) body =
+  let tx = the_tx () in
+  match Hashtbl.find_opt tx.app.canvas_viewboxes id with
+  | Some viewbox -> emit tx (drawing_record id [] viewbox body)
+  | None -> invalid_arg (Printf.sprintf "kaya: draw names widget %Ld, which is no canvas" id)
 
 
 (* A container from its children. A child is a PARTIALLY APPLIED creator
@@ -3432,6 +3598,44 @@ let dismiss_sheet id = emit (the_tx ()) (Kaya_wire.tx_dismiss_sheet id)
 type 'a ask = ('a -> unit) -> unit
 
 let ( let* ) (ask : 'a ask) k = ask k
+
+(* A read as a question: the frames in index order or the peaks, or why
+   not. Its continuation runs in its own transaction; a read that fails,
+   or is cancelled by [close_reader], gives back the images it carried. *)
+let await_read register (k : (_, Read_error.t) result -> unit) =
+  let tx = the_tx () in
+  let m = tx.app.media in
+  let (Read read) = register () in
+  let rec reply =
+    {
+      carried = [];
+      answered_peaks = None;
+      answer =
+        (function
+        | Read_done Read_outcome.Completed ->
+            k (Ok (List.sort (fun (a : Frame.t) b -> compare a.index b.index) reply.carried, reply.answered_peaks))
+        | Read_done Read_outcome.Cancelled -> k (Error Read_error.Cancelled)
+        | Read_done (Read_outcome.Failed (why, detail)) -> k (Error (Read_error.Failed (why, detail)))
+        | _ -> ());
+    }
+  in
+  Hashtbl.replace m.read_replies read reply
+
+let frames ?max_size ~accuracy reader times_ms (k : (Frame.t list, Read_error.t) result -> unit) =
+  await_read
+    (fun () -> read_frames ?max_size ~accuracy reader times_ms)
+    (fun r -> k (Result.map fst r))
+
+let peaks reader ~samples_per_pair (k : (Peaks.t, Read_error.t) result -> unit) =
+  await_read
+    (fun () -> read_peaks reader ~samples_per_pair)
+    (fun r ->
+      k
+        (Result.map
+           (fun (_, p) ->
+             Option.value p
+               ~default:{ Peaks.sample_rate = 0; samples_per_pair; channels = 0; length = 0; data = [||] })
+           r))
 
 let show_alert ?(window = 0L) ?(title = "") ?(message = "")
     ?(actions = []) ~cancel () k =
@@ -5679,6 +5883,31 @@ let on_visibility_node app (Node id) (f : key list -> float -> unit) =
    controls. *)
 let on_session app (f : Session_action.t -> unit) = app.media.session_handler <- Some f
 
+let on_read app (Read read) what handler =
+  Hashtbl.replace app.media.read_handlers (read, what) handler
+
+(* Each time of a [read_frames] as it is answered, in the platform's order. *)
+let on_frame app read (f : Frame.t -> unit) =
+  on_read app read "frame" (function Read_frame fr -> f fr | _ -> ())
+
+(* A peaks read's progress: milliseconds decoded of the total. *)
+let on_read_progress app read (f : int -> int -> unit) =
+  on_read app read "progress" (function Read_progress (d, t) -> f d t | _ -> ())
+
+(* A peaks read's answer, just before its end. *)
+let on_peaks app read (f : Peaks.t -> unit) =
+  on_read app read "peaks" (function Read_peaks p -> f p | _ -> ())
+
+(* The read's end; its registrations retire with it. *)
+let on_read_done app read (f : Read_outcome.t -> unit) =
+  on_read app read "done" (function Read_done o -> f o | _ -> ())
+
+(* A [load_image]'s answer: the size, or the reason and the decoder's
+   sentence. One-shot. *)
+let on_image_loaded app (Image image) f = Hashtbl.replace app.media.image_loads image f
+
+let read_occurrence_names = [ "frame"; "progress"; "peaks"; "done" ]
+
 let player_occurrence_names = [ "state"; "ended"; "failed"; "seek_completed"; "position"; "tracks"; "cue" ]
 
 let fire_player app id occ =
@@ -5712,11 +5941,126 @@ let tracks_of_tail = function
       Some { Tracks.audio; captions; audio_selected = sel asel; caption_selected = sel csel }
   | _ -> Option.none
 
+let failure_of_wire n detail =
+  let detail = match detail with Kaya_wire.Str s -> s | _ -> "" in
+  match Media_failure.of_wire n with
+  | Some why -> (why, detail)
+  | None -> (Media_failure.Decode_error, detail)
+
+(* The reader's half (rule 4 of the charge, docs/media-plan.md §8 ruling
+   4): an abandoned read's answers are not heard and a dropped frame's
+   image rides the next commit as release_image; a reply's carried images
+   go back when its read does not complete. *)
+let reader_occurrence app kind reader tail =
+  let m = app.media in
+  let release (Image i) = m.pending_ops <- m.pending_ops @ [ Kaya_wire.tx_release_image i ] in
+  let read = match tail with Kaya_wire.I64 r :: _ -> r | _ -> 0L in
+  let occ =
+    match List.map int_of_value tail with
+    | _ :: image :: index :: w :: h :: requested :: actual :: _ when kind = Kaya_wire.occ_kind_reader_frame ->
+        Some
+          (Read_frame
+             {
+               Frame.index;
+               requested_ms = requested;
+               actual_ms = actual;
+               image = Image (Int64.of_int image);
+               width = w;
+               height = h;
+             })
+    | _ :: done_ms :: total_ms :: _ when kind = Kaya_wire.occ_kind_reader_progress ->
+        Some (Read_progress (done_ms, total_ms))
+    | _ :: rate :: spp :: channels :: length :: _ when kind = Kaya_wire.occ_kind_reader_peaks ->
+        if Hashtbl.mem m.abandoned_reads read then Some (Read_peaks { Peaks.sample_rate = rate; samples_per_pair = spp; channels; length; data = [||] })
+        else
+          Some
+            (Read_peaks
+               {
+                 Peaks.sample_rate = rate;
+                 samples_per_pair = spp;
+                 channels;
+                 length;
+                 data = Kaya_runtime.reader_peaks reader read (length * channels * 2);
+               })
+    | _ :: outcome :: failure :: _ when kind = Kaya_wire.occ_kind_reader_done ->
+        let detail = match tail with [ _; _; _; d ] -> d | _ -> Kaya_wire.Str "" in
+        Some
+          (Read_done
+             (if outcome = Kaya_wire.read_outcome_completed then Read_outcome.Completed
+              else if outcome = Kaya_wire.read_outcome_cancelled then Read_outcome.Cancelled
+              else
+                let why, detail = failure_of_wire failure detail in
+                Read_outcome.Failed (why, detail)))
+    | _ -> None
+  in
+  (match occ with
+  | Some (Read_done _) ->
+      if Hashtbl.find_opt m.reads_in_flight reader = Some read then Hashtbl.remove m.reads_in_flight reader
+  | _ -> ());
+  let abandoned = Hashtbl.mem m.abandoned_reads read in
+  match occ with
+  | None -> ()
+  | Some (Read_frame f) when abandoned -> release f.image
+  | Some (Read_done _ as o) ->
+      Hashtbl.remove m.abandoned_reads read;
+      let o =
+        if abandoned then Read_done Read_outcome.Cancelled else o
+      in
+      let reply = Hashtbl.find_opt m.read_replies read in
+      Hashtbl.remove m.read_replies read;
+      let handlers =
+        List.filter_map (fun what -> Hashtbl.find_opt m.read_handlers (read, what)) read_occurrence_names
+      in
+      List.iter (fun what -> Hashtbl.remove m.read_handlers (read, what)) read_occurrence_names;
+      (match (reply, o) with
+      | Some r, Read_done Read_outcome.Completed -> ignore r
+      | Some r, _ ->
+          List.iter (fun (f : Frame.t) -> release f.image) r.carried;
+          r.carried <- []
+      | None, _ -> ());
+      (match reply with
+      | Some r -> dispatch app (fun () -> r.answer o)
+      | None -> ());
+      if handlers <> [] then dispatch app (fun () -> List.iter (fun h -> h o) handlers);
+      if m.pending_ops <> [] then dispatch app (fun () -> ())
+  | Some _ when abandoned -> ()
+  | Some o -> (
+      match Hashtbl.find_opt m.read_replies read with
+      | Some r -> (
+          match o with
+          | Read_frame f -> r.carried <- f :: r.carried
+          | Read_peaks p -> r.answered_peaks <- Some p
+          | _ -> ())
+      | None ->
+          let handlers =
+            List.filter_map (fun what -> Hashtbl.find_opt m.read_handlers (read, what)) read_occurrence_names
+          in
+          if handlers <> [] then dispatch app (fun () -> List.iter (fun h -> h o) handlers))
+
 (* Absorb a media occurrence into the mirror, THEN hand it on, so a
    handler reads the readings it was told about. True when [kind] was a
    media occurrence. *)
 let media_occurrence app kind id keys payload tail =
   let m = app.media in
+  if kind = Kaya_wire.occ_kind_reader_frame || kind = Kaya_wire.occ_kind_reader_progress
+     || kind = Kaya_wire.occ_kind_reader_peaks || kind = Kaya_wire.occ_kind_reader_done
+  then begin
+    reader_occurrence app kind id tail;
+    true
+  end
+  else if kind = Kaya_wire.occ_kind_image_loaded then begin
+    (match (Hashtbl.find_opt m.image_loads id, List.map int_of_value tail, tail) with
+    | Some f, w :: h :: failure :: _, [ _; _; _; detail ] ->
+        Hashtbl.remove m.image_loads id;
+        let answer =
+          if failure = Kaya_wire.media_failure_none then Ok (w, h)
+          else Error (failure_of_wire failure detail)
+        in
+        dispatch app (fun () -> f answer)
+    | _ -> ());
+    true
+  end
+  else
   let reading pid = Option.value (Hashtbl.find_opt m.readings pid) ~default:Player_reading.initial in
   if kind = Kaya_wire.occ_kind_player_changed then begin
     (match tail with

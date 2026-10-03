@@ -11,6 +11,7 @@
 
 import Control.Monad (forM_, when)
 import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
+import Data.List (sort, sortOn)
 import Data.Maybe (fromMaybe)
 import GHC.Generics (Generic)
 import System.Environment (lookupEnv)
@@ -287,10 +288,134 @@ feedApp app = do
       when (row == 0) $ writeSignal first ("r0 " <> word)
       when (row == feedRows - 1) $ writeSignal lastRow ("r" <> tshow row <> " " <> word)
 
+-- | The answered times as the labels spell them: each time asked, then
+-- the time of the picture the platform returned, in ms.
+frameLine :: Text -> [Frame] -> ReadOutcome -> Text
+frameLine what frames outcome =
+  T.unwords ([what] ++ [tshow f.requestedMs <> "@" <> tshow f.actualMs | f <- sortOn (.index) frames] ++ [readOutcomeName outcome])
+
+-- | h264_frames.mp4's grey bands: frame 12 (0x505050) and frame 37
+-- (0xA0A0A0) at 25 fps, its one keyframe at 0 (tools/gen-media.py).
+bands :: [Int]
+bands = [480, 1480]
+
+-- | media_reader (docs/media-plan.md §8 rulings 3 and 4): a reader with no
+-- player draws a filmstrip of h264_frames.mp4's exact and keyframe
+-- pictures and a waveform of tone.wav's peaks beside two loaded images; a
+-- read the server never finishes is cancelled and another is closed under
+-- its reader; a file that is not media and a missing file fail.
+readerApp :: App -> IO ()
+readerApp app = do
+  base <-
+    mediaUrlOf
+      "kaya: the media scenes that stream read KAYA_MEDIA_URL, the local server the lane \
+      \starts (tools/lib/media_server.py); a hand run goes through tools/run-leg.py"
+  exact <- newIORef []
+  keyframe <- newIORef []
+  failures <- newIORef []
+  missing <- newIORef []
+  cancels <- newIORef []
+  trickling <- newIORef Nothing
+  let stripBox = Viewbox 320 45
+      waveBox = Viewbox 200 60
+  (labels, strip, wave, clip, exactRead, peaksRead, ends, logo, photo) <- buildTx app $ do
+    window primary [WTitle "media reader", WSize 560 560]
+    labels <- mapM signalText ["exact", "keyframe", "peaks", "cancel", "failures", "no track"]
+    let line i lines what outcome = do
+          modifyIORef' lines (sort . ((what <> " " <> readOutcomeName outcome) :))
+          joined <- T.intercalate "; " <$> readIORef lines
+          submitTx app (writeSignal (labels !! i) joined)
+        start = do
+          (trickle, r, closing, closingRead) <- buildTx app $ do
+            trickle <- openReader (mediaUrl (base <> "/trickle/h264_frames.mp4"))
+            r <- readFrames trickle [0] (80, 45) Exact
+            closing <- openReader (mediaUrl (base <> "/trickle/h264_aac.mp4"))
+            closingRead <- readFrames closing [0] (80, 45) Exact
+            writeSignal (labels !! 3) "reading"
+            return (trickle, r, closing, closingRead)
+          onReadDone app r (line 3 cancels "trickle")
+          onReadDone app closingRead (line 3 cancels "closed")
+          writeIORef trickling (Just (trickle, r, closing))
+        cancel = do
+          t <- readIORef trickling
+          writeIORef trickling Nothing
+          forM_ t $ \(trickle, r, closing) -> submitTx app $ do
+            cancelRead trickle r
+            closeReader closing
+    strip <- canvas stripBox [] [A11yId "strip", A11yLabel "Filmstrip"]
+    wave <- canvas waveBox [] [A11yId "wave", A11yLabel "Waveform"]
+    root <-
+      column
+        ( map labelBound labels -- label#0..#5
+            ++ [ pure strip,
+                 pure wave,
+                 buttonOn "start" start, -- button#0
+                 buttonOn "cancel" cancel -- button#1
+               ]
+        )
+    mount root
+    clip <- openReader (mediaAsset "media/h264_frames.mp4")
+    exactRead <- readFrames clip bands (80, 45) Exact
+    tone <- openReader (mediaAsset "media/tone.wav")
+    peaksRead <- readPeaks tone 4800
+    failed <-
+      mapM
+        ( \(what, source) -> do
+            r <- openReader (mediaAsset source)
+            read' <- readFrames r [0] (80, 45) Exact
+            return (read', line 4 failures what)
+        )
+        [("OFL.txt", "fonts/OFL.txt"), ("missing.mp4", "media/missing.mp4")]
+    silent <- openReader (mediaAsset "media/h264_noaudio.mp4")
+    silentRead <- readPeaks silent 4800
+    song <- openReader (mediaAsset "media/tone.mp3")
+    songRead <- readFrames song [0] (80, 45) Exact
+    logo <- loadImage (mediaAsset "images/a11y-logo.png")
+    photo <- loadImage (mediaAsset "images/photo.jpg")
+    let ends =
+          failed
+            ++ [ (silentRead, line 5 missing "noaudio peaks"),
+                 (songRead, line 5 missing "mp3 frames")
+               ]
+    return (labels, strip, wave, clip, exactRead, peaksRead, ends, logo, photo)
+  forM_ ends $ \(r, h) -> onReadDone app r h
+  onFrame app exactRead (\f -> modifyIORef' exact (f :))
+  onReadDone app exactRead $ \outcome -> do
+    frames <- readIORef exact
+    keyframeRead <- buildTx app $ do
+      writeSignal (labels !! 0) (frameLine "exact" frames outcome)
+      readFrames clip bands (80, 45) Keyframe
+    onFrame app keyframeRead (\f -> modifyIORef' keyframe (f :))
+    onReadDone app keyframeRead $ \outcome' -> do
+      ex <- sortOn (.index) <$> readIORef exact
+      kf <- sortOn (.index) <$> readIORef keyframe
+      submitTx app $ do
+        writeSignal (labels !! 1) (frameLine "keyframe" kf outcome')
+        draw strip stripBox [drawImage f.picture (80 * fromIntegral i) 0 80 45 | (i, f) <- zip [0 :: Int ..] (ex ++ kf)]
+  onPeaks app peaksRead $ \p -> do
+    let pairs = [peaksPair p i 0 | i <- [0 .. p.pairCount - 1]]
+        lows = if null pairs then 0 else minimum (map fst pairs)
+        highs = if null pairs then 0 else maximum (map snd pairs)
+        y v = 30 - fromIntegral v * 25 / 8192
+        bar i (lo, hi) =
+          let x = 8 + 7 * fromIntegral i
+           in [moveTo x (y hi), lineTo (x + 5) (y hi), lineTo (x + 5) (y lo), lineTo x (y lo), close, fill PaintSeries Nonzero]
+    submitTx app $ do
+      writeSignal (labels !! 2) $
+        "peaks " <> tshow p.sampleRate <> " Hz, " <> tshow p.channels <> " ch, " <> tshow p.pairCount
+          <> " pairs of " <> tshow p.samplesPerPair <> ", " <> tshow lows <> ".." <> tshow highs
+      draw wave waveBox $
+        concat (zipWith bar [0 :: Int ..] pairs)
+          ++ [drawImage logo 150 4 20 20, drawImage photo 150 30 40 30]
+  onReadDone app peaksRead $ \outcome -> case outcome of
+    ReadCompleted -> return ()
+    _ -> submitTx app (writeSignal (labels !! 2) ("peaks " <> readOutcomeName outcome))
+
 main :: IO ()
 main = kayaMain $ \app -> do
   scene <- fromMaybe "" <$> lookupEnv "KAYA_SELFTEST"
   case scene of
     "media_tracks" -> tracksApp app
     "media_feed" -> feedApp app
+    "media_reader" -> readerApp app
     _ -> formatsApp app scene

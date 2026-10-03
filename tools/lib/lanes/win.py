@@ -306,6 +306,9 @@ ORDER = [
      "media_formats_go", "media_formats_csharp", "media_formats_java",
      "media_feed_rust", "media_feed_python", "media_feed_js",
      "media_feed_go", "media_feed_csharp", "media_feed_java",
+     # The reader (docs/media-plan.md §8): nothing played, nothing typed.
+     "media_reader_rust", "media_reader_python", "media_reader_js",
+     "media_reader_go", "media_reader_csharp", "media_reader_java",
      # The bound (docs/media-plan.md §7c): a source the server never answers
      # fails `timeout`; progressive, so it pools.
      "media_timeout_rust",
@@ -818,7 +821,7 @@ GUEST_STEM = {"listdetail": "split", "formatde": "format", "formatar": "format",
               "rangertl": "range",
               "media_formats": "media", "media_delivery": "media", "media_session": "media",
               "media_tracks": "media", "media_feed": "media", "media_picked": "media",
-              "media_timeout": "media"}
+              "media_timeout": "media", "media_reader": "media"}
 
 # THE MEDIA SUITE'S SERVER (docs/media-plan.md §7a): the VM reaches the host
 # over UTM's bridge, so the runner binds it there, on this lane's own port,

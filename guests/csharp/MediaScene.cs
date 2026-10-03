@@ -78,6 +78,7 @@ static class MediaScene
         {
             case "media_tracks": TracksApp(); return;
             case "media_feed": FeedApp(); return;
+            case "media_reader": ReaderApp(); return;
         }
         bool session = scene == "media_session";
         var items = scene == "media_delivery" ? Delivery() : Formats();
@@ -310,6 +311,173 @@ static class MediaScene
                 var player = tx.Player(muted: true, source: MediaSource.Asset("media/h264_aac.mp4"));
                 clips.Insert(tx, (long)i, new MediaClip($"r{i}", player));
             }
+        });
+        Environment.Exit(app.Run());
+    }
+
+    /// h264_frames.mp4's grey bands: frame 12 (0x505050) and frame 37
+    /// (0xA0A0A0) at 25 fps, its one keyframe at 0 (tools/gen-media.py).
+    static readonly ulong[] Bands = { 480, 1480 };
+    static readonly Viewbox StripBox = new(320.0, 45.0);
+    static readonly Viewbox WaveBox = new(200.0, 60.0);
+
+    /// The answered times as the labels spell them: each time asked, then
+    /// the time of the picture the platform returned, in ms.
+    static string FrameLine(string what, List<Frame> frames, ReadOutcome outcome)
+    {
+        var sorted = new List<Frame>(frames);
+        sorted.Sort((a, b) => a.Index.CompareTo(b.Index));
+        var times = sorted.ConvertAll(f => $"{f.RequestedMs}@{f.ActualMs}");
+        return $"{what} {string.Join(" ", times)} {OutcomeWord(outcome)}";
+    }
+
+    static string OutcomeWord(ReadOutcome outcome) => outcome switch
+    {
+        ReadOutcome.Completed => "completed",
+        ReadOutcome.Cancelled => "cancelled",
+        ReadOutcome.Failed failed => $"failed {failed.Why.Name()}",
+        _ => throw new InvalidOperationException($"an outcome no read ends with: {outcome}"),
+    };
+
+    /// media_reader (docs/media-plan.md §8 rulings 3 and 4): a reader with
+    /// no player draws a filmstrip of h264_frames.mp4's exact and keyframe
+    /// pictures and a waveform of tone.wav's peaks beside two loaded
+    /// images; a read the server never finishes is cancelled and another is
+    /// closed under its reader; a file that is not media and a missing file
+    /// fail.
+    static void ReaderApp()
+    {
+        var baseUrl = MediaUrl("media_reader scene");
+        var app = new KayaApp();
+        var exact = new List<Frame>();
+        var keyframe = new List<Frame>();
+        var failures = new List<string>();
+        var missing = new List<string>();
+        var cancels = new List<string>();
+        Action<Tx>? trickling = null;
+        Signal[] labels = Array.Empty<Signal>();
+        Widget strip = default, wave = default;
+        Reader clip = default;
+        Image logo = default, photo = default;
+
+        Action<Tx, ReadOutcome> Settle(List<string> list, int label, string what) => (t, outcome) =>
+        {
+            list.Add($"{what} {OutcomeWord(outcome)}");
+            list.Sort(StringComparer.Ordinal);
+            t.Write(labels[label], string.Join("; ", list));
+        };
+
+        void KeyframeDone(Tx t, ReadOutcome outcome)
+        {
+            t.Write(labels[1], FrameLine("keyframe", keyframe, outcome));
+            exact.Sort((a, b) => a.Index.CompareTo(b.Index));
+            keyframe.Sort((a, b) => a.Index.CompareTo(b.Index));
+            var tiles = new List<Frame>(exact);
+            tiles.AddRange(keyframe);
+            t.Draw(strip, d =>
+            {
+                for (int i = 0; i < tiles.Count; i++)
+                    d.Image(tiles[i].Image, 80.0 * i, 0.0, 80.0, 45.0);
+            });
+        }
+
+        void ExactDone(Tx t, ReadOutcome outcome)
+        {
+            t.Write(labels[0], FrameLine("exact", exact, outcome));
+            t.ReadFrames(clip, Bands, 80, 45, FrameAccuracy.Keyframe,
+                onFrame: (_, f) => keyframe.Add(f), onDone: KeyframeDone);
+        }
+
+        void PeaksHeard(Tx t, Peaks p)
+        {
+            short lows = 0, highs = 0;
+            for (int i = 0; i < p.Count; i++)
+            {
+                var (lo, hi) = p.Pair(i, 0);
+                if (i == 0 || lo < lows) lows = lo;
+                if (i == 0 || hi > highs) highs = hi;
+            }
+            t.Write(labels[2], $"peaks {p.SampleRate} Hz, {p.Channels} ch, {p.Count} pairs of "
+                + $"{p.SamplesPerPair}, {lows}..{highs}");
+            t.Draw(wave, d =>
+            {
+                static double Y(short v) => 30.0 - v * 25.0 / 8192.0;
+                for (int i = 0; i < p.Count; i++)
+                {
+                    var (lo, hi) = p.Pair(i, 0);
+                    double x = 8.0 + 7.0 * i;
+                    d.MoveTo(x, Y(hi)).LineTo(x + 5.0, Y(hi)).LineTo(x + 5.0, Y(lo)).LineTo(x, Y(lo)).Close();
+                    d.Fill(Paint.Series, FillRule.Nonzero);
+                }
+                d.Image(logo, 150.0, 4.0, 20.0, 20.0);
+                d.Image(photo, 150.0, 30.0, 40.0, 30.0);
+            });
+        }
+
+        app.Build(tx =>
+        {
+            tx.Window(title: "media reader", width: 560.0, height: 560.0);
+            labels = Array.ConvertAll(
+                new[] { "exact", "keyframe", "peaks", "cancel", "failures", "no track" },
+                s => tx.Signal(s));
+            tx.Mount(tx.Column(root =>
+            {
+                foreach (var label in labels) tx.Label(bind: label);   // label#0..#5
+                strip = tx.Canvas(StripBox);
+                tx.SetA11yId(strip, "strip");
+                tx.SetA11yLabel(strip, "Filmstrip");
+                wave = tx.Canvas(WaveBox);
+                tx.SetA11yId(wave, "wave");
+                tx.SetA11yLabel(wave, "Waveform");
+                tx.Button("start", t =>                               // button#0
+                {
+                    var trickle = t.Reader(MediaSource.Url($"{baseUrl}/trickle/h264_frames.mp4"));
+                    var read = t.ReadFrames(trickle, new ulong[] { 0 }, 80, 45, FrameAccuracy.Exact,
+                        onDone: Settle(cancels, 3, "trickle"));
+                    var closing = t.Reader(MediaSource.Url($"{baseUrl}/trickle/h264_aac.mp4"));
+                    t.ReadFrames(closing, new ulong[] { 0 }, 80, 45, FrameAccuracy.Exact,
+                        onDone: Settle(cancels, 3, "closed"));
+                    trickling = c =>
+                    {
+                        c.CancelRead(trickle, read);
+                        c.CloseReader(closing);
+                    };
+                    t.Write(labels[3], "reading");
+                });
+                tx.Button("cancel", t =>                              // button#1
+                {
+                    trickling?.Invoke(t);
+                    trickling = null;
+                });
+                return root;
+            }));
+
+            clip = tx.Reader(MediaSource.Asset("media/h264_frames.mp4"));
+            tx.ReadFrames(clip, Bands, 80, 45, FrameAccuracy.Exact,
+                onFrame: (_, f) => exact.Add(f), onDone: ExactDone);
+
+            var tone = tx.Reader(MediaSource.Asset("media/tone.wav"));
+            tx.ReadPeaks(tone, 4800, onPeaks: PeaksHeard, onDone: (t, outcome) =>
+            {
+                if (outcome is not ReadOutcome.Completed)
+                    t.Write(labels[2], $"peaks {OutcomeWord(outcome)}");
+            });
+
+            foreach (var (what, source) in new[] { ("OFL.txt", "fonts/OFL.txt"), ("missing.mp4", "media/missing.mp4") })
+            {
+                var reader = tx.Reader(MediaSource.Asset(source));
+                tx.ReadFrames(reader, new ulong[] { 0 }, 80, 45, FrameAccuracy.Exact,
+                    onDone: Settle(failures, 4, what));
+            }
+
+            var silent = tx.Reader(MediaSource.Asset("media/h264_noaudio.mp4"));
+            tx.ReadPeaks(silent, 4800, onDone: Settle(missing, 5, "noaudio peaks"));
+            var song = tx.Reader(MediaSource.Asset("media/tone.mp3"));
+            tx.ReadFrames(song, new ulong[] { 0 }, 80, 45, FrameAccuracy.Exact,
+                onDone: Settle(missing, 5, "mp3 frames"));
+
+            logo = tx.LoadImage(MediaSource.Asset("images/a11y-logo.png"));
+            photo = tx.LoadImage(MediaSource.Asset("images/photo.jpg"));
         });
         Environment.Exit(app.Run());
     }

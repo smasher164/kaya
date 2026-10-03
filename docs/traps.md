@@ -13638,10 +13638,26 @@ and not -11828; a file that is not media at all (a TOML, a licence text, a
 JPEG) fails -11828 under -12847 (unsupported_container); a missing file fails
 -11800 under -17913, which names nothing, and the core answers not_found
 before the platform sees it. -11869 falls to the failure table's default,
-`decode_error` (the ruling question in docs/deferred.md's reader BUILD entry).
+`decode_error` (docs/deferred.md's missing-track RULING).
 And `AVURLAsset.cancelLoading()` leaves the asset unable to answer a LATER
 read: with it in the stop after every read, media_reader's keyframe read,
 asked after its exact read on the same reader, never answered. So the
 SwiftUI arm tears an asset's loading down only on a read given up on
 (cancelled, past the bound, its reader closed) and opens a fresh asset for
 the reader's next read; check-verbs holds the stop's shape.
+
+## GStreamer's reader pipeline: videoconvert reads the bands wrong, and an appsink before PAUSED reads as ended (measured 2026-10-02)
+
+In the linux lane image (GStreamer 1.26), h264_frames.mp4's frames decode to
+I420 Y 85 / 153 and Y 91, Cb 101, Cr 191 with colorimetry `2:3:7:1`
+(limited range, BT.709), which the BT.709 matrix reads as 505050, A0A0A0 and
+C83C1E exactly; `videoconvert` to RGBA (with `dither=none`, with the chroma
+resampler at nearest, and `videoconvertscale` alike) answered 4E4E4E,
+9D9D9D and C6381D, past expect_ink's ±1. So the GTK reader takes I420 and
+kaya converts it (crate::reader::Ycc, which the WinUI arm uses for NV12 too).
+And an appsink that has not reached PAUSED answers `try_pull_sample` with
+nothing at once and `is_eos()` true, so a peaks read pulled right after
+`set_state(PLAYING)` "finished" with no PCM; the arm waits for the preroll
+first. A playbin3 whose flags name only audio, on a file with no audio,
+posts a stream collection without an audio stream before anything else,
+which is where the missing-track case is read.

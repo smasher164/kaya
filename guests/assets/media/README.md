@@ -23,6 +23,8 @@ first's `eng`, so a check can tell them apart by pitch.
   (grey 505050) and 36-38 (grey A0A0A0), so the picture at 0.5 s and at 1.5 s has a
   colour of its own and one two frames either side does not (docs/traps.md,
   the edit-list entry; tools/scenes/media_tracks.steps).
+- `h264_noaudio.mp4`: the floor's video with no audio track, the media
+  reader's missing-track case (tools/scenes/media_reader.steps).
 - `tone.mp3`, `tone.m4a` (AAC), `tone.ogg` (Opus), `tone_opus.webm`,
   `tone.flac`, `tone.wav`: audio only.
 - `captions.vtt`: two cues, "first cue" 0-1 s and "second cue" 1-2 s, the

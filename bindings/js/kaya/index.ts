@@ -4693,6 +4693,15 @@ export class Draw {
       String(s),
     );
   }
+
+  /** Draw a core-held image (a reader's frame, a loaded image) into the
+   * rectangle at (x, y), `w` by `h` (docs/media-plan.md §8 ruling 3). kaya
+   * rasterizes it with the rest of the drawing; an image that holds no
+   * picture, or was released, is refused. */
+  image(image: Image, x: number, y: number, w: number, h: number): this {
+    if (!(image instanceof Image)) throw new TypeError(`kaya: Draw.image takes a kaya.Image, not ${runtime.describe(image)}`);
+    return this._op(wire.DRAW_OP_IMAGE, new I64(image.id), Number(x), Number(y), Number(w), Number(h));
+  }
 }
 
 export type Size = [width: number, height: number];
@@ -5329,8 +5338,337 @@ function sessionAction(code: number): SessionAction {
   throw new Error(`kaya: a session action carries ${code}, which this build does not know`);
 }
 
+// --- THE READER AND THE CORE-HELD IMAGES (docs/media-plan.md §8 rulings
+// 3, 4) --------------------------------------------------------------
+
+/** KEYFRAME is the keyframe at or before the time on every platform,
+ * EXACT the frame shown at it. */
+export type FrameAccuracy = "keyframe" | "exact";
+
+const FRAME_ACCURACIES: Record<FrameAccuracy, number> = { keyframe: wire.FRAME_ACCURACY_KEYFRAME, exact: wire.FRAME_ACCURACY_EXACT };
+
+/** A read's end: completed, cancelled, or failed with the player's closed
+ * reason and the platform's sentence. */
+export type ReadOutcome =
+  | { readonly status: "completed" | "cancelled" }
+  | { readonly status: "failed"; readonly failure: MediaFailure; readonly detail: string };
+
+/** What an awaited read rejects with when it gives no answer: cancelled
+ * (its reader closed under it) or failed. */
+export class ReadError extends Error {
+  readonly outcome: ReadOutcome;
+  constructor(outcome: ReadOutcome) {
+    super(outcome.status === "failed" ? `kaya: the read failed ${outcome.failure}: ${outcome.detail}` : "kaya: the read was cancelled");
+    this.name = "ReadError";
+    this.outcome = outcome;
+  }
+}
+
+/** A core-held picture (a reader's frame, a loaded image), the app's
+ * until it releases it; `Draw.image` draws it. */
+export class Image {
+  readonly id: number;
+
+  /** @internal */
+  constructor(id: number) {
+    this.id = id;
+  }
+
+  /** Forget the picture. A drawing declared before keeps showing it until
+   * it is declared again. */
+  release(): void {
+    records().push(wire.tx_release_image(this.id));
+  }
+
+  /** The picture's size and premultiplied RGBA8 bytes; null for an image
+   * holding none. No transaction. */
+  pixels(): { width: number; height: number; bytes: Uint8Array } | null {
+    return runtime.imagePixels(this.id);
+  }
+}
+
+/** One requested time answered: which of the times it is, the time asked,
+ * the time of the picture the platform returned, and its image. */
+export type Frame = {
+  readonly index: number;
+  readonly requestedMs: number;
+  readonly actualMs: number;
+  readonly image: Image;
+  readonly width: number;
+  readonly height: number;
+};
+
+/** A peaks read's answer: a [min, max] pair per channel per
+ * `samplesPerPair` frames, computed in the core. */
+export class Peaks {
+  readonly sampleRate: number;
+  readonly samplesPerPair: number;
+  readonly channels: number;
+  private readonly _data: Int16Array;
+
+  /** @internal */
+  constructor(sampleRate: number, samplesPerPair: number, channels: number, data: Int16Array) {
+    this.sampleRate = sampleRate;
+    this.samplesPerPair = samplesPerPair;
+    this.channels = channels;
+    this._data = data;
+  }
+
+  /** How many pairs per channel. */
+  get length(): number {
+    return this.channels === 0 ? 0 : Math.floor(this._data.length / (2 * this.channels));
+  }
+
+  /** Pair `index`'s [min, max] on `channel`. */
+  pair(index: number, channel = 0): [min: number, max: number] {
+    if (!(index >= 0 && index < this.length && channel >= 0 && channel < this.channels)) {
+      throw new RangeError(`kaya: Peaks.pair(${index}, ${channel}) is outside ${this.length} pairs of ${this.channels} channel(s)`);
+    }
+    const at = (index * this.channels + channel) * 2;
+    return [this._data[at]!, this._data[at + 1]!];
+  }
+}
+
+type ReadSeat = {
+  reader: number;
+  onFrame?: ((frame: Frame) => void) | undefined;
+  onProgress?: ((doneMs: number, totalMs: number) => void) | undefined;
+  onPeaks?: ((peaks: Peaks) => void) | undefined;
+  onDone?: ((outcome: ReadOutcome) => void) | undefined;
+};
+
+type LoadSeat = { onLoaded?: ((width: number, height: number) => void) | undefined; onFailed?: ((failure: MediaFailure, detail: string) => void) | undefined };
+
+/** @internal The reads the app registered, the read in flight per reader,
+ * the reads it gave up, and the image loads it awaits — one object so a
+ * rolled-back transaction restores all four together. */
+export class ReaderBook {
+  reads = new Map<number, ReadSeat>();
+  inFlight = new Map<number, number>();
+  abandoned = new Set<number>();
+  loads = new Map<number, LoadSeat>();
+
+  journal(): void {
+    const [reads, inFlight, abandoned, loads] = [new Map(this.reads), new Map(this.inFlight), new Set(this.abandoned), new Map(this.loads)];
+    journalOnce(this, () => {
+      [this.reads, this.inFlight, this.abandoned, this.loads] = [reads, inFlight, abandoned, loads];
+    });
+  }
+
+  /** The app gave up on `read`: its answers still to come are not heard,
+   * and the images they carry go back with the next commit. */
+  abandon(read: number): void {
+    this.journal();
+    this.abandoned.add(read);
+    for (const [reader, inFlight] of this.inFlight) if (inFlight === read) this.inFlight.delete(reader);
+  }
+}
+
+/** One frames or peaks read in flight on a reader. */
+export class Read {
+  readonly id: number;
+  readonly reader: number;
+
+  /** @internal */
+  constructor(id: number, reader: number) {
+    this.id = id;
+    this.reader = reader;
+  }
+
+  /** Stop the read: it ends cancelled, and nothing else of it is heard. */
+  cancel(): void {
+    const recs = records();
+    app()._readerBook.abandon(this.id);
+    recs.push(wire.tx_cancel_read(this.reader, this.id));
+  }
+}
+
+export type FramesOptions = {
+  /** Bounds the picture, aspect kept, 0 for no bound on that axis. */
+  maxSize?: readonly [width: number, height: number];
+  accuracy: FrameAccuracy;
+  /** Each time as it is answered, in the platform's order. */
+  onFrame?: (frame: Frame) => void;
+  /** The read's end; the read's registrations retire with it. */
+  onDone?: (outcome: ReadOutcome) => void;
+  /** Awaited form only: aborting cancels the read and releases the images
+   * it had carried. */
+  signal?: AbortSignal;
+};
+
+export type PeaksOptions = {
+  /** Milliseconds decoded of the total. */
+  onProgress?: (doneMs: number, totalMs: number) => void;
+  /** The peaks, just before the end. */
+  onPeaks?: (peaks: Peaks) => void;
+  onDone?: (outcome: ReadOutcome) => void;
+  /** Awaited form only: aborting cancels the read. */
+  signal?: AbortSignal;
+};
+
+function msList(times: readonly number[]): I64[] {
+  return times.map((t) => {
+    if (!Number.isSafeInteger(t) || t < 0) throw new RangeError(`kaya: Reader.frames takes times in ms >= 0, not ${String(t)}`);
+    return new I64(t);
+  });
+}
+
+function dimension(what: string, v: unknown): number {
+  if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > 0xffffffff) throw new RangeError(`kaya: ${what} is a whole number of pixels >= 0, not ${String(v)}`);
+  return v;
+}
+
+/** A media reader (docs/media-plan.md §8 ruling 4): frames and peaks from a
+ * source with no player. One read in flight per reader. */
+export class Reader {
+  readonly id: number;
+
+  /** @internal */
+  constructor(id: number) {
+    this.id = id;
+  }
+
+  private _read(seat: ReadSeat): Read {
+    const a = app();
+    a._readerBook.journal();
+    const read = new Read(a._next("read"), this.id);
+    a._readerBook.inFlight.set(this.id, read.id);
+    a._readerBook.reads.set(read.id, seat);
+    return read;
+  }
+
+  /** The awaited half: `seat` collects, the end settles. Aborting gives
+   * the read up, releases what it carried and rejects with the reason. */
+  private _await<T>(signal: AbortSignal | undefined, issue: (seat: ReadSeat) => Read, collect: ReadSeat, settle: (outcome: ReadOutcome) => T, carried: () => Image[]): Promise<T> {
+    if (signal?.aborted) return Promise.reject(signal.reason);
+    return new Promise<T>((resolve, reject) => {
+      let read: Read | null = null;
+      const onAbort = (): void => {
+        const a = app();
+        if (read === null || !a._readerBook.reads.has(read.id)) return;
+        const recs = records();
+        a._readerBook.reads.delete(read.id);
+        a._readerBook.abandon(read.id);
+        for (const image of carried()) recs.push(wire.tx_release_image(image.id));
+        recs.push(wire.tx_cancel_read(this.id, read.id));
+        reject(signal!.reason);
+      };
+      collect.onDone = (outcome) => {
+        signal?.removeEventListener("abort", onAbort);
+        if (outcome.status === "completed") {
+          resolve(settle(outcome));
+          return;
+        }
+        const recs = records();
+        for (const image of carried()) recs.push(wire.tx_release_image(image.id));
+        reject(new ReadError(outcome));
+      };
+      read = issue(collect);
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
+  }
+
+  /** One picture per time in `timesMs`, each heard by `onFrame`, then the
+   * read's end by `onDone`; with neither, a promise of the frames in
+   * index order, rejected with a ReadError when the read is cancelled or
+   * fails (the images it had carried released). */
+  frames(timesMs: readonly number[], opts: FramesOptions & ({ onFrame: (frame: Frame) => void } | { onDone: (outcome: ReadOutcome) => void })): Read;
+  frames(timesMs: readonly number[], opts: FramesOptions): Promise<Frame[]>;
+  frames(timesMs: readonly number[], opts: FramesOptions): Read | Promise<Frame[]> {
+    const times = msList(timesMs);
+    const accuracy = FRAME_ACCURACIES[opts.accuracy];
+    if (accuracy === undefined) throw new Error(`kaya: accuracy must be one of ${JSON.stringify(Object.keys(FRAME_ACCURACIES))}, got ${JSON.stringify(opts.accuracy)}`);
+    const [mw, mh] = opts.maxSize ?? [0, 0];
+    const maxW = dimension("maxSize's width", mw);
+    const maxH = dimension("maxSize's height", mh);
+    const issue = (seat: ReadSeat): Read => {
+      const recs = records();
+      const read = this._read(seat);
+      const a = app();
+      const first = a._reserve("image", times.length);
+      recs.push(wire.tx_read_frames(this.id, read.id, first, accuracy, maxW, maxH, times));
+      return read;
+    };
+    if (opts.onFrame !== undefined || opts.onDone !== undefined) return issue({ reader: this.id, onFrame: opts.onFrame, onDone: opts.onDone });
+    const frames: Frame[] = [];
+    return this._await(
+      opts.signal,
+      issue,
+      { reader: this.id, onFrame: (f) => frames.push(f) },
+      () => [...frames].sort((x, y) => x.index - y.index),
+      () => frames.map((f) => f.image),
+    );
+  }
+
+  /** The first audio track's peaks, a [min, max] pair per channel per
+   * `samplesPerPair` frames: progress as it decodes, the peaks just before
+   * the end; with no handler, a promise of the peaks. */
+  peaks(samplesPerPair: number, opts: PeaksOptions & ({ onProgress: (doneMs: number, totalMs: number) => void } | { onPeaks: (peaks: Peaks) => void } | { onDone: (outcome: ReadOutcome) => void })): Read;
+  peaks(samplesPerPair: number, opts?: PeaksOptions): Promise<Peaks>;
+  peaks(samplesPerPair: number, opts: PeaksOptions = {}): Read | Promise<Peaks> {
+    const perPair = dimension("samplesPerPair", samplesPerPair);
+    const issue = (seat: ReadSeat): Read => {
+      const recs = records();
+      const read = this._read(seat);
+      recs.push(wire.tx_read_peaks(this.id, read.id, perPair));
+      return read;
+    };
+    if (opts.onProgress !== undefined || opts.onPeaks !== undefined || opts.onDone !== undefined) {
+      return issue({ reader: this.id, onProgress: opts.onProgress, onPeaks: opts.onPeaks, onDone: opts.onDone });
+    }
+    let answer: Peaks = new Peaks(0, perPair, 0, new Int16Array(0));
+    return this._await(
+      opts.signal,
+      issue,
+      { reader: this.id, onPeaks: (p) => (answer = p) },
+      () => answer,
+      () => [],
+    );
+  }
+
+  /** Forget the reader, cancelling its read in flight. The images it
+   * answered with stay the app's. */
+  close(): void {
+    const recs = records();
+    const book = app()._readerBook;
+    const read = book.inFlight.get(this.id);
+    if (read !== undefined) book.abandon(read);
+    recs.push(wire.tx_close_reader(this.id));
+  }
+}
+
+/** A media reader on `source`, created in the ambient transaction. */
+export function reader(source: MediaSource): Reader {
+  const path = mediaPath("kaya.reader", source);
+  const recs = records();
+  const r = new Reader(app()._next("reader"));
+  recs.push(wire.tx_open_reader(r.id, path));
+  return r;
+}
+
+export type LoadImageOptions = {
+  onLoaded?: (width: number, height: number) => void;
+  onFailed?: (failure: MediaFailure, detail: string) => void;
+};
+
+/** A PNG or JPEG decoded by kaya from an asset or a picked file, answered
+ * by `onLoaded(width, height)` or `onFailed(reason, detail)`. A drawing may
+ * name the image in the same transaction. */
+export function loadImage(source: MediaSource, opts: LoadImageOptions = {}): Image {
+  const path = mediaPath("kaya.loadImage", source);
+  const recs = records();
+  const a = app();
+  const image = new Image(a._next("image"));
+  recs.push(wire.tx_load_image(image.id, path));
+  if (opts.onLoaded !== undefined || opts.onFailed !== undefined) {
+    a._readerBook.journal();
+    a._readerBook.loads.set(image.id, { onLoaded: opts.onLoaded, onFailed: opts.onFailed });
+  }
+  return image;
+}
+
 export class App {
-  private readonly _counters: Record<string, number> = { signal: 0, widget: 0, collection: 0, alert: 0, menu_item: 0, file_dialog: 0, clipboard: 0, link_route: 0, player: 0 };
+  private readonly _counters: Record<string, number> = { signal: 0, widget: 0, collection: 0, alert: 0, menu_item: 0, file_dialog: 0, clipboard: 0, link_route: 0, player: 0, reader: 0, read: 0, image: 0 };
   /** @internal */ readonly _widgetHandlers = new Map<string, Handler>();
   /** @internal */ readonly _nodeHandlers = new Map<string, Handler>();
   /** @internal */ readonly _nodeOwners = new Map<number, Collection<unknown, unknown>>();
@@ -5382,6 +5720,7 @@ export class App {
    * outside the rollback journal as the Rust binding's are. */
   readonly _players = new Map<number, Player>();
   /** @internal */ _sessionAction: ((action: SessionAction, atMs: number) => void) | undefined;
+  /** @internal */ readonly _readerBook = new ReaderBook();
   private _posted: [Handler, unknown[]][] = [];
   private _drainScheduled = false;
   private _shutdown: (() => void) | null = null;
@@ -5396,6 +5735,14 @@ export class App {
     const n = (this._counters[space] ?? 0) + 1;
     this._counters[space] = n;
     return n;
+  }
+
+  /** @internal `count` ids in a row from `space`, answering the first —
+   * the one the next id would have been when `count` is 0. */
+  _reserve(space: string, count: number): number {
+    const first = (this._counters[space] ?? 0) + 1;
+    this._counters[space] = first - 1 + count;
+    return first;
   }
 
   /** @internal */
@@ -5742,6 +6089,48 @@ export class App {
     for (const [fn, args] of batch) this._dispatch(fn, ...args);
   }
 
+  /** @internal The handlers one reader or image occurrence reaches. AFTER
+   * A CANCEL OR A CLOSE THE APP HEARS ONLY THE END: an abandoned read's
+   * answers are dropped, and the images they carried go back with the next
+   * commit, since the app never learned their ids. */
+  _readerAnswer(kind: number, ident: number, payload: wire.Decoded[]): [Handler, unknown[]][] {
+    const book = this._readerBook;
+    if (kind === wire.OCC_IMAGE_LOADED) {
+      const seat = book.loads.get(ident);
+      book.loads.delete(ident);
+      const [width, height, failure, detail] = payload;
+      if (Number(failure) === wire.MEDIA_FAILURE_NONE) return seat?.onLoaded === undefined ? [] : [[seat.onLoaded as Handler, [Number(width), Number(height)]]];
+      return seat?.onFailed === undefined ? [] : [[seat.onFailed as Handler, [known(MEDIA_FAILURES, Number(failure), "media failure"), String(detail)]]];
+    }
+    const read = Number(payload[0]);
+    if (kind === wire.OCC_READER_DONE && book.inFlight.get(ident) === read) book.inFlight.delete(ident);
+    if (book.abandoned.has(read)) {
+      if (kind === wire.OCC_READER_FRAME) this._pendingRecords.push(wire.tx_release_image(Number(payload[1])));
+      if (kind !== wire.OCC_READER_DONE) return [];
+      book.abandoned.delete(read);
+    }
+    const seat = book.reads.get(read);
+    if (kind === wire.OCC_READER_DONE) book.reads.delete(read);
+    if (seat === undefined) return [];
+    if (kind === wire.OCC_READER_FRAME) {
+      const [, image, index, width, height, requested, actual] = payload.map(Number) as number[];
+      const frame: Frame = { index: index!, requestedMs: requested!, actualMs: actual!, image: new Image(image!), width: width!, height: height! };
+      return seat.onFrame === undefined ? [] : [[seat.onFrame as Handler, [frame]]];
+    }
+    if (kind === wire.OCC_READER_PROGRESS) return seat.onProgress === undefined ? [] : [[seat.onProgress as Handler, [Number(payload[1]), Number(payload[2])]]];
+    if (kind === wire.OCC_READER_PEAKS) {
+      if (seat.onPeaks === undefined) return [];
+      const [, rate, perPair, channels] = payload.map(Number) as number[];
+      return [[seat.onPeaks as Handler, [new Peaks(rate!, perPair!, channels!, runtime.readerPeaks(ident, read))]]];
+    }
+    const [, outcome, failure, detail] = payload;
+    const end: ReadOutcome =
+      Number(outcome) === wire.READ_OUTCOME_FAILED
+        ? { status: "failed", failure: known(MEDIA_FAILURES, Number(failure), "media failure"), detail: String(detail) }
+        : { status: Number(outcome) === wire.READ_OUTCOME_CANCELLED ? "cancelled" : "completed" };
+    return seat.onDone === undefined ? [] : [[seat.onDone as Handler, [end]]];
+  }
+
   private _onOccurrence(occ: wire.Occurrence): void {
     // Posted work first, then the ring: whatever brought this thread
     // back, it looks here before anywhere else.
@@ -5914,6 +6303,10 @@ export class App {
       if (seat === undefined) return;
       seat._absorb(kind, pair ? ident : payload);
       for (const [fn, args] of seat._handlers(kind)) this._dispatch(fn, ...args);
+      return;
+    }
+    if (kind === wire.OCC_READER_FRAME || kind === wire.OCC_READER_PROGRESS || kind === wire.OCC_READER_PEAKS || kind === wire.OCC_READER_DONE || kind === wire.OCC_IMAGE_LOADED) {
+      for (const [fn, args] of this._readerAnswer(kind, ident, payload as wire.Decoded[])) this._dispatch(fn, ...args);
       return;
     }
     if (kind === wire.OCC_SESSION_ACTION) {

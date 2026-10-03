@@ -132,6 +132,12 @@ let kaya_can_play =
   foreign ~from:lib "kaya_can_play"
     (string @-> size_t @-> string @-> size_t @-> returning uint8_t)
 let kaya_catalog = foreign ~from:lib "kaya_catalog" (string @-> returning void)
+let kaya_reader_peaks =
+  foreign ~from:lib "kaya_reader_peaks"
+    (uint64_t @-> uint64_t @-> ptr int16_t @-> size_t @-> returning size_t)
+let kaya_image_pixels =
+  foreign ~from:lib "kaya_image_pixels"
+    (uint64_t @-> ptr uint8_t @-> size_t @-> ptr uint32_t @-> ptr uint32_t @-> returning size_t)
 
 type tr_arg_c
 let tr_arg_c : tr_arg_c structure typ = structure "KayaTrArg"
@@ -193,6 +199,41 @@ let can_play mime codecs =
        (Unsigned.Size_t.of_int (String.length codecs)))
   <> 0
 let catalog app = kaya_catalog app
+
+let reader_peaks reader read count =
+  let u = Unsigned.UInt64.of_int64 in
+  if count <= 0 then [||]
+  else begin
+    let buf = CArray.make int16_t count in
+    let whole =
+      Unsigned.Size_t.to_int
+        (kaya_reader_peaks (u reader) (u read) (CArray.start buf) (Unsigned.Size_t.of_int count))
+    in
+    Array.init (min whole count) (fun i -> CArray.get buf i)
+  end
+
+let image_pixels image =
+  let id = Unsigned.UInt64.of_int64 image in
+  let w = allocate uint32_t Unsigned.UInt32.zero in
+  let h = allocate uint32_t Unsigned.UInt32.zero in
+  let len =
+    Unsigned.Size_t.to_int
+      (kaya_image_pixels id (from_voidp uint8_t null) Unsigned.Size_t.zero w h)
+  in
+  if len = 0 then None
+  else begin
+    let buf = CArray.make uint8_t len in
+    let got =
+      Unsigned.Size_t.to_int
+        (kaya_image_pixels id (CArray.start buf) (Unsigned.Size_t.of_int len) w h)
+    in
+    if got <> len then None
+    else
+      Some
+        ( Unsigned.UInt32.to_int !@w,
+          Unsigned.UInt32.to_int !@h,
+          Bytes.init len (fun i -> Char.chr (Unsigned.UInt8.to_int (CArray.get buf i))) )
+  end
 
 type tr_arg =
   | Tr_int of int64

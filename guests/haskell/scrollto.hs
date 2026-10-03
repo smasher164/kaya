@@ -15,7 +15,7 @@ import Data.IORef (newIORef, readIORef, writeIORef)
 import GHC.Generics (Generic)
 
 import Data.Text (Text)
-import KayaApp
+import KayaApp hiding (Frame (..))
 
 data Message = Message {text :: Text}
   deriving stock (Generic)

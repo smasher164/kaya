@@ -152,6 +152,8 @@ LEGS = {
         # no other lane and no other device of the pool shares.
         "media_formats-compose", "media_delivery-compose", "media_session-compose",
         "media_tracks-compose", "media_feed-compose",
+        # The reader and the canvas's images (docs/media-plan.md §8).
+        "media_reader-compose",
         # A picked clip played (docs/media-plan.md §2): rust-only, DocumentsUI.
         "media_picked-compose",
         # The bound (docs/media-plan.md §7c): rust-only.
@@ -177,7 +179,7 @@ LEGS = {
         "numberfield-jvm", "numberfieldde-jvm", "colorpicker-jvm",
         "range-jvm", "rangertl-jvm",
         "media_formats-jvm", "media_delivery-jvm", "media_session-jvm",
-        "media_tracks-jvm", "media_feed-jvm",
+        "media_tracks-jvm", "media_feed-jvm", "media_reader-jvm",
     ],
     "go": [
         "go", "a11y-go", "a11yrows-go",
@@ -199,7 +201,7 @@ LEGS = {
         "numberfield-go", "numberfieldde-go", "colorpicker-go",
         "range-go", "rangertl-go",
         "media_formats-go", "media_delivery-go", "media_session-go",
-        "media_tracks-go", "media_feed-go",
+        "media_tracks-go", "media_feed-go", "media_reader-go",
     ],
     "python": [
         "varied-python", "portfolio-python",

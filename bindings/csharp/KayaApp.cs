@@ -894,6 +894,68 @@ sealed record PlayerTracks(IReadOnlyList<string> Audio, IReadOnlyList<string> Ca
         new(Array.Empty<string>(), Array.Empty<string>(), null, null);
 }
 
+/// A media reader the app holds (docs/media-plan.md §8 ruling 4): frames
+/// and peaks from a source, with no player.
+readonly record struct Reader(ulong Id);
+
+/// One frames or peaks request on a reader.
+readonly record struct Read(ulong Id);
+
+/// A core-held picture, a frame a read answered or a LoadImage, which
+/// Draw.Image draws. It is the app's until ReleaseImage.
+readonly record struct Image(ulong Id);
+
+/// Keyframe is the keyframe at or before the time, Exact the frame shown at it.
+enum FrameAccuracy : uint
+{
+    Keyframe = KayaWire.FrameAccuracyKeyframe,
+    Exact = KayaWire.FrameAccuracyExact,
+}
+
+/// One requested time answered: which of the times it is, the time asked,
+/// the time of the picture the platform returned, and the image holding it.
+readonly record struct Frame(int Index, ulong RequestedMs, ulong ActualMs, Image Image,
+    uint Width, uint Height);
+
+/// A read's audio peaks: a min/max pair per channel for every
+/// SamplesPerPair frames (audiowaveform's .dat shape).
+sealed class Peaks(uint sampleRate, uint samplesPerPair, uint channels, int count, short[] pairs)
+{
+    public static readonly Peaks None = new(0, 0, 0, 0, Array.Empty<short>());
+
+    public uint SampleRate => sampleRate;
+    public uint SamplesPerPair => samplesPerPair;
+    public uint Channels => channels;
+
+    /// The number of pairs per channel.
+    public int Count => count;
+
+    public (short Min, short Max) Pair(int i, int channel)
+    {
+        int at = (i * (int)channels + channel) * 2;
+        return (pairs[at], pairs[at + 1]);
+    }
+}
+
+/// How a read ended.
+abstract record ReadOutcome
+{
+    public sealed record Completed() : ReadOutcome;
+
+    public sealed record Cancelled() : ReadOutcome;
+
+    /// The player's closed reason, and the platform's sentence.
+    public sealed record Failed(MediaFailure Why, string Detail) : ReadOutcome;
+}
+
+/// An awaited read the platform failed (FramesAsync, PeaksAsync).
+sealed class MediaReadException(MediaFailure why, string detail)
+    : Exception($"kaya: the read failed {why.Name()}: {detail}")
+{
+    public MediaFailure Why => why;
+    public string Detail => detail;
+}
+
 /// The wire's words for the media vocabularies.
 static class MediaWords
 {
@@ -924,6 +986,36 @@ static partial class Kaya
 {
     [System.Runtime.InteropServices.DllImport("kaya")]
     static extern byte kaya_can_play(byte[] mime, nuint mimeLen, byte[] codecs, nuint codecsLen);
+
+    [System.Runtime.InteropServices.DllImport("kaya")]
+    static extern nuint kaya_reader_peaks(ulong reader, ulong read, short[]? pairs, nuint cap);
+
+    [System.Runtime.InteropServices.DllImport("kaya")]
+    static extern nuint kaya_image_pixels(ulong image, byte[]? pixels, nuint cap,
+        out uint width, out uint height);
+
+    /// An image's size and premultiplied RGBA8 bytes, null for an image
+    /// holding no picture. Any thread, no transaction.
+    public static (uint Width, uint Height, byte[] Pixels)? ImagePixels(Image image)
+    {
+        nuint n = kaya_image_pixels(image.Id, null, 0, out _, out _);
+        if (n == 0) return null;
+        var pixels = new byte[n];
+        nuint got = kaya_image_pixels(image.Id, pixels, n, out uint w, out uint h);
+        return (w, h, got < n ? pixels[..(int)got] : pixels);
+    }
+
+    /// A finished peaks read's pairs, pulled when its reader_peaks is heard.
+    internal static Peaks PulledPeaks(ulong reader, ReaderPeaked p)
+    {
+        int want = p.Count * (int)p.Channels * 2;
+        var pairs = new short[want];
+        nuint got = want == 0 ? 0 : kaya_reader_peaks(reader, p.ReadId, pairs, (nuint)want);
+        if ((int)got != want)
+            throw new InvalidOperationException(
+                $"kaya: read {p.ReadId}'s peaks hold {got} values, its reader_peaks promised {want}");
+        return new Peaks(p.SampleRate, p.SamplesPerPair, p.Channels, p.Count, pairs);
+    }
 
     /// Whether this platform plays `mime` with `codecs` (an RFC 6381 list,
     /// "" for none): true exactly when loading such media would not fail as
@@ -1045,6 +1137,23 @@ sealed record VideoShown(ulong Id, List<object> Keys, double Shown) : Occurrence
 
 sealed record SessionActed(ulong Id, List<object> Keys, SessionAction Action)
     : Occurrence(Id, Keys);
+
+// The reader's answers (docs/media-plan.md §8 ruling 4): Id is the READER,
+// an image_loaded's the image.
+sealed record ReaderFramed(ulong Id, List<object> Keys, ulong ReadId, Frame Frame)
+    : Occurrence(Id, Keys);
+
+sealed record ReaderProgressed(ulong Id, List<object> Keys, ulong ReadId, ulong DoneMs,
+    ulong TotalMs) : Occurrence(Id, Keys);
+
+sealed record ReaderPeaked(ulong Id, List<object> Keys, ulong ReadId, uint SampleRate,
+    uint SamplesPerPair, uint Channels, int Count) : Occurrence(Id, Keys);
+
+sealed record ReaderEnded(ulong Id, List<object> Keys, ulong ReadId, ReadOutcome Outcome)
+    : Occurrence(Id, Keys);
+
+sealed record ImageLoaded(ulong Id, List<object> Keys, uint Width, uint Height,
+    MediaFailure? Failure, string Detail) : Occurrence(Id, Keys);
 
 sealed class KayaInstance
 {
@@ -1282,6 +1391,12 @@ sealed class Draw
         TextAlign align = TextAlign.Start,
         TextBaseline baseline = TextBaseline.Alphabetic) =>
         Op(KayaWire.DrawOpText, x, y, (long)paint, (long)align, (long)baseline, s);
+
+    /// <summary>Draw a core-held image into the rectangle at (x, y), `w` by
+    /// `h` (docs/media-plan.md §8 ruling 3); one holding no picture, or
+    /// released, is refused.</summary>
+    public Draw Image(Image image, double x, double y, double w, double h) =>
+        Op(KayaWire.DrawOpImage, (long)image.Id, x, y, w, h);
 }
 
 /// The app's preferences store (docs/tasks-s4-plan.md P2/P3): a small
@@ -1540,6 +1655,19 @@ sealed class KayaApp
     readonly Dictionary<ulong, Action<Tx, double>> widgetVisibility = new();
     readonly Dictionary<ulong, Action<Tx, List<object>, double>> nodeVisibility = new();
     Action<Tx, SessionAction>? sessionHandler;
+    // The reader's three id spaces (docs/media-plan.md §8 ruling 4), the
+    // read each reader has in flight, the reads the app gave up on, and the
+    // one-shot registrations, retired by the read's end or the image's load.
+    ulong readers, reads, images;
+    readonly Dictionary<ulong, ulong> readsInFlight = new();
+    internal readonly HashSet<ulong> abandonedReads = new();
+    internal readonly Dictionary<ulong, ReadHandlers> readHandlers = new();
+    internal readonly Dictionary<ulong, (Action<Tx, uint, uint>? Loaded,
+        Action<Tx, MediaFailure, string>? Failed)> imageLoads = new();
+
+    internal sealed record ReadHandlers(Action<Tx, Frame>? OnFrame = null,
+        Action<Tx, ulong, ulong>? OnProgress = null, Action<Tx, Peaks>? OnPeaks = null,
+        Action<Tx, ReadOutcome>? OnDone = null);
     // Window lifecycle: one handler each, receiving the window id.
     internal readonly Dictionary<ulong, Action<Tx>> closeRequested = new();
     internal readonly Dictionary<ulong, Action<Tx>> entryPopped = new();
@@ -1643,6 +1771,34 @@ sealed class KayaApp
     internal Node NextNode() => new(++widgets);
 
     internal Player NextPlayer() => new(++players);
+
+    internal Reader NextReader() => new(++readers);
+
+    internal Read NextRead(Reader reader)
+    {
+        var read = new Read(++reads);
+        readsInFlight[reader.Id] = read.Id;
+        return read;
+    }
+
+    internal ulong NextImages(int n)
+    {
+        ulong first = images + 1;
+        images += (ulong)n;
+        return first;
+    }
+
+    internal ulong? ReadInFlight(Reader reader) =>
+        readsInFlight.TryGetValue(reader.Id, out var read) ? read : null;
+
+    /// The app gave up on `read`: answers of it still in the ring are not
+    /// heard, and the images they carry are released by the next commit.
+    internal void Abandon(ulong read)
+    {
+        abandonedReads.Add(read);
+        foreach (var (reader, r) in readsInFlight)
+            if (r == read) readsInFlight.Remove(reader);
+    }
 
     internal Collection NextCollection() => new(++collections, Array.Empty<object>());
 
@@ -1869,6 +2025,103 @@ sealed class KayaApp
             foreach (string kind in accepting) request.Accept(kind);
             request.OnResult((_, clip) => resolve(clip)).Send();
         });
+
+    /// The frames at `timesMs` as one awaited read, in index order
+    /// (docs/async-dialogs-plan.md §2.2's tier). Cancelling `cancel`
+    /// cancels the read and releases the images it had carried; a read the
+    /// platform failed throws MediaReadException, one cancelled under it
+    /// (CancelRead, CloseReader) OperationCanceledException, and either
+    /// releases what it had carried.
+    public Task<List<Frame>> FramesAsync(Reader reader, IReadOnlyList<ulong> timesMs,
+        uint maxWidth = 0, uint maxHeight = 0, FrameAccuracy accuracy = FrameAccuracy.Exact,
+        CancellationToken cancel = default)
+    {
+        var carried = new List<Frame>();
+        return AwaitRead(reader, cancel, carried,
+            (tx, done) => tx.ReadFrames(reader, timesMs, maxWidth, maxHeight, accuracy,
+                onFrame: (_, f) => carried.Add(f), onDone: done),
+            () =>
+            {
+                var frames = new List<Frame>(carried);
+                frames.Sort((a, b) => a.Index.CompareTo(b.Index));
+                return frames;
+            });
+    }
+
+    /// The reader's peaks as one awaited read, FramesAsync's rules.
+    public Task<Peaks> PeaksAsync(Reader reader, uint samplesPerPair,
+        CancellationToken cancel = default)
+    {
+        Peaks? peaks = null;
+        return AwaitRead(reader, cancel, null,
+            (tx, done) => tx.ReadPeaks(reader, samplesPerPair, onPeaks: (_, p) => peaks = p,
+                onDone: done),
+            () => peaks ?? Peaks.None);
+    }
+
+    Task<T> AwaitRead<T>(Reader reader, CancellationToken cancel, List<Frame>? carried,
+        Func<Tx, Action<Tx, ReadOutcome>, Read> send, Func<T> answer)
+    {
+        RequireAppThread();
+        if (TplDepth != 0)
+            throw new InvalidOperationException("kaya: an awaited read cannot be requested inside a template body");
+        if (cancel.IsCancellationRequested) return Task.FromCanceled<T>(cancel);
+        var result = new TaskCompletionSource<T>();
+        var read = default(Read);
+        var stop = default(CancellationTokenRegistration);
+        // Run as an async job, outside every transaction: what the read
+        // carried goes back with the next commit, which the post makes.
+        void GiveBack(params byte[][] also)
+        {
+            foreach (var f in carried ?? new List<Frame>())
+                pendingRecords.Add(KayaWire.TxReleaseImage(f.Image.Id));
+            carried?.Clear();
+            pendingRecords.AddRange(also);
+            Post(_ => { });
+        }
+        void Done(Tx tx, ReadOutcome outcome)
+        {
+            stop.Dispose();
+            switch (outcome)
+            {
+                case ReadOutcome.Completed:
+                    var value = answer();
+                    QueueAsync(() => result.TrySetResult(value));
+                    break;
+                case ReadOutcome.Failed failed:
+                    QueueAsync(() =>
+                    {
+                        GiveBack();
+                        result.TrySetException(new MediaReadException(failed.Why, failed.Detail));
+                    });
+                    break;
+                default:
+                    QueueAsync(() =>
+                    {
+                        GiveBack();
+                        result.TrySetCanceled();
+                    });
+                    break;
+            }
+        }
+        void Request(Tx tx)
+        {
+            read = send(tx, Done);
+            tx.RollbackActions.Add(() => QueueAsync(() => result.TrySetException(
+                new InvalidOperationException("kaya: the read request transaction was rolled back"))));
+        }
+        if (CurrentTx is { } current) Request(current);
+        else Build(Request);
+        if (cancel.CanBeCanceled)
+            stop = cancel.Register(() => QueueAsync(() =>
+            {
+                if (result.Task.IsCompleted || !readHandlers.Remove(read.Id)) return;
+                Abandon(read.Id);
+                GiveBack(KayaWire.TxCancelRead(reader.Id, read.Id));
+                result.TrySetCanceled(cancel);
+            }));
+        return result.Task;
+    }
 
     internal void AlertResult(ulong id, AlertChoice choice)
     {
@@ -2405,6 +2658,55 @@ sealed class KayaApp
             case SessionActed acted when sessionHandler is { } onSession:
                 Dispatch(tx => onSession(tx, acted.Action));
                 break;
+            case ReaderFramed or ReaderProgressed or ReaderPeaked or ReaderEnded or ImageLoaded:
+                DispatchReader(occurrence);
+                break;
+        }
+    }
+
+    /// The reader's answers. A read the app gave up on is heard only at its
+    /// end, and an image one of its late answers carried is released at the
+    /// next commit, since the app never learned it.
+    void DispatchReader(Occurrence occurrence)
+    {
+        switch (occurrence)
+        {
+            case ReaderEnded ended:
+                if (readsInFlight.TryGetValue(ended.Id, out var flying) && flying == ended.ReadId)
+                    readsInFlight.Remove(ended.Id);
+                abandonedReads.Remove(ended.ReadId);
+                if (readHandlers.Remove(ended.ReadId, out var gone) && gone.OnDone is { } onDone)
+                    Dispatch(tx => onDone(tx, ended.Outcome));
+                break;
+            case ImageLoaded loaded when imageLoads.Remove(loaded.Id, out var load):
+                if (loaded.Failure is { } why)
+                {
+                    if (load.Failed is { } onFailed) Dispatch(tx => onFailed(tx, why, loaded.Detail));
+                }
+                else if (load.Loaded is { } onLoaded)
+                    Dispatch(tx => onLoaded(tx, loaded.Width, loaded.Height));
+                break;
+            case ReaderFramed late when abandonedReads.Contains(late.ReadId):
+                pendingRecords.Add(KayaWire.TxReleaseImage(late.Frame.Image.Id));
+                break;
+            case ReaderProgressed lateProgress when abandonedReads.Contains(lateProgress.ReadId):
+                break;
+            case ReaderPeaked latePeaks when abandonedReads.Contains(latePeaks.ReadId):
+                break;
+            case ReaderFramed framed
+                when readHandlers.TryGetValue(framed.ReadId, out var h) && h.OnFrame is { } onFrame:
+                Dispatch(tx => onFrame(tx, framed.Frame));
+                break;
+            case ReaderProgressed progress
+                when readHandlers.TryGetValue(progress.ReadId, out var h)
+                    && h.OnProgress is { } onProgress:
+                Dispatch(tx => onProgress(tx, progress.DoneMs, progress.TotalMs));
+                break;
+            case ReaderPeaked peaked
+                when readHandlers.TryGetValue(peaked.ReadId, out var h) && h.OnPeaks is { } onPeaks:
+                var pulled = Kaya.PulledPeaks(peaked.Id, peaked);
+                Dispatch(tx => onPeaks(tx, pulled));
+                break;
         }
     }
 
@@ -2774,6 +3076,45 @@ sealed class KayaApp
             case KayaWire.OccKindCaptionCue:
                 return new CueChanged(id, keys, payload as string ?? "");
             case KayaWire.OccKindVideoVisibility: return new VideoShown(id, keys, number);
+            case KayaWire.OccKindReaderFrame:
+            {
+                var tail = FlatTail("reader_frame", payload as List<object>, 7);
+                return new ReaderFramed(id, keys, (ulong)Int(tail[0]), new Frame((int)Int(tail[2]),
+                    (ulong)Int(tail[5]), (ulong)Int(tail[6]), new Image((ulong)Int(tail[1])),
+                    (uint)Int(tail[3]), (uint)Int(tail[4])));
+            }
+            case KayaWire.OccKindReaderProgress:
+            {
+                var tail = FlatTail("reader_progress", payload as List<object>, 3);
+                return new ReaderProgressed(id, keys, (ulong)Int(tail[0]), (ulong)Int(tail[1]),
+                    (ulong)Int(tail[2]));
+            }
+            case KayaWire.OccKindReaderPeaks:
+            {
+                var tail = FlatTail("reader_peaks", payload as List<object>, 5);
+                return new ReaderPeaked(id, keys, (ulong)Int(tail[0]), (uint)Int(tail[1]),
+                    (uint)Int(tail[2]), (uint)Int(tail[3]), (int)Int(tail[4]));
+            }
+            case KayaWire.OccKindReaderDone:
+            {
+                var tail = FlatTail("reader_done", payload as List<object>, 4);
+                ReadOutcome outcome = (uint)Int(tail[1]) switch
+                {
+                    KayaWire.ReadOutcomeCompleted => new ReadOutcome.Completed(),
+                    KayaWire.ReadOutcomeCancelled => new ReadOutcome.Cancelled(),
+                    _ => new ReadOutcome.Failed((MediaFailure)(uint)Int(tail[2]),
+                        tail[3] as string ?? ""),
+                };
+                return new ReaderEnded(id, keys, (ulong)Int(tail[0]), outcome);
+            }
+            case KayaWire.OccKindImageLoaded:
+            {
+                var tail = FlatTail("image_loaded", payload as List<object>, 4);
+                var failure = (uint)Int(tail[2]);
+                return new ImageLoaded(id, keys, (uint)Int(tail[0]), (uint)Int(tail[1]),
+                    failure == KayaWire.MediaFailureNone ? null : (MediaFailure)failure,
+                    tail[3] as string ?? "");
+            }
             case KayaWire.OccKindSessionAction:
             {
                 var tail = FlatTail("session_action", payload as List<object>, 2);
@@ -3018,7 +3359,8 @@ sealed class KayaApp
                         Dispatch(tx => onWalk(tx, walk.Step.Label, walk.Step.Delta));
                     break;
                 case PlayerMoved or PlayerAt or TracksListed or CueChanged or VideoShown
-                    or SessionActed:
+                    or SessionActed or ReaderFramed or ReaderProgressed or ReaderPeaked
+                    or ReaderEnded or ImageLoaded:
                     DispatchMedia(occurrence);
                     break;
                 // A paste rides a click tag verbatim, so it arrives on the
@@ -3979,6 +4321,84 @@ sealed class Tx : IDisposable
         Records.Add(KayaWire.TxPlayerCommand(p.Id, KayaWire.PlayerCommandSeek, ms));
 
     public void ReleasePlayer(Player p) => Records.Add(KayaWire.TxReleasePlayer(p.Id));
+
+    /// A media reader on `source` (docs/media-plan.md §8 ruling 4): frames
+    /// and peaks without a player.
+    public Reader Reader(MediaSource source)
+    {
+        var reader = App.NextReader();
+        Records.Add(KayaWire.TxOpenReader(reader.Id, source.Value));
+        return reader;
+    }
+
+    Read Register(Read read, KayaApp.ReadHandlers handlers)
+    {
+        App.readHandlers[read.Id] = handlers;
+        RollbackActions.Add(() => App.readHandlers.Remove(read.Id));
+        return read;
+    }
+
+    /// One picture per time in `timesMs`, each heard by `onFrame` in the
+    /// platform's order and the read's end by `onDone`. maxWidth x
+    /// maxHeight bounds the picture, aspect kept, 0 for no bound on that
+    /// axis. One read in flight per reader.
+    public Read ReadFrames(Reader reader, IReadOnlyList<ulong> timesMs, uint maxWidth = 0,
+        uint maxHeight = 0, FrameAccuracy accuracy = FrameAccuracy.Exact,
+        Action<Tx, Frame>? onFrame = null, Action<Tx, ReadOutcome>? onDone = null)
+    {
+        Alive();
+        var read = App.NextRead(reader);
+        ulong first = App.NextImages(timesMs.Count);
+        var times = new object[timesMs.Count];
+        for (int i = 0; i < times.Length; i++) times[i] = (long)timesMs[i];
+        Records.Add(KayaWire.TxReadFrames(reader.Id, read.Id, first, (uint)accuracy, maxWidth,
+            maxHeight, times));
+        return Register(read, new(OnFrame: onFrame, OnDone: onDone));
+    }
+
+    /// The first audio track's peaks, a min/max pair per channel per
+    /// `samplesPerPair` frames: `onProgress` hears how far it has decoded
+    /// in ms of the total, `onPeaks` the answer, `onDone` the end.
+    public Read ReadPeaks(Reader reader, uint samplesPerPair,
+        Action<Tx, ulong, ulong>? onProgress = null, Action<Tx, Peaks>? onPeaks = null,
+        Action<Tx, ReadOutcome>? onDone = null)
+    {
+        Alive();
+        var read = App.NextRead(reader);
+        Records.Add(KayaWire.TxReadPeaks(reader.Id, read.Id, samplesPerPair));
+        return Register(read, new(OnProgress: onProgress, OnPeaks: onPeaks, OnDone: onDone));
+    }
+
+    /// Stop a read: its onDone hears it cancelled, and nothing else of it
+    /// is heard.
+    public void CancelRead(Reader reader, Read read)
+    {
+        Records.Add(KayaWire.TxCancelRead(reader.Id, read.Id));
+        App.Abandon(read.Id);
+    }
+
+    /// Forget a reader, cancelling its read in flight the same way. The
+    /// images it answered with stay the app's.
+    public void CloseReader(Reader reader)
+    {
+        Records.Add(KayaWire.TxCloseReader(reader.Id));
+        if (App.ReadInFlight(reader) is ulong read) App.Abandon(read);
+    }
+
+    /// An image decoded by kaya from a PNG or JPEG asset or picked file:
+    /// `onLoaded` hears its size, `onFailed` why it did not decode. A
+    /// drawing may name it in the same transaction.
+    public Image LoadImage(MediaSource source, Action<Tx, uint, uint>? onLoaded = null,
+        Action<Tx, MediaFailure, string>? onFailed = null)
+    {
+        var image = new Image(App.NextImages(1));
+        Records.Add(KayaWire.TxLoadImage(image.Id, source.Value));
+        App.imageLoads[image.Id] = (onLoaded, onFailed);
+        RollbackActions.Add(() => App.imageLoads.Remove(image.Id));
+        return image;
+    }
+
+    public void ReleaseImage(Image image) => Records.Add(KayaWire.TxReleaseImage(image.Id));
 
     /// Select audio track `index`, 0-based in App.Tracks.
     public void SelectAudio(Player p, int index) =>

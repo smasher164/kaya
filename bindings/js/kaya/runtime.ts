@@ -52,6 +52,12 @@ type Floor = {
   direction(): number;
   textScale(): number;
   canPlay(mime: string, codecs: string): boolean;
+  // The reader's two pulls (docs/media-plan.md §8 ruling 4): a ring
+  // record cannot carry peaks or pixels. kaya_reader_peaks answers a
+  // finished read's i16, pair-major; kaya_image_pixels an image's
+  // premultiplied RGBA8 and size, null for an image holding none.
+  readerPeaks?(reader: number, read: number): Int16Array;
+  imagePixels?(image: number): { width: number; height: number; bytes: Uint8Array } | null;
   catalog(app: string): void;
   tr(key: string, args: [string, number, number, number, string][]): string;
   openPicked(handle: number, mode: number): { raw: number; seekable: boolean };
@@ -116,7 +122,8 @@ export const hooks: {
   submit: ((records: readonly Uint8Array[]) => void) | null;
   blob: ((data: Uint8Array) => void) | null;
   occurrenceBlob: ((handle: number) => Uint8Array) | null;
-} = { submit: null, blob: null, occurrenceBlob: null };
+  readerPeaks: ((reader: number, read: number) => Int16Array) | null;
+} = { submit: null, blob: null, occurrenceBlob: null, readerPeaks: null };
 
 // Copy then release, in that order: the addon does both inside
 // occurrenceBlob, so no handle ever reaches an app.
@@ -291,6 +298,27 @@ export function textScale(): number {
 
 export function canPlay(mime: string, codecs: string): boolean {
   return lib.canPlay(mime, codecs);
+}
+
+function addonEntry<K extends "readerPeaks" | "imagePixels">(name: K, c: string): NonNullable<Floor[K]> {
+  const f = lib[name];
+  if (typeof f !== "function") {
+    throw new Error(`kaya: this libkaya's node addon has no ${name} — crates/kaya/src/node.rs exports ${c} under that name, so rebuild the library from this tree`);
+  }
+  return f.bind(lib) as NonNullable<Floor[K]>;
+}
+
+/** A finished read_peaks' i16, pair-major, min then max; empty when the
+ * core holds none for that read. */
+export function readerPeaks(reader: number, read: number): Int16Array {
+  if (hooks.readerPeaks !== null) return hooks.readerPeaks(reader, read);
+  return addonEntry("readerPeaks", "kaya_reader_peaks")(reader, read);
+}
+
+/** A core-held image's size and premultiplied RGBA8 bytes, null for an
+ * image holding none. */
+export function imagePixels(image: number): { width: number; height: number; bytes: Uint8Array } | null {
+  return addonEntry("imagePixels", "kaya_image_pixels")(image);
 }
 
 export function catalog(app: string): void {

@@ -26845,6 +26845,15 @@ final class KayaReader {
         stop(read)
     }
 
+    /// THE ONE SITE a read for a track the source lacks is reported from;
+    /// the core decides its reason (docs/deferred.md, the missing-track RULING).
+    private func noTrack(_ read: UInt64, _ kind: String) {
+        let detail = Array("kaya: the source has no \(kind) track".utf8)
+        kayaDiag("reader \(id) read \(read): no \(kind) track")
+        detail.withUnsafeBufferPointer { KayaHost.api.reader_no_track(id, read, $0.baseAddress, UInt($0.count)) }
+        stop(read)
+    }
+
     /// `exact` asks for the frame shown at each time; otherwise the keyframe
     /// AT OR BEFORE it, which is tolerance-after zero (measured: the default
     /// is the NEAREST keyframe, either side).
@@ -26854,6 +26863,24 @@ final class KayaReader {
             return
         }
         self.read = read
+        answered(read)
+        Task { @MainActor in
+            do {
+                let tracks = try await asset.loadTracks(withMediaType: .video)
+                guard self.read == read else { return }
+                if tracks.isEmpty {
+                    self.noTrack(read, "video")
+                    return
+                }
+                self.generate(read, asset, exact: exact, maxSize: maxSize, times: times)
+            } catch {
+                guard self.read == read else { return }
+                self.failed(read, error, "kaya: the platform would not open the video")
+            }
+        }
+    }
+
+    private func generate(_ read: UInt64, _ asset: AVURLAsset, exact: Bool, maxSize: CGSize, times: [UInt64]) {
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = maxSize
@@ -26863,7 +26890,6 @@ final class KayaReader {
         var index: [Int64: [UInt32]] = [:]
         for (i, t) in times.enumerated() { index[Int64(t), default: []].append(UInt32(i)) }
         let asked = times.map { NSValue(time: CMTime(value: CMTimeValue($0), timescale: 1000)) }
-        answered(read)
         generator.generateCGImagesAsynchronously(forTimes: asked) { [weak self] requested, image, actual, result, error in
             let ms = requested.convertScale(1000, method: .roundHalfAwayFromZero).value
             let pixels = image.flatMap(kayaPremultipliedRGBA)
@@ -26906,7 +26932,7 @@ final class KayaReader {
                 let duration = try await asset.load(.duration)
                 guard self.read == read else { return }
                 guard let track = tracks.first else {
-                    self.failed(read, nil, "kaya: the source has no audio track to read peaks from")
+                    self.noTrack(read, "audio")
                     return
                 }
                 let reader = try AVAssetReader(asset: asset)

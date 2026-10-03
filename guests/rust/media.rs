@@ -571,14 +571,14 @@ fn reader_app(ctx: kaya::AppCtx) {
     let base = media_url();
     let msgs = kaya::Messages::<ReadMsg>::new();
     let (labels, strip, wave, clip, logo, photo) = ctx.apply(|tx| {
-        tx.window(kaya::DEFAULT_WINDOW).title("media reader");
+        tx.window(kaya::DEFAULT_WINDOW).title("media reader").size(560.0, 560.0);
         let labels: Vec<_> =
-            ["exact", "keyframe", "peaks", "cancel", "failures"].into_iter().map(|s| tx.signal(s)).collect();
+            ["exact", "keyframe", "peaks", "cancel", "failures", "no track"].into_iter().map(|s| tx.signal(s)).collect();
         let mut canvases = None;
         let root = tx
             .column(|tx| {
                 for label in &labels {
-                    tx.label(*label); // label#0..#4
+                    tx.label(*label); // label#0..#5
                 }
                 let strip = tx.canvas(STRIP).a11y_id("strip").a11y_label("Filmstrip").id();
                 let wave = tx.canvas(WAVE).a11y_id("wave").a11y_label("Waveform").id();
@@ -608,6 +608,13 @@ fn reader_app(ctx: kaya::AppCtx) {
             msgs.on_read_done(read, move |o| ReadMsg::Done(what, o));
         }
 
+        let silent = tx.reader(&MediaSource::asset("media/h264_noaudio.mp4"));
+        let read = tx.read_peaks(silent, 4800);
+        msgs.on_read_done(read, |o| ReadMsg::Done("noaudio peaks", o));
+        let song = tx.reader(&MediaSource::asset("media/tone.mp3"));
+        let read = tx.read_frames(song, &[0], (80, 45), FrameAccuracy::Exact);
+        msgs.on_read_done(read, |o| ReadMsg::Done("mp3 frames", o));
+
         let logo = tx.load_image(&MediaSource::asset("images/a11y-logo.png"));
         let photo = tx.load_image(&MediaSource::asset("images/photo.jpg"));
         (labels, strip, wave, clip, logo, photo)
@@ -616,6 +623,7 @@ fn reader_app(ctx: kaya::AppCtx) {
     let mut exact = Vec::new();
     let mut keyframe = Vec::new();
     let mut failures: Vec<String> = Vec::new();
+    let mut missing: Vec<String> = Vec::new();
     let mut cancels: Vec<String> = Vec::new();
     let mut trickling = None;
     while let Some(msg) = msgs.next(&ctx) {
@@ -672,6 +680,11 @@ fn reader_app(ctx: kaya::AppCtx) {
                 failures.push(format!("{what} {}", outcome_word(&outcome)));
                 failures.sort();
                 ctx.apply(|tx| tx.write(labels[4], failures.join("; ")));
+            }
+            ReadMsg::Done(what @ ("noaudio peaks" | "mp3 frames"), outcome) => {
+                missing.push(format!("{what} {}", outcome_word(&outcome)));
+                missing.sort();
+                ctx.apply(|tx| tx.write(labels[5], missing.join("; ")));
             }
             ReadMsg::Start => ctx.apply(|tx| {
                 let trickle = tx.reader(&MediaSource::url(format!("{base}/trickle/h264_frames.mp4")));

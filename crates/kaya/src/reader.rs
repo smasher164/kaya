@@ -5,7 +5,7 @@
 //! decoded; this decides what the app hears.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant};
 
 use vello_cpu::Pixmap;
@@ -15,6 +15,11 @@ use crate::media::{Resolved, TIMEOUT_MS, TIMEOUT_SLACK_MS};
 use crate::protocol::{
     ApplyOp, FrameAccuracy, ImageId, MediaFailure, Occurrence, Peaks, ReadId, ReadOutcome, ReaderId, Value,
 };
+
+/// What a read for a track its source lacks answers: no reason in the
+/// closed vocabulary names it yet, so `decode_error` (docs/deferred.md, the
+/// missing-track RULING) — the one line a new reason changes.
+const NO_TRACK: MediaFailure = MediaFailure::DecodeError;
 
 /// The largest image side kaya holds: the canvas raster's own clamp.
 const MAX_SIDE: u32 = 16384;
@@ -39,7 +44,7 @@ pub(crate) fn pixmap(width: u32, height: u32, rgba: &[u8]) -> Result<Pixmap, Str
 
 /// Straight-alpha RGBA8 to premultiplied, rounding to nearest: ONE rule,
 /// so a decoded asset hashes alike everywhere.
-fn premultiply(rgba: &mut [u8]) {
+pub(crate) fn premultiply(rgba: &mut [u8]) {
     for p in rgba.chunks_exact_mut(4) {
         let a = u32::from(p[3]);
         if a == 255 {
@@ -129,8 +134,203 @@ pub(crate) enum Report<'a> {
     /// The platform has nothing more for this read.
     Finished,
     Failed { domain: String, code: i64, underlying: i64, detail: String },
+    /// The source has no track of the kind the read asked for: frames from
+    /// an audio-only file, peaks from a video with no audio. Every backend
+    /// reports it from ONE site.
+    NoTrack { detail: String },
     /// The backend's timer, TIMEOUT_MS after the ask or the last answer.
     Overdue,
+}
+
+/// The size a read's `max_size` gives a `width` x `height` picture: aspect
+/// kept, never enlarged, 0 bounding nothing on that axis (Apple's
+/// `maximumSize`, which the backends that decode at full size follow).
+#[cfg_attr(not(any(target_os = "linux", target_os = "windows", target_os = "android", test)), allow(dead_code))]
+pub(crate) fn fitted(width: u32, height: u32, max: (u32, u32)) -> (u32, u32) {
+    let scale = |bound: u32, side: u32| if bound == 0 { 1.0 } else { f64::from(bound) / f64::from(side) };
+    let s = scale(max.0, width).min(scale(max.1, height)).min(1.0);
+    if s >= 1.0 {
+        return (width, height);
+    }
+    let side = |v: u32| ((f64::from(v) * s).round() as u32).max(1);
+    (side(width), side(height))
+}
+
+/// A premultiplied RGBA8 picture scaled down to `fitted`'s size by area
+/// averaging, for the backends whose platform hands the full-size frame.
+#[cfg_attr(not(any(target_os = "linux", target_os = "windows", target_os = "android", test)), allow(dead_code))]
+pub(crate) fn fit(width: u32, height: u32, rgba: &[u8], max: (u32, u32)) -> (u32, u32, Vec<u8>) {
+    let (w, h) = fitted(width, height, max);
+    if (w, h) == (width, height) {
+        return (width, height, rgba.to_vec());
+    }
+    let (sw, sh) = (width as usize, height as usize);
+    let mut out = Vec::with_capacity(w as usize * h as usize * 4);
+    for y in 0..h as usize {
+        let (y0, y1) = (y * sh / h as usize, ((y + 1) * sh).div_ceil(h as usize).max(y * sh / h as usize + 1));
+        for x in 0..w as usize {
+            let (x0, x1) = (x * sw / w as usize, ((x + 1) * sw).div_ceil(w as usize).max(x * sw / w as usize + 1));
+            let mut sum = [0u64; 4];
+            for sy in y0..y1.min(sh) {
+                for sx in x0..x1.min(sw) {
+                    let i = (sy * sw + sx) * 4;
+                    for c in 0..4 {
+                        sum[c] += u64::from(rgba[i + c]);
+                    }
+                }
+            }
+            let n = ((y1.min(sh) - y0) * (x1.min(sw) - x0)) as u64;
+            out.extend(sum.iter().map(|v| ((v + n / 2) / n) as u8));
+        }
+    }
+    (w, h, out)
+}
+
+/// A YCbCr picture's matrix (Kr, Kb) and range: the GTK and WinUI arms
+/// convert a decoded frame here, so the two read one colour for one pixel
+/// (GStreamer's videoconvert read the band at Y 85 as 4E, measured, where
+/// the matrix says 50).
+#[cfg_attr(not(any(target_os = "linux", target_os = "windows", test)), allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Ycc {
+    pub(crate) kr: f64,
+    pub(crate) kb: f64,
+    pub(crate) full_range: bool,
+}
+
+#[cfg_attr(not(any(target_os = "linux", target_os = "windows", test)), allow(dead_code))]
+impl Ycc {
+    pub(crate) const BT709: (f64, f64) = (0.2126, 0.0722);
+    pub(crate) const BT601: (f64, f64) = (0.299, 0.114);
+    pub(crate) const BT2020: (f64, f64) = (0.2627, 0.0593);
+    pub(crate) const SMPTE240M: (f64, f64) = (0.212, 0.087);
+
+    /// A stream that names no matrix: BT.601 below 720 lines, BT.709 at or
+    /// above, the convention every decoder follows.
+    pub(crate) fn unnamed(height: u32) -> (f64, f64) {
+        if height >= 720 { Self::BT709 } else { Self::BT601 }
+    }
+
+    /// Opaque RGBA8 for a `width` x `height` picture whose pixel (x, y) has
+    /// the (Y, Cb, Cr) `at` answers.
+    pub(crate) fn rgba(&self, width: u32, height: u32, at: impl Fn(usize, usize) -> (u8, u8, u8)) -> Vec<u8> {
+        let kg = 1.0 - self.kr - self.kb;
+        let (ys, cs, y0) = if self.full_range { (1.0, 1.0, 0.0) } else { (255.0 / 219.0, 255.0 / 224.0, 16.0) };
+        let px = |v: f64| v.round().clamp(0.0, 255.0) as u8;
+        let mut out = Vec::with_capacity(width as usize * height as usize * 4);
+        for y in 0..height as usize {
+            for x in 0..width as usize {
+                let (l, u, v) = at(x, y);
+                let yy = (f64::from(l) - y0) * ys;
+                let (cb, cr) = ((f64::from(u) - 128.0) * cs, (f64::from(v) - 128.0) * cs);
+                let r = yy + 2.0 * (1.0 - self.kr) * cr;
+                let g = yy - 2.0 * self.kb * (1.0 - self.kb) / kg * cb - 2.0 * self.kr * (1.0 - self.kr) / kg * cr;
+                let b = yy + 2.0 * (1.0 - self.kb) * cb;
+                out.extend([px(r), px(g), px(b), 255]);
+            }
+        }
+        out
+    }
+}
+
+/// A report a backend's worker thread owns until its UI thread hands it to
+/// the core (the GTK and WinUI arms decode off the UI thread).
+#[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(dead_code))]
+pub(crate) enum Owned {
+    Frame { index: u32, actual_ms: u64, width: u32, height: u32, pixels: Vec<u8> },
+    Pcm { channels: u32, sample_rate: u32, samples: Vec<f32>, total_ms: u64 },
+    Finished,
+    Failed { domain: String, code: i64, underlying: i64, detail: String },
+    NoTrack(String),
+    Overdue,
+}
+
+/// What a backend does with its read once the core has answered a report.
+#[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(dead_code))]
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Then {
+    /// The read is over: stop the platform's work.
+    Stop,
+    /// An answer the core still wants: the bound restarts from it.
+    Rebound,
+    /// An overdue ask inside the bound.
+    Carry,
+}
+
+#[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(dead_code))]
+impl Owned {
+    pub(crate) fn report(&self) -> Report<'_> {
+        match self {
+            Owned::Frame { index, actual_ms, width, height, pixels } => {
+                Report::Frame { index: *index, actual_ms: *actual_ms, width: *width, height: *height, pixels }
+            }
+            Owned::Pcm { channels, sample_rate, samples, total_ms } => {
+                Report::Pcm { channels: *channels, sample_rate: *sample_rate, samples, total_ms: *total_ms }
+            }
+            Owned::Finished => Report::Finished,
+            Owned::Failed { domain, code, underlying, detail } => Report::Failed {
+                domain: domain.clone(),
+                code: *code,
+                underlying: *underlying,
+                detail: detail.clone(),
+            },
+            Owned::NoTrack(detail) => Report::NoTrack { detail: detail.clone() },
+            Owned::Overdue => Report::Overdue,
+        }
+    }
+
+    pub(crate) fn then(&self, answer: bool) -> Then {
+        match self {
+            Owned::Frame { .. } | Owned::Pcm { .. } if answer => Then::Rebound,
+            Owned::Overdue if !answer => Then::Carry,
+            _ => Then::Stop,
+        }
+    }
+}
+
+/// One read's flight between a UI thread and its worker: the stop, and the
+/// PCM the worker has handed over that the core has not taken yet.
+#[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(dead_code))]
+#[derive(Default)]
+pub(crate) struct Flight {
+    stopped: std::sync::atomic::AtomicBool,
+    ahead: Mutex<usize>,
+    room: std::sync::Condvar,
+}
+
+#[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(dead_code))]
+impl Flight {
+    /// PCM buffers a worker may have ahead of the core.
+    const AHEAD: usize = 4;
+
+    pub(crate) fn wanted(&self) -> bool {
+        !self.stopped.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    pub(crate) fn stop(&self) {
+        self.stopped.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.room.notify_all();
+    }
+
+    pub(crate) fn taken(&self) {
+        let mut ahead = self.ahead.lock().unwrap_or_else(|e| e.into_inner());
+        *ahead = ahead.saturating_sub(1);
+        self.room.notify_all();
+    }
+
+    /// Waits until the core has taken enough PCM; false once stopped.
+    pub(crate) fn make_room(&self) -> bool {
+        let mut ahead = self.ahead.lock().unwrap_or_else(|e| e.into_inner());
+        while *ahead >= Self::AHEAD && self.wanted() {
+            ahead = self
+                .room
+                .wait_timeout(ahead, Duration::from_millis(100))
+                .unwrap_or_else(|e| e.into_inner())
+                .0;
+        }
+        *ahead += 1;
+        self.wanted()
+    }
 }
 
 /// The audiowaveform reduction (docs/probes/media-extraction-2026-10-01.md):
@@ -245,13 +445,53 @@ struct Reader {
     read: Option<Read>,
 }
 
-/// Every reader, the image table, and each reader's last peaks for the ring
-/// consumers' pull, held by the scene.
+/// The image table and each reader's last peaks: what a guest pulls
+/// (kaya_image_pixels, kaya_reader_peaks) from its own thread, on a backend
+/// whose scene lives on the UI thread (GTK, WinUI) as on the interpreters.
+#[derive(Default)]
+struct Store {
+    images: HashMap<ImageId, Slot>,
+    peaks: HashMap<ReaderId, (ReadId, Peaks)>,
+}
+
+/// A refusal panics with the store held; the next read must still see it.
+fn held(store: &Mutex<Store>) -> MutexGuard<'_, Store> {
+    store.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// The live scene's store, for the guest-side pulls.
+static PULLS: Mutex<Option<Weak<Mutex<Store>>>> = Mutex::new(None);
+
+fn pulls() -> Option<Arc<Mutex<Store>>> {
+    PULLS.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(Weak::upgrade)
+}
+
+/// A read_peaks' pairs, pair-major, while the reader holds them.
+pub(crate) fn pulled_peaks(reader: ReaderId, read: ReadId) -> Option<Vec<i16>> {
+    let store = pulls()?;
+    let store = held(&store);
+    store.peaks.get(&reader).filter(|(id, _)| *id == read).map(|(_, p)| p.data.clone())
+}
+
+/// A core-held image's size and premultiplied RGBA8 bytes.
+pub(crate) fn pulled_pixels(image: ImageId) -> Option<(u32, u32, Vec<u8>)> {
+    let store = pulls()?;
+    let store = held(&store);
+    pixels_of(&store, image)
+}
+
+fn pixels_of(store: &Store, image: ImageId) -> Option<(u32, u32, Vec<u8>)> {
+    match store.images.get(&image) {
+        Some(Slot::Ready(p)) => Some((u32::from(p.width()), u32::from(p.height()), p.data_as_u8_slice().to_vec())),
+        _ => None,
+    }
+}
+
+/// Every reader and the store, held by the scene.
 #[derive(Default)]
 pub(crate) struct Readers {
     readers: HashMap<ReaderId, Reader>,
-    images: HashMap<ImageId, Slot>,
-    peaks: HashMap<ReaderId, (ReadId, Peaks)>,
+    store: Arc<Mutex<Store>>,
     /// Added to the clock, so a unit test can pass the bound.
     skew: Duration,
 }
@@ -322,14 +562,14 @@ impl Readers {
         }
         if let Some((why, detail)) = r.refused.clone() {
             for id in reserved {
-                self.images.insert(*id, Slot::Empty(format!("its read {} failed {}: {detail}", read.0, why.name())));
+                held(&self.store).images.insert(*id, Slot::Empty(format!("its read {} failed {}: {detail}", read.0, why.name())));
             }
             published.push(done(reader, read, ReadOutcome::Failed(why, detail)));
             return false;
         }
         r.read = Some(Read { id: read, last: now, kind });
         for id in reserved {
-            self.images.insert(*id, Slot::Pending { reader, read });
+            held(&self.store).images.insert(*id, Slot::Pending { reader, read });
         }
         true
     }
@@ -355,7 +595,7 @@ impl Readers {
             })
             .collect();
         for id in &reserved {
-            if matches!(self.images.get(id), Some(Slot::Pending { .. } | Slot::Ready(_) | Slot::Empty(_))) {
+            if matches!(held(&self.store).images.get(id), Some(Slot::Pending { .. } | Slot::Ready(_) | Slot::Empty(_))) {
                 panic!(
                     "kaya: read_frames {} would put frame {} in image {}, which is live — release_image \
                      it first or start the run elsewhere",
@@ -388,13 +628,13 @@ impl Readers {
         );
         let kind = Kind::Peaks { sum: PeakSum::new(samples_per_pair), total_ms: 0, tenth: 0 };
         if self.start(reader, read, "read_peaks", kind, &[], published) {
-            self.peaks.remove(&reader);
+            held(&self.store).peaks.remove(&reader);
             out.push(ApplyOp::ReadPeaks { reader, read });
         }
     }
 
     fn empty_pending(&mut self, reader: ReaderId, read: ReadId, why: &str) {
-        for slot in self.images.values_mut() {
+        for slot in held(&self.store).images.values_mut() {
             if matches!(slot, Slot::Pending { reader: r, read: q } if *r == reader && *q == read) {
                 *slot = Slot::Empty(why.to_owned());
             }
@@ -422,7 +662,7 @@ impl Readers {
         let r = self.readers.remove(&reader).unwrap_or_else(|| {
             panic!("kaya: close_reader names reader {}, which is not open", reader.0)
         });
-        self.peaks.remove(&reader);
+        held(&self.store).peaks.remove(&reader);
         if let Some(read) = r.read {
             self.empty_pending(reader, read.id, &format!("its reader {} was closed", reader.0));
             published.push(done(reader, read.id, ReadOutcome::Cancelled));
@@ -435,7 +675,7 @@ impl Readers {
     pub(crate) fn load_image(&mut self, image: ImageId, source: Value, published: &mut Vec<Occurrence>) {
         assert!(image.0 != 0, "kaya: image id 0 is reserved");
         assert!(
-            matches!(self.images.get(&image), None | Some(Slot::Released)),
+            matches!(held(&self.store).images.get(&image), None | Some(Slot::Released)),
             "kaya: load_image {} names a live image — release_image it first",
             image.0
         );
@@ -478,11 +718,11 @@ impl Readers {
         let occurrence = match decoded {
             Ok(pixmap) => {
                 let (width, height) = (u32::from(pixmap.width()), u32::from(pixmap.height()));
-                self.images.insert(image, Slot::Ready(Arc::new(pixmap)));
+                held(&self.store).images.insert(image, Slot::Ready(Arc::new(pixmap)));
                 Occurrence::ImageLoaded { image, width, height, failure: None }
             }
             Err((why, detail)) => {
-                self.images.insert(image, Slot::Empty(format!("its load failed {}: {detail}", why.name())));
+                held(&self.store).images.insert(image, Slot::Empty(format!("its load failed {}: {detail}", why.name())));
                 Occurrence::ImageLoaded { image, width: 0, height: 0, failure: Some((why, detail)) }
             }
         };
@@ -490,7 +730,7 @@ impl Readers {
     }
 
     pub(crate) fn release_image(&mut self, image: ImageId) {
-        match self.images.get_mut(&image) {
+        match held(&self.store).images.get_mut(&image) {
             None => panic!("kaya: release_image {} names an image that was never created", image.0),
             Some(Slot::Released) => panic!("kaya: release_image {} releases it a second time", image.0),
             Some(slot) => *slot = Slot::Released,
@@ -498,7 +738,8 @@ impl Readers {
     }
 
     pub(crate) fn lookup(&self, id: i64) -> Result<Arc<Pixmap>, String> {
-        let slot = u64::try_from(id).ok().and_then(|id| self.images.get(&ImageId(id)));
+        let store = held(&self.store);
+        let slot = u64::try_from(id).ok().and_then(|id| store.images.get(&ImageId(id)));
         match slot {
             Some(Slot::Ready(pixmap)) => Ok(pixmap.clone()),
             Some(Slot::Pending { reader, read }) => Err(format!(
@@ -517,19 +758,19 @@ impl Readers {
         }
     }
 
-    pub(crate) fn peaks_of(&self, reader: ReaderId, read: ReadId) -> Option<&Peaks> {
-        self.peaks.get(&reader).filter(|(id, _)| *id == read).map(|(_, p)| p)
+    #[cfg(test)]
+    pub(crate) fn peaks_of(&self, reader: ReaderId, read: ReadId) -> Option<Peaks> {
+        held(&self.store).peaks.get(&reader).filter(|(id, _)| *id == read).map(|(_, p)| p.clone())
     }
 
+    /// This scene's store answers the guest-side pulls from now on.
+    pub(crate) fn serve_pulls(&self) {
+        *PULLS.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::downgrade(&self.store));
+    }
+
+    #[cfg(test)]
     pub(crate) fn pixels(&self, image: ImageId) -> Option<(u32, u32, Vec<u8>)> {
-        match self.images.get(&image) {
-            Some(Slot::Ready(p)) => Some((
-                u32::from(p.width()),
-                u32::from(p.height()),
-                p.data_as_u8_slice().to_vec(),
-            )),
-            _ => None,
-        }
+        pixels_of(&held(&self.store), image)
     }
 
     /// A backend's report: what the app hears, and whether the read is
@@ -560,8 +801,8 @@ impl Readers {
                 let pixmap = pixmap(width, height, pixels).unwrap_or_else(|why| {
                     panic!("kaya: reader {} read {} time {index}: {why}", reader.0, read.0)
                 });
-                if !matches!(self.images.get(&image), Some(Slot::Released)) {
-                    self.images.insert(image, Slot::Ready(Arc::new(pixmap)));
+                if !matches!(held(&self.store).images.get(&image), Some(Slot::Released)) {
+                    held(&self.store).images.insert(image, Slot::Ready(Arc::new(pixmap)));
                 }
                 published.push(Occurrence::ReaderFrame {
                     reader,
@@ -605,6 +846,7 @@ impl Readers {
             (Report::Failed { domain, code, underlying, detail }, _) => {
                 outcome = Some(ReadOutcome::Failed(crate::media::failure_reason(&domain, code, underlying), detail));
             }
+            (Report::NoTrack { detail }, _) => outcome = Some(ReadOutcome::Failed(NO_TRACK, detail)),
             (Report::Overdue, _) => {
                 let quiet = now.saturating_duration_since(q.last);
                 if quiet + Duration::from_millis(TIMEOUT_SLACK_MS) >= Duration::from_millis(TIMEOUT_MS) {
@@ -630,7 +872,7 @@ impl Readers {
             let Some(Read { kind: Kind::Peaks { sum, .. }, .. }) = r.read.take() else { unreachable!() };
             let peaks = sum.finish();
             published.push(Occurrence::ReaderPeaks { reader, read, peaks: peaks.clone() });
-            self.peaks.insert(reader, (read, peaks));
+            held(&self.store).peaks.insert(reader, (read, peaks));
             published.push(done(reader, read, ReadOutcome::Completed));
             return (published, false);
         }
@@ -873,7 +1115,7 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
-        assert_eq!(rs.peaks_of(R, ReadId(6)).map(Peaks::len), Some(100));
+        assert_eq!(rs.peaks_of(R, ReadId(6)).as_ref().map(Peaks::len), Some(100));
     }
 
     #[test]
@@ -920,6 +1162,38 @@ mod tests {
         }
         let image = decode(&bytes).unwrap();
         assert_eq!(image.data_as_u8_slice(), [100, 50, 2, 128]);
+    }
+
+    #[test]
+    fn a_frame_fits_its_bound_with_its_aspect_kept() {
+        assert_eq!(fitted(160, 90, (80, 45)), (80, 45));
+        assert_eq!(fitted(160, 90, (80, 0)), (80, 45));
+        assert_eq!(fitted(160, 90, (0, 0)), (160, 90));
+        assert_eq!(fitted(160, 90, (320, 180)), (160, 90), "never enlarged");
+        assert_eq!(fitted(1920, 1080, (100, 100)), (100, 56));
+        let mut src = Vec::new();
+        for y in 0..2u8 {
+            for x in 0..4u8 {
+                src.extend([x * 10 + y, 0, 0, 255]);
+            }
+        }
+        let (w, h, out) = fit(4, 2, &src, (2, 0));
+        assert_eq!((w, h), (2, 1));
+        assert_eq!(out, vec![6, 0, 0, 255, 26, 0, 0, 255], "each pixel the rounded mean of its 2x2 block");
+    }
+
+    /// tools/gen-media.py's bands and flat colour as the decoder hands them
+    /// (Y 85, 153 grey; 91/101/191 the C83C1E body, measured in the linux
+    /// image), limited-range BT.709: the scene's strip ink.
+    #[test]
+    fn a_frames_ycbcr_reads_the_colour_its_matrix_names() {
+        let m = Ycc { kr: Ycc::BT709.0, kb: Ycc::BT709.1, full_range: false };
+        let one = |y, u, v| m.rgba(1, 1, |_, _| (y, u, v));
+        assert_eq!(one(85, 128, 128), [0x50, 0x50, 0x50, 255]);
+        assert_eq!(one(153, 128, 128), [0xA0, 0xA0, 0xA0, 255]);
+        assert_eq!(one(91, 101, 191), [0xC8, 0x3C, 0x1E, 255]);
+        let full = Ycc { full_range: true, ..m };
+        assert_eq!(full.rgba(1, 1, |_, _| (80, 128, 128)), [80, 80, 80, 255]);
     }
 
     #[test]

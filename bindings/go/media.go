@@ -112,6 +112,14 @@ type mediaState struct {
 	widgetShown map[uint64]func(*Tx, float64)
 	nodeShown   map[uint64]func(*Tx, []any, float64)
 	session     func(*Tx, SessionAction)
+	// The reader's three id spaces (docs/media-plan.md §8 ruling 4), the
+	// read each reader has in flight, the reads the app gave up on, and the
+	// one-shot registrations, retired by the read's end or the image's load.
+	nextReader, nextRead, nextImage uint64
+	inFlight                        map[uint64]uint64
+	abandoned                       map[uint64]bool
+	reads                           map[uint64]*readHandlers
+	images                          map[uint64]*imageHandlers
 }
 
 func (a *App) mirror(id uint64) *playerMirror {
@@ -388,7 +396,8 @@ func (s SessionRef) Declare() {
 func mediaOccurrence(kind uint16) bool {
 	switch kind {
 	case occPlayerChanged, occPlayerPosition, occSeekCompleted, occPlayerTracks,
-		occCaptionCue, occVideoVisibility, occSessionAction:
+		occCaptionCue, occVideoVisibility, occSessionAction,
+		occReaderFrame, occReaderProgress, occReaderPeaks, occReaderDone, occImageLoaded:
 		return true
 	}
 	return false
@@ -492,6 +501,340 @@ func (a *App) mediaOccurred(kind uint16, id uint64, keys []any, payload any) {
 		action := SessionAction{Kind: SessionActionKind(tailInt(tail, 0)), AtMs: uint64(tailInt(tail, 1))}
 		if fn := a.media.session; fn != nil {
 			a.dispatch(func(tx *Tx) { fn(tx, action) })
+		}
+	case occReaderFrame, occReaderProgress, occReaderPeaks, occReaderDone, occImageLoaded:
+		tail, _ := payload.([]any)
+		a.readerOccurred(kind, id, tail)
+	}
+}
+
+// Reader is a media reader the app holds (docs/media-plan.md §8 ruling 4):
+// frames and peaks from a source, with no player.
+type Reader struct{ id uint64 }
+
+// Read is one frames or peaks request on a reader.
+type Read struct{ id uint64 }
+
+// Image is a core-held picture, a frame a read answered or a LoadImage,
+// which Draw.Image draws. It is the app's until ReleaseImage.
+type Image struct{ id uint64 }
+
+// FrameAccuracy is FrameAccuracyKeyframe, the keyframe at or before the
+// time, or FrameAccuracyExact, the frame shown at it.
+type FrameAccuracy int64
+
+// ReadOutcomeKind is ReadOutcomeCompleted, ReadOutcomeCancelled or
+// ReadOutcomeFailed.
+type ReadOutcomeKind int64
+
+// ReadOutcome is how a read ended; Failure and Detail, the platform's
+// sentence, are set when it failed.
+type ReadOutcome struct {
+	Kind    ReadOutcomeKind
+	Failure MediaFailure
+	Detail  string
+}
+
+// Frame is one requested time answered: which of the times it is, the
+// time asked, the time of the picture the platform returned, and the
+// image holding it.
+type Frame struct {
+	Index       int
+	RequestedMs uint64
+	ActualMs    uint64
+	Image       Image
+	Width       uint32
+	Height      uint32
+}
+
+// Peaks is a read's audio peaks: a min/max pair per channel for every
+// SamplesPerPair frames (audiowaveform's .dat shape).
+type Peaks struct {
+	SampleRate     uint32
+	SamplesPerPair uint32
+	Channels       uint32
+	length         int
+	pairs          []int16
+}
+
+// Len is the number of pairs per channel.
+func (p Peaks) Len() int { return p.length }
+
+// Pair is pair i of channel's (min, max).
+func (p Peaks) Pair(i, channel int) (min, max int16) {
+	at := (i*int(p.Channels) + channel) * 2
+	return p.pairs[at], p.pairs[at+1]
+}
+
+type readHandlers struct {
+	onFrame    func(*Tx, Frame)
+	onProgress func(*Tx, uint64, uint64)
+	onPeaks    func(*Tx, Peaks)
+	onDone     func(*Tx, ReadOutcome)
+}
+
+type imageHandlers struct {
+	onLoaded func(*Tx, uint32, uint32)
+	onFailed func(*Tx, MediaFailure, string)
+}
+
+// Reader opens a media reader on src: an asset, a URL or a picked file,
+// as a player takes.
+func (tx *Tx) Reader(src MediaSource) Reader {
+	tx.app.media.nextReader++
+	r := Reader{tx.app.media.nextReader}
+	tx.emit(TxOpenReader(r.id, src.value()))
+	return r
+}
+
+// ReadRef is a read just asked for: its handlers chain, and ID hands the
+// Read back. They retire with the read's end.
+type ReadRef struct {
+	tx   *Tx
+	read Read
+}
+
+func (r ReadRef) ID() Read { return r.read }
+
+func (r ReadRef) handlers() *readHandlers {
+	m := &r.tx.app.media
+	if m.reads == nil {
+		m.reads = map[uint64]*readHandlers{}
+	}
+	h := m.reads[r.read.id]
+	if h == nil {
+		h = &readHandlers{}
+		m.reads[r.read.id] = h
+	}
+	return h
+}
+
+// OnFrame hears each time of a ReadFrames as it is answered, in the
+// platform's order.
+func (r ReadRef) OnFrame(fn func(*Tx, Frame)) ReadRef { r.handlers().onFrame = fn; return r }
+
+// OnProgress hears how far a ReadPeaks has decoded, in ms of the total.
+func (r ReadRef) OnProgress(fn func(tx *Tx, doneMs, totalMs uint64)) ReadRef {
+	r.handlers().onProgress = fn
+	return r
+}
+
+// OnPeaks hears a ReadPeaks' answer, just before its end.
+func (r ReadRef) OnPeaks(fn func(*Tx, Peaks)) ReadRef { r.handlers().onPeaks = fn; return r }
+
+// OnDone hears the read's end: completed, cancelled or failed.
+func (r ReadRef) OnDone(fn func(*Tx, ReadOutcome)) ReadRef { r.handlers().onDone = fn; return r }
+
+func (tx *Tx) newRead(r Reader) Read {
+	m := &tx.app.media
+	m.nextRead++
+	if m.inFlight == nil {
+		m.inFlight = map[uint64]uint64{}
+	}
+	m.inFlight[r.id] = m.nextRead
+	return Read{m.nextRead}
+}
+
+// ReadFrames asks for one picture per time in timesMs, bounded by
+// maxWidth x maxHeight with the aspect kept (0: no bound on that axis).
+// One read in flight per reader.
+func (tx *Tx) ReadFrames(r Reader, timesMs []uint64, maxWidth, maxHeight uint32, accuracy FrameAccuracy) ReadRef {
+	read := tx.newRead(r)
+	m := &tx.app.media
+	first := m.nextImage + 1
+	m.nextImage += uint64(len(timesMs))
+	times := make([]any, len(timesMs))
+	for i, t := range timesMs {
+		times[i] = int64(t)
+	}
+	tx.emit(TxReadFrames(r.id, read.id, first, uint32(accuracy), maxWidth, maxHeight, times))
+	return ReadRef{tx, read}
+}
+
+// ReadPeaks asks for the first audio track's peaks, a min/max pair per
+// channel per samplesPerPair frames.
+func (tx *Tx) ReadPeaks(r Reader, samplesPerPair uint32) ReadRef {
+	read := tx.newRead(r)
+	tx.emit(TxReadPeaks(r.id, read.id, samplesPerPair))
+	return ReadRef{tx, read}
+}
+
+func (a *App) abandon(read uint64) {
+	m := &a.media
+	if m.abandoned == nil {
+		m.abandoned = map[uint64]bool{}
+	}
+	m.abandoned[read] = true
+	for reader, r := range m.inFlight {
+		if r == read {
+			delete(m.inFlight, reader)
+		}
+	}
+}
+
+// CancelRead stops a read: OnDone hears it cancelled and nothing else of
+// it is heard.
+func (tx *Tx) CancelRead(r Reader, read Read) {
+	tx.app.abandon(read.id)
+	tx.emit(TxCancelRead(r.id, read.id))
+}
+
+// CloseReader forgets a reader, cancelling its read in flight the same
+// way. The images it answered with stay the app's.
+func (tx *Tx) CloseReader(r Reader) {
+	if read, ok := tx.app.media.inFlight[r.id]; ok {
+		tx.app.abandon(read)
+	}
+	tx.emit(TxCloseReader(r.id))
+}
+
+// ImageRef is an image being loaded: its handlers chain, and ID hands the
+// Image back, which a drawing may name in the same transaction.
+type ImageRef struct {
+	tx    *Tx
+	image Image
+}
+
+func (r ImageRef) ID() Image { return r.image }
+
+func (r ImageRef) handlers() *imageHandlers {
+	m := &r.tx.app.media
+	if m.images == nil {
+		m.images = map[uint64]*imageHandlers{}
+	}
+	h := m.images[r.image.id]
+	if h == nil {
+		h = &imageHandlers{}
+		m.images[r.image.id] = h
+	}
+	return h
+}
+
+// OnLoaded hears the decoded size.
+func (r ImageRef) OnLoaded(fn func(tx *Tx, width, height uint32)) ImageRef {
+	r.handlers().onLoaded = fn
+	return r
+}
+
+// OnFailed hears why the image did not decode, and the decoder's sentence.
+func (r ImageRef) OnFailed(fn func(*Tx, MediaFailure, string)) ImageRef {
+	r.handlers().onFailed = fn
+	return r
+}
+
+// LoadImage decodes a PNG or JPEG asset or picked file in kaya.
+func (tx *Tx) LoadImage(src MediaSource) ImageRef {
+	tx.app.media.nextImage++
+	img := Image{tx.app.media.nextImage}
+	tx.emit(TxLoadImage(img.id, src.value()))
+	return ImageRef{tx, img}
+}
+
+func (tx *Tx) ReleaseImage(img Image) { tx.emit(TxReleaseImage(img.id)) }
+
+// ImagePixels is an image's size and premultiplied RGBA8 bytes; ok is
+// false for an image holding no picture. Any goroutine, no transaction.
+func ImagePixels(img Image) (width, height uint32, pixels []byte, ok bool) {
+	var w, h C.uint32_t
+	n := int(C.kaya_image_pixels(C.uint64_t(img.id), nil, 0, &w, &h))
+	if n == 0 {
+		return 0, 0, nil, false
+	}
+	buf := make([]byte, n)
+	got := int(C.kaya_image_pixels(C.uint64_t(img.id), (*C.uint8_t)(unsafe.Pointer(&buf[0])),
+		C.uintptr_t(n), &w, &h))
+	return uint32(w), uint32(h), buf[:min(n, got)], true
+}
+
+func pulledPeaks(reader, read uint64, tail []any) Peaks {
+	p := Peaks{
+		SampleRate:     uint32(tailInt(tail, 1)),
+		SamplesPerPair: uint32(tailInt(tail, 2)),
+		Channels:       uint32(tailInt(tail, 3)),
+		length:         int(tailInt(tail, 4)),
+	}
+	want := p.length * int(p.Channels) * 2
+	if want == 0 {
+		return p
+	}
+	p.pairs = make([]int16, want)
+	got := int(C.kaya_reader_peaks(C.uint64_t(reader), C.uint64_t(read),
+		(*C.int16_t)(unsafe.Pointer(&p.pairs[0])), C.uintptr_t(want)))
+	if got != want {
+		panic(fmt.Sprintf("kaya: read %d's peaks hold %d values, its reader_peaks promised %d", read, got, want))
+	}
+	return p
+}
+
+// readerOccurred is the reader's half of mediaOccurred. A read the app gave
+// up on is heard only at its end, and an image one of its late answers
+// carried is released at the next commit, since the app never learned it.
+func (a *App) readerOccurred(kind uint16, id uint64, tail []any) {
+	m := &a.media
+	if kind == occImageLoaded {
+		h := m.images[id]
+		delete(m.images, id)
+		if h == nil {
+			return
+		}
+		w, ht := uint32(tailInt(tail, 0)), uint32(tailInt(tail, 1))
+		why := MediaFailure(tailInt(tail, 2))
+		detail, _ := tail[3].(string)
+		if why == MediaFailureNone && h.onLoaded != nil {
+			a.dispatch(func(tx *Tx) { h.onLoaded(tx, w, ht) })
+		} else if why != MediaFailureNone && h.onFailed != nil {
+			a.dispatch(func(tx *Tx) { h.onFailed(tx, why, detail) })
+		}
+		return
+	}
+	read := uint64(tailInt(tail, 0))
+	if kind == occReaderDone {
+		if m.inFlight[id] == read {
+			delete(m.inFlight, id)
+		}
+		delete(m.abandoned, read)
+		h := m.reads[read]
+		delete(m.reads, read)
+		if h == nil || h.onDone == nil {
+			return
+		}
+		outcome := ReadOutcome{Kind: ReadOutcomeKind(tailInt(tail, 1))}
+		if outcome.Kind == ReadOutcomeFailed {
+			outcome.Failure = MediaFailure(tailInt(tail, 2))
+			outcome.Detail, _ = tail[3].(string)
+		}
+		a.dispatch(func(tx *Tx) { h.onDone(tx, outcome) })
+		return
+	}
+	if m.abandoned[read] {
+		if kind == occReaderFrame {
+			a.pendingRecords = append(a.pendingRecords, TxReleaseImage(uint64(tailInt(tail, 1))))
+		}
+		return
+	}
+	h := m.reads[read]
+	if h == nil {
+		return
+	}
+	switch kind {
+	case occReaderFrame:
+		f := Frame{
+			Image: Image{uint64(tailInt(tail, 1))}, Index: int(tailInt(tail, 2)),
+			Width: uint32(tailInt(tail, 3)), Height: uint32(tailInt(tail, 4)),
+			RequestedMs: uint64(tailInt(tail, 5)), ActualMs: uint64(tailInt(tail, 6)),
+		}
+		if h.onFrame != nil {
+			a.dispatch(func(tx *Tx) { h.onFrame(tx, f) })
+		}
+	case occReaderProgress:
+		done, total := uint64(tailInt(tail, 1)), uint64(tailInt(tail, 2))
+		if h.onProgress != nil {
+			a.dispatch(func(tx *Tx) { h.onProgress(tx, done, total) })
+		}
+	case occReaderPeaks:
+		if h.onPeaks != nil {
+			p := pulledPeaks(id, read, tail)
+			a.dispatch(func(tx *Tx) { h.onPeaks(tx, p) })
 		}
 	}
 }

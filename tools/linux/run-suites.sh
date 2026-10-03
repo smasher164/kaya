@@ -1861,6 +1861,23 @@ for proto in x11 wayland; do
         tools/linux/media-leg.sh tools/linux/a11y-leg.sh "$(hs_bin media)"
     run "$proto" media_feed-java env KAYA_SELFTEST=media_feed KAYA_LIB="$LIB" \
         tools/linux/media-leg.sh tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    # The media reader and the canvas's images (docs/media-plan.md §8).
+    run "$proto" media_reader-rust env KAYA_SELFTEST=media_reader \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/media"
+    run "$proto" media_reader-python env KAYA_SELFTEST=media_reader KAYA_LIB="$LIB" \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh python3 guests/python/media.py
+    run "$proto" media_reader-js env KAYA_SELFTEST=media_reader KAYA_LIB="$LIB" \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh node guests/js/media.ts
+    run "$proto" media_reader-go env KAYA_SELFTEST=media_reader \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" media_reader-csharp env KAYA_SELFTEST=media_reader KAYA_LIB="$LIB" \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" media_reader-ocaml env KAYA_SELFTEST=media_reader KAYA_LIB="$LIB" \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/media.exe
+    run "$proto" media_reader-haskell env KAYA_SELFTEST=media_reader \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh "$(hs_bin media)"
+    run "$proto" media_reader-java env KAYA_SELFTEST=media_reader KAYA_LIB="$LIB" \
+        tools/linux/media-leg.sh tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     # A clip picked through GNOME's own picker and played (docs/media-plan.md
     # §2): rust-only, pooled like filedialog.
     run "$proto" media_picked-rust env KAYA_SELFTEST=media_picked \

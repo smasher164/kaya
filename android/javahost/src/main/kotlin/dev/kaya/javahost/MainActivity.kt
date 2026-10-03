@@ -48,7 +48,7 @@ object GuestStart : KayaGuestStart {
             "colorpicker" -> ColorPicker::app
             "range" -> Range::app
             "rangertl" -> Range::app
-            "media_formats", "media_delivery", "media_session", "media_tracks", "media_feed" -> Media::app
+            "media_formats", "media_delivery", "media_session", "media_tracks", "media_feed", "media_reader" -> Media::app
             // One app behind both list-detail scripts. `split` itself
             // is desktop-only (it drives resize_window, which this host
             // rejects), so only `listdetail` is wired.

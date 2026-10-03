@@ -325,6 +325,13 @@ public final class KayaDraw {
         op(KAYA_DRAW_FONT, .str(asset), .f64(size), .i64(weight))
     }
 
+    /// Draw a core-held image (a reader's frame or a loaded image) into the
+    /// box at (x, y), `w` by `h`, in the viewbox.
+    @discardableResult
+    public func image(_ image: KayaImage, _ x: Double, _ y: Double, _ w: Double, _ h: Double) -> KayaDraw {
+        op(KAYA_DRAW_IMAGE, .i64(Int64(bitPattern: image.id)), .f64(x), .f64(y), .f64(w), .f64(h))
+    }
+
     /// Draw ONE LINE with its anchor at (x, y). A line break in `s` is
     /// refused by the core (§3.3).
     @discardableResult
@@ -2510,6 +2517,7 @@ public final class KayaApp {
     var pendingRoutes = KayaTx()
     /// The players' mirrors and handlers and the session's (KayaMedia.swift).
     let media = KayaMediaState()
+    let readers = KayaReaderState()
     var fileDialogs: [UInt64: (KayaAppTx, [KayaPickedFile]) throws -> Void] = [:]
     // Clipboard reads: one-shot, keyed by request id, on the alert's
     // request/result grammar.
@@ -2595,12 +2603,12 @@ public final class KayaApp {
     // (a frame per open container). Constructors parent AT CREATION,
     // never at expression position — that silently drops any let-bound
     // child — and the zone tag makes a cross-zone child loud.
-    struct KayaFrame {
+    struct KayaChildFrame {
         let template: Bool
         var ids: [UInt64] = []
     }
 
-    var childFrames: [KayaFrame] = []
+    var childFrames: [KayaChildFrame] = []
 
     /// A live widget parents into the open live frame at creation.
     fileprivate func parentAtCreation(live id: UInt64) {
@@ -2624,7 +2632,7 @@ public final class KayaApp {
     /// directly in that body is a ROOT of the template it declares, never a
     /// child of whatever container encloses the combinator.
     fileprivate func inTemplateBody<R>(_ body: () -> R) -> R {
-        childFrames.append(KayaFrame(template: true))
+        childFrames.append(KayaChildFrame(template: true))
         defer { childFrames.removeLast() }
         return body()
     }
@@ -3544,6 +3552,9 @@ public final class KayaApp {
             if mediaOccurrence(kind, id, keys, payload, tail, { h in self.dispatch { try self.build(h) } }) {
                 continue
             }
+            if readerOccurrence(kind, id, tail, { h in self.dispatch { try self.build(h) } }) {
+                continue
+            }
             var text: String?
             var checked = false
             var value = 0.0
@@ -4024,7 +4035,7 @@ public final class KayaAppTx {
         // `storage` and not `tx`: the submit is the transaction's own
         // last act, and routing it through the liveness property would
         // make the guard trip on the very call that closes it.
-        let routes = app.takePendingRoutes()
+        let routes = app.takePendingRoutes() + app.takePendingReleases()
         if !routes.isEmpty || !storage.bytes.isEmpty {
             var whole = KayaTx()
             whole.bytes = routes + storage.bytes
@@ -4790,7 +4801,7 @@ public final class KayaAppTx {
         grow: Double? = nil
     ) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_SELECT))
-        app.childFrames.append(KayaApp.KayaFrame(template: false))
+        app.childFrames.append(KayaApp.KayaChildFrame(template: false))
         for option in options {
             let o = widget(UInt32(KAYA_KIND_LABEL))
             setText(o, option)
@@ -4814,7 +4825,7 @@ public final class KayaAppTx {
         grow: Double? = nil
     ) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_RADIO))
-        app.childFrames.append(KayaApp.KayaFrame(template: false))
+        app.childFrames.append(KayaApp.KayaChildFrame(template: false))
         for option in options {
             let o = widget(UInt32(KAYA_KIND_LABEL))
             setText(o, option)
@@ -5013,7 +5024,7 @@ public final class KayaAppTx {
         if let spacing { setSpacing(parent, spacing) }
         if let inset { setInset(parent, inset) }
         if let grow { setGrow(parent, grow) }
-        app.childFrames.append(KayaApp.KayaFrame(template: false))
+        app.childFrames.append(KayaApp.KayaChildFrame(template: false))
         defer {
             let ids = app.childFrames.removeLast().ids
             for id in ids { tx.addChild(parent.id, id) }
@@ -5055,7 +5066,7 @@ public final class KayaAppTx {
         if let spacing { setSpacing(parent, spacing) }
         if let inset { setInset(parent, inset) }
         if let grow { setGrow(parent, grow) }
-        app.childFrames.append(KayaApp.KayaFrame(template: false))
+        app.childFrames.append(KayaApp.KayaChildFrame(template: false))
         name()
         defer {
             let ids = app.childFrames.removeLast().ids
@@ -5086,7 +5097,7 @@ public final class KayaAppTx {
         if let inset { setInset(parent, inset) }
         if let align { setAlign(parent, align) }
         if let filled { setFilled(parent, filled) }
-        app.childFrames.append(KayaApp.KayaFrame(template: false))
+        app.childFrames.append(KayaApp.KayaChildFrame(template: false))
         defer {
             let ids = app.childFrames.removeLast().ids
             for id in ids { tx.addChild(parent.id, id) }
@@ -6979,7 +6990,7 @@ public final class KayaTpl {
         _ onSelect: ((KayaAppTx, [KayaValue], Int) throws -> Void)?
     ) -> KayaNodeHandle {
         let n = widget(kind)
-        tx.app.childFrames.append(KayaApp.KayaFrame(template: true))
+        tx.app.childFrames.append(KayaApp.KayaChildFrame(template: true))
         for option in options {
             let o = widget(UInt32(KAYA_KIND_LABEL))
             setText(o, option)
@@ -7112,7 +7123,7 @@ public final class KayaTpl {
         _ children: () -> Void, _ name: () -> Void
     ) -> KayaNodeHandle {
         let parent = widget(UInt32(KAYA_KIND_LABELED))
-        tx.app.childFrames.append(KayaApp.KayaFrame(template: true))
+        tx.app.childFrames.append(KayaApp.KayaChildFrame(template: true))
         name()
         children()
         let ids = tx.app.childFrames.removeLast().ids
@@ -7131,7 +7142,7 @@ public final class KayaTpl {
 
     private func nodeContainerOf(_ kind: UInt32, _ children: () -> Void) -> KayaNodeHandle {
         let parent = widget(kind)
-        tx.app.childFrames.append(KayaApp.KayaFrame(template: true))
+        tx.app.childFrames.append(KayaApp.KayaChildFrame(template: true))
         children()
         let ids = tx.app.childFrames.removeLast().ids
         for id in ids { tx.tx.addChild(parent.id, id) }

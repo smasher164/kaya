@@ -4928,4 +4928,189 @@ check("a session action reaches on_action as the closed action",
 check("a stamped video's visibility passes the copy's row first",
       ("shown", 3, 0.5) in md_seen)
 
+
+# --- THE READER (docs/media-plan.md §8 ruling 4). AFTER A CANCEL OR A
+# CLOSE THE APP HEARS ONLY THE END: answers of that read already queued
+# are not delivered, and the images they carried are released by the next
+# commit. The bytes are packed in the spec's own field order
+# (crates/kaya/src/spec.rs, reader_frame / reader_done / reader_peaks /
+# image_loaded) and decoded by the GENERATED decoder.
+def _rd_frame(reader, read, image, index, ms):
+    return _occ_bytes(_W.OCC_READER_FRAME, struct.pack(
+        "<QQQIIIIQQ", reader, read, image, index, 2, 1, 0, ms, ms))
+
+
+def _rd_done(reader, read, outcome, failure=0, detail=""):
+    return _occ_bytes(_W.OCC_READER_DONE, struct.pack(
+        "<QQII", reader, read, outcome, failure) + _W._enc.value(detail))
+
+
+def _rd_peaks(reader, read, rate, per_pair, channels, length):
+    return _occ_bytes(_W.OCC_READER_PEAKS, struct.pack(
+        "<QQIIII", reader, read, rate, per_pair, channels, length))
+
+
+def _rd_loaded(image, w, h, failure=0, detail=""):
+    return _occ_bytes(_W.OCC_IMAGE_LOADED, struct.pack(
+        "<QIIII", image, w, h, failure, 0) + _W._enc.value(detail))
+
+
+def _rd_run(app_, *packed):
+    queue = [_W.parse_occurrence(b) for b in packed]
+    real = kaya.runtime.next_occurrence
+    kaya.runtime.next_occurrence = lambda: queue.pop(0) if queue else None
+    try:
+        app_._dispatch_loop()
+    finally:
+        kaya.runtime.next_occurrence = real
+
+
+def _rd_released(shipped):
+    return [struct.unpack_from("<Q", r, 8)[0] for tx in shipped for r in tx
+            if _rec_kind(r) == _W.TX_RELEASE_IMAGE]
+
+
+_rd_real_submit = kaya.runtime.submit
+_rd_real_peaks = kaya.runtime.reader_peaks
+_rd_shipped = []
+kaya.runtime.submit = lambda *records: _rd_shipped.append(list(records))
+try:
+    for _rd_how in ("cancel", "close"):
+        app_rd = kaya.App()
+        rd_seen = []
+        _rd_shipped.clear()
+        with app_rd.build():
+            rd_reader = kaya.reader(kaya.MediaSource.asset("media/h264_frames.mp4"))
+            rd_read = rd_reader.frames(
+                [0, 40], accuracy=kaya.FrameAccuracy.EXACT,
+                on_frame=lambda f: rd_seen.append(("frame", f.index)),
+                on_done=lambda o: rd_seen.append(("done", o.status)))
+        check(f"a frames read packs its reader, read, first image and times ({_rd_how})",
+              _rd_shipped[0][1] == _W.tx_read_frames(
+                  rd_reader.id, rd_read.id, 1, _W.FRAME_ACCURACY_EXACT, 0, 0, [0, 40]))
+        with app_rd.build():
+            if _rd_how == "cancel":
+                rd_read.cancel()
+            else:
+                rd_reader.close()
+        check(f"the {_rd_how} ships its record",
+              _rd_shipped[-1] == ([_W.tx_cancel_read(rd_reader.id, rd_read.id)]
+                                  if _rd_how == "cancel"
+                                  else [_W.tx_close_reader(rd_reader.id)]))
+        _rd_before = len(_rd_shipped)
+        _rd_run(app_rd, _rd_frame(rd_reader.id, rd_read.id, 1, 0, 0),
+                _rd_done(rd_reader.id, rd_read.id, _W.READ_OUTCOME_CANCELLED))
+        check(f"after a {_rd_how} the app hears only the end",
+              rd_seen == [("done", kaya.ReadStatus.CANCELLED)])
+        check(f"after a {_rd_how} a late frame's image is released at the next commit",
+              _rd_released(_rd_shipped[_rd_before:]) == [1])
+
+    # Heard frame by frame in the platform's order; the registrations
+    # retire with the end.
+    app_rd = kaya.App()
+    rd_seen = []
+    with app_rd.build():
+        rd_reader = kaya.reader(kaya.MediaSource.asset("media/h264_frames.mp4"))
+        rd_read = rd_reader.frames(
+            [0, 40], accuracy="keyframe",
+            on_frame=lambda f: rd_seen.append(("frame", f.index, f.image.id, f.actual_ms)),
+            on_done=lambda o: rd_seen.append(("done", o.status)))
+    _rd_shipped.clear()
+    _rd_run(app_rd, _rd_frame(rd_reader.id, rd_read.id, 2, 1, 40),
+            _rd_frame(rd_reader.id, rd_read.id, 1, 0, 0),
+            _rd_done(rd_reader.id, rd_read.id, _W.READ_OUTCOME_COMPLETED),
+            _rd_frame(rd_reader.id, rd_read.id, 1, 0, 0))
+    check("a read in flight is heard frame by frame, then its end",
+          rd_seen == [("frame", 1, 2, 40), ("frame", 0, 1, 0),
+                      ("done", kaya.ReadStatus.COMPLETED)])
+    check("a read's registrations retire with its end, and a heard read's images are not released",
+          not app_rd._reader_book.reads and not app_rd._reader_book.in_flight
+          and _rd_released(_rd_shipped) == [])
+
+    # A failure carries the player's closed reason and the sentence.
+    app_rd = kaya.App()
+    rd_seen = []
+    with app_rd.build():
+        rd_reader = kaya.reader(kaya.MediaSource.asset("fonts/OFL.txt"))
+        rd_read = rd_reader.frames([0], accuracy=kaya.FrameAccuracy.EXACT,
+                                   on_done=rd_seen.append)
+    _rd_run(app_rd, _rd_done(rd_reader.id, rd_read.id, _W.READ_OUTCOME_FAILED,
+                             _W.MEDIA_FAILURE_UNSUPPORTED_CONTAINER, "not media"))
+    check("a failed read ends with the closed reason and the platform's sentence",
+          rd_seen == [kaya.ReadOutcome(kaya.ReadStatus.FAILED,
+                                       kaya.MediaFailure.UNSUPPORTED_CONTAINER,
+                                       "not media")])
+
+    # The peaks are PULLED when their occurrence is decoded.
+    app_rd = kaya.App()
+    rd_seen = []
+    rd_pulls = []
+
+    def _rd_fake_peaks(reader, read, count):
+        rd_pulls.append((reader, read, count))
+        return [-3, 4, -1, 2, -5, 6, 0, 1]
+
+    kaya.runtime.reader_peaks = _rd_fake_peaks
+    with app_rd.build():
+        rd_reader = kaya.reader(kaya.MediaSource.asset("media/tone.wav"))
+        rd_read = rd_reader.peaks(
+            4800, on_progress=lambda d, t: rd_seen.append(("progress", d, t)),
+            on_peaks=rd_seen.append)
+    _rd_run(app_rd,
+            _occ_bytes(_W.OCC_READER_PROGRESS, struct.pack(
+                "<QQQQ", rd_reader.id, rd_read.id, 500, 1000)),
+            _rd_peaks(rd_reader.id, rd_read.id, 48000, 4800, 2, 2),
+            _rd_done(rd_reader.id, rd_read.id, _W.READ_OUTCOME_COMPLETED))
+    _rd_p = rd_seen[1] if len(rd_seen) > 1 else None
+    check("peaks are pulled for length * channels * 2 i16 and read pair-major",
+          rd_seen[:1] == [("progress", 500, 1000)]
+          and rd_pulls == [(rd_reader.id, rd_read.id, 8)]
+          and isinstance(_rd_p, kaya.Peaks) and len(_rd_p) == 2
+          and _rd_p.pair(0, 0) == (-3, 4) and _rd_p.pair(0, 1) == (-1, 2)
+          and _rd_p.pair(1, 1) == (0, 1) and _rd_p.sample_rate == 48000)
+
+    # A handler that cancels and then raises rolled its records back, so
+    # the read was never given up: its answers are still the app's.
+    app_rd = kaya.App()
+    rd_seen = []
+    with app_rd.build():
+        rd_reader = kaya.reader(kaya.MediaSource.asset("media/h264_frames.mp4"))
+        rd_read = rd_reader.frames([0], accuracy=kaya.FrameAccuracy.EXACT,
+                                   on_frame=lambda f: rd_seen.append(f.index))
+    try:
+        with app_rd.build():
+            rd_read.cancel()
+            raise RuntimeError("rolled back")
+    except RuntimeError:
+        pass
+    _rd_run(app_rd, _rd_frame(rd_reader.id, rd_read.id, 1, 0, 0))
+    check("a cancel rolled back with its transaction gives nothing up",
+          rd_seen == [0] and not app_rd._reader_book.abandoned)
+
+    # load_image's answer, and the canvas op spelled like the others.
+    app_rd = kaya.App()
+    rd_seen = []
+    with app_rd.window():
+        with kaya.column():
+            rd_canvas = kaya.canvas((10.0, 10.0))
+        rd_ok = kaya.load_image(kaya.MediaSource.asset("images/photo.jpg"),
+                                on_loaded=lambda w, h: rd_seen.append(("ok", w, h)))
+        rd_bad = kaya.load_image(kaya.MediaSource.asset("images/nope.png"),
+                                 on_failed=lambda why, d: rd_seen.append(("bad", why, d)))
+        rd_records = kaya._tx
+        with rd_canvas.draw() as rd_d:
+            rd_d.image(rd_ok, 1, 2, 3, 4)
+    check("load_image packs its image and source",
+          _W.tx_load_image(rd_ok.id, "images/photo.jpg") in rd_records)
+    check("Draw.image is the image op with its id and rectangle",
+          rd_d._ops == [_W.DRAW_OP_IMAGE, rd_ok.id, 1.0, 2.0, 3.0, 4.0])
+    _rd_run(app_rd, _rd_loaded(rd_ok.id, 40, 30),
+            _rd_loaded(rd_bad.id, 0, 0, _W.MEDIA_FAILURE_NOT_FOUND, "no file"))
+    check("image_loaded answers the size or the reason, once",
+          rd_seen == [("ok", 40, 30), ("bad", kaya.MediaFailure.NOT_FOUND, "no file")]
+          and not app_rd._reader_book.loads)
+finally:
+    kaya.runtime.submit = _rd_real_submit
+    kaya.runtime.reader_peaks = _rd_real_peaks
+
 sys.exit(1 if failures else 0)

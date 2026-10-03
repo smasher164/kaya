@@ -146,10 +146,7 @@ HAND_QUEUED = {"editor": "go", "chat": "go", "portfolio": "python", "varied": "p
                # A picked clip played (docs/media-plan.md §2): rust-only.
                "media_picked": "rust",
                # The bound (docs/media-plan.md §7c): rust-only, one 30 s wait.
-               "media_timeout": "rust",
-               # The reader and the canvas's images (docs/media-plan.md §8),
-               # rust-only at depth.
-               "media_reader": "rust"}
+               "media_timeout": "rust"}
 
 # The queue, in run order. Entries:
 #   (scene, (lang, ...))    a group: script export + one leg per lang
@@ -283,7 +280,7 @@ ORDER = [
     ("media_tracks", LANGS),
     ("media_feed", LANGS),
     ("media_timeout", ("rust",)),
-    ("media_reader", ("rust",)),
+    ("media_reader", LANGS),
     ("richtext", ("rust", "python", "js", "go", "csharp", "java", "swift",
                   "ocaml", "haskell")),
     ("ownundo", ("rust", "python", "js", "go", "csharp", "java", "swift",

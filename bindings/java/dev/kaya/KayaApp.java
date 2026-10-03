@@ -387,6 +387,20 @@ public final class KayaApp {
     private final Map<Long, BiConsumer<Tx, Double>> widgetVisibility = new HashMap<>();
     private final Map<Long, VisibilityHandler> nodeVisibility = new HashMap<>();
     private BiConsumer<Tx, SessionAction> sessionHandler;
+    // The reader's three id spaces (docs/media-plan.md §8 ruling 4), each
+    // reader's read in flight, the reads the app gave up on, the
+    // handlers and awaited futures per read.
+    private long nextReader;
+    private long nextRead;
+    private long nextImage;
+    final Map<Long, Long> readsInFlight = new HashMap<>();
+    final java.util.Set<Long> abandonedReads = new java.util.HashSet<>();
+    final Map<Long, BiConsumer<Tx, Frame>> frameHandlers = new HashMap<>();
+    final Map<Long, ProgressHandler> progressHandlers = new HashMap<>();
+    final Map<Long, BiConsumer<Tx, Peaks>> peaksHandlers = new HashMap<>();
+    final Map<Long, BiConsumer<Tx, ReadOutcome>> doneHandlers = new HashMap<>();
+    final Map<Long, ReadWaiter<?>> readWaiters = new HashMap<>();
+    private final Map<Long, BiConsumer<Tx, ImageLoad>> imageLoads = new HashMap<>();
     private long nextFileDialog;
     // One-shot, keyed by request id — the alert's request/result
     // grammar.
@@ -1841,6 +1855,97 @@ public final class KayaApp {
     @FunctionalInterface
     public interface VisibilityHandler {
         void accept(Tx tx, List<Object> keys, double shown);
+    }
+
+    /** A media reader: frames and peaks without a player
+     * (docs/media-plan.md §8 ruling 4), an id in its own space. */
+    public record Reader(long id) {}
+
+    /** One read on a reader, an id in its own space. */
+    public record Read(long id) {}
+
+    /** A core-held premultiplied RGBA8 image, the app's until it releases
+     * it; {@link Draw#image} draws it. */
+    public record Image(long id) {}
+
+    /** Which picture answers a time: the keyframe at or before it, or the
+     * frame shown at it. */
+    public enum FrameAccuracy {
+        KEYFRAME(KayaWire.FRAME_ACCURACY_KEYFRAME),
+        EXACT(KayaWire.FRAME_ACCURACY_EXACT);
+
+        final int wire;
+
+        FrameAccuracy(int wire) {
+            this.wire = wire;
+        }
+    }
+
+    /** One requested time answered: which of the times it is, the time
+     * asked, the time of the picture the platform returned, and its image. */
+    public record Frame(int index, long requestedMs, long actualMs, Image image, int width, int height) {}
+
+    /** One pair's minimum and maximum on one channel. */
+    public record Pair(short min, short max) {}
+
+    /** A peaks read's answer: a min/max pair per channel per
+     * {@code samplesPerPair} frames, pair-major. */
+    public record Peaks(int sampleRate, int samplesPerPair, int channels, short[] data) {
+        /** How many pairs per channel. */
+        public int count() {
+            return channels == 0 ? 0 : data.length / (2 * channels);
+        }
+
+        public Pair pair(int i, int channel) {
+            int at = (i * channels + channel) * 2;
+            return new Pair(data[at], data[at + 1]);
+        }
+    }
+
+    /** A read's end: completed, cancelled, or failed with the player's
+     * reason and the platform's sentence. */
+    public sealed interface ReadOutcome
+            permits ReadOutcome.Completed, ReadOutcome.Cancelled, ReadOutcome.Failed {
+        record Completed() implements ReadOutcome {}
+
+        record Cancelled() implements ReadOutcome {}
+
+        record Failed(MediaFailure reason, String detail) implements ReadOutcome {}
+
+        ReadOutcome COMPLETED = new Completed();
+        ReadOutcome CANCELLED = new Cancelled();
+    }
+
+    /** Why an awaited read gave no answer: its outcome, cancelled (the
+     * read was cancelled or its reader closed under it) or failed. */
+    public static final class ReadException extends RuntimeException {
+        private final ReadOutcome outcome;
+
+        ReadException(ReadOutcome outcome) {
+            super("kaya: the read ended " + outcome);
+            this.outcome = outcome;
+        }
+
+        public ReadOutcome outcome() {
+            return outcome;
+        }
+    }
+
+    /** A load_image's answer: the size, or the reason and the decoder's
+     * sentence. */
+    public sealed interface ImageLoad permits ImageLoad.Loaded, ImageLoad.Failed {
+        record Loaded(int width, int height) implements ImageLoad {}
+
+        record Failed(MediaFailure reason, String detail) implements ImageLoad {}
+    }
+
+    /** An image's premultiplied RGBA8 bytes and size. */
+    public record Pixels(int width, int height, byte[] bytes) {}
+
+    /** A peaks read's progress: milliseconds decoded of the total. */
+    @FunctionalInterface
+    public interface ProgressHandler {
+        void accept(Tx tx, long doneMs, long totalMs);
     }
 
     /** Whether this platform plays {@code mime} with {@code codecs} (an
@@ -3637,6 +3742,12 @@ public final class KayaApp {
                 TextAlign align, TextBaseline baseline) {
             return op(KayaWire.DRAW_OP_TEXT, x, y, paint.wire, align.wire,
                 baseline.wire, s);
+        }
+
+        /** Draw a core-held image (a reader's frame or a loaded image)
+         * into the box at (x, y), {@code w} by {@code h}, in the viewbox. */
+        public Draw image(Image image, double x, double y, double w, double h) {
+            return op(KayaWire.DRAW_OP_IMAGE, image.id(), x, y, w, h);
         }
     }
 
@@ -6443,6 +6554,151 @@ public final class KayaApp {
                 KayaApp.this.onColor(w, onColor);
             }
             return w;
+        }
+
+        /** A media reader on {@code source} (docs/media-plan.md §8 ruling
+         * 4): frames and peaks without a player. */
+        public Reader reader(MediaSource source) {
+            Reader reader = new Reader(++nextReader);
+            emit(KayaWire.txOpenReader(reader.id(), source.value()));
+            return reader;
+        }
+
+        private Read beginRead(Reader reader) {
+            long read = ++nextRead;
+            readsInFlight.put(reader.id(), read);
+            rollbackActions.add(() -> {
+                readsInFlight.remove(reader.id(), read);
+                frameHandlers.remove(read);
+                progressHandlers.remove(read);
+                peaksHandlers.remove(read);
+                doneHandlers.remove(read);
+                readWaiters.remove(read);
+            });
+            return new Read(read);
+        }
+
+        /** One picture per time in {@code timesMs}, each heard through
+         * {@link KayaApp#onFrame} and the read's end through
+         * {@link KayaApp#onReadDone}. A bound of 0 is no bound on that
+         * axis; the aspect is kept. One read in flight per reader. */
+        public Read readFrames(Reader reader, long[] timesMs, int maxWidth, int maxHeight,
+                FrameAccuracy accuracy) {
+            Read read = beginRead(reader);
+            long first = nextImage + 1;
+            nextImage += timesMs.length;
+            Object[] times = new Object[timesMs.length];
+            for (int i = 0; i < timesMs.length; i++) {
+                times[i] = timesMs[i];
+            }
+            emit(KayaWire.txReadFrames(reader.id(), read.id(), first, accuracy.wire,
+                    maxWidth, maxHeight, times));
+            return read;
+        }
+
+        /** The first audio track's peaks, a min/max pair per channel per
+         * {@code samplesPerPair} frames: progress, then the peaks, then
+         * the end. */
+        public Read readPeaks(Reader reader, int samplesPerPair) {
+            Read read = beginRead(reader);
+            emit(KayaWire.txReadPeaks(reader.id(), read.id(), samplesPerPair));
+            return read;
+        }
+
+        private void abandon(long reader, long read) {
+            boolean added = abandonedReads.add(read);
+            boolean wasInFlight = readsInFlight.remove(reader, read);
+            rollbackActions.add(() -> {
+                if (added) abandonedReads.remove(read);
+                if (wasInFlight) readsInFlight.put(reader, read);
+            });
+        }
+
+        /** Stop a read: it ends cancelled, and nothing else of it is
+         * heard. */
+        public void cancelRead(Reader reader, Read read) {
+            alive();
+            abandon(reader.id(), read.id());
+            emit(KayaWire.txCancelRead(reader.id(), read.id()));
+        }
+
+        /** Forget a reader, cancelling its read in flight: that read is
+         * heard only by its end. The images it answered with stay the
+         * app's. */
+        public void closeReader(Reader reader) {
+            alive();
+            Long read = readsInFlight.get(reader.id());
+            if (read != null) {
+                abandon(reader.id(), read);
+            }
+            emit(KayaWire.txCloseReader(reader.id()));
+        }
+
+        /** An image decoded by kaya from an asset or a picked file, heard
+         * through {@link KayaApp#onImageLoaded}; a drawing may name it in
+         * the same transaction. */
+        public Image loadImage(MediaSource source) {
+            Image image = new Image(++nextImage);
+            emit(KayaWire.txLoadImage(image.id(), source.value()));
+            return image;
+        }
+
+        public void releaseImage(Image image) {
+            emit(KayaWire.txReleaseImage(image.id()));
+        }
+
+        /** The pictures at {@code timesMs} as one awaited read, in index
+         * order, completed on the app thread outside any transaction.
+         * Cancelling THIS future cancels the read and releases the images
+         * it carried; a read cancelled under it or failed completes it
+         * with a {@link ReadException}, its images released. */
+        public CompletableFuture<List<Frame>> framesFuture(Reader reader, long[] timesMs,
+                int maxWidth, int maxHeight, FrameAccuracy accuracy) {
+            Read read = readFrames(reader, timesMs, maxWidth, maxHeight, accuracy);
+            return awaitRead(reader, read, w -> {
+                List<Frame> frames = new ArrayList<>(w.frames);
+                frames.sort(java.util.Comparator.comparingInt(Frame::index));
+                return List.copyOf(frames);
+            });
+        }
+
+        /** The reader's peaks as one awaited read. */
+        public CompletableFuture<Peaks> peaksFuture(Reader reader, int samplesPerPair) {
+            Read read = readPeaks(reader, samplesPerPair);
+            return awaitRead(reader, read, w -> w.peaks != null ? w.peaks
+                    : new Peaks(0, samplesPerPair, 0, new short[0]));
+        }
+
+        private <T> CompletableFuture<T> awaitRead(Reader reader, Read read,
+                java.util.function.Function<ReadWaiter<T>, T> answer) {
+            if (tplDepth != 0) {
+                throw new IllegalStateException("kaya: async reads cannot be requested inside a template body");
+            }
+            CompletableFuture<T> future = new CompletableFuture<>();
+            ReadWaiter<T> waiter = new ReadWaiter<>(reader.id(), future, answer);
+            readWaiters.put(read.id(), waiter);
+            future.whenComplete((value, failure) -> {
+                if (future.isCancelled()) {
+                    queueAsync(() -> build((Consumer<Tx>) t -> t.abandonAwaited(reader.id(), read.id())));
+                }
+            });
+            rollbackActions.add(() -> queueAsync(() -> future.completeExceptionally(
+                    new IllegalStateException("kaya: read request transaction aborted"))));
+            return future;
+        }
+
+        /** An awaiting future was cancelled: its read is cancelled and the
+         * images it carried go back. */
+        void abandonAwaited(long reader, long read) {
+            ReadWaiter<?> waiter = readWaiters.remove(read);
+            if (waiter == null) {
+                return;
+            }
+            for (Frame f : waiter.frames) {
+                releaseImage(f.image());
+            }
+            abandon(reader, read);
+            emit(KayaWire.txCancelRead(reader, read));
         }
 
         /** A media player (docs/media-plan.md §2): an object with no
@@ -9799,6 +10055,180 @@ public final class KayaApp {
         }
     }
 
+    /** An awaited read's answers so far and its future. */
+    static final class ReadWaiter<T> {
+        final long reader;
+        final CompletableFuture<T> future;
+        final java.util.function.Function<ReadWaiter<T>, T> answer;
+        final List<Frame> frames = new ArrayList<>();
+        Peaks peaks;
+
+        ReadWaiter(long reader, CompletableFuture<T> future,
+                java.util.function.Function<ReadWaiter<T>, T> answer) {
+            this.reader = reader;
+            this.future = future;
+            this.answer = answer;
+        }
+
+        /** Completed on the app thread outside any transaction; a future
+         * cancelled meanwhile gives its images back. */
+        void finish(KayaApp app, ReadOutcome outcome) {
+            app.queueAsync(() -> {
+                app.requireAsyncBoundary();
+                boolean took = outcome instanceof ReadOutcome.Completed
+                        ? future.complete(answer.apply(this))
+                        : future.completeExceptionally(new ReadException(outcome));
+                if (!took || !(outcome instanceof ReadOutcome.Completed)) {
+                    app.releaseLater(frames);
+                }
+            });
+        }
+    }
+
+    /** Images the app never heard, released by the next commit. */
+    void releaseLater(List<Frame> frames) {
+        for (Frame f : frames) {
+            pendingRecords.add(KayaWire.txReleaseImage(f.image().id()));
+        }
+    }
+
+    /** Each time of a readFrames as it is answered, in the platform's
+     * order. Its registrations retire with the read's end. */
+    public void onFrame(Read read, BiConsumer<Tx, Frame> handler) {
+        frameHandlers.put(read.id(), handler);
+    }
+
+    /** A peaks read's progress: milliseconds decoded of the total. */
+    public void onReadProgress(Read read, ProgressHandler handler) {
+        progressHandlers.put(read.id(), handler);
+    }
+
+    /** A peaks read's answer, just before its end. */
+    public void onPeaks(Read read, BiConsumer<Tx, Peaks> handler) {
+        peaksHandlers.put(read.id(), handler);
+    }
+
+    /** The read's end: completed, cancelled or failed. */
+    public void onReadDone(Read read, BiConsumer<Tx, ReadOutcome> handler) {
+        doneHandlers.put(read.id(), handler);
+    }
+
+    /** A loadImage's answer; the registration retires with it. */
+    public void onImageLoaded(Image image, BiConsumer<Tx, ImageLoad> handler) {
+        imageLoads.put(image.id(), handler);
+    }
+
+    /** An image's premultiplied RGBA8 bytes and size; empty for an image
+     * holding none. */
+    public static Optional<Pixels> imagePixels(Image image) {
+        int[] size = new int[2];
+        byte[] bytes = KayaRing.imagePixels(image.id(), size);
+        return bytes == null ? Optional.empty() : Optional.of(new Pixels(size[0], size[1], bytes));
+    }
+
+    /** The occurrence half of the reader: a read the app gave up on is
+     * heard only by its end, the images its unheard frames carried
+     * released by the next commit; an awaited read's answers go to its
+     * future. False for a record that is not the reader's. */
+    boolean readerOccurrence(KayaWire.Occ occ) {
+        if (occ.kind == KayaWire.OCC_KIND_IMAGE_LOADED) {
+            List<?> tail = (List<?>) occ.payload;
+            Optional<MediaFailure> failure = MediaFailure.fromWire(flatLong(tail, 2));
+            ImageLoad answer = failure.isPresent()
+                    ? new ImageLoad.Failed(failure.get(), tail.get(3) instanceof String s ? s : "")
+                    : new ImageLoad.Loaded((int) flatLong(tail, 0), (int) flatLong(tail, 1));
+            BiConsumer<Tx, ImageLoad> handler = imageLoads.remove(occ.id);
+            if (handler != null) {
+                dispatch(tx -> handler.accept(tx, answer));
+            }
+            return true;
+        }
+        if (occ.kind != KayaWire.OCC_KIND_READER_FRAME && occ.kind != KayaWire.OCC_KIND_READER_PROGRESS
+                && occ.kind != KayaWire.OCC_KIND_READER_PEAKS && occ.kind != KayaWire.OCC_KIND_READER_DONE) {
+            return false;
+        }
+        List<?> tail = (List<?>) occ.payload;
+        long reader = occ.id;
+        long read = flatLong(tail, 0);
+        boolean done = occ.kind == KayaWire.OCC_KIND_READER_DONE;
+        if (done) {
+            readsInFlight.remove(reader, read);
+        }
+        if (abandonedReads.contains(read)) {
+            if (occ.kind == KayaWire.OCC_KIND_READER_FRAME) {
+                pendingRecords.add(KayaWire.txReleaseImage(flatLong(tail, 1)));
+            }
+            if (!done) {
+                return true;
+            }
+            abandonedReads.remove(read);
+        }
+        ReadWaiter<?> waiter = readWaiters.get(read);
+        switch (occ.kind) {
+            case KayaWire.OCC_KIND_READER_FRAME -> {
+                Frame frame = new Frame((int) flatLong(tail, 2), flatLong(tail, 5), flatLong(tail, 6),
+                        new Image(flatLong(tail, 1)), (int) flatLong(tail, 3), (int) flatLong(tail, 4));
+                BiConsumer<Tx, Frame> handler = frameHandlers.get(read);
+                if (waiter != null) {
+                    waiter.frames.add(frame);
+                } else if (handler != null) {
+                    dispatch(tx -> handler.accept(tx, frame));
+                }
+            }
+            case KayaWire.OCC_KIND_READER_PROGRESS -> {
+                ProgressHandler handler = progressHandlers.get(read);
+                if (waiter == null && handler != null) {
+                    long doneMs = flatLong(tail, 1);
+                    long totalMs = flatLong(tail, 2);
+                    dispatch(tx -> handler.accept(tx, doneMs, totalMs));
+                }
+            }
+            case KayaWire.OCC_KIND_READER_PEAKS -> {
+                int channels = (int) flatLong(tail, 3);
+                int length = (int) flatLong(tail, 4);
+                short[] data = KayaRing.readerPeaks(reader, read);
+                if (data == null) {
+                    data = new short[0];
+                }
+                if (data.length != length * channels * 2) {
+                    throw new IllegalStateException("kaya: read " + read + "'s peaks hold "
+                            + data.length + " values where its record names " + length * channels * 2);
+                }
+                Peaks peaks = new Peaks((int) flatLong(tail, 1), (int) flatLong(tail, 2), channels, data);
+                BiConsumer<Tx, Peaks> handler = peaksHandlers.get(read);
+                if (waiter != null) {
+                    waiter.peaks = peaks;
+                } else if (handler != null) {
+                    dispatch(tx -> handler.accept(tx, peaks));
+                }
+            }
+            default -> {
+                long code = flatLong(tail, 1);
+                ReadOutcome outcome;
+                if (code == KayaWire.READ_OUTCOME_COMPLETED) {
+                    outcome = ReadOutcome.COMPLETED;
+                } else if (code == KayaWire.READ_OUTCOME_CANCELLED) {
+                    outcome = ReadOutcome.CANCELLED;
+                } else {
+                    outcome = new ReadOutcome.Failed(
+                            MediaFailure.fromWire(flatLong(tail, 2)).orElse(MediaFailure.DECODE_ERROR),
+                            tail.get(3) instanceof String s ? s : "");
+                }
+                frameHandlers.remove(read);
+                progressHandlers.remove(read);
+                peaksHandlers.remove(read);
+                BiConsumer<Tx, ReadOutcome> handler = doneHandlers.remove(read);
+                if (waiter != null) {
+                    readWaiters.remove(read);
+                    waiter.finish(this, outcome);
+                } else if (handler != null) {
+                    dispatch(tx -> handler.accept(tx, outcome));
+                }
+            }
+        }
+        return true;
+    }
+
     /** Register a live range's move handler: every movement of either
      * thumb, both values (docs/range-plan.md §2). */
     public void onRangeChanged(Widget w, RangeChange handler) {
@@ -10110,6 +10540,9 @@ public final class KayaApp {
 
             KayaWire.Occ occ = KayaWire.parseOccurrence(rec);
             if (occ == null) {
+                continue;
+            }
+            if (readerOccurrence(occ)) {
                 continue;
             }
             if (mediaOccurrence(occ.kind)) {

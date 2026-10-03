@@ -192,6 +192,7 @@ public final class Main {
             case "media_session":
             case "media_tracks":
             case "media_feed":
+            case "media_reader":
                 app = Media::app;
                 break;
             case "tooltips":

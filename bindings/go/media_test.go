@@ -8,6 +8,7 @@ package kaya
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math"
 	"reflect"
 	"testing"
@@ -186,5 +187,96 @@ func TestAPlayerFieldRidesTheWireAsItsID(t *testing.T) {
 	back := restoreRecord(reflect.TypeFor[clip](), info, []any{"r0", int64(7)}).(clip)
 	if back.Player != (Player{7}) {
 		t.Fatalf("a restored row's player is %+v, want id 7", back.Player)
+	}
+}
+
+func readerFrameRec(reader, read, image uint64, index uint32) []byte {
+	b := binary.LittleEndian.AppendUint64(nil, reader)
+	b = binary.LittleEndian.AppendUint64(b, read)
+	b = binary.LittleEndian.AppendUint64(b, image)
+	b = binary.LittleEndian.AppendUint32(b, index)
+	b = binary.LittleEndian.AppendUint32(b, 2)
+	b = binary.LittleEndian.AppendUint32(b, 1)
+	b = binary.LittleEndian.AppendUint32(b, 0)
+	b = binary.LittleEndian.AppendUint64(b, 40*uint64(index))
+	b = binary.LittleEndian.AppendUint64(b, 40*uint64(index))
+	return occRecord(occReaderFrame, b)
+}
+
+func readerDoneRec(reader, read uint64, outcome uint32, failure MediaFailure, detail string) []byte {
+	b := binary.LittleEndian.AppendUint64(nil, reader)
+	b = binary.LittleEndian.AppendUint64(b, read)
+	b = binary.LittleEndian.AppendUint32(b, outcome)
+	b = binary.LittleEndian.AppendUint32(b, uint32(failure))
+	return occRecord(occReaderDone, strValue(b, detail))
+}
+
+// AFTER A CANCEL OR A CLOSE THE APP HEARS ONLY THE END: answers already in
+// the ring are dropped, and the images they carried are released by the
+// next commit, since the app never learned their ids (docs/media-plan.md §8
+// ruling 4).
+func TestAGivenUpReadIsHeardOnlyAtItsEndAndItsLateImagesGoBack(t *testing.T) {
+	for _, how := range []string{"cancel", "close"} {
+		app := NewApp()
+		var heard []string
+		var reader Reader
+		var read Read
+		app.Build(func(tx *Tx) {
+			reader = tx.Reader(MediaAsset("media/h264_frames.mp4"))
+			read = tx.ReadFrames(reader, []uint64{0, 40}, 0, 0, FrameAccuracyExact).
+				OnFrame(func(_ *Tx, f Frame) { heard = append(heard, fmt.Sprint("frame ", f.Index)) }).
+				OnDone(func(_ *Tx, o ReadOutcome) { heard = append(heard, fmt.Sprint("done ", o.Kind)) }).ID()
+		})
+		app.Build(func(tx *Tx) {
+			if how == "cancel" {
+				tx.CancelRead(reader, read)
+			} else {
+				tx.CloseReader(reader)
+			}
+		})
+		deliver(t, app, readerFrameRec(reader.id, read.id, 1, 0))
+		want := [][]byte{TxReleaseImage(1)}
+		if !reflect.DeepEqual(app.pendingRecords, want) {
+			t.Fatalf("%s: a late frame left %d records for the next commit, want its image's release", how, len(app.pendingRecords))
+		}
+		deliver(t, app, readerDoneRec(reader.id, read.id, ReadOutcomeCancelled, MediaFailureNone, ""))
+		if !reflect.DeepEqual(heard, []string{"done 1"}) {
+			t.Fatalf("%s: the app heard %v, want only the end", how, heard)
+		}
+		app.Build(func(*Tx) {})
+		if len(app.pendingRecords) != 0 || len(app.media.reads) != 0 || len(app.media.abandoned) != 0 {
+			t.Fatalf("%s: after the next commit %d records wait, %d reads and %d given-up reads are registered",
+				how, len(app.pendingRecords), len(app.media.reads), len(app.media.abandoned))
+		}
+	}
+}
+
+func TestAReadInFlightIsHeardFrameByFrameAndRetiresAtItsEnd(t *testing.T) {
+	app := NewApp()
+	var heard []string
+	app.Build(func(tx *Tx) {
+		reader := tx.Reader(MediaAsset("media/h264_frames.mp4"))
+		tx.ReadFrames(reader, []uint64{0, 40}, 80, 45, FrameAccuracyKeyframe).
+			OnFrame(func(_ *Tx, f Frame) {
+				heard = append(heard, fmt.Sprintf("%d %d@%d image %d %dx%d", f.Index, f.RequestedMs, f.ActualMs, f.Image.id, f.Width, f.Height))
+			}).
+			OnDone(func(_ *Tx, o ReadOutcome) { heard = append(heard, fmt.Sprint(o.Kind, o.Failure, o.Detail)) })
+		tx.LoadImage(MediaAsset("images/photo.jpg")).
+			OnLoaded(func(_ *Tx, w, h uint32) { heard = append(heard, fmt.Sprint("loaded ", w, "x", h)) })
+	})
+	deliver(t, app, readerFrameRec(1, 1, 2, 1))
+	deliver(t, app, readerFrameRec(1, 1, 1, 0))
+	deliver(t, app, readerDoneRec(1, 1, ReadOutcomeFailed, MediaFailureDecodeError, "x"))
+	b := binary.LittleEndian.AppendUint64(nil, 3)
+	b = binary.LittleEndian.AppendUint32(b, 64)
+	b = binary.LittleEndian.AppendUint32(b, 48)
+	b = binary.LittleEndian.AppendUint64(b, 0)
+	deliver(t, app, occRecord(occImageLoaded, strValue(b, "")))
+	want := []string{"1 40@40 image 2 2x1", "0 0@0 image 1 2x1", "2 decode_errorx", "loaded 64x48"}
+	if !reflect.DeepEqual(heard, want) {
+		t.Fatalf("heard %q, want %q", heard, want)
+	}
+	if len(app.media.reads) != 0 || len(app.media.images) != 0 || len(app.media.inFlight) != 0 {
+		t.Fatal("a read's or an image's registrations outlived its end")
 	}
 }

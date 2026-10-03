@@ -15,7 +15,7 @@ import Data.ByteString.Builder (toLazyByteString)
 import qualified Data.ByteString.Builder as BB
 import qualified Data.ByteString.Char8 as BC
 import qualified Data.ByteString.Lazy as BL
-import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
 import Data.List (isInfixOf)
 import Data.Word (Word8)
 import Foreign.Ptr (castPtr)
@@ -353,5 +353,74 @@ main = do
           && wordAt 4 (at + 20) == fromIntegral W.sourceElement
           && wordAt 4 (at + 28) == 1
   check (any bound (records 0)) "a stamped video's player field never reached PROP_PLAYER"
+
+  -- THE READER'S RULE 4: after cancelRead or closeReader the app hears
+  -- only the end, and the image a late frame carried rides the next
+  -- commit as release_image; an awaited read closed under it answers
+  -- Left ReadErrorCancelled and gives back what it carried.
+  readerApp <- newApp
+  let frameRec r rd ix img =
+        decode W.occKindReaderFrame
+          (u64 r <> u64 rd <> u64 img <> u32 ix <> u32 2 <> u32 1 <> u32 0 <> u64 (40 * ix) <> u64 (40 * ix))
+      doneRec r rd outcome = decode W.occKindReaderDone (u64 r <> u64 rd <> u32 (fromIntegral outcome) <> u32 0 <> str "")
+      feedR (k, ident, keys, payload, tail_) = do
+        took <- mediaOccurrence readerApp k ident keys payload tail_
+        check took ("the media arm did not take reader occurrence kind " ++ show k)
+      pendingBytes = map (BL.toStrict . toLazyByteString) <$> readIORef readerApp.appMedia.pendingOps
+      releaseOf n = BL.toStrict (toLazyByteString (W.txReleaseImage n))
+  heardFrames <- newIORef []
+  heardEnds <- newIORef []
+  let listen rd = do
+        onFrame readerApp rd (\f -> modifyIORef' heardFrames (f.index :))
+        onReadDone readerApp rd (\o -> modifyIORef' heardEnds (readOutcomeName o :))
+      lateFrame what r rd img = do
+        frameRec r rd 0 img >>= feedR
+        fr <- readIORef heardFrames
+        check (null fr) ("a " ++ what ++ " was heard: frames " ++ show fr)
+        p <- pendingBytes
+        check (p == [releaseOf (fromIntegral img)])
+          ("a " ++ what ++ "'s late frame: image " ++ show img ++ " was not released by the next commit")
+        doneRec r rd W.readOutcomeCancelled >>= feedR
+        left <- pendingBytes
+        check (null left) ("a " ++ what ++ "'s release did not ride the next commit")
+        en <- readIORef heardEnds
+        check (en == ["cancelled"]) ("a " ++ what ++ " ended " ++ show en ++ ", wanted only cancelled")
+        writeIORef heardEnds []
+  (clipR, rd1) <- buildTx readerApp $ do
+    r <- openReader (mediaAsset "media/h264_frames.mp4")
+    (,) r <$> readFrames r [0, 40] (0, 0) Exact
+  listen rd1
+  buildTx readerApp (cancelRead clipR rd1)
+  lateFrame "cancelled read" 1 1 1
+  (closing, rd2) <- buildTx readerApp $ do
+    r <- openReader (mediaAsset "media/h264_frames.mp4")
+    (,) r <$> readFrames r [0] (0, 0) Exact
+  listen rd2
+  buildTx readerApp (closeReader closing)
+  lateFrame "closed reader's read" 2 2 3
+  rd3 <- buildTx readerApp (openReader (mediaAsset "media/h264_frames.mp4") >>= \r -> readFrames r [0, 40] (0, 0) Exact)
+  listen rd3
+  frameRec 3 3 1 5 >>= feedR
+  frameRec 3 3 0 4 >>= feedR
+  doneRec 3 3 W.readOutcomeCompleted >>= feedR
+  readIORef heardFrames >>= \fr -> check (fr == [0, 1]) ("a read in flight was heard as frames " ++ show fr)
+  readIORef heardEnds >>= \en -> check (en == ["completed"]) ("a completed read ended " ++ show en)
+  answer <- newIORef ""
+  awaited <- buildTx readerApp $ do
+    r <- openReader (mediaAsset "media/h264_frames.mp4")
+    awaitFrames r [0, 40] (0, 0) Keyframe $ \result -> do
+      p <- pendingBytes
+      let gave = if releaseOf 6 `elem` p && releaseOf 7 `elem` p then " released" else " kept"
+      writeIORef answer $ case result of
+        Right fs -> "ok " ++ show (length fs)
+        Left ReadErrorCancelled -> "cancelled" ++ gave
+        Left (ReadErrorFailed why _) -> "failed " ++ show why
+    return r
+  frameRec 4 4 0 6 >>= feedR
+  buildTx readerApp (closeReader awaited)
+  frameRec 4 4 1 7 >>= feedR
+  doneRec 4 4 W.readOutcomeCancelled >>= feedR
+  readIORef answer >>= \a ->
+    check (a == "cancelled released") ("an awaited read closed under it answered " ++ show a ++ ", wanted \"cancelled released\"")
 
   putStrLn "haskell abort check: OK"

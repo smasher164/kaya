@@ -14157,12 +14157,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
         }
         ApplyOp::SelectTrack { player, kind, index } => gtk_media::select_track(player.0, kind, index),
         ApplyOp::CaptionTimes { player, times } => gtk_media::caption_times(player.0, times),
-        // docs/media-plan.md §8 ruling 4: the reader is a depth slice on the mac.
-        ApplyOp::OpenReader { .. }
-        | ApplyOp::ReadFrames { .. }
-        | ApplyOp::ReadPeaks { .. }
-        | ApplyOp::CancelRead { .. }
-        | ApplyOp::CloseReader(_) => crate::depth_stub("media_reader"),
+        ApplyOp::OpenReader { reader, url } => gtk_reader::open(reader.0, url),
+        ApplyOp::ReadFrames { reader, read, accuracy, max_size, times_ms } => gtk_reader::frames(
+            reader.0,
+            read.0,
+            accuracy == crate::protocol::FrameAccuracy::Exact,
+            max_size,
+            times_ms,
+        ),
+        ApplyOp::ReadPeaks { reader, read } => gtk_reader::peaks(reader.0, read.0),
+        ApplyOp::CancelRead { reader, read } => gtk_reader::cancel(reader.0, read.0),
+        ApplyOp::CloseReader(reader) => gtk_reader::close(reader.0),
         ApplyOp::SetSession { player, offered, playback_state: _, title, artist, album, artwork } => {
             gtk_media::set_session(
                 core,
@@ -17307,6 +17312,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 scene: {
                     let mut scene = Scene::new();
                     scene.declare_windowing();
+                    scene.serve_reader_pulls();
                     scene
                 },
                 occurrences: occ_tx.clone(),
@@ -22667,6 +22673,17 @@ impl crate::harness::Stage for GtkStage {
                 return format!("<the toplevel rendered to {tw}x{th} pixels for {rw}x{rh}>");
             }
             let (sx, sy) = (f64::from(tw) / rw, f64::from(th) / rh);
+            // The geometry a wrong ink is read against (a squeezed canvas
+            // letterboxes its drawing, so a probe lands elsewhere in it).
+            eprintln!(
+                "KAYA_DIAG canvas_ink {:?}#{}: {}x{} at {},{} in a {rw}x{rh} toplevel, {tw}x{th} pixels",
+                target.kind,
+                target.index,
+                bounds.width(),
+                bounds.height(),
+                bounds.x(),
+                bounds.y()
+            );
             let stride = tw as usize * 4;
             let mut buf = vec![0u8; stride * th as usize];
             gtk4::gdk::prelude::TextureExtManual::download(&shot, &mut buf, stride);
@@ -24359,7 +24376,7 @@ mod gtk_media {
 
     /// GStreamer, initialized once for the process: the player's pipelines and
     /// the capability query's registry read.
-    fn gst_ready() -> Result<(), String> {
+    pub(super) fn gst_ready() -> Result<(), String> {
         static READY: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
         READY
             .get_or_init(|| {
@@ -25227,7 +25244,7 @@ mod gtk_media {
 
     /// The GError behind a bus error, as the failure table reads it: its
     /// domain's quark string and code, and whether a network source posted it.
-    fn gst_error_report(msg: &gst::Message, err: &glib::Error) -> crate::media::Report {
+    pub(super) fn gst_error_report(msg: &gst::Message, err: &glib::Error) -> crate::media::Report {
         use glib::translate::ToGlibPtr;
         let raw: *const glib::ffi::GError = err.to_glib_none().0;
         // SAFETY: `raw` is the live GError `err` wraps.
@@ -26141,4 +26158,480 @@ mod media_tests {
 /// docs/media-plan.md §8 ruling 1, this backend's half of the capability query.
 pub(crate) fn can_play(mime: &str, codecs: &str) -> bool {
     gtk_media::registry_can_play(mime, codecs)
+}
+
+/// THE READER (docs/media-plan.md §8 ruling 4): a playbin3 per read on its
+/// own thread, the stream type selected by the pipeline's flags before any
+/// decoder (docs/probes/media-extraction-2026-10-01.md: 7.7 s for a waveform
+/// otherwise), frames into an RGBA appsink after a flushing seek
+/// (`ACCURATE`, or `KEY_UNIT|SNAP_BEFORE` for the keyframe at or before), the
+/// actual time through the sample's segment (the edit list), and PCM as F32
+/// at the track's own channel count. Every report reaches the core on the
+/// main thread through `reader_report`, the one door.
+mod gtk_reader {
+    use super::*;
+    use gstreamer as gst;
+    use gstreamer::prelude::{Cast, ElementExt, ElementExtManual, GObjectExtManualGst, GstBinExtManual, ObjectExt};
+    use std::sync::Arc;
+
+    use crate::reader::{Flight as Shared, Owned as Msg, Then};
+
+    const POLL: gst::ClockTime = gst::ClockTime::from_mseconds(100);
+
+    struct Reader {
+        url: String,
+        read: Option<(u64, Arc<Shared>)>,
+        /// Bumped at every answer, so only the latest bound timer asks.
+        answers: u64,
+    }
+
+    thread_local! {
+        static READERS: RefCell<HashMap<u64, Reader>> = RefCell::new(HashMap::new());
+        static PENDING: RefCell<std::collections::VecDeque<(u64, u64, Arc<Shared>, Msg)>> =
+            RefCell::new(Default::default());
+        static FLUSH_SCHEDULED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    /// A worker's side of one read.
+    struct Out {
+        reader: u64,
+        read: u64,
+        shared: Arc<Shared>,
+    }
+
+    impl Out {
+        fn send(&self, msg: Msg) {
+            let (reader, read, shared) = (self.reader, self.read, self.shared.clone());
+            glib::MainContext::default().invoke(move || queue(reader, read, shared, msg));
+        }
+
+        fn wanted(&self) -> bool {
+            self.shared.wanted()
+        }
+
+        /// THE ONE SITE a read for a track the source lacks is reported
+        /// from; the core decides its reason (docs/deferred.md, the missing-track
+        /// RULING).
+        fn no_track(&self, kind: &str) {
+            self.send(Msg::NoTrack(format!("kaya: the source has no {kind} track")));
+        }
+
+        fn failed(&self, detail: String) {
+            self.send(Msg::Failed { domain: "kaya-gstreamer".to_owned(), code: 0, underlying: 0, detail });
+        }
+    }
+
+    fn queue(reader: u64, read: u64, shared: Arc<Shared>, msg: Msg) {
+        PENDING.with_borrow_mut(|q| q.push_back((reader, read, shared, msg)));
+        if !FLUSH_SCHEDULED.replace(true) {
+            glib::idle_add_local_once(flush);
+        }
+    }
+
+    fn flush() {
+        FLUSH_SCHEDULED.set(false);
+        if CORE.with(|c| c.try_borrow_mut().is_err()) {
+            if !FLUSH_SCHEDULED.replace(true) {
+                glib::timeout_add_local_once(std::time::Duration::from_millis(5), flush);
+            }
+            return;
+        }
+        while let Some((reader, read, shared, msg)) = PENDING.with_borrow_mut(|q| q.pop_front()) {
+            CORE.with_borrow_mut(|core| {
+                let Some(core) = core.as_mut() else { return };
+                crate::fault::guard("a reader report", || reader_report(core, reader, read, &shared, msg));
+            });
+        }
+    }
+
+    /// THE ONE DOOR every reader report takes: the core decides what the app
+    /// hears, and its answer stops the read or restarts the bound.
+    fn reader_report(core: &mut CoreState, reader: u64, read: u64, shared: &Shared, msg: Msg) {
+        let (published, answer) =
+            core.scene.reader_report(crate::protocol::ReaderId(reader), crate::protocol::ReadId(read), msg.report());
+        for occ in published {
+            core.occurrences.send(occ);
+        }
+        if matches!(msg, Msg::Pcm { .. }) {
+            shared.taken();
+        }
+        match msg.then(answer) {
+            Then::Stop => stop(reader, read),
+            Then::Rebound => bound(reader, read),
+            Then::Carry => {}
+        }
+    }
+
+    /// The bound (docs/media-plan.md §7c) from the ask or the latest answer;
+    /// the core's clock decides.
+    fn bound(reader: u64, read: u64) {
+        let Some((seen, shared)) = READERS.with_borrow_mut(|rs| {
+            let r = rs.get_mut(&reader)?;
+            let (current, shared) = r.read.as_ref()?;
+            if *current != read {
+                return None;
+            }
+            let shared = shared.clone();
+            r.answers += 1;
+            Some((r.answers, shared))
+        }) else {
+            return;
+        };
+        glib::timeout_add_local_once(std::time::Duration::from_millis(crate::media::TIMEOUT_MS), move || {
+            let still = READERS.with_borrow(|rs| {
+                rs.get(&reader).is_some_and(|r| r.answers == seen && r.read.as_ref().is_some_and(|(q, _)| *q == read))
+            });
+            if still {
+                queue(reader, read, shared, Msg::Overdue);
+            }
+        });
+    }
+
+    fn stop(reader: u64, read: u64) {
+        READERS.with_borrow_mut(|rs| {
+            if let Some(r) = rs.get_mut(&reader) {
+                if r.read.as_ref().is_some_and(|(q, _)| *q == read) {
+                    if let Some((_, shared)) = r.read.take() {
+                        shared.stop();
+                    }
+                }
+            }
+        });
+    }
+
+    pub(super) fn open(reader: u64, url: String) {
+        READERS.with_borrow_mut(|rs| rs.insert(reader, Reader { url, read: None, answers: 0 }));
+    }
+
+    fn start(reader: u64, read: u64, what: &str, work: impl FnOnce(String, &Out) + Send + 'static) {
+        let shared = Arc::new(Shared::default());
+        let Some(url) = READERS.with_borrow_mut(|rs| {
+            let r = rs.get_mut(&reader)?;
+            r.read = Some((read, shared.clone()));
+            Some(r.url.clone())
+        }) else {
+            return;
+        };
+        let out = Out { reader, read, shared };
+        bound(reader, read);
+        let spawned = std::thread::Builder::new().name(format!("kaya-reader-{reader}")).spawn(move || {
+            if let Err(why) = super::gtk_media::gst_ready() {
+                out.failed(why);
+                return;
+            }
+            work(url, &out);
+        });
+        if let Err(e) = spawned {
+            panic!("kaya: the reader's {what} thread would not start: {e}");
+        }
+    }
+
+    pub(super) fn frames(reader: u64, read: u64, exact: bool, max: (u32, u32), times: Vec<u64>) {
+        start(reader, read, "frames", move |url, out| frames_worker(&url, exact, max, &times, out));
+    }
+
+    pub(super) fn peaks(reader: u64, read: u64) {
+        start(reader, read, "peaks", move |url, out| peaks_worker(&url, out));
+    }
+
+    pub(super) fn cancel(reader: u64, read: u64) {
+        stop(reader, read);
+    }
+
+    pub(super) fn close(reader: u64) {
+        if let Some(r) = READERS.with_borrow_mut(|rs| rs.remove(&reader)) {
+            if let Some((_, shared)) = r.read {
+                shared.stop();
+            }
+        }
+    }
+
+    /// A playbin3 decoding `kind` alone ("video" or "audio"), into `sink`.
+    fn pipeline(url: &str, kind: &str, sink: &gst::Element) -> Result<gst::Element, String> {
+        let playbin = gst::ElementFactory::make("playbin3")
+            .build()
+            .map_err(|e| format!("kaya: the reader needs GStreamer's playbin3 ({e})"))?;
+        playbin.set_property_from_str("flags", kind);
+        playbin.set_property(if kind == "video" { "video-sink" } else { "audio-sink" }, sink);
+        playbin.set_property("uri", url);
+        Ok(playbin)
+    }
+
+    fn element(factory: &str) -> Result<gst::Element, String> {
+        gst::ElementFactory::make(factory)
+            .build()
+            .map_err(|e| format!("kaya: the reader needs GStreamer's {factory} ({e})"))
+    }
+
+    /// `convert ! capsfilter ! appsink` as one sink element.
+    fn sink_bin(convert: &[&str], caps: gst::Caps, sync: bool) -> Result<(gst::Element, gstreamer_app::AppSink), String> {
+        let bin = gst::Bin::new();
+        let appsink = gstreamer_app::AppSink::builder().caps(&caps).sync(sync).max_buffers(1).build();
+        let mut chain = Vec::new();
+        for factory in convert {
+            chain.push(element(factory)?);
+        }
+        chain.push(appsink.clone().upcast());
+        bin.add_many(chain.iter()).map_err(|e| format!("kaya: the reader's sink would not assemble: {e}"))?;
+        gst::Element::link_many(chain.iter()).map_err(|e| format!("kaya: the reader's sink would not link: {e}"))?;
+        let pad = chain[0].static_pad("sink").ok_or("kaya: the reader's converter has no sink pad")?;
+        let ghost = gst::GhostPad::with_target(&pad).map_err(|e| format!("kaya: the reader's sink pad: {e}"))?;
+        bin.add_pad(&ghost).map_err(|e| format!("kaya: the reader's sink pad: {e}"))?;
+        Ok((bin.upcast(), appsink))
+    }
+
+    enum Bus {
+        Ready,
+        Ended,
+        Stop,
+    }
+
+    /// Reads the bus until the pipeline prerolls (ASYNC_DONE), reaching end
+    /// of stream counts as `Ended`; an error, a missing plugin for the
+    /// container, a source lacking the track, or the read no longer wanted
+    /// is `Stop`, reported where it is the platform's.
+    fn wait(pipeline: &gst::Element, bus: &gst::Bus, kind: &str, out: &Out, until_async: bool) -> Bus {
+        use gst::MessageView as M;
+        let want = if kind == "video" { gst::StreamType::VIDEO } else { gst::StreamType::AUDIO };
+        loop {
+            if !out.wanted() {
+                return Bus::Stop;
+            }
+            let msg = if until_async { bus.timed_pop(POLL) } else { bus.pop() };
+            let Some(msg) = msg else {
+                if until_async {
+                    continue;
+                }
+                return Bus::Ready;
+            };
+            match msg.view() {
+                M::StreamCollection(c) => {
+                    let collection = c.stream_collection();
+                    if !collection.iter().any(|st| st.stream_type().contains(want)) {
+                        out.no_track(kind);
+                        return Bus::Stop;
+                    }
+                }
+                M::Error(e) => {
+                    if let crate::media::Report::Failed { domain, code, underlying, detail } =
+                        super::gtk_media::gst_error_report(&msg, &e.error())
+                    {
+                        out.send(Msg::Failed { domain, code, underlying, detail });
+                    }
+                    return Bus::Stop;
+                }
+                M::Element(e) => {
+                    let Some(s) = e.structure() else { continue };
+                    if s.name() != "missing-plugin" {
+                        continue;
+                    }
+                    let media = s
+                        .get::<gst::Caps>("detail")
+                        .ok()
+                        .and_then(|c| c.structure(0).map(|s| s.name().to_string()))
+                        .unwrap_or_default();
+                    if media.starts_with(kind) || crate::media::gst_container_caps(&media) {
+                        out.send(Msg::Failed {
+                            domain: format!("{}{media}", crate::media::GST_MISSING_PLUGIN),
+                            code: 0,
+                            underlying: 0,
+                            detail: format!("GStreamer has no element for {media}"),
+                        });
+                        return Bus::Stop;
+                    }
+                }
+                M::Eos(_) => return Bus::Ended,
+                M::AsyncDone(_) if until_async && msg.src().is_some_and(|s| s == pipeline.upcast_ref::<gst::Object>()) => {
+                    return Bus::Ready;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn ms(t: gst::ClockTime) -> u64 {
+        (t.nseconds() + 500_000) / 1_000_000
+    }
+
+    fn frames_worker(url: &str, exact: bool, max: (u32, u32), times: &[u64], out: &Out) {
+        let caps = gst::Caps::builder("video/x-raw").field("format", "I420").build();
+        let built = sink_bin(&["videoconvert"], caps, false)
+            .and_then(|(bin, sink)| Ok((pipeline(url, "video", &bin)?, sink)));
+        let (pipeline, sink) = match built {
+            Ok(p) => p,
+            Err(why) => return out.failed(why),
+        };
+        let bus = pipeline.bus().expect("a pipeline has a bus");
+        super::gtk_media::while_prerolling(&pipeline, || {
+            let _ = pipeline.set_state(gst::State::Paused);
+        });
+        frames_read(&pipeline, &bus, &sink, exact, max, times, out);
+        let _ = pipeline.set_state(gst::State::Null);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn frames_read(
+        pipeline: &gst::Element,
+        bus: &gst::Bus,
+        sink: &gstreamer_app::AppSink,
+        exact: bool,
+        max: (u32, u32),
+        times: &[u64],
+        out: &Out,
+    ) {
+        match wait(pipeline, bus, "video", out, true) {
+            Bus::Ready => {}
+            Bus::Ended => return out.send(Msg::Finished),
+            Bus::Stop => return,
+        }
+        let flags = gst::SeekFlags::FLUSH
+            | if exact { gst::SeekFlags::ACCURATE } else { gst::SeekFlags::KEY_UNIT | gst::SeekFlags::SNAP_BEFORE };
+        for (index, t) in times.iter().enumerate() {
+            if pipeline.seek_simple(flags, gst::ClockTime::from_mseconds(*t)).is_err() {
+                return out.failed(format!("kaya: GStreamer refused the seek to {t} ms"));
+            }
+            match wait(pipeline, bus, "video", out, true) {
+                Bus::Ready => {}
+                Bus::Ended => return out.send(Msg::Finished),
+                Bus::Stop => return,
+            }
+            let sample = loop {
+                if !out.wanted() {
+                    return;
+                }
+                if let Some(sample) = sink.try_pull_preroll(POLL) {
+                    break sample;
+                }
+                if sink.is_eos() {
+                    return out.send(Msg::Finished);
+                }
+            };
+            match frame(&sample, max) {
+                Ok((actual_ms, width, height, pixels)) => {
+                    out.send(Msg::Frame { index: index as u32, actual_ms, width, height, pixels })
+                }
+                Err(why) => return out.failed(why),
+            }
+        }
+    }
+
+    /// One prerolled I420 sample as RGBA8 at the read's bound, converted
+    /// through its own matrix and range by kaya (crate::reader::Ycc:
+    /// videoconvert read the 505050 band as 4E4E4E, measured), and its
+    /// picture's time in the stream (the edit list read through the
+    /// segment, docs/probes/media-extraction-2026-10-01.md).
+    fn frame(sample: &gst::Sample, max: (u32, u32)) -> Result<(u64, u32, u32, Vec<u8>), String> {
+        let buffer = sample.buffer().ok_or("kaya: GStreamer prerolled a sample with no buffer")?;
+        let caps = sample.caps().ok_or("kaya: GStreamer prerolled a sample with no caps")?;
+        let s = caps.structure(0).ok_or("kaya: the sample's caps are empty")?;
+        let (w, h) = (
+            s.get::<i32>("width").map_err(|e| e.to_string())? as u32,
+            s.get::<i32>("height").map_err(|e| e.to_string())? as u32,
+        );
+        let ycc = ycc(s.get::<String>("colorimetry").ok().as_deref(), h);
+        let actual = sample
+            .segment()
+            .and_then(|seg| seg.downcast_ref::<gst::ClockTime>().and_then(|seg| seg.to_stream_time(buffer.pts()?)))
+            .or(buffer.pts())
+            .map(ms)
+            .unwrap_or(0);
+        let map = buffer.map_readable().map_err(|e| format!("kaya: the frame would not map: {e}"))?;
+        // GStreamer's default I420 layout (an appsink offers no video meta).
+        let up = |v: usize, to: usize| v.div_ceil(to) * to;
+        let (wu, hu) = (w as usize, h as usize);
+        let (ystride, cstride) = (up(wu, 4), up(up(wu, 2) / 2, 4));
+        let u_at = ystride * up(hu, 2);
+        let v_at = u_at + cstride * (up(hu, 2) / 2);
+        let want = v_at + cstride * (up(hu, 2) / 2);
+        if map.size() < want {
+            return Err(format!("kaya: a {w}x{h} I420 frame of {} bytes, wanted {want}", map.size()));
+        }
+        let rgba = ycc.rgba(w, h, |x, y| {
+            let c = (y / 2) * cstride + x / 2;
+            (map[y * ystride + x], map[u_at + c], map[v_at + c])
+        });
+        let (w, h, rgba) = crate::reader::fit(w, h, &rgba, max);
+        Ok((actual, w, h, rgba))
+    }
+
+    /// GStreamer's colorimetry string as kaya's matrix and range: its four
+    /// numbers `range:matrix:transfer:primaries` or one of its names.
+    fn ycc(colorimetry: Option<&str>, height: u32) -> crate::reader::Ycc {
+        use crate::reader::Ycc;
+        let c = colorimetry.unwrap_or("");
+        let nums: Vec<i32> = c.split(':').filter_map(|p| p.parse().ok()).collect();
+        let ((kr, kb), full_range) = if nums.len() == 4 {
+            let m = match nums[1] {
+                3 => Ycc::BT709,
+                4 => Ycc::BT601,
+                5 => Ycc::SMPTE240M,
+                6 => Ycc::BT2020,
+                _ => Ycc::unnamed(height),
+            };
+            (m, nums[0] == 1)
+        } else if c.starts_with("bt709") {
+            (Ycc::BT709, false)
+        } else if c.starts_with("bt601") {
+            (Ycc::BT601, false)
+        } else if c.starts_with("bt2020") || c.starts_with("bt2100") {
+            (Ycc::BT2020, false)
+        } else if c.starts_with("smpte240m") {
+            (Ycc::SMPTE240M, false)
+        } else {
+            (Ycc::unnamed(height), false)
+        };
+        Ycc { kr, kb, full_range }
+    }
+
+    fn peaks_worker(url: &str, out: &Out) {
+        let caps = gst::Caps::builder("audio/x-raw").field("format", "F32LE").field("layout", "interleaved").build();
+        let built = sink_bin(&["audioconvert"], caps, false)
+            .and_then(|(bin, sink)| Ok((pipeline(url, "audio", &bin)?, sink)));
+        let (pipeline, sink) = match built {
+            Ok(p) => p,
+            Err(why) => return out.failed(why),
+        };
+        let bus = pipeline.bus().expect("a pipeline has a bus");
+        super::gtk_media::while_prerolling(&pipeline, || {
+            let _ = pipeline.set_state(gst::State::Playing);
+        });
+        peaks_read(&pipeline, &bus, &sink, out);
+        let _ = pipeline.set_state(gst::State::Null);
+    }
+
+    fn peaks_read(pipeline: &gst::Element, bus: &gst::Bus, sink: &gstreamer_app::AppSink, out: &Out) {
+        // An appsink outside PAUSED or PLAYING answers no sample and reads
+        // as at its end (measured: a peaks read finished empty), so the
+        // pull waits for the preroll.
+        match wait(pipeline, bus, "audio", out, true) {
+            Bus::Ready | Bus::Ended => {}
+            Bus::Stop => return,
+        }
+        loop {
+            if let Bus::Stop = wait(pipeline, bus, "audio", out, false) {
+                return;
+            }
+            let Some(sample) = sink.try_pull_sample(POLL) else {
+                if sink.is_eos() {
+                    return out.send(Msg::Finished);
+                }
+                continue;
+            };
+            let (Some(buffer), Some(caps)) = (sample.buffer(), sample.caps()) else { continue };
+            let Some(s) = caps.structure(0) else { continue };
+            let (Ok(channels), Ok(rate)) = (s.get::<i32>("channels"), s.get::<i32>("rate")) else { continue };
+            let Ok(map) = buffer.map_readable() else { continue };
+            let samples: Vec<f32> =
+                map.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
+            drop(map);
+            if samples.is_empty() {
+                continue;
+            }
+            let total_ms = pipeline.query_duration::<gst::ClockTime>().map(ms).unwrap_or(0);
+            if !out.shared.make_room() {
+                return;
+            }
+            out.send(Msg::Pcm { channels: channels as u32, sample_rate: rate as u32, samples, total_ms });
+        }
+    }
 }

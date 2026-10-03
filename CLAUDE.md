@@ -610,9 +610,8 @@ in docs/deferred.md.
    AND THE MEDIA READER AND THE CANVAS'S IMAGE OP SINCE 2026-10-02
    (docs/media-plan.md §8 rulings 3 and 4): each binding's hand-written
    surface calling the reader's seven generated record writers and naming
-   the `image` draw op, Rust the reference row; red by design in the eight
-   bindings the depth slice did not build (docs/deferred.md's reader BUILD
-   entry), a fake-name census firing every row, counts printed),
+   the `image` draw op, Rust the reference row, green in all nine since the
+   breadth slice, a fake-name census firing every row, counts printed),
    `tools/check-universal-props.py` (the lowering-side sibling: every
    backend applies the universal a11y props to every kind — Compose
    per-arm, SwiftUI's one wrapper unbypassed, GTK/WinUI's apply arm
@@ -1419,7 +1418,13 @@ in docs/deferred.md.
    answer alike, and AVFoundation's default is the nearest — the arm is held
    to tolerance-after zero; the bound restarted at every answer; a stop that
    cancels the generator and the PCM reader; and every report on the main
-   thread. Four watched negatives, counts printed),
+   thread. Four watched negatives, counts printed. AND ON THE OTHER THREE
+   ARMS SINCE THE BREADTH: GTK's keyframe seek SNAP_BEFORE and its picture
+   time through the segment, WinUI's seeks and times moved by the edit list
+   Media Foundation ignores, Compose's keyframe taken from the sync samples,
+   each arm's one report door, and ONE site per backend reporting a missing
+   track, so the reason a ruling names is one line (docs/deferred.md's
+   missing-track RULING). Five more watched negatives, counts printed),
    `tools/check-file-modes.py` (the file-mode NUMBERS agree with the
    spec's wherever they are written down. `kaya_open_picked` takes an
    integer, crates/kaya/src/spec.rs decides what it means, and five

@@ -1122,4 +1122,111 @@ let () =
       if not (List.exists bound fresh) then
         fail "a stamped video's player field never reached PROP_PLAYER");
 
+  (* THE READER'S RULE 4: after cancel_read or close_reader the app hears
+     only the end, and the image a late frame carried rides the next
+     commit as release_image; an awaited read closed under it answers
+     Error Cancelled and gives back what it carried. *)
+  let frame reader read index image =
+    record Kaya_wire.occ_kind_reader_frame (fun b ->
+        Buffer.add_int64_le b reader;
+        Buffer.add_int64_le b read;
+        Buffer.add_int64_le b image;
+        Buffer.add_int32_le b (Int32.of_int index);
+        Buffer.add_int32_le b 2l;
+        Buffer.add_int32_le b 1l;
+        Buffer.add_int32_le b 0l;
+        Buffer.add_int64_le b (Int64.of_int (40 * index));
+        Buffer.add_int64_le b (Int64.of_int (40 * index)))
+  in
+  let finished reader read outcome =
+    record Kaya_wire.occ_kind_reader_done (fun b ->
+        Buffer.add_int64_le b reader;
+        Buffer.add_int64_le b read;
+        Buffer.add_int32_le b (Int32.of_int outcome);
+        Buffer.add_int32_le b 0l;
+        Kaya_wire.encode_value b (Str ""))
+  in
+  let reader_app = Kaya_app.create () in
+  let feed (kind, id, keys, payload, tail) =
+    if not (For_media_checks.occurrence reader_app kind id keys payload tail) then
+      fail "the media arm did not take reader occurrence kind %d" kind
+  in
+  let released records image = List.mem (Kaya_wire.tx_release_image image) records in
+  let frames_heard = ref [] and ends = ref [] in
+  let listen read =
+    on_frame reader_app read (fun f -> frames_heard := f.Frame.index :: !frames_heard);
+    on_read_done reader_app read (fun o ->
+        ends := (Read_outcome.name o, For_checks.records (the_tx ())) :: !ends)
+  in
+  (* reader 1, read 1, images 1 and 2 *)
+  let clip, read =
+    build reader_app (fun () ->
+        let r = reader (Media_source.asset "media/h264_frames.mp4") in
+        (r, read_frames ~accuracy:Frame_accuracy.Exact r [ 0; 40 ]))
+  in
+  listen read;
+  build reader_app (fun () -> cancel_read clip read);
+  feed (frame 1L 1L 0 1L);
+  feed (finished 1L 1L Kaya_wire.read_outcome_cancelled);
+  (match (!frames_heard, !ends) with
+  | [], [ ("cancelled", records) ] ->
+      if not (released records 1L) then
+        fail "a cancelled read's late frame: image 1 was not released by the next commit"
+  | heard, ends ->
+      fail "a cancelled read was heard: frames [%s], ends [%s]"
+        (String.concat "; " (List.map string_of_int heard))
+        (String.concat "; " (List.map fst ends)));
+  (* reader 2, read 2, image 3: closing the reader gives its read up *)
+  frames_heard := [];
+  ends := [];
+  let closing, read =
+    build reader_app (fun () ->
+        let r = reader (Media_source.asset "media/h264_frames.mp4") in
+        (r, read_frames ~accuracy:Frame_accuracy.Exact r [ 0 ]))
+  in
+  listen read;
+  build reader_app (fun () -> close_reader closing);
+  feed (frame 2L 2L 0 3L);
+  feed (finished 2L 2L Kaya_wire.read_outcome_cancelled);
+  (match (!frames_heard, !ends) with
+  | [], [ ("cancelled", records) ] ->
+      if not (released records 3L) then
+        fail "a closed reader's late frame: image 3 was not released by the next commit"
+  | heard, ends ->
+      fail "a closed reader's read was heard: frames [%s], ends [%s]"
+        (String.concat "; " (List.map string_of_int heard))
+        (String.concat "; " (List.map fst ends)));
+  (* reader 3, read 3, images 4 and 5: heard frame by frame, then done *)
+  frames_heard := [];
+  ends := [];
+  let read = build reader_app (fun () -> read_frames ~accuracy:Frame_accuracy.Exact (reader (Media_source.asset "media/h264_frames.mp4")) [ 0; 40 ]) in
+  listen read;
+  feed (frame 3L 3L 1 5L);
+  feed (frame 3L 3L 0 4L);
+  feed (finished 3L 3L Kaya_wire.read_outcome_completed);
+  if !frames_heard <> [ 0; 1 ] || List.map fst !ends <> [ "completed" ] then
+    fail "a read in flight was not heard frame by frame";
+  (* reader 4, read 4, images 6 and 7: awaited, one frame carried, then
+     its reader closed under it *)
+  let answer = ref "" in
+  let awaited =
+    build reader_app (fun () ->
+        let r = reader (Media_source.asset "media/h264_frames.mp4") in
+        frames ~accuracy:Frame_accuracy.Keyframe r [ 0; 40 ] (fun result ->
+            let records = For_checks.records (the_tx ()) in
+            answer :=
+              (match result with
+              | Ok fs -> Printf.sprintf "ok %d" (List.length fs)
+              | Error Read_error.Cancelled -> "cancelled"
+              | Error (Read_error.Failed (why, _)) -> "failed " ^ Media_failure.name why)
+              ^ if released records 6L && released records 7L then " released" else " kept");
+        r)
+  in
+  feed (frame 4L 4L 0 6L);
+  build reader_app (fun () -> close_reader awaited);
+  feed (frame 4L 4L 1 7L);
+  feed (finished 4L 4L Kaya_wire.read_outcome_cancelled);
+  if !answer <> "cancelled released" then
+    fail "an awaited read closed under it answered %S, wanted \"cancelled released\"" !answer;
+
   print_endline "ocaml abort check: OK"

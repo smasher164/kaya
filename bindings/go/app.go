@@ -301,8 +301,9 @@ type App struct {
 	// nothing is kept here but the handler.
 	links         map[uint64]func(*Tx, map[string]string)
 	nextLinkRoute uint64
-	// Link may be called before the first transaction, so its record
-	// waits here for one (Build drains it head-first).
+	// Records that wait for the next commit (Build drains them head-first):
+	// a Link declared before the first transaction, and the release of an
+	// image a given-up read answered with late (media.go).
 	pendingRecords [][]byte
 	fileDialogs    map[uint64]func(*Tx, []PickedFile)
 	clipboardReads map[uint64]func(*Tx, Representation)
@@ -2277,6 +2278,13 @@ func (d *Draw) Font(asset string, size float64, weight int64) *Draw {
 func (d *Draw) Text(x, y float64, s string, paint Paint, align TextAlign,
 	baseline TextBaseline) *Draw {
 	return d.op(DrawOpText, x, y, int64(paint), int64(align), int64(baseline), s)
+}
+
+// Image draws a core-held image into the rectangle at (x, y), w by h
+// (docs/media-plan.md §8 ruling 3); one holding no picture, or released,
+// is refused.
+func (d *Draw) Image(img Image, x, y, w, h float64) *Draw {
+	return d.op(DrawOpImage, int64(img.id), x, y, w, h)
 }
 
 // Canvas creates a drawing surface. vb is the coordinate system the ops

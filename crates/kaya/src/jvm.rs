@@ -169,6 +169,9 @@ pub(crate) fn register_ring_natives(env: &mut JNIEnv) -> jni::errors::Result<()>
             NativeMethod { name: "tr".into(), sig: "([B[BI)[B".into(), fn_ptr: ring_tr as *mut _ },
             // The capability query (docs/media-plan.md §8 ruling 1).
             NativeMethod { name: "canPlay".into(), sig: "([B[B)Z".into(), fn_ptr: ring_can_play as *mut _ },
+            // The reader's two pulls (docs/media-plan.md §8 ruling 4).
+            NativeMethod { name: "readerPeaks".into(), sig: "(JJ)[S".into(), fn_ptr: ring_reader_peaks as *mut _ },
+            NativeMethod { name: "imagePixels".into(), sig: "(J[I)[B".into(), fn_ptr: ring_image_pixels as *mut _ },
             NativeMethod {
                 name: "prefRemove".into(),
                 sig: "([B)V".into(),
@@ -471,6 +474,28 @@ extern "system" fn ring_direction(_env: JNIEnv, _class: JClass) -> jint {
 
 extern "system" fn ring_text_scale(_env: JNIEnv, _class: JClass) -> jdouble {
     crate::capi::kaya_text_scale()
+}
+
+/// A finished peaks read's pairs, pair-major i16 (min then max per channel); null for none
+extern "system" fn ring_reader_peaks<'a>(env: JNIEnv<'a>, _c: JClass<'a>, reader: jlong, read: jlong) -> jni::objects::JShortArray<'a> {
+    let n = unsafe { crate::capi::kaya_reader_peaks(reader as u64, read as u64, std::ptr::null_mut(), 0) };
+    if n == 0 { return null_ref(); }
+    let mut buf = vec![0i16; n];
+    unsafe { crate::capi::kaya_reader_peaks(reader as u64, read as u64, buf.as_mut_ptr(), n) };
+    let out = env.new_short_array(n as i32).expect("kaya: allocating the peaks failed");
+    env.set_short_array_region(&out, 0, &buf).expect("kaya: writing the peaks failed");
+    out
+}
+
+/// A core-held image's premultiplied RGBA8; size[0], size[1] = width, height; null for none
+extern "system" fn ring_image_pixels<'a>(env: JNIEnv<'a>, _c: JClass<'a>, image: jlong, size: jni::objects::JIntArray<'a>) -> JByteArray<'a> {
+    let (mut w, mut h) = (0u32, 0u32);
+    let n = unsafe { crate::capi::kaya_image_pixels(image as u64, std::ptr::null_mut(), 0, &mut w, &mut h) };
+    if n == 0 { return null_ref(); }
+    let mut buf = vec![0u8; n];
+    unsafe { crate::capi::kaya_image_pixels(image as u64, buf.as_mut_ptr(), n, &mut w, &mut h) };
+    env.set_int_array_region(&size, 0, &[w as i32, h as i32]).expect("kaya: writing the size failed");
+    env.byte_array_from_slice(&buf).expect("kaya: allocating the pixels failed")
 }
 
 extern "system" fn ring_can_play<'a>(

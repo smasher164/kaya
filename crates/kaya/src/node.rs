@@ -26,6 +26,7 @@ type Finalize = unsafe extern "C" fn(Env, *mut c_void, *mut c_void);
 const NAPI_OK: Status = 0;
 const NAPI_PENDING_EXCEPTION: Status = 10;
 const NAPI_UINT8_ARRAY: c_int = 1;
+const NAPI_INT16_ARRAY: c_int = 3;
 const NAPI_TSFN_RELEASE: c_int = 0;
 const NAPI_TSFN_BLOCKING: c_int = 1;
 
@@ -173,6 +174,8 @@ pub unsafe extern "C" fn napi_register_module_v1(env: Env, exports: Value) -> Va
         ("direction", direction),
         ("textScale", text_scale),
         ("canPlay", can_play),
+        ("readerPeaks", reader_peaks),
+        ("imagePixels", image_pixels),
         ("catalog", catalog),
         ("tr", tr),
         ("startPump", start_pump),
@@ -549,6 +552,52 @@ unsafe extern "C" fn can_play(env: Env, info: CbInfo) -> Value {
     let codecs = try_or_throw!(env, unsafe { string_arg(env, c, "canPlay codecs") });
     let yes = unsafe { capi::kaya_can_play(mime.as_ptr(), mime.len(), codecs.as_ptr(), codecs.len()) };
     unsafe { boolean(env, yes != 0) }
+}
+
+/// `readerPeaks(reader, read)`: kaya_reader_peaks, the whole run as an
+/// Int16Array, pair-major, min then max (docs/media-plan.md §8 ruling 4).
+unsafe extern "C" fn reader_peaks(env: Env, info: CbInfo) -> Value {
+    let [r, q] = unsafe { args::<2>(env, info) };
+    let reader = try_or_throw!(env, unsafe { u64_arg(env, r, "readerPeaks reader") });
+    let read = try_or_throw!(env, unsafe { u64_arg(env, q, "readerPeaks read") });
+    let n = unsafe { capi::kaya_reader_peaks(reader, read, ptr::null_mut(), 0) };
+    let mut buf = vec![0i16; n];
+    let got = unsafe { capi::kaya_reader_peaks(reader, read, buf.as_mut_ptr(), n) }.min(n);
+    let api = api();
+    let mut data: *mut c_void = ptr::null_mut();
+    let mut ab: Value = ptr::null_mut();
+    let mut out: Value = ptr::null_mut();
+    unsafe {
+        (api.napi_create_arraybuffer)(env, got * 2, &mut data, &mut ab);
+        if got > 0 && !data.is_null() {
+            ptr::copy_nonoverlapping(buf.as_ptr(), data as *mut i16, got);
+        }
+        (api.napi_create_typedarray)(env, NAPI_INT16_ARRAY, got, ab, 0, &mut out);
+    }
+    out
+}
+
+/// `imagePixels(image)`: kaya_image_pixels as `{width, height, bytes}`, null
+/// for an image holding no picture.
+unsafe extern "C" fn image_pixels(env: Env, info: CbInfo) -> Value {
+    let [i] = unsafe { args::<1>(env, info) };
+    let image = try_or_throw!(env, unsafe { u64_arg(env, i, "imagePixels") });
+    let (mut w, mut h) = (0u32, 0u32);
+    let n = unsafe { capi::kaya_image_pixels(image, ptr::null_mut(), 0, &mut w, &mut h) };
+    if n == 0 {
+        return unsafe { null(env) };
+    }
+    let mut buf = vec![0u8; n];
+    let got = unsafe { capi::kaya_image_pixels(image, buf.as_mut_ptr(), n, &mut w, &mut h) }.min(n);
+    let api = api();
+    let mut out: Value = ptr::null_mut();
+    unsafe {
+        (api.napi_create_object)(env, &mut out);
+        (api.napi_set_named_property)(env, out, c"width".as_ptr(), number(env, f64::from(w)));
+        (api.napi_set_named_property)(env, out, c"height".as_ptr(), number(env, f64::from(h)));
+        (api.napi_set_named_property)(env, out, c"bytes".as_ptr(), uint8array(env, &buf[..got]));
+    }
+    out
 }
 
 unsafe extern "C" fn catalog(env: Env, info: CbInfo) -> Value {

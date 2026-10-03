@@ -164,6 +164,18 @@ _lib.kaya_text_scale.restype = ctypes.c_double
 _lib.kaya_can_play.argtypes = [ctypes.c_char_p, ctypes.c_size_t,
                                ctypes.c_char_p, ctypes.c_size_t]
 _lib.kaya_can_play.restype = ctypes.c_uint8
+# The reader's two pulls (docs/media-plan.md §8 ruling 4): a ring record
+# cannot carry peaks or pixels.
+_lib.kaya_reader_peaks.argtypes = [ctypes.c_uint64, ctypes.c_uint64,
+                                   ctypes.POINTER(ctypes.c_int16),
+                                   ctypes.c_size_t]
+_lib.kaya_reader_peaks.restype = ctypes.c_size_t
+_lib.kaya_image_pixels.argtypes = [ctypes.c_uint64,
+                                   ctypes.POINTER(ctypes.c_uint8),
+                                   ctypes.c_size_t,
+                                   ctypes.POINTER(ctypes.c_uint32),
+                                   ctypes.POINTER(ctypes.c_uint32)]
+_lib.kaya_image_pixels.restype = ctypes.c_size_t
 _lib.kaya_catalog.argtypes = [ctypes.c_char_p]
 _lib.kaya_catalog.restype = None
 
@@ -465,6 +477,26 @@ def text_scale() -> float:
 def can_play(mime: str, codecs: str) -> bool:
     m, c = mime.encode("utf-8"), codecs.encode("utf-8")
     return _lib.kaya_can_play(m, len(m), c, len(c)) != 0
+
+
+def reader_peaks(reader: int, read: int, count: int) -> list[int]:
+    """A finished read_peaks' `count` i16, pair-major, min then max; []
+    when the core holds none for that read."""
+    buf = (ctypes.c_int16 * max(count, 1))()
+    n = _lib.kaya_reader_peaks(reader, read, buf, count)
+    return list(buf[:min(n, count)])
+
+
+def image_pixels(image: int) -> tuple[int, int, bytes] | None:
+    """A core-held image's premultiplied RGBA8 bytes and size, None for an
+    image holding no picture."""
+    w, h = ctypes.c_uint32(0), ctypes.c_uint32(0)
+    n = _lib.kaya_image_pixels(image, None, 0, ctypes.byref(w), ctypes.byref(h))
+    if n == 0:
+        return None
+    buf = (ctypes.c_uint8 * n)()
+    got = _lib.kaya_image_pixels(image, buf, n, ctypes.byref(w), ctypes.byref(h))
+    return w.value, h.value, bytes(buf[:min(got, n)])
 
 
 def catalog(app: str) -> None:

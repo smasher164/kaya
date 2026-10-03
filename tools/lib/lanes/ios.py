@@ -41,6 +41,8 @@ SWIFT_ENTRIES = [
     # The media suite, one guest (docs/media-plan.md §7a).
     "media_formats:media", "media_delivery:media", "media_session:media",
     "media_tracks:media", "media_feed:media",
+    # The reader and the canvas's images (docs/media-plan.md §8).
+    "media_reader:media",
 ]
 
 # The go suite: the swift roster entry for entry minus the two
@@ -60,7 +62,7 @@ GO_SCENES = [
     "colorpicker",
     "range", "rangertl",
     "media_formats", "media_delivery", "media_session", "media_tracks",
-    "media_feed",
+    "media_feed", "media_reader",
 ]
 
 # CPython embedded in ONE bundle carrying every python scene
@@ -140,7 +142,7 @@ RUST_SCENES = [
     # The media suite (docs/media-plan.md §7a), one guest; the lane's
     # local server is up while any of these is queued.
     "media_formats", "media_delivery", "media_session", "media_tracks",
-    "media_feed",
+    "media_feed", "media_reader",
     # A picked clip played (docs/media-plan.md §2): rust-only.
     "media_picked",
     # The bound (docs/media-plan.md §7c): rust-only.
@@ -173,9 +175,7 @@ DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes"]
 # tooltips with its own (docs/tooltip-plan.md §5) — the iOS arm is the
 # shared interpreter's `.help`, which lands on the accessibility hint,
 # and expect_help reads it there.
-# The reader's iOS arm is the shared interpreter's, compiled; its legs are
-# the breadth slice's to measure (docs/media-plan.md §8 ruling 4).
-UNWIRED_SCENES = ["media_reader"]
+UNWIRED_SCENES = []
 
 # The fullscreen scene's app-only way back after the cut, the same steps as
 # tools/lib/lanes/android.py's FULLSCREEN_APP_TAIL: no user change arrives.
@@ -341,13 +341,14 @@ RUST_EXAMPLE = {"listdetail": "split", "taskspersist": "tasks",
                 "media_formats": "media", "media_delivery": "media",
                 "media_session": "media", "media_tracks": "media",
                 "media_feed": "media", "media_picked": "media",
-                "media_timeout": "media"}
+                "media_timeout": "media", "media_reader": "media"}
 
 # The scenes whose guest declares a media session: their bundles carry
 # UIBackgroundModes audio (docs/media-plan.md §5). The media guest is one
 # app for the five scenes, so all five bundles carry it.
 SESSION_SCENES = ("media_formats", "media_delivery", "media_session",
-                  "media_tracks", "media_feed", "media_picked", "media_timeout")
+                  "media_tracks", "media_feed", "media_picked", "media_timeout",
+                  "media_reader")
 
 # The locale a scene runs under, the knob the leg carries
 # (docs/compliance-plan.md §4); the reads ask the platform, never this.

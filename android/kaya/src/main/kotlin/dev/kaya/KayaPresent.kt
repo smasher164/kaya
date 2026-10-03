@@ -132,6 +132,41 @@ object KayaPresent {
         captionSelected: Int,
     ): Int
     @JvmStatic external fun playerCue(player: Long, text: String): Int
+
+    /** A reader's reports (docs/media-plan.md §8 ruling 4), kaya_reader_*'s
+     * JNI spellings, called on the main thread from KayaReader.kt alone: a
+     * frame's full-size premultiplied RGBA8, fitted to the read's bound in
+     * the core, and frame and pcm answer 1 while the read is wanted. */
+    @JvmStatic external fun readerFrame(
+        reader: Long,
+        read: Long,
+        index: Int,
+        actualMs: Long,
+        width: Int,
+        height: Int,
+        maxWidth: Int,
+        maxHeight: Int,
+        pixels: ByteArray,
+    ): Int
+    @JvmStatic external fun readerPcm(
+        reader: Long,
+        read: Long,
+        channels: Int,
+        rate: Int,
+        samples: FloatArray,
+        totalMs: Long,
+    ): Int
+    @JvmStatic external fun readerFinished(reader: Long, read: Long)
+    @JvmStatic external fun readerFailed(
+        reader: Long,
+        read: Long,
+        domain: String,
+        code: Long,
+        underlying: Long,
+        detail: String,
+    )
+    @JvmStatic external fun readerNoTrack(reader: Long, read: Long, detail: String)
+    @JvmStatic external fun readerOverdue(reader: Long, read: Long): Int
     @JvmStatic external fun playerCaptionsText(player: Long, url: String, text: String): Int
     @JvmStatic external fun playerCaptionsFailed(
         player: Long,

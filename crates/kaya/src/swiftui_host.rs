@@ -385,6 +385,7 @@ pub struct KayaHostApi {
     pub reader_finished: extern "C" fn(u64, u64),
     pub reader_failed: unsafe extern "C" fn(u64, u64, *const u8, usize, i64, i64, *const u8, usize),
     pub reader_overdue: extern "C" fn(u64, u64) -> u32,
+    pub reader_no_track: unsafe extern "C" fn(u64, u64, *const u8, usize),
 }
 
 /// # Safety
@@ -650,6 +651,7 @@ pub(crate) fn run() -> i32 {
         reader_finished: crate::capi::kaya_reader_finished,
         reader_failed: crate::capi::kaya_reader_failed,
         reader_overdue: crate::capi::kaya_reader_overdue,
+        reader_no_track: crate::capi::kaya_reader_no_track,
     };
     // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the declares-windowing
     // entry), and the declaration has to beat the first transaction rather

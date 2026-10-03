@@ -504,9 +504,8 @@ impl super::AppCtx {
 
     /// An image's premultiplied RGBA8 bytes and size, for an app that keeps
     /// its pictures; None for an image holding none.
-    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
     pub fn image_pixels(&self, image: ImageId) -> Option<(u32, u32, Vec<u8>)> {
-        crate::capi::image_pixels(image)
+        crate::reader::pulled_pixels(image)
     }
 
     /// The occurrence half of the reader: an abandoned read's answers

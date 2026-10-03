@@ -763,6 +763,17 @@ pub(crate) fn failure_reason(domain: &str, code: i64, underlying: i64) -> MediaF
         ("MediaPlayerError", 4, WIN_SERVER_NOT_FOUND) => F::Network,
         ("MediaPlayerError", 2, _) => F::Network,
         ("MediaPlayerError", 3, _) => F::DecodeError,
+        // The Compose reader's names for the exception each platform call
+        // threw (KayaReader.kt's READER_* codes).
+        ("android.reader", 1, _) => F::UnsupportedContainer,
+        ("android.reader", 2, _) => F::NotFound,
+        ("android.reader", 3, _) => F::UnsupportedCodec,
+        // Media Foundation's HRESULT under the WinUI reader (winui/reader.rs),
+        // as u32.
+        ("MediaFoundation", WIN_UNSUPPORTED_BYTESTREAM | WIN_UNSUPPORTED_MANIFEST, _) => F::UnsupportedContainer,
+        ("MediaFoundation", WIN_FILE_NOT_FOUND | WIN_PATH_NOT_FOUND | WIN_ERROR_FILE_NOT_FOUND, _) => F::NotFound,
+        ("MediaFoundation", WIN_SERVER_NOT_FOUND, _) => F::Network,
+        ("MediaFoundation", WIN_CODEC_NOT_FOUND | WIN_INVALID_MEDIA_TYPE, _) => F::UnsupportedCodec,
         // A transport failure of the HTTP client a WinUI sidecar is fetched
         // with; a status arrives as `http`.
         ("Windows.Web.Http", _, _) => F::Network,
@@ -790,6 +801,10 @@ const WIN_UNSUPPORTED_BYTESTREAM: i64 = 0xC00D_36C4;
 const WIN_UNSUPPORTED_MANIFEST: i64 = 0xC00D_6591;
 const WIN_FILE_NOT_FOUND: i64 = 0xC00D_001A;
 const WIN_SERVER_NOT_FOUND: i64 = 0xC00D_0035;
+const WIN_PATH_NOT_FOUND: i64 = 0x8007_0003;
+const WIN_ERROR_FILE_NOT_FOUND: i64 = 0x8007_0002;
+const WIN_CODEC_NOT_FOUND: i64 = 0xC00D_5212;
+const WIN_INVALID_MEDIA_TYPE: i64 = 0xC00D_36B4;
 
 /// Where a `source` points, checked before any backend sees it: an asset
 /// name through the one resolver, an http(s) URL as written, a picked

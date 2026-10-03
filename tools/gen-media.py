@@ -201,6 +201,9 @@ def generate(out):
     av(out, "h264_aac.mp4", H264, AAC)
     ffmpeg(out, *banded(), *tone(440), "-map", "0:v", "-map", "1:a",
            "-vf", VF, *TAGS709, *FRAMES_H264, *AAC, *BITEXACT, "h264_frames.mp4")
+    # No audio track: a peaks read on it is the reader's missing-track case
+    # (tools/scenes/media_reader.steps).
+    ffmpeg(out, *video(), "-map", "0:v", "-vf", VF, *TAGS709, *H264, *BITEXACT, "h264_noaudio.mp4")
     av(out, "hevc_aac.mp4", HEVC, AAC)
     av(out, "hevc_aac.mov", HEVC, AAC)
     av(out, "vp9_opus.webm", VP9, OPUS)

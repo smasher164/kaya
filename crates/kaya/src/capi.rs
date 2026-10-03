@@ -2839,6 +2839,7 @@ fn latch_window_metrics(window: u64, width: f64, size_class: i64) {
 
 fn presentation_scene() -> Scene {
     let mut scene = Scene::new();
+    scene.serve_reader_pulls();
     if WINDOWING_DECLARED.load(std::sync::atomic::Ordering::SeqCst) {
         scene.declare_windowing();
     }
@@ -4785,6 +4786,19 @@ pub unsafe extern "C" fn kaya_reader_failed(
     reader_report(reader, read, crate::reader::Report::Failed { domain, code, underlying, detail });
 }
 
+/// Presentation side: the source has no track of the kind the read asked
+/// for (frames from an audio-only file, peaks from a video with no audio);
+/// the core decides the reason.
+///
+/// # Safety
+/// `detail` must describe `detail_len` readable UTF-8 bytes, or be NULL
+/// with length 0.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_reader_no_track(reader: u64, read: u64, detail: *const u8, detail_len: usize) {
+    let detail = unsafe { lossy(detail, detail_len) };
+    reader_report(reader, read, crate::reader::Report::NoTrack { detail });
+}
+
 /// Presentation side: KAYA_MEDIA_TIMEOUT_MS passed since the backend handed
 /// a read over or last answered it. Answers 1 when the core's own clock
 /// failed it `timeout`, so the backend stops it, else 0.
@@ -4802,18 +4816,15 @@ pub extern "C" fn kaya_reader_overdue(reader: u64, read: u64) -> u32 {
 /// `out` must be writable for `cap` i16, or NULL with `cap` 0.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kaya_reader_peaks(reader: u64, read: u64, out: *mut i16, cap: usize) -> usize {
-    let scene_slot = PRESENTATION_SCENE.lock().unwrap_or_else(|e| e.into_inner());
-    let Some(peaks) = scene_slot
-        .as_ref()
-        .and_then(|s| s.reader_peaks(crate::protocol::ReaderId(reader), crate::protocol::ReadId(read)))
+    let Some(data) = crate::reader::pulled_peaks(crate::protocol::ReaderId(reader), crate::protocol::ReadId(read))
     else {
         return 0;
     };
-    let n = peaks.data.len().min(cap);
+    let n = data.len().min(cap);
     if n > 0 && !out.is_null() {
-        unsafe { std::ptr::copy_nonoverlapping(peaks.data.as_ptr(), out, n) };
+        unsafe { std::ptr::copy_nonoverlapping(data.as_ptr(), out, n) };
     }
-    peaks.data.len()
+    data.len()
 }
 
 /// Guest side: a core-held image's premultiplied RGBA8 bytes into `out`
@@ -4831,7 +4842,7 @@ pub unsafe extern "C" fn kaya_image_pixels(
     width: *mut u32,
     height: *mut u32,
 ) -> usize {
-    let Some((w, h, bytes)) = image_pixels(crate::protocol::ImageId(image)) else { return 0 };
+    let Some((w, h, bytes)) = crate::reader::pulled_pixels(crate::protocol::ImageId(image)) else { return 0 };
     if !width.is_null() {
         unsafe { *width = w };
     }
@@ -4845,11 +4856,6 @@ pub unsafe extern "C" fn kaya_image_pixels(
     bytes.len()
 }
 
-/// A core-held image's size and bytes, where the scene is this process's.
-pub(crate) fn image_pixels(image: crate::protocol::ImageId) -> Option<(u32, u32, Vec<u8>)> {
-    let scene_slot = PRESENTATION_SCENE.lock().unwrap_or_else(|e| e.into_inner());
-    scene_slot.as_ref().and_then(|s| s.image_pixels(image))
-}
 
 /// Presentation side: the system's media controls sent a SESSION_ACTION
 /// (`at_ms` for seek_to). THE CORE ROUTES IT (docs/media-plan.md §5): 0

@@ -323,7 +323,7 @@ static ARRIVALS: AtomicU64 = AtomicU64::new(0);
 
 /// Run `f` on the UI thread with the core, once whoever holds it has
 /// returned. Every platform media event is raised off the UI thread.
-fn post<F: FnOnce(&mut CoreState) + Send + 'static>(f: F) {
+pub(super) fn post<F: FnOnce(&mut CoreState) + Send + 'static>(f: F) {
     let Some(dispatcher) = DISPATCHER.get() else { return };
     let cell = std::sync::Mutex::new(Some(f));
     let handler = DispatcherQueueHandler::new(move || {

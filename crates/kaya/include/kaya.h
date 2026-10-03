@@ -2226,6 +2226,7 @@ typedef struct KayaHostApi {
                         const uint8_t*,
                         uintptr_t);
   uint32_t (*reader_overdue)(uint64_t, uint64_t);
+  void (*reader_no_track)(uint64_t, uint64_t, const uint8_t*, uintptr_t);
 } KayaHostApi;
 
 
@@ -3206,6 +3207,20 @@ void kaya_reader_failed(uint64_t reader,
                         int64_t underlying,
                         const uint8_t *detail,
                         uintptr_t detail_len);
+
+/**
+ * Presentation side: the source has no track of the kind the read asked
+ * for (frames from an audio-only file, peaks from a video with no audio);
+ * the core decides the reason.
+ *
+ * # Safety
+ * `detail` must describe `detail_len` readable UTF-8 bytes, or be NULL
+ * with length 0.
+ */
+void kaya_reader_no_track(uint64_t reader,
+                          uint64_t read,
+                          const uint8_t *detail,
+                          uintptr_t detail_len);
 
 /**
  * Presentation side: KAYA_MEDIA_TIMEOUT_MS passed since the backend handed

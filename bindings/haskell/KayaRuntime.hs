@@ -25,6 +25,8 @@ module KayaRuntime
     directionBit,
     textScaleRaw,
     canPlayRaw,
+    readerPeaksRaw,
+    imagePixelsRaw,
     catalogRaw,
     TrArgRaw (..),
     trRaw,
@@ -69,7 +71,7 @@ import qualified Data.ByteString.Lazy as BL
 import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import Data.IORef (IORef, mkWeakIORef, newIORef, readIORef, writeIORef)
 import Data.String (IsString (..))
-import Data.Int (Int32, Int64)
+import Data.Int (Int16, Int32, Int64)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -77,6 +79,7 @@ import Data.Word (Word16, Word32, Word64, Word8)
 import Foreign.C.Types (CBool (..), CInt (..), CSize (..))
 import Foreign.Marshal.Alloc (alloca, allocaBytes, mallocBytes)
 import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
+import Foreign.Marshal.Array (allocaArray, peekArray)
 import Foreign.Storable (peek, peekByteOff, poke, pokeByteOff)
 import Control.Monad (foldM_)
 -- Text's own UTF-8 codec, not Foreign.C.String and not GHC.Foreign: the
@@ -212,6 +215,12 @@ foreign import ccall unsafe "kaya_text_scale"
 
 foreign import ccall unsafe "kaya_can_play"
   c_kaya_can_play :: Ptr Word8 -> CSize -> Ptr Word8 -> CSize -> IO Word8
+
+foreign import ccall unsafe "kaya_reader_peaks"
+  c_kaya_reader_peaks :: Word64 -> Word64 -> Ptr Int16 -> CSize -> IO CSize
+
+foreign import ccall unsafe "kaya_image_pixels"
+  c_kaya_image_pixels :: Word64 -> Ptr Word8 -> CSize -> Ptr Word32 -> Ptr Word32 -> IO CSize
 
 foreign import ccall unsafe "kaya_catalog"
   c_kaya_catalog :: Ptr Word8 -> IO ()
@@ -415,6 +424,31 @@ canPlayRaw mime codecs =
   unsafeUseAsCStringLen (TE.encodeUtf8 mime) $ \(m, ml) ->
     unsafeUseAsCStringLen (TE.encodeUtf8 codecs) $ \(c, cl) ->
       (/= 0) <$> c_kaya_can_play (castPtr m) (fromIntegral ml) (castPtr c) (fromIntegral cl)
+
+-- | kaya_reader_peaks: a finished peaks read's @count@ i16, pair-major.
+readerPeaksRaw :: Word64 -> Word64 -> Int -> IO [Int16]
+readerPeaksRaw reader readId count
+  | count <= 0 = return []
+  | otherwise = allocaArray count $ \buf -> do
+      whole <- c_kaya_reader_peaks reader readId buf (fromIntegral count)
+      peekArray (min count (fromIntegral whole)) buf
+
+-- | kaya_image_pixels: a core-held image's size and premultiplied RGBA8.
+imagePixelsRaw :: Word64 -> IO (Maybe (Int, Int, BS.ByteString))
+imagePixelsRaw image =
+  alloca $ \w -> alloca $ \h -> do
+    len <- fromIntegral <$> c_kaya_image_pixels image nullPtr 0 w h
+    if len == (0 :: Int)
+      then return Nothing
+      else allocaBytes len $ \buf -> do
+        got <- fromIntegral <$> c_kaya_image_pixels image buf (fromIntegral len) w h
+        if got /= len
+          then return Nothing
+          else do
+            bytes <- BS.pack <$> peekArray len buf
+            width <- peek w
+            height <- peek h
+            return (Just (fromIntegral width, fromIntegral height, bytes))
 
 catalogRaw :: Text -> IO ()
 catalogRaw app = withCString0 app c_kaya_catalog

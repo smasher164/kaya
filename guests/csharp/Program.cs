@@ -48,7 +48,7 @@ static class Program
             case "pickers": PickersScene.Run(); break;
             case "listdetail": SplitScene.Run(); break;
             case "scroll": ScrollScene.Run(); break;
-            case "scrollto": ScrollToScene.Run(); break;
+            case "scrollto": ScrollTo.ScrollToScene.Run(); break;
             case "search": SearchScene.Run(); break;
             case "submit": SubmitScene.Run(); break;
             case "progress": ProgressScene.Run(); break;
@@ -86,7 +86,7 @@ static class Program
             case "colorpicker": ColorPickerScene.Run(); break;
             case "range": case "rangertl": RangeScene.Run(); break;
             case "media": case "media_formats": case "media_delivery": case "media_session":
-            case "media_tracks": case "media_feed": Media.MediaScene.Run(); break;
+            case "media_tracks": case "media_feed": case "media_reader": Media.MediaScene.Run(); break;
             case "adaptive": AdaptiveScene.Run(); break;
             case "encodebench": EncodeBench.Run(); break;
             default: Milestone2Scene.Run(); break;

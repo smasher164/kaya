@@ -1,5 +1,6 @@
 // tools/check-abort.py; docs/async-dialogs-plan.md
 import Foundation
+internal import CKaya
 
 enum AsyncProbeError: Error { case failure }
 let mode = CommandLine.arguments.dropFirst().first ?? "requests"
@@ -68,6 +69,76 @@ let mode = CommandLine.arguments.dropFirst().first ?? "requests"
             fatalError("async: clipboard answer changed")
         }
     }
+}
+
+/// docs/media-plan.md §8 ruling 4, rule 4: after cancel_read or close_reader
+/// the app hears only the read's end, and an unheard frame's image is
+/// released by the next commit; an awaited read the same, by task
+/// cancellation or a failed end.
+@KayaAppActor func readerRule(_ app: KayaApp) async {
+    func run(_ h: @escaping (KayaAppTx) throws -> Void) { try! app.build(h) }
+    func frame(_ reader: KayaReader, _ read: UInt64, _ index: Int64, _ image: UInt64) {
+        _ = app.readerOccurrence(
+            UInt16(KAYA_OCCURRENCE_READER_FRAME), reader.id,
+            [.i64(Int64(read)), .i64(Int64(image)), .i64(index), .i64(2), .i64(1), .i64(40), .i64(40)], run)
+    }
+    func done(_ reader: KayaReader, _ read: UInt64, _ outcome: Int32, _ failure: Int32 = 0) {
+        _ = app.readerOccurrence(
+            UInt16(KAYA_OCCURRENCE_READER_DONE), reader.id,
+            [.i64(Int64(read)), .i64(Int64(outcome)), .i64(Int64(failure)), .str("why")], run)
+    }
+    func released(_ images: [UInt64]) -> Bool {
+        var want = KayaTx()
+        for image in images { want.releaseImage(image) }
+        return app.readers.pendingReleases.bytes == want.bytes
+    }
+    for closing in [false, true] {
+        var heard: [String] = []
+        let (reader, read, image) = app.build { tx -> (KayaReader, KayaRead, UInt64) in
+            let reader = tx.reader(.asset("media/h264_frames.mp4"))
+            let read = tx.readFrames(
+                reader, at: [0, 40], onFrame: { _, f in heard.append("frame \(f.index)") },
+                onDone: { _, o in heard.append("done \(o)") })
+            return (reader, read, app.readers.nextImage - 1)
+        }
+        frame(reader, read.id, 0, image)
+        app.build { tx in if closing { tx.closeReader(reader) } else { tx.cancelRead(reader, read) } }
+        frame(reader, read.id, 1, image + 1)
+        precondition(heard == ["frame 0"], "reader: a late answer after cancel or close was heard: \(heard)")
+        precondition(released([image + 1]), "reader: the unheard frame's image was not queued for release")
+        done(reader, read.id, KAYA_READ_OUTCOME_CANCELLED)
+        precondition(heard == ["frame 0", "done cancelled"], "reader: the end was not heard: \(heard)")
+        precondition(app.readers.pendingReleases.bytes.isEmpty, "reader: the release did not ride the next commit")
+        precondition(app.readers.handlers.isEmpty, "reader: the read's handlers did not retire")
+    }
+    let (clip, first) = app.build { tx -> (KayaReader, UInt64) in
+        (tx.reader(.asset("media/h264_frames.mp4")), app.readers.nextImage + 1)
+    }
+    let task = Task { @KayaAppActor in try await app.frames(clip, at: [0, 40], accuracy: .exact) }
+    while app.readers.waiters.isEmpty { await Task.yield() }
+    let awaited = app.readers.waiters.keys.first!
+    frame(clip, awaited, 0, first)
+    task.cancel()
+    switch await task.result {
+    case .failure(let e) where e is CancellationError: break
+    default: fatalError("reader: a cancelled awaiting task did not throw CancellationError")
+    }
+    precondition(app.readers.waiters.isEmpty, "reader: the cancelled await stayed registered")
+    frame(clip, awaited, 1, first + 1)
+    precondition(released([first + 1]), "reader: the cancelled await's late image was not queued for release")
+    done(clip, awaited, KAYA_READ_OUTCOME_CANCELLED)
+    app.build { _ in }
+    let failing = Task { @KayaAppActor in try await app.frames(clip, at: [0, 40], accuracy: .exact) }
+    while app.readers.waiters.isEmpty { await Task.yield() }
+    let failed = app.readers.waiters.keys.first!
+    frame(clip, failed, 0, first + 2)
+    done(clip, failed, KAYA_READ_OUTCOME_FAILED, Int32(KAYA_MEDIA_FAILURE_NOT_FOUND))
+    switch await failing.result {
+    case .failure(let e as KayaReadError) where e == .failed(.notFound, "why"): break
+    default: fatalError("reader: a failed awaited read did not throw its reason")
+    }
+    precondition(released([first + 2]), "reader: a failed awaited read's image was not queued for release")
+    app.build { _ in }
 }
 
 @KayaAppActor func rollback(_ app: KayaApp) {
@@ -167,6 +238,7 @@ let mode = CommandLine.arguments.dropFirst().first ?? "requests"
         precondition(app.currentTx == nil, "async: task began inside a transaction")
         if mode == "requests" {
             await requests(app, owner)
+            await readerRule(app)
             return
         }
         Task { @KayaAppActor in app.alertResult(app.liveAlert, .action0) }

@@ -743,6 +743,18 @@ MEDIA_NEGATIVES = [
      r"kind == OCC_KIND_PLAYER_TRACKS\b",
      "kind == -1",
      "player_tracks read back as"),
+    ("reader negative: an unheard frame's image kept", "KayaApp.java",
+     r"\n {16}pendingRecords\.add\(KayaWire\.txReleaseImage\(flatLong\(tail, 1\)\)\);",
+     "",
+     "the unheard frame's image was not queued for release"),
+    ("reader negative: a late answer heard after cancel", "KayaApp.java",
+     r"\n {12}if \(!done\) \{\n {16}return true;\n {12}\}",
+     "",
+     "a late answer after cancel or close was heard"),
+    ("reader negative: a failed awaited read keeps its images", "KayaApp.java",
+     r"if \(!took \|\| !\(outcome instanceof ReadOutcome\.Completed\)\) \{",
+     "if (!took) {",
+     "a failed awaited read's image was not queued for release"),
 ]
 for label, name, pattern, repl, sentence in MEDIA_NEGATIVES:
     rel = ROOT / "bindings" / "java" / "dev" / "kaya" / name

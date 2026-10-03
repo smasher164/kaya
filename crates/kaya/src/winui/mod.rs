@@ -9,6 +9,7 @@
 )]
 mod bindings;
 mod media;
+mod reader;
 mod order;
 
 use order::{track_of, ChildOrder};
@@ -16263,12 +16264,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
         ApplyOp::SetVideoPlayer { widget, player } => media::set_video_player(core, widget.0, player.map(|p| p.0))?,
         ApplyOp::SelectTrack { player, kind, index } => media::select_track(core, player.0, kind, index)?,
         ApplyOp::CaptionTimes { player, times } => media::caption_times(core, player.0, times),
-        // docs/media-plan.md §8 ruling 4: the reader is a depth slice on the mac.
-        ApplyOp::OpenReader { .. }
-        | ApplyOp::ReadFrames { .. }
-        | ApplyOp::ReadPeaks { .. }
-        | ApplyOp::CancelRead { .. }
-        | ApplyOp::CloseReader(_) => crate::depth_stub("media_reader"),
+        ApplyOp::OpenReader { reader, url } => reader::open(reader.0, url),
+        ApplyOp::ReadFrames { reader, read, accuracy, max_size, times_ms } => reader::frames(
+            reader.0,
+            read.0,
+            accuracy == crate::protocol::FrameAccuracy::Exact,
+            max_size,
+            times_ms,
+        ),
+        ApplyOp::ReadPeaks { reader, read } => reader::peaks(reader.0, read.0),
+        ApplyOp::CancelRead { reader, read } => reader::cancel(reader.0, read.0),
+        ApplyOp::CloseReader(reader) => reader::close(reader.0),
         ApplyOp::SetSession { player, offered, playback_state, title, artist, album, artwork } => {
             media::set_session(
                 core,
@@ -19471,6 +19477,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             scene: {
                 let mut scene = Scene::new();
                 scene.declare_windowing();
+                scene.serve_reader_pulls();
                 scene
             },
             occurrences: occ_tx.clone(),

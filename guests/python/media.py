@@ -5,7 +5,8 @@ label#0; `media_session` attaches the player to the app's session and
 answers `next` itself; `media_tracks` lists and selects each item's audio
 and caption tracks and reads the current cue; `media_feed` stamps a video
 view per row, each showing its row's own player, and reads their
-visibility (§7b)."""
+visibility (§7b); `media_reader` draws a filmstrip and a waveform on canvases
+from a reader with no player (§8 rulings 3 and 4)."""
 
 import os
 import sys
@@ -302,9 +303,136 @@ def feed_app():
             clips.insert(i, Clip(name=f"r{i}", player=p))
 
 
+def outcome_word(outcome):
+    if outcome.status == kaya.ReadStatus.FAILED:
+        return f"failed {outcome.failure}"
+    return str(outcome.status)
+
+
+def frame_line(what, frames, outcome):
+    """The answered times as the labels spell them: each time asked, then
+    the time of the picture the platform returned, in ms."""
+    times = " ".join(f"{f.requested_ms}@{f.actual_ms}"
+                     for f in sorted(frames, key=lambda f: f.index))
+    return f"{what} {times} {outcome_word(outcome)}"
+
+
+# h264_frames.mp4's grey bands: frame 12 (0x505050) and frame 37 (0xA0A0A0)
+# at 25 fps, its one keyframe at 0 (tools/gen-media.py).
+BANDS = [480, 1480]
+
+
+def reader_app():
+    """media_reader (docs/media-plan.md §8 rulings 3 and 4): a reader with
+    no player draws a filmstrip of h264_frames.mp4's exact and keyframe
+    pictures and a waveform of tone.wav's peaks beside two loaded images; a
+    read the server never finishes is cancelled and another is closed under
+    its reader; a file that is not media and a missing file fail."""
+    base = media_url()
+    exact, keyframe, failures, missing, cancels = [], [], [], [], []
+    trickling = []
+
+    def on_exact_done(outcome):
+        labels[0].set(frame_line("exact", exact, outcome))
+        clip.frames(BANDS, max_size=(80, 45),
+                    accuracy=kaya.FrameAccuracy.KEYFRAME,
+                    on_frame=keyframe.append, on_done=on_keyframe_done)
+
+    def on_keyframe_done(outcome):
+        labels[1].set(frame_line("keyframe", keyframe, outcome))
+        tiles = [f.image for f in sorted(exact, key=lambda f: f.index)]
+        tiles += [f.image for f in sorted(keyframe, key=lambda f: f.index)]
+        with strip.draw() as d:
+            for i, image in enumerate(tiles):
+                d.image(image, 80.0 * i, 0.0, 80.0, 45.0)
+
+    def on_peaks(p):
+        lows = min((p.pair(i)[0] for i in range(len(p))), default=0)
+        highs = max((p.pair(i)[1] for i in range(len(p))), default=0)
+        labels[2].set(f"peaks {p.sample_rate} Hz, {p.channels} ch, "
+                      f"{len(p)} pairs of {p.samples_per_pair}, {lows}..{highs}")
+
+        def y(v):
+            return 30.0 - float(v) * 25.0 / 8192.0
+
+        with wave.draw() as d:
+            for i in range(len(p)):
+                lo, hi = p.pair(i)
+                x = 8.0 + 7.0 * i
+                (d.move_to(x, y(hi)).line_to(x + 5.0, y(hi))
+                 .line_to(x + 5.0, y(lo)).line_to(x, y(lo)).close())
+                d.fill("series", "nonzero")
+            d.image(logo, 150.0, 4.0, 20.0, 20.0)
+            d.image(photo, 150.0, 30.0, 40.0, 30.0)
+
+    def on_peaks_done(outcome):
+        if outcome.status != kaya.ReadStatus.COMPLETED:
+            labels[2].set(f"peaks {outcome_word(outcome)}")
+
+    def into(lines, label, what):
+        def done(outcome):
+            lines.append(f"{what} {outcome_word(outcome)}")
+            lines.sort()
+            label.set("; ".join(lines))
+        return done
+
+    def on_start():
+        trickle = kaya.reader(kaya.MediaSource.url(f"{base}/trickle/h264_frames.mp4"))
+        read = trickle.frames([0], max_size=(80, 45),
+                              accuracy=kaya.FrameAccuracy.EXACT,
+                              on_done=into(cancels, labels[3], "trickle"))
+        closing = kaya.reader(kaya.MediaSource.url(f"{base}/trickle/h264_aac.mp4"))
+        closing.frames([0], max_size=(80, 45), accuracy=kaya.FrameAccuracy.EXACT,
+                       on_done=into(cancels, labels[3], "closed"))
+        trickling[:] = [read, closing]
+        labels[3].set("reading")
+
+    def on_cancel():
+        if trickling:
+            read, closing = trickling
+            trickling.clear()
+            read.cancel()
+            closing.close()
+
+    with app.window("media reader", width=560.0, height=560.0):
+        labels = [kaya.signal(s) for s in
+                  ("exact", "keyframe", "peaks", "cancel", "failures", "no track")]
+        with kaya.column():
+            for label in labels:
+                kaya.label(bind=label)                              # label#0..#5
+            strip = kaya.canvas((320.0, 45.0)).a11y_id("strip").a11y_label("Filmstrip")
+            wave = kaya.canvas((200.0, 60.0)).a11y_id("wave").a11y_label("Waveform")
+            kaya.button("start", on_click=on_start)                 # button#0
+            kaya.button("cancel", on_click=on_cancel)               # button#1
+
+        clip = kaya.reader(kaya.MediaSource.asset("media/h264_frames.mp4"))
+        clip.frames(BANDS, max_size=(80, 45), accuracy=kaya.FrameAccuracy.EXACT,
+                    on_frame=exact.append, on_done=on_exact_done)
+
+        tone = kaya.reader(kaya.MediaSource.asset("media/tone.wav"))
+        tone.peaks(4800, on_peaks=on_peaks, on_done=on_peaks_done)
+
+        for what, source in (("OFL.txt", "fonts/OFL.txt"),
+                             ("missing.mp4", "media/missing.mp4")):
+            kaya.reader(kaya.MediaSource.asset(source)).frames(
+                [0], max_size=(80, 45), accuracy=kaya.FrameAccuracy.EXACT,
+                on_done=into(failures, labels[4], what))
+
+        kaya.reader(kaya.MediaSource.asset("media/h264_noaudio.mp4")).peaks(
+            4800, on_done=into(missing, labels[5], "noaudio peaks"))
+        kaya.reader(kaya.MediaSource.asset("media/tone.mp3")).frames(
+            [0], max_size=(80, 45), accuracy=kaya.FrameAccuracy.EXACT,
+            on_done=into(missing, labels[5], "mp3 frames"))
+
+        logo = kaya.load_image(kaya.MediaSource.asset("images/a11y-logo.png"))
+        photo = kaya.load_image(kaya.MediaSource.asset("images/photo.jpg"))
+
+
 scene = os.environ.get("KAYA_SELFTEST", "")
 if scene == "media_tracks":
     tracks_app()
+elif scene == "media_reader":
+    reader_app()
 elif scene == "media_feed":
     feed_app()
 else:

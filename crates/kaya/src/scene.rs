@@ -8785,16 +8785,9 @@ impl Scene {
         self.readers.report(reader, read, report)
     }
 
-    pub(crate) fn reader_peaks(
-        &self,
-        reader: crate::protocol::ReaderId,
-        read: crate::protocol::ReadId,
-    ) -> Option<&crate::protocol::Peaks> {
-        self.readers.peaks_of(reader, read)
-    }
-
-    pub(crate) fn image_pixels(&self, image: crate::protocol::ImageId) -> Option<(u32, u32, Vec<u8>)> {
-        self.readers.pixels(image)
+    /// This scene's images and peaks answer the guest-side pulls.
+    pub(crate) fn serve_reader_pulls(&self) {
+        self.readers.serve_pulls();
     }
 
     pub(crate) fn media_route(&self, action: crate::protocol::SessionAction) -> crate::media::Route {

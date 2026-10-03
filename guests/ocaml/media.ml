@@ -299,10 +299,135 @@ let feed_app app =
       done);
   exit (run app)
 
+(* The answered times as the labels spell them: each time asked, then the
+   time of the picture the platform returned, in ms. *)
+let frame_line what (frames : Frame.t list) outcome =
+  let sorted = List.sort (fun (a : Frame.t) b -> compare a.index b.index) frames in
+  let times = List.map (fun (f : Frame.t) -> Printf.sprintf "%d@%d" f.requested_ms f.actual_ms) sorted in
+  Printf.sprintf "%s %s %s" what (String.concat " " times) (Read_outcome.name outcome)
+
+(* h264_frames.mp4's grey bands: frame 12 (0x505050) and frame 37
+   (0xA0A0A0) at 25 fps, its one keyframe at 0 (tools/gen-media.py). *)
+let bands = [ 480; 1480 ]
+
+(* media_reader (docs/media-plan.md §8 rulings 3 and 4): a reader with no
+   player draws a filmstrip of h264_frames.mp4's exact and keyframe
+   pictures and a waveform of tone.wav's peaks beside two loaded images; a
+   read the server never finishes is cancelled and another is closed under
+   its reader; a file that is not media and a missing file fail. *)
+let reader_app app =
+  let base = media_url () in
+  let exact = ref [] and keyframe = ref [] in
+  let failures = ref [] and missing = ref [] and cancels = ref [] in
+  let trickling = ref None in
+  let line labels i lines what outcome =
+    lines := List.sort compare ((what ^ " " ^ Read_outcome.name outcome) :: !lines);
+    write labels.(i) (String.concat "; " !lines)
+  in
+  build app (fun () ->
+      window ~title:"media reader" ~width:560.0 ~height:560.0 ();
+      let labels = Array.map (signal Scalar.Str) [| "exact"; "keyframe"; "peaks"; "cancel"; "failures"; "no track" |] in
+      let start () =
+        let trickle = reader (Media_source.url (base ^ "/trickle/h264_frames.mp4")) in
+        let read = read_frames ~max_size:(80, 45) ~accuracy:Frame_accuracy.Exact trickle [ 0 ] in
+        on_read_done app read (line labels 3 cancels "trickle");
+        let closing = reader (Media_source.url (base ^ "/trickle/h264_aac.mp4")) in
+        let closing_read = read_frames ~max_size:(80, 45) ~accuracy:Frame_accuracy.Exact closing [ 0 ] in
+        on_read_done app closing_read (line labels 3 cancels "closed");
+        trickling := Some (trickle, read, closing);
+        write labels.(3) "reading"
+      in
+      let cancel () =
+        Option.iter
+          (fun (trickle, read, closing) ->
+            cancel_read trickle read;
+            close_reader closing)
+          !trickling;
+        trickling := None
+      in
+      let strip = canvas ~a11y_id:"strip" ~a11y_label:"Filmstrip" ~viewbox:(320.0, 45.0) () in
+      let wave = canvas ~a11y_id:"wave" ~a11y_label:"Waveform" ~viewbox:(200.0, 60.0) () in
+      let root =
+        column
+          [
+            label ~bind:labels.(0); (* label#0 *)
+            label ~bind:labels.(1);
+            label ~bind:labels.(2);
+            label ~bind:labels.(3);
+            label ~bind:labels.(4);
+            label ~bind:labels.(5); (* label#5 *)
+            w strip;
+            w wave;
+            button ~text:"start" ~on_click:start; (* button#0 *)
+            button ~text:"cancel" ~on_click:cancel; (* button#1 *)
+          ]
+          ()
+      in
+      mount root;
+      let clip = reader (Media_source.asset "media/h264_frames.mp4") in
+      let exact_read = read_frames ~max_size:(80, 45) ~accuracy:Frame_accuracy.Exact clip bands in
+      on_frame app exact_read (fun f -> exact := f :: !exact);
+      on_read_done app exact_read (fun outcome ->
+          write labels.(0) (frame_line "exact" !exact outcome);
+          let read = read_frames ~max_size:(80, 45) ~accuracy:Frame_accuracy.Keyframe clip bands in
+          on_frame app read (fun f -> keyframe := f :: !keyframe);
+          on_read_done app read (fun outcome ->
+              write labels.(1) (frame_line "keyframe" !keyframe outcome);
+              let by_index = List.sort (fun (a : Frame.t) b -> compare a.index b.index) in
+              let tiles = List.map (fun (f : Frame.t) -> f.image) (by_index !exact @ by_index !keyframe) in
+              draw strip (fun d ->
+                  List.iteri (fun i image -> draw_image d image (80.0 *. float i) 0.0 80.0 45.0) tiles)));
+
+      let tone = reader (Media_source.asset "media/tone.wav") in
+      let peaks_read = read_peaks tone ~samples_per_pair:4800 in
+
+      List.iter
+        (fun (what, source) ->
+          let r = reader (Media_source.asset source) in
+          let read = read_frames ~max_size:(80, 45) ~accuracy:Frame_accuracy.Exact r [ 0 ] in
+          on_read_done app read (line labels 4 failures what))
+        [ ("OFL.txt", "fonts/OFL.txt"); ("missing.mp4", "media/missing.mp4") ];
+
+      let silent = reader (Media_source.asset "media/h264_noaudio.mp4") in
+      let read = read_peaks silent ~samples_per_pair:4800 in
+      on_read_done app read (line labels 5 missing "noaudio peaks");
+      let song = reader (Media_source.asset "media/tone.mp3") in
+      let read = read_frames ~max_size:(80, 45) ~accuracy:Frame_accuracy.Exact song [ 0 ] in
+      on_read_done app read (line labels 5 missing "mp3 frames");
+
+      let logo = load_image (Media_source.asset "images/a11y-logo.png") in
+      let photo = load_image (Media_source.asset "images/photo.jpg") in
+      on_peaks app peaks_read (fun p ->
+          let pairs = List.init p.Peaks.length (fun i -> Peaks.pair p i 0) in
+          let lows = List.fold_left (fun acc (lo, _) -> min acc lo) (if pairs = [] then 0 else max_int) pairs in
+          let highs = List.fold_left (fun acc (_, hi) -> max acc hi) (if pairs = [] then 0 else min_int) pairs in
+          write labels.(2)
+            (Printf.sprintf "peaks %d Hz, %d ch, %d pairs of %d, %d..%d" p.sample_rate p.channels p.length
+               p.samples_per_pair lows highs);
+          draw wave (fun d ->
+              let y v = 30.0 -. (float v *. 25.0 /. 8192.0) in
+              List.iteri
+                (fun i (lo, hi) ->
+                  let x = 8.0 +. (7.0 *. float i) in
+                  move_to d x (y hi);
+                  line_to d (x +. 5.0) (y hi);
+                  line_to d (x +. 5.0) (y lo);
+                  line_to d x (y lo);
+                  close d;
+                  fill d ~paint:Series ~rule:Nonzero ())
+                pairs;
+              draw_image d logo 150.0 4.0 20.0 20.0;
+              draw_image d photo 150.0 30.0 40.0 30.0));
+      on_read_done app peaks_read (function
+        | Read_outcome.Completed -> ()
+        | outcome -> write labels.(2) ("peaks " ^ Read_outcome.name outcome)));
+  exit (run app)
+
 let () =
   let scene = Option.value (Sys.getenv_opt "KAYA_SELFTEST") ~default:"" in
   let app = Kaya_app.create () in
   match scene with
   | "media_tracks" -> tracks_app app
   | "media_feed" -> feed_app app
+  | "media_reader" -> reader_app app
   | _ -> formats_app app scene

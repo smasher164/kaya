@@ -5504,6 +5504,18 @@ class Draw:
                                     baseline),
                         str(s))
 
+    def image(self, image: Image, x: float, y: float, w: float,
+              h: float) -> Draw:
+        """Draw a core-held image (a reader's frame, a loaded image) into
+        the rectangle at (x, y), `w` by `h` (docs/media-plan.md §8 ruling
+        3). kaya rasterizes it with the rest of the drawing; an image that
+        holds no picture, or was released, is refused."""
+        if not isinstance(image, Image):
+            raise KayaTypeError(
+                f"kaya: Draw.image takes a kaya.Image, not {type(image).__name__}")
+        return self._op(wire.DRAW_OP_IMAGE, int(image.id), float(x), float(y),
+                        float(w), float(h))
+
 
 class _DrawScope:
     """`_Handle.draw`'s with-block: records through `Draw`, submits one
@@ -6397,6 +6409,293 @@ def can_play(mime: str, codecs: str = "") -> bool:
                             _text_value("can_play's codecs", codecs))
 
 
+# --- THE READER AND THE CORE-HELD IMAGES (docs/media-plan.md §8 rulings
+# 3, 4) ---------------------------------------------------------------
+
+
+class FrameAccuracy(enum.IntEnum):
+    """KEYFRAME is the keyframe at or before the time on every platform,
+    EXACT the frame shown at it."""
+
+    KEYFRAME = wire.FRAME_ACCURACY_KEYFRAME
+    EXACT = wire.FRAME_ACCURACY_EXACT
+
+    def __str__(self) -> str:
+        return self.name.lower()
+
+    @classmethod
+    def _missing_(cls, value: object) -> Any:
+        return _vocab_missing(cls, value, "a frame accuracy",
+                              "kaya.FrameAccuracy.EXACT")
+
+
+class ReadStatus(enum.IntEnum):
+    """How a read ended. `str()` is the wire's own word."""
+
+    COMPLETED = wire.READ_OUTCOME_COMPLETED
+    CANCELLED = wire.READ_OUTCOME_CANCELLED
+    FAILED = wire.READ_OUTCOME_FAILED
+
+    def __str__(self) -> str:
+        return self.name.lower()
+
+    @classmethod
+    def _missing_(cls, value: object) -> Any:
+        return _vocab_missing(cls, value, "a read outcome",
+                              "kaya.ReadStatus.COMPLETED")
+
+
+@dataclasses.dataclass(frozen=True)
+class ReadOutcome:
+    """A read's end: completed, cancelled, or failed with the player's
+    closed reason and the platform's sentence."""
+
+    status: ReadStatus
+    failure: MediaFailure | None = None
+    detail: str = ""
+
+
+class Image:
+    """A core-held picture (a reader's frame, a loaded image), the app's
+    until it releases it; `Draw.image` draws it."""
+
+    __slots__ = ("id",)
+
+    def __init__(self, ident: int) -> None:
+        self.id: int = ident
+
+    def release(self) -> None:
+        """Forget the picture. A drawing declared before keeps showing it
+        until it is declared again."""
+        _records().append(wire.tx_release_image(self.id))
+
+    def pixels(self) -> tuple[int, int, bytes] | None:
+        """The picture's width, height and premultiplied RGBA8 bytes; None
+        for an image holding none. Any thread, no transaction."""
+        return runtime.image_pixels(self.id)
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, Image) and other.id == self.id
+
+    def __hash__(self) -> int:
+        return hash(("kaya.Image", self.id))
+
+    def __repr__(self) -> str:
+        return f"<kaya.Image {self.id}>"
+
+
+@dataclasses.dataclass(frozen=True)
+class Frame:
+    """One requested time answered: which of the times it is, the time
+    asked, the time of the picture the platform returned, and its image."""
+
+    index: int
+    requested_ms: int
+    actual_ms: int
+    image: Image
+    width: int
+    height: int
+
+
+class Peaks:
+    """A peaks read's answer: a (min, max) pair per channel per
+    `samples_per_pair` frames, computed in the core."""
+
+    __slots__ = ("sample_rate", "samples_per_pair", "channels", "_data")
+
+    def __init__(self, sample_rate: int, samples_per_pair: int,
+                 channels: int, data: Sequence[int]) -> None:
+        self.sample_rate: int = sample_rate
+        self.samples_per_pair: int = samples_per_pair
+        self.channels: int = channels
+        self._data: tuple[int, ...] = tuple(data)
+
+    def __len__(self) -> int:
+        """How many pairs per channel."""
+        return len(self._data) // (2 * self.channels) if self.channels else 0
+
+    def pair(self, index: int, channel: int = 0) -> tuple[int, int]:
+        """Pair `index`'s (min, max) on `channel`."""
+        if not 0 <= index < len(self) or not 0 <= channel < self.channels:
+            raise KayaValueError(
+                f"kaya: Peaks.pair({index}, {channel}) is outside "
+                f"{len(self)} pairs of {self.channels} channel(s)")
+        at = (index * self.channels + channel) * 2
+        return self._data[at], self._data[at + 1]
+
+    def __repr__(self) -> str:
+        return (f"<kaya.Peaks {self.sample_rate} Hz, {self.channels} ch, "
+                f"{len(self)} pairs of {self.samples_per_pair}>")
+
+
+class _ReadSeat:
+    __slots__ = ("reader", "on_frame", "on_progress", "on_peaks", "on_done")
+
+    def __init__(self, reader: int,
+                 on_frame: Callable[[Frame], object] | None = None,
+                 on_progress: Callable[[int, int], object] | None = None,
+                 on_peaks: Callable[[Peaks], object] | None = None,
+                 on_done: Callable[[ReadOutcome], object] | None = None) -> None:
+        self.reader = reader
+        self.on_frame = on_frame
+        self.on_progress = on_progress
+        self.on_peaks = on_peaks
+        self.on_done = on_done
+
+
+class _ReaderBook:
+    """The reads the app registered, the read in flight per reader, the
+    reads it gave up, and the image loads it awaits — one object so a
+    rolled-back transaction restores all four together."""
+
+    def __init__(self) -> None:
+        self.reads: dict[int, _ReadSeat] = {}
+        self.in_flight: dict[int, int] = {}
+        self.abandoned: set[int] = set()
+        self.loads: dict[int, tuple[Callable[[int, int], object] | None,
+                                    Callable[[MediaFailure, str], object] | None]] = {}
+
+    def journal(self) -> None:
+        if _journal is None or id(self) in _journal:
+            return
+        reads, flight = dict(self.reads), dict(self.in_flight)
+        abandoned, loads = set(self.abandoned), dict(self.loads)
+
+        def restore() -> None:
+            self.reads, self.in_flight = reads, flight
+            self.abandoned, self.loads = abandoned, loads
+
+        _journal[id(self)] = restore
+
+    def abandon(self, read: int) -> None:
+        """The app gave up on `read`: its answers still to come are not
+        heard, and the images they carry go back with the next commit."""
+        self.journal()
+        self.abandoned.add(read)
+        self.in_flight = {r: q for r, q in self.in_flight.items() if q != read}
+
+
+class Read:
+    """One frames or peaks read in flight on a reader."""
+
+    __slots__ = ("id", "reader")
+
+    def __init__(self, ident: int, reader: int) -> None:
+        self.id: int = ident
+        self.reader: int = reader
+
+    def cancel(self) -> None:
+        """Stop the read: it ends cancelled, and nothing else of it is
+        heard."""
+        _app._reader_book.abandon(self.id)
+        _records().append(wire.tx_cancel_read(self.reader, self.id))
+
+    def __repr__(self) -> str:
+        return f"<kaya.Read {self.id} on reader {self.reader}>"
+
+
+def _times_ms(times_ms: Sequence[int]) -> list[int]:
+    out: list[int] = []
+    for t in times_ms:
+        if isinstance(t, bool) or not isinstance(t, int) or t < 0:
+            raise KayaValueError(
+                f"kaya: Reader.frames takes times in ms >= 0, not {t!r}")
+        out.append(t)
+    return out
+
+
+class Reader:
+    """A media reader (docs/media-plan.md §8 ruling 4): frames and peaks
+    from a source with no player. One read in flight per reader."""
+
+    __slots__ = ("id",)
+
+    def __init__(self, ident: int) -> None:
+        self.id: int = ident
+
+    def _read(self, seat: _ReadSeat) -> Read:
+        book = _app._reader_book
+        book.journal()
+        read = Read(_app._next("read"), self.id)
+        book.in_flight[self.id] = read.id
+        book.reads[read.id] = seat
+        return read
+
+    def frames(self, times_ms: Sequence[int], *,
+               max_size: tuple[int, int] = (0, 0),
+               accuracy: FrameAccuracy | str | int,
+               on_frame: Callable[[Frame], object] | None = None,
+               on_done: Callable[[ReadOutcome], object] | None = None) -> Read:
+        """One picture per time in `times_ms`, each heard by `on_frame` in
+        the platform's order, then the read's end by `on_done`. `max_size`
+        bounds the picture, aspect kept, 0 for no bound on that axis."""
+        times = _times_ms(times_ms)
+        mw, mh = (int(v) for v in max_size)
+        acc = FrameAccuracy(accuracy)
+        records = _records()
+        read = self._read(_ReadSeat(self.id, on_frame=on_frame,
+                                    on_done=on_done))
+        first = _app._counters["image"] + 1
+        _app._counters["image"] += len(times)
+        records.append(wire.tx_read_frames(self.id, read.id, first, int(acc),
+                                           mw, mh, times))
+        return read
+
+    def peaks(self, samples_per_pair: int, *,
+              on_progress: Callable[[int, int], object] | None = None,
+              on_peaks: Callable[[Peaks], object] | None = None,
+              on_done: Callable[[ReadOutcome], object] | None = None) -> Read:
+        """The first audio track's peaks, a (min, max) pair per channel per
+        `samples_per_pair` frames: progress as it decodes, the peaks just
+        before the end."""
+        records = _records()
+        read = self._read(_ReadSeat(self.id, on_progress=on_progress,
+                                    on_peaks=on_peaks, on_done=on_done))
+        records.append(wire.tx_read_peaks(self.id, read.id,
+                                          int(samples_per_pair)))
+        return read
+
+    def close(self) -> None:
+        """Forget the reader, cancelling its read in flight. The images it
+        answered with stay the app's."""
+        book = _app._reader_book
+        records = _records()
+        read = book.in_flight.get(self.id)
+        if read is not None:
+            book.abandon(read)
+        records.append(wire.tx_close_reader(self.id))
+
+    def __repr__(self) -> str:
+        return f"<kaya.Reader {self.id}>"
+
+
+def reader(source: MediaSource) -> Reader:
+    """A media reader on `source`, created in the ambient transaction."""
+    path = _media_source("kaya.reader", source)
+    records = _records()
+    r = Reader(_app._next("reader"))
+    records.append(wire.tx_open_reader(r.id, path))
+    return r
+
+
+def load_image(source: MediaSource, *,
+               on_loaded: Callable[[int, int], object] | None = None,
+               on_failed: Callable[[MediaFailure, str], object] | None = None
+               ) -> Image:
+    """A PNG or JPEG decoded by kaya from an asset or a picked file:
+    `on_loaded(width, height)`, or `on_failed(reason, detail)`. A drawing
+    may name the image in the same transaction."""
+    path = _media_source("kaya.load_image", source)
+    records = _records()
+    image = Image(_app._next("image"))
+    records.append(wire.tx_load_image(image.id, path))
+    if on_loaded is not None or on_failed is not None:
+        book = _app._reader_book
+        book.journal()
+        book.loads[image.id] = (on_loaded, on_failed)
+    return image
+
+
 class App:
     """The process's app: the scene scopes (`window`, `build`,
     `push_entry`, `add_section`), the window command catalog, and the
@@ -6408,7 +6707,8 @@ class App:
         # Binding conventions).
         self._counters = {"signal": 0, "widget": 0, "collection": 0,
                           "alert": 0, "menu_item": 0, "file_dialog": 0,
-                          "clipboard": 0, "link_route": 0, "player": 0}
+                          "clipboard": 0, "link_route": 0, "player": 0,
+                          "reader": 0, "read": 0, "image": 0}
         # The wire routes by path_len, not by number, so two dicts.
         self._widget_handlers: dict[tuple[int, int], Handler] = {}
         self._alert_handlers: dict[int, Callable[[AlertChoice], object]] = {}
@@ -6480,6 +6780,7 @@ class App:
         # rollback journal as the Rust binding's are.
         self._players: dict[int, Player] = {}
         self._session_action: Callable[[SessionAction, int], object] | None = None
+        self._reader_book = _ReaderBook()
         self._post_lock = threading.Lock()
         self._posted: list[tuple[Callable[..., object], tuple[Any, ...]]] = []
         _app = self
@@ -7173,6 +7474,12 @@ class App:
                 for fn, args in seat._handlers(kind):
                     self._dispatch(fn, *args)
                 continue
+            if kind in (wire.OCC_READER_FRAME, wire.OCC_READER_PROGRESS,
+                        wire.OCC_READER_PEAKS, wire.OCC_READER_DONE,
+                        wire.OCC_IMAGE_LOADED):
+                for fn, args in self._reader_answer(kind, int(ident), payload):
+                    self._dispatch(fn, *args)
+                continue
             if kind == wire.OCC_SESSION_ACTION:
                 if self._session_action is not None:
                     action, at_ms = payload
@@ -7227,6 +7534,55 @@ class App:
             elif payload is not None:
                 args.append(payload)
             self._dispatch(handler, *args)
+
+    def _reader_answer(self, kind: int, ident: int, payload: Any
+                       ) -> list[tuple[Callable[..., object], tuple[Any, ...]]]:
+        """The handlers one reader or image occurrence reaches. AFTER A
+        CANCEL OR A CLOSE THE APP HEARS ONLY THE END: an abandoned read's
+        answers are dropped, and the images they carried go back with the
+        next commit, since the app never learned their ids."""
+        book = self._reader_book
+        if kind == wire.OCC_IMAGE_LOADED:
+            on_loaded, on_failed = book.loads.pop(ident, (None, None))
+            width, height, failure, detail = payload
+            if failure == wire.MEDIA_FAILURE_NONE:
+                return [] if on_loaded is None else [
+                    (on_loaded, (int(width), int(height)))]
+            return [] if on_failed is None else [
+                (on_failed, (MediaFailure(failure), str(detail)))]
+        read = int(payload[0])
+        if kind == wire.OCC_READER_DONE and book.in_flight.get(ident) == read:
+            del book.in_flight[ident]
+        if read in book.abandoned:
+            if kind == wire.OCC_READER_FRAME:
+                self._pending_records.append(
+                    wire.tx_release_image(int(payload[1])))
+            if kind != wire.OCC_READER_DONE:
+                return []
+            book.abandoned.discard(read)
+        seat = (book.reads.pop(read, None) if kind == wire.OCC_READER_DONE
+                else book.reads.get(read))
+        if seat is None:
+            return []
+        if kind == wire.OCC_READER_FRAME:
+            _, image, index, width, height, requested, actual = payload
+            return [] if seat.on_frame is None else [(seat.on_frame, (Frame(
+                int(index), int(requested), int(actual), Image(int(image)),
+                int(width), int(height)),))]
+        if kind == wire.OCC_READER_PROGRESS:
+            return [] if seat.on_progress is None else [
+                (seat.on_progress, (int(payload[1]), int(payload[2])))]
+        if kind == wire.OCC_READER_PEAKS:
+            _, rate, per_pair, channels, length = (int(v) for v in payload)
+            if seat.on_peaks is None:
+                return []
+            data = runtime.reader_peaks(ident, read, length * channels * 2)
+            return [(seat.on_peaks, (Peaks(rate, per_pair, channels, data),))]
+        _, outcome, failure, detail = payload
+        status = ReadStatus(outcome)
+        end = ReadOutcome(status, MediaFailure(failure)
+                          if status == ReadStatus.FAILED else None, str(detail))
+        return [] if seat.on_done is None else [(seat.on_done, (end,))]
 
     def run(self) -> int:
         """Block until the app ends; returns the exit code. On the

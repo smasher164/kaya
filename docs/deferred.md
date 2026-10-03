@@ -9,42 +9,55 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
-## BUILD — the media reader and the canvas's image op (docs/media-plan.md §8 rulings 3 and 4), depth on the mac (2026-10-02); the GTK, WinUI and Compose arms, the iOS legs and the other eight bindings are the breadth slice
-KEY: media reader, ReaderId, ReadId, ImageId, open_reader, read_frames, read_peaks, cancel_read, close_reader, load_image, release_image, reader_frame, reader_progress, reader_peaks, reader_done, image_loaded, frame_accuracy, read_outcome, DRAW_IMAGE, KAYA_DRAW_IMAGE, kaya_reader_frame, kaya_reader_pcm, kaya_reader_finished, kaya_reader_failed, kaya_reader_overdue, kaya_reader_peaks, kaya_image_pixels, crates/kaya/src/reader.rs, media_reader, DEPTH STUB media_reader, READER_SURFACES, READER_ARMS
+## RULING — a media reader's read for a track its source lacks answers `decode_error` (found 2026-10-02, the reader's depth slice)
+KEY: NO_TRACK, Report::NoTrack, kaya_reader_no_track, reader_no_track, readerNoTrack, no_track, noTrack, h264_noaudio.mp4, media_reader label#5
 
-The depth slice: the spec's seven transaction, five apply and five occurrence
-records and the `image` draw op (8), the core's reader (crates/kaya/src/reader.rs:
-the reads and their bound, the peaks reduction, the image table, PNG and JPEG
-decoded in the core), the canvas's `image` op rasterized by the core, the Rust
-binding (a message tier and an awaited tier whose dropped future cancels), the
-SwiftUI arm (AVAssetImageGenerator and AVAssetReader; iOS compiled) and the
-media_reader scene on the mac lane. What breadth owes:
+Frames from an audio-only file (tone.mp3) and peaks from a video with no
+audio (h264_noaudio.mp4) answer `reader_done failed decode_error` on all five
+platforms, since no reason in the player's closed vocabulary names a missing
+track. Every backend reports the case from ONE site (`Report::NoTrack` through
+`kaya_reader_no_track`, Swift's `noTrack`, GTK's and WinUI's `Out::no_track`,
+Compose's `noTrack`; tools/check-verbs.py counts each backend's sites), and
+crates/kaya/src/reader.rs's `const NO_TRACK` is the one line a new reason
+changes, with tools/scenes/media_reader.steps' label#5 the observation that
+moves with it. For the maintainer: keep `decode_error`, or add a reason
+(`no_track`) to the closed vocabulary, which the spec, nine bindings and the
+player's failure table would then carry.
 
-  - **DEPTH STUB: media_reader on gtk** — a decodebin3 + appsink pipeline per
-    read (`KEY_UNIT|SNAP_BEFORE` for keyframe, `ACCURATE` for exact, the actual
-    time through the segment) and an audio-only one for the PCM, the stream
-    selected before the decoder (docs/probes/media-extraction-2026-10-01.md:
-    7.7 s for a waveform otherwise). Its scene also needs the guest-side pulls
-    (kaya_reader_peaks, kaya_image_pixels), which read the interpreters' scene
-    today.
-  - **DEPTH STUB: media_reader on winui** — IMFSourceReader converting only the
-    frames kept, its times shifted by the edit list (crates/kaya/src/edit_list.rs),
-    measured against MediaComposition's 12.4 s before it is chosen; the pulls as
-    on gtk.
-  - **DEPTH STUB: media_reader on compose** — media3's FrameExtractor (whether
-    it keeps one decoder across frames is the first measurement) and
-    MediaExtractor + MediaCodec for the PCM, 17-19 s for ten minutes on the
-    emulator, so the progress occurrences are what an app shows.
-  - The iOS legs: the arm is the shared interpreter's and compiles; the scene
-    is in tools/lib/lanes/ios.py's UNWIRED_SCENES until it is measured.
-  - The other eight bindings: tools/check-sugar-surface.py's reader census is
-    red by design (64 findings, eight parts in each), and each must keep the
-    Rust binding's rule that answers of a read the app cancelled or closed are
-    not heard and the images they carried are released.
-  - FOUND FOR A RULING: a read asking for a track the source lacks (frames from
-    tone.mp3, peaks from a video with no audio) answers `decode_error`: no
-    reason in the closed vocabulary names it, and AVFoundation's -11869
-    (AVErrorNoSourceTrack) falls to the failure table's default.
+## ~~BUILD — the media reader and the canvas's image op (docs/media-plan.md §8 rulings 3 and 4), depth on the mac (2026-10-02); the GTK, WinUI and Compose arms, the iOS legs and the other eight bindings are the breadth slice~~ COMPLETE 2026-10-02 (the breadth slice): the reader on all five platforms and in all nine bindings, media_reader green on every lane; the missing-track reason is the RULING above
+KEY: media reader, ReaderId, ReadId, ImageId, open_reader, read_frames, read_peaks, cancel_read, close_reader, load_image, release_image, reader_frame, reader_progress, reader_peaks, reader_done, image_loaded, frame_accuracy, read_outcome, DRAW_IMAGE, KAYA_DRAW_IMAGE, kaya_reader_frame, kaya_reader_pcm, kaya_reader_finished, kaya_reader_failed, kaya_reader_overdue, kaya_reader_peaks, kaya_image_pixels, crates/kaya/src/reader.rs, media_reader, DEPTH STUB media_reader, READER_SURFACES, READER_ARMS, READER_BACKENDS
+
+The depth slice: the spec's records, the core's reader (crates/kaya/src/reader.rs),
+the canvas's `image` op, the Rust binding and the SwiftUI arm. The breadth:
+
+  - ~~**DEPTH STUB: media_reader on gtk**~~ — LANDED 2026-10-02: a playbin3 per
+    read on its own thread with the pipeline's flags selecting the one stream
+    type before any decoder, frames as I420 converted by kaya
+    (crate::reader::Ycc; videoconvert read the 505050 band as 4E4E4E, measured)
+    after a flushing ACCURATE or KEY_UNIT|SNAP_BEFORE seek, the actual time
+    through the sample's segment, PCM as F32 (gtk.rs, `mod gtk_reader`). The
+    guest-side pulls read a store every backend's scene registers
+    (`Scene::serve_reader_pulls`).
+  - ~~**DEPTH STUB: media_reader on winui**~~ — LANDED 2026-10-02: Media
+    Foundation's source reader per read, NV12 converted by kaya for the kept
+    frame only, seeks and actual times moved by the video edit list
+    (winui/reader.rs). OPEN, unmeasured: an AAC track's 1024 priming samples
+    reach the peaks (MF ignores the audio edit list too); a cancelled read on
+    a source the network never finishes leaves its worker blocked in
+    MFCreateSourceReaderFromURL until the process ends.
+  - ~~**DEPTH STUB: media_reader on compose**~~ — LANDED 2026-10-02:
+    MediaExtractor's video sample times (the honest actual time, and the sync
+    sample at or before) then MediaMetadataRetriever for that one picture,
+    fitted by the core over JNI; MediaExtractor + MediaCodec for the PCM
+    (KayaReader.kt). OPEN: the retriever makes a decoder per frame, so a long
+    filmstrip is slow; media3's FrameExtractor keeps one and is the measured
+    next step.
+  - ~~The iOS legs~~ — LANDED 2026-10-02: the swift, go and rust-swiftui suites.
+  - ~~The other eight bindings~~ — LANDED 2026-10-02: each with its message tier
+    and, where its dialogs have one, its async tier; each holds that a read the
+    app cancelled or closed is heard only as its end and the images its late
+    answers carried are released at the next commit, watched failing in each
+    binding's own checks. node.rs and jvm.rs export the two pulls.
 
 ## ~~RULING — which player a stamped video view shows (found 2026-09-30, the media depth slice)~~ CLOSED 2026-09-30, ruled by the maintainer: option (a), a row binds a player through a player-valued field; a player is shown by at most ONE video view at a time on every platform (the root refuses a second, naming both views), so the platforms that render one surface per player hold by the rule rather than by accident; the video view gains a visibility occurrence (entering and leaving view, and how much of it shows) so an app keeps players only for rows on screen and plays the most visible one; and running out of hardware decoders is a failure with its own reason, `resources`. BUILT at depth on the mac 2026-09-30 (the player prop and the Rust player field, the one-view rule, the visibility occurrence, `resources`; docs/media-plan.md §7b); tools/tpl-surfaces.py's LIVE_ONLY is gone and `video` is held in both zones like every kind
 KEY: video, template zone, Tpl video, LIVE_ONLY, tpl-surfaces, set_video_player

@@ -145,6 +145,10 @@ object KayaRing {
 
     @JvmStatic external fun tr(key: ByteArray, args: ByteArray, nargs: Int): ByteArray?
     @JvmStatic external fun canPlay(mime: ByteArray, codecs: ByteArray): Boolean
+    /** The reader's pulls (docs/media-plan.md §8 ruling 4): a finished peaks
+     * read's pairs, and a core-held image's RGBA8 with its size in [size]. */
+    @JvmStatic external fun readerPeaks(reader: Long, read: Long): ShortArray?
+    @JvmStatic external fun imagePixels(image: Long, size: IntArray): ByteArray?
 
     @JvmStatic external fun prefGetI64(key: ByteArray): LongArray?
 
