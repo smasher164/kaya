@@ -11,6 +11,7 @@ import (
 	"dev.kaya/guests/go/align"
 	"dev.kaya/guests/go/assets"
 	"dev.kaya/guests/go/background"
+	"dev.kaya/guests/go/capture"
 	"dev.kaya/guests/go/chat"
 	"dev.kaya/guests/go/clipboard"
 	"dev.kaya/guests/go/colorpicker"
@@ -83,6 +84,8 @@ var scenes = map[string]func() *kaya.App{
 	"align":          align.App,
 	"assets":         assets.App,
 	"background":     background.App,
+	"capture":        capture.App,
+	"capture_denied": capture.App,
 	"clipboard":      clipboard.App,
 	"commands":       commands.App,
 	"confirm":        confirm.App,

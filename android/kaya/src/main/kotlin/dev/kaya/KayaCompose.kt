@@ -573,6 +573,8 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
      * its fit, and a counter bumped whenever that player's picture, size or
      * caption moves. */
     var videoPlayer by mutableLongStateOf(0L)
+    /** The capture it previews instead (docs/capture-plan.md §3), 0 none. */
+    var videoCapture by mutableLongStateOf(0L)
     var fit by mutableLongStateOf(0L)
     var videoSeq by mutableIntStateOf(0)
 
@@ -3855,8 +3857,36 @@ object KayaCompose {
                     kayaReaders[rid]?.stop(b.long)
                 }
                 APPLY_CLOSE_READER -> kayaReaderClose(b.long)
-                APPLY_CREATE_CAPTURE, APPLY_SET_CAPTURE_PROP, APPLY_CAPTURE_COMMAND, APPLY_RELEASE_CAPTURE,
-                APPLY_REQUEST_PERMISSION, APPLY_WATCH_CAPTURE_DEVICES, APPLY_SET_VIDEO_CAPTURE -> depthStub("capture")
+                // docs/capture-plan.md: the capture (KayaCapture.kt).
+                APPLY_CREATE_CAPTURE -> kayaCaptureCreate(b.long)
+                APPLY_SET_CAPTURE_PROP -> {
+                    // { u64 capture; u32 cprop; u32 reserved; value }.
+                    val cid = b.long
+                    val cprop = b.int
+                    b.int
+                    val value: Any = when (cprop) {
+                        CPROP_CAMERA, CPROP_MICROPHONE -> readString(b)
+                        CPROP_MUTED -> readBool(b)
+                        else -> readF64(b)
+                    }
+                    kayaCaptures[cid]?.set(cprop, value)
+                }
+                APPLY_CAPTURE_COMMAND -> {
+                    // { u64 capture; u32 command; u32 reserved }.
+                    val cid = b.long
+                    kayaCaptureCommand(cid, b.int)
+                }
+                APPLY_RELEASE_CAPTURE -> kayaCaptureRelease(b.long)
+                APPLY_REQUEST_PERMISSION -> kayaCaptureRequestPermission(b.int)
+                APPLY_WATCH_CAPTURE_DEVICES -> kayaCaptureWatchDevices(b.int != 0)
+                APPLY_SET_VIDEO_CAPTURE -> {
+                    // { u64 widget; u64 capture }, 0 for none.
+                    val vid = b.long
+                    val vnode = KayaSceneModel.nodes[vid] ?: error("kaya: set_video_capture on unknown widget $vid")
+                    vnode.videoCapture = b.long
+                    vnode.videoSeq += 1
+                    kayaFollowKeepAwake()
+                }
                 APPLY_SET_BADGE -> {
                     // { u32 count; u32 reserved } (docs/app-badge-plan.md §3).
                     val count = b.int
@@ -8884,7 +8914,22 @@ object KayaCompose {
                             else -> failures.add("${parts[1]} is drawn $got, wanted $want")
                         }
                     }
-                    "expect_capture", "answer_permission" -> depthStub("capture")
+                    "expect_capture" -> {
+                        // docs/capture-plan.md §7: the core's own statistics of what
+                        // passed through the capture, never the app's word.
+                        val said = KayaPresent.captureHarness(0, parts[1].toIntOrNull() ?: -1, quoted(parts.drop(2)))
+                        if (said.startsWith("1")) observed.add(said.substring(1)) else failures.add(said.substring(1))
+                    }
+                    "answer_permission" -> {
+                        // What the synthetic prompt answers (docs/capture-plan.md §7).
+                        val kind = when (parts[1]) {
+                            "camera" -> CAPTURE_KIND_CAMERA
+                            "microphone" -> CAPTURE_KIND_MICROPHONE
+                            else -> -1
+                        }
+                        val said = KayaPresent.captureHarness(1, kind, parts.getOrElse(2) { "" })
+                        if (said.startsWith("1")) observed.add(said.substring(1)) else failures.add(said.substring(1))
+                    }
                     "copy_asset" -> {
                         // The scene's fixture file, the core's own body
                         // (docs/photo-attach-plan.md §5).
@@ -8907,9 +8952,11 @@ object KayaCompose {
                             failures.add("no such target ${parts[1]}")
                         } else {
                             val (box, why) = onUi(activity) {
-                                kayaVideoScreenBox(activity.window.decorView, vnode) to kayaVideoFramesWhyNot(vnode)
+                                kayaVideoScreenBox(activity.window.decorView, vnode) to
+                                    if (vnode.videoCapture != 0L) kayaCaptureFramesWhyNot(vnode) else kayaVideoFramesWhyNot(vnode)
                             }
-                            val frames = why ?: "media3 rendered this item's first frame to the view's surface"
+                            val frames = why ?: if (vnode.videoCapture != 0L) "the capture's camera is open and handing frames to the core"
+                            else "media3 rendered this item's first frame to the view's surface"
                             if (box == null) {
                                 failures.add("video ${parts[1]} has no box on screen to read; $frames")
                             } else {

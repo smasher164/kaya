@@ -8,7 +8,7 @@
 import { existsSync, writeSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Worker, isMainThread, workerData } from "node:worker_threads";
+import { Worker, isMainThread, parentPort, workerData } from "node:worker_threads";
 
 import * as wire from "./wire.ts";
 
@@ -63,8 +63,27 @@ type Floor = {
   openPicked(handle: number, mode: number): { raw: number; seekable: boolean };
   pickedRead(handle: number): Uint8Array;
   pickedWrite(handle: number, bytes: Uint8Array): void;
+  // The capture worker (docs/capture-plan.md §4; crates/kaya/src/node.rs):
+  // a listener per (capture, kind 0 frames / 1 samples), called by kaya's
+  // capture thread and waited for; captureDrop forgets both.
+  captureListen(capture: number, kind: number, cb: ((frame: CaptureFrameRaw) => void) | ((chunk: Int16Array, timestampNs: bigint) => void) | null): void;
+  captureDrop(capture: number): void;
+  captureTestCall(capture: number): void;
   startPump(cb: (record: Uint8Array | null) => void): void;
   exit(code: number): never;
+};
+
+/** A frame as the addon hands it to the capture worker: both planes the
+ * worker's own copies. */
+export type CaptureFrameRaw = {
+  width: number;
+  height: number;
+  y: Uint8Array;
+  yStride: number;
+  uv: Uint8Array;
+  uvStride: number;
+  timestampNs: bigint;
+  rotation: number;
 };
 
 function findLibrary(): string {
@@ -377,8 +396,47 @@ export function startPump(cb: (record: wire.Occurrence | null) => void): void {
   });
 }
 
-/** True in the worker, which IS the kaya-app thread. */
-export const IS_APP_THREAD = !isMainThread;
+/** The capture this thread is the worker of, or null: a capture worker
+ * runs the app's frame and sample callbacks and is NOT the app thread. */
+export const CAPTURE_WORKER_OF: number | null = (() => {
+  const id = (workerData as { kayaCapture?: unknown } | null)?.kayaCapture;
+  return typeof id === "number" ? id : null;
+})();
+
+/** True on the process main thread, which import surrenders to kaya_run. */
+export const IS_MAIN_THREAD = isMainThread;
+
+/** True in the worker that IS the kaya-app thread. */
+export const IS_APP_THREAD = !isMainThread && CAPTURE_WORKER_OF === null;
+
+/** In a capture worker: listen for the capture's frames (kind 0) or
+ * samples (kind 1), null to stop. */
+export function captureListen(kind: number, cb: ((frame: CaptureFrameRaw) => void) | ((chunk: Int16Array, timestampNs: bigint) => void) | null): void {
+  if (CAPTURE_WORKER_OF === null) throw new Error("kaya: capture callbacks are registered in a capture worker — the module kaya.capture({ worker }) names");
+  lib.captureListen(CAPTURE_WORKER_OF, kind, cb);
+}
+
+/** In a capture worker: hand `message` to the app thread's onMessage. */
+export function postToApp(message: unknown): void {
+  if (CAPTURE_WORKER_OF === null || parentPort === null) throw new Error("kaya: postToApp is a capture worker's way to the app thread — on the app thread, call the handler or app.post(fn)");
+  parentPort.postMessage(message);
+}
+
+/** On the app thread: forget a released capture's listeners. */
+export function captureDrop(capture: number): void {
+  lib.captureDrop(capture);
+}
+
+/** bindings/js/kaya_app_checks.ts's stand-in for the core's capture
+ * thread (crates/kaya/src/node.rs, captureTestCall). */
+export function captureTestCall(capture: number): void {
+  lib.captureTestCall(capture);
+}
+
+/** On the app thread: start `module` as `capture`'s worker. */
+export function spawnCaptureWorker(module: string | URL, capture: number): Worker {
+  return new Worker(module, { workerData: { kayaCapture: capture } });
+}
 
 // The worker's stdio is a stream posted to the parent, whose event loop
 // is blocked inside kaya_run for the life of the process, so console

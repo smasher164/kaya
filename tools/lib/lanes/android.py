@@ -46,7 +46,13 @@ EXCLUSIVE = {"dnd-compose", "dnd-jvm", "dnd-go", "tasks-compose",
              "notify-compose", "chat-go",
              # The device's own 24-hour setting is every process's
              # (SCENE_SETTINGS), so nothing else runs under it.
-             "clock24-compose"}
+             "clock24-compose",
+             # THE EMULATOR'S AUDIO INPUT BREAKS UNDER HOST LOAD: the guest
+             # HAL's reads fail with EIO for the rest of the input's life,
+             # with or without the injected tone, read as `samples silent`
+             # (docs/traps.md; docs/probes/capture-2026-10-01/compose-measured.md
+             # §4): no failed read in 8 quiet runs, most runs beside 14 spinning cores.
+             "capture-compose", "capture-jvm", "capture-go"}
 
 # A device setting a scene runs under, `settings put <namespace> <key>
 # <value>` on every phone in the pool before the leg and deleted after
@@ -158,6 +164,10 @@ LEGS = {
         "media_picked-compose",
         # The bound (docs/media-plan.md §7c): rust-only.
         "media_timeout-compose",
+        # The capture (docs/capture-plan.md §7): the emulator's own cameras
+        # and microphone carrying the synthetic devices
+        # (tools/lib/emulator_capture.py).
+        "capture-compose", "capture_denied-compose",
     ],
     "jvm": [
         "jvm", "a11y-jvm", "entry-jvm",
@@ -180,6 +190,7 @@ LEGS = {
         "range-jvm", "rangertl-jvm",
         "media_formats-jvm", "media_delivery-jvm", "media_session-jvm",
         "media_tracks-jvm", "media_feed-jvm", "media_reader-jvm",
+        "capture-jvm", "capture_denied-jvm",
     ],
     "go": [
         "go", "a11y-go", "a11yrows-go",
@@ -202,6 +213,7 @@ LEGS = {
         "range-go", "rangertl-go",
         "media_formats-go", "media_delivery-go", "media_session-go",
         "media_tracks-go", "media_feed-go", "media_reader-go",
+        "capture-go", "capture_denied-go",
     ],
     "python": [
         "varied-python", "portfolio-python",

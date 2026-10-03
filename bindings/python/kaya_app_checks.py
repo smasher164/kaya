@@ -5113,4 +5113,195 @@ finally:
     kaya.runtime.submit = _rd_real_submit
     kaya.runtime.reader_peaks = _rd_real_peaks
 
+
+# --- THE CAPTURE (docs/capture-plan.md §2-§4) ---------------------------
+import ctypes  # noqa: E402
+import threading  # noqa: E402
+
+_CR = kaya.runtime
+
+
+def _cap_changed(capture, state, failure=0, w=0, h=0, rate=0, detail=""):
+    return _occ_bytes(_W.OCC_CAPTURE_CHANGED, struct.pack(
+        "<QIIIIII", capture, state, failure, 0, w, h, rate) + _W._enc.value(detail))
+
+
+def _cap_frame(w, h, fill):
+    """A KayaCaptureFrame over buffers this check owns, as a backend hands
+    one over: borrowed for the call."""
+    y = (ctypes.c_uint8 * (w * h))(*([fill] * (w * h)))
+    uv = (ctypes.c_uint8 * (w * ((h + 1) // 2)))(*([128] * (w * ((h + 1) // 2))))
+    frame = _CR.KayaCaptureFrame(w, h, ctypes.cast(y, ctypes.POINTER(ctypes.c_uint8)),
+                                 ctypes.cast(uv, ctypes.POINTER(ctypes.c_uint8)),
+                                 w, w, 1234, 90, 0)
+    return frame, y, uv
+
+
+def _on_capture_thread(capture_id, frame=None, chunk=None):
+    """Call the binding's trampolines THROUGH THEIR C POINTERS on a thread
+    that is not the app thread, as kaya's capture thread does. No checks
+    file can make a capture live (Captures::create is a scene's), so this
+    is the core's call with the core taken out."""
+    def run():
+        if frame is not None:
+            fp = _CR.CAPTURE_FRAME_FN(
+                ctypes.cast(_CR.FRAME_TRAMPOLINE, ctypes.c_void_p).value)
+            fp(capture_id, ctypes.byref(frame))
+        if chunk is not None:
+            fp = _CR.CAPTURE_SAMPLES_FN(
+                ctypes.cast(_CR.SAMPLES_TRAMPOLINE, ctypes.c_void_p).value)
+            buf = (ctypes.c_int16 * len(chunk))(*chunk)
+            fp(capture_id, buf, len(chunk), 5678)
+    th = threading.Thread(target=run)
+    th.start()
+    th.join()
+
+
+_cap_real_submit = kaya.runtime.submit
+_cap_shipped = []
+kaya.runtime.submit = lambda *records: _cap_shipped.append(list(records))
+try:
+    app_cap = kaya.App()
+    cap_seen = []
+    with app_cap.window():
+        cap_label = kaya.signal("idle")
+        cap = kaya.capture(camera="cam", microphone="mic", size=(600.0, 400.0),
+                           frame_rate=30.0,
+                           on_state=lambda r: cap_seen.append(("state", r)),
+                           on_failed=lambda why, d: cap_seen.append(("failed", why, d)),
+                           on_overrun=lambda ms: cap_seen.append(("overrun", ms)))
+        with kaya.column():
+            kaya.label(bind=cap_label)
+            cap_view = kaya.video(capture=cap)
+            cap_refused = None
+            with kaya.for_each(kaya.collection()):
+                try:
+                    kaya.video(capture=cap)
+                except RuntimeError as e:
+                    cap_refused = str(e)
+                kaya.label("row")
+        kaya.request_permission(kaya.CaptureKind.CAMERA)
+        kaya.watch_capture_devices(True)
+        cap_records = list(kaya._tx or [])
+    for want, rec in (
+            ("create", _W.tx_create_capture(cap.id)),
+            ("camera", _W.tx_set_capture_prop(cap.id, _W.CPROP_CAMERA, "cam")),
+            ("width", _W.tx_set_capture_prop(cap.id, _W.CPROP_WIDTH, 600.0)),
+            ("frame rate", _W.tx_set_capture_prop(cap.id, _W.CPROP_FRAME_RATE, 30.0)),
+            ("preview", _W.tx_set_capture(cap_view.id, cap.id)),
+            ("permission", _W.tx_request_permission(_W.CAPTURE_KIND_CAMERA)),
+            ("watch", _W.tx_watch_capture_devices(1))):
+        check(f"a capture's declaration packs its {want} record", rec in cap_records)
+    check("a row template refuses a capture's preview, naming the live zone",
+          cap_refused is not None and "live zone only" in cap_refused)
+
+    kaya.on_permission(lambda k, p: cap_seen.append(("permission", k, p)))
+    kaya.on_capture_devices(lambda d: cap_seen.append(("devices", len(d))))
+    _rd_run(app_cap,
+            _occ_bytes(_W.OCC_CAPTURE_PERMISSION, struct.pack(
+                "<II", _W.CAPTURE_KIND_CAMERA, _W.PERMISSION_GRANTED) + _W._enc.value("")),
+            _cap_changed(cap.id, _W.CAPTURE_STATE_RUNNING, w=640, h=480, rate=30),
+            _occ_bytes(_W.OCC_CAPTURE_OVERRUN, struct.pack("<QQ", cap.id, 250)),
+            _occ_bytes(_W.OCC_CAPTURE_DEVICES, struct.pack("<II", 5, 0)
+                       + b"".join(_W._enc.value(v) for v in
+                                  ("cam", "Camera", _W.CAPTURE_KIND_CAMERA,
+                                   _W.CAMERA_FACING_FRONT, True))),
+            _cap_changed(cap.id, _W.CAPTURE_STATE_FAILED, _W.CAPTURE_FAILURE_IN_USE,
+                         detail="the platform's words"))
+    check("a capture's occurrences reach its readings and handlers in order",
+          [e[0] for e in cap_seen] == ["permission", "state", "overrun", "devices",
+                                       "state", "failed"]
+          and cap_seen[1][1] == kaya.CaptureReading(kaya.CaptureState.RUNNING, None,
+                                                    None, 640, 480, 30)
+          and cap_seen[2] == ("overrun", 250)
+          and cap_seen[5] == ("failed", kaya.CaptureFailure.IN_USE, "the platform's words"))
+    check("a kind's permission and the device list are read back",
+          kaya.permission(kaya.CaptureKind.CAMERA) == kaya.Permission.GRANTED
+          and kaya.permission(kaya.CaptureKind.MICROPHONE) == kaya.Permission.PROMPT
+          and kaya.capture_devices() == (kaya.CaptureDevice(
+              "cam", "Camera", kaya.CaptureKind.CAMERA, kaya.CameraFacing.FRONT, True),))
+
+    # The callbacks, on a thread that is not the app thread.
+    cap_frames, cap_chunks, cap_refusals = [], [], []
+
+    def cap_on_frame(f):
+        cap_frames.append((f, threading.get_ident()))
+        try:
+            with app_cap.build():
+                cap_label.set("from the capture thread")
+        except RuntimeError as e:
+            cap_refusals.append(("build", str(e)))
+        try:
+            cap_label.set("from the capture thread")
+        except RuntimeError as e:
+            cap_refusals.append(("write", str(e)))
+
+    cap.on_frame(cap_on_frame)
+    cap.on_samples(lambda chunk, at: cap_chunks.append((chunk, at)))
+    cap_frame, cap_y, cap_uv = _cap_frame(4, 3, 200)
+    with app_cap.build():
+        cap_label.set("the app thread's")
+        _on_capture_thread(cap.id, frame=cap_frame, chunk=[1, -2, 3])
+        cap_open = list(kaya._tx or [])
+    check("a capture callback runs off the app thread",
+          len(cap_frames) == 1 and cap_frames[0][1] != threading.get_ident())
+    check("a transaction opened in a capture callback is refused as the wrong thread",
+          any(k == "build" and "belongs to the app thread" in m for k, m in cap_refusals))
+    check("a write in a capture callback is refused as the wrong thread, the app "
+          "thread's open transaction untouched",
+          any(k == "write" and "belongs to the app thread" in m for k, m in cap_refusals)
+          and cap_open == [_W.tx_write_signal(cap_label.id, "the app thread's")])
+    kept = cap_frames[0][0]
+    cap_y[0] = 7
+    cap_uv[0] = 7
+    check("a frame is the callback's own copy, kept past the call",
+          isinstance(kept.y, bytes) and kept.y == bytes([200] * 12)
+          and kept.uv == bytes([128] * 8) and (kept.width, kept.height) == (4, 3)
+          and (kept.timestamp_ns, kept.rotation) == (1234, 90))
+    check("a chunk is the callback's own array of s16 with its time",
+          len(cap_chunks) == 1 and list(cap_chunks[0][0]) == [1, -2, 3]
+          and cap_chunks[0][0].typecode == "h" and cap_chunks[0][1] == 5678)
+
+    # A callback that raises is caught and logged naming the capture, and
+    # the next frame still reaches it (DESIGN.md's abort rule).
+    import contextlib  # noqa: E402
+    cap_calls = []
+
+    def cap_raising(f):
+        cap_calls.append(f.width)
+        if len(cap_calls) == 1:
+            raise ValueError("the app's own bug")
+
+    cap.on_frame(cap_raising)
+    cap_err = io.StringIO()
+    with contextlib.redirect_stderr(cap_err):
+        _on_capture_thread(cap.id, frame=cap_frame)
+        _on_capture_thread(cap.id, frame=cap_frame)
+    check("a capture callback that raises is logged naming the capture, and the "
+          "next frame still reaches it",
+          len(cap_calls) == 2 and f"kaya: capture {cap.id}'s frame callback raised: "
+          "the app's own bug; the capture keeps running" in cap_err.getvalue())
+    cap.on_frame(cap_on_frame)
+
+    # A release rolled back keeps the callbacks; a release drops them.
+    try:
+        with app_cap.build():
+            cap.release()
+            raise ValueError("roll back")
+    except ValueError:
+        pass
+    check("a rolled-back release keeps the capture's callbacks",
+          cap.id in app_cap._capture_frames and cap.id in app_cap._capture_samples)
+    with app_cap.build():
+        cap.release()
+        cap_rel = list(kaya._tx or [])
+    _on_capture_thread(cap.id, frame=cap_frame, chunk=[4])
+    check("a released capture's callbacks are dropped by the binding",
+          _W.tx_release_capture(cap.id) in cap_rel
+          and cap.id not in app_cap._capture_frames
+          and cap.id not in app_cap._capture_samples
+          and len(cap_frames) == 1 and len(cap_chunks) == 1)
+finally:
+    kaya.runtime.submit = _cap_real_submit
+
 sys.exit(1 if failures else 0)

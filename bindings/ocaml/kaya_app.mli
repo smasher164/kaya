@@ -490,6 +490,91 @@ module Tracks : sig
   }
 end
 
+(* The capture's vocabularies (docs/capture-plan.md §2); each [name] is
+   the vocabulary's own word. *)
+module Capture_state : sig
+  type t = Idle | Starting | Running | Interrupted | Failed
+
+  val name : t -> string
+end
+
+module Capture_failure : sig
+  type t = Denied | Not_found | In_use | Disconnected | Unsupported | Hardware_error | Timeout
+
+  val name : t -> string
+end
+
+module Capture_interruption : sig
+  type t = Background | Another_app | System_pressure
+
+  val name : t -> string
+end
+
+module Capture_kind : sig
+  type t = Camera | Microphone
+
+  val name : t -> string
+end
+
+module Camera_facing : sig
+  type t = Unknown | Front | Back | External
+
+  val name : t -> string
+end
+
+module Permission : sig
+  type t = Prompt | Granted | Denied
+
+  val name : t -> string
+end
+
+(* A camera and a microphone the app holds (docs/capture-plan.md §2). *)
+type capture
+
+(* A capture's readings as the core last published them; the format is
+   0x0 at 0 with no camera running. *)
+module Capture_reading : sig
+  type t = {
+    state : Capture_state.t;
+    failure : Capture_failure.t option;
+    interruption : Capture_interruption.t option;
+    width : int;
+    height : int;
+    frame_rate : int;
+  }
+end
+
+module Capture_device : sig
+  type t = {
+    id : string;
+    name : string;
+    kind : Capture_kind.t;
+    facing : Camera_facing.t;
+    preferred : bool;
+  }
+end
+
+(* A frame as the frame callback is handed it (docs/capture-plan.md §4):
+   NV12, video-range BT.601, the Y plane [y_stride] bytes a row and the
+   interleaved UV plane at half resolution [uv_stride] bytes a row, its
+   time on the capture's clock and the rotation that stands it upright.
+   The planes are the callback's own copies. *)
+module Capture_frame : sig
+  type t = {
+    width : int;
+    height : int;
+    y : bytes;
+    uv : bytes;
+    y_stride : int;
+    uv_stride : int;
+    timestamp_ns : int64;
+    rotation : int;
+  }
+end
+
+(* A chunk of 48 kHz mono s16 samples, the callback's own copy. *)
+type samples = (int, Bigarray.int16_signed_elt, Bigarray.c_layout) Bigarray.Array1.t
+
 (* The media reader and the core-held images (docs/media-plan.md §8
    rulings 3, 4): frames and peaks without a player. *)
 type reader
@@ -1089,6 +1174,59 @@ val declare_session :
 (* Whether this platform plays [mime] with [codecs] (an RFC 6381 list, ""
    for none). Any thread, no transaction. *)
 val can_play : string -> string -> bool
+
+(* A capture (docs/capture-plan.md §2): at most one camera and one
+   microphone, with no place in the layout; [~size] and [~frame_rate] are
+   wishes met by the platform's nearest format. Created inside a
+   transaction; [start_capture] it once its devices are set. *)
+val capture :
+  ?camera:string -> ?microphone:string -> ?size:float * float -> ?frame_rate:float -> ?muted:bool -> unit -> capture
+
+(* The camera by a device's id from [capture_devices]; [None] closes it
+   and puts its indicator out. *)
+val capture_camera : capture -> string option -> unit
+
+val capture_microphone : capture -> string option -> unit
+val capture_size : capture -> float -> float -> unit
+val capture_frame_rate : capture -> float -> unit
+
+(* The microphone stays open and delivers silence, as a call's mute. *)
+val capture_muted : capture -> bool -> unit
+
+(* Open the devices, asking for each kind's permission still at prompt;
+   the answer is the capture's own state. *)
+val start_capture : capture -> unit
+
+val stop_capture : capture -> unit
+
+(* Stop and forget a capture; its callbacks are dropped with it. *)
+val release_capture : capture -> unit
+
+(* Ask for a kind's permission before any capture starts; answered
+   through [on_permission]. *)
+val request_permission : Capture_kind.t -> unit
+
+(* List the cameras and microphones now and whenever one comes or goes
+   ([on_capture_devices]); false stops. *)
+val watch_capture_devices : bool -> unit
+
+(* Preview another capture in a live video view, or none. A view shows a
+   player or a capture. *)
+val show_capture : widget -> capture option -> unit
+
+(* A video view previewing a capture (docs/capture-plan.md §3), mirrored
+   for a front camera. Live zone only. *)
+val video_capture :
+  ?grow:float ->
+  ?fill:bool ->
+  ?a11y_id:string ->
+  ?a11y_id_bind:string signal ->
+  ?a11y_label:string ->
+  ?a11y_label_bind:string signal ->
+  ?help:string ->
+  ?help_bind:string signal ->
+  ?a11y_hint:string ->
+  ?fit:Fit.t -> capture:capture -> unit -> widget
 
 (* A media reader on a source. *)
 val reader : Media_source.t -> reader
@@ -2436,6 +2574,60 @@ val on_visibility_node : app -> node -> (key list -> float -> unit) -> unit
 
 (* The actions the declared session handles. *)
 val on_session : app -> (Session_action.t -> unit) -> unit
+
+(* A capture's readings, a kind's permission (prompt until the platform
+   says) and the device list, as of the last occurrence this loop took. *)
+val capture_reading : app -> capture -> Capture_reading.t
+
+val permission : app -> Capture_kind.t -> Permission.t
+val capture_devices : app -> Capture_device.t list
+
+(* A capture's occurrences: every state it moves to, failed included; the
+   failure's closed reason and the platform's sentence; how many ms the
+   sample callback fell behind the microphone. *)
+val on_capture_state : app -> capture -> (Capture_reading.t -> unit) -> unit
+
+val on_capture_failed : app -> capture -> (Capture_failure.t -> string -> unit) -> unit
+val on_capture_overrun : app -> capture -> (int -> unit) -> unit
+
+(* A kind's permission moved or was asked about. *)
+val on_permission : app -> (Capture_kind.t -> Permission.t -> unit) -> unit
+
+(* The device list, as watching starts and whenever it changes. *)
+val on_capture_devices : app -> (Capture_device.t list -> unit) -> unit
+
+(* Run [f] on KAYA'S CAPTURE THREAD, NOT THE APP THREAD, for each frame of
+   the capture, the next frame dropped while [f] still runs
+   (docs/capture-plan.md §4). It holds no transaction, and a write from it
+   is refused: [post] to touch the scene. The frame is [f]'s own copy, kept
+   past the call as it likes. Replaces the last; dropped with the capture. *)
+val on_capture_frame : app -> capture -> (Capture_frame.t -> unit) -> unit
+
+(* Run [f] on kaya's capture thread, not the app thread, for every 10 ms of
+   the capture's microphone: 480 samples of 48 kHz mono s16 and the first
+   one's time in ns on the capture's clock, none dropped; a callback slower
+   than the microphone is told through [on_capture_overrun]. It holds no
+   transaction: [post] to touch the scene. The chunk is [f]'s own copy. *)
+val on_capture_samples : app -> capture -> (samples -> int64 -> unit) -> unit
+
+(* The capture's callbacks driven from a foreign thread as kaya's capture
+   thread drives them, and the occurrence arm ((kind, id, payload, tail) as
+   Kaya_wire.parse_occurrence answers them) — for bindings/ocaml/checks
+   alone; a guest calls none of it. [drive_frame] and [drive_samples]
+   answer whether kaya's own buffers came back unchanged; [thread_counts]
+   how many foreign threads registered and unregistered with the runtime. *)
+module For_capture_checks : sig
+  val drive_frame : capture -> int -> int -> bool
+  val drive_samples : capture -> bool
+  val thread_counts : unit -> int * int
+  val occurrence : app -> int -> int64 -> Kaya_wire.value option -> Kaya_wire.value list -> bool
+
+  (* Make the calling thread the app thread, as the dispatch loop does. *)
+  val claim_app_thread : unit -> unit
+
+  (* How many capture callbacks raised and were caught and logged. *)
+  val raised : unit -> int
+end
 
 (* The dispatch loop's media arm — (kind, id, keys, payload, tail) as
    Kaya_wire.parse_occurrence answers them — for bindings/ocaml/checks

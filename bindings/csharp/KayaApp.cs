@@ -986,6 +986,246 @@ static class MediaWords
     };
 }
 
+/// A capture (docs/capture-plan.md §2): at most one camera and one
+/// microphone in an object the app holds, an id in its own space, with no
+/// place in the layout. Tx.Capture makes one; a video view previews it.
+readonly record struct Capture(ulong Id);
+
+enum CaptureState : uint
+{
+    Idle = KayaWire.CaptureStateIdle,
+    Starting = KayaWire.CaptureStateStarting,
+    Running = KayaWire.CaptureStateRunning,
+    Interrupted = KayaWire.CaptureStateInterrupted,
+    Failed = KayaWire.CaptureStateFailed,
+}
+
+/// Why a capture cannot run: the closed reason (docs/capture-plan.md §2
+/// rule 2).
+enum CaptureFailure : uint
+{
+    Denied = KayaWire.CaptureFailureDenied,
+    NotFound = KayaWire.CaptureFailureNotFound,
+    InUse = KayaWire.CaptureFailureInUse,
+    Disconnected = KayaWire.CaptureFailureDisconnected,
+    Unsupported = KayaWire.CaptureFailureUnsupported,
+    HardwareError = KayaWire.CaptureFailureHardwareError,
+    Timeout = KayaWire.CaptureFailureTimeout,
+}
+
+/// Why a capture is interrupted, a state that ends by itself (§2 rule 3).
+enum CaptureInterruption : uint
+{
+    Background = KayaWire.CaptureInterruptionBackground,
+    AnotherApp = KayaWire.CaptureInterruptionAnotherApp,
+    SystemPressure = KayaWire.CaptureInterruptionSystemPressure,
+}
+
+enum CaptureKind : uint
+{
+    Camera = KayaWire.CaptureKindCamera,
+    Microphone = KayaWire.CaptureKindMicrophone,
+}
+
+/// A kind's permission: the web's three.
+enum Permission : uint
+{
+    Prompt = KayaWire.PermissionPrompt,
+    Granted = KayaWire.PermissionGranted,
+    Denied = KayaWire.PermissionDenied,
+}
+
+enum CameraFacing : uint
+{
+    Unknown = KayaWire.CameraFacingUnknown,
+    Front = KayaWire.CameraFacingFront,
+    Back = KayaWire.CameraFacingBack,
+    External = KayaWire.CameraFacingExternal,
+}
+
+/// A capture's readings, as the core last published them: the format the
+/// platform chose, 0x0 at 0 with no camera running.
+readonly record struct CaptureReading(CaptureState State, CaptureFailure? Failure,
+    CaptureInterruption? Interruption, uint Width, uint Height, uint FrameRate);
+
+/// One camera or microphone; Preferred marks the one the user chose in the
+/// platform's settings.
+readonly record struct CaptureDevice(string Id, string Name, CaptureKind Kind,
+    CameraFacing Facing, bool Preferred);
+
+/// One NV12 frame (docs/capture-plan.md §4): the Y plane YStride bytes a
+/// row, then the interleaved UV plane at half resolution UVStride bytes a
+/// row; its time on the capture's monotonic clock and the rotation (0, 90,
+/// 180, 270) that stands it upright. Y and UV are YOUR OWN COPY, made before
+/// the callback ran, so keeping them past the call is safe.
+sealed record CaptureFrame(uint Width, uint Height, byte[] Y, byte[] UV, uint YStride,
+    uint UVStride, ulong TimestampNs, uint Rotation);
+
+/// The wire's words for the capture vocabularies.
+static class CaptureWords
+{
+    public static string Name(this CaptureState s) => s switch
+    {
+        CaptureState.Idle => "idle",
+        CaptureState.Starting => "starting",
+        CaptureState.Running => "running",
+        CaptureState.Interrupted => "interrupted",
+        _ => "failed",
+    };
+
+    public static string Name(this CaptureFailure f) => f switch
+    {
+        CaptureFailure.Denied => "denied",
+        CaptureFailure.NotFound => "not_found",
+        CaptureFailure.InUse => "in_use",
+        CaptureFailure.Disconnected => "disconnected",
+        CaptureFailure.Unsupported => "unsupported",
+        CaptureFailure.HardwareError => "hardware_error",
+        CaptureFailure.Timeout => "timeout",
+        _ => throw new ArgumentOutOfRangeException(nameof(f), f, "kaya: a capture failure this build does not know"),
+    };
+
+    public static string Name(this CaptureInterruption i) => i switch
+    {
+        CaptureInterruption.Background => "background",
+        CaptureInterruption.AnotherApp => "another_app",
+        CaptureInterruption.SystemPressure => "system_pressure",
+        _ => throw new ArgumentOutOfRangeException(nameof(i), i, "kaya: an interruption this build does not know"),
+    };
+
+    public static string Name(this CaptureKind k) => k == CaptureKind.Camera ? "camera" : "microphone";
+
+    public static string Name(this Permission p) => p switch
+    {
+        Permission.Prompt => "prompt",
+        Permission.Granted => "granted",
+        _ => "denied",
+    };
+
+    public static string Name(this CameraFacing f) => f switch
+    {
+        CameraFacing.Front => "front",
+        CameraFacing.Back => "back",
+        CameraFacing.External => "external",
+        _ => "unknown",
+    };
+}
+
+/// The capture's frame and sample callbacks (docs/capture-plan.md §4). kaya's
+/// ctx is the capture id and the trampolines are static, so nothing is pinned
+/// or kept alive: the core calls a sink it took under its own lock, so a
+/// released or replaced callback can be looked up once more, and an id that
+/// answers nothing is the safe late answer where a freed GCHandle is not.
+static unsafe partial class Kaya
+{
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    internal struct NativeCaptureFrame
+    {
+        public uint Width, Height;
+        public byte* Y, UV;
+        public uint YStride, UVStride;
+        public ulong TimestampNs;
+        public uint Rotation, Reserved;
+    }
+
+    [System.Runtime.InteropServices.DllImport("kaya")]
+    static extern void kaya_capture_on_frame(ulong capture,
+        delegate* unmanaged[Cdecl]<IntPtr, NativeCaptureFrame*, void> callback, IntPtr ctx);
+
+    [System.Runtime.InteropServices.DllImport("kaya")]
+    static extern void kaya_capture_on_samples(ulong capture,
+        delegate* unmanaged[Cdecl]<IntPtr, short*, nuint, ulong, void> callback, IntPtr ctx);
+
+    static readonly object captureLock = new();
+    static readonly Dictionary<ulong, Action<CaptureFrame>> frameSinks = new();
+    static readonly Dictionary<ulong, Action<short[], ulong>> sampleSinks = new();
+
+    internal static void SetFrameSink(ulong capture, Action<CaptureFrame>? sink)
+    {
+        lock (captureLock)
+        {
+            if (sink == null) frameSinks.Remove(capture);
+            else frameSinks[capture] = sink;
+        }
+        if (sink == null) kaya_capture_on_frame(capture, null, IntPtr.Zero);
+        else kaya_capture_on_frame(capture, &CaptureFrameArrived, (IntPtr)(long)capture);
+    }
+
+    internal static void SetSampleSink(ulong capture, Action<short[], ulong>? sink)
+    {
+        lock (captureLock)
+        {
+            if (sink == null) sampleSinks.Remove(capture);
+            else sampleSinks[capture] = sink;
+        }
+        if (sink == null) kaya_capture_on_samples(capture, null, IntPtr.Zero);
+        else kaya_capture_on_samples(capture, &CaptureSamplesArrived, (IntPtr)(long)capture);
+    }
+
+    /// A released capture's callbacks, forgotten once its release commits;
+    /// the core drops its own references at the release.
+    internal static void DropCaptureSinks(ulong capture)
+    {
+        lock (captureLock)
+        {
+            frameSinks.Remove(capture);
+            sampleSinks.Remove(capture);
+        }
+    }
+
+    internal static bool HoldsCaptureSinks(ulong capture)
+    {
+        lock (captureLock) return frameSinks.ContainsKey(capture) || sampleSinks.ContainsKey(capture);
+    }
+
+    /// The frame trampoline's own address, for the checks to call as the
+    /// core does.
+    internal static delegate* unmanaged[Cdecl]<IntPtr, NativeCaptureFrame*, void> FrameTrampoline =>
+        &CaptureFrameArrived;
+
+    internal static delegate* unmanaged[Cdecl]<IntPtr, short*, nuint, ulong, void> SamplesTrampoline =>
+        &CaptureSamplesArrived;
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly(CallConvs = new[] { typeof(System.Runtime.CompilerServices.CallConvCdecl) })]
+    static void CaptureFrameArrived(IntPtr ctx, NativeCaptureFrame* f)
+    {
+        Action<CaptureFrame>? sink;
+        lock (captureLock) frameSinks.TryGetValue((ulong)(long)ctx, out sink);
+        if (sink == null) return;
+        int ySize = checked((int)(f->YStride * f->Height));
+        int uvSize = checked((int)(f->UVStride * ((f->Height + 1) / 2)));
+        var y = new ReadOnlySpan<byte>(f->Y, ySize).ToArray();
+        var uv = new ReadOnlySpan<byte>(f->UV, uvSize).ToArray();
+        var frame = new CaptureFrame(f->Width, f->Height, y, uv, f->YStride, f->UVStride,
+            f->TimestampNs, f->Rotation);
+        Survive((ulong)(long)ctx, "frame", () => sink(frame));
+    }
+
+    /// DESIGN.md's abort rule on the capture thread (the core's
+    /// crate::capture::survive): a callback that throws is logged naming the
+    /// capture and the capture keeps running. Caught here because an
+    /// exception out of an [UnmanagedCallersOnly] method kills the process.
+    static void Survive(ulong capture, string what, Action call)
+    {
+        try { call(); }
+        catch (Exception e)
+        {
+            Console.Error.WriteLine(
+                $"kaya: capture {capture}'s {what} callback threw ({e.Message}); the capture keeps running");
+        }
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly(CallConvs = new[] { typeof(System.Runtime.CompilerServices.CallConvCdecl) })]
+    static void CaptureSamplesArrived(IntPtr ctx, short* samples, nuint count, ulong timestampNs)
+    {
+        Action<short[], ulong>? sink;
+        lock (captureLock) sampleSinks.TryGetValue((ulong)(long)ctx, out sink);
+        if (sink == null) return;
+        var chunk = new ReadOnlySpan<short>(samples, checked((int)count)).ToArray();
+        Survive((ulong)(long)ctx, "samples", () => sink(chunk, timestampNs));
+    }
+}
+
 static partial class Kaya
 {
     [System.Runtime.InteropServices.DllImport("kaya")]
@@ -1158,6 +1398,19 @@ sealed record ReaderEnded(ulong Id, List<object> Keys, ulong ReadId, ReadOutcome
 
 sealed record ImageLoaded(ulong Id, List<object> Keys, uint Width, uint Height,
     MediaFailure? Failure, string Detail) : Occurrence(Id, Keys);
+
+// The capture's (docs/capture-plan.md §2): Id is the CAPTURE; a permission's
+// and a device list's are 0.
+sealed record CaptureMoved(ulong Id, List<object> Keys, CaptureReading Reading, string Detail)
+    : Occurrence(Id, Keys);
+
+sealed record CaptureOverran(ulong Id, List<object> Keys, ulong BehindMs) : Occurrence(Id, Keys);
+
+sealed record PermissionHeard(ulong Id, List<object> Keys, CaptureKind Kind, Permission Permission)
+    : Occurrence(Id, Keys);
+
+sealed record DevicesListed(ulong Id, List<object> Keys, IReadOnlyList<CaptureDevice> Devices)
+    : Occurrence(Id, Keys);
 
 sealed class KayaInstance
 {
@@ -2623,6 +2876,107 @@ sealed class KayaApp
     /// controls (docs/media-plan.md §5).
     public void OnSession(Action<Tx, SessionAction> handler) => sessionHandler = handler;
 
+    internal Capture NextCapture() => new(++captures);
+
+    ulong captures;
+    readonly Dictionary<ulong, CaptureReading> captureReadings = new();
+    readonly Dictionary<ulong, Action<Tx, CaptureReading>> captureStates = new();
+    readonly Dictionary<ulong, Action<Tx, CaptureFailure, string>> captureFailed = new();
+    readonly Dictionary<ulong, Action<Tx, ulong>> captureOverruns = new();
+    readonly Dictionary<CaptureKind, Permission> permissions = new();
+    IReadOnlyList<CaptureDevice> captureDevices = Array.Empty<CaptureDevice>();
+    Action<Tx, CaptureKind, Permission>? permissionHandler;
+    Action<Tx, IReadOnlyList<CaptureDevice>>? devicesHandler;
+
+    /// A capture's readings as of the last occurrence taken.
+    public CaptureReading Capture(Capture c) =>
+        captureReadings.TryGetValue(c.Id, out var r) ? r : default;
+
+    /// A kind's permission as last heard: Prompt until the platform says.
+    public Permission Permission(CaptureKind kind) =>
+        permissions.TryGetValue(kind, out var p) ? p : global::Permission.Prompt;
+
+    /// The cameras and microphones as last listed (Tx.WatchCaptureDevices).
+    public IReadOnlyList<CaptureDevice> CaptureDevices() => captureDevices;
+
+    /// Every state the capture moves to, failed included.
+    public void OnCaptureState(Capture c, Action<Tx, CaptureReading> handler) =>
+        captureStates[c.Id] = handler;
+
+    /// The capture cannot run: the closed reason, and the platform's
+    /// sentence, which no two platforms word alike.
+    public void OnCaptureFailed(Capture c, Action<Tx, CaptureFailure, string> handler) =>
+        captureFailed[c.Id] = handler;
+
+    /// The sample callback fell this many ms behind the microphone.
+    public void OnCaptureOverrun(Capture c, Action<Tx, ulong> handler) =>
+        captureOverruns[c.Id] = handler;
+
+    /// A kind's permission moved or was asked about.
+    public void OnPermission(Action<Tx, CaptureKind, Permission> handler) =>
+        permissionHandler = handler;
+
+    /// The device list, as watching starts and whenever it changes.
+    public void OnCaptureDevices(Action<Tx, IReadOnlyList<CaptureDevice>> handler) =>
+        devicesHandler = handler;
+
+    /// Run `callback` ON KAYA'S CAPTURE THREAD, NOT THE APP THREAD, for each
+    /// frame of `c`, the next frame dropped while it still runs
+    /// (docs/capture-plan.md §4). It holds no transaction: a Build from it is
+    /// refused, and to touch the scene it posts (App.Post). The frame is
+    /// YOUR OWN COPY, made before the call, so it may be kept. An exception
+    /// out of it is logged naming the capture, which keeps running. Any
+    /// thread; null drops it, and a released capture's is dropped with it.
+    public void OnCaptureFrame(Capture c, Action<CaptureFrame>? callback) =>
+        Kaya.SetFrameSink(c.Id, callback);
+
+    /// Run `callback` on kaya's capture thread, not the app thread, for
+    /// every 10 ms of `c`'s microphone: 480 samples of 48 kHz mono s16 (your
+    /// own copy) and the first one's time on the capture's clock. None is
+    /// dropped; a callback slower than the microphone is told through
+    /// OnCaptureOverrun. It holds no transaction and posts to touch the
+    /// scene. Any thread; null drops it.
+    public void OnCaptureSamples(Capture c, Action<short[], ulong>? callback) =>
+        Kaya.SetSampleSink(c.Id, callback);
+
+    /// The capture's occurrences: THE MIRROR FOLLOWS FIRST, handlers or
+    /// none (DispatchMedia's rule). The ring loop's arm and
+    /// guests/csharp/MediaCheck.cs's CaptureCheck both come through here.
+    internal void DispatchCapture(Occurrence? occurrence)
+    {
+        switch (occurrence)
+        {
+            case CaptureMoved moved:
+            {
+                captureReadings[moved.Id] = moved.Reading;
+                captureStates.TryGetValue(moved.Id, out var onState);
+                Action<Tx, CaptureFailure, string>? onFailed =
+                    moved.Reading is { State: CaptureState.Failed, Failure: not null }
+                    && captureFailed.TryGetValue(moved.Id, out var f) ? f : null;
+                if (onState == null && onFailed == null) break;
+                Dispatch(tx =>
+                {
+                    onState?.Invoke(tx, moved.Reading);
+                    onFailed?.Invoke(tx, moved.Reading.Failure!.Value, moved.Detail);
+                });
+                break;
+            }
+            case CaptureOverran over when captureOverruns.TryGetValue(over.Id, out var onOver):
+                Dispatch(tx => onOver(tx, over.BehindMs));
+                break;
+            case PermissionHeard heard:
+                permissions[heard.Kind] = heard.Permission;
+                if (permissionHandler is { } onPermission)
+                    Dispatch(tx => onPermission(tx, heard.Kind, heard.Permission));
+                break;
+            case DevicesListed listed:
+                captureDevices = listed.Devices;
+                if (devicesHandler is { } onDevices)
+                    Dispatch(tx => onDevices(tx, listed.Devices));
+                break;
+        }
+    }
+
     /// A player's occurrences, the visibility and the session: THE MIRROR
     /// FOLLOWS FIRST, handlers or none, so a handler reads the readings the
     /// occurrence brought (docs/media-plan.md §2). The ring loop's arm and
@@ -3080,6 +3434,41 @@ sealed class KayaApp
             case KayaWire.OccKindCaptionCue:
                 return new CueChanged(id, keys, payload as string ?? "");
             case KayaWire.OccKindVideoVisibility: return new VideoShown(id, keys, number);
+            case KayaWire.OccKindCaptureChanged:
+            {
+                var tail = FlatTail("capture_changed", payload as List<object>, 7);
+                var failure = (uint)Int(tail[1]);
+                var interruption = (uint)Int(tail[2]);
+                return new CaptureMoved(id, keys, new CaptureReading((CaptureState)(uint)Int(tail[0]),
+                    failure == KayaWire.CaptureFailureNone ? null : (CaptureFailure)failure,
+                    interruption == KayaWire.CaptureInterruptionNone ? null
+                        : (CaptureInterruption)interruption,
+                    (uint)Int(tail[3]), (uint)Int(tail[4]), (uint)Int(tail[5])), tail[6] as string ?? "");
+            }
+            // The surface-pair shape: behind_ms keys the record and the
+            // capture rides as the payload.
+            case KayaWire.OccKindCaptureOverrun:
+                return new CaptureOverran(payload is ulong capture ? capture : 0, keys, id);
+            case KayaWire.OccKindCapturePermission:
+            {
+                var tail = FlatTail("capture_permission", payload as List<object>, 2);
+                return new PermissionHeard(id, keys, (CaptureKind)(uint)Int(tail[0]),
+                    (Permission)(uint)Int(tail[1]));
+            }
+            case KayaWire.OccKindCaptureDevices:
+            {
+                var tail = FlatTail("capture_devices", payload as List<object>, 1);
+                int count = (int)Int(tail[0]);
+                if (count % 5 != 0 || tail.Count < 1 + count)
+                    throw new InvalidOperationException(
+                        $"kaya: a capture_devices carries {count} values, want five per device");
+                var devices = new List<CaptureDevice>(count / 5);
+                for (int at = 1; at < 1 + count; at += 5)
+                    devices.Add(new CaptureDevice(tail[at] as string ?? "", tail[at + 1] as string ?? "",
+                        (CaptureKind)(uint)Int(tail[at + 2]), (CameraFacing)(uint)Int(tail[at + 3]),
+                        tail[at + 4] is true));
+                return new DevicesListed(id, keys, devices);
+            }
             case KayaWire.OccKindReaderFrame:
             {
                 var tail = FlatTail("reader_frame", payload as List<object>, 7);
@@ -3367,6 +3756,9 @@ sealed class KayaApp
                     or ReaderEnded or ImageLoaded:
                     DispatchMedia(occurrence);
                     break;
+                case CaptureMoved or CaptureOverran or PermissionHeard or DevicesListed:
+                    DispatchCapture(occurrence);
+                    break;
                 // A paste rides a click tag verbatim, so it arrives on the
                 // ordinary widget/node split. Never empty: a paste that
                 // delivered nothing is not an occurrence.
@@ -3496,6 +3888,10 @@ sealed class Tx : IDisposable
 
     internal Tx(KayaApp app) => App = app;
     internal readonly List<Action> RollbackActions = new();
+    // Run once the transaction's records are submitted: a released
+    // capture's callbacks are dropped here and not at the call, so a
+    // rolled-back release keeps them.
+    internal readonly List<Action> CommitActions = new();
 
     internal void SubmitIfAny()
     {
@@ -3529,6 +3925,7 @@ sealed class Tx : IDisposable
             whole.AddRange(records.ToArray());
         if (whole.Count > 0)
             Kaya.Submit(whole.ToArray());
+        foreach (var action in CommitActions) action();
     }
 
     internal void Rollback()
@@ -4326,6 +4723,74 @@ sealed class Tx : IDisposable
 
     public void ReleasePlayer(Player p) => Records.Add(KayaWire.TxReleasePlayer(p.Id));
 
+    /// A capture (docs/capture-plan.md §2): at most one camera and one
+    /// microphone, by ids from App.CaptureDevices, with no place in the
+    /// layout. `size` and `frameRate` are wishes the platform meets with its
+    /// nearest format. Preview it with Video(capture); StartCapture it once
+    /// its devices are set.
+    public Capture Capture(string? camera = null, string? microphone = null,
+        (double Width, double Height)? size = null, double? frameRate = null, bool? muted = null)
+    {
+        var c = App.NextCapture();
+        Records.Add(KayaWire.TxCreateCapture(c.Id));
+        if (camera != null) SetCamera(c, camera);
+        if (microphone != null) SetMicrophone(c, microphone);
+        if (size is var (w, h)) SetCaptureSize(c, w, h);
+        if (frameRate is double r) SetFrameRate(c, r);
+        if (muted is bool m) SetMuted(c, m);
+        return c;
+    }
+
+    void CaptureProp(Capture c, uint prop, object value) =>
+        Records.Add(KayaWire.TxSetCaptureProp(c.Id, prop, value));
+
+    /// The camera, by a device's id; null closes it and puts its indicator
+    /// out.
+    public void SetCamera(Capture c, string? device) =>
+        CaptureProp(c, KayaWire.CpropCamera, device ?? "");
+
+    /// The microphone, as SetCamera.
+    public void SetMicrophone(Capture c, string? device) =>
+        CaptureProp(c, KayaWire.CpropMicrophone, device ?? "");
+
+    /// The picture size wished for, met by the platform's nearest format.
+    public void SetCaptureSize(Capture c, double width, double height)
+    {
+        CaptureProp(c, KayaWire.CpropWidth, width);
+        CaptureProp(c, KayaWire.CpropHeight, height);
+    }
+
+    public void SetFrameRate(Capture c, double rate) => CaptureProp(c, KayaWire.CpropFrameRate, rate);
+
+    /// The microphone stays open and delivers silence, as a call's mute.
+    public void SetMuted(Capture c, bool on) => CaptureProp(c, KayaWire.CpropMuted, on);
+
+    /// Open the devices, asking for each kind's permission still at prompt;
+    /// the answer is the capture's own state.
+    public void StartCapture(Capture c) =>
+        Records.Add(KayaWire.TxCaptureCommand(c.Id, KayaWire.CaptureCommandStart));
+
+    public void StopCapture(Capture c) =>
+        Records.Add(KayaWire.TxCaptureCommand(c.Id, KayaWire.CaptureCommandStop));
+
+    /// Stop and forget a capture; its callbacks are dropped with it once
+    /// this transaction commits.
+    public void ReleaseCapture(Capture c)
+    {
+        Records.Add(KayaWire.TxReleaseCapture(c.Id));
+        CommitActions.Add(() => Kaya.DropCaptureSinks(c.Id));
+    }
+
+    /// Ask for a kind's permission before any capture starts; the answer
+    /// arrives through App.OnPermission.
+    public void RequestPermission(CaptureKind kind) =>
+        Records.Add(KayaWire.TxRequestPermission((uint)kind));
+
+    /// List the cameras and microphones now and whenever one comes or goes
+    /// (App.OnCaptureDevices); false stops.
+    public void WatchCaptureDevices(bool on) =>
+        Records.Add(KayaWire.TxWatchCaptureDevices(on ? 1u : 0u));
+
     /// A media reader on `source` (docs/media-plan.md §8 ruling 4): frames
     /// and peaks without a player.
     public Reader Reader(MediaSource source)
@@ -4431,6 +4896,24 @@ sealed class Tx : IDisposable
     /// Show another player in a live video view, or none.
     public void ShowPlayer(Widget video, Player? player) =>
         Records.Add(KayaWire.TxSetPlayer(video.Id, (long)(player?.Id ?? 0)));
+
+    /// A video view previewing `capture` (docs/capture-plan.md §3): the
+    /// player's view one source over, mirrored for a front camera. Live
+    /// zone only: a row template shows no capture.
+    public Widget Video(Capture capture, Fit? fit = null,
+        Action<Tx, double>? onVisibility = null, double? grow = null)
+    {
+        var w = Widget(KayaWire.KindVideo);
+        Records.Add(KayaWire.TxSetCapture(w.Id, (long)capture.Id));
+        if (fit is Fit f) SetFit(w, f);
+        if (onVisibility != null) App.OnVisibility(w, onVisibility);
+        if (grow is double g) SetGrow(w, g);
+        return w;
+    }
+
+    /// Preview another capture in a live video view, or none.
+    public void ShowCapture(Widget video, Capture? capture) =>
+        Records.Add(KayaWire.TxSetCapture(video.Id, (long)(capture?.Id ?? 0)));
 
     public void SetFit(Widget video, Fit fit) =>
         Records.Add(KayaWire.TxSetFit(video.Id, (long)fit));

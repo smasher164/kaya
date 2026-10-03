@@ -457,6 +457,10 @@ PY
         && run_exact_test gtk::color_tests::gtk_color_round_trips_every_byte \\
         && run_exact_test gtk::range_tests::gtk_range_press_split_and_travel \\
         && run_exact_test gtk::media_tests::gtk_media_can_play_follows_the_registry \\
+        && run_exact_test \\
+        gtk::capture::tests::gtk_capture_wall_refuses_every_device_outside_the_synthetic_table \\
+        && run_exact_test \\
+            gtk::capture::tests::gtk_capture_reads_a_devices_formats_and_its_native_audio \\
         && run_exact_test gtk::media_tests::gtk_media_lane_table_reads_the_demoted_elements \\
         && run_exact_test \\
             gtk::media_tests::gtk_media_have_type_waits_for_its_pipelines_preroll_call \\

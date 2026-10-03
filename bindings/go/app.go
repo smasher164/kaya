@@ -275,6 +275,8 @@ type App struct {
 	nodeSettles    map[uint64]func(*Tx, []any, float64, float64)
 	// The players' mirrors and the media handlers (media.go).
 	media mediaState
+	// The captures' mirrors and handlers (capture.go).
+	capture captureState
 	widgetTimes    map[uint64]func(*Tx, Time)
 	nodeTimes      map[uint64]func(*Tx, []any, Time)
 	// Window lifecycle: one handler each, receiving the window id.
@@ -654,6 +656,9 @@ type Tx struct {
 	// Set by Undoable: the wire admits one head-of-batch marker per
 	// batch, so a second name is a guest bug.
 	undoGroup bool
+	// Captures released this transaction, whose callbacks the binding
+	// drops on commit (capture.go).
+	releasedCaptures []uint64
 }
 
 type pendingDerived struct {
@@ -746,6 +751,9 @@ func (a *App) Build(fn func(*Tx)) {
 	a.pendingRecords = nil
 	if len(records) > 0 {
 		Submit(records...)
+	}
+	for _, id := range tx.releasedCaptures {
+		dropCaptureSinks(id)
 	}
 }
 
@@ -6599,6 +6607,8 @@ func (a *App) Serve() {
 		// any other.
 		case mediaOccurrence(kind):
 			a.mediaOccurred(kind, id, keys, payload)
+		case captureOccurrence(kind):
+			a.captureOccurred(kind, id, payload)
 		case kind == occDrawRequested || kind == occTick:
 			a.answerCanvasAsk(kind, id, keys, tail)
 		case kind == occButtonClicked && len(keys) == 0:

@@ -14168,14 +14168,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
         ApplyOp::ReadPeaks { reader, read } => gtk_reader::peaks(reader.0, read.0),
         ApplyOp::CancelRead { reader, read } => gtk_reader::cancel(reader.0, read.0),
         ApplyOp::CloseReader(reader) => gtk_reader::close(reader.0),
-        // docs/capture-plan.md §8: the capture is a depth slice on the mac.
-        ApplyOp::CreateCapture(_)
-        | ApplyOp::SetCaptureProp { .. }
-        | ApplyOp::CaptureCommand { .. }
-        | ApplyOp::ReleaseCapture(_)
-        | ApplyOp::RequestPermission(_)
-        | ApplyOp::WatchCaptureDevices(_)
-        | ApplyOp::SetVideoCapture { .. } => crate::depth_stub("capture"),
+        ApplyOp::CreateCapture(capture) => capture::create(capture.0),
+        ApplyOp::SetCaptureProp { capture, prop, value } => capture::set_prop(capture.0, prop, &value),
+        ApplyOp::CaptureCommand { capture, command } => capture::command(capture.0, command),
+        ApplyOp::ReleaseCapture(capture) => capture::release(core, capture.0),
+        ApplyOp::RequestPermission(kind) => capture::request_permission(kind),
+        ApplyOp::WatchCaptureDevices(on) => capture::watch(on),
+        ApplyOp::SetVideoCapture { widget, capture } => capture::set_video_capture(core, widget, capture.map(|c| c.0)),
         ApplyOp::SetSession { player, offered, playback_state: _, title, artist, album, artwork } => {
             gtk_media::set_session(
                 core,
@@ -24370,6 +24369,8 @@ fn atspi_promoted_buttons(title: &str) -> Result<Vec<(String, bool)>, AtspiMiss>
     })
 }
 
+mod capture;
+
 mod gtk_media {
     use super::*;
     use crate::protocol::{PlayerCommand, PlayerState};
@@ -24500,6 +24501,8 @@ mod gtk_media {
         pub(super) picture: gtk4::Picture,
         pub(super) caption: gtk4::Label,
         pub(super) shown: Rc<std::cell::Cell<Option<u64>>>,
+        /// The capture this view previews (docs/capture-plan.md §3).
+        pub(super) capture: Rc<std::cell::Cell<Option<u64>>>,
     }
 
     /// A caption overlay is no node of its own on the accessibility bus (the
@@ -24575,7 +24578,7 @@ mod gtk_media {
                 queue(Pending::Visible(id, 0.0));
             }
         });
-        GtkVideoView { id, overlay, picture, caption, shown }
+        GtkVideoView { id, overlay, picture, caption, shown, capture: Rc::new(std::cell::Cell::new(None)) }
     }
 
     /// How much of `widget` shows: its box intersected with the window's and
@@ -25583,11 +25586,12 @@ mod gtk_media {
     /// Rule 5 (docs/media-plan.md §2): the display stays awake exactly while a
     /// player shown by a mapped video view plays, through GtkApplication's own
     /// idle inhibitor as GNOME's Showtime does.
-    fn follow_keep_awake(core: &CoreState) {
+    pub(super) fn follow_keep_awake(core: &CoreState) {
         use gtk4::prelude::{GtkApplicationExt, WidgetExt};
         let want = core.videos.iter().any(|v| {
             v.overlay.is_mapped()
-                && v.shown.get().and_then(player).is_some_and(|p| p.inner.borrow().state == PlayerState::Playing)
+                && (v.shown.get().and_then(player).is_some_and(|p| p.inner.borrow().state == PlayerState::Playing)
+                    || v.capture.get().is_some_and(super::capture::previews_a_camera))
         });
         let Some(app) = core.app.as_ref() else { return };
         match (want, AWAKE.get()) {

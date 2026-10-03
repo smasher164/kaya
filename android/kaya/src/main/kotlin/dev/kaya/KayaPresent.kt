@@ -186,6 +186,33 @@ object KayaPresent {
     @JvmStatic external fun sessionAction(action: Int, atMs: Long): Int
     @JvmStatic external fun sessionState(): Int
 
+    /** The capture (docs/capture-plan.md; KayaCapture.kt): kaya_capture_*'s
+     * JNI spellings. captureFrame and captureSamples run on the capture's
+     * own threads; captureFrame answers 0 once the capture is released, 1
+     * for planes handed over in place and 2 for planes repacked to NV12. */
+    @JvmStatic external fun captureState(
+        capture: Long, state: Int, reason: Int, width: Int, height: Int, frameRate: Int, detail: String,
+    )
+    @JvmStatic external fun captureOverdue(capture: Long): Int
+    @JvmStatic external fun capturePermission(kind: Int, permission: Int, detail: String)
+    @JvmStatic external fun captureDevicesBegin()
+    @JvmStatic external fun captureDevice(id: String, name: String, kind: Int, facing: Int, preferred: Boolean)
+    @JvmStatic external fun captureDevicesEnd()
+    @JvmStatic external fun captureFrame(
+        capture: Long, width: Int, height: Int,
+        y: java.nio.ByteBuffer, yRow: Int, yPixel: Int,
+        u: java.nio.ByteBuffer, uRow: Int, uPixel: Int,
+        v: java.nio.ByteBuffer, vRow: Int, vPixel: Int,
+        timestampNs: Long, rotation: Int,
+    ): Int
+    @JvmStatic external fun captureSamples(
+        capture: Long, channels: Int, rate: Int, samples: FloatArray, count: Int, timestampNs: Long,
+    )
+    @JvmStatic external fun captureSynthetic(index: Int): String?
+    @JvmStatic external fun captureSyntheticPermission(kind: Int, ask: Boolean): Int
+    @JvmStatic external fun captureNearestFormat(offered: IntArray, width: Double, height: Double, frameRate: Double): IntArray?
+    @JvmStatic external fun captureHarness(verb: Int, index: Int, text: String): String
+
     /** Emit a column-header click: [tag] is the sort tag delivered
      * with the container's SET_COLUMN_HEADERS record, verbatim;
      * [column] the 0-based index. A REQUEST — the guest sorts

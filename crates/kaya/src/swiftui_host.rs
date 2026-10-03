@@ -400,6 +400,7 @@ pub struct KayaHostApi {
     pub capture_synthetic_permission: extern "C" fn(u32, u32) -> u32,
     pub capture_harness: unsafe extern "C" fn(u32, u32, *const u8, usize, *mut u8, usize, *mut u8) -> usize,
     pub reader_no_track: unsafe extern "C" fn(u64, u64, *const u8, usize),
+    pub capture_nearest_format: unsafe extern "C" fn(*const u32, usize, f64, f64, f64, *mut u32) -> u32,
 }
 
 /// # Safety
@@ -677,6 +678,7 @@ pub(crate) fn run() -> i32 {
         capture_synthetic_permission: crate::capi::kaya_capture_synthetic_permission,
         capture_harness: crate::capi::kaya_capture_harness,
         reader_no_track: crate::capi::kaya_reader_no_track,
+        capture_nearest_format: crate::capi::kaya_capture_nearest_format,
     };
     // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the declares-windowing
     // entry), and the declaration has to beat the first transaction rather

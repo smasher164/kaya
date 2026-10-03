@@ -1229,4 +1229,75 @@ let () =
   if !answer <> "cancelled released" then
     fail "an awaited read closed under it answered %S, wanted \"cancelled released\"" !answer;
 
+  (* THE CAPTURE'S CALLBACKS (docs/capture-plan.md §4), driven from a fresh
+     foreign thread as kaya's capture thread drives them: no transaction
+     from there, even while the app thread holds one open; the frame and
+     the chunk are the callback's own copies; a released capture's
+     callbacks are dropped once the release commits, and kept when it
+     rolls back. *)
+  let capture_app = Kaya_app.create () in
+  For_capture_checks.claim_app_thread ();
+  let call, shown = build capture_app (fun () -> (capture ~camera:"cam" (), signal Scalar.Str "")) in
+  let refusals = ref [] and kept_y = ref Bytes.empty and frames = ref 0 in
+  let refused what f =
+    match f () with
+    | () -> refusals := (what ^ " went through") :: !refusals
+    | exception Failure m ->
+        if not (String.length m > 40 && String.sub m 0 40 = "kaya: a transaction belongs to the app t") then
+          refusals := (what ^ ": " ^ m) :: !refusals
+  in
+  on_capture_frame capture_app call (fun f ->
+      incr frames;
+      refused "a write" (fun () -> write shown "from the capture thread");
+      refused "a build" (fun () -> build capture_app (fun () -> write shown "from the capture thread"));
+      Bytes.set f.y 0 'Z';
+      kept_y := f.y);
+  let intact = build capture_app (fun () -> For_capture_checks.drive_frame call 4 4) in
+  if !frames <> 1 then fail "the frame callback ran %d times, wanted 1" !frames;
+  if !refusals <> [] then fail "a capture callback's transaction was not refused: %s" (String.concat "; " !refusals);
+  if not intact then fail "a frame callback's mutation reached kaya's own planes";
+  if Bytes.length !kept_y <> 16 || Bytes.get !kept_y 0 <> 'Z' || Bytes.get !kept_y 15 <> '\x51' then
+    fail "a frame's Y plane did not survive its call as the callback's copy: %S" (Bytes.to_string !kept_y);
+  let chunks = ref [] and kept_chunk = ref None in
+  on_capture_samples capture_app call (fun chunk at ->
+      chunks := (Bigarray.Array1.dim chunk, chunk.{1}, at) :: !chunks;
+      chunk.{1} <- 999;
+      kept_chunk := Some chunk);
+  if not (For_capture_checks.drive_samples call) then fail "a sample callback's mutation reached kaya's own samples";
+  if !chunks <> [ (480, 1, 9L) ] then fail "the sample callback did not see one chunk of 480 at 9 ns";
+  (match !kept_chunk with
+  | Some c when c.{1} = 999 && c.{2} = 2 -> ()
+  | _ -> fail "a chunk did not survive its call as the callback's copy");
+  let registered, unregistered = For_capture_checks.thread_counts () in
+  if registered <> 2 || unregistered <> 2 then
+    fail "two foreign capture threads registered %d and unregistered %d, wanted 2 and 2" registered unregistered;
+  (* A callback that raises is caught, logged, and still handed the next
+     frame (DESIGN.md's abort rule on the capture thread). *)
+  let raising = ref 0 in
+  on_capture_frame capture_app call (fun _ ->
+      incr raising;
+      if !raising = 1 then failwith "a raising frame callback");
+  ignore (For_capture_checks.drive_frame call 4 4);
+  ignore (For_capture_checks.drive_frame call 4 4);
+  if !raising <> 2 || For_capture_checks.raised () <> 1 then
+    fail "a raising capture callback: %d calls and %d caught, wanted 2 and 1" !raising (For_capture_checks.raised ());
+  on_capture_frame capture_app call (fun _ -> incr frames);
+  build capture_app (fun () -> release_capture call);
+  ignore (For_capture_checks.drive_frame call 4 4);
+  ignore (For_capture_checks.drive_samples call);
+  if !frames <> 1 || List.length !chunks <> 1 then
+    fail "a released capture's callbacks still ran (%d frames, %d chunks)" !frames (List.length !chunks);
+  let kept, gone = build capture_app (fun () -> (capture ~camera:"kept" (), capture ~camera:"gone" ())) in
+  let heard = ref [] in
+  on_capture_frame capture_app kept (fun _ -> heard := "kept" :: !heard);
+  on_capture_frame capture_app gone (fun _ -> heard := "gone" :: !heard);
+  build capture_app (fun () ->
+      release_capture gone;
+      try build capture_app (fun () -> release_capture kept; raise Exit) with Exit -> ());
+  ignore (For_capture_checks.drive_frame kept 4 4);
+  ignore (For_capture_checks.drive_frame gone 4 4);
+  if !heard <> [ "kept" ] then
+    fail "a committed release and a rolled-back one nested in it: the callbacks heard [%s], wanted [kept]"
+      (String.concat "; " !heard);
+
   print_endline "ocaml abort check: OK"

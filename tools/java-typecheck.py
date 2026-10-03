@@ -755,6 +755,20 @@ MEDIA_NEGATIVES = [
      r"if \(!took \|\| !\(outcome instanceof ReadOutcome\.Completed\)\) \{",
      "if (!took) {",
      "a failed awaited read's image was not queued for release"),
+    ("capture negative: a callback's transaction let through off the app thread", "KayaApp.java",
+     r"(public <R> R build\(java\.util\.function\.Function<Tx, R> build\) \{\n) {8}"
+     r"requireAppThread\(\);\n",
+     r"\1",
+     "was not refused by the wrong-thread refusal"),
+    ("capture negative: one array reused for every frame", "KayaApp.java",
+     r"( {4}static void captureFrame\()((?:.|\n)*?)byte\[\] yCopy = new byte\[y\.remaining\(\)\];",
+     r"    static byte[] reusedY = new byte[0];\n\1\2if (reusedY.length != y.remaining()) {\n"
+     r"            reusedY = new byte[y.remaining()];\n        }\n        byte[] yCopy = reusedY;",
+     "a later frame or chunk reused an array the app had kept"),
+    ("capture negative: a released capture's callbacks kept", "KayaApp.java",
+     r"CaptureFrameCallback frames = captureFrames\.remove\(c\.id\);",
+     "CaptureFrameCallback frames = captureFrames.get(c.id);",
+     "a released capture's callbacks were kept by the binding"),
 ]
 for label, name, pattern, repl, sentence in MEDIA_NEGATIVES:
     rel = ROOT / "bindings" / "java" / "dev" / "kaya" / name

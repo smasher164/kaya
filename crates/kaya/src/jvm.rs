@@ -172,6 +172,17 @@ pub(crate) fn register_ring_natives(env: &mut JNIEnv) -> jni::errors::Result<()>
             // The reader's two pulls (docs/media-plan.md §8 ruling 4).
             NativeMethod { name: "readerPeaks".into(), sig: "(JJ)[S".into(), fn_ptr: ring_reader_peaks as *mut _ },
             NativeMethod { name: "imagePixels".into(), sig: "(J[I)[B".into(), fn_ptr: ring_image_pixels as *mut _ },
+            // The capture's callbacks (docs/capture-plan.md §4).
+            NativeMethod {
+                name: "captureOnFrame".into(),
+                sig: "(JZ)V".into(),
+                fn_ptr: ring_capture_on_frame as *mut _,
+            },
+            NativeMethod {
+                name: "captureOnSamples".into(),
+                sig: "(JZ)V".into(),
+                fn_ptr: ring_capture_on_samples as *mut _,
+            },
             NativeMethod {
                 name: "prefRemove".into(),
                 sig: "([B)V".into(),
@@ -701,6 +712,100 @@ extern "system" fn ring_pref_remove<'a>(
 ) {
     let key = env.convert_byte_array(&key).expect("kaya: reading the pref key failed");
     unsafe { crate::capi::kaya_pref_remove(key.as_ptr(), key.len()) };
+}
+
+/// THE CAPTURE CALLBACKS (docs/capture-plan.md §4): the core's sink calls
+/// KayaApp.captureFrame / captureSamples on kaya's capture thread, the
+/// borrowed planes lent as direct buffers that the Java side copies before
+/// the app's callback runs. The class is resolved here, on the registering
+/// thread: a thread attached from native code gets the system class loader,
+/// which on Android cannot see the app's classes.
+struct CaptureDispatch {
+    vm: jni::JavaVM,
+    class: jni::objects::GlobalRef,
+}
+
+static CAPTURE_DISPATCH: std::sync::OnceLock<CaptureDispatch> = std::sync::OnceLock::new();
+
+fn capture_dispatch(env: &mut JNIEnv) -> &'static CaptureDispatch {
+    CAPTURE_DISPATCH.get_or_init(|| {
+        let vm = env.get_java_vm().expect("kaya: reading the JavaVM for the capture callbacks failed");
+        let class = env.find_class("dev/kaya/KayaApp").expect("kaya: dev.kaya.KayaApp is not loadable");
+        let class = env.new_global_ref(class).expect("kaya: holding dev.kaya.KayaApp failed");
+        CaptureDispatch { vm, class }
+    })
+}
+
+/// One call into Java from kaya's capture thread, its local references
+/// freed with it (the thread stays attached and never returns to Java, so
+/// nothing else would free them), and a pending exception reported rather
+/// than left for the next call to trip over.
+fn capture_call(d: &CaptureDispatch, call: impl FnOnce(&mut JNIEnv) -> jni::errors::Result<()>) {
+    let mut env = d.vm.attach_current_thread_as_daemon().expect("kaya: attaching kaya's capture thread to the JVM");
+    let done = env.with_local_frame(4, call);
+    if env.exception_check().unwrap_or(false) {
+        let _ = env.exception_describe();
+        let _ = env.exception_clear();
+    } else if let Err(e) = done {
+        eprintln!("kaya: handing a capture callback its data failed: {e}");
+    }
+}
+
+extern "system" fn ring_capture_on_frame(mut env: JNIEnv, _class: JClass, capture: jlong, on: jboolean) {
+    let id = crate::protocol::CaptureId(capture as u64);
+    if on == 0 {
+        crate::capture::set_frame_sink(id, None);
+        return;
+    }
+    let d = capture_dispatch(&mut env);
+    let sink = move |f: &crate::capture::CaptureFrame<'_>| {
+        capture_call(d, |env| {
+            let y = unsafe { env.new_direct_byte_buffer(f.y.as_ptr() as *mut u8, f.y.len()) }?;
+            let uv = unsafe { env.new_direct_byte_buffer(f.uv.as_ptr() as *mut u8, f.uv.len()) }?;
+            env.call_static_method(
+                &d.class,
+                "captureFrame",
+                "(JIILjava/nio/ByteBuffer;Ljava/nio/ByteBuffer;IIJI)V",
+                &[
+                    jni::objects::JValue::Long(capture),
+                    jni::objects::JValue::Int(f.width as jint),
+                    jni::objects::JValue::Int(f.height as jint),
+                    (&y).into(),
+                    (&uv).into(),
+                    jni::objects::JValue::Int(f.y_stride as jint),
+                    jni::objects::JValue::Int(f.uv_stride as jint),
+                    jni::objects::JValue::Long(f.timestamp_ns as jlong),
+                    jni::objects::JValue::Int(f.rotation as jint),
+                ],
+            )?;
+            Ok(())
+        })
+    };
+    crate::capture::set_frame_sink(id, Some(std::sync::Arc::new(sink)));
+}
+
+extern "system" fn ring_capture_on_samples(mut env: JNIEnv, _class: JClass, capture: jlong, on: jboolean) {
+    let id = crate::protocol::CaptureId(capture as u64);
+    if on == 0 {
+        crate::capture::set_sample_sink(id, None);
+        return;
+    }
+    let d = capture_dispatch(&mut env);
+    let sink = move |chunk: &[i16], at: u64| {
+        capture_call(d, |env| {
+            let samples = unsafe {
+                env.new_direct_byte_buffer(chunk.as_ptr() as *mut u8, std::mem::size_of_val(chunk))
+            }?;
+            env.call_static_method(
+                &d.class,
+                "captureSamples",
+                "(JLjava/nio/ByteBuffer;J)V",
+                &[jni::objects::JValue::Long(capture), (&samples).into(), jni::objects::JValue::Long(at as jlong)],
+            )?;
+            Ok(())
+        })
+    };
+    crate::capture::set_sample_sink(id, Some(std::sync::Arc::new(sink)));
 }
 
 /// The desktop bootstrap, and the ONLY symbol the JVM looks up by name

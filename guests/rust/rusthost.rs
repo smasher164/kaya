@@ -148,6 +148,8 @@ mod colorpicker;
 mod range;
 #[path = "media.rs"]
 mod media;
+#[path = "capture.rs"]
+mod capture;
 
 #[path = "sheet.rs"]
 mod sheet;
@@ -239,6 +241,7 @@ fn app(ctx: kaya::AppCtx) {
         | Ok("media_picked") | Ok("media_timeout") | Ok("media_reader") => {
             media::app(ctx)
         }
+        Ok("capture") | Ok("capture_denied") => capture::app(ctx),
         Ok("sheet") => sheet::app(ctx),
         // One guest under three locales (tools/lib/lanes/android.py's
         // SCENE_LOCALE): a scene selects a SCRIPT, never an app.

@@ -2518,6 +2518,7 @@ public final class KayaApp {
     /// The players' mirrors and handlers and the session's (KayaMedia.swift).
     let media = KayaMediaState()
     let readers = KayaReaderState()
+    let captures = KayaCaptureMirror()
     var fileDialogs: [UInt64: (KayaAppTx, [KayaPickedFile]) throws -> Void] = [:]
     // Clipboard reads: one-shot, keyed by request id, on the alert's
     // request/result grammar.
@@ -3553,6 +3554,9 @@ public final class KayaApp {
                 continue
             }
             if readerOccurrence(kind, id, tail, { h in self.dispatch { try self.build(h) } }) {
+                continue
+            }
+            if captureOccurrence(kind, id, payload, tail, { h in self.dispatch { try self.build(h) } }) {
                 continue
             }
             var text: String?

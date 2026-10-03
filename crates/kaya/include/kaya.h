@@ -2445,6 +2445,7 @@ typedef struct KayaHostApi {
                                uintptr_t,
                                uint8_t*);
   void (*reader_no_track)(uint64_t, uint64_t, const uint8_t*, uintptr_t);
+  uint32_t (*capture_nearest_format)(const uint32_t*, uintptr_t, double, double, double, uint32_t*);
 } KayaHostApi;
 
 
@@ -3600,6 +3601,24 @@ uint32_t kaya_capture_synthetic(uint32_t index,
  * harness's arranged answer, granted unless answer_permission said else).
  */
 uint32_t kaya_capture_synthetic_permission(uint32_t kind, uint32_t ask);
+
+/**
+ * Presentation side: a capture's wish (`width`, `height`, `frame_rate`, 0
+ * for the platform's own choice) met by the nearest of the `count`
+ * formats the device offers, `offered` holding them as (width, height,
+ * frame rate) triples; the choice goes into `out`'s three. Answers 0 when
+ * nothing is offered. One rule for every backend (docs/capture-plan.md §2).
+ *
+ * # Safety
+ * `offered` must describe `count * 3` readable u32s and `out` three
+ * writable ones.
+ */
+uint32_t kaya_capture_nearest_format(const uint32_t *offered,
+                                     uintptr_t count,
+                                     double width,
+                                     double height,
+                                     double frame_rate,
+                                     uint32_t *out);
 
 /**
  * The harness's two capture verbs for an interpreter: `expect_capture`

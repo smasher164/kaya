@@ -2490,6 +2490,191 @@ if (isMainThread) {
   check("tr refuses an empty key", throws(() => kaya.tr(""), /message's key/));
   check("fmt is still the derived-string template tag", typeof kaya.fmt === "function" && typeof kaya.fmt.date === "function");
 
+  // THE CAPTURE (docs/capture-plan.md §2-§4). The callbacks are a module
+  // run in the capture's worker; no checks file can make a capture live
+  // (only a scene applies create_capture), so the addon's captureTestCall
+  // stands in for the core's capture thread and calls the same trampolines.
+  {
+    const cpSame = (x: Uint8Array, y: Uint8Array): boolean => Buffer.from(x).equals(Buffer.from(y));
+    const cpFrom = shipped.length;
+    let cp!: K.Capture;
+    let cpView!: K.Widget;
+    let cpRefused = "";
+    const cpSeen: unknown[] = [];
+    const cpInbox: Record<string, unknown>[] = [];
+    const kayaUrl = new URL("./kaya/index.ts", import.meta.url).href;
+    const workerSource = `
+      const kaya = await import(${JSON.stringify(kayaUrl)});
+      let first = null;
+      const tries = (act) => { try { act(); return "no refusal"; } catch (e) { return String(e && e.message); } };
+      kaya.onCaptureFrame((f) => {
+        if (first === null) first = f;
+        kaya.postToApp({ kind: "frame", y: [...f.y], firstY: [...first.y], firstUv: [...first.uv],
+          meta: [f.width, f.height, f.yStride, f.uvStride, typeof f.timestampNs, String(f.timestampNs), f.rotation],
+          signal: tries(() => kaya.signal(1)), app: tries(() => new kaya.App()) });
+      });
+      kaya.onCaptureSamples((chunk, at) => kaya.postToApp({ kind: "samples", chunk: [...chunk],
+        int16: chunk instanceof Int16Array, at: typeof at + " " + String(at) }));
+      kaya.postToApp({ kind: "ready" });
+    `;
+    const cpWait = async (pred: () => boolean, ms = 5000): Promise<boolean> => {
+      const until = Date.now() + ms;
+      while (!pred() && Date.now() < until) await new Promise((r) => setTimeout(r, 10));
+      return pred();
+    };
+    app.window(() => {
+      cp = kaya.capture({
+        camera: "cam",
+        microphone: "mic",
+        size: [600, 400],
+        frameRate: 30,
+        onState: (r) => cpSeen.push(["state", r]),
+        onFailed: (why, detail) => cpSeen.push(["failed", why, detail]),
+        onOverrun: (ms) => cpSeen.push(["overrun", ms]),
+        worker: { module: new URL("data:text/javascript," + encodeURIComponent(workerSource)), onMessage: (m) => cpInbox.push(m as Record<string, unknown>) },
+      });
+      kaya.column(() => {
+        cpView = kaya.video(null, { capture: cp });
+        kaya.forEach(kaya.collection(), () => {
+          try {
+            kaya.video(null, { capture: cp });
+          } catch (e) {
+            cpRefused = e instanceof Error ? e.message : String(e);
+          }
+          kaya.label("row");
+        });
+      });
+      kaya.requestPermission("camera");
+      kaya.watchCaptureDevices(true);
+    });
+    const cpRecs = shipped.slice(cpFrom).flat();
+    for (const [want, rec] of [
+      ["create", wire.tx_create_capture(cp.id)],
+      ["camera", wire.tx_set_capture_prop(cp.id, wire.CPROP_CAMERA, "cam")],
+      ["width", wire.tx_set_capture_prop(cp.id, wire.CPROP_WIDTH, 600)],
+      ["frame rate", wire.tx_set_capture_prop(cp.id, wire.CPROP_FRAME_RATE, 30)],
+      ["preview", wire.tx_set_capture(cpView.id, cp.id)],
+      ["permission", wire.tx_request_permission(wire.CAPTURE_KIND_CAMERA)],
+      ["watch", wire.tx_watch_capture_devices(1)],
+    ] as const) {
+      check(`a capture's declaration packs its ${want} record`, cpRecs.some((r) => cpSame(r, rec)));
+    }
+    check("a row template refuses a capture's preview, naming the live zone", /live zone only/.test(cpRefused));
+
+    kaya.onPermission((k, p) => cpSeen.push(["permission", k, p]));
+    kaya.onCaptureDevices((d) => cpSeen.push(["devices", d.length]));
+    const packChanged = (state: number, failure = 0, w = 0, h = 0, rate = 0, detail = ""): Uint8Array =>
+      frame(wire.OCC_CAPTURE_CHANGED, (v) => {
+        v.setBigUint64(8, BigInt(cp.id), true);
+        v.setUint32(16, state, true);
+        v.setUint32(20, failure, true);
+        v.setUint32(24, 0, true);
+        v.setUint32(28, w, true);
+        v.setUint32(32, h, true);
+        v.setUint32(36, rate, true);
+      }, 32, [valueBytes(detail)]);
+    rdFire(
+      frame(wire.OCC_CAPTURE_PERMISSION, (v) => {
+        v.setUint32(8, wire.CAPTURE_KIND_CAMERA, true);
+        v.setUint32(12, wire.PERMISSION_GRANTED, true);
+      }, 8, [valueBytes("")]),
+      packChanged(wire.CAPTURE_STATE_RUNNING, 0, 640, 480, 30),
+      frame(wire.OCC_CAPTURE_OVERRUN, (v) => {
+        v.setBigUint64(8, BigInt(cp.id), true);
+        v.setBigUint64(16, 250n, true);
+      }, 16, []),
+      frame(wire.OCC_CAPTURE_DEVICES, (v) => v.setUint32(8, 5, true), 8,
+        ["cam", "Camera", new wire.I64(wire.CAPTURE_KIND_CAMERA), new wire.I64(wire.CAMERA_FACING_FRONT), true].map((x) => valueBytes(x as W.WireValue))),
+      packChanged(wire.CAPTURE_STATE_FAILED, wire.CAPTURE_FAILURE_IN_USE, 0, 0, 0, "the platform's words"),
+    );
+    check("a capture's occurrences reach its readings and handlers in order",
+      JSON.stringify(cpSeen) === JSON.stringify([
+        ["permission", "camera", "granted"],
+        ["state", { state: "running", failure: null, interruption: null, width: 640, height: 480, frameRate: 30 }],
+        ["overrun", 250],
+        ["devices", 1],
+        ["state", { state: "failed", failure: "in_use", interruption: null, width: 0, height: 0, frameRate: 0 }],
+        ["failed", "in_use", "the platform's words"],
+      ]));
+    check("a kind's permission and the device list are read back",
+      kaya.permission("camera") === "granted" && kaya.permission("microphone") === "prompt"
+        && JSON.stringify(kaya.captureDevices()) === JSON.stringify([{ id: "cam", name: "Camera", kind: "camera", facing: "front", preferred: true }]));
+
+    // The worker, called from a native thread as kaya's capture thread calls it.
+    const cpReady = await cpWait(() => cpInbox.some((m) => m["kind"] === "ready"));
+    check("a capture's worker starts and reaches the app thread through postToApp", cpReady);
+    runtime.captureTestCall(cp.id);
+    const cpGot = await cpWait(() => cpInbox.filter((m) => m["kind"] === "frame").length === 2 && cpInbox.some((m) => m["kind"] === "samples"));
+    const cpFrames = cpInbox.filter((m) => m["kind"] === "frame");
+    const cpSamples = cpInbox.find((m) => m["kind"] === "samples");
+    check("the capture thread's frames and chunk reach the worker's callbacks", cpGot);
+    const second = cpFrames[1];
+    check("a transaction opened in a capture callback is refused as the wrong thread, naming postToApp",
+      second !== undefined && /belongs to the app thread — this is capture \d+'s worker/.test(String(second["signal"])) && /postToApp/.test(String(second["signal"])));
+    check("a capture worker is not the app thread: new App() there is refused",
+      second !== undefined && /created on the app thread/.test(String(second["app"])));
+    check("a frame is the worker's own copy, kept past the call",
+      second !== undefined && JSON.stringify(second["y"]) === JSON.stringify(Array(12).fill(7))
+        && JSON.stringify(second["firstY"]) === JSON.stringify(Array(12).fill(200))
+        && JSON.stringify(second["firstUv"]) === JSON.stringify(Array(8).fill(128))
+        && JSON.stringify(cpFrames[0]!["meta"]) === JSON.stringify([4, 3, 4, 4, "bigint", "1234", 90]));
+    check("a chunk is the worker's own Int16Array with its time as a bigint",
+      cpSamples !== undefined && JSON.stringify(cpSamples["chunk"]) === "[1,-2,3]" && cpSamples["int16"] === true && cpSamples["at"] === "bigint 5678");
+
+    // A callback that throws is caught and logged naming the capture, and
+    // the next frame still reaches it (DESIGN.md's abort rule on the
+    // capture thread): the worker below throws on the first frame and
+    // forwards what console.error printed.
+    {
+      let thrower!: K.Capture;
+      const said: Record<string, unknown>[] = [];
+      const throwSource = `
+        const kaya = await import(${JSON.stringify(kayaUrl)});
+        const printed = [];
+        console.error = (...a) => printed.push(a.map(String).join(" "));
+        kaya.onCaptureFrame((f) => {
+          if (f.y[0] === 200) throw new Error("the app's own bug");
+          kaya.postToApp({ kind: "after", printed: [...printed] });
+        });
+        kaya.postToApp({ kind: "ready" });
+      `;
+      app.build(() => {
+        thrower = kaya.capture({ worker: { module: new URL("data:text/javascript," + encodeURIComponent(throwSource)), onMessage: (m) => said.push(m as Record<string, unknown>) } });
+      });
+      await cpWait(() => said.some((m) => m["kind"] === "ready"));
+      runtime.captureTestCall(thrower.id);
+      const after = await cpWait(() => said.some((m) => m["kind"] === "after"));
+      const printed = (said.find((m) => m["kind"] === "after")?.["printed"] ?? []) as string[];
+      check("a capture callback that throws is logged naming the capture, and the next frame still reaches it",
+        after && printed.some((l) => l === `kaya: capture ${thrower.id}'s frame callback raised: the app's own bug; the capture keeps running`));
+      app.build(() => thrower.release());
+    }
+
+    // A release rolled back keeps the worker; a release ends it.
+    try {
+      app.build(() => {
+        cp.release();
+        throw new Error("rolled back");
+      });
+    } catch {
+      // the build rethrows; its records and the release went back
+    }
+    await cpWait(() => false, 100);
+    cpInbox.length = 0;
+    runtime.captureTestCall(cp.id);
+    check("a rolled-back release keeps the capture's worker and callbacks",
+      await cpWait(() => cpInbox.filter((m) => m["kind"] === "frame").length === 2));
+    const cpRelFrom = shipped.length;
+    app.build(() => cp.release());
+    await cpWait(() => false, 200);
+    cpInbox.length = 0;
+    runtime.captureTestCall(cp.id);
+    await cpWait(() => false, 500);
+    check("a released capture's worker and callbacks are dropped by the binding",
+      shipped.slice(cpRelFrom).flat().some((r) => cpSame(r, wire.tx_release_capture(cp.id)))
+        && cpInbox.length === 0 && (cp as unknown as { _worker: unknown })._worker === null);
+  }
+
   if (failures.length > 0) {
     console.log(`kaya_app_checks: ${failures.length} FAILED`);
     process.exit(1);

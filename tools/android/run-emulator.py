@@ -36,6 +36,7 @@ import only  # noqa: E402
 import scene_cut
 import flightrec_lane
 import media_server
+import emulator_capture
 
 # Device output is not clean UTF-8 (docs/traps.md, "NOT UTF-8").
 TEXT = {"text": True, "encoding": "utf-8", "errors": "replace"}
@@ -452,6 +453,69 @@ def shape_pool_panel(avd):
           f"{have.get('hw.lcd.height')}); the quickboot snapshot reseeds")
 
 
+# THE CAPTURE LEGS' CAMERAS (docs/capture-plan.md §7): the phone AVD's
+# front and back cameras are each an `imagefile:` of one flat colour out of
+# the core's synthetic table (tools/lib/emulator_capture.py). In the AVD and
+# not on the command line: the camera list is the GUEST's, taken at boot, so
+# a flag over the read-only snapshot leaves the snapshot's cameras
+# (docs/probes/capture-2026-10-01/compose-measured.md). A change reseeds the
+# snapshot once, as the panel's does.
+CAMERA_DIR = ROOT / "target/avd/kaya-cameras"
+
+
+def shape_pool_cameras(avd):
+    images = emulator_capture.camera_images(CAMERA_DIR)
+    want = {"hw.camera.front": f"imagefile:{images['front']}",
+            "hw.camera.back": f"imagefile:{images['back']}"}
+    avd_dir = pathlib.Path(os.environ["ANDROID_AVD_HOME"]) / f"{avd}.avd"
+    ini = avd_dir / "config.ini"
+    lines = ini.read_text(encoding="utf-8").splitlines()
+    have = dict(ln.split("=", 1) for ln in lines if "=" in ln)
+    if all(have.get(k) == v for k, v in want.items()):
+        return
+    if not stop_all_avd_instances(avd):
+        die(f"run-emulator: could not stop {avd} to give it the capture cameras")
+    kept = [ln for ln in lines if ln.split("=", 1)[0] not in want]
+    kept += [f"{k}={v}" for k, v in want.items()]
+    ini.write_text("\n".join(kept) + "\n", encoding="utf-8")
+    shutil.rmtree(avd_dir / "snapshots/default_boot", ignore_errors=True)
+    (avd_dir / ".kaya-default-boot-id").unlink(missing_ok=True)
+    print(f"run-emulator: {avd}'s cameras are now {want} (were "
+          f"{have.get('hw.camera.front')}, {have.get('hw.camera.back')}); the "
+          f"quickboot snapshot reseeds")
+
+
+# THE WALL'S ANDROID HALF (docs/capture-plan.md §7): an emulator this runner
+# starts never hears the host's microphone or sees the host's camera. Every
+# launch goes through here, and an AVD naming a webcam is refused too.
+HOST_DEVICE_FLAGS = ("-allow-host-audio", "-webcam", "hostmicon")
+
+
+def refuse_host_devices(argv, avd):
+    said = [a for a in argv if any(flag in a for flag in HOST_DEVICE_FLAGS)
+            or a.startswith("webcam")]
+    ini = pathlib.Path(os.environ["ANDROID_AVD_HOME"]) / f"{avd}.avd/config.ini"
+    said += [ln for ln in ini.read_text(encoding="utf-8").splitlines()
+             if ln.startswith("hw.camera.") and "webcam" in ln]
+    if said:
+        die(f"run-emulator: refusing to start {avd} with {said}: a lane never "
+            f"reaches the host's camera or microphone (docs/capture-plan.md §7)")
+    return argv
+
+
+# The emulator's own audio is off (the pool's -no-audio), and its gRPC
+# endpoint is on, localhost and token-guarded, for the capture legs' tone.
+def emulator_argv(avd, port, *head):
+    grpc = emulator_capture.GRPC_BASE + port - emulator_capture.CONSOLE_BASE
+    return refuse_host_devices(
+        ["emulator", "-avd", avd, *head, "-no-window", *AUDIO_FLAGS,
+         "-no-boot-anim", "-gpu", "swiftshader_indirect", "-port", str(port),
+         "-grpc", str(grpc), "-grpc-use-token"], avd)
+
+
+AUDIO_FLAGS = ("-no-audio",)
+
+
 def make_snapshot(avd, port):
     serial = f"emulator-{port}"
     avd_dir = pathlib.Path(os.environ["ANDROID_AVD_HOME"]) / f"{avd}.avd"
@@ -478,9 +542,7 @@ def make_snapshot(avd, port):
     marker.unlink(missing_ok=True)
     with open(log, "w", encoding="utf-8") as lf:
         builder = subprocess.Popen(
-            ["emulator", "-avd", avd, "-no-snapshot-load", "-no-window",
-             "-no-audio", "-no-boot-anim", "-gpu", "swiftshader_indirect",
-             "-port", str(port)],
+            emulator_argv(avd, port, "-no-snapshot-load"),
             stdout=lf, stderr=lf)
     if not boot_wait(serial, builder):
         return False
@@ -521,7 +583,14 @@ READERS = []
 def launch_reader(port, expected_avd):
     serial = f"emulator-{port}"
     if live_instance_current(serial, expected_avd):
-        return True
+        grpc, why = emulator_capture.discovery(serial)
+        if grpc is not None:
+            return True
+        # Started before the capture legs' gRPC endpoint was part of the
+        # launch: the instance is current in everything but that.
+        print(f"run-emulator: {serial} has no gRPC endpoint ({why}); restarting it")
+        if not stop_avd_instance(serial, expected_avd):
+            return False
     if device_present(serial):
         actual = avd_name(serial)
         if actual is None:
@@ -540,10 +609,8 @@ def launch_reader(port, expected_avd):
     with open(ROOT / f"target/emu-{port}.log", "w",
               encoding="utf-8") as lf:
         proc = subprocess.Popen(
-            ["emulator", "-avd", expected_avd, "-read-only", "-snapshot",
-             "default_boot", "-force-snapshot-load", "-no-window",
-             "-no-audio", "-no-boot-anim", "-gpu",
-             "swiftshader_indirect", "-port", str(port)],
+            emulator_argv(expected_avd, port, "-read-only", "-snapshot",
+                          "default_boot", "-force-snapshot-load"),
             stdout=lf, stderr=lf)
     READERS.append((port, expected_avd, proc))
     return True
@@ -586,6 +653,7 @@ def finish_reader(port, expected_avd, proc):
 
 
 shape_pool_panel(AVD)
+shape_pool_cameras(AVD)
 if not make_snapshot(AVD, 5554):
     sys.exit(1)
 if not make_snapshot(TABLET_AVD, TABLET_PORT):
@@ -1149,6 +1217,21 @@ def stage_suite_apk(label, apk, package, targets):
                               f"on {package} said {grant.strip()!r} — the "
                               f"notify legs would meet the runtime prompt",
                               file=slog)
+                    # THE CAPTURE'S PLATFORM GRANT, arranged by the lane
+                    # (docs/capture-plan.md §7, OPEN C): the prompt a scene
+                    # answers is kaya's synthetic one, and a platform
+                    # refusal still reads `denied`.
+                    if package in CAPTURE_PACKAGES:
+                        for perm in ("CAMERA", "RECORD_AUDIO"):
+                            said = out_of(
+                                ["adb", "-s", serial, "shell", "pm", "grant",
+                                 package, f"android.permission.{perm}"],
+                                stderr=subprocess.STDOUT)
+                            if said.strip():
+                                print(f"run-emulator: pm grant {perm} on "
+                                      f"{package} said {said.strip()!r} — "
+                                      f"the capture legs would read denied",
+                                      file=slog)
                     target_verdict = "OK"
                 else:
                     print(f"run-emulator: {package} is not on {serial} "
@@ -1411,6 +1494,16 @@ def run_apk_on(serial, name, apk, component, script, extras,
     # ENDED, refused or taken; drags are serial, so the start count at a
     # seq's first injection dates every later start to that seq.
     served = {}
+    # THE CAPTURE LEGS' MICROPHONE (docs/capture-plan.md §7): the tone starts
+    # once the app's input EXISTS (an injection with none ends the emulator
+    # in SIGSEGV) and BEFORE it records (an injection started under a
+    # recording input broke the guest HAL's reads for good under load), the
+    # app starting its input on this runner's answer; it streams to the leg's
+    # end, since a second call is refused while the first's microphone is
+    # still registered (docs/probes/capture-2026-10-01/compose-measured.md).
+    mic = {"feed": None, "seen": set()}
+    if script in CAPTURE_SCENES:
+        print(f"{name}: {lane_capture_state(serial)}", file=log)
     # The shade taps this leg has served, keyed by the app's own sequence
     # number — the drag's bookkeeping, one verb over.
     tapped = {}
@@ -1517,7 +1610,18 @@ def run_apk_on(serial, name, apk, component, script, extras,
             print(f"{name}: draganddrop #{seq} try {tries + 1} "
                   f"{' '.join(aim)} {spelled} -> {told} in "
                   f"{int((time.monotonic() - began) * 1000)}ms", file=log)
+        for seq in re.findall(r"KAYA_REQUEST: microphone (\d+)", dump):
+            if seq not in mic["seen"]:
+                mic["seen"].add(seq)
+                print(f"{name}: microphone #{seq} -> {lane_microphone(serial, mic)}", file=log)
         time.sleep(0.5)
+    if mic["feed"] is not None:
+        feed = mic["feed"]
+        emulator_capture.stop(feed)
+        LIVE_FEEDS.discard(feed)
+        print(f"{name}: microphone stopped at the leg's end; {feed.sentence()}", file=log)
+    if script in CAPTURE_SCENES:
+        print(f"{name}: {capture_audio_timeline(serial)}", file=log)
     if out:
         CORE_DIAG["legs"] += 1
         if CORE_DIAG_LINE in dump:
@@ -2044,6 +2148,76 @@ def dispatch_media_key(serial, key, log):
     chosen = re.search(r"Media button session is (.*)", dump)
     return (f"exit {got.returncode} {got.stdout.strip()!r}; media button "
             f"session: {chosen.group(1).strip() if chosen else 'not named'}")
+
+
+CAPTURE_SCENES = {"capture", "capture_denied"}
+CAPTURE_PACKAGES = {lane.SUITE_APPS[s][1] for s in ("compose", "jvm", "go")}
+LIVE_FEEDS = set()
+
+
+@atexit.register
+def _stop_live_feeds():
+    for feed in list(LIVE_FEEDS):
+        emulator_capture.stop(feed)
+        LIVE_FEEDS.discard(feed)
+
+
+def lane_microphone(serial, mic):
+    """The tone on, once per leg; what was done, for the leg's log."""
+    if mic["feed"] is None:
+        mic["feed"] = emulator_capture.start(serial)
+        LIVE_FEEDS.add(mic["feed"])
+        return mic["feed"].sentence()
+    return f"already streaming; {mic['feed'].sentence()}"
+
+
+HAL_AUDIO_TAG = "android.hardware.audio@7.1-impl.ranchu"
+
+
+def capture_audio_timeline(serial):
+    """What the guest's audio HAL said while the leg's input ran, per second:
+    a read the HAL padded with silence and a read that FAILED. A capture leg
+    hearing `samples silent` under an injected tone is the HAL failing its
+    reads (docs/probes/capture-2026-10-01/compose-measured.md), which no
+    kaya line can show."""
+    dump = out_of(["timeout", "10", "adb", "-s", serial, "logcat", "-d", "-v", "time",
+                   "-s", f"{HAL_AUDIO_TAG}:*", "kaya:I"]).replace("\r", "")
+    seconds = {}
+    for line in dump.splitlines():
+        m = re.match(r"\S+ (\d\d:\d\d:\d\d)", line)
+        if not m:
+            continue
+        key = ("open" if "KAYA_CAPTURE_AUDIO" in line
+               else "silence-padded" if "inserting" in line and "silence" in line
+               else "read-failed" if "pcm_readi failed" in line else None)
+        if key:
+            seconds.setdefault(m.group(1), {}).setdefault(key, 0)
+            seconds[m.group(1)][key] += 1
+    if not seconds:
+        return "audio HAL: nothing logged (no input opened)"
+    failed = sum(s.get("read-failed", 0) for s in seconds.values())
+    rows = "; ".join(f"{at} " + ",".join(f"{k} {n}" for k, n in s.items())
+                     for at, s in sorted(seconds.items()))
+    cause = (f"; THE EMULATOR'S AUDIO INPUT BROKE, so the guest heard padded silence "
+             f"whatever was injected — measured under host load "
+             f"(one-minute load {os.getloadavg()[0]:.1f} now; docs/traps.md)" if failed else "")
+    return f"audio HAL: {failed} failed read(s){cause}; per second: {rows}"
+
+
+def lane_capture_state(serial):
+    """The lane's capture devices as this device runs them, for a capture
+    leg's log: the cameras the AVD declares and the gRPC endpoint the tone
+    goes through."""
+    ini = pathlib.Path(os.environ["ANDROID_AVD_HOME"]) / f"{AVD}.avd/config.ini"
+    lines = ini.read_text(encoding="utf-8").splitlines()
+    have = dict(ln.split("=", 1) for ln in lines if "=" in ln)
+    port, token = emulator_capture.discovery(serial)
+    grpc = f"gRPC 127.0.0.1:{port}" if port else f"no gRPC ({token})"
+    cams = adb_out(serial, "shell", "dumpsys", "media.camera").replace("\r", "")
+    facings = re.findall(r"Facing: (\w+)", cams)
+    return (f"capture lane: hw.camera.front={have.get('hw.camera.front')} "
+            f"hw.camera.back={have.get('hw.camera.back')}; the guest lists "
+            f"{len(facings)} camera(s) {facings}; {grpc}")
 
 
 def answer_hold_screen(serial, package, seq, log):

@@ -15,7 +15,7 @@ import Data.ByteString.Builder (toLazyByteString)
 import qualified Data.ByteString.Builder as BB
 import qualified Data.ByteString.Char8 as BC
 import qualified Data.ByteString.Lazy as BL
-import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
+import Data.IORef (atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
 import Data.List (isInfixOf)
 import Data.Word (Word8)
 import Foreign.Ptr (castPtr)
@@ -422,5 +422,63 @@ main = do
   doneRec 4 4 W.readOutcomeCancelled >>= feedR
   readIORef answer >>= \a ->
     check (a == "cancelled released") ("an awaited read closed under it answered " ++ show a ++ ", wanted \"cancelled released\"")
+
+  -- THE CAPTURE'S CALLBACKS (docs/capture-plan.md §4), driven from a fresh
+  -- foreign thread as kaya's capture thread drives them: a transaction
+  -- opened there is refused; the frame and the chunk are the callback's
+  -- own copies, still whole after kaya scribbles over its buffers; a
+  -- released capture's callbacks are dropped as the release commits, and
+  -- kept when the transaction holding the release throws.
+  captureApp <- newApp
+  forChecksClaimAppThread
+  (call, shown) <- buildTx captureApp ((,) <$> capture [CaptureCameraIs "cam"] <*> signalText "")
+  refusals <- newIORef []
+  keptY <- newIORef BS.empty
+  frames <- newIORef (0 :: Int)
+  onCaptureFrame captureApp call $ \f -> do
+    modifyIORef' frames (+ 1)
+    r <- try (submitTx captureApp (writeSignal shown "from the capture thread"))
+    case r of
+      Right () -> modifyIORef' refusals ("a transaction went through" :)
+      Left e
+        | "kaya: a transaction belongs to the app thread" `isInfixOf` show (e :: SomeException) -> return ()
+        | otherwise -> modifyIORef' refusals (show e :)
+    writeIORef keptY f.y
+  intact <- forChecksDriveFrame call 4 4
+  readIORef frames >>= \n -> check (n == 1) ("the frame callback ran " ++ show n ++ " times, wanted 1")
+  readIORef refusals >>= \rs -> check (null rs) ("a capture callback's transaction was not refused: " ++ show rs)
+  check intact "a frame callback reached kaya's own planes"
+  readIORef keptY >>= \y ->
+    check (y == BS.replicate 16 0x51) ("a frame's Y plane did not survive its call as the callback's copy: " ++ show y)
+  chunks <- newIORef []
+  onCaptureSamples captureApp call $ \chunk at -> modifyIORef' chunks ((chunk, at) :)
+  samplesIntact <- forChecksDriveSamples call
+  check samplesIntact "a sample callback reached kaya's own samples"
+  readIORef chunks >>= \cs ->
+    check (cs == [([0 .. 479], 9)]) ("the sample callback did not keep one chunk of 0..479 at 9 ns: " ++ show (map (\(c, a) -> (take 3 c, length c, a)) cs))
+  -- A callback that raises is caught, logged, and still handed the next
+  -- frame (DESIGN.md's abort rule on the capture thread).
+  raising <- newIORef (0 :: Int)
+  onCaptureFrame captureApp call $ \_ -> do
+    k <- atomicModifyIORef' raising (\k -> (k + 1, k + 1))
+    if k == 1 then error "a raising frame callback" else return ()
+  _ <- forChecksDriveFrame call 4 4
+  _ <- forChecksDriveFrame call 4 4
+  calls <- readIORef raising
+  caught <- forChecksCaptureRaised
+  check (calls == 2 && caught == 1)
+    ("a raising capture callback: " ++ show calls ++ " calls and " ++ show caught ++ " caught, wanted 2 and 1")
+  onCaptureFrame captureApp call $ \_ -> modifyIORef' frames (+ 1)
+  thrown <- try (buildTx captureApp (releaseCapture call >> error "abandoned")) :: IO (Either SomeException ())
+  check (either (const True) (const False) thrown) "a throwing release did not throw"
+  _ <- forChecksDriveFrame call 4 4
+  readIORef frames >>= \n -> check (n == 2) ("a release whose transaction threw dropped the frame callback (" ++ show n ++ " calls, wanted 2)")
+  buildTx captureApp (releaseCapture call)
+  _ <- forChecksDriveFrame call 4 4
+  _ <- forChecksDriveSamples call
+  n <- readIORef frames
+  cs <- readIORef chunks
+  check (n == 2 && length cs == 1)
+    ("a released capture's callbacks still ran (" ++ show n ++ " frames, " ++ show (length cs) ++ " chunks)")
 
   putStrLn "haskell abort check: OK"

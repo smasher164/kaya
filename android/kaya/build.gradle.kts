@@ -92,6 +92,14 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-dash:1.10.1")
     implementation("androidx.media3:media3-session:1.10.1")
     implementation("androidx.media3:media3-ui-compose:1.10.1")
+    // THE CAPTURE (docs/capture-plan.md §1, §3): CameraX's preview, frames
+    // and Camera2 characteristics, one version for the four modules. 1.5.1
+    // IS THE CEILING: 1.6's AARs require AGP 8.9.1 and this build is 8.7.3
+    // (checkDebugAarMetadata, measured 2026-10-02).
+    implementation("androidx.camera:camera-core:1.5.1")
+    implementation("androidx.camera:camera-camera2:1.5.1")
+    implementation("androidx.camera:camera-lifecycle:1.5.1")
+    implementation("androidx.camera:camera-view:1.5.1")
     // KayaColorSchemesTest, the wall check-compose runs so the emulator
     // never proves the brand scheme first.
     testImplementation("junit:junit:4.13.2")

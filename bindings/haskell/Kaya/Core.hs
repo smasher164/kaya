@@ -230,6 +230,31 @@ module Kaya.Core
     ReadError (..),
     ReadOcc (..),
     Await (..),
+    CaptureState (..),
+    captureStateName,
+    captureStateOfWire,
+    CaptureFailure (..),
+    captureFailureName,
+    captureFailureOfWire,
+    CaptureInterruption (..),
+    captureInterruptionName,
+    captureInterruptionOfWire,
+    CaptureKind (..),
+    captureKindName,
+    captureKindWire,
+    captureKindOfWire,
+    CameraFacing (..),
+    cameraFacingName,
+    cameraFacingOfWire,
+    Permission (..),
+    permissionName,
+    permissionOfWire,
+    Capture (..),
+    CaptureReading (..),
+    initialCaptureReading,
+    CaptureDevice (..),
+    CaptureFrame (..),
+    CaptureOcc (..),
     MediaState (..),
     allocP,
     recordHandle,
@@ -409,7 +434,9 @@ data Counters = Counters
     -- The media reader's three id spaces (docs/media-plan.md §8 ruling 4).
     cReader :: !Word64,
     cRead :: !Word64,
-    cImage :: !Word64
+    cImage :: !Word64,
+    -- The capture's own id space (docs/capture-plan.md §2).
+    cCapture :: !Word64
   }
 
 -- One collection instance: the table inside the stamped copy its path
@@ -485,6 +512,8 @@ data Pending
   | PReadAbandoned !Word64
   | PReaderClosed !Word64
   | PAwait !Word64 (Either ReadError ([Frame], Maybe Peaks) -> IO ())
+  -- A released capture's callbacks, dropped as the release commits.
+  | PCaptureReleased !Word64
 
 modelSet :: Word64 -> [W.Value] -> W.Value -> Word32 -> [W.Value] -> Model -> Model
 modelSet cid path key variant fields model =
@@ -1816,6 +1845,183 @@ data Await = Await
     awaitAnswer :: Either ReadError ([Frame], Maybe Peaks) -> IO ()
   }
 
+-- | A capture's state (docs\/capture-plan.md §2).
+data CaptureState
+  = CaptureIdle
+  | CaptureStarting
+  | CaptureRunning
+  | CaptureInterrupted
+  | CaptureFailed
+  deriving (Eq, Show)
+
+-- | The vocabulary's own word: @running@, @failed@.
+captureStateName :: CaptureState -> Text
+captureStateName s = case s of
+  CaptureIdle -> "idle"
+  CaptureStarting -> "starting"
+  CaptureRunning -> "running"
+  CaptureInterrupted -> "interrupted"
+  CaptureFailed -> "failed"
+
+captureStateOfWire :: Word32 -> CaptureState
+captureStateOfWire n
+  | n == W.captureStateIdle = CaptureIdle
+  | n == W.captureStateStarting = CaptureStarting
+  | n == W.captureStateRunning = CaptureRunning
+  | n == W.captureStateInterrupted = CaptureInterrupted
+  | n == W.captureStateFailed = CaptureFailed
+  | otherwise = error ("kaya: a capture state of " <> show n <> ", which this build does not know")
+
+-- | Why a capture cannot run: the closed reason.
+data CaptureFailure
+  = CaptureDenied
+  | CaptureNotFound
+  | CaptureInUse
+  | CaptureDisconnected
+  | CaptureUnsupported
+  | CaptureHardwareError
+  | CaptureTimeout
+  deriving (Eq, Show)
+
+captureFailureName :: CaptureFailure -> Text
+captureFailureName f = case f of
+  CaptureDenied -> "denied"
+  CaptureNotFound -> "not_found"
+  CaptureInUse -> "in_use"
+  CaptureDisconnected -> "disconnected"
+  CaptureUnsupported -> "unsupported"
+  CaptureHardwareError -> "hardware_error"
+  CaptureTimeout -> "timeout"
+
+captureFailureOfWire :: Word32 -> Maybe CaptureFailure
+captureFailureOfWire n
+  | n == W.captureFailureNone = Nothing
+  | n == W.captureFailureDenied = Just CaptureDenied
+  | n == W.captureFailureNotFound = Just CaptureNotFound
+  | n == W.captureFailureInUse = Just CaptureInUse
+  | n == W.captureFailureDisconnected = Just CaptureDisconnected
+  | n == W.captureFailureUnsupported = Just CaptureUnsupported
+  | n == W.captureFailureHardwareError = Just CaptureHardwareError
+  | n == W.captureFailureTimeout = Just CaptureTimeout
+  | otherwise = error ("kaya: a capture failure of " <> show n <> ", which this build does not know")
+
+-- | Why a running capture paused.
+data CaptureInterruption
+  = InterruptedBackground
+  | InterruptedAnotherApp
+  | InterruptedSystemPressure
+  deriving (Eq, Show)
+
+captureInterruptionName :: CaptureInterruption -> Text
+captureInterruptionName i = case i of
+  InterruptedBackground -> "background"
+  InterruptedAnotherApp -> "another_app"
+  InterruptedSystemPressure -> "system_pressure"
+
+captureInterruptionOfWire :: Word32 -> Maybe CaptureInterruption
+captureInterruptionOfWire n
+  | n == W.captureInterruptionNone = Nothing
+  | n == W.captureInterruptionBackground = Just InterruptedBackground
+  | n == W.captureInterruptionAnotherApp = Just InterruptedAnotherApp
+  | n == W.captureInterruptionSystemPressure = Just InterruptedSystemPressure
+  | otherwise = error ("kaya: a capture interruption of " <> show n <> ", which this build does not know")
+
+data CaptureKind = Camera | Microphone
+  deriving (Eq, Ord, Show)
+
+captureKindName :: CaptureKind -> Text
+captureKindName k = case k of Camera -> "camera"; Microphone -> "microphone"
+
+captureKindWire :: CaptureKind -> Word32
+captureKindWire k = case k of Camera -> W.captureKindCamera; Microphone -> W.captureKindMicrophone
+
+captureKindOfWire :: Word32 -> CaptureKind
+captureKindOfWire n
+  | n == W.captureKindCamera = Camera
+  | n == W.captureKindMicrophone = Microphone
+  | otherwise = error ("kaya: a capture kind of " <> show n <> ", which this build does not know")
+
+data CameraFacing = FacingUnknown | FacingFront | FacingBack | FacingExternal
+  deriving (Eq, Show)
+
+cameraFacingName :: CameraFacing -> Text
+cameraFacingName f = case f of
+  FacingUnknown -> "unknown"
+  FacingFront -> "front"
+  FacingBack -> "back"
+  FacingExternal -> "external"
+
+cameraFacingOfWire :: Word32 -> CameraFacing
+cameraFacingOfWire n
+  | n == W.cameraFacingUnknown = FacingUnknown
+  | n == W.cameraFacingFront = FacingFront
+  | n == W.cameraFacingBack = FacingBack
+  | n == W.cameraFacingExternal = FacingExternal
+  | otherwise = error ("kaya: a camera facing of " <> show n <> ", which this build does not know")
+
+data Permission = PermissionPrompt | PermissionGranted | PermissionDenied
+  deriving (Eq, Show)
+
+permissionName :: Permission -> Text
+permissionName p = case p of
+  PermissionPrompt -> "prompt"
+  PermissionGranted -> "granted"
+  PermissionDenied -> "denied"
+
+permissionOfWire :: Word32 -> Permission
+permissionOfWire n
+  | n == W.permissionPrompt = PermissionPrompt
+  | n == W.permissionGranted = PermissionGranted
+  | n == W.permissionDenied = PermissionDenied
+  | otherwise = error ("kaya: a permission of " <> show n <> ", which this build does not know")
+
+-- | A camera and a microphone the app holds (docs\/capture-plan.md §2),
+-- ids in their own space.
+newtype Capture = Capture Word64
+  deriving (Eq, Ord, Show)
+
+-- | A capture's readings as the core last published them; the format is
+-- 0x0 at 0 with no camera running.
+data CaptureReading = CaptureReading
+  { state :: !CaptureState,
+    failure :: !(Maybe CaptureFailure),
+    interruption :: !(Maybe CaptureInterruption),
+    width :: !Int,
+    height :: !Int,
+    frameRate :: !Int
+  }
+  deriving (Eq, Show)
+
+initialCaptureReading :: CaptureReading
+initialCaptureReading = CaptureReading CaptureIdle Nothing Nothing 0 0 0
+
+data CaptureDevice = CaptureDevice
+  { id :: !Text,
+    name :: !Text,
+    kind :: !CaptureKind,
+    facing :: !CameraFacing,
+    preferred :: !Bool
+  }
+  deriving (Eq, Show)
+
+-- | A frame as the frame callback is handed it (docs\/capture-plan.md §4):
+-- NV12, video-range BT.601, the Y plane @yStride@ bytes a row and the
+-- interleaved UV plane at half resolution @uvStride@ bytes a row, its time
+-- on the capture's clock and the rotation that stands it upright. The
+-- planes are the callback's own copies.
+data CaptureFrame = CaptureFrame
+  { width :: !Int,
+    height :: !Int,
+    y :: !BS.ByteString,
+    uv :: !BS.ByteString,
+    yStride :: !Int,
+    uvStride :: !Int,
+    timestampNs :: !Word64,
+    rotation :: !Int
+  }
+
+data CaptureOcc = CaptureChanged CaptureReading Text | CaptureOverrun Int
+
 -- | The binding's media mirror and handler tables, app-thread only.
 data MediaState = MediaState
   { readsInFlight :: IORef (Map.Map Word64 Word64),
@@ -1833,7 +2039,14 @@ data MediaState = MediaState
     playerHandlers :: IORef (Map.Map (Word64, Text) (MediaOcc -> IO ())),
     widgetVisibility :: IORef (Map.Map Word64 (Double -> IO ())),
     nodeVisibility :: IORef (Map.Map Word64 ([Key] -> Double -> IO ())),
-    sessionHandler :: IORef (Maybe (SessionAction -> IO ()))
+    sessionHandler :: IORef (Maybe (SessionAction -> IO ())),
+    captureReadings :: IORef (Map.Map Word64 CaptureReading),
+    permissions :: IORef (Map.Map CaptureKind Permission),
+    captureDeviceList :: IORef [CaptureDevice],
+    -- Per (capture, occurrence name): the newest registration wins.
+    captureHandlers :: IORef (Map.Map (Word64, Text) (CaptureOcc -> IO ())),
+    permissionHandler :: IORef (Maybe (CaptureKind -> Permission -> IO ())),
+    devicesHandler :: IORef (Maybe ([CaptureDevice] -> IO ()))
   }
 
 -- | Players get their OWN id space (docs\/media-plan.md §2).

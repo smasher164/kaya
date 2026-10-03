@@ -174,6 +174,93 @@ public final class MediaCheck {
         app.build((java.util.function.Consumer<KayaApp.Tx>) tx -> {});
     }
 
+    /** docs/capture-plan.md §4: a capture callback runs on kaya's capture
+     * thread, where a transaction it opens is refused by the wrong-thread
+     * refusal; it is handed the app's own copy of the frame and the chunk;
+     * and a released capture's callbacks are dropped by the binding (put
+     * back when the release rolls back). The core's own entry is driven the
+     * way jvm.rs drives it: direct buffers over memory the "core" keeps. */
+    private static final int CHUNK = 480;
+
+    private static void captureRule(KayaApp app) throws InterruptedException {
+        KayaApp.claimAppThread();
+        KayaApp.Capture[] made = new KayaApp.Capture[1];
+        app.build((java.util.function.Consumer<KayaApp.Tx>) tx -> made[0] = tx.capture().camera("cam"));
+        KayaApp.Capture c = made[0];
+        List<KayaApp.CaptureFrame> kept = new ArrayList<>();
+        List<short[]> chunks = new ArrayList<>();
+        List<String> refused = new ArrayList<>();
+        app.onCaptureFrame(c, f -> {
+            kept.add(f);
+            try {
+                app.build((java.util.function.Consumer<KayaApp.Tx>) tx -> {});
+                refused.add("accepted on " + Thread.currentThread().getName());
+            } catch (IllegalStateException e) {
+                refused.add(e.getMessage());
+            }
+        });
+        app.onCaptureSamples(c, (samples, at) -> chunks.add(samples));
+        ByteBuffer y = ByteBuffer.allocateDirect(8);
+        ByteBuffer uv = ByteBuffer.allocateDirect(4);
+        ByteBuffer pcm = ByteBuffer.allocateDirect(2 * CHUNK).order(ByteOrder.nativeOrder());
+        for (int i = 0; i < 8; i++) {
+            y.put(i, (byte) (i + 1));
+        }
+        for (int i = 0; i < 4; i++) {
+            uv.put(i, (byte) (i + 11));
+        }
+        for (int i = 0; i < CHUNK; i++) {
+            pcm.putShort(2 * i, (short) i);
+        }
+        Runnable deliver = () -> {
+            KayaApp.captureFrame(c.id(), 2, 2, y.duplicate(), uv.duplicate(), 4, 4, 77, 0);
+            KayaApp.captureSamples(c.id(), pcm.duplicate(), 78);
+        };
+        Thread capture = new Thread(deliver, "kaya-capture-probe");
+        capture.start();
+        capture.join();
+        check(refused.size() == 1 && refused.get(0).contains("a transaction belongs to the app thread"),
+                "capture: a transaction opened in a frame callback was not refused by the wrong-thread"
+                        + " refusal: " + refused);
+        check(kept.size() == 1 && chunks.size() == 1, "capture: the callbacks heard " + kept.size()
+                + " frame(s) and " + chunks.size() + " chunk(s), not one of each");
+        KayaApp.CaptureFrame first = kept.get(0);
+        check(first.width() == 2 && first.yStride() == 4 && first.timestampNs() == 77
+                        && first.y().length == 8 && first.uv().length == 4 && first.uv()[3] == 14,
+                "capture: the frame arrived as " + first);
+        y.put(0, (byte) 99);
+        pcm.putShort(0, (short) -7);
+        first.uv()[0] = 42;
+        check(first.y()[0] == 1 && chunks.get(0)[0] == 0 && chunks.get(0).length == CHUNK,
+                "capture: what the callback kept is kaya's buffer, not the app's copy");
+        check(uv.get(0) == 11, "capture: writing the app's frame wrote kaya's buffer");
+        Thread again = new Thread(deliver, "kaya-capture-probe");
+        again.start();
+        again.join();
+        check(kept.size() == 2 && kept.get(1).y()[0] == 99 && first.y()[0] == 1
+                        && kept.get(1).y() != first.y() && chunks.get(1)[0] == -7 && chunks.get(0)[0] == 0,
+                "capture: a later frame or chunk reused an array the app had kept");
+
+        try {
+            app.build((java.util.function.Consumer<KayaApp.Tx>) tx -> {
+                tx.releaseCapture(c);
+                throw new IllegalStateException("roll back");
+            });
+        } catch (IllegalStateException expected) {
+            // the rollback is the point
+        }
+        check(KayaApp.captureFrames.containsKey(c.id()) && KayaApp.captureSampleSinks.containsKey(c.id()),
+                "capture: a rolled-back release dropped the callbacks anyway");
+        app.build((java.util.function.Consumer<KayaApp.Tx>) tx -> tx.releaseCapture(c));
+        check(!KayaApp.captureFrames.containsKey(c.id()) && !KayaApp.captureSampleSinks.containsKey(c.id()),
+                "capture: a released capture's callbacks were kept by the binding");
+        Thread late = new Thread(deliver, "kaya-capture-probe");
+        late.start();
+        late.join();
+        check(kept.size() == 2 && chunks.size() == 2, "capture: a released capture's callback still ran");
+        KayaApp.appThread = null;
+    }
+
     public static void main(String[] args) throws Exception {
         String lib = System.getenv("KAYA_LIB");
         if (lib != null) {
@@ -276,13 +363,16 @@ public final class MediaCheck {
         check(found, "the template video emitted no PROP_PLAYER bound to field 1 (" + bound.size() + " records)");
 
         readerRule(app);
+        captureRule(app);
 
         System.out.println("media-check: OK — player_changed, player_tracks and session_action decode"
                 + " through the generated decoder, the mirror moves before the handler, the failed"
                 + " handler hears not_found, loading resets the position, a row's player packs as"
                 + " its id and a stamped video binds PROP_PLAYER from the row's field; a cancelled,"
                 + " closed or failed read is heard only by its end and its unheard images are"
-                + " released by the next commit");
+                + " released by the next commit; a capture callback's transaction is refused off the"
+                + " app thread, its frame and chunk are the app's own copies, and a released"
+                + " capture's callbacks are dropped");
     }
 
     private MediaCheck() {}

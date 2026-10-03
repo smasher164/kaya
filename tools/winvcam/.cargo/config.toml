@@ -1,0 +1,4 @@
+# The DLL is loaded into the Frame Server service and the helper runs on a
+# bare VM: neither may lean on a Visual C++ runtime being installed.
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

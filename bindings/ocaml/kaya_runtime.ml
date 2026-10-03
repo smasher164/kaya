@@ -632,3 +632,29 @@ let poll_occurrence =
       end
     in
     scan ()
+
+(* The capture's callbacks (docs/capture-plan.md §4): the C trampolines in
+   kaya_ml_stubs.c, the capture id as their context. *)
+external capture_frame_fn : unit -> nativeint = "kaya_ml_capture_frame_fn"
+external capture_samples_fn : unit -> nativeint = "kaya_ml_capture_samples_fn"
+
+let kaya_capture_on_frame =
+  foreign ~from:lib "kaya_capture_on_frame"
+    (uint64_t @-> ptr void @-> ptr void @-> returning void)
+
+let kaya_capture_on_samples =
+  foreign ~from:lib "kaya_capture_on_samples"
+    (uint64_t @-> ptr void @-> ptr void @-> returning void)
+
+let capture_hook register fn capture on =
+  register
+    (Unsigned.UInt64.of_int64 capture)
+    (if on then ptr_of_raw_address (fn ()) else null)
+    (ptr_of_raw_address (Int64.to_nativeint capture))
+
+let capture_on_frame = capture_hook kaya_capture_on_frame capture_frame_fn
+let capture_on_samples = capture_hook kaya_capture_on_samples capture_samples_fn
+
+external capture_drive_frame : int64 -> int -> int -> bool = "kaya_ml_capture_drive_frame"
+external capture_drive_samples : int64 -> bool = "kaya_ml_capture_drive_samples"
+external capture_thread_counts : unit -> int * int = "kaya_ml_capture_thread_counts"

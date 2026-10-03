@@ -864,6 +864,64 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 sig: "()I".into(),
                 fn_ptr: present_session_state as *mut _,
             },
+            // The capture's reports, frames and samples (docs/capture-plan.md
+            // §2, §4), the synthetic devices and the harness's two verbs.
+            NativeMethod {
+                name: "captureState".into(),
+                sig: "(JIIIIILjava/lang/String;)V".into(),
+                fn_ptr: present_capture_state as *mut _,
+            },
+            NativeMethod { name: "captureOverdue".into(), sig: "(J)I".into(), fn_ptr: present_capture_overdue as *mut _ },
+            NativeMethod {
+                name: "capturePermission".into(),
+                sig: "(IILjava/lang/String;)V".into(),
+                fn_ptr: present_capture_permission as *mut _,
+            },
+            NativeMethod {
+                name: "captureDevicesBegin".into(),
+                sig: "()V".into(),
+                fn_ptr: present_capture_devices_begin as *mut _,
+            },
+            NativeMethod {
+                name: "captureDevice".into(),
+                sig: "(Ljava/lang/String;Ljava/lang/String;IIZ)V".into(),
+                fn_ptr: present_capture_device as *mut _,
+            },
+            NativeMethod {
+                name: "captureDevicesEnd".into(),
+                sig: "()V".into(),
+                fn_ptr: present_capture_devices_end as *mut _,
+            },
+            NativeMethod {
+                name: "captureFrame".into(),
+                sig: "(JIILjava/nio/ByteBuffer;IILjava/nio/ByteBuffer;IILjava/nio/ByteBuffer;IIJI)I".into(),
+                fn_ptr: present_capture_frame as *mut _,
+            },
+            NativeMethod {
+                name: "captureSamples".into(),
+                sig: "(JII[FIJ)V".into(),
+                fn_ptr: present_capture_samples as *mut _,
+            },
+            NativeMethod {
+                name: "captureSynthetic".into(),
+                sig: "(I)Ljava/lang/String;".into(),
+                fn_ptr: present_capture_synthetic as *mut _,
+            },
+            NativeMethod {
+                name: "captureSyntheticPermission".into(),
+                sig: "(IZ)I".into(),
+                fn_ptr: present_capture_synthetic_permission as *mut _,
+            },
+            NativeMethod {
+                name: "captureNearestFormat".into(),
+                sig: "([IDDD)[I".into(),
+                fn_ptr: present_capture_nearest_format as *mut _,
+            },
+            NativeMethod {
+                name: "captureHarness".into(),
+                sig: "(IILjava/lang/String;)Ljava/lang/String;".into(),
+                fn_ptr: present_capture_harness as *mut _,
+            },
             NativeMethod {
                 name: "emitSortRequested".into(),
                 sig: "([BI)V".into(),
@@ -2567,6 +2625,240 @@ extern "system" fn present_session_action(_env: JNIEnv, _class: JClass, action: 
 
 extern "system" fn present_session_state(_env: JNIEnv, _class: JClass) -> jint {
     crate::capi::kaya_session_state() as jint
+}
+
+#[allow(clippy::too_many_arguments)]
+extern "system" fn present_capture_state(
+    mut env: JNIEnv,
+    _class: JClass,
+    capture: jlong,
+    state: jint,
+    reason: jint,
+    width: jint,
+    height: jint,
+    frame_rate: jint,
+    detail: JString,
+) {
+    let detail = jstring_text(&mut env, &detail, "capture detail");
+    unsafe {
+        crate::capi::kaya_capture_state(
+            capture as u64,
+            state.max(0) as u32,
+            reason.max(0) as u32,
+            width.max(0) as u32,
+            height.max(0) as u32,
+            frame_rate.max(0) as u32,
+            detail.as_ptr(),
+            detail.len(),
+        )
+    }
+}
+
+extern "system" fn present_capture_overdue(_env: JNIEnv, _class: JClass, capture: jlong) -> jint {
+    crate::capi::kaya_capture_overdue(capture as u64) as jint
+}
+
+extern "system" fn present_capture_permission(mut env: JNIEnv, _class: JClass, kind: jint, permission: jint, detail: JString) {
+    let detail = jstring_text(&mut env, &detail, "permission detail");
+    unsafe { crate::capi::kaya_capture_permission(kind.max(0) as u32, permission.max(0) as u32, detail.as_ptr(), detail.len()) }
+}
+
+extern "system" fn present_capture_devices_begin(_env: JNIEnv, _class: JClass) {
+    crate::capi::kaya_capture_devices_begin();
+}
+
+extern "system" fn present_capture_device(
+    mut env: JNIEnv,
+    _class: JClass,
+    id: JString,
+    name: JString,
+    kind: jint,
+    facing: jint,
+    preferred: jni::sys::jboolean,
+) {
+    let id = jstring_text(&mut env, &id, "capture device id");
+    let name = jstring_text(&mut env, &name, "capture device name");
+    unsafe {
+        crate::capi::kaya_capture_device(
+            id.as_ptr(),
+            id.len(),
+            name.as_ptr(),
+            name.len(),
+            kind.max(0) as u32,
+            facing.max(0) as u32,
+            u32::from(preferred != 0),
+        )
+    }
+}
+
+extern "system" fn present_capture_devices_end(_env: JNIEnv, _class: JClass) {
+    crate::capi::kaya_capture_devices_end();
+}
+
+/// A plane as the platform handed it: a direct buffer, its row stride and
+/// the distance between two samples of one row.
+struct Plane {
+    at: *const u8,
+    len: usize,
+    row: usize,
+    pixel: usize,
+}
+
+fn plane(env: &JNIEnv, buffer: &jni::objects::JByteBuffer, row: jint, pixel: jint) -> Option<Plane> {
+    let at = env.get_direct_buffer_address(buffer).ok()?;
+    let len = env.get_direct_buffer_capacity(buffer).ok()?;
+    Some(Plane { at: at as *const u8, len, row: row.max(0) as usize, pixel: pixel.max(1) as usize })
+}
+
+/// YUV_420_888's three planes as NV12 (docs/capture-plan.md §4): handed
+/// over in place when the U plane already IS the interleaved UV plane (U
+/// first, V one byte after it, both planes whole), else repacked.
+#[allow(clippy::too_many_arguments)]
+extern "system" fn present_capture_frame(
+    env: JNIEnv,
+    _class: JClass,
+    capture: jlong,
+    width: jint,
+    height: jint,
+    y: jni::objects::JByteBuffer,
+    y_row: jint,
+    y_pixel: jint,
+    u: jni::objects::JByteBuffer,
+    u_row: jint,
+    u_pixel: jint,
+    v: jni::objects::JByteBuffer,
+    v_row: jint,
+    v_pixel: jint,
+    timestamp_ns: jlong,
+    rotation: jint,
+) -> jint {
+    let (w, h) = (width.max(0) as usize, height.max(0) as usize);
+    let (Some(yp), Some(up), Some(vp)) = (plane(&env, &y, y_row, y_pixel), plane(&env, &u, u_row, u_pixel), plane(&env, &v, v_row, v_pixel))
+    else {
+        return 1;
+    };
+    if w == 0 || h == 0 || yp.at.is_null() || up.at.is_null() || vp.at.is_null() {
+        return 1;
+    }
+    let rows = h.div_ceil(2);
+    let in_place = yp.pixel == 1
+        && yp.len >= yp.row * h
+        && up.pixel == 2
+        && vp.pixel == 2
+        && up.row == vp.row
+        && vp.at as usize == up.at as usize + 1
+        && vp.len + 1 >= up.row * rows;
+    let live = if in_place {
+        unsafe { crate::capi::kaya_capture_frame(capture as u64, w as u32, h as u32, yp.at, yp.row as u32, up.at, up.row as u32, timestamp_ns as u64, rotation.max(0) as u32) }
+    } else {
+        let sample = |p: &Plane, x: usize, row: usize| -> u8 {
+            let at = row * p.row + x * p.pixel;
+            if at < p.len { unsafe { *p.at.add(at) } } else { 0 }
+        };
+        let mut luma = vec![0u8; w * h];
+        for row in 0..h {
+            for x in 0..w {
+                luma[row * w + x] = sample(&yp, x, row);
+            }
+        }
+        let mut chroma = vec![0u8; w.div_ceil(2) * 2 * rows];
+        let stride = w.div_ceil(2) * 2;
+        for row in 0..rows {
+            for x in 0..w.div_ceil(2) {
+                chroma[row * stride + x * 2] = sample(&up, x, row);
+                chroma[row * stride + x * 2 + 1] = sample(&vp, x, row);
+            }
+        }
+        unsafe {
+            crate::capi::kaya_capture_frame(capture as u64, w as u32, h as u32, luma.as_ptr(), w as u32, chroma.as_ptr(), stride as u32, timestamp_ns as u64, rotation.max(0) as u32)
+        }
+    };
+    // 2 for a frame repacked, so the arm can say once which layout came.
+    if live == 0 { 0 } else if in_place { 1 } else { 2 }
+}
+
+extern "system" fn present_capture_samples(
+    env: JNIEnv,
+    _class: JClass,
+    capture: jlong,
+    channels: jint,
+    rate: jint,
+    samples: jni::objects::JFloatArray,
+    count: jint,
+    timestamp_ns: jlong,
+) {
+    let n = count.max(0) as usize;
+    let mut floats = vec![0f32; n];
+    if n == 0 || env.get_float_array_region(&samples, 0, &mut floats).is_err() {
+        return;
+    }
+    unsafe {
+        crate::capi::kaya_capture_samples(capture as u64, channels.max(1) as u32, rate.max(0) as u32, floats.as_ptr(), n, timestamp_ns as u64)
+    }
+}
+
+/// The `index`th synthetic device as "id\nname\nkind\nfacing\npreferred\ncontent",
+/// or null past the last.
+extern "system" fn present_capture_synthetic<'local>(env: JNIEnv<'local>, _class: JClass, index: jint) -> JString<'local> {
+    let Some(d) = crate::capture::SYNTHETIC.get(index.max(0) as usize) else { return JString::default() };
+    let line = format!(
+        "{}\n{}\n{}\n{}\n{}\n{}",
+        d.id,
+        d.name,
+        crate::wire::capture_kind_raw(d.kind),
+        crate::wire::camera_facing_raw(d.facing),
+        u32::from(d.preferred),
+        d.content
+    );
+    env.new_string(line).unwrap_or_default()
+}
+
+extern "system" fn present_capture_synthetic_permission(_env: JNIEnv, _class: JClass, kind: jint, ask: jni::sys::jboolean) -> jint {
+    crate::capi::kaya_capture_synthetic_permission(kind.max(0) as u32, u32::from(ask != 0)) as jint
+}
+
+extern "system" fn present_capture_nearest_format<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass,
+    offered: jni::objects::JIntArray,
+    width: f64,
+    height: f64,
+    frame_rate: f64,
+) -> jni::objects::JIntArray<'local> {
+    let n = env.get_array_length(&offered).unwrap_or(0).max(0) as usize;
+    let mut raw = vec![0i32; n];
+    if env.get_int_array_region(&offered, 0, &mut raw).is_err() {
+        return jni::objects::JIntArray::default();
+    }
+    let formats: Vec<(u32, u32, u32)> =
+        raw.chunks_exact(3).map(|t| (t[0].max(0) as u32, t[1].max(0) as u32, t[2].max(0) as u32)).collect();
+    let Some((w, h, fps)) = crate::capture::nearest_format(&formats, (width, height, frame_rate)) else {
+        return jni::objects::JIntArray::default();
+    };
+    let Ok(out) = env.new_int_array(3) else { return jni::objects::JIntArray::default() };
+    if env.set_int_array_region(&out, 0, &[w as i32, h as i32, fps as i32]).is_err() {
+        return jni::objects::JIntArray::default();
+    }
+    out
+}
+
+/// The harness's capture verbs: "1" or "0" (recorded or failed), then the sentence.
+extern "system" fn present_capture_harness<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass,
+    verb: jint,
+    index: jint,
+    text: JString,
+) -> JString<'local> {
+    let text = jstring_text(&mut env, &text, "capture verb text");
+    let mut out = vec![0u8; 1024];
+    let mut ok = 0u8;
+    let n = unsafe {
+        crate::capi::kaya_capture_harness(verb.max(0) as u32, index as u32, text.as_ptr(), text.len(), out.as_mut_ptr(), out.len(), &mut ok)
+    };
+    out.truncate(n.min(1024));
+    let sentence = String::from_utf8_lossy(&out);
+    env.new_string(format!("{ok}{sentence}")).unwrap_or_default()
 }
 
 extern "system" fn present_color_palette(env: JNIEnv, _class: JClass) -> jni::sys::jlongArray {

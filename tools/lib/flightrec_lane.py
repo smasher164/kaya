@@ -45,7 +45,7 @@ SECTIONS = {
             "windowserver", "sampler", "sample", "unified-log", "power-history"),
     "windows": ("leg-log", "verb-trace", "shot", "desktop-shot", "desktop",
                 "foreground", "foreground-text", "desktop-live", "notifications",
-                "toast-moment", "gesture-moment", "media-server"),
+                "toast-moment", "gesture-moment", "media-server", "capture-devices"),
     "ios": ("leg-log", "verb-trace", "shot", "panic", "app-log", "devices", "binary-stamp"),
     "android": ("leg-log", "verb-trace", "shot", "logcat", "devices",
                 "system-events", "anr-history"),
@@ -788,6 +788,36 @@ class WinRecorder(LaneRecorder):
         dest.write_text(head + "".join(picked), encoding="utf-8")
         self.mark(bundle, "media-server", "ok", dest.stat().st_size)
 
+    def capture_devices(self, bundle, leg):
+        """THE CAPTURE LEGS' DEVICES (docs/HACKING.md, the Windows capture
+        install): the one-time install's state and the lane helper's own log,
+        which lists the cameras and microphones the console session saw once
+        its virtual cameras and tone ran. A capture leg's `label#0` short a
+        device reads the same whether the helper never started, a camera was
+        refused, or the cable is gone; these two say which."""
+        scene = leg.rpartition("_")[0]
+        if scene not in ("capture", "capture_denied"):
+            self.skip(bundle, "capture-devices",
+                      f"flightrec: {leg} is not a capture leg; the lane's capture "
+                      f"devices run around capture legs only")
+            return
+        dest = bundle / "capture-devices.txt"
+        state = self._ssh_out(
+            "powershell -NoProfile -ExecutionPolicy Bypass -Command "
+            "\"& C:\\kaya\\capture-install.ps1 -Mode check; exit 0\"") if self._ssh_out else None
+        helper = bundle / "capture-lane.log"
+        got = self._scp_from("C:/kaya/capture-lane.log", helper) if self._scp_from else False
+        text = ("flightrec: the one-time install (capture-install.ps1 -Mode check):\n"
+                + (state.replace("\r", "") if state else "<the check did not answer over ssh>\n")
+                + "\nflightrec: the lane helper's log (C:\\kaya\\capture-lane.log):\n"
+                + (helper.read_text(encoding="utf-8", errors="replace").replace("\r", "")
+                   if got and helper.is_file() else
+                   "<no helper log on the guest: the runner never started kaya-capture-lane>\n"))
+        if helper.is_file():
+            helper.unlink()
+        dest.write_text(text, encoding="utf-8")
+        self.mark(bundle, "capture-devices", "ok", dest.stat().st_size)
+
     @staticmethod
     def _drop_db(db):
         """The copy AND the two files sqlite makes beside it. A read-only
@@ -1017,6 +1047,7 @@ class WinRecorder(LaneRecorder):
                 self.toast_moment(bundle, leg, t0)
                 self.gesture_moment(bundle, leg)
                 self.media_server(bundle, log, t0)
+                self.capture_devices(bundle, leg)
                 # The Rust verb trace (crates/kaya/src/vtrace.rs), dumped by
                 # the guest on a failed verdict to the file its launcher
                 # names (since 2026-09-07; check-steps holds the line).

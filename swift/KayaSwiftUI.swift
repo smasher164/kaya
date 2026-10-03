@@ -27606,12 +27606,20 @@ final class KayaSyntheticSource: KayaCaptureSource {
     ) {
         self.capture = capture
         if let camera {
-            let size = KayaSyntheticSource.formats.min { a, b in
-                KayaSyntheticSource.distance(a, wish) < KayaSyntheticSource.distance(b, wish)
-            }!
-            let fps = wish.2 > 0
-                ? KayaSyntheticSource.rates.min { abs(Double($0) - wish.2) < abs(Double($1) - wish.2) }!
-                : 30
+            // The core's one rule for a wish (docs/capture-plan.md §2).
+            var offered: [UInt32] = []
+            for size in KayaSyntheticSource.formats {
+                for rate in KayaSyntheticSource.rates { offered += [size.0, size.1, rate] }
+            }
+            var chosen: [UInt32] = [0, 0, 0]
+            let found = offered.withUnsafeBufferPointer { o in
+                chosen.withUnsafeMutableBufferPointer { c in
+                    KayaHost.api.capture_nearest_format(o.baseAddress, UInt(o.count / 3), wish.0, wish.1, wish.2, c.baseAddress)
+                }
+            }
+            precondition(found == 1, "kaya: the synthetic camera offers no format")
+            let size = (chosen[0], chosen[1])
+            let fps = chosen[2]
             format = (size.0, size.1, fps)
             let layer = AVSampleBufferDisplayLayer()
             layer.videoGravity = .resizeAspect
@@ -27644,12 +27652,6 @@ final class KayaSyntheticSource: KayaCaptureSource {
         started = DispatchTime.now()
         videoTimer?.resume()
         audioTimer?.resume()
-    }
-
-    static func distance(_ size: (UInt32, UInt32), _ wish: (Double, Double, Double)) -> Double {
-        let w = wish.0 > 0 ? wish.0 : 640
-        let h = wish.1 > 0 ? wish.1 : 480
-        return abs(Double(size.0) - w) + abs(Double(size.1) - h)
     }
 
     /// A 420v buffer of one colour: video-range BT.601, the camera's own

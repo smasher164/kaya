@@ -1,0 +1,37 @@
+[package]
+name = "kaya_winvcam"
+version = "0.1.0"
+edition = "2021"
+
+# ITS OWN WORKSPACE: the Windows lane's synthetic devices for the capture
+# legs (docs/capture-plan.md §7), never part of libkaya's graph. The DLL is
+# the virtual cameras' media source, loaded by the Frame Server; the binary
+# is what the lane starts around the capture legs (docs/HACKING.md, the
+# capture install recipe).
+[workspace]
+
+[lib]
+name = "kaya_winvcam"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "kaya-capture-lane"
+path = "src/bin/kaya-capture-lane.rs"
+
+[dependencies]
+windows-core = "=0.62.2"
+windows = { version = "=0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_Media_Audio",
+    "Win32_Media_KernelStreaming",
+    "Win32_Media_MediaFoundation",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
+    "Win32_System_Threading",
+    "Win32_Devices_FunctionDiscovery",
+    "Win32_UI_Shell_PropertiesSystem",
+] }
+
+[profile.release]
+panic = "abort"

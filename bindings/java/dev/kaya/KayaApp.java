@@ -387,6 +387,23 @@ public final class KayaApp {
     private final Map<Long, BiConsumer<Tx, Double>> widgetVisibility = new HashMap<>();
     private final Map<Long, VisibilityHandler> nodeVisibility = new HashMap<>();
     private BiConsumer<Tx, SessionAction> sessionHandler;
+    // Captures get their own id space (docs/capture-plan.md §2); the
+    // mirror each occurrence moves before any handler runs, the handlers.
+    private long nextCapture;
+    private final Map<Long, CaptureReading> captureReadings = new HashMap<>();
+    private final Map<CaptureKind, Permission> permissions = new java.util.EnumMap<>(CaptureKind.class);
+    private List<CaptureDevice> captureDeviceList = List.of();
+    private final Map<Long, BiConsumer<Tx, CaptureReading>> captureStates = new HashMap<>();
+    private final Map<Long, CaptureFailedHandler> captureFailed = new HashMap<>();
+    private final Map<Long, BiConsumer<Tx, Long>> captureOverruns = new HashMap<>();
+    private PermissionHandler permissionHandler;
+    private BiConsumer<Tx, List<CaptureDevice>> captureDevicesHandler;
+    // The capture callbacks by capture id, process-wide as the core's sinks
+    // are: written on the app thread, read on kaya's capture thread.
+    static final Map<Long, CaptureFrameCallback> captureFrames =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    static final Map<Long, CaptureSamplesCallback> captureSampleSinks =
+            new java.util.concurrent.ConcurrentHashMap<>();
     // The reader's three id spaces (docs/media-plan.md §8 ruling 4), each
     // reader's read in flight, the reads the app gave up on, the
     // handlers and awaited futures per read.
@@ -1857,6 +1874,324 @@ public final class KayaApp {
     @FunctionalInterface
     public interface VisibilityHandler {
         void accept(Tx tx, List<Object> keys, double shown);
+    }
+
+    /** A capture's state (docs/capture-plan.md §2); {@code toString} is
+     * the wire's word. */
+    public enum CaptureState {
+        IDLE(KayaWire.CAPTURE_STATE_IDLE, "idle"),
+        STARTING(KayaWire.CAPTURE_STATE_STARTING, "starting"),
+        RUNNING(KayaWire.CAPTURE_STATE_RUNNING, "running"),
+        INTERRUPTED(KayaWire.CAPTURE_STATE_INTERRUPTED, "interrupted"),
+        FAILED(KayaWire.CAPTURE_STATE_FAILED, "failed");
+
+        final int wire;
+        final String word;
+
+        CaptureState(int wire, String word) {
+            this.wire = wire;
+            this.word = word;
+        }
+
+        @Override
+        public String toString() {
+            return word;
+        }
+
+        static CaptureState fromWire(long number) {
+            for (CaptureState s : values()) {
+                if (s.wire == number) {
+                    return s;
+                }
+            }
+            throw new IllegalStateException("kaya: capture state " + number
+                    + " is not one this build of the Java binding knows");
+        }
+    }
+
+    /** Why a capture cannot run: the closed reason (docs/capture-plan.md
+     * §2 rule 2), the platform's sentence beside it. */
+    public enum CaptureFailure {
+        DENIED(KayaWire.CAPTURE_FAILURE_DENIED, "denied"),
+        NOT_FOUND(KayaWire.CAPTURE_FAILURE_NOT_FOUND, "not_found"),
+        IN_USE(KayaWire.CAPTURE_FAILURE_IN_USE, "in_use"),
+        DISCONNECTED(KayaWire.CAPTURE_FAILURE_DISCONNECTED, "disconnected"),
+        UNSUPPORTED(KayaWire.CAPTURE_FAILURE_UNSUPPORTED, "unsupported"),
+        HARDWARE_ERROR(KayaWire.CAPTURE_FAILURE_HARDWARE_ERROR, "hardware_error"),
+        TIMEOUT(KayaWire.CAPTURE_FAILURE_TIMEOUT, "timeout");
+
+        final int wire;
+        final String word;
+
+        CaptureFailure(int wire, String word) {
+            this.wire = wire;
+            this.word = word;
+        }
+
+        @Override
+        public String toString() {
+            return word;
+        }
+
+        static Optional<CaptureFailure> fromWire(long number) {
+            if (number == KayaWire.CAPTURE_FAILURE_NONE) {
+                return Optional.empty();
+            }
+            for (CaptureFailure f : values()) {
+                if (f.wire == number) {
+                    return Optional.of(f);
+                }
+            }
+            throw new IllegalStateException("kaya: capture failure " + number
+                    + " is not one this build of the Java binding knows");
+        }
+    }
+
+    /** Why a running capture paused (docs/capture-plan.md §2 rule 3): a
+     * state that ends by itself, never a failure. */
+    public enum CaptureInterruption {
+        BACKGROUND(KayaWire.CAPTURE_INTERRUPTION_BACKGROUND, "background"),
+        ANOTHER_APP(KayaWire.CAPTURE_INTERRUPTION_ANOTHER_APP, "another_app"),
+        SYSTEM_PRESSURE(KayaWire.CAPTURE_INTERRUPTION_SYSTEM_PRESSURE, "system_pressure");
+
+        final int wire;
+        final String word;
+
+        CaptureInterruption(int wire, String word) {
+            this.wire = wire;
+            this.word = word;
+        }
+
+        @Override
+        public String toString() {
+            return word;
+        }
+
+        static Optional<CaptureInterruption> fromWire(long number) {
+            if (number == KayaWire.CAPTURE_INTERRUPTION_NONE) {
+                return Optional.empty();
+            }
+            for (CaptureInterruption i : values()) {
+                if (i.wire == number) {
+                    return Optional.of(i);
+                }
+            }
+            throw new IllegalStateException("kaya: capture interruption " + number
+                    + " is not one this build of the Java binding knows");
+        }
+    }
+
+    /** A capture device's kind. */
+    public enum CaptureKind {
+        CAMERA(KayaWire.CAPTURE_KIND_CAMERA, "camera"),
+        MICROPHONE(KayaWire.CAPTURE_KIND_MICROPHONE, "microphone");
+
+        final int wire;
+        final String word;
+
+        CaptureKind(int wire, String word) {
+            this.wire = wire;
+            this.word = word;
+        }
+
+        @Override
+        public String toString() {
+            return word;
+        }
+
+        static CaptureKind fromWire(long number) {
+            for (CaptureKind k : values()) {
+                if (k.wire == number) {
+                    return k;
+                }
+            }
+            throw new IllegalStateException("kaya: capture kind " + number
+                    + " is not one this build of the Java binding knows");
+        }
+    }
+
+    /** Which way a camera looks. */
+    public enum CameraFacing {
+        UNKNOWN(KayaWire.CAMERA_FACING_UNKNOWN, "unknown"),
+        FRONT(KayaWire.CAMERA_FACING_FRONT, "front"),
+        BACK(KayaWire.CAMERA_FACING_BACK, "back"),
+        EXTERNAL(KayaWire.CAMERA_FACING_EXTERNAL, "external");
+
+        final int wire;
+        final String word;
+
+        CameraFacing(int wire, String word) {
+            this.wire = wire;
+            this.word = word;
+        }
+
+        @Override
+        public String toString() {
+            return word;
+        }
+
+        static CameraFacing fromWire(long number) {
+            for (CameraFacing f : values()) {
+                if (f.wire == number) {
+                    return f;
+                }
+            }
+            throw new IllegalStateException("kaya: camera facing " + number
+                    + " is not one this build of the Java binding knows");
+        }
+    }
+
+    /** A kind's permission, the web's three (Apple's restricted is
+     * denied). */
+    public enum Permission {
+        PROMPT(KayaWire.PERMISSION_PROMPT, "prompt"),
+        GRANTED(KayaWire.PERMISSION_GRANTED, "granted"),
+        DENIED(KayaWire.PERMISSION_DENIED, "denied");
+
+        final int wire;
+        final String word;
+
+        Permission(int wire, String word) {
+            this.wire = wire;
+            this.word = word;
+        }
+
+        @Override
+        public String toString() {
+            return word;
+        }
+
+        static Permission fromWire(long number) {
+            for (Permission p : values()) {
+                if (p.wire == number) {
+                    return p;
+                }
+            }
+            throw new IllegalStateException("kaya: permission " + number
+                    + " is not one this build of the Java binding knows");
+        }
+    }
+
+    /** A capture's readings as the core last published them; the format
+     * the platform chose, 0x0 at 0 with no camera running. */
+    public record CaptureReading(CaptureState state, Optional<CaptureFailure> failure,
+            Optional<CaptureInterruption> interruption, int width, int height, int frameRate) {
+        static final CaptureReading IDLE = new CaptureReading(CaptureState.IDLE,
+                Optional.empty(), Optional.empty(), 0, 0, 0);
+    }
+
+    /** A camera or a microphone as the platform lists it; {@code preferred}
+     * marks the one the user chose for the system. */
+    public record CaptureDevice(String id, String name, CaptureKind kind, CameraFacing facing,
+            boolean preferred) {}
+
+    /** One NV12 frame (docs/capture-plan.md §4): the Y plane {@code yStride}
+     * bytes a row, the interleaved UV plane at half resolution
+     * {@code uvStride} bytes a row, its time on the capture's clock and the
+     * rotation that stands it upright. THE ARRAYS ARE THE APP'S OWN COPY,
+     * made before the callback runs, so keeping them is safe. */
+    public record CaptureFrame(int width, int height, byte[] y, byte[] uv, int yStride,
+            int uvStride, long timestampNs, int rotation) {}
+
+    /** The app's frame callback: RUNS ON KAYA'S CAPTURE THREAD, NOT THE APP
+     * THREAD, and holds no transaction — post to touch the scene. The next
+     * frame is dropped while it still runs. */
+    @FunctionalInterface
+    public interface CaptureFrameCallback {
+        void accept(CaptureFrame frame);
+    }
+
+    /** The app's sample callback: RUNS ON KAYA'S CAPTURE THREAD, NOT THE APP
+     * THREAD, and holds no transaction — post to touch the scene. 480
+     * samples of 48 kHz mono s16 (the app's own copy) and the first one's
+     * time; none is dropped, a slow callback told by onCaptureOverrun. */
+    @FunctionalInterface
+    public interface CaptureSamplesCallback {
+        void accept(short[] samples, long timestampNs);
+    }
+
+    /** The capture cannot run: the closed reason and the platform's
+     * sentence. */
+    @FunctionalInterface
+    public interface CaptureFailedHandler {
+        void accept(Tx tx, CaptureFailure reason, String detail);
+    }
+
+    /** A kind's permission moved or was asked about. */
+    @FunctionalInterface
+    public interface PermissionHandler {
+        void accept(Tx tx, CaptureKind kind, Permission permission);
+    }
+
+    /**
+     * A capture (docs/capture-plan.md §2): at most one camera and one
+     * microphone in an object the app holds, with no place in the layout;
+     * a video view previews it. Its settings chain where it is created,
+     * under the Widget chain's discipline; later they are Tx verbs.
+     */
+    public static final class Capture {
+        final long id;
+        final Tx tx;
+
+        Capture(long id, Tx tx) {
+            this.id = id;
+            this.tx = tx;
+        }
+
+        public long id() {
+            return id;
+        }
+
+        private Tx building(String what) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException("kaya: " + what + " on a capture outside the"
+                        + " transaction that created it — use the Tx verb inside a live transaction");
+            }
+            return tx;
+        }
+
+        /** The camera, by a device's id from {@link KayaApp#captureDevices}. */
+        public Capture camera(String device) {
+            building("camera").captureCamera(this, device);
+            return this;
+        }
+
+        public Capture microphone(String device) {
+            building("microphone").captureMicrophone(this, device);
+            return this;
+        }
+
+        /** The picture size wished for, met by the platform's nearest
+         * format. */
+        public Capture size(double width, double height) {
+            building("size").captureSize(this, width, height);
+            return this;
+        }
+
+        public Capture frameRate(double rate) {
+            building("frameRate").captureFrameRate(this, rate);
+            return this;
+        }
+
+        public Capture muted(boolean on) {
+            building("muted").captureMuted(this, on);
+            return this;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            return o instanceof Capture other && other.id == id;
+        }
+
+        @Override
+        public int hashCode() {
+            return Long.hashCode(id);
+        }
+
+        @Override
+        public String toString() {
+            return "Capture(" + id + ")";
+        }
     }
 
     /** A media reader: frames and peaks without a player
@@ -6809,6 +7144,100 @@ public final class KayaApp {
             emit(KayaWire.txSetPlayer(video.id, player == null ? 0 : player.id));
         }
 
+        /** A capture (docs/capture-plan.md §2): at most one camera and one
+         * microphone, with no place in the layout. Preview it with
+         * {@link #video(Capture)}; {@link #startCapture} it once its
+         * devices are set. */
+        public Capture capture() {
+            Capture c = new Capture(++nextCapture, this);
+            emit(KayaWire.txCreateCapture(c.id));
+            return c;
+        }
+
+        private void captureProp(Capture c, int prop, Object value) {
+            emit(KayaWire.txSetCaptureProp(c.id, prop, value));
+        }
+
+        /** The camera, by a device's id; null closes it and puts its
+         * indicator out. */
+        public void captureCamera(Capture c, String device) {
+            captureProp(c, KayaWire.CPROP_CAMERA, device == null ? "" : device);
+        }
+
+        /** The microphone, as {@link #captureCamera}. */
+        public void captureMicrophone(Capture c, String device) {
+            captureProp(c, KayaWire.CPROP_MICROPHONE, device == null ? "" : device);
+        }
+
+        /** The picture size wished for, met by the platform's nearest
+         * format. */
+        public void captureSize(Capture c, double width, double height) {
+            captureProp(c, KayaWire.CPROP_WIDTH, width);
+            captureProp(c, KayaWire.CPROP_HEIGHT, height);
+        }
+
+        public void captureFrameRate(Capture c, double rate) {
+            captureProp(c, KayaWire.CPROP_FRAME_RATE, rate);
+        }
+
+        /** The microphone stays open and delivers silence, as a call's
+         * mute. */
+        public void captureMuted(Capture c, boolean on) {
+            captureProp(c, KayaWire.CPROP_MUTED, on);
+        }
+
+        /** Open the devices, asking for each kind's permission still at
+         * prompt; the answer is the capture's own state. */
+        public void startCapture(Capture c) {
+            emit(KayaWire.txCaptureCommand(c.id, KayaWire.CAPTURE_COMMAND_START));
+        }
+
+        public void stopCapture(Capture c) {
+            emit(KayaWire.txCaptureCommand(c.id, KayaWire.CAPTURE_COMMAND_STOP));
+        }
+
+        /** Stop and forget a capture; its frame and sample callbacks are
+         * dropped with it (put back if this transaction rolls back). */
+        public void releaseCapture(Capture c) {
+            emit(KayaWire.txReleaseCapture(c.id));
+            CaptureFrameCallback frames = captureFrames.remove(c.id);
+            CaptureSamplesCallback samples = captureSampleSinks.remove(c.id);
+            rollbackActions.add(() -> {
+                if (frames != null) {
+                    captureFrames.put(c.id, frames);
+                }
+                if (samples != null) {
+                    captureSampleSinks.put(c.id, samples);
+                }
+            });
+        }
+
+        /** Ask for a kind's permission before any capture starts; the
+         * answer arrives through {@link KayaApp#onPermission}. */
+        public void requestPermission(CaptureKind kind) {
+            emit(KayaWire.txRequestPermission(kind.wire));
+        }
+
+        /** List the cameras and microphones now and whenever one comes or
+         * goes ({@link KayaApp#onCaptureDevices}); false stops. */
+        public void watchCaptureDevices(boolean on) {
+            emit(KayaWire.txWatchCaptureDevices(on ? 1 : 0));
+        }
+
+        /** A video view previewing {@code capture} (docs/capture-plan.md
+         * §3): the player's view one source over, mirrored for a front
+         * camera. Live zone only; a view shows a player or a capture. */
+        public Widget video(Capture capture) {
+            Widget w = widget(KayaWire.KIND_VIDEO);
+            emit(KayaWire.txSetCapture(w.id, capture.id));
+            return w;
+        }
+
+        /** Preview another capture in a live video view, or none (null). */
+        public void showCapture(Widget video, Capture capture) {
+            emit(KayaWire.txSetCapture(video.id, capture == null ? 0 : capture.id));
+        }
+
         /** Declare the app's one media session, replacing the last
          * (docs/media-plan.md §5); {@code .declare()} sends it. */
         public Session session() {
@@ -9934,6 +10363,184 @@ public final class KayaApp {
         sessionHandler = handler;
     }
 
+    /** A capture's readings as of the last occurrence this loop took. */
+    public CaptureReading capture(Capture c) {
+        return captureReadings.getOrDefault(c.id, CaptureReading.IDLE);
+    }
+
+    /** A kind's permission as last heard: prompt until the platform says. */
+    public Permission permission(CaptureKind kind) {
+        return permissions.getOrDefault(kind, Permission.PROMPT);
+    }
+
+    /** The cameras and microphones as last listed (watch them with
+     * {@link Tx#watchCaptureDevices}). */
+    public List<CaptureDevice> captureDevices() {
+        return captureDeviceList;
+    }
+
+    /** Every state the capture moves to, failed included. */
+    public void onCaptureState(Capture c, BiConsumer<Tx, CaptureReading> handler) {
+        captureStates.put(c.id, handler);
+    }
+
+    /** The capture cannot run (docs/capture-plan.md §2 rule 2). */
+    public void onCaptureFailed(Capture c, CaptureFailedHandler handler) {
+        captureFailed.put(c.id, handler);
+    }
+
+    /** The sample callback fell this many ms behind the microphone. */
+    public void onCaptureOverrun(Capture c, BiConsumer<Tx, Long> handler) {
+        captureOverruns.put(c.id, handler);
+    }
+
+    /** A kind's permission moved or was asked about. */
+    public void onPermission(PermissionHandler handler) {
+        permissionHandler = handler;
+    }
+
+    /** The device list, as watching starts and whenever it changes. */
+    public void onCaptureDevices(BiConsumer<Tx, List<CaptureDevice>> handler) {
+        captureDevicesHandler = handler;
+    }
+
+    /**
+     * Run {@code f} for each frame of {@code c} (docs/capture-plan.md §4).
+     * IT RUNS ON KAYA'S CAPTURE THREAD, NOT THE APP THREAD, and holds no
+     * transaction: to touch the scene, {@link #post}. The frame is the
+     * app's own copy. The next frame is dropped while {@code f} still
+     * runs; null drops the callback, as releasing the capture does.
+     */
+    public void onCaptureFrame(Capture c, CaptureFrameCallback f) {
+        requireAppThread();
+        if (f == null) {
+            captureFrames.remove(c.id);
+            KayaRing.captureOnFrame(c.id, false);
+            return;
+        }
+        captureFrames.put(c.id, f);
+        KayaRing.captureOnFrame(c.id, true);
+    }
+
+    /**
+     * Run {@code f} for every 10 ms of {@code c}'s microphone: 480 samples
+     * of 48 kHz mono s16, the app's own copy, and the first one's time. IT
+     * RUNS ON KAYA'S CAPTURE THREAD, NOT THE APP THREAD, and holds no
+     * transaction: to touch the scene, {@link #post}. None is dropped; a
+     * callback slower than the microphone is told through
+     * {@link #onCaptureOverrun}.
+     */
+    public void onCaptureSamples(Capture c, CaptureSamplesCallback f) {
+        requireAppThread();
+        if (f == null) {
+            captureSampleSinks.remove(c.id);
+            KayaRing.captureOnSamples(c.id, false);
+            return;
+        }
+        captureSampleSinks.put(c.id, f);
+        KayaRing.captureOnSamples(c.id, true);
+    }
+
+    /** Called by jvm.rs on kaya's capture thread with the core's borrowed
+     * planes; the app's callback gets its own copy. */
+    static void captureFrame(long capture, int width, int height, java.nio.ByteBuffer y,
+            java.nio.ByteBuffer uv, int yStride, int uvStride, long timestampNs, int rotation) {
+        CaptureFrameCallback f = captureFrames.get(capture);
+        if (f == null) {
+            return;
+        }
+        byte[] yCopy = new byte[y.remaining()];
+        y.get(yCopy);
+        byte[] uvCopy = new byte[uv.remaining()];
+        uv.get(uvCopy);
+        try {
+            f.accept(new CaptureFrame(width, height, yCopy, uvCopy, yStride, uvStride,
+                    timestampNs, rotation));
+        } catch (RuntimeException e) {
+            System.err.println("kaya: capture " + capture + "'s frame callback threw: " + e);
+        }
+    }
+
+    /** Called by jvm.rs on kaya's capture thread with the core's borrowed
+     * chunk; the app's callback gets its own copy. */
+    static void captureSamples(long capture, java.nio.ByteBuffer chunk, long timestampNs) {
+        CaptureSamplesCallback f = captureSampleSinks.get(capture);
+        if (f == null) {
+            return;
+        }
+        short[] copy = new short[chunk.remaining() / 2];
+        chunk.order(java.nio.ByteOrder.nativeOrder()).asShortBuffer().get(copy);
+        try {
+            f.accept(copy, timestampNs);
+        } catch (RuntimeException e) {
+            System.err.println("kaya: capture " + capture + "'s sample callback threw: " + e);
+        }
+    }
+
+    /** One capture occurrence: the mirror moves first, then the handlers,
+     * each in its own transaction. False for any other record. */
+    boolean captureOccurrence(KayaWire.Occ occ) {
+        switch (occ.kind) {
+            case KayaWire.OCC_KIND_CAPTURE_CHANGED -> {
+                long capture = occ.id;
+                List<?> tail = (List<?>) occ.payload;
+                CaptureState state = CaptureState.fromWire(flatLong(tail, 0));
+                Optional<CaptureFailure> failure = CaptureFailure.fromWire(flatLong(tail, 1));
+                CaptureReading reading = new CaptureReading(state, failure,
+                        CaptureInterruption.fromWire(flatLong(tail, 2)), (int) flatLong(tail, 3),
+                        (int) flatLong(tail, 4), (int) flatLong(tail, 5));
+                String detail = tail.get(6) instanceof String s ? s : "";
+                captureReadings.put(capture, reading);
+                BiConsumer<Tx, CaptureReading> onState = captureStates.get(capture);
+                if (onState != null) {
+                    dispatch(tx -> onState.accept(tx, reading));
+                }
+                CaptureFailedHandler onFail = captureFailed.get(capture);
+                if (state == CaptureState.FAILED && failure.isPresent() && onFail != null) {
+                    dispatch(tx -> onFail.accept(tx, failure.get(), detail));
+                }
+            }
+            case KayaWire.OCC_KIND_CAPTURE_PERMISSION -> {
+                List<?> tail = (List<?>) occ.payload;
+                CaptureKind kind = CaptureKind.fromWire(flatLong(tail, 0));
+                Permission permission = Permission.fromWire(flatLong(tail, 1));
+                permissions.put(kind, permission);
+                PermissionHandler handler = permissionHandler;
+                if (handler != null) {
+                    dispatch(tx -> handler.accept(tx, kind, permission));
+                }
+            }
+            case KayaWire.OCC_KIND_CAPTURE_DEVICES -> {
+                List<?> tail = (List<?>) occ.payload;
+                List<CaptureDevice> devices = new ArrayList<>();
+                for (int at = 1; at + 5 <= tail.size(); at += 5) {
+                    devices.add(new CaptureDevice((String) tail.get(at), (String) tail.get(at + 1),
+                            CaptureKind.fromWire(flatLong(tail, at + 2)),
+                            CameraFacing.fromWire(flatLong(tail, at + 3)),
+                            (Boolean) tail.get(at + 4)));
+                }
+                captureDeviceList = List.copyOf(devices);
+                BiConsumer<Tx, List<CaptureDevice>> handler = captureDevicesHandler;
+                if (handler != null) {
+                    List<CaptureDevice> heard = captureDeviceList;
+                    dispatch(tx -> handler.accept(tx, heard));
+                }
+            }
+            case KayaWire.OCC_KIND_CAPTURE_OVERRUN -> {
+                long capture = (Long) occ.payload;
+                long behindMs = occ.id;
+                BiConsumer<Tx, Long> handler = captureOverruns.get(capture);
+                if (handler != null) {
+                    dispatch(tx -> handler.accept(tx, behindMs));
+                }
+            }
+            default -> {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private static boolean mediaOccurrence(short kind) {
         return kind == KayaWire.OCC_KIND_PLAYER_CHANGED
                 || kind == KayaWire.OCC_KIND_PLAYER_POSITION
@@ -10545,6 +11152,9 @@ public final class KayaApp {
                 continue;
             }
             if (readerOccurrence(occ)) {
+                continue;
+            }
+            if (captureOccurrence(occ)) {
                 continue;
             }
             if (mediaOccurrence(occ.kind)) {

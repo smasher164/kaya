@@ -7,6 +7,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Threading;
 
 [KayaGen]
 record MediaCheckRow(string Name, Player Clip);
@@ -152,6 +153,7 @@ static class MediaCheck
             "a Player field does not travel as its id");
         Console.WriteLine("media-check: a stamped video binds the row's player field");
         Reader(app);
+        CaptureCheck.Run(app);
         Console.WriteLine("media-check: OK");
     }
 
@@ -275,5 +277,235 @@ static class MediaCheck
         finally { System.Threading.SynchronizationContext.SetSynchronizationContext(previous); }
         Console.WriteLine("media-check: an awaited read answers in index order; a cancelled or "
             + "failed one gives back its images");
+    }
+}
+
+// The capture surface's decode, mirror and dispatch, and its capture-thread
+// callbacks' three rules (docs/capture-plan.md §2, §4): a transaction from
+// the capture thread is refused, the frame a callback is handed is its own
+// copy, and a released capture's callbacks are dropped. Headless, run inside
+// KAYA_CHECK=media (MediaCheck.Run calls it); the callbacks are driven
+// through the binding's own trampolines, from another thread, the way the
+// core calls them.
+static unsafe class CaptureCheck
+{
+    static void Check(bool ok, string what)
+    {
+        if (!ok)
+        {
+            Console.WriteLine("media-check: FAIL — capture: " + what);
+            Environment.Exit(1);
+        }
+    }
+
+    static byte[] Record(ushort kind, Action<BinaryWriter> body)
+    {
+        var ms = new MemoryStream();
+        var w = new BinaryWriter(ms);
+        w.Write(0u);
+        w.Write(kind);
+        w.Write((ushort)0);
+        body(w);
+        var rec = ms.ToArray();
+        BitConverter.GetBytes((uint)rec.Length).CopyTo(rec, 0);
+        return rec;
+    }
+
+    static void Str(BinaryWriter w, string s)
+    {
+        var bytes = Encoding.UTF8.GetBytes(s);
+        w.Write(KayaWire.ValueStr);
+        w.Write((uint)bytes.Length);
+        w.Write(bytes);
+        for (int pad = (8 - bytes.Length % 8) % 8; pad > 0; pad--) w.Write((byte)0);
+    }
+
+    static void I64(BinaryWriter w, long v)
+    {
+        w.Write(KayaWire.ValueI64);
+        w.Write(8u);
+        w.Write(v);
+    }
+
+    static byte[] Changed(ulong capture, uint state, uint failure, uint width, uint height,
+        uint rate, string detail) => Record(KayaWire.OccKindCaptureChanged, w =>
+        {
+            w.Write(capture);
+            w.Write(state);
+            w.Write(failure);
+            w.Write(0u);
+            w.Write(width);
+            w.Write(height);
+            w.Write(rate);
+            Str(w, detail);
+        });
+
+    /// Call the binding's frame trampoline on another thread, as kaya's
+    /// capture thread does, with a 4x2 NV12 frame in native memory.
+    static void FrameFromAnotherThread(ulong capture, byte* y, byte* uv)
+    {
+        var t = new Thread(() =>
+        {
+            var f = new Kaya.NativeCaptureFrame
+            {
+                Width = 4, Height = 2, Y = y, UV = uv, YStride = 4, UVStride = 4,
+                TimestampNs = 7, Rotation = 90,
+            };
+            var trampoline = Kaya.FrameTrampoline;
+            trampoline((IntPtr)(long)capture, &f);
+        });
+        t.Start();
+        t.Join();
+    }
+
+    static void SamplesFromAnotherThread(ulong capture)
+    {
+        var t = new Thread(() =>
+        {
+            var chunk = stackalloc short[480];
+            var trampoline = Kaya.SamplesTrampoline;
+            trampoline((IntPtr)(long)capture, chunk, 480, 11);
+        });
+        t.Start();
+        t.Join();
+    }
+
+    /// `app` is the process's one KayaApp, MediaCheck's.
+    public static void Run(KayaApp app)
+    {
+        // THE FOUR RECORDS, decoded and absorbed; the mirror leads the handlers.
+        var c = app.Build(tx => tx.Capture(camera: "cam", microphone: "mic", size: (640, 480)));
+        var heard = new System.Collections.Generic.List<string>();
+        app.OnCaptureState(c, (_, r) => heard.Add($"{r.State.Name()} {app.Capture(c).Width}"));
+        app.OnCaptureFailed(c, (_, why, detail) => heard.Add($"failed {why.Name()} {detail}"));
+        app.OnCaptureOverrun(c, (_, ms) => heard.Add($"overrun {ms}"));
+        app.OnPermission((_, kind, p) => heard.Add($"{kind.Name()} {p.Name()} {app.Permission(kind).Name()}"));
+        app.OnCaptureDevices((_, list) => heard.Add($"devices {list.Count} {app.CaptureDevices()[0].Id}"));
+        Check(app.Permission(CaptureKind.Microphone) == Permission.Prompt,
+            "an unheard permission does not read prompt");
+        app.DispatchCapture(KayaApp.DecodeRecord(Record(KayaWire.OccKindCapturePermission, w =>
+        {
+            w.Write(KayaWire.CaptureKindCamera);
+            w.Write(KayaWire.PermissionGranted);
+            Str(w, "");
+        })));
+        app.DispatchCapture(KayaApp.DecodeRecord(Changed(c.Id, KayaWire.CaptureStateRunning,
+            KayaWire.CaptureFailureNone, 640, 480, 30, "")));
+        app.DispatchCapture(KayaApp.DecodeRecord(Record(KayaWire.OccKindCaptureOverrun, w =>
+        {
+            w.Write(c.Id);
+            w.Write(250ul);
+        })));
+        app.DispatchCapture(KayaApp.DecodeRecord(Record(KayaWire.OccKindCaptureDevices, w =>
+        {
+            w.Write(5u);
+            w.Write(0u);
+            Str(w, "cam");
+            Str(w, "Camera");
+            I64(w, KayaWire.CaptureKindCamera);
+            I64(w, KayaWire.CameraFacingFront);
+            w.Write(KayaWire.ValueBool);
+            w.Write(1u);
+            w.Write(1ul);
+        })));
+        app.DispatchCapture(KayaApp.DecodeRecord(Changed(c.Id, KayaWire.CaptureStateFailed,
+            KayaWire.CaptureFailureInUse, 0, 0, 0, "the platform's words")));
+        var want = "camera granted granted|running 640|overrun 250|devices 1 cam|failed 0"
+            + "|failed in_use the platform's words";
+        Check(string.Join("|", heard) == want,
+            $"the handlers heard \"{string.Join("|", heard)}\", wanted \"{want}\"");
+        Check(app.CaptureDevices()[0] is { Kind: CaptureKind.Camera, Facing: CameraFacing.Front,
+                Preferred: true },
+            $"the device list reads {app.CaptureDevices()[0]}");
+        Console.WriteLine("media-check: capture_changed, capture_permission, capture_overrun and "
+            + "capture_devices reach the mirror before the handlers");
+
+        // A CALLBACK HOLDS NO TRANSACTION, AND ITS FRAME IS ITS OWN COPY.
+        KayaApp.ClaimAppThread();
+        var y = (byte*)System.Runtime.InteropServices.NativeMemory.Alloc(8);
+        var uv = (byte*)System.Runtime.InteropServices.NativeMemory.Alloc(4);
+        for (int i = 0; i < 8; i++) y[i] = (byte)(16 + i);
+        for (int i = 0; i < 4; i++) uv[i] = 128;
+        var s = app.Build(tx => tx.Signal("before"));
+        string? refused = null;
+        CaptureFrame? kept = null;
+        short[]? chunk = null;
+        string ran = "";
+        app.OnCaptureFrame(c, f =>
+        {
+            kept = f;
+            try { app.Build(tx => tx.Write(s, "from the capture thread")); }
+            catch (InvalidOperationException e) { refused = e.Message; }
+            app.Post(tx => { ran = "posted"; tx.Write(s, "posted"); });
+        });
+        app.OnCaptureSamples(c, (samples, _) => chunk = samples);
+        FrameFromAnotherThread(c.Id, y, uv);
+        Check(refused is { } msg && msg.Contains("belongs to the app thread") && msg.Contains("App.Post"),
+            $"a transaction from the capture thread was answered with \"{refused}\" — it must be "
+            + "the wrong-thread refusal naming App.Post");
+        app.DrainPosted();
+        Check(ran == "posted", "the callback's post did not reach the app thread");
+        Check(kept is { Width: 4, Height: 2, YStride: 4, UVStride: 4, TimestampNs: 7, Rotation: 90 }
+                && kept.Y.Length == 8 && kept.UV.Length == 4,
+            $"the frame arrived as {kept}");
+        var first = kept!;
+        first.UV[0] = 1;
+        y[0] = 99;
+        FrameFromAnotherThread(c.Id, y, uv);
+        Check(first.Y[0] == 16 && uv[0] == 128 && kept!.Y[0] == 99,
+            $"a kept frame reads {first.Y[0]} after the next frame brought {kept?.Y[0]}, and "
+            + $"kaya's UV reads {uv[0]} after the app wrote its copy — a frame must be the "
+            + "callback's own copy");
+        app.DrainPosted();
+        SamplesFromAnotherThread(c.Id);
+        Check(chunk is { Length: 480 }, $"the chunk arrived as {chunk?.Length} samples");
+        Console.WriteLine("media-check: a capture callback is refused a transaction, posts, and "
+            + "keeps its own copy");
+
+        // A CALLBACK THAT THROWS IS LOGGED AND THE CAPTURE KEEPS RUNNING
+        // (DESIGN.md's abort rule on the capture thread): the next frame and
+        // chunk still reach it.
+        int frames = 0, chunks = 0;
+        app.OnCaptureFrame(c, _ =>
+        {
+            if (++frames == 1) throw new InvalidOperationException("the app's first frame");
+        });
+        app.OnCaptureSamples(c, (_, _) =>
+        {
+            if (++chunks == 1) throw new InvalidOperationException("the app's first chunk");
+        });
+        for (int i = 0; i < 2; i++)
+        {
+            FrameFromAnotherThread(c.Id, y, uv);
+            SamplesFromAnotherThread(c.Id);
+        }
+        Check(frames == 2 && chunks == 2,
+            $"after a throwing call the callbacks ran {frames} frame(s) and {chunks} chunk(s), want 2 each");
+        app.OnCaptureFrame(c, f => kept = f);
+        app.OnCaptureSamples(c, (samples, _) => chunk = samples);
+        Console.WriteLine("media-check: a capture callback that throws is logged and the capture "
+            + "keeps running");
+
+        // A RELEASED CAPTURE'S CALLBACKS ARE DROPPED, once the release commits.
+        try
+        {
+            app.Build<int>(tx =>
+            {
+                tx.ReleaseCapture(c);
+                throw new InvalidOperationException("abandoned");
+            });
+        }
+        catch (InvalidOperationException) { }
+        Check(Kaya.HoldsCaptureSinks(c.Id), "a rolled-back release dropped the callbacks");
+        app.Build(tx => tx.ReleaseCapture(c));
+        Check(!Kaya.HoldsCaptureSinks(c.Id), "the binding still holds a released capture's callbacks");
+        kept = null;
+        chunk = null;
+        FrameFromAnotherThread(c.Id, y, uv);
+        SamplesFromAnotherThread(c.Id);
+        Check(kept == null && chunk == null, "a released capture's callbacks still ran");
+        System.Runtime.InteropServices.NativeMemory.Free(y);
+        System.Runtime.InteropServices.NativeMemory.Free(uv);
+        Console.WriteLine("media-check: a released capture's callbacks are dropped");
     }
 }

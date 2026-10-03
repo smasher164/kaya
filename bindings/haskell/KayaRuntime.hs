@@ -27,6 +27,10 @@ module KayaRuntime
     canPlayRaw,
     readerPeaksRaw,
     imagePixelsRaw,
+    captureOnFrame,
+    captureOnSamples,
+    captureDriveFrame,
+    captureDriveSamples,
     catalogRaw,
     TrArgRaw (..),
     trRaw,
@@ -78,7 +82,7 @@ import qualified Data.Text.Encoding as TE
 import Data.Word (Word16, Word32, Word64, Word8)
 import Foreign.C.Types (CBool (..), CInt (..), CSize (..))
 import Foreign.Marshal.Alloc (alloca, allocaBytes, mallocBytes)
-import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
+import Foreign.Ptr (FunPtr, Ptr, castPtr, nullFunPtr, nullPtr, plusPtr, wordPtrToPtr)
 import Foreign.Marshal.Array (allocaArray, peekArray)
 import Foreign.Storable (peek, peekByteOff, poke, pokeByteOff)
 import Control.Monad (foldM_)
@@ -424,6 +428,47 @@ canPlayRaw mime codecs =
   unsafeUseAsCStringLen (TE.encodeUtf8 mime) $ \(m, ml) ->
     unsafeUseAsCStringLen (TE.encodeUtf8 codecs) $ \(c, cl) ->
       (/= 0) <$> c_kaya_can_play (castPtr m) (fromIntegral ml) (castPtr c) (fromIntegral cl)
+
+-- The capture's callbacks (docs/capture-plan.md §4): kaya_hs_stubs.c's
+-- trampolines, the capture id as their context.
+foreign import ccall unsafe "kaya_capture_on_frame"
+  c_kaya_capture_on_frame :: Word64 -> FunPtr (Ptr () -> Ptr () -> IO ()) -> Ptr () -> IO ()
+
+foreign import ccall unsafe "kaya_capture_on_samples"
+  c_kaya_capture_on_samples :: Word64 -> FunPtr (Ptr () -> Ptr Int16 -> CSize -> Word64 -> IO ()) -> Ptr () -> IO ()
+
+foreign import ccall "&kaya_hs_capture_frame"
+  captureFrameTrampoline :: FunPtr (Ptr () -> Ptr () -> IO ())
+
+foreign import ccall "&kaya_hs_capture_samples"
+  captureSamplesTrampoline :: FunPtr (Ptr () -> Ptr Int16 -> CSize -> Word64 -> IO ())
+
+-- | Hand kaya's capture thread the frame or sample trampoline for a
+-- capture (True), or take it back (False).
+captureOnFrame :: Word64 -> Bool -> IO ()
+captureOnFrame c on =
+  c_kaya_capture_on_frame c (if on then captureFrameTrampoline else nullFunPtr) (wordPtrToPtr (fromIntegral c))
+
+captureOnSamples :: Word64 -> Bool -> IO ()
+captureOnSamples c on =
+  c_kaya_capture_on_samples c (if on then captureSamplesTrampoline else nullFunPtr) (wordPtrToPtr (fromIntegral c))
+
+-- SAFE, so the trampoline's foreign thread can run Haskell while this one
+-- waits in C.
+foreign import ccall safe "kaya_hs_capture_drive_frame"
+  c_kaya_hs_capture_drive_frame :: Word64 -> Word32 -> Word32 -> IO CInt
+
+foreign import ccall safe "kaya_hs_capture_drive_samples"
+  c_kaya_hs_capture_drive_samples :: Word64 -> IO CInt
+
+-- | guests/haskell/AbortCheck alone: call a trampoline from a fresh
+-- foreign thread over kaya-owned buffers, answering whether those buffers
+-- came back unchanged.
+captureDriveFrame :: Word64 -> Int -> Int -> IO Bool
+captureDriveFrame c w h = (/= 0) <$> c_kaya_hs_capture_drive_frame c (fromIntegral w) (fromIntegral h)
+
+captureDriveSamples :: Word64 -> IO Bool
+captureDriveSamples c = (/= 0) <$> c_kaya_hs_capture_drive_samples c
 
 -- | kaya_reader_peaks: a finished peaks read's @count@ i16, pair-major.
 readerPeaksRaw :: Word64 -> Word64 -> Int -> IO [Int16]

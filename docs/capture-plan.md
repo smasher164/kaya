@@ -2,8 +2,12 @@
 
 Status: DESIGNED 2026-10-01; the DEPTH SLICE BUILT 2026-10-02 (the protocol,
 the core, the SwiftUI arm on the synthetic devices, the Rust binding, the
-`capture` and `capture_denied` scenes on the mac lane; the breadth is
-docs/deferred.md's capture BUILD entry). Asked for by the maintainer's
+`capture` and `capture_denied` scenes on the mac lane); the BREADTH BUILT
+2026-10-03 (the GTK, WinUI and Compose arms, the iOS legs, all nine bindings;
+each lane's synthetic source measured first, in
+docs/probes/capture-2026-10-01/{linux,windows,compose,ios}-measured.md), the
+Windows legs still to run; what remains is docs/deferred.md's capture BUILD
+entry. Asked for by the maintainer's
 accepted direction of 2026-09-28: calls are a stage of the chat app
 (docs/chat-plan.md), a voice or video call from a conversation with a live
 self-preview and a choice of camera and microphone, the simulated peer

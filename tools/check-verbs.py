@@ -4312,6 +4312,388 @@ for pattern, repl, label in (
     if not found:
         fail(f"check-verbs SELF-TEST: the capture wall passed with {label}")
 
+# --- THE CAPTURE WALL, GTK (docs/capture-plan.md §7) -----------------------
+# On Linux the lane's synthetic devices ARE PipeWire nodes, reached through
+# the same pipewiresrc a real camera is, so nothing can route around the
+# platform under the harness; the wall is the one device-open function
+# instead. Every capture source element is made inside `fn open_devices(`,
+# which begins with `wall(` for both devices; the wall panics under
+# KAYA_SELFTEST for any id outside the core's synthetic table; and every
+# source names its node with the session's default refused, since a
+# pipewiresrc with no target links to WirePlumber's default source.
+GTK_CAPTURE = "crates/kaya/src/gtk/capture.rs"
+GTK_CAPTURE_REAL = ('"pipewiresrc"', '"v4l2src"', '"libcamerasrc"', '"pulsesrc"', '"autovideosrc"',
+                    '"autoaudiosrc"', '"camerabin"', '"alsasrc"')
+
+
+def capture_wall_gtk(text=None, gtk_text=None):
+    code = re.sub(r"//[^\n]*", "", text if text is not None else real(GTK_CAPTURE))
+    rest = re.sub(r"//[^\n]*", "", gtk_text if gtk_text is not None else real(GTK))
+    bad = []
+    head = "fn open_devices("
+    at = code.find(head)
+    body = brace_body(code, head)
+    if at < 0 or body is None:
+        return [f"GTK ({GTK_CAPTURE}): no `{head}` — the capture wall reads nothing and would "
+                f"agree with everything"]
+    lo = code.find("{", at)
+    hi = lo + len(body)
+    seen = 0
+    for token in GTK_CAPTURE_REAL:
+        for m in re.finditer(re.escape(token), code):
+            seen += 1
+            if not lo <= m.start() < hi:
+                line = code.count("\n", 0, m.start()) + 1
+                bad.append(f"GTK ({GTK_CAPTURE}): {token} at line {line} is outside open_devices — "
+                           f"a capture source made past the wall (docs/capture-plan.md §7)")
+        if token in rest:
+            bad.append(f"GTK ({GTK}): {token} is named in gtk.rs — a capture source outside the "
+                       f"capture arm's one device-open function")
+    if seen < 1:
+        bad.append(f"GTK ({GTK_CAPTURE}): no capture source read — the census reads too little")
+    if not re.match(r"\{\s*wall\(camera[^;]*;\s*wall\(microphone", body):
+        bad.append(f"GTK ({GTK_CAPTURE}): open_devices does not begin with wall( for the camera "
+                   f"and the microphone — a device opened with nothing refusing it under the "
+                   f"harness")
+    for m in re.finditer(r'make\("pipewiresrc"\)', body):
+        tail = body[m.end():]
+        if '"target-object"' not in tail or '.field("node.dont-fallback", true)' not in tail:
+            bad.append(f"GTK ({GTK_CAPTURE}): a pipewiresrc in open_devices does not name its node "
+                       f"with the default refused — it would link to WirePlumber's default source")
+    wall = brace_body(code, "fn wall(")
+    refusal = brace_body(code, "fn refusal(")
+    if wall is None or refusal is None or "refusal(device, under_harness())" not in wall \
+            or "panic!(" not in wall or "crate::capture::SYNTHETIC" not in refusal:
+        bad.append(f"GTK ({GTK_CAPTURE}): wall() is not fatal under the harness for a device "
+                   f"outside the synthetic table — the wall refuses nothing")
+    harness = brace_body(code, "fn under_harness(")
+    if harness is None or 'std::env::var_os("KAYA_SELFTEST")' not in harness:
+        bad.append(f"GTK ({GTK_CAPTURE}): under_harness() no longer reads KAYA_SELFTEST — the wall "
+                   f"asks the wrong question")
+    return bad
+
+
+capture_gtk_out = capture_wall_gtk()
+capture_gtk_status = 0
+if capture_gtk_out:
+    print("check-verbs: the GTK capture wall is breached:", file=sys.stderr)
+    print("\n".join(capture_gtk_out), file=sys.stderr)
+    capture_gtk_status = 1
+print(f"check-verbs: the GTK capture wall read ({len(GTK_CAPTURE_REAL)} source names, "
+      f"open_devices, "
+      f"the wall, its harness question)")
+for pattern, repl, label in (
+    (r"(fn nodes\(\) -> Vec<Node> \{\n)",
+     r'\1    let _ = gst::ElementFactory::make("pipewiresrc");\n',
+     "a PipeWire source made outside open_devices"),
+    (r"(\) -> Result<Open, \(CaptureFailure, String\)> \{\n)\s*wall\(camera[^\n]*\n",
+     r"\1", "the wall cut from open_devices"),
+    (r"(if let Some\(why\) = refusal\(device, under_harness\(\)\) \{\n\s*)panic!\(",
+     r"\1eprintln!(",
+     "the wall made non-fatal"),
+    (r'std::env::var_os\("KAYA_SELFTEST"\)', r'std::env::var_os("KAYA_SELFTEST_X")',
+     "the harness question asking another variable"),
+    (r'\n\s*\.field\("node\.dont-fallback", true\)', "",
+     "a source that may fall back to the default"),
+):
+    cut = g.doctor(f"the GTK capture wall: {label}", real(GTK_CAPTURE), pattern, repl)
+    found = [f for f in capture_wall_gtk(cut) if f not in capture_gtk_out]
+    print(f"check-verbs: the GTK capture wall negative ({label}): {len(found)} finding(s)")
+    if not found:
+        fail(f"check-verbs SELF-TEST: the GTK capture wall passed with {label}")
+gtk_planted = g.doctor("the GTK capture wall: a capture source in gtk.rs", real(GTK),
+                       r"(\nmod capture;\n)", r'\1const _PLANTED: &str = "v4l2src";\n')
+found = [f for f in capture_wall_gtk(None, gtk_planted) if f not in capture_gtk_out]
+print(f"check-verbs: the GTK capture wall negative (a capture source in gtk.rs): "
+      f"{len(found)} finding(s)")
+if not found:
+    fail("check-verbs SELF-TEST: the GTK capture wall passed with a capture source in gtk.rs")
+
+# --- THE CAPTURE WALL, COMPOSE (docs/capture-plan.md §7) -----------------
+# On Android the lane's synthetic devices ARE the emulator's own cameras and
+# microphone (tools/lib/emulator_capture.py), so the wall is two halves: the
+# app reaches a camera or a microphone only through `internal object
+# KayaRealCapture`, each entry of which calls kayaCaptureWall first, fatal
+# under KAYA_SELFTEST unless the device is the emulator's; and the runner
+# starts every emulator through refuse_host_devices, so no host webcam or
+# host audio is ever on the far side. No scene can see either: a real phone
+# camera showing C83C1E is not a thing the scene can tell apart.
+COMPOSE_CAPTURE = "android/kaya/src/main/kotlin/dev/kaya/KayaCapture.kt"
+COMPOSE_KOTLIN_DIR = "android/kaya/src/main/kotlin/dev/kaya"
+RUNNER_ANDROID = "tools/android/run-emulator.py"
+COMPOSE_CAPTURE_REAL = ("ProcessCameraProvider", "Camera2CameraInfo", "bindToLifecycle",
+                        "AudioRecord(", "CameraManager", "RequestPermission()",
+                        "checkSelfPermission(", "GET_DEVICES_INPUTS", "ImageAnalysis.Builder",
+                        "Preview.Builder")
+COMPOSE_CAPTURE_HEAD = "internal object KayaRealCapture {"
+COMPOSE_CAPTURE_SHARED = ("checkSelfPermission(", "RequestPermission()")
+
+
+def capture_wall_compose(text=None, others=None, runner=None):
+    code = re.sub(r"(?m)//[^\n]*|^import [^\n]*", "",
+                  text if text is not None else real(COMPOSE_CAPTURE))
+    bad = []
+    at = code.find(COMPOSE_CAPTURE_HEAD)
+    body = brace_body(code, COMPOSE_CAPTURE_HEAD)
+    if at < 0 or body is None:
+        return [f"Compose ({COMPOSE_CAPTURE}): no `{COMPOSE_CAPTURE_HEAD}` — the capture "
+                f"wall reads nothing and would agree with everything"]
+    lo = code.find("{", at)
+    hi = lo + len(body)
+    seen = 0
+    for token in COMPOSE_CAPTURE_REAL:
+        for m in re.finditer(re.escape(token), code):
+            seen += 1
+            if not lo <= m.start() < hi:
+                line = code.count("\n", 0, m.start()) + 1
+                bad.append(f"Compose ({COMPOSE_CAPTURE}): `{token}` at line {line} is "
+                           f"outside KayaRealCapture — a real camera or microphone "
+                           f"reached past the wall")
+    if seen < 10:
+        bad.append(f"Compose ({COMPOSE_CAPTURE}): only {seen} real-capture names read — "
+                   f"the wall's census reads too little to agree with anything")
+    if others is None:
+        others = {f.name: f.read_text(encoding="utf-8")
+                  for f in sorted((ROOT / COMPOSE_KOTLIN_DIR).glob("*.kt"))
+                  if f.name != pathlib.Path(COMPOSE_CAPTURE).name}
+    for name, other in others.items():
+        other = re.sub(r"(?m)//[^\n]*|^import [^\n]*", "", other)
+        for token in COMPOSE_CAPTURE_REAL:
+            if token in other and token not in COMPOSE_CAPTURE_SHARED:
+                bad.append(f"Compose ({name}): `{token}` outside KayaCapture.kt's "
+                           f"KayaRealCapture")
+    entries = (list(re.finditer(r"\n    fun (\w+)\([^{]*\{", body))
+               + list(re.finditer(r"\n\s+fun (open\w+)\([^{]*\{", body)))
+    if len(entries) < 7:
+        bad.append(f"Compose ({COMPOSE_CAPTURE}): only {len(entries)} entry points read in "
+                   f"KayaRealCapture — the wall's census reads too little")
+    for m in entries:
+        if not body[m.end():].lstrip().startswith("kayaCaptureWall("):
+            bad.append(f"Compose ({COMPOSE_CAPTURE}): KayaRealCapture.{m.group(1)} does not "
+                       f"begin with kayaCaptureWall( — an entry into the devices with "
+                       f"nothing refusing it under the harness")
+    wall = brace_body(code, "internal fun kayaCaptureWall(")
+    if (wall is None or "if (!kayaCaptureUnderHarness()) return" not in wall
+            or "error(" not in wall or "kayaOnEmulator()" not in wall):
+        bad.append(f"Compose ({COMPOSE_CAPTURE}): kayaCaptureWall is not fatal under the "
+                   f"harness for a device off the emulator — the wall refuses nothing")
+    if 'System.getenv("KAYA_SELFTEST") != null' not in code:
+        bad.append(f"Compose ({COMPOSE_CAPTURE}): kayaCaptureUnderHarness no longer reads "
+                   f"KAYA_SELFTEST")
+    run = runner if runner is not None else real(RUNNER_ANDROID)
+    starts = re.findall(r'\["emulator",', run)
+    at = run.find("def emulator_argv(")
+    if (len(starts) != 1 or at < 0
+            or "refuse_host_devices(" not in run[at:run.find("\n\n\n", at)]):
+        bad.append(f"Android runner ({RUNNER_ANDROID}): {len(starts)} emulator launch(es), "
+                   f"wanted exactly one, emulator_argv, passing refuse_host_devices — a "
+                   f"launch around it could hand the guest the host's camera or microphone")
+    refuse = run[run.find("def refuse_host_devices("):run.find("def emulator_argv(")]
+    if (not re.search(r'HOST_DEVICE_FLAGS = \("-allow-host-audio", "-webcam", "hostmicon"\)',
+                      run)
+            or "die(" not in refuse):
+        bad.append(f"Android runner ({RUNNER_ANDROID}): HOST_DEVICE_FLAGS or its refusal "
+                   f"moved — the wall's runner half refuses nothing")
+    if re.search(r'"hostmicon"\s*\]|"avd",\s*"hostmicon"', run):
+        bad.append(f"Android runner ({RUNNER_ANDROID}): the runner sends `avd hostmicon`")
+    # The lane's tone is asked for once the input's FIRST READ came back: an
+    # injection with no capture open ends the emulator in SIGSEGV, measured
+    # with the ask before startRecording and, under load, between it and the
+    # first read (docs/probes/capture-2026-10-01/compose-measured.md §4).
+    asks = [m.start() for m in re.finditer(r"kayaLaneToneRequest\(\)", code)
+            if not code[:m.start()].rstrip().endswith("fun")]
+    first = code.find("if (!said) {")
+    read = code.find(".read(buf, 0, buf.size")
+    block = brace_body(code[first:], "if (!said) {") if first >= 0 else None
+    if (len(asks) != 1 or read < 0 or block is None
+            or not read < first < asks[0] < first + len(block)):
+        bad.append(f"Compose ({COMPOSE_CAPTURE}): the lane's tone is asked for {len(asks)} "
+                   f"time(s), not once inside the audio loop's first-read block — an injection "
+                   f"that reaches the emulator before its capture delivers ends the emulator")
+    return bad
+
+
+capture_compose_out = capture_wall_compose()
+capture_compose_status = 0
+if capture_compose_out:
+    print("check-verbs: the Compose capture wall is breached:", file=sys.stderr)
+    print("\n".join(capture_compose_out), file=sys.stderr)
+    capture_compose_status = 1
+print(f"check-verbs: the Compose capture wall read ({len(COMPOSE_CAPTURE_REAL)} names, the "
+      f"object's entry points, the wall, the runner's one launch)")
+for pattern, repl, label in (
+    (r"(internal fun kayaCaptureWatchDevices\(on: Boolean\) \{\n)",
+     r"\1    ProcessCameraProvider.getInstance(KayaCompose.kayaAppContext!!)\n",
+     "a real device named outside the object"),
+    (r"(    fun devices\(context: Context, done: \(List<KayaCaptureDeviceInfo>\) -> Unit\) "
+     r"\{\n)\s*kayaCaptureWall\([^\n]*\n",
+     r"\1", "the wall cut from an entry point"),
+    (r"(fun openMicrophone\([^{]*\{\n)\s*kayaCaptureWall\([^\n]*\n", r"\1",
+     "the wall cut from the microphone's open"),
+    (r"(if \(!lane \|\| !kayaOnEmulator\(\)\) \{\n\s*)error\(", r'\1Log.w("kaya", ',
+     "the wall made non-fatal"),
+    (r'System\.getenv\("KAYA_SELFTEST"\) != null',
+     r'System.getenv("KAYA_SELFTEST_X") != null',
+     "the harness question asking another variable"),
+    (r"(\n\s*)if \(laneChannel != null\) kayaLaneToneRequest\(\)\n(\s*\}\n)",
+     r"\1\2", "the tone's ask cut from the first read"),
+    (r"(\n(\s*)val refused = startRecord\(r\)\n)",
+     r"\n\2if (laneChannel != null) kayaLaneToneRequest()\1",
+     "the tone asked for before the input starts"),
+):
+    cut = g.doctor(f"the Compose capture wall: {label}", real(COMPOSE_CAPTURE), pattern, repl)
+    found = [f for f in capture_wall_compose(cut) if f not in capture_compose_out]
+    print(f"check-verbs: the Compose capture wall negative ({label}): {len(found)} finding(s)")
+    if not found:
+        fail(f"check-verbs SELF-TEST: the Compose capture wall passed with {label}")
+for pattern, repl, label in (
+    (r"(def make_snapshot\(avd, port\):\n)",
+     r'\1    _ = ["emulator", "-avd", avd, "-allow-host-audio"]\n',
+     "an emulator launched around emulator_argv"),
+    (r'HOST_DEVICE_FLAGS = \("-allow-host-audio", ', r'HOST_DEVICE_FLAGS = (',
+     "the host-audio flag let through"),
+):
+    cut = g.doctor(f"the Compose capture wall's runner half: {label}", real(RUNNER_ANDROID),
+                   pattern, repl)
+    found = [f for f in capture_wall_compose(None, None, cut) if f not in capture_compose_out]
+    print(f"check-verbs: the Compose capture wall negative ({label}): {len(found)} finding(s)")
+    if not found:
+        fail(f"check-verbs SELF-TEST: the Compose capture wall passed with {label}")
+
+# THE EMULATOR'S TONE STARTS ONLY ON THE APP'S ASK (docs/traps.md, the
+# emulator's audio injection): an injectAudio stream with no capture open
+# crashes the emulator, so the arm asks (`KAYA_REQUEST: microphone <n>`) only
+# once its input's first read came back (the Compose capture wall above holds
+# the arm's half), and the runner starts the stream only inside
+# lane_microphone, called only on that line. No scene can see the order until
+# the emulator dies mid-leg.
+MIC_ASK = "KAYA_REQUEST: microphone "
+
+
+def capture_inject_order(runner=None):
+    run = runner if runner is not None else real(RUNNER_ANDROID)
+    bad = []
+    starts = [m.start() for m in re.finditer(r"emulator_capture\.start\(", run)]
+    owner = run.find("def lane_microphone(")
+    end = run.find("\ndef ", owner + 1)
+    if not starts or owner < 0 or any(not owner < at < end for at in starts):
+        bad.append(f"{RUNNER_ANDROID}: emulator_capture.start( is called outside "
+                   f"lane_microphone (or nowhere)")
+    calls = [m.start() for m in re.finditer(r"(?<!def )lane_microphone\(", run)]
+    for at in calls:
+        if MIC_ASK not in run[max(0, at - 400):at]:
+            line = run.count("\n", 0, at) + 1
+            bad.append(f"{RUNNER_ANDROID}:{line}: lane_microphone is called without "
+                       f"`{MIC_ASK}<n>` read just before it")
+    if not calls:
+        bad.append(f"{RUNNER_ANDROID}: lane_microphone is never called — the census reads nothing")
+    return bad
+
+
+capture_inject_out = capture_inject_order()
+if capture_inject_out:
+    print("check-verbs: the emulator's tone can start before the app asks:", file=sys.stderr)
+    print("\n".join(capture_inject_out), file=sys.stderr)
+    capture_compose_status = 1
+print("check-verbs: the emulator's tone order read (the runner's one start, on the app's ask)")
+for pattern, repl, label in (
+    (r"(def lane_capture_state\(serial\):\n)",
+     r"\1    emulator_capture.start(serial)\n", "a stream started outside lane_microphone"),
+    (r'KAYA_REQUEST: microphone \(', "KAYA_REQUEST: wanted (",
+     "the runner keyed on another line"),
+):
+    cut = g.doctor(f"the emulator's tone order: {label}", real(RUNNER_ANDROID), pattern, repl)
+    found = [f for f in capture_inject_order(cut) if f not in capture_inject_out]
+    print(f"check-verbs: the emulator's tone order negative ({label}): {len(found)} finding(s)")
+    if not found:
+        fail(f"check-verbs SELF-TEST: the emulator's tone order passed with {label}")
+
+# THE CAPTURE WALL, WINUI'S CLAUSE (docs/capture-plan.md §7): the arm's
+# `open_devices` is the one function that opens a camera or a microphone,
+# it passes every device through `wall` first, and the wall is fatal under
+# KAYA_SELFTEST for anything but the lane's virtual cameras and cable — the
+# VM's Line In is the HOST's input, and a guest that opened it would record
+# the maintainer's room with every capture scene still green.
+WINUI_CAPTURE = "crates/kaya/src/winui/capture.rs"
+WINUI_CAPTURE_REAL = ("MediaCaptureInitializationSettings::new", "MediaCapture::new",
+                      "InitializeWithSettingsAsync", "SetVideoDeviceId", "SetAudioDeviceId")
+
+
+def winui_capture_wall(text=None, others=None):
+    code = re.sub(r"//[^\n]*", "", text if text is not None else real(WINUI_CAPTURE))
+    bad = []
+    head = "fn open_devices("
+    at = code.find(head)
+    body = brace_body(code, head)
+    if at < 0 or body is None:
+        return [f"WinUI ({WINUI_CAPTURE}): no `{head}` — the capture wall reads nothing "
+                f"and would agree with everything"]
+    lo = code.find("{", at)
+    hi = lo + len(body)
+    seen = 0
+    for token in WINUI_CAPTURE_REAL:
+        for m in re.finditer(re.escape(token), code):
+            seen += 1
+            if not lo <= m.start() < hi:
+                line = code.count("\n", 0, m.start()) + 1
+                bad.append(f"WinUI ({WINUI_CAPTURE}): `{token}` at line {line} is outside "
+                           f"open_devices — a real camera or microphone opened past the wall")
+    if seen < len(WINUI_CAPTURE_REAL):
+        bad.append(f"WinUI ({WINUI_CAPTURE}): only {seen} device-open names read — the "
+                   f"wall's census reads too little to agree with anything")
+    for rel, other in (others if others is not None else
+                       [(r, real(r)) for r in ("crates/kaya/src/winui/mod.rs",
+                                              "crates/kaya/src/winui/media.rs")]):
+        other = re.sub(r"//[^\n]*", "", other)
+        for token in WINUI_CAPTURE_REAL:
+            if token in other:
+                bad.append(f"WinUI ({rel}): `{token}` outside capture.rs's open_devices — "
+                           f"a device opened with no wall in front of it")
+    first = body[1:].lstrip()
+    if not re.match(r"for device in [^{]*\{\s*wall\(device\);", first):
+        bad.append(f"WinUI ({WINUI_CAPTURE}): open_devices does not begin by passing every "
+                   f"device through wall( — an open with nothing refusing it under the harness")
+    wall = brace_body(code, "fn wall(")
+    if wall is None or "if !under_harness()" not in wall or "panic!(" not in wall:
+        bad.append(f"WinUI ({WINUI_CAPTURE}): wall is not fatal under the harness — the "
+                   f"wall refuses nothing")
+    if not re.search(r'fn under_harness\(\) -> bool \{\s*std::env::var_os\("KAYA_SELFTEST"\)'
+                     r'\.is_some\(\)', code):
+        bad.append(f"WinUI ({WINUI_CAPTURE}): under_harness no longer reads KAYA_SELFTEST — "
+                   f"the wall asks the wrong question")
+    return bad
+
+
+winui_capture_out = winui_capture_wall()
+if winui_capture_out:
+    print("check-verbs: the WinUI capture wall is breached:", file=sys.stderr)
+    print("\n".join(winui_capture_out), file=sys.stderr)
+    capture_status = 1
+print(f"check-verbs: the WinUI capture wall read ({len(WINUI_CAPTURE_REAL)} names, "
+      f"open_devices, wall, under_harness)")
+for pattern, repl, label in (
+    (r"(pub\(super\) fn request_permission\(core: &mut CoreState, kind: CaptureKind\) \{\n)",
+     r"\1    let _ = MediaCapture::new();\n", "a device opened outside open_devices"),
+    (r"(    for device in camera\.into_iter\(\)\.chain\(microphone\) \{\n)\s*wall\(device\);\n",
+     r"\1", "the wall cut from open_devices"),
+    (r"(fn wall\(device: &Found\) \{[\s\S]*?)panic!\(", r"\1eprintln!(", "the wall made non-fatal"),
+    (r'std::env::var_os\("KAYA_SELFTEST"\)', r'std::env::var_os("KAYA_SELFTEST_X")',
+     "the harness check asking another variable"),
+):
+    cut = g.doctor(f"the WinUI capture wall: {label}", real(WINUI_CAPTURE), pattern, repl)
+    found = [f for f in winui_capture_wall(cut) if f not in winui_capture_out]
+    print(f"check-verbs: the WinUI capture wall negative ({label}): {len(found)} finding(s)")
+    if not found:
+        fail(f"check-verbs SELF-TEST: the WinUI capture wall passed with {label}")
+_media_cut = (real("crates/kaya/src/winui/media.rs")
+              + "\nfn planted() { let _ = MediaCapture::new(); }\n")
+found = [f for f in winui_capture_wall(None, [("crates/kaya/src/winui/media.rs", _media_cut)])
+         if f not in winui_capture_out]
+print(f"check-verbs: the WinUI capture wall negative (a device opened in media.rs): "
+      f"{len(found)} finding(s)")
+if not found:
+    fail("check-verbs SELF-TEST: the WinUI capture wall passed with a device opened in media.rs")
+
 # clip_mirrors() ran first and printed its own findings; its verdict
 # is read here so there is exactly ONE verdict line.
 if (clip_status or window_status or ink_status or ax_status
@@ -4321,7 +4703,7 @@ if (clip_status or window_status or ink_status or ax_status
         or answer_status or seed_focus_status or notify_auth_status
         or pump_status or immersive_status or kind_status
         or range_status or media_status or timeout_status or frame_status
-        or capture_status):
+        or capture_status or capture_gtk_status or capture_compose_status):
     raise SystemExit(1)
 g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"({len(canvas_rows)} of them the canvas vocabularies) + "
@@ -4351,4 +4733,6 @@ g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"+ the Android video read (the device's screencap, its tolerance, no decoder moved "
           f"between surfaces, no picture no SurfaceView) "
           f"+ the capture wall (real devices behind KAYA_SELFTEST) "
+          f"+ the Compose capture wall (the emulator's devices only, "
+          f"the runner's one launch) "
           f"+ spec hash against 2 interpreters")

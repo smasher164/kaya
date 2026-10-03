@@ -766,6 +766,58 @@ fn main() {
         "Windows.Media.Streaming.Adaptive.AdaptiveMediaSourceDiagnosticAvailableEventArgs".to_string(),
         "Windows.Media.Streaming.Adaptive.AdaptiveMediaSourceDiagnosticType".to_string(),
         "Windows.Media.Core.MediaSourceStateChangedEventArgs".to_string(),
+        // THE CAPTURE (docs/capture-plan.md, the WinUI rows): MediaCapture over
+        // the chosen devices, MediaFrameReader's NV12 and float frames on its
+        // own thread, the preview a MediaPlayerElement over
+        // MediaSource.CreateFromMediaFrameSource, the devices from
+        // DeviceInformation and its watcher (crates/kaya/src/winui/capture.rs).
+        "Windows.Media.Capture.MediaCapture".to_string(),
+        "Windows.Media.Capture.MediaCaptureInitializationSettings".to_string(),
+        "Windows.Media.Capture.MediaCaptureSharingMode".to_string(),
+        "Windows.Media.Capture.MediaCaptureMemoryPreference".to_string(),
+        "Windows.Media.Capture.StreamingCaptureMode".to_string(),
+        "Windows.Media.Capture.MediaStreamType".to_string(),
+        "Windows.Media.Capture.MediaCaptureFailedEventArgs".to_string(),
+        "Windows.Media.Capture.MediaCaptureFailedEventHandler".to_string(),
+        "Windows.Media.Capture.Frames.MediaFrameSource".to_string(),
+        "Windows.Media.Capture.Frames.MediaFrameSourceInfo".to_string(),
+        "Windows.Media.Capture.Frames.MediaFrameSourceKind".to_string(),
+        "Windows.Media.Capture.Frames.MediaFrameFormat".to_string(),
+        "Windows.Media.Capture.Frames.VideoMediaFrameFormat".to_string(),
+        "Windows.Media.Capture.Frames.MediaFrameReader".to_string(),
+        "Windows.Media.Capture.Frames.MediaFrameReaderStartStatus".to_string(),
+        "Windows.Media.Capture.Frames.MediaFrameReaderAcquisitionMode".to_string(),
+        "Windows.Media.Capture.Frames.MediaFrameArrivedEventArgs".to_string(),
+        "Windows.Media.Capture.Frames.MediaFrameReference".to_string(),
+        "Windows.Media.Capture.Frames.VideoMediaFrame".to_string(),
+        "Windows.Media.Capture.Frames.AudioMediaFrame".to_string(),
+        "Windows.Media.AudioFrame".to_string(),
+        "Windows.Media.AudioBuffer".to_string(),
+        "Windows.Media.AudioBufferAccessMode".to_string(),
+        "Windows.Media.MediaProperties.AudioEncodingProperties".to_string(),
+        "Windows.Media.MediaProperties.IAudioEncodingProperties".to_string(),
+        "Windows.Graphics.Imaging.SoftwareBitmap".to_string(),
+        "Windows.Graphics.Imaging.BitmapBuffer".to_string(),
+        "Windows.Graphics.Imaging.BitmapBufferAccessMode".to_string(),
+        "Windows.Graphics.Imaging.BitmapPlaneDescription".to_string(),
+        "Windows.Graphics.Imaging.BitmapPixelFormat".to_string(),
+        "Windows.Foundation.IMemoryBuffer".to_string(),
+        "Windows.Foundation.IMemoryBufferReference".to_string(),
+        "Windows.Devices.Enumeration.DeviceInformation".to_string(),
+        "Windows.Devices.Enumeration.DeviceInformationCollection".to_string(),
+        "Windows.Devices.Enumeration.DeviceInformationUpdate".to_string(),
+        "Windows.Devices.Enumeration.DeviceClass".to_string(),
+        "Windows.Devices.Enumeration.DeviceWatcher".to_string(),
+        "Windows.Devices.Enumeration.EnclosureLocation".to_string(),
+        "Windows.Devices.Enumeration.Panel".to_string(),
+        "Windows.Media.Devices.MediaDevice".to_string(),
+        // MediaDevice.GetDefaultAudioCaptureId's argument: the preferred microphone.
+        "Windows.Media.Devices.AudioDeviceRole".to_string(),
+        // The self-view's mirror (docs/capture-plan.md §2 rule 4): WinUI has no
+        // mirroring of its own, so kaya scales the preview by -1 on x;
+        // UIElement.SetRenderTransform is a pad until Transform is named.
+        "Microsoft.UI.Xaml.Media.Transform".to_string(),
+        "Microsoft.UI.Xaml.Media.ScaleTransform".to_string(),
     ];
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     // The returned Warnings are windows-bindgen's own notes about the metadata,

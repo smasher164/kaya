@@ -37,6 +37,8 @@ SCENES = [
     # The media suite's one guest in every language (docs/media-plan.md
     # §7a); its scenes are media_formats and kin, GUEST_STEM below.
     "media",
+    # The capture (docs/capture-plan.md); capture_denied runs its guest.
+    "capture",
 ]
 
 # THE LEGS THAT RUN AS THE ONLY INPUT-DRIVING LEG ON THE HOST (tools/lib/
@@ -331,6 +333,14 @@ ORDER = [
     ["media_tracks_go"],
     ["media_tracks_csharp"],
     ["media_tracks_java"],
+    # EACH CAPTURE LEG ALONE (docs/capture-plan.md §7): the arm opens its
+    # devices ExclusiveControl, so two guests on one virtual camera would
+    # answer each other in_use; the runner starts the lane's devices
+    # (CAPTURE_DEVICES) around these legs and stops them after.
+    ["capture_rust"], ["capture_python"], ["capture_js"], ["capture_go"],
+    ["capture_csharp"], ["capture_java"],
+    ["capture_denied_rust"], ["capture_denied_python"], ["capture_denied_js"],
+    ["capture_denied_go"], ["capture_denied_csharp"], ["capture_denied_java"],
     # EACH media_session LEG ALONE: the system's media session manager is one
     # per desktop, every unpackaged kaya process wears the same declared app id
     # in it, and the leg sends commands through it to whichever session
@@ -821,7 +831,7 @@ GUEST_STEM = {"listdetail": "split", "formatde": "format", "formatar": "format",
               "rangertl": "range",
               "media_formats": "media", "media_delivery": "media", "media_session": "media",
               "media_tracks": "media", "media_feed": "media", "media_picked": "media",
-              "media_timeout": "media", "media_reader": "media"}
+              "media_timeout": "media", "media_reader": "media", "capture_denied": "capture"}
 
 # THE MEDIA SUITE'S SERVER (docs/media-plan.md §7a): the VM reaches the host
 # over UTM's bridge, so the runner binds it there, on this lane's own port,
@@ -840,6 +850,19 @@ def media_leg(leg):
 # video items play their audio alone and silently.
 CODEC_EXTENSIONS = ("Microsoft.HEVCVideoExtension", "Microsoft.AV1VideoExtension",
                     "Microsoft.VP9VideoExtensions", "Microsoft.WebMediaExtensions")
+
+
+def capture_leg(leg):
+    return scene_lang(leg)[0] in ("capture", "capture_denied")
+
+
+# THE CAPTURE LEGS' DEVICES (docs/HACKING.md, the Windows capture install):
+# the one-time install's state check, and the helper the runner starts in
+# the console session around the capture legs (tools/winvcam).
+CAPTURE_INSTALL_SCRIPT = "capture-install.ps1"
+CAPTURE_LANE_SCRIPT = "capture-lane.cmd"
+CAPTURE_LANE_EXE = "kaya-capture-lane.exe"
+CAPTURE_DLL = "kaya_winvcam.dll"
 
 
 def guest_stem(scene):

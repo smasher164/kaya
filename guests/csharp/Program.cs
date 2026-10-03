@@ -87,6 +87,7 @@ static class Program
             case "range": case "rangertl": RangeScene.Run(); break;
             case "media": case "media_formats": case "media_delivery": case "media_session":
             case "media_tracks": case "media_feed": case "media_reader": Media.MediaScene.Run(); break;
+            case "capture": case "capture_denied": CaptureScene.Run(); break;
             case "adaptive": AdaptiveScene.Run(); break;
             case "encodebench": EncodeBench.Run(); break;
             default: Milestone2Scene.Run(); break;

@@ -17,6 +17,12 @@
     <!-- THE MEDIA SUITE (docs/media-plan.md §5, §7a): the session's
          mediaPlayback foreground service, and the streams from the lane's
          local server. -->
+    <!-- THE CAPTURE (docs/capture-plan.md §2): the app declares its camera
+         and microphone; the lane grants both over adb, and a refusal reads
+         `denied`. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.INTERNET" />

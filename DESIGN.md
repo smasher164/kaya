@@ -1126,7 +1126,12 @@ rules so far:
   surface), so the tx boundary's Drop-rollback is where its uniformity
   lives and loop survival is the guest's own choice. Every binding
   carries the same negative test — abort mid-handler: mirror restored,
-  nothing shipped, next dispatch works (tools/check-abort.py).
+  nothing shipped, next dispatch works (tools/check-abort.py). A capture
+  callback on kaya's capture thread (docs/capture-plan.md §4) keeps the
+  same rule where the language can catch: caught, logged naming the
+  capture, and the capture keeps running (built in all nine 2026-10-03,
+  awaiting the maintainer's ruling in docs/deferred.md's capture BUILD
+  entry).
 - A guest asks KAYA where the platform keeps things — `kaya.Env` and
   its siblings, in every binding — and never the language runtime's
   own environment snapshot. An embedded runtime carries a DEAD COPY:

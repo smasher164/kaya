@@ -4,6 +4,7 @@ tier-1 sugar (DESIGN.md, "the shape of an app").
 
 from __future__ import annotations
 
+import array
 import dataclasses
 import datetime
 import enum
@@ -327,6 +328,7 @@ def _ship(records: Sequence[bytes]) -> None:
 
 
 def _records() -> list[bytes]:
+    _require_app_thread()
     if _tx is None:
         raise KayaStateError(
             "kaya: no ambient transaction — declare inside `with app.window():` "
@@ -927,6 +929,12 @@ class Widget(_Handle):
         shown by one video view at a time (docs/media-plan.md §7b)."""
         _records().append(wire.tx_set_player(
             self.id, 0 if player is None else player.id))
+
+    def show_capture(self, capture: Capture | None) -> None:
+        """Preview another capture in this video view, or none
+        (docs/capture-plan.md §3)."""
+        _records().append(wire.tx_set_capture(
+            self.id, 0 if capture is None else capture.id))
 
     def scroll_to_row(self, key: Key) -> None:
         """Scroll the For mounted in this container so the row keyed
@@ -6349,16 +6357,34 @@ _FIELD_DECODERS[Player] = _decode_player_field
 def video(player: Player | Source | None = None, *,
           fit: Fit | str | int | None = None,
           on_visibility: Handler | None = None,
-          grow: float | None = None) -> Widget:
+          grow: float | None = None,
+          capture: Capture | None = None) -> Widget:
     """A video view showing `player` (docs/media-plan.md §3): the
     platform's own view with its controls off. In a template the source
     is the row's Player field. A player is shown by one video view at a
     time (§7b). `on_visibility` hears how much of the view shows, 0 to 1,
     as it enters, leaves, moves by a tenth and shows whole — a stamped
-    copy's `Row` first."""
+    copy's `Row` first. `capture=` previews a `kaya.Capture` instead, in
+    the live zone only (docs/capture-plan.md §3); a view shows a player or
+    a capture, never both."""
+    if capture is not None and player is not None:
+        raise KayaValueError(
+            "kaya: a video view shows a player or previews a capture, never "
+            "both (docs/capture-plan.md §3)")
+    if capture is not None and not isinstance(capture, Capture):
+        raise KayaTypeError(
+            f"kaya: a video view previews a kaya.Capture, not "
+            f"{type(capture).__name__}")
+    if capture is not None and _tpl_depth > 0:
+        raise KayaStateError(
+            "kaya: a video view previews a capture in the live zone only — "
+            "a row template shows a Player field, never a capture "
+            "(docs/capture-plan.md §3)")
     handle = _widget(wire.KIND_VIDEO)
     if isinstance(player, Player):
         _records().append(wire.tx_set_player(handle.id, player.id))
+    elif capture is not None:
+        _records().append(wire.tx_set_capture(handle.id, capture.id))
     elif isinstance(player, FieldRef):
         _picker_field("a video view", player, Player)
         _records().append(wire.tx_bind_player_element(
@@ -6697,6 +6723,382 @@ def load_image(source: MediaSource, *,
     return image
 
 
+
+# --- THE CAPTURE (docs/capture-plan.md): a camera and a microphone in one
+# object, its preview, and the frames and samples handed to the app's code
+# on kaya's capture thread -----------------------------------------------
+
+
+class CaptureState(enum.IntEnum):
+    """What a capture reads (docs/capture-plan.md §2). `str()` is the
+    wire's own word, `running`."""
+
+    IDLE = wire.CAPTURE_STATE_IDLE
+    STARTING = wire.CAPTURE_STATE_STARTING
+    RUNNING = wire.CAPTURE_STATE_RUNNING
+    INTERRUPTED = wire.CAPTURE_STATE_INTERRUPTED
+    FAILED = wire.CAPTURE_STATE_FAILED
+
+    def __str__(self) -> str:
+        return self.name.lower()
+
+    @classmethod
+    def _missing_(cls, value: object) -> Any:
+        return _vocab_missing(cls, value, "a capture state",
+                              "kaya.CaptureState.RUNNING")
+
+
+class CaptureFailure(enum.IntEnum):
+    """Why a capture cannot run: the closed reason. `str()` is the wire's
+    own word, `not_found`."""
+
+    DENIED = wire.CAPTURE_FAILURE_DENIED
+    NOT_FOUND = wire.CAPTURE_FAILURE_NOT_FOUND
+    IN_USE = wire.CAPTURE_FAILURE_IN_USE
+    DISCONNECTED = wire.CAPTURE_FAILURE_DISCONNECTED
+    UNSUPPORTED = wire.CAPTURE_FAILURE_UNSUPPORTED
+    HARDWARE_ERROR = wire.CAPTURE_FAILURE_HARDWARE_ERROR
+    TIMEOUT = wire.CAPTURE_FAILURE_TIMEOUT
+
+    def __str__(self) -> str:
+        return self.name.lower()
+
+    @classmethod
+    def _missing_(cls, value: object) -> Any:
+        return _vocab_missing(cls, value, "a capture failure",
+                              "kaya.CaptureFailure.DENIED")
+
+
+class CaptureInterruption(enum.IntEnum):
+    """Why a running capture paused, the platform to resume it."""
+
+    BACKGROUND = wire.CAPTURE_INTERRUPTION_BACKGROUND
+    ANOTHER_APP = wire.CAPTURE_INTERRUPTION_ANOTHER_APP
+    SYSTEM_PRESSURE = wire.CAPTURE_INTERRUPTION_SYSTEM_PRESSURE
+
+    def __str__(self) -> str:
+        return self.name.lower()
+
+    @classmethod
+    def _missing_(cls, value: object) -> Any:
+        return _vocab_missing(cls, value, "a capture interruption",
+                              "kaya.CaptureInterruption.BACKGROUND")
+
+
+class CaptureKind(enum.IntEnum):
+    CAMERA = wire.CAPTURE_KIND_CAMERA
+    MICROPHONE = wire.CAPTURE_KIND_MICROPHONE
+
+    def __str__(self) -> str:
+        return self.name.lower()
+
+    @classmethod
+    def _missing_(cls, value: object) -> Any:
+        return _vocab_missing(cls, value, "a capture kind",
+                              "kaya.CaptureKind.CAMERA")
+
+
+class CameraFacing(enum.IntEnum):
+    UNKNOWN = wire.CAMERA_FACING_UNKNOWN
+    FRONT = wire.CAMERA_FACING_FRONT
+    BACK = wire.CAMERA_FACING_BACK
+    EXTERNAL = wire.CAMERA_FACING_EXTERNAL
+
+    def __str__(self) -> str:
+        return self.name.lower()
+
+    @classmethod
+    def _missing_(cls, value: object) -> Any:
+        return _vocab_missing(cls, value, "a camera facing",
+                              "kaya.CameraFacing.FRONT")
+
+
+class Permission(enum.IntEnum):
+    """A capture kind's permission as last heard."""
+
+    PROMPT = wire.PERMISSION_PROMPT
+    GRANTED = wire.PERMISSION_GRANTED
+    DENIED = wire.PERMISSION_DENIED
+
+    def __str__(self) -> str:
+        return self.name.lower()
+
+    @classmethod
+    def _missing_(cls, value: object) -> Any:
+        return _vocab_missing(cls, value, "a permission",
+                              "kaya.Permission.GRANTED")
+
+
+@dataclasses.dataclass(frozen=True)
+class CaptureDevice:
+    """A camera or microphone as the platform lists it."""
+
+    id: str
+    name: str
+    kind: CaptureKind
+    facing: CameraFacing
+    preferred: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class CaptureReading:
+    """A capture's readings as the core last published them; the format
+    is the one the platform chose, 0x0 at 0 with no camera running."""
+
+    state: CaptureState = CaptureState.IDLE
+    failure: CaptureFailure | None = None
+    interruption: CaptureInterruption | None = None
+    width: int = 0
+    height: int = 0
+    frame_rate: int = 0
+
+
+@dataclasses.dataclass(frozen=True)
+class CaptureFrame:
+    """One NV12 frame (video-range BT.601): the Y plane `y_stride` bytes a
+    row, the interleaved UV plane at half resolution `uv_stride` bytes a
+    row, its time on the capture's monotonic clock and the rotation that
+    stands it upright. Both planes are the callback's own copies."""
+
+    width: int
+    height: int
+    y: bytes
+    y_stride: int
+    uv: bytes
+    uv_stride: int
+    timestamp_ns: int
+    rotation: int
+
+
+FrameCallback = Callable[[CaptureFrame], object]
+SamplesCallback = Callable[[array.array[int], int], object]
+
+
+class Capture:
+    """A capture (docs/capture-plan.md §2): at most one camera and one
+    microphone, with no place in the layout; `kaya.video(capture)`
+    previews it. Its readings are the last occurrence the loop took; its
+    commands ride the ambient transaction."""
+
+    __slots__ = ("id", "_reading", "_detail", "_on_state", "_on_failed",
+                 "_on_overrun")
+
+    def __init__(self, ident: int) -> None:
+        self.id: int = ident
+        self._reading = CaptureReading()
+        self._detail = ""
+        self._on_state: Callable[[CaptureReading], object] | None = None
+        self._on_failed: Callable[[CaptureFailure, str], object] | None = None
+        self._on_overrun: Callable[[int], object] | None = None
+
+    @property
+    def reading(self) -> CaptureReading:
+        return self._reading
+
+    @property
+    def detail(self) -> str:
+        """The platform's sentence beside a failure; no two word it alike."""
+        return self._detail
+
+    def _prop(self, prop: int, value: wire.Value) -> None:
+        _records().append(wire.tx_set_capture_prop(self.id, prop, value))
+
+    def set_camera(self, device: str | None) -> None:
+        """The camera, by a device's id from `kaya.capture_devices()`;
+        None closes it and puts its indicator out."""
+        self._prop(wire.CPROP_CAMERA,
+                   "" if device is None else _text_value("a camera", device))
+
+    def set_microphone(self, device: str | None) -> None:
+        self._prop(wire.CPROP_MICROPHONE,
+                   "" if device is None else _text_value("a microphone", device))
+
+    def set_size(self, width: float, height: float) -> None:
+        """The picture size wished for, met by the platform's nearest
+        format."""
+        self._prop(wire.CPROP_WIDTH, float(width))
+        self._prop(wire.CPROP_HEIGHT, float(height))
+
+    def set_frame_rate(self, rate: float) -> None:
+        self._prop(wire.CPROP_FRAME_RATE, float(rate))
+
+    def set_muted(self, on: bool) -> None:
+        """The microphone stays open and delivers silence, as a call's
+        mute."""
+        self._prop(wire.CPROP_MUTED, bool(on))
+
+    def start(self) -> None:
+        """Open the devices, asking for each kind's permission still at
+        prompt; the answer is the capture's own state."""
+        _records().append(wire.tx_capture_command(
+            self.id, wire.CAPTURE_COMMAND_START))
+
+    def stop(self) -> None:
+        _records().append(wire.tx_capture_command(
+            self.id, wire.CAPTURE_COMMAND_STOP))
+
+    def release(self) -> None:
+        """Stop and forget the capture; its frame and sample callbacks
+        are dropped with it."""
+        records = _records()
+        frames = _app._capture_frames.get(self.id)
+        samples = _app._capture_samples.get(self.id)
+
+        def restore() -> None:
+            if frames is not None:
+                _app._capture_frames[self.id] = frames
+            if samples is not None:
+                _app._capture_samples[self.id] = samples
+        _journal_once(self, restore)
+        _app._capture_frames.pop(self.id, None)
+        _app._capture_samples.pop(self.id, None)
+        records.append(wire.tx_release_capture(self.id))
+
+    def on_frame(self, f: FrameCallback | None) -> None:
+        """Run `f(frame)` on KAYA'S CAPTURE THREAD, NOT THE APP THREAD, for
+        each frame, the next one dropped while `f` still runs
+        (docs/capture-plan.md §4). It holds no transaction: to touch the
+        scene, `app.post`. The frame is `f`'s own copy, safe to keep. None
+        drops it."""
+        _require_app_thread()
+        if f is None:
+            _app._capture_frames.pop(self.id, None)
+        else:
+            _app._capture_frames[self.id] = f
+        runtime.capture_on_frame(self.id, f is not None)
+
+    def on_samples(self, f: SamplesCallback | None) -> None:
+        """Run `f(chunk, timestamp_ns)` on kaya's capture thread, not the
+        app thread, for every 10 ms of the microphone: 480 samples of
+        48 kHz mono s16 (`f`'s own copy, an `array('h')`) and the first
+        one's time on the capture's clock. None is dropped; a callback
+        slower than the microphone is told through `on_overrun`. It holds
+        no transaction: to touch the scene, `app.post`."""
+        _require_app_thread()
+        if f is None:
+            _app._capture_samples.pop(self.id, None)
+        else:
+            _app._capture_samples[self.id] = f
+        runtime.capture_on_samples(self.id, f is not None)
+
+    def _absorb(self, kind: int, payload: Any) -> None:
+        if kind == wire.OCC_CAPTURE_CHANGED:
+            state, failure, interruption, width, height, rate, detail = payload
+            self._reading = CaptureReading(
+                CaptureState(state),
+                None if failure == wire.CAPTURE_FAILURE_NONE
+                else CaptureFailure(failure),
+                None if interruption == wire.CAPTURE_INTERRUPTION_NONE
+                else CaptureInterruption(interruption),
+                int(width), int(height), int(rate))
+            self._detail = str(detail)
+
+    def _handlers(self, kind: int, payload: Any
+                  ) -> list[tuple[Callable[..., object], tuple[Any, ...]]]:
+        out: list[tuple[Callable[..., object], tuple[Any, ...]]] = []
+        if kind == wire.OCC_CAPTURE_CHANGED:
+            if self._on_state is not None:
+                out.append((self._on_state, (self._reading,)))
+            failure = self._reading.failure
+            if (self._reading.state == CaptureState.FAILED
+                    and failure is not None and self._on_failed is not None):
+                out.append((self._on_failed, (failure, self._detail)))
+        elif kind == wire.OCC_CAPTURE_OVERRUN and self._on_overrun is not None:
+            out.append((self._on_overrun, (int(payload),)))
+        return out
+
+    def __repr__(self) -> str:
+        return f"<kaya.Capture {self.id} {self._reading.state}>"
+
+
+def capture(*, camera: str | None = None, microphone: str | None = None,
+            size: tuple[float, float] | None = None,
+            frame_rate: float | None = None, muted: bool | None = None,
+            on_state: Callable[[CaptureReading], object] | None = None,
+            on_failed: Callable[[CaptureFailure, str], object] | None = None,
+            on_overrun: Callable[[int], object] | None = None,
+            on_frame: FrameCallback | None = None,
+            on_samples: SamplesCallback | None = None) -> Capture:
+    """A capture (docs/capture-plan.md §2), created in the ambient
+    transaction. `on_state` hears every state, `failed` included;
+    `on_failed` the closed reason and the platform's sentence;
+    `on_overrun` how many ms the sample callback fell behind. `on_frame`
+    and `on_samples` run on kaya's capture thread (Capture.on_frame)."""
+    records = _records()
+    c = Capture(_app._next("capture"))
+    records.append(wire.tx_create_capture(c.id))
+    _app._captures[c.id] = c
+    c._on_state, c._on_failed, c._on_overrun = on_state, on_failed, on_overrun
+    if camera is not None:
+        c.set_camera(camera)
+    if microphone is not None:
+        c.set_microphone(microphone)
+    if size is not None:
+        c.set_size(*size)
+    if frame_rate is not None:
+        c.set_frame_rate(frame_rate)
+    if muted is not None:
+        c.set_muted(muted)
+    if on_frame is not None:
+        c.on_frame(on_frame)
+    if on_samples is not None:
+        c.on_samples(on_samples)
+    return c
+
+
+def request_permission(kind: CaptureKind | str | int) -> None:
+    """Ask for a kind's permission before any capture starts; the answer
+    arrives through `kaya.on_permission`."""
+    _records().append(wire.tx_request_permission(int(CaptureKind(kind))))
+
+
+def watch_capture_devices(on: bool = True) -> None:
+    """List the cameras and microphones now and whenever one comes or goes
+    (`kaya.on_capture_devices`); False stops."""
+    _records().append(wire.tx_watch_capture_devices(1 if on else 0))
+
+
+def permission(kind: CaptureKind | str | int) -> Permission:
+    """A kind's permission as last heard: PROMPT until the platform says."""
+    return _app._capture_permissions.get(CaptureKind(kind), Permission.PROMPT)
+
+
+def capture_devices() -> tuple[CaptureDevice, ...]:
+    """The cameras and microphones as last listed."""
+    return _app._capture_devices
+
+
+def on_permission(f: Callable[[CaptureKind, Permission], object]) -> None:
+    """Register the handler for a kind's permission moving or being asked
+    about; needs no transaction."""
+    _app._on_permission = f
+
+
+def on_capture_devices(f: Callable[[tuple[CaptureDevice, ...]], object]) -> None:
+    """Register the handler for the device list, as watching starts and
+    whenever it changes; needs no transaction."""
+    _app._on_capture_devices = f
+
+
+def _capture_frame(capture_id: int, frame: tuple[Any, ...]) -> None:
+    fn = _app._capture_frames.get(capture_id)
+    if fn is not None:
+        fn(CaptureFrame(*frame))
+
+
+def _capture_samples(capture_id: int, chunk: bytes, at: int) -> None:
+    fn = _app._capture_samples.get(capture_id)
+    if fn is None:
+        return
+    samples = array.array("h")
+    samples.frombytes(chunk)
+    fn(samples, int(at))
+
+
+runtime.frame_sink = _capture_frame
+runtime.samples_sink = _capture_samples
+
+
 class App:
     """The process's app: the scene scopes (`window`, `build`,
     `push_entry`, `add_section`), the window command catalog, and the
@@ -6709,7 +7111,8 @@ class App:
         self._counters = {"signal": 0, "widget": 0, "collection": 0,
                           "alert": 0, "menu_item": 0, "file_dialog": 0,
                           "clipboard": 0, "link_route": 0, "player": 0,
-                          "reader": 0, "read": 0, "image": 0}
+                          "reader": 0, "read": 0, "image": 0,
+                          "capture": 0}
         # The wire routes by path_len, not by number, so two dicts.
         self._widget_handlers: dict[tuple[int, int], Handler] = {}
         self._alert_handlers: dict[int, Callable[[AlertChoice], object]] = {}
@@ -6782,6 +7185,16 @@ class App:
         self._players: dict[int, Player] = {}
         self._session_action: Callable[[SessionAction, int], object] | None = None
         self._reader_book = _ReaderBook()
+        # The captures' mirrors as the players' are; the two callback
+        # tables are READ ON KAYA'S CAPTURE THREAD (runtime.frame_sink).
+        self._captures: dict[int, Capture] = {}
+        self._capture_frames: dict[int, FrameCallback] = {}
+        self._capture_samples: dict[int, SamplesCallback] = {}
+        self._capture_permissions: dict[CaptureKind, Permission] = {}
+        self._capture_devices: tuple[CaptureDevice, ...] = ()
+        self._on_permission: Callable[[CaptureKind, Permission], object] | None = None
+        self._on_capture_devices: Callable[
+            [tuple[CaptureDevice, ...]], object] | None = None
         self._post_lock = threading.Lock()
         self._posted: list[tuple[Callable[..., object], tuple[Any, ...]]] = []
         _app = self
@@ -7474,6 +7887,33 @@ class App:
                 seat._absorb(kind, payload)
                 for fn, args in seat._handlers(kind):
                     self._dispatch(fn, *args)
+                continue
+            if kind in (wire.OCC_CAPTURE_CHANGED, wire.OCC_CAPTURE_OVERRUN):
+                if kind == wire.OCC_CAPTURE_OVERRUN:
+                    ident, payload = payload, ident
+                seat = self._captures.get(int(ident))
+                if seat is None:
+                    continue
+                seat._absorb(kind, payload)
+                for fn, args in seat._handlers(kind, payload):
+                    self._dispatch(fn, *args)
+                continue
+            if kind == wire.OCC_CAPTURE_PERMISSION:
+                which, granted = CaptureKind(payload[0]), Permission(payload[1])
+                self._capture_permissions[which] = granted
+                if self._on_permission is not None:
+                    self._dispatch(self._on_permission, which, granted)
+                continue
+            if kind == wire.OCC_CAPTURE_DEVICES:
+                flat = payload[1:]
+                self._capture_devices = tuple(
+                    CaptureDevice(str(flat[i]), str(flat[i + 1]),
+                                  CaptureKind(flat[i + 2]),
+                                  CameraFacing(flat[i + 3]), bool(flat[i + 4]))
+                    for i in builtins.range(0, len(flat) - 4, 5))
+                if self._on_capture_devices is not None:
+                    self._dispatch(self._on_capture_devices,
+                                   self._capture_devices)
                 continue
             if kind in (wire.OCC_READER_FRAME, wire.OCC_READER_PROGRESS,
                         wire.OCC_READER_PEAKS, wire.OCC_READER_DONE,

@@ -13663,3 +13663,114 @@ nothing at once and `is_eos()` true, so a peaks read pulled right after
 first. A playbin3 whose flags name only audio, on a file with no audio,
 posts a stream collection without an audio stream before anything else,
 which is where the missing-track case is read.
+
+## OCaml 5 on macOS: a foreign thread cannot unregister from a pthread key destructor (measured 2026-10-02)
+
+caml/threads.h asks a C thread that called caml_c_thread_register to call
+caml_c_thread_unregister before it finishes. Done from a pthread key
+destructor (register once per thread, unregister at thread exit), the
+destructor RAN for both foreign threads the OCaml capture check drives, and
+caml_c_thread_unregister answered 0 for each: the runtime's own per-thread
+TLS is already gone when a later key's destructor runs on macOS, so the
+runtime no longer knows the thread and its descriptor and stack leak, one per
+foreign thread that ever called in (a GCD worker pool churns them). So the
+OCaml capture trampolines (bindings/ocaml/kaya_ml_stubs.c) register and
+unregister around EACH call: 1.3 us a call measured, the 4x4 frame and the
+check's two refusals included. bindings/ocaml/checks/abort_check.ml holds
+registrations equal to unregistrations.
+
+## PipeWire capture in the linux lane: five things a consumer and a fake device get wrong (measured 2026-10-02)
+
+docs/probes/capture-2026-10-01/linux-measured.md has the runs. (1)
+`videotestsrc ! pipewiresink mode=provide` is no fake camera: it offers the
+one format its caps fixed and EXITS ("all buffers have been removed") the
+moment its consumer unlinks, and the audio twin is never linked at all
+(WirePlumber: "no usable format found"); tools/linux/pwsynth is the lane's
+device instead. (2) A `pipewiresrc target-object=<node>` with no `media.type`
+in its stream-properties is never linked: WirePlumber 0.5's
+find-best-target asserts on the missing key and the stream reports "target
+not found". (3) `pipewiresrc ! audioconvert ! audio/x-raw,format=F32LE`
+FIXATES AT rate=1, channels=1, because the stream's adapter offers ranges:
+zero samples arrive and the core reads `samples silent`, so the GTK arm
+asks the device's own rate and channels first. (4) NV12 caps from
+gstreamer1.0-pipewire 1.4 carry no colorimetry, and GStreamer then reads
+720p as BT.709: the arm reads a source that names none as BT.601. (5) The
+camera portal keys an UNSANDBOXED app by the empty app id (Register is
+refused without a desktop entry); an AccessCamera nobody answers gets no
+Response at all (the gtk backend's dialog waits on a display nobody
+watches), and the store afterwards held `'': ['no']`, so a capture leg
+without tools/linux/capture-leg.py's grant waits out the media bound.
+
+## UTM's graceful stop can wedge it in `stopping`, and the next boot comes up on default displays (measured 2026-10-02)
+
+Rebooting the Windows VM after the capture install (docs/HACKING.md, the
+Windows capture install): `utmctl stop Windows` answered "Timed out waiting
+for RPC" (OSStatus -2700) and UTM reported `stopping` for minutes while the
+guest stayed up and ignored the request. One `ssh shutdown /r /t 0` then
+rebooted the guest in about 20 s, but UTM went on saying `stopping`, and the
+guest came back on TWO default displays (1024x768 primary and an 800x600
+second, `[Screen]::AllScreens`) instead of the lane's one 1280x800 — so the
+desktop warm-up refused the lane (a "New notification" CoreWindow holding
+the foreground) and every pointer leg's screen geometry was wrong. A guest
+`shutdown /s /t 0` powered it off with UTM still at `stopping`; after that
+`utmctl start` and `utmctl stop --kill` both failed ("Operation not
+available", OSStatus -1712/-2700), so UTM itself had to be restarted, which
+a session cannot do on its own. So: reboot the VM through UTM's window or
+the guest's own Start menu, never `utmctl stop` while the guest is healthy,
+and after any reboot read the displays back before a lane trusts them.
+
+## A scene negative read green once with its cut in the tree, and the guard that refuses that (measured 2026-10-03)
+
+The capture depth slice's scene cut "the synthetic microphone's rate
+misreported" (the SwiftUI source passing 48000 for its 44.1 kHz buffers, so
+the core reads 479 Hz where the scene wants 440) came back GREEN once, right
+after a camera cut whose leg ended at the pool's `timeout 120`, and red every
+time after. The core's reading cannot produce that: zero crossings per sample
+do not depend on timing, so a misreported rate reads 479 Hz on every run. What
+can is the route around the leg: another builder replacing the interpreter
+dylib with one built from a tree without the cut between run-leg's verify and
+the guest's dlopen, a verdict read from a stale log instead of the run's own
+output, or a host sleep inside the window. The ad hoc harness was gone, so the
+cause is not established. The guard is tools/mac/scene-negative.py: WATCHED
+RED only when the leg failed with the named sentence in its own output, both
+artifacts still carry the doctored tree's id AFTER the leg, pmset logs no
+sleep inside the window, and the restore's sha256 matches (the saved copy is
+kept in target/scene-negative until it does). Run through it, the same two
+cuts in the same order went red twice each (2026-10-02 23:15-23:22 PDT:
+"wanted frames 1280x720 1E5AC8", "samples 479 Hz").
+
+## The emulator's audio injection crashes the emulator when nothing records (measured 2026-10-02)
+
+Emulator 37.1.11: a gRPC `injectAudio` stream started while no app has its
+input open kills the emulator with a segfault (the minidump names
+`audio_forwarder_enable`), and a second inject is refused while the first
+stream's microphone is still registered. So the android lane starts ONE
+stream once the app's input has DELIVERED its first read and stops it at the
+leg's end (tools/lib/emulator_capture.py, tools/android/run-emulator.py); the
+stream survives the app closing and reopening its input. "Recording" is not
+enough: an AudioRecord made and not started crashed it (2026-10-03, the same
+minidump), and so did one started whose first read had not come back yet,
+under a host load of 121. tools/check-verbs.py holds the order (the arm's
+`KAYA_REQUEST: microphone <n>` inside the audio loop's first-read block, the
+runner's one start keyed on that line; four watched negatives), since no scene
+sees it until the emulator dies mid-leg
+(docs/probes/capture-2026-10-01/compose-measured.md).
+
+## The emulator's audio input breaks for good under host load, tone or no tone (measured 2026-10-03)
+
+Emulator 37.1.11, the pool's `-no-audio`: under host load the guest's audio
+HAL (`android.hardware.audio@7.1-impl.ranchu`) starts logging `pcm_readi
+failed with 'cannot read/write stream data: I/O error'` about ten times a
+second, pads every read with silence, and never recovers for that input's life
+(its talsa::pcmRead retries EIO three times and never re-prepares the pcm), so
+a capture leg reads `samples silent` under an injected tone. Measured: 0
+failed reads in 8 quiet runs; beside 14 spinning cores 4 of 5, 5 of 6 and 3 of
+5 runs broke, and 3 of 4 broke WITH NO INJECTION AT ALL, so the tone is not
+the cause. Injecting at 48 kHz instead of 44.1 kHz and restarting the stream
+when the failures start both changed nothing. Prior art: the same two HAL lines
+and the same silence, open and unexplained
+(github.com/Envious-Labs-LLC/EnviousWispr-Android issue 273). So the android
+capture legs that open a microphone run EXCLUSIVE (tools/lib/lanes/android.py)
+and every capture leg's log carries the HAL's per-second read failures, with
+the cause named when there were any (run-emulator.py's
+capture_audio_timeline).

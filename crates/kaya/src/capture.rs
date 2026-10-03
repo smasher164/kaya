@@ -88,6 +88,28 @@ pub(crate) const SYNTHETIC: &[Synthetic] = &[
     },
 ];
 
+/// What a wish of 0 stands for: the platform's own choice, read as the
+/// web's default 640x480 at 30.
+const DEFAULT_WISH: (f64, f64, f64) = (640.0, 480.0, 30.0);
+
+/// §2's wish met by the nearest format, ONE rule for every backend: the
+/// size nearest the wished width plus height, then that size's rate
+/// nearest the wished rate; a tie takes the larger. `offered` is every
+/// (width, height, frame rate) the device can deliver.
+pub(crate) fn nearest_format(offered: &[(u32, u32, u32)], wish: (f64, f64, f64)) -> Option<(u32, u32, u32)> {
+    let or = |x: f64, d: f64| if x > 0.0 { x } else { d };
+    let (w, h, fps) = (or(wish.0, DEFAULT_WISH.0), or(wish.1, DEFAULT_WISH.1), or(wish.2, DEFAULT_WISH.2));
+    let size_cost = |&(ow, oh, _): &(u32, u32, u32)| (f64::from(ow) - w).abs() + (f64::from(oh) - h).abs();
+    let size = offered.iter().copied().min_by(|a, b| {
+        size_cost(a).total_cmp(&size_cost(b)).then((b.0 * b.1).cmp(&(a.0 * a.1)))
+    })?;
+    offered
+        .iter()
+        .copied()
+        .filter(|o| (o.0, o.1) == (size.0, size.1))
+        .min_by(|a, b| (f64::from(a.2) - fps).abs().total_cmp(&(f64::from(b.2) - fps).abs()).then(b.2.cmp(&a.2)))
+}
+
 /// The synthetic permission store: `prompt` until a kind is asked, then
 /// what the harness said the user answers (`granted` unless
 /// `answer_permission` said otherwise before the ask).
@@ -795,6 +817,20 @@ pub(crate) fn set_sample_sink(capture: CaptureId, sink: Option<SampleSink>) {
     });
 }
 
+/// DESIGN.md's abort rule on the capture thread: a callback that panics is
+/// caught and logged naming the capture, and the capture keeps running, as
+/// a binding's dispatch loop survives a handler that throws.
+fn survive(capture: CaptureId, what: &str, call: impl FnOnce()) {
+    if let Err(e) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(call)) {
+        let why = e
+            .downcast_ref::<&str>()
+            .map(|s| (*s).to_owned())
+            .or_else(|| e.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "a panic with no message".to_owned());
+        eprintln!("kaya: capture {}'s {what} callback panicked ({why}); the capture keeps running", capture.0);
+    }
+}
+
 /// A backend's frame, on its capture thread: counted, and handed to the
 /// app's callback unless the last one is still running (keep-only-latest).
 /// False when the capture is not live.
@@ -807,7 +843,7 @@ pub(crate) fn frame(capture: CaptureId, frame: &CaptureFrame<'_>) -> bool {
     let Some((sink, busy)) = picked else { return false };
     if let Some(sink) = sink {
         if busy.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_ok() {
-            sink(frame);
+            survive(capture, "frame", || sink(frame));
             busy.store(false, Ordering::Release);
         }
     }
@@ -828,7 +864,7 @@ pub(crate) fn samples(capture: CaptureId, channels: u32, rate: u32, samples: &[f
     let mut out = Vec::new();
     for (chunk, at) in chunks {
         let started = Instant::now();
-        sink(&chunk, at);
+        survive(capture, "sample", || sink(&chunk, at));
         let spent = started.elapsed();
         let overrun = with_pipes(|p| p.pipes.get_mut(&capture.0).and_then(|pipe| pipe.account(spent)));
         if let Some(behind_ms) = overrun {
@@ -1228,6 +1264,52 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), 2, "the next one after it returned is handed over");
         c.release(id, &mut out);
         assert!(!frame(id, &f), "a released capture takes no frame");
+    }
+
+    #[test]
+    fn a_panicking_callback_is_logged_and_the_capture_keeps_running() {
+        let mut c = Captures::default();
+        let (id, mut out) = (CaptureId(9_209), Vec::new());
+        c.create(id, &mut out);
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = calls.clone();
+        set_frame_sink(
+            id,
+            Some(Arc::new(move |_: &CaptureFrame<'_>| {
+                counted.fetch_add(1, Ordering::SeqCst);
+                panic!("the app's encoder failed");
+            })),
+        );
+        let heard = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let into = heard.clone();
+        set_sample_sink(
+            id,
+            Some(Arc::new(move |_: &[i16], _| {
+                into.fetch_add(1, Ordering::SeqCst);
+                panic!("the app's voice path failed");
+            })),
+        );
+        let (y, uv) = nv12(4, 4, 0xC83C1E);
+        let f = CaptureFrame { width: 4, height: 4, y: &y, y_stride: 4, uv: &uv, uv_stride: 4, timestamp_ns: 0, rotation: 0 };
+        assert!(frame(id, &f));
+        assert!(frame(id, &f), "a frame after the panic is still taken");
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "the callback is not left marked busy by its panic");
+        samples(id, 1, SAMPLE_RATE, &sine(440.0, SAMPLE_RATE, 1, 1920, 0), 0);
+        assert_eq!(heard.load(Ordering::SeqCst), 3, "every chunk is still handed over after a panic");
+        c.release(id, &mut out);
+    }
+
+    #[test]
+    fn a_wish_meets_its_nearest_format() {
+        let offered = [(640, 480, 15), (640, 480, 30), (1280, 720, 15), (1280, 720, 30), (320, 240, 30)];
+        assert_eq!(nearest_format(&offered, (600.0, 400.0, 30.0)), Some((640, 480, 30)));
+        assert_eq!(nearest_format(&offered, (1280.0, 720.0, 15.0)), Some((1280, 720, 15)));
+        assert_eq!(nearest_format(&offered, (0.0, 0.0, 0.0)), Some((640, 480, 30)), "0 is the platform's default");
+        assert_eq!(nearest_format(&offered, (1920.0, 1080.0, 60.0)), Some((1280, 720, 30)));
+        assert_eq!(nearest_format(&offered, (300.0, 200.0, 22.0)), Some((320, 240, 30)));
+        assert_eq!(nearest_format(&[(640, 480, 20), (640, 480, 10)], (640.0, 480.0, 15.0)), Some((640, 480, 20)), "a tie takes the larger");
+        assert_eq!(nearest_format(&[(800, 600, 30), (480, 360, 30)], (640.0, 480.0, 30.0)), Some((800, 600, 30)), "a tie takes the larger");
+        assert_eq!(nearest_format(&[], (640.0, 480.0, 30.0)), None);
     }
 
     #[test]

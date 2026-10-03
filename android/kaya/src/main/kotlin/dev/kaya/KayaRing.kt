@@ -149,6 +149,11 @@ object KayaRing {
      * read's pairs, and a core-held image's RGBA8 with its size in [size]. */
     @JvmStatic external fun readerPeaks(reader: Long, read: Long): ShortArray?
     @JvmStatic external fun imagePixels(image: Long, size: IntArray): ByteArray?
+    /** The capture's callbacks (docs/capture-plan.md §4), the desktop ring's
+     * two: on, the core calls KayaApp.captureFrame / captureSamples on kaya's
+     * capture thread; off drops it. */
+    @JvmStatic external fun captureOnFrame(capture: Long, on: Boolean)
+    @JvmStatic external fun captureOnSamples(capture: Long, on: Boolean)
 
     @JvmStatic external fun prefGetI64(key: ByteArray): LongArray?
 

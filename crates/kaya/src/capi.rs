@@ -5249,6 +5249,38 @@ pub extern "C" fn kaya_capture_synthetic_permission(kind: u32, ask: u32) -> u32 
     crate::wire::permission_raw(p)
 }
 
+/// Presentation side: a capture's wish (`width`, `height`, `frame_rate`, 0
+/// for the platform's own choice) met by the nearest of the `count`
+/// formats the device offers, `offered` holding them as (width, height,
+/// frame rate) triples; the choice goes into `out`'s three. Answers 0 when
+/// nothing is offered. One rule for every backend (docs/capture-plan.md §2).
+///
+/// # Safety
+/// `offered` must describe `count * 3` readable u32s and `out` three
+/// writable ones.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_capture_nearest_format(
+    offered: *const u32,
+    count: usize,
+    width: f64,
+    height: f64,
+    frame_rate: f64,
+    out: *mut u32,
+) -> u32 {
+    if offered.is_null() || count == 0 || out.is_null() {
+        return 0;
+    }
+    let raw = unsafe { std::slice::from_raw_parts(offered, count * 3) };
+    let formats: Vec<(u32, u32, u32)> = raw.chunks_exact(3).map(|t| (t[0], t[1], t[2])).collect();
+    let Some((w, h, fps)) = crate::capture::nearest_format(&formats, (width, height, frame_rate)) else { return 0 };
+    unsafe {
+        *out = w;
+        *out.add(1) = h;
+        *out.add(2) = fps;
+    }
+    1
+}
+
 /// The harness's two capture verbs for an interpreter: `expect_capture`
 /// (`verb` 0, `index` the capture and `text` the wanted reading) and
 /// `answer_permission` (`verb` 1, `index` the KAYA_CAPTURE_KIND_* and `text`

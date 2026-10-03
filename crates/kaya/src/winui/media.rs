@@ -286,6 +286,9 @@ pub(super) struct WinVideo {
     caption_box: Grid,
     caption: TextBlock,
     player: Option<u64>,
+    /// The capture this view previews (docs/capture-plan.md §3); a view
+    /// shows a player or a capture, never both (the core holds that).
+    capture: Option<u64>,
 }
 
 #[derive(Default)]
@@ -315,6 +318,9 @@ pub(super) struct MediaState {
     /// The process's display request (keep_awake), and whether it is set.
     power_request: Option<isize>,
     awake: bool,
+    /// Each open capture's preview (capture.rs): its player over the camera's
+    /// frame source, the picture's size, and whether the self-view mirrors.
+    capture_previews: HashMap<u64, (MediaPlayer, (u32, u32), bool)>,
 }
 
 /// Remote commands that reached this process's SMTC handler: session_send's
@@ -1548,7 +1554,7 @@ pub(super) fn create_video(core: &mut CoreState, id: u64) -> windows_core::Resul
     host.Children()?.Append(&element)?;
     host.Children()?.Append(&ax)?;
     host.Children()?.Append(&caption_box)?;
-    let video = WinVideo { host, element, ax, caption_box, caption, player: None };
+    let video = WinVideo { host, element, ax, caption_box, caption, player: None, capture: None };
     natural_size(&video, (0, 0))?;
     core.media.video_ids.push(id);
     Ok(video)
@@ -1597,6 +1603,10 @@ pub(super) fn set_fit(core: &CoreState, id: u64, fit: i64) -> windows_core::Resu
 /// end state, so a player moving between two views in one batch is taken
 /// off the first here before the second shows it.
 pub(super) fn set_video_player(core: &mut CoreState, widget: u64, player: Option<u64>) -> windows_core::Result<()> {
+    // A view previewing a capture is not cleared by its player going to none.
+    if player.is_none() && core.media.videos.get(&widget).is_some_and(|v| v.capture.is_some()) {
+        return Ok(());
+    }
     if let Some(p) = player {
         for (other, video) in core.media.videos.iter_mut() {
             if *other != widget && video.player == Some(p) {
@@ -1608,6 +1618,7 @@ pub(super) fn set_video_player(core: &mut CoreState, widget: u64, player: Option
     }
     let shown = player.and_then(|p| core.media.players.get(&p)).map(|p| (p.player.clone(), p.size, p.kaya_caption.clone()));
     let Some(video) = core.media.videos.get_mut(&widget) else { return Ok(()) };
+    mirror(&video.element, false)?;
     match &shown {
         Some((media, size, caption)) => {
             video.player = player;
@@ -1626,6 +1637,77 @@ pub(super) fn set_video_player(core: &mut CoreState, widget: u64, player: Option
     Ok(())
 }
 
+// ---- the capture's preview (docs/capture-plan.md §3) -------------------------
+
+/// The self-view's mirror (rule 4): WinUI mirrors nothing itself, so kaya
+/// scales the element by -1 on x about its centre; the frames never mirror.
+fn mirror(element: &MediaPlayerElement, on: bool) -> windows_core::Result<()> {
+    if on {
+        let scale = super::bindings::Microsoft::UI::Xaml::Media::ScaleTransform::new()?;
+        scale.SetScaleX(-1.0)?;
+        element.SetRenderTransformOrigin(super::bindings::Windows::Foundation::Point { X: 0.5, Y: 0.5 })?;
+        element.SetRenderTransform(&scale.cast::<super::bindings::Microsoft::UI::Xaml::Media::Transform>()?)
+    } else {
+        element.SetRenderTransform(None::<&super::bindings::Microsoft::UI::Xaml::Media::Transform>)
+    }
+}
+
+/// A view showing `capture` shows its preview now, or nothing.
+fn show_capture(video: &WinVideo, preview: Option<&(MediaPlayer, (u32, u32), bool)>) -> windows_core::Result<()> {
+    match preview {
+        Some((player, size, mirrored)) => {
+            video.element.SetMediaPlayer(player)?;
+            natural_size(video, *size)?;
+            mirror(&video.element, *mirrored)
+        }
+        None => {
+            video.element.SetMediaPlayer(None::<&MediaPlayer>)?;
+            natural_size(video, (0, 0))?;
+            mirror(&video.element, false)
+        }
+    }
+}
+
+/// capture.rs's word that a capture's preview started or went out: every
+/// view previewing it follows, and so does the keep-awake.
+pub(super) fn capture_preview(core: &mut CoreState, capture: u64, preview: Option<(MediaPlayer, (u32, u32), bool)>) {
+    let old = match preview {
+        Some(p) => core.media.capture_previews.insert(capture, p),
+        None => core.media.capture_previews.remove(&capture),
+    };
+    let now = core.media.capture_previews.get(&capture);
+    for video in core.media.videos.values().filter(|v| v.capture == Some(capture)) {
+        if let Err(e) = show_capture(video, now) {
+            eprintln!("KAYA_DIAG winui capture {capture}: the view could not show the preview: {}", e.message());
+        }
+    }
+    if let Some((player, ..)) = old {
+        let _ = player.Pause();
+        let _ = player.Close();
+    }
+    keep_awake(core);
+}
+
+/// SetVideoCapture: the core holds the one-view rule on the batch's end
+/// state, so a capture moving between two views is taken off the first.
+pub(super) fn set_video_capture(core: &mut CoreState, widget: u64, capture: Option<u64>) -> windows_core::Result<()> {
+    if let Some(c) = capture {
+        for (other, video) in core.media.videos.iter_mut() {
+            if *other != widget && video.capture == Some(c) {
+                video.capture = None;
+                show_capture(video, None)?;
+            }
+        }
+    }
+    let Some(video) = core.media.videos.get_mut(&widget) else { return Ok(()) };
+    video.capture = capture;
+    video.player = None;
+    show_capture(video, capture.and_then(|c| core.media.capture_previews.get(&c)))?;
+    show_caption(video, "")?;
+    keep_awake(core);
+    Ok(())
+}
+
 // ---- keep-awake (§2 rule 5) -----------------------------------------------
 
 /// A player shown by a video view keeps the display awake while it plays
@@ -1637,12 +1719,12 @@ pub(super) fn set_video_player(core: &mut CoreState, widget: u64, player: Option
 fn keep_awake(core: &mut CoreState) {
     let want = core.media.players.iter().any(|(id, p)| {
         p.playing && p.size != (0, 0) && core.media.videos.values().any(|v| v.player == Some(*id))
-    });
+    }) || core.media.videos.values().any(|v| v.capture.is_some_and(|c| core.media.capture_previews.contains_key(&c)));
     if want == core.media.awake {
         return;
     }
     let request = *core.media.power_request.get_or_insert_with(|| {
-        let reason: Vec<u16> = "kaya: a video view shows a playing player".encode_utf16().chain(Some(0)).collect();
+        let reason: Vec<u16> = "kaya: a video view shows a playing player or a camera".encode_utf16().chain(Some(0)).collect();
         let context = ReasonContext { version: 0, flags: 1, reason: reason.as_ptr(), _detailed: [0; 2] };
         // SAFETY: a filled REASON_CONTEXT whose string outlives the call.
         unsafe { PowerCreateRequest(&context) }

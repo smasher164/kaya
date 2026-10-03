@@ -30,7 +30,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) the foreign suites load;
 # --example alone would build only the rlib it depends on.
-SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen numberfield colorpicker range media"
+SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen numberfield colorpicker range media capture"
 # Depth-slice scenes, rust only. `windowed` and `canvas` are rust BY
 # DESIGN rather than by depth — the compiled conformance scenes every
 # lane runs (docs/virtualization-plan.md §6.3, docs/canvas-plan.md
@@ -285,6 +285,10 @@ python3 /work/tools/linux/persist-leg.py --self-test || exit 1
 # an activatable entry with no service file, and a service file carrying
 # `--gapplication-service` all pass every warm assertion on this lane.
 python3 /work/tools/linux/link-leg.py --self-test || exit 1
+# THE CAPTURE LEG'S REGIME AND ITS STOP (docs/capture-plan.md §7): a portal
+# leg that quietly took the direct route measures the wrong half of §9
+# ruling 5 and stays green.
+python3 /work/tools/linux/capture-leg.py --self-test || exit 1
 
 # A LEG WHOSE GTK PRINTED `natural size must be >= min size` IS RED: the
 # layout GTK clamps to is not the one kaya asked for, and the legs stayed
@@ -727,6 +731,16 @@ build_wlpointer() {
             wlr-virtual-pointer-unstable-v1-protocol.c -lwayland-client
 }
 run_build wlpointer build_wlpointer
+
+# The capture legs' synthetic devices (tools/linux/capture-leg.py).
+build_pwsynth() {
+    local pw_flags
+    read -r -a pw_flags <<< "$(pkg-config --cflags --libs libpipewire-0.3)" || return 1
+    mkdir -p /tmp/pwsynth \
+        && cc -O2 -Wall -Wextra -Werror -o /tmp/pwsynth/pwsynth /work/tools/linux/pwsynth/pwsynth.c \
+            "${pw_flags[@]}" -lm
+}
+run_build pwsynth build_pwsynth
 
 # Its own build dir: _build is shared with the host through the repo
 # mount and dune keys targets on source hashes, not platform, so without
@@ -1878,6 +1892,43 @@ for proto in x11 wayland; do
         tools/linux/media-leg.sh tools/linux/a11y-leg.sh "$(hs_bin media)"
     run "$proto" media_reader-java env KAYA_SELFTEST=media_reader KAYA_LIB="$LIB" \
         tools/linux/media-leg.sh tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    # THE CAPTURE (docs/capture-plan.md §7): each leg its own PipeWire, the
+    # lane's four synthetic devices and their stop (tools/linux/capture-leg.py).
+    # The camera's route is §9 ruling 5's two halves, one per protocol: the
+    # portal on wayland, PipeWire directly on x11, each asserted by the leg.
+    if [ "$proto" = wayland ]; then capture_regime=portal; else capture_regime=direct; fi
+    run "$proto" capture-rust env KAYA_SELFTEST=capture \
+        python3 tools/linux/capture-leg.py "$capture_regime" "$CARGO_TARGET_DIR/debug/examples/capture"
+    run "$proto" capture-python env KAYA_SELFTEST=capture KAYA_LIB="$LIB" \
+        python3 tools/linux/capture-leg.py "$capture_regime" python3 guests/python/capture.py
+    run "$proto" capture-js env KAYA_SELFTEST=capture KAYA_LIB="$LIB" \
+        python3 tools/linux/capture-leg.py "$capture_regime" node guests/js/capture.ts
+    run "$proto" capture-go env KAYA_SELFTEST=capture \
+        python3 tools/linux/capture-leg.py "$capture_regime" /tmp/go-guests/kaya-go
+    run "$proto" capture-csharp env KAYA_SELFTEST=capture KAYA_LIB="$LIB" \
+        python3 tools/linux/capture-leg.py "$capture_regime" dotnet exec "$CS_GUEST"
+    run "$proto" capture-ocaml env KAYA_SELFTEST=capture KAYA_LIB="$LIB" \
+        python3 tools/linux/capture-leg.py "$capture_regime" _build-linux/default/guests/ocaml/capture.exe
+    run "$proto" capture-haskell env KAYA_SELFTEST=capture \
+        python3 tools/linux/capture-leg.py "$capture_regime" "$(hs_bin capture)"
+    run "$proto" capture-java env KAYA_SELFTEST=capture KAYA_LIB="$LIB" \
+        python3 tools/linux/capture-leg.py "$capture_regime" java -cp /tmp/java-guests dev.kaya.guests.Main
+    run "$proto" capture_denied-rust env KAYA_SELFTEST=capture_denied \
+        python3 tools/linux/capture-leg.py "$capture_regime" "$CARGO_TARGET_DIR/debug/examples/capture"
+    run "$proto" capture_denied-python env KAYA_SELFTEST=capture_denied KAYA_LIB="$LIB" \
+        python3 tools/linux/capture-leg.py "$capture_regime" python3 guests/python/capture.py
+    run "$proto" capture_denied-js env KAYA_SELFTEST=capture_denied KAYA_LIB="$LIB" \
+        python3 tools/linux/capture-leg.py "$capture_regime" node guests/js/capture.ts
+    run "$proto" capture_denied-go env KAYA_SELFTEST=capture_denied \
+        python3 tools/linux/capture-leg.py "$capture_regime" /tmp/go-guests/kaya-go
+    run "$proto" capture_denied-csharp env KAYA_SELFTEST=capture_denied KAYA_LIB="$LIB" \
+        python3 tools/linux/capture-leg.py "$capture_regime" dotnet exec "$CS_GUEST"
+    run "$proto" capture_denied-ocaml env KAYA_SELFTEST=capture_denied KAYA_LIB="$LIB" \
+        python3 tools/linux/capture-leg.py "$capture_regime" _build-linux/default/guests/ocaml/capture.exe
+    run "$proto" capture_denied-haskell env KAYA_SELFTEST=capture_denied \
+        python3 tools/linux/capture-leg.py "$capture_regime" "$(hs_bin capture)"
+    run "$proto" capture_denied-java env KAYA_SELFTEST=capture_denied KAYA_LIB="$LIB" \
+        python3 tools/linux/capture-leg.py "$capture_regime" java -cp /tmp/java-guests dev.kaya.guests.Main
     # A clip picked through GNOME's own picker and played (docs/media-plan.md
     # §2): rust-only, pooled like filedialog.
     run "$proto" media_picked-rust env KAYA_SELFTEST=media_picked \

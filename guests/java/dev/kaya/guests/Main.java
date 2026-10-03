@@ -195,6 +195,10 @@ public final class Main {
             case "media_reader":
                 app = Media::app;
                 break;
+            case "capture":
+            case "capture_denied":
+                app = Capture::app;
+                break;
             case "tooltips":
                 app = Tooltips::app;
                 break;

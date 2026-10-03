@@ -8,6 +8,7 @@ import ctypes
 import os
 import pathlib
 import sys
+import traceback
 from collections.abc import Callable, Sequence
 from typing import IO, Any
 
@@ -497,6 +498,80 @@ def image_pixels(image: int) -> tuple[int, int, bytes] | None:
     buf = (ctypes.c_uint8 * n)()
     got = _lib.kaya_image_pixels(image, buf, n, ctypes.byref(w), ctypes.byref(h))
     return w.value, h.value, bytes(buf[:min(got, n)])
+
+
+class KayaCaptureFrame(ctypes.Structure):
+    """kaya.h's KayaCaptureFrame: NV12, borrowed until the callback
+    returns."""
+
+    _fields_ = [("width", ctypes.c_uint32), ("height", ctypes.c_uint32),
+                ("y", ctypes.POINTER(ctypes.c_uint8)),
+                ("uv", ctypes.POINTER(ctypes.c_uint8)),
+                ("y_stride", ctypes.c_uint32), ("uv_stride", ctypes.c_uint32),
+                ("timestamp_ns", ctypes.c_uint64), ("rotation", ctypes.c_uint32),
+                ("reserved", ctypes.c_uint32)]
+
+
+CAPTURE_FRAME_FN = ctypes.CFUNCTYPE(None, ctypes.c_void_p,
+                                    ctypes.POINTER(KayaCaptureFrame))
+CAPTURE_SAMPLES_FN = ctypes.CFUNCTYPE(None, ctypes.c_void_p,
+                                      ctypes.POINTER(ctypes.c_int16),
+                                      ctypes.c_size_t, ctypes.c_uint64)
+_lib.kaya_capture_on_frame.argtypes = [ctypes.c_uint64, ctypes.c_void_p,
+                                       ctypes.c_void_p]
+_lib.kaya_capture_on_frame.restype = None
+_lib.kaya_capture_on_samples.argtypes = [ctypes.c_uint64, ctypes.c_void_p,
+                                         ctypes.c_void_p]
+_lib.kaya_capture_on_samples.restype = None
+
+# Set by kaya/__init__.py: where a frame or chunk goes, by capture id.
+frame_sink: Callable[[int, tuple[Any, ...]], None] | None = None
+samples_sink: Callable[[int, bytes, int], None] | None = None
+
+
+def _frame_trampoline(ctx: int | None, frame: Any) -> None:
+    sink = frame_sink
+    if sink is None or not ctx:
+        return
+    try:
+        f = frame.contents
+        rows = (f.height + 1) // 2
+        sink(ctx, (f.width, f.height, ctypes.string_at(f.y, f.y_stride * f.height),
+                   f.y_stride, ctypes.string_at(f.uv, f.uv_stride * rows),
+                   f.uv_stride, f.timestamp_ns, f.rotation))
+    except Exception as err:
+        traceback.print_exc()
+        print(f"kaya: capture {ctx}'s frame callback raised: {err}; "
+              "the capture keeps running", file=sys.stderr)
+
+
+def _samples_trampoline(ctx: int | None, samples: Any, count: int, at: int) -> None:
+    sink = samples_sink
+    if sink is None or not ctx:
+        return
+    try:
+        sink(ctx, ctypes.string_at(samples, count * 2), at)
+    except Exception as err:
+        traceback.print_exc()
+        print(f"kaya: capture {ctx}'s sample callback raised: {err}; "
+              "the capture keeps running", file=sys.stderr)
+
+
+# ONE trampoline of each kind for the life of the process, the capture id
+# riding as the context: the core may still be inside one after a release
+# applies, so nothing native is ever freed under it.
+FRAME_TRAMPOLINE = CAPTURE_FRAME_FN(_frame_trampoline)
+SAMPLES_TRAMPOLINE = CAPTURE_SAMPLES_FN(_samples_trampoline)
+
+
+def capture_on_frame(capture: int, on: bool) -> None:
+    fn = ctypes.cast(FRAME_TRAMPOLINE, ctypes.c_void_p) if on else None
+    _lib.kaya_capture_on_frame(capture, fn, capture)
+
+
+def capture_on_samples(capture: int, on: bool) -> None:
+    fn = ctypes.cast(SAMPLES_TRAMPOLINE, ctypes.c_void_p) if on else None
+    _lib.kaya_capture_on_samples(capture, fn, capture)
 
 
 def catalog(app: str) -> None:

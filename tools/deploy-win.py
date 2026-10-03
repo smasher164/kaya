@@ -354,7 +354,9 @@ SCENE_PYS = ([ROOT / f"guests/python/{s}.py" for s in SCENES]
 # import the binding from C:\kaya\node_modules\kaya-gui, which is where
 # node's bare-specifier resolution looks from a flat file
 # (docs/js-plan.md §5).
-SCENE_TSS = [ROOT / f"guests/js/{s}.ts" for s in SCENES]
+SCENE_TSS = ([ROOT / f"guests/js/{s}.ts" for s in SCENES]
+             # The capture's callbacks run in a worker module beside its guest.
+             + [ROOT / "guests/js/capture_worker.ts"])
 NODE_VERSION = "24.19.0"
 NODE_WIN_ARM64_SHA256 = "8502f4a50b458d4cc38ed8f2001556c2cd239d464920f74017926ccb1e1c157f"
 NODE_DIR = f"C:\\kaya\\node24\\node-v{NODE_VERSION}-win-arm64"
@@ -455,6 +457,13 @@ for build_args in (
     build_env = dict(os.environ, CARGO_PROFILE_RELEASE_DEBUG="line-tables-only")
     if subprocess.run(build_args, cwd=ROOT, check=False, env=build_env).returncode != 0:
         sys.exit(1)
+# THE CAPTURE LEGS' SYNTHETIC DEVICES (tools/winvcam): the virtual cameras'
+# media source and the helper that makes them and plays the cable's tone,
+# its own workspace, built every run like the guests it serves.
+if subprocess.run(["cargo", "xwin", "build", "--locked", "--release",
+                   "--target", "aarch64-pc-windows-msvc"],
+                  cwd=ROOT / "tools/winvcam", check=False).returncode != 0:
+    sys.exit(1)
 # Verify BEFORE the deploy: a stale dll that reaches the VM is a stale
 # dll on another machine, where nothing local can see it.
 if subprocess.run([str(ROOT / "tools/build-id.py"), "--verify",
@@ -1065,12 +1074,16 @@ WITNESS_SOURCES = (sorted((ROOT / "tools/win/dragprobe/stock").glob("*"))
                    + sorted((ROOT / "tools/win/dragprobe/shared").glob("*")))
 
 
+WINVCAM = ROOT / "tools/winvcam/target/aarch64-pc-windows-msvc/release"
+
+
 def deploy_artifacts():
     return (SCENE_EXES
             + [TARGET / "kaya.dll", TARGET / "kaya.pdb", BOOTSTRAP]
             + SCENE_PYS
             + SCENE_TSS
             + [ROOT / "go.mod", ROOT / "crates/kaya/include/kaya.h"]
+            + [WINVCAM / lane.CAPTURE_LANE_EXE, WINVCAM / lane.CAPTURE_DLL]
             + sorted((ROOT / "tools/guest").glob("*.cmd"))
             + sorted((ROOT / "tools/guest").glob("*.vbs"))
             + [ROOT / "tools/guest/shot.ps1",
@@ -1088,7 +1101,8 @@ def deploy_artifacts():
                ROOT / "tools/guest/dismiss-toasts.ps1",
                ROOT / "tools/guest/toast-probe.ps1",
                ROOT / "tools/guest/phantom-probe.ps1",
-               ROOT / "tools/guest/dnd-witness.ps1"])
+               ROOT / "tools/guest/dnd-witness.ps1",
+               ROOT / "tools/guest/capture-install.ps1"])
 
 
 def deploy_stamp():
@@ -2234,6 +2248,71 @@ def dismiss_toasts():
             print(f"== {line} ==")
 
 
+CAPTURE_LANE = {"on": False}
+# The helper's own wall-clock bound: it leaves by itself if this runner dies
+# without stopping it.
+CAPTURE_LANE_BOUND_S = 900
+
+
+def capture_devices_start():
+    """THE CAPTURE LEGS' DEVICES UP (docs/HACKING.md, the Windows capture
+    install): kaya-capture-lane makes the two virtual cameras and plays the
+    cable's tone, in the console session, because a virtual camera belongs
+    to the logon session that made it."""
+    if CAPTURE_LANE["on"]:
+        return
+    run_ssh("del C:\\kaya\\capture-lane.ready C:\\kaya\\capture-lane.stop "
+            "C:\\kaya\\capture-lane.log 2>nul & schtasks /create /tn kaya_capture_lane "
+            f'/tr "wscript C:\\kaya\\run-hidden-args.vbs {lane.CAPTURE_LANE_SCRIPT} '
+            f'{CAPTURE_LANE_BOUND_S}" /sc once /st 00:00 /it /rl highest /f >nul && '
+            "schtasks /run /tn kaya_capture_lane >nul")
+    CAPTURE_LANE["on"] = True
+    for _ in range(61):
+        if run_ssh("cmd /c if exist C:\\kaya\\capture-lane.ready (exit 0) else (exit 1)") == 0:
+            print("== capture devices up (kaya-capture-lane: two virtual cameras, the "
+                  "cable's tone) ==", flush=True)
+            return
+        time.sleep(0.5)
+    log = (run_ssh_out("cmd /c type C:\\kaya\\capture-lane.log") or "").replace("\r", "")
+    print("deploy-win: THE CAPTURE DEVICES DID NOT COME UP in 30 s; every capture "
+          "leg will read its device list short.", file=sys.stderr)
+    print(f"  kaya-capture-lane's log: {log.strip()!r}", file=sys.stderr)
+
+
+def capture_devices_stop():
+    """THE CAPTURE LEGS' DEVICES DOWN, PROVEN: the stop file, the helper's own
+    exit (its cameras go with it), and the process list read back empty."""
+    global status
+    if not CAPTURE_LANE["on"]:
+        return
+    CAPTURE_LANE["on"] = False
+    run_ssh("cmd /c echo stop> C:\\kaya\\capture-lane.stop")
+    probe = ('powershell -NoProfile -Command "@(Get-Process kaya-capture-lane '
+             '-ErrorAction SilentlyContinue).Count"')
+    left = "?"
+    for _ in range(21):
+        left = (run_ssh_out(probe) or "?").strip()
+        if left == "0":
+            break
+        time.sleep(0.5)
+    if left != "0":
+        run_ssh("taskkill /f /im kaya-capture-lane.exe >nul 2>&1")
+        left = (run_ssh_out(probe) or "?").strip()
+        print(f"deploy-win: kaya-capture-lane ignored its stop file for 10 s and "
+              f"was killed; processes left: {left}", file=sys.stderr)
+    run_ssh("schtasks /delete /tn kaya_capture_lane /f >nul 2>&1")
+    if left == "0":
+        print("== capture devices down (no kaya-capture-lane process on the guest) ==",
+              flush=True)
+    else:
+        print(f"deploy-win: kaya-capture-lane is STILL RUNNING on the guest ({left})",
+              file=sys.stderr)
+        status = 1
+
+
+atexit.register(capture_devices_stop)
+
+
 def run_suite(name):
     # THE MATRIX-WIDE TOKEN (tools/lib/exclusive.py), taken on the host for a
     # leg that runs on the VM.
@@ -2241,6 +2320,8 @@ def run_suite(name):
     mode = os.environ.get("KAYA_EXCLUSIVE", "")
     if (mode == "only") != (name in lane.EXCLUSIVE) and mode in ("only", "skip"):
         return
+    if lane.capture_leg(name):
+        capture_devices_start()
     SUITES_RUN.append(name)
     _leg_names.append(name)
     if name in lane.EXCLUSIVE:
@@ -2300,6 +2381,8 @@ def drain_suites():
         secs = (sfile.read_text(encoding="utf-8").strip()
                 if sfile.is_file() else "?")
         print(f"{name}: {verdict} ({secs}s)", flush=True)
+    if any(lane.capture_leg(n) for n in _leg_names):
+        capture_devices_stop()
     _leg_names.clear()
 
 
@@ -2509,6 +2592,39 @@ def codec_extensions():
     print("== codec extensions: " + ", ".join(
         f"{name} {have[name][0]}" for name in lane.CODEC_EXTENSIONS) + " ==")
 
+
+def capture_install():
+    """THE ONE-TIME CAPTURE INSTALL'S STATE, SAID ON EVERY RUN (docs/HACKING.md,
+    the Windows capture install): VM state, as Defender's exclusion is. The
+    DLL and its class ids follow the deploy (the ssh session is elevated);
+    the cable is a driver and a reboot, the maintainer's install alone."""
+    check = (f'powershell -NoProfile -ExecutionPolicy Bypass -Command "& '
+             f'C:\\kaya\\{lane.CAPTURE_INSTALL_SCRIPT} -Mode check; exit 0"')
+    lines = [ln for ln in (run_ssh_out(check) or "").replace("\r", "").splitlines()
+             if ln.startswith("capture-install: ")]
+    parts = {ln.split()[1]: ln for ln in lines}
+    queued = any(lane.capture_leg(leg) for leg in queued_legs())
+    ours = ("dll", "clsid")
+    if (queued and parts and all(parts[p].split()[2] == "ok" for p in parts if p not in ours)
+            and any(parts.get(p, "").split()[2:3] != ["ok"] for p in ours)):
+        print("deploy-win: the capture DLL on the guest is not the deployed one; "
+              "installing it (capture-install.ps1 -Mode install)", flush=True)
+        run_ssh(f"powershell -NoProfile -ExecutionPolicy Bypass -File "
+                f"C:\\kaya\\{lane.CAPTURE_INSTALL_SCRIPT} -Mode install")
+        lines = [ln for ln in (run_ssh_out(check) or "").replace("\r", "").splitlines()
+                 if ln.startswith("capture-install: ")]
+    whole = bool(lines) and all(ln.split()[2] == "ok" for ln in lines)
+    print(f"deploy-win: capture install {'IN PLACE' if whole else 'NOT IN PLACE'}: "
+          + ("; ".join(ln[len("capture-install: "):] for ln in lines)
+             or "the check did not answer"), flush=True)
+    if queued and not whole:
+        die("deploy-win: the capture legs need the one-time capture install on the "
+            "VM: follow docs/HACKING.md's \"The Windows capture install\" (an "
+            f"interactive task running C:\\kaya\\{lane.CAPTURE_INSTALL_SCRIPT} "
+            "-Mode install, then one reboot)")
+
+
+capture_install()
 
 MEDIA = contextlib.ExitStack()
 atexit.register(MEDIA.close)

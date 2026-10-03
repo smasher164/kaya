@@ -8,6 +8,7 @@
     clippy::all
 )]
 mod bindings;
+mod capture;
 mod media;
 mod reader;
 mod order;
@@ -16275,14 +16276,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
         ApplyOp::ReadPeaks { reader, read } => reader::peaks(reader.0, read.0),
         ApplyOp::CancelRead { reader, read } => reader::cancel(reader.0, read.0),
         ApplyOp::CloseReader(reader) => reader::close(reader.0),
-        // docs/capture-plan.md §8: the capture is a depth slice on the mac.
-        ApplyOp::CreateCapture(_)
-        | ApplyOp::SetCaptureProp { .. }
-        | ApplyOp::CaptureCommand { .. }
-        | ApplyOp::ReleaseCapture(_)
-        | ApplyOp::RequestPermission(_)
-        | ApplyOp::WatchCaptureDevices(_)
-        | ApplyOp::SetVideoCapture { .. } => crate::depth_stub("capture"),
+        ApplyOp::CreateCapture(capture) => capture::create(core, capture.0),
+        ApplyOp::SetCaptureProp { capture, prop, value } => capture::set_prop(core, capture.0, prop, value),
+        ApplyOp::CaptureCommand { capture, command } => capture::command(core, capture.0, command),
+        ApplyOp::ReleaseCapture(capture) => capture::release(core, capture.0),
+        ApplyOp::RequestPermission(kind) => capture::request_permission(core, kind),
+        ApplyOp::WatchCaptureDevices(on) => capture::watch_devices(core, on),
+        ApplyOp::SetVideoCapture { widget, capture } => media::set_video_capture(core, widget.0, capture.map(|c| c.0))?,
         ApplyOp::SetSession { player, offered, playback_state, title, artist, album, artwork } => {
             media::set_session(
                 core,

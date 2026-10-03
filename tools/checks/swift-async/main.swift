@@ -1,5 +1,6 @@
 // tools/check-abort.py; docs/async-dialogs-plan.md
 import Foundation
+import os
 internal import CKaya
 
 enum AsyncProbeError: Error { case failure }
@@ -181,9 +182,122 @@ let mode = CommandLine.arguments.dropFirst().first ?? "requests"
     precondition(app.liveFileDialog == 0 && app.liveAlert == 0, "async: handlerless slots did not retire")
 }
 
+// docs/capture-plan.md §4: a capture callback runs on kaya's capture thread,
+// where a transaction it opens is refused; it is handed the core's frame
+// BORROWED; a released capture's callbacks are dropped by the binding.
+final class CaptureTracker: Sendable {}
+
+// What @Sendable refuses at compile time, forced, so the runtime refusal is
+// the one under test (the child mode below).
+final class CaptureSmuggle: @unchecked Sendable {
+    let app: KayaApp
+    init(_ app: KayaApp) { self.app = app }
+}
+
+func onCaptureThread(_ body: @escaping @Sendable () -> Void) {
+    let done = DispatchSemaphore(value: 0)
+    Thread.detachNewThread {
+        body()
+        done.signal()
+    }
+    done.wait()
+}
+
+/// The core's two calls into the binding, made as capi.rs makes them: the
+/// capture id as the context, the frame and chunk in memory the "core" owns.
+func captureDeliver(_ id: UInt64, _ y: UInt, _ uv: UInt, _ pcm: UInt) {
+    var frame = CKaya.KayaCaptureFrame(
+        width: 2, height: 2, y: UnsafePointer(bitPattern: y), uv: UnsafePointer(bitPattern: uv),
+        y_stride: 4, uv_stride: 4, timestamp_ns: 77, rotation: 0, reserved: 0)
+    withUnsafePointer(to: &frame) { kayaCaptureFrameCall(kayaCaptureContext(id), $0) }
+    kayaCaptureSamplesCall(kayaCaptureContext(id), UnsafePointer(bitPattern: pcm), 480, 78)
+}
+
+@KayaAppActor func captureRule(_ app: KayaApp) {
+    let y = UnsafeMutableBufferPointer<UInt8>.allocate(capacity: 8)
+    let uv = UnsafeMutableBufferPointer<UInt8>.allocate(capacity: 4)
+    let pcm = UnsafeMutableBufferPointer<Int16>.allocate(capacity: 480)
+    defer {
+        y.deallocate()
+        uv.deallocate()
+        pcm.deallocate()
+    }
+    for i in 0..<8 { y[i] = UInt8(i + 1) }
+    for i in 0..<4 { uv[i] = UInt8(i + 11) }
+    for i in 0..<480 { pcm[i] = Int16(i) }
+    let at = (UInt(bitPattern: y.baseAddress), UInt(bitPattern: uv.baseAddress), UInt(bitPattern: pcm.baseAddress))
+
+    let c = app.build { tx in tx.capture(camera: "cam") }
+    let heard = OSAllocatedUnfairLock(initialState: [String]())
+    weak var watched: CaptureTracker?
+    do {
+        let held = CaptureTracker()
+        watched = held
+        app.onCaptureFrame(c) { f in
+            _ = held
+            let borrowed = UInt(bitPattern: f.y.baseAddress) == at.0 && UInt(bitPattern: f.uv.baseAddress) == at.1
+            let line = "frame \(f.width)x\(f.height) \(f.y.count) \(f.uv.count) \(f.timestampNs) borrowed \(borrowed)"
+            heard.withLock { $0.append(line) }
+        }
+        app.onCaptureSamples(c) { chunk, ns in
+            _ = held
+            let borrowed = UInt(bitPattern: chunk.baseAddress) == at.2
+            let line = "chunk \(chunk.count) \(ns) borrowed \(borrowed)"
+            heard.withLock { $0.append(line) }
+        }
+    }
+    let id = c.id
+    onCaptureThread { captureDeliver(id, at.0, at.1, at.2) }
+    let first = heard.withLock { $0 }
+    precondition(first == ["frame 2x2 8 4 77 borrowed true", "chunk 480 78 borrowed true"],
+                 "capture: the callbacks heard \(first)")
+
+    do {
+        try app.build { tx in
+            tx.releaseCapture(c)
+            throw AsyncProbeError.failure
+        }
+    } catch {}
+    precondition(kayaCaptureSinks.withLock { $0.frames[c.id] != nil && $0.samples[c.id] != nil },
+                 "capture: a rolled-back release dropped the callbacks anyway")
+    app.build { tx in tx.releaseCapture(c) }
+    precondition(kayaCaptureSinks.withLock { $0.frames[c.id] == nil && $0.samples[c.id] == nil },
+                 "capture: a released capture's callbacks were kept by the binding")
+    precondition(watched == nil, "capture: a released capture's callbacks are still alive")
+    onCaptureThread { captureDeliver(id, at.0, at.1, at.2) }
+    precondition(heard.withLock { $0.count } == 2, "capture: a released capture's callback still ran")
+
+    let child = Process()
+    child.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
+    child.arguments = ["capture-wrong-thread"]
+    let said = Pipe()
+    child.standardError = said
+    child.standardOutput = FileHandle.nullDevice
+    do { try child.run() } catch { preconditionFailure("capture: the wrong-thread child did not start: \(error)") }
+    let text = String(decoding: said.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    child.waitUntilExit()
+    precondition(child.terminationStatus != 0 && text.contains("a transaction belongs to the app thread"),
+                 "capture: a transaction opened in a frame callback was not refused by the wrong-thread"
+                    + " refusal (status \(child.terminationStatus)): \(text)")
+}
+
 @KayaAppActor func probe(_ app: KayaApp) throws {
     let owner = pthread_self()
     precondition(!Thread.isMainThread, "async: construction ran on main")
+    if mode == "capture-wrong-thread" {
+        let c = app.build { tx in tx.capture(camera: "cam") }
+        let smuggled = CaptureSmuggle(app)
+        app.onCaptureFrame(c) { _ in
+            smuggled.app.build { tx in _ = tx.signal(.i64(0)) }
+        }
+        let y = UnsafeMutableBufferPointer<UInt8>.allocate(capacity: 8)
+        let uv = UnsafeMutableBufferPointer<UInt8>.allocate(capacity: 4)
+        let pcm = UnsafeMutableBufferPointer<Int16>.allocate(capacity: 480)
+        let at = (UInt(bitPattern: y.baseAddress), UInt(bitPattern: uv.baseAddress), UInt(bitPattern: pcm.baseAddress))
+        let id = c.id
+        onCaptureThread { captureDeliver(id, at.0, at.1, at.2) }
+        fatalError("capture: a transaction opened in a frame callback was accepted off the app thread")
+    }
     if mode.hasPrefix("async-overlap-") {
         for _ in 0..<2 {
             app.task {
@@ -239,6 +353,7 @@ let mode = CommandLine.arguments.dropFirst().first ?? "requests"
         if mode == "requests" {
             await requests(app, owner)
             await readerRule(app)
+            captureRule(app)
             return
         }
         Task { @KayaAppActor in app.alertResult(app.liveAlert, .action0) }

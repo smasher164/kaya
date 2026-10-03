@@ -13,7 +13,7 @@ export { wire };
 
 // THE MAIN THREAD IS SURRENDERED HERE, at import: the guest's module body
 // runs only in the worker (runtime.ts, surrenderMainThread).
-if (!runtime.IS_APP_THREAD) {
+if (runtime.IS_MAIN_THREAD) {
   runtime.surrenderMainThread();
 }
 
@@ -285,6 +285,13 @@ let _implicit = false; // the open _tx was opened by a mutation, not a scope
  * of this module, so a foreign thread has no `_tx` to stamp into — what
  * it has is no App at all, and this names the way out. */
 function requireAppThread(): void {
+  if (runtime.CAPTURE_WORKER_OF !== null) {
+    throw new Error(
+      `kaya: a transaction belongs to the app thread — this is capture ${runtime.CAPTURE_WORKER_OF}'s worker, ` +
+        "which holds none. To touch the scene, kaya.postToApp(message) here and answer it in the " +
+        "capture's onMessage, which runs as a transaction on the app thread.",
+    );
+  }
   if (!runtime.IS_APP_THREAD || _app === null) {
     throw new Error(
       "kaya: a transaction belongs to the app thread — this thread is not the one kaya's " +
@@ -2046,6 +2053,7 @@ function widget(kind: number): Widget {
 }
 
 function app(): App {
+  if (runtime.CAPTURE_WORKER_OF !== null) requireAppThread();
   if (_app === null) throw new Error("kaya: no App — create one first: const app = new kaya.App()");
   return _app;
 }
@@ -5260,13 +5268,23 @@ export type VideoOptions = GrowOption & {
   /** How much of the view shows, 0 to 1, as it enters, leaves, moves by a
    * tenth and shows whole — a stamped copy's row first (§7b). */
   onVisibility?: Handler;
+  /** Preview a capture instead of showing a player, in the live zone only
+   * (docs/capture-plan.md §3); the source is then null. */
+  capture?: Capture;
 };
 
 /** A video view showing `player` (docs/media-plan.md §3): the platform's
  * own view with its controls off. In a template the source is the row's
  * Player field. A player is shown by one video view at a time (§7b). */
 export function video(source: Player | FieldRef | null, opts: VideoOptions = {}): Widget {
+  const preview = opts.capture;
+  if (preview !== undefined) {
+    if (!(preview instanceof Capture)) throw new TypeError(`kaya: a video view previews a kaya.Capture, not ${runtime.describe(preview)}`);
+    if (source !== null) throw new Error("kaya: a video view shows a player or previews a capture, never both (docs/capture-plan.md §3)");
+    if (_tplDepth > 0) throw new Error("kaya: a video view previews a capture in the live zone only — a row template shows a Player field, never a capture (docs/capture-plan.md §3)");
+  }
   const handle = widget(wire.KIND_VIDEO);
+  if (preview !== undefined) records().push(wire.tx_set_capture(handle.id, preview.id));
   if (source instanceof Player) records().push(wire.tx_set_player(handle.id, source.id));
   else if (source instanceof FieldRef) {
     pickerField("a video view", source, Player, "kaya.Player");
@@ -5668,8 +5686,342 @@ export function loadImage(source: MediaSource, opts: LoadImageOptions = {}): Ima
   return image;
 }
 
+// --- THE CAPTURE (docs/capture-plan.md): a camera and a microphone in one
+// object, its preview, and the frames and samples handed to the app's
+// code in the capture's worker ------------------------------------------
+
+/** What a capture reads (docs/capture-plan.md §2), the wire's own words. */
+export type CaptureState = "idle" | "starting" | "running" | "interrupted" | "failed";
+/** Why a capture cannot run: the closed reason. */
+export type CaptureFailure = "denied" | "not_found" | "in_use" | "disconnected" | "unsupported" | "hardware_error" | "timeout";
+/** Why a running capture paused, the platform to resume it. */
+export type CaptureInterruption = "background" | "another_app" | "system_pressure";
+export type CaptureKind = "camera" | "microphone";
+export type CameraFacing = "unknown" | "front" | "back" | "external";
+/** A capture kind's permission as last heard. */
+export type Permission = "prompt" | "granted" | "denied";
+
+const CAPTURE_STATES: ReadonlyMap<number, CaptureState> = new Map([
+  [wire.CAPTURE_STATE_IDLE, "idle"],
+  [wire.CAPTURE_STATE_STARTING, "starting"],
+  [wire.CAPTURE_STATE_RUNNING, "running"],
+  [wire.CAPTURE_STATE_INTERRUPTED, "interrupted"],
+  [wire.CAPTURE_STATE_FAILED, "failed"],
+] as const);
+
+const CAPTURE_FAILURES: ReadonlyMap<number, CaptureFailure> = new Map([
+  [wire.CAPTURE_FAILURE_DENIED, "denied"],
+  [wire.CAPTURE_FAILURE_NOT_FOUND, "not_found"],
+  [wire.CAPTURE_FAILURE_IN_USE, "in_use"],
+  [wire.CAPTURE_FAILURE_DISCONNECTED, "disconnected"],
+  [wire.CAPTURE_FAILURE_UNSUPPORTED, "unsupported"],
+  [wire.CAPTURE_FAILURE_HARDWARE_ERROR, "hardware_error"],
+  [wire.CAPTURE_FAILURE_TIMEOUT, "timeout"],
+] as const);
+
+const CAPTURE_INTERRUPTIONS: ReadonlyMap<number, CaptureInterruption> = new Map([
+  [wire.CAPTURE_INTERRUPTION_BACKGROUND, "background"],
+  [wire.CAPTURE_INTERRUPTION_ANOTHER_APP, "another_app"],
+  [wire.CAPTURE_INTERRUPTION_SYSTEM_PRESSURE, "system_pressure"],
+] as const);
+
+const CAPTURE_KINDS: ReadonlyMap<number, CaptureKind> = new Map([
+  [wire.CAPTURE_KIND_CAMERA, "camera"],
+  [wire.CAPTURE_KIND_MICROPHONE, "microphone"],
+] as const);
+
+const CAMERA_FACINGS: ReadonlyMap<number, CameraFacing> = new Map([
+  [wire.CAMERA_FACING_UNKNOWN, "unknown"],
+  [wire.CAMERA_FACING_FRONT, "front"],
+  [wire.CAMERA_FACING_BACK, "back"],
+  [wire.CAMERA_FACING_EXTERNAL, "external"],
+] as const);
+
+const PERMISSIONS: ReadonlyMap<number, Permission> = new Map([
+  [wire.PERMISSION_PROMPT, "prompt"],
+  [wire.PERMISSION_GRANTED, "granted"],
+  [wire.PERMISSION_DENIED, "denied"],
+] as const);
+
+function captureKindCode(kind: CaptureKind): number {
+  for (const [code, word] of CAPTURE_KINDS) if (word === kind) return code;
+  throw new Error(`kaya: a capture kind is "camera" or "microphone", not ${JSON.stringify(kind)}`);
+}
+
+/** A camera or microphone as the platform lists it. */
+export type CaptureDevice = {
+  readonly id: string;
+  readonly name: string;
+  readonly kind: CaptureKind;
+  readonly facing: CameraFacing;
+  readonly preferred: boolean;
+};
+
+/** A capture's readings as the core last published them; the format is
+ * the one the platform chose, 0x0 at 0 with no camera running. */
+export type CaptureReading = {
+  readonly state: CaptureState;
+  readonly failure: CaptureFailure | null;
+  readonly interruption: CaptureInterruption | null;
+  readonly width: number;
+  readonly height: number;
+  readonly frameRate: number;
+};
+
+/** One NV12 frame (video-range BT.601): the Y plane `yStride` bytes a
+ * row, the interleaved UV plane at half resolution `uvStride` bytes a
+ * row, its time on the capture's monotonic clock and the rotation that
+ * stands it upright. Both planes are the worker's own copies. */
+export type CaptureFrame = runtime.CaptureFrameRaw;
+
+/** A capture's worker: the module that registers its frame and sample
+ * callbacks (`kaya.onCaptureFrame`, `kaya.onCaptureSamples`), and the
+ * app-thread handler for what it posts (`kaya.postToApp`), run as a
+ * transaction there. */
+export type CaptureWorker = {
+  module: string | URL;
+  onMessage?: (message: unknown) => void;
+};
+
+export type CaptureOptions = {
+  /** A device's id from `kaya.captureDevices()`. */
+  camera?: string;
+  microphone?: string;
+  /** The picture size wished for, met by the platform's nearest format. */
+  size?: readonly [number, number];
+  frameRate?: number;
+  muted?: boolean;
+  /** Every state the capture moves to, `failed` included. */
+  onState?: (reading: CaptureReading) => void;
+  /** The closed reason, and the platform's sentence, which no two word alike. */
+  onFailed?: (failure: CaptureFailure, detail: string) => void;
+  /** The sample callback fell this many ms behind the microphone. */
+  onOverrun?: (behindMs: number) => void;
+  worker?: CaptureWorker;
+};
+
+/** A capture (docs/capture-plan.md §2): at most one camera and one
+ * microphone, with no place in the layout; `kaya.video(null, { capture })`
+ * previews it. Its readings are the last occurrence the loop took; its
+ * commands ride the ambient transaction. */
+export class Capture {
+  readonly id: number;
+  private _reading: CaptureReading = { state: "idle", failure: null, interruption: null, width: 0, height: 0, frameRate: 0 };
+  private _detail = "";
+  private _worker: import("node:worker_threads").Worker | null = null;
+  private _releasing = false;
+  /** @internal */ _opts: CaptureOptions = {};
+
+  /** @internal */
+  constructor(id: number) {
+    this.id = id;
+  }
+
+  get reading(): CaptureReading {
+    return this._reading;
+  }
+
+  /** The platform's sentence beside a failure; no two word it alike. */
+  get detail(): string {
+    return this._detail;
+  }
+
+  private _prop(prop: number, value: wire.WireValue): void {
+    records().push(wire.tx_set_capture_prop(this.id, prop, value));
+  }
+
+  /** The camera, by a device's id; null closes it and puts its indicator out. */
+  setCamera(device: string | null): void {
+    this._prop(wire.CPROP_CAMERA, device === null ? "" : textValue("a camera", device));
+  }
+
+  setMicrophone(device: string | null): void {
+    this._prop(wire.CPROP_MICROPHONE, device === null ? "" : textValue("a microphone", device));
+  }
+
+  /** The picture size wished for, met by the platform's nearest format. */
+  setSize(width: number, height: number): void {
+    this._prop(wire.CPROP_WIDTH, Number(width));
+    this._prop(wire.CPROP_HEIGHT, Number(height));
+  }
+
+  setFrameRate(rate: number): void {
+    this._prop(wire.CPROP_FRAME_RATE, Number(rate));
+  }
+
+  /** The microphone stays open and delivers silence, as a call's mute. */
+  setMuted(on: boolean): void {
+    this._prop(wire.CPROP_MUTED, Boolean(on));
+  }
+
+  /** Open the devices, asking for each kind's permission still at prompt;
+   * the answer is the capture's own state. */
+  start(): void {
+    records().push(wire.tx_capture_command(this.id, wire.CAPTURE_COMMAND_START));
+  }
+
+  stop(): void {
+    records().push(wire.tx_capture_command(this.id, wire.CAPTURE_COMMAND_STOP));
+  }
+
+  /** Stop and forget the capture; its worker ends and its callbacks are
+   * dropped with it, once the transaction commits. */
+  release(): void {
+    records().push(wire.tx_release_capture(this.id));
+    journalOnce(this, () => {
+      this._releasing = false;
+    });
+    this._releasing = true;
+    queueMicrotask(() => {
+      if (this._releasing) this._dropWorker();
+    });
+  }
+
+  /** Run `worker.module` as this capture's worker, replacing the last;
+   * null ends it. The module's callbacks run on KAYA'S CAPTURE THREAD'S
+   * BEHALF, NOT ON THE APP THREAD: kaya's capture thread waits for each,
+   * which holds no transaction and posts to touch the scene
+   * (`kaya.postToApp`). The frame or chunk is the worker's own copy. */
+  setWorker(worker: CaptureWorker | null): void {
+    requireAppThread();
+    this._dropWorker();
+    if (worker === null) return;
+    const w = runtime.spawnCaptureWorker(worker.module, this.id);
+    const onMessage = worker.onMessage;
+    w.on("message", (message: unknown) => {
+      if (onMessage !== undefined) app().post(onMessage as Handler, message);
+    });
+    w.on("error", (err: unknown) => {
+      console.error(err instanceof Error ? (err.stack ?? err.message) : String(err));
+      console.error(`kaya: capture ${this.id}'s worker failed`);
+    });
+    this._worker = w;
+  }
+
+  /** @internal */
+  _dropWorker(): void {
+    runtime.captureDrop(this.id);
+    const w = this._worker;
+    this._worker = null;
+    if (w !== null) void w.terminate();
+  }
+
+  /** @internal The mirror follows first, handler or none. */
+  _absorb(kind: number, payload: unknown): void {
+    if (kind !== wire.OCC_CAPTURE_CHANGED) return;
+    const [state, failure, interruption, width, height, rate, detail] = payload as [number, number, number, number, number, number, string];
+    this._reading = {
+      state: known(CAPTURE_STATES, Number(state), "capture state"),
+      failure: Number(failure) === wire.CAPTURE_FAILURE_NONE ? null : known(CAPTURE_FAILURES, Number(failure), "capture failure"),
+      interruption: Number(interruption) === wire.CAPTURE_INTERRUPTION_NONE ? null : known(CAPTURE_INTERRUPTIONS, Number(interruption), "capture interruption"),
+      width: Number(width),
+      height: Number(height),
+      frameRate: Number(rate),
+    };
+    this._detail = String(detail);
+  }
+
+  /** @internal */
+  _handlers(kind: number, payload: unknown): [Handler, unknown[]][] {
+    const o = this._opts;
+    const out: [Handler, unknown[]][] = [];
+    if (kind === wire.OCC_CAPTURE_CHANGED) {
+      if (o.onState !== undefined) out.push([o.onState as Handler, [this._reading]]);
+      if (this._reading.state === "failed" && this._reading.failure !== null && o.onFailed !== undefined) out.push([o.onFailed as Handler, [this._reading.failure, this._detail]]);
+    } else if (kind === wire.OCC_CAPTURE_OVERRUN && o.onOverrun !== undefined) out.push([o.onOverrun as Handler, [Number(payload)]]);
+    return out;
+  }
+}
+
+/** A capture (docs/capture-plan.md §2), created in the ambient transaction. */
+export function capture(opts: CaptureOptions = {}): Capture {
+  const recs = records();
+  const c = new Capture(app()._next("capture"));
+  recs.push(wire.tx_create_capture(c.id));
+  app()._captures.set(c.id, c);
+  c._opts = opts;
+  if (opts.camera !== undefined) c.setCamera(opts.camera);
+  if (opts.microphone !== undefined) c.setMicrophone(opts.microphone);
+  if (opts.size !== undefined) c.setSize(opts.size[0], opts.size[1]);
+  if (opts.frameRate !== undefined) c.setFrameRate(opts.frameRate);
+  if (opts.muted !== undefined) c.setMuted(opts.muted);
+  if (opts.worker !== undefined) c.setWorker(opts.worker);
+  return c;
+}
+
+/** Ask for a kind's permission before any capture starts; the answer
+ * arrives through `kaya.onPermission`. */
+export function requestPermission(kind: CaptureKind): void {
+  records().push(wire.tx_request_permission(captureKindCode(kind)));
+}
+
+/** List the cameras and microphones now and whenever one comes or goes
+ * (`kaya.onCaptureDevices`); false stops. */
+export function watchCaptureDevices(on = true): void {
+  records().push(wire.tx_watch_capture_devices(on ? 1 : 0));
+}
+
+/** A kind's permission as last heard: "prompt" until the platform says. */
+export function permission(kind: CaptureKind): Permission {
+  return app()._capturePermissions.get(kind) ?? "prompt";
+}
+
+/** The cameras and microphones as last listed. */
+export function captureDevices(): readonly CaptureDevice[] {
+  return app()._captureDevices;
+}
+
+/** The handler for a kind's permission moving or being asked about. */
+export function onPermission(f: (kind: CaptureKind, permission: Permission) => void): void {
+  app()._onPermission = f;
+}
+
+/** The handler for the device list, as watching starts and whenever it
+ * changes. */
+export function onCaptureDevices(f: (devices: readonly CaptureDevice[]) => void): void {
+  app()._onCaptureDevices = f;
+}
+
+function captureCallback<A extends unknown[]>(what: string, f: (...args: A) => void): (...args: A) => void {
+  return (...args: A) => {
+    try {
+      f(...args);
+    } catch (err) {
+      console.error(err instanceof Error ? (err.stack ?? err.message) : String(err));
+      const why = err instanceof Error ? err.message : String(err);
+      console.error(`kaya: capture ${runtime.CAPTURE_WORKER_OF}'s ${what} callback raised: ${why}; the capture keeps running`);
+    }
+  };
+}
+
+/** IN A CAPTURE WORKER: run `f(frame)` for each frame of the worker's
+ * capture, on kaya's capture thread's behalf, NOT THE APP THREAD — the
+ * capture thread waits for it, and the next frame is dropped while it
+ * runs (docs/capture-plan.md §4). It holds no transaction: to touch the
+ * scene, `kaya.postToApp`. The frame is `f`'s own copy, safe to keep.
+ * null stops. */
+export function onCaptureFrame(f: ((frame: CaptureFrame) => void) | null): void {
+  runtime.captureListen(0, f === null ? null : captureCallback("frame", f));
+}
+
+/** IN A CAPTURE WORKER: run `f(chunk, timestampNs)` for every 10 ms of the
+ * capture's microphone: 480 samples of 48 kHz mono s16 (`f`'s own copy)
+ * and the first one's time on the capture's clock, none dropped; a
+ * callback slower than the microphone is told through `onOverrun`. It
+ * holds no transaction: to touch the scene, `kaya.postToApp`. */
+export function onCaptureSamples(f: ((chunk: Int16Array, timestampNs: bigint) => void) | null): void {
+  runtime.captureListen(1, f === null ? null : captureCallback("sample", f));
+}
+
+/** IN A CAPTURE WORKER: hand `message` (structured-cloned) to the
+ * capture's `onMessage`, which runs it as a transaction on the app
+ * thread. */
+export function postToApp(message: unknown): void {
+  runtime.postToApp(message);
+}
+
 export class App {
-  private readonly _counters: Record<string, number> = { signal: 0, widget: 0, collection: 0, alert: 0, menu_item: 0, file_dialog: 0, clipboard: 0, link_route: 0, player: 0, reader: 0, read: 0, image: 0 };
+  private readonly _counters: Record<string, number> = { signal: 0, widget: 0, collection: 0, alert: 0, menu_item: 0, file_dialog: 0, clipboard: 0, link_route: 0, player: 0, reader: 0, read: 0, image: 0, capture: 0 };
   /** @internal */ readonly _widgetHandlers = new Map<string, Handler>();
   /** @internal */ readonly _nodeHandlers = new Map<string, Handler>();
   /** @internal */ readonly _nodeOwners = new Map<number, Collection<unknown, unknown>>();
@@ -5722,6 +6074,12 @@ export class App {
   readonly _players = new Map<number, Player>();
   /** @internal */ _sessionAction: ((action: SessionAction, atMs: number) => void) | undefined;
   /** @internal */ readonly _readerBook = new ReaderBook();
+  /** @internal The captures' mirrors, as the players' are. */
+  readonly _captures = new Map<number, Capture>();
+  /** @internal */ readonly _capturePermissions = new Map<CaptureKind, Permission>();
+  /** @internal */ _captureDevices: readonly CaptureDevice[] = [];
+  /** @internal */ _onPermission: ((kind: CaptureKind, permission: Permission) => void) | undefined;
+  /** @internal */ _onCaptureDevices: ((devices: readonly CaptureDevice[]) => void) | undefined;
   private _posted: [Handler, unknown[]][] = [];
   private _drainScheduled = false;
   private _shutdown: (() => void) | null = null;
@@ -6304,6 +6662,39 @@ export class App {
       if (seat === undefined) return;
       seat._absorb(kind, pair ? ident : payload);
       for (const [fn, args] of seat._handlers(kind)) this._dispatch(fn, ...args);
+      return;
+    }
+    if (kind === wire.OCC_CAPTURE_CHANGED || kind === wire.OCC_CAPTURE_OVERRUN) {
+      // The surface-pair decode hands an overrun back as (behind, capture).
+      const pair = kind === wire.OCC_CAPTURE_OVERRUN;
+      const seat = this._captures.get(Number(pair ? payload : ident));
+      if (seat === undefined) return;
+      seat._absorb(kind, payload);
+      for (const [fn, args] of seat._handlers(kind, pair ? ident : payload)) this._dispatch(fn, ...args);
+      return;
+    }
+    if (kind === wire.OCC_CAPTURE_PERMISSION) {
+      const [k, p] = payload as [number, number];
+      const which = known(CAPTURE_KINDS, Number(k), "capture kind");
+      const granted = known(PERMISSIONS, Number(p), "permission");
+      this._capturePermissions.set(which, granted);
+      if (this._onPermission !== undefined) this._dispatch(this._onPermission as Handler, which, granted);
+      return;
+    }
+    if (kind === wire.OCC_CAPTURE_DEVICES) {
+      const flat = (payload as wire.Decoded[]).slice(1);
+      const devices: CaptureDevice[] = [];
+      for (let i = 0; i + 4 < flat.length; i += 5) {
+        devices.push({
+          id: String(flat[i]),
+          name: String(flat[i + 1]),
+          kind: known(CAPTURE_KINDS, Number(flat[i + 2]), "capture kind"),
+          facing: known(CAMERA_FACINGS, Number(flat[i + 3]), "camera facing"),
+          preferred: Boolean(flat[i + 4]),
+        });
+      }
+      this._captureDevices = devices;
+      if (this._onCaptureDevices !== undefined) this._dispatch(this._onCaptureDevices as Handler, devices);
       return;
     }
     if (kind === wire.OCC_READER_FRAME || kind === wire.OCC_READER_PROGRESS || kind === wire.OCC_READER_PEAKS || kind === wire.OCC_READER_DONE || kind === wire.OCC_IMAGE_LOADED) {

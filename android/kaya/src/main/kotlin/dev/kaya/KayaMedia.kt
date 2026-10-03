@@ -542,7 +542,8 @@ internal fun kayaVideoSizeChanged(id: Long) {
  * PlayerView sets; an audio-only player keeps nothing on.
  */
 internal fun kayaFollowKeepAwake() {
-    val on = KayaSceneModel.videos.any { node -> kayaPlayers[node.videoPlayer]?.exo?.isPlaying == true }
+    val on = KayaSceneModel.videos.any { node -> kayaPlayers[node.videoPlayer]?.exo?.isPlaying == true } ||
+        kayaCaptureKeepsAwake()
     kayaMediaHostView?.let { if (it.keepScreenOn != on) it.keepScreenOn = on }
 }
 
@@ -629,6 +630,7 @@ internal fun KayaVideoView(node: KayaNode, a11y: Modifier, boxFill: Modifier) {
         } else {
             SideEffect { kayaVideoSurfaces.remove(node.id) }
         }
+        if (node.videoCapture != 0L) KayaCapturePreview(node, node.fit.toInt() == FIT_COVER || node.fit.toInt() == FIT_FILL)
         val caption = when {
             p == null -> ""
             p.drawsSidecar -> p.kayaCaption

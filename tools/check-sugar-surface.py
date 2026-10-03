@@ -10721,23 +10721,42 @@ CAPTURE_SURFACES = [
      + [("crates/kaya/src/app/capture.rs", r"Prop::{}\b", "Capture")]
      + [("crates/kaya/src/app/capture.rs", r"crate::capture::{}\(", s)
         for s in ("set_frame_sink", "set_sample_sink")]),
-    ("python", _capture_row("bindings/python/kaya/__init__.py", r"wire\.{}\(", lambda r: "tx_" + r,
-                            r"wire\.{}\b", "PROP_CAPTURE")),
-    ("go", _capture_row("bindings/go/media.go", r"\b{}\(", lambda r: "Tx" + _pascal(r),
-                        r"\b{}\b", "PropCapture")),
+    ("python", [(rel, template, name)
+                for rel, template, name in _capture_row(
+                    "bindings/python/kaya/__init__.py", r"wire\.{}\(", lambda r: "tx_" + r,
+                    r"wire\.{}\(", "tx_set_capture")
+                if name not in _CAPTURE_CALLBACKS]
+     + [("bindings/python/kaya/runtime.py", r"_lib\.{}\(", c) for c in _CAPTURE_CALLBACKS]),
+    ("go", _capture_row("bindings/go/capture.go", r"\b{}\(", lambda r: "Tx" + _pascal(r),
+                        r"\b{}\(", "TxSetCapture")),
     ("csharp", _capture_row("bindings/csharp/KayaApp.cs", r"KayaWire\.{}\(",
                             lambda r: "Tx" + _pascal(r),
-                            r"KayaWire\.{}\b", "PropCapture")),
-    ("java", _capture_row("bindings/java/dev/kaya/KayaApp.java", r"KayaWire\.{}\(",
-                          lambda r: "tx" + _pascal(r), r"KayaWire\.{}\b", "PROP_CAPTURE")),
-    ("swift", _capture_row("bindings/swift/KayaMedia.swift", r"tx\.{}\(", _camel,
-                           r"\b{}\b", "KAYA_PROP_CAPTURE")),
-    ("haskell", _capture_row("bindings/haskell/KayaApp.hs", r"W\.{}\b", lambda r: "tx" + _pascal(r),
-                             r"W\.{}\b", "propCapture")),
-    ("ocaml", _capture_row("bindings/ocaml/kaya_app.ml", r"Kaya_wire\.{}\b", lambda r: "tx_" + r,
-                           r"Kaya_wire\.{}\b", "prop_capture")),
-    ("js", _capture_row("bindings/js/kaya/index.ts", r"wire\.{}\(", lambda r: "tx_" + r,
-                        r"wire\.{}\b", "PROP_CAPTURE")),
+                            r"KayaWire\.{}\(", "TxSetCapture")),
+    # Java's callbacks reach the core through its two JNI natives (jvm.rs
+    # sets the sinks), so its callback parts name those.
+    ("java", [("bindings/java/dev/kaya/KayaApp.java", r"KayaWire\.{}\(", "tx" + _pascal(r))
+              for r in _CAPTURE_RECORDS]
+     + [("bindings/java/dev/kaya/KayaApp.java", r"KayaWire\.{}\(", "txSetCapture")]
+     + [("bindings/java/dev/kaya/KayaApp.java", r"KayaRing\.{}\(", n)
+        for n in ("captureOnFrame", "captureOnSamples")]),
+    ("swift", _capture_row("bindings/swift/KayaCapture.swift", r"tx\.{}\(", _camel,
+                           r"tx\.{}\(", "setCapture")),
+    # The video view's capture is the generated prop setter; the callbacks
+    # are the runtime module's imports of the two C entries.
+    ("haskell", [("bindings/haskell/KayaApp.hs", r"W\.{}\b", "tx" + _pascal(r))
+                 for r in _CAPTURE_RECORDS]
+     + [("bindings/haskell/KayaApp.hs", r"W\.{}\b", "txSetCapture")]
+     + [("bindings/haskell/KayaRuntime.hs", r"\b{}\b", c) for c in _CAPTURE_CALLBACKS]),
+    ("ocaml", [("bindings/ocaml/kaya_app.ml", r"Kaya_wire\.{}\b", "tx_" + r)
+               for r in _CAPTURE_RECORDS]
+     + [("bindings/ocaml/kaya_app.ml", r"Kaya_wire\.{}\b", "tx_set_capture")]
+     + [("bindings/ocaml/kaya_runtime.ml", r"\b{}\b", c) for c in _CAPTURE_CALLBACKS]),
+    ("js", [(rel, template, name)
+            for rel, template, name in _capture_row(
+                "bindings/js/kaya/index.ts", r"wire\.{}\(", lambda r: "tx_" + r,
+                r"wire\.{}\(", "tx_set_capture")
+            if name not in _CAPTURE_CALLBACKS]
+     + [("crates/kaya/src/node.rs", r"capi::{}\(", c) for c in _CAPTURE_CALLBACKS]),
 ]
 
 

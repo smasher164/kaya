@@ -161,5 +161,12 @@ public final class KayaRing {
      * size into {@code size[0]} and {@code size[1]}; null for none. */
     public static native byte[] imagePixels(long image, int[] size);
 
+    /** kaya_capture_on_frame / kaya_capture_on_samples: on, the core calls
+     * KayaApp.captureFrame / captureSamples for {@code capture} on kaya's
+     * capture thread; off drops it. KayaApp holds the app's callbacks. */
+    public static native void captureOnFrame(long capture, boolean on);
+
+    public static native void captureOnSamples(long capture, boolean on);
+
     private KayaRing() {}
 }

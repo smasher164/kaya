@@ -43,6 +43,8 @@ SWIFT_ENTRIES = [
     "media_tracks:media", "media_feed:media",
     # The reader and the canvas's images (docs/media-plan.md §8).
     "media_reader:media",
+    # The capture on kaya's in-process synthetic devices (docs/capture-plan.md §7).
+    "capture", "capture_denied:capture",
 ]
 
 # The go suite: the swift roster entry for entry minus the two
@@ -63,6 +65,7 @@ GO_SCENES = [
     "range", "rangertl",
     "media_formats", "media_delivery", "media_session", "media_tracks",
     "media_feed", "media_reader",
+    "capture", "capture_denied",
 ]
 
 # CPython embedded in ONE bundle carrying every python scene
@@ -147,6 +150,10 @@ RUST_SCENES = [
     "media_picked",
     # The bound (docs/media-plan.md §7c): rust-only.
     "media_timeout",
+    # The capture (docs/capture-plan.md §7): kaya's in-process synthetic
+    # devices, the simulator having no camera and its microphone being the
+    # host's.
+    "capture", "capture_denied",
 ]
 
 # The iPad legs, queued right after their phone sibling: the phone pool is
@@ -175,9 +182,7 @@ DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes"]
 # tooltips with its own (docs/tooltip-plan.md §5) — the iOS arm is the
 # shared interpreter's `.help`, which lands on the accessibility hint,
 # and expect_help reads it there.
-# The capture's iOS arm is the shared interpreter's, compiled; its legs are
-# the breadth slice's to measure first (docs/capture-plan.md §7 item 4).
-UNWIRED_SCENES = ["capture", "capture_denied"]
+UNWIRED_SCENES = []
 
 # The fullscreen scene's app-only way back after the cut, the same steps as
 # tools/lib/lanes/android.py's FULLSCREEN_APP_TAIL: no user change arrives.
@@ -343,7 +348,8 @@ RUST_EXAMPLE = {"listdetail": "split", "taskspersist": "tasks",
                 "media_formats": "media", "media_delivery": "media",
                 "media_session": "media", "media_tracks": "media",
                 "media_feed": "media", "media_picked": "media",
-                "media_timeout": "media", "media_reader": "media"}
+                "media_timeout": "media", "media_reader": "media",
+                "capture_denied": "capture"}
 
 # The scenes whose guest declares a media session: their bundles carry
 # UIBackgroundModes audio (docs/media-plan.md §5). The media guest is one

@@ -10,7 +10,8 @@
 use std::ffi::{CString, c_char, c_int, c_void};
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Condvar, Mutex, OnceLock};
+use std::collections::HashMap;
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
 use crate::capi;
 
@@ -25,9 +26,13 @@ type Finalize = unsafe extern "C" fn(Env, *mut c_void, *mut c_void);
 
 const NAPI_OK: Status = 0;
 const NAPI_PENDING_EXCEPTION: Status = 10;
+const NAPI_NULL: c_int = 1;
+const NAPI_FUNCTION: c_int = 7;
 const NAPI_UINT8_ARRAY: c_int = 1;
 const NAPI_INT16_ARRAY: c_int = 3;
 const NAPI_TSFN_RELEASE: c_int = 0;
+const NAPI_TSFN_ABORT: c_int = 1;
+const NAPI_TSFN_NONBLOCKING: c_int = 0;
 const NAPI_TSFN_BLOCKING: c_int = 1;
 
 macro_rules! node_api {
@@ -71,6 +76,7 @@ node_api! {
     napi_coerce_to_string: fn(Env, Value, *mut Value) -> Status,
     napi_get_array_length: fn(Env, Value, *mut u32) -> Status,
     napi_get_element: fn(Env, Value, u32, *mut Value) -> Status,
+    napi_typeof: fn(Env, Value, *mut c_int) -> Status,
 }
 
 static NAPI: OnceLock<NodeApi> = OnceLock::new();
@@ -178,6 +184,11 @@ pub unsafe extern "C" fn napi_register_module_v1(env: Env, exports: Value) -> Va
         ("imagePixels", image_pixels),
         ("catalog", catalog),
         ("tr", tr),
+        // The capture worker's two listeners and their teardown
+        // (docs/capture-plan.md §4; bindings/js/kaya/index.ts's capture).
+        ("captureListen", capture_listen),
+        ("captureDrop", capture_drop),
+        ("captureTestCall", capture_test_call),
         ("startPump", start_pump),
         ("exit", exit),
     ];
@@ -975,4 +986,316 @@ unsafe fn report_exception(env: Env) {
         "kaya: the occurrence callback threw: {}",
         String::from_utf8_lossy(&sentence)
     );
+}
+
+// ---------------------------------------------------------------------
+// THE CAPTURE WORKER (docs/capture-plan.md §4): JS runs app code on one
+// thread, so a capture's frame and sample callbacks are a module the app
+// names, run in a worker of their own. Kaya's capture thread calls that
+// worker SYNCHRONOUSLY: it queues the call on the worker's loop and
+// blocks until the handler returns, so the core's keep-only-latest and
+// its overrun account see the handler's own duration, as in every other
+// binding.
+// ---------------------------------------------------------------------
+
+const CAPTURE_FRAME: u8 = 0;
+const CAPTURE_SAMPLES: u8 = 1;
+
+struct CaptureSink {
+    tsfn: std::sync::atomic::AtomicPtr<c_void>,
+}
+
+impl CaptureSink {
+    fn tsfn(&self) -> Tsfn {
+        self.tsfn.load(Ordering::Acquire)
+    }
+}
+
+// The threadsafe function is called from kaya's capture thread and
+// consumed on the capture worker's loop (napi's own contract).
+unsafe impl Send for CaptureSink {}
+unsafe impl Sync for CaptureSink {}
+
+/// One live listener per (capture, kind). The trampolines call through
+/// it UNDER THIS LOCK, and a sink's finalizer removes it under the same
+/// lock, so no call reaches a threadsafe function napi has deleted.
+static CAPTURE_SINKS: Mutex<Option<CaptureSinks>> = Mutex::new(None);
+
+type CaptureSinks = HashMap<(u64, u8), Arc<CaptureSink>>;
+
+type Handed = Arc<(Mutex<bool>, Condvar)>;
+
+enum CapturePayload {
+    Frame { frame: capi::KayaCaptureFrame },
+    Samples { samples: *const i16, count: usize, at: u64 },
+}
+
+struct CaptureCall {
+    payload: CapturePayload,
+    done: Handed,
+}
+
+fn sinks() -> std::sync::MutexGuard<'static, Option<CaptureSinks>> {
+    CAPTURE_SINKS.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Hand one call to the capture's worker and wait for its handler. The
+/// borrowed frame or chunk stays valid while this waits, which is what
+/// lets the worker copy straight out of it.
+fn capture_call(capture: u64, kind: u8, payload: CapturePayload) {
+    let done: Handed = Arc::new((Mutex::new(false), Condvar::new()));
+    let data = Box::into_raw(Box::new(CaptureCall { payload, done: done.clone() }));
+    let queued = {
+        let table = sinks();
+        match table.as_ref().and_then(|t| t.get(&(capture, kind))) {
+            Some(sink) => {
+                let st = unsafe {
+                    (api().napi_call_threadsafe_function)(sink.tsfn(), data as *mut c_void, NAPI_TSFN_NONBLOCKING)
+                };
+                st == NAPI_OK
+            }
+            None => false,
+        }
+    };
+    if !queued {
+        drop(unsafe { Box::from_raw(data) });
+        return;
+    }
+    let (lock, cv) = &*done;
+    let mut handed = lock.lock().unwrap_or_else(|e| e.into_inner());
+    while !*handed {
+        handed = cv.wait(handed).unwrap_or_else(|e| e.into_inner());
+    }
+}
+
+unsafe extern "C" fn capture_frame_trampoline(ctx: *mut c_void, frame: *const capi::KayaCaptureFrame) {
+    if frame.is_null() {
+        return;
+    }
+    let f = unsafe { &*frame };
+    let frame = capi::KayaCaptureFrame {
+        width: f.width,
+        height: f.height,
+        y: f.y,
+        uv: f.uv,
+        y_stride: f.y_stride,
+        uv_stride: f.uv_stride,
+        timestamp_ns: f.timestamp_ns,
+        rotation: f.rotation,
+        reserved: 0,
+    };
+    capture_call(ctx as u64, CAPTURE_FRAME, CapturePayload::Frame { frame });
+}
+
+unsafe extern "C" fn capture_samples_trampoline(ctx: *mut c_void, samples: *const i16, count: usize, at: u64) {
+    if samples.is_null() {
+        return;
+    }
+    capture_call(ctx as u64, CAPTURE_SAMPLES, CapturePayload::Samples { samples, count, at });
+}
+
+unsafe fn bigint(env: Env, n: u64) -> Value {
+    let mut out: Value = ptr::null_mut();
+    unsafe { (api().napi_create_bigint_uint64)(env, n, &mut out) };
+    out
+}
+
+unsafe fn int16array(env: Env, samples: &[i16]) -> Value {
+    let api = api();
+    let mut data: *mut c_void = ptr::null_mut();
+    let mut ab: Value = ptr::null_mut();
+    let mut out: Value = ptr::null_mut();
+    unsafe {
+        (api.napi_create_arraybuffer)(env, samples.len() * 2, &mut data, &mut ab);
+        if !samples.is_empty() && !data.is_null() {
+            ptr::copy_nonoverlapping(samples.as_ptr(), data as *mut i16, samples.len());
+        }
+        (api.napi_create_typedarray)(env, NAPI_INT16_ARRAY, samples.len(), ab, 0, &mut out);
+    }
+    out
+}
+
+/// On the capture worker's loop: the frame or chunk COPIED into the
+/// worker's own buffers, the handler called, the capture thread released.
+/// A null env is napi draining a closing function's queue.
+unsafe extern "C" fn on_capture_call(env: Env, js_cb: Value, _context: *mut c_void, data: *mut c_void) {
+    let call = unsafe { Box::from_raw(data as *mut CaptureCall) };
+    if !env.is_null() && !js_cb.is_null() {
+        let api = api();
+        let mut result: Value = ptr::null_mut();
+        let st = match call.payload {
+            CapturePayload::Frame { ref frame } => {
+                let rows = frame.height.div_ceil(2) as usize;
+                let y = unsafe { std::slice::from_raw_parts(frame.y, frame.y_stride as usize * frame.height as usize) };
+                let uv = unsafe { std::slice::from_raw_parts(frame.uv, frame.uv_stride as usize * rows) };
+                let mut obj: Value = ptr::null_mut();
+                unsafe {
+                    (api.napi_create_object)(env, &mut obj);
+                    for (name, v) in [
+                        (c"width", number(env, f64::from(frame.width))),
+                        (c"height", number(env, f64::from(frame.height))),
+                        (c"y", uint8array(env, y)),
+                        (c"yStride", number(env, f64::from(frame.y_stride))),
+                        (c"uv", uint8array(env, uv)),
+                        (c"uvStride", number(env, f64::from(frame.uv_stride))),
+                        (c"timestampNs", bigint(env, frame.timestamp_ns)),
+                        (c"rotation", number(env, f64::from(frame.rotation))),
+                    ] {
+                        (api.napi_set_named_property)(env, obj, name.as_ptr(), v);
+                    }
+                    (api.napi_call_function)(env, undefined(env), js_cb, 1, &obj, &mut result)
+                }
+            }
+            CapturePayload::Samples { samples, count, at } => {
+                let chunk = unsafe { std::slice::from_raw_parts(samples, count) };
+                let argv = unsafe { [int16array(env, chunk), bigint(env, at)] };
+                unsafe { (api.napi_call_function)(env, undefined(env), js_cb, 2, argv.as_ptr(), &mut result) }
+            }
+        };
+        if st == NAPI_PENDING_EXCEPTION {
+            unsafe { report_exception(env) };
+        }
+    }
+    let (lock, cv) = &*call.done;
+    *lock.lock().unwrap_or_else(|e| e.into_inner()) = true;
+    cv.notify_all();
+}
+
+/// The worker's environment is tearing down (or the function was
+/// aborted): forget the sink if it is still the one listening.
+unsafe extern "C" fn on_capture_sink_finalize(_env: Env, data: *mut c_void, hint: *mut c_void) {
+    let sink = unsafe { Arc::from_raw(data as *const CaptureSink) };
+    let key = (hint as usize as u64 >> 1, (hint as usize & 1) as u8);
+    let mut table = sinks();
+    if let Some(t) = table.as_mut()
+        && t.get(&key).is_some_and(|live| Arc::ptr_eq(live, &sink))
+    {
+        t.remove(&key);
+    }
+}
+
+fn register_core_sink(capture: u64, kind: u8, on: bool) {
+    let ctx = capture as usize as *mut c_void;
+    unsafe {
+        if kind == CAPTURE_FRAME {
+            capi::kaya_capture_on_frame(capture, on.then_some(capture_frame_trampoline as _), ctx);
+        } else {
+            capi::kaya_capture_on_samples(capture, on.then_some(capture_samples_trampoline as _), ctx);
+        }
+    }
+}
+
+fn take_sink(capture: u64, kind: u8) -> Option<Arc<CaptureSink>> {
+    sinks().as_mut().and_then(|t| t.remove(&(capture, kind)))
+}
+
+/// `captureListen(capture, kind, cb | null)`, in the capture worker:
+/// cb(frame) for kind 0, cb(chunk, timestampNs) for kind 1, each call
+/// waited for by kaya's capture thread; null stops listening.
+unsafe extern "C" fn capture_listen(env: Env, info: CbInfo) -> Value {
+    let [c, k, cb] = unsafe { args::<3>(env, info) };
+    let capture = try_or_throw!(env, unsafe { u64_arg(env, c, "captureListen capture") });
+    if capture >= 1 << 62 {
+        return unsafe { throw(env, "kaya: captureListen's capture id is past the range a listener can key") };
+    }
+    let kind = match try_or_throw!(env, unsafe { u64_arg(env, k, "captureListen kind") }) {
+        0 => CAPTURE_FRAME,
+        1 => CAPTURE_SAMPLES,
+        other => {
+            return unsafe { throw(env, &format!("kaya: captureListen's kind is 0 (frames) or 1 (samples), not {other}")) };
+        }
+    };
+    let mut ty: c_int = -1;
+    unsafe { (api().napi_typeof)(env, cb, &mut ty) };
+    if ty != NAPI_FUNCTION && ty != NAPI_NULL {
+        return unsafe { throw(env, "kaya: captureListen takes a function or null") };
+    }
+    if let Some(old) = take_sink(capture, kind) {
+        unsafe { (api().napi_release_threadsafe_function)(old.tsfn(), NAPI_TSFN_ABORT) };
+    }
+    if ty == NAPI_NULL {
+        register_core_sink(capture, kind, false);
+        return unsafe { undefined(env) };
+    }
+    let sink = Arc::new(CaptureSink { tsfn: std::sync::atomic::AtomicPtr::new(ptr::null_mut()) });
+    let raw = Arc::into_raw(sink.clone()) as *mut c_void;
+    let hint = ((capture << 1) | u64::from(kind)) as usize as *mut c_void;
+    let mut tsfn: Tsfn = ptr::null_mut();
+    let st = unsafe {
+        (api().napi_create_threadsafe_function)(
+            env,
+            cb,
+            ptr::null_mut(),
+            string(env, b"kaya capture"),
+            0,
+            1,
+            raw,
+            Some(on_capture_sink_finalize),
+            hint,
+            on_capture_call,
+            &mut tsfn,
+        )
+    };
+    if st != NAPI_OK {
+        drop(unsafe { Arc::from_raw(raw as *const CaptureSink) });
+        return unsafe { throw(env, "kaya: captureListen could not make its threadsafe function") };
+    }
+    sink.tsfn.store(tsfn, Ordering::Release);
+    sinks().get_or_insert_with(HashMap::new).insert((capture, kind), sink);
+    register_core_sink(capture, kind, true);
+    unsafe { undefined(env) }
+}
+
+/// `captureDrop(capture)`, on the app thread as a capture is released:
+/// both listeners forgotten and their functions closed, a call already
+/// queued answered by napi's drain.
+unsafe extern "C" fn capture_drop(env: Env, info: CbInfo) -> Value {
+    let [c] = unsafe { args::<1>(env, info) };
+    let capture = try_or_throw!(env, unsafe { u64_arg(env, c, "captureDrop") });
+    for kind in [CAPTURE_FRAME, CAPTURE_SAMPLES] {
+        if let Some(old) = take_sink(capture, kind) {
+            unsafe { (api().napi_release_threadsafe_function)(old.tsfn(), NAPI_TSFN_ABORT) };
+        }
+    }
+    unsafe { undefined(env) }
+}
+
+/// `captureTestCall(capture)`: what the core does on its capture thread,
+/// for bindings/js/kaya_app_checks.ts, which cannot make a capture live
+/// (only a scene applies create_capture). A thread of its own calls the
+/// two trampolines with a 4x3 frame (Y 200, UV 128) and a chunk [1, -2,
+/// 3], then overwrites its buffers with 7 and calls the frame trampoline
+/// again — so a worker that kept the first frame can say whether it kept
+/// a copy.
+unsafe extern "C" fn capture_test_call(env: Env, info: CbInfo) -> Value {
+    let [c] = unsafe { args::<1>(env, info) };
+    let capture = try_or_throw!(env, unsafe { u64_arg(env, c, "captureTestCall") });
+    std::thread::Builder::new()
+        .name("kaya-capture-test".into())
+        .spawn(move || {
+            let mut y = vec![200u8; 12];
+            let mut uv = vec![128u8; 8];
+            let frame = |y: &[u8], uv: &[u8], at: u64| capi::KayaCaptureFrame {
+                width: 4,
+                height: 3,
+                y: y.as_ptr(),
+                uv: uv.as_ptr(),
+                y_stride: 4,
+                uv_stride: 4,
+                timestamp_ns: at,
+                rotation: 90,
+                reserved: 0,
+            };
+            let ctx = capture as usize as *mut c_void;
+            let chunk = [1i16, -2, 3];
+            unsafe {
+                capture_frame_trampoline(ctx, &frame(&y, &uv, 1234));
+                capture_samples_trampoline(ctx, chunk.as_ptr(), chunk.len(), 5678);
+            }
+            y.fill(7);
+            uv.fill(7);
+            unsafe { capture_frame_trampoline(ctx, &frame(&y, &uv, 1235)) };
+        })
+        .expect("kaya: could not spawn the capture test thread");
+    unsafe { undefined(env) }
 }

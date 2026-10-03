@@ -122,3 +122,17 @@ val wait_occurrences : unit -> bool
 
 (* Return the app thread from [wait_occurrences]. Safe from any thread. *)
 val wake : unit -> unit
+
+(* Hand kaya's capture thread the binding's frame or sample trampoline for
+   [capture] (true), or take it back (false); the trampolines call the
+   values registered as "kaya_capture_frame" / "kaya_capture_samples". *)
+val capture_on_frame : int64 -> bool -> unit
+val capture_on_samples : int64 -> bool -> unit
+
+(* bindings/ocaml/checks alone: call a trampoline from a fresh foreign
+   thread over kaya-owned buffers, answering whether those buffers came
+   back unchanged; and how many foreign threads registered and
+   unregistered with the runtime so far. *)
+val capture_drive_frame : int64 -> int -> int -> bool
+val capture_drive_samples : int64 -> bool
+val capture_thread_counts : unit -> int * int

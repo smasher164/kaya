@@ -616,9 +616,10 @@ in docs/deferred.md.
    binding's hand-written surface calling the capture's six generated
    record writers, naming the video view's `capture` prop and registering
    the frame and sample callbacks (kaya_capture_on_frame,
-   kaya_capture_on_samples), Rust the reference row; red by design in the
-   eight bindings the depth slice did not build (docs/deferred.md's capture
-   BUILD entry), a fake-name census firing every row, counts printed),
+   kaya_capture_on_samples; Java's rows read KayaRing.captureOnFrame and
+   captureOnSamples, its JNI pair), Rust the reference row, green in all
+   nine since the breadth slice, a fake-name census firing every row,
+   counts printed),
    `tools/check-universal-props.py` (the lowering-side sibling: every
    backend applies the universal a11y props to every kind — Compose
    per-arm, SwiftUI's one wrapper unbypassed, GTK/WinUI's apply arm
@@ -1442,7 +1443,24 @@ in docs/deferred.md.
    begins with `kayaCaptureWall(`, which is fatal under KAYA_SELFTEST, its
    source has only a private init, and every route into the type from
    outside sits behind `kayaCaptureUnderHarness` in its function. Five
-   watched negatives, counts printed),
+   watched negatives, counts printed. ONE CLAUSE PER BACKEND SINCE THE
+   BREADTH (2026-10-03), the same rule wherever the lane's device sits in
+   the platform's own path: GTK's every capture source made in
+   gtk/capture.rs's `open_devices`, which passes both devices through
+   `wall(` first, each naming its PipeWire node with node.dont-fallback;
+   WinUI's MediaCapture, its settings, InitializeWithSettingsAsync and the
+   device ids named only in winui/capture.rs's `open_devices`, behind
+   `wall(`, since the VM's Line In is the host's own input; Compose's every
+   CameraX and AudioRecord name inside `internal object KayaRealCapture`,
+   each entry walled, fatal unless the device is the emulator's, and the
+   runner launching every emulator through the refusal of host audio and
+   webcams. Every wall is fatal under KAYA_SELFTEST over the core's
+   synthetic table. AND THE EMULATOR'S TONE STARTS ONLY ONCE THE APP
+   RECORDS (docs/traps.md): an injectAudio stream into an input nobody
+   records, or one asked for before the input's first read returns,
+   crashes the emulator, so the arm asks for the tone only after that first
+   read and the runner's one stream start is keyed on the arm's request.
+   Watched negatives on every clause, counts printed),
    `tools/check-file-modes.py` (the file-mode NUMBERS agree with the
    spec's wherever they are written down. `kaya_open_picked` takes an
    integer, crates/kaya/src/spec.rs decides what it means, and five

@@ -718,6 +718,209 @@ module Tracks = struct
   let empty = { audio = []; captions = []; audio_selected = Option.none; caption_selected = Option.none }
 end
 
+(* The capture's vocabularies (docs/capture-plan.md §2); each [name] is
+   the vocabulary's own word. *)
+module Capture_state = struct
+  type t = Idle | Starting | Running | Interrupted | Failed
+
+  let of_wire n =
+    if n = Kaya_wire.capture_state_idle then Idle
+    else if n = Kaya_wire.capture_state_starting then Starting
+    else if n = Kaya_wire.capture_state_running then Running
+    else if n = Kaya_wire.capture_state_interrupted then Interrupted
+    else if n = Kaya_wire.capture_state_failed then Failed
+    else invalid_arg (Printf.sprintf "kaya: a capture state of %d, which this build does not know" n)
+
+  let name = function
+    | Idle -> "idle"
+    | Starting -> "starting"
+    | Running -> "running"
+    | Interrupted -> "interrupted"
+    | Failed -> "failed"
+end
+
+module Capture_failure = struct
+  type t = Denied | Not_found | In_use | Disconnected | Unsupported | Hardware_error | Timeout
+
+  let of_wire n =
+    if n = Kaya_wire.capture_failure_none then Option.none
+    else if n = Kaya_wire.capture_failure_denied then Some Denied
+    else if n = Kaya_wire.capture_failure_not_found then Some Not_found
+    else if n = Kaya_wire.capture_failure_in_use then Some In_use
+    else if n = Kaya_wire.capture_failure_disconnected then Some Disconnected
+    else if n = Kaya_wire.capture_failure_unsupported then Some Unsupported
+    else if n = Kaya_wire.capture_failure_hardware_error then Some Hardware_error
+    else if n = Kaya_wire.capture_failure_timeout then Some Timeout
+    else invalid_arg (Printf.sprintf "kaya: a capture failure of %d, which this build does not know" n)
+
+  let name = function
+    | Denied -> "denied"
+    | Not_found -> "not_found"
+    | In_use -> "in_use"
+    | Disconnected -> "disconnected"
+    | Unsupported -> "unsupported"
+    | Hardware_error -> "hardware_error"
+    | Timeout -> "timeout"
+end
+
+module Capture_interruption = struct
+  type t = Background | Another_app | System_pressure
+
+  let of_wire n =
+    if n = Kaya_wire.capture_interruption_none then Option.none
+    else if n = Kaya_wire.capture_interruption_background then Some Background
+    else if n = Kaya_wire.capture_interruption_another_app then Some Another_app
+    else if n = Kaya_wire.capture_interruption_system_pressure then Some System_pressure
+    else invalid_arg (Printf.sprintf "kaya: a capture interruption of %d, which this build does not know" n)
+
+  let name = function
+    | Background -> "background"
+    | Another_app -> "another_app"
+    | System_pressure -> "system_pressure"
+end
+
+module Capture_kind = struct
+  type t = Camera | Microphone
+
+  let of_wire n =
+    if n = Kaya_wire.capture_kind_camera then Camera
+    else if n = Kaya_wire.capture_kind_microphone then Microphone
+    else invalid_arg (Printf.sprintf "kaya: a capture kind of %d, which this build does not know" n)
+
+  let wire = function Camera -> Kaya_wire.capture_kind_camera | Microphone -> Kaya_wire.capture_kind_microphone
+  let name = function Camera -> "camera" | Microphone -> "microphone"
+end
+
+module Camera_facing = struct
+  type t = Unknown | Front | Back | External
+
+  let of_wire n =
+    if n = Kaya_wire.camera_facing_unknown then Unknown
+    else if n = Kaya_wire.camera_facing_front then Front
+    else if n = Kaya_wire.camera_facing_back then Back
+    else if n = Kaya_wire.camera_facing_external then External
+    else invalid_arg (Printf.sprintf "kaya: a camera facing of %d, which this build does not know" n)
+
+  let name = function Unknown -> "unknown" | Front -> "front" | Back -> "back" | External -> "external"
+end
+
+module Permission = struct
+  type t = Prompt | Granted | Denied
+
+  let of_wire n =
+    if n = Kaya_wire.permission_prompt then Prompt
+    else if n = Kaya_wire.permission_granted then Granted
+    else if n = Kaya_wire.permission_denied then Denied
+    else invalid_arg (Printf.sprintf "kaya: a permission of %d, which this build does not know" n)
+
+  let name = function Prompt -> "prompt" | Granted -> "granted" | Denied -> "denied"
+end
+
+(* A capture the app holds (docs/capture-plan.md §2): ids in their own
+   space, the app's own counter. *)
+type capture = Capture of int64
+
+module Capture_reading = struct
+  type t = {
+    state : Capture_state.t;
+    failure : Capture_failure.t option;
+    interruption : Capture_interruption.t option;
+    width : int;
+    height : int;
+    frame_rate : int;
+  }
+
+  let initial =
+    {
+      state = Capture_state.Idle;
+      failure = Option.none;
+      interruption = Option.none;
+      width = 0;
+      height = 0;
+      frame_rate = 0;
+    }
+end
+
+module Capture_device = struct
+  type t = {
+    id : string;
+    name : string;
+    kind : Capture_kind.t;
+    facing : Camera_facing.t;
+    preferred : bool;
+  }
+end
+
+module Capture_frame = struct
+  type t = {
+    width : int;
+    height : int;
+    y : bytes;
+    uv : bytes;
+    y_stride : int;
+    uv_stride : int;
+    timestamp_ns : int64;
+    rotation : int;
+  }
+end
+
+type samples = (int, Bigarray.int16_signed_elt, Bigarray.c_layout) Bigarray.Array1.t
+
+type capture_occ =
+  | Capture_changed of Capture_reading.t * string
+  | Capture_overrun of int
+
+(* The frame and sample callbacks by capture id: THE ONE TABLE THE CAPTURE
+   THREAD READS, so it carries its own mutex. The trampolines in
+   kaya_ml_stubs.c find these two functions by name. *)
+let capture_sinks_lock = Mutex.create ()
+let capture_frame_sinks : (int64, Capture_frame.t -> unit) Hashtbl.t = Hashtbl.create 4
+let capture_sample_sinks : (int64, samples -> int64 -> unit) Hashtbl.t = Hashtbl.create 4
+
+let capture_sink table id =
+  Mutex.lock capture_sinks_lock;
+  let f = Hashtbl.find_opt table id in
+  Mutex.unlock capture_sinks_lock;
+  f
+
+(* DESIGN.md's abort rule on the capture thread: caught, logged, and the
+   capture keeps running. *)
+let capture_raised = Atomic.make 0
+
+let capture_callback id what f =
+  try f ()
+  with e ->
+    Atomic.incr capture_raised;
+    Printf.eprintf "kaya: capture %Ld's %s callback raised: %s; the capture keeps running\n%!" id what
+      (Printexc.to_string e)
+
+let () =
+  Callback.register "kaya_capture_frame"
+    (fun id width height y uv y_stride uv_stride timestamp_ns rotation ->
+      match capture_sink capture_frame_sinks id with
+      | Some f ->
+          capture_callback id "frame" (fun () ->
+              f { Capture_frame.width; height; y; uv; y_stride; uv_stride; timestamp_ns; rotation })
+      | None -> ());
+  Callback.register "kaya_capture_samples" (fun id (chunk : samples) at ->
+      match capture_sink capture_sample_sinks id with
+      | Some f -> capture_callback id "samples" (fun () -> f chunk at)
+      | None -> ())
+
+let set_capture_sink table hook id f =
+  Mutex.lock capture_sinks_lock;
+  (match f with Some f -> Hashtbl.replace table id f | None -> Hashtbl.remove table id);
+  Mutex.unlock capture_sinks_lock;
+  hook id (Option.is_some f)
+
+(* A released capture's callbacks: the core has dropped its own; the
+   binding drops its references once the release commits. *)
+let drop_capture_sinks id =
+  Mutex.lock capture_sinks_lock;
+  Hashtbl.remove capture_frame_sinks id;
+  Hashtbl.remove capture_sample_sinks id;
+  Mutex.unlock capture_sinks_lock
+
 type media_occ =
   | Media_changed of Player_state.t * Media_failure.t option * string
   | Media_position of int
@@ -811,6 +1014,16 @@ type media = {
   widget_visibility : (int64, float -> unit) Hashtbl.t;
   node_visibility : (int64, Kaya_wire.value list -> float -> unit) Hashtbl.t;
   mutable session_handler : (Session_action.t -> unit) option;
+  mutable next_capture : int64;
+  capture_readings : (int64, Capture_reading.t) Hashtbl.t;
+  permissions : (Capture_kind.t, Permission.t) Hashtbl.t;
+  mutable capture_devices : Capture_device.t list;
+  (* Per (capture, occurrence name): the newest registration wins. *)
+  capture_handlers : (int64 * string, capture_occ -> unit) Hashtbl.t;
+  mutable permission_handler : (Capture_kind.t -> Permission.t -> unit) option;
+  mutable devices_handler : (Capture_device.t list -> unit) option;
+  (* The captures this build has released, dropped once it commits. *)
+  mutable released_captures : int64 list;
 }
 
 type app = {
@@ -1027,6 +1240,9 @@ module For_checks = struct
 end
 
 let the_tx () =
+  (* A write from another thread would stamp the app thread's open
+     transaction (a capture callback's, docs/capture-plan.md §4). *)
+  require_app_thread ();
   match !ambient_tx with
   | Some tx -> tx
   | None ->
@@ -1054,6 +1270,14 @@ let create () =
         widget_visibility = Hashtbl.create 8;
         node_visibility = Hashtbl.create 8;
         session_handler = Option.none;
+        next_capture = 1L;
+        capture_readings = Hashtbl.create 4;
+        permissions = Hashtbl.create 2;
+        capture_devices = [];
+        capture_handlers = Hashtbl.create 8;
+        permission_handler = Option.none;
+        devices_handler = Option.none;
+        released_captures = [];
       };
     post_lock = Mutex.create ();
     posted = [];
@@ -1261,6 +1485,8 @@ let build app (program : unit -> 'a) =
   require_app_thread ();
   let carried = app.media.pending_ops in
   app.media.pending_ops <- [];
+  let released_before = app.media.released_captures in
+  app.media.released_captures <- [];
   let tx =
     { app; records = List.rev carried; undo_group = None; journal = []; pending_derived = [] }
   in
@@ -1290,9 +1516,12 @@ let build app (program : unit -> 'a) =
       let records = app.pending_routes @ records in
       app.pending_routes <- [];
       if records <> [] then Kaya_runtime.submit records;
+      List.iter drop_capture_sinks app.media.released_captures;
+      app.media.released_captures <- released_before;
       result
   | exception e ->
       restore ();
+      app.media.released_captures <- released_before;
       app.media.pending_ops <- carried @ app.media.pending_ops;
       List.iter (fun (cid, saved) -> Hashtbl.replace app.model cid saved) tx.journal;
       raise e
@@ -2664,6 +2893,83 @@ let declare_session ?player ?(title = "") ?(artist = "") ?(album = "") ?(artwork
    for none): true exactly when loading it would not fail as
    unsupported_codec or unsupported_container. Any thread. *)
 let can_play mime codecs = Kaya_runtime.can_play mime codecs
+
+(* --- THE CAPTURE (docs/capture-plan.md §2, §3) *)
+
+let write_capture_prop (Capture id) prop value =
+  emit (the_tx ()) (Kaya_wire.tx_set_capture_prop id prop value)
+
+(* The camera by a device's id from [capture_devices]; [None] closes it
+   and puts its indicator out. *)
+let capture_camera c device =
+  write_capture_prop c Kaya_wire.cprop_camera (Kaya_wire.Str (Option.value device ~default:""))
+
+let capture_microphone c device =
+  write_capture_prop c Kaya_wire.cprop_microphone (Kaya_wire.Str (Option.value device ~default:""))
+
+(* The picture size wished for, met by the platform's nearest format. *)
+let capture_size c width height =
+  write_capture_prop c Kaya_wire.cprop_width (Kaya_wire.F64 width);
+  write_capture_prop c Kaya_wire.cprop_height (Kaya_wire.F64 height)
+
+let capture_frame_rate c rate = write_capture_prop c Kaya_wire.cprop_frame_rate (Kaya_wire.F64 rate)
+
+(* The microphone stays open and delivers silence, as a call's mute. *)
+let capture_muted c on = write_capture_prop c Kaya_wire.cprop_muted (Kaya_wire.Bool on)
+
+let capture ?camera ?microphone ?size ?frame_rate ?muted () =
+  let tx = the_tx () in
+  let id = tx.app.media.next_capture in
+  tx.app.media.next_capture <- Int64.succ id;
+  emit tx (Kaya_wire.tx_create_capture id);
+  let c = Capture id in
+  Option.iter (fun d -> capture_camera c (Some d)) camera;
+  Option.iter (fun d -> capture_microphone c (Some d)) microphone;
+  Option.iter (fun (w, h) -> capture_size c w h) size;
+  Option.iter (capture_frame_rate c) frame_rate;
+  Option.iter (capture_muted c) muted;
+  c
+
+(* Open the devices, asking for each kind's permission still at prompt;
+   the answer is the capture's own state. *)
+let start_capture (Capture id) =
+  emit (the_tx ()) (Kaya_wire.tx_capture_command id Kaya_wire.capture_command_start)
+
+let stop_capture (Capture id) =
+  emit (the_tx ()) (Kaya_wire.tx_capture_command id Kaya_wire.capture_command_stop)
+
+(* Stop and forget a capture; its callbacks are dropped with it. *)
+let release_capture (Capture id) =
+  let tx = the_tx () in
+  emit tx (Kaya_wire.tx_release_capture id);
+  tx.app.media.released_captures <- id :: tx.app.media.released_captures
+
+(* Ask for a kind's permission before any capture starts; the answer
+   arrives through [on_permission]. *)
+let request_permission kind = emit (the_tx ()) (Kaya_wire.tx_request_permission (Capture_kind.wire kind))
+
+(* List the cameras and microphones now and whenever one comes or goes
+   ([on_capture_devices]); false stops. *)
+let watch_capture_devices on =
+  emit (the_tx ()) (Kaya_wire.tx_watch_capture_devices (if on then 1 else 0))
+
+(* Preview another capture in a live video view, or none. *)
+let show_capture (Widget id) c =
+  emit (the_tx ()) (Kaya_wire.tx_set_capture id (match c with Some (Capture cid) -> cid | None -> 0L))
+
+(* A video view previewing [capture] (docs/capture-plan.md §3): the
+   player's view one source over, mirrored for a front camera. *)
+let video_capture ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind
+    ?a11y_hint ?fit ~capture () =
+  let w = widget Kaya_wire.kind_video in
+  Option.iter (fun g -> set_grow w g) grow;
+  Option.iter (fun v -> set_fill w v) fill;
+  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
+  Option.iter (fun v -> set_a11y_hint w v) a11y_hint;
+  show_capture w (Some capture);
+  Option.iter (set_fit w) fit;
+  w
+
 
 let reader source =
   let tx = the_tx () in
@@ -5886,6 +6192,135 @@ let on_visibility_node app (Node id) (f : key list -> float -> unit) =
    controls. *)
 let on_session app (f : Session_action.t -> unit) = app.media.session_handler <- Some f
 
+(* --- THE CAPTURE'S READINGS AND HANDLERS (docs/capture-plan.md §2, §4) *)
+
+(* A capture's readings as of the last occurrence this loop took. *)
+let capture_reading app (Capture id) =
+  Option.value (Hashtbl.find_opt app.media.capture_readings id) ~default:Capture_reading.initial
+
+(* A kind's permission as last heard: prompt until the platform says. *)
+let permission app kind =
+  Option.value (Hashtbl.find_opt app.media.permissions kind) ~default:Permission.Prompt
+
+(* The cameras and microphones as last listed. *)
+let capture_devices app = app.media.capture_devices
+
+let on_capture app (Capture id) what handler =
+  Hashtbl.replace app.media.capture_handlers (id, what) handler
+
+(* Every state the capture moves to, failed included. *)
+let on_capture_state app c (f : Capture_reading.t -> unit) =
+  on_capture app c "state" (function Capture_changed (r, _) -> f r | _ -> ())
+
+(* The capture cannot run: the closed reason and the platform's sentence,
+   which no two platforms word alike. *)
+let on_capture_failed app c (f : Capture_failure.t -> string -> unit) =
+  on_capture app c "failed" (function
+    | Capture_changed ({ Capture_reading.state = Capture_state.Failed; failure = Some why; _ }, detail) ->
+        f why detail
+    | _ -> ())
+
+(* The app's sample callback fell this many ms behind the microphone. *)
+let on_capture_overrun app c (f : int -> unit) =
+  on_capture app c "overrun" (function Capture_overrun ms -> f ms | _ -> ())
+
+(* A kind's permission moved or was asked about. *)
+let on_permission app (f : Capture_kind.t -> Permission.t -> unit) = app.media.permission_handler <- Some f
+
+(* The device list, as watching starts and whenever it changes. *)
+let on_capture_devices app (f : Capture_device.t list -> unit) = app.media.devices_handler <- Some f
+
+(* Run [f] on KAYA'S CAPTURE THREAD, NOT THE APP THREAD, for each frame
+   of [capture], the next frame dropped while [f] still runs. It holds no
+   transaction (a write from it is refused): post to touch the scene. The
+   frame is the callback's own copy, kept past the call as it likes. *)
+let on_capture_frame (_ : app) (Capture id) (f : Capture_frame.t -> unit) =
+  set_capture_sink capture_frame_sinks Kaya_runtime.capture_on_frame id (Some f)
+
+(* Run [f] on kaya's capture thread, not the app thread, for every 10 ms
+   of [capture]'s microphone: 480 samples of 48 kHz mono s16 and the first
+   one's time in ns on the capture's clock. None is dropped; a callback
+   slower than the microphone is told through [on_capture_overrun]. It
+   holds no transaction: post to touch the scene. The chunk is the
+   callback's own copy. *)
+let on_capture_samples (_ : app) (Capture id) (f : samples -> int64 -> unit) =
+  set_capture_sink capture_sample_sinks Kaya_runtime.capture_on_samples id (Some f)
+
+(* The capture's occurrences, absorbed into the readings first. *)
+let capture_occurrence app kind id payload tail =
+  let m = app.media in
+  let fire cid occ =
+    let found =
+      List.filter_map (fun what -> Hashtbl.find_opt m.capture_handlers (cid, what)) [ "state"; "failed"; "overrun" ]
+    in
+    if found <> [] then dispatch app (fun () -> List.iter (fun h -> h occ) found)
+  in
+  if kind = Kaya_wire.occ_kind_capture_changed then begin
+    (match tail with
+    | Kaya_wire.I64 st :: Kaya_wire.I64 fl :: Kaya_wire.I64 intr :: Kaya_wire.I64 w :: Kaya_wire.I64 h
+      :: Kaya_wire.I64 rate :: detail :: _ ->
+        let r =
+          {
+            Capture_reading.state = Capture_state.of_wire (Int64.to_int st);
+            failure = Capture_failure.of_wire (Int64.to_int fl);
+            interruption = Capture_interruption.of_wire (Int64.to_int intr);
+            width = Int64.to_int w;
+            height = Int64.to_int h;
+            frame_rate = Int64.to_int rate;
+          }
+        in
+        Hashtbl.replace m.capture_readings id r;
+        fire id (Capture_changed (r, match detail with Kaya_wire.Str s -> s | _ -> ""))
+    | _ -> ());
+    true
+  end
+  else if kind = Kaya_wire.occ_kind_capture_overrun then begin
+    (* The pair class: behind_ms keys the record, the capture rides as the
+       payload. *)
+    (match payload with Some (Kaya_wire.I64 cid) -> fire cid (Capture_overrun (Int64.to_int id)) | _ -> ());
+    true
+  end
+  else if kind = Kaya_wire.occ_kind_capture_permission then begin
+    (match tail with
+    | Kaya_wire.I64 k :: Kaya_wire.I64 p :: _ ->
+        let k = Capture_kind.of_wire (Int64.to_int k) and p = Permission.of_wire (Int64.to_int p) in
+        Hashtbl.replace m.permissions k p;
+        Option.iter (fun f -> dispatch app (fun () -> f k p)) m.permission_handler
+    | _ -> ());
+    true
+  end
+  else if kind = Kaya_wire.occ_kind_capture_devices then begin
+    let rec devices = function
+      | Kaya_wire.Str id :: Kaya_wire.Str name :: Kaya_wire.I64 k :: Kaya_wire.I64 facing :: Kaya_wire.Bool preferred
+        :: rest ->
+          {
+            Capture_device.id;
+            name;
+            kind = Capture_kind.of_wire (Int64.to_int k);
+            facing = Camera_facing.of_wire (Int64.to_int facing);
+            preferred;
+          }
+          :: devices rest
+      | _ -> []
+    in
+    m.capture_devices <- devices (match tail with _count :: values -> values | [] -> []);
+    Option.iter (fun f -> dispatch app (fun () -> f m.capture_devices)) m.devices_handler;
+    true
+  end
+  else false
+
+(* bindings/ocaml/checks alone: the capture's callbacks driven from a
+   foreign thread as kaya's capture thread drives them, and the
+   occurrence arm. *)
+module For_capture_checks = struct
+  let drive_frame (Capture id) width height = Kaya_runtime.capture_drive_frame id width height
+  let drive_samples (Capture id) = Kaya_runtime.capture_drive_samples id
+  let thread_counts = Kaya_runtime.capture_thread_counts
+  let occurrence = capture_occurrence
+  let claim_app_thread () = app_thread := Some (Thread.id (Thread.self ()))
+  let raised () = Atomic.get capture_raised
+end
+
 let on_read app (Read read) what handler =
   Hashtbl.replace app.media.read_handlers (read, what) handler
 
@@ -6129,6 +6564,7 @@ let media_occurrence app kind id keys payload tail =
     | _ -> ());
     true
   end
+  else if capture_occurrence app kind id payload tail then true
   else if kind = Kaya_wire.occ_kind_session_action then begin
     (match (tail, m.session_handler) with
     | action :: at_ms :: _, Some f ->

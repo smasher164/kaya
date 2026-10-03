@@ -295,6 +295,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && command -v eu-stack
 
+# CAPTURE (docs/capture-plan.md §7, docs/probes/capture-2026-10-01/
+# linux-measured.md): a capture leg starts its own PipeWire and WirePlumber
+# and the lane's synthetic devices (tools/linux/pwsynth, built against the
+# -dev headers) through tools/linux/capture-leg.py; pipewiresrc is the GTK
+# arm's source. Versions read because the measurements were taken on 1.4
+# and 0.5.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pipewire pipewire-bin wireplumber gstreamer1.0-pipewire libpipewire-0.3-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && case "$(dpkg-query -W -f='${Version}' pipewire)" in 1.4.*) ;; *) exit 1 ;; esac \
+    && case "$(dpkg-query -W -f='${Version}' wireplumber)" in 0.5.*) ;; *) exit 1 ;; esac \
+    && gst-inspect-1.0 --exists pipewiresrc
+
 COPY gtk-settings.ini /etc/gtk-4.0/settings.ini
 COPY 99-kaya-font.gschema.override \
     /usr/share/glib-2.0/schemas/99-kaya-font.gschema.override

@@ -312,6 +312,34 @@ module KayaApp
     onCue,
     onSession,
     canPlay,
+    capture,
+    CaptureAttr (..),
+    captureCamera,
+    captureMicrophone,
+    captureSize,
+    captureFrameRate,
+    captureMuted,
+    startCapture,
+    stopCapture,
+    releaseCapture,
+    requestPermission,
+    watchCaptureDevices,
+    videoCapture,
+    showCapture,
+    captureReading,
+    permission,
+    captureDevices,
+    onCaptureState,
+    onCaptureFailed,
+    onCaptureOverrun,
+    onPermission,
+    onCaptureDevices,
+    onCaptureFrame,
+    onCaptureSamples,
+    forChecksClaimAppThread,
+    forChecksDriveFrame,
+    forChecksDriveSamples,
+    forChecksCaptureRaised,
     openReader,
     readFrames,
     readPeaks,
@@ -473,7 +501,11 @@ import Data.Bits ((.&.))
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BC
 import Data.ByteString.Builder (Builder)
-import Data.Int (Int32, Int64)
+import Data.Int (Int16, Int32, Int64)
+import Foreign.C.Types (CChar)
+import Foreign.Marshal.Array (peekArray)
+import Foreign.Ptr (Ptr, ptrToWordPtr)
+import Foreign.Storable (peekByteOff)
 import Data.IORef
 import Data.List (elemIndex)
 import Data.Maybe (fromMaybe, listToMaybe)
@@ -3660,6 +3692,94 @@ onImageLoaded app (Image n) f = modifyIORef' app.appMedia.imageLoads (Map.insert
 canPlay :: Text -> Text -> IO Bool
 canPlay = R.canPlayRaw
 
+-- THE CAPTURE (docs/capture-plan.md §2, §3).
+
+-- | A capture's settings at creation: device ids from 'captureDevices',
+-- and the size and rate wished for, met by the platform's nearest format.
+data CaptureAttr
+  = CaptureCameraIs Text
+  | CaptureMicrophoneIs Text
+  | CaptureSizeIs Double Double
+  | CaptureFrameRateIs Double
+  | CaptureMutedIs Bool
+
+-- | A capture: at most one camera and one microphone, with no place in the
+-- layout. 'startCapture' it once its devices are set.
+capture :: [CaptureAttr] -> Build Capture
+capture attrs = do
+  n <- state $ \s -> let c = s.bCounters; next = c.cCapture + 1 in (next, s {bCounters = c {cCapture = next}})
+  emitB (W.txCreateCapture n)
+  let c = Capture n
+  mapM_
+    ( \a -> case a of
+        CaptureCameraIs d -> captureCamera c (Just d)
+        CaptureMicrophoneIs d -> captureMicrophone c (Just d)
+        CaptureSizeIs w h -> captureSize c w h
+        CaptureFrameRateIs r -> captureFrameRate c r
+        CaptureMutedIs on -> captureMuted c on
+    )
+    attrs
+  return c
+
+writeCaptureProp :: Capture -> Word32 -> W.Value -> Build ()
+writeCaptureProp (Capture c) prop v = emitB (W.txSetCaptureProp c prop v)
+
+-- | The camera by a device's id; 'Nothing' closes it and puts its
+-- indicator out.
+captureCamera :: Capture -> Maybe Text -> Build ()
+captureCamera c d = writeCaptureProp c W.cpropCamera (W.VStr (maybe "" T.unpack d))
+
+captureMicrophone :: Capture -> Maybe Text -> Build ()
+captureMicrophone c d = writeCaptureProp c W.cpropMicrophone (W.VStr (maybe "" T.unpack d))
+
+captureSize :: Capture -> Double -> Double -> Build ()
+captureSize c w h = do
+  writeCaptureProp c W.cpropWidth (W.VF64 w)
+  writeCaptureProp c W.cpropHeight (W.VF64 h)
+
+captureFrameRate :: Capture -> Double -> Build ()
+captureFrameRate c r = writeCaptureProp c W.cpropFrameRate (W.VF64 r)
+
+-- | The microphone stays open and delivers silence, as a call's mute.
+captureMuted :: Capture -> Bool -> Build ()
+captureMuted c on = writeCaptureProp c W.cpropMuted (W.VBool on)
+
+-- | Open the devices, asking for each kind's permission still at prompt;
+-- the answer is the capture's own state.
+startCapture :: Capture -> Build ()
+startCapture (Capture c) = emitB (W.txCaptureCommand c W.captureCommandStart)
+
+stopCapture :: Capture -> Build ()
+stopCapture (Capture c) = emitB (W.txCaptureCommand c W.captureCommandStop)
+
+-- | Stop and forget a capture; its callbacks are dropped with it.
+releaseCapture :: Capture -> Build ()
+releaseCapture (Capture c) = do
+  emitB (W.txReleaseCapture c)
+  pendB (PCaptureReleased c)
+
+-- | Ask for a kind's permission before any capture starts; answered
+-- through 'onPermission'.
+requestPermission :: CaptureKind -> Build ()
+requestPermission k = emitB (W.txRequestPermission (captureKindWire k))
+
+-- | List the cameras and microphones now and whenever one comes or goes
+-- ('onCaptureDevices'); False stops.
+watchCaptureDevices :: Bool -> Build ()
+watchCaptureDevices on = emitB (W.txWatchCaptureDevices (if on then 1 else 0))
+
+-- | A video view previewing a capture (docs\/capture-plan.md §3), mirrored
+-- for a front camera. Live zone only; a view shows a player or a capture.
+videoCapture :: (LeafArgs r) => Capture -> r
+videoCapture (Capture c) = leafish $ do
+  w@(Widget n) <- widget W.kindVideo
+  emitB (W.txSetCapture n (fromIntegral c))
+  return w
+
+-- | Preview another capture in a live video view, or none.
+showCapture :: Widget -> Maybe Capture -> Build ()
+showCapture (Widget n) c = emitB (W.txSetCapture n (maybe 0 (\(Capture i) -> fromIntegral i) c))
+
 -- THE CANVAS (docs/canvas-plan.md §2.2): 'DrawOp' holds one opcode and
 -- its operands already encoded, which is what the wire carries anyway.
 
@@ -4619,6 +4739,7 @@ register app pending = case pending of
   PReadAbandoned readId -> abandonRead app readId
   PReaderClosed r -> readIORef app.appMedia.readsInFlight >>= mapM_ (abandonRead app) . Map.lookup r
   PAwait readId k -> modifyIORef' app.appMedia.awaits (Map.insert readId (Await [] Nothing k))
+  PCaptureReleased c -> dropCaptureSinks c
 
 -- | The app gave up on a read: its answers still in the channel are not
 -- heard, and the images they carry go back with the next commit.
@@ -4871,6 +4992,202 @@ onCue app p f = onPlayer app p "cue" $ \o -> case o of
 onSession :: App -> (SessionAction -> IO ()) -> IO ()
 onSession app f = writeIORef app.appMedia.sessionHandler (Just f)
 
+-- THE CAPTURE'S READINGS AND HANDLERS (docs/capture-plan.md §2, §4).
+
+-- | A capture's readings as of the last occurrence this loop took.
+captureReading :: App -> Capture -> IO CaptureReading
+captureReading app (Capture c) = Map.findWithDefault initialCaptureReading c <$> readIORef app.appMedia.captureReadings
+
+-- | A kind's permission as last heard: prompt until the platform says.
+permission :: App -> CaptureKind -> IO Permission
+permission app k = Map.findWithDefault PermissionPrompt k <$> readIORef app.appMedia.permissions
+
+-- | The cameras and microphones as last listed.
+captureDevices :: App -> IO [CaptureDevice]
+captureDevices app = readIORef app.appMedia.captureDeviceList
+
+onCapture :: App -> Capture -> Text -> (CaptureOcc -> IO ()) -> IO ()
+onCapture app (Capture c) what h = modifyIORef' app.appMedia.captureHandlers (Map.insert (c, what) h)
+
+-- | Every state the capture moves to, failed included.
+onCaptureState :: App -> Capture -> (CaptureReading -> IO ()) -> IO ()
+onCaptureState app c f = onCapture app c "state" $ \o -> case o of
+  CaptureChanged r _ -> f r
+  _ -> return ()
+
+-- | The capture cannot run: the closed reason and the platform's
+-- sentence, which no two platforms word alike.
+onCaptureFailed :: App -> Capture -> (CaptureFailure -> Text -> IO ()) -> IO ()
+onCaptureFailed app c f = onCapture app c "failed" $ \o -> case o of
+  CaptureChanged r detail | r.state == CaptureFailed, Just why <- r.failure -> f why detail
+  _ -> return ()
+
+-- | The app's sample callback fell this many ms behind the microphone.
+onCaptureOverrun :: App -> Capture -> (Int -> IO ()) -> IO ()
+onCaptureOverrun app c f = onCapture app c "overrun" $ \o -> case o of
+  CaptureOverrun ms -> f ms
+  _ -> return ()
+
+-- | A kind's permission moved or was asked about.
+onPermission :: App -> (CaptureKind -> Permission -> IO ()) -> IO ()
+onPermission app f = writeIORef app.appMedia.permissionHandler (Just f)
+
+-- | The device list, as watching starts and whenever it changes.
+onCaptureDevices :: App -> ([CaptureDevice] -> IO ()) -> IO ()
+onCaptureDevices app f = writeIORef app.appMedia.devicesHandler (Just f)
+
+-- The frame and sample callbacks by capture id: THE ONE TABLE THE CAPTURE
+-- THREAD READS, swapped whole so a read is one atomic load.
+captureFrameSinks :: IORef (Map.Map Word64 (CaptureFrame -> IO ()))
+captureFrameSinks = unsafePerformIO (newIORef Map.empty)
+{-# NOINLINE captureFrameSinks #-}
+
+captureSampleSinks :: IORef (Map.Map Word64 ([Int16] -> Word64 -> IO ()))
+captureSampleSinks = unsafePerformIO (newIORef Map.empty)
+{-# NOINLINE captureSampleSinks #-}
+
+-- | Run @f@ on KAYA'S CAPTURE THREAD, NOT THE APP THREAD, for each frame of
+-- the capture, the next frame dropped while @f@ still runs
+-- (docs\/capture-plan.md §4). It holds no transaction, and a transaction
+-- opened from it is refused: 'post' to touch the scene. The frame is
+-- @f@'s own copy, kept past the call as it likes. Replaces the last;
+-- dropped with the capture.
+onCaptureFrame :: App -> Capture -> (CaptureFrame -> IO ()) -> IO ()
+onCaptureFrame _ (Capture c) f = do
+  atomicModifyIORef' captureFrameSinks (\m -> (Map.insert c f m, ()))
+  R.captureOnFrame c True
+
+-- | Run @f@ on kaya's capture thread, not the app thread, for every 10 ms
+-- of the capture's microphone: 480 samples of 48 kHz mono s16 and the
+-- first one's time in ns on the capture's clock, none dropped; a callback
+-- slower than the microphone is told through 'onCaptureOverrun'. It holds
+-- no transaction: 'post' to touch the scene. The chunk is @f@'s own copy.
+onCaptureSamples :: App -> Capture -> ([Int16] -> Word64 -> IO ()) -> IO ()
+onCaptureSamples _ (Capture c) f = do
+  atomicModifyIORef' captureSampleSinks (\m -> (Map.insert c f m, ()))
+  R.captureOnSamples c True
+
+dropCaptureSinks :: Word64 -> IO ()
+dropCaptureSinks c = do
+  atomicModifyIORef' captureFrameSinks (\m -> (Map.delete c m, ()))
+  atomicModifyIORef' captureSampleSinks (\m -> (Map.delete c m, ()))
+
+-- DESIGN.md's abort rule on the capture thread: caught, logged, and the
+-- capture keeps running.
+captureRaised :: IORef Int
+captureRaised = unsafePerformIO (newIORef 0)
+{-# NOINLINE captureRaised #-}
+
+captureCallback :: Word64 -> String -> IO () -> IO ()
+captureCallback c what body =
+  body `catch` \e -> do
+    atomicModifyIORef' captureRaised (\n -> (n + 1, ()))
+    hPutStrLn stderr
+      ("kaya: capture " ++ show c ++ "'s " ++ what ++ " callback raised: " ++ takeWhile (/= '\n') (show (e :: SomeException)) ++ "; the capture keeps running")
+
+-- | AbortCheck alone: how many capture callbacks raised and were caught.
+forChecksCaptureRaised :: IO Int
+forChecksCaptureRaised = readIORef captureRaised
+
+foreign export ccall "kaya_hs_capture_frame_in" captureFrameIn :: Ptr () -> Ptr () -> IO ()
+
+foreign export ccall "kaya_hs_capture_samples_in" captureSamplesIn :: Ptr () -> Ptr Int16 -> Word64 -> Word64 -> IO ()
+
+-- kaya.h's KayaCaptureFrame, read field by field; a drifted layout reads a
+-- wrong size, which the capture scene's "app frames WxH" line refuses.
+captureFrameIn :: Ptr () -> Ptr () -> IO ()
+captureFrameIn ctx p = do
+  sinks <- readIORef captureFrameSinks
+  case Map.lookup (fromIntegral (ptrToWordPtr ctx)) sinks of
+    Nothing -> return ()
+    Just f -> captureCallback (fromIntegral (ptrToWordPtr ctx)) "frame" $ do
+      w <- peekByteOff p 0 :: IO Word32
+      h <- peekByteOff p 4 :: IO Word32
+      yp <- peekByteOff p 8 :: IO (Ptr CChar)
+      uvp <- peekByteOff p 16 :: IO (Ptr CChar)
+      ys <- peekByteOff p 24 :: IO Word32
+      uvs <- peekByteOff p 28 :: IO Word32
+      at <- peekByteOff p 32 :: IO Word64
+      rot <- peekByteOff p 40 :: IO Word32
+      yb <- BS.packCStringLen (yp, fromIntegral ys * fromIntegral h)
+      uvb <- BS.packCStringLen (uvp, fromIntegral uvs * ((fromIntegral h + 1) `div` 2))
+      f (CaptureFrame (fromIntegral w) (fromIntegral h) yb uvb (fromIntegral ys) (fromIntegral uvs) at (fromIntegral rot))
+
+captureSamplesIn :: Ptr () -> Ptr Int16 -> Word64 -> Word64 -> IO ()
+captureSamplesIn ctx p count at = do
+  sinks <- readIORef captureSampleSinks
+  case Map.lookup (fromIntegral (ptrToWordPtr ctx)) sinks of
+    Nothing -> return ()
+    Just f -> captureCallback (fromIntegral (ptrToWordPtr ctx)) "samples" $ do
+      chunk <- peekArray (fromIntegral count) p
+      f chunk at
+
+-- | guests/haskell/AbortCheck alone: make the calling thread the app
+-- thread, as the dispatch loop does, and call a capture's trampolines from
+-- a fresh foreign thread as kaya's capture thread does, answering whether
+-- kaya's own buffers came back unchanged.
+forChecksClaimAppThread :: IO ()
+forChecksClaimAppThread = myThreadId >>= \here -> writeIORef appThreadRef (Just here)
+
+forChecksDriveFrame :: Capture -> Int -> Int -> IO Bool
+forChecksDriveFrame (Capture c) = R.captureDriveFrame c
+
+forChecksDriveSamples :: Capture -> IO Bool
+forChecksDriveSamples (Capture c) = R.captureDriveSamples c
+
+-- | The capture's occurrences, absorbed into the readings first.
+captureOccurrence :: App -> Word16 -> Word64 -> Maybe W.Value -> [W.Value] -> IO Bool
+captureOccurrence app kind ident payload tail_
+  | kind == W.occKindCaptureChanged = do
+      case tail_ of
+        W.VI64 st : W.VI64 fl : W.VI64 intr : W.VI64 w : W.VI64 h : W.VI64 rate : detail : _ -> do
+          let r =
+                CaptureReading
+                  (captureStateOfWire (fromIntegral st))
+                  (captureFailureOfWire (fromIntegral fl))
+                  (captureInterruptionOfWire (fromIntegral intr))
+                  (fromIntegral w)
+                  (fromIntegral h)
+                  (fromIntegral rate)
+          modifyIORef' m.captureReadings (Map.insert ident r)
+          fire ident (CaptureChanged r (case detail of W.VStr d -> T.pack d; _ -> ""))
+        _ -> return ()
+      return True
+  | kind == W.occKindCaptureOverrun = do
+      -- The pair class: behind_ms keys the record, the capture rides as
+      -- the payload.
+      case payload of
+        Just (W.VI64 c) -> fire (fromIntegral c) (CaptureOverrun (fromIntegral ident))
+        _ -> return ()
+      return True
+  | kind == W.occKindCapturePermission = do
+      case tail_ of
+        W.VI64 k : W.VI64 p : _ -> do
+          let k' = captureKindOfWire (fromIntegral k)
+              p' = permissionOfWire (fromIntegral p)
+          modifyIORef' m.permissions (Map.insert k' p')
+          h <- readIORef m.permissionHandler
+          dispatch (mapM_ (\f -> f k' p') h)
+        _ -> return ()
+      return True
+  | kind == W.occKindCaptureDevices = do
+      let devices (W.VStr i : W.VStr n : W.VI64 k : W.VI64 f : W.VBool pref : rest) =
+            CaptureDevice (T.pack i) (T.pack n) (captureKindOfWire (fromIntegral k)) (cameraFacingOfWire (fromIntegral f)) pref
+              : devices rest
+          devices _ = []
+          list = devices (drop 1 tail_)
+      writeIORef m.captureDeviceList list
+      h <- readIORef m.devicesHandler
+      dispatch (mapM_ ($ list) h)
+      return True
+  | otherwise = return False
+  where
+    m = app.appMedia
+    fire c occ = do
+      hs <- readIORef m.captureHandlers
+      let found = [h | what <- ["state", "failed", "overrun"], Just h <- [Map.lookup (c, what) hs]]
+      if null found then return () else dispatch (mapM_ ($ occ) found)
+
 -- | Fold a media occurrence into the mirror, THEN hand it on, so a
 -- handler reads the readings it was told about. The flat records'
 -- tails are tools/kaya-bindgen's (the fields in order, lists as a count
@@ -5010,6 +5327,8 @@ mediaOccurrence app kind ident keys payload tail_
             dispatch (mapM_ (\h -> h (keyPath keys) shown) (Map.lookup ident hs))
         _ -> return ()
       return True
+  | kind `elem` [W.occKindCaptureChanged, W.occKindCapturePermission, W.occKindCaptureDevices, W.occKindCaptureOverrun] =
+      captureOccurrence app kind ident payload tail_
   | kind == W.occKindSessionAction = do
       case tail_ of
         W.VI64 action : W.VI64 atMs : _ -> do
@@ -5061,7 +5380,7 @@ newApp :: IO App
 newApp =
   App
     <$> newMVar [] -- appPosted
-    <*> newIORef (Counters 0 0 0 0 0 0 0 0 0 0 0) -- appCounters
+    <*> newIORef (Counters 0 0 0 0 0 0 0 0 0 0 0 0) -- appCounters
     <*> newIORef (Map.empty, Map.empty) -- appModel
     <*> newIORef Map.empty -- appFresh
     <*> newIORef Map.empty -- appDerived
@@ -5140,6 +5459,12 @@ newApp =
             <*> newIORef Map.empty
             <*> newIORef Map.empty
             <*> newIORef Nothing
+            <*> newIORef Map.empty -- captureReadings
+            <*> newIORef Map.empty -- permissions
+            <*> newIORef [] -- captureDeviceList
+            <*> newIORef Map.empty -- captureHandlers
+            <*> newIORef Nothing -- permissionHandler
+            <*> newIORef Nothing -- devicesHandler
         ) -- appMedia
 
 -- | Set up (build the scene, register handlers) and run: occurrences
@@ -5191,7 +5516,7 @@ drainPosted app = do
 
 isMediaKind :: Word16 -> Bool
 isMediaKind kind =
-  kind `elem` [W.occKindPlayerChanged, W.occKindPlayerPosition, W.occKindSeekCompleted, W.occKindPlayerTracks, W.occKindCaptionCue, W.occKindVideoVisibility, W.occKindSessionAction, W.occKindReaderFrame, W.occKindReaderProgress, W.occKindReaderPeaks, W.occKindReaderDone, W.occKindImageLoaded]
+  kind `elem` [W.occKindPlayerChanged, W.occKindPlayerPosition, W.occKindSeekCompleted, W.occKindPlayerTracks, W.occKindCaptionCue, W.occKindVideoVisibility, W.occKindSessionAction, W.occKindReaderFrame, W.occKindReaderProgress, W.occKindReaderPeaks, W.occKindReaderDone, W.occKindImageLoaded, W.occKindCaptureChanged, W.occKindCapturePermission, W.occKindCaptureDevices, W.occKindCaptureOverrun]
 
 dispatchLoop :: App -> IO ()
 dispatchLoop app = do

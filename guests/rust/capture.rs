@@ -42,7 +42,7 @@ fn evidence(frames: Option<(u32, u32)>, chunk: Option<usize>) -> String {
     format!("{frames}, {chunks}")
 }
 
-fn app(ctx: kaya::AppCtx) {
+pub fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::<Msg>::new();
     let (labels, call, missing) = ctx.apply(|tx| {
         tx.window(kaya::DEFAULT_WINDOW).title("capture").size(520.0, 640.0);

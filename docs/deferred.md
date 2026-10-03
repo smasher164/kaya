@@ -9,8 +9,24 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
-## BUILD — camera and microphone capture (docs/capture-plan.md), depth on the mac (2026-10-02); the GTK, WinUI and Compose arms, the iOS legs, the other eight bindings and the C floor are the breadth slice
-KEY: capture, CaptureId, CaptureRef, CaptureReading, CaptureFrame, create_capture, set_capture_prop, capture_command, release_capture, request_permission, watch_capture_devices, set_video_capture, capture_changed, capture_permission, capture_devices, capture_overrun, cprop, capture_state, capture_failure, capture_interruption, capture_kind, camera_facing, PropKind::Capture, PROP_CAPTURE, kaya_capture_state, kaya_capture_frame, kaya_capture_samples, kaya_capture_on_frame, kaya_capture_on_samples, kaya_capture_synthetic, kaya_capture_harness, crates/kaya/src/capture.rs, KayaRealCapture, kayaCaptureWall, expect_capture, answer_permission, DEPTH STUB capture, CAPTURE_SURFACES, capture_denied
+## DEFECT — iOS media_session-swiftui: a routed remote pause left the player playing, and the bundle cannot say why (seen once 2026-10-03, under a capture,media_ matrix)
+KEY: media_session-swiftui, session_send pause, routed 2, remote command action=2, expect_now_playing, ios media_session
+
+`tools/validate-all.py --only capture,media_` (2026-10-03 ~02:20 PDT, the iOS
+lane waiting 191 s for the exclusive token) read media_session-swiftui red:
+`session_send pause` reached the app (`remote command action=2 ... routed 2`,
+the player) and for 15 s the label, Now Playing and the display hold all
+still read playing; the later play, next and the accessibility Pause all
+worked. Run alone three times after, the three media_session legs were green
+9 of 9. The bundle (flightrec run 20261003T091946Z-075251) records the route
+and nothing after it: what the player was told and what it answered
+(timeControlStatus, the rate, the core's next player report) is not carried,
+so the recorder grows that line around a routed session command before the
+next sighting, proven by a forced red. Not touched by the capture slice (the
+capture arm reaches no player or session).
+
+## BUILD — camera and microphone capture (docs/capture-plan.md), depth on the mac (2026-10-02), breadth built 2026-10-03 with the Windows legs still to run; the C floor's parsers, §5's far end and the rulings below remain
+KEY: capture, CaptureId, CaptureRef, CaptureReading, CaptureFrame, create_capture, set_capture_prop, capture_command, release_capture, request_permission, watch_capture_devices, set_video_capture, capture_changed, capture_permission, capture_devices, capture_overrun, cprop, capture_state, capture_failure, capture_interruption, capture_kind, camera_facing, PropKind::Capture, PROP_CAPTURE, kaya_capture_state, kaya_capture_frame, kaya_capture_samples, kaya_capture_on_frame, kaya_capture_on_samples, kaya_capture_synthetic, kaya_capture_nearest_format, kaya_capture_harness, crates/kaya/src/capture.rs, KayaRealCapture, kayaCaptureWall, expect_capture, answer_permission, DEPTH STUB capture, CAPTURE_SURFACES, capture_denied, pwsynth, capture-leg.py, winvcam, kaya-capture-lane, capture-install.ps1, emulator_capture.py, KayaCapture.kt, scene-negative.py
 
 The depth slice: the spec's six transaction, seven apply and four occurrence
 records, the video view's `capture` prop, the core (crates/kaya/src/capture.rs:
@@ -22,45 +38,73 @@ callback, keep-only-latest frames, the overrun account), the Rust binding
 thread), the SwiftUI arm (the synthetic source as 420v pixel buffers into an
 AVSampleBufferDisplayLayer and 44.1 kHz stereo float; the real AVCaptureSession
 path in `enum KayaRealCapture`, compiled for macOS and iOS, run by no lane) and
-the `capture` and `capture_denied` scenes on the mac lane. What breadth owes:
+the `capture` and `capture_denied` scenes on the mac lane. The breadth slice
+(2026-10-03) moved the wish's nearest format into the core
+(`nearest_format`, kaya_capture_nearest_format, the SwiftUI source included)
+and caught a panicking capture callback there (`survive`):
 
-  - **DEPTH STUB: capture on gtk** — GStreamer beside GTK: the camera portal
-    first and PipeWire directly when no portal answers (§9 ruling 5), the
-    preview a GtkPicture over gtk4paintablesink on a tee, appsink frames and
-    samples into kaya_capture_frame/kaya_capture_samples; the lane's PipeWire
-    daemon per session with videotestsrc/audiotestsrc nodes is measured first
-    (docs/capture-plan.md §7 item 2).
-  - **DEPTH STUB: capture on winui** — MediaCapture and MediaFrameReader, the
-    preview a MediaPlayerElement over the frame source, the unpackaged
-    E_ACCESSDENIED read as `denied`; the VM's virtual camera DLL and loopback
-    driver installed once by admin (§9, ruled) and measured first (§7 item 3).
-  - **DEPTH STUB: capture on compose** — CameraX Preview, ImageAnalysis and
-    AudioRecord on the emulator's videofile camera and injectAudio tone,
-    measured first over the read-only snapshot (§7 item 1); the runner refuses
-    a host-audio flag and a webcam camera mode, the wall's Android half.
-  - The iOS legs: the arm is the shared interpreter's and compiles; both scenes
-    are in tools/lib/lanes/ios.py's UNWIRED_SCENES until the simulator's lack
-    of a camera and the in-process source keeping the host's microphone closed
-    are measured (§7 item 4). Rule 7's audio session category is unbuilt.
-  - The other eight bindings and the C floor: tools/check-sugar-surface.py's
-    capture census is red by design (72 findings, nine parts in each), its
-    eight rows a first calibration to move with each binding's capture surface;
-    each binding copies a frame or a chunk into its own buffer before the call
-    where it has a collector (§4), and its wrong-thread refusal is what keeps a
-    callback from writing the scene.
-  - Each lane's synthetic device sits in its platform's own path (§9 ruling 3);
-    the mac's and the iOS simulator's are kaya's in-process source, behind the
-    wall tools/check-verbs.py holds (every real-device name inside
-    `KayaRealCapture`, each entry walled, every route behind KAYA_SELFTEST).
-  - Not built at depth, each with its plan section: §5's surface frames and
-    voice output (and with them the `voice` prop), the opt-in real-device leg
+  - ~~**DEPTH STUB: capture on gtk**~~ — LANDED 2026-10-03: GStreamer beside
+    GTK, the camera portal on wayland legs and PipeWire directly on x11 legs
+    (§9 ruling 5, each leg asserting its route), crates/kaya/src/gtk/capture.rs;
+    the lane's devices are tools/linux/pwsynth (gst's pipewiresink offers one
+    format and exits with its consumer), started and proven stopped per leg by
+    tools/linux/capture-leg.py; 32 legs green (eight languages, two protocols,
+    two scenes). docs/probes/capture-2026-10-01/linux-measured.md.
+  - ~~**DEPTH STUB: capture on winui**~~ — LANDED 2026-10-03 AS AN ARM, ITS LEGS
+    NOT YET RUN: MediaCapture (ExclusiveControl, so a wish can set the format)
+    and MediaFrameReader, crates/kaya/src/winui/capture.rs; the ruled one-time
+    install is on the VM (VB-CABLE pack 45, the two virtual cameras' DLL
+    tools/winvcam registered in HKLM, docs/HACKING.md "The Windows capture
+    install"), measured carrying C83C1E and 440/660 Hz on its two channels
+    (docs/probes/capture-2026-10-01/windows-measured.md). The twelve legs are
+    wired, each in a block of its own; the VM came back from the install's
+    reboot on two default displays and UTM then wedged in `stopping`
+    (docs/traps.md), so they wait on the maintainer restarting UTM.
+  - ~~**DEPTH STUB: capture on compose**~~ — LANDED 2026-10-03: CameraX 1.5.1
+    (1.6.2 needs AGP 8.9.1) and AudioRecord, KayaCapture.kt; the phone AVD's
+    two cameras are flat-colour `imagefile:` images (a camera flag over the
+    snapshot changes nothing, the guest lists its cameras at boot), the tone
+    injected over the emulator's gRPC only once the app records
+    (tools/lib/emulator_capture.py; an earlier inject crashes the emulator,
+    docs/traps.md); six legs green (compose, jvm, go).
+    docs/probes/capture-2026-10-01/compose-measured.md.
+  - The iOS legs — LANDED 2026-10-03: the shared interpreter's in-process
+    source on the rust, swift and go suites, six legs green; the simulator
+    lists no camera service and a read-only CoreAudio probe read the host's
+    input idle across the legs. Rule 7's audio session category is left to
+    the real path (OPEN D in the breadth notes) and unbuilt.
+  - The other eight bindings — LANDED 2026-10-03: check-sugar-surface's capture
+    census green in all nine. The callbacks run on kaya's capture thread in
+    every binding; Python, C#, Java, OCaml, Haskell and JS hand a copy, Go and
+    Swift borrow as C and Rust do; JS runs them in a capture worker the
+    capture thread calls synchronously (RULING below).
+  - **RULING (open)**: a capture callback that raises is caught, logged naming
+    the capture and the capture keeps running, DESIGN.md's abort rule carried
+    to the capture thread — built in all nine, each with a watched negative.
+    And JS's one difference: its worker carries a capture's frame and sample
+    callbacks both, so a slow frame handler delays a chunk (reported as
+    overrun, never lost).
+  - **The C floor**: kaya.h carries every capture entry point, but
+    bindings/c/kaya_wire.h has no parsers for the four capture occurrences
+    and no C guest exists; the generator's C arm is the next step.
+  - Each lane's synthetic device sits in its platform's own path (§9 ruling 3)
+    under the harness, every backend lists the core's synthetic table, each
+    entry carried by the lane device found for it (a PipeWire node named by
+    the id, a virtual camera by its name, the emulator's cameras, a cable's or
+    the emulator microphone's left and right channel for the two
+    microphones), and the prompt is the core's synthetic one, the platform's
+    own grant arranged by the lane. tools/check-verbs.py holds a wall per
+    backend: every real-device open inside one walled function, fatal under
+    KAYA_SELFTEST.
+  - Not built, each with its plan section: §5's surface frames and voice
+    output (and with them the `voice` prop), the opt-in real-device leg
     (§7a), rule 6's background capture, `systemPreferredCamera` followed live
     (it is read when the list is reported), the self-view's mirroring asserted
     (it is applied for a front or desktop camera, but a flat synthetic colour
-    cannot show it), and an Info.plist with the camera and microphone usage
-    strings for a guest the maintainer runs by hand (an unbundled guest is
-    attributed to its terminal, and macOS ends a process that asks with no
-    usage string).
+    cannot show it), interruptions on Android and Windows, and an Info.plist
+    with the camera and microphone usage strings for a guest the maintainer
+    runs by hand (an unbundled guest is attributed to its terminal, and macOS
+    ends a process that asks with no usage string).
 
 ## ~~RULING — a media reader's read for a track its source lacks answers `decode_error` (found 2026-10-02, the reader's depth slice)~~ RESOLVED 2026-10-02, ruled and built: a new closed reason `no_track` (spec media_failure 8) in all nine bindings, answered on all five platforms from the same one site per backend through crates/kaya/src/reader.rs's `NO_TRACK`; a genuine decode failure still answers `decode_error`, and the player never answers `no_track` (docs/media-plan.md §8 ruling 4 says why); media_reader's no-track label (label#4 since the cancel line moved below its buttons) reads `no_track`
 KEY: NO_TRACK, Report::NoTrack, kaya_reader_no_track, reader_no_track, readerNoTrack, no_track, noTrack, h264_noaudio.mp4, media_reader label#5

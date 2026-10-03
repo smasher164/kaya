@@ -120,6 +120,8 @@ afternoon twice, 2026-09-07). The routes:
 | probe GTK without a lane | `docker run --rm -i -v "$PWD":/work kaya-linux:latest bash -c 'xvfb-run -a …'` — python3-gi, Xvfb, weston and ImageMagick are in the image; `convert -trim` cuts a root-window grab to the window |
 | run one Rust guest on a warm emulator | `adb -s emulator-5554 shell am start -W -n dev.kaya.rusthost/.MainActivity --es KAYA_SELFTEST <scene> --es KAYA_SELFTEST_SCRIPT '<steps folded with ;>'`; the pool stays booted between runs THE SINGLE QUOTES AROUND THE FOLDED SCRIPT ARE LOAD-BEARING: the device shell reads each `;` as a command separator without them (`shlex.quote` the script). |
 | run one leg on the VM | `tools/deploy-win.py akhil@192.168.64.2 <leg>` (per-leg names are the grammar; `python` is the milestone2 python leg, not the python suite) |
+| hand-run a linux capture leg | `KAYA_ONLY=capture-rust tools/validate-linux.py`; inside the container `tools/linux/capture-leg.py portal\|direct <guest>` owns the leg's PipeWire, WirePlumber, the four `tools/linux/pwsynth` synthetic devices, the portal grant (keyed on the empty app id an unsandboxed process has) and their proven stop; wayland legs take the camera portal, x11 legs PipeWire directly (docs/probes/capture-2026-10-01/linux-measured.md) |
+| watch a mac scene negative fail | `tools/mac/scene-negative.py <scene> <lang> <file> <pattern> <repl> "<red sentence>"`: one cut (exactly one substitution, printed), run-leg --build, restore from a saved copy with its sha256 compared, and WATCHED RED only when the leg failed with that sentence in its own output, both artifacts still carried the doctored tree's id after the leg, and the host did not sleep inside the window. The tree is doctored while the leg runs, so nothing else on the host may build then (docs/traps.md, the capture rate cut) |
 | hold a scene still for a capture | give the guest its own steps through `KAYA_SELFTEST_SCRIPT` (the mac lane sets it from tools/scenes in `lanes.mac.leg_env`, so build that env and replace the one key) with `settle 9000` where the photograph goes; the tree stays untouched. On the mac, `KAYA_SELFTEST_SCRIPT="$(cat <yours>)" tools/run-leg.py <scene> <lang>` keeps yours over the scene's and prints that it did |
 | read a failed leg | the flight recorder's bundle first: `~/.local/state/kaya/flightrec/runs/<run>/bundles/<lane>-<leg>/` — the leg log, the verb trace, a PICTURE of what the user would have seen, and each lane's own sections, every one present or carrying a sentence saying what was measured instead; the leg's log prints them all with their sizes. The table is in "The flight recorder's bundle, lane by lane" below |
 
@@ -271,6 +273,59 @@ collection keys. See DESIGN.md's transport section for the doctrine.
   every run prints which state it found (`deploy-win: Defender excludes
   …` or `DEFENDER SCANS …` naming the command), since it is VM state
   and a rebuilt VM starts without it.
+- THE WINDOWS CAPTURE INSTALL (ruled 2026-10-02, docs/capture-plan.md §9;
+  done on the VM 2026-10-02): the capture legs' synthetic devices are two
+  Media Foundation virtual cameras and the VB-CABLE loopback, and both need
+  an admin install once, plus one reboot. Every deploy prints which state
+  it found (`deploy-win: capture install IN PLACE: …` or `NOT IN PLACE`),
+  refuses capture legs on a VM without it, and re-copies its own DLL and
+  class ids when the deployed DLL moved (the ssh session is elevated). On a
+  rebuilt VM: run `tools/deploy-win.py <host> rust` once (it ships the
+  script, the DLL and the helper to C:\kaya), copy the vendor zip beside
+  them or let the script download it, then run the install IN THE CONSOLE
+  SESSION, the way every guest payload runs:
+  `ssh <host> 'schtasks /create /tn kaya_capinstall /tr "powershell -NoProfile -ExecutionPolicy Bypass -File C:\kaya\capture-install.ps1 -Mode install" /sc once /st 00:00 /it /rl highest /f && schtasks /run /tn kaya_capinstall'`,
+  read `-Mode check` until it says `cable … staged: a reboot is owed`,
+  delete the task, and reboot once. What it leaves on the machine
+  (tools/guest/capture-install.ps1 holds every value):
+  - `C:\Program Files\kaya-capture\kaya_winvcam.dll`, the arm64 media source
+    the Frame Server loads (tools/winvcam, `cargo xwin build --locked
+    --release --target aarch64-pc-windows-msvc`, static CRT), outside any
+    user profile so the Frame Server's account can read it.
+  - `HKLM\SOFTWARE\Classes\CLSID\{73D25515-3E88-5187-8020-696B652FA737}` and
+    `…\{9D4DF51D-C03E-5430-9201-371FF0648E12}` (kaya Synthetic Camera 1,
+    C83C1E; 2, 1E5AC8), each with `InprocServer32` = that path and
+    `ThreadingModel` = Both. No camera exists until kaya-capture-lane makes
+    one: they are SESSION-lifetime virtual cameras, current user, made by
+    the runner around the capture legs and gone when it stops them.
+  - VB-CABLE Driver Pack 45 from
+    `https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip`
+    (sha256 b950e39f01af1d04ea623c8f6d8eb9b6ea5c477c637295fabf20631c85116bfb,
+    held by the script), installed by the vendor's own
+    `VBCABLE_Setup_x64.exe -i -h` (silent; the x64 setup installs the ARM64
+    driver): driver store `vbmmecable64_win10.inf` 3.3.1.7 (2024-10-07, as
+    oem13.inf on this VM), device `ROOT\MEDIA\0000` "VB-Audio Virtual Cable",
+    endpoints "CABLE Input" and "CABLE In 16ch" (render) and "CABLE Output"
+    (capture), all named "(VB-Audio Virtual Cable)" only after the reboot.
+    Donationware, used AS IS from the vendor's zip and never redistributed
+    (its licence forbids folding it into another installer). Chosen over
+    VirtualDrivers/Virtual-Audio-Driver, which is test-signed (it needs
+    `bcdedit /set testsigning on`) and whose speaker does not feed its
+    microphone (docs/probes/capture-2026-10-01/windows-measured.md).
+  - the desktop-apps camera and microphone switches left on (`check` reads
+    HKLM and HKCU ConsentStore and refuses a Deny).
+  Uninstalling: the vendor setup's `-u -h`, the two CLSID keys, the
+  directory, one reboot. The lane side is kaya-capture-lane (tools/winvcam,
+  shipped flat to C:\kaya): deploy-win starts it through
+  `tools/guest/capture-lane.cmd` as an interactive task before a capture
+  leg, waits for `C:\kaya\capture-lane.ready`, and after the leg writes
+  `C:\kaya\capture-lane.stop` and reads the process list back empty; the
+  helper also leaves by itself at its wall-clock bound. Its log
+  (`C:\kaya\capture-lane.log`, the session's device list included) is a red
+  capture leg's `capture-devices` bundle section. By hand:
+  `C:\kaya\kaya-capture-lane.exe list|frame <camera>|listen` in an
+  interactive task. NEVER open the VM's "Line In": it is UTM's route to the
+  host's own input, which is why the arm's wall refuses it under the harness.
 - The accessibility scene is the one leg with an environment
   requirement of its own: GTK publishes an accessibility tree only
   under `GTK_A11Y=atspi` with a session bus and the AT-SPI launcher
