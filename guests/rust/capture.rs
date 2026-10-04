@@ -57,19 +57,22 @@ pub fn app(ctx: kaya::AppCtx) {
                 for label in &labels {
                     tx.label(*label); // label#0..#4
                 }
+                tx.row(|tx| {
+                    for (title, msg) in [
+                        ("Ask camera", Msg::Ask),
+                        ("Start", Msg::Start),
+                        ("Switch", Msg::Switch),
+                        ("Mute", Msg::Mute),
+                        ("Camera off", Msg::CameraOff),
+                        ("Stop", Msg::Stop),
+                        ("Open missing", Msg::Missing),
+                    ] {
+                        let b = tx.button(title).id(); // button#0..#6
+                        msgs.on_click(b, msg);
+                    }
+                })
+                .wrap(true);
                 tx.video_capture(call).a11y_label("Self view"); // video#0
-                for (title, msg) in [
-                    ("Ask camera", Msg::Ask),
-                    ("Start", Msg::Start),
-                    ("Switch", Msg::Switch),
-                    ("Mute", Msg::Mute),
-                    ("Camera off", Msg::CameraOff),
-                    ("Stop", Msg::Stop),
-                    ("Open missing", Msg::Missing),
-                ] {
-                    let b = tx.button(title).id(); // button#0..#6
-                    msgs.on_click(b, msg);
-                }
             })
             .id();
         tx.mount(root);

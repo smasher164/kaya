@@ -401,7 +401,7 @@ pub struct KayaHostApi {
     pub capture_harness: unsafe extern "C" fn(u32, u32, *const u8, usize, *mut u8, usize, *mut u8) -> usize,
     pub reader_no_track: unsafe extern "C" fn(u64, u64, *const u8, usize),
     pub capture_nearest_format: unsafe extern "C" fn(*const u32, usize, f64, f64, f64, *mut u32) -> u32,
-    pub capture_self_view_natural: unsafe extern "C" fn(u32, u32, *mut u32),
+    pub capture_self_view_natural: unsafe extern "C" fn(u32, u32, u32, *mut u32),
 }
 
 /// # Safety

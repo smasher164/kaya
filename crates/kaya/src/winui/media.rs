@@ -278,10 +278,11 @@ fn trail_adaptive(adaptive: &AdaptiveMediaSource, trail: &Trail, generation: u64
 
 pub(super) struct WinVideo {
     pub(super) host: Grid,
-    /// An empty child at the natural size: the host has no Width of its
-    /// own, so it takes the natural size where it fits and the room it is
-    /// given where it does not, SwiftUI's idealWidth with maxWidth.
-    extent: Grid,
+    /// An empty child at the natural size inside a Viewbox, which scales it
+    /// to the host's room at its aspect (docs/media-plan.md §3): the host
+    /// has no Width or Height of its own, so it takes the natural size where
+    /// it fits, and where it does not its height follows its width.
+    frame: Grid,
     pub(super) element: MediaPlayerElement,
     /// What assistive clients read (docs/media-plan.md §3): an empty Image
     /// over the picture, since a named MediaPlayerElement publishes only a
@@ -1574,7 +1575,10 @@ pub(super) fn create_video(core: &mut CoreState, id: u64) -> windows_core::Resul
     let picture = super::bindings::Microsoft::UI::Xaml::Controls::Image::new()?;
     picture.SetIsHitTestVisible(false)?;
     picture.SetStretch(Stretch::Uniform)?;
-    let extent = Grid::new()?;
+    let frame = Grid::new()?;
+    let extent = super::bindings::Microsoft::UI::Xaml::Controls::Viewbox::new()?;
+    extent.SetStretch(Stretch::Uniform)?;
+    extent.SetChild(&frame)?;
     extent.SetIsHitTestVisible(false)?;
     extent.SetHorizontalAlignment(HorizontalAlignment::Left)?;
     host.Children()?.Append(&extent)?;
@@ -1582,7 +1586,7 @@ pub(super) fn create_video(core: &mut CoreState, id: u64) -> windows_core::Resul
     host.Children()?.Append(&picture)?;
     host.Children()?.Append(&ax)?;
     host.Children()?.Append(&caption_box)?;
-    let video = WinVideo { host, extent, element, ax, picture, caption_box, caption, player: None, capture: None };
+    let video = WinVideo { host, frame, element, ax, picture, caption_box, caption, player: None, capture: None };
     natural_size(&video, (0, 0))?;
     core.media.video_ids.push(id);
     Ok(video)
@@ -1600,15 +1604,15 @@ pub(super) fn elements(core: &CoreState) -> Vec<super::bindings::Microsoft::UI::
 }
 
 /// The view's natural size: its picture's, 320x180 until one is known —
-/// the SwiftUI arm's `kayaVideoNatural` — and no wider than the room it is
-/// given.
+/// the SwiftUI arm's `kayaVideoNatural` — no wider than the room it is
+/// given, its height following its width (docs/media-plan.md §3).
 fn natural_size(video: &WinVideo, size: (u32, u32)) -> windows_core::Result<()> {
     let (w, h) = if size.0 == 0 || size.1 == 0 { (320.0, 180.0) } else { (f64::from(size.0), f64::from(size.1)) };
-    video.extent.SetWidth(w)?;
-    video.extent.SetHeight(h)?;
+    video.frame.SetWidth(w)?;
+    video.frame.SetHeight(h)?;
     video.host.SetWidth(f64::NAN)?;
     video.host.SetMaxWidth(w)?;
-    video.host.SetHeight(h)
+    video.host.SetHeight(f64::NAN)
 }
 
 pub(super) fn destroy_video(core: &mut CoreState, id: u64) {
@@ -1696,12 +1700,12 @@ fn show_capture(video: &WinVideo, preview: Option<&CapturePreview>) -> windows_c
                 Some((b, _)) => video.picture.SetSource(b)?,
                 None => video.picture.SetSource(None::<&super::bindings::Microsoft::UI::Xaml::Media::ImageSource>)?,
             }
-            natural_size(video, crate::capture::self_view_natural(p.size))?;
+            natural_size(video, crate::capture::self_view_natural(p.size, 0))?;
             mirror(&video.picture, p.mirror)
         }
         None => {
             video.picture.SetSource(None::<&super::bindings::Microsoft::UI::Xaml::Media::ImageSource>)?;
-            natural_size(video, crate::capture::self_view_natural((0, 0)))?;
+            natural_size(video, crate::capture::self_view_natural((0, 0), 0))?;
             mirror(&video.picture, false)
         }
     }

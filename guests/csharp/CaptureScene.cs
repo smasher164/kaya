@@ -40,21 +40,26 @@ static class CaptureScene
             tx.Mount(tx.Column(root =>
             {
                 foreach (var label in labels) tx.Label(bind: label); // label#0..#4
+                var buttons = tx.Row(buttons =>
+                {
+                    tx.Button("Ask camera", t => t.RequestPermission(CaptureKind.Camera)); // button#0
+                    tx.Button("Start", t => t.StartCapture(call));                         // button#1
+                    tx.Button("Switch", t =>                                               // button#2
+                    {
+                        t.SetCamera(call, Camera2);
+                        t.SetMicrophone(call, Microphone2);
+                        t.SetCaptureSize(call, 1280, 720);
+                        t.SetFrameRate(call, 15);
+                    });
+                    tx.Button("Mute", t => t.SetMuted(call, true));             // button#3
+                    tx.Button("Camera off", t => t.SetCamera(call, null));      // button#4
+                    tx.Button("Stop", t => t.StopCapture(call));                // button#5
+                    tx.Button("Open missing", t => t.StartCapture(missing));    // button#6
+                    return buttons;
+                });
+                tx.SetWrap(buttons, true);
                 var view = tx.Video(call);                            // video#0
                 tx.SetA11yLabel(view, "Self view");
-                tx.Button("Ask camera", t => t.RequestPermission(CaptureKind.Camera)); // button#0
-                tx.Button("Start", t => t.StartCapture(call));                         // button#1
-                tx.Button("Switch", t =>                                               // button#2
-                {
-                    t.SetCamera(call, Camera2);
-                    t.SetMicrophone(call, Microphone2);
-                    t.SetCaptureSize(call, 1280, 720);
-                    t.SetFrameRate(call, 15);
-                });
-                tx.Button("Mute", t => t.SetMuted(call, true));             // button#3
-                tx.Button("Camera off", t => t.SetCamera(call, null));      // button#4
-                tx.Button("Stop", t => t.StopCapture(call));                // button#5
-                tx.Button("Open missing", t => t.StartCapture(missing));    // button#6
                 return root;
             }));
             tx.WatchCaptureDevices(true);

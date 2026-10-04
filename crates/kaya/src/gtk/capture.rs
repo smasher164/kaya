@@ -162,7 +162,7 @@ fn repaint(core: &mut CoreState, id: u64) {
         (open.and_then(|o| o.paintable.clone()), open.map_or((0, 0), |o| o.frames))
     });
     for view in core.videos.iter().filter(|v| v.capture.get() == Some(id)) {
-        self_view_size(view, Some(crate::capture::self_view_natural(frames)));
+        self_view_size(view, Some(crate::capture::self_view_natural(frames, 0)));
         view.picture.set_paintable(paintable.as_ref());
         view.picture.queue_draw();
     }
@@ -170,84 +170,12 @@ fn repaint(core: &mut CoreState, id: u64) {
 }
 
 /// A self-view takes the core's natural size with no minimum, so it shrinks
-/// to its room (docs/capture-plan.md §3); `None` gives the view back to the
-/// player's picture sizing.
+/// to its room at its aspect (docs/capture-plan.md §3); `None` gives the view
+/// back to the player's picture sizing.
 fn self_view_size(view: &gtk_media::GtkVideoView, natural: Option<(u32, u32)>) {
-    match natural {
-        Some((w, h)) => {
-            let layout = view
-                .picture
-                .layout_manager()
-                .and_then(|l| l.downcast::<natural_layout::NaturalLayout>().ok())
-                .unwrap_or_else(|| {
-                    let layout = natural_layout::NaturalLayout::default();
-                    view.picture.set_layout_manager(Some(layout.clone()));
-                    layout
-                });
-            layout.set_natural(w as i32, h as i32);
-            view.picture.set_size_request(-1, -1);
-            let grows = grow_weight(view.overlay.upcast_ref()) > 0.0;
-            view.picture.set_halign(if grows { gtk4::Align::Fill } else { gtk4::Align::Center });
-        }
-        None => {
-            view.picture.set_layout_manager(None::<gtk4::LayoutManager>);
-            view.picture.set_size_request(gtk_media::VIDEO_PLACEHOLDER.0, gtk_media::VIDEO_PLACEHOLDER.1);
-            view.picture.set_halign(gtk4::Align::Fill);
-        }
-    }
-}
-
-mod natural_layout {
-    use gtk4::glib;
-    use gtk4::prelude::*;
-    use gtk4::subclass::prelude::*;
-    use std::cell::Cell;
-
-    #[derive(Default)]
-    pub struct NaturalLayoutInner {
-        natural: Cell<(i32, i32)>,
-    }
-
-    #[glib::object_subclass]
-    impl ObjectSubclass for NaturalLayoutInner {
-        const NAME: &'static str = "KayaNaturalLayout";
-        type Type = NaturalLayout;
-        type ParentType = gtk4::LayoutManager;
-    }
-
-    impl ObjectImpl for NaturalLayoutInner {}
-
-    impl LayoutManagerImpl for NaturalLayoutInner {
-        fn measure(
-            &self,
-            _widget: &gtk4::Widget,
-            orientation: gtk4::Orientation,
-            _for_size: i32,
-        ) -> (i32, i32, i32, i32) {
-            let (w, h) = self.natural.get();
-            (0, if orientation == gtk4::Orientation::Horizontal { w } else { h }, -1, -1)
-        }
-
-        fn allocate(&self, _widget: &gtk4::Widget, _width: i32, _height: i32, _baseline: i32) {}
-    }
-
-    glib::wrapper! {
-        pub struct NaturalLayout(ObjectSubclass<NaturalLayoutInner>)
-            @extends gtk4::LayoutManager;
-    }
-
-    impl Default for NaturalLayout {
-        fn default() -> Self {
-            glib::Object::new()
-        }
-    }
-
-    impl NaturalLayout {
-        pub fn set_natural(&self, width: i32, height: i32) {
-            self.imp().natural.set((width, height));
-            self.layout_changed();
-        }
-    }
+    gtk_media::video_layout(view).set_natural(natural.map(|(w, h)| (w as i32, h as i32)));
+    let grows = natural.is_some() && grow_weight(view.overlay.upcast_ref()) > 0.0;
+    view.picture.set_halign(if natural.is_none() || grows { gtk4::Align::Fill } else { gtk4::Align::Center });
 }
 
 /// Rule 5: a capture keeps the display awake while its camera is open and

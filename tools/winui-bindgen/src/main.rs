@@ -310,6 +310,9 @@ fn main() {
         // from an in-memory stream (encoded bytes arrive as blobs;
         // there is no file to point a Uri at).
         "Microsoft.UI.Xaml.Controls.Image".to_string(),
+        // A video view's extent: scaled to its room at its natural aspect
+        // (docs/media-plan.md §3).
+        "Microsoft.UI.Xaml.Controls.Viewbox".to_string(),
         // Without the class filter windows-bindgen emits only the
         // IImageSource interface, leaving BitmapImage's
         // required_hierarchy! (and Image.Source/SetSource) referencing a

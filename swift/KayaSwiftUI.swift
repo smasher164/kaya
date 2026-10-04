@@ -19755,25 +19755,24 @@ struct KayaRender: View {
             KayaRangeSurface(node: node)
                 .frame(maxWidth: node.grow > 0 ? .infinity : 200)
         case kindVideo:
-            // docs/media-plan.md §3: the bare layer at its picture's size, a
-            // picture to an assistive reader, with play and pause as actions.
+            // docs/media-plan.md §3: the bare layer at its picture's size,
+            // its height following its width, a picture to an assistive
+            // reader, with play and pause as actions.
             let natural = kayaVideoNatural(node)
             let actions = kayaVideoActions(node)
             if node.videoCapture != 0 {
                 // docs/capture-plan.md §3: a self-view has no play or pause.
                 KayaVideoSurface(node: node)
-                    .frame(
-                        idealWidth: natural.width, maxWidth: node.grow > 0 ? .infinity : natural.width,
-                        idealHeight: natural.height, maxHeight: natural.height)
+                    .aspectRatio(natural, contentMode: .fit)
+                    .frame(idealWidth: natural.width, maxWidth: node.grow > 0 ? .infinity : natural.width)
                     .background(KayaVideoVisibility(node: node))
                     .accessibilityElement(children: .ignore)
                     .accessibilityAddTraits(.isImage)
             } else {
                 KayaVideoSurface(node: node)
                     .overlay { KayaCaptionOverlay(node: node) }
-                    .frame(
-                        idealWidth: natural.width, maxWidth: node.grow > 0 ? .infinity : natural.width,
-                        idealHeight: natural.height, maxHeight: natural.height)
+                    .aspectRatio(natural, contentMode: .fit)
+                    .frame(idealWidth: natural.width, maxWidth: node.grow > 0 ? .infinity : natural.width)
                     .background(KayaVideoVisibility(node: node))
                     .accessibilityElement(children: .ignore)
                     .accessibilityAddTraits(.isImage)
@@ -28340,7 +28339,7 @@ func kayaVideoNatural(_ node: KayaNode) -> CGSize {
     if node.videoCapture != 0 {
         let format = kayaCaptures[node.videoCapture]?.source?.format ?? (0, 0, 0)
         var natural: [UInt32] = [0, 0]
-        natural.withUnsafeMutableBufferPointer { KayaHost.api.capture_self_view_natural(format.0, format.1, $0.baseAddress) }
+        natural.withUnsafeMutableBufferPointer { KayaHost.api.capture_self_view_natural(format.0, format.1, 0, $0.baseAddress) }
         return CGSize(width: Int(natural[0]), height: Int(natural[1]))
     }
     let size = kayaPlayers[node.videoPlayer]?.mediaSize ?? .zero

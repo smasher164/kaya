@@ -105,19 +105,21 @@ func App() *kaya.App {
 			for _, label := range labels {
 				tx.Label(label) // label#0..#4
 			}
+			tx.Row(func() {
+				tx.Button("Ask camera", func(tx *kaya.Tx) { tx.RequestPermission(kaya.CaptureKindCamera) }) // button#0
+				tx.Button("Start", func(tx *kaya.Tx) { tx.StartCapture(call) })                             // button#1
+				tx.Button("Switch", func(tx *kaya.Tx) {                                                     // button#2
+					tx.CaptureCamera(call, camera2)
+					tx.CaptureMicrophone(call, microphone2)
+					tx.CaptureSize(call, 1280, 720)
+					tx.CaptureFrameRate(call, 15)
+				})
+				tx.Button("Mute", func(tx *kaya.Tx) { tx.CaptureMuted(call, true) })      // button#3
+				tx.Button("Camera off", func(tx *kaya.Tx) { tx.CameraOff(call) })         // button#4
+				tx.Button("Stop", func(tx *kaya.Tx) { tx.StopCapture(call) })             // button#5
+				tx.Button("Open missing", func(tx *kaya.Tx) { tx.StartCapture(missing) }) // button#6
+			}).Wrap(true)
 			tx.VideoCapture(call).A11yLabel("Self view")                                                // video#0
-			tx.Button("Ask camera", func(tx *kaya.Tx) { tx.RequestPermission(kaya.CaptureKindCamera) }) // button#0
-			tx.Button("Start", func(tx *kaya.Tx) { tx.StartCapture(call) })                             // button#1
-			tx.Button("Switch", func(tx *kaya.Tx) {                                                     // button#2
-				tx.CaptureCamera(call, camera2)
-				tx.CaptureMicrophone(call, microphone2)
-				tx.CaptureSize(call, 1280, 720)
-				tx.CaptureFrameRate(call, 15)
-			})
-			tx.Button("Mute", func(tx *kaya.Tx) { tx.CaptureMuted(call, true) })      // button#3
-			tx.Button("Camera off", func(tx *kaya.Tx) { tx.CameraOff(call) })         // button#4
-			tx.Button("Stop", func(tx *kaya.Tx) { tx.StopCapture(call) })             // button#5
-			tx.Button("Open missing", func(tx *kaya.Tx) { tx.StartCapture(missing) }) // button#6
 		}))
 		tx.WatchCaptureDevices(true)
 	})

@@ -2506,6 +2506,12 @@ mod flex {
     }
 
     impl LayoutManagerImpl for FlowLayoutInner {
+        // Its height is its lines' at the width it is given; left to the
+        // default, buttons answer CONSTANT_SIZE and GTK measures one line.
+        fn request_mode(&self, _widget: &gtk4::Widget) -> gtk4::SizeRequestMode {
+            gtk4::SizeRequestMode::HeightForWidth
+        }
+
         fn measure(
             &self,
             widget: &gtk4::Widget,
@@ -24522,7 +24528,90 @@ mod gtk_media {
     ";
 
     /// A player's picture before its media size is known.
-    pub(super) const VIDEO_PLACEHOLDER: (i32, i32) = (320, 180);
+    const VIDEO_PLACEHOLDER: (i32, i32) = (320, 180);
+
+    pub(super) fn video_layout(view: &GtkVideoView) -> video_layout_manager::VideoLayout {
+        view.picture
+            .layout_manager()
+            .and_then(|l| l.downcast::<video_layout_manager::VideoLayout>().ok())
+            .expect("build_video_view installs the video layout")
+    }
+
+    /// The video view's size, the player's and the self-view's alike: its
+    /// natural size with no minimum, its height following its width
+    /// (docs/media-plan.md §3, crate::media::video_view_height).
+    pub(super) mod video_layout_manager {
+        use gtk4::glib;
+        use gtk4::prelude::*;
+        use gtk4::subclass::prelude::*;
+        use std::cell::Cell;
+
+        #[derive(Default)]
+        pub struct VideoLayoutInner {
+            /// A self-view's natural size; `None` is the player's picture's.
+            natural: Cell<Option<(i32, i32)>>,
+        }
+
+        #[glib::object_subclass]
+        impl ObjectSubclass for VideoLayoutInner {
+            const NAME: &'static str = "KayaVideoLayout";
+            type Type = VideoLayout;
+            type ParentType = gtk4::LayoutManager;
+        }
+
+        impl ObjectImpl for VideoLayoutInner {}
+
+        impl LayoutManagerImpl for VideoLayoutInner {
+            fn request_mode(&self, _widget: &gtk4::Widget) -> gtk4::SizeRequestMode {
+                gtk4::SizeRequestMode::HeightForWidth
+            }
+
+            fn measure(
+                &self,
+                widget: &gtk4::Widget,
+                orientation: gtk4::Orientation,
+                for_size: i32,
+            ) -> (i32, i32, i32, i32) {
+                let (w, h) = self.natural.get().unwrap_or_else(|| {
+                    widget
+                        .downcast_ref::<gtk4::Picture>()
+                        .and_then(|p| p.paintable())
+                        .map(|p| (p.intrinsic_width(), p.intrinsic_height()))
+                        .filter(|(w, h)| *w > 0 && *h > 0)
+                        .unwrap_or(super::VIDEO_PLACEHOLDER)
+                });
+                if orientation == gtk4::Orientation::Horizontal {
+                    return (0, w, -1, -1);
+                }
+                if for_size < 0 {
+                    return (0, h, -1, -1);
+                }
+                let grows = widget.parent().is_some_and(|p| super::super::grow_weight(&p) > 0.0);
+                let at = crate::media::video_view_height((w.max(0) as u32, h.max(0) as u32), for_size, grows);
+                (at, at, -1, -1)
+            }
+
+            fn allocate(&self, _widget: &gtk4::Widget, _width: i32, _height: i32, _baseline: i32) {}
+        }
+
+        glib::wrapper! {
+            pub struct VideoLayout(ObjectSubclass<VideoLayoutInner>)
+                @extends gtk4::LayoutManager;
+        }
+
+        impl Default for VideoLayout {
+            fn default() -> Self {
+                glib::Object::new()
+            }
+        }
+
+        impl VideoLayout {
+            pub fn set_natural(&self, natural: Option<(i32, i32)>) {
+                self.imp().natural.set(natural);
+                self.layout_changed();
+            }
+        }
+    }
 
     pub(super) fn build_video_view(id: WidgetId) -> GtkVideoView {
         use gtk4::prelude::{AccessibleExt, WidgetExt};
@@ -24530,8 +24619,7 @@ mod gtk_media {
             glib::Object::builder().property("accessible-role", gtk4::AccessibleRole::Img).build();
         let picture: gtk4::Picture =
             glib::Object::builder().property("accessible-role", gtk4::AccessibleRole::None).build();
-        picture.set_can_shrink(false);
-        picture.set_size_request(VIDEO_PLACEHOLDER.0, VIDEO_PLACEHOLDER.1);
+        picture.set_layout_manager(Some(video_layout_manager::VideoLayout::default()));
         picture.set_content_fit(gtk4::ContentFit::Contain);
         overlay.set_child(Some(&picture));
         let caption = gtk4::Label::new(None);

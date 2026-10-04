@@ -990,9 +990,29 @@ fn platform_can_play(mime: &str, codecs: &str) -> bool {
     crate::android::can_play(mime, codecs)
 }
 
+/// A video view's height for the width it is laid out at: its natural
+/// size's aspect, the player's and the self-view's alike (docs/media-plan.md
+/// §3). A view that does not grow is no wider than its natural width.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(crate) fn video_view_height(natural: (u32, u32), width: i32, grows: bool) -> i32 {
+    let (w, h) = (i64::from(natural.0.max(1)), i64::from(natural.1));
+    let width = if grows { i64::from(width.max(0)) } else { i64::from(width.max(0)).min(w) };
+    ((width * h + w / 2) / w) as i32
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_video_view_keeps_its_aspect_as_it_shrinks() {
+        assert_eq!(video_view_height((640, 360), 640, false), 360);
+        assert_eq!(video_view_height((640, 360), 488, false), 275);
+        assert_eq!(video_view_height((640, 360), 900, false), 360);
+        assert_eq!(video_view_height((640, 360), 900, true), 506);
+        assert_eq!(video_view_height((320, 240), 0, false), 0);
+        assert_eq!(video_view_height((0, 0), 300, true), 0);
+    }
 
     const P: PlayerId = PlayerId(7);
 

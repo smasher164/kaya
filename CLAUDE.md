@@ -1471,11 +1471,18 @@ in docs/deferred.md.
    read and the runner's one stream start is keyed on the arm's request.
    Watched negatives on every clause, counts printed. AND A SELF-VIEW'S
    NATURAL SIZE SINCE 2026-10-03 (docs/capture-plan.md §3): half its
-   frames', 320x240 with no camera and no minimum, from
-   `crate::capture::self_view_natural` on all five arms through its C and
-   JNI doors; Compose had shipped a fixed 320x180 and GTK the frames' full
-   size with every capture leg green. Eleven watched negatives, counts
-   printed),
+   frames' as they stand upright, 320x240 with no camera and no minimum,
+   from `crate::capture::self_view_natural` on all five arms through its C
+   and JNI doors; Compose had shipped a fixed 320x180 and GTK the frames'
+   full size with every capture leg green. AND EVERY VIDEO VIEW, PLAYER OR
+   SELF-VIEW, KEEPS ITS ASPECT AS IT SHRINKS (docs/media-plan.md §3): its
+   height follows its width, where every arm had kept the full natural
+   height and letterboxed the picture inside it; and Android's box is the
+   upright picture's, its preview cropped to the frames' field of view
+   (docs/traps.md, the Android self-view's shape); and GTK's flowing row
+   is height-for-width, since left to the default it measured one line and
+   the capture guests' second line of buttons sat under the self-view.
+   Twenty-two watched negatives, counts printed),
    `tools/check-file-modes.py` (the file-mode NUMBERS agree with the
    spec's wherever they are written down. `kaya_open_picked` takes an
    integer, crates/kaya/src/spec.rs decides what it means, and five

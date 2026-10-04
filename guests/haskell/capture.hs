@@ -46,19 +46,22 @@ main = kayaMain $ \app -> do
     root <-
       column
         ( map labelBound labels -- label#0..#4
-            ++ [ videoCapture call [A11yLabel "Self view"], -- video#0
-                 buttonOn "Ask camera" (submitTx app (requestPermission Camera)), -- button#0
-                 buttonOn "Start" (submitTx app (startCapture call)),
-                 buttonOn "Switch" $
-                   submitTx app $ do
-                     captureCamera call (Just camera2)
-                     captureMicrophone call (Just microphone2)
-                     captureSize call 1280 720
-                     captureFrameRate call 15,
-                 buttonOn "Mute" (submitTx app (captureMuted call True)),
-                 buttonOn "Camera off" (submitTx app (captureCamera call Nothing)),
-                 buttonOn "Stop" (submitTx app (stopCapture call)),
-                 buttonOn "Open missing" (submitTx app (startCapture missing)) -- button#6
+            ++ [ row
+                   [Wrap True]
+                   [ buttonOn "Ask camera" (submitTx app (requestPermission Camera)), -- button#0
+                     buttonOn "Start" (submitTx app (startCapture call)),
+                     buttonOn "Switch" $
+                       submitTx app $ do
+                         captureCamera call (Just camera2)
+                         captureMicrophone call (Just microphone2)
+                         captureSize call 1280 720
+                         captureFrameRate call 15,
+                     buttonOn "Mute" (submitTx app (captureMuted call True)),
+                     buttonOn "Camera off" (submitTx app (captureCamera call Nothing)),
+                     buttonOn "Stop" (submitTx app (stopCapture call)),
+                     buttonOn "Open missing" (submitTx app (startCapture missing)) -- button#6
+                   ],
+                 videoCapture call [A11yLabel "Self view"] -- video#0
                ]
         )
     mount root

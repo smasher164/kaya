@@ -11,11 +11,10 @@ import android.os.Looper
 import android.view.accessibility.CaptioningManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -584,20 +583,21 @@ internal fun KayaVideoView(node: KayaNode, a11y: Modifier, boxFill: Modifier) {
     node.videoSeq
     kayaCaptionStyleSeq.intValue
     val p = kayaPlayers[node.videoPlayer]
-    // A self-view's natural size is the core's rule and shrinks to its room (docs/capture-plan.md §3).
+    // A self-view's natural size is the core's rule, its frames as they stand upright (docs/capture-plan.md §3).
     val selfView = if (node.videoCapture != 0L) {
-        val frames = kayaCaptures[node.videoCapture]?.source?.format
-        KayaPresent.captureSelfViewNatural(frames?.get(0) ?: 0, frames?.get(1) ?: 0)
+        val source = kayaCaptures[node.videoCapture]?.source
+        val frames = source?.format
+        KayaPresent.captureSelfViewNatural(frames?.get(0) ?: 0, frames?.get(1) ?: 0, source?.rotation ?: 0)
             ?: error("kaya: captureSelfViewNatural answered nothing")
     } else null
     val w = selfView?.get(0) ?: if (p != null && p.mediaWidth > 0) p.mediaWidth else 320
     val h = selfView?.get(1) ?: if (p != null && p.mediaHeight > 0) p.mediaHeight else 180
     val view = LocalView.current
     SideEffect { kayaMediaHostView = view }
+    // docs/media-plan.md §3: no wider than its natural size, its height following its width.
     val sized = when {
-        node.grow > 0 || node.fill == true -> boxFill.height(h.dp)
-        selfView != null -> Modifier.widthIn(max = w.dp).fillMaxWidth().height(h.dp)
-        else -> Modifier.size(w.dp, h.dp)
+        node.grow > 0 || node.fill == true -> boxFill.aspectRatio(w.toFloat() / h)
+        else -> Modifier.widthIn(max = w.dp).fillMaxWidth().aspectRatio(w.toFloat() / h)
     }
     val actions = listOf(
         CustomAccessibilityAction("Play") { kayaPlayers[node.videoPlayer]?.play(); true },
@@ -642,7 +642,7 @@ internal fun KayaVideoView(node: KayaNode, a11y: Modifier, boxFill: Modifier) {
         } else {
             SideEffect { kayaVideoSurfaces.remove(node.id) }
         }
-        if (node.videoCapture != 0L) KayaCapturePreview(node, node.fit.toInt() == FIT_COVER || node.fit.toInt() == FIT_FILL)
+        if (node.videoCapture != 0L) KayaCapturePreview(node)
         val caption = when {
             p == null -> ""
             p.drawsSidecar -> p.kayaCaption

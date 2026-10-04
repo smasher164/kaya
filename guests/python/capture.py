@@ -106,15 +106,17 @@ with app.window("capture", width=520.0, height=640.0):
     with kaya.column():
         for label in labels:
             kaya.label(bind=label)                                   # label#0..#4
+        with kaya.row() as buttons:
+            buttons.wrap(True)
+            kaya.button("Ask camera", on_click=lambda: kaya.request_permission(
+                kaya.CaptureKind.CAMERA))                                # button#0
+            kaya.button("Start", on_click=call.start)                    # button#1
+            kaya.button("Switch", on_click=on_switch)                    # button#2
+            kaya.button("Mute", on_click=lambda: call.set_muted(True))   # button#3
+            kaya.button("Camera off", on_click=lambda: call.set_camera(None))  # button#4
+            kaya.button("Stop", on_click=call.stop)                      # button#5
+            kaya.button("Open missing", on_click=missing.start)          # button#6
         kaya.video(capture=call).a11y_label("Self view")             # video#0
-        kaya.button("Ask camera", on_click=lambda: kaya.request_permission(
-            kaya.CaptureKind.CAMERA))                                # button#0
-        kaya.button("Start", on_click=call.start)                    # button#1
-        kaya.button("Switch", on_click=on_switch)                    # button#2
-        kaya.button("Mute", on_click=lambda: call.set_muted(True))   # button#3
-        kaya.button("Camera off", on_click=lambda: call.set_camera(None))  # button#4
-        kaya.button("Stop", on_click=call.stop)                      # button#5
-        kaya.button("Open missing", on_click=missing.start)          # button#6
     kaya.watch_capture_devices(True)
 
 kaya.on_capture_devices(lambda devices: labels[0].set(device_line(devices)))

@@ -132,14 +132,23 @@ lowering is the same element the player already uses:
 | Android | CameraX `Preview` into a `PreviewView` (or `CameraXViewfinder`) in PERFORMANCE mode | the SurfaceView hole, as the player's |
 
 A self-view's natural size is half its frames' (320x240 for 640x480,
-640x360 for 1280x720) and 320x240 while no camera is open, and it takes no
-minimum: in a window narrower than that it shrinks to the room it is given
-and the picture keeps its aspect inside. One rule on all five backends,
-computed in one place, `crate::capture::self_view_natural`, which GTK and
-WinUI call directly and the two interpreters reach through
-`kaya_capture_self_view_natural` (the SwiftUI host table) and
-`KayaPresent.captureSelfViewNatural` (JNI); tools/check-verbs.py's
-self-view clause holds every arm to it. Half rather than the whole: a
+640x360 for 1280x720) and 320x240 while no camera is open; frames carrying
+a rotation of 90 or 270 stand on end, so their upright picture is fitted
+inside that half-size box (180x240 for 640x480, 203x360 for 1280x720) and a
+layout that fits one platform fits the others. It takes no minimum: in a window narrower than that it shrinks to the room
+it is given, keeping its aspect, so its height follows its width and the
+picture fills it with no bands (docs/media-plan.md §3, the one rule every
+video view keeps). The natural size is computed in one place,
+`crate::capture::self_view_natural`, which GTK and WinUI call directly and
+the two interpreters reach through `kaya_capture_self_view_natural` (the
+SwiftUI host table) and `KayaPresent.captureSelfViewNatural` (JNI);
+tools/check-verbs.py's video view clause holds every arm to it. The
+rotation is the one the frames carry (§4): a phone's camera sensor is
+mounted across its portrait panel, so Android hands 640x480 frames with a
+rotation of 90 and its preview draws them upright, 3:4; the box takes the
+upright shape rather than the sideways frames', and the preview is cropped
+to the frames' field of view where the platform's preview stream has
+another aspect (docs/traps.md, the Android self-view's shape). Half rather than the whole: a
 1280x720 camera at its full size is wider than most windows a call sits in,
 and the frames the app is handed are the full size either way (§4).
 

@@ -13809,3 +13809,34 @@ true; the capture devices' readiness check was written that way and said
 the devices never came up on every run while the legs used them. Quoted
 whole (`cmd /c "if ... "`) it answers correctly; tools/check-python.py's
 rule 11 refuses the unquoted shape.
+
+## The Android self-view's shape: the preview stands the frames upright, the frames stay sideways (measured 2026-10-03)
+
+On the pool's 360x800 portrait phone the capture scene's self-view showed
+camera 1 as a 3:4 picture with black bands at the sides of a 4:3 box, while
+the app was handed 640x480 frames. Neither the emulator nor the PreviewView
+arm was wrong. `dumpsys media.camera` answers a sensor orientation of 90 for
+both `imagefile:` cameras, which is how a real phone mounts its sensor
+across a portrait panel; ImageAnalysis hands the frames as the sensor reads
+them with `rotationDegrees` 90 (`KAYA_CAPTURE_LAYOUT: 1280x720 rotation 90`
+in the capture leg's logcat), and PreviewView turns its preview to the
+display, so the picture stands 3:4 (CameraX's use-case rotation docs; a
+WebRTC self-view draws frames with their rotation applied the same way). The
+box was the sideways frames' shape. crates/kaya/src/capture.rs
+`self_view_natural` now takes the rotation and fits the upright picture
+inside the half-size box (180x240 for 640x480), so the box is the picture's
+shape and no taller than the other four platforms'. A first cut that used
+the upright frames' own half size (360x640 for 1280x720) overflowed the
+phone: the wrapping button row lost two lines and the SurfaceView covered
+what was left.
+
+Camera 2 has a second cause: CameraX offers no 16:9 preview on the phone
+beside the 1280x720 analysis stream (1280x720 is the camera's only 16:9 size
+and a preview that large was refused, docs/probes/capture-2026-10-01/
+compose-measured.md), so the preview stream falls back to 4:3 while the
+frames are 16:9. FIT_CENTER letterboxed it inside the 16:9 box. The arm now
+always uses FILL_CENTER: the box is the frames' aspect, so cropping the
+preview to it shows the frames' field of view (on a camera whose 16:9 mode
+is a centre crop of its 4:3 sensor; the flat synthetic colours cannot show
+the crop). tools/check-verbs.py's video view clause holds the rotation in
+the core rule, its JNI door and the arm.

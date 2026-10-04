@@ -43,18 +43,21 @@ let () =
               label ~bind:labels.(2);
               label ~bind:labels.(3);
               label ~bind:labels.(4); (* label#4 *)
+              row ~wrap:true
+                [
+                  button ~text:"Ask camera" ~on_click:(fun () -> request_permission Capture_kind.Camera);
+                  button ~text:"Start" ~on_click:(fun () -> start_capture call);
+                  button ~text:"Switch" ~on_click:(fun () ->
+                      capture_camera call (Some camera_2);
+                      capture_microphone call (Some microphone_2);
+                      capture_size call 1280.0 720.0;
+                      capture_frame_rate call 15.0);
+                  button ~text:"Mute" ~on_click:(fun () -> capture_muted call true);
+                  button ~text:"Camera off" ~on_click:(fun () -> capture_camera call None);
+                  button ~text:"Stop" ~on_click:(fun () -> stop_capture call);
+                  button ~text:"Open missing" ~on_click:(fun () -> start_capture missing); (* button#6 *)
+                ];
               video_capture ~a11y_label:"Self view" ~capture:call; (* video#0 *)
-              button ~text:"Ask camera" ~on_click:(fun () -> request_permission Capture_kind.Camera);
-              button ~text:"Start" ~on_click:(fun () -> start_capture call);
-              button ~text:"Switch" ~on_click:(fun () ->
-                  capture_camera call (Some camera_2);
-                  capture_microphone call (Some microphone_2);
-                  capture_size call 1280.0 720.0;
-                  capture_frame_rate call 15.0);
-              button ~text:"Mute" ~on_click:(fun () -> capture_muted call true);
-              button ~text:"Camera off" ~on_click:(fun () -> capture_camera call None);
-              button ~text:"Stop" ~on_click:(fun () -> stop_capture call);
-              button ~text:"Open missing" ~on_click:(fun () -> start_capture missing); (* button#6 *)
             ]
             ()
         in

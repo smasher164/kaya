@@ -40,19 +40,23 @@ KayaApp.run { app in
             for label in labels {
                 tx.label(bind: label)  // label#0..#4
             }
-            tx.setA11yLabel(tx.video(capture: call), "Self view")  // video#0
-            tx.button("Ask camera") { tx in tx.requestPermission(.camera) }  // button#0
-            tx.button("Start") { tx in tx.startCapture(call) }  // button#1
-            tx.button("Switch") { tx in  // button#2
-                tx.captureCamera(call, camera2)
-                tx.captureMicrophone(call, microphone2)
-                tx.captureSize(call, width: 1280, height: 720)
-                tx.captureFrameRate(call, 15)
+            let buttons = tx.row { buttons in
+                tx.button("Ask camera") { tx in tx.requestPermission(.camera) }  // button#0
+                tx.button("Start") { tx in tx.startCapture(call) }  // button#1
+                tx.button("Switch") { tx in  // button#2
+                    tx.captureCamera(call, camera2)
+                    tx.captureMicrophone(call, microphone2)
+                    tx.captureSize(call, width: 1280, height: 720)
+                    tx.captureFrameRate(call, 15)
+                }
+                tx.button("Mute") { tx in tx.captureMuted(call, true) }  // button#3
+                tx.button("Camera off") { tx in tx.captureCamera(call, nil) }  // button#4
+                tx.button("Stop") { tx in tx.stopCapture(call) }  // button#5
+                tx.button("Open missing") { tx in tx.startCapture(missing) }  // button#6
+                return buttons
             }
-            tx.button("Mute") { tx in tx.captureMuted(call, true) }  // button#3
-            tx.button("Camera off") { tx in tx.captureCamera(call, nil) }  // button#4
-            tx.button("Stop") { tx in tx.stopCapture(call) }  // button#5
-            tx.button("Open missing") { tx in tx.startCapture(missing) }  // button#6
+            tx.setWrap(buttons, true)
+            tx.setA11yLabel(tx.video(capture: call), "Self view")  // video#0
             return root
         }
         tx.mount(root)

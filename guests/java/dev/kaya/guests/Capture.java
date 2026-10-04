@@ -63,19 +63,21 @@ public final class Capture {
                 for (KayaApp.Signal<String> label : labels) {
                     tx.label(label); // label#0..#4
                 }
+                tx.row(buttons -> {
+                    tx.button("Ask camera", t -> t.requestPermission(CaptureKind.CAMERA)); // button#0
+                    tx.button("Start", t -> t.startCapture(call)); // button#1
+                    tx.button("Switch", t -> { // button#2
+                        t.captureCamera(call, CAMERA_2);
+                        t.captureMicrophone(call, MICROPHONE_2);
+                        t.captureSize(call, 1280.0, 720.0);
+                        t.captureFrameRate(call, 15.0);
+                    });
+                    tx.button("Mute", t -> t.captureMuted(call, true)); // button#3
+                    tx.button("Camera off", t -> t.captureCamera(call, null)); // button#4
+                    tx.button("Stop", t -> t.stopCapture(call)); // button#5
+                    tx.button("Open missing", t -> t.startCapture(missing)); // button#6
+                }).wrap(true);
                 tx.video(call).a11yLabel("Self view"); // video#0
-                tx.button("Ask camera", t -> t.requestPermission(CaptureKind.CAMERA)); // button#0
-                tx.button("Start", t -> t.startCapture(call)); // button#1
-                tx.button("Switch", t -> { // button#2
-                    t.captureCamera(call, CAMERA_2);
-                    t.captureMicrophone(call, MICROPHONE_2);
-                    t.captureSize(call, 1280.0, 720.0);
-                    t.captureFrameRate(call, 15.0);
-                });
-                tx.button("Mute", t -> t.captureMuted(call, true)); // button#3
-                tx.button("Camera off", t -> t.captureCamera(call, null)); // button#4
-                tx.button("Stop", t -> t.stopCapture(call)); // button#5
-                tx.button("Open missing", t -> t.startCapture(missing)); // button#6
             }));
             tx.watchCaptureDevices(true);
             made[0] = call;

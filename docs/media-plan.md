@@ -139,6 +139,16 @@ platform view contributes anything to a screen reader: measured on macOS
 and Android, and WinUI's peer names only the control type), and takes
 `fit` (`contain`, `cover`, `fill`, the image widget's words).
 
+Its natural size is its picture's (320x180 until a player knows its media
+size; a self-view's is docs/capture-plan.md §3's) and it takes no minimum:
+it is no wider than its natural width unless it grows, narrower where its
+room is, and its height always follows its width at its natural aspect, so
+a shrunk view is a smaller picture rather than a letterbox. One rule for the
+player and the self-view, `crate::media::video_view_height`, which GTK's
+height-for-width layout calls; SwiftUI spells it `.aspectRatio(.fit)`,
+Compose `Modifier.aspectRatio` and WinUI a `Viewbox` around the natural
+extent. tools/check-verbs.py's video view clause holds all five.
+
 | backend | lowering | `fit` | first-frame signal |
 |---|---|---|---|
 | macOS, iOS | a representable backed by a bare `AVPlayerLayer`; never `AVPlayerView` (it keeps Space, arrows and J/K/L at every controls style), `AVPlayerViewController` (child view controller parenting, its own Now Playing session) or SwiftUI `VideoPlayer` (no way to hide its controls; dims a paused picture) | `videoGravity` | `isReadyForDisplay` |

@@ -5282,17 +5282,17 @@ pub unsafe extern "C" fn kaya_capture_nearest_format(
 }
 
 /// Presentation side: a self-view's natural size for frames of `width` by
-/// `height` (0 by 0 with no camera open) into `out`'s two
+/// `height` (0 by 0 with no camera open) carrying `rotation` into `out`'s two
 /// (docs/capture-plan.md §3).
 ///
 /// # Safety
 /// `out` must be null or writable for two u32s.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kaya_capture_self_view_natural(width: u32, height: u32, out: *mut u32) {
+pub unsafe extern "C" fn kaya_capture_self_view_natural(width: u32, height: u32, rotation: u32, out: *mut u32) {
     if out.is_null() {
         return;
     }
-    let (w, h) = crate::capture::self_view_natural((width, height));
+    let (w, h) = crate::capture::self_view_natural((width, height), rotation);
     unsafe {
         *out = w;
         *out.add(1) = h;

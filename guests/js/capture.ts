@@ -53,21 +53,24 @@ const { labels, call, missing } = app.window({ title: "capture", width: 520, hei
   const missing = kaya.capture({ camera: "no-such-camera", onState: (r) => labels[4]!.set(stateLine(r)) });
   kaya.column(() => {
     for (const label of labels) kaya.label({ bind: label }); // label#0..#4
+    kaya.row((buttons) => {
+      buttons.wrap(true);
+      kaya.button("Ask camera", { onClick: () => kaya.requestPermission("camera") }); // button#0
+      kaya.button("Start", { onClick: () => call.start() }); // button#1
+      kaya.button("Switch", {
+        onClick: () => {
+          call.setCamera(CAMERA_2);
+          call.setMicrophone(MICROPHONE_2);
+          call.setSize(1280, 720);
+          call.setFrameRate(15);
+        },
+      }); // button#2
+      kaya.button("Mute", { onClick: () => call.setMuted(true) }); // button#3
+      kaya.button("Camera off", { onClick: () => call.setCamera(null) }); // button#4
+      kaya.button("Stop", { onClick: () => call.stop() }); // button#5
+      kaya.button("Open missing", { onClick: () => missing.start() }); // button#6
+    });
     kaya.video(null, { capture: call }).a11yLabel("Self view"); // video#0
-    kaya.button("Ask camera", { onClick: () => kaya.requestPermission("camera") }); // button#0
-    kaya.button("Start", { onClick: () => call.start() }); // button#1
-    kaya.button("Switch", {
-      onClick: () => {
-        call.setCamera(CAMERA_2);
-        call.setMicrophone(MICROPHONE_2);
-        call.setSize(1280, 720);
-        call.setFrameRate(15);
-      },
-    }); // button#2
-    kaya.button("Mute", { onClick: () => call.setMuted(true) }); // button#3
-    kaya.button("Camera off", { onClick: () => call.setCamera(null) }); // button#4
-    kaya.button("Stop", { onClick: () => call.stop() }); // button#5
-    kaya.button("Open missing", { onClick: () => missing.start() }); // button#6
   });
   kaya.watchCaptureDevices(true);
   return { labels, call, missing };

@@ -366,7 +366,7 @@ internal fun kayaCaptureCommand(id: Long, command: Int) {
  * front camera's self-view by itself (rule 4); nothing at all while the
  * capture has no open camera, so the view shows its ground. */
 @Composable
-internal fun KayaCapturePreview(node: KayaNode, fill: Boolean) {
+internal fun KayaCapturePreview(node: KayaNode) {
     node.videoSeq
     val source = kayaCaptures[node.videoCapture]?.source
     if (source?.cameraOpen != true) return
@@ -378,7 +378,9 @@ internal fun KayaCapturePreview(node: KayaNode, fill: Boolean) {
             }
         },
         update = { view ->
-            view.scaleType = if (fill) PreviewView.ScaleType.FILL_CENTER else PreviewView.ScaleType.FIT_CENTER
+            // The box is the frames' upright aspect; a preview stream of another aspect is cropped to
+            // the frames' field of view (docs/traps.md, the Android self-view's shape).
+            view.scaleType = PreviewView.ScaleType.FILL_CENTER
             source.attach(view)
         },
         modifier = Modifier.fillMaxSize().clearAndSetSemantics {},
@@ -521,6 +523,8 @@ internal object KayaRealCapture {
     class Source(private val context: Context, val capture: Long, hasCamera: Boolean, private val hasMicrophone: Boolean) {
         /** The chosen format, (0, 0, 0) with no camera. */
         val format = IntArray(3)
+        /** The clockwise degrees the frames carry to stand upright. */
+        @Volatile var rotation = 0
         @Volatile var cameraOpen = hasCamera
         @Volatile var frames = 0L
         var previewAttached = false
@@ -702,9 +706,10 @@ internal object KayaRealCapture {
                     planes[2].buffer, planes[2].rowStride, planes[2].pixelStride,
                     it.imageInfo.timestamp, it.imageInfo.rotationDegrees,
                 )
+                rotation = it.imageInfo.rotationDegrees
                 if (!layoutSaid) {
                     layoutSaid = true
-                    Log.i("kaya", "KAYA_CAPTURE_LAYOUT: ${it.width}x${it.height} y ${planes[0].rowStride}/" +
+                    Log.i("kaya", "KAYA_CAPTURE_LAYOUT: ${it.width}x${it.height} rotation $rotation y ${planes[0].rowStride}/" +
                         "${planes[0].pixelStride} u ${planes[1].rowStride}/${planes[1].pixelStride} v " +
                         "${planes[2].rowStride}/${planes[2].pixelStride} -> ${if (how == 1) "NV12 in place" else "repacked"}")
                 }
