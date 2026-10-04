@@ -8,6 +8,9 @@ expect label#0 "camera kaya-synthetic-camera-1 front preferred; camera kaya-synt
 expect label#1 "camera prompt, microphone prompt"
 expect label#2 "idle"
 expect_capture 0 "frames none, samples none"
+# The nine buttons flow onto the lines the window's width allows, none past
+# its edge (WinUI's flowing row once drew Stop outside the window).
+expect_no_clipping
 # Asked before the call: the camera alone.
 click button#0
 expect label#1 "camera granted, microphone prompt"
@@ -22,9 +25,10 @@ expect label#3 "app frames 640x480, app chunks of 480"
 expect_display_awake yes
 # The app's own box (docs/media-plan.md §3, RULED 2026-10-03): 16:9 whatever
 # the picture's shape (4:3 here, 3:4 on a phone whose camera stands upright),
-# the picture covering it, then contained in it with bars beside it.
+# 320 wide on every platform (the picture's longer side at half size), the
+# picture covering it, then contained in it with bars beside it.
 click button#7
-expect_video_box video#0 "16:9"
+expect_video_box video#0 "320x180"
 expect_video_corner video#0 "C83C1E"
 expect_video_ink video#0 "C83C1E"
 click button#8

@@ -981,7 +981,7 @@ export class Widget extends Handle {
    * picture's shape (docs/media-plan.md §3). */
   aspect(width: number, height: number): this {
     this._live("aspect()");
-    records().push(wire.tx_set_aspect(this.id, packAspect(width, height)));
+    records().push(aspectRecord(this.id, width, height));
     return this;
   }
 
@@ -5018,17 +5018,33 @@ function fitValue(name: Fit): number {
   return fit;
 }
 
-// kaya::Aspect::pack, each part saturated; the core refuses a part outside
-// 1..=65535 naming the prop. The width saturates at ±(2^21 − 1) rather than
-// i32's bounds so the packed value stays a safe integer, which the wire's
-// I64 demands; such a width is refused by the core all the same.
-function packAspect(width: number, height: number): number {
+// kaya::Aspect::pack, each part saturated at i32's bounds as the other eight
+// bindings do; the core refuses a part outside 1..=65535 naming the prop and
+// the number given.
+function packAspect(width: number, height: number): bigint {
   for (const part of [width, height]) {
     if (!Number.isInteger(part)) throw new TypeError(`kaya: an aspect part is a whole number, not ${String(part)}`);
   }
-  const w = Math.min(Math.max(width, -(2 ** 21 - 1)), 2 ** 21 - 1);
-  const h = Math.min(Math.max(height, -(2 ** 31)), 2 ** 31 - 1);
-  return w * 2 ** 32 + (h >>> 0);
+  const sat = (v: number): number => Math.min(Math.max(v, -(2 ** 31)), 2 ** 31 - 1);
+  return (BigInt(sat(width)) << 32n) | BigInt(sat(height) >>> 0);
+}
+
+// wire.tx_set_aspect's record. A width of 2^21 or more packs past a safe
+// integer, which the wire's I64 refuses before the core could, so that record
+// is written here in tx_set_aspect's layout (kaya_app_checks.ts holds the two
+// byte for byte) and the core's refusal prints the width the app gave.
+function aspectRecord(id: number, width: number, height: number): Uint8Array {
+  const packed = packAspect(width, height);
+  if (Number.isSafeInteger(Number(packed))) return wire.tx_set_aspect(id, Number(packed));
+  const body = new Uint8Array(32);
+  const view = new DataView(body.buffer);
+  view.setBigUint64(0, BigInt(id), true);
+  view.setUint32(8, wire.PROP_ASPECT, true);
+  view.setUint32(12, wire.SOURCE_CONST, true);
+  view.setUint32(16, wire.VALUE_I64, true);
+  view.setUint32(20, 8, true);
+  view.setBigInt64(24, packed, true);
+  return wire.record(wire.TX_SET_PROPERTY, body);
 }
 
 function known<T>(table: ReadonlyMap<number, T>, code: number, what: string): T {
@@ -5331,7 +5347,7 @@ export function video(source: Player | FieldRef | null, opts: VideoOptions = {})
   if (opts.fit !== undefined) {
     records().push(wire.tx_set_fit(handle.id, fitValue(opts.fit)));
   }
-  if (opts.aspect !== undefined) records().push(wire.tx_set_aspect(handle.id, packAspect(opts.aspect[0], opts.aspect[1])));
+  if (opts.aspect !== undefined) records().push(aspectRecord(handle.id, opts.aspect[0], opts.aspect[1]));
   const onVisibility = opts.onVisibility;
   if (onVisibility !== undefined) {
     app()._register(handle, wire.OCC_VIDEO_VISIBILITY, (...args: unknown[]) => onVisibility(...args.slice(0, -1), Number(args[args.length - 1])));

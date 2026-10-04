@@ -110,15 +110,21 @@ pub(crate) fn nearest_format(offered: &[(u32, u32, u32)], wish: (f64, f64, f64))
         .min_by(|a, b| (f64::from(a.2) - fps).abs().total_cmp(&(f64::from(b.2) - fps).abs()).then(b.2.cmp(&a.2)))
 }
 
+/// A self-view's picture at its natural scale (docs/capture-plan.md §3): half
+/// the frames as they arrive, 320x240 with no camera.
+pub(crate) fn self_view_scale(frames: (u32, u32)) -> (u32, u32) {
+    if frames.0 == 0 || frames.1 == 0 {
+        return (320, 240);
+    }
+    (frames.0 / 2, frames.1 / 2)
+}
+
 /// A self-view's natural size, one rule for every backend (docs/capture-plan.md §3):
 /// half the frames, and for frames whose `rotation` (the clockwise degrees
 /// they carry) stands them on end, the upright picture fitted inside that box.
 pub(crate) fn self_view_natural(frames: (u32, u32), rotation: u32) -> (u32, u32) {
-    if frames.0 == 0 || frames.1 == 0 {
-        return (320, 240);
-    }
-    let (w, h) = (frames.0 / 2, frames.1 / 2);
-    if rotation % 180 != 90 {
+    let (w, h) = self_view_scale(frames);
+    if frames.0 == 0 || frames.1 == 0 || rotation % 180 != 90 {
         return (w, h);
     }
     let (uw, uh) = (u64::from(frames.1), u64::from(frames.0));
@@ -949,6 +955,9 @@ mod tests {
         assert_eq!(self_view_natural((1280, 720), 270), (203, 360));
         assert_eq!(self_view_natural((480, 640), 90), (240, 180));
         assert_eq!(self_view_natural((0, 0), 90), (320, 240));
+        assert_eq!(self_view_scale((640, 480)), (320, 240));
+        assert_eq!(self_view_scale((0, 480)), (320, 240));
+        assert_eq!(self_view_scale((1280, 720)), (640, 360));
     }
 
     #[test]

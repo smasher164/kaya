@@ -2919,10 +2919,10 @@ ASPECT_SURFACES = [
      r"^  {0}\?: readonly \[width: number, height: number\];"),
     ("js", "bindings/js/kaya/index.ts", "runtime", "aspect",
      r"^  {0}\(width: number, height: number\): this \{{\n[^\n]*\n"
-     r"\s*records\(\)\.push\(wire\.tx_set_aspect\(this\.id, packAspect\(width, height\)\)\);"),
+     r"\s*records\(\)\.push\(aspectRecord\(this\.id, width, height\)\);"),
     ("js", "bindings/js/kaya/index.ts", "packer", "packAspect",
-     r"^function {0}\(width: number, height: number\): number \{{\n(?:[^\n]*\n){{1,8}}?"
-     r"\s*return w \* 2 \*\* 32 \+ \(h >>> 0\);"),
+     r"^function {0}\(width: number, height: number\): bigint \{{\n(?:[^\n]*\n){{1,8}}?"
+     r"\s*return \(BigInt\(sat\(width\)\) << 32n\) \| BigInt\(sat\(height\) >>> 0\);"),
     ("go", "bindings/go/media.go", "runtime", "SetAspect",
      r"func \(tx \*Tx\) {0}\(w Widget, width, height int\) \{{"),
     ("go", "bindings/go/media.go", "live chain", "Aspect",
@@ -3058,7 +3058,7 @@ for _lang, _rel, _part, _name, _template in ASPECT_SURFACES:
     _real = read_rel(_rel)
     _m = re.search(_template.format(_name), _real, re.M)
     _line = _m.group(0).splitlines()[-1]
-    _pair = ("w", "h") if _lang == "js" else ("width", "height")
+    _pair = ("width", "height")
     _w = re.search(rf"\b{_pair[0]}\b", _line)
     _h = re.search(rf"\b{_pair[1]}\b", _line[_w.end():]) if _w else None
     if _w is None or _h is None:

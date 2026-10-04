@@ -10490,13 +10490,19 @@ private func kayaRunScript(_ script: String) {
                     }
                 #endif
             case "expect_video_box":
-                // docs/media-plan.md §3: the box the platform laid out, its ratio alone.
+                // docs/media-plan.md §3: the box the platform laid out, its ratio ("16:9")
+                // or its size ("320x180").
                 let want = kayaQuoted(Array(parts[2...]))
                 let ratio = want.split(separator: ":").compactMap { Int($0) }
+                let size = want.split(separator: "x").compactMap { Int($0) }
                 let node = DispatchQueue.main.sync { kayaTarget(parts[1], "video", kayaScene.videos) }
                 let got = node.map { kayaVideoBox($0) } ?? "<no such target>"
                 if ratio.count == 2, kayaVideoBoxShaped(got, ratio[0], ratio[1]) {
                     observed.append("video box \(want)")
+                } else if size.count == 2, kayaVideoBoxSized(got, size[0], size[1]) {
+                    observed.append("video box \(want)")
+                } else if size.count == 2 {
+                    failures.append("video box \(got), wanted \(want) with each side within one unit")
                 } else {
                     failures.append("video box \(got), wanted \(want) with its height within one unit")
                 }
@@ -28373,24 +28379,23 @@ func kayaShownFraction(_ node: KayaNode, _ frame: CGRect) -> Double {
     return Double(clip.width * clip.height / (frame.width * frame.height))
 }
 
-/// The video view's box before layout: its picture's natural size (320x180
-/// until one is known; a self-view's is the core's rule, docs/capture-plan.md
-/// §3) through the core's box rule, which applies the app's aspect
-/// (docs/media-plan.md §3).
+/// The video view's box before layout, the core's rule with the app's
+/// aspect (docs/media-plan.md §3): a self-view's from its frames
+/// (docs/capture-plan.md §3), a player's from its picture's natural size,
+/// 320x180 until one is known.
 func kayaVideoNatural(_ node: KayaNode) -> CGSize {
     _ = node.videoSeq
-    var picture: (UInt32, UInt32)
+    var box: [UInt32] = [0, 0]
     if node.videoCapture != 0 {
         let format = kayaCaptures[node.videoCapture]?.source?.format ?? (0, 0, 0)
-        var natural: [UInt32] = [0, 0]
-        natural.withUnsafeMutableBufferPointer { KayaHost.api.capture_self_view_natural(format.0, format.1, 0, $0.baseAddress) }
-        picture = (natural[0], natural[1])
+        box.withUnsafeMutableBufferPointer {
+            KayaHost.api.capture_self_view_box(format.0, format.1, 0, node.aspect, $0.baseAddress)
+        }
     } else {
         let size = kayaPlayers[node.videoPlayer]?.mediaSize ?? .zero
-        picture = size == .zero ? (320, 180) : (UInt32(size.width.rounded()), UInt32(size.height.rounded()))
+        let picture: (UInt32, UInt32) = size == .zero ? (320, 180) : (UInt32(size.width.rounded()), UInt32(size.height.rounded()))
+        box.withUnsafeMutableBufferPointer { KayaHost.api.video_view_box(picture.0, picture.1, node.aspect, $0.baseAddress) }
     }
-    var box: [UInt32] = [0, 0]
-    box.withUnsafeMutableBufferPointer { KayaHost.api.video_view_box(picture.0, picture.1, node.aspect, $0.baseAddress) }
     return CGSize(width: Int(box[0]), height: Int(box[1]))
 }
 
@@ -28679,6 +28684,12 @@ func kayaVideoBoxShaped(_ got: String, _ w: Int, _ h: Int) -> Bool {
     let parts = got.split(separator: " ").compactMap { Double($0) }
     guard parts.count == 2, got.split(separator: " ").count == 2, parts[0] > 0, parts[1] > 0 else { return false }
     return abs(parts[1] - parts[0] * Double(h) / Double(w)) <= 1
+}
+
+func kayaVideoBoxSized(_ got: String, _ w: Int, _ h: Int) -> Bool {
+    let parts = got.split(separator: " ").compactMap { Double($0) }
+    guard parts.count == 2, got.split(separator: " ").count == 2, parts[0] > 0, parts[1] > 0 else { return false }
+    return abs(parts[0] - Double(w)) <= 1 && abs(parts[1] - Double(h)) <= 1
 }
 
 func kayaVideoInkMatches(_ got: String, _ want: String) -> Bool {

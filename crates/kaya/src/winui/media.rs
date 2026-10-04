@@ -298,9 +298,9 @@ pub(super) struct WinVideo {
     /// The capture this view previews (docs/capture-plan.md §3); a view
     /// shows a player or a capture, never both (the core holds that).
     capture: Option<u64>,
-    /// The picture's natural size last given, and the app's packed aspect
-    /// (0 none): the box is the core's rule over both (docs/media-plan.md §3).
-    natural: std::cell::Cell<(u32, u32)>,
+    /// The picture last given, and the app's packed aspect (0 none): the box
+    /// is the core's rule over both (docs/media-plan.md §3).
+    shows: std::cell::Cell<crate::media::VideoPicture>,
     aspect: std::cell::Cell<i64>,
 }
 
@@ -799,7 +799,7 @@ fn finish_open(core: &mut CoreState, id: u64, generation: u64) {
     report_tracks(core, id);
     ask_caption(core, id);
     for video in core.media.videos.values().filter(|v| v.player == Some(id)) {
-        let _ = natural_size(video, size);
+        let _ = natural_size(video, crate::media::VideoPicture::Player(size));
     }
 }
 
@@ -1604,10 +1604,10 @@ pub(super) fn create_video(core: &mut CoreState, id: u64) -> windows_core::Resul
         caption,
         player: None,
         capture: None,
-        natural: std::cell::Cell::new((0, 0)),
+        shows: std::cell::Cell::new(crate::media::VideoPicture::Player((0, 0))),
         aspect: std::cell::Cell::new(0),
     };
-    natural_size(&video, (0, 0))?;
+    natural_size(&video, crate::media::VideoPicture::Player((0, 0)))?;
     core.media.video_ids.push(id);
     Ok(video)
 }
@@ -1623,12 +1623,17 @@ pub(super) fn elements(core: &CoreState) -> Vec<super::bindings::Microsoft::UI::
     core.media.video_ids.iter().filter_map(|id| core.media.videos.get(id)).map(|v| v.ax.clone()).collect()
 }
 
-/// The view's natural size: its picture's, 320x180 until one is known —
-/// the SwiftUI arm's `kayaVideoNatural` — no wider than the room it is
-/// given, its height following its width (docs/media-plan.md §3).
-fn natural_size(video: &WinVideo, size: (u32, u32)) -> windows_core::Result<()> {
-    video.natural.set(size);
-    let picture = if size.0 == 0 || size.1 == 0 { (320, 180) } else { size };
+/// The view's natural size: the core's box for its picture, a player's
+/// 320x180 until one is known — the SwiftUI arm's `kayaVideoNatural` — no
+/// wider than the room it is given, its height following its width
+/// (docs/media-plan.md §3).
+fn natural_size(video: &WinVideo, shows: crate::media::VideoPicture) -> windows_core::Result<()> {
+    use crate::media::VideoPicture;
+    video.shows.set(shows);
+    let picture = match shows {
+        VideoPicture::Player(size) if size.0 == 0 || size.1 == 0 => VideoPicture::Player((320, 180)),
+        other => other,
+    };
     let (w, h) = crate::media::video_view_box(picture, video.aspect.get());
     let (w, h) = (f64::from(w), f64::from(h));
     video.frame.SetWidth(w)?;
@@ -1652,7 +1657,7 @@ pub(super) fn destroy_video(core: &mut CoreState, id: u64) {
 pub(super) fn set_aspect(core: &CoreState, id: u64, aspect: i64) -> windows_core::Result<()> {
     let Some(video) = core.media.videos.get(&id) else { return Ok(()) };
     video.aspect.set(aspect);
-    natural_size(video, video.natural.get())
+    natural_size(video, video.shows.get())
 }
 
 pub(super) fn set_fit(core: &CoreState, id: u64, fit: i64) -> windows_core::Result<()> {
@@ -1690,13 +1695,13 @@ pub(super) fn set_video_player(core: &mut CoreState, widget: u64, player: Option
         Some((media, size, caption)) => {
             video.player = player;
             video.element.SetMediaPlayer(media)?;
-            natural_size(video, *size)?;
+            natural_size(video, crate::media::VideoPicture::Player(*size))?;
             show_caption(video, caption)?;
         }
         None => {
             video.player = None;
             video.element.SetMediaPlayer(None::<&MediaPlayer>)?;
-            natural_size(video, (0, 0))?;
+            natural_size(video, crate::media::VideoPicture::Player((0, 0)))?;
             show_caption(video, "")?;
         }
     }
@@ -1730,12 +1735,12 @@ fn show_capture(video: &WinVideo, preview: Option<&CapturePreview>) -> windows_c
                 Some((b, _)) => video.picture.SetSource(b)?,
                 None => video.picture.SetSource(None::<&super::bindings::Microsoft::UI::Xaml::Media::ImageSource>)?,
             }
-            natural_size(video, crate::capture::self_view_natural(p.size, 0))?;
+            natural_size(video, crate::media::VideoPicture::SelfView { frames: p.size, rotation: 0 })?;
             mirror(&video.picture, p.mirror)
         }
         None => {
             video.picture.SetSource(None::<&super::bindings::Microsoft::UI::Xaml::Media::ImageSource>)?;
-            natural_size(video, crate::capture::self_view_natural((0, 0), 0))?;
+            natural_size(video, crate::media::VideoPicture::SelfView { frames: (0, 0), rotation: 0 })?;
             mirror(&video.picture, false)
         }
     }

@@ -167,11 +167,25 @@ view): `cover` scales the picture to fill the box and crops it about its
 centre, `contain` scales it to fit inside with bars beside it, `fill` stretches
 it to the box. It applies to the player and to a capture's self-view alike, so
 an app can make Android's upright front camera (3:4) a 16:9 tile as the other
-four platforms show it. One rule in the core, `crate::media::video_view_box`,
-answers the box before layout (the natural width, the height at the ratio) and
-`video_view_height` lays it out; GTK and WinUI call it, SwiftUI through
-`kaya_video_view_box` (the host table) and Compose through
-`KayaPresent.videoViewBox` (JNI). Each arm keeps the PICTURE's natural size for
+four platforms show it.
+
+*The box's width with an aspect set, RULED 2026-10-04 (the maintainer, so that
+an aspect makes every platform look the same).* The box's natural width is the
+picture's LONGER side at its natural scale, whatever its rotation, and the
+height follows at the chosen ratio: a 640x480 camera at half size gives 320 on
+every platform, so its 16:9 tile is 320x180 on Android too, where the box first
+took the upright picture's fitted width (180, a 180x101 tile against the
+desktops' 320x180). A player's natural scale is its picture's natural size, so
+a portrait 1080x1920 video's 16:9 box is 1920 wide before its room shrinks it.
+Unset, nothing changes: the box is the picture's natural size as above.
+
+One rule in the core, `crate::media::video_view_box`, answers the box before
+layout from a `VideoPicture` (a player's natural size, or a self-view's frames
+and rotation, from which it takes both the fitted natural size and the
+half-size scale) and `video_view_height` lays it out; GTK and WinUI call it,
+SwiftUI through `kaya_video_view_box` and `kaya_capture_self_view_box` (the
+host table) and Compose through `KayaPresent.videoViewBox` and
+`KayaPresent.captureSelfViewBox` (JNI). Each arm keeps the PICTURE's natural size for
 placing the picture, never the box's: Compose's player scales its surface by
 the picture's size, and Android's preview is a frames-shaped view placed by
 `fit` inside the box (a stretch for `fill` is the view's own scale).
@@ -182,15 +196,18 @@ says two whole numbers (`aspect(16, 9)`) and the root sees both parts exactly
 as given. A ratio carried as one F64 could not refuse a zero or negative part:
 `-16:-9` would arrive as 16:9 and `16:0` as infinity, and 16/9 is inexact,
 while two integers keep the arithmetic exact in the one rule. A packer
-saturates a part outside the signed 32-bit range (JS saturates the width at
-2^21 - 1 instead, so the packed value stays a safe integer) and the root
+saturates a part outside the signed 32-bit range (JS writes a packed value
+past a safe integer, a width of 2^21 or more, in `tx_set_aspect`'s own record
+layout rather than through the wire's safe-integer I64, so the refusal names
+the width given there too) and the root
 refuses any part outside 1 to 65535 as a scene error naming the prop
 (`kaya: Aspect on Video: aspect 16:0 has a height of 0; ...`). There is no
 "unset" value and no clear spelling: 0 is the pair 0:0 and is refused, the
 `max_width` precedent, so a view that has taken an aspect keeps one.
 tools/scenes/capture.steps reads it on all five lanes (`expect_video_box`
-reads the laid-out box's ratio, `expect_video_corner` the box's top-left
-corner four points in, `"bars"` a corner the picture leaves), and
+reads the laid-out box's size, `"320x180"`, each side within one unit in the
+platform's own units, or its ratio, `"16:9"`; `expect_video_corner` the box's
+top-left corner four points in, `"bars"` a corner the picture leaves), and
 tools/check-verbs.py's aspect clause holds the rule, the three doors and the
 five arms.
 

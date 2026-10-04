@@ -162,20 +162,20 @@ fn repaint(core: &mut CoreState, id: u64) {
         (open.and_then(|o| o.paintable.clone()), open.map_or((0, 0), |o| o.frames))
     });
     for view in core.videos.iter().filter(|v| v.capture.get() == Some(id)) {
-        self_view_size(view, Some(crate::capture::self_view_natural(frames, 0)));
+        self_view_size(view, Some(frames));
         view.picture.set_paintable(paintable.as_ref());
         view.picture.queue_draw();
     }
     gtk_media::follow_keep_awake(core);
 }
 
-/// A self-view takes the core's natural size with no minimum, so it shrinks
-/// to its room at its aspect (docs/capture-plan.md §3); `None` gives the view
-/// back to the player's picture sizing.
-fn self_view_size(view: &gtk_media::GtkVideoView, natural: Option<(u32, u32)>) {
-    gtk_media::video_layout(view).set_natural(natural.map(|(w, h)| (w as i32, h as i32)));
-    let grows = natural.is_some() && grow_weight(view.overlay.upcast_ref()) > 0.0;
-    view.picture.set_halign(if natural.is_none() || grows { gtk4::Align::Fill } else { gtk4::Align::Center });
+/// A self-view takes the core's box for its frames with no minimum, so it
+/// shrinks to its room at its aspect (docs/capture-plan.md §3); `None` gives
+/// the view back to the player's picture sizing.
+fn self_view_size(view: &gtk_media::GtkVideoView, frames: Option<(u32, u32)>) {
+    gtk_media::video_layout(view).set_self_view(frames);
+    let grows = frames.is_some() && grow_weight(view.overlay.upcast_ref()) > 0.0;
+    view.picture.set_halign(if frames.is_none() || grows { gtk4::Align::Fill } else { gtk4::Align::Center });
 }
 
 /// Rule 5: a capture keeps the display awake while its camera is open and

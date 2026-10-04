@@ -174,6 +174,13 @@ impl MenuState {
     }
 }
 
+/// `expect_video_box`'s two readings (docs/media-plan.md §3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VideoBox {
+    Ratio(u32, u32),
+    Size(u32, u32),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Step {
     Settle(u64),
@@ -484,7 +491,9 @@ pub enum Step {
     /// `expect_video_box video#0 "16:9"`: the video view's box as the
     /// platform laid it out has this width:height, its height within one
     /// unit of its width at that ratio (docs/media-plan.md §3, the aspect).
-    ExpectVideoBox(Target, u32, u32),
+    /// `"320x180"`: the box is that size in the platform's own units, each
+    /// side within one unit.
+    ExpectVideoBox(Target, VideoBox),
     /// `expect_video_corner video#0 "C83C1E"`: the box's top-left corner,
     /// VIDEO_CORNER_INSET points in on both axes, read as `expect_video_ink`
     /// reads the centre. `"bars"`: the corner is NOT within tolerance of the
@@ -1166,12 +1175,20 @@ pub const VIDEO_CORNER_BARS: &str = "bars";
 /// platform's own units) has the aspect `width:height`, its height within
 /// one unit of its width at that ratio.
 pub fn video_box_shaped(got: &str, aspect: (u32, u32)) -> bool {
+    video_box_read(got).is_some_and(|(w, h)| (h - w * f64::from(aspect.1) / f64::from(aspect.0)).abs() <= 1.0)
+}
+
+/// Whether a box read as `"<width> <height>"` is `size`, each side within one unit.
+pub fn video_box_sized(got: &str, size: (u32, u32)) -> bool {
+    video_box_read(got)
+        .is_some_and(|(w, h)| (w - f64::from(size.0)).abs() <= 1.0 && (h - f64::from(size.1)).abs() <= 1.0)
+}
+
+fn video_box_read(got: &str) -> Option<(f64, f64)> {
     let mut parts = got.split(' ').map(str::parse::<f64>);
     match (parts.next(), parts.next(), parts.next()) {
-        (Some(Ok(w)), Some(Ok(h)), None) if w > 0.0 && h > 0.0 => {
-            (h - w * f64::from(aspect.1) / f64::from(aspect.0)).abs() <= 1.0
-        }
-        _ => false,
+        (Some(Ok(w)), Some(Ok(h)), None) if w > 0.0 && h > 0.0 => Some((w, h)),
+        _ => None,
     }
 }
 
@@ -2675,9 +2692,11 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 }
                 let want = parse_string(text)?;
                 let part = |s: &str| s.parse::<u32>().ok().filter(|n| (1..=65535).contains(n) && !s.starts_with('0'));
-                match want.split_once(':').map(|(w, h)| (part(w), part(h))) {
-                    Some((Some(w), Some(h))) => Step::ExpectVideoBox(target, w, h),
-                    _ => return Err(format!("expect_video_box wants \"W:H\", two whole numbers from 1 to 65535, got {want:?}")),
+                let pair = |sep: char| want.split_once(sep).map(|(w, h)| (part(w), part(h)));
+                match (pair(':'), pair('x')) {
+                    (Some((Some(w), Some(h))), _) => Step::ExpectVideoBox(target, VideoBox::Ratio(w, h)),
+                    (_, Some((Some(w), Some(h)))) => Step::ExpectVideoBox(target, VideoBox::Size(w, h)),
+                    _ => return Err(format!("expect_video_box wants \"W:H\" or \"WxH\", two whole numbers from 1 to 65535, got {want:?}")),
                 }
             }
             "expect_video_corner" => {
@@ -4956,12 +4975,20 @@ fn run_with_log(
                     Err(format!("video ink {got}, wanted {want} within {tolerance} per channel"))
                 }
             })),
-            Step::ExpectVideoBox(t, w, h) => Some(poll(|| {
+            Step::ExpectVideoBox(t, VideoBox::Ratio(w, h)) => Some(poll(|| {
                 let got = stage.video_box(*t);
                 if video_box_shaped(&got, (*w, *h)) {
                     Ok(format!("video box {w}:{h}"))
                 } else {
                     Err(format!("video box {got}, wanted {w}:{h} with its height within one unit"))
+                }
+            })),
+            Step::ExpectVideoBox(t, VideoBox::Size(w, h)) => Some(poll(|| {
+                let got = stage.video_box(*t);
+                if video_box_sized(&got, (*w, *h)) {
+                    Ok(format!("video box {w}x{h}"))
+                } else {
+                    Err(format!("video box {got}, wanted {w}x{h} with each side within one unit"))
                 }
             })),
             Step::ExpectVideoCorner(t, want) if want == VIDEO_CORNER_BARS => Some(poll(|| {
@@ -7416,9 +7443,13 @@ mod tests {
         assert!(parse("expect_video_ink video#0 \"None\"").is_err());
         assert!(matches!(
             parse("expect_video_box video#0 \"16:9\"").unwrap().as_slice(),
-            [Step::ExpectVideoBox(t, 16, 9)] if *t == video
+            [Step::ExpectVideoBox(t, VideoBox::Ratio(16, 9))] if *t == video
         ));
-        for bad in ["0:9", "16:0", "-16:9", "16x9", "16:", "016:9", "65536:1", "16:9:1"] {
+        assert!(matches!(
+            parse("expect_video_box video#0 \"320x180\"").unwrap().as_slice(),
+            [Step::ExpectVideoBox(t, VideoBox::Size(320, 180))] if *t == video
+        ));
+        for bad in ["0:9", "16:0", "-16:9", "16X9", "16:", "016:9", "65536:1", "16:9:1", "0x180", "320x", "320x180x1", "320 180"] {
             assert!(parse(&format!("expect_video_box video#0 \"{bad}\"")).is_err(), "{bad}");
         }
         assert!(parse("expect_video_box label#0 \"16:9\"").is_err());
@@ -7440,6 +7471,12 @@ mod tests {
         assert!(!video_box_shaped("<no video view on screen>", (16, 9)));
         assert!(!video_box_shaped("0 0", (16, 9)));
         assert!(!video_box_shaped("320 180 1", (16, 9)));
+        assert!(video_box_sized("320 180", (320, 180)));
+        assert!(video_box_sized("320.6 179.4", (320, 180)));
+        assert!(!video_box_sized("180 101", (320, 180)));
+        assert!(!video_box_sized("320 240", (320, 180)));
+        assert!(!video_box_sized("322 180", (320, 180)));
+        assert!(!video_box_sized("<no video view on screen>", (320, 180)));
         assert!(matches!(
             parse("expect_caption video#0 \"first cue\"").unwrap().as_slice(),
             [Step::ExpectCaption(t, w)] if *t == video && w == "first cue"

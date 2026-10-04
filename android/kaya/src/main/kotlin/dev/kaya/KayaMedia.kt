@@ -588,17 +588,18 @@ internal fun KayaVideoView(node: KayaNode, a11y: Modifier, boxFill: Modifier) {
     node.videoSeq
     kayaCaptionStyleSeq.intValue
     val p = kayaPlayers[node.videoPlayer]
-    // A self-view's natural size is the core's rule, its frames as they stand upright (docs/capture-plan.md §3).
-    val selfView = if (node.videoCapture != 0L) {
+    val pw = if (p != null && p.mediaWidth > 0) p.mediaWidth else 320
+    val ph = if (p != null && p.mediaHeight > 0) p.mediaHeight else 180
+    // docs/media-plan.md §3: the box is the core's rule, the app's aspect applied; a
+    // self-view's from its frames as they arrive and their rotation (docs/capture-plan.md §3).
+    val box = if (node.videoCapture != 0L) {
         val source = kayaCaptures[node.videoCapture]?.source
         val frames = source?.format
-        KayaPresent.captureSelfViewNatural(frames?.get(0) ?: 0, frames?.get(1) ?: 0, source?.rotation ?: 0)
-            ?: error("kaya: captureSelfViewNatural answered nothing")
-    } else null
-    val pw = selfView?.get(0) ?: if (p != null && p.mediaWidth > 0) p.mediaWidth else 320
-    val ph = selfView?.get(1) ?: if (p != null && p.mediaHeight > 0) p.mediaHeight else 180
-    // docs/media-plan.md §3: the box is the core's rule, the app's aspect applied.
-    val box = KayaPresent.videoViewBox(pw, ph, node.aspect) ?: error("kaya: videoViewBox answered nothing")
+        KayaPresent.captureSelfViewBox(frames?.get(0) ?: 0, frames?.get(1) ?: 0, source?.rotation ?: 0, node.aspect)
+            ?: error("kaya: captureSelfViewBox answered nothing")
+    } else {
+        KayaPresent.videoViewBox(pw, ph, node.aspect) ?: error("kaya: videoViewBox answered nothing")
+    }
     val w = box[0]
     val h = box[1]
     val view = LocalView.current
@@ -759,6 +760,14 @@ internal fun kayaVideoBoxShaped(got: String, w: Int, h: Int): Boolean {
     val bw = parts[0].toDoubleOrNull() ?: return false
     val bh = parts[1].toDoubleOrNull() ?: return false
     return bw > 0 && bh > 0 && kotlin.math.abs(bh - bw * h / w) <= 1.0
+}
+
+internal fun kayaVideoBoxSized(got: String, w: Int, h: Int): Boolean {
+    val parts = got.split(' ')
+    if (parts.size != 2) return false
+    val bw = parts[0].toDoubleOrNull() ?: return false
+    val bh = parts[1].toDoubleOrNull() ?: return false
+    return bw > 0 && bh > 0 && kotlin.math.abs(bw - w) <= 1.0 && kotlin.math.abs(bh - h) <= 1.0
 }
 
 /** The box's top-left corner, KAYA_VIDEO_CORNER_INSET in on both axes, as a

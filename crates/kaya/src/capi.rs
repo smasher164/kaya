@@ -5285,9 +5285,10 @@ pub unsafe extern "C" fn kaya_capture_nearest_format(
     1
 }
 
-/// Presentation side: a video view's box before layout for a picture whose
-/// natural size is `width` by `height`, with `aspect` the view's packed
-/// aspect prop (0 for none), into `out`'s two (docs/media-plan.md §3).
+/// Presentation side: a player's video view's box before layout for a
+/// picture whose natural size is `width` by `height`, with `aspect` the
+/// view's packed aspect prop (0 for none), into `out`'s two
+/// (docs/media-plan.md §3).
 ///
 /// # Safety
 /// `out` must be null or writable for two u32s.
@@ -5296,25 +5297,27 @@ pub unsafe extern "C" fn kaya_video_view_box(width: u32, height: u32, aspect: i6
     if out.is_null() {
         return;
     }
-    let (w, h) = crate::media::video_view_box((width, height), aspect);
+    let (w, h) = crate::media::video_view_box(crate::media::VideoPicture::Player((width, height)), aspect);
     unsafe {
         *out = w;
         *out.add(1) = h;
     }
 }
 
-/// Presentation side: a self-view's natural size for frames of `width` by
-/// `height` (0 by 0 with no camera open) carrying `rotation` into `out`'s two
-/// (docs/capture-plan.md §3).
+/// Presentation side: a self-view's box before layout for frames of `width`
+/// by `height` (0 by 0 with no camera open) carrying `rotation`, with
+/// `aspect` the view's packed aspect prop (0 for none), into `out`'s two
+/// (docs/capture-plan.md §3, docs/media-plan.md §3).
 ///
 /// # Safety
 /// `out` must be null or writable for two u32s.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kaya_capture_self_view_natural(width: u32, height: u32, rotation: u32, out: *mut u32) {
+pub unsafe extern "C" fn kaya_capture_self_view_box(width: u32, height: u32, rotation: u32, aspect: i64, out: *mut u32) {
     if out.is_null() {
         return;
     }
-    let (w, h) = crate::capture::self_view_natural((width, height), rotation);
+    let (w, h) =
+        crate::media::video_view_box(crate::media::VideoPicture::SelfView { frames: (width, height), rotation }, aspect);
     unsafe {
         *out = w;
         *out.add(1) = h;

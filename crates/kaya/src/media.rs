@@ -1000,16 +1000,34 @@ pub(crate) fn video_view_height(natural: (u32, u32), width: i32, grows: bool) ->
     ((width * h + w / 2) / w) as i32
 }
 
+/// What a video view shows, as its box rule reads it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum VideoPicture {
+    /// A player's picture at its natural size (the arm's placeholder until known).
+    Player((u32, u32)),
+    /// A capture's self-view: its frames as they arrive (0x0 with no camera)
+    /// and the clockwise rotation they carry.
+    SelfView { frames: (u32, u32), rotation: u32 },
+}
+
 /// A video view's box before layout (docs/media-plan.md §3, RULED
 /// 2026-10-03): its picture's natural size, or with an `aspect` the app set
-/// (the wire's packed I64, 0 for none) the natural width at that ratio.
+/// (the wire's packed I64, 0 for none) the picture's LONGER side at its
+/// natural scale for the width, whatever its rotation, at that ratio.
 /// `video_view_height` lays out whatever this answers.
-pub(crate) fn video_view_box(natural: (u32, u32), aspect: i64) -> (u32, u32) {
+pub(crate) fn video_view_box(picture: VideoPicture, aspect: i64) -> (u32, u32) {
+    let (natural, scale) = match picture {
+        VideoPicture::Player(natural) => (natural, natural),
+        VideoPicture::SelfView { frames, rotation } => {
+            (crate::capture::self_view_natural(frames, rotation), crate::capture::self_view_scale(frames))
+        }
+    };
     let Ok(a) = crate::protocol::Aspect::from_packed(aspect) else {
         return natural;
     };
-    let (w, aw, ah) = (u64::from(natural.0), u64::from(a.width), u64::from(a.height));
-    (natural.0, ((w * ah + aw / 2) / aw).clamp(1, u64::from(u32::MAX)) as u32)
+    let width = scale.0.max(scale.1);
+    let (w, aw, ah) = (u64::from(width), u64::from(a.width), u64::from(a.height));
+    (width, ((w * ah + aw / 2) / aw).clamp(1, u64::from(u32::MAX)) as u32)
 }
 
 #[cfg(test)]
@@ -1019,14 +1037,25 @@ mod tests {
     #[test]
     fn an_aspect_sets_the_box_and_nothing_else_does() {
         let pack = crate::protocol::Aspect::pack;
-        assert_eq!(video_view_box((320, 240), 0), (320, 240));
-        assert_eq!(video_view_box((180, 240), 0), (180, 240));
-        assert_eq!(video_view_box((320, 240), pack(16, 9)), (320, 180));
-        assert_eq!(video_view_box((180, 240), pack(16, 9)), (180, 101));
-        assert_eq!(video_view_box((640, 360), pack(1, 1)), (640, 640));
-        assert_eq!(video_view_box((640, 360), pack(65535, 1)), (640, 1));
-        assert_eq!(video_view_box((320, 240), pack(0, 9)), (320, 240));
-        let (w, h) = video_view_box((320, 240), pack(16, 9));
+        let player = VideoPicture::Player;
+        let camera = |frames, rotation| VideoPicture::SelfView { frames, rotation };
+        assert_eq!(video_view_box(player((320, 240)), 0), (320, 240));
+        assert_eq!(video_view_box(player((180, 240)), 0), (180, 240));
+        assert_eq!(video_view_box(player((320, 240)), pack(16, 9)), (320, 180));
+        assert_eq!(video_view_box(player((180, 240)), pack(16, 9)), (240, 135));
+        assert_eq!(video_view_box(player((640, 360)), pack(1, 1)), (640, 640));
+        assert_eq!(video_view_box(player((640, 360)), pack(65535, 1)), (640, 1));
+        assert_eq!(video_view_box(player((320, 240)), pack(0, 9)), (320, 240));
+        assert_eq!(video_view_box(camera((640, 480), 0), 0), (320, 240));
+        assert_eq!(video_view_box(camera((640, 480), 90), 0), (180, 240));
+        assert_eq!(video_view_box(camera((0, 0), 90), 0), (320, 240));
+        for rotation in [0, 90, 180, 270] {
+            assert_eq!(video_view_box(camera((640, 480), rotation), pack(16, 9)), (320, 180), "{rotation}");
+            assert_eq!(video_view_box(camera((480, 640), rotation), pack(16, 9)), (320, 180), "{rotation}");
+            assert_eq!(video_view_box(camera((1280, 720), rotation), pack(16, 9)), (640, 360), "{rotation}");
+            assert_eq!(video_view_box(camera((0, 0), rotation), pack(16, 9)), (320, 180), "{rotation}");
+        }
+        let (w, h) = video_view_box(player((320, 240)), pack(16, 9));
         assert_eq!(video_view_height((w, h), 160, false), 90);
         assert_eq!(video_view_height((w, h), 900, true), 506);
     }

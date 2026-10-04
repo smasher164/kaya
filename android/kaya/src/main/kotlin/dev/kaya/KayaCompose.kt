@@ -8982,14 +8982,20 @@ object KayaCompose {
                         }
                     }
                     "expect_video_box" -> {
-                        // docs/media-plan.md §3: the box Compose laid out, its ratio alone.
+                        // docs/media-plan.md §3: the box Compose laid out, its ratio ("16:9")
+                        // or its size ("320x180").
                         val want = quoted(parts.drop(2))
                         val ratio = want.split(':').mapNotNull { it.toIntOrNull() }
+                        val size = want.split('x').mapNotNull { it.toIntOrNull() }
                         val vnode = kayaWidgetTarget(parts[1])
                         val got = vnode?.let { n -> onUi(activity) { kayaVideoBoxSize(n) } ?: "<no video view laid out>" }
                             ?: "<no such target>"
                         if (ratio.size == 2 && kayaVideoBoxShaped(got, ratio[0], ratio[1])) {
                             observed.add("video box $want")
+                        } else if (size.size == 2 && kayaVideoBoxSized(got, size[0], size[1])) {
+                            observed.add("video box $want")
+                        } else if (size.size == 2) {
+                            failures.add("video box $got, wanted $want with each side within one unit")
                         } else {
                             failures.add("video box $got, wanted $want with its height within one unit")
                         }

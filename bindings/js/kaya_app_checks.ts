@@ -2561,6 +2561,27 @@ if (isMainThread) {
     }
     check("a row template refuses a capture's preview, naming the live zone", /live zone only/.test(cpRefused));
 
+    // An aspect part past what a safe integer packs still reaches the core
+    // exactly, so its refusal names the width the app gave as the other
+    // bindings' does (docs/media-plan.md §3): one record in tx_set_aspect's
+    // own layout, each part saturated at i32's bounds.
+    const aspectFrom = shipped.length;
+    app.build(() => {
+      cpView.aspect(16, 9);
+      cpView.aspect(3_000_000, 9);
+      cpView.aspect(2 ** 40, -(2 ** 40));
+    });
+    const aspectRecs = shipped.slice(aspectFrom).flat();
+    const aspectAt = (w: number, h: number): Uint8Array => {
+      const rec = wire.tx_set_aspect(cpView.id, 0);
+      new DataView(rec.buffer, rec.byteOffset).setBigInt64(rec.length - 8, (BigInt(w) << 32n) | BigInt(h >>> 0), true);
+      return rec;
+    };
+    check("an aspect in range packs through tx_set_aspect", aspectRecs.some((r) => cpSame(r, wire.tx_set_aspect(cpView.id, 16 * 2 ** 32 + 9))));
+    check("a written aspect record is tx_set_aspect's layout", cpSame(aspectAt(16, 9), wire.tx_set_aspect(cpView.id, 16 * 2 ** 32 + 9)));
+    check("a width past a safe integer reaches the core as given", aspectRecs.some((r) => cpSame(r, aspectAt(3_000_000, 9))));
+    check("an aspect part past i32 saturates as the other bindings do", aspectRecs.some((r) => cpSame(r, aspectAt(2 ** 31 - 1, -(2 ** 31)))));
+
     kaya.onPermission((k, p) => cpSeen.push(["permission", k, p]));
     kaya.onCaptureDevices((d) => cpSeen.push(["devices", d.length]));
     const packChanged = (state: number, failure = 0, w = 0, h = 0, rate = 0, detail = ""): Uint8Array =>

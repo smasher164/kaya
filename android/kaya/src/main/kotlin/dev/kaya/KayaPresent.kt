@@ -211,7 +211,7 @@ object KayaPresent {
     @JvmStatic external fun captureSynthetic(index: Int): String?
     @JvmStatic external fun captureSyntheticPermission(kind: Int, ask: Boolean): Int
     @JvmStatic external fun captureNearestFormat(offered: IntArray, width: Double, height: Double, frameRate: Double): IntArray?
-    @JvmStatic external fun captureSelfViewNatural(width: Int, height: Int, rotation: Int): IntArray?
+    @JvmStatic external fun captureSelfViewBox(width: Int, height: Int, rotation: Int, aspect: Long): IntArray?
     @JvmStatic external fun videoViewBox(width: Int, height: Int, aspect: Long): IntArray?
     @JvmStatic external fun captureHarness(verb: Int, index: Int, text: String): String
 

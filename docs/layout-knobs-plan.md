@@ -68,9 +68,11 @@ layout manager, FlowLayout, swapped onto the same GtkBox (children stay
 direct children, so every walker is unchanged; measure answers the widest
 child as the minimum and one line as the natural, and the height for a
 width from the lines that width allows); WinUI: reindex hands a wrapping
-row to reflow_wrap, which re-stamps the Grid from its own ActualWidth into
-Auto tracks, and the row's LayoutUpdated re-runs it only when the breaks
-moved. align.steps' `row@wrapped` flows six 100x20 images: exact pixel
+row to reflow_wrap, which re-stamps the Grid from its parent's content
+width into one Auto column and an Auto row per line, each line laid out by its
+own children (each child's offset on its leading margin; lines sharing column
+tracks once ran a line past its room, docs/deferred.md's WinUI flowing row
+entry), and the row's LayoutUpdated re-runs it only when that flow moved. align.steps' `row@wrapped` flows six 100x20 images: exact pixel
 widths, so every lane breaks them onto two lines (desktops four and two,
 phones three and three; a third line needs under 316 points), and
 `row@plain` is the one-line control. Nine spellings, `wrap(bool)` on a

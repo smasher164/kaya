@@ -918,9 +918,9 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 fn_ptr: present_capture_nearest_format as *mut _,
             },
             NativeMethod {
-                name: "captureSelfViewNatural".into(),
-                sig: "(III)[I".into(),
-                fn_ptr: present_capture_self_view_natural as *mut _,
+                name: "captureSelfViewBox".into(),
+                sig: "(IIIJ)[I".into(),
+                fn_ptr: present_capture_self_view_box as *mut _,
             },
             NativeMethod {
                 name: "videoViewBox".into(),
@@ -2852,15 +2852,19 @@ extern "system" fn present_capture_nearest_format<'local>(
     out
 }
 
-extern "system" fn present_capture_self_view_natural<'local>(
+extern "system" fn present_capture_self_view_box<'local>(
     env: JNIEnv<'local>,
     _class: JClass,
     width: jint,
     height: jint,
     rotation: jint,
+    aspect: jni::sys::jlong,
 ) -> jni::objects::JIntArray<'local> {
-    let (w, h) =
-        crate::capture::self_view_natural((width.max(0) as u32, height.max(0) as u32), rotation.max(0) as u32);
+    let frames = (width.max(0) as u32, height.max(0) as u32);
+    let (w, h) = crate::media::video_view_box(
+        crate::media::VideoPicture::SelfView { frames, rotation: rotation.max(0) as u32 },
+        aspect,
+    );
     let Ok(out) = env.new_int_array(2) else { return jni::objects::JIntArray::default() };
     if env.set_int_array_region(&out, 0, &[w as i32, h as i32]).is_err() {
         return jni::objects::JIntArray::default();
@@ -2875,7 +2879,8 @@ extern "system" fn present_video_view_box<'local>(
     height: jint,
     aspect: jni::sys::jlong,
 ) -> jni::objects::JIntArray<'local> {
-    let (w, h) = crate::media::video_view_box((width.max(0) as u32, height.max(0) as u32), aspect);
+    let picture = crate::media::VideoPicture::Player((width.max(0) as u32, height.max(0) as u32));
+    let (w, h) = crate::media::video_view_box(picture, aspect);
     let Ok(out) = env.new_int_array(2) else { return jni::objects::JIntArray::default() };
     if env.set_int_array_region(&out, 0, &[w as i32, h as i32]).is_err() {
         return jni::objects::JIntArray::default();

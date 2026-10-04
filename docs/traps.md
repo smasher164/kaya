@@ -13840,3 +13840,18 @@ preview to it shows the frames' field of view (on a camera whose 16:9 mode
 is a centre crop of its 4:3 sensor; the flat synthetic colours cannot show
 the crop). tools/check-verbs.py's video view clause holds the rotation in
 the core rule, its JNI door and the arm.
+
+## The WinUI off-screen read excused everything: the window's root ScrollViewer sits above the ground (measured 2026-10-04)
+
+`off_screen` (crates/kaya/src/winui/mod.rs, expect_no_clipping's button and
+label clause) excuses an element along any axis a ScrollViewer ancestor
+scrolls, and walked `FrameworkElement::Parent()` with no stop. Above kaya's
+window ground WinUI keeps a root ScrollViewer of its own, whose bars are not
+`Disabled`, so every element read as carried on both axes and the clause could
+never fire: the capture guests' Stop button at 514...567px in a 520px window
+passed (a KAYA_DIAG print on the windows lane read `carried true true` for
+every label and button). The walk stops at the ground now; with the flowing
+row's shipped shared columns put back, the capture leg went red naming Stop.
+Every scene that asserts expect_no_clipping on Windows was blind on that half
+until then.
+

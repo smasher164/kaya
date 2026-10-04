@@ -567,10 +567,10 @@ struct CoreState {
     grid_auto_cols: HashMap<u64, i32>,
     auto_grids: std::collections::HashSet<u64>,
     /// The rows that flow, the ones whose LayoutUpdated is wired, and each
-    /// one's last line breaks (docs/layout-knobs-plan.md §2).
+    /// one's last flow (docs/layout-knobs-plan.md §2).
     wrapping: std::collections::HashSet<u64>,
     wrap_wired: std::collections::HashSet<u64>,
-    wrap_breaks: HashMap<u64, Vec<usize>>,
+    wrap_breaks: HashMap<u64, WrapFlow>,
     /// Radio plumbing, the select_options shape: label id -> (its
     /// group, its row in the group's Items vector) — option text
     /// updates land with SetAt.
@@ -2698,25 +2698,43 @@ fn reindex_labeled(core: &CoreState, id: WidgetId, grid: &Grid) -> windows_core:
     Ok(())
 }
 
-/// The lines a wrapping row's children fall onto at `width`: the index
-/// each line starts at, from the children's own desired widths.
-fn wrap_lines(core: &CoreState, order: &[WidgetId], width: f64, gap: f64) -> windows_core::Result<Vec<usize>> {
+/// A wrapping row's flow at a width: the index each line starts at, and
+/// each child's offset along its own line.
+#[derive(Debug, Clone, PartialEq)]
+struct WrapFlow {
+    breaks: Vec<usize>,
+    offsets: Vec<f64>,
+}
+
+/// The lines a wrapping row's children fall onto at `width`, each line laid
+/// out by its OWN children's desired widths alone. Lines sharing a Grid's
+/// column tracks widened every column to its widest child on any line, so a
+/// line that fit by its own widths ran past its room (docs/deferred.md's
+/// WinUI flowing row entry). The offset rides the child's leading margin,
+/// which its DesiredSize carries, so it is taken back out here.
+fn wrap_lines(core: &CoreState, order: &[WidgetId], width: f64, gap: f64) -> windows_core::Result<WrapFlow> {
     let mut breaks = vec![0usize];
+    let mut offsets = Vec::with_capacity(order.len());
     let mut x = 0.0;
     for (i, child) in order.iter().enumerate() {
-        let Some(widget) = core.widgets.get(child) else { continue };
+        let Some(widget) = core.widgets.get(child) else {
+            offsets.push(0.0);
+            continue;
+        };
         let element: FrameworkElement = widget.element()?.cast()?;
-        let w = f64::from(element.DesiredSize()?.Width);
+        let w = (f64::from(element.DesiredSize()?.Width) - element.Margin()?.Left).max(0.0);
         let first = *breaks.last().unwrap() == i;
-        let next = x + if first { 0.0 } else { gap } + w;
-        if !first && width > 0.0 && next > width {
+        let start = if first { 0.0 } else { x + gap };
+        if !first && width > 0.0 && start + w > width {
             breaks.push(i);
+            offsets.push(0.0);
             x = w;
         } else {
-            x = next;
+            offsets.push(start);
+            x = start + w;
         }
     }
-    Ok(breaks)
+    Ok(WrapFlow { breaks, offsets })
 }
 
 /// THE WIDTH A WRAPPING ROW FITS: its PARENT's content width, never its
@@ -2740,29 +2758,20 @@ fn wrap_width(grid: &Grid) -> f64 {
 }
 
 /// A ROW THAT FLOWS (docs/layout-knobs-plan.md §2) is a Grid re-stamped
-/// from the width it has: Auto tracks, each child at its line and slot,
-/// leading-aligned. Reached from reindex and from the row's LayoutUpdated,
-/// which re-runs it only when the breaks moved.
-fn reflow_wrap(core: &CoreState, parent: WidgetId, grid: &Grid, order: &[WidgetId]) -> windows_core::Result<Vec<usize>> {
+/// from the width it has: one Auto column, an Auto row per line, each child
+/// on its line at its own offset, leading-aligned. Reached from reindex and
+/// from the row's LayoutUpdated, which re-runs it only when the flow moved.
+fn reflow_wrap(core: &CoreState, _parent: WidgetId, grid: &Grid, order: &[WidgetId]) -> windows_core::Result<WrapFlow> {
     let gap = grid.ColumnSpacing()?;
     grid.SetRowSpacing(gap)?;
     let width = wrap_width(grid);
-    let breaks = wrap_lines(core, order, width, gap)?;
-    let lines = breaks.len();
-    let per_line = (0..lines)
-        .map(|l| {
-            let end = if l + 1 < lines { breaks[l + 1] } else { order.len() };
-            end - breaks[l]
-        })
-        .max()
-        .unwrap_or(0);
+    let flow = wrap_lines(core, order, width, gap)?;
+    let lines = flow.breaks.len();
     let cols = grid.ColumnDefinitions()?;
     cols.Clear()?;
-    for _ in 0..per_line.max(1) {
-        let def = ColumnDefinition::new()?;
-        def.SetWidth(GridLength { Value: 0.0, GridUnitType: GridUnitType::Auto })?;
-        cols.Append(&def)?;
-    }
+    let def = ColumnDefinition::new()?;
+    def.SetWidth(GridLength { Value: 0.0, GridUnitType: GridUnitType::Auto })?;
+    cols.Append(&def)?;
     let rows = grid.RowDefinitions()?;
     rows.Clear()?;
     for _ in 0..lines.max(1) {
@@ -2773,13 +2782,15 @@ fn reflow_wrap(core: &CoreState, parent: WidgetId, grid: &Grid, order: &[WidgetI
     for (i, child) in order.iter().enumerate() {
         let Some(widget) = core.widgets.get(child) else { continue };
         let element: FrameworkElement = widget.element()?.cast()?;
-        let line = breaks.iter().rposition(|b| *b <= i).unwrap_or(0);
+        let line = flow.breaks.iter().rposition(|b| *b <= i).unwrap_or(0);
         Grid::SetRow(&element, line as i32)?;
-        Grid::SetColumn(&element, (i - breaks[line]) as i32)?;
+        Grid::SetColumn(&element, 0)?;
+        let margin = element.Margin()?;
+        element.SetMargin(Thickness { Left: flow.offsets[i], ..margin })?;
         element.SetHorizontalAlignment(bindings::Microsoft::UI::Xaml::HorizontalAlignment::Left)?;
         element.SetVerticalAlignment(bindings::Microsoft::UI::Xaml::VerticalAlignment::Top)?;
     }
-    Ok(breaks)
+    Ok(flow)
 }
 
 /// A wrapping row's LayoutUpdated body: the breaks its width allows now,
@@ -2797,8 +2808,8 @@ fn wrap_track(core: &mut CoreState, rid: u64, probe: &Grid) {
         .collect();
     let gap = probe.ColumnSpacing().unwrap_or(0.0);
     let width = wrap_width(probe);
-    let Ok(breaks) = wrap_lines(core, &order, width, gap) else { return };
-    if core.wrap_breaks.get(&rid) != Some(&breaks) {
+    let Ok(flow) = wrap_lines(core, &order, width, gap) else { return };
+    if core.wrap_breaks.get(&rid) != Some(&flow) {
         if let Ok(placed) = reflow_wrap(core, WidgetId(rid), probe, &order) {
             core.wrap_breaks.insert(rid, placed);
         }
@@ -3465,10 +3476,16 @@ fn off_screen(
     let y0 = f64::from(origin.Y);
     let (x1, y1) = (x0 + w, y0 + h);
     // Excused along the axis of any ScrollViewer that carries it
-    // (docs/hscroll-plan.md §2), read off that viewer's own bars.
+    // (docs/hscroll-plan.md §2), read off that viewer's own bars, up to the
+    // ground and no further: the window's own root ScrollViewer sits above
+    // it and excused every element (docs/traps.md, the WinUI off-screen read).
     let (mut carried_across, mut carried_down) = (false, false);
+    let ground_node: bindings::Microsoft::UI::Xaml::DependencyObject = ground.cast()?;
     let mut parent = element.Parent().ok();
     while let Some(p) = parent {
+        if p == ground_node {
+            break;
+        }
         if let Ok(viewer) = windows_core::Interface::cast::<ScrollViewer>(&p) {
             carried_across |= viewer.HorizontalScrollBarVisibility()? != ScrollBarVisibility::Disabled;
             carried_down |= viewer.VerticalScrollBarVisibility()? != ScrollBarVisibility::Disabled;
@@ -16866,6 +16883,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     } else {
                         core.wrapping.remove(&id.0);
                         core.wrap_breaks.remove(&id.0);
+                        for child in core.child_order.children(id).to_vec() {
+                            if let Some(widget) = core.widgets.get(&child) {
+                                let element: FrameworkElement = widget.element()?.cast()?;
+                                let margin = element.Margin()?;
+                                element.SetMargin(Thickness { Left: 0.0, ..margin })?;
+                            }
+                        }
                     }
                     if on && core.wrap_wired.insert(id.0) {
                         // The width is read on LayoutUpdated (no SizeChanged

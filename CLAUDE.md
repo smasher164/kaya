@@ -1478,8 +1478,8 @@ in docs/deferred.md.
    Watched negatives on every clause, counts printed. AND A SELF-VIEW'S
    NATURAL SIZE SINCE 2026-10-03 (docs/capture-plan.md §3): half its
    frames' as they stand upright, 320x240 with no camera and no minimum,
-   from `crate::capture::self_view_natural` on all five arms through its C
-   and JNI doors; Compose had shipped a fixed 320x180 and GTK the frames'
+   from `crate::capture::self_view_natural` on all five arms through the
+   box rule's C and JNI self-view doors; Compose had shipped a fixed 320x180 and GTK the frames'
    full size with every capture leg green. AND EVERY VIDEO VIEW, PLAYER OR
    SELF-VIEW, KEEPS ITS ASPECT AS IT SHRINKS (docs/media-plan.md §3): its
    height follows its width, where every arm had kept the full natural
@@ -1496,8 +1496,14 @@ in docs/deferred.md.
    `fit`), and both interpreters read `expect_video_box` off the laid-out
    view and `expect_video_corner` four points in; the capture scene sees
    one aspect and two fits on a self-view only, so a backend that reads the
-   prop and sizes the box from the picture anyway is a negative here.
-   Seventeen watched negatives and a fake-name census, counts printed),
+   prop and sizes the box from the picture anyway is a negative here. AND
+   THE BOX'S WIDTH IS THE PICTURE'S LONGER SIDE AT ITS NATURAL SCALE SINCE
+   2026-10-04, so a rotated phone camera's 16:9 tile is the desktops' 320
+   wide rather than the upright picture's 180: the doors carry the
+   self-view's frames and rotation, never its fitted size, and the scene
+   reads the box's size (`"320x180"`) in all three harnesses, each held to
+   comparing both sides. Twenty-eight watched negatives and a fake-name
+   census, counts printed),
    `tools/check-file-modes.py` (the file-mode NUMBERS agree with the
    spec's wherever they are written down. `kaya_open_picked` takes an
    integer, crates/kaya/src/spec.rs decides what it means, and five

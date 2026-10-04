@@ -139,10 +139,12 @@ layout that fits one platform fits the others. It takes no minimum: in a window 
 it is given, keeping its aspect, so its height follows its width and the
 picture fills it with no bands (docs/media-plan.md §3, the one rule every
 video view keeps). The natural size is computed in one place,
-`crate::capture::self_view_natural`, which GTK and WinUI call directly and
-the two interpreters reach through `kaya_capture_self_view_natural` (the
-SwiftUI host table) and `KayaPresent.captureSelfViewNatural` (JNI);
-tools/check-verbs.py's video view clause holds every arm to it. The
+`crate::capture::self_view_natural`, reached only through the video view's
+box rule (`crate::media::video_view_box`, docs/media-plan.md §3), which GTK
+and WinUI call directly and the two interpreters reach through
+`kaya_capture_self_view_box` (the SwiftUI host table) and
+`KayaPresent.captureSelfViewBox` (JNI), each handed the frames and their
+rotation; tools/check-verbs.py's video view clause holds every arm to it. The
 rotation is the one the frames carry (§4): a phone's camera sensor is
 mounted across its portrait panel, so Android hands 640x480 frames with a
 rotation of 90 and its preview draws them upright, 3:4; the box takes the

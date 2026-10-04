@@ -24565,8 +24565,8 @@ mod gtk_media {
 
         #[derive(Default)]
         pub struct VideoLayoutInner {
-            /// A self-view's natural size; `None` is the player's picture's.
-            natural: Cell<Option<(i32, i32)>>,
+            /// A self-view's frames (0x0 with no camera); `None` is the player's picture.
+            self_view: Cell<Option<(u32, u32)>>,
             /// The app's packed aspect, 0 for none (docs/media-plan.md §3).
             aspect: Cell<i64>,
         }
@@ -24591,16 +24591,19 @@ mod gtk_media {
                 orientation: gtk4::Orientation,
                 for_size: i32,
             ) -> (i32, i32, i32, i32) {
-                let picture = self.natural.get().unwrap_or_else(|| {
-                    widget
-                        .downcast_ref::<gtk4::Picture>()
-                        .and_then(|p| p.paintable())
-                        .map(|p| (p.intrinsic_width(), p.intrinsic_height()))
-                        .filter(|(w, h)| *w > 0 && *h > 0)
-                        .unwrap_or(super::VIDEO_PLACEHOLDER)
-                });
-                let (w, h) =
-                    crate::media::video_view_box((picture.0.max(0) as u32, picture.1.max(0) as u32), self.aspect.get());
+                let picture = match self.self_view.get() {
+                    Some(frames) => crate::media::VideoPicture::SelfView { frames, rotation: 0 },
+                    None => {
+                        let (w, h) = widget
+                            .downcast_ref::<gtk4::Picture>()
+                            .and_then(|p| p.paintable())
+                            .map(|p| (p.intrinsic_width(), p.intrinsic_height()))
+                            .filter(|(w, h)| *w > 0 && *h > 0)
+                            .unwrap_or(super::VIDEO_PLACEHOLDER);
+                        crate::media::VideoPicture::Player((w.max(0) as u32, h.max(0) as u32))
+                    }
+                };
+                let (w, h) = crate::media::video_view_box(picture, self.aspect.get());
                 let (w, h) = (w as i32, h as i32);
                 if orientation == gtk4::Orientation::Horizontal {
                     return (0, w, -1, -1);
@@ -24628,8 +24631,8 @@ mod gtk_media {
         }
 
         impl VideoLayout {
-            pub fn set_natural(&self, natural: Option<(i32, i32)>) {
-                self.imp().natural.set(natural);
+            pub fn set_self_view(&self, frames: Option<(u32, u32)>) {
+                self.imp().self_view.set(frames);
                 self.layout_changed();
             }
 
