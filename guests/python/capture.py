@@ -84,7 +84,7 @@ def on_samples(chunk, _at):
     with seen_lock:
         seen.chunk = len(chunk)
         line = evidence(seen.frames, seen.chunk)
-    app.post(labels[3].set, line)
+        app.post(labels[3].set, line)
 
 
 def on_switch():

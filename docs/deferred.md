@@ -25,7 +25,7 @@ so the recorder grows that line around a routed session command before the
 next sighting, proven by a forced red. Not touched by the capture slice (the
 capture arm reaches no player or session).
 
-## BUILD — camera and microphone capture (docs/capture-plan.md), depth on the mac (2026-10-02), breadth built 2026-10-03 with the Windows legs still to run; the C floor's parsers, §5's far end and the rulings below remain
+## BUILD — camera and microphone capture (docs/capture-plan.md), depth on the mac (2026-10-02), breadth built 2026-10-03 and the Windows legs green the same day; the C floor's parsers, §5's far end and the rulings below remain
 KEY: capture, CaptureId, CaptureRef, CaptureReading, CaptureFrame, create_capture, set_capture_prop, capture_command, release_capture, request_permission, watch_capture_devices, set_video_capture, capture_changed, capture_permission, capture_devices, capture_overrun, cprop, capture_state, capture_failure, capture_interruption, capture_kind, camera_facing, PropKind::Capture, PROP_CAPTURE, kaya_capture_state, kaya_capture_frame, kaya_capture_samples, kaya_capture_on_frame, kaya_capture_on_samples, kaya_capture_synthetic, kaya_capture_nearest_format, kaya_capture_harness, crates/kaya/src/capture.rs, KayaRealCapture, kayaCaptureWall, expect_capture, answer_permission, DEPTH STUB capture, CAPTURE_SURFACES, capture_denied, pwsynth, capture-leg.py, winvcam, kaya-capture-lane, capture-install.ps1, emulator_capture.py, KayaCapture.kt, scene-negative.py
 
 The depth slice: the spec's six transaction, seven apply and four occurrence
@@ -50,8 +50,9 @@ and caught a panicking capture callback there (`survive`):
     format and exits with its consumer), started and proven stopped per leg by
     tools/linux/capture-leg.py; 32 legs green (eight languages, two protocols,
     two scenes). docs/probes/capture-2026-10-01/linux-measured.md.
-  - ~~**DEPTH STUB: capture on winui**~~ — LANDED 2026-10-03 AS AN ARM, ITS LEGS
-    NOT YET RUN: MediaCapture (ExclusiveControl, so a wish can set the format)
+  - ~~**DEPTH STUB: capture on winui**~~ — LANDED 2026-10-03, ITS TWELVE LEGS
+    GREEN THE SAME DAY (deploy-win KAYA_ONLY=capture ALL PASS, KAYA_ONLY=media_
+    ALL PASS after it): MediaCapture (ExclusiveControl, so a wish can set the format)
     and MediaFrameReader, crates/kaya/src/winui/capture.rs; the ruled one-time
     install is on the VM (VB-CABLE pack 45, the two virtual cameras' DLL
     tools/winvcam registered in HKLM, docs/HACKING.md "The Windows capture
@@ -59,7 +60,19 @@ and caught a panicking capture callback there (`survive`):
     (docs/probes/capture-2026-10-01/windows-measured.md). The twelve legs are
     wired, each in a block of its own; the VM came back from the install's
     reboot on two default displays and UTM then wedged in `stopping`
-    (docs/traps.md), so they wait on the maintainer restarting UTM.
+    (docs/traps.md); after the maintainer restarted UTM and switched the
+    display, the first runs found four arm defects, fixed: the device watch
+    never reported under the harness (the watch was only made off it), a
+    batch of props reopened the devices once per prop with four exclusive
+    opens racing, a denied start reported inside the batch so the core's own
+    `starting` overwrote it, and the platform's player over the frame source
+    decodes the camera's BT.601 as BT.709 (docs/traps.md, the WinUI self-view
+    colour), so the self-view is drawn from kaya's own frames. The video view
+    now shrinks to the room it is given and a self-view is half its frames'
+    size, the SwiftUI arm's rule. The Java, Swift and Python guests posted
+    their evidence line outside their lock, so a late frame line could land
+    under an older one (capture_java red once); they post under it now, as
+    the other six do.
   - ~~**DEPTH STUB: capture on compose**~~ — LANDED 2026-10-03: CameraX 1.5.1
     (1.6.2 needs AGP 8.9.1) and AudioRecord, KayaCapture.kt; the phone AVD's
     two cameras are flat-colour `imagefile:` images (a camera flag over the
@@ -77,8 +90,8 @@ and caught a panicking capture callback there (`survive`):
     census green in all nine. The callbacks run on kaya's capture thread in
     every binding; Python, C#, Java, OCaml, Haskell and JS hand a copy, Go and
     Swift borrow as C and Rust do; JS runs them in a capture worker the
-    capture thread calls synchronously (RULING below).
-  - **RULING (open)**: a capture callback that raises is caught, logged naming
+    capture thread calls synchronously (RULED below).
+  - **RULED 2026-10-03 (the maintainer, as recommended)**: a capture callback that raises is caught, logged naming
     the capture and the capture keeps running, DESIGN.md's abort rule carried
     to the capture thread — built in all nine, each with a watched negative.
     And JS's one difference: its worker carries a capture's frame and sample

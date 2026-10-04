@@ -2268,7 +2268,7 @@ def capture_devices_start():
             "schtasks /run /tn kaya_capture_lane >nul")
     CAPTURE_LANE["on"] = True
     for _ in range(61):
-        if run_ssh("cmd /c if exist C:\\kaya\\capture-lane.ready (exit 0) else (exit 1)") == 0:
+        if run_ssh('cmd /c "if exist C:\\kaya\\capture-lane.ready (exit 0) else (exit 1)"') == 0:
             print("== capture devices up (kaya-capture-lane: two virtual cameras, the "
                   "cable's tone) ==", flush=True)
             return
@@ -2419,6 +2419,10 @@ def desk_warm():
             print(out, file=sys.stderr)
             return False
         time.sleep(0.5)
+    refused = lane.screens_refusal(out)
+    if refused:
+        print(f"deploy-win: THE GUEST'S DISPLAY IS NOT THE LANE'S: {refused}", file=sys.stderr)
+        return False
     m = re.search(r"deskwarm\.verdict=([A-Z]*)", out)
     if m and m.group(1) == "OK":
         # One line on the happy path, carrying what it had to get past:

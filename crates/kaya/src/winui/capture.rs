@@ -1,9 +1,10 @@
 //! The capture on WinUI (docs/capture-plan.md, the WinUI rows): one
 //! `MediaCapture` per capture over its chosen devices, `MediaFrameReader`
 //! handing NV12 and float frames to the core on the reader's own thread, the
-//! preview a `MediaPlayerElement` over `MediaSource.CreateFromMediaFrameSource`
-//! (the video view's own element, media.rs), every report through the core's
-//! one state machine on the UI thread.
+//! preview those same frames drawn into the video view's picture (media.rs;
+//! the platform's player over the frame source decodes BT.601 as BT.709,
+//! docs/traps.md), every report through the core's one state machine on the
+//! UI thread.
 //!
 //! Under the harness the devices are the core's synthetic table, each entry
 //! listed only while the lane's device carrying it is present: the two MF
@@ -34,9 +35,7 @@ use super::bindings::Windows::Media::Capture::{
     MediaCapture, MediaCaptureFailedEventArgs, MediaCaptureFailedEventHandler, MediaCaptureInitializationSettings,
     MediaCaptureMemoryPreference, MediaCaptureSharingMode, StreamingCaptureMode,
 };
-use super::bindings::Windows::Media::Core::MediaSource;
 use super::bindings::Windows::Media::Devices::{AudioDeviceRole, MediaDevice};
-use super::bindings::Windows::Media::Playback::{IMediaPlaybackSource, MediaPlayer};
 use super::CoreState;
 use crate::capture::{CaptureFrame, Report};
 use crate::protocol::{
@@ -89,7 +88,6 @@ struct Opened {
     media: MediaCapture,
     video: Option<MediaFrameReader>,
     audio: Option<MediaFrameReader>,
-    preview: Option<MediaSource>,
 }
 
 struct WinCapture {
@@ -111,6 +109,8 @@ thread_local! {
     static WATCH: RefCell<Option<Watch>> = const { RefCell::new(None) };
     /// The permission each kind last reported, so a kind is reported when it moves.
     static KNOWN: RefCell<HashMap<CaptureKind, Permission>> = RefCell::new(HashMap::new());
+    /// Captures with a reopen already posted for this batch.
+    static REOPEN: RefCell<std::collections::HashSet<u64>> = RefCell::new(std::collections::HashSet::new());
 }
 
 // ---- the doors to the core ----------------------------------------------------
@@ -282,46 +282,57 @@ pub(super) fn watch_devices(core: &mut CoreState, on: bool) {
     if !on {
         return;
     }
-    if under_harness() {
-        for kind in [CaptureKind::Camera, CaptureKind::Microphone] {
+    for kind in [CaptureKind::Camera, CaptureKind::Microphone] {
+        let (standing, detail) = if under_harness() {
             let standing = crate::capture::synthetic_permission(kind);
             KNOWN.with(|k| k.borrow_mut().insert(kind, standing));
-            for occ in core.scene.capture_permission(kind, standing, String::new()) {
-                core.occurrences.send(occ);
-            }
-        }
-    } else {
-        for kind in [CaptureKind::Camera, CaptureKind::Microphone] {
+            (standing, String::new())
+        } else {
             let standing = KNOWN.with(|k| k.borrow().get(&kind).copied()).unwrap_or(Permission::Prompt);
-            for occ in core.scene.capture_permission(
-                kind,
-                standing,
-                "Windows answers an unpackaged app only when a device opens".to_owned(),
-            ) {
-                core.occurrences.send(occ);
-            }
+            (standing, "Windows answers an unpackaged app only when a device opens".to_owned())
+        };
+        for occ in core.scene.capture_permission(kind, standing, detail) {
+            core.occurrences.send(occ);
         }
-        let mut watchers = Vec::new();
-        for class in [DeviceClass::VideoCapture, DeviceClass::AudioCapture] {
-            let Ok(watcher) = DeviceInformation::CreateWatcherDeviceClass(class) else { continue };
-            let relist = || relist_later();
-            let _ = watcher.Added(&TypedEventHandler::new(move |_, _| {
-                relist();
-                Ok(())
-            }));
-            let _ = watcher.Removed(&TypedEventHandler::new(move |_, _| {
-                relist_later();
-                Ok(())
-            }));
-            let _ = watcher.Updated(&TypedEventHandler::new(move |_, _| {
-                relist_later();
-                Ok(())
-            }));
-            let _ = watcher.Start();
-            watchers.push(watcher);
-        }
-        WATCH.with(|w| *w.borrow_mut() = Some(Watch { watchers }));
     }
+    // The watch is Some under the harness too, since relist_later reports
+    // only while it is; a lane carrier appearing relists like any device.
+    let mut watchers = Vec::new();
+    for class in [DeviceClass::VideoCapture, DeviceClass::AudioCapture] {
+        let Ok(watcher) = DeviceInformation::CreateWatcherDeviceClass(class) else { continue };
+        // Added fires once per present device before EnumerationCompleted;
+        // the first list is relist_later's below.
+        let enumerated = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let moved = |enumerated: &Arc<std::sync::atomic::AtomicBool>| {
+            let enumerated = enumerated.clone();
+            move || {
+                if enumerated.load(Ordering::SeqCst) {
+                    relist_later();
+                }
+            }
+        };
+        let (added, removed, updated) = (moved(&enumerated), moved(&enumerated), moved(&enumerated));
+        let _ = watcher.Added(&TypedEventHandler::new(move |_, _| {
+            added();
+            Ok(())
+        }));
+        let _ = watcher.Removed(&TypedEventHandler::new(move |_, _| {
+            removed();
+            Ok(())
+        }));
+        let _ = watcher.Updated(&TypedEventHandler::new(move |_, _| {
+            updated();
+            Ok(())
+        }));
+        let done = enumerated.clone();
+        let _ = watcher.EnumerationCompleted(&TypedEventHandler::new(move |_, _| {
+            done.store(true, Ordering::SeqCst);
+            Ok(())
+        }));
+        let _ = watcher.Start();
+        watchers.push(watcher);
+    }
+    WATCH.with(|w| *w.borrow_mut() = Some(Watch { watchers }));
     relist_later();
 }
 
@@ -412,7 +423,7 @@ pub(super) fn create(_core: &mut CoreState, id: u64) {
     });
 }
 
-pub(super) fn set_prop(core: &mut CoreState, id: u64, prop: CaptureProp, value: Value) {
+pub(super) fn set_prop(_core: &mut CoreState, id: u64, prop: CaptureProp, value: Value) {
     let reopen = CAPTURES.with(|c| {
         let mut c = c.borrow_mut();
         let Some(cap) = c.get_mut(&id) else { return false };
@@ -429,8 +440,15 @@ pub(super) fn set_prop(core: &mut CoreState, id: u64, prop: CaptureProp, value: 
         // A device change while running reopens (docs/capture-plan.md §2).
         cap.running
     });
-    if reopen {
-        open(core, id);
+    // Once for every prop one transaction wrote, the GTK arm's rule: a
+    // reopen per prop raced four ExclusiveControl opens of one device.
+    if reopen && REOPEN.with(|r| r.borrow_mut().insert(id)) {
+        super::media::post(move |core| {
+            REOPEN.with(|r| r.borrow_mut().remove(&id));
+            if CAPTURES.with(|c| c.borrow().get(&id).is_some_and(|cap| cap.running)) {
+                open(core, id);
+            }
+        });
     }
 }
 
@@ -469,6 +487,12 @@ pub(super) fn release(core: &mut CoreState, id: u64) {
 /// Close what is open: the generation moves first, so anything still
 /// arriving for the old devices is dropped, then the preview goes out.
 fn close(core: &mut CoreState, id: u64) {
+    if let Some(o) = take_opened(core, id) {
+        on_worker(move || teardown(o.take()));
+    }
+}
+
+fn take_opened(core: &mut CoreState, id: u64) -> Option<Sendable<Opened>> {
     let opened = CAPTURES.with(|c| {
         let mut c = c.borrow_mut();
         let cap = c.get_mut(&id)?;
@@ -476,29 +500,26 @@ fn close(core: &mut CoreState, id: u64) {
         cap.opened.take()
     });
     super::media::capture_preview(core, id, None);
-    if let Some(Sendable(o)) = opened {
-        let o = Sendable(o);
-        on_worker(move || {
-            let o = o.take();
-            for reader in [o.video, o.audio].into_iter().flatten() {
-                if let Ok(op) = reader.StopAsync() {
-                    let _ = op.join();
-                }
-                let _ = reader.Close();
-            }
-            if let Some(p) = o.preview {
-                let _ = p.Close();
-            }
-            let _ = o.media.Close();
-        });
+    opened
+}
+
+/// On a worker: the readers stopped and the devices released before
+/// anything else opens them.
+fn teardown(o: Opened) {
+    for reader in [o.video, o.audio].into_iter().flatten() {
+        if let Ok(op) = reader.StopAsync() {
+            let _ = op.join();
+        }
+        let _ = reader.Close();
     }
+    let _ = o.media.Close();
 }
 
 /// Open the capture's devices: each kind's permission asked first, then the
 /// devices resolved and opened on a worker, the result reported on the UI
 /// thread if it is still the capture's latest.
 fn open(core: &mut CoreState, id: u64) {
-    close(core, id);
+    let old = take_opened(core, id);
     let Some((camera, microphone, wish, generation)) = CAPTURES.with(|c| {
         c.borrow().get(&id).map(|cap| (cap.camera.clone(), cap.microphone.clone(), cap.wish, cap.generation.clone()))
     }) else {
@@ -530,16 +551,28 @@ fn open(core: &mut CoreState, id: u64) {
             denied |= answer == Permission::Denied;
         }
         if denied {
-            report(
-                core,
-                id,
-                Report::Failed(CaptureFailure::Denied, "the user denied this app the camera or the microphone".to_owned()),
-            );
+            if let Some(o) = old {
+                on_worker(move || teardown(o.take()));
+            }
+            // After the batch, as every other open's answer comes: inside it
+            // the core's own `starting` would land after the failure.
+            super::media::post(move |core| {
+                if CAPTURES.with(|c| c.borrow().get(&id).is_some_and(|cap| cap.running && cap.generation.load(Ordering::SeqCst) == at)) {
+                    report(
+                        core,
+                        id,
+                        Report::Failed(CaptureFailure::Denied, "the user denied this app the camera or the microphone".to_owned()),
+                    );
+                }
+            });
             return;
         }
     }
     let sink = core.occurrences.clone();
     on_worker(move || {
+        if let Some(o) = old {
+            teardown(o.take());
+        }
         let outcome = open_on_worker(id, &camera, &microphone, wish, sink, &generation, at);
         let outcome = Sendable(outcome);
         super::media::post(move |core| {
@@ -567,29 +600,24 @@ fn finish_open(core: &mut CoreState, id: u64, at: u64, outcome: Result<Outcome, 
                     permission(core, *kind, Permission::Granted, String::new());
                 }
             }
-            let preview = o.opened.preview.clone();
+            let camera = o.opened.video.is_some();
             CAPTURES.with(|c| {
                 if let Some(cap) = c.borrow_mut().get_mut(&id) {
                     cap.opened = Some(Sendable(o.opened));
                 }
             });
-            if let Some(source) = preview {
-                match preview_player(&source) {
-                    Ok(player) => super::media::capture_preview(core, id, Some((player, (o.format.0, o.format.1), o.mirror))),
-                    Err(e) => eprintln!("KAYA_DIAG winui capture {id}: the preview did not start: {}", e.message()),
-                }
+            if camera {
+                super::media::capture_preview(core, id, Some(super::media::CapturePreview::new((o.format.0, o.format.1), o.mirror)));
             }
             report(core, id, Report::Running { width: o.format.0, height: o.format.1, frame_rate: o.format.2 });
         }
         Ok(o) => {
             // Stopped or reopened meanwhile: this open is nobody's.
             let stale = Sendable(o.opened);
-            on_worker(move || {
-                let o = stale.take();
-                let _ = o.media.Close();
-            });
+            on_worker(move || teardown(stale.take()));
         }
         Err((reason, detail)) if current => {
+            eprintln!("KAYA_DIAG winui capture {id}: the open failed, {}: {detail}", reason.name());
             if reason == CaptureFailure::Denied && !under_harness() {
                 let kinds: Vec<CaptureKind> = CAPTURES.with(|c| {
                     c.borrow()
@@ -610,18 +638,6 @@ fn finish_open(core: &mut CoreState, id: u64, at: u64, outcome: Result<Outcome, 
         }
         Err(_) => {}
     }
-}
-
-fn preview_player(source: &MediaSource) -> windows_core::Result<MediaPlayer> {
-    let player = MediaPlayer::new()?;
-    player.SetRealTimePlayback(true)?;
-    player.SetAutoPlay(true)?;
-    // The self-view is not Now Playing (docs/capture-plan.md §6).
-    player.CommandManager()?.SetIsEnabled(false)?;
-    player.SystemMediaTransportControls()?.SetIsEnabled(false)?;
-    player.SetSource(&source.cast::<IMediaPlaybackSource>()?)?;
-    player.Play()?;
-    Ok(player)
 }
 
 /// The worker half of an open: resolve, open, choose the format, start the
@@ -662,7 +678,6 @@ fn open_on_worker(
     let started = Instant::now();
     let mut format = (0, 0, 0);
     let mut video = None;
-    let mut preview = None;
     if cam.is_some() {
         let source = frame_source(&media, MediaFrameSourceKind::Color).ok_or_else(|| {
             fail(&media, (CaptureFailure::HardwareError, "the camera offers no colour frame source".to_owned()))
@@ -674,13 +689,14 @@ fn open_on_worker(
             .map_err(|e| fail(&media, failure_of(&e)))?;
         reader.SetAcquisitionMode(MediaFrameReaderAcquisitionMode::Realtime).map_err(|e| fail(&media, failure_of(&e)))?;
         let live = generation.clone();
+        let drawing = Arc::new(std::sync::atomic::AtomicBool::new(false));
         reader
             .FrameArrived(&TypedEventHandler::<MediaFrameReader, MediaFrameArrivedEventArgs>::new(move |reader, _| {
                 if live.load(Ordering::SeqCst) != at {
                     return Ok(());
                 }
                 if let Some(reader) = reader.as_ref() {
-                    if let Err(e) = video_frame(reader, id, started) {
+                    if let Err(e) = video_frame(reader, id, started, at, &drawing) {
                         eprintln!("KAYA_DIAG winui capture {id}: a video frame could not be read: {}", e.message());
                     }
                 }
@@ -688,7 +704,6 @@ fn open_on_worker(
             }))
             .map_err(|e| fail(&media, failure_of(&e)))?;
         start_reader(&reader).map_err(|why| fail(&media, why))?;
-        preview = Some(MediaSource::CreateFromMediaFrameSource(&source).map_err(|e| fail(&media, failure_of(&e)))?);
         video = Some(reader);
     }
     let mut audio = None;
@@ -733,7 +748,7 @@ fn open_on_worker(
         .into_iter()
         .flatten()
         .collect();
-    Ok(Outcome { opened: Opened { media, video, audio, preview }, format, mirror, kinds })
+    Ok(Outcome { opened: Opened { media, video, audio }, format, mirror, kinds })
 }
 
 fn frame_source(media: &MediaCapture, kind: MediaFrameSourceKind) -> Option<MediaFrameSource> {
@@ -797,7 +812,13 @@ fn start_reader(reader: &MediaFrameReader) -> Result<(), (CaptureFailure, String
 
 /// The reader's thread: the latest NV12 frame to the core, its planes as the
 /// bitmap lays them out.
-fn video_frame(reader: &MediaFrameReader, id: u64, started: Instant) -> windows_core::Result<()> {
+fn video_frame(
+    reader: &MediaFrameReader,
+    id: u64,
+    started: Instant,
+    at: u64,
+    drawing: &Arc<std::sync::atomic::AtomicBool>,
+) -> windows_core::Result<()> {
     let Ok(frame) = reader.TryAcquireLatestFrame() else { return Ok(()) };
     let bitmap = frame.VideoMediaFrame()?.SoftwareBitmap()?;
     if bitmap.BitmapPixelFormat()? != BitmapPixelFormat::Nv12 {
@@ -826,19 +847,31 @@ fn video_frame(reader: &MediaFrameReader, id: u64, started: Instant) -> windows_
                 std::slice::from_raw_parts(data.add(uv.StartIndex as usize), uv_len),
             )
         };
-        crate::capture::frame(
-            CaptureId(id),
-            &CaptureFrame {
-                width,
-                height,
-                y: ys,
-                y_stride,
-                uv: uvs,
-                uv_stride,
-                timestamp_ns: started.elapsed().as_nanos() as u64,
-                rotation: 0,
-            },
-        );
+        let frame = CaptureFrame {
+            width,
+            height,
+            y: ys,
+            y_stride,
+            uv: uvs,
+            uv_stride,
+            timestamp_ns: started.elapsed().as_nanos() as u64,
+            rotation: 0,
+        };
+        crate::capture::frame(CaptureId(id), &frame);
+        // One frame in flight to the UI thread; the rest are dropped.
+        if !drawing.swap(true, Ordering::AcqRel) {
+            let bgra = bgra_of(&frame);
+            let drawing = drawing.clone();
+            super::media::post(move |core| {
+                let current = CAPTURES.with(|c| c.borrow().get(&id).is_some_and(|cap| cap.generation.load(Ordering::SeqCst) == at));
+                if current {
+                    if let Err(e) = super::media::capture_picture(core, id, width, height, &bgra) {
+                        eprintln!("KAYA_DIAG winui capture {id}: the self-view could not draw a frame: {}", e.message());
+                    }
+                }
+                drawing.store(false, Ordering::Release);
+            });
+        }
     }
     drop(access);
     let _ = reference.Close();
@@ -846,6 +879,18 @@ fn video_frame(reader: &MediaFrameReader, id: u64, started: Instant) -> windows_
     let _ = bitmap.Close();
     let _ = frame.Close();
     Ok(())
+}
+
+/// A frame as opaque BGRA8, through CaptureFrame::rgb_at, the core's one rule.
+fn bgra_of(frame: &CaptureFrame<'_>) -> Vec<u8> {
+    let mut out = Vec::with_capacity(frame.width as usize * frame.height as usize * 4);
+    for y in 0..frame.height {
+        for x in 0..frame.width {
+            let [r, g, b] = frame.rgb_at(x, y);
+            out.extend_from_slice(&[b, g, r, 255]);
+        }
+    }
+    out
 }
 
 /// The reader's thread: float samples to the core at their own rate and

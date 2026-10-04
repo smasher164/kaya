@@ -449,6 +449,28 @@ def census(texts, lanes=None, tools=None):
         out.append("tools/validate-linux.py: does not tell the container where the token lives")
     if 'exclusive.wait("gates", name)' not in texts["tools/gates.py"]:
         out.append("tools/gates.py: the sweep does not yield to a held token")
+    # 6b. THE WINDOWS LANE REFUSES A DISPLAY ITS LEGS DO NOT ASSUME
+    # (docs/traps.md, the UTM entry): desk_warm asks screens_refusal, which
+    # is run here against the shipped reading and against doctored ones.
+    if "lane.screens_refusal(out)" not in py_function(texts["tools/deploy-win.py"], "desk_warm"):
+        out.append("tools/deploy-win.py: desk_warm never asks lane.screens_refusal(out), so the "
+                   "lane runs its legs on whatever screens the interactive session has")
+    if win is not None:
+        ok = "deskwarm.screen=\\\\.\\DISPLAY2 primary=True 1280x800\n"
+        for reading, want in ((ok, None),
+                              (ok + "deskwarm.screen=\\\\.\\DISPLAY3 primary=False 800x600\n",
+                               "800x600"),
+                              ("deskwarm.screen=\\\\.\\DISPLAY1 primary=True 1024x768\n",
+                               "1024x768"),
+                              ("deskwarm.verdict=OK\n", "no screen at all")):
+            got = win.screens_refusal(reading)
+            if want is None and got is not None:
+                out.append(f"tools/lib/lanes/win.py: screens_refusal refused the lane's own "
+                           f"one 1280x800 screen: {got!r}")
+            if want is not None and (got is None or want not in got
+                                     or "DisplaySwitch.exe /internal" not in got):
+                out.append(f"tools/lib/lanes/win.py: screens_refusal admitted or misnamed the "
+                           f"reading {reading.strip()!r} ({got!r})")
     # 7. THE MAC FUNNEL WAITS FOR AN IDLE HOST.
     mac_mod = lanes.get("mac")
     if mac_mod is not None:
@@ -641,7 +663,22 @@ _win_pooled_mod.write_text(_win_pooled, encoding="utf-8")
 watched("a windows fullscreen leg run in the pool", REAL,
         "'fullscreen_go' is not EXCLUSIVE", lanes={**MODS, "windows": load_lane(_win_pooled_mod)})
 
-gate.negatives_ran(21)
+# 22. THE WINDOWS WARM-UP STOPS ASKING ABOUT THE SCREENS.
+_any_screen = gate.doctor("desk_warm's screens read cut", REAL["tools/deploy-win.py"],
+                          r"refused = lane\.screens_refusal\(out\)", "refused = None")
+watched("a windows warm-up that runs its legs on two screens",
+        {**REAL, "tools/deploy-win.py": _any_screen}, "never asks lane.screens_refusal(out)")
+
+# 23. THE DECISION ADMITS ANY READING.
+_admits_all = gate.doctor("screens_refusal admitting every reading", gate.read(WIN_LANE),
+                          r"(def screens_refusal\(warmup\):\n(?: .*\n)*?) +read = ",
+                          r"\1    return None\n    read = ")
+_admits_all_mod = gate.scratch() / "win-screens-admit.py"
+_admits_all_mod.write_text(_admits_all, encoding="utf-8")
+watched("a windows lane admitting the phantom second display", REAL,
+        "admitted or misnamed the reading", lanes={**MODS, "windows": load_lane(_admits_all_mod)})
+
+gate.negatives_ran(23)
 
 gate.counted("windows legs whose scene posts a notification",
              sorted(MODS["windows"].notification_legs(str(ROOT / "tools/scenes"))), floor=2)

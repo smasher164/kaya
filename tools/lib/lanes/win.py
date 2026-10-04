@@ -15,6 +15,7 @@ check-gates read the runner BODY, which is behaviour, not a table).
 
 import os
 import pathlib
+import re
 
 # THE scene list: every mechanical per-scene surface derives from it
 # (cross-build examples, exe/python shipping, taskkill). Adding a
@@ -863,6 +864,23 @@ CAPTURE_INSTALL_SCRIPT = "capture-install.ps1"
 CAPTURE_LANE_SCRIPT = "capture-lane.cmd"
 CAPTURE_LANE_EXE = "kaya-capture-lane.exe"
 CAPTURE_DLL = "kaya_winvcam.dll"
+
+
+# The one screen every leg's geometry assumes (docs/traps.md, the UTM entry).
+SCREEN = (1280, 800)
+
+
+def screens_refusal(warmup):
+    """None when the warm-up's `deskwarm.screen=` lines name exactly one
+    SCREEN; otherwise the sentence the lane refuses with."""
+    read = re.findall(r"^deskwarm\.screen=(\S+) primary=(\S+) (\d+)x(\d+)\s*$", warmup, re.M)
+    if len(read) == 1 and (int(read[0][2]), int(read[0][3])) == SCREEN:
+        return None
+    said = "; ".join(f"{n} primary={p} {w}x{h}" for n, p, w, h in read) or "no screen at all"
+    return (f"the interactive session has {len(read)} screen(s), {said}, where every leg's geometry "
+            f"assumes one {SCREEN[0]}x{SCREEN[1]} screen. Run `DisplaySwitch.exe /internal` as an /it "
+            f"scheduled task in that session (docs/traps.md, the UTM entry), or set the display in "
+            f"UTM, then re-run.")
 
 
 def guest_stem(scene):

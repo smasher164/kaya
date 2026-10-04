@@ -88,21 +88,21 @@ KayaApp.run { app in
             && f.yStride >= f.width
             && f.uvStride >= f.width
         let now = whole ? "app frames \(f.width)x\(f.height)" : "app frames none"
-        let line: String? = seen.withLock { s in
-            if s.frames == now { return nil }
+        seen.withLock { s in
+            if s.frames == now { return }
             s.frames = now
-            return s.line
+            let line = s.line
+            post { tx in show(tx, line) }
         }
-        if let line { post { tx in show(tx, line) } }
     }
     app.onCaptureSamples(call) { chunk, _ in
         let n = chunk.count
-        let line: String? = seen.withLock { s in
-            if s.chunkPosted { return nil }
+        seen.withLock { s in
+            if s.chunkPosted { return }
             s.chunkPosted = true
             s.chunks = "app chunks of \(n)"
-            return s.line
+            let line = s.line
+            post { tx in show(tx, line) }
         }
-        if let line { post { tx in show(tx, line) } }
     }
 }

@@ -113,10 +113,12 @@ public final class Capture {
                     && f.uv().length >= (long) f.uvStride() * ((f.height() + 1) / 2)
                     && f.yStride() >= f.width()
                     && f.uvStride() >= f.width();
-            String line = seen.frames(whole ? "app frames " + f.width() + "x" + f.height()
-                    : "app frames none");
-            if (line != null) {
-                app.post(t -> t.write(shown, line));
+            synchronized (seen) {
+                String line = seen.frames(whole ? "app frames " + f.width() + "x" + f.height()
+                        : "app frames none");
+                if (line != null) {
+                    app.post(t -> t.write(shown, line));
+                }
             }
         });
         AtomicBoolean posted = new AtomicBoolean();
@@ -124,8 +126,10 @@ public final class Capture {
             if (posted.getAndSet(true)) {
                 return;
             }
-            String line = seen.chunks(chunk.length);
-            app.post(t -> t.write(shown, line));
+            synchronized (seen) {
+                String line = seen.chunks(chunk.length);
+                app.post(t -> t.write(shown, line));
+            }
         });
         app.dispatchLoop();
     }

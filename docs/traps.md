@@ -13719,6 +13719,18 @@ a session cannot do on its own. So: reboot the VM through UTM's window or
 the guest's own Start menu, never `utmctl stop` while the guest is healthy,
 and after any reboot read the displays back before a lane trusts them.
 
+RESTARTING UTM DOES NOT CLEAR IT (measured 2026-10-03): after the maintainer
+restarted UTM the qemu command still carried one `virtio-ramfb-gl`, yet the
+interactive session kept a 1280x800 primary beside an 800x600 second (a
+Windows-side `Generic Monitor`, DISPLAY\DEFAULT_MONITOR), and the first
+capture leg's window opened on the small one: `the canvas sits at 24,182
+640x480 inside a 536x679 window`. An ssh session cannot see this, since it
+reports session 0's one 1024x768 screen. The read that can is
+`[System.Windows.Forms.Screen]::AllScreens` run as an `/it` scheduled task,
+and the fix is `DisplaySwitch.exe /internal` run the same way, after which
+that read answered `\\.\DISPLAY2 primary=True {X=0,Y=0,Width=1280,Height=800}`
+alone.
+
 ## A scene negative read green once with its cut in the tree, and the guard that refuses that (measured 2026-10-03)
 
 The capture depth slice's scene cut "the synthetic microphone's rate
@@ -13774,3 +13786,26 @@ capture legs that open a microphone run EXCLUSIVE (tools/lib/lanes/android.py)
 and every capture leg's log carries the HAL's per-second read failures, with
 the cause named when there were any (run-emulator.py's
 capture_audio_timeline).
+
+## The WinUI self-view colour: the platform's player over a camera's frame source decodes BT.601 as BT.709 (measured 2026-10-03)
+
+The documented WinUI 3 camera preview, `MediaPlayerElement` over
+`MediaSource.CreateFromMediaFrameSource`, showed the lane's virtual camera
+1 (C83C1E, NV12 Y101 U94 V192, video range) as D6481B and camera 2
+(1E5AC8) as 185BCD, in `PrintWindow` and on the screen alike. D6481B is
+exactly those samples decoded with the BT.709 matrix. The format the
+frame source answered carried the tags correctly (`MF_MT_YUV_MATRIX` 2,
+BT.601, and `MF_MT_VIDEO_NOMINAL_RANGE` 2, 16-235, read off
+`CurrentFormat().Properties()`), the reader handed the core C83C1E, and a
+file tagged BT.709 plays true through the same element (the media legs),
+so the player drops or ignores the tag on this path. No prior art was
+found. crates/kaya/src/winui/capture.rs therefore draws the reader's own
+frames through `CaptureFrame::rgb_at` into a `WriteableBitmap`, one frame
+in flight to the UI thread, and the self-view reads C83C1E within 1.
+
+An unquoted `cmd /c if exist X (exit 0) else (exit 1)` sent over ssh to
+the VM answers `" was unexpected at this time.` and exit 1 whatever is
+true; the capture devices' readiness check was written that way and said
+the devices never came up on every run while the legs used them. Quoted
+whole (`cmd /c "if ... "`) it answers correctly; tools/check-python.py's
+rule 11 refuses the unquoted shape.

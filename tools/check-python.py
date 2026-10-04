@@ -175,6 +175,10 @@ SH_TOOLCMD = re.compile(r"(?:^|[|;&(]|\$\()\s*(?:[A-Za-z_]+=\S+\s+)*"
                         r"(sed|awk)\b")
 SH_FFMPEG = re.compile(r"(?:^|[|;&(]|\$\()\s*(?:[A-Za-z_]+=\S+\s+)*"
                        r"ffmpeg\b")
+# An unquoted `cmd /c if ... (` reaches cmd through ssh with its brackets
+# split, so it answers `" was unexpected at this time.` and exit 1 whatever
+# is true: the capture readiness check that could only ever say no (2026-10-03).
+CMD_IF = re.compile(r"cmd /c if\b[^\"]*\(")
 # `run` resolves dependencies exactly as `build` does.
 RESOLVING = {"build", "check", "test", "run"}
 COMPILING = {"-d", "-proc:only"}
@@ -228,6 +232,11 @@ def command_findings(path, node):
             bad.append(f"{path}:{node.lineno}: run_javac compiles without "
                        f"-encoding — javac takes the PLATFORM charset and "
                        f"the hosts disagree (docs/traps.md).")
+    if isinstance(node, ast.Constant) and isinstance(node.value, str) \
+            and CMD_IF.search(node.value):
+        bad.append(f"{path}:{node.lineno}: an unquoted cmd-if with brackets — "
+                   f"over ssh they are split and it exits 1 whatever is true; "
+                   f"put the whole if inside one pair of double quotes.")
     if isinstance(node, ast.Constant) and isinstance(node.value, str) \
             and "\n" in node.value:
         for n, line in shell_logical(node.value):
@@ -551,7 +560,19 @@ gate.negative("N21 an undefined name in an unconverted module",
               lambda r=_n21: ([] if r.returncode == 0 else [r.stdout]),
               want="F821")
 
-gate.negatives_ran(20)
+# N22 — the unquoted cmd /c if, put back into deploy-win's readiness check.
+_unquoted = gate.doctor(
+    "N22 rule 11 — the capture readiness check unquoted again",
+    gate.read("tools/deploy-win.py"),
+    r"""run_ssh\('cmd /c "if exist C:\\\\kaya\\\\capture-lane\.ready """
+    r"""\(exit 0\) else \(exit 1\)"'\)""",
+    'run_ssh("cmd /c i' + 'f exist ready (exit 0) else (exit 1)")',
+    want=1)
+gate.negative("N22 rule 11 — an unquoted cmd /c if over ssh",
+              lambda b=_unquoted: command_census({"tools/deploy-win.py": b}),
+              want="an unquoted cmd-if with brackets")
+
+gate.negatives_ran(21)
 
 # --------------------------------------------------------------- clauses
 

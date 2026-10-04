@@ -284,7 +284,10 @@ in docs/deferred.md.
    undefined and unused names in every tools/**/*.py the eleven rules do
    not reach, because `re` used and never imported in the recorder's host
    half passed this gate and died on the Windows failure path; one planted
-   undefined name is its watched negative. It also runs
+   undefined name is its watched negative. AND AN UNQUOTED CMD-IF WITH
+   BRACKETS SINCE 2026-10-03: sent over ssh its brackets are split and it
+   exits 1 whatever is true (docs/traps.md, the WinUI self-view colour
+   entry's second half); one watched negative. It also runs
    the prelude's OWN negatives — the fingerprint against the real
    shell pipeline, both dev-shell sentences, a perturbation that
    applied nothing, the census floor, scratch surviving nothing —
@@ -820,7 +823,13 @@ in docs/deferred.md.
    `DISPLAY_LEGS`, whose wait wants 120s idle within 120s and on expiry or
    an unreadable clock reports the leg NOT RUN instead of running it; the
    funnel and tools/run-leg.py both honour the refusal, and the wait is
-   RUN against a doubled clock. Twenty watched negatives, counts printed),
+   RUN against a doubled clock. AND THE WINDOWS LANE REFUSES A DISPLAY ITS
+   LEGS DO NOT ASSUME since 2026-10-03 (docs/traps.md, the UTM entry): the
+   desktop warm-up reads `Screen.AllScreens` in the interactive session and
+   deploy-win's desk_warm refuses unless lane.screens_refusal finds exactly
+   one 1280x800 screen, naming what it read and `DisplaySwitch.exe
+   /internal`; run here against four readings. Twenty-two watched negatives,
+   counts printed),
    `tools/check-flightrec.py` (A RED LEG'S BUNDLE NAMES ITS CAUSE ON
    EVERY LANE, or says what it measured instead (the maintainer's
    2026-09-16 ruling): the bundle shape is ONE declaration —

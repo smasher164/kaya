@@ -41,7 +41,7 @@ it, and frames and samples handed to the app's own code.
 | iOS | the same, one active camera per app, `AVCaptureMultiCamSession` for more | the same layer | the same; audio format is the device's (Int16 typically) | the same; camera stops in the background (interruption `videoDeviceNotAvailableInBackground`) | the simulator has NO camera; its microphone is the HOST's input, picked in Simulator's I/O menu; `simctl privacy` lists microphone but no camera service (Xcode 26.6) |
 | Android | CameraX 1.6.2: `bindToLifecycle` with use cases; `AudioRecord`, `VOICE_COMMUNICATION` source for calls | `PreviewView` PERFORMANCE (SurfaceView, the media plan's hole) or COMPATIBLE (TextureView); `CameraXViewfinder` in camera-compose prefers the SurfaceView | `ImageAnalysis`, keep-only-latest by default, `YUV_420_888` or RGBA, on the executor the app gives; `AudioRecord.read` blocking on its own thread, 16-bit PCM guaranteed | runtime `CAMERA`, `RECORD_AUDIO`, "only this time"; background apps get no camera and a silent microphone; Android 12 quick-settings toggles give "a blank camera feed" and "silent audio"; `pm grant` from adb | the emulator's camera modes `emulated`, `imagefile:`, `videofile:`; the pool's AVDs say `hw.camera.back=emulated`, `hw.camera.front=none`; the microphone takes PCM over the emulator's gRPC `injectAudio` with no host device, and host audio input is blocked unless asked for |
 | GTK 4 | GStreamer beside GTK (GTK has no capture API): `pipewiresrc` on the camera portal's PipeWire remote, or `v4l2src`; audio from `pipewiresrc`/`pulsesrc` | `gtk4paintablesink`'s paintable in a `GtkPicture`, the player's own route (GNOME Snapshot's `aperture` does exactly this) | `appsink` | `org.freedesktop.portal.Camera` `AccessCamera` then `OpenPipeWireRemote`; no portal for the microphone; an unsandboxed app may reach PipeWire directly, and Snapshot falls back to that when the portal fails | a PipeWire node made by `videotestsrc ! pipewiresink mode=provide` with `media.class=Video/Source`, `media.role=Camera` (what the portal's `IsCameraPresent` counts); a null-sink virtual source for audio; v4l2loopback is a kernel module and out of reach in the container |
-| WinUI 3 | `MediaCapture` (`SharedReadOnly` or `ExclusiveControl`, `AudioAndVideo`), devices by `DeviceInformation` and a `DeviceWatcher` | no `CaptureElement` in WinUI 3: `MediaPlayerElement` over `MediaSource.CreateFromMediaFrameSource`, the documented quickstart, the player's own element | `MediaFrameReader` raising `FrameArrived` on its own thread (Realtime drops all but the newest); the microphone through the same reader since 1803 | an UNPACKAGED app gets no prompt: one "let desktop apps access your camera" switch, and `E_ACCESSDENIED` at initialization; per-app prompts for desktop apps are in an Insider build only | `MFCreateVirtualCamera` (Windows 11): a COM media source DLL registered in HKLM, loaded by the Frame Server, so built for arm64 on the lane's VM; no built-in virtual microphone (VB-CABLE has an ARM64 driver, admin install and reboot) |
+| WinUI 3 | `MediaCapture` (`SharedReadOnly` or `ExclusiveControl`, `AudioAndVideo`), devices by `DeviceInformation` and a `DeviceWatcher` | no `CaptureElement` in WinUI 3: the documented quickstart is `MediaPlayerElement` over `MediaSource.CreateFromMediaFrameSource`, which decodes a BT.601 camera as BT.709 (docs/traps.md, the WinUI self-view colour), so kaya draws the reader's own frames into a `WriteableBitmap` | `MediaFrameReader` raising `FrameArrived` on its own thread (Realtime drops all but the newest); the microphone through the same reader since 1803 | an UNPACKAGED app gets no prompt: one "let desktop apps access your camera" switch, and `E_ACCESSDENIED` at initialization; per-app prompts for desktop apps are in an Insider build only | `MFCreateVirtualCamera` (Windows 11): a COM media source DLL registered in HKLM, loaded by the Frame Server, so built for arm64 on the lane's VM; no built-in virtual microphone (VB-CABLE has an ARM64 driver, admin install and reboot) |
 
 Every platform draws its own privacy indicator, so kaya draws none.
 Flutter's `camera` previews through a Texture and has no audio stream;
@@ -128,7 +128,7 @@ lowering is the same element the player already uses:
 |---|---|---|
 | macOS, iOS | `AVCaptureVideoPreviewLayer` in the representable that holds `AVPlayerLayer` today | as the player's layer: composited, read only by a window-server capture |
 | GTK 4 | `GtkPicture` over `gtk4paintablesink` on a tee of the capture pipeline | nothing beyond the player's |
-| WinUI 3 | `MediaPlayerElement` over the frame source, `RealTimePlayback` on | external content, as the player's (docs/media-plan.md §3) |
+| WinUI 3 | the reader's own frames through `CaptureFrame::rgb_at` into a `WriteableBitmap` (docs/traps.md, the WinUI self-view colour) | external content, as the player's (docs/media-plan.md §3) |
 | Android | CameraX `Preview` into a `PreviewView` (or `CameraXViewfinder`) in PERFORMANCE mode | the SurfaceView hole, as the player's |
 
 The one-view rule, `fit`, the accessibility props and the visibility
@@ -331,3 +331,26 @@ slice), screen sharing, background calls, CallKit, ConnectionService.
 5. **On Linux, the camera portal first and PipeWire directly when no portal
    answers**, GNOME Snapshot's rule. RECOMMENDED: yes; portal-only would
    leave a desktop with no portal backend without a camera.
+
+## §10. The choices the build settled — RULED 2026-10-03 as built (the maintainer: "go with your recommendations")
+
+The depth and breadth slices met eight questions the plan above did not
+settle, built a recommendation for each, and the maintainer took all eight
+(docs/deferred.md's capture BUILD entry):
+
+1. Audio captured just before a mute is still delivered; the mute takes the
+   next chunk.
+2. A video view shows a player or a capture, never both, and a row template
+   shows no capture.
+3. Starting a capture on a machine with no device of that kind is a scene
+   error, not a failure the app handles.
+4. Watching the devices also reports each permission as it stands.
+5. A capture callback that raises is caught, logged naming the capture, and
+   the capture keeps running (DESIGN.md's abort rule on the capture thread),
+   in all nine bindings.
+6. Under the harness every backend lists the core's synthetic device table.
+7. Where a lane has one audio input, the two synthetic microphones are its
+   left and right channels.
+8. iOS sets the `.playAndRecord` audio category only on the real-device
+   path; and JS runs capture callbacks in a worker the capture thread calls
+   and waits on.

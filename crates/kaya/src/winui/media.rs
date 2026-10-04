@@ -278,11 +278,18 @@ fn trail_adaptive(adaptive: &AdaptiveMediaSource, trail: &Trail, generation: u64
 
 pub(super) struct WinVideo {
     pub(super) host: Grid,
+    /// An empty child at the natural size: the host has no Width of its
+    /// own, so it takes the natural size where it fits and the room it is
+    /// given where it does not, SwiftUI's idealWidth with maxWidth.
+    extent: Grid,
     pub(super) element: MediaPlayerElement,
     /// What assistive clients read (docs/media-plan.md §3): an empty Image
     /// over the picture, since a named MediaPlayerElement publishes only a
     /// NamedContainerAutomationPeer, a Group (measured 2026-09-30).
     pub(super) ax: super::bindings::Microsoft::UI::Xaml::Controls::Image,
+    /// A self-view's picture: the frames kaya already holds, drawn through
+    /// the core's one BT.601 rule (docs/traps.md, the WinUI self-view colour).
+    picture: super::bindings::Microsoft::UI::Xaml::Controls::Image,
     caption_box: Grid,
     caption: TextBlock,
     player: Option<u64>,
@@ -318,9 +325,22 @@ pub(super) struct MediaState {
     /// The process's display request (keep_awake), and whether it is set.
     power_request: Option<isize>,
     awake: bool,
-    /// Each open capture's preview (capture.rs): its player over the camera's
-    /// frame source, the picture's size, and whether the self-view mirrors.
-    capture_previews: HashMap<u64, (MediaPlayer, (u32, u32), bool)>,
+    /// Each open capture's preview (capture.rs).
+    capture_previews: HashMap<u64, CapturePreview>,
+}
+
+/// An open camera's self-view: the frames' size, whether it mirrors, and the
+/// bitmap its latest frame was drawn into, made at the first frame.
+pub(super) struct CapturePreview {
+    pub(super) size: (u32, u32),
+    pub(super) mirror: bool,
+    bitmap: Option<(super::bindings::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap, (u32, u32))>,
+}
+
+impl CapturePreview {
+    pub(super) fn new(size: (u32, u32), mirror: bool) -> Self {
+        CapturePreview { size, mirror, bitmap: None }
+    }
 }
 
 /// Remote commands that reached this process's SMTC handler: session_send's
@@ -1551,10 +1571,18 @@ pub(super) fn create_video(core: &mut CoreState, id: u64) -> windows_core::Resul
         &element,
         super::bindings::Microsoft::UI::Xaml::Automation::Peers::AccessibilityView::Raw,
     )?;
+    let picture = super::bindings::Microsoft::UI::Xaml::Controls::Image::new()?;
+    picture.SetIsHitTestVisible(false)?;
+    picture.SetStretch(Stretch::Uniform)?;
+    let extent = Grid::new()?;
+    extent.SetIsHitTestVisible(false)?;
+    extent.SetHorizontalAlignment(HorizontalAlignment::Left)?;
+    host.Children()?.Append(&extent)?;
     host.Children()?.Append(&element)?;
+    host.Children()?.Append(&picture)?;
     host.Children()?.Append(&ax)?;
     host.Children()?.Append(&caption_box)?;
-    let video = WinVideo { host, element, ax, caption_box, caption, player: None, capture: None };
+    let video = WinVideo { host, extent, element, ax, picture, caption_box, caption, player: None, capture: None };
     natural_size(&video, (0, 0))?;
     core.media.video_ids.push(id);
     Ok(video)
@@ -1572,11 +1600,21 @@ pub(super) fn elements(core: &CoreState) -> Vec<super::bindings::Microsoft::UI::
 }
 
 /// The view's natural size: its picture's, 320x180 until one is known —
-/// the SwiftUI arm's `kayaVideoNatural`.
+/// the SwiftUI arm's `kayaVideoNatural` — and no wider than the room it is
+/// given.
 fn natural_size(video: &WinVideo, size: (u32, u32)) -> windows_core::Result<()> {
     let (w, h) = if size.0 == 0 || size.1 == 0 { (320.0, 180.0) } else { (f64::from(size.0), f64::from(size.1)) };
-    video.host.SetWidth(w)?;
+    video.extent.SetWidth(w)?;
+    video.extent.SetHeight(h)?;
+    video.host.SetWidth(f64::NAN)?;
+    video.host.SetMaxWidth(w)?;
     video.host.SetHeight(h)
+}
+
+/// A self-view's natural size: half its frames', 320x240 until it opens —
+/// `kayaVideoNatural`'s capture arm.
+fn capture_natural(size: (u32, u32)) -> (u32, u32) {
+    if size.0 == 0 || size.1 == 0 { (320, 240) } else { (size.0 / 2, size.1 / 2) }
 }
 
 pub(super) fn destroy_video(core: &mut CoreState, id: u64) {
@@ -1596,6 +1634,7 @@ pub(super) fn set_fit(core: &CoreState, id: u64, fit: i64) -> windows_core::Resu
         Some("fill") => Stretch::Fill,
         _ => Stretch::Uniform,
     };
+    video.picture.SetStretch(stretch)?;
     video.element.SetStretch(stretch)
 }
 
@@ -1641,7 +1680,8 @@ pub(super) fn set_video_player(core: &mut CoreState, widget: u64, player: Option
 
 /// The self-view's mirror (rule 4): WinUI mirrors nothing itself, so kaya
 /// scales the element by -1 on x about its centre; the frames never mirror.
-fn mirror(element: &MediaPlayerElement, on: bool) -> windows_core::Result<()> {
+fn mirror(element: &impl windows_core::Interface, on: bool) -> windows_core::Result<()> {
+    let element: UIElement = element.cast()?;
     if on {
         let scale = super::bindings::Microsoft::UI::Xaml::Media::ScaleTransform::new()?;
         scale.SetScaleX(-1.0)?;
@@ -1653,25 +1693,30 @@ fn mirror(element: &MediaPlayerElement, on: bool) -> windows_core::Result<()> {
 }
 
 /// A view showing `capture` shows its preview now, or nothing.
-fn show_capture(video: &WinVideo, preview: Option<&(MediaPlayer, (u32, u32), bool)>) -> windows_core::Result<()> {
+fn show_capture(video: &WinVideo, preview: Option<&CapturePreview>) -> windows_core::Result<()> {
+    video.element.SetMediaPlayer(None::<&MediaPlayer>)?;
+    mirror(&video.element, false)?;
     match preview {
-        Some((player, size, mirrored)) => {
-            video.element.SetMediaPlayer(player)?;
-            natural_size(video, *size)?;
-            mirror(&video.element, *mirrored)
+        Some(p) => {
+            match &p.bitmap {
+                Some((b, _)) => video.picture.SetSource(b)?,
+                None => video.picture.SetSource(None::<&super::bindings::Microsoft::UI::Xaml::Media::ImageSource>)?,
+            }
+            natural_size(video, capture_natural(p.size))?;
+            mirror(&video.picture, p.mirror)
         }
         None => {
-            video.element.SetMediaPlayer(None::<&MediaPlayer>)?;
-            natural_size(video, (0, 0))?;
-            mirror(&video.element, false)
+            video.picture.SetSource(None::<&super::bindings::Microsoft::UI::Xaml::Media::ImageSource>)?;
+            natural_size(video, capture_natural((0, 0)))?;
+            mirror(&video.picture, false)
         }
     }
 }
 
 /// capture.rs's word that a capture's preview started or went out: every
 /// view previewing it follows, and so does the keep-awake.
-pub(super) fn capture_preview(core: &mut CoreState, capture: u64, preview: Option<(MediaPlayer, (u32, u32), bool)>) {
-    let old = match preview {
+pub(super) fn capture_preview(core: &mut CoreState, capture: u64, preview: Option<CapturePreview>) {
+    match preview {
         Some(p) => core.media.capture_previews.insert(capture, p),
         None => core.media.capture_previews.remove(&capture),
     };
@@ -1681,11 +1726,38 @@ pub(super) fn capture_preview(core: &mut CoreState, capture: u64, preview: Optio
             eprintln!("KAYA_DIAG winui capture {capture}: the view could not show the preview: {}", e.message());
         }
     }
-    if let Some((player, ..)) = old {
-        let _ = player.Pause();
-        let _ = player.Close();
-    }
     keep_awake(core);
+}
+
+/// capture.rs's latest frame for an open preview, already BGRA8 and opaque:
+/// written into the preview's bitmap, made or remade at the frame's size.
+pub(super) fn capture_picture(core: &mut CoreState, capture: u64, width: u32, height: u32, bgra: &[u8]) -> windows_core::Result<()> {
+    use super::bindings::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap;
+    let Some(preview) = core.media.capture_previews.get_mut(&capture) else { return Ok(()) };
+    let count = width as usize * height as usize * 4;
+    let fresh = preview.bitmap.as_ref().is_none_or(|(_, size)| *size != (width, height));
+    if fresh {
+        preview.bitmap = Some((WriteableBitmap::CreateInstanceWithDimensions(width as i32, height as i32)?, (width, height)));
+    }
+    let Some((bitmap, _)) = preview.bitmap.clone() else { return Ok(()) };
+    let buffer = bitmap.PixelBuffer()?;
+    if (buffer.Capacity()? as usize) < count || bgra.len() < count {
+        return Err(windows_core::Error::new(
+            windows_core::HRESULT(0x8000_4005u32 as i32),
+            format!("a {width}x{height} frame of {} bytes for a {}-byte bitmap", bgra.len(), buffer.Capacity()?),
+        ));
+    }
+    let access: windows::Win32::System::WinRT::IBufferByteAccess = buffer.cast()?;
+    // SAFETY: the bitmap's own pixel store, its capacity checked above.
+    unsafe { std::ptr::copy_nonoverlapping(bgra.as_ptr(), access.Buffer()?, count) };
+    bitmap.Invalidate()?;
+    if fresh {
+        let now = core.media.capture_previews.get(&capture);
+        for video in core.media.videos.values().filter(|v| v.capture == Some(capture)) {
+            show_capture(video, now)?;
+        }
+    }
+    Ok(())
 }
 
 /// SetVideoCapture: the core holds the one-view rule on the batch's end
