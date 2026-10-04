@@ -239,6 +239,7 @@ pub(crate) fn date_note(kind: &PropKind) -> &'static str {
         PropKind::Date => " A civil date, packed YYYYMMDD on the wire.",
         PropKind::Time => " A civil time, packed HHMM on the wire.",
         PropKind::Color => " An sRGB colour, packed 0xRRGGBBAA on the wire.",
+        PropKind::Aspect => " A width:height ratio, packed width << 32 | height on the wire, each a signed 32-bit integer.",
         _ => "",
     }
 }

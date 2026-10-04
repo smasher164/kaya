@@ -298,6 +298,8 @@ module KayaApp
     selectAudio,
     selectCaptions,
     showPlayer,
+    setFit,
+    setAspect,
     declareSession,
     SessionAttr (..),
     playerReading,
@@ -2898,6 +2900,9 @@ data Attr (c :: WClass) where
   Alpha :: Bool -> Attr 'LeafW
   -- | How a video view fits its picture (docs\/media-plan.md §3).
   FitAs :: Fit -> Attr 'LeafW
+  -- | The width:height ratio of a video view's box, whatever its picture's
+  -- own shape; 'FitAs' places the picture in it.
+  AspectAs :: Int -> Int -> Attr 'LeafW
   -- | The granularity a slider's thumb rests on: min + k * step
   -- (docs\/slider-plan.md S1). Divides the range evenly; 0 is continuous.
   Step :: Double -> Attr 'LeafW
@@ -2973,7 +2978,8 @@ applyAttr (MaxDate d) (Widget n) =
   let (y, m, dd) = toGregorian d
    in emitB (W.txSetMaxDate n (fromIntegral y) m dd)
 applyAttr (Alpha on) (Widget n) = emitB (W.txSetAlpha n on)
-applyAttr (FitAs f) (Widget n) = emitB (W.txSetFit n (fitWire f))
+applyAttr (FitAs f) w = setFit w f
+applyAttr (AspectAs width height) w = setAspect w width height
 applyAttr (MinuteStep minutes) (Widget n) =
   emitB (W.txSetMinuteStep n (fromIntegral minutes))
 applyAttr (Step step) (Widget n) = emitB (W.txSetStep n step)
@@ -3537,6 +3543,15 @@ selectCaptions (Player p) i =
 -- by one video view at a time (docs\/media-plan.md §7b).
 showPlayer :: Widget -> Maybe Player -> Build ()
 showPlayer (Widget n) mp = emitB (W.txSetPlayer n (maybe 0 (\(Player p) -> fromIntegral p) mp))
+
+-- | How a live video view fits its picture.
+setFit :: Widget -> Fit -> Build ()
+setFit (Widget n) f = emitB (W.txSetFit n (fitWire f))
+
+-- | The width:height ratio of a live video view's box, whatever its
+-- picture's own shape; its fit places the picture in it.
+setAspect :: Widget -> Int -> Int -> Build ()
+setAspect (Widget n) width height = emitB (W.txSetAspect n (aspectWire width height))
 
 -- | The session's declaration.
 data SessionAttr
@@ -4191,6 +4206,8 @@ data TplAttr where
   TplAlpha :: Bool -> TplAttr
   -- | A stamped video view's fit, constant across the copies.
   TplFitAs :: Fit -> TplAttr
+  -- | A stamped video view's box ratio, constant across the copies.
+  TplAspectAs :: Int -> Int -> TplAttr
   -- | What this stamped copy takes from a paste — the closed kinds by
   -- name plus any custom format ids. A CONSTANT LIST AND NOT A SOURCE.
   -- Every backend gates the paste occurrence on the focused widget's
@@ -4255,6 +4272,7 @@ applyTplAttr (TplMin v) (Node n) = emitT (W.txSetMin n v)
 applyTplAttr (TplMax v) (Node n) = emitT (W.txSetMax n v)
 applyTplAttr (TplAlpha on) (Node n) = emitT (W.txSetAlpha n on)
 applyTplAttr (TplFitAs f) (Node n) = emitT (W.txSetFit n (fitWire f))
+applyTplAttr (TplAspectAs width height) (Node n) = emitT (W.txSetAspect n (aspectWire width height))
 applyTplAttr (TplAccepts kinds) n = setNodeAccepts n kinds
 applyTplAttr (TplDraggable clip ops) n = setNodeDragSource n clip ops
 applyTplAttr (TplDropTarget ops) n = setNodeDropTarget n ops

@@ -206,6 +206,7 @@ module Kaya.Core
     playbackStateWire,
     Fit (..),
     fitWire,
+    aspectWire,
     MediaSource (..),
     mediaAsset,
     mediaUrl,
@@ -272,12 +273,12 @@ module Kaya.Core
 where
 
 import Control.Concurrent.MVar (MVar)
-import Data.Bits (shiftL)
+import Data.Bits (shiftL, (.&.), (.|.))
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BC
 import Data.ByteString.Builder (Builder, toLazyByteString)
 import qualified Data.ByteString.Lazy as BL
-import Data.Int (Int16, Int64)
+import Data.Int (Int16, Int32, Int64)
 import Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
 import Data.IORef (IORef)
@@ -1697,6 +1698,14 @@ fitWire f = fromIntegral $ case f of
   FitContain -> W.fitContain
   FitCover -> W.fitCover
   FitFill -> W.fitFill
+
+-- | A video view's box ratio as the wire packs it (@kaya::Aspect::pack@):
+-- each part saturated to 32 signed bits, width high, height low.
+aspectWire :: Int -> Int -> Int64
+aspectWire width height = (part width `shiftL` 32) .|. (part height .&. 0xFFFFFFFF)
+  where
+    part :: Int -> Int64
+    part x = fromIntegral (max (fromIntegral (minBound :: Int32)) (min (fromIntegral (maxBound :: Int32)) x))
 
 -- | Where a player reads its media: an asset name, an http(s) URL, or a
 -- picked file itself, which the platform's player opens however the

@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0xc769ec72ad1213den;
+export const SPEC_HASH = 0x0e75ba3234ed9bffn;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -124,6 +124,7 @@ export const PROP_HIGH_LABEL = 50;
 export const PROP_FIT = 51;
 export const PROP_PLAYER = 52;
 export const PROP_CAPTURE = 53;
+export const PROP_ASPECT = 54;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -2391,6 +2392,24 @@ export function tx_bind_capture(widget_id: number, signal_id: number): Uint8Arra
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_capture_element(widget_id: number, level = 0, field = 0): Uint8Array {
   enc.begin(); enc.u64(widget_id); enc.u32(PROP_CAPTURE); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant aspect value. A width:height ratio, packed width << 32 | height on the wire, each a signed 32-bit integer. */
+export function tx_set_aspect(widget_id: number, aspect: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_ASPECT); enc.u32(SOURCE_CONST); enc.value(new I64(aspect));
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound aspect value. */
+export function tx_bind_aspect(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_ASPECT); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_aspect_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_ASPECT); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
   return enc.end(TX_SET_PROPERTY);
 }
 

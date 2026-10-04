@@ -278,10 +278,11 @@ fn trail_adaptive(adaptive: &AdaptiveMediaSource, trail: &Trail, generation: u64
 
 pub(super) struct WinVideo {
     pub(super) host: Grid,
-    /// An empty child at the natural size inside a Viewbox, which scales it
-    /// to the host's room at its aspect (docs/media-plan.md §3): the host
-    /// has no Width or Height of its own, so it takes the natural size where
-    /// it fits, and where it does not its height follows its width.
+    /// The box at its natural size inside a Viewbox, which scales it to the
+    /// host's room at its aspect (docs/media-plan.md §3), the element and the
+    /// self-view's picture inside it: the host has no Width or Height of its
+    /// own, so it takes the natural size where it fits, and where it does not
+    /// its height follows its width.
     frame: Grid,
     pub(super) element: MediaPlayerElement,
     /// What assistive clients read (docs/media-plan.md §3): an empty Image
@@ -297,6 +298,10 @@ pub(super) struct WinVideo {
     /// The capture this view previews (docs/capture-plan.md §3); a view
     /// shows a player or a capture, never both (the core holds that).
     capture: Option<u64>,
+    /// The picture's natural size last given, and the app's packed aspect
+    /// (0 none): the box is the core's rule over both (docs/media-plan.md §3).
+    natural: std::cell::Cell<(u32, u32)>,
+    aspect: std::cell::Cell<i64>,
 }
 
 #[derive(Default)]
@@ -1581,12 +1586,27 @@ pub(super) fn create_video(core: &mut CoreState, id: u64) -> windows_core::Resul
     extent.SetChild(&frame)?;
     extent.SetIsHitTestVisible(false)?;
     extent.SetHorizontalAlignment(HorizontalAlignment::Left)?;
+    // The picture's elements live in the box's own frame, so the Viewbox
+    // scales them with it: a host child would answer its own picture's height
+    // and the Grid would take that over the box's (docs/media-plan.md §3).
+    frame.Children()?.Append(&element)?;
+    frame.Children()?.Append(&picture)?;
     host.Children()?.Append(&extent)?;
-    host.Children()?.Append(&element)?;
-    host.Children()?.Append(&picture)?;
     host.Children()?.Append(&ax)?;
     host.Children()?.Append(&caption_box)?;
-    let video = WinVideo { host, frame, element, ax, picture, caption_box, caption, player: None, capture: None };
+    let video = WinVideo {
+        host,
+        frame,
+        element,
+        ax,
+        picture,
+        caption_box,
+        caption,
+        player: None,
+        capture: None,
+        natural: std::cell::Cell::new((0, 0)),
+        aspect: std::cell::Cell::new(0),
+    };
     natural_size(&video, (0, 0))?;
     core.media.video_ids.push(id);
     Ok(video)
@@ -1607,7 +1627,10 @@ pub(super) fn elements(core: &CoreState) -> Vec<super::bindings::Microsoft::UI::
 /// the SwiftUI arm's `kayaVideoNatural` — no wider than the room it is
 /// given, its height following its width (docs/media-plan.md §3).
 fn natural_size(video: &WinVideo, size: (u32, u32)) -> windows_core::Result<()> {
-    let (w, h) = if size.0 == 0 || size.1 == 0 { (320.0, 180.0) } else { (f64::from(size.0), f64::from(size.1)) };
+    video.natural.set(size);
+    let picture = if size.0 == 0 || size.1 == 0 { (320, 180) } else { size };
+    let (w, h) = crate::media::video_view_box(picture, video.aspect.get());
+    let (w, h) = (f64::from(w), f64::from(h));
     video.frame.SetWidth(w)?;
     video.frame.SetHeight(h)?;
     video.host.SetWidth(f64::NAN)?;
@@ -1623,6 +1646,13 @@ pub(super) fn destroy_video(core: &mut CoreState, id: u64) {
         let _ = video.element.SetMediaPlayer(None::<&MediaPlayer>);
     }
     keep_awake(core);
+}
+
+/// The app's box ratio (docs/media-plan.md §3): the box follows it at once.
+pub(super) fn set_aspect(core: &CoreState, id: u64, aspect: i64) -> windows_core::Result<()> {
+    let Some(video) = core.media.videos.get(&id) else { return Ok(()) };
+    video.aspect.set(aspect);
+    natural_size(video, video.natural.get())
 }
 
 pub(super) fn set_fit(core: &CoreState, id: u64, fit: i64) -> windows_core::Result<()> {

@@ -481,6 +481,16 @@ pub enum Step {
     /// no process snapshot. `"none"`: the view shows no picture, its centre
     /// reading the ground beside it (docs/media-plan.md §7b).
     ExpectVideoInk(Target, String),
+    /// `expect_video_box video#0 "16:9"`: the video view's box as the
+    /// platform laid it out has this width:height, its height within one
+    /// unit of its width at that ratio (docs/media-plan.md §3, the aspect).
+    ExpectVideoBox(Target, u32, u32),
+    /// `expect_video_corner video#0 "C83C1E"`: the box's top-left corner,
+    /// VIDEO_CORNER_INSET points in on both axes, read as `expect_video_ink`
+    /// reads the centre. `"bars"`: the corner is NOT within tolerance of the
+    /// centre's reading, so the picture leaves that corner of its box
+    /// (docs/media-plan.md §3, `fit` inside an aspect).
+    ExpectVideoCorner(Target, String),
     /// `expect_caption video#0 "first cue"`: the caption text the video view
     /// shows now, "" for none — kaya's caption renderer's where kaya draws,
     /// the platform's own cue where it does (docs/media-plan.md §3); never
@@ -835,6 +845,8 @@ impl Step {
             | Step::Expect(t, _)
             | Step::ExpectImageSize(t, _)
             | Step::ExpectVideoInk(t, _)
+            | Step::ExpectVideoBox(t, ..)
+            | Step::ExpectVideoCorner(t, _)
             | Step::ExpectCaption(t, _)
             | Step::AxAction(t, _)
             | Step::SwipeAction(t, _)
@@ -1065,6 +1077,8 @@ impl Step {
             Step::ExpectNoNotification { .. } => true,
             Step::ExpectBadge { .. } => true,
             Step::ExpectVideoInk(..) => true,
+            Step::ExpectVideoBox(..) => true,
+            Step::ExpectVideoCorner(..) => true,
             Step::ExpectCaption(..) => true,
             Step::AxAction(..) => false,
             Step::SessionSend(..) => false,
@@ -1140,6 +1154,26 @@ pub const VIDEO_INK_NONE: &str = "none";
 
 /// How far right of a video view's box `Stage::video_ground` reads, in points.
 pub(crate) const VIDEO_GROUND_OFFSET: f64 = 8.0;
+
+/// How far in from the box's top-left corner `Stage::video_corner` reads, in
+/// points on both axes: clear of a rounded or antialiased edge.
+pub(crate) const VIDEO_CORNER_INSET: f64 = 4.0;
+
+/// `expect_video_corner`'s word for a corner the picture leaves.
+pub const VIDEO_CORNER_BARS: &str = "bars";
+
+/// Whether a box read as `"<width> <height>"` (Stage::video_box, in the
+/// platform's own units) has the aspect `width:height`, its height within
+/// one unit of its width at that ratio.
+pub fn video_box_shaped(got: &str, aspect: (u32, u32)) -> bool {
+    let mut parts = got.split(' ').map(str::parse::<f64>);
+    match (parts.next(), parts.next(), parts.next()) {
+        (Some(Ok(w)), Some(Ok(h)), None) if w > 0.0 && h > 0.0 => {
+            (h - w * f64::from(aspect.1) / f64::from(aspect.0)).abs() <= 1.0
+        }
+        _ => false,
+    }
+}
 
 pub fn video_ink_matches(got: &str, want: &str) -> bool {
     video_ink_within(got, want, VIDEO_INK_TOLERANCE)
@@ -1535,6 +1569,13 @@ pub trait Stage: Send + 'static {
     /// The window's ground beside the video view, VIDEO_GROUND_OFFSET points
     /// right of its box at its vertical centre, read as video_ink reads.
     fn video_ground(&self, target: Target) -> String;
+    /// The video view's box as the platform laid it out, `"<width> <height>"`
+    /// in the platform's own units (points, DIPs or pixels: only the ratio is
+    /// compared); `<…>` saying what was measured when there is none.
+    fn video_box(&self, target: Target) -> String;
+    /// The box's top-left corner, VIDEO_CORNER_INSET points in on both axes,
+    /// read as video_ink reads the centre.
+    fn video_corner(&self, target: Target) -> String;
     /// The caption text the video view shows now, "" for none: what kaya's
     /// caption renderer drew, or the platform's own cue where it draws.
     fn caption(&self, target: Target) -> String;
@@ -2623,6 +2664,39 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     ));
                 }
                 Step::ExpectVideoInk(target, want)
+            }
+            "expect_video_box" => {
+                let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_video_box wants a video and a \"W:H\" string: {line:?}")
+                })?;
+                let target = parse_target(target)?;
+                if target.kind != TargetKind::Video {
+                    return Err(format!("expect_video_box reads a video view, not {target:?}"));
+                }
+                let want = parse_string(text)?;
+                let part = |s: &str| s.parse::<u32>().ok().filter(|n| (1..=65535).contains(n) && !s.starts_with('0'));
+                match want.split_once(':').map(|(w, h)| (part(w), part(h))) {
+                    Some((Some(w), Some(h))) => Step::ExpectVideoBox(target, w, h),
+                    _ => return Err(format!("expect_video_box wants \"W:H\", two whole numbers from 1 to 65535, got {want:?}")),
+                }
+            }
+            "expect_video_corner" => {
+                let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_video_corner wants a video and an RRGGBB string: {line:?}")
+                })?;
+                let target = parse_target(target)?;
+                if target.kind != TargetKind::Video {
+                    return Err(format!("expect_video_corner reads a video view, not {target:?}"));
+                }
+                let want = parse_string(text)?;
+                if want != VIDEO_CORNER_BARS
+                    && (want.len() != 6 || !want.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_lowercase()))
+                {
+                    return Err(format!(
+                        "expect_video_corner wants six uppercase hex digits or {VIDEO_CORNER_BARS:?}, got {want:?}"
+                    ));
+                }
+                Step::ExpectVideoCorner(target, want)
             }
             "expect_caption" => {
                 let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
@@ -4880,6 +4954,37 @@ fn run_with_log(
                     Ok(format!("video ink {want}"))
                 } else {
                     Err(format!("video ink {got}, wanted {want} within {tolerance} per channel"))
+                }
+            })),
+            Step::ExpectVideoBox(t, w, h) => Some(poll(|| {
+                let got = stage.video_box(*t);
+                if video_box_shaped(&got, (*w, *h)) {
+                    Ok(format!("video box {w}:{h}"))
+                } else {
+                    Err(format!("video box {got}, wanted {w}:{h} with its height within one unit"))
+                }
+            })),
+            Step::ExpectVideoCorner(t, want) if want == VIDEO_CORNER_BARS => Some(poll(|| {
+                let corner = stage.video_corner(*t);
+                let centre = stage.video_ink(*t);
+                let tolerance = stage.video_ink_tolerance();
+                let hex = |s: &str| video_ink_within(s, s, 0);
+                if hex(&corner) && hex(&centre) && !video_ink_within(&corner, &centre, tolerance) {
+                    Ok(format!("video corner {want}"))
+                } else {
+                    Err(format!(
+                        "video corner {corner} with the centre {centre}, wanted {want}: the corner off the centre's \
+                         reading by more than {tolerance} per channel"
+                    ))
+                }
+            })),
+            Step::ExpectVideoCorner(t, want) => Some(poll(|| {
+                let got = stage.video_corner(*t);
+                let tolerance = stage.video_ink_tolerance();
+                if video_ink_within(&got, want, tolerance) {
+                    Ok(format!("video corner {want}"))
+                } else {
+                    Err(format!("video corner {got}, wanted {want} within {tolerance} per channel"))
                 }
             })),
             Step::ExpectCaption(t, want) => Some(poll(|| {
@@ -7310,6 +7415,32 @@ mod tests {
         ));
         assert!(parse("expect_video_ink video#0 \"None\"").is_err());
         assert!(matches!(
+            parse("expect_video_box video#0 \"16:9\"").unwrap().as_slice(),
+            [Step::ExpectVideoBox(t, 16, 9)] if *t == video
+        ));
+        for bad in ["0:9", "16:0", "-16:9", "16x9", "16:", "016:9", "65536:1", "16:9:1"] {
+            assert!(parse(&format!("expect_video_box video#0 \"{bad}\"")).is_err(), "{bad}");
+        }
+        assert!(parse("expect_video_box label#0 \"16:9\"").is_err());
+        assert!(matches!(
+            parse("expect_video_corner video#0 \"C83C1E\"").unwrap().as_slice(),
+            [Step::ExpectVideoCorner(t, w)] if *t == video && w == "C83C1E"
+        ));
+        assert!(matches!(
+            parse("expect_video_corner video#0 \"bars\"").unwrap().as_slice(),
+            [Step::ExpectVideoCorner(_, w)] if w == VIDEO_CORNER_BARS
+        ));
+        assert!(parse("expect_video_corner video#0 \"none\"").is_err());
+        assert!(parse("expect_video_corner label#0 \"bars\"").is_err());
+        assert!(video_box_shaped("320 180", (16, 9)));
+        assert!(video_box_shaped("180 101", (16, 9)));
+        assert!(video_box_shaped("472.5 265.8", (16, 9)));
+        assert!(!video_box_shaped("320 240", (16, 9)));
+        assert!(!video_box_shaped("180 240", (16, 9)));
+        assert!(!video_box_shaped("<no video view on screen>", (16, 9)));
+        assert!(!video_box_shaped("0 0", (16, 9)));
+        assert!(!video_box_shaped("320 180 1", (16, 9)));
+        assert!(matches!(
             parse("expect_caption video#0 \"first cue\"").unwrap().as_slice(),
             [Step::ExpectCaption(t, w)] if *t == video && w == "first cue"
         ));
@@ -7725,6 +7856,12 @@ mod tests {
             String::new()
         }
         fn video_ground(&self, _target: Target) -> String {
+            String::new()
+        }
+        fn video_box(&self, _target: Target) -> String {
+            String::new()
+        }
+        fn video_corner(&self, _target: Target) -> String {
             String::new()
         }
         fn caption(&self, _target: Target) -> String {
@@ -8797,6 +8934,12 @@ mod tests {
         fn video_ground(&self, _target: Target) -> String {
             String::new()
         }
+        fn video_box(&self, _target: Target) -> String {
+            String::new()
+        }
+        fn video_corner(&self, _target: Target) -> String {
+            String::new()
+        }
         fn caption(&self, _target: Target) -> String {
             String::new()
         }
@@ -9190,6 +9333,12 @@ mod tests {
             String::new()
         }
         fn video_ground(&self, _target: Target) -> String {
+            String::new()
+        }
+        fn video_box(&self, _target: Target) -> String {
+            String::new()
+        }
+        fn video_corner(&self, _target: Target) -> String {
             String::new()
         }
         fn caption(&self, _target: Target) -> String {

@@ -610,6 +610,12 @@ in docs/deferred.md.
    zones with its props, thumb labels bound from a row field, `on_change` and
    `on_commit` where each binding spells the slider's, and `axis` on a slider
    in all nine; fake-name negatives firing every row, counts printed.
+   AND THE VIDEO VIEW'S ASPECT SINCE 2026-10-03 (docs/media-plan.md §3):
+   the live zone, a live view at run time, the template zone and each
+   binding's own packer, width high and height low, in all nine; fake-name
+   and rename-in-a-copy negatives on every row, and each packer with its
+   halves swapped watched red, since a swapped packer compiles and sends
+   9:16 for 16:9.
    AND THE MEDIA READER AND THE CANVAS'S IMAGE OP SINCE 2026-10-02
    (docs/media-plan.md §8 rulings 3 and 4): each binding's hand-written
    surface calling the reader's seven generated record writers and naming
@@ -1482,7 +1488,16 @@ in docs/deferred.md.
    (docs/traps.md, the Android self-view's shape); and GTK's flowing row
    is height-for-width, since left to the default it measured one line and
    the capture guests' second line of buttons sat under the self-view.
-   Twenty-two watched negatives, counts printed),
+   Twenty-two watched negatives, counts printed. AND THE APP'S ASPECT
+   SINCE 2026-10-03 (docs/media-plan.md §3, the ruling): the box is
+   `crate::media::video_view_box` on all five arms through its C, host and
+   JNI doors, each arm keeps the PICTURE's size for placing the picture
+   (Compose's player scale, Android's frames-shaped preview placed by
+   `fit`), and both interpreters read `expect_video_box` off the laid-out
+   view and `expect_video_corner` four points in; the capture scene sees
+   one aspect and two fits on a self-view only, so a backend that reads the
+   prop and sizes the box from the picture anyway is a negative here.
+   Seventeen watched negatives and a fake-name census, counts printed),
    `tools/check-file-modes.py` (the file-mode NUMBERS agree with the
    spec's wherever they are written down. `kaya_open_picked` takes an
    integer, crates/kaya/src/spec.rs decides what it means, and five

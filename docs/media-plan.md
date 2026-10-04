@@ -156,6 +156,44 @@ extent. tools/check-verbs.py's video view clause holds all five.
 | WinUI 3 | `MediaPlayerElement` with `AreTransportControlsEnabled` false and the player set by `SetMediaPlayer` | `Stretch` | `NaturalVideoSizeChanged` (an HLS or DASH source states a placeholder size until its first frame, measured) |
 | Android | media3 `PlayerSurface` with `SURFACE_TYPE_SURFACE_VIEW` | the containing frame's resize mode | `onRenderedFirstFrame` |
 
+**The box's aspect, RULED 2026-10-03 (the maintainer).** The video view takes
+`aspect`, a width:height ratio the app chooses for the view's BOX, whatever
+the picture's own shape. Unset (the default) the box is the picture's natural
+aspect as above. Set, the box is the natural width at that ratio, its height
+following its width at that ratio as it shrinks, still with no minimum, and
+`fit` places the picture in it as CSS's `object-fit` does inside an element
+given an `aspect-ratio` (and CameraX's `PreviewView.ScaleType` inside its
+view): `cover` scales the picture to fill the box and crops it about its
+centre, `contain` scales it to fit inside with bars beside it, `fill` stretches
+it to the box. It applies to the player and to a capture's self-view alike, so
+an app can make Android's upright front camera (3:4) a 16:9 tile as the other
+four platforms show it. One rule in the core, `crate::media::video_view_box`,
+answers the box before layout (the natural width, the height at the ratio) and
+`video_view_height` lays it out; GTK and WinUI call it, SwiftUI through
+`kaya_video_view_box` (the host table) and Compose through
+`KayaPresent.videoViewBox` (JNI). Each arm keeps the PICTURE's natural size for
+placing the picture, never the box's: Compose's player scales its surface by
+the picture's size, and Android's preview is a frames-shaped view placed by
+`fit` inside the box (a stretch for `fill` is the view's own scale).
+
+*The wire shape, and why.* `PropKind::Aspect`, one I64: the width in the high
+32 bits and the height in the low 32, each a SIGNED 32-bit integer, so the app
+says two whole numbers (`aspect(16, 9)`) and the root sees both parts exactly
+as given. A ratio carried as one F64 could not refuse a zero or negative part:
+`-16:-9` would arrive as 16:9 and `16:0` as infinity, and 16/9 is inexact,
+while two integers keep the arithmetic exact in the one rule. A packer
+saturates a part outside the signed 32-bit range (JS saturates the width at
+2^21 - 1 instead, so the packed value stays a safe integer) and the root
+refuses any part outside 1 to 65535 as a scene error naming the prop
+(`kaya: Aspect on Video: aspect 16:0 has a height of 0; ...`). There is no
+"unset" value and no clear spelling: 0 is the pair 0:0 and is refused, the
+`max_width` precedent, so a view that has taken an aspect keeps one.
+tools/scenes/capture.steps reads it on all five lanes (`expect_video_box`
+reads the laid-out box's ratio, `expect_video_corner` the box's top-left
+corner four points in, `"bars"` a corner the picture leaves), and
+tools/check-verbs.py's aspect clause holds the rule, the three doors and the
+five arms.
+
 **What each platform cannot do, stated once.** On Apple and GTK the video
 view is an ordinary composited widget: see-through, rounded over anything,
 animated, drawn over. On WinUI it is "external content": kaya can draw

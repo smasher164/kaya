@@ -84,10 +84,10 @@ struct TodoRow {
 
     @discardableResult
     func video(
-        _ f: KayaField<KayaPlayer>, fit: KayaFit? = nil,
+        _ f: KayaField<KayaPlayer>, fit: KayaFit? = nil, aspect: (Int, Int)? = nil,
         onVisibility: ((KayaAppTx, [KayaValue], Double) -> Void)? = nil
     ) -> KayaNodeHandle {
-        t.video(f, fit: fit, onVisibility: onVisibility)
+        t.video(f, fit: fit, aspect: aspect, onVisibility: onVisibility)
     }
 
     @discardableResult

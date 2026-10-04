@@ -50,6 +50,7 @@ public final class Capture {
         KayaApp app = new KayaApp();
         List<KayaApp.Signal<String>> labels = new ArrayList<>();
         KayaApp.Capture[] made = new KayaApp.Capture[2];
+        KayaApp.Widget[] view = new KayaApp.Widget[1];
         app.build(tx -> {
             tx.window(0).title("capture").size(520.0, 640.0);
             for (String s : new String[] {"devices", "permissions", "idle",
@@ -76,8 +77,13 @@ public final class Capture {
                     tx.button("Camera off", t -> t.captureCamera(call, null)); // button#4
                     tx.button("Stop", t -> t.stopCapture(call)); // button#5
                     tx.button("Open missing", t -> t.startCapture(missing)); // button#6
+                    tx.button("Wide cover", t -> { // button#7
+                        t.setAspect(view[0], 16, 9);
+                        t.setFit(view[0], KayaApp.Fit.COVER);
+                    });
+                    tx.button("Wide contain", t -> t.setFit(view[0], KayaApp.Fit.CONTAIN)); // button#8
                 }).wrap(true);
-                tx.video(call).a11yLabel("Self view"); // video#0
+                view[0] = tx.video(call).a11yLabel("Self view"); // video#0
             }));
             tx.watchCaptureDevices(true);
             made[0] = call;

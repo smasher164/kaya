@@ -324,7 +324,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::Blob => {
                 ("uint64_t handle".to_string(), "kaya_blob(handle)".to_string())
             }
-            crate::PropKind::Enum(_) | crate::PropKind::Player | crate::PropKind::Capture => (format!("int64_t {prop}"), format!("kaya_i64({prop})")),
+            crate::PropKind::Enum(_) | crate::PropKind::Player | crate::PropKind::Capture | crate::PropKind::Aspect => (format!("int64_t {prop}"), format!("kaya_i64({prop})")),
             crate::PropKind::Date => (
                 "int32_t year, int32_t month, int32_t day".to_string(),
                 "kaya_i64(kaya_pack_date(year, month, day))".to_string(),
@@ -383,7 +383,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::Bool => ("int ", "kaya_bool", *prop),
             crate::PropKind::F64 => ("double ", "kaya_f64", *prop),
             crate::PropKind::Blob => ("uint64_t ", "kaya_blob", "handle"),
-            crate::PropKind::Enum(_) | crate::PropKind::Player | crate::PropKind::Capture => ("int64_t ", "kaya_i64", *prop),
+            crate::PropKind::Enum(_) | crate::PropKind::Player | crate::PropKind::Capture | crate::PropKind::Aspect => ("int64_t ", "kaya_i64", *prop),
             crate::PropKind::Date | crate::PropKind::Time | crate::PropKind::Color => {
                 unreachable!("no menu prop is a date, a time or a colour")
             }

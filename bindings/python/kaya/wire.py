@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0xc769ec72ad1213de
+SPEC_HASH = 0x0e75ba3234ed9bff
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -131,6 +131,7 @@ PROP_HIGH_LABEL = 50
 PROP_FIT = 51
 PROP_PLAYER = 52
 PROP_CAPTURE = 53
+PROP_ASPECT = 54
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -1757,6 +1758,21 @@ def tx_bind_capture(widget_id: int, signal_id: int) -> bytes:
 def tx_bind_capture_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_CAPTURE, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_aspect(widget_id: int, aspect: int) -> bytes:
+    """set_property with a constant aspect value (int)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_ASPECT, SOURCE_CONST) + _enc.value(int(aspect)))
+
+
+def tx_bind_aspect(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound aspect value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_ASPECT, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_aspect_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_ASPECT, SOURCE_ELEMENT, level, field))
 
 
 def tx_set_window_title(window: int, title: str) -> bytes:

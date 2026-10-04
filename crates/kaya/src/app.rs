@@ -4837,6 +4837,14 @@ impl<'b> Row<'_, 'b> {
         self.tpl().max_width(node, points)
     }
 
+    pub fn fit(&mut self, node: TemplateNodeId, fit: crate::protocol::Fit) {
+        self.tpl().fit(node, fit)
+    }
+
+    pub fn aspect(&mut self, node: TemplateNodeId, width: i32, height: i32) {
+        self.tpl().aspect(node, width, height)
+    }
+
     pub fn max_height(&mut self, node: TemplateNodeId, points: f64) {
         self.tpl().max_height(node, points)
     }
@@ -8193,6 +8201,17 @@ impl<'b> Tpl<'_, 'b> {
     /// A stamped image's bound, the blueprint twin of [`Tx::max_width`].
     pub fn max_width(&mut self, node: TemplateNodeId, points: f64) {
         self.set(node, Prop::MaxWidth, points);
+    }
+
+    /// A stamped video view's fit, the blueprint twin of [`Tx::video_fit`].
+    pub fn fit(&mut self, node: TemplateNodeId, fit: crate::protocol::Fit) {
+        self.set(node, Prop::Fit, media::fit_wire(fit));
+    }
+
+    /// A stamped video view's box ratio, the blueprint twin of
+    /// [`Tx::video_aspect`].
+    pub fn aspect(&mut self, node: TemplateNodeId, width: i32, height: i32) {
+        self.set(node, Prop::Aspect, crate::protocol::Aspect::pack(width.into(), height.into()));
     }
 
     /// A stamped image's bound, the blueprint twin of [`Tx::max_height`].

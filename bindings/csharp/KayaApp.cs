@@ -4883,11 +4883,13 @@ sealed class Tx : IDisposable
     /// own view with its controls off. A player is shown by one video view
     /// at a time (§7b).
     public Widget Video(Player player, Fit? fit = null,
-        Action<Tx, double>? onVisibility = null, double? grow = null)
+        Action<Tx, double>? onVisibility = null, double? grow = null,
+        (int Width, int Height)? aspect = null)
     {
         var w = Widget(KayaWire.KindVideo);
         Records.Add(KayaWire.TxSetPlayer(w.Id, (long)player.Id));
         if (fit is Fit f) SetFit(w, f);
+        if (aspect is var (aw, ah)) SetAspect(w, aw, ah);
         if (onVisibility != null) App.OnVisibility(w, onVisibility);
         if (grow is double g) SetGrow(w, g);
         return w;
@@ -4901,11 +4903,13 @@ sealed class Tx : IDisposable
     /// player's view one source over, mirrored for a front camera. Live
     /// zone only: a row template shows no capture.
     public Widget Video(Capture capture, Fit? fit = null,
-        Action<Tx, double>? onVisibility = null, double? grow = null)
+        Action<Tx, double>? onVisibility = null, double? grow = null,
+        (int Width, int Height)? aspect = null)
     {
         var w = Widget(KayaWire.KindVideo);
         Records.Add(KayaWire.TxSetCapture(w.Id, (long)capture.Id));
         if (fit is Fit f) SetFit(w, f);
+        if (aspect is var (aw, ah)) SetAspect(w, aw, ah);
         if (onVisibility != null) App.OnVisibility(w, onVisibility);
         if (grow is double g) SetGrow(w, g);
         return w;
@@ -4917,6 +4921,14 @@ sealed class Tx : IDisposable
 
     public void SetFit(Widget video, Fit fit) =>
         Records.Add(KayaWire.TxSetFit(video.Id, (long)fit));
+
+    /// The width:height ratio of a video view's box, whatever its picture's
+    /// shape; SetFit places the picture in it (docs/media-plan.md §3).
+    public void SetAspect(Widget video, int width, int height) =>
+        Records.Add(KayaWire.TxSetAspect(video.Id, AspectWire(width, height)));
+
+    internal static long AspectWire(int width, int height) =>
+        ((long)width << 32) | (uint)height;
 
     /// Declare the app's one media session, replacing the last
     /// (docs/media-plan.md §5): the attached player the system's controls
@@ -6856,6 +6868,10 @@ sealed class Tpl
 
     /// How every stamped copy's video view fits its picture.
     public void SetFit(Node n, Fit fit) => tx.Records.Add(KayaWire.TxSetFit(n.Id, (long)fit));
+
+    /// Every stamped copy's video view box ratio.
+    public void SetAspect(Node n, int width, int height) =>
+        tx.Records.Add(KayaWire.TxSetAspect(n.Id, Tx.AspectWire(width, height)));
 
     Node ColorPickerOf(bool alpha, Action<Tx, List<object>, Color>? onColor)
     {

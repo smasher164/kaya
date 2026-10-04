@@ -4956,12 +4956,13 @@ public final class KayaAppTx {
     /// a time (§7b); `showPlayer` moves it.
     @discardableResult
     public func video(
-        _ player: KayaPlayer, fit: KayaFit? = nil,
+        _ player: KayaPlayer, fit: KayaFit? = nil, aspect: (Int, Int)? = nil,
         onVisibility: ((KayaAppTx, Double) throws -> Void)? = nil, grow: Double? = nil
     ) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_VIDEO))
         tx.setPlayer(w.id, Int64(bitPattern: player.id))
         if let fit { tx.setFit(w.id, fit.rawValue) }
+        if let aspect { tx.setAspect(w.id, kayaAspect(aspect.0, aspect.1)) }
         if let onVisibility { app.onVisibility(w, onVisibility) }
         if let grow { setGrow(w, grow) }
         return w
@@ -7036,12 +7037,13 @@ public final class KayaTpl {
     /// the copy's keys first.
     @discardableResult
     public func video(
-        _ f: KayaField<KayaPlayer>, fit: KayaFit? = nil,
+        _ f: KayaField<KayaPlayer>, fit: KayaFit? = nil, aspect: (Int, Int)? = nil,
         onVisibility: ((KayaAppTx, [KayaValue], Double) throws -> Void)? = nil
     ) -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_VIDEO))
         tx.tx.bindPlayerElement(n.id, level: 0, field: f.index)
         if let fit { tx.tx.setFit(n.id, fit.rawValue) }
+        if let aspect { tx.tx.setAspect(n.id, kayaAspect(aspect.0, aspect.1)) }
         if let onVisibility { tx.app.onVisibility(n, onVisibility) }
         return n
     }
@@ -7050,12 +7052,13 @@ public final class KayaTpl {
     /// one-view rule refuses past the first copy (docs/media-plan.md §7b).
     @discardableResult
     public func video(
-        _ player: KayaPlayer, fit: KayaFit? = nil,
+        _ player: KayaPlayer, fit: KayaFit? = nil, aspect: (Int, Int)? = nil,
         onVisibility: ((KayaAppTx, [KayaValue], Double) throws -> Void)? = nil
     ) -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_VIDEO))
         tx.tx.setPlayer(n.id, Int64(bitPattern: player.id))
         if let fit { tx.tx.setFit(n.id, fit.rawValue) }
+        if let aspect { tx.tx.setAspect(n.id, kayaAspect(aspect.0, aspect.1)) }
         if let onVisibility { tx.app.onVisibility(n, onVisibility) }
         return n
     }

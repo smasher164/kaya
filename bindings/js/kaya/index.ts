@@ -969,6 +969,22 @@ export class Widget extends Handle {
     records().push(wire.tx_widget_command(this.id, wire.COMMAND_FOCUS));
   }
 
+  /** Place this video view's picture in its box another way
+   * (docs/media-plan.md §3). */
+  fit(fit: Fit): this {
+    this._live("fit()");
+    records().push(wire.tx_set_fit(this.id, fitValue(fit)));
+    return this;
+  }
+
+  /** Give this video view's box another width:height, whatever the
+   * picture's shape (docs/media-plan.md §3). */
+  aspect(width: number, height: number): this {
+    this._live("aspect()");
+    records().push(wire.tx_set_aspect(this.id, packAspect(width, height)));
+    return this;
+  }
+
   /** Show another player in this video view, or none. A player is shown
    * by one video view at a time (docs/media-plan.md §7b). */
   showPlayer(player: Player | null): void {
@@ -4996,6 +5012,25 @@ const PLAYBACK_STATES: Record<PlaybackState, number> = {
 
 const FITS: Record<Fit, number> = { contain: wire.FIT_CONTAIN, cover: wire.FIT_COVER, fill: wire.FIT_FILL };
 
+function fitValue(name: Fit): number {
+  const fit = FITS[name];
+  if (fit === undefined) throw new Error(`kaya: fit must be one of ${JSON.stringify(Object.keys(FITS))}, got ${JSON.stringify(name)}`);
+  return fit;
+}
+
+// kaya::Aspect::pack, each part saturated; the core refuses a part outside
+// 1..=65535 naming the prop. The width saturates at ±(2^21 − 1) rather than
+// i32's bounds so the packed value stays a safe integer, which the wire's
+// I64 demands; such a width is refused by the core all the same.
+function packAspect(width: number, height: number): number {
+  for (const part of [width, height]) {
+    if (!Number.isInteger(part)) throw new TypeError(`kaya: an aspect part is a whole number, not ${String(part)}`);
+  }
+  const w = Math.min(Math.max(width, -(2 ** 21 - 1)), 2 ** 21 - 1);
+  const h = Math.min(Math.max(height, -(2 ** 31)), 2 ** 31 - 1);
+  return w * 2 ** 32 + (h >>> 0);
+}
+
 function known<T>(table: ReadonlyMap<number, T>, code: number, what: string): T {
   const word = table.get(code);
   if (word === undefined) throw new Error(`kaya: a ${what} carries ${code}, which this build does not know`);
@@ -5265,6 +5300,9 @@ export function player(opts: PlayerOptions = {}): Player {
 
 export type VideoOptions = GrowOption & {
   fit?: Fit;
+  /** The box's width:height, whatever the picture's shape; `fit` places
+   * the picture in it (§3). */
+  aspect?: readonly [width: number, height: number];
   /** How much of the view shows, 0 to 1, as it enters, leaves, moves by a
    * tenth and shows whole — a stamped copy's row first (§7b). */
   onVisibility?: Handler;
@@ -5291,10 +5329,9 @@ export function video(source: Player | FieldRef | null, opts: VideoOptions = {})
     records().push(wire.tx_bind_player_element(handle.id, source._level(), source._index));
   } else if (source !== null) throw new TypeError(`kaya: a video view shows a kaya.Player or a row's Player field, not ${runtime.describe(source)}`);
   if (opts.fit !== undefined) {
-    const fit = FITS[opts.fit];
-    if (fit === undefined) throw new Error(`kaya: fit must be one of ${JSON.stringify(Object.keys(FITS))}, got ${JSON.stringify(opts.fit)}`);
-    records().push(wire.tx_set_fit(handle.id, fit));
+    records().push(wire.tx_set_fit(handle.id, fitValue(opts.fit)));
   }
+  if (opts.aspect !== undefined) records().push(wire.tx_set_aspect(handle.id, packAspect(opts.aspect[0], opts.aspect[1])));
   const onVisibility = opts.onVisibility;
   if (onVisibility !== undefined) {
     app()._register(handle, wire.OCC_VIDEO_VISIBILITY, (...args: unknown[]) => onVisibility(...args.slice(0, -1), Number(args[args.length - 1])));

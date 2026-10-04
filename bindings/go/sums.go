@@ -443,6 +443,9 @@ func (sc SumCase[K, V]) SetAlpha(n Node, on bool) { sc.t.SetAlpha(n, on) }
 // SetFit is how a video view this arm stamps fits its picture (Tpl.SetFit).
 func (sc SumCase[K, V]) SetFit(n Node, fit Fit) { sc.t.SetFit(n, fit) }
 
+// SetAspect is that video view's box ratio (Tpl.SetAspect).
+func (sc SumCase[K, V]) SetAspect(n Node, width, height int) { sc.t.SetAspect(n, width, height) }
+
 // SetTickSpacing is the distance between that slider's drawn ticks
 // (Tpl.SetTickSpacing).
 func (sc SumCase[K, V]) SetTickSpacing(n Node, spacing float64) {

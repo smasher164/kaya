@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xc769ec72ad1213de;
+    public const ulong SpecHash = 0x0e75ba3234ed9bff;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -129,6 +129,7 @@ static class KayaWire
     public const uint PropFit = 51;
     public const uint PropPlayer = 52;
     public const uint PropCapture = 53;
+    public const uint PropAspect = 54;
     public const uint WpropTitle = 1;
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
@@ -2801,6 +2802,31 @@ static class KayaWire
     {
         var w = Begin(out var stream);
         w.Write(widgetId); w.Write(PropCapture); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant aspect value. A width:height ratio, packed width << 32 | height on the wire, each a signed 32-bit integer.
+    public static byte[] TxSetAspect(ulong widgetId, long aspect)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropAspect); w.Write(SourceConst);
+        EncodeValue(w, aspect);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound aspect value.
+    public static byte[] TxBindAspect(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropAspect); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindAspectElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropAspect); w.Write(SourceElement); w.Write(level); w.Write(field);
         return Finish(stream, w, TxKindSetProperty);
     }
 

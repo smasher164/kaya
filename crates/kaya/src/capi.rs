@@ -1094,6 +1094,9 @@ pub const KAYA_PROP_FIT: u32 = 51;
 pub const KAYA_PROP_PLAYER: u32 = 52;
 /// A video view's capture (docs/capture-plan.md §3): an I64 id, 0 none.
 pub const KAYA_PROP_CAPTURE: u32 = 53;
+/// A video view's box ratio (docs/media-plan.md §3): the width in the high
+/// 32 bits and the height in the low 32, each a signed 32-bit integer.
+pub const KAYA_PROP_ASPECT: u32 = 54;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -1343,6 +1346,7 @@ const _: () = assert!(
         && KAYA_PROP_FIT == wire::PROP_FIT
         && KAYA_PROP_PLAYER == wire::PROP_PLAYER
         && KAYA_PROP_CAPTURE == wire::PROP_CAPTURE
+        && KAYA_PROP_ASPECT == wire::PROP_ASPECT
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -1864,7 +1868,7 @@ const _: () = {
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 53,
+    crate::spec::PROPS.len() == 54,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(
@@ -5279,6 +5283,24 @@ pub unsafe extern "C" fn kaya_capture_nearest_format(
         *out.add(2) = fps;
     }
     1
+}
+
+/// Presentation side: a video view's box before layout for a picture whose
+/// natural size is `width` by `height`, with `aspect` the view's packed
+/// aspect prop (0 for none), into `out`'s two (docs/media-plan.md §3).
+///
+/// # Safety
+/// `out` must be null or writable for two u32s.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_video_view_box(width: u32, height: u32, aspect: i64, out: *mut u32) {
+    if out.is_null() {
+        return;
+    }
+    let (w, h) = crate::media::video_view_box((width, height), aspect);
+    unsafe {
+        *out = w;
+        *out.add(1) = h;
+    }
 }
 
 /// Presentation side: a self-view's natural size for frames of `width` by

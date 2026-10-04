@@ -3542,7 +3542,7 @@ if android_read_out:
     print("\n".join(android_read_out), file=sys.stderr)
 print("check-verbs: Android video read held (screencap, tolerance, renderer, picture)")
 for pattern, repl, label, which in (
-    (r"(Log\.i\(\"kaya\", \"KAYA_REQUEST: )video_ink", "video_frames",
+    (r"(Log\.i\(\"kaya\", \"KAYA_REQUEST: )video_ink( \$seq \$box)", r"\1video_frames\2",
      "the Compose arm not asking for the screencap", "compose"),
     (r'(\["timeout", "20", "adb", "-s", serial, "exec-out", )"screencap", "-p"\]',
      '"cat", "/dev/null"]', "the runner not taking the screencap", "runner"),
@@ -4793,6 +4793,7 @@ def self_view_natural(texts=None):
            why="the WinUI view keeps its full height as it shrinks")
     need("winui", "pub(super) fn create_video(", "Viewbox::new()", "SetStretch(Stretch::Uniform)",
          "extent.SetChild(&frame)", "host.Children()?.Append(&extent)",
+         "frame.Children()?.Append(&element)", "frame.Children()?.Append(&picture)",
          why="the WinUI view's extent is not scaled to its room at its aspect")
     need("gtk", "fn repaint(",
          "self_view_size(view, Some(crate::capture::self_view_natural(frames, 0)))",
@@ -4872,10 +4873,9 @@ for key, pattern, repl, label in (
      "i64::from(width.max(0))", "the height rule ignoring the natural width"),
     ("jni", r"\(\(width\.max\(0\) as u32, height\.max\(0\) as u32\), rotation\.max\(0\) as u32\)",
      "((width.max(0) as u32, height.max(0) as u32), 0)", "the JNI door dropping the rotation"),
-    ("swift", r"var natural: \[UInt32\] = \[0, 0\]\n[^\n]*\n[^\n]*"
-              r"CGSize\(width: Int\(natural\[0\]\), "
-              r"height: Int\(natural\[1\]\)\)",
-     "return CGSize(width: Int(format.0) / 2, height: Int(format.1) / 2)",
+    ("swift", r"var natural: \[UInt32\] = \[0, 0\]\n[^\n]*\n\s*"
+              r"picture = \(natural\[0\], natural\[1\]\)",
+     "picture = (format.0 / 2, format.1 / 2)",
      "SwiftUI with its own copy of the rule"),
     ("swift", r"(KayaVideoSurface\(node: node\)\n)\s*\.aspectRatio\(natural, contentMode: \.fit\)\n"
               r"(\s*)\.frame\(idealWidth: natural\.width, "
@@ -4935,6 +4935,213 @@ for key, pattern, repl, label in (
     if not found:
         fail(f"check-verbs SELF-TEST: the video view clause passed with {label}")
 
+# THE VIDEO VIEW'S ASPECT (docs/media-plan.md §3, RULED 2026-10-03): the box
+# the app chose, one core rule (media::video_view_box) every arm reaches, and
+# `fit` placing the picture in it. The capture scene reads the box's ratio and
+# its corner on all five lanes, but only for a self-view at one aspect and two
+# fits: a backend that reads the prop and then sizes the box from the picture
+# anyway, a player arm whose content scale takes the box for the picture, or a
+# door that drops the aspect on its way through, each shows only where no
+# scene looks. Each is held here, with its negative watched.
+ASPECT_FILES = {
+    "media": "crates/kaya/src/media.rs",
+    "protocol": "crates/kaya/src/protocol.rs",
+    "capi": "crates/kaya/src/capi.rs",
+    "host": "crates/kaya/src/swiftui_host.rs",
+    "jni": "crates/kaya/src/android.rs",
+    "harness": HARNESS,
+    "swift": SWIFT,
+    "kotlin": KOTLIN,
+    "compose": KOTLIN_MEDIA,
+    "compose_capture": COMPOSE_CAPTURE,
+    "gtk": GTK,
+    "winui": WINUI_MEDIA,
+    "winui_mod": WINUI,
+}
+
+
+def video_aspect(texts=None, names=None):
+    t = {k: re.sub(r"//[^\n]*", "", texts[k] if texts and k in texts else real(rel))
+         for k, rel in ASPECT_FILES.items()}
+    n = {"box": "video_view_box", "door": "kaya_video_view_box", "jni": "videoViewBox",
+         **(names or {})}
+    bad = []
+
+    def need(key, head, *parts, why):
+        body = brace_body(t[key], head)
+        if body is None:
+            bad.append(f"{ASPECT_FILES[key]}: no `{head}` — the aspect clause reads nothing "
+                       f"there and would agree with everything")
+            return None
+        for part in parts:
+            if part not in body:
+                bad.append(f"{ASPECT_FILES[key]}: `{head}` lacks `{part}` — {why}")
+        return body
+
+    def has(key, part, why):
+        if part not in t[key]:
+            bad.append(f"{ASPECT_FILES[key]}: no `{part}` — {why}")
+
+    need("media", f"pub(crate) fn {n['box']}(", "crate::protocol::Aspect::from_packed(aspect)",
+         "return natural;", "(w * ah + aw / 2) / aw",
+         why="the box is no longer the natural width at the app's ratio, or the "
+             "picture's own size with none")
+    need("protocol", "pub fn from_packed(packed: i64) -> Result<Aspect, String>",
+         "((packed >> 32) as i32)", "(packed as i32)", "(1..=Self::MAX_PART).contains(&part)",
+         why="a zero, negative or oversized part is no longer refused by name")
+    need("capi", f"pub unsafe extern \"C\" fn {n['door']}(",
+         f"crate::media::{n['box']}((width, height), aspect)",
+         why="the C door answers a box of its own")
+    has("host", f"video_view_box: crate::capi::{n['door']}",
+        "the SwiftUI host table does not carry the box door")
+    need("jni", "extern \"system\" fn present_video_view_box",
+         f"crate::media::{n['box']}((width.max(0) as u32, height.max(0) as u32), aspect)",
+         why="the JNI door answers a box of its own")
+    has("jni", f'name: "{n["jni"]}".into(),\n                sig: "(IIJ)[I".into()',
+        "the JNI box door is not registered taking the packed aspect")
+    has("harness", "pub(crate) const VIDEO_CORNER_INSET: f64 = 4.0;",
+        "expect_video_corner reads elsewhere than the ruled four points in")
+    has("swift", "private let propAspect: UInt32 = 54", "SwiftUI has no aspect prop")
+    has("swift", "case (propAspect, valueI64):\n                    kayaScene.nodes[id]!.aspect =",
+        "SwiftUI ignores the aspect prop")
+    has("swift", "let kayaVideoCornerInset: CGFloat = 4",
+        "SwiftUI's corner read is not harness.rs's four points")
+    natural = need("swift", "func kayaVideoNatural(", "KayaHost.api.video_view_box(",
+                   "node.aspect, $0.baseAddress",
+                   why="SwiftUI sizes the box from the picture when the app set an aspect")
+    if natural is not None and natural.find("KayaHost.api.video_view_box(") < \
+            natural.find("picture = size == .zero"):
+        bad.append(f"{SWIFT}: kayaVideoNatural reaches the box door before it knows the picture")
+    box = need("swift", "func kayaVideoBox(", "view.bounds",
+               why="expect_video_box reads something other than the laid-out view")
+    if box is not None and ("natural" in box or "aspect" in box):
+        bad.append(f"{SWIFT}: expect_video_box reads the request, not the layout")
+    has("kotlin", "private const val PROP_ASPECT = 54", "Compose has no aspect prop")
+    has("kotlin", "PROP_ASPECT -> KayaSceneModel.nodes[id]!!.aspect = readI64(b)",
+        "Compose ignores the aspect prop")
+    has("compose", "internal const val KAYA_VIDEO_CORNER_INSET = 4f",
+        "Compose's corner read is not harness.rs's four points")
+    view = need("compose", "internal fun KayaVideoView(",
+                f"KayaPresent.{n['jni']}(pw, ph, node.aspect)",
+                ".resizeWithContentScale(scale, Size(pw.toFloat(), ph.toFloat()))",
+                why="the Compose box is sized from the picture when the app set an aspect, "
+                    "or the player's content scale takes the box for the picture")
+    if view is not None and "Size(w.toFloat(), h.toFloat())" in view:
+        bad.append(f"{KOTLIN_MEDIA}: the player's content scale reads the box's size as the "
+                   f"picture's, so cover and contain inside an aspect place it wrongly")
+    frames = need("compose", "internal fun kayaVideoBoxSize(", "kayaVideoFrames[node.id]",
+                  why="expect_video_box reads something other than the laid-out view")
+    if frames is not None and "aspect" in frames:
+        bad.append(f"{KOTLIN_MEDIA}: expect_video_box reads the request, not the layout")
+    need("compose_capture", "internal fun KayaCapturePreview(",
+         "val fit = node.fit.toInt()",
+         "if (fit == FIT_COVER) maxOf(bw / fw, bh / fh) else minOf(bw / fw, bh / fh)",
+         "view.scaleX = if (fit == FIT_FILL && iw > 0f) bw / iw else 1f",
+         "Modifier.requiredSize(iw.toDp(), ih.toDp())",
+         why="the Android preview is not placed in its box by `fit`")
+    layout = brace_body(t["gtk"], "pub(super) mod video_layout_manager {")
+    if layout is None:
+        bad.append(f"{GTK}: no video_layout_manager — the aspect clause reads nothing there")
+    else:
+        measure = brace_body(layout, "fn measure(")
+        if measure is None or f"crate::media::{n['box']}(" not in measure \
+                or "self.aspect.get()" not in measure:
+            bad.append(f"{GTK}: the video layout sizes the box from the picture when the app "
+                       f"set an aspect")
+        if "pub fn set_aspect(&self, aspect: i64)" not in layout:
+            bad.append(f"{GTK}: the video layout has no set_aspect")
+    has("gtk", "(NativeWidget::Video(view), Prop::Aspect, Value::I64(aspect)) => {\n"
+               "                    gtk_media::video_layout(view).set_aspect(aspect)",
+        "GTK ignores the aspect prop")
+    need("gtk", "pub(super) fn video_pixel(view: &GtkVideoView, corner: bool)",
+         "renderer.render_texture(&node, Some(&viewport))",
+         why="the GTK corner read renders only what the picture drew, so a contained "
+             "picture's bars are outside the texture and the corner reads the picture")
+    need("gtk", "pub(super) fn video_box(view: &GtkVideoView)", "view.picture.width()",
+         why="expect_video_box reads something other than the laid-out picture")
+    need("winui", "fn natural_size(", f"crate::media::{n['box']}(picture, video.aspect.get())",
+         "video.natural.set(size)",
+         why="the WinUI box is sized from the picture when the app set an aspect")
+    need("winui", "pub(super) fn create_video(", "frame.Children()?.Append(&element)",
+         "frame.Children()?.Append(&picture)",
+         why="a picture element outside the box's frame answers its own height and the "
+             "host takes it over the box's")
+    need("winui", "pub(super) fn set_aspect(", "video.aspect.set(aspect)",
+         "natural_size(video, video.natural.get())",
+         why="the WinUI box does not follow a new aspect")
+    has("winui_mod", "(NativeWidget::Video { .. }, Prop::Aspect, Value::I64(aspect)) => "
+                     "media::set_aspect(core, id.0, aspect)?",
+        "WinUI ignores the aspect prop")
+    need("winui", "pub(super) fn set_fit(", "video.picture.SetStretch(stretch)?",
+         "video.element.SetStretch(stretch)",
+         why="WinUI's fit reaches only one of the player and the self-view")
+    return bad
+
+
+aspect_out = video_aspect()
+if aspect_out:
+    print("check-verbs: the video view's aspect drifts:", file=sys.stderr)
+    print("\n".join(aspect_out), file=sys.stderr)
+    capture_status = 1
+print(f"check-verbs: the video view's aspect read ({len(ASPECT_FILES)} files, the core's box "
+      f"rule, three doors, two corner reads and five arms)")
+aspect_fakes = video_aspect(names={"box": "kayaFakeVideoBox", "door": "kaya_fake_video_box",
+                                   "jni": "kayaFakeVideoBox"})
+print(f"check-verbs: the aspect clause under fake names: {len(aspect_fakes)} finding(s)")
+if len(aspect_fakes) < 8:
+    fail("check-verbs SELF-TEST: the aspect clause passed names that exist nowhere")
+for key, pattern, repl, label in (
+    ("media", r"\(w \* ah \+ aw / 2\) / aw", "u64::from(natural.1)",
+     "the core's box ignoring the aspect"),
+    ("protocol", r"\(1\.\.=Self::MAX_PART\)\.contains\(&part\)", "part != 0",
+     "the core taking a negative part"),
+    ("capi", r"crate::media::video_view_box\(\(width, height\), aspect\)",
+     "crate::media::video_view_box((width, height), 0)", "the C door dropping the aspect"),
+    ("jni", r"\(width\.max\(0\) as u32, height\.max\(0\) as u32\), aspect\)",
+     "(width.max(0) as u32, height.max(0) as u32), 0)", "the JNI door dropping the aspect"),
+    ("swift", r"node\.aspect, \$0\.baseAddress", "0, $0.baseAddress",
+     "SwiftUI sizing the box from the picture with an aspect set"),
+    ("swift", r"\n\s*case \(propAspect, valueI64\):\n[^\n]*\n", "\n",
+     "SwiftUI ignoring the prop"),
+    ("swift", r"let kayaVideoCornerInset: CGFloat = 4", "let kayaVideoCornerInset: CGFloat = 12",
+     "SwiftUI's corner read moved"),
+    ("swift", r"(func kayaVideoBox\([^\n]*\n[^\n]*\n[^\n]*\n)\s*let b = view\.bounds",
+     r"\1        let b = CGRect(origin: .zero, size: kayaVideoNatural(node))",
+     "SwiftUI's box read taking the request for the layout"),
+    ("kotlin", r"\n\s*PROP_ASPECT -> KayaSceneModel\.nodes\[id\]!!\.aspect = readI64\(b\)", "",
+     "Compose ignoring the prop"),
+    ("compose", r"KayaPresent\.videoViewBox\(pw, ph, node\.aspect\)",
+     "KayaPresent.videoViewBox(pw, ph, 0L)", "Compose sizing the box from the picture"),
+    ("compose", r"Size\(pw\.toFloat\(\), ph\.toFloat\(\)\)", "Size(w.toFloat(), h.toFloat())",
+     "Compose's player scaled as though the box were its picture"),
+    ("compose_capture", r"if \(fit == FIT_COVER\) maxOf\(bw / fw, bh / fh\) else "
+                        r"minOf\(bw / fw, bh / fh\)",
+     "maxOf(bw / fw, bh / fh)", "Android's preview ignoring fit"),
+    ("gtk", r"crate::media::video_view_box\(\(picture\.0\.max\(0\) as u32, "
+            r"picture\.1\.max\(0\) as u32\), self\.aspect\.get\(\)\)",
+     "(picture.0.max(0) as u32, picture.1.max(0) as u32)",
+     "GTK sizing the box from the picture"),
+    ("gtk", r"\n\s*\(NativeWidget::Video\(view\), Prop::Aspect, Value::I64\(aspect\)\) => \{\n"
+            r"[^\n]*\n\s*\}", "", "GTK ignoring the prop"),
+    ("winui", r"crate::media::video_view_box\(picture, video\.aspect\.get\(\)\)", "picture",
+     "WinUI sizing the box from the picture"),
+    ("winui_mod", r"\n\s*\(NativeWidget::Video \{ \.\. \}, Prop::Aspect, Value::I64\(aspect\)\)"
+                  r" => media::set_aspect\(core, id\.0, aspect\)\?,", "",
+     "WinUI ignoring the prop"),
+    ("winui", r"\n\s*video\.picture\.SetStretch\(stretch\)\?;", "",
+     "WinUI's self-view ignoring fit"),
+    ("gtk", r"renderer\.render_texture\(&node, Some\(&viewport\)\)",
+     "renderer.render_texture(&node, None)",
+     "GTK's corner read over the picture's own bounds, as first built"),
+    ("winui", r"frame\.Children\(\)\?\.Append\(&picture\)", "host.Children()?.Append(&picture)",
+     "WinUI's self-view sizing the host from its own picture, as first built"),
+):
+    cut = g.doctor(f"the video view's aspect: {label}", real(ASPECT_FILES[key]), pattern, repl)
+    found = [f for f in video_aspect({key: cut}) if f not in aspect_out]
+    print(f"check-verbs: the aspect negative ({label}): {len(found)} finding(s)")
+    if not found:
+        fail(f"check-verbs SELF-TEST: the aspect clause passed with {label}")
+
 # clip_mirrors() ran first and printed its own findings; its verdict
 # is read here so there is exactly ONE verdict line.
 if (clip_status or window_status or ink_status or ax_status
@@ -4977,4 +5184,5 @@ g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"+ the Compose capture wall (the emulator's devices only, "
           f"the runner's one launch) "
           f"+ a self-view's natural size through the core's one rule on 5 arms "
+          f"+ the app's aspect through the core's box rule on 5 arms "
           f"+ spec hash against 2 interpreters")

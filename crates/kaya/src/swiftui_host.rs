@@ -402,6 +402,7 @@ pub struct KayaHostApi {
     pub reader_no_track: unsafe extern "C" fn(u64, u64, *const u8, usize),
     pub capture_nearest_format: unsafe extern "C" fn(*const u32, usize, f64, f64, f64, *mut u32) -> u32,
     pub capture_self_view_natural: unsafe extern "C" fn(u32, u32, u32, *mut u32),
+    pub video_view_box: unsafe extern "C" fn(u32, u32, i64, *mut u32),
 }
 
 /// # Safety
@@ -681,6 +682,7 @@ pub(crate) fn run() -> i32 {
         reader_no_track: crate::capi::kaya_reader_no_track,
         capture_nearest_format: crate::capi::kaya_capture_nearest_format,
         capture_self_view_natural: crate::capi::kaya_capture_self_view_natural,
+        video_view_box: crate::capi::kaya_video_view_box,
     };
     // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the declares-windowing
     // entry), and the declaration has to beat the first transaction rather

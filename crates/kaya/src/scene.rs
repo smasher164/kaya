@@ -1128,7 +1128,7 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // docs/color-picker-plan.md §2.
         Prop::Color | Prop::Alpha => matches!(kind, WidgetKind::ColorPicker),
         // docs/media-plan.md §3.
-        Prop::Fit | Prop::Player | Prop::Capture => matches!(kind, WidgetKind::Video),
+        Prop::Fit | Prop::Player | Prop::Capture | Prop::Aspect => matches!(kind, WidgetKind::Video),
         Prop::Indeterminate => matches!(kind, WidgetKind::Progress),
         Prop::Source => matches!(kind, WidgetKind::Image),
         // Layout weight is kind-agnostic: any child of a row/column may
@@ -1721,7 +1721,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::MaxLines => ValueType::F64,
         Prop::MaxWidth | Prop::MaxHeight => ValueType::F64,
         Prop::Axis => ValueType::I64,
-        Prop::Fit | Prop::Player | Prop::Capture => ValueType::I64,
+        Prop::Fit | Prop::Player | Prop::Capture | Prop::Aspect => ValueType::I64,
         Prop::Role => ValueType::I64,
         Prop::Symbol => ValueType::I64,
         Prop::Indeterminate | Prop::Fill | Prop::Wrap | Prop::Rich | Prop::Submits => ValueType::Bool,
@@ -2508,6 +2508,11 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
     }
     if let (Prop::Capture, Value::I64(capture)) = (prop, value) {
         assert!(*capture >= 0, "kaya: a video view's capture is a capture id, 0 for none, got {capture}");
+    }
+    if let (Prop::Aspect, Value::I64(packed)) = (prop, value) {
+        if let Err(why) = crate::protocol::Aspect::from_packed(*packed) {
+            panic!("kaya: {prop:?} on {kind:?}: {why}");
+        }
     }
     if let (Prop::Fit, Value::I64(fit)) = (prop, value) {
         assert!(
@@ -10676,6 +10681,24 @@ mod tests {
     #[should_panic(expected = "role link does not fit Button")]
     fn a_link_button_dies_naming_link() {
         declare(WidgetKind::Button, Prop::Role, 7);
+    }
+
+    #[test]
+    #[should_panic(expected = "kaya: Aspect on Video: aspect 16:0 has a height of 0")]
+    fn a_video_aspect_with_a_zero_part_dies_naming_the_prop() {
+        declare(WidgetKind::Video, Prop::Aspect, crate::protocol::Aspect::pack(16, 0));
+    }
+
+    #[test]
+    #[should_panic(expected = "kaya: Aspect on Video: aspect -16:9 has a width of -16")]
+    fn a_video_aspect_with_a_negative_part_dies_naming_the_prop() {
+        declare(WidgetKind::Video, Prop::Aspect, crate::protocol::Aspect::pack(-16, 9));
+    }
+
+    #[test]
+    #[should_panic(expected = "Image has no property Aspect")]
+    fn an_aspect_is_a_video_views_alone() {
+        declare(WidgetKind::Image, Prop::Aspect, crate::protocol::Aspect::pack(16, 9));
     }
 
     #[test]

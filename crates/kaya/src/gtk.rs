@@ -14241,6 +14241,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             let widget = core.widgets.get(&id).expect("scene validated the id");
             match (widget, prop, value) {
                 (NativeWidget::Video(view), Prop::Fit, Value::I64(fit)) => gtk_media::set_fit(view, fit),
+                (NativeWidget::Video(view), Prop::Aspect, Value::I64(aspect)) => {
+                    gtk_media::video_layout(view).set_aspect(aspect)
+                }
                 (NativeWidget::Button(button), Prop::Text, Value::Str(s)) => {
                     use gtk4::prelude::AccessibleExt;
                     if button.icon_name().is_some() {
@@ -21487,9 +21490,23 @@ impl crate::harness::Stage for GtkStage {
     fn video_ink(&self, target: crate::harness::Target) -> String {
         Self::on_main(move |core| {
             match crate::harness::try_resolve(target.index, core.videos.len()) {
-                Some(i) => gtk_media::video_pixel(&core.videos[i]),
+                Some(i) => gtk_media::video_pixel(&core.videos[i], false),
                 None => format!("<no video#{} among {} video views>", target.index, core.videos.len()),
             }
+        })
+    }
+
+    fn video_corner(&self, target: crate::harness::Target) -> String {
+        Self::on_main(move |core| match crate::harness::try_resolve(target.index, core.videos.len()) {
+            Some(i) => gtk_media::video_pixel(&core.videos[i], true),
+            None => format!("<no video#{} among {} video views>", target.index, core.videos.len()),
+        })
+    }
+
+    fn video_box(&self, target: crate::harness::Target) -> String {
+        Self::on_main(move |core| match crate::harness::try_resolve(target.index, core.videos.len()) {
+            Some(i) => gtk_media::video_box(&core.videos[i]),
+            None => format!("<no video#{} among {} video views>", target.index, core.videos.len()),
         })
     }
 
@@ -24550,6 +24567,8 @@ mod gtk_media {
         pub struct VideoLayoutInner {
             /// A self-view's natural size; `None` is the player's picture's.
             natural: Cell<Option<(i32, i32)>>,
+            /// The app's packed aspect, 0 for none (docs/media-plan.md §3).
+            aspect: Cell<i64>,
         }
 
         #[glib::object_subclass]
@@ -24572,7 +24591,7 @@ mod gtk_media {
                 orientation: gtk4::Orientation,
                 for_size: i32,
             ) -> (i32, i32, i32, i32) {
-                let (w, h) = self.natural.get().unwrap_or_else(|| {
+                let picture = self.natural.get().unwrap_or_else(|| {
                     widget
                         .downcast_ref::<gtk4::Picture>()
                         .and_then(|p| p.paintable())
@@ -24580,6 +24599,9 @@ mod gtk_media {
                         .filter(|(w, h)| *w > 0 && *h > 0)
                         .unwrap_or(super::VIDEO_PLACEHOLDER)
                 });
+                let (w, h) =
+                    crate::media::video_view_box((picture.0.max(0) as u32, picture.1.max(0) as u32), self.aspect.get());
+                let (w, h) = (w as i32, h as i32);
                 if orientation == gtk4::Orientation::Horizontal {
                     return (0, w, -1, -1);
                 }
@@ -24608,6 +24630,11 @@ mod gtk_media {
         impl VideoLayout {
             pub fn set_natural(&self, natural: Option<(i32, i32)>) {
                 self.imp().natural.set(natural);
+                self.layout_changed();
+            }
+
+            pub fn set_aspect(&self, aspect: i64) {
+                self.imp().aspect.set(aspect);
                 self.layout_changed();
             }
         }
@@ -25963,7 +25990,7 @@ mod gtk_media {
     /// ordinary composited paintable here (docs/probes/video-native-2026-09-29,
     /// android-linux.md §5), read back as the widget's own snapshot.
     #[cfg(feature = "harness")]
-    pub(super) fn video_pixel(view: &GtkVideoView) -> String {
+    pub(super) fn video_pixel(view: &GtkVideoView, corner: bool) -> String {
         use gtk4::prelude::{NativeExt, SnapshotExt, WidgetExt};
         let widget: gtk4::Widget = view.picture.clone().upcast();
         let Some(native) = widget.native() else {
@@ -25973,8 +26000,10 @@ mod gtk_media {
         if w < 2.0 || h < 2.0 {
             return format!("<the video view laid out at {w}x{h}>");
         }
+        let inset = crate::harness::VIDEO_CORNER_INSET;
+        let (ax, ay) = if corner { (inset, inset) } else { (w / 2.0, h / 2.0) };
         if view.picture.paintable().is_none() {
-            return window_pixel(&widget, w / 2.0, h / 2.0);
+            return window_pixel(&widget, ax, ay);
         }
         let Some(renderer) = native.renderer() else {
             return "<this toplevel has no GSK renderer>".to_owned();
@@ -25985,7 +26014,11 @@ mod gtk_media {
         let Some(node) = snapshot.to_node() else {
             return format!("<the video view snapshotted to nothing at {w}x{h}: no frame yet>");
         };
-        let shot = renderer.render_texture(&node, None);
+        // The viewport is the widget's whole box: left to its own bounds the node
+        // is only what the picture drew, and a contained picture's bounds
+        // exclude the bars the corner read is after.
+        let viewport = gtk4::graphene::Rect::new(0.0, 0.0, w as f32, h as f32);
+        let shot = renderer.render_texture(&node, Some(&viewport));
         let (tw, th) = (shot.width(), shot.height());
         if tw < 1 || th < 1 {
             return format!("<the video view rendered to {tw}x{th} pixels>");
@@ -25993,13 +26026,21 @@ mod gtk_media {
         let stride = tw as usize * 4;
         let mut buf = vec![0u8; stride * th as usize];
         gtk4::gdk::prelude::TextureExtManual::download(&shot, &mut buf, stride);
-        let (x, y) = ((tw / 2) as usize, (th / 2) as usize);
+        let x = ((ax * f64::from(tw) / w) as usize).min(tw as usize - 1);
+        let y = ((ay * f64::from(th) / h) as usize).min(th as usize - 1);
         let at = y * stride + x * 4;
         let word = u32::from_ne_bytes([buf[at], buf[at + 1], buf[at + 2], buf[at + 3]]);
         if (word >> 24) & 0xff != 0xff {
-            return window_pixel(&widget, w / 2.0, h / 2.0);
+            return window_pixel(&widget, ax, ay);
         }
         format!("{:02X}{:02X}{:02X}", (word >> 16) & 0xff, (word >> 8) & 0xff, word & 0xff)
+    }
+
+    /// expect_video_box's read: the picture's laid-out size, the view's box.
+    #[cfg(feature = "harness")]
+    pub(super) fn video_box(view: &GtkVideoView) -> String {
+        use gtk4::prelude::WidgetExt;
+        format!("{} {}", view.picture.width(), view.picture.height())
     }
 
     #[cfg(feature = "harness")]

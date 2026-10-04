@@ -936,6 +936,16 @@ class Widget(_Handle):
         _records().append(wire.tx_set_capture(
             self.id, 0 if capture is None else capture.id))
 
+    def fit(self, fit: Fit | str | int) -> None:
+        """Place this video view's picture in its box another way
+        (docs/media-plan.md §3)."""
+        _records().append(wire.tx_set_fit(self.id, int(Fit(fit))))
+
+    def aspect(self, width: int, height: int) -> None:
+        """Give this video view's box another width:height, whatever the
+        picture's shape (docs/media-plan.md §3)."""
+        _records().append(wire.tx_set_aspect(self.id, _pack_aspect(width, height)))
+
     def scroll_to_row(self, key: Key) -> None:
         """Scroll the For mounted in this container so the row keyed
         `key` has its top at the viewport's top, clamped at the content's
@@ -6354,9 +6364,25 @@ _FIELD_ENCODERS[Player] = _encode_player_field
 _FIELD_DECODERS[Player] = _decode_player_field
 
 
+def _pack_aspect(width: int, height: int) -> int:
+    """`kaya::Aspect::pack`: each part saturated to i32, width high. The
+    core refuses a part outside 1..=65535 naming the prop."""
+    for part in (width, height):
+        if isinstance(part, bool) or not isinstance(part, int):
+            raise KayaTypeError(
+                f"kaya: an aspect part is a whole number, not {part!r}")
+    lo, hi = -(1 << 31), (1 << 31) - 1
+
+    def sat(x: int) -> int:
+        return min(max(x, lo), hi)
+
+    return (sat(width) << 32) | (sat(height) & 0xFFFFFFFF)
+
+
 def video(player: Player | Source | None = None, *,
           fit: Fit | str | int | None = None,
           on_visibility: Handler | None = None,
+          aspect: tuple[int, int] | None = None,
           grow: float | None = None,
           capture: Capture | None = None) -> Widget:
     """A video view showing `player` (docs/media-plan.md §3): the
@@ -6364,7 +6390,9 @@ def video(player: Player | Source | None = None, *,
     is the row's Player field. A player is shown by one video view at a
     time (§7b). `on_visibility` hears how much of the view shows, 0 to 1,
     as it enters, leaves, moves by a tenth and shows whole — a stamped
-    copy's `Row` first. `capture=` previews a `kaya.Capture` instead, in
+    copy's `Row` first. `aspect=(16, 9)` is the box's width:height,
+    whatever the picture's shape, and `fit` places the picture in it.
+    `capture=` previews a `kaya.Capture` instead, in
     the live zone only (docs/capture-plan.md §3); a view shows a player or
     a capture, never both."""
     if capture is not None and player is not None:
@@ -6395,6 +6423,9 @@ def video(player: Player | Source | None = None, *,
             f"field, not {type(player).__name__}")
     if fit is not None:
         _records().append(wire.tx_set_fit(handle.id, int(Fit(fit))))
+    if aspect is not None:
+        width, height = aspect
+        _records().append(wire.tx_set_aspect(handle.id, _pack_aspect(width, height)))
     if on_visibility is not None:
         _app._register(handle, wire.OCC_VIDEO_VISIBILITY,
                        lambda *args: on_visibility(*args[:-1], float(args[-1])))

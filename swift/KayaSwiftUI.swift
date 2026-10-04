@@ -22,7 +22,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xc769ec72ad1213de
+let kayaSpecHash: UInt64 = 0x0e75ba3234ed9bff
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -317,6 +317,7 @@ private let propHighLabel: UInt32 = 50
 private let propFit: UInt32 = 51
 private let propPlayer: UInt32 = 52
 private let propCapture: UInt32 = 53
+private let propAspect: UInt32 = 54
 private let fileContentImages: UInt32 = 1
 private let tintAccent: Int64 = 1
 private let tintSuccess: Int64 = 2
@@ -794,6 +795,8 @@ final class KayaNode: Identifiable {
     /// and a bump for when that player's picture size is learned.
     var videoPlayer: UInt64 = 0
     var fit: Int64 = 0
+    /// The packed box ratio the app chose (0 none; docs/media-plan.md §3).
+    var aspect: Int64 = 0
     var videoSeq = 0
     /// docs/capture-plan.md §3: the capture a video view previews (0 none).
     var videoCapture: UInt64 = 0
@@ -6241,6 +6244,8 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaScene.nodes[id]!.highLabel = String(decoding: bytes, as: UTF8.self)
                 case (propFit, valueI64):
                     kayaScene.nodes[id]!.fit = raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
+                case (propAspect, valueI64):
+                    kayaScene.nodes[id]!.aspect = raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
                 case (propPlayer, _):
                     fatalError("kaya: a video view's player arrives as set_video_player; the core never forwards the player prop")
                 case (propCapture, _):
@@ -10484,6 +10489,38 @@ private func kayaRunScript(_ script: String) {
                         failures.append("video ink \(got), wanted \(want) within \(kayaVideoInkTolerance) per channel")
                     }
                 #endif
+            case "expect_video_box":
+                // docs/media-plan.md §3: the box the platform laid out, its ratio alone.
+                let want = kayaQuoted(Array(parts[2...]))
+                let ratio = want.split(separator: ":").compactMap { Int($0) }
+                let node = DispatchQueue.main.sync { kayaTarget(parts[1], "video", kayaScene.videos) }
+                let got = node.map { kayaVideoBox($0) } ?? "<no such target>"
+                if ratio.count == 2, kayaVideoBoxShaped(got, ratio[0], ratio[1]) {
+                    observed.append("video box \(want)")
+                } else {
+                    failures.append("video box \(got), wanted \(want) with its height within one unit")
+                }
+            case "expect_video_corner":
+                // docs/media-plan.md §3: the box's top-left corner, read as
+                // expect_video_ink reads the centre; "bars" is a corner off the
+                // centre's reading.
+                let want = kayaQuoted(Array(parts[2...]))
+                let node = DispatchQueue.main.sync { kayaTarget(parts[1], "video", kayaScene.videos) }
+                let got = node.map { kayaVideoInk($0, corner: true) } ?? "<no such target>"
+                if want == "bars" {
+                    let centre = node.map { kayaVideoInk($0) } ?? "<no such target>"
+                    if kayaVideoInkMatches(got, got), kayaVideoInkMatches(centre, centre), !kayaVideoInkMatches(got, centre) {
+                        observed.append("video corner \(want)")
+                    } else {
+                        failures.append(
+                            "video corner \(got) with the centre \(centre), wanted \(want): the corner off the centre's "
+                                + "reading by more than \(kayaVideoInkTolerance) per channel")
+                    }
+                } else if kayaVideoInkMatches(got, want) {
+                    observed.append("video corner \(want)")
+                } else {
+                    failures.append("video corner \(got), wanted \(want) within \(kayaVideoInkTolerance) per channel")
+                }
             case "expect_capture":
                 // docs/capture-plan.md §7: the core's own statistics of what
                 // passed through the capture, never the app's word.
@@ -28112,6 +28149,8 @@ func kayaVideoGravity(_ fit: Int64) -> AVLayerVideoGravity {
         override init(frame: NSRect) {
             super.init(frame: frame)
             wantsLayer = true
+            // `cover` crops to the box (docs/media-plan.md §3).
+            playerLayer.masksToBounds = true
         }
 
         required init?(coder: NSCoder) { fatalError("kaya: KayaVideoView is not archived") }
@@ -28192,6 +28231,8 @@ func kayaVideoGravity(_ fit: Int64) -> AVLayerVideoGravity {
 
         func makeUIView(context: Context) -> KayaVideoView {
             let view = KayaVideoView()
+            // `cover` crops to the box (docs/media-plan.md §3).
+            view.clipsToBounds = true
             update(view)
             return view
         }
@@ -28332,18 +28373,25 @@ func kayaShownFraction(_ node: KayaNode, _ frame: CGRect) -> Double {
     return Double(clip.width * clip.height / (frame.width * frame.height))
 }
 
-/// The video view's natural size: its picture's, 320x180 until one is known;
-/// a self-view's is the core's rule (docs/capture-plan.md §3).
+/// The video view's box before layout: its picture's natural size (320x180
+/// until one is known; a self-view's is the core's rule, docs/capture-plan.md
+/// §3) through the core's box rule, which applies the app's aspect
+/// (docs/media-plan.md §3).
 func kayaVideoNatural(_ node: KayaNode) -> CGSize {
     _ = node.videoSeq
+    var picture: (UInt32, UInt32)
     if node.videoCapture != 0 {
         let format = kayaCaptures[node.videoCapture]?.source?.format ?? (0, 0, 0)
         var natural: [UInt32] = [0, 0]
         natural.withUnsafeMutableBufferPointer { KayaHost.api.capture_self_view_natural(format.0, format.1, 0, $0.baseAddress) }
-        return CGSize(width: Int(natural[0]), height: Int(natural[1]))
+        picture = (natural[0], natural[1])
+    } else {
+        let size = kayaPlayers[node.videoPlayer]?.mediaSize ?? .zero
+        picture = size == .zero ? (320, 180) : (UInt32(size.width.rounded()), UInt32(size.height.rounded()))
     }
-    let size = kayaPlayers[node.videoPlayer]?.mediaSize ?? .zero
-    return size == .zero ? CGSize(width: 320, height: 180) : size
+    var box: [UInt32] = [0, 0]
+    box.withUnsafeMutableBufferPointer { KayaHost.api.video_view_box(picture.0, picture.1, node.aspect, $0.baseAddress) }
+    return CGSize(width: Int(box[0]), height: Int(box[1]))
 }
 
 /// The accessibility actions a video view carries (docs/media-plan.md §3),
@@ -28397,7 +28445,7 @@ func kayaMediaRefusal(_ item: String) -> String? {
     /// The video view's centre as the WINDOW SERVER composited it, in sRGB:
     /// the picture is in no process snapshot (measured), and a window
     /// capture by id reads it back colour-managed.
-    func kayaVideoInk(_ node: KayaNode, beside: Bool = false) -> String {
+    func kayaVideoInk(_ node: KayaNode, beside: Bool = false, corner: Bool = false) -> String {
         let found = DispatchQueue.main.sync { () -> (CGWindowID, CGRect, CGFloat)? in
             guard let view = kayaVideoViews[node.id], let window = view.window else { return nil }
             // Window coordinates run from the frame's bottom-left, title bar
@@ -28409,8 +28457,9 @@ func kayaMediaRefusal(_ item: String) -> String? {
             return (CGWindowID(window.windowNumber), flipped, window.backingScaleFactor)
         }
         guard let (wid, rect, scale) = found else { return "<no video view on screen>" }
-        let px = Int(((beside ? rect.maxX + kayaVideoGroundOffset : rect.midX) * scale).rounded())
-        let py = Int((rect.midY * scale).rounded())
+        let x = corner ? rect.minX + kayaVideoCornerInset : beside ? rect.maxX + kayaVideoGroundOffset : rect.midX
+        let px = Int((x * scale).rounded())
+        let py = Int(((corner ? rect.minY + kayaVideoCornerInset : rect.midY) * scale).rounded())
         let done = DispatchSemaphore(value: 0)
         // Each stage says where a capture stood when the 5 s ran out
         // (docs/traps.md, the pooled ink read that never answered).
@@ -28547,13 +28596,14 @@ func kayaMediaRefusal(_ item: String) -> String? {
     /// host (`simctl io screenshot`, sRGB, measured to hold the layer's
     /// picture); no in-process read sees it while playing
     /// (docs/media-plan.md §6).
-    func kayaVideoInk(_ node: KayaNode, beside: Bool = false) -> String {
+    func kayaVideoInk(_ node: KayaNode, beside: Bool = false, corner: Bool = false) -> String {
         let found = DispatchQueue.main.sync { () -> CGPoint? in
             guard let view = kayaVideoViews[node.id], let window = view.window else { return nil }
             let r = view.convert(view.bounds, to: window.screen.coordinateSpace)
             let scale = window.screen.scale
-            let x = beside ? r.maxX + kayaVideoGroundOffset : r.midX
-            return CGPoint(x: (x * scale).rounded(), y: (r.midY * scale).rounded())
+            let x = corner ? r.minX + kayaVideoCornerInset : beside ? r.maxX + kayaVideoGroundOffset : r.midX
+            let y = corner ? r.minY + kayaVideoCornerInset : r.midY
+            return CGPoint(x: (x * scale).rounded(), y: (y * scale).rounded())
         }
         guard let at = found else { return "<no video view on screen>" }
         let (ok, lines) = KayaSimdrive.ask("media_screen \(Int(at.x)) \(Int(at.y))", timeout: 30)
@@ -28611,6 +28661,25 @@ let kayaVideoInkTolerance = 2
 
 /// harness.rs's VIDEO_GROUND_OFFSET: where `"none"` reads the ground beside a video view.
 let kayaVideoGroundOffset: CGFloat = 8
+
+/// harness.rs's VIDEO_CORNER_INSET: where expect_video_corner reads, in from the box's top-left.
+let kayaVideoCornerInset: CGFloat = 4
+
+/// expect_video_box's read: the view's laid-out bounds, "<width> <height>" in points.
+func kayaVideoBox(_ node: KayaNode) -> String {
+    DispatchQueue.main.sync {
+        guard let view = kayaVideoViews[node.id] else { return "<no video view on screen>" }
+        let b = view.bounds
+        return "\(Double(b.width)) \(Double(b.height))"
+    }
+}
+
+/// harness.rs's video_box_shaped: the height within one unit of the width at the ratio.
+func kayaVideoBoxShaped(_ got: String, _ w: Int, _ h: Int) -> Bool {
+    let parts = got.split(separator: " ").compactMap { Double($0) }
+    guard parts.count == 2, got.split(separator: " ").count == 2, parts[0] > 0, parts[1] > 0 else { return false }
+    return abs(parts[1] - parts[0] * Double(h) / Double(w)) <= 1
+}
 
 func kayaVideoInkMatches(_ got: String, _ want: String) -> Bool {
     func rgb(_ s: String) -> [Int]? {

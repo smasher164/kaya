@@ -1641,6 +1641,10 @@ public final class KayaApp {
         }
     }
 
+    static long aspectWire(int width, int height) {
+        return ((long) width << 32) | (height & 0xFFFFFFFFL);
+    }
+
     /** How a video view fits its picture (docs/media-plan.md §3). */
     public enum Fit {
         CONTAIN(KayaWire.FIT_CONTAIN, "contain"),
@@ -4603,6 +4607,19 @@ public final class KayaApp {
             return this;
         }
 
+        /** The width:height ratio of a video view's box, whatever its
+         * picture's shape; {@link #fit} places the picture in it
+         * (docs/media-plan.md §3). */
+        public Widget aspect(int width, int height) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: aspect on a widget outside its build transaction"
+                    + " — a video view's aspect is declared where the view is built");
+            }
+            tx.emit(KayaWire.txSetAspect(id, aspectWire(width, height)));
+            return this;
+        }
+
         /** Let a colour picker's user choose translucency (off by
          * default: docs/color-picker-plan.md §3 rule 3). */
         public Widget alpha(boolean on) {
@@ -5609,6 +5626,16 @@ public final class KayaApp {
             t.setAlpha(n, on);
         }
 
+        /** This row's copy of that video view's fit (Tpl.setFit). */
+        public void setFit(Node n, Fit fit) {
+            t.setFit(n, fit);
+        }
+
+        /** This row's copy of that video view's box ratio (Tpl.setAspect). */
+        public void setAspect(Node n, int width, int height) {
+            t.setAspect(n, width, height);
+        }
+
         /** This row's copy of that range's gap (Tpl.setMinGap). */
         public void setMinGap(Node n, double gap) {
             t.setMinGap(n, gap);
@@ -6296,6 +6323,17 @@ public final class KayaApp {
          */
         public void setGrow(Widget w, double weight) {
             emit(KayaWire.txSetGrow(w.id, weight));
+        }
+
+        /** How a video view fits its picture (docs/media-plan.md §3). */
+        public void setFit(Widget video, Fit fit) {
+            emit(KayaWire.txSetFit(video.id, fit.wire));
+        }
+
+        /** The width:height ratio of a video view's box, whatever its
+         * picture's shape; {@link #setFit} places the picture in it. */
+        public void setAspect(Widget video, int width, int height) {
+            emit(KayaWire.txSetAspect(video.id, aspectWire(width, height)));
         }
 
         /**
@@ -8581,6 +8619,16 @@ public final class KayaApp {
         /** A stamped colour picker's alpha, constant across the copies. */
         public void setAlpha(Node n, boolean on) {
             tx.emit(KayaWire.txSetAlpha(n.id, on));
+        }
+
+        /** How every stamped copy's video view fits its picture. */
+        public void setFit(Node n, Fit fit) {
+            tx.emit(KayaWire.txSetFit(n.id, fit.wire));
+        }
+
+        /** Every stamped copy's video view box ratio. */
+        public void setAspect(Node n, int width, int height) {
+            tx.emit(KayaWire.txSetAspect(n.id, aspectWire(width, height)));
         }
 
         /** A stamped range's least gap (docs/range-plan.md §2), constant

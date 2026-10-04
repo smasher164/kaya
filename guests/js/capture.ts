@@ -69,8 +69,10 @@ const { labels, call, missing } = app.window({ title: "capture", width: 520, hei
       kaya.button("Camera off", { onClick: () => call.setCamera(null) }); // button#4
       kaya.button("Stop", { onClick: () => call.stop() }); // button#5
       kaya.button("Open missing", { onClick: () => missing.start() }); // button#6
+      kaya.button("Wide cover", { onClick: () => view.aspect(16, 9).fit("cover") }); // button#7
+      kaya.button("Wide contain", { onClick: () => view.fit("contain") }); // button#8
     });
-    kaya.video(null, { capture: call }).a11yLabel("Self view"); // video#0
+    const view = kaya.video(null, { capture: call }).a11yLabel("Self view"); // video#0
   });
   kaya.watchCaptureDevices(true);
   return { labels, call, missing };

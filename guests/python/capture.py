@@ -94,6 +94,11 @@ def on_switch():
     call.set_frame_rate(15.0)
 
 
+def on_wide_cover():
+    view.aspect(16, 9)
+    view.fit(kaya.Fit.COVER)
+
+
 with app.window("capture", width=520.0, height=640.0):
     labels = [kaya.signal(s) for s in
               ("devices", "permissions", "idle", evidence(None, None), "idle")]
@@ -116,7 +121,9 @@ with app.window("capture", width=520.0, height=640.0):
             kaya.button("Camera off", on_click=lambda: call.set_camera(None))  # button#4
             kaya.button("Stop", on_click=call.stop)                      # button#5
             kaya.button("Open missing", on_click=missing.start)          # button#6
-        kaya.video(capture=call).a11y_label("Self view")             # video#0
+            kaya.button("Wide cover", on_click=on_wide_cover)            # button#7
+            kaya.button("Wide contain", on_click=lambda: view.fit(kaya.Fit.CONTAIN))  # button#8
+        view = kaya.video(capture=call).a11y_label("Self view")      # video#0
     kaya.watch_capture_devices(True)
 
 kaya.on_capture_devices(lambda devices: labels[0].set(device_line(devices)))

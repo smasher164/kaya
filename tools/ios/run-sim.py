@@ -1418,7 +1418,7 @@ BRIDGE_VERBS = frozenset((
     # driver can answer (docs/app-badge-plan.md §4).
     "expect_badge",
     # The screenshot and the remote command are the host's (media_verb).
-    "expect_video_ink", "session_send",
+    "expect_video_ink", "expect_video_corner", "session_send",
 ))
 
 

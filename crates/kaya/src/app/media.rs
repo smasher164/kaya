@@ -233,15 +233,38 @@ impl<'a> Tx<'a> {
     }
 }
 
+pub(super) fn fit_wire(fit: Fit) -> i64 {
+    match fit {
+        Fit::Contain => 0,
+        Fit::Cover => 1,
+        Fit::Fill => 2,
+    }
+}
+
+impl Tx<'_> {
+    /// How a video view fits its picture in its box (docs/media-plan.md §3).
+    pub fn video_fit(&mut self, video: WidgetId, fit: Fit) {
+        self.set(video, crate::protocol::Prop::Fit, fit_wire(fit));
+    }
+
+    /// The width:height ratio of a video view's box, whatever its picture's
+    /// own shape; `fit` places the picture in it (docs/media-plan.md §3).
+    pub fn video_aspect(&mut self, video: WidgetId, width: i32, height: i32) {
+        let packed = crate::protocol::Aspect::pack(width.into(), height.into());
+        self.set(video, crate::protocol::Prop::Aspect, packed);
+    }
+}
+
 impl<R> Widget<'_, '_, R> {
-    /// How a video view fits its picture (docs/media-plan.md §3).
+    /// [`Tx::video_fit`] chained.
     pub fn fit(self, fit: Fit) -> Self {
-        let raw = match fit {
-            Fit::Contain => 0i64,
-            Fit::Cover => 1,
-            Fit::Fill => 2,
-        };
-        self.tx.set(self.id, crate::protocol::Prop::Fit, raw);
+        self.tx.video_fit(self.id, fit);
+        self
+    }
+
+    /// [`Tx::video_aspect`] chained.
+    pub fn aspect(self, width: i32, height: i32) -> Self {
+        self.tx.video_aspect(self.id, width, height);
         self
     }
 }

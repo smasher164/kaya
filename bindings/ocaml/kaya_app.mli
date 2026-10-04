@@ -1142,6 +1142,10 @@ val select_captions : player -> int option -> unit
 
 val set_fit : widget -> Fit.t -> unit
 
+(* The width:height ratio of a live video view's box, whatever its
+   picture's own shape; its fit places the picture in it. *)
+val set_aspect : widget -> int -> int -> unit
+
 (* Show another player in a live video view, or none; a player is shown
    by one video view at a time. *)
 val show_player : widget -> player option -> unit
@@ -1158,7 +1162,7 @@ val video :
   ?help:string ->
   ?help_bind:string signal ->
   ?a11y_hint:string ->
-  ?fit:Fit.t -> ?on_visibility:(float -> unit) -> player:player -> unit -> widget
+  ?fit:Fit.t -> ?aspect:int * int -> ?on_visibility:(float -> unit) -> player:player -> unit -> widget
 
 (* Declare the app's one media session, replacing the last. [~handles]
    are the actions the app answers through [on_session]; play, pause and
@@ -1226,7 +1230,7 @@ val video_capture :
   ?help:string ->
   ?help_bind:string signal ->
   ?a11y_hint:string ->
-  ?fit:Fit.t -> capture:capture -> unit -> widget
+  ?fit:Fit.t -> ?aspect:int * int -> capture:capture -> unit -> widget
 
 (* A media reader on a source. *)
 val reader : Media_source.t -> reader
@@ -2317,6 +2321,7 @@ module Tpl : sig
     ?player:player ->
     ?bind_field:('d, player) field ->
     ?fit:Fit.t ->
+    ?aspect:int * int ->
     ?level:int ->
     ?a11y_level:int -> ?on_visibility:(key list -> float -> unit) -> unit -> node
 

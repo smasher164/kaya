@@ -64,7 +64,8 @@ GATES = {
                       "bindings", "go.mod"],
     # guests/: the SCENE-TIER clause reads guests/*/entry.*. docs/ here and
     # below: keyed-inputs cannot tell a cited path from a read one.
-    "check-sugar-surface": ["crates", "bindings", "guests", "docs"],
+    "check-sugar-surface": ["crates", "bindings", "guests", "docs", "cmd/kaya-gen/main.go",
+                            "tools/kaya-csgen", "tools/kaya-swift-gen/Sources"],
     # The catalogs and the guests that name their keys both live under
     # guests/ (docs/compliance-plan.md §2.4).
     "check-l10n": ["guests"],

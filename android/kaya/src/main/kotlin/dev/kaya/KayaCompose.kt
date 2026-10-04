@@ -576,6 +576,8 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     /** The capture it previews instead (docs/capture-plan.md §3), 0 none. */
     var videoCapture by mutableLongStateOf(0L)
     var fit by mutableLongStateOf(0L)
+    /** The packed box ratio the app chose, 0 none (docs/media-plan.md §3). */
+    var aspect by mutableLongStateOf(0L)
     var videoSeq by mutableIntStateOf(0)
 
     /**
@@ -2119,7 +2121,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0xc769ec72ad1213deuL
+    private const val SPEC_HASH: ULong = 0x0e75ba3234ed9bffuL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -2420,6 +2422,7 @@ object KayaCompose {
     private const val PROP_FIT = 51
     private const val PROP_PLAYER = 52
     private const val PROP_CAPTURE = 53
+    private const val PROP_ASPECT = 54
     private const val FILE_CONTENT_IMAGES = 1
     private const val PROP_COLUMNS = 11
     // The accessibility identifier (never spoken) and label (spoken).
@@ -3420,6 +3423,7 @@ object KayaCompose {
                         PROP_LOW_LABEL -> KayaSceneModel.nodes[id]!!.lowLabel = readString(b)
                         PROP_HIGH_LABEL -> KayaSceneModel.nodes[id]!!.highLabel = readString(b)
                         PROP_FIT -> KayaSceneModel.nodes[id]!!.fit = readI64(b)
+                        PROP_ASPECT -> KayaSceneModel.nodes[id]!!.aspect = readI64(b)
                         PROP_PLAYER -> error("kaya: a video view's player arrives as set_video_player; the core never forwards the player prop")
                         PROP_CAPTURE -> error("kaya: a video view's capture arrives as set_video_capture; the core never forwards the capture prop")
                         // docs/rich-text-plan.md §14: this platform's lever
@@ -8974,6 +8978,58 @@ object KayaCompose {
                                 } else {
                                     failures.add("video ink $said, wanted $want within $KAYA_VIDEO_INK_TOLERANCE per channel; $frames")
                                 }
+                            }
+                        }
+                    }
+                    "expect_video_box" -> {
+                        // docs/media-plan.md §3: the box Compose laid out, its ratio alone.
+                        val want = quoted(parts.drop(2))
+                        val ratio = want.split(':').mapNotNull { it.toIntOrNull() }
+                        val vnode = kayaWidgetTarget(parts[1])
+                        val got = vnode?.let { n -> onUi(activity) { kayaVideoBoxSize(n) } ?: "<no video view laid out>" }
+                            ?: "<no such target>"
+                        if (ratio.size == 2 && kayaVideoBoxShaped(got, ratio[0], ratio[1])) {
+                            observed.add("video box $want")
+                        } else {
+                            failures.add("video box $got, wanted $want with its height within one unit")
+                        }
+                    }
+                    "expect_video_corner" -> {
+                        // The box's top-left corner from the runner's screencap, as
+                        // expect_video_ink reads the centre; "bars" is a corner off the
+                        // centre's reading (docs/media-plan.md §3).
+                        val want = quoted(parts.drop(2))
+                        val vnode = kayaWidgetTarget(parts[1])
+                        if (vnode == null) {
+                            failures.add("no such target ${parts[1]}")
+                        } else {
+                            val (corner, centre) = onUi(activity) {
+                                kayaVideoCornerBox(activity.window.decorView, vnode) to
+                                    kayaVideoScreenBox(activity.window.decorView, vnode)
+                            }
+                            fun read(at: String?): String {
+                                if (at == null) return "<no box on screen>"
+                                kayaHostRequests += 1
+                                val seq = kayaHostRequests
+                                Log.i("kaya", "KAYA_REQUEST: video_ink $seq $at")
+                                val said = kayaHostAnswer(activity, seq) ?: return "<no screencap reading of $at within 8 s>"
+                                return said.split(' ').getOrElse(0) { "" }
+                            }
+                            val got = read(corner)
+                            if (want == "bars") {
+                                val mid = read(centre)
+                                if (kayaVideoInkWithin(got, got) && kayaVideoInkWithin(mid, mid) && !kayaVideoInkWithin(got, mid)) {
+                                    observed.add("video corner $want")
+                                } else {
+                                    failures.add(
+                                        "video corner $got with the centre $mid, wanted $want: the corner off the centre's " +
+                                            "reading by more than $KAYA_VIDEO_INK_TOLERANCE per channel",
+                                    )
+                                }
+                            } else if (kayaVideoInkWithin(got, want)) {
+                                observed.add("video corner $want")
+                            } else {
+                                failures.add("video corner $got, wanted $want within $KAYA_VIDEO_INK_TOLERANCE per channel")
                             }
                         }
                     }

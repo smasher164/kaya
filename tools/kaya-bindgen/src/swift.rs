@@ -226,7 +226,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::Blob => {
                 ("_ handle: UInt64".to_string(), ".blob(handle)".to_string())
             }
-            crate::PropKind::Enum(_) | crate::PropKind::Player | crate::PropKind::Capture => (
+            crate::PropKind::Enum(_) | crate::PropKind::Player | crate::PropKind::Capture | crate::PropKind::Aspect => (
                 format!("_ {}: Int64", camel(prop)),
                 format!(".i64({})", camel(prop)),
             ),
@@ -436,7 +436,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::Bool => (camel(prop), "Bool", format!(".bool({})", camel(prop))),
             crate::PropKind::F64 => (camel(prop), "Double", format!(".f64({})", camel(prop))),
             crate::PropKind::Blob => ("handle".to_string(), "UInt64", ".blob(handle)".to_string()),
-            crate::PropKind::Enum(_) | crate::PropKind::Player | crate::PropKind::Capture => (camel(prop), "Int64", format!(".i64({})", camel(prop))),
+            crate::PropKind::Enum(_) | crate::PropKind::Player | crate::PropKind::Capture | crate::PropKind::Aspect => (camel(prop), "Int64", format!(".i64({})", camel(prop))),
             crate::PropKind::Date | crate::PropKind::Time | crate::PropKind::Color => {
                 unreachable!("no menu prop is a date, a time or a colour")
             }

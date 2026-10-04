@@ -175,7 +175,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 "Word64".to_string(),
                 "VBlob handle".to_string(),
             ),
-            crate::PropKind::Enum(_) | crate::PropKind::Player | crate::PropKind::Capture => (camel(prop), "Int64".to_string(), format!("VI64 {}", camel(prop))),
+            crate::PropKind::Enum(_) | crate::PropKind::Player | crate::PropKind::Capture | crate::PropKind::Aspect => (camel(prop), "Int64".to_string(), format!("VI64 {}", camel(prop))),
             crate::PropKind::Date => (
                 "year month day".to_string(),
                 "Int -> Int -> Int".to_string(),
@@ -404,7 +404,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::Bool => (camel(prop), "Bool", format!("VBool {}", camel(prop))),
             crate::PropKind::F64 => (camel(prop), "Double", format!("VF64 {}", camel(prop))),
             crate::PropKind::Blob => ("handle".to_string(), "Word64", "VBlob handle".to_string()),
-            crate::PropKind::Enum(_) | crate::PropKind::Player | crate::PropKind::Capture => (camel(prop), "Int64", format!("VI64 {}", camel(prop))),
+            crate::PropKind::Enum(_) | crate::PropKind::Player | crate::PropKind::Capture | crate::PropKind::Aspect => (camel(prop), "Int64", format!("VI64 {}", camel(prop))),
             crate::PropKind::Date | crate::PropKind::Time | crate::PropKind::Color => {
                 unreachable!("no menu prop is a date, a time or a colour")
             }

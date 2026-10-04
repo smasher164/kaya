@@ -1000,9 +1000,58 @@ pub(crate) fn video_view_height(natural: (u32, u32), width: i32, grows: bool) ->
     ((width * h + w / 2) / w) as i32
 }
 
+/// A video view's box before layout (docs/media-plan.md §3, RULED
+/// 2026-10-03): its picture's natural size, or with an `aspect` the app set
+/// (the wire's packed I64, 0 for none) the natural width at that ratio.
+/// `video_view_height` lays out whatever this answers.
+pub(crate) fn video_view_box(natural: (u32, u32), aspect: i64) -> (u32, u32) {
+    let Ok(a) = crate::protocol::Aspect::from_packed(aspect) else {
+        return natural;
+    };
+    let (w, aw, ah) = (u64::from(natural.0), u64::from(a.width), u64::from(a.height));
+    (natural.0, ((w * ah + aw / 2) / aw).clamp(1, u64::from(u32::MAX)) as u32)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_aspect_sets_the_box_and_nothing_else_does() {
+        let pack = crate::protocol::Aspect::pack;
+        assert_eq!(video_view_box((320, 240), 0), (320, 240));
+        assert_eq!(video_view_box((180, 240), 0), (180, 240));
+        assert_eq!(video_view_box((320, 240), pack(16, 9)), (320, 180));
+        assert_eq!(video_view_box((180, 240), pack(16, 9)), (180, 101));
+        assert_eq!(video_view_box((640, 360), pack(1, 1)), (640, 640));
+        assert_eq!(video_view_box((640, 360), pack(65535, 1)), (640, 1));
+        assert_eq!(video_view_box((320, 240), pack(0, 9)), (320, 240));
+        let (w, h) = video_view_box((320, 240), pack(16, 9));
+        assert_eq!(video_view_height((w, h), 160, false), 90);
+        assert_eq!(video_view_height((w, h), 900, true), 506);
+    }
+
+    #[test]
+    fn an_aspect_packs_both_parts_signed_and_refuses_each_by_name() {
+        use crate::protocol::Aspect;
+        assert_eq!(Aspect::pack(16, 9), (16 << 32) | 9);
+        assert_eq!(Aspect::from_packed(Aspect::pack(16, 9)), Ok(Aspect { width: 16, height: 9 }));
+        assert_eq!(Aspect::from_packed(Aspect::pack(65535, 1)), Ok(Aspect { width: 65535, height: 1 }));
+        for (w, h, said) in [
+            (0, 9, "aspect 0:9 has a width of 0"),
+            (16, 0, "aspect 16:0 has a height of 0"),
+            (0, 0, "aspect 0:0 has a width of 0"),
+            (-16, 9, "aspect -16:9 has a width of -16"),
+            (16, -9, "aspect 16:-9 has a height of -9"),
+            (-16, -9, "aspect -16:-9 has a width of -16"),
+            (65536, 9, "aspect 65536:9 has a width of 65536"),
+            (1 << 40, 9, "aspect 2147483647:9 has a width of 2147483647"),
+            (16, -(1 << 40), "aspect 16:-2147483648 has a height of -2147483648"),
+        ] {
+            let why = Aspect::from_packed(Aspect::pack(w, h)).unwrap_err();
+            assert!(why.starts_with(said), "{w}:{h} said {why:?}, wanted it to start {said:?}");
+        }
+    }
 
     #[test]
     fn a_video_view_keeps_its_aspect_as_it_shrinks() {

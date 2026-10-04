@@ -37,6 +37,7 @@ static class CaptureScene
             var call = tx.Capture(camera: Camera1, microphone: Microphone1, size: (600, 400),
                 frameRate: 30);
             var missing = tx.Capture(camera: "no-such-camera");
+            Widget view = default;
             tx.Mount(tx.Column(root =>
             {
                 foreach (var label in labels) tx.Label(bind: label); // label#0..#4
@@ -55,10 +56,16 @@ static class CaptureScene
                     tx.Button("Camera off", t => t.SetCamera(call, null));      // button#4
                     tx.Button("Stop", t => t.StopCapture(call));                // button#5
                     tx.Button("Open missing", t => t.StartCapture(missing));    // button#6
+                    tx.Button("Wide cover", t =>                                // button#7
+                    {
+                        t.SetAspect(view, 16, 9);
+                        t.SetFit(view, Fit.Cover);
+                    });
+                    tx.Button("Wide contain", t => t.SetFit(view, Fit.Contain)); // button#8
                     return buttons;
                 });
                 tx.SetWrap(buttons, true);
-                var view = tx.Video(call);                            // video#0
+                view = tx.Video(call);                                // video#0
                 tx.SetA11yLabel(view, "Self view");
                 return root;
             }));

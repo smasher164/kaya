@@ -1566,6 +1566,41 @@ pub enum WidgetKind {
     Video,
 }
 
+/// A video view's box ratio, width:height (docs/media-plan.md §3, RULED
+/// 2026-10-03). On the wire ONE I64 (PropKind::Aspect): the width in the high
+/// 32 bits, the height in the low 32, each a signed 32-bit integer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Aspect {
+    pub width: u32,
+    pub height: u32,
+}
+
+impl Aspect {
+    /// The largest part the root takes. A packer saturates a part outside
+    /// i32 into it, so an overflow lands above this and is refused.
+    pub const MAX_PART: i64 = 65535;
+
+    /// Two parts as the wire carries them; a zero, negative or oversized
+    /// part travels intact for the root to refuse.
+    pub fn pack(width: i64, height: i64) -> i64 {
+        let part = |x: i64| x.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32;
+        (i64::from(part(width)) << 32) | i64::from(part(height) as u32)
+    }
+
+    pub fn from_packed(packed: i64) -> Result<Aspect, String> {
+        let (width, height) = (i64::from((packed >> 32) as i32), i64::from(packed as i32));
+        for (name, part) in [("width", width), ("height", height)] {
+            if !(1..=Self::MAX_PART).contains(&part) {
+                return Err(format!(
+                    "aspect {width}:{height} has a {name} of {part}; each part is a whole number from 1 to {}",
+                    Self::MAX_PART
+                ));
+            }
+        }
+        Ok(Aspect { width: width as u32, height: height as u32 })
+    }
+}
+
 /// An sRGB colour, 8 bits a channel, straight alpha: what a colour picker
 /// holds (docs/color-picker-plan.md §2). On the wire ONE I64, `0xRRGGBBAA`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -2113,6 +2148,9 @@ pub enum Prop {
     /// The capture a video view previews (PropKind::Capture, an I64 id, 0
     /// none; docs/capture-plan.md §3). The core lowers it to SetVideoCapture.
     Capture,
+    /// A video view's box ratio (PropKind::Aspect, see [`Aspect`];
+    /// docs/media-plan.md §3).
+    Aspect,
     /// The app owns a rich textarea's undo (Bool-valued; docs/rich-text-plan.md
     /// R6, §14): the native stack is off, the ledger never banks it, and
     /// Edit>Undo/Redo reach the app through the role item's own activation.

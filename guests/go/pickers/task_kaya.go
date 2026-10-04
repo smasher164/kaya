@@ -118,7 +118,8 @@ func (r taskRow) SetMax(n kaya.Node, max float64) { r.t.SetMax(n, max) }
 
 func (r taskRow) SetAlpha(n kaya.Node, on bool) { r.t.SetAlpha(n, on) }
 
-func (r taskRow) SetFit(n kaya.Node, fit kaya.Fit) { r.t.SetFit(n, fit) }
+func (r taskRow) SetFit(n kaya.Node, fit kaya.Fit)         { r.t.SetFit(n, fit) }
+func (r taskRow) SetAspect(n kaya.Node, width, height int) { r.t.SetAspect(n, width, height) }
 
 func (r taskRow) SetMinGap(n kaya.Node, gap float64)          { r.t.SetMinGap(n, gap) }
 func (r taskRow) SetLowLabel(n kaya.Node, label string)       { r.t.SetLowLabel(n, label) }

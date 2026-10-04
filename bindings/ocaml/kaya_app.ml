@@ -2851,6 +2851,15 @@ let select_captions (Player id) index =
 let set_fit (Widget id) fit =
   emit (the_tx ()) (Kaya_wire.tx_set_fit id (Int64.of_int (Fit.wire fit)))
 
+(* A video view's box ratio as the wire packs it ([kaya::Aspect::pack]):
+   each part saturated to 32 signed bits, width high, height low. *)
+let aspect_wire width height =
+  let part x = Int64.of_int (max (Int32.to_int Int32.min_int) (min (Int32.to_int Int32.max_int) x)) in
+  Int64.logor (Int64.shift_left (part width) 32) (Int64.logand (part height) 0xFFFFFFFFL)
+
+let set_aspect (Widget id) width height =
+  emit (the_tx ()) (Kaya_wire.tx_set_aspect id (aspect_wire width height))
+
 (* Show another player in a live video view, or none. A player is shown
    by one video view at a time (docs/media-plan.md §7b). *)
 let show_player (Widget id) p =
@@ -2861,7 +2870,7 @@ let show_player (Widget id) p =
    own view with its controls off. [~on_visibility] hears how much of it
    shows, 0 to 1. *)
 let video ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind
-    ?a11y_hint ?fit ?on_visibility ~player () =
+    ?a11y_hint ?fit ?aspect ?on_visibility ~player () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_video in
   Option.iter (fun g -> set_grow w g) grow;
@@ -2871,6 +2880,7 @@ let video ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help 
   let (Widget id) = w in
   emit tx (Kaya_wire.tx_set_player id (pack_player player));
   Option.iter (set_fit w) fit;
+  Option.iter (fun (width, height) -> set_aspect w width height) aspect;
   Option.iter (fun f -> Hashtbl.replace tx.app.media.widget_visibility id f) on_visibility;
   w
 
@@ -2960,7 +2970,7 @@ let show_capture (Widget id) c =
 (* A video view previewing [capture] (docs/capture-plan.md §3): the
    player's view one source over, mirrored for a front camera. *)
 let video_capture ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind
-    ?a11y_hint ?fit ~capture () =
+    ?a11y_hint ?fit ?aspect ~capture () =
   let w = widget Kaya_wire.kind_video in
   Option.iter (fun g -> set_grow w g) grow;
   Option.iter (fun v -> set_fill w v) fill;
@@ -2968,6 +2978,7 @@ let video_capture ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bin
   Option.iter (fun v -> set_a11y_hint w v) a11y_hint;
   show_capture w (Some capture);
   Option.iter (set_fit w) fit;
+  Option.iter (fun (width, height) -> set_aspect w width height) aspect;
   w
 
 
@@ -5686,7 +5697,7 @@ module Tpl = struct
      shows nothing. [~on_visibility] carries the copy's keys first. *)
   let video ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_hint ?player ?bind_field
-      ?fit ?(level = 0) ?(a11y_level = level) ?on_visibility () =
+      ?fit ?aspect ?(level = 0) ?(a11y_level = level) ?on_visibility () =
     let n = Floor.widget Kaya_wire.kind_video in
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Option.iter (fun v -> Floor.set_fill n v) fill;
@@ -5702,6 +5713,9 @@ module Tpl = struct
     Option.iter
       (fun f -> emit (the_tx ()) (Kaya_wire.tx_set_fit id (Int64.of_int (Fit.wire f))))
       fit;
+    Option.iter
+      (fun (width, height) -> emit (the_tx ()) (Kaya_wire.tx_set_aspect id (aspect_wire width height)))
+      aspect;
     (match on_visibility with
     | Some handler ->
         Hashtbl.replace (the_tx ()).app.media.node_visibility id (fun keys shown ->

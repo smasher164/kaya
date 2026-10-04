@@ -6,7 +6,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use kaya::{CaptureId, CaptureKind, CaptureReading, CaptureState, Permission, SignalId};
+use kaya::{CaptureId, CaptureKind, CaptureReading, CaptureState, Fit, Permission, SignalId};
 
 const CAMERA_1: &str = "kaya-synthetic-camera-1";
 const CAMERA_2: &str = "kaya-synthetic-camera-2";
@@ -25,6 +25,8 @@ enum Msg {
     CameraOff,
     Stop,
     Missing,
+    WideCover,
+    WideContain,
 }
 
 fn state_line(r: &CaptureReading) -> String {
@@ -44,7 +46,7 @@ fn evidence(frames: Option<(u32, u32)>, chunk: Option<usize>) -> String {
 
 pub fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::<Msg>::new();
-    let (labels, call, missing) = ctx.apply(|tx| {
+    let (labels, call, missing, video) = ctx.apply(|tx| {
         tx.window(kaya::DEFAULT_WINDOW).title("capture").size(520.0, 640.0);
         let labels: Vec<SignalId> = ["devices", "permissions", "idle", &evidence(None, None), "idle"]
             .into_iter()
@@ -52,7 +54,7 @@ pub fn app(ctx: kaya::AppCtx) {
             .collect();
         let call = tx.capture().camera(CAMERA_1).microphone(MICROPHONE_1).size(600.0, 400.0).frame_rate(30.0).id();
         let missing = tx.capture().camera("no-such-camera").id();
-        let root = tx
+        let (root, video) = tx
             .column(|tx| {
                 for label in &labels {
                     tx.label(*label); // label#0..#4
@@ -66,18 +68,20 @@ pub fn app(ctx: kaya::AppCtx) {
                         ("Camera off", Msg::CameraOff),
                         ("Stop", Msg::Stop),
                         ("Open missing", Msg::Missing),
+                        ("Wide cover", Msg::WideCover),
+                        ("Wide contain", Msg::WideContain),
                     ] {
-                        let b = tx.button(title).id(); // button#0..#6
+                        let b = tx.button(title).id(); // button#0..#8
                         msgs.on_click(b, msg);
                     }
                 })
                 .wrap(true);
-                tx.video_capture(call).a11y_label("Self view"); // video#0
+                tx.video_capture(call).a11y_label("Self view").id() // video#0
             })
-            .id();
+            .into_parts();
         tx.mount(root);
         tx.watch_capture_devices(true);
-        (labels, call, missing)
+        (labels, call, missing, video)
     });
     msgs.on_capture_devices(|_| Msg::Devices);
     msgs.on_permission(|_, _| Msg::Permission);
@@ -160,6 +164,11 @@ pub fn app(ctx: kaya::AppCtx) {
             Msg::CameraOff => ctx.apply(|tx| tx.capture_camera(call, None)),
             Msg::Stop => ctx.apply(|tx| tx.stop_capture(call)),
             Msg::Missing => ctx.apply(|tx| tx.start_capture(missing)),
+            Msg::WideCover => ctx.apply(|tx| {
+                tx.video_aspect(video, 16, 9);
+                tx.video_fit(video, Fit::Cover);
+            }),
+            Msg::WideContain => ctx.apply(|tx| tx.video_fit(video, Fit::Contain)),
         }
     }
 }

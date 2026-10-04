@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xc769ec72ad1213de
+specHash = 0x0e75ba3234ed9bff
 
 valueBool :: Word32
 valueBool = 1
@@ -256,6 +256,8 @@ propPlayer :: Word32
 propPlayer = 52
 propCapture :: Word32
 propCapture = 53
+propAspect :: Word32
+propAspect = 54
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -2495,6 +2497,25 @@ txBindCapture widgetId signalId = wireRecord txKindSetProperty
 txBindCaptureElement :: Word64 -> Word32 -> Word32 -> Builder
 txBindCaptureElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propCapture <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant aspect value. A width:height ratio, packed width << 32 | height on the wire, each a signed 32-bit integer.
+txSetAspect :: Word64 -> Int64 -> Builder
+txSetAspect widgetId aspect = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propAspect <> word32LE sourceConst
+    <> encodeValue (VI64 aspect))
+
+-- set_property with a signal-bound aspect value.
+txBindAspect :: Word64 -> Word64 -> Builder
+txBindAspect widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propAspect <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindAspectElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindAspectElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propAspect <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
 -- set_window_prop with a constant title value (window 0, the primary surface).

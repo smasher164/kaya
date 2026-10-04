@@ -36,6 +36,7 @@ KayaApp.run { app in
             .map { tx.signal(.str($0)) }
         let call = tx.capture(camera: camera1, microphone: microphone1, size: (600, 400), frameRate: 30)
         let missing = tx.capture(camera: "no-such-camera")
+        var selfView: KayaWidget!
         let root = tx.column { root in
             for label in labels {
                 tx.label(bind: label)  // label#0..#4
@@ -53,10 +54,16 @@ KayaApp.run { app in
                 tx.button("Camera off") { tx in tx.captureCamera(call, nil) }  // button#4
                 tx.button("Stop") { tx in tx.stopCapture(call) }  // button#5
                 tx.button("Open missing") { tx in tx.startCapture(missing) }  // button#6
+                tx.button("Wide cover") { tx in  // button#7
+                    tx.setAspect(selfView, 16, 9)
+                    tx.setFit(selfView, .cover)
+                }
+                tx.button("Wide contain") { tx in tx.setFit(selfView, .contain) }  // button#8
                 return buttons
             }
             tx.setWrap(buttons, true)
-            tx.setA11yLabel(tx.video(capture: call), "Self view")  // video#0
+            selfView = tx.video(capture: call)  // video#0
+            tx.setA11yLabel(selfView, "Self view")
             return root
         }
         tx.mount(root)

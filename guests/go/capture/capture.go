@@ -101,6 +101,7 @@ func App() *kaya.App {
 		missing = tx.Capture().Camera("no-such-camera").
 			OnState(func(tx *kaya.Tx, r kaya.CaptureReading) { tx.Write(labels[4], stateLine(r)) }).
 			ID()
+		var video kaya.Widget
 		tx.Mount(tx.Column(func() {
 			for _, label := range labels {
 				tx.Label(label) // label#0..#4
@@ -118,8 +119,13 @@ func App() *kaya.App {
 				tx.Button("Camera off", func(tx *kaya.Tx) { tx.CameraOff(call) })         // button#4
 				tx.Button("Stop", func(tx *kaya.Tx) { tx.StopCapture(call) })             // button#5
 				tx.Button("Open missing", func(tx *kaya.Tx) { tx.StartCapture(missing) }) // button#6
+				tx.Button("Wide cover", func(tx *kaya.Tx) {                               // button#7
+					tx.SetAspect(video, 16, 9)
+					tx.SetFit(video, kaya.FitCover)
+				})
+				tx.Button("Wide contain", func(tx *kaya.Tx) { tx.SetFit(video, kaya.FitContain) }) // button#8
 			}).Wrap(true)
-			tx.VideoCapture(call).A11yLabel("Self view")                                                // video#0
+			video = tx.VideoCapture(call).A11yLabel("Self view") // video#0
 		}))
 		tx.WatchCaptureDevices(true)
 	})

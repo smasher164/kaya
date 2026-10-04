@@ -275,7 +275,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 "handle uint64".to_string(),
                 "encodeValue(b, BlobHandle(handle))".to_string(),
             ),
-            crate::PropKind::Enum(_) | crate::PropKind::Player | crate::PropKind::Capture => (
+            crate::PropKind::Enum(_) | crate::PropKind::Player | crate::PropKind::Capture | crate::PropKind::Aspect => (
                 format!("{} int64", param(prop)),
                 format!("encodeValue(b, {})", param(prop)),
             ),
@@ -556,7 +556,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 "uint64",
                 "encodeValue(b, BlobHandle(handle))".to_string(),
             ),
-            crate::PropKind::Enum(_) | crate::PropKind::Player | crate::PropKind::Capture => (param(prop), "int64", format!("encodeValue(b, {})", param(prop))),
+            crate::PropKind::Enum(_) | crate::PropKind::Player | crate::PropKind::Capture | crate::PropKind::Aspect => (param(prop), "int64", format!("encodeValue(b, {})", param(prop))),
             crate::PropKind::Date | crate::PropKind::Time | crate::PropKind::Color => {
                 unreachable!("no menu prop is a date, a time or a colour")
             }

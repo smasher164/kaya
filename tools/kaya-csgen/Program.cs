@@ -518,6 +518,7 @@ static class Program
         Set("SetColumnsAuto", ["Node n", "double minWidth"], "n, minWidth");
         Set("SetWrap", ["Node n", "bool on"], "n, on");
         Set("SetFit", ["Node n", "Fit fit"], "n, fit");
+        Set("SetAspect", ["Node n", "int width", "int height"], "n, width, height");
         // Fwd leaves a trailing blank line; the class brace closes on it.
         b.Length -= System.Environment.NewLine.Length;
         b.AppendLine("}");

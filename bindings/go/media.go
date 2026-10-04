@@ -11,6 +11,7 @@ import "C"
 
 import (
 	"fmt"
+	"math"
 	"unsafe"
 )
 
@@ -308,6 +309,33 @@ func (w Widget) Fit(fit Fit) Widget {
 	return w
 }
 
+// aspectWire packs a width:height ratio as kaya::Aspect::pack does; the
+// core refuses a part outside 1..=65535, so nothing is checked here.
+func aspectWire(width, height int) int64 {
+	part := func(x int) int32 {
+		switch {
+		case x < math.MinInt32:
+			return math.MinInt32
+		case x > math.MaxInt32:
+			return math.MaxInt32
+		}
+		return int32(x)
+	}
+	return int64(part(width))<<32 | int64(uint32(part(height)))
+}
+
+// SetAspect is the width:height ratio of a video view's box, whatever its
+// picture's shape; SetFit places the picture in it (docs/media-plan.md §3).
+func (tx *Tx) SetAspect(w Widget, width, height int) {
+	tx.emit(TxSetAspect(w.id, aspectWire(width, height)))
+}
+
+// Aspect is SetAspect's chain.
+func (w Widget) Aspect(width, height int) Widget {
+	w.tx.SetAspect(w, width, height)
+	return w
+}
+
 // OnVisibility hears how much of a live video view shows, 0 to 1, as it
 // enters, leaves, moves by a tenth and shows whole (docs/media-plan.md §7b).
 func (w Widget) OnVisibility(fn func(*Tx, float64)) Widget {
@@ -330,6 +358,12 @@ func (n Node) OnVisibility(fn func(*Tx, []any, float64)) Node {
 
 // SetFit is how every stamped copy of a video view fits its picture.
 func (t *Tpl) SetFit(n Node, fit Fit) { t.tx.emit(TxSetFit(n.id, int64(fit))) }
+
+// SetAspect is the width:height ratio of every stamped copy's video view
+// box.
+func (t *Tpl) SetAspect(n Node, width, height int) {
+	t.tx.emit(TxSetAspect(n.id, aspectWire(width, height)))
+}
 
 // BindPlayerField binds a video view's player to one field of the
 // element; Field[Player] only.

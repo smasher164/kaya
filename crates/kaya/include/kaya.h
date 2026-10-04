@@ -16,6 +16,12 @@
 #define VIDEO_INK_TOLERANCE 2
 
 /**
+ * The largest part the root takes. A packer saturates a part outside
+ * i32 into it, so an overflow lands above this and is refused.
+ */
+#define Aspect_MAX_PART 65535
+
+/**
  * Occurrence record kinds (the ring, core -> guest). BUTTON_CLICKED
  * body: u64 id, u32 path_len, u32 reserved, then path_len key values.
  * path_len 0 means id is a widget id (a click on a guest-created
@@ -1179,6 +1185,12 @@
  * A video view's capture (docs/capture-plan.md §3): an I64 id, 0 none.
  */
 #define KAYA_PROP_CAPTURE 53
+
+/**
+ * A video view's box ratio (docs/media-plan.md §3): the width in the high
+ * 32 bits and the height in the low 32, each a signed 32-bit integer.
+ */
+#define KAYA_PROP_ASPECT 54
 
 /**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
@@ -2447,6 +2459,7 @@ typedef struct KayaHostApi {
   void (*reader_no_track)(uint64_t, uint64_t, const uint8_t*, uintptr_t);
   uint32_t (*capture_nearest_format)(const uint32_t*, uintptr_t, double, double, double, uint32_t*);
   void (*capture_self_view_natural)(uint32_t, uint32_t, uint32_t, uint32_t*);
+  void (*video_view_box)(uint32_t, uint32_t, int64_t, uint32_t*);
 } KayaHostApi;
 
 
@@ -3620,6 +3633,16 @@ uint32_t kaya_capture_nearest_format(const uint32_t *offered,
                                      double height,
                                      double frame_rate,
                                      uint32_t *out);
+
+/**
+ * Presentation side: a video view's box before layout for a picture whose
+ * natural size is `width` by `height`, with `aspect` the view's packed
+ * aspect prop (0 for none), into `out`'s two (docs/media-plan.md §3).
+ *
+ * # Safety
+ * `out` must be null or writable for two u32s.
+ */
+void kaya_video_view_box(uint32_t width, uint32_t height, int64_t aspect, uint32_t *out);
 
 /**
  * Presentation side: a self-view's natural size for frames of `width` by

@@ -118,6 +118,13 @@ public enum KayaFit: Int64, Sendable {
     case fill = 2
 }
 
+/// A video view's box ratio as the wire packs it (`kaya::Aspect::pack`):
+/// each part saturated to 32 signed bits, width high, height low.
+func kayaAspect(_ width: Int, _ height: Int) -> Int64 {
+    let part = { (x: Int) in Int32(clamping: x) }
+    return (Int64(part(width)) << 32) | Int64(UInt32(bitPattern: part(height)))
+}
+
 /// What the system shows while no player is attached to the session.
 public enum KayaPlaybackState: UInt32, Sendable {
     case none = 0
@@ -501,6 +508,12 @@ extension KayaAppTx {
     /// How a live video view fits its picture.
     public func setFit(_ video: KayaWidget, _ fit: KayaFit) {
         tx.setFit(video.id, fit.rawValue)
+    }
+
+    /// The width:height ratio of a live video view's box, whatever its
+    /// picture's own shape; its fit places the picture in it.
+    public func setAspect(_ video: KayaWidget, _ width: Int, _ height: Int) {
+        tx.setAspect(video.id, kayaAspect(width, height))
     }
 
     /// Select audio track `index` (0-based in `app.tracks`).

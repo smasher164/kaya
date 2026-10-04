@@ -37,10 +37,14 @@ import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -364,27 +368,43 @@ internal fun kayaCaptureCommand(id: Long, command: Int) {
 /** The preview (docs/capture-plan.md §3): CameraX's PreviewView in
  * PERFORMANCE mode, a SurfaceView, the media plan's hole, which mirrors a
  * front camera's self-view by itself (rule 4); nothing at all while the
- * capture has no open camera, so the view shows its ground. */
+ * capture has no open camera, so the view shows its ground. The PreviewView
+ * is the frames' upright shape, placed in the view's box by `fit`
+ * (docs/media-plan.md §3), and crops a preview stream of another aspect to
+ * the frames' field of view (docs/traps.md, the Android self-view's shape). */
 @Composable
 internal fun KayaCapturePreview(node: KayaNode) {
     node.videoSeq
     val source = kayaCaptures[node.videoCapture]?.source
     if (source?.cameraOpen != true) return
-    AndroidView(
-        factory = { context ->
-            PreviewView(context).apply {
-                implementationMode = PreviewView.ImplementationMode.PERFORMANCE
-                layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-            }
-        },
-        update = { view ->
-            // The box is the frames' upright aspect; a preview stream of another aspect is cropped to
-            // the frames' field of view (docs/traps.md, the Android self-view's shape).
-            view.scaleType = PreviewView.ScaleType.FILL_CENTER
-            source.attach(view)
-        },
-        modifier = Modifier.fillMaxSize().clearAndSetSemantics {},
-    )
+    val sideways = source.rotation % 180 == 90
+    val fw = (if (sideways) source.format[1] else source.format[0]).coerceAtLeast(1).toFloat()
+    val fh = (if (sideways) source.format[0] else source.format[1]).coerceAtLeast(1).toFloat()
+    val fit = node.fit.toInt()
+    BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        val bw = constraints.maxWidth.toFloat()
+        val bh = constraints.maxHeight.toFloat()
+        val s = if (fit == FIT_COVER) maxOf(bw / fw, bh / fh) else minOf(bw / fw, bh / fh)
+        val iw = fw * s
+        val ih = fh * s
+        val density = LocalDensity.current
+        AndroidView(
+            factory = { context ->
+                PreviewView(context).apply {
+                    implementationMode = PreviewView.ImplementationMode.PERFORMANCE
+                    layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                }
+            },
+            update = { view ->
+                view.scaleType = PreviewView.ScaleType.FILL_CENTER
+                // `fill` stretches the contained picture over the box, as CSS object-fit does.
+                view.scaleX = if (fit == FIT_FILL && iw > 0f) bw / iw else 1f
+                view.scaleY = if (fit == FIT_FILL && ih > 0f) bh / ih else 1f
+                source.attach(view)
+            },
+            modifier = with(density) { Modifier.requiredSize(iw.toDp(), ih.toDp()) }.clearAndSetSemantics {},
+        )
+    }
     DisposableEffect(source) {
         onDispose { source.detach() }
     }

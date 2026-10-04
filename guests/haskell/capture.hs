@@ -43,6 +43,7 @@ main = kayaMain $ \app -> do
     labels <- mapM signalText ["devices", "permissions", "idle", evidence Nothing Nothing, "idle"]
     call <- capture [CaptureCameraIs camera1, CaptureMicrophoneIs microphone1, CaptureSizeIs 600 400, CaptureFrameRateIs 30]
     missing <- capture [CaptureCameraIs "no-such-camera"]
+    selfView <- videoCapture call [A11yLabel "Self view"] -- video#0
     root <-
       column
         ( map labelBound labels -- label#0..#4
@@ -59,9 +60,14 @@ main = kayaMain $ \app -> do
                      buttonOn "Mute" (submitTx app (captureMuted call True)),
                      buttonOn "Camera off" (submitTx app (captureCamera call Nothing)),
                      buttonOn "Stop" (submitTx app (stopCapture call)),
-                     buttonOn "Open missing" (submitTx app (startCapture missing)) -- button#6
+                     buttonOn "Open missing" (submitTx app (startCapture missing)), -- button#6
+                     buttonOn "Wide cover" $ -- button#7
+                       submitTx app $ do
+                         setAspect selfView 16 9
+                         setFit selfView FitCover,
+                     buttonOn "Wide contain" (submitTx app (setFit selfView FitContain)) -- button#8
                    ],
-                 videoCapture call [A11yLabel "Self view"] -- video#0
+                 pure selfView
                ]
         )
     mount root

@@ -502,12 +502,13 @@ extension KayaAppTx {
     /// only; a view shows a player or a capture.
     @discardableResult
     public func video(
-        capture: KayaCapture, fit: KayaFit? = nil,
+        capture: KayaCapture, fit: KayaFit? = nil, aspect: (Int, Int)? = nil,
         onVisibility: ((KayaAppTx, Double) throws -> Void)? = nil, grow: Double? = nil
     ) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_VIDEO))
         tx.setCapture(w.id, Int64(bitPattern: capture.id))
         if let fit { tx.setFit(w.id, fit.rawValue) }
+        if let aspect { tx.setAspect(w.id, kayaAspect(aspect.0, aspect.1)) }
         if let onVisibility { app.onVisibility(w, onVisibility) }
         if let grow { setGrow(w, grow) }
         return w

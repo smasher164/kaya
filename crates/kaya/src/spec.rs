@@ -114,6 +114,12 @@ pub enum PropKind {
     /// generator turns into one taking the binding's capture handle. Live
     /// zone only: no row field holds one.
     Capture,
+    /// A width:height ratio (docs/media-plan.md §3, RULED 2026-10-03), one
+    /// I64: the width in the high 32 bits and the height in the low 32, each
+    /// a SIGNED 32-bit integer, so a zero or negative part reaches the root
+    /// intact and is refused there by name. No value means "unset": 0 is the
+    /// pair 0:0 and is refused, the max_width precedent.
+    Aspect,
 }
 
 /// Properties with their wire ids and value kinds; kept in lockstep
@@ -273,6 +279,9 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // player's prop one source over (§9 ruling 1); a view shows a player or
     // a capture, and a capture is shown by one view at a time.
     ("capture", 53, PropKind::Capture),
+    // docs/media-plan.md §3 (RULED 2026-10-03): the ratio a video view's box
+    // takes, whatever its picture's own shape; `fit` places the picture in it.
+    ("aspect", 54, PropKind::Aspect),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -4141,6 +4150,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("fit", 51),
                 ("player", 52),
                 ("capture", 53),
+                ("aspect", 54),
             ],
         },
         EnumSpec {
@@ -5214,6 +5224,7 @@ mod tests {
                     ("prop", "fit") => wire::PROP_FIT,
                     ("prop", "player") => wire::PROP_PLAYER,
                     ("prop", "capture") => wire::PROP_CAPTURE,
+                    ("prop", "aspect") => wire::PROP_ASPECT,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,

@@ -391,6 +391,9 @@ sealed class LineRow
     public void SetWrap(Node n, bool on) => t.SetWrap(n, on);
 
     public void SetFit(Node n, Fit fit) => t.SetFit(n, fit);
+
+    public void SetAspect(Node n, int width, int height) =>
+        t.SetAspect(n, width, height);
 }
 
 /// <summary>The duck-typed enumerable behind Rows(): no IEnumerable,

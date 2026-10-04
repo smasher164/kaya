@@ -128,6 +128,8 @@ VERB_FEATURE = {
     # video view, so a backend stubbing the media_formats feature holds all
     # of their legs off.
     "expect_video_ink": "media_formats",
+    "expect_video_box": "media_formats",
+    "expect_video_corner": "media_formats",
     "ax_action": "media_formats",
     "session_send": "media_formats",
     "expect_now_playing": "media_formats",

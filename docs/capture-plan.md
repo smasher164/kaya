@@ -152,8 +152,10 @@ another aspect (docs/traps.md, the Android self-view's shape). Half rather than 
 1280x720 camera at its full size is wider than most windows a call sits in,
 and the frames the app is handed are the full size either way (§4).
 
-The one-view rule, `fit`, the accessibility props and the visibility
-occurrence are the video view's. An app that must process its self-view
+The one-view rule, `fit`, `aspect` (the box's ratio the app chooses,
+docs/media-plan.md §3, RULED 2026-10-03: a 16:9 box with `cover` shows a
+phone's upright 3:4 camera as the wide tile the other platforms show), the
+accessibility props and the visibility occurrence are the video view's. An app that must process its self-view
 (a blurred background) shows `surface(capture)` instead, the frames mode of
 docs/media-plan.md §4, or feeds its processed frames to a surface (§5).
 

@@ -2653,7 +2653,9 @@ MEDIA_SURFACES = [
     ("swift", "tools/kaya-swift-gen/Sources/main.swift", "player field", "KayaPlayer",
      r"\"{0}\": \(\"i64\", \"KayaPlayer\.none\"\)"),
     ("swift", "bindings/swift/KayaApp.swift", "live video", "video",
-     r"public func {0}\(\n\s*_ player: KayaPlayer, fit: KayaFit\? = nil,\n\s*onVisibility: \(\(Ka"
+     r"public func {0}\(\n\s*_ player: KayaPlayer, fit:"
+     r" KayaFit\? = nil, aspect: \(Int, Int\)\? = nil,\n"
+     r"\s*onVisibility: \(\(Ka"
      r"yaAppTx, Double\) throws -> Void\)\? = nil, grow: Double\? = nil\n\s*\) -> KayaWidget"),
     ("swift", "bindings/swift/KayaApp.swift", "template video", "video",
      r"public func {0}\(\n\s*_ f: KayaField<KayaPlayer>, fit: KayaFit\? = nil,"),
@@ -2765,9 +2767,11 @@ MEDIA_SURFACES = [
     ("ocaml", "bindings/ocaml/kaya_app.ml", "player field", "player_field",
      r"^let {0} index : \('a, player\) field ="),
     ("ocaml", "bindings/ocaml/kaya_app.ml", "live video", "video",
-     r"^let {0} \?grow \?fill .*\n(.*\n)?\s*\?a11y_hint \?fit \?on_visibility ~player \(\) ="),
+     r"^let {0} \?grow \?fill .*\n(.*\n)?\s*\?a11y_hint"
+     r" \?fit \?aspect \?on_visibility ~player \(\) ="),
     ("ocaml", "bindings/ocaml/kaya_app.ml", "template video", "video",
-     r"^  let {0} \?grow \?fill .*\n.*\?player \?bind_field\n\s*\?fit \?\(level = 0\) \?\(a11y_le"
+     r"^  let {0} \?grow \?fill .*\n.*\?player \?bind_field\n\s*\?fit"
+     r" \?aspect \?\(level = 0\) \?\(a11y_le"
      r"vel = level\) \?on_visibility \(\) ="),
     ("ocaml", "bindings/ocaml/kaya_app.ml", "visibility", "on_visibility",
      r"^let {0} app \(Widget id\) \(f : float -> unit\) ="),
@@ -2880,6 +2884,202 @@ for _lang, _rel, _part, _name, _template in MEDIA_SURFACES:
                       f"under the media cut)")
     _media_cuts += 1
 print(f"check-sugar-surface: media cuts watched red {_media_cuts}/{len(MEDIA_SURFACES)}")
+
+# THE VIDEO VIEW'S ASPECT (docs/media-plan.md §3, RULED 2026-10-03): the box
+# ratio in every binding, in the live zone, on a live view at run time, in the
+# template zone wherever the binding spells a stamped video's fit, and the
+# binding's own packer, width high and height low. A packer with its halves
+# swapped compiles and sends 9:16 for 16:9; a zone without the word leaves an
+# app no way to say it; the capture scene exercises one live spelling per
+# binding and none of the rest.
+ASPECT_SURFACES = [
+    ("rust", "crates/kaya/src/app/media.rs", "live chain", "aspect",
+     r"pub fn {0}\(self, width: i32, height: i32\) -> Self \{{\n\s*self\.tx\.video_aspect\("),
+    ("rust", "crates/kaya/src/app/media.rs", "runtime", "video_aspect",
+     r"pub fn {0}\(&mut self, video: WidgetId, width: i32, height: i32\) \{{\n"
+     r"\s*let packed = crate::protocol::Aspect::pack\(width\.into\(\), height\.into\(\)\);"),
+    ("rust", "crates/kaya/src/app.rs", "template", "aspect",
+     r"pub fn {0}\(&mut self, node: TemplateNodeId, width: i32, height: i32\) \{{\n"
+     r"\s*self\.set\(node, Prop::Aspect, crate::protocol::Aspect::pack\("),
+    ("rust", "crates/kaya/src/app.rs", "row", "aspect",
+     r"pub fn {0}\(&mut self, node: TemplateNodeId, width: i32, height: i32\) \{{\n"
+     r"\s*self\.tpl\(\)\.{0}\(node, width, height\)"),
+    ("rust", "crates/kaya/src/protocol.rs", "packer", "pack",
+     r"pub fn {0}\(width: i64, height: i64\) -> i64 \{{\n[^\n]*\n"
+     r"\s*\(i64::from\(part\(width\)\) << 32\) \| i64::from\(part\(height\) as u32\)"),
+    ("python", "bindings/python/kaya/__init__.py", "live and template", "aspect",
+     r"^def video\(player: [^\n]*\n(?:[^\n]*\n){{1,3}}\s*{0}: tuple\[int, int\] \| None = None,"),
+    ("python", "bindings/python/kaya/__init__.py", "runtime", "aspect",
+     r"^    def {0}\(self, width: int, height: int\) -> None:\n(?:[^\n]*\n){{0,3}}"
+     r"\s*_records\(\)\.append\(wire\.tx_set_aspect\(self\.id, _pack_aspect\(width, height\)\)\)"),
+    ("python", "bindings/python/kaya/__init__.py", "packer", "_pack_aspect",
+     r"^def {0}\(width: int, height: int\) -> int:\n(?:[^\n]*\n){{1,12}}?"
+     r"\s*return \(sat\(width\) << 32\) \| \(sat\(height\) & 0xFFFFFFFF\)"),
+    ("js", "bindings/js/kaya/index.ts", "live and template", "aspect",
+     r"^  {0}\?: readonly \[width: number, height: number\];"),
+    ("js", "bindings/js/kaya/index.ts", "runtime", "aspect",
+     r"^  {0}\(width: number, height: number\): this \{{\n[^\n]*\n"
+     r"\s*records\(\)\.push\(wire\.tx_set_aspect\(this\.id, packAspect\(width, height\)\)\);"),
+    ("js", "bindings/js/kaya/index.ts", "packer", "packAspect",
+     r"^function {0}\(width: number, height: number\): number \{{\n(?:[^\n]*\n){{1,8}}?"
+     r"\s*return w \* 2 \*\* 32 \+ \(h >>> 0\);"),
+    ("go", "bindings/go/media.go", "runtime", "SetAspect",
+     r"func \(tx \*Tx\) {0}\(w Widget, width, height int\) \{{"),
+    ("go", "bindings/go/media.go", "live chain", "Aspect",
+     r"func \(w Widget\) {0}\(width, height int\) Widget \{{"),
+    ("go", "bindings/go/media.go", "template", "SetAspect",
+     r"func \(t \*Tpl\) {0}\(n Node, width, height int\) \{{"),
+    ("go", "bindings/go/sums.go", "sum arm", "SetAspect",
+     r"func \(sc SumCase\[K, V\]\) {0}\(n Node, width, height"
+     r" int\) \{{ sc\.t\.{0}\(n, width, height\) \}}"),
+    ("go", "cmd/kaya-gen/main.go", "row", "SetAspect",
+     r"func \(r %sRow\) {0}\(n kaya\.Node, width, height"
+     r" int\) \{{ r\.t\.{0}\(n, width, height\) \}}"),
+    ("go", "bindings/go/media.go", "packer", "aspectWire",
+     r"func {0}\(width, height int\) int64 \{{\n(?:[^\n]*\n){{1,10}}?"
+     r"\s*return int64\(part\(width\)\)<<32 \| int64\(uint32\(part\(height\)\)\)"),
+    ("csharp", "bindings/csharp/KayaApp.cs", "live", "aspect",
+     r"public Widget Video\(Player player, Fit\? fit = null,\n[^\n]*\n\s*\(int"
+     r" Width, int Height\)\? {0} = null\)"),
+    ("csharp", "bindings/csharp/KayaApp.cs", "runtime", "SetAspect",
+     r"public void {0}\(Widget video, int width, int height\) =>"),
+    ("csharp", "bindings/csharp/KayaApp.cs", "template", "SetAspect",
+     r"public void {0}\(Node n, int width, int height\) =>"),
+    ("csharp", "tools/kaya-csgen/Program.cs", "row", "SetAspect",
+     r"Set\(\"{0}\", \[\"Node n\", \"int width\", \"int height\"\], \"n, width, height\"\);"),
+    ("csharp", "bindings/csharp/KayaApp.cs", "packer", "AspectWire",
+     r"internal static long {0}\(int width, int height\)"
+     r" =>\n\s*\(\(long\)width << 32\) \| \(uint\)height;"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", "live chain", "aspect",
+     r"public Widget {0}\(int width, int height\) \{{"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", "runtime", "setAspect",
+     r"public void {0}\(Widget video, int width, int height\) \{{"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", "template", "setAspect",
+     r"public void {0}\(Node n, int width, int height\) \{{\n\s*tx\.emit\(KayaWire\.txSetAspect"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", "row", "setAspect",
+     r"public void {0}\(Node n, int width, int height\) \{{\n\s*t\.{0}\(n, width, height\);"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", "packer", "aspectWire",
+     r"static long {0}\(int width, int height\) \{{\n\s*return"
+     r" \(\(long\) width << 32\) \| \(height & 0xFFFFFFFFL\);"),
+    ("swift", "bindings/swift/KayaApp.swift", "live", "aspect",
+     r"_ player: KayaPlayer, fit: KayaFit\? = nil, {0}: \(Int, Int\)\? = nil,\n"
+     r"\s*onVisibility: \(\(KayaAppTx, Double\) throws -> Void\)\? = nil, grow: Double\? = nil"),
+    ("swift", "bindings/swift/KayaMedia.swift", "runtime", "setAspect",
+     r"public func {0}\(_ video: KayaWidget, _ width: Int, _ height: Int\) \{{"),
+    ("swift", "bindings/swift/KayaApp.swift", "template", "aspect",
+     r"_ f: KayaField<KayaPlayer>, fit: KayaFit\? = nil, {0}: \(Int, Int\)\? = nil,"),
+    ("swift", "tools/kaya-swift-gen/Sources/main.swift", "row", "aspect",
+     r"t\.video\(f, fit: fit, {0}: {0}, onVisibility: onVisibility\)"),
+    ("swift", "bindings/swift/KayaMedia.swift", "packer", "kayaAspect",
+     r"func {0}\(_ width: Int, _ height: Int\) -> Int64 \{{\n[^\n]*\n"
+     r"\s*return \(Int64\(part\(width\)\) << 32\) \|"
+     r" Int64\(UInt32\(bitPattern: part\(height\)\)\)"),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", "live", "aspect",
+     r"^let video \?grow \?fill .*\n(.*\n)?\s*\?a11y_hint"
+     r" \?fit \?{0} \?on_visibility ~player \(\) ="),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", "runtime", "set_aspect",
+     r"^let {0} \(Widget id\) width height =\n\s*emit \(the_tx \(\)\) \(Kaya_wire\.tx_set_aspect"),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", "template", "aspect",
+     r"^  let video \?grow \?fill .*\n.*\?player \?bind_field\n\s*\?fit \?{0} \?\(level = 0\)"),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", "packer", "aspect_wire",
+     r"^let {0} width height =\n[^\n]*\n"
+     r"\s*Int64\.logor \(Int64\.shift_left \(part width\)"
+     r" 32\) \(Int64\.logand \(part height\) 0xFFFFFFFFL\)"),
+    ("haskell", "bindings/haskell/KayaApp.hs", "live", "AspectAs",
+     r"^  {0} :: Int -> Int -> Attr 'LeafW"),
+    ("haskell", "bindings/haskell/KayaApp.hs", "runtime", "setAspect",
+     r"^{0} :: Widget -> Int -> Int -> Build \(\)"),
+    ("haskell", "bindings/haskell/KayaApp.hs", "template", "TplAspectAs",
+     r"^  {0} :: Int -> Int -> TplAttr"),
+    ("haskell", "bindings/haskell/Kaya/Core.hs", "packer", "aspectWire",
+     r"^{0} width height = \(part width `shiftL` 32\) \.\|\. \(part height \.&\. 0xFFFFFFFF\)"),
+]
+ASPECT_PARTS = ("live", "runtime", "template", "packer")
+
+
+def check_aspect_surface(fake_name=None, findings=None, text_for=None):
+    global status
+    for lang, rel, part, name, template in ASPECT_SURFACES:
+        pat = template.format(fake_name or name)
+        text = text_for(lang, rel) if text_for else read_rel(rel)
+        if re.search(pat, text, re.M) is None:
+            msg = (f"check-sugar-surface: {lang} has no aspect {part} (wanted /{pat}/ in {rel}; "
+                   f"docs/media-plan.md §3)")
+            if findings is None:
+                print(msg)
+                status = 1
+            else:
+                findings.append(msg)
+    have = {(lang, part) for lang, _rel, part, _name, _tpl in ASPECT_SURFACES}
+    for lang in ("rust", "python", "go", "csharp", "java", "swift", "ocaml", "haskell", "js"):
+        for part in ASPECT_PARTS:
+            spelled = {p for (lg, p) in have if lg == lang and part in p}
+            if not spelled:
+                msg = f"check-sugar-surface: the aspect census holds no {part} row for {lang}"
+                if findings is None:
+                    print(msg)
+                    status = 1
+                else:
+                    findings.append(msg)
+
+
+check_aspect_surface()
+_fake = []
+check_aspect_surface("kayaFakeAspect", findings=_fake)
+print(f"check-sugar-surface: fake aspect spellings fired {len(_fake)}/{len(ASPECT_SURFACES)}")
+if len(_fake) != len(ASPECT_SURFACES):
+    selftest_exit(f"check-sugar-surface: self-test failed ({len(_fake)}/{len(ASPECT_SURFACES)} "
+                  f"aspect patterns fired for a name that exists nowhere)")
+_aspect_cuts = 0
+for _lang, _rel, _part, _name, _template in ASPECT_SURFACES:
+    _real = read_rel(_rel)
+    _m = re.search(_template.format(_name), _real, re.M)
+    if _m is None:
+        selftest_exit(f"check-sugar-surface: aspect cut found no {_lang} {_part} to cut in {_rel}")
+    _mangled, _n = sub_count(rf"\b{re.escape(_name)}\b", "kayaCutAspect", _m.group(0))
+    print(f"check-sugar-surface: aspect cut {_lang} {_part}: {_n} substitution(s)")
+    if _n == 0:
+        selftest_exit(f"check-sugar-surface: self-test failed (the {_lang} aspect {_part} cut "
+                      f"applied nothing)")
+    _copy = _real[:_m.start()] + _mangled + _real[_m.end():]
+    _found = []
+    check_aspect_surface(
+        findings=_found,
+        text_for=lambda lang, rel, _c=_copy, _r=_rel: _c if rel == _r else read_rel(rel))
+    if not _found or not all(_lang in f and "aspect" in f for f in _found):
+        selftest_exit(f"check-sugar-surface: self-test failed (the {_lang} aspect {_part} cut gave "
+                      f"{len(_found)} finding(s): {_found})")
+    _aspect_cuts += 1
+print(f"check-sugar-surface: aspect cuts watched red {_aspect_cuts}/{len(ASPECT_SURFACES)}")
+_swapped = 0
+for _lang, _rel, _part, _name, _template in ASPECT_SURFACES:
+    if _part != "packer":
+        continue
+    _real = read_rel(_rel)
+    _m = re.search(_template.format(_name), _real, re.M)
+    _line = _m.group(0).splitlines()[-1]
+    _pair = ("w", "h") if _lang == "js" else ("width", "height")
+    _w = re.search(rf"\b{_pair[0]}\b", _line)
+    _h = re.search(rf"\b{_pair[1]}\b", _line[_w.end():]) if _w else None
+    if _w is None or _h is None:
+        selftest_exit(f"check-sugar-surface: self-test failed (the {_lang} packer's last line "
+                      f"names no {_pair} to swap: {_line!r})")
+    _h = re.search(rf"\b{_pair[1]}\b", _line[_w.end():])
+    _hs, _he = _w.end() + _h.start(), _w.end() + _h.end()
+    _swap = _line[:_w.start()] + _pair[1] + _line[_w.end():_hs] + _pair[0] + _line[_he:]
+    _copy = _real.replace(_line, _swap, 1)
+    _found = []
+    check_aspect_surface(findings=_found,
+                         text_for=lambda lang, rel, _c=_copy, _r=_rel:
+                         _c if rel == _r else read_rel(rel))
+    print(f"check-sugar-surface: aspect packer {_lang} with its halves swapped: "
+          f"{len(_found)} finding(s)")
+    if not _found:
+        selftest_exit(f"check-sugar-surface: self-test failed (the {_lang} packer with height high "
+                      f"passed)")
+    _swapped += 1
+if _swapped != 9:
+    selftest_exit(f"check-sugar-surface: self-test failed ({_swapped} of 9 packers swapped)")
 
 MEDIA_LANGS = ("rust", "python", "go", "csharp", "java", "swift", "ocaml", "haskell", "js")
 MEDIA_PARTS = ("player object", "player field", "visibility", "audio selection",

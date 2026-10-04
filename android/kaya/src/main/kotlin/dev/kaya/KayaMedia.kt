@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -114,6 +115,10 @@ internal val kayaVideoSurfaces = ConcurrentHashMap<Long, Long>()
 
 /** Each video view's box in window pixels, clipped by its ancestors, by node. */
 internal val kayaVideoBoxes = ConcurrentHashMap<Long, androidx.compose.ui.geometry.Rect>()
+
+/** Each video view's whole laid-out box in window pixels, unclipped:
+ * expect_video_box's and expect_video_corner's read (docs/media-plan.md §3). */
+internal val kayaVideoFrames = ConcurrentHashMap<Long, androidx.compose.ui.geometry.Rect>()
 
 /** The window's view, which carries keepScreenOn (docs/media-plan.md §2 rule 5). */
 internal var kayaMediaHostView: android.view.View? = null
@@ -590,8 +595,12 @@ internal fun KayaVideoView(node: KayaNode, a11y: Modifier, boxFill: Modifier) {
         KayaPresent.captureSelfViewNatural(frames?.get(0) ?: 0, frames?.get(1) ?: 0, source?.rotation ?: 0)
             ?: error("kaya: captureSelfViewNatural answered nothing")
     } else null
-    val w = selfView?.get(0) ?: if (p != null && p.mediaWidth > 0) p.mediaWidth else 320
-    val h = selfView?.get(1) ?: if (p != null && p.mediaHeight > 0) p.mediaHeight else 180
+    val pw = selfView?.get(0) ?: if (p != null && p.mediaWidth > 0) p.mediaWidth else 320
+    val ph = selfView?.get(1) ?: if (p != null && p.mediaHeight > 0) p.mediaHeight else 180
+    // docs/media-plan.md §3: the box is the core's rule, the app's aspect applied.
+    val box = KayaPresent.videoViewBox(pw, ph, node.aspect) ?: error("kaya: videoViewBox answered nothing")
+    val w = box[0]
+    val h = box[1]
     val view = LocalView.current
     SideEffect { kayaMediaHostView = view }
     // docs/media-plan.md §3: no wider than its natural size, its height following its width.
@@ -614,6 +623,10 @@ internal fun KayaVideoView(node: KayaNode, a11y: Modifier, boxFill: Modifier) {
                 val all = c.size.width.toFloat() * c.size.height
                 val shown = c.boundsInWindow()
                 kayaVideoBoxes[node.id] = shown
+                kayaVideoFrames[node.id] = androidx.compose.ui.geometry.Rect(
+                    c.positionInWindow(),
+                    androidx.compose.ui.geometry.Size(c.size.width.toFloat(), c.size.height.toFloat()),
+                )
                 KayaPresent.videoVisible(node.id, if (all > 0) (shown.width * shown.height / all).toDouble() else 0.0)
             },
     ) {
@@ -621,6 +634,7 @@ internal fun KayaVideoView(node: KayaNode, a11y: Modifier, boxFill: Modifier) {
             onDispose {
                 kayaVideoSurfaces.remove(node.id)
                 kayaVideoBoxes.remove(node.id)
+                kayaVideoFrames.remove(node.id)
                 kayaCaptionShown.remove(node.id)
                 KayaPresent.videoVisible(node.id, 0.0)
             }
@@ -634,7 +648,7 @@ internal fun KayaVideoView(node: KayaNode, a11y: Modifier, boxFill: Modifier) {
             PlayerSurface(
                 player = p.exo,
                 modifier = Modifier.fillMaxSize()
-                    .resizeWithContentScale(scale, Size(w.toFloat(), h.toFloat()))
+                    .resizeWithContentScale(scale, Size(pw.toFloat(), ph.toFloat()))
                     .clearAndSetSemantics {},
                 surfaceType = SURFACE_TYPE_SURFACE_VIEW,
             )
@@ -726,6 +740,39 @@ internal fun kayaVideoScreenBox(decor: android.view.View, node: KayaNode): Strin
     val beside = box.right + KAYA_VIDEO_GROUND_OFFSET * decor.resources.displayMetrics.density
     return "${corner[0] + box.left.toInt()} ${corner[1] + box.top.toInt()} " +
         "${corner[0] + box.right.toInt()} ${corner[1] + box.bottom.toInt()} ${corner[0] + beside.toInt()}"
+}
+
+/** harness.rs's VIDEO_CORNER_INSET, in dp: where expect_video_corner reads. */
+internal const val KAYA_VIDEO_CORNER_INSET = 4f
+
+/** expect_video_box's read: the view's whole laid-out box, "<width> <height>"
+ * in pixels (only the ratio is compared); null when it has none. */
+internal fun kayaVideoBoxSize(node: KayaNode): String? {
+    val f = kayaVideoFrames[node.id] ?: return null
+    return "${f.width.toDouble()} ${f.height.toDouble()}"
+}
+
+/** harness.rs's video_box_shaped: the height within one unit of the width at the ratio. */
+internal fun kayaVideoBoxShaped(got: String, w: Int, h: Int): Boolean {
+    val parts = got.split(' ')
+    if (parts.size != 2) return false
+    val bw = parts[0].toDoubleOrNull() ?: return false
+    val bh = parts[1].toDoubleOrNull() ?: return false
+    return bw > 0 && bh > 0 && kotlin.math.abs(bh - bw * h / w) <= 1.0
+}
+
+/** The box's top-left corner, KAYA_VIDEO_CORNER_INSET in on both axes, as a
+ * two-pixel box in SCREEN pixels in kayaVideoScreenBox's shape, so the
+ * runner's screencap reads the corner at its centre. Main thread. */
+internal fun kayaVideoCornerBox(decor: android.view.View, node: KayaNode): String? {
+    val f = kayaVideoFrames[node.id] ?: return null
+    if (f.width < 1f || f.height < 1f) return null
+    val corner = IntArray(2)
+    decor.getLocationOnScreen(corner)
+    val inset = KAYA_VIDEO_CORNER_INSET * decor.resources.displayMetrics.density
+    val x = corner[0] + (f.left + inset).toInt()
+    val y = corner[1] + (f.top + inset).toInt()
+    return "${x - 1} ${y - 1} ${x + 1} ${y + 1} ${x + 1}"
 }
 
 /**

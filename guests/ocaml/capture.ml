@@ -35,6 +35,7 @@ let () =
         in
         let call = capture ~camera:camera_1 ~microphone:microphone_1 ~size:(600.0, 400.0) ~frame_rate:30.0 () in
         let missing = capture ~camera:"no-such-camera" () in
+        let self_view = ref None in
         let root =
           column
             [
@@ -56,8 +57,15 @@ let () =
                   button ~text:"Camera off" ~on_click:(fun () -> capture_camera call None);
                   button ~text:"Stop" ~on_click:(fun () -> stop_capture call);
                   button ~text:"Open missing" ~on_click:(fun () -> start_capture missing); (* button#6 *)
+                  button ~text:"Wide cover" ~on_click:(fun () ->
+                      set_aspect (Option.get !self_view) 16 9;
+                      set_fit (Option.get !self_view) Fit.Cover);
+                  button ~text:"Wide contain" ~on_click:(fun () -> set_fit (Option.get !self_view) Fit.Contain); (* button#8 *)
                 ];
-              video_capture ~a11y_label:"Self view" ~capture:call; (* video#0 *)
+              (fun () ->
+                let w = video_capture ~a11y_label:"Self view" ~capture:call () in (* video#0 *)
+                self_view := Some w;
+                w);
             ]
             ()
         in
