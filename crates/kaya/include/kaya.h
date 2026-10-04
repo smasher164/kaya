@@ -2446,6 +2446,7 @@ typedef struct KayaHostApi {
                                uint8_t*);
   void (*reader_no_track)(uint64_t, uint64_t, const uint8_t*, uintptr_t);
   uint32_t (*capture_nearest_format)(const uint32_t*, uintptr_t, double, double, double, uint32_t*);
+  void (*capture_self_view_natural)(uint32_t, uint32_t, uint32_t*);
 } KayaHostApi;
 
 
@@ -3619,6 +3620,16 @@ uint32_t kaya_capture_nearest_format(const uint32_t *offered,
                                      double height,
                                      double frame_rate,
                                      uint32_t *out);
+
+/**
+ * Presentation side: a self-view's natural size for frames of `width` by
+ * `height` (0 by 0 with no camera open) into `out`'s two
+ * (docs/capture-plan.md §3).
+ *
+ * # Safety
+ * `out` must be null or writable for two u32s.
+ */
+void kaya_capture_self_view_natural(uint32_t width, uint32_t height, uint32_t *out);
 
 /**
  * The harness's two capture verbs for an interpreter: `expect_capture`

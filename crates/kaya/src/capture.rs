@@ -110,6 +110,11 @@ pub(crate) fn nearest_format(offered: &[(u32, u32, u32)], wish: (f64, f64, f64))
         .min_by(|a, b| (f64::from(a.2) - fps).abs().total_cmp(&(f64::from(b.2) - fps).abs()).then(b.2.cmp(&a.2)))
 }
 
+/// A self-view's natural size, one rule for every backend (docs/capture-plan.md §3).
+pub(crate) fn self_view_natural(frames: (u32, u32)) -> (u32, u32) {
+    if frames.0 == 0 || frames.1 == 0 { (320, 240) } else { (frames.0 / 2, frames.1 / 2) }
+}
+
 /// The synthetic permission store: `prompt` until a kind is asked, then
 /// what the harness said the user answers (`granted` unless
 /// `answer_permission` said otherwise before the ask).
@@ -916,6 +921,14 @@ mod tests {
                 std::iter::repeat_n(x, channels)
             })
             .collect()
+    }
+
+    #[test]
+    fn a_self_view_is_half_its_frames_and_320x240_with_no_camera() {
+        assert_eq!(self_view_natural((640, 480)), (320, 240));
+        assert_eq!(self_view_natural((1280, 720)), (640, 360));
+        assert_eq!(self_view_natural((0, 0)), (320, 240));
+        assert_eq!(self_view_natural((640, 0)), (320, 240));
     }
 
     #[test]

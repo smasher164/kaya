@@ -211,6 +211,7 @@ object KayaPresent {
     @JvmStatic external fun captureSynthetic(index: Int): String?
     @JvmStatic external fun captureSyntheticPermission(kind: Int, ask: Boolean): Int
     @JvmStatic external fun captureNearestFormat(offered: IntArray, width: Double, height: Double, frameRate: Double): IntArray?
+    @JvmStatic external fun captureSelfViewNatural(width: Int, height: Int): IntArray?
     @JvmStatic external fun captureHarness(verb: Int, index: Int, text: String): String
 
     /** Emit a column-header click: [tag] is the sort tag delivered

@@ -12,9 +12,11 @@ import android.view.accessibility.CaptioningManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -582,11 +584,21 @@ internal fun KayaVideoView(node: KayaNode, a11y: Modifier, boxFill: Modifier) {
     node.videoSeq
     kayaCaptionStyleSeq.intValue
     val p = kayaPlayers[node.videoPlayer]
-    val w = if (p != null && p.mediaWidth > 0) p.mediaWidth else 320
-    val h = if (p != null && p.mediaHeight > 0) p.mediaHeight else 180
+    // A self-view's natural size is the core's rule and shrinks to its room (docs/capture-plan.md §3).
+    val selfView = if (node.videoCapture != 0L) {
+        val frames = kayaCaptures[node.videoCapture]?.source?.format
+        KayaPresent.captureSelfViewNatural(frames?.get(0) ?: 0, frames?.get(1) ?: 0)
+            ?: error("kaya: captureSelfViewNatural answered nothing")
+    } else null
+    val w = selfView?.get(0) ?: if (p != null && p.mediaWidth > 0) p.mediaWidth else 320
+    val h = selfView?.get(1) ?: if (p != null && p.mediaHeight > 0) p.mediaHeight else 180
     val view = LocalView.current
     SideEffect { kayaMediaHostView = view }
-    val sized = if (node.grow > 0 || node.fill == true) boxFill.height(h.dp) else Modifier.size(w.dp, h.dp)
+    val sized = when {
+        node.grow > 0 || node.fill == true -> boxFill.height(h.dp)
+        selfView != null -> Modifier.widthIn(max = w.dp).fillMaxWidth().height(h.dp)
+        else -> Modifier.size(w.dp, h.dp)
+    }
     val actions = listOf(
         CustomAccessibilityAction("Play") { kayaPlayers[node.videoPlayer]?.play(); true },
         CustomAccessibilityAction("Pause") { kayaPlayers[node.videoPlayer]?.pause(); true },

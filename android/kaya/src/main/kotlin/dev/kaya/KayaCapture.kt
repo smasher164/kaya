@@ -549,6 +549,7 @@ internal object KayaRealCapture {
                 if (stopped || reported) return@post
                 if (cameraOpen && frames == 0L) return@post
                 reported = true
+                kayaCapturePreviewMoved(capture)
                 KayaPresent.captureState(capture, CAPTURE_STATE_RUNNING, 0, format[0], format[1], format[2], "")
             }
         }

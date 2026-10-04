@@ -24521,6 +24521,9 @@ mod gtk_media {
     padding: 2px 6px; border-radius: 4px; margin-bottom: 8px; }
     ";
 
+    /// A player's picture before its media size is known.
+    pub(super) const VIDEO_PLACEHOLDER: (i32, i32) = (320, 180);
+
     pub(super) fn build_video_view(id: WidgetId) -> GtkVideoView {
         use gtk4::prelude::{AccessibleExt, WidgetExt};
         let overlay: gtk4::Overlay =
@@ -24528,7 +24531,7 @@ mod gtk_media {
         let picture: gtk4::Picture =
             glib::Object::builder().property("accessible-role", gtk4::AccessibleRole::None).build();
         picture.set_can_shrink(false);
-        picture.set_size_request(320, 180);
+        picture.set_size_request(VIDEO_PLACEHOLDER.0, VIDEO_PLACEHOLDER.1);
         picture.set_content_fit(gtk4::ContentFit::Contain);
         overlay.set_child(Some(&picture));
         let caption = gtk4::Label::new(None);

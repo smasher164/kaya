@@ -4694,6 +4694,151 @@ print(f"check-verbs: the WinUI capture wall negative (a device opened in media.r
 if not found:
     fail("check-verbs SELF-TEST: the WinUI capture wall passed with a device opened in media.rs")
 
+# THE SELF-VIEW'S NATURAL SIZE (docs/capture-plan.md §3): half its frames',
+# 320x240 with no camera, no minimum, ONE function in the core every arm
+# reaches. No scene can hold it: the five windows differ in width, so the
+# self-view's laid-out size differs by platform under the same rule, and
+# expect_video_ink samples one pixel that any size shows. Compose shipped a
+# fixed 320x180 and GTK the frames' full size with every capture leg green.
+CORE_CAPTURE = "crates/kaya/src/capture.rs"
+SELF_VIEW_FILES = {
+    "core": CORE_CAPTURE,
+    "capi": "crates/kaya/src/capi.rs",
+    "host": "crates/kaya/src/swiftui_host.rs",
+    "jni": "crates/kaya/src/android.rs",
+    "swift": SWIFT,
+    "winui": WINUI_MEDIA,
+    "gtk": "crates/kaya/src/gtk/capture.rs",
+    "compose": KOTLIN_MEDIA,
+    "compose_capture": COMPOSE_CAPTURE,
+}
+
+
+def self_view_natural(texts=None):
+    t = {k: re.sub(r"//[^\n]*", "", texts[k] if texts and k in texts else real(rel))
+         for k, rel in SELF_VIEW_FILES.items()}
+    bad = []
+
+    def need(key, head, *parts, why):
+        body = brace_body(t[key], head)
+        if body is None:
+            bad.append(f"{SELF_VIEW_FILES[key]}: no `{head}` — the self-view clause reads "
+                       f"nothing there and would agree with everything")
+            return None
+        for part in parts:
+            if part not in body:
+                bad.append(f"{SELF_VIEW_FILES[key]}: `{head}` lacks `{part}` — {why}")
+        return body
+
+    need("core", "pub(crate) fn self_view_natural(", "(320, 240)",
+         "(frames.0 / 2, frames.1 / 2)",
+         why="the one rule is no longer half the frames, 320x240 with no camera")
+    need("capi", "pub unsafe extern \"C\" fn kaya_capture_self_view_natural(",
+         "crate::capture::self_view_natural(", why="the C door answers its own rule")
+    if "capture_self_view_natural: crate::capi::kaya_capture_self_view_natural" not in t["host"]:
+        bad.append(f"{SELF_VIEW_FILES['host']}: the SwiftUI host table does not carry "
+                   f"kaya_capture_self_view_natural")
+    need("jni", "extern \"system\" fn present_capture_self_view_natural",
+         "crate::capture::self_view_natural(", why="the JNI door answers its own rule")
+    if 'name: "captureSelfViewNatural".into()' not in t["jni"]:
+        bad.append(f"{SELF_VIEW_FILES['jni']}: captureSelfViewNatural is not registered")
+    swift = need("swift", "func kayaVideoNatural(", "KayaHost.api.capture_self_view_natural(",
+                 why="the SwiftUI self-view sizes itself by a rule of its own")
+    if swift is not None:
+        arm = brace_body(swift, "if node.videoCapture != 0")
+        if arm is None or "KayaHost.api.capture_self_view_natural(" not in arm or "/ 2" in arm:
+            bad.append(f"{SWIFT}: kayaVideoNatural's capture arm does not answer the core's "
+                       f"self_view_natural alone")
+    case = t["swift"].find("case kindVideo:")
+    frame = brace_body(t["swift"][case:], "if node.videoCapture != 0 {") if case >= 0 else None
+    if frame is None or "idealWidth: natural.width" not in frame or "minWidth" in frame \
+            or "minHeight" in frame:
+        bad.append(f"{SWIFT}: the self-view's frame is not idealWidth natural with no minimum "
+                   f"— it no longer shrinks to its room")
+    calls = re.findall(r"natural_size\(video, ([^\n]*)\)\?;", t["winui"])
+    capture_calls = [c for c in calls if "self_view_natural" in c]
+    if len(capture_calls) != 2 or any(not c.startswith("crate::capture::self_view_natural(")
+                                       for c in capture_calls):
+        bad.append(f"{WINUI_MEDIA}: {len(capture_calls)} self-view sizing call(s) through "
+                   f"crate::capture::self_view_natural, wanted the attach and the detach")
+    winui_capture = brace_body(t["winui"], "fn natural_size(")
+    if winui_capture is None or "SetMaxWidth(w)" not in winui_capture \
+            or "host.SetWidth(f64::NAN)" not in winui_capture:
+        bad.append(f"{WINUI_MEDIA}: natural_size fixes the host's width — the view no longer "
+                   f"shrinks to its room")
+    need("gtk", "fn repaint(",
+         "self_view_size(view, Some(crate::capture::self_view_natural(frames)))",
+         why="the GTK self-view is sized by something other than the core's rule")
+    need("gtk", "fn self_view_size(", "set_size_request(-1, -1)", "NaturalLayout",
+         why="the GTK self-view keeps a minimum or the frames' own size")
+    need("gtk", "fn measure(",
+         "(0, if orientation == gtk4::Orientation::Horizontal { w } else { h }",
+         why="the natural layout reports a minimum, so the view cannot shrink")
+    if "frames: (format.0, format.1)" not in t["gtk"]:
+        bad.append(f"{SELF_VIEW_FILES['gtk']}: the open's frame size is not the chosen format's")
+    need("compose", "internal fun KayaVideoView(",
+         "KayaPresent.captureSelfViewNatural(", "selfView != null -> Modifier.widthIn(max = w.dp)",
+         why="the Compose self-view is not the core's natural size, shrinking to its room")
+    ready = need("compose_capture", "fun ready() {", "kayaCapturePreviewMoved(capture)",
+                 why="the view never re-reads its size once the format is chosen")
+    if ready is not None and ready.find("kayaCapturePreviewMoved(capture)") > \
+            ready.find("CAPTURE_STATE_RUNNING"):
+        bad.append(f"{COMPOSE_CAPTURE}: ready() reports running before the view re-reads "
+                   f"its size")
+    return bad
+
+
+self_view_out = self_view_natural()
+if self_view_out:
+    print("check-verbs: a self-view's natural size drifts from the core's rule:", file=sys.stderr)
+    print("\n".join(self_view_out), file=sys.stderr)
+    capture_status = 1
+print(f"check-verbs: the self-view's natural size read ({len(SELF_VIEW_FILES)} files, "
+      f"the core's rule, its two doors and five arms)")
+for key, pattern, repl, label in (
+    ("core", r"\(frames\.0 / 2, frames\.1 / 2\)", "(frames.0, frames.1)",
+     "the core's rule at the frames' full size"),
+    ("swift", r"var natural: \[UInt32\] = \[0, 0\]\n[^\n]*\n[^\n]*"
+              r"CGSize\(width: Int\(natural\[0\]\), "
+              r"height: Int\(natural\[1\]\)\)",
+     "return CGSize(width: Int(format.0) / 2, height: Int(format.1) / 2)",
+     "SwiftUI with its own copy of the rule"),
+    ("swift", r"(idealWidth: natural\.width, )"
+              r"(maxWidth: node\.grow > 0 \? \.infinity : natural\.width,\n"
+              r"\s*idealHeight: natural\.height, maxHeight: natural\.height\)\n"
+              r"\s*\.background\(KayaVideoVisibility\(node: node\)\)\n"
+              r"\s*\.accessibilityElement\(children: \.ignore\)\n"
+              r"\s*\.accessibilityAddTraits\(\.isImage\)\n\s*\} else)",
+     r"minWidth: natural.width, \1\2", "SwiftUI's self-view given a minimum"),
+    ("winui", r"natural_size\(video, crate::capture::self_view_natural\(p\.size\)\)",
+     "natural_size(video, p.size)", "WinUI at the frames' full size"),
+    ("winui", r"video\.host\.SetWidth\(f64::NAN\)\?;", "video.host.SetWidth(w)?;",
+     "WinUI's host width fixed"),
+    ("gtk", r"Some\(crate::capture::self_view_natural\(frames\)\)", "Some(frames)",
+     "GTK at the frames' full size"),
+    ("gtk", r"\n\s*view\.picture\.set_size_request\(-1, -1\);", "",
+     "GTK's self-view keeping the player's minimum"),
+    ("gtk", r"\(0, if orientation == gtk4::Orientation::Horizontal \{ w \} else \{ h \}",
+     "(w, if orientation == gtk4::Orientation::Horizontal { w } else { h }",
+     "GTK's natural layout reporting a minimum"),
+    ("compose", r"KayaPresent\.captureSelfViewNatural\(frames\?\.get\(0\) \?: 0, "
+                r"frames\?\.get\(1\) \?: 0\)",
+     "intArrayOf(320, 180)", "Compose's fixed 320x180 as shipped"),
+    ("compose", r"selfView != null -> Modifier\.widthIn\(max = w\.dp\)"
+                r"\.fillMaxWidth\(\)\.height\(h\.dp\)",
+     "selfView != null -> Modifier.size(w.dp, h.dp)", "Compose's self-view at a fixed size"),
+    ("compose_capture", r"\n\s*kayaCapturePreviewMoved\(capture\)\n"
+                        r"(\s*KayaPresent\.captureState\(capture, "
+                        r"CAPTURE_STATE_RUNNING)", r"\n\1",
+     "Compose's view never told the format arrived"),
+):
+    cut = g.doctor(f"the self-view's natural size: {label}", real(SELF_VIEW_FILES[key]),
+                   pattern, repl)
+    found = [f for f in self_view_natural({key: cut}) if f not in self_view_out]
+    print(f"check-verbs: the self-view negative ({label}): {len(found)} finding(s)")
+    if not found:
+        fail(f"check-verbs SELF-TEST: the self-view clause passed with {label}")
+
 # clip_mirrors() ran first and printed its own findings; its verdict
 # is read here so there is exactly ONE verdict line.
 if (clip_status or window_status or ink_status or ax_status
@@ -4735,4 +4880,5 @@ g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"+ the capture wall (real devices behind KAYA_SELFTEST) "
           f"+ the Compose capture wall (the emulator's devices only, "
           f"the runner's one launch) "
+          f"+ a self-view's natural size through the core's one rule on 5 arms "
           f"+ spec hash against 2 interpreters")

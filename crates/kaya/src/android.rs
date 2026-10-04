@@ -918,6 +918,11 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 fn_ptr: present_capture_nearest_format as *mut _,
             },
             NativeMethod {
+                name: "captureSelfViewNatural".into(),
+                sig: "(II)[I".into(),
+                fn_ptr: present_capture_self_view_natural as *mut _,
+            },
+            NativeMethod {
                 name: "captureHarness".into(),
                 sig: "(IILjava/lang/String;)Ljava/lang/String;".into(),
                 fn_ptr: present_capture_harness as *mut _,
@@ -2837,6 +2842,20 @@ extern "system" fn present_capture_nearest_format<'local>(
     };
     let Ok(out) = env.new_int_array(3) else { return jni::objects::JIntArray::default() };
     if env.set_int_array_region(&out, 0, &[w as i32, h as i32, fps as i32]).is_err() {
+        return jni::objects::JIntArray::default();
+    }
+    out
+}
+
+extern "system" fn present_capture_self_view_natural<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass,
+    width: jint,
+    height: jint,
+) -> jni::objects::JIntArray<'local> {
+    let (w, h) = crate::capture::self_view_natural((width.max(0) as u32, height.max(0) as u32));
+    let Ok(out) = env.new_int_array(2) else { return jni::objects::JIntArray::default() };
+    if env.set_int_array_region(&out, 0, &[w as i32, h as i32]).is_err() {
         return jni::objects::JIntArray::default();
     }
     out

@@ -28333,12 +28333,15 @@ func kayaShownFraction(_ node: KayaNode, _ frame: CGRect) -> Double {
     return Double(clip.width * clip.height / (frame.width * frame.height))
 }
 
-/// The video view's natural size: its picture's, 320x180 until one is known.
+/// The video view's natural size: its picture's, 320x180 until one is known;
+/// a self-view's is the core's rule (docs/capture-plan.md §3).
 func kayaVideoNatural(_ node: KayaNode) -> CGSize {
     _ = node.videoSeq
     if node.videoCapture != 0 {
         let format = kayaCaptures[node.videoCapture]?.source?.format ?? (0, 0, 0)
-        return format.0 == 0 ? CGSize(width: 320, height: 240) : CGSize(width: Int(format.0) / 2, height: Int(format.1) / 2)
+        var natural: [UInt32] = [0, 0]
+        natural.withUnsafeMutableBufferPointer { KayaHost.api.capture_self_view_natural(format.0, format.1, $0.baseAddress) }
+        return CGSize(width: Int(natural[0]), height: Int(natural[1]))
     }
     let size = kayaPlayers[node.videoPlayer]?.mediaSize ?? .zero
     return size == .zero ? CGSize(width: 320, height: 180) : size

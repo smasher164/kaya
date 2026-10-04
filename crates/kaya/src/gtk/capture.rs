@@ -49,6 +49,8 @@ fn refusal(device: &str, harness: bool) -> Option<String> {
 struct Open {
     pipeline: gst::Pipeline,
     paintable: Option<gdk::Paintable>,
+    /// The camera's frame size, (0, 0) with no camera.
+    frames: (u32, u32),
     _watch: gst::bus::BusWatchGuard,
     /// The portal's PipeWire remote, alive as long as the pipeline.
     _remote: Option<std::os::fd::OwnedFd>,
@@ -155,12 +157,97 @@ fn capture_report(core: &mut CoreState, id: u64, r: Report) {
 }
 
 fn repaint(core: &mut CoreState, id: u64) {
-    let paintable = CAPTURES.with_borrow(|c| c.get(&id).and_then(|c| c.open.as_ref()?.paintable.clone()));
+    let (paintable, frames) = CAPTURES.with_borrow(|c| {
+        let open = c.get(&id).and_then(|c| c.open.as_ref());
+        (open.and_then(|o| o.paintable.clone()), open.map_or((0, 0), |o| o.frames))
+    });
     for view in core.videos.iter().filter(|v| v.capture.get() == Some(id)) {
+        self_view_size(view, Some(crate::capture::self_view_natural(frames)));
         view.picture.set_paintable(paintable.as_ref());
         view.picture.queue_draw();
     }
     gtk_media::follow_keep_awake(core);
+}
+
+/// A self-view takes the core's natural size with no minimum, so it shrinks
+/// to its room (docs/capture-plan.md §3); `None` gives the view back to the
+/// player's picture sizing.
+fn self_view_size(view: &gtk_media::GtkVideoView, natural: Option<(u32, u32)>) {
+    match natural {
+        Some((w, h)) => {
+            let layout = view
+                .picture
+                .layout_manager()
+                .and_then(|l| l.downcast::<natural_layout::NaturalLayout>().ok())
+                .unwrap_or_else(|| {
+                    let layout = natural_layout::NaturalLayout::default();
+                    view.picture.set_layout_manager(Some(layout.clone()));
+                    layout
+                });
+            layout.set_natural(w as i32, h as i32);
+            view.picture.set_size_request(-1, -1);
+            let grows = grow_weight(view.overlay.upcast_ref()) > 0.0;
+            view.picture.set_halign(if grows { gtk4::Align::Fill } else { gtk4::Align::Center });
+        }
+        None => {
+            view.picture.set_layout_manager(None::<gtk4::LayoutManager>);
+            view.picture.set_size_request(gtk_media::VIDEO_PLACEHOLDER.0, gtk_media::VIDEO_PLACEHOLDER.1);
+            view.picture.set_halign(gtk4::Align::Fill);
+        }
+    }
+}
+
+mod natural_layout {
+    use gtk4::glib;
+    use gtk4::prelude::*;
+    use gtk4::subclass::prelude::*;
+    use std::cell::Cell;
+
+    #[derive(Default)]
+    pub struct NaturalLayoutInner {
+        natural: Cell<(i32, i32)>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for NaturalLayoutInner {
+        const NAME: &'static str = "KayaNaturalLayout";
+        type Type = NaturalLayout;
+        type ParentType = gtk4::LayoutManager;
+    }
+
+    impl ObjectImpl for NaturalLayoutInner {}
+
+    impl LayoutManagerImpl for NaturalLayoutInner {
+        fn measure(
+            &self,
+            _widget: &gtk4::Widget,
+            orientation: gtk4::Orientation,
+            _for_size: i32,
+        ) -> (i32, i32, i32, i32) {
+            let (w, h) = self.natural.get();
+            (0, if orientation == gtk4::Orientation::Horizontal { w } else { h }, -1, -1)
+        }
+
+        fn allocate(&self, _widget: &gtk4::Widget, _width: i32, _height: i32, _baseline: i32) {}
+    }
+
+    glib::wrapper! {
+        pub struct NaturalLayout(ObjectSubclass<NaturalLayoutInner>)
+            @extends gtk4::LayoutManager;
+    }
+
+    impl Default for NaturalLayout {
+        fn default() -> Self {
+            glib::Object::new()
+        }
+    }
+
+    impl NaturalLayout {
+        pub fn set_natural(&self, width: i32, height: i32) {
+            self.imp().natural.set((width, height));
+            self.layout_changed();
+        }
+    }
 }
 
 /// Rule 5: a capture keeps the display awake while its camera is open and
@@ -243,6 +330,7 @@ pub(super) fn release(core: &mut CoreState, id: u64) {
     for view in core.videos.iter().filter(|v| v.capture.get() == Some(id)) {
         view.picture.set_paintable(None::<&gdk::Paintable>);
         view.capture.set(None);
+        self_view_size(view, None);
     }
     gtk_media::follow_keep_awake(core);
 }
@@ -254,6 +342,7 @@ pub(super) fn set_video_capture(core: &mut CoreState, widget: WidgetId, capture:
         Some(id) => repaint(core, id),
         None => {
             view.picture.set_paintable(None::<&gdk::Paintable>);
+            self_view_size(&view, None);
             gtk_media::follow_keep_awake(core);
         }
     }
@@ -888,7 +977,7 @@ fn open_devices(
         let _ = pipeline.set_state(gst::State::Null);
         return Err((CaptureFailure::HardwareError, "the capture pipeline refused to start".to_owned()));
     }
-    Ok(Open { pipeline, paintable, _watch: watch, _remote: remote })
+    Ok(Open { pipeline, paintable, frames: (format.0, format.1), _watch: watch, _remote: remote })
 }
 
 /// GStreamer's error in the closed vocabulary (rule 2), its sentence kept.

@@ -1611,12 +1611,6 @@ fn natural_size(video: &WinVideo, size: (u32, u32)) -> windows_core::Result<()> 
     video.host.SetHeight(h)
 }
 
-/// A self-view's natural size: half its frames', 320x240 until it opens —
-/// `kayaVideoNatural`'s capture arm.
-fn capture_natural(size: (u32, u32)) -> (u32, u32) {
-    if size.0 == 0 || size.1 == 0 { (320, 240) } else { (size.0 / 2, size.1 / 2) }
-}
-
 pub(super) fn destroy_video(core: &mut CoreState, id: u64) {
     if let Some(i) = core.media.video_ids.iter().position(|v| *v == id) {
         core.media.video_ids.remove(i);
@@ -1702,12 +1696,12 @@ fn show_capture(video: &WinVideo, preview: Option<&CapturePreview>) -> windows_c
                 Some((b, _)) => video.picture.SetSource(b)?,
                 None => video.picture.SetSource(None::<&super::bindings::Microsoft::UI::Xaml::Media::ImageSource>)?,
             }
-            natural_size(video, capture_natural(p.size))?;
+            natural_size(video, crate::capture::self_view_natural(p.size))?;
             mirror(&video.picture, p.mirror)
         }
         None => {
             video.picture.SetSource(None::<&super::bindings::Microsoft::UI::Xaml::Media::ImageSource>)?;
-            natural_size(video, capture_natural((0, 0)))?;
+            natural_size(video, crate::capture::self_view_natural((0, 0)))?;
             mirror(&video.picture, false)
         }
     }

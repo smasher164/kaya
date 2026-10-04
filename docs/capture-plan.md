@@ -131,6 +131,18 @@ lowering is the same element the player already uses:
 | WinUI 3 | the reader's own frames through `CaptureFrame::rgb_at` into a `WriteableBitmap` (docs/traps.md, the WinUI self-view colour) | external content, as the player's (docs/media-plan.md §3) |
 | Android | CameraX `Preview` into a `PreviewView` (or `CameraXViewfinder`) in PERFORMANCE mode | the SurfaceView hole, as the player's |
 
+A self-view's natural size is half its frames' (320x240 for 640x480,
+640x360 for 1280x720) and 320x240 while no camera is open, and it takes no
+minimum: in a window narrower than that it shrinks to the room it is given
+and the picture keeps its aspect inside. One rule on all five backends,
+computed in one place, `crate::capture::self_view_natural`, which GTK and
+WinUI call directly and the two interpreters reach through
+`kaya_capture_self_view_natural` (the SwiftUI host table) and
+`KayaPresent.captureSelfViewNatural` (JNI); tools/check-verbs.py's
+self-view clause holds every arm to it. Half rather than the whole: a
+1280x720 camera at its full size is wider than most windows a call sits in,
+and the frames the app is handed are the full size either way (§4).
+
 The one-view rule, `fit`, the accessibility props and the visibility
 occurrence are the video view's. An app that must process its self-view
 (a blurred background) shows `surface(capture)` instead, the frames mode of

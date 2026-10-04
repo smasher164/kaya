@@ -1469,7 +1469,13 @@ in docs/deferred.md.
    records, or one asked for before the input's first read returns,
    crashes the emulator, so the arm asks for the tone only after that first
    read and the runner's one stream start is keyed on the arm's request.
-   Watched negatives on every clause, counts printed),
+   Watched negatives on every clause, counts printed. AND A SELF-VIEW'S
+   NATURAL SIZE SINCE 2026-10-03 (docs/capture-plan.md §3): half its
+   frames', 320x240 with no camera and no minimum, from
+   `crate::capture::self_view_natural` on all five arms through its C and
+   JNI doors; Compose had shipped a fixed 320x180 and GTK the frames' full
+   size with every capture leg green. Eleven watched negatives, counts
+   printed),
    `tools/check-file-modes.py` (the file-mode NUMBERS agree with the
    spec's wherever they are written down. `kaya_open_picked` takes an
    integer, crates/kaya/src/spec.rs decides what it means, and five
