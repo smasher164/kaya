@@ -14066,3 +14066,24 @@ now, 29 s standalone, with the verdicts still read in declaration order; a
 case's expected error renamed in a copy was watched refused. The next
 largest steps are haskell-build (17 s) and ten swift probe builds of about
 6.5 s each, still serial.
+
+## The android pool's per-leg drains, and its lib/example rebuild (measured 2026-10-05)
+
+Each Android EXCLUSIVE leg waits for every running leg to finish before it
+holds the token, so a suite with five of them interleaved drained its pool
+five times. On the full matrix of 2026-10-05 17:13Z the suites' legs summed
+715, 542 and 471 s (compose, jvm, go) on a four-phone pool, about 179, 135
+and 118 s if the pool stayed full, while the phases read 443, 266 and 224 s
+with 279 s of the lane's own exclusive holds among them. run_suite_legs now
+queues a suite's exclusive legs after its pooled ones, so they share the one
+drain the suite ends with anyway.
+
+Separately, `cargo ndk build --example rusthost` (compose) and `--lib` (jvm,
+go, python) rebuild kaya each time they alternate: the example graph unifies
+the dev-dependencies' features (rusqlite, automerge) into kaya's own, and
+`CARGO_LOG=cargo::core::compiler::fingerprint=info` reports
+`UnitDependencyInfoChanged` on kaya's lib unit both ways (76 s, then 30.6 s,
+then 0.2 s for a second `--lib`, then 11.3 s for the example again, on an
+otherwise quiet host). The iOS lane's `--lib`/`--example` pair does the same.
+A separate target directory for the example graph would end it, but costs a
+second 8 GB android tree on a disk that had 20 GB free; not done.

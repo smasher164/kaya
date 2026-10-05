@@ -2198,9 +2198,11 @@ def capture_audio_timeline(serial):
     failed = sum(s.get("read-failed", 0) for s in seconds.values())
     rows = "; ".join(f"{at} " + ",".join(f"{k} {n}" for k, n in s.items())
                      for at, s in sorted(seconds.items()))
+    load = os.getloadavg()[0]
     cause = (f"; THE EMULATOR'S AUDIO INPUT BROKE, so the guest heard padded silence "
              f"whatever was injected — measured under host load "
-             f"(one-minute load {os.getloadavg()[0]:.1f} now; docs/traps.md)" if failed else "")
+             f"(one-minute load {load:.1f} now; docs/traps.md)" if failed
+             else f"; one-minute load {load:.1f} now")
     return f"audio HAL: {failed} failed read(s){cause}; per second: {rows}"
 
 
@@ -3391,7 +3393,9 @@ def run_suite_legs(suite):
     apk_rel, package, activity = lane.SUITE_APPS[suite]
     apk = ROOT / apk_rel
     component = f"{package}/{activity}"
-    for leg in selected_legs(suite):
+    # THE SUITE'S EXCLUSIVE LEGS RUN LAST, together (docs/traps.md, the
+    # android pool's per-leg drains): each one empties the pool first.
+    for leg in sorted(selected_legs(suite), key=lambda leg: leg in lane.EXCLUSIVE):
         _selected += 1
         flags = lane.FLAGS.get(leg, {})
         scene = lane.scene_of(leg)
