@@ -13855,3 +13855,40 @@ row's shipped shared columns put back, the capture leg went red naming Stop.
 Every scene that asserts expect_no_clipping on Windows was blind on that half
 until then.
 
+
+
+## Timecode validation precedes When materialization
+
+The 2026-10-05 mac timecode leg refused `SwitchFormat` at step 42: the
+number declaration still held its bound signal's initial `-2`, although
+that transaction coalesced the signal to `1800` and selected drop-frame
+format. The flight-recorder bundle was
+`mac-timecode-rust-swiftui` in recorder run `20261005T051042Z-026519`
+(leg log and verb trace); the native backend never received the batch.
+
+The core now checks number declarations against coalesced writes and
+projects timecode template properties through signals and row records.
+The reader includes unrealized rows and newly-on When bodies before signal
+fan-out. Row mutations and inverse deltas use that same pure reader before
+changing derived structure. A post-fan-out refusal cannot use
+`rollback_group` to undo a newly stamped When: that rollback restores data,
+not stamps or bindings, and leaves the next activation believing the body
+already exists. User commits also advance the number value used by later
+format changes; a stale initial constant is not the current value.
+
+Guard: the `scene::tests::timecode_` regressions, including coalesced format
+switches, signal rollback, realized/unrealized row fields, inverse refusal,
+When recovery, dynamic format signals, and the latest user commit. The
+first focused run watched five failures (`target/timecode-finalstate-red.log`
+(built)); the shared timecode scene holds the native switching path.
+
+The focused unit binary also paused before Rust printed its test count.
+The successful process sample (`target/timecode-test-hang.sample` (built))
+showed PID 32676 at `_dyld_start + 0`, no loaded binary images, a 160 KB
+physical footprint, and 37 seconds elapsed. The launch log
+(`target/timecode-launch-log.txt` (built)) recorded AMFI's no-CMS diagnostic
+at 22:32:21, XprotectService's failed libiconv load-command diagnostic at
+22:32:41, and syspolicyd's `GK evaluateScanResult` at 22:33:02. These are
+matching launch/scan timestamps, not proof that any one diagnostic caused
+the delay. The process then ran the ten focused tests in 0.06 seconds and
+exited successfully; no launch-policy bypass was attempted.

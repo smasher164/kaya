@@ -1,0 +1,61 @@
+expect number_field@position "01:02:03:12"
+expect label@playhead "01:02:03:12"
+expect number_field@drop "00:00:59;29"
+expect_value number_field@drop "1799"
+expect number_field@rowtime[a] "00:00:01:00"
+click number_field@position
+set_text number_field@position ""
+expect_focused number_field@position
+type "00:00:02:12"
+expect label@commits "commits: 0"
+press return
+expect_value number_field@position "62"
+expect label@commits "commits: 1"
+expect label@playhead "00:00:02:12"
+click number_field@position
+set_text number_field@position "00:00:00:25"
+unfocus number_field@position
+expect number_field@position "00:00:02:12"
+expect label@commits "commits: 1"
+click number_field@position
+set_text number_field@position "٠٠:٠٠:٠٣:١٢"
+press return
+expect_value number_field@position "87"
+expect number_field@position "00:00:03:12"
+expect label@commits "commits: 2"
+click number_field@rowtime[a]
+set_text number_field@rowtime[a] "00:00:04:00"
+press return
+expect label@row "row a: 100"
+click number_field@drop
+set_text number_field@drop "00:01:00;02"
+press return
+expect_value number_field@drop "1800"
+expect number_field@drop "00:01:00;02"
+expect label@commits "commits: 3"
+click number_field@drop
+set_text number_field@drop "00:01:00;00"
+press return
+expect_value number_field@drop "1800"
+expect number_field@drop "00:01:00;02"
+expect label@commits "commits: 3"
+expect number_field@switching "{fmt:field -2 1}"
+click button@switchformat
+expect number_field@switching "00:01:00;02"
+expect_value number_field@switching "1800"
+click button@switchformat
+expect number_field@switching "{fmt:field -2 1}"
+expect_value number_field@switching "-2"
+click button@switchformat
+expect number_field@switching "00:01:00;02"
+click button@switchformat
+expect number_field@switching "{fmt:field -2 1}"
+expect label@commits "commits: 3"
+click number_field@drop
+nudge number_field@drop down
+expect_value number_field@drop "1799"
+expect number_field@drop "00:00:59;29"
+nudge number_field@drop up
+expect_value number_field@drop "1800"
+expect number_field@drop "00:01:00;02"
+expect label@commits "commits: 5"

@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x0e75ba3234ed9bffn;
+export const SPEC_HASH = 0xb28d4a0fddd60b2bn;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -125,6 +125,7 @@ export const PROP_FIT = 51;
 export const PROP_PLAYER = 52;
 export const PROP_CAPTURE = 53;
 export const PROP_ASPECT = 54;
+export const PROP_FORMAT = 55;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -2410,6 +2411,24 @@ export function tx_bind_aspect(widget_id: number, signal_id: number): Uint8Array
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_aspect_element(widget_id: number, level = 0, field = 0): Uint8Array {
   enc.begin(); enc.u64(widget_id); enc.u32(PROP_ASPECT); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant format value. */
+export function tx_set_format(widget_id: number, format: string): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_FORMAT); enc.u32(SOURCE_CONST); enc.value(format);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound format value. */
+export function tx_bind_format(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_FORMAT); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_format_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_FORMAT); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
   return enc.end(TX_SET_PROPERTY);
 }
 

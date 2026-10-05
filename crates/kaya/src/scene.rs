@@ -413,6 +413,14 @@ enum ClosedScope {
     When { id: u64, signal: SignalId, body: Arc<TplBody> },
 }
 
+#[derive(Default)]
+struct NumberInputs {
+    signals: HashMap<SignalId, Value>,
+    entries: HashMap<EntryRef, Option<(u32, Record)>>,
+    writes: HashSet<WidgetId>,
+    declarations: HashSet<u64>,
+}
+
 struct CollDecl {
     /// The declaration scope (0 = live zone); a For may only bind a
     /// collection declared in its own scope.
@@ -1002,6 +1010,8 @@ pub(crate) struct Scene {
     /// The number field's twin of the two above (docs/number-field-plan.md §2).
     number_ranges: HashMap<(bool, u64), crate::number_field::NumberRange>,
     number_dirty: Vec<(bool, u64)>,
+    number_commits: HashMap<WidgetId, f64>,
+    number_dynamic_formats: bool,
     /// docs/color-picker-plan.md §3 rule 3, the same shape again.
     color_decls: HashMap<(bool, u64), ColorDecl>,
     color_dirty: Vec<(bool, u64)>,
@@ -1116,6 +1126,7 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         Prop::Min | Prop::Max | Prop::Step => {
             matches!(kind, WidgetKind::Slider | WidgetKind::NumberField | WidgetKind::Range)
         }
+        Prop::Format => matches!(kind, WidgetKind::NumberField),
         Prop::TickSpacing => matches!(kind, WidgetKind::Slider | WidgetKind::Range),
         Prop::Low | Prop::High | Prop::MinGap | Prop::LowLabel | Prop::HighLabel => {
             kind == WidgetKind::Range
@@ -1698,7 +1709,7 @@ fn derive_edit(before: &str, after: &str) -> (usize, usize, String) {
 /// exhaustive: a new prop cannot ship without declaring its type.
 fn prop_value_type(prop: Prop) -> ValueType {
     match prop {
-        Prop::Text => ValueType::Str,
+        Prop::Text | Prop::Format => ValueType::Str,
         Prop::Checked => ValueType::Bool,
         Prop::Value | Prop::Min | Prop::Max => ValueType::F64,
         // Packed civil values (docs/datetime-plan.md D2): the enum
@@ -2509,6 +2520,9 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
     if let (Prop::Capture, Value::I64(capture)) = (prop, value) {
         assert!(*capture >= 0, "kaya: a video view's capture is a capture id, 0 for none, got {capture}");
     }
+    if let (Prop::Format, Value::Str(format)) = (prop, value) {
+        crate::fmt::NumberFormat::from_wire(format).unwrap_or_else(|why| panic!("kaya: Format on {kind:?}: {why}"));
+    }
     if let (Prop::Aspect, Value::I64(packed)) = (prop, value) {
         if let Err(why) = crate::protocol::Aspect::from_packed(*packed) {
             panic!("kaya: {prop:?} on {kind:?}: {why}");
@@ -2870,17 +2884,220 @@ impl Scene {
     }
 
     fn note_number_prop(&mut self, key: (bool, u64), prop: Prop, value: &Value) {
-        let Value::F64(x) = value else { return };
-        let range = self.number_ranges.entry(key).or_default();
-        match prop {
-            Prop::Min => range.min = *x,
-            Prop::Max => range.max = *x,
-            Prop::Step => range.step = *x,
-            Prop::Value => range.value = Some(*x),
-            _ => return,
-        }
+        if !self.number_ranges.entry(key).or_default().note(prop, value) { return; }
         if !self.number_dirty.contains(&key) {
             self.number_dirty.push(key);
+        }
+    }
+
+    fn preflight_number_rows(&self, tx: &[TxOp]) {
+        if !self.number_dynamic_formats
+            && !self.number_ranges.values().any(|range| matches!(range.format, crate::fmt::NumberFormat::Timecode(_)))
+            && !tx.iter().any(|op| matches!(op, TxOp::SetProperty { prop: Prop::Format, .. })) {
+            return;
+        }
+        let mut inputs = NumberInputs::default();
+        let mut properties = Vec::new();
+        let mut scope = 0usize;
+        for op in tx {
+            match op {
+                TxOp::CreateFor { .. } | TxOp::CreateWhen { .. } => { scope += 1; continue; }
+                TxOp::TemplateEnd => { scope = scope.saturating_sub(1); continue; }
+                _ if scope != 0 => continue,
+                _ => {}
+            }
+            match op {
+                TxOp::WriteSignal { id, value } => { inputs.signals.insert(*id, value.clone()); }
+                TxOp::SetProperty { widget, prop, value } => { properties.push((*widget, *prop, value)); }
+                TxOp::CollectionInsert { id, path, key, variant, record }
+                | TxOp::CollectionUpdate { id, path, key, variant, record } => {
+                    inputs.entries.insert((*id, path.iter().map(Key::from_value).collect(), Key::from_value(key)), Some((*variant, record.clone())));
+                }
+                TxOp::CollectionRemove { id, path, key } => {
+                    inputs.entries.insert((*id, path.iter().map(Key::from_value).collect(), Key::from_value(key)), None);
+                }
+                TxOp::CollectionUpdateField { id, path, key, field, value, .. } => {
+                    let entry = (*id, path.iter().map(Key::from_value).collect(), Key::from_value(key));
+                    if let Some(mut record) = self.number_entry(&entry, &inputs).cloned() {
+                        if let Some(slot) = record.1.get_mut(*field as usize) { *slot = value.clone(); }
+                        inputs.entries.insert(entry, Some(record));
+                    }
+                }
+                _ => {}
+            }
+        }
+        if inputs.entries.is_empty() { return; }
+        let mut candidates = self.number_candidates(&inputs);
+        for (widget, prop, value) in properties {
+            let Some(range) = candidates.get_mut(&(false, widget.0)) else { continue };
+            let value = match value {
+                PropValue::Const(value) => Some(value),
+                PropValue::Signal(signal) => self.number_signal(signal, &inputs),
+                _ => None,
+            };
+            if let Some(value) = value { range.note(prop, value); }
+        }
+        if let Some(msg) = self.timecode_refusal(&candidates, &inputs) { panic!("{msg}"); }
+    }
+
+    fn number_candidates(&self, inputs: &NumberInputs) -> HashMap<(bool, u64), crate::number_field::NumberRange> {
+        let mut candidates = self.number_ranges.clone();
+        for (signal, value) in &inputs.signals {
+            for (widget, prop) in self.bindings.get(signal).into_iter().flatten() {
+                if let Some(range) = candidates.get_mut(&(false, widget.0)) { range.note(*prop, value); }
+            }
+        }
+        candidates
+    }
+
+    fn number_signal<'a>(&'a self, id: &SignalId, inputs: &'a NumberInputs) -> Option<&'a Value> {
+        inputs.signals.get(id).or_else(|| self.signals.get(id))
+    }
+
+    fn number_entry<'a>(&'a self, entry: &EntryRef, inputs: &'a NumberInputs) -> Option<&'a (u32, Record)> {
+        if let Some(state) = inputs.entries.get(entry) { return state.as_ref(); }
+        self.coll_instances.get(&(entry.0, entry.1.clone()))?.entries.get(&entry.2)
+    }
+
+    fn number_body_has_timecode(&self, body: &TplBody, inputs: &NumberInputs) -> bool {
+        body.ops.iter().any(|op| match op {
+            TplOp::SetProp { prop: Prop::Format, value, .. } => {
+                let value = match value {
+                    PropValue::Const(value) => Some(value),
+                    PropValue::Signal(signal) => self.number_signal(signal, inputs),
+                    PropValue::Element { .. } => return true,
+                };
+                !matches!(value, Some(Value::Str(text)) if text == "number")
+            }
+            TplOp::For { bodies, .. } => bodies.iter().any(|body| self.number_body_has_timecode(body, inputs)),
+            TplOp::When { body, .. } => self.number_body_has_timecode(body, inputs),
+            _ => false,
+        })
+    }
+
+    // docs/traps.md: Timecode validation precedes When materialization.
+    fn number_body_refusal(&self, body: &TplBody, path: &PathKey, chain: Option<&[EntryRef]>, inputs: &NumberInputs) -> Option<String> {
+        if inputs.declarations.is_empty() && !self.number_body_has_timecode(body, inputs) { return None; }
+        let mut ranges: HashMap<u64, crate::number_field::NumberRange> = HashMap::new();
+        for op in &body.ops {
+            match op {
+                TplOp::Widget { node, kind: WidgetKind::NumberField } => { ranges.insert(*node, Default::default()); }
+                TplOp::SetProp { node, prop, value } => {
+                    let Some(range) = ranges.get_mut(node) else { continue };
+                    let resolved = match value {
+                        PropValue::Const(value) => Some(value),
+                        PropValue::Signal(signal) => self.number_signal(signal, inputs),
+                        PropValue::Element { level, field } => chain.and_then(|chain| {
+                            let entry = chain.get(chain.len().checked_sub(*level as usize + 1)?)?;
+                            self.number_entry(entry, inputs)?.1.get(*field as usize)
+                        }),
+                    };
+                    if let Some(value) = resolved { range.note(*prop, value); }
+                    if *prop == Prop::Value && chain.is_some() {
+                        if let Some(widget) = self.node_instances.get(&(*node, path.clone())) {
+                            let replaced = inputs.writes.contains(widget) || match value {
+                                PropValue::Signal(signal) => inputs.signals.contains_key(signal),
+                                PropValue::Element { level, .. } => chain.is_some_and(|chain| {
+                                    chain.get(chain.len().saturating_sub(*level as usize + 1))
+                                        .is_some_and(|entry| inputs.entries.contains_key(entry))
+                                }),
+                                _ => false,
+                            };
+                            if !replaced {
+                                if let Some(value) = self.number_commits.get(widget) { range.value = Some(*value); }
+                            }
+                        }
+                    }
+                }
+                TplOp::For { collection, bodies, .. } => {
+                    let refusal = if let Some(chain) = chain {
+                        self.number_rows_refusal(*collection, path, chain, bodies, inputs)
+                    } else {
+                        bodies.iter().find_map(|body| self.number_body_refusal(body, path, None, inputs))
+                    };
+                    if refusal.is_some() { return refusal; }
+                }
+                TplOp::When { signal, body, .. } => {
+                    if chain.is_none() || self.number_signal(signal, inputs) == Some(&Value::Bool(true)) {
+                        let refusal = self.number_body_refusal(body, path, chain, inputs);
+                        if refusal.is_some() { return refusal; }
+                    }
+                }
+                _ => {}
+            }
+        }
+        ranges.into_iter().find_map(|(node, mut range)| {
+            if chain.is_some() && range.value.is_none() {
+                if let Some(id) = self.node_instances.get(&(node, path.clone())) {
+                    if !inputs.writes.contains(id) { range.value = self.number_commits.get(id).copied(); }
+                }
+            }
+            if (chain.is_none() && inputs.declarations.contains(&node))
+                || (chain.is_some() && (range.invalid_format || matches!(range.format, crate::fmt::NumberFormat::Timecode(_)))) {
+                range.refusal(&format!("template node {node} at {path:?}"))
+            } else { None }
+        })
+    }
+
+    fn number_rows_refusal(&self, collection: CollectionId, path: &PathKey, chain: &[EntryRef], bodies: &[Arc<TplBody>], inputs: &NumberInputs) -> Option<String> {
+        if !bodies.iter().any(|body| self.number_body_has_timecode(body, inputs)) { return None; }
+        let mut keys: HashSet<Key> = self.coll_instances.get(&(collection, path.clone()))
+            .map(|instance| instance.entries.keys().cloned().collect()).unwrap_or_default();
+        keys.extend(inputs.entries.keys().filter(|(id, p, _)| *id == collection && p == path).map(|(_, _, key)| key.clone()));
+        for key in keys {
+            let entry = (collection, path.clone(), key.clone());
+            let Some((variant, _)) = self.number_entry(&entry, inputs) else { continue };
+            let Some(body) = bodies.get(*variant as usize) else { continue };
+            let mut row_chain = chain.to_vec();
+            row_chain.push(entry);
+            let mut row_path = path.clone();
+            row_path.push(key);
+            if let Some(msg) = self.number_body_refusal(body, &row_path, Some(&row_chain), inputs) { return Some(msg); }
+        }
+        None
+    }
+
+    fn timecode_refusal(&self, candidates: &HashMap<(bool, u64), crate::number_field::NumberRange>, inputs: &NumberInputs) -> Option<String> {
+        if inputs.declarations.is_empty() && !self.number_dynamic_formats && !candidates.values().any(|range| range.invalid_format || matches!(range.format, crate::fmt::NumberFormat::Timecode(_))) { return None; }
+        for ((template, id), range) in candidates {
+            if !template && (range.invalid_format || matches!(range.format, crate::fmt::NumberFormat::Timecode(_))) {
+                if let Some(msg) = range.refusal(&id.to_string()) { return Some(msg); }
+            }
+        }
+        for ((collection, path), site) in &self.for_sites {
+            if !self.widgets.contains_key(&site.container) { continue; }
+            for body in &site.bodies {
+                if let Some(msg) = self.number_body_refusal(body, path, None, inputs) { return Some(msg); }
+            }
+            if let Some(msg) = self.number_rows_refusal(*collection, path, &site.chain, &site.bodies, inputs) { return Some(msg); }
+        }
+        for site in self.when_sites.values().filter(|site| self.widgets.contains_key(&site.container)) {
+            if let Some(msg) = self.number_body_refusal(&site.body, &site.path, None, inputs) { return Some(msg); }
+            if self.number_signal(&site.signal, inputs) == Some(&Value::Bool(true)) {
+                if let Some(msg) = self.number_body_refusal(&site.body, &site.path, Some(&site.chain), inputs) { return Some(msg); }
+            }
+        }
+        None
+    }
+
+    pub(crate) fn user_number_committed(&mut self, tag: &[u8], value: f64) {
+        match crate::wire::decode_value_committed_tag(tag, value) {
+            Occurrence::ValueCommitted { id, .. } if self.widgets.get(&id) == Some(&WidgetKind::NumberField) => {
+                self.number_ranges.entry((false, id.0)).or_default().value = Some(value);
+            }
+            Occurrence::InstanceValueCommitted { node, path, .. } if self.template_nodes.get(&node.0) == Some(&WidgetKind::NumberField) => {
+                if let Some(id) = self.instance_widget(node.0, &path) { self.number_commits.insert(id, value); }
+            }
+            _ => {}
+        }
+    }
+
+    fn absorb_number_writes(&mut self, out: &[ApplyOp]) {
+        for op in out {
+            match op {
+                ApplyOp::SetProp { id, prop: Prop::Value, .. } | ApplyOp::Destroy { id } => { self.number_commits.remove(id); }
+                _ => {}
+            }
         }
     }
 
@@ -2923,6 +3140,8 @@ impl Scene {
     }
 
     pub(crate) fn apply(&mut self, tx: Transaction) -> Vec<ApplyOp> {
+        self.preflight_number_rows(&tx);
+        let number_before = self.number_ranges.clone();
         let mut out = Vec::new();
         // First-dirtied order, deduped.
         let mut dirty: Vec<SignalId> = Vec::new();
@@ -2947,6 +3166,9 @@ impl Scene {
         let mut declared_breakpoints: Vec<usize> = Vec::new();
 
         for (at, op) in tx.into_iter().enumerate() {
+            if matches!(&op, TxOp::SetProperty { prop: Prop::Format, value: PropValue::Signal(_) | PropValue::Element { .. }, .. }) {
+                self.number_dynamic_formats = true;
+            }
             if !scopes.is_empty() {
                 self.declare(op, &mut scopes, &mut out);
                 continue;
@@ -4745,12 +4967,30 @@ impl Scene {
                 range.check(key.1);
             }
         }
-        for key in std::mem::take(&mut self.number_dirty) {
-            if let Some(range) = self.number_ranges.get(&key) {
-                let who = if key.0 { format!("template node {}", key.1) } else { key.1.to_string() };
-                range.check(&who);
+        let number_dirty = std::mem::take(&mut self.number_dirty);
+        let number_inputs = NumberInputs {
+            declarations: number_dirty.iter().filter_map(|(template, node)| template.then_some(*node)).collect(),
+            signals: dirty.iter().map(|id| (*id, self.signals[id].clone())).collect(),
+            writes: out.iter().filter_map(|op| match op {
+                ApplyOp::SetProp { id, prop: Prop::Value, .. } => Some(*id),
+                _ => None,
+            }).collect(),
+            ..NumberInputs::default()
+        };
+        let number_candidates = self.number_candidates(&number_inputs);
+        let refusal = number_dirty.iter().find_map(|key| {
+            if key.0 { return None; }
+            number_candidates.get(key)?.refusal(&key.1.to_string())
+        }).or_else(|| self.timecode_refusal(&number_candidates, &number_inputs));
+        if let Some(msg) = refusal {
+            self.number_ranges = number_before;
+            match group.take() {
+                Some(cap) => self.rollback_group(&cap, &rollback),
+                None => { for (sid, old) in &rollback { self.signals.insert(*sid, old.clone()); } }
             }
+            panic!("{msg}");
         }
+        self.number_ranges = number_candidates;
         for key in std::mem::take(&mut self.color_dirty) {
             if let Some(decl) = self.color_decls.get(&key) {
                 let who = if key.0 { format!("template node {}", key.1) } else { key.1.to_string() };
@@ -4969,6 +5209,7 @@ impl Scene {
         // core's record of each field's text and closes an episode when an
         // app write changes it (D7, narrowed by A3 to writes that
         // differ).
+        self.absorb_number_writes(&out);
         self.absorb_text_writes(&out);
 
         if let Some(cap) = group {
@@ -5887,6 +6128,9 @@ impl Scene {
         window: WindowId,
         out: &mut Vec<ApplyOp>,
     ) -> Option<Occurrence> {
+        if let LedgerEntry::Group { inverse, .. } = self.ledgers.get(&window)?.done.last()? {
+            self.preflight_number_delta(inverse);
+        }
         let entry = self.ledgers.get_mut(&window)?.done.pop()?;
         let (label, delta, back) = match entry {
             LedgerEntry::Group {
@@ -5935,6 +6179,9 @@ impl Scene {
     /// forward delta was computed at apply, beside the inverse, so a
     /// redo re-runs no handler and re-derives nothing.
     pub(crate) fn redo(&mut self, window: WindowId) -> Option<(Vec<ApplyOp>, Occurrence)> {
+        if let LedgerEntry::Group { forward, .. } = self.ledgers.get(&window)?.redo.last()? {
+            self.preflight_number_delta(forward);
+        }
         let entry = self.ledgers.get_mut(&window)?.redo.pop()?;
         let (label, delta, back) = match entry {
             LedgerEntry::Group {
@@ -5980,7 +6227,22 @@ impl Scene {
     /// widgets follow their props; then entries, so everything the order names
     /// exists; then orders; then texts, the only part that touches
     /// widget-owned state.
+    fn preflight_number_delta(&self, delta: &UndoDelta) -> HashMap<(bool, u64), crate::number_field::NumberRange> {
+        let inputs = NumberInputs {
+            signals: delta.signals.iter().cloned().collect(),
+            entries: delta.entries.iter().map(|entry| (
+                (entry.collection, entry.path.iter().map(Key::from_value).collect(), Key::from_value(&entry.key)),
+                entry.state.clone(),
+            )).collect(),
+            ..NumberInputs::default()
+        };
+        let candidates = self.number_candidates(&inputs);
+        if let Some(msg) = self.timecode_refusal(&candidates, &inputs) { panic!("{msg}"); }
+        candidates
+    }
+
     fn apply_delta(&mut self, delta: &UndoDelta, out: &mut Vec<ApplyOp>) {
+        self.number_ranges = self.preflight_number_delta(delta);
         let from = out.len();
         let mut dirty: Vec<SignalId> = Vec::new();
         for (id, value) in &delta.signals {
@@ -8734,6 +8996,7 @@ impl Scene {
             ledger.redo.retain(|entry| !spent(entry));
         }
         for id in stamp.widgets.iter().rev() {
+            self.number_commits.remove(id);
             out.push(ApplyOp::Destroy { id: *id });
         }
     }
@@ -13284,6 +13547,233 @@ mod tests {
             value: PropValue::Signal(SignalId(1)),
         });
         Scene::new().apply(ops);
+    }
+
+    #[test]
+    fn timecode_format_is_checked_with_the_complete_declaration() {
+        let ops = |format: &str, value: f64, step: f64| vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::NumberField },
+            TxOp::SetProperty { widget: WidgetId(1), prop: Prop::Value, value: PropValue::Const(Value::F64(value)) },
+            TxOp::SetProperty { widget: WidgetId(1), prop: Prop::Format, value: PropValue::Const(Value::Str(format.into())) },
+            TxOp::SetProperty { widget: WidgetId(1), prop: Prop::Step, value: PropValue::Const(Value::F64(step)) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ];
+        Scene::new().apply(ops("timecode:30000/1001:df", 1800.0, 1.0));
+        for (f,v,step) in [("percent", 0.0, 1.0), ("timecode:25/1:df", 0.0, 1.0), ("timecode:25/1:ndf", -1.0, 1.0), ("timecode:25/1:ndf", 1.5, 1.0), ("timecode:25/1:ndf", 1.0, 2.0)] {
+            assert!(std::panic::catch_unwind(|| Scene::new().apply(ops(f,v,step))).is_err(), "{f} {v} {step}");
+        }
+    }
+
+    #[test]
+    fn timecode_switch_reads_the_coalesced_bound_value() {
+        for reversed in [false, true] {
+            let mut scene = Scene::new();
+            scene.apply(vec![
+                TxOp::CreateSignal { id: SignalId(1), initial: Value::F64(-2.0) },
+                TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::NumberField },
+                TxOp::SetProperty { widget: WidgetId(1), prop: Prop::Value,
+                    value: PropValue::Signal(SignalId(1)) },
+                TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+            ]);
+            for (format, value) in [("timecode:30000/1001:df", 1800.0), ("number", -2.0)] {
+                let mut ops = vec![
+                    TxOp::SetProperty { widget: WidgetId(1), prop: Prop::Format,
+                        value: PropValue::Const(Value::Str(format.into())) },
+                    TxOp::WriteSignal { id: SignalId(1), value: Value::F64(value) },
+                ];
+                if reversed { ops.reverse(); }
+                let out = scene.apply(ops);
+                assert!(out.iter().any(|op| matches!(op, ApplyOp::SetProp {
+                    id: WidgetId(1), prop: Prop::Value, value: Value::F64(v)
+                } if *v == value)));
+            }
+        }
+    }
+
+    #[test]
+    fn timecode_switch_reads_the_latest_user_commit() {
+        let mut scene = Scene::new();
+        scene.apply(number_field(&[(Prop::Value, 0.0)]));
+        scene.user_number_committed(&crate::wire::click_tag(1, &[]), -2.0);
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            scene.apply(vec![TxOp::SetProperty { widget: WidgetId(1), prop: Prop::Format,
+                value: PropValue::Const(v("timecode:30000/1001:df")) }]);
+        })).is_err());
+        assert!(matches!(scene.number_ranges[&(false, 1)].format, crate::fmt::NumberFormat::Number));
+        scene.apply(vec![
+            TxOp::SetProperty { widget: WidgetId(1), prop: Prop::Format,
+                value: PropValue::Const(v("timecode:30000/1001:df")) },
+            TxOp::SetProperty { widget: WidgetId(1), prop: Prop::Value, value: PropValue::Const(Value::F64(1800.0)) },
+        ]);
+    }
+
+    #[test]
+    fn timecode_preserves_ordinary_number_signal_clamping() {
+        let mut scene = Scene::new();
+        let mut ops = vec![TxOp::CreateSignal { id: SignalId(1), initial: Value::F64(2.0) }];
+        ops.extend(number_field(&[(Prop::Min, 0.0), (Prop::Max, 10.0)]));
+        ops.push(TxOp::SetProperty { widget: WidgetId(1), prop: Prop::Value, value: PropValue::Signal(SignalId(1)) });
+        scene.apply(ops);
+        let out = scene.apply(vec![TxOp::WriteSignal { id: SignalId(1), value: Value::F64(-2.5) }]);
+        assert!(out.iter().any(|op| matches!(op, ApplyOp::SetProp { prop: Prop::Value, value: Value::F64(v), .. } if *v == -2.5)));
+    }
+
+    fn timecode_signal_scene(conditional: bool) -> Scene {
+        let mut scene = Scene::new();
+        let mut ops = vec![
+            TxOp::CreateSignal { id: SignalId(1), initial: Value::F64(12.0) },
+            TxOp::CreateSignal { id: SignalId(2), initial: Value::Bool(false) },
+        ];
+        if conditional { ops.push(TxOp::CreateWhen { id: 2, signal: SignalId(2) }); }
+        ops.extend([
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::NumberField },
+            TxOp::SetProperty { widget: WidgetId(1), prop: Prop::Value, value: PropValue::Signal(SignalId(1)) },
+            TxOp::SetProperty { widget: WidgetId(1), prop: Prop::Format,
+                value: PropValue::Const(v("timecode:30000/1001:df")) },
+        ]);
+        if conditional { ops.push(TxOp::TemplateEnd); }
+        ops.push(TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(if conditional { 2 } else { 1 }) });
+        scene.apply(ops);
+        scene
+    }
+
+    #[test]
+    fn timecode_invalid_signal_rolls_back_before_fanout() {
+        for bad in [-1.0, 1.5, crate::number_field::UNBOUNDED] {
+            let mut scene = timecode_signal_scene(false);
+            let before = scene.bindings.clone();
+            assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                scene.apply(vec![TxOp::WriteSignal { id: SignalId(1), value: Value::F64(bad) }]);
+            })).is_err());
+            assert_eq!(scene.signals[&SignalId(1)], Value::F64(12.0));
+            assert_eq!(scene.bindings, before);
+            scene.apply(vec![TxOp::WriteSignal { id: SignalId(1), value: Value::F64(13.0) }]);
+        }
+    }
+
+    #[test]
+    fn timecode_when_refusal_does_not_poison_later_activation() {
+        let mut scene = timecode_signal_scene(true);
+        scene.apply(vec![TxOp::WriteSignal { id: SignalId(1), value: Value::F64(-1.0) }]);
+        let instances = scene.node_instances.clone();
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            scene.apply(vec![TxOp::WriteSignal { id: SignalId(2), value: Value::Bool(true) }]);
+        })).is_err());
+        assert_eq!(scene.signals[&SignalId(2)], Value::Bool(false));
+        assert_eq!(scene.node_instances, instances);
+        assert!(scene.when_sites.values().all(|site| site.stamp.is_none()));
+        let ops = scene.apply(vec![
+            TxOp::WriteSignal { id: SignalId(2), value: Value::Bool(true) },
+            TxOp::WriteSignal { id: SignalId(1), value: Value::F64(1800.0) },
+        ]);
+        assert_eq!(creates(&ops), vec![(WidgetKind::NumberField, true)]);
+    }
+
+    fn timecode_row_scene() -> Scene {
+        let mut scene = Scene::new();
+        scene.declare_windowing();
+        scene.apply(vec![
+            TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::F64]] },
+            TxOp::CreateFor { id: 1, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::NumberField },
+            TxOp::SetProperty { widget: WidgetId(10), prop: Prop::Value,
+                value: PropValue::Element { level: 0, field: 0 } },
+            TxOp::SetProperty { widget: WidgetId(10), prop: Prop::Format,
+                value: PropValue::Const(v("timecode:30000/1001:df")) },
+            TxOp::TemplateEnd,
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+        scene.apply((0..200).map(|key| TxOp::CollectionInsert {
+            id: CollectionId(1), path: vec![], key: Value::I64(key), variant: 0,
+            record: vec![Value::F64(key as f64)],
+        }).collect());
+        scene
+    }
+
+    #[test]
+    fn timecode_row_field_refuses_invalid_realized_and_unrealized_frames() {
+        for (key, marked) in [(0, false), (0, true), (199, false), (199, true)] {
+            for bad in [-1.0, 1.5] {
+                let mut scene = timecode_row_scene();
+                assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let mut ops = if marked { vec![group("bad frame")] } else { Vec::new() };
+                    ops.push(TxOp::CollectionUpdateField {
+                        id: CollectionId(1), path: vec![], key: Value::I64(key), variant: 0,
+                        field: 0, value: Value::F64(bad),
+                    });
+                    scene.apply(ops);
+                })).is_err());
+                assert_eq!(scene.coll_instances[&(CollectionId(1), vec![])].entries[&Key::I64(key)].1,
+                    vec![Value::F64(key as f64)]);
+                scene.window_moved(1, key as usize, 1);
+                assert!(scene.node_instances.contains_key(&(10, vec![Key::I64(key)])));
+            }
+        }
+    }
+
+    #[test]
+    fn timecode_window_teardown_forgets_user_commits() {
+        let mut scene = timecode_row_scene();
+        let id = scene.instance_widget(10, &[Value::I64(0)]).unwrap();
+        scene.user_number_committed(&crate::wire::click_tag(10, &[Value::I64(0)]), 12.0);
+        assert_eq!(scene.number_commits.get(&id), Some(&12.0));
+        scene.window_moved(1, 199, 1);
+        assert!(!scene.number_commits.contains_key(&id));
+    }
+
+    #[test]
+    fn timecode_template_format_signal_reads_final_row_frames() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateSignal { id: SignalId(1), initial: v("number") },
+            TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::F64]] },
+            TxOp::CreateFor { id: 1, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::NumberField },
+            TxOp::SetProperty { widget: WidgetId(10), prop: Prop::Value, value: PropValue::Element { level: 0, field: 0 } },
+            TxOp::SetProperty { widget: WidgetId(10), prop: Prop::Format, value: PropValue::Signal(SignalId(1)) },
+            TxOp::TemplateEnd,
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+            TxOp::CollectionInsert { id: CollectionId(1), path: vec![], key: v("a"), variant: 0, record: vec![Value::F64(-2.0)] },
+        ]);
+        for format in ["timecode:30000/1001:df", "invalid"] {
+            assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                scene.apply(vec![TxOp::WriteSignal { id: SignalId(1), value: v(format) }]);
+            })).is_err());
+            assert_eq!(scene.signals[&SignalId(1)], v("number"));
+        }
+        scene.apply(vec![
+            TxOp::WriteSignal { id: SignalId(1), value: v("timecode:30000/1001:df") },
+            TxOp::CollectionUpdateField { id: CollectionId(1), path: vec![], key: v("a"), variant: 0, field: 0, value: Value::F64(1800.0) },
+        ]);
+        scene.apply(vec![
+            TxOp::CollectionUpdateField { id: CollectionId(1), path: vec![], key: v("a"), variant: 0, field: 0, value: Value::F64(-2.0) },
+            TxOp::WriteSignal { id: SignalId(1), value: v("number") },
+        ]);
+    }
+
+    #[test]
+    fn timecode_inverse_refuses_before_mutating_signals_or_whens() {
+        let mut scene = timecode_signal_scene(true);
+        let delta = UndoDelta { signals: vec![(SignalId(1), Value::F64(-1.0)),
+            (SignalId(2), Value::Bool(true))], ..UndoDelta::default() };
+        let mut out = Vec::new();
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            scene.apply_delta(&delta, &mut out);
+        })).is_err());
+        assert!(out.is_empty());
+        assert_eq!(scene.signals[&SignalId(1)], Value::F64(12.0));
+        assert_eq!(scene.signals[&SignalId(2)], Value::Bool(false));
+        assert!(scene.when_sites.values().all(|site| site.stamp.is_none()));
+    }
+
+    #[test]
+    #[should_panic(expected = "Label has no property Format")]
+    fn only_a_number_field_takes_format() {
+        Scene::new().apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Label },
+            TxOp::SetProperty { widget: WidgetId(1), prop: Prop::Format, value: PropValue::Const(Value::Str("number".into())) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
     }
 
     fn color_picker(props: &[(Prop, Value)]) -> Vec<TxOp> {

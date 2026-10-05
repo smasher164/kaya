@@ -1097,6 +1097,7 @@ pub const KAYA_PROP_CAPTURE: u32 = 53;
 /// A video view's box ratio (docs/media-plan.md §3): the width in the high
 /// 32 bits and the height in the low 32, each a signed 32-bit integer.
 pub const KAYA_PROP_ASPECT: u32 = 54;
+pub const KAYA_PROP_FORMAT: u32 = 55;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -1347,6 +1348,7 @@ const _: () = assert!(
         && KAYA_PROP_PLAYER == wire::PROP_PLAYER
         && KAYA_PROP_CAPTURE == wire::PROP_CAPTURE
         && KAYA_PROP_ASPECT == wire::PROP_ASPECT
+        && KAYA_PROP_FORMAT == wire::PROP_FORMAT
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -1868,7 +1870,7 @@ const _: () = {
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 54,
+    crate::spec::PROPS.len() == 55,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(
@@ -2320,6 +2322,91 @@ pub unsafe extern "C" fn kaya_fmt_number(
     cap: usize,
 ) -> usize {
     unsafe { fill(crate::fmt::number(value, number_options(options)).as_bytes(), out, cap) }
+}
+
+// docs/number-field-plan.md §10.
+fn timecode_rate(numerator: i64, denominator: i64, drop_frame: u32) -> Option<crate::fmt::TimecodeRate> {
+    if drop_frame > 1 {
+        crate::fault::report(format!("kaya: format timecode drop flag {drop_frame}: expected 0 or 1"));
+        return None;
+    }
+    match crate::fmt::TimecodeRate::new(numerator, denominator, drop_frame != 0) {
+        Ok(rate) => Some(rate),
+        Err(why) => { crate::fault::report(format!("kaya: {why}")); None }
+    }
+}
+
+/// # Safety
+/// `out` must be null or valid for `cap` bytes. Zero reports invalid arguments through kaya_fault.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_fmt_timecode(frames: i64, numerator: i64, denominator: i64, drop_frame: u32, out: *mut u8, cap: usize) -> usize {
+    let Some(rate) = timecode_rate(numerator, denominator, drop_frame) else { return 0 };
+    let Some(text) = crate::fmt::timecode(frames, rate) else {
+        crate::fault::report(format!("kaya: format timecode frames {frames}: expected 0..={}", crate::fmt::MAX_TIMECODE_FRAMES));
+        return 0;
+    };
+    unsafe { fill(text.as_bytes(), out, cap) }
+}
+
+/// # Safety
+/// `text` must be a NUL-terminated UTF-8 string. Returns -1 for unreadable text or invalid rate.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_fmt_parse_timecode(text: *const std::ffi::c_char, numerator: i64, denominator: i64, drop_frame: u32) -> i64 {
+    let Some(rate) = timecode_rate(numerator, denominator, drop_frame) else { return -1 };
+    if text.is_null() { return -1; }
+    let Ok(text) = (unsafe { std::ffi::CStr::from_ptr(text) }).to_str() else { return -1 };
+    crate::fmt::parse_timecode(text, rate).unwrap_or(-1)
+}
+
+#[cfg(test)]
+mod timecode_floor_tests {
+    use super::*;
+
+    #[test]
+    fn timecode_floor_sizes_copies_and_parses() {
+        unsafe {
+            assert_eq!(kaya_fmt_timecode(1800, 30000, 1001, 1, std::ptr::null_mut(), 0), 11);
+            let mut out = [b'x'; 14];
+            assert_eq!(kaya_fmt_timecode(1800, 30000, 1001, 1, out.as_mut_ptr(), 5), 11);
+            assert_eq!(&out[..6], b"00:01x");
+            assert_eq!(kaya_fmt_timecode(1800, 30000, 1001, 1, out.as_mut_ptr(), 14), 11);
+            assert_eq!(&out[..12], b"00:01:00;02x");
+            assert_eq!(kaya_fmt_parse_timecode(c"00:01:00;02".as_ptr(), 30000, 1001, 1), 1800);
+            assert_eq!(kaya_fmt_parse_timecode(c"00:01:00;00".as_ptr(), 30000, 1001, 1), -1);
+            assert_eq!(kaya_fmt_parse_timecode(std::ptr::null(), 25, 1, 0), -1);
+            assert_eq!(kaya_fmt_parse_timecode([0xffu8, 0].as_ptr().cast(), 25, 1, 0), -1);
+        }
+    }
+
+    #[test]
+    #[ignore = "run in a fresh process by timecode_floor_refusals_are_named"]
+    fn refusal_child() {
+        let case = std::env::var("KAYA_TIMECODE_REFUSAL").expect("parent supplies refusal");
+        unsafe {
+            match case.as_str() {
+                "flag" => { kaya_fmt_timecode(0, 25, 1, 2, std::ptr::null_mut(), 0); }
+                "rate" => { kaya_fmt_timecode(0, 25, 0, 0, std::ptr::null_mut(), 0); }
+                "frames" => { kaya_fmt_timecode(-1, 25, 1, 0, std::ptr::null_mut(), 0); }
+                _ => panic!("unknown refusal {case}"),
+            }
+        }
+        panic!("the invalid argument was not refused");
+    }
+
+    #[test]
+    fn timecode_floor_refusals_are_named() {
+        for (case, sentence) in [("flag", "format timecode drop flag 2"),
+                                 ("rate", "format timecode rate 25/0"),
+                                 ("frames", "format timecode frames -1")] {
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--ignored", "--exact", "capi::timecode_floor_tests::refusal_child", "--nocapture"])
+                .env("KAYA_TIMECODE_REFUSAL", case).output().unwrap();
+            let said = String::from_utf8_lossy(&out.stderr);
+            assert_eq!(out.status.code(), Some(1), "{case}: {said}");
+            assert!(said.contains(sentence), "{case}: {said}");
+            eprintln!("timecode refusal {case}: {said}");
+        }
+    }
 }
 
 /// A fraction as the locale's percentage; `options` may be null.
@@ -4553,6 +4640,9 @@ pub unsafe extern "C" fn kaya_emit_value_committed(tag: *const u8, tag_len: usiz
     let tag = unsafe { std::slice::from_raw_parts(tag, tag_len) };
     if !stamped_tag_is_live(tag, "a value commit") {
         return;
+    }
+    if let Some(scene) = PRESENTATION_SCENE.lock().unwrap().as_mut() {
+        scene.user_number_committed(tag, value);
     }
     if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
         sink.send_value_committed_tag(tag, value);

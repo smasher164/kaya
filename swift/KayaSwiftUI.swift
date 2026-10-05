@@ -22,7 +22,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x0e75ba3234ed9bff
+let kayaSpecHash: UInt64 = 0xb28d4a0fddd60b2b
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -318,6 +318,7 @@ private let propFit: UInt32 = 51
 private let propPlayer: UInt32 = 52
 private let propCapture: UInt32 = 53
 private let propAspect: UInt32 = 54
+private let propFormat: UInt32 = 55
 private let fileContentImages: UInt32 = 1
 private let tintAccent: Int64 = 1
 private let tintSuccess: Int64 = 2
@@ -766,6 +767,7 @@ final class KayaNode: Identifiable {
     var value = 0.0
     var minValue = 0.0
     var maxValue = 1.0
+    var numberFormat = "number"
     /// The slider's granularity and drawn ticks (0 = none), and the value the
     /// last gesture SETTLED ON — what value_committed compares against
     /// (docs/slider-plan.md S1, S2, S5).
@@ -5545,6 +5547,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
     // catalog re-syncs the native chrome ONCE at the batch boundary
     // (the macOS NSMenu segment, the shortcut dispatch table).
     var menusTouched = false
+    var numberWrites = Set<UInt64>()
     batch.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
         var at = 0
         while at + 8 <= raw.count {
@@ -6186,15 +6189,17 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaScene.nodes[id]!.committed = kayaScene.nodes[id]!.value
                     // An app write shows the new value (docs/number-field-plan.md §2).
                     if kayaScene.nodes[id]!.kind == kindNumberField {
-                        kayaScene.nodes[id]!.text =
-                            kayaNumberText(kayaScene.nodes[id]!.value, kayaScene.nodes[id]!.step)
+                        numberWrites.insert(id)
                     }
+                case (propFormat, valueStr):
+                    let node = kayaScene.nodes[id]!
+                    node.numberFormat = String(decoding: raw[(body + 24)..<(body + 24 + len)], as: UTF8.self)
+                    numberWrites.insert(id)
                 case (propStep, valueF64):
                     kayaScene.nodes[id]!.step =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
                     if kayaScene.nodes[id]!.kind == kindNumberField {
-                        kayaScene.nodes[id]!.text =
-                            kayaNumberText(kayaScene.nodes[id]!.value, kayaScene.nodes[id]!.step)
+                        numberWrites.insert(id)
                     }
                 case (propTickSpacing, valueF64):
                     kayaScene.nodes[id]!.tickSpacing =
@@ -6878,6 +6883,11 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 fatalError("kaya: unknown apply record kind \(kind)")
             }
             at += size
+        }
+    }
+    for id in numberWrites {
+        if let node = kayaScene.nodes[id] {
+            node.text = kayaNumberText(node.value, node.step, node.numberFormat)
         }
     }
     #if !os(macOS)
@@ -24024,13 +24034,15 @@ struct KayaSearch: View {
 let kayaNumberUnbounded = 9_007_199_254_740_992.0
 
 /// A value's text at a step, written by the core's door.
-func kayaNumberText(_ value: Double, _ step: Double) -> String {
-    let needed = Int(KayaHost.api.number_text(value, step, UnsafeMutablePointer<UInt8>(nil), 0))
-    var buf = [UInt8](repeating: 0, count: needed)
-    let written = buf.withUnsafeMutableBufferPointer { p in
-        Int(KayaHost.api.number_text(value, step, p.baseAddress, UInt(needed)))
+func kayaNumberText(_ value: Double, _ step: Double, _ format: String = "number") -> String {
+    format.withCString { format in
+        let needed = Int(KayaHost.api.number_text(value, step, format, UnsafeMutablePointer<UInt8>(nil), 0))
+        var buf = [UInt8](repeating: 0, count: needed)
+        let written = buf.withUnsafeMutableBufferPointer { p in
+            Int(KayaHost.api.number_text(value, step, format, p.baseAddress, UInt(needed)))
+        }
+        return String(decoding: buf.prefix(min(written, needed)), as: UTF8.self)
     }
-    return String(decoding: buf.prefix(min(written, needed)), as: UTF8.self)
 }
 
 /// THE COMMIT PATH (§3 rules 1-3): Return, focus loss and the phone
@@ -24039,9 +24051,11 @@ func kayaNumberText(_ value: Double, _ step: Double) -> String {
 func kayaNumberCommit(_ node: KayaNode) {
     var moved = node.value
     let bytes = Array(node.text.utf8)
-    let answer = bytes.withUnsafeBufferPointer { p in
-        KayaHost.api.number_commit(
-            p.baseAddress, UInt(p.count), node.value, node.minValue, node.maxValue, node.step, &moved)
+    let answer = node.numberFormat.withCString { format in
+        bytes.withUnsafeBufferPointer { p in
+            KayaHost.api.number_commit(
+                p.baseAddress, UInt(p.count), node.value, node.minValue, node.maxValue, node.step, format, &moved)
+        }
     }
     kayaNumberSettle(node, answer, moved)
 }
@@ -24049,8 +24063,10 @@ func kayaNumberCommit(_ node: KayaNode) {
 /// THE STEP PATH (§3 rule 6): `steps` steps from the committed value.
 func kayaNumberStep(_ node: KayaNode, _ steps: Int32) {
     var moved = node.value
-    let answer = KayaHost.api.number_step(
-        node.value, steps, node.minValue, node.maxValue, node.step, &moved)
+    let answer = node.numberFormat.withCString { format in
+        KayaHost.api.number_step(
+            node.value, steps, node.minValue, node.maxValue, node.step, format, &moved)
+    }
     kayaNumberSettle(node, answer, moved)
 }
 
@@ -24060,7 +24076,7 @@ private func kayaNumberSettle(_ node: KayaNode, _ answer: UInt32, _ moved: Doubl
         kayaUserWrite { node.value = moved }
         KayaHost.emitValueCommitted(node.tag, moved)
     }
-    kayaUserWrite { node.text = kayaNumberText(node.value, node.step) }
+    kayaUserWrite { node.text = kayaNumberText(node.value, node.step, node.numberFormat) }
 }
 
 struct KayaNumberField: View {
@@ -24081,7 +24097,7 @@ struct KayaNumberField: View {
         .textFieldStyle(.roundedBorder)
         .frame(
             maxWidth: (node.grow > 0 || (flexVertical == true && node.fill != false))
-                ? .infinity : 120)
+                ? .infinity : (node.numberFormat == "number" ? 120 : 180))
         .focused($focused)
         .onSubmit { kayaNumberCommit(node) }
         .onKeyPress(.upArrow) {
@@ -24132,7 +24148,7 @@ struct KayaNumberField: View {
     /// §4.2: `.decimalPad` has no minus and no Return, so a field that can go
     /// below zero takes the punctuation keyboard; the toolbar's Done commits.
     func kayaNumberKeyboard(_ node: KayaNode) -> UIKeyboardType {
-        if node.minValue < 0 { return .numbersAndPunctuation }
+        if node.numberFormat != "number" || node.minValue < 0 { return .numbersAndPunctuation }
         return node.step.rounded() == node.step ? .numberPad : .decimalPad
     }
 #endif

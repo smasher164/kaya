@@ -547,3 +547,7 @@ path = "../../guests/rust/tints.rs"
 name = "rusthost"
 path = "../../guests/rust/rusthost.rs"
 crate-type = ["cdylib"]
+
+[[example]]
+name = "timecode"
+path = "../../guests/rust/timecode.rs"

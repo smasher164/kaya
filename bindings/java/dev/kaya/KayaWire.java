@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x0e75ba3234ed9bffL;
+    public static final long SPEC_HASH = 0xb28d4a0fddd60b2bL;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -131,6 +131,7 @@ public final class KayaWire {
     public static final int PROP_PLAYER = 52;
     public static final int PROP_CAPTURE = 53;
     public static final int PROP_ASPECT = 54;
+    public static final int PROP_FORMAT = 55;
     public static final int WPROP_TITLE = 1;
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
@@ -2670,6 +2671,29 @@ public final class KayaWire {
     public static byte[] txBindAspectElement(long widgetId, int level, int field) {
         Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_ASPECT).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant format value. */
+    public static byte[] txSetFormat(long widgetId, String format) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_FORMAT).putInt(SOURCE_CONST);
+        encodeValue(b, format);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound format value. */
+    public static byte[] txBindFormat(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_FORMAT).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindFormatElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_FORMAT).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
     }

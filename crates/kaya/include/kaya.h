@@ -8,6 +8,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#define MAX_TIMECODE_FRAMES 9007199254740991
+
 /**
  * `expect_video_ink`'s tolerance per channel, in sRGB: a video's picture
  * is decoded and colour-managed before the window server has it (±2
@@ -1191,6 +1193,8 @@
  * 32 bits and the height in the low 32, each a signed 32-bit integer.
  */
 #define KAYA_PROP_ASPECT 54
+
+#define KAYA_PROP_FORMAT 55
 
 /**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
@@ -2379,9 +2383,16 @@ typedef struct KayaHostApi {
    * makes of the committed value — 0 revert, 1 unchanged, 2 moved with
    * the new value written through the pointer.
    */
-  uintptr_t (*number_text)(double, double, uint8_t*, uintptr_t);
-  uint32_t (*number_commit)(const uint8_t*, uintptr_t, double, double, double, double, double*);
-  uint32_t (*number_step)(double, int32_t, double, double, double, double*);
+  uintptr_t (*number_text)(double, double, const char*, uint8_t*, uintptr_t);
+  uint32_t (*number_commit)(const uint8_t*,
+                            uintptr_t,
+                            double,
+                            double,
+                            double,
+                            double,
+                            const char*,
+                            double*);
+  uint32_t (*number_step)(double, int32_t, double, double, double, const char*, double*);
   /**
    * docs/media-plan.md §8 ruling 4: a reader's reports, through the core;
    * frame and pcm answer 1 while the read is still wanted, overdue 1 when
@@ -2682,6 +2693,26 @@ uintptr_t kaya_fmt_number(double value,
                           const struct KayaNumberOptions *options,
                           uint8_t *out,
                           uintptr_t cap);
+
+/**
+ * # Safety
+ * `out` must be null or valid for `cap` bytes. Zero reports invalid arguments through kaya_fault.
+ */
+uintptr_t kaya_fmt_timecode(int64_t frames,
+                            int64_t numerator,
+                            int64_t denominator,
+                            uint32_t drop_frame,
+                            uint8_t *out,
+                            uintptr_t cap);
+
+/**
+ * # Safety
+ * `text` must be a NUL-terminated UTF-8 string. Returns -1 for unreadable text or invalid rate.
+ */
+int64_t kaya_fmt_parse_timecode(const char *text,
+                                int64_t numerator,
+                                int64_t denominator,
+                                uint32_t drop_frame);
 
 /**
  * A fraction as the locale's percentage; `options` may be null.

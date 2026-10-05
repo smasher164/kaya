@@ -369,7 +369,98 @@ independently for `{fmt:field …}` (Foundation's `NumberFormatter` here),
 which is what lets the German leg catch a separator either side wrote
 for itself. `expect_slider` is renamed `expect_value` in all three
 harnesses.
-Both §8 recommendations are what is built: no timecode format on the
-kind, and empty text reverts like any other unreadable text
+At the number-field slice, no timecode format was on the kind
+(superseded by §10). Empty text reverts like any other unreadable text
 (`a_commit_reads_the_text_through_the_door`), so `value` is always a
 number.
+
+## §10. Timecode (2026-10-04, built-as-recommended choices awaiting confirmation)
+
+The scope is the whole formatter, including drop-frame, by the maintainer’s
+2026-10-04 instruction. The choices below are recommendations to implement
+and review; validation and delivery are still pending.
+
+The rate is an exact rational numerator/denominator with a drop flag, not a
+rounded decimal or an enum of common rates. Positive signed-32-bit parts
+are reduced before comparison. Supported non-drop rates are integers 1..120
+and 24000/1001, 30000/1001, 60000/1001, counted at nominal 24, 30, 60.
+Drop-frame is supported only at 30000/1001 and 60000/1001. The integer bound
+includes high-frame-rate 120 fps and bounds the displayed frame field to
+three digits. 23.976 is non-drop at nominal 24, the industry convention.
+
+The format prop (55, Str) carries `number` or
+`timecode:<numerator>/<denominator>:<ndf|df>`. This is a closed formatter
+selection with rational parameters, validated at the root, not a formatting
+pattern or callback. A string keeps the complete selection atomic in the
+existing property machinery without packing away invalid signed arguments.
+Bindings expose a typed NumberFormat and TimecodeRate (in their own idiom),
+so guests never author this representation. Both construction zones take it.
+The default is number; setting number explicitly restores normal formatting.
+Unknown formats and unsupported rates are scene errors naming format.
+
+Timecode values are whole frames from zero through 2^53-1, shared with the
+JS safe integer range and the number field’s F64 carrier. Hours grow past
+23 instead of wrapping, so formatting and parsing preserve long timelines.
+Timecode fields default to this range and step one frame. Explicit bounds
+must be whole frames in this range; explicit step must be one. A page key
+still takes ten steps under §3 rule 6. Invalid app values are scene errors;
+valid typed values outside a narrower field range clamp as before.
+A format and value can change together in one transaction, in either order.
+Native controls may display a bounded intermediate value while applying its
+props; the declared value is retained and restored by the completed batch.
+The root still refuses invalid completed declarations. It validates the final
+signal and row values before fanout or materialization, including unrealized
+rows and newly opened conditional fields. Rejected writes preserve prior
+values; undo and redo use the same validation before consuming their ledger
+entry. A format change reads the latest user commit until an app value write
+replaces it.
+
+Accepted text, after trimming surrounding whitespace, is exactly four
+fields: HH:MM:SS:FF for non-drop and HH:MM:SS;FF for drop. Hours have at
+least two digits; minutes and seconds exactly two; frames exactly two up to
+100 fps and exactly three above 100. Any Unicode Nd digit is accepted via
+typed_number’s existing table; output always uses ASCII digits and separators.
+Minutes and seconds must be below 60 and frames below the nominal rate.
+No short forms, signs, relative offsets, decimal points, internal whitespace,
+or bare frame counts. Drop input requires the semicolon, so punctuation
+cannot silently change the counting mode. A skipped frame label is refused,
+never shifted to a different frame. The field uses its existing revert rule.
+Phones use a punctuation-capable keyboard for timecode.
+
+Prior art read before implementation:
+
+- [FFmpeg av_timecode](https://ffmpeg.org/doxygen/8.0/timecode_8c_source.html):
+  ten-minute blocks contain 17982 frames at 29.97 and twice that at 59.94;
+  nine minutes per block omit labels. Its string formatter can retain hours
+  beyond 24. Its permissive component parser is not the proposed input rule.
+- [OpenTimelineIO opentime](https://raw.githubusercontent.com/AcademySoftwareFoundation/OpenTimelineIO/main/src/opentime/rationalTime.cpp):
+  two/four omitted labels, frame-field bound, nominal-24 non-drop counting,
+  and punctuation distinguishing drop from non-drop. Its parser subtracts
+  omitted labels without rejecting nonexistent labels. Kaya deliberately
+  refuses those to preserve the exact frame the user specified.
+- [Premiere input](https://helpx.adobe.com/premiere/desktop/organize-media/apply-labeling/enter-timecode.html):
+  permits shorthand and relative edits. Those conveniences are excluded from
+  this strict formatter parse; they require a separate explicit contract.
+- [Blackmagic camera manual](https://documents.blackmagicdesign.com/UserManuals/BlackmagicCinemaCameraManual.pdf?_v=1743922810000):
+  identifies drop-frame at project rates 29.97 and 59.94.
+
+Arithmetic is integer-only. A ten-minute block starts with a full nominal
+minute; its following nine minutes omit labels 0..1 or 0..3. Formatting
+locates the block and minute, then adds its omitted labels. Parsing checks
+that the label exists before subtracting omissions from the nominal count.
+Tests independently enumerate successive legal labels, cover minute, tenth
+minute, hour and day boundaries, all rates, overflow and refusals. Counted
+mutations must make the minute skip, tenth-minute exception and frame bound
+fail. Scene proof includes a label using the door, field commits and reverts,
+a row-template field, Arabic-Indic input and desktop stepping across a skip.
+The door census, both-zone sugar census and core-routing guard grow with it.
+
+The nine-language assessment is **do** for Rust, Python, Go, C#, Java,
+Swift, OCaml, Haskell and JS: both door functions and both construction
+zones, with no deferred language. The C floor exposes both functions and
+the generated Format property. Rust validates the rate with a fallible
+constructor and returns Option for an invalid frame/text; the C door
+reports invalid rates or frame arguments as a named app fault, and returns
+-1 for unreadable text. Each binding maps unreadable text to its usual
+optional/result idiom. A NUL within a guest string is unreadable, with
+invalid rate arguments still refused first.

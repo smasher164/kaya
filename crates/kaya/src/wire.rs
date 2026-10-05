@@ -1167,6 +1167,7 @@ pub(crate) const PROP_FIT: u32 = 51;
 pub(crate) const PROP_PLAYER: u32 = 52;
 pub(crate) const PROP_CAPTURE: u32 = 53;
 pub(crate) const PROP_ASPECT: u32 = 54;
+pub(crate) const PROP_FORMAT: u32 = 55;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
@@ -1716,6 +1717,7 @@ fn prop(raw: u32) -> Prop {
         PROP_PLAYER => Prop::Player,
         PROP_CAPTURE => Prop::Capture,
         PROP_ASPECT => Prop::Aspect,
+        PROP_FORMAT => Prop::Format,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -5521,6 +5523,7 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::Player => PROP_PLAYER,
         Prop::Capture => PROP_CAPTURE,
         Prop::Aspect => PROP_ASPECT,
+        Prop::Format => PROP_FORMAT,
     }
 }
 

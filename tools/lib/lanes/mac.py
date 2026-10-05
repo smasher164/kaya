@@ -55,7 +55,7 @@ SCENES = [
 DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows",
                 "format", "flexshrink", "listrow", "tints", "badge", "emoji", "media",
                 # The capture (docs/capture-plan.md §8), rust-only at depth.
-                "capture"]
+                "capture", "timecode"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -167,6 +167,7 @@ ORDER = [
     ("search", LANGS),
     # The number field in the everyday locale and in German
     # (docs/number-field-plan.md §5).
+    ("timecode", ("rust",)),
     ("numberfield", LANGS),
     ("numberfieldde", LANGS),
     ("numberfieldar", ("rust",)),

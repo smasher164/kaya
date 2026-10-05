@@ -2057,6 +2057,11 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    pub fn format(self, format: crate::fmt::NumberFormat) -> Self {
+        self.tx.set(self.id, Prop::Format, format.wire());
+        self
+    }
+
     /// A slider's granularity: the thumb rests only on `min + k * step`
     /// (docs/slider-plan.md S1). Must divide the range evenly; 0 is
     /// continuous, the default.
@@ -3051,6 +3056,10 @@ impl<'a> Tx<'a> {
     }
 
     /// Auto columns at a floor (docs/layout-knobs-plan.md §3).
+    pub fn number_format(&mut self, widget: WidgetId, format: crate::fmt::NumberFormat) {
+        self.set(widget, Prop::Format, format.wire());
+    }
+
     pub fn columns_auto(&mut self, widget: WidgetId, min_width: f64) {
         self.set(widget, Prop::Columns, 0.0);
         self.set(widget, Prop::MinColumnWidth, min_width);
@@ -4755,6 +4764,10 @@ impl<'b> Row<'_, 'b> {
 
     pub fn high_label(&mut self, node: TemplateNodeId, label: impl Into<TplSource<StrKind>>) {
         self.tpl().high_label(node, label)
+    }
+
+    pub fn format(&mut self, node: TemplateNodeId, format: crate::fmt::NumberFormat) {
+        self.tpl().format(node, format)
     }
 
     pub fn step(&mut self, node: TemplateNodeId, step: f64) {
@@ -8357,6 +8370,10 @@ impl<'b> Tpl<'_, 'b> {
     /// apart want a sourced id, the row's own field.
     pub fn a11y_id(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
         self.apply_source(node, Prop::A11yId, src.into().inner);
+    }
+
+    pub fn format(&mut self, node: TemplateNodeId, format: crate::fmt::NumberFormat) {
+        self.set(node, Prop::Format, format.wire());
     }
 
     /// A stamped slider's granularity (docs/slider-plan.md S1): constant

@@ -7,6 +7,207 @@
 use crate::protocol::{Date, Time};
 use crate::typed_number;
 
+// docs/number-field-plan.md §10.
+pub const MAX_TIMECODE_FRAMES: i64 = 9_007_199_254_740_991;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TimecodeRate {
+    numerator: i32,
+    denominator: i32,
+    drop_frame: bool,
+    nominal: u32,
+}
+
+impl TimecodeRate {
+    pub fn new(numerator: i64, denominator: i64, drop_frame: bool) -> Result<Self, String> {
+        let bad = || format!("format timecode rate {numerator}/{denominator}, drop={drop_frame}: expected integer 1..120 or 24000/1001, 30000/1001, 60000/1001; drop requires 30000/1001 or 60000/1001, and positive signed-32-bit parts");
+        if !(1..=i32::MAX as i64).contains(&numerator) || !(1..=i32::MAX as i64).contains(&denominator) {
+            return Err(bad());
+        }
+        let (mut a, mut b) = (numerator, denominator);
+        while b != 0 { (a, b) = (b, a % b); }
+        let (n, d) = (numerator / a, denominator / a);
+        let nominal = match (n, d, drop_frame) {
+            (1..=120, 1, false) => n as u32,
+            (24000, 1001, false) => 24,
+            (30000, 1001, _) => 30,
+            (60000, 1001, _) => 60,
+            _ => return Err(bad()),
+        };
+        Ok(Self { numerator: n as i32, denominator: d as i32, drop_frame, nominal })
+    }
+
+    pub fn numerator(self) -> i32 { self.numerator }
+    pub fn denominator(self) -> i32 { self.denominator }
+    pub fn drop_frame(self) -> bool { self.drop_frame }
+    fn omitted(self) -> i64 { if self.drop_frame { i64::from(self.nominal / 15) } else { 0 } }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NumberFormat {
+    #[default]
+    Number,
+    Timecode(TimecodeRate),
+}
+
+impl NumberFormat {
+    pub(crate) fn wire(self) -> String {
+        match self {
+            Self::Number => "number".into(),
+            Self::Timecode(r) => format!("timecode:{}/{}:{}", r.numerator, r.denominator, if r.drop_frame { "df" } else { "ndf" }),
+        }
+    }
+
+    pub(crate) fn from_wire(text: &str) -> Result<Self, String> {
+        if text == "number" { return Ok(Self::Number); }
+        let bad = || format!("format {text:?}: expected number or timecode:<numerator>/<denominator>:<ndf|df>");
+        let rest = text.strip_prefix("timecode:").ok_or_else(bad)?;
+        let (parts, mode) = rest.split_once(':').ok_or_else(bad)?;
+        let (n, d) = parts.split_once('/').ok_or_else(bad)?;
+        let drop = match mode { "df" => true, "ndf" => false, _ => return Err(bad()) };
+        Ok(Self::Timecode(TimecodeRate::new(n.parse().map_err(|_| bad())?, d.parse().map_err(|_| bad())?, drop)?))
+    }
+}
+
+pub fn timecode(frames: i64, rate: TimecodeRate) -> Option<String> {
+    if !(0..=MAX_TIMECODE_FRAMES).contains(&frames) { return None; }
+    let fps = i64::from(rate.nominal);
+    let omitted = rate.omitted();
+    let mut label = frames;
+    if omitted != 0 {
+        let block = fps * 600 - omitted * 9;
+        let whole = frames / block;
+        let rest = frames % block;
+        let short_minute = fps * 60 - omitted;
+        let skipped_minutes = if rest < fps * 60 { 0 } else { 1 + (rest - fps * 60) / short_minute };
+        label += omitted * (whole * 9 + skipped_minutes);
+    }
+    let seconds = label / fps;
+    let width = if fps > 100 { 3 } else { 2 };
+    Some(format!("{:02}:{:02}:{:02}{}{:0width$}", seconds / 3600, seconds / 60 % 60, seconds % 60,
+        if rate.drop_frame { ';' } else { ':' }, label % fps))
+}
+
+pub fn parse_timecode(text: &str, rate: TimecodeRate) -> Option<i64> {
+    let mut fields = [0i64; 4];
+    let mut lengths = [0usize; 4];
+    let mut at = 0usize;
+    for c in text.trim().chars() {
+        if let Some(digit) = typed_number::digit(c) {
+            fields[at] = fields[at].checked_mul(10)?.checked_add(i64::from(digit))?;
+            lengths[at] += 1;
+        } else {
+            let separator = if at == 2 && rate.drop_frame { ';' } else { ':' };
+            if at >= 3 || c != separator || lengths[at] == 0 { return None; }
+            at += 1;
+        }
+    }
+    let width = if rate.nominal > 100 { 3 } else { 2 };
+    if at != 3 || lengths[0] < 2 || lengths[1] != 2 || lengths[2] != 2 || lengths[3] != width { return None; }
+    let [hours, minutes, seconds, frames] = fields;
+    let fps = i64::from(rate.nominal);
+    if minutes >= 60 || seconds >= 60 || frames >= fps { return None; }
+    let omitted = rate.omitted();
+    if minutes % 10 != 0 && seconds == 0 && frames < omitted { return None; }
+    let total_minutes = hours.checked_mul(60)?.checked_add(minutes)?;
+    let nominal = total_minutes.checked_mul(60)?.checked_add(seconds)?.checked_mul(fps)?.checked_add(frames)?;
+    let count = nominal.checked_sub(omitted.checked_mul(total_minutes - total_minutes / 10)?)?;
+    (0..=MAX_TIMECODE_FRAMES).contains(&count).then_some(count)
+}
+
+#[cfg(test)]
+mod timecode_tests {
+    use super::*;
+    fn rate(n: i64, d: i64, drop: bool) -> TimecodeRate { TimecodeRate::new(n, d, drop).unwrap() }
+
+    #[test]
+    fn minute_skip() {
+        for (n, before, after) in [(30000, "00:00:59;29", "00:01:00;02"), (60000, "00:00:59;59", "00:01:00;04")] {
+            let r = rate(n, 1001, true);
+            let last = i64::from(r.nominal) * 60 - 1;
+            assert_eq!(timecode(last, r).as_deref(), Some(before));
+            assert_eq!(timecode(last + 1, r).as_deref(), Some(after));
+            assert_eq!(parse_timecode(after, r), Some(last + 1));
+        }
+    }
+
+    #[test]
+    fn tenth_minute_and_hour_exception() {
+        for n in [30000, 60000] {
+            let r = rate(n, 1001, true);
+            let block = (n / 30000) * 17982;
+            assert_eq!(timecode(block, r).as_deref(), Some("00:10:00;00"));
+            assert_eq!(parse_timecode("00:10:00;00", r), Some(block));
+            assert_eq!(timecode(block * 6, r).as_deref(), Some("01:00:00;00"));
+            assert_eq!(timecode(block * 144, r).as_deref(), Some("24:00:00;00"));
+            assert_eq!(parse_timecode("24:00:00;00", r), Some(block * 144));
+        }
+    }
+
+    #[test]
+    fn all_rates_and_long_round_trips() {
+        let rates = (1..=120).map(|n| rate(n, 1, false)).chain([
+            rate(24000, 1001, false), rate(30000, 1001, false), rate(60000, 1001, false),
+            rate(30000, 1001, true), rate(60000, 1001, true),
+        ]);
+        for r in rates {
+            for frame in [0, 1, 23, 24, 25, 29, 30, 59, 60, 1799, 1800, 17981, 17982, 35964, 107892, 2589408, MAX_TIMECODE_FRAMES] {
+                let text = timecode(frame, r).unwrap();
+                assert_eq!(parse_timecode(&text, r), Some(frame), "{r:?} {text}");
+            }
+        }
+        for n in [30000, 60000] {
+            let r = rate(n, 1001, true);
+            let mut frame = 0;
+            for minute in 0..70 {
+                for second in 0..60 {
+                    for f in 0..r.nominal {
+                        if minute % 10 != 0 && second == 0 && i64::from(f) < r.omitted() { continue; }
+                        let expected = format!("{:02}:{:02}:{second:02};{f:02}", minute / 60, minute % 60);
+                        assert_eq!(timecode(frame, r).as_deref(), Some(expected.as_str()));
+                        assert_eq!(parse_timecode(&expected, r), Some(frame));
+                        frame += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn frame_bound_and_input_refusals() {
+        let r = rate(25, 1, false);
+        for text in ["", "1", "00:01", "00:00:01", "0:00:00:00", "00:60:00:00", "00:00:60:00", "00:00:00:25", "-00:00:00:01", "+00:00:00:01", "00:00:00;01", "00:00:00:001", "00:00:00:1", "00:00: 00:01", "00:00:00:01x", "99999999999999999999:00:00:00", "99999999999999:00:00:00"] {
+            assert_eq!(parse_timecode(text, r), None, "{text:?}");
+        }
+        for n in [30000, 60000] {
+            let r = rate(n, 1001, true);
+            for f in 0..r.omitted() {
+                assert_eq!(parse_timecode(&format!("00:01:00;{f:02}"), r), None);
+                assert_eq!(parse_timecode(&format!("00:10:00;{f:02}"), r), Some(n / 30000 * 17982 + f));
+            }
+            assert_eq!(parse_timecode("00:01:00:04", r), None);
+        }
+        assert_eq!(parse_timecode(" ٠١:٠٢:٠٣:١٢ ", r), Some(93087));
+        assert_eq!(timecode(-1, r), None);
+        assert_eq!(timecode(MAX_TIMECODE_FRAMES + 1, r), None);
+    }
+
+    #[test]
+    fn rate_and_format_refusals() {
+        for (n,d,drop) in [(0,1,false),(-25,1,false),(25,0,false),(25,-1,false),(121,1,false),(2997,100,false),(24000,1001,true),(30,1,true),(i64::MAX,1,false)] {
+            assert!(TimecodeRate::new(n,d,drop).is_err(), "{n}/{d} {drop}");
+        }
+        assert_eq!(rate(60000,2002,true),rate(30000,1001,true));
+        for text in ["", "percent", "timecode:0/1:ndf", "timecode:25/1:df", "timecode:25:ndf", "timecode:25/1:auto"] {
+            assert!(NumberFormat::from_wire(text).is_err(), "{text}");
+        }
+        for f in [NumberFormat::Number, NumberFormat::Timecode(rate(25,1,false)), NumberFormat::Timecode(rate(30000,1001,true))] {
+            assert_eq!(NumberFormat::from_wire(&f.wire()),Ok(f));
+        }
+    }
+}
+
+
 /// How much of a date or time to write. `Short` is the numeric form,
 /// `Medium` the abbreviated words, `Long` the full words; each maps onto
 /// the platform's own named style where it has one.

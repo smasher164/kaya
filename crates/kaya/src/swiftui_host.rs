@@ -374,9 +374,9 @@ pub struct KayaHostApi {
     /// the core: a value's text at a step, and what a commit or a step
     /// makes of the committed value — 0 revert, 1 unchanged, 2 moved with
     /// the new value written through the pointer.
-    pub number_text: unsafe extern "C" fn(f64, f64, *mut u8, usize) -> usize,
-    pub number_commit: unsafe extern "C" fn(*const u8, usize, f64, f64, f64, f64, *mut f64) -> u32,
-    pub number_step: unsafe extern "C" fn(f64, i32, f64, f64, f64, *mut f64) -> u32,
+    pub number_text: unsafe extern "C" fn(f64, f64, *const c_char, *mut u8, usize) -> usize,
+    pub number_commit: unsafe extern "C" fn(*const u8, usize, f64, f64, f64, f64, *const c_char, *mut f64) -> u32,
+    pub number_step: unsafe extern "C" fn(f64, i32, f64, f64, f64, *const c_char, *mut f64) -> u32,
     /// docs/media-plan.md §8 ruling 4: a reader's reports, through the core;
     /// frame and pcm answer 1 while the read is still wanted, overdue 1 when
     /// the core failed it `timeout`.
@@ -406,9 +406,16 @@ pub struct KayaHostApi {
 }
 
 /// # Safety
-/// `out` must be null or valid for `cap` bytes.
-unsafe extern "C" fn number_text(value: f64, step: f64, out: *mut u8, cap: usize) -> usize {
-    let text = crate::number_field::text(value, step);
+/// `format` must point to a NUL-terminated UTF-8 string.
+unsafe fn number_format(format: *const c_char) -> crate::fmt::NumberFormat {
+    let text = unsafe { std::ffi::CStr::from_ptr(format) }.to_str().expect("UTF-8 format");
+    crate::fmt::NumberFormat::from_wire(text).expect("validated format")
+}
+
+/// # Safety
+/// `format` must point to a NUL-terminated UTF-8 string; `out` must be null or valid for `cap` bytes.
+unsafe extern "C" fn number_text(value: f64, step: f64, format: *const c_char, out: *mut u8, cap: usize) -> usize {
+    let text = crate::number_field::text_for(value, step, unsafe { number_format(format) });
     let bytes = text.as_bytes();
     if !out.is_null() && cap > 0 {
         let n = bytes.len().min(cap);
@@ -433,6 +440,7 @@ fn number_answer(commit: crate::number_field::Commit, out: *mut f64) -> u32 {
 
 /// # Safety
 /// `text` must be valid for `len` bytes; `out` must be null or valid.
+/// `format` must point to a NUL-terminated UTF-8 string.
 unsafe extern "C" fn number_commit(
     text: *const u8,
     len: usize,
@@ -440,17 +448,18 @@ unsafe extern "C" fn number_commit(
     min: f64,
     max: f64,
     step: f64,
+    format: *const c_char,
     out: *mut f64,
 ) -> u32 {
     let bytes = if text.is_null() || len == 0 { &[][..] } else { unsafe { std::slice::from_raw_parts(text, len) } };
     let text = String::from_utf8_lossy(bytes);
-    number_answer(crate::number_field::commit(&text, committed, min, max, step), out)
+    number_answer(crate::number_field::commit_for(&text, committed, min, max, step, unsafe { number_format(format) }), out)
 }
 
 /// # Safety
-/// `out` must be null or valid.
-unsafe extern "C" fn number_step(committed: f64, steps: i32, min: f64, max: f64, step: f64, out: *mut f64) -> u32 {
-    number_answer(crate::number_field::stepped(committed, steps, min, max, step), out)
+/// `out` must be null or valid; `format` must point to a NUL-terminated UTF-8 string.
+unsafe extern "C" fn number_step(committed: f64, steps: i32, min: f64, max: f64, step: f64, format: *const c_char, out: *mut f64) -> u32 {
+    number_answer(crate::number_field::stepped_for(committed, steps, min, max, step, unsafe { number_format(format) }), out)
 }
 
 /// # Safety

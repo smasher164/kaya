@@ -282,6 +282,8 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // docs/media-plan.md §3 (RULED 2026-10-03): the ratio a video view's box
     // takes, whatever its picture's own shape; `fit` places the picture in it.
     ("aspect", 54, PropKind::Aspect),
+    // docs/number-field-plan.md §10.
+    ("format", 55, PropKind::Str),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -4151,6 +4153,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("player", 52),
                 ("capture", 53),
                 ("aspect", 54),
+                ("format", 55),
             ],
         },
         EnumSpec {
@@ -5225,6 +5228,7 @@ mod tests {
                     ("prop", "player") => wire::PROP_PLAYER,
                     ("prop", "capture") => wire::PROP_CAPTURE,
                     ("prop", "aspect") => wire::PROP_ASPECT,
+                    ("prop", "format") => wire::PROP_FORMAT,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,

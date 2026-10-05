@@ -2151,6 +2151,7 @@ pub enum Prop {
     /// A video view's box ratio (PropKind::Aspect, see [`Aspect`];
     /// docs/media-plan.md §3).
     Aspect,
+    Format,
     /// The app owns a rich textarea's undo (Bool-valued; docs/rich-text-plan.md
     /// R6, §14): the native stack is off, the ledger never banks it, and
     /// Edit>Undo/Redo reach the app through the role item's own activation.
