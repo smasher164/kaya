@@ -14087,3 +14087,22 @@ then 0.2 s for a second `--lib`, then 11.3 s for the example again, on an
 otherwise quiet host). The iOS lane's `--lib`/`--example` pair does the same.
 A separate target directory for the example graph would end it, but costs a
 second 8 GB android tree on a disk that had 20 GB free; not done.
+
+## The android capture tone read high with no HAL failure (sighted 2026-10-05)
+
+capture-compose went red on the 18:07Z full matrix reading `samples 681 Hz`
+for 15 s where the scene wants 660 (tolerance 10), with zero failed HAL reads
+and the one-minute load at 18.8 when the leg ended (load had fallen from 102
+two minutes before). This is not the HAL trap above. Forced in a copy:
+pacing the runner's injection 3% slower than real time read 440 as 630 and
+598 Hz; one 0.8 s stall at three points, and a 30 ms sleep every fifth
+packet (up to 67 ms behind schedule), both stayed green, so a brief stall
+recovers and a sustained shortfall does not. The 681 sighting's own bundle
+cannot tell those apart, so two readings were added: the runner's feed says
+how many packets went out more than a packet behind schedule and how far
+behind it got (tools/lib/emulator_capture.py), and expect_capture's failure
+names the samples that arrived in the last second and the window's
+upward-crossing gaps (min/median/max). The forced 3% run read `48000 samples
+arrived ... crossings every 2/109/111 samples`: full arrival, the tone's own
+median, and two-sample gaps from the gaps the emulator filled. A compressed
+tone would move the median instead. Cause of the 681 sighting: unproven.

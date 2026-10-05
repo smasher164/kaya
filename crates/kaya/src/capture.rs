@@ -522,6 +522,7 @@ pub(crate) struct Pipe {
     pending: Vec<i16>,
     next_chunk_ns: Option<u64>,
     window: VecDeque<i16>,
+    arrivals: VecDeque<(Instant, usize, u32)>,
     last_samples: Option<Instant>,
     backlog: Duration,
     behind: bool,
@@ -539,6 +540,7 @@ impl Pipe {
             pending: Vec::new(),
             next_chunk_ns: None,
             window: VecDeque::new(),
+            arrivals: VecDeque::new(),
             last_samples: None,
             backlog: Duration::ZERO,
             behind: false,
@@ -576,6 +578,10 @@ impl Pipe {
             }
         }));
         self.last_samples = Some(now);
+        self.arrivals.push_back((now, mono.len(), rate));
+        while self.arrivals.front().is_some_and(|(at, ..)| now.saturating_duration_since(*at) > WINDOW) {
+            self.arrivals.pop_front();
+        }
         let mut chunks = Vec::new();
         while self.pending.len() >= CHUNK {
             let chunk: Vec<i16> = self.pending.drain(..CHUNK).collect();
@@ -623,7 +629,22 @@ impl Pipe {
             }
             _ => None,
         };
-        Observed { frames, samples }
+        let arrived: usize = self
+            .arrivals
+            .iter()
+            .filter(|(at, ..)| now.saturating_duration_since(*at) <= WINDOW)
+            .map(|(_, n, _)| n)
+            .sum();
+        let rate = self.arrivals.back().map_or(0, |(.., rate)| *rate);
+        let spread = crossing_spread(self.window.iter().copied())
+            .map_or("no upward crossings".to_owned(), |(lo, mid, hi)| {
+                format!("upward crossings every {lo}/{mid}/{hi} samples (min/median/max)")
+            });
+        let detail = format!(
+            "{arrived} samples arrived in the last {} ms at a declared {rate} Hz; the window's {spread}",
+            WINDOW.as_millis()
+        );
+        Observed { frames, samples, detail }
     }
 }
 
@@ -687,10 +708,31 @@ fn tone(samples: impl Iterator<Item = i16> + Clone) -> Option<u32> {
     Some((crossings as f64 * f64::from(SAMPLE_RATE) / count as f64).round() as u32)
 }
 
+/// The gaps between upward zero crossings in samples: (min, median, max).
+fn crossing_spread(samples: impl Iterator<Item = i16>) -> Option<(usize, usize, usize)> {
+    let mut gaps = Vec::new();
+    let mut last = None;
+    let mut prev: Option<i16> = None;
+    for (i, s) in samples.enumerate() {
+        if prev.is_some_and(|p| p < 0 && s >= 0) {
+            if let Some(l) = last {
+                gaps.push(i - l);
+            }
+            last = Some(i);
+        }
+        prev = Some(s);
+    }
+    gaps.sort_unstable();
+    Some((*gaps.first()?, gaps[gaps.len() / 2], *gaps.last()?))
+}
+
 struct Observed {
     frames: Option<(u32, u32, [u8; 3])>,
     /// None: nothing in the window; Some(None): silent; Some(Some(hz)).
     samples: Option<Option<u32>>,
+    /// The failure sentence's measurements (docs/traps.md, the android
+    /// capture tone read high).
+    detail: String,
 }
 
 impl Observed {
@@ -915,8 +957,9 @@ pub(crate) fn expect(index: usize, want: &str) -> Result<String, String> {
         Ok(o) if o.matches(&wanted) => Ok(format!("capture {want}")),
         Ok(o) => Err(format!(
             "capture {index} reads {}, wanted {want} (within {CAPTURE_INK_TOLERANCE} a channel and \
-             {CAPTURE_HZ_TOLERANCE} Hz)",
-            o.text()
+             {CAPTURE_HZ_TOLERANCE} Hz); {}",
+            o.text(),
+            o.detail
         )),
     }
 }
@@ -1003,6 +1046,35 @@ mod tests {
         assert_eq!(tone(pipe.window.iter().copied()), Some(440));
         let peak = pipe.window.iter().map(|s| s.unsigned_abs()).max().unwrap();
         assert!((16_000..=16_500).contains(&peak), "a half-scale sine peaks at half of i16, got {peak}");
+    }
+
+    /// expect_capture's failure says what arrived and how evenly the tone
+    /// crossed zero: a clean tone's gaps are all one length, and a tone
+    /// with silence spliced into it has short ones.
+    #[test]
+    fn the_capture_failure_names_arrivals_and_the_crossing_spread() {
+        let now = Instant::now();
+        let mut clean = Pipe::new(1);
+        let mut from = 0;
+        while from < 48_000 {
+            clean.convert(1, 48_000, &sine(660.0, 48_000, 1, 480, from), 0, now);
+            from += 480;
+        }
+        let seen = clean.describe(now);
+        assert_eq!(seen.text(), "frames none, samples 660 Hz");
+        assert!(seen.detail.starts_with("48000 samples arrived in the last 1000 ms at a declared 48000 Hz; "), "{}", seen.detail);
+        let (lo, _, hi) = crossing_spread(clean.window.iter().copied()).unwrap();
+        assert!(hi - lo <= 1, "a clean 660 Hz tone crosses every 72 or 73 samples, got {lo}..{hi}");
+        let mut gappy = Pipe::new(2);
+        let (mut from, mut made) = (0, 0);
+        while made < 48_000 {
+            gappy.convert(1, 48_000, &sine(660.0, 48_000, 1, 470, from), 0, now);
+            gappy.convert(1, 48_000, &[0.0; 10], 0, now);
+            from += 470;
+            made += 480;
+        }
+        let (lo, mid, _) = crossing_spread(gappy.window.iter().copied()).unwrap();
+        assert!(lo < 60 && (72..=73).contains(&mid), "spliced silence shortens some gaps: {lo}/{mid}");
     }
 
     /// The rate holds across buffers: a resampler that restarted at each

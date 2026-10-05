@@ -178,6 +178,9 @@ class Feed:
         self.port = port
         self.token = token
         self.packets = 0
+        self.late = 0
+        self.behind_max = 0.0
+        self.restarts = 0
         self.refused = None
         self.first_at = None
         self.hz = lane_tones()
@@ -205,7 +208,9 @@ class Feed:
             return (f"inject-audio on {self.serial} (gRPC 127.0.0.1:{self.port}) ended after "
                     f"{self.packets} packet(s): {self.ended}")
         return (f"inject-audio on {self.serial} (gRPC 127.0.0.1:{self.port}) streaming, "
-                f"{self.packets} packet(s) of {PACKET_FRAMES} stereo frames sent")
+                f"{self.packets} packet(s) of {PACKET_FRAMES} stereo frames sent, "
+                f"{self.late} sent more than a packet behind schedule, at most "
+                f"{self.behind_max:.3f} s behind, schedule restarted {self.restarts} time(s)")
 
     def _end(self, why):
         if self.ended is None:
@@ -305,6 +310,10 @@ class Feed:
         # 300 ms, and a schedule that fell a second behind starts again.
         due = time.time()
         while not self.stop.is_set() and self.ended is None:
+            behind = time.time() - due
+            if behind > PACKET_FRAMES / RATE:
+                self.late += 1
+                self.behind_max = max(self.behind_max, behind)
             if not self._send(packet(tone(frame, PACKET_FRAMES, self.hz), frame == 0)):
                 break
             frame += PACKET_FRAMES
@@ -317,6 +326,7 @@ class Feed:
                 self.stop.wait(due - now)
             elif now - due > 1.0:
                 due = now
+                self.restarts += 1
         with contextlib.suppress(OSError):
             self.sock.sendall(_frame(_DATA, 1, 1, b""))
         with contextlib.suppress(OSError):
