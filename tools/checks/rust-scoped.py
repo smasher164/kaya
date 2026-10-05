@@ -5,6 +5,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "lib"))
 from kaya_gate import ROOT, Gate, dev_shell_or_die, scratch_dir
 
+import concurrent.futures
 import subprocess
 
 dev_shell_or_die()
@@ -153,14 +154,25 @@ async_cases = [
 ]
 with scratch_dir("rust-scoped-") as tmp:
     population = [(source, case) for case in cases] + [(async_source, case) for case in async_cases]
-    for template, (name, body, refusal) in population:
-        path = tmp / f"{name}.rs"
-        path.write_text(g.doctor(name, template, "BODY", body, want=1), encoding="utf-8")
-        result = subprocess.run([
-            "rustc", "--edition=2024", "--crate-type=lib", "--emit=metadata", str(path),
+    for template, (name, body, _refusal) in population:
+        (tmp / f"{name}.rs").write_text(
+            g.doctor(name, template, "BODY", body, want=1), encoding="utf-8")
+
+    def compile_case(name):
+        return subprocess.run([
+            "rustc", "--edition=2024", "--crate-type=lib", "--emit=metadata",
+            str(tmp / f"{name}.rs"),
             "--extern", f"kaya={ROOT / 'target/debug/deps/libkaya.rlib'}",
-            "-L", f"dependency={ROOT / 'target/debug/deps'}", "-o", str(tmp / f"{name}.rmeta")],
-            cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30, check=False)
+            "-L", f"dependency={ROOT / 'target/debug/deps'}",
+            "-o", str(tmp / f"{name}.rmeta")],
+            cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=60, check=False)
+
+    # ONE RUSTC PER CASE, RUN SIX AT A TIME (docs/traps.md, the gate sweep's
+    # check-abort tail).
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+        results = list(pool.map(compile_case, [case[0] for _t, case in population]))
+    for (_t, (name, _body, refusal)), result in zip(population, results,
+                                                    strict=True):
         if refusal is None and result.returncode:
             g.refuse(f"{name}: valid scoped code failed: {result.stderr}")
         if refusal is not None and (result.returncode == 0 or refusal not in result.stderr):

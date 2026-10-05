@@ -20,6 +20,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 
 g = Gate("check-abort")
 
@@ -44,9 +45,12 @@ def step(name, argv, log, *, env=ENV, cwd=ROOT, echo=None):
     on SUCCESS too: the notification-order and link-route arms each
     publish a verdict, and a run that says nothing cannot be told from
     one that skipped them."""
+    began = time.monotonic()
     with log.open("w", encoding="utf-8") as out:
         run = subprocess.run(argv, cwd=cwd, env=env, stdout=out,
                              stderr=subprocess.STDOUT, check=False)
+    print(f"check-abort: step {name} {time.monotonic() - began:.1f}s",
+          flush=True)
     if run.returncode != 0:
         fail(name, log)
     if echo:

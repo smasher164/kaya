@@ -14035,3 +14035,34 @@ unknown exits and incomplete cleanup; every accepted image is viewed before
 the review page is published. These actual refusals and successful controls
 are retained beside the local timecode handoff review. No backend change was
 needed for these capture failures.
+
+## The iOS lane built its Rust examples one cargo call at a time (measured 2026-10-05)
+
+tools/ios/run-sim.py's rust-swiftui suite called `cargo build --example <one>`
+once per scene, between leg queues. On the timecode full matrix that was 82
+cargo completions totalling 533 s, and the suite's phase read 861 s with only
+486 s of leg time behind it on a four-phone pool; the pool drained 19 s after
+the last build, so the serial build was the lane's critical path. Measured on
+a quiet host after touching `crates/kaya/src/lib.rs`: all 80 examples in ONE
+call, 90 s; thirteen of them one call at a time, 75.5 s, about 5.3 s an
+example after the first. The suite now builds every wanted example in one
+call and prints `TIMING swiftui-examples-built`. The `--lib` build at the
+lane's start and the first example build still each rebuild kaya once,
+because the example graph unifies dev-dependency features into the library
+(`CARGO_LOG=cargo::core::compiler::fingerprint=info` says
+`UnitDependencyInfoChanged`); that costs one library compile per run, not one
+per example. The other four lanes already pass every `--example` to one call.
+GUARD: the iOS duration ceiling in tools/validate-all.py.
+
+## The gate sweep's check-abort tail (measured 2026-10-05)
+
+check-abort is the sweep's longest gate and starts in its first wave, so it
+sets the sweep's length: 390 s inside the timecode full matrix (sweep 636 s
+against 600) and 274 s standalone on a quiet host. Its steps print their own
+seconds now (`check-abort: step <name> <s>`). Standalone, the 67 steps were
+216 s and rust-scoped alone was 82 s: twenty `rustc --emit=metadata` runs one
+after another, about 4 s each loading the kaya rlib. They run six at a time
+now, 29 s standalone, with the verdicts still read in declaration order; a
+case's expected error renamed in a copy was watched refused. The next
+largest steps are haskell-build (17 s) and ten swift probe builds of about
+6.5 s each, still serial.

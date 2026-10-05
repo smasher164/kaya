@@ -3238,16 +3238,22 @@ if SUITE in ("rust-swiftui", "all"):
     # embedded dylib. The scene order, per-leg cuts and iPad siblings
     # come off the module's tables, and each MODS entry names its plan.
     build_swiftui_dylib()
-    for scene in lane.RUST_SCENES:
+    # A FILTERED RUN BUILDS ONLY WHAT IT RUNS (tools/lib/only.py): the
+    # example of a scene none of whose legs is wanted is not built.
+    RUST_BUILT = [scene for scene in lane.RUST_SCENES
+                  if not only.active() or only.matches(
+                      ["rust-swiftui" if scene == "milestone2"
+                       else f"{scene}-swiftui",
+                       f"{scene}-swiftui-pad", f"{scene}dark-swiftui"])]
+    # ONE CARGO CALL FOR EVERY EXAMPLE (docs/traps.md, the iOS lane's
+    # serial example builds).
+    if RUST_BUILT:
+        cargo_ios(["build", "--locked", "--target", "aarch64-apple-ios-sim",
+                   *(arg for scene in RUST_BUILT
+                     for arg in ("--example", lane.rust_example(scene)))])
+        timing("swiftui-examples-built")
+    for scene in RUST_BUILT:
         example = lane.rust_example(scene)
-        # A FILTERED RUN BUILDS ONLY WHAT IT RUNS (tools/lib/only.py): the
-        # example of a scene none of whose legs is wanted is not built.
-        if only.active() and not only.matches(
-                ["rust-swiftui" if scene == "milestone2" else f"{scene}-swiftui",
-                 f"{scene}-swiftui-pad", f"{scene}dark-swiftui"]):
-            continue
-        cargo_ios(["build", "--locked", "--target",
-                   "aarch64-apple-ios-sim", "--example", example])
         if scene == "milestone2":
             app = with_dylib(make_bundle(
                 "milestone2rs-swiftui", "dev.kaya.rustswiftui",

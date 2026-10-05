@@ -3308,8 +3308,7 @@ def build_suite(suite):
         return False
     if not apk_assets_verify(apk):
         return False
-    if suite != "compose":
-        timing(f"build-{suite}")
+    timing(f"build-{suite}")
     targets = ([*SERIALS, TABLET_SERIAL] if suite == "compose"
                else list(SERIALS))
     return stage_suite_apk(suite, apk, package, targets)
