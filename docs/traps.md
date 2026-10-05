@@ -13811,6 +13811,24 @@ and every capture leg's log carries the HAL's per-second read failures, with
 the cause named when there were any (run-emulator.py's
 capture_audio_timeline).
 
+REOPENING DOES NOT CURE IT (measured 2026-10-05): the two matrix reds of
+2026-10-04 and 2026-10-05 broke on the leg's first input and their second input
+(the scene's device switch) read clean, which looked like a first-open race.
+Under 14 wall-clock-bounded spinners, three `--only capture-compose` runs went
+red, red, green (load 20.7, 27.8, 28.0 at the leg's end): the first input broke
+at open in one, broke four seconds AFTER a clean open in another, and the
+second and third inputs failed reads too. So the input breaks whenever the
+emulator is starved while it is open, at any point, and a new input only
+starts clean. The one-minute load at the leg's end does not separate the
+cases: matrix legs passed at 42-70 and broke at 77-104, while these broke at
+21-28. The source of the stuck state: the guest HAL's TinyalsaSource retries
+`pcm_readi` three times and gives up for that read, never re-preparing the
+pcm (device/generic/goldfish hals/audio/talsa.cpp, `pcmRead`), and pads every
+read it has no data for with silence (device_port_source.cpp, "pcm_readi was
+late delivering frames"). The guest kernel's virtio_snd logged no control
+message timeout over the period that held two reds (dmesg through adb root on
+emulator-5554, then unroot).
+
 ## The WinUI self-view colour: the platform's player over a camera's frame source decodes BT.601 as BT.709 (measured 2026-10-03)
 
 The documented WinUI 3 camera preview, `MediaPlayerElement` over
@@ -13997,6 +14015,13 @@ does not turn the original matrix green. No encoder setting or fixture was
 changed. The existing guard is the generator's nonzero-exit refusal plus
 N37's demand for the specific byte-mismatch finding: an encoder crash
 cannot stand in for the negative the gate intended to exercise.
+
+The crash report's threads (read 2026-10-05): besides the crashing API thread
+`enc0:0:libx265`, x265 had one `WorkerThread` (the `pools=1` pool, which runs
+lookahead jobs) and one `FrameEncoder`, both idle in a condition wait at the
+time. `pools=none` would take the worker away, but it is not free:
+`tools/gen-media.py --check` with it reads hevc_aac.mp4 and hevc_aac.mov as
+changed (2 of 62 files), so it would move the committed assets. Not changed.
 
 
 ### Review captures can precede the iOS launch fade, and a successful screenshot command can write nothing (2026-10-05)
