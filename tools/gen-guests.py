@@ -134,6 +134,7 @@ def generate(tmp):
                        "guests/swift/pickers.swift",
                        "guests/swift/sliders.swift",
                        "guests/swift/numberfield.swift",
+                       "guests/swift/timecode.swift",
                        "guests/swift/colorpicker.swift",
                        "guests/swift/range.swift",
                        "guests/swift/tooltips.swift",

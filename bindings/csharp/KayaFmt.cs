@@ -7,6 +7,18 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
 
+readonly record struct TimecodeRate(long Numerator, long Denominator = 1, bool Drop = false);
+readonly record struct NumberFormat
+{
+    readonly TimecodeRate? rate;
+    NumberFormat(TimecodeRate rate) { this.rate = rate; }
+    public static NumberFormat Number => default;
+    public static NumberFormat Timecode(TimecodeRate rate) => new(rate);
+    internal string Wire() => rate is { } r
+        ? FormattableString.Invariant($"timecode:{r.Numerator}/{r.Denominator}:{(r.Drop ? "df" : "ndf")}")
+        : "number";
+}
+
 /// How much of a date or time to write: the numeric form, the abbreviated
 /// words, the full words.
 enum Length { Short = 0, Medium = 1, Long = 2 }
@@ -86,6 +98,12 @@ static partial class Kaya
     [DllImport("kaya")]
     static extern nuint kaya_tr(byte[] key, KayaTrArg[]? args, nuint nargs, byte[]? into, nuint cap);
 
+    [DllImport("kaya")]
+    static extern nuint kaya_fmt_timecode(long frames, long numerator, long denominator, uint drop, byte[]? into, nuint cap);
+
+    [DllImport("kaya")]
+    static extern long kaya_fmt_parse_timecode(byte[] text, long numerator, long denominator, uint drop);
+
     static byte[] CStr(string s) => Encoding.UTF8.GetBytes(s + "\0");
 
     /// One string-out core call twice, the ask-size-ask shape (PrefGetString's);
@@ -123,6 +141,19 @@ static partial class Kaya
     /// locale and the user's settings.
     public static class Fmt
     {
+        public static string Timecode(long frames, TimecodeRate rate) =>
+            Filled("Fmt.Timecode", (into, cap) => kaya_fmt_timecode(frames,
+                rate.Numerator, rate.Denominator, rate.Drop ? 1u : 0u, into, cap));
+
+        public static long? ParseTimecode(string text, TimecodeRate rate)
+        {
+            _ = Timecode(0, rate);
+            if (text.Contains('\0')) return null;
+            long value = kaya_fmt_parse_timecode(CStr(text), rate.Numerator,
+                rate.Denominator, rate.Drop ? 1u : 0u);
+            return value < 0 ? null : value;
+        }
+
         public static string Date(DateOnly d, Length length = Length.Medium) =>
             Filled("Fmt.Date", (into, cap) => kaya_fmt_date(Packed(d), (long)length, into, cap));
 

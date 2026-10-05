@@ -43,6 +43,7 @@ object GuestStart : KayaGuestStart {
             "format" -> Format::app
             "formatde" -> Format::app
             "formatar" -> Format::app
+            "timecode" -> Timecode::app
             "numberfield" -> NumberField::app
             "numberfieldde" -> NumberField::app
             "colorpicker" -> ColorPicker::app

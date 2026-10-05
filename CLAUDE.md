@@ -465,6 +465,12 @@ in docs/deferred.md.
    shipped with the number in nine wire files and the name in two. Nine
    patterns per role, one watched negative — a role that exists nowhere
    must fire all nine.
+   AND THE TIMECODE SURFACE SINCE 2026-10-04: both door functions
+   in all nine, format selection in both zones, and each overload in the
+   bindings whose constructors have several value sources
+   (tools/lib/timecode_surface.py). check-verbs holds the native routes
+   through the core and the drop-frame arithmetic's three watched cuts
+   (tools/lib/timecode_routes.py; docs/number-field-plan.md §10).
    AND THE RICH TEXT SURFACE SINCE 2026-09-11, which neither half of
    this gate could see: `rich` is a WIDGET prop and the prop census
    reads WINDOW props and TEMPLATE props only, so nothing would have
@@ -737,7 +743,7 @@ in docs/deferred.md.
    all four backends since the breadth (GTK's activate, focus leaving for
    another widget and the stepper around value-changed; WinUI's
    ValueChanged door; Compose's keyboard action, hardware Return and focus
-   loss). 48 watched negatives, counts printed),
+   loss). 50 watched negatives, counts printed),
    `tools/check-scroll-to.py` (THE APP'S SCROLL LANDS INSTANTLY, HOLDS
    UNTIL LAYOUT AND SHARES THE TIERS' PARK (docs/scroll-to-plan.md S4, S6,
    §3): tools/scenes/scrollto.steps asserts where a row lands and its
@@ -1300,6 +1306,10 @@ in docs/deferred.md.
    spec hash pinned against bindings/c/kaya_wire.h, the
    byte-compared-verdict rule, the vtable rule, and the
    stamped-observation rule.
+   Caption clock, publication, callback and native-read diagnostics are
+   held by tools/lib/caption_routes.py (27 routes, 33 watched negatives;
+   docs/traps.md, GTK caption reads need the player clock and publication
+   timeline).
    THE CANVAS VOCABULARIES JOINED 2026-08-26, and they are the reason
    the constant sweep now reads a TYPE as well as a prefix: draw_op,
    paint, fill_rule, text_align and text_baseline ride the op stream as

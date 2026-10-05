@@ -30,7 +30,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) the foreign suites load;
 # --example alone would build only the rlib it depends on.
-SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen numberfield colorpicker range media capture"
+SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen numberfield timecode colorpicker range media capture"
 # Depth-slice scenes, rust only. `windowed` and `canvas` are rust BY
 # DESIGN rather than by depth — the compiled conformance scenes every
 # lane runs (docs/virtualization-plan.md §6.3, docs/canvas-plan.md
@@ -1705,6 +1705,22 @@ for proto in x11 wayland; do
     # THE NUMBER FIELD (docs/number-field-plan.md §5), through a11y-leg.sh
     # for its `expect_ax`; the German leg runs the same guest in every
     # language.
+    run "$proto" timecode-rust env KAYA_SELFTEST=timecode \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/timecode"
+    run "$proto" timecode-python env KAYA_SELFTEST=timecode KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/timecode.py
+    run "$proto" timecode-js env KAYA_SELFTEST=timecode KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/timecode.ts
+    run "$proto" timecode-go env KAYA_SELFTEST=timecode \
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" timecode-csharp env KAYA_SELFTEST=timecode KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" timecode-ocaml env KAYA_SELFTEST=timecode KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/timecode.exe
+    run "$proto" timecode-haskell env KAYA_SELFTEST=timecode \
+        tools/linux/a11y-leg.sh "$(hs_bin timecode)"
+    run "$proto" timecode-java env KAYA_SELFTEST=timecode KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" numberfield-rust env KAYA_SELFTEST=numberfield \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/numberfield"
     run "$proto" numberfieldde-rust env KAYA_LOCALE=de-DE KAYA_SELFTEST=numberfieldde \

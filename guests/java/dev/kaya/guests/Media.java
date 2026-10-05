@@ -280,7 +280,14 @@ public final class Media {
                 t.write(audio, trackLine("audio", tracks.audio(), tracks.audioSelected()));
                 t.write(captions, trackLine("captions", tracks.captions(), tracks.captionSelected()));
             });
-            app.onCue(player, (t, text) -> t.write(cue, text));
+            app.onCue(player, (t, text) -> {
+                if ("media_tracks".equals(System.getenv("KAYA_SELFTEST"))) {
+                    System.err.printf("KAYA_DIAG caption_callback wall_ms=%d text_b64=%s%n",
+                            System.currentTimeMillis(), java.util.Base64.getEncoder().encodeToString(
+                                    text.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+                }
+                t.write(cue, text);
+            });
             return null;
         });
         app.dispatchLoop();

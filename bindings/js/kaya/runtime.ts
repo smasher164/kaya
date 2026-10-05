@@ -41,6 +41,8 @@ type Floor = {
   // lengths 0/1/2, digit counts -1 for the platform's default, a tr
   // argument as [name, tag, i, f, s] in the C API's own record; a
   // refused input THROWS out of the addon with the core's sentence.
+  fmtTimecode(frames: number, numerator: number, denominator: number, drop: number): string;
+  fmtParseTimecode(text: string, numerator: number, denominator: number, drop: number): number;
   fmtDate(packed: number, length: number): string;
   fmtDateWeekday(packed: number): string;
   fmtTime(packed: number, length: number): string;
@@ -270,6 +272,14 @@ export function prefSetBool(key: string, value: boolean): void {
 
 export function prefRemove(key: string): void {
   lib.prefRemove(key);
+}
+
+export function fmtTimecode(frames: number, numerator: number, denominator: number, drop: boolean): string {
+  return lib.fmtTimecode(frames, numerator, denominator, drop ? 1 : 0);
+}
+
+export function fmtParseTimecode(text: string, numerator: number, denominator: number, drop: boolean): number {
+  return lib.fmtParseTimecode(text, numerator, denominator, drop ? 1 : 0);
 }
 
 export function fmtDate(packed: number, length: number): string {

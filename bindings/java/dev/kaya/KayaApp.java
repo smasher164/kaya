@@ -2320,6 +2320,23 @@ public final class KayaApp {
         return new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
     }
 
+    public record TimecodeRate(long numerator, long denominator, boolean drop) {}
+
+    public sealed interface NumberFormat {
+        enum Number implements NumberFormat { INSTANCE }
+        record Timecode(TimecodeRate rate) implements NumberFormat {}
+        NumberFormat NUMBER = Number.INSTANCE;
+        static NumberFormat timecode(TimecodeRate rate) { return new Timecode(rate); }
+    }
+
+    private static String numberFormatWire(NumberFormat format) {
+        return switch (format) {
+            case NumberFormat.Number ignored -> "number";
+            case NumberFormat.Timecode(var rate) -> "timecode:" + rate.numerator() + "/" + rate.denominator()
+                    + ":" + (rate.drop() ? "df" : "ndf");
+        };
+    }
+
     /**
      * The formatter door: dates, times, numbers, percentages and money
      * written the way the user's platform writes them, by the platform's
@@ -2345,6 +2362,17 @@ public final class KayaApp {
 
         public String dateTime(LocalDate d, LocalTime t, Length length) {
             return answer(KayaRing.fmtDateTime(packDate(d), packTime(t), length.code()), "fmt.dateTime");
+        }
+
+        public String timecode(long frames, TimecodeRate rate) {
+            return answer(KayaRing.fmtTimecode(frames, rate.numerator(), rate.denominator(), rate.drop()), "fmt.timecode");
+        }
+
+        public java.util.OptionalLong parseTimecode(String text, TimecodeRate rate) {
+            Objects.requireNonNull(text, "kaya: fmt.parseTimecode needs text");
+            timecode(0, rate);
+            long frames = KayaRing.fmtParseTimecode(text, rate.numerator(), rate.denominator(), rate.drop());
+            return frames < 0 ? java.util.OptionalLong.empty() : java.util.OptionalLong.of(frames);
         }
 
         public String number(double value) {
@@ -4567,6 +4595,14 @@ public final class KayaApp {
             return this;
         }
 
+        public Widget format(NumberFormat format) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException("kaya: format on a widget outside its build transaction");
+            }
+            tx.emit(KayaWire.txSetFormat(id, numberFormatWire(format)));
+            return this;
+        }
+
         /**
          * The granularity this slider's thumb rests on: min + k * step
          * (docs/slider-plan.md S1). It divides the range evenly; 0 is
@@ -5603,6 +5639,10 @@ public final class KayaApp {
          * ({@link Tpl#setSubmits}). */
         public void setSubmits(Node n, boolean on) {
             t.setSubmits(n, on);
+        }
+
+        public void setFormat(Node n, NumberFormat format) {
+            t.setFormat(n, format);
         }
 
         /** This row's copy of that slider's granularity (Tpl.setStep). */
@@ -6853,6 +6893,10 @@ public final class KayaApp {
                 KayaApp.this.onValueChanged(w, onChange);
             }
             return w;
+        }
+
+        public void setFormat(Widget widget, NumberFormat format) {
+            emit(KayaWire.txSetFormat(widget.id, numberFormatWire(format)));
         }
 
         /** A number field at value (docs/number-field-plan.md), its commit
@@ -8592,6 +8636,10 @@ public final class KayaApp {
          * {@link Widget#submits()}. */
         public void setSubmits(Node n, boolean on) {
             tx.emit(KayaWire.txSetSubmits(n.id, on));
+        }
+
+        public void setFormat(Node n, NumberFormat format) {
+            tx.emit(KayaWire.txSetFormat(n.id, numberFormatWire(format)));
         }
 
         /** A stamped slider's granularity (docs/slider-plan.md S1):

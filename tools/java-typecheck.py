@@ -504,6 +504,58 @@ if not LIBKAYA.is_file():
 NOTIFY_ENV = dict(os.environ, KAYA_LIB=str(LIBKAYA),
                   KAYA_SELFTEST="java_notify_order")
 
+TIMECODE_CHECK = "tools/checks/java-timecode/dev/kaya/TimecodeCheck.java"
+if run_javac("-encoding", "UTF-8", "-cp", TMP / "classes", "-d",
+             TMP / "timecodeclasses", TIMECODE_CHECK) != 0:
+    fail("FAIL — the timecode null exerciser did not compile.")
+if run_java("-cp", f"{TMP / 'classes'}:{TMP / 'timecodeclasses'}",
+            "dev.kaya.TimecodeCheck") != 0:
+    fail("FAIL — null timecode text was not refused before JNI.")
+
+(TMP / "timecodenull").mkdir()
+for p in sorted((ROOT / "bindings/java/dev/kaya").glob("*.java")):
+    (TMP / "timecodenull" / p.name).write_bytes(p.read_bytes())
+timecode_copy = TMP / "timecodenull/KayaApp.java"
+timecode_copy.write_text(g.doctor(
+    "timecode null negative removed the public refusal",
+    timecode_copy.read_text(encoding="utf-8"),
+    r'Objects\.requireNonNull\(text, "kaya: fmt\.parseTimecode needs text"\);', ""),
+    encoding="utf-8")
+if run_javac("-encoding", "UTF-8", "-d", TMP / "timecodenullclasses",
+             "bindings/java-desktop/dev/kaya/KayaRing.java",
+             *sorted((TMP / "timecodenull").glob("*.java")), TIMECODE_CHECK) != 0:
+    fail("FAIL — the timecode null negative did not compile.")
+timecode_log = TMP / "timecodenull.log"
+if run_java("-cp", str(TMP / "timecodenullclasses"), "dev.kaya.TimecodeCheck",
+            log=timecode_log) == 0:
+    fail("FAIL — the timecode null negative passed without its guard.")
+if "null timecode text reached JNI" not in timecode_log.read_text(encoding="utf-8"):
+    fail("FAIL — the timecode null negative failed for the wrong reason.")
+print("java-typecheck: timecode public null refusal: watched red")
+
+
+def timecode_jni_panics(source):
+    body = source.split('fn ring_fmt_parse_timecode', 1)[1].split(
+        'extern "system" fn', 1)[0]
+    return re.search(r"\.(?:expect|unwrap)\s*\(", body) is not None
+
+
+jni_source = (ROOT / "crates/kaya/src/jvm.rs").read_text(encoding="utf-8")
+if timecode_jni_panics(jni_source):
+    fail("FAIL — timecode JNI can panic while reading app text; report a Java exception.")
+jni_panic = g.doctor("timecode JNI negative restored a panicking text read", jni_source,
+                    r"match env\.get_string\(&text\) \{",
+                    'match env.get_string(&text).map(|value| Some(value).expect("cut")) {')
+if not timecode_jni_panics(jni_panic):
+    fail("FAIL — the timecode JNI panic guard passed its counted negative.")
+print("java-typecheck: timecode JNI panic guard: watched red")
+if subprocess.run(["tools/build-id.py", "--verify", str(LIBKAYA)],
+                  cwd=ROOT, check=False).returncode != 0:
+    fail("FAIL — rebuild libkaya before the native timecode refusal check.")
+if run_java("-cp", f"{TMP / 'classes'}:{TMP / 'timecodeclasses'}",
+            "dev.kaya.TimecodeCheck", "--native", env=NOTIFY_ENV) != 0:
+    fail("FAIL — timecode JNI did not safely report its measured text-read failure.")
+
 # THE PROCESS-LEVEL NOTIFICATION HANDLER'S DISPATCH ORDER, RUN
 # (docs/tasks-s9-plan.md R1, docs/deferred.md's S9 entry, which asked for
 # exactly this in five bindings): the one-shot handler bound at the show

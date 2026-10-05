@@ -4,6 +4,7 @@ import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.draw.clip
@@ -556,6 +557,7 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
      * its stops and its ticks from the first two.
      */
     var step by mutableStateOf(0.0)
+    var numberFormat by mutableStateOf("number")
     var tickSpacing by mutableStateOf(0.0)
     var committed by mutableStateOf(0.0)
 
@@ -2121,7 +2123,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0x0e75ba3234ed9bffuL
+    private const val SPEC_HASH: ULong = 0xb28d4a0fddd60b2buL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -2423,6 +2425,7 @@ object KayaCompose {
     private const val PROP_PLAYER = 52
     private const val PROP_CAPTURE = 53
     private const val PROP_ASPECT = 54
+    private const val PROP_FORMAT = 55
     private const val FILE_CONTENT_IMAGES = 1
     private const val PROP_COLUMNS = 11
     // The accessibility identifier (never spoken) and label (spoken).
@@ -3289,6 +3292,7 @@ object KayaCompose {
         // UI thread past the harness's 60s step ceiling.
         val doomed = HashSet<Long>()
         val bereaved = HashSet<Long>()
+        val numberWrites = HashSet<Long>()
         // The three-link trace's third link (KayaDiag): how big this
         // batch was and how long the UI thread spent on it.
         var records = 0
@@ -3338,7 +3342,7 @@ object KayaCompose {
                             node.minValue = -KAYA_NUMBER_UNBOUNDED
                             node.maxValue = KAYA_NUMBER_UNBOUNDED
                             node.step = 1.0
-                            kayaWriteText(node, KayaPresent.numberText(0.0, 1.0))
+                            kayaWriteText(node, KayaPresent.numberText(0.0, 1.0, node.numberFormat))
                             KayaSceneModel.numberFields.add(node)
                         }
                     }
@@ -3366,8 +3370,13 @@ object KayaCompose {
                             // An app write shows the new value
                             // (docs/number-field-plan.md §2) and fires nothing.
                             if (node.kind == KIND_NUMBER_FIELD) {
-                                kayaWriteText(node, KayaPresent.numberText(node.value, node.step))
+                                numberWrites.add(id)
                             }
+                        }
+                        PROP_FORMAT -> {
+                            val node = KayaSceneModel.nodes[id]!!
+                            node.numberFormat = readString(b)
+                            numberWrites.add(id)
                         }
                         PROP_MIN -> KayaSceneModel.nodes[id]!!.minValue = readF64(b)
                         PROP_MAX -> KayaSceneModel.nodes[id]!!.maxValue = readF64(b)
@@ -3482,7 +3491,7 @@ object KayaCompose {
                             val node = KayaSceneModel.nodes[id]!!
                             node.step = readF64(b)
                             if (node.kind == KIND_NUMBER_FIELD) {
-                                kayaWriteText(node, KayaPresent.numberText(node.value, node.step))
+                                numberWrites.add(id)
                             }
                         }
                         PROP_TICK_SPACING ->
@@ -4444,6 +4453,11 @@ object KayaCompose {
                 else -> error("kaya: unknown apply record kind $kind")
             }
             b.position(start + size)
+        }
+        for (id in numberWrites) {
+            KayaSceneModel.nodes[id]?.let { node ->
+                kayaWriteText(node, KayaPresent.numberText(node.value, node.step, node.numberFormat))
+            }
         }
         for (parent in bereaved) {
             KayaSceneModel.nodes[parent]?.children?.removeAll { it.id in doomed }
@@ -19166,7 +19180,7 @@ internal const val KAYA_NUMBER_UNBOUNDED = 9_007_199_254_740_992.0
 internal fun kayaNumberCommit(node: KayaNode) {
     val out = DoubleArray(1)
     val answer = KayaPresent.numberCommit(
-        node.textState.text.toString(), node.value, node.minValue, node.maxValue, node.step, out)
+        node.textState.text.toString(), node.value, node.minValue, node.maxValue, node.step, node.numberFormat, out)
     kayaNumberSettle(node, answer, out[0])
 }
 
@@ -19177,12 +19191,13 @@ private fun kayaNumberSettle(node: KayaNode, answer: Int, moved: Double) {
         node.committed = moved
         KayaPresent.emitValueCommitted(node.tag, moved)
     }
-    kayaWriteText(node, KayaPresent.numberText(node.value, node.step))
+    kayaWriteText(node, KayaPresent.numberText(node.value, node.step, node.numberFormat))
 }
 
 /** §4.2, measured on the lane's Gboard (docs/number-field-plan.md). */
-internal fun kayaNumberKeyboard(min: Double, step: Double): KeyboardType =
+internal fun kayaNumberKeyboard(min: Double, step: Double, format: String = "number"): KeyboardType =
     when {
+        format != "number" -> KeyboardType.Ascii
         min < 0 -> KeyboardType.Decimal
         step == Math.rint(step) -> KeyboardType.Number
         else -> KeyboardType.Decimal
@@ -19203,7 +19218,7 @@ private fun KayaNumberField(node: KayaNode, a11y: Modifier, fill: Modifier) {
         state = node.textState,
         lineLimits = TextFieldLineLimits.SingleLine,
         keyboardOptions = KeyboardOptions(
-            keyboardType = kayaNumberKeyboard(node.minValue, node.step),
+            keyboardType = kayaNumberKeyboard(node.minValue, node.step, node.numberFormat),
             imeAction = ImeAction.Done,
         ),
         onKeyboardAction = { performDefaultAction ->
@@ -19214,6 +19229,7 @@ private fun KayaNumberField(node: KayaNode, a11y: Modifier, fill: Modifier) {
         textStyle = LocalTextStyle.current.copy(color = LocalContentColor.current),
         modifier = a11y
             .then(fill)
+            .widthIn(min = if (node.numberFormat == "number") 0.dp else 180.dp)
             .focusRequester(focusRequester)
             // A hardware Return never reaches onKeyboardAction (the entry's
             // §7.3 finding, docs/submit-plan.md).

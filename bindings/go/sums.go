@@ -409,9 +409,11 @@ func (sc SumCase[K, V]) onValue(n Node, onChange func(*Tx, K, float64)) {
 // SetGrow weights this arm's node within its stamped row or column.
 func (sc SumCase[K, V]) SetGrow(n Node, weight float64) { sc.t.SetGrow(n, weight) }
 
+func (sc SumCase[K, V]) SetFormat(n Node, format NumberFormat) { sc.t.SetFormat(n, format) }
+
 // SetStep is the granularity a slider this arm stamps rests on; const
 // only, like the range (Tpl.SetStep).
-func (sc SumCase[K, V]) SetStep(n Node, step float64) { sc.t.SetStep(n, step) }
+func (sc SumCase[K, V]) SetStep(n Node, step float64)          { sc.t.SetStep(n, step) }
 
 // SetMin and SetMax are a number field's bounds this arm stamps
 // (Tpl.SetMin).

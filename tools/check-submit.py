@@ -325,6 +325,11 @@ def swift_number_findings(source):
     return out
 
 
+def direct_rust_calls(source, name):
+    pattern = r"(?P<qualifier>\bfn\s+|[.:]\s*)?\b" + re.escape(name) + r"\s*\("
+    return sum(match["qualifier"] is None for match in re.finditer(pattern, source))
+
+
 def gtk_number_findings(source):
     """GTK's spin button reads its text on activate, on focus-out and before
     every step (gtk_spin_button_update), and reports each through ONE
@@ -358,14 +363,14 @@ def gtk_number_findings(source):
     if "if !inside {" not in leave or "spin.update();" not in block_after(leave, "if !inside {"):
         out.append(f"{GTK}: the number field's focus door does not commit once the window's "
                    f"focus sits elsewhere — Tab away commits nothing (§3 rule 1)")
-    if "crate::number_field::commit(" not in reads:
+    if "crate::number_field::commit_for(" not in reads:
         out.append(f"{GTK}: the spin button's `input` handler does not read the text through "
-                   f"number_field::commit — the platform's parse decides the value (§3 rule 5)")
+                   f"number_field::commit_for — the platform's parse decides the value (§3 rule 5)")
     if "send_value_committed_tag(" in arm:
         out.append(f"{GTK}: the number field's create arm emits for itself — the one emit is "
                    f"number_committed's")
-    calls = src.count("number_committed(") - src.count("fn number_committed(")
-    inside = door.count("number_committed(")
+    calls = direct_rust_calls(src, "number_committed")
+    inside = direct_rust_calls(door, "number_committed")
     if calls == 0:
         out.append(f"{GTK}: nothing calls number_committed — the number field's value-changed "
                    f"door is not wired")
@@ -449,7 +454,7 @@ def winui_number_findings(source):
     door = block_after(arm, "move |sender, args| {")
     shape = block_after(src, "fn winui_number_shape(")
     settle = block_after(src, "fn winui_number_settle(")
-    reader = block_after(src, "fn read(text: &HSTRING) -> Option<f64> {")
+    reader = block_after(src, "fn read(&self, text: &HSTRING) -> Option<f64> {")
     if "NumberBoxValidationMode::InvalidInputOverwritten" not in arm:
         out.append(f"{WINUI}: the NumberBox does not overwrite invalid input — unreadable text "
                    f"stays in the box (§3 rule 2)")
@@ -462,9 +467,9 @@ def winui_number_findings(source):
     if "SetNumberFormatter(" not in shape or "KayaNumberText {" not in shape:
         out.append(f"{WINUI}: the NumberBox is not given kaya's own formatter — its text is the "
                    f"platform's parse and display (§3 rule 5)")
-    if "crate::fmt::parse_number(" not in reader:
+    if "crate::number_field::parse_for(" not in reader:
         out.append(f"{WINUI}: KayaNumberText reads the text for itself, not through "
-                   f"fmt::parse_number — the platform's own parse, not kaya's one rule, "
+                   f"number_field::parse_for — the platform's own parse, not kaya's one rule, "
                    f"decides the value (§3 rule 5)")
     if "send_value_committed_tag(" in arm:
         out.append(f"{WINUI}: the number field's create arm emits for itself — the one emit is "
@@ -668,7 +673,7 @@ watched("a SwiftUI number field whose focus loss commits nothing", {**REAL, SWIF
         "focus loss does not commit")
 n27 = gate.doctor("settle emitting whether or not the value moved", REAL[SWIFT],
                   r"(\n\s*kayaUserWrite \{ node\.text = "
-                  r"kayaNumberText\(node\.value, node\.step\) \})",
+                  r"kayaNumberText\(node\.value, node\.step, node\.numberFormat\) \})",
                   r"\n    KayaHost.emitValueCommitted(node.tag, node.value)\1")
 watched("a SwiftUI number field firing on an unchanged commit", {**REAL, SWIFT: n27},
         "an unchanged commit fires nothing")
@@ -700,7 +705,7 @@ n32 = gate.doctor("number_committed emitting whether or not the value moved", RE
 watched("a GTK number field firing on an unchanged commit", {**REAL, GTK: n32},
         "an unchanged commit fires nothing")
 n33 = gate.doctor("the input handler reading the text for itself", REAL[GTK],
-                  r"Some\(Ok\(match crate::number_field::commit\(",
+                  r"Some\(Ok\(match crate::number_field::commit_for\(",
                   "Some(Ok(match own_parse(")
 watched("a GTK number field whose parse is the platform's", {**REAL, GTK: n33},
         "the platform's parse decides")
@@ -709,6 +714,31 @@ n34 = gate.doctor("the value-changed door cut", REAL[GTK],
                   "let _ = sb;")
 watched("a GTK number field whose steps and Return commit nothing", {**REAL, GTK: n34},
         "nothing calls number_committed")
+for alias in ("gtk_user_number_committed", "scene.number_committed"):
+    substituted = gate.doctor(f"the value-changed door replaced by {alias}", REAL[GTK],
+                              r"\bnumber_committed(?=\(&committed, &quiet, &sink, "
+                              r"&tag, sb\.value\(\)\))",
+                              alias)
+    watched(f"a GTK number field calling {alias} instead of its commit door",
+            {**REAL, GTK: substituted}, "nothing calls number_committed")
+calibration = """
+fn number_committed() {}
+fn gtk_user_number_committed() {}
+fn calls() {
+    number_committed ();
+    gtk_user_number_committed();
+    scene.number_committed();
+    scene.user_number_committed();
+    scene . number_committed ();
+    other::number_committed();
+    number_committed_extra();
+}
+"""
+calibrated = direct_rust_calls(calibration, "number_committed")
+print(f"check-submit: direct Rust call calibration: {calibrated} call(s), expected 1")
+if calibrated != 1:
+    gate.finding("direct Rust call census includes a definition, prefix or member name")
+
 
 # COMPOSE
 n35 = gate.doctor("a commit planted in the number field's text collector", REAL[COMPOSE],
@@ -736,7 +766,7 @@ watched("a Compose number field whose focus loss commits nothing", {**REAL, COMP
         "focus loss does not commit")
 n39 = gate.doctor("kayaNumberSettle emitting whether or not the value moved", REAL[COMPOSE],
                   r"(\n\s*kayaWriteText\(node, KayaPresent\.numberText\(node\.value, "
-                  r"node\.step\)\)\n\})",
+                  r"node\.step, node\.numberFormat\)\)\n\})",
                   r"\n    KayaPresent.emitValueCommitted(node.tag, node.value)\1")
 watched("a Compose number field firing on an unchanged commit", {**REAL, COMPOSE: n39},
         "an unchanged commit fires nothing")
@@ -775,7 +805,8 @@ n_win_moved = gate.doctor("winui_number_settle emitting whether or not the value
 watched("a WinUI number field firing on an unchanged commit", {**REAL, WINUI: n_win_moved},
         "an unchanged commit fires nothing")
 n_win_parse = gate.doctor("KayaNumberText reading the text for itself", REAL[WINUI],
-                          r"crate::fmt::parse_number\(text\.to_string\(\)\.trim\(\)\)",
+                          r"crate::number_field::parse_for\(&text\.to_string\(\), "
+                          r"self\.cell\.format\(\)\)",
                           "text.to_string().trim().parse().ok()")
 watched("a WinUI number field whose parse is its own", {**REAL, WINUI: n_win_parse},
         "reads the text for itself")
@@ -790,7 +821,7 @@ n_win_verb = gate.doctor("the harness's nudge committing past the door", REAL[WI
 watched("a WinUI verb that commits without the user's door", {**REAL, WINUI: n_win_verb},
         "winui_number_settle is called")
 
-gate.negatives_ran(48)
+gate.negatives_ran(50)
 
 for line in census(REAL):
     gate.finding(line)

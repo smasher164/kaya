@@ -19,6 +19,8 @@ module KayaRuntime
     fmtTimeRaw,
     fmtDateTimeRaw,
     fmtNumberRaw,
+    fmtTimecodeRaw,
+    fmtParseTimecodeRaw,
     fmtPercentRaw,
     fmtCurrencyRaw,
     localeLine,
@@ -198,6 +200,12 @@ foreign import ccall unsafe "kaya_fmt_time"
 
 foreign import ccall unsafe "kaya_fmt_date_time"
   c_kaya_fmt_date_time :: Int64 -> Int64 -> Int64 -> Ptr Word8 -> CSize -> IO CSize
+
+foreign import ccall unsafe "kaya_fmt_timecode"
+  c_kaya_fmt_timecode :: Int64 -> Int64 -> Int64 -> Word32 -> Ptr Word8 -> CSize -> IO CSize
+
+foreign import ccall unsafe "kaya_fmt_parse_timecode"
+  c_kaya_fmt_parse_timecode :: Ptr Word8 -> Int64 -> Int64 -> Word32 -> IO Int64
 
 foreign import ccall unsafe "kaya_fmt_number"
   c_kaya_fmt_number :: Double -> Ptr Word8 -> Ptr Word8 -> CSize -> IO CSize
@@ -401,6 +409,17 @@ withNumberOptions minD maxD grouped body =
     pokeByteOff o 4 maxD
     pokeByteOff o 8 (if grouped then 1 else 0 :: Word8)
     body o
+
+fmtTimecodeRaw :: Int64 -> Int64 -> Int64 -> Bool -> IO (Maybe Text)
+fmtTimecodeRaw frames numerator denominator drop =
+  fillDoor (c_kaya_fmt_timecode frames numerator denominator (if drop then 1 else 0))
+
+fmtParseTimecodeRaw :: Text -> Int64 -> Int64 -> Bool -> IO (Maybe Int64)
+fmtParseTimecodeRaw text numerator denominator drop
+  | BS.elem 0 (TE.encodeUtf8 text) = return Nothing
+  | otherwise = withCString0 text $ \ptr -> do
+      frames <- c_kaya_fmt_parse_timecode ptr numerator denominator (if drop then 1 else 0)
+      return (if frames < 0 then Nothing else Just frames)
 
 fmtNumberRaw :: Double -> Int32 -> Int32 -> Bool -> IO (Maybe Text)
 fmtNumberRaw v minD maxD grouped =

@@ -79,6 +79,18 @@ struct Player {
     cue: String,
 }
 
+#[cfg(feature = "harness")]
+#[derive(Debug, PartialEq)]
+pub(crate) struct CaptionSnapshot {
+    pub(crate) state: PlayerState,
+    pub(crate) duration_ms: u64,
+    pub(crate) sidecar: bool,
+    pub(crate) selected: bool,
+    pub(crate) boundaries: Vec<u64>,
+    pub(crate) sidecar_expected: Option<String>,
+    pub(crate) published: String,
+}
+
 impl Player {
     fn new() -> Self {
         Player {
@@ -420,6 +432,23 @@ impl Media {
         };
         p.publish_cue(player, text.clone(), &mut out);
         (text, out)
+    }
+
+    #[cfg(feature = "harness")]
+    pub(crate) fn caption_snapshot(&self, player: PlayerId, t_ms: Option<u64>) -> Option<CaptionSnapshot> {
+        let p = self.players.get(&player)?;
+        Some(CaptionSnapshot {
+            state: p.state,
+            duration_ms: p.duration_ms,
+            sidecar: p.sidecar.is_some(),
+            selected: p.sidecar_selected,
+            boundaries: p.sidecar.as_ref().map_or_else(Vec::new, Captions::boundaries),
+            sidecar_expected: t_ms.map(|t| match (&p.sidecar, p.sidecar_selected) {
+                (Some(c), true) => c.text_at(t),
+                _ => String::new(),
+            }),
+            published: p.cue.clone(),
+        })
     }
 
     pub(crate) fn was_released(&self, player: PlayerId) -> bool {
@@ -1771,6 +1800,38 @@ mod tests {
             Report::CaptionsFailed { url: url.into(), domain: "http".into(), code: 404, underlying: 0, detail: String::new() },
         );
         assert!(late.is_empty(), "a stale fetch's answer is not news: {late:?}");
+    }
+
+    #[cfg(feature = "harness")]
+    #[test]
+    fn caption_snapshot_measures_without_publishing() {
+        let (mut m, _, _) = with_source("media/h264_aac.mp4");
+        assert!(m.caption_snapshot(PlayerId(999), Some(1500)).is_none());
+        let absent = m.caption_snapshot(P, Some(1500)).unwrap();
+        assert!(!absent.sidecar && !absent.selected && absent.boundaries.is_empty());
+        assert_eq!(absent.sidecar_expected, Some(String::new()));
+        let mut out = Vec::new();
+        let mut heard = Vec::new();
+        m.set_prop(P, PlayerProp::Captions, Value::Str("media/captions.vtt".into()), &mut out, &mut heard);
+        let off = m.caption_snapshot(P, Some(1500)).unwrap();
+        assert!(off.sidecar && !off.selected);
+        assert_eq!(off.sidecar_expected, Some(String::new()));
+        m.select(P, TrackKind::Caption, 1, &mut out, &mut heard);
+        let before = m.caption_snapshot(P, Some(500)).unwrap();
+        assert_eq!(before.boundaries, vec![0, 1000, 2000]);
+        assert_eq!(before.sidecar_expected.as_deref(), Some("first cue"));
+        for (at, expected) in [(Some(1500), Some("second cue")), (Some(2000), Some("")), (None, None)] {
+            let snapshot = m.caption_snapshot(P, at).unwrap();
+            assert_eq!(snapshot.sidecar_expected.as_deref(), expected);
+            assert_eq!(snapshot.published, before.published);
+            assert_eq!(snapshot.state, before.state);
+            assert_eq!(snapshot.duration_ms, before.duration_ms);
+            eprintln!("caption snapshot at={at:?}: {snapshot:?}");
+        }
+        assert_eq!(m.caption_snapshot(P, Some(500)).unwrap(), before);
+        assert_eq!(m.caption_at(P, 1500).1,
+            vec![Occurrence::CaptionCue { player: P, text: "second cue".into() }]);
+        assert!(m.caption_at(P, 1500).1.is_empty());
     }
 
     #[test]

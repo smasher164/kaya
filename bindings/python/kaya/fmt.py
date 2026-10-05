@@ -70,6 +70,73 @@ def _digits(what: str, value: int | None) -> int | None:
     return value
 
 
+@dataclasses.dataclass(frozen=True)
+class TimecodeRate:
+    numerator: int
+    denominator: int = 1
+    drop: bool = False
+
+    def __post_init__(self) -> None:
+        for name, value in (("numerator", self.numerator), ("denominator", self.denominator)):
+            _integer(name, value)
+        if not isinstance(self.drop, bool):
+            type_error, _ = _errors()
+            raise type_error("kaya: TimecodeRate.drop is a bool")
+
+
+@dataclasses.dataclass(frozen=True)
+class NumberFormat:
+    rate: TimecodeRate | None = None
+
+    def __post_init__(self) -> None:
+        if self.rate is not None:
+            _rate(self.rate)
+
+    @classmethod
+    def number(cls) -> NumberFormat:
+        return cls()
+
+    @classmethod
+    def timecode(cls, rate: TimecodeRate) -> NumberFormat:
+        return cls(_rate(rate))
+
+    def _wire(self) -> str:
+        if self.rate is None:
+            return "number"
+        r = self.rate
+        return f"timecode:{r.numerator}/{r.denominator}:{'df' if r.drop else 'ndf'}"
+
+
+def _rate(value: TimecodeRate) -> TimecodeRate:
+    if not isinstance(value, TimecodeRate):
+        type_error, _ = _errors()
+        raise type_error(f"kaya: timecode requires a TimecodeRate, not {type(value).__name__}")
+    return value
+
+
+def _integer(what: str, value: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not -(1 << 63) <= value < (1 << 63):
+        _, value_error = _errors()
+        raise value_error(f"kaya: {what} must be a signed 64-bit integer, got {value!r}")
+    return value
+
+
+def timecode(frames: int, rate: TimecodeRate) -> str:
+    _rate(rate)
+    return runtime.fmt_timecode(_integer("timecode frames", frames), rate.numerator, rate.denominator, rate.drop)
+
+
+def parse_timecode(text: str, rate: TimecodeRate) -> int | None:
+    timecode(0, rate)
+    if "\0" in text:
+        return None
+    try:
+        value = runtime.fmt_parse_timecode(text, rate.numerator, rate.denominator, rate.drop)
+    except UnicodeEncodeError:
+        return None
+    return None if value < 0 else value
+
+
 def date(value: datetime.date, *, length: Length = "medium") -> str:
     """The date, in the process locale."""
     return runtime.fmt_date(_date("fmt.date's value", value), _length(length))

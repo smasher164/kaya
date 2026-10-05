@@ -6824,6 +6824,11 @@ impl Scene {
         self.media.caption_at(player, t_ms)
     }
 
+    #[cfg(feature = "harness")]
+    pub(crate) fn caption_snapshot(&self, player: crate::protocol::PlayerId, t_ms: Option<u64>) -> Option<crate::media::CaptionSnapshot> {
+        self.media.caption_snapshot(player, t_ms)
+    }
+
     /// EVERY RANGE WRITE this batch produced, read off the ops (the
     /// `absorb_text_writes` stance): a batch moving ONE thumb of a range the
     /// backend already holds that would cross the other as it stands is

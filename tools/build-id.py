@@ -96,7 +96,7 @@ GATES = {
     # key blind to one root passes stale for the file that just grew one.
     "check-diagnostics": ["crates", "swift", "android", "bindings",
                           "guests", "cmd"],
-    "check-verbs": ["crates", "bindings", "swift", "android"],
+    "check-verbs": ["crates", "bindings", "swift", "android", "guests"],
     # tools/checks/ too: its clause B compiles the probe that lives there.
     "check-harness-ceiling": ["crates", "swift", "android", "tools/checks"],
     "check-file-modes": ["crates", "bindings", "swift", "android"],
@@ -134,7 +134,7 @@ GATES = {
     # gated by gen-header, which is keyed on all of crates/.
     "swift-typecheck": ["crates/kaya/include", "bindings/swift",
                         "guests/swift", "swift", "Package.swift"],
-    "java-typecheck": ["bindings/java", "bindings/java-desktop", "guests/java"],
+    "java-typecheck": ["crates", "bindings/java", "bindings/java-desktop", "guests/java"],
     "js-typecheck": ["bindings/js", "guests/js"],
     "py-typecheck": ["bindings/python", "guests/python"],
     "go-typecheck": ["go.mod", "go.sum", "bindings/go", "guests/go", "cmd", "crates/kaya/include"],

@@ -9,6 +9,63 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
+## ~~BUILD — timecode formatter and number-field format (2026-10-04)~~ COMPLETE implementation 2026-10-05: all nine bindings plus C, all five backends, viewed review page; full-matrix validation follow-up remains open below.
+KEY: timecode, TimecodeRate, NumberFormat, drop-frame, number-field format
+
+Built under docs/number-field-plan.md §10, including final transaction
+validation for coalesced signals, unrealized rows, conditional activation,
+user commits and undo/redo. Core: 923 tests passed; filtered matrix: 236/236;
+all 37 timecode legs in the full matrix passed. Ten native images were viewed
+in the local handoff review (`~/Projects/kaya-handoffs/2026-10-04-timecode/review/index.html`).
+Desktop scenes run 61 steps; phones retain the first 54 and omit the nudge
+block because their number fields expose no stepping control.
+GUARDS: final-declaration checks and core unit tests; check-verbs' 69 routing
+clauses/87 watched negatives and three arithmetic cuts; check-sugar-surface's
+25 door/zone clauses/26 negatives; shared scene assertions. Caption diagnostic
+coverage adds 27 routes/33 negatives and a forced-expiry red bundle read-back.
+
+## RULING WANTED — confirm the built timecode rate, wire and input choices (2026-10-05)
+KEY: timecode recommendations, TimecodeRate, NumberFormat, drop-frame grammar
+
+The §10 choices remain built as recommended awaiting the maintainer:
+integer rates 1..120 plus the three exact fractional rates; nonnegative
+whole frames through 2^53-1; hours beyond 24; four complete fields; strict
+colon/non-drop and semicolon/drop punctuation; skipped labels refused;
+Unicode decimal input with ASCII output. The wire uses one atomic string
+selected by typed binding values. The review page groups these as rates,
+frame domain, input grammar and closed format selection. Validation does not
+ratify a design ruling. The independent number-field width ruling stays open.
+
+## VALIDATION — timecode full-matrix run was red despite green focused controls (2026-10-05)
+KEY: timecode full matrix, duration ceilings, media_delivery_go, x265 encoder crash
+
+The final normal matrix exited 1 after 2635 s: 2680 passed, one Windows
+media_delivery_go failure, two macOS fullscreen legs NOT RUN while the host
+was active. Linux 1139/1139, iOS 217/217, Android 226/226; macOS 680/682 ran
+and passed, Windows 418/419 passed. The gate sweep was 63/64: ffmpeg's x265
+encoder crashed inside check-assets. The two fullscreen controls passed
+when the host became idle, Windows media delivery passed in 28 s, and the
+unchanged asset gate passed all 39 negatives in 25 s. Those independent
+controls do not turn the recorded full run green.
+
+Duration limits also refused macOS (1253 net >1100), Windows (1689 >1650),
+iOS (1728 >1350), Android (1237 >870), and gates (636 >600). No limits were
+raised. Zero dated host Sleep/Wake events occurred. Live samples recorded
+host load and token waits; iOS rebuilt unchanged Rust artifacts after
+prewarm, but Cargo did not record its exact dirty reason. Do not assert a
+specific cause from that inference. The next validation work must explain
+these overruns and get a clean full-run verdict, not erase the failed run.
+
+Evidence is retained locally under target with the timecode-full-final,
+timecode-final-duration-live, timecode-ios-rebuild-audit,
+timecode-win-delivery-control and timecode-check-assets-control prefixes.
+The Windows and encoder failure measurements are in docs/traps.md under
+WinUI adaptive opening and the x265 negative. The original uninstrumented
+GTK caption failure is still unproven; its missing clock/publication evidence
+was added and proven with a forced red leg, and the final full-run caption
+leg passed. GUARDS: existing leg deadlines, measured diagnostic snapshots,
+exit/verdict refusals, idle guard and duration ceilings all remain enabled.
+
 ## DEFECT — iOS media_session-swiftui: a routed remote pause left the player playing, and the bundle cannot say why (seen once 2026-10-03, under a capture,media_ matrix)
 KEY: media_session-swiftui, session_send pause, routed 2, remote command action=2, expect_now_playing, ios media_session
 

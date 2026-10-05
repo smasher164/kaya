@@ -164,7 +164,8 @@ func (r taskRow) SetColumnsAuto(n kaya.Node, minWidth float64) { r.t.SetColumnsA
 
 func (r taskRow) SetWrap(n kaya.Node, on bool) { r.t.SetWrap(n, on) }
 
-func (r taskRow) SetSubmits(n kaya.Node, on bool) { r.t.SetSubmits(n, on) }
+func (r taskRow) SetFormat(n kaya.Node, format kaya.NumberFormat) { r.t.SetFormat(n, format) }
+func (r taskRow) SetSubmits(n kaya.Node, on bool)                 { r.t.SetSubmits(n, on) }
 
 func (r taskRow) Draggable(n kaya.Node) kaya.TplDragRef { return r.t.Draggable(n) }
 

@@ -175,6 +175,9 @@ public final class Main {
             case "sliders":
                 app = Sliders::app;
                 break;
+            case "timecode":
+                app = Timecode::app;
+                break;
             case "numberfield":
             case "numberfieldde":
                 app = NumberField::app;

@@ -240,17 +240,17 @@ sealed class ChoreTaskRow
         System.Action<Tx, System.Collections.Generic.List<object>, double, double>? onCommit = null) =>
         t.Range(min, max, low, high, step, tickSpacing, minGap, lowLabel, highLabel, onChange, onCommit);
 
-    public Node NumberField(double value, double? min = null, double? max = null, double? step = null,
-        System.Action<Tx, System.Collections.Generic.List<object>, double>? onCommit = null) =>
-        t.NumberField(value, min, max, step, onCommit);
+    public Node NumberField(double value, double? min = null, double? max = null, double? step = null, System.Action<Tx, System.Collections.Generic.List<object>, double>? onCommit = null,
+        NumberFormat? format = null) =>
+        t.NumberField(value, min, max, step, onCommit, format);
 
-    public Node NumberField(Signal value, double? min = null, double? max = null, double? step = null,
-        System.Action<Tx, System.Collections.Generic.List<object>, double>? onCommit = null) =>
-        t.NumberField(value, min, max, step, onCommit);
+    public Node NumberField(Signal value, double? min = null, double? max = null, double? step = null, System.Action<Tx, System.Collections.Generic.List<object>, double>? onCommit = null,
+        NumberFormat? format = null) =>
+        t.NumberField(value, min, max, step, onCommit, format);
 
-    public Node NumberField(Field<double> value, double? min = null, double? max = null, double? step = null,
-        System.Action<Tx, System.Collections.Generic.List<object>, double>? onCommit = null) =>
-        t.NumberField(value, min, max, step, onCommit);
+    public Node NumberField(Field<double> value, double? min = null, double? max = null, double? step = null, System.Action<Tx, System.Collections.Generic.List<object>, double>? onCommit = null,
+        NumberFormat? format = null) =>
+        t.NumberField(value, min, max, step, onCommit, format);
 
     public Node Select(string[] options, int selected,
         System.Action<Tx, System.Collections.Generic.List<object>, int>? onSelect = null) =>
@@ -374,6 +374,8 @@ sealed class ChoreTaskRow
     public void SetInset(Node n, double pad) => t.SetInset(n, pad);
 
     public void SetFill(Node n, bool on) => t.SetFill(n, on);
+
+    public void SetFormat(Node n, NumberFormat format) => t.SetFormat(n, format);
 
     public void SetSubmits(Node n, bool on) => t.SetSubmits(n, on);
 

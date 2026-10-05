@@ -37,6 +37,12 @@ module KayaApp
     fmtTime,
     fmtDateTime,
     fmtNumber,
+    TimecodeRate (..),
+    NumberFormat (..),
+    fmtTimecode,
+    fmtParseTimecode,
+    setNumberFormat,
+    setNodeNumberFormat,
     fmtPercent,
     fmtCurrency,
     Locale (..),
@@ -368,6 +374,7 @@ module KayaApp
     rangeBoundOn,
     numberFieldOn,
     numberFieldBoundOn,
+    numberFieldBound,
     selectOn,
     radioOn,
     spacer,
@@ -689,6 +696,23 @@ fmtTime len t = door "kaya_fmt_time" (R.fmtTimeRaw (packTimeOfDay t) (lengthCode
 fmtDateTime :: Length -> Day -> TimeOfDay -> IO Text
 fmtDateTime len day t =
   door "kaya_fmt_date_time" (R.fmtDateTimeRaw (packDay day) (packTimeOfDay t) (lengthCode len))
+
+data TimecodeRate = TimecodeRate Int64 Int64 Bool deriving (Eq, Show)
+data NumberFormat = Number | Timecode TimecodeRate deriving (Eq, Show)
+
+numberFormatWire :: NumberFormat -> String
+numberFormatWire Number = "number"
+numberFormatWire (Timecode (TimecodeRate numerator denominator drop)) =
+  "timecode:" ++ show numerator ++ "/" ++ show denominator ++ ":" ++ if drop then "df" else "ndf"
+
+fmtTimecode :: TimecodeRate -> Int64 -> IO Text
+fmtTimecode (TimecodeRate numerator denominator drop) frames =
+  door "kaya_fmt_timecode" (R.fmtTimecodeRaw frames numerator denominator drop)
+
+fmtParseTimecode :: TimecodeRate -> Text -> IO (Maybe Int64)
+fmtParseTimecode rate@(TimecodeRate numerator denominator drop) text = do
+  _ <- fmtTimecode rate 0
+  R.fmtParseTimecodeRaw text numerator denominator drop
 
 fmtNumber :: NumberOptions -> Double -> IO Text
 fmtNumber o v =
@@ -2409,6 +2433,9 @@ setRich (Widget n) on = emitB (W.txSetRich n on)
 setOwnUndo :: Widget -> Bool -> Build ()
 setOwnUndo (Widget n) on = emitB (W.txSetOwnUndo n on)
 
+setNumberFormat :: Widget -> NumberFormat -> Build ()
+setNumberFormat (Widget n) format = emitB (W.txSetFormat n (numberFormatWire format))
+
 -- | Return in this textarea publishes 'onSubmit' instead of inserting a
 -- newline (docs\/submit-plan.md S2); Shift+Return is then the newline.
 setSubmits :: Widget -> Bool -> Build ()
@@ -2903,6 +2930,7 @@ data Attr (c :: WClass) where
   -- | The width:height ratio of a video view's box, whatever its picture's
   -- own shape; 'FitAs' places the picture in it.
   AspectAs :: Int -> Int -> Attr 'LeafW
+  NumberFormat :: NumberFormat -> Attr 'LeafW
   -- | The granularity a slider's thumb rests on: min + k * step
   -- (docs\/slider-plan.md S1). Divides the range evenly; 0 is continuous.
   Step :: Double -> Attr 'LeafW
@@ -2982,6 +3010,7 @@ applyAttr (FitAs f) w = setFit w f
 applyAttr (AspectAs width height) w = setAspect w width height
 applyAttr (MinuteStep minutes) (Widget n) =
   emitB (W.txSetMinuteStep n (fromIntegral minutes))
+applyAttr (NumberFormat format) w = setNumberFormat w format
 applyAttr (Step step) (Widget n) = emitB (W.txSetStep n step)
 applyAttr (TickSpacing spacing) (Widget n) = emitB (W.txSetTickSpacing n spacing)
 applyAttr (MinGap gap) (Widget n) = emitB (W.txSetMinGap n gap)
@@ -3322,6 +3351,12 @@ numberFieldOn value handler = leafish $ do
   w@(Widget n) <- widget W.kindNumberField
   emitB (W.txSetValue n value)
   pendB (PCommit n handler)
+  return w
+
+numberFieldBound :: (LeafArgs r) => Signal Double -> r
+numberFieldBound sig = leafish $ do
+  w <- widget W.kindNumberField
+  bindValue w sig
   return w
 
 -- | A number field whose value follows a float signal, with its commit
@@ -4182,6 +4217,7 @@ data TplAttr where
   -- CONSTANT and not a source, for 'TplGrow''s reason: every copy of one
   -- blueprint has the same gesture.
   TplSubmits :: Bool -> TplAttr
+  TplNumberFormat :: NumberFormat -> TplAttr
   -- | A stamped slider's granularity (docs\/slider-plan.md S1): constant
   -- across the copies, like the range.
   TplStep :: Double -> TplAttr
@@ -4257,6 +4293,7 @@ applyTplAttr (TplHrefBound src) n = bindStrSource hrefProp n src
 applyTplAttr (TplHrefField src) n = bindStrSource hrefProp n src
 applyTplAttr (TplRole r) n = setNodeRole n r
 applyTplAttr (TplSubmits on) n = setNodeSubmits n on
+applyTplAttr (TplNumberFormat format) n = setNodeNumberFormat n format
 applyTplAttr (TplStep step) (Node n) = emitT (W.txSetStep n step)
 applyTplAttr (TplMinGap gap) (Node n) = emitT (W.txSetMinGap n gap)
 applyTplAttr (TplLowLabel v) n = bindStrSource lowLabelProp n v
@@ -4295,6 +4332,9 @@ setNodeInset (Node n) pad = emitT (W.txSetInset n pad)
 -- | A stamped copy carries attribute runs (the live 'setRich').
 setNodeRich :: Node -> Bool -> Tpl ()
 setNodeRich (Node n) on = emitT (W.txSetRich n on)
+
+setNodeNumberFormat :: Node -> NumberFormat -> Tpl ()
+setNodeNumberFormat (Node n) format = emitT (W.txSetFormat n (numberFormatWire format))
 
 -- | A stamped textarea sends on Return (the live 'setSubmits').
 setNodeSubmits :: Node -> Bool -> Tpl ()

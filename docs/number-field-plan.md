@@ -378,7 +378,13 @@ number.
 
 The scope is the whole formatter, including drop-frame, by the maintainer’s
 2026-10-04 instruction. The choices below are recommendations to implement
-and review; validation and delivery are still pending.
+and review. Built on all five backends and all nine bindings plus C; the
+review page has ten viewed native captures. Core 923 tests and the filtered
+236-leg matrix passed; all 37 timecode legs passed in the full run. The full
+matrix itself remained red (2680 passed, one media failure, two idle skips,
+63/64 gates and duration overruns), with each failed/skipped check passing a
+separate control. docs/deferred.md records that open validation follow-up.
+The choices below still await the maintainer’s confirmation.
 
 The rate is an exact rational numerator/denominator with a drop flag, not a
 rounded decimal or an enum of common rates. Positive signed-32-bit parts
@@ -454,6 +460,10 @@ mutations must make the minute skip, tenth-minute exception and frame bound
 fail. Scene proof includes a label using the door, field commits and reverts,
 a row-template field, Arabic-Indic input and desktop stepping across a skip.
 The door census, both-zone sugar census and core-routing guard grow with it.
+Desktop lanes run all 61 shared steps; phones run the prefix through step 54
+and omit the nudge tail because their fields have no stepping control. The
+prefix covers typed commits/refusals, Unicode input, row fields and both
+atomic format/value orders. Screenshots prove only the two captured states.
 
 The nine-language assessment is **do** for Rust, Python, Go, C#, Java,
 Swift, OCaml, Haskell and JS: both door functions and both construction

@@ -433,16 +433,16 @@ static class Program
                 + "onCommit");
         Fwd("NumberField",
             ["double value", "double? min = null", "double? max = null",
-             "double? step = null", $"{onValue} onCommit = null"],
-            "value, min, max, step, onCommit");
+             "double? step = null", $"{onValue} onCommit = null", "NumberFormat? format = null"],
+            "value, min, max, step, onCommit, format");
         Fwd("NumberField",
             ["Signal value", "double? min = null", "double? max = null",
-             "double? step = null", $"{onValue} onCommit = null"],
-            "value, min, max, step, onCommit");
+             "double? step = null", $"{onValue} onCommit = null", "NumberFormat? format = null"],
+            "value, min, max, step, onCommit, format");
         Fwd("NumberField",
             ["Field<double> value", "double? min = null", "double? max = null",
-             "double? step = null", $"{onValue} onCommit = null"],
-            "value, min, max, step, onCommit");
+             "double? step = null", $"{onValue} onCommit = null", "NumberFormat? format = null"],
+            "value, min, max, step, onCommit, format");
         Fwd("Select", ["string[] options", "int selected", $"{onSelect} onSelect = null"],
             "options, selected, onSelect");
         Fwd("Select", ["string[] options", "Signal selected", $"{onSelect} onSelect = null"],
@@ -510,6 +510,7 @@ static class Program
         Set("SetRole", ["Node n", "Role role"], "n, role");
         Set("SetInset", ["Node n", "double pad"], "n, pad");
         Set("SetFill", ["Node n", "bool on"], "n, on");
+        Set("SetFormat", ["Node n", "NumberFormat format"], "n, format");
         Set("SetSubmits", ["Node n", "bool on"], "n, on");
         Set("SetAlign", ["Node n", "Align align"], "n, align");
         Set("SetFilled", ["Node n", "Tint tint"], "n, tint");

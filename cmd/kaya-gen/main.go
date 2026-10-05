@@ -493,6 +493,7 @@ func generateRecord(w func(string, ...any), strct *ast.StructType, name, key str
 	w("")
 	w("func (r %sRow) SetWrap(n kaya.Node, on bool) { r.t.SetWrap(n, on) }", lowerFirst(name))
 	w("")
+	w("func (r %sRow) SetFormat(n kaya.Node, format kaya.NumberFormat) { r.t.SetFormat(n, format) }", lowerFirst(name))
 	w("func (r %sRow) SetSubmits(n kaya.Node, on bool) { r.t.SetSubmits(n, on) }", lowerFirst(name))
 	w("")
 	w("func (r %sRow) Draggable(n kaya.Node) kaya.TplDragRef { return r.t.Draggable(n) }", lowerFirst(name))

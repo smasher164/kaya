@@ -79,7 +79,7 @@ LEGS = {
         "scrollto-compose",
         # The number field in the everyday locale and in German
         # (docs/number-field-plan.md §5); MODS cuts the steps.
-        "numberfield-compose", "numberfieldde-compose",
+        "timecode-compose", "numberfield-compose", "numberfieldde-compose",
         # Under ar-EG, what a typed number may contain (§3 rule 5).
         "numberfieldar-compose",
         # The colour picker's synthesized sheet (docs/color-picker-plan.md §6).
@@ -186,7 +186,7 @@ LEGS = {
         "assets-jvm", "dnd-jvm", "pickers-jvm", "sliders-jvm", "tooltips-jvm",
         "sheet-jvm",
         "format-jvm", "formatde-jvm", "formatar-jvm",
-        "numberfield-jvm", "numberfieldde-jvm", "colorpicker-jvm",
+        "timecode-jvm", "numberfield-jvm", "numberfieldde-jvm", "colorpicker-jvm",
         "range-jvm", "rangertl-jvm",
         "media_formats-jvm", "media_delivery-jvm", "media_session-jvm",
         "media_tracks-jvm", "media_feed-jvm", "media_reader-jvm",
@@ -209,7 +209,7 @@ LEGS = {
         "dnd-go", "pickers-go", "sliders-go", "tooltips-go",
         "sheet-go",
         "format-go", "formatde-go", "formatar-go",
-        "numberfield-go", "numberfieldde-go", "colorpicker-go",
+        "timecode-go", "numberfield-go", "numberfieldde-go", "colorpicker-go",
         "range-go", "rangertl-go",
         "media_formats-go", "media_delivery-go", "media_session-go",
         "media_tracks-go", "media_feed-go", "media_reader-go",
@@ -356,6 +356,7 @@ MODS = {
                    "append": FULLSCREEN_APP_TAIL},
     # A PHONE'S NUMBER FIELD HAS NO STEPPING DOOR (docs/number-field-plan.md
     # §3 rule 7): the scene steps last, so the cut takes the steps alone.
+    "timecode": {"cut": ("nudge", "expect_value", "")},
     "numberfield": {"cut": ("nudge", "expect_focused expect_ax", "")},
     "numberfieldde": {"cut": ("nudge", "expect_focused expect_ax", "")},
     # A PHONE'S SLIDER HAS NO KEYBOARD DOOR (docs/range-plan.md §5, the

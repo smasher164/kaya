@@ -366,3 +366,8 @@ executable kaya-notify-order-check
   import: shared
   main-is: NotifyOrderCheck.hs
   build-depends: kaya-guests, directory
+
+executable timecode
+  import: shared
+  main-is: timecode.hs
+  build-depends: kaya-guests

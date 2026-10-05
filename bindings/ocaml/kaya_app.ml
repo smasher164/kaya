@@ -1638,7 +1638,25 @@ let door name = function
   | Some s -> s
   | None -> failwith (Printf.sprintf "kaya: %s reported a fault (the sentence is on stderr)" name)
 
+type timecode_rate = { numerator : int64; denominator : int64; drop : bool }
+type number_format = Number | Timecode of timecode_rate
+
+let number_format_wire = function
+  | Number -> "number"
+  | Timecode rate -> Printf.sprintf "timecode:%Ld/%Ld:%s" rate.numerator rate.denominator
+      (if rate.drop then "df" else "ndf")
+
+let set_format (Widget id) format =
+  emit (the_tx ()) (Kaya_wire.tx_set_format id (number_format_wire format))
+
 module Fmt = struct
+  let timecode rate frames =
+    door "kaya_fmt_timecode" (Kaya_runtime.fmt_timecode frames rate.numerator rate.denominator rate.drop)
+
+  let parse_timecode rate text =
+    ignore (timecode rate 0L);
+    Kaya_runtime.fmt_parse_timecode text rate.numerator rate.denominator rate.drop
+
   type length = [ `Short | `Medium | `Long ]
 
   let code = function `Short -> 0 | `Medium -> 1 | `Long -> 2
@@ -2637,9 +2655,10 @@ let range ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help 
    [on_commit]. [?min]/[?max] unset are -2^53..2^53; a write through
    [~bind] never echoes. *)
 let number_field ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?min ?max ?(value = 0.0) ?step ?bind
-    ?on_commit () =
+    ?(format = Number) ?on_commit () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_number_field in
+  set_format w format;
   Option.iter (fun g -> set_grow w g) grow;
   Option.iter (fun v -> set_fill w v) fill;
   set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
@@ -5466,13 +5485,17 @@ module Tpl = struct
       on_commit;
     n
 
+  let set_format (Node id) format =
+    emit (the_tx ()) (Kaya_wire.tx_set_format id (number_format_wire format))
+
   (* A number field per stamped copy, its value from any of the three
      sources; the bounds and the step are constant across the copies. *)
   let number_field ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?min ?max ?value ?step
       ?bind ?bind_field ?(level = 0) ?(a11y_level = level)
-      ?on_commit () =
+      ?(format = Number) ?on_commit () =
     let n = Floor.widget Kaya_wire.kind_number_field in
+    set_format n format;
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Option.iter (fun v -> Floor.set_fill n v) fill;
     Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label

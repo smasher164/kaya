@@ -111,6 +111,14 @@ let no_max = field number_options "max_fraction_digits" int32_t
 let no_grouping = field number_options "grouping" bool
 let () = seal number_options
 
+let kaya_fmt_timecode =
+  foreign ~from:lib "kaya_fmt_timecode"
+    (int64_t @-> int64_t @-> int64_t @-> uint32_t @-> ptr char @-> size_t @-> returning size_t)
+
+let kaya_fmt_parse_timecode =
+  foreign ~from:lib "kaya_fmt_parse_timecode"
+    (string @-> int64_t @-> int64_t @-> uint32_t @-> returning int64_t)
+
 let kaya_fmt_number =
   foreign ~from:lib "kaya_fmt_number"
     (double @-> ptr number_options @-> ptr char @-> size_t @-> returning size_t)
@@ -181,6 +189,15 @@ let with_number_options min max grouping ask =
   setf o no_max (Int32.of_int max);
   setf o no_grouping grouping;
   fill (ask (addr o))
+
+let fmt_timecode frames numerator denominator drop =
+  fill (kaya_fmt_timecode frames numerator denominator (Unsigned.UInt32.of_int (if drop then 1 else 0)))
+
+let fmt_parse_timecode text numerator denominator drop =
+  if String.contains text '\000' then None
+  else
+    let frames = kaya_fmt_parse_timecode text numerator denominator (Unsigned.UInt32.of_int (if drop then 1 else 0)) in
+    if frames < 0L then None else Some frames
 
 let fmt_number value min max grouping =
   with_number_options min max grouping (kaya_fmt_number value)

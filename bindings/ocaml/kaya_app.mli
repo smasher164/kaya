@@ -627,11 +627,19 @@ module Read_error : sig
   type t = Cancelled | Failed of Media_failure.t * string
 end
 
+type timecode_rate = { numerator : int64; denominator : int64; drop : bool }
+type number_format = Number | Timecode of timecode_rate
+
+val set_format : widget -> number_format -> unit
+
 (* The formatter door (docs/compliance-plan.md §1.4, the OCaml row): a
    value in, the platform's own string out, in the process locale; pure,
    any thread, no transaction. An unstated digit count is the platform's
    default. A fault at the floor raises by name. *)
 module Fmt : sig
+  val timecode : timecode_rate -> int64 -> string
+  val parse_timecode : timecode_rate -> string -> int64 option
+
   type length = [ `Short | `Medium | `Long ]
 
   val date : ?length:length -> date -> string
@@ -1019,6 +1027,7 @@ val number_field :
   ?value:float ->
   ?step:float ->
   ?bind:float signal ->
+  ?format:number_format ->
   ?on_commit:(float -> unit) -> unit -> widget
 
 val select :
@@ -2165,6 +2174,8 @@ module Tpl : sig
     ?on_change:(key list -> float -> float -> unit) ->
     ?on_commit:(key list -> float -> float -> unit) -> unit -> node
 
+  val set_format : node -> number_format -> unit
+
   (* A number field per stamped copy, its value from any of the three
      sources. *)
   val number_field :
@@ -2187,6 +2198,7 @@ module Tpl : sig
     ?bind_field:('d, float) field ->
     ?level:int ->
     ?a11y_level:int ->
+    ?format:number_format ->
     ?on_commit:(key list -> float -> unit) -> unit -> node
 
   (* A dropdown select per stamped copy, over fixed options — each

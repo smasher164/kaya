@@ -35,6 +35,51 @@ type NumberOptions struct {
 	Grouping          bool
 }
 
+type TimecodeRate struct {
+	Numerator   int64
+	Denominator int64
+	Drop        bool
+}
+
+type NumberFormat struct{ rate *TimecodeRate }
+
+func Number() NumberFormat                    { return NumberFormat{} }
+func Timecode(rate TimecodeRate) NumberFormat { return NumberFormat{rate: &rate} }
+func (f NumberFormat) wire() string {
+	if f.rate == nil {
+		return "number"
+	}
+	mode := "ndf"
+	if f.rate.Drop {
+		mode = "df"
+	}
+	return fmt.Sprintf("timecode:%d/%d:%s", f.rate.Numerator, f.rate.Denominator, mode)
+}
+func (r TimecodeRate) dropCode() C.uint32_t {
+	if r.Drop {
+		return 1
+	}
+	return 0
+}
+func FormatTimecode(frames int64, rate TimecodeRate) string {
+	return filled("FormatTimecode", func(out *C.uint8_t, cap C.size_t) C.size_t {
+		return C.kaya_fmt_timecode(C.int64_t(frames), C.int64_t(rate.Numerator), C.int64_t(rate.Denominator), rate.dropCode(), out, cap)
+	})
+}
+func ParseTimecode(text string, rate TimecodeRate) (int64, bool) {
+	FormatTimecode(0, rate)
+	if strings.ContainsRune(text, 0) {
+		return 0, false
+	}
+	cs := C.CString(text)
+	defer C.free(unsafe.Pointer(cs))
+	value := int64(C.kaya_fmt_parse_timecode(cs, C.int64_t(rate.Numerator), C.int64_t(rate.Denominator), rate.dropCode()))
+	if value < 0 {
+		return 0, false
+	}
+	return value, true
+}
+
 // LayoutDirection is which way the layout runs, decided by the locale's
 // script; Direction() answers it.
 type LayoutDirection int

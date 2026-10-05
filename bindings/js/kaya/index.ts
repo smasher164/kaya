@@ -32,6 +32,48 @@ export const CivilDate: unique symbol = Symbol("kaya.CivilDate");
 export const CivilTime: unique symbol = Symbol("kaya.CivilTime");
 export type CivilDateToken = typeof CivilDate;
 export type CivilTimeToken = typeof CivilTime;
+export class TimecodeRate {
+  readonly numerator: number;
+  readonly denominator: number;
+  readonly drop: boolean;
+  constructor(numerator: number, denominator = 1, drop = false) {
+    for (const value of [numerator, denominator]) {
+      if (!Number.isSafeInteger(value)) throw new RangeError(`kaya: timecode rate parts must be safe integers, got ${value}`);
+    }
+    if (typeof drop !== "boolean") throw new TypeError("kaya: TimecodeRate.drop is a boolean");
+    this.numerator = numerator;
+    this.denominator = denominator;
+    this.drop = drop;
+    Object.freeze(this);
+  }
+}
+
+export type NumberFormat = { readonly kind: "number" } | { readonly kind: "timecode"; readonly rate: TimecodeRate };
+export const NumberFormat = Object.freeze({
+  number: Object.freeze({ kind: "number" } as const),
+  timecode(rate: TimecodeRate): NumberFormat { return Object.freeze({ kind: "timecode", rate: timecodeRate(rate) }); },
+});
+
+function timecodeRate(rate: TimecodeRate): TimecodeRate {
+  if (rate === null || typeof rate !== "object") {
+    throw new TypeError("kaya: timecode rate must have numerator, denominator and drop");
+  }
+  if (!Number.isSafeInteger(rate.numerator) || !Number.isSafeInteger(rate.denominator)) {
+    throw new RangeError("kaya: timecode rate numerator and denominator must be safe integers");
+  }
+  if (typeof rate.drop !== "boolean") {
+    throw new TypeError("kaya: timecode rate drop must be a boolean");
+  }
+  return rate;
+}
+
+function numberFormatWire(format: NumberFormat): string {
+  if (format?.kind === "number") return "number";
+  if (format?.kind !== "timecode") throw new TypeError("kaya: number format must be number or timecode");
+  const r = timecodeRate(format.rate);
+  return `timecode:${r.numerator}/${r.denominator}:${r.drop ? "df" : "ndf"}`;
+}
+
 /** An sRGB colour, 8 bits a channel, straight alpha: what a colour picker
  * holds and a `kaya.Color` field carries, one packed I64 on the wire
  * (docs/color-picker-plan.md §2). `String(c)` is the scenes' fixed
@@ -672,6 +714,11 @@ function propSource(
  * type serves both zones because the transaction is ambient; which
  * sources are reachable differs by zone, not the call. */
 export class Handle {
+  numberFormat(format: NumberFormat): this {
+    records().push(wire.tx_set_format(this.id, numberFormatWire(format)));
+    return this;
+  }
+
   readonly id: number;
 
   /** @internal */
@@ -3697,6 +3744,18 @@ export type Locale = {
  * writes them, by the platform's own formatter. Pure functions, any
  * thread, no transaction; `kaya.fmt.date(d, "medium")`. */
 const fmtDoor = Object.freeze({
+  timecode(frames: number, rate: TimecodeRate): string {
+    timecodeRate(rate);
+    if (!Number.isSafeInteger(frames)) throw new RangeError(`kaya: timecode frames must be a safe integer, got ${frames}`);
+    return runtime.fmtTimecode(frames, rate.numerator, rate.denominator, rate.drop);
+  },
+  parseTimecode(text: string, rate: TimecodeRate): number | null {
+    timecodeRate(rate);
+    runtime.fmtTimecode(0, rate.numerator, rate.denominator, rate.drop);
+    if (text.includes("\0")) return null;
+    const value = runtime.fmtParseTimecode(text, rate.numerator, rate.denominator, rate.drop);
+    return value < 0 ? null : value;
+  },
   /** The date, in the process locale. */
   date(value: CivilDate, length: Length = "medium"): string {
     return runtime.fmtDate(wire.pack_date(...dateParts("fmt.date's value", value)), lengthCode(length));
@@ -4372,13 +4431,14 @@ export function range(opts: RangeOptions): Widget {
   return handle;
 }
 
-export type NumberFieldOptions = GrowOption & { value?: number | Signal<number> | FieldRef; min?: number; max?: number; step?: number; onCommit?: Handler };
+export type NumberFieldOptions = GrowOption & { format?: NumberFormat; value?: number | Signal<number> | FieldRef; min?: number; max?: number; step?: number; onCommit?: Handler };
 
 /** A number field (docs/number-field-plan.md): typed text committed on
  * Return, focus loss or a step, each commit one onCommit, template copies
  * getting the row first. An app write never echoes. */
 export function numberField(opts: NumberFieldOptions = {}): Widget {
   const handle = widget(wire.KIND_NUMBER_FIELD);
+  if (opts.format !== undefined) handle.numberFormat(opts.format);
   if (opts.min !== undefined) records().push(wire.tx_set_min(handle.id, Number(opts.min)));
   if (opts.max !== undefined) records().push(wire.tx_set_max(handle.id, Number(opts.max)));
   if (opts.step !== undefined) records().push(wire.tx_set_step(handle.id, Number(opts.step)));

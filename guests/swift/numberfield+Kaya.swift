@@ -120,10 +120,10 @@ struct LineRow {
     @discardableResult
     func numberField(
         value f: KayaField<Double>, min: Double? = nil, max: Double? = nil,
-        step: Double? = nil,
+        step: Double? = nil, format: KayaNumberFormat = .number,
         onCommit: ((KayaAppTx, [KayaValue], Double) -> Void)? = nil
     ) -> KayaNodeHandle {
-        t.numberField(value: f, min: min, max: max, step: step, onCommit: onCommit)
+        t.numberField(value: f, min: min, max: max, step: step, format: format, onCommit: onCommit)
     }
 
     @discardableResult

@@ -125,6 +125,8 @@ object KayaRing {
 
     @JvmStatic external fun fmtDateTime(date: Long, time: Long, length: Long): ByteArray?
 
+    @JvmStatic external fun fmtTimecode(frames: Long, numerator: Long, denominator: Long, drop: Boolean): ByteArray?
+    @JvmStatic external fun fmtParseTimecode(text: String, numerator: Long, denominator: Long, drop: Boolean): Long
     @JvmStatic external fun fmtNumber(
         value: Double, minFractionDigits: Int, maxFractionDigits: Int, grouping: Boolean,
     ): ByteArray?

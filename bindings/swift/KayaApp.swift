@@ -1755,10 +1755,48 @@ func kayaFilled(_ what: String, _ ask: (UnsafeMutablePointer<UInt8>?, UInt) -> U
     return String(decoding: out[0..<Int(min(written, len))], as: UTF8.self)
 }
 
+public struct KayaTimecodeRate: Sendable {
+    public let numerator: Int64
+    public let denominator: Int64
+    public let drop: Bool
+    public init(_ numerator: Int64, _ denominator: Int64 = 1, drop: Bool = false) {
+        self.numerator = numerator
+        self.denominator = denominator
+        self.drop = drop
+    }
+}
+
+public enum KayaNumberFormat: Sendable {
+    case number
+    case timecode(KayaTimecodeRate)
+    var wire: String {
+        switch self {
+        case .number: return "number"
+        case .timecode(let rate):
+            return "timecode:\(rate.numerator)/\(rate.denominator):\(rate.drop ? "df" : "ndf")"
+        }
+    }
+}
+
 /// The formatter door: dates, times, numbers, percentages and money
 /// written the way the user's platform writes them, by the platform's own
 /// formatter. Pure functions, any thread, no transaction.
 public enum KayaFmt {
+    public static func timecode(_ frames: Int64, _ rate: KayaTimecodeRate) -> String {
+        kayaFilled("fmt.timecode") {
+            kaya_fmt_timecode(frames, rate.numerator, rate.denominator, rate.drop ? 1 : 0, $0, $1)
+        }
+    }
+
+    public static func parseTimecode(_ text: String, _ rate: KayaTimecodeRate) -> Int64? {
+        _ = timecode(0, rate)
+        guard !text.utf8.contains(0) else { return nil }
+        let frames = text.withCString {
+            kaya_fmt_parse_timecode($0, rate.numerator, rate.denominator, rate.drop ? 1 : 0)
+        }
+        return frames < 0 ? nil : frames
+    }
+
     public static func date(_ d: KayaDate, _ length: KayaLength = .medium) -> String {
         let packed = kayaPackedDate("fmt.date", d)
         return kayaFilled("fmt.date") { kaya_fmt_date(packed, length.rawValue, $0, $1) }
@@ -4769,6 +4807,10 @@ public final class KayaAppTx {
         return w
     }
 
+    public func setFormat(_ w: KayaWidget, _ format: KayaNumberFormat) {
+        tx.setFormat(w.id, format.wire)
+    }
+
     /// A number field at value (docs/number-field-plan.md), its commit
     /// handler co-located: one call per commit (Return, focus loss, a
     /// step), never per keystroke. `bind` takes a float signal instead of
@@ -4776,11 +4818,12 @@ public final class KayaAppTx {
     @discardableResult
     public func numberField(
         value: Double = 0.0, min: Double? = nil, max: Double? = nil,
-        step: Double? = nil, bind: KayaSignal? = nil,
+        step: Double? = nil, bind: KayaSignal? = nil, format: KayaNumberFormat = .number,
         onCommit: ((KayaAppTx, Double) throws -> Void)? = nil,
         grow: Double? = nil
     ) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_NUMBER_FIELD))
+        setFormat(w, format)
         if let min { tx.setMin(w.id, min) }
         if let max { tx.setMax(w.id, max) }
         if let step { tx.setStep(w.id, step) }
@@ -6791,16 +6834,20 @@ public final class KayaTpl {
         return n
     }
 
+    public func setFormat(_ n: KayaNodeHandle, _ format: KayaNumberFormat) {
+        tx.tx.setFormat(n.id, format.wire)
+    }
+
     /// A number field in the blueprint, its value from a source and its
     /// commit handler co-located; the bounds and the step are constant
     /// across the copies.
     @discardableResult
     func numberField(
         value: Double, min: Double? = nil, max: Double? = nil,
-        step: Double? = nil,
+        step: Double? = nil, format: KayaNumberFormat = .number,
         onCommit: ((KayaAppTx, [KayaValue], Double) throws -> Void)? = nil
     ) -> KayaNodeHandle {
-        let n = numberFieldOf(min, max, step, onCommit)
+        let n = numberFieldOf(min, max, step, format, onCommit)
         tx.tx.setValue(n.id, value)
         return n
     }
@@ -6808,10 +6855,10 @@ public final class KayaTpl {
     @discardableResult
     func numberField(
         value s: KayaSignal, min: Double? = nil, max: Double? = nil,
-        step: Double? = nil,
+        step: Double? = nil, format: KayaNumberFormat = .number,
         onCommit: ((KayaAppTx, [KayaValue], Double) throws -> Void)? = nil
     ) -> KayaNodeHandle {
-        let n = numberFieldOf(min, max, step, onCommit)
+        let n = numberFieldOf(min, max, step, format, onCommit)
         tx.tx.bindValue(n.id, s.id)
         return n
     }
@@ -6819,19 +6866,20 @@ public final class KayaTpl {
     @discardableResult
     public func numberField(
         value f: KayaField<Double>, min: Double? = nil, max: Double? = nil,
-        step: Double? = nil,
+        step: Double? = nil, format: KayaNumberFormat = .number,
         onCommit: ((KayaAppTx, [KayaValue], Double) throws -> Void)? = nil
     ) -> KayaNodeHandle {
-        let n = numberFieldOf(min, max, step, onCommit)
+        let n = numberFieldOf(min, max, step, format, onCommit)
         bindValueField(n, f)
         return n
     }
 
     private func numberFieldOf(
-        _ min: Double?, _ max: Double?, _ step: Double?,
+        _ min: Double?, _ max: Double?, _ step: Double?, _ format: KayaNumberFormat,
         _ onCommit: ((KayaAppTx, [KayaValue], Double) throws -> Void)?
     ) -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_NUMBER_FIELD))
+        setFormat(n, format)
         if let min { tx.tx.setMin(n.id, min) }
         if let max { tx.tx.setMax(n.id, max) }
         if let step { tx.tx.setStep(n.id, step) }

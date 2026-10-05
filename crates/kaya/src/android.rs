@@ -1079,12 +1079,12 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
             // core's one copy: the text at a step, and a commit's answer.
             NativeMethod {
                 name: "numberText".into(),
-                sig: "(DD)Ljava/lang/String;".into(),
+                sig: "(DDLjava/lang/String;)Ljava/lang/String;".into(),
                 fn_ptr: present_number_text as *mut _,
             },
             NativeMethod {
                 name: "numberCommit".into(),
-                sig: "(Ljava/lang/String;DDDD[D)I".into(),
+                sig: "(Ljava/lang/String;DDDDLjava/lang/String;[D)I".into(),
                 fn_ptr: present_number_commit as *mut _,
             },
             NativeMethod {
@@ -1636,14 +1636,19 @@ extern "system" fn present_scroll_to_row(
     unsafe { crate::capi::kaya_scroll_to_row_str(container as u64, key.as_ptr(), key.len()) as jlong }
 }
 
-/// KayaPresent.numberText: `number_field::text`, the field's text.
+/// docs/number-field-plan.md §10.
 extern "system" fn present_number_text<'a>(
-    env: JNIEnv<'a>,
+    mut env: JNIEnv<'a>,
     _class: JClass,
     value: jni::sys::jdouble,
     step: jni::sys::jdouble,
+    format: JString,
 ) -> jni::sys::jstring {
-    env.new_string(crate::number_field::text(value, step))
+    let format: String = env.get_string(&format)
+        .expect("kaya: reading number field format failed").into();
+    let format = crate::fmt::NumberFormat::from_wire(&format)
+        .expect("validated number field format");
+    env.new_string(crate::number_field::text_for(value, step, format))
         .expect("kaya: handing a number field's text back to the JVM failed")
         .into_raw()
 }
@@ -1658,13 +1663,18 @@ extern "system" fn present_number_commit(
     min: jni::sys::jdouble,
     max: jni::sys::jdouble,
     step: jni::sys::jdouble,
+    format: JString,
     out: jni::objects::JDoubleArray,
 ) -> jint {
     let text: String = env
         .get_string(&text)
         .map(Into::into)
         .expect("kaya: reading a number field's text failed");
-    match crate::number_field::commit(&text, committed, min, max, step) {
+    let format: String = env.get_string(&format)
+        .expect("kaya: reading number field format failed").into();
+    let format = crate::fmt::NumberFormat::from_wire(&format)
+        .expect("validated number field format");
+    match crate::number_field::commit_for(&text, committed, min, max, step, format) {
         crate::number_field::Commit::Revert => 0,
         crate::number_field::Commit::Unchanged => 1,
         crate::number_field::Commit::Moved(value) => {

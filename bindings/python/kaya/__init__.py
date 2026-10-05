@@ -21,6 +21,7 @@ from typing import (IO, Any, Generic, Literal, NoReturn, TypeVar, cast,
                     overload)
 
 from . import fmt
+from .fmt import NumberFormat as NumberFormat, TimecodeRate as TimecodeRate
 from . import runtime
 from . import wire
 
@@ -655,6 +656,10 @@ class _Handle:
         _records().append(_prop_source(
             "href", self, url, wire.tx_set_href,
             wire.tx_bind_href, wire.tx_bind_href_element))
+        return self
+
+    def number_format(self: H, format: NumberFormat) -> H:
+        _records().append(wire.tx_set_format(self.id, format._wire()))
         return self
 
     def fill(self: H, on: bool) -> H:
@@ -5066,6 +5071,7 @@ def range(low: NumberSource, high: NumberSource, *,
 
 
 def number_field(value: NumberSource | None = None, *,
+                 format: NumberFormat | None = None,
                  min: float | None = None, max: float | None = None,
                  step: float | None = None,
                  on_commit: Handler | None = None,
@@ -5075,6 +5081,8 @@ def number_field(value: NumberSource | None = None, *,
     template copies getting their `Row` first. An app write never
     echoes."""
     handle = _widget(wire.KIND_NUMBER_FIELD)
+    if format is not None:
+        handle.number_format(format)
     if min is not None:
         _records().append(wire.tx_set_min(handle.id, float(min)))
     if max is not None:

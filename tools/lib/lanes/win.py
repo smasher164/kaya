@@ -26,7 +26,7 @@ SCENES = [
     "reorder", "feed", "grow", "layout", "align", "window", "panels",
     "confirm", "nav", "split", "panes", "table", "scroll",
     "progress", "select", "radio", "grid", "textarea", "search", "submit", "scrollto", "fullscreen",
-    "numberfield", "colorpicker", "range",
+    "numberfield", "timecode", "colorpicker", "range",
     "sections",
     "menus", "commands", "a11y", "a11yrows", "filedialog",
     "clipboard", "undo", "dirty", "ranges", "save", "styling",
@@ -584,6 +584,24 @@ ORDER = [
     # and `unfocus` are real keystrokes on the system queue
     # (docs/number-field-plan.md §5). The German legs are the same guests
     # under KAYA_LOCALE=de-DE (their launchers).
+    [
+     "timecode_rust",
+    ],
+    [
+     "timecode_python",
+    ],
+    [
+     "timecode_js",
+    ],
+    [
+     "timecode_go",
+    ],
+    [
+     "timecode_csharp",
+    ],
+    [
+     "timecode_java",
+    ],
     [
      "numberfield_rust",
     ],

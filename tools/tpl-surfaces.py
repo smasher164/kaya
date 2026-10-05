@@ -258,7 +258,7 @@ ZONES = [
 # `set_grow`, `setGrow` and `SetGrow` each name two different surfaces in
 # the same file, so every name is read out of the zone's own block
 # (docs/tpl-props-plan.md P1/P2, docs/styling-plan.md D3/D4).
-TPL_PROPS = ["grow", "a11y_id", "a11y_label", "a11y_hint", "accepts", "role", "inset",
+TPL_PROPS = ["format", "grow", "a11y_id", "a11y_label", "a11y_hint", "accepts", "role", "inset",
              "help", "placeholder", "href", "fill", "columns_auto", "wrap",
              # docs/flex-shrink-plan.md §9: a stamped container's cross-axis
              # child placement, R5's own escape hatch, which no collection
@@ -281,6 +281,7 @@ TPL_PROPS = ["grow", "a11y_id", "a11y_label", "a11y_hint", "accepts", "role", "i
 # write. The named rows can.
 PROP_MEMBERS = {
     "rust": {
+        "format": "format",
         "grow": "set", "a11y_id": "a11y_id", "a11y_label": "a11y_label",
         "a11y_hint": "a11y_hint", "accepts": "accepts", "role": "role",
         "inset": "inset", "help": "help", "placeholder": "placeholder",
@@ -290,6 +291,7 @@ PROP_MEMBERS = {
         "submits": "submits",
     },
     "go": {
+        "format": "SetFormat",
         "grow": "SetGrow", "a11y_id": "SetA11yID", "a11y_label": "SetA11yLabel",
         "a11y_hint": "SetA11yHint", "accepts": "SetAccepts", "role": "SetRole",
         "inset": "SetInset", "help": "SetHelp",
@@ -300,6 +302,7 @@ PROP_MEMBERS = {
         "submits": "SetSubmits",
     },
     "csharp": {
+        "format": "SetFormat",
         "grow": "SetGrow", "a11y_id": "SetA11yId", "a11y_label": "SetA11yLabel",
         "a11y_hint": "SetA11yHint", "accepts": "SetAccepts", "role": "SetRole",
         "inset": "SetInset", "help": "SetHelp",
@@ -310,6 +313,7 @@ PROP_MEMBERS = {
         "submits": "SetSubmits",
     },
     "java": {
+        "format": "setFormat",
         "grow": "setGrow", "a11y_id": "setA11yId", "a11y_label": "setA11yLabel",
         "a11y_hint": "setA11yHint", "accepts": "setAccepts", "role": "setRole",
         "inset": "setInset", "help": "setHelp",
@@ -320,6 +324,7 @@ PROP_MEMBERS = {
         "submits": "setSubmits",
     },
     "swift": {
+        "format": "setFormat",
         "grow": "setGrow", "a11y_id": "setA11yId", "a11y_label": "setA11yLabel",
         "a11y_hint": "setA11yHint", "accepts": "setAccepts", "role": "setRole",
         "inset": "setInset", "help": "setHelp",
@@ -330,6 +335,7 @@ PROP_MEMBERS = {
         "submits": "setSubmits",
     },
     "ocaml": {
+        "format": "set_format",
         "grow": "set_grow", "a11y_id": "set_a11y_id", "a11y_label": "set_a11y_label",
         "a11y_hint": "set_a11y_hint", "accepts": "set_accepts", "role": "set_role",
         "inset": "set_inset", "help": "set_help",
@@ -342,6 +348,7 @@ PROP_MEMBERS = {
     # Haskell's template props are not methods but CONSTRUCTORS of the
     # `TplAttr` GADT, applied by `applyTplAttr`.
     "haskell": {
+        "format": "TplNumberFormat",
         "grow": "TplGrow", "a11y_id": "TplA11yId", "a11y_label": "TplA11yLabel",
         "a11y_hint": "TplA11yHint", "accepts": "TplAccepts", "role": "TplRole",
         "inset": "TplInset", "help": "TplHelp",
@@ -355,6 +362,7 @@ PROP_MEMBERS = {
     # and the other two as CONSTRUCTOR OPTIONS; members_js says why the
     # two halves are read apart.
     "js": {
+        "format": "numberFormat",
         "grow": "grow", "a11y_id": "a11yId", "a11y_label": "a11yLabel",
         "a11y_hint": "a11yHint", "accepts": "accepts", "role": "role",
         "inset": "inset", "help": "help", "placeholder": "placeholder",

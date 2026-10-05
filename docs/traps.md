@@ -13500,6 +13500,30 @@ media_delivery and media_tracks leg alone, and a player whose open or seek
 passes the 30 s bound fails `timeout` on every platform, its item torn down,
 the retry the app's.
 
+RECURRENCE 2026-10-05, with the Windows delivery route already serial:
+`media_delivery_go` failed in 43 s in recorder run
+`20261005T073206Z-035428`, bundle `windows-media_delivery_go`. The DASH
+assertion stayed `loading` for its 15 s window. Adaptive creation succeeded
+at +19 ms; all seven requested init/chunk downloads completed HTTP 200 by
++95 ms, when the source reached `Opened`. At the 5 s diagnostic the session
+still read `Opening`. The server independently recorded complete responses
+in 0–6 ms. MP4 and both HLS items had passed. The leg then selected the next
+source before the player's 30 s timeout could be observed for DASH.
+
+This matches the earlier downloaded/source-Opened/session-Opening shape,
+but this bundle has no native dump: the internal lost-event diagnosis is
+not established for this occurrence. Other platform lanes were active;
+calling this Windows leg pooled would contradict its serial route. The
+bundle census and exact failing call are retained in
+`target/timecode-win-delivery-failure.txt` (built).
+
+The unchanged focused `media_delivery_go` control passed in 28 s, exit 0,
+in recorder run `20261005T081239Z-074539`; DASH opened, played past one second
+and ended. Its log is `target/timecode-win-delivery-control.log` (built).
+That control establishes a successful separate run, not a repair or a green
+verdict for the failed matrix. The existing OPEN TRAIL, server recorder and
+scene assertion exposed the recurrence; no source fix was inferred.
+
 ## AVFoundation opens no next item on a host while an asset's load hangs (measured 2026-10-01)
 Against a server that accepts a connection and never answers (the media
 server's never-answering mode at the time), `replaceCurrentItem(with: nil)` and then a new
@@ -13892,3 +13916,122 @@ at 22:32:21, XprotectService's failed libiconv load-command diagnostic at
 matching launch/scan timestamps, not proof that any one diagnostic caused
 the delay. The process then ran the ten focused tests in 0.06 seconds and
 exited successfully; no launch-policy bypass was attempted.
+
+## GTK caption reads need the player clock and publication timeline
+
+The 2026-10-05 full matrix's `linux-media_tracks-java-wayland` bundle in
+recorder run `20261005T061534Z-000373` read the played cue label at +1778 ms
+and began the native caption assertion at +4060 ms. The latter returned
+empty for 15 seconds. Earlier paused seek/caption assertions passed. The
+bundle had no player-position query or cue/callback/apply timeline, so it
+could not distinguish an expired cue from a stale overlay or a delayed Java
+signal write. Wall time between harness steps alone does not establish the
+player's position.
+
+The GTK harness now records raw position-query success (`None` differs from
+`Some(0)`), generation, boundary schedule/fire, core sidecar boundaries and
+expected text at that position, published cue, native cache, actual label
+text/visibility and the returned read. The pure core snapshot does not
+publish a cue. `sidecar_expected` is deliberately scoped to sidecars: an
+embedded/native subtitle is not judged against that field. The Java media
+tracks harness records callback text as UTF-8 base64 and wall time before
+its signal write; GTK records applied label text after the native setter.
+These records live in the recorder's existing leg log.
+
+The forced-red proof copied the scene and Linux runner, inserting exactly
+one `settle 2500` between the played second-cue label and caption reads.
+Three counted substitutions selected the script and copied runner through
+the ordinary build/verify/recorder route; all three original files remained
+byte-identical. In run `20261005T070336Z-005245`, the second cue published at
+queried 1002 ms, Java received it in the same wall-clock millisecond, and
+the label applied it one millisecond later. The 2000 ms boundary published
+empty; Java received and applied it one millisecond after that publication.
+The failing read measured 2000 ms/Ended, empty sidecar expectation,
+published cue, cache, native text and return, with native visibility false.
+That forced case is measured cue expiry. It does not establish the cause
+of the earlier uninstrumented failure. The copied lane exited 1 and its
+bundle retained all six sections (the expected empty Xvfb log included).
+
+The unmodified `media_tracks-java-wayland` control then passed in five
+seconds in run `20261005T070939Z-005241`. Use `KAYA_JOBS=2` with the exact
+`KAYA_ONLY=media_tracks-java-wayland` filter for this one-leg recorder proof:
+the Linux serial `KAYA_JOBS=1` path journals but does not retain the pooled
+leg log needed to form this bundle. The existing runner's script override
+is injected in the copy because the host launcher does not forward an
+arbitrary `KAYA_SELFTEST_SCRIPT` into its container.
+
+Guard: `tools/lib/caption_routes.py`, run by `tools/check-verbs.py`, reads
+actual call bodies and holds publication/callback/apply ordering with 33
+watched negatives. The core's
+`caption_snapshot_measures_without_publishing` test checks unknown clock,
+cue boundaries, inactive sidecars and unchanged publication state. The
+forced proof and unmodified control logs are
+`target/caption-expiry-proof.log` (built) and
+`target/caption-control.log` (built).
+
+
+## FFmpeg's x265 encoder crashed during the media-derivation negative (2026-10-05)
+
+The full gate sweep's `check-assets` N37 flipped exactly one byte of the
+shadow `tone.wav`, then `tools/gen-media.py` exited on FFmpeg status -11
+while encoding `hevc_aac.mov`. The expected byte-mismatch finding was never
+reached. `target/validate-lanes/gates.log` (built) records the gate's
+`SELF-TEST FAILED` and exit 1 after 35.4 s; this was not an unapplied mutation.
+
+The OS report `ffmpeg-2026-10-05-010201.ips`, captured at
+01:01:35.2559 PDT, names PID 66649 and thread `enc0:0:libx265`:
+`EXC_BAD_ACCESS`, address `0x4c10`, in `x265::PicList::popFront`, through
+`Lookahead::getDecidedPicture`, `Encoder::encode`, `x265_encoder_encode`
+and `libx265_encode_frame`. Its exact retained copy is
+`target/timecode-check-assets-ffmpeg-crash.ips` (built); the diagnosis is
+`target/timecode-check-assets-diagnosis.txt` (built). The stack locates the
+fault in the encoder's picture/lookahead queue. It does not establish why
+the queue state was invalid, that host load caused it, or that a thread
+setting would fix it.
+
+The unchanged standalone `tools/check-assets.py` control under
+`caffeinate -i` passed in 25.06 s, actual exit 0: N37 again flipped one byte,
+all 39 watched negatives ran, and the real-tree derivation passed. The log
+is `target/timecode-check-assets-control.log` (built). This separate control
+does not turn the original matrix green. No encoder setting or fixture was
+changed. The existing guard is the generator's nonzero-exit refusal plus
+N37's demand for the specific byte-mismatch finding: an encoder crash
+cannot stand in for the negative the gate intended to exercise.
+
+
+### Review captures can precede the iOS launch fade, and a successful screenshot command can write nothing (2026-10-05)
+
+Timecode review's first two iOS screenshots were taken about 0.53 s after
+launch, when the scene logged the START of its 20 s settle. Both showed the
+four-quadrant launch mark behind the fields. That mark matched
+`guests/assets/icons/kaya-mark.png`, which the normal runner bundles as the
+launch graphic. Capturing two seconds after the logged hold began, with the
+owned PID rechecked, removed the overlay in both states. All four images
+were viewed; the first pair was preserved as rejected launch-fade evidence.
+A settle-start log does not prove the view has settled.
+
+On macOS, the recorder's window shot refused a hidden pending PNG filename.
+A direct screencapture of the same measured on-screen window exited 0 but
+printed “cannot write file to intended destination” and produced no file.
+A non-hidden pending basename in the same directory succeeded for both
+states. No permission or window-visibility cause was established. The
+capture helper's file/PNG check caught the false-success exit; retain that
+check and use a normal pending basename. The helper also tracked each
+recorder guest's own PID/start time, since terminating the outer run-leg
+process group did not terminate a guest launched in its own session.
+
+The Windows capture helper initially merged PowerShell progress stderr into
+its SHA256 stdout and refused the polluted hash. After separating streams,
+a real staged/local DLL mismatch remained: its fresh build had not yet been
+staged. Build, verify, stage, then compare exact hashes. A later run printed
+scene OK but Start-Process exposed an empty ExitCode after WaitForExit;
+retaining the process handle and reading GetExitCodeProcess measured exit 0
+(the same shape as `tools/guest/relaunch-launch.ps1`). Neither failure was
+treated as success. Both final captures published only after measured exit,
+exact guest/driver PID absence, task deletion and scratch removal.
+
+GUARDS: capture helpers refuse absent/invalid PNGs, stale staged hashes,
+unknown exits and incomplete cleanup; every accepted image is viewed before
+the review page is published. These actual refusals and successful controls
+are retained beside the local timecode handoff review. No backend change was
+needed for these capture failures.

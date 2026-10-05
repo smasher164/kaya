@@ -18,6 +18,10 @@ import re
 
 g = Gate("check-verbs")
 
+from caption_routes import run as check_caption_routes
+
+check_caption_routes(g)
+
 WIRE = "crates/kaya/src/wire.rs"
 SWIFT = "swift/KayaSwiftUI.swift"
 SWIFT_ENTRY = "swift/KayaSwiftUIEntry.swift"
@@ -5190,6 +5194,58 @@ for key, pattern, repl, label in (
 
 # clip_mirrors() ran first and printed its own findings; its verdict
 # is read here so there is exactly ONE verdict line.
+
+# docs/number-field-plan.md §10.
+def timecode_arithmetic():
+    import subprocess
+
+    source = real("crates/kaya/src/fmt.rs")
+    start = source.index("pub const MAX_TIMECODE_FRAMES")
+    end = source.index("/// How much of a date", start)
+    cut = source[start:end]
+    scratch = g.scratch() / "timecode"
+    scratch.mkdir(exist_ok=True)
+    digits = ROOT / "crates/kaya/src/typed_number.rs"
+
+    def run(label, code, test, red=False):
+        src = scratch / (label + ".rs")
+        binary = scratch / label
+        src.write_text(f'#[path = "{digits}"] mod typed_number;\n'
+                       + "mod fmt { use crate::typed_number;\n" + code + "\n}\n",
+                       encoding="utf-8")
+        built = subprocess.run(["rustc", "--edition=2024", "--test", "-Awarnings",
+                                str(src), "-o", str(binary)],
+                               capture_output=True, text=True, encoding="utf-8")
+        if built.returncode:
+            g.refuse(f"timecode {label} did not build: {built.stderr}")
+        checked = subprocess.run([str(binary), test], capture_output=True,
+                                 text=True, encoding="utf-8")
+        expected = f"test fmt::timecode_tests::{test} ... FAILED"
+        if red:
+            if checked.returncode == 0 or expected not in checked.stdout:
+                g.refuse(f"timecode {label} did not fail its test: "
+                         f"{checked.stdout}{checked.stderr}")
+            print(f"check-verbs: timecode {label}: WATCHED RED ({test})")
+        elif checked.returncode != 0 or "5 passed; 0 failed" not in checked.stdout:
+            g.refuse(f"timecode baseline refused or under-ran: "
+                     f"{checked.stdout}{checked.stderr}")
+
+    run("baseline", cut, "timecode_tests")
+    for label, pattern, replacement, test in (
+        ("minute-skip", r"label \+= omitted \* \(whole \* 9 \+ skipped_minutes\);",
+         "label += omitted * whole * 9;", "minute_skip"),
+        ("tenth-minute", r"whole \* 9 \+ skipped_minutes", "whole * 10 + skipped_minutes",
+         "tenth_minute_and_hour_exception"),
+        ("frame-bound", r" \|\| frames >= fps", "", "frame_bound_and_input_refusals"),
+    ):
+        broken = g.doctor("timecode " + label, cut, pattern, replacement)
+        run(label, broken, test, red=True)
+
+
+timecode_arithmetic()
+from timecode_routes import run as check_timecode_routes
+check_timecode_routes(g)
+
 if (clip_status or window_status or ink_status or ax_status
         or words_status or label_status or polish_status
         or metrics_status or keyed_status or drop_line_status

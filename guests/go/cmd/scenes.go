@@ -62,6 +62,7 @@ import (
 	"dev.kaya/guests/go/submit"
 	"dev.kaya/guests/go/table"
 	"dev.kaya/guests/go/textarea"
+	"dev.kaya/guests/go/timecode"
 	"dev.kaya/guests/go/todos"
 	"dev.kaya/guests/go/toolbar"
 	"dev.kaya/guests/go/tooltips"
@@ -111,6 +112,7 @@ var scenes = map[string]func() *kaya.App{
 	"listdetail":     split.App,
 	"menus":          menus.App,
 	"nav":            nav.App,
+	"timecode":       timecode.App,
 	"numberfield":    numberfield.App,
 	"colorpicker":    colorpicker.App,
 	"numberfieldde":  numberfield.App,

@@ -141,6 +141,23 @@ _lib.kaya_fmt_date_time.argtypes = [ctypes.c_int64, ctypes.c_int64,
 _lib.kaya_fmt_date_time.restype = ctypes.c_size_t
 
 
+_lib.kaya_fmt_timecode.argtypes = [ctypes.c_int64, ctypes.c_int64, ctypes.c_int64,
+                                   ctypes.c_uint32, ctypes.c_char_p, ctypes.c_size_t]
+_lib.kaya_fmt_timecode.restype = ctypes.c_size_t
+_lib.kaya_fmt_parse_timecode.argtypes = [ctypes.c_char_p, ctypes.c_int64,
+                                         ctypes.c_int64, ctypes.c_uint32]
+_lib.kaya_fmt_parse_timecode.restype = ctypes.c_int64
+
+
+def fmt_timecode(frames: int, numerator: int, denominator: int, drop: bool) -> str:
+    return _filled("kaya_fmt_timecode", lambda o, c:
+                   _lib.kaya_fmt_timecode(frames, numerator, denominator, int(drop), o, c))
+
+
+def fmt_parse_timecode(text: str, numerator: int, denominator: int, drop: bool) -> int:
+    return _lib.kaya_fmt_parse_timecode(text.encode("utf-8"), numerator, denominator, int(drop))
+
+
 class KayaNumberOptions(ctypes.Structure):
     _fields_ = [("min_fraction_digits", ctypes.c_int32),
                 ("max_fraction_digits", ctypes.c_int32),

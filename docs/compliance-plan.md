@@ -130,7 +130,7 @@ its own idiom over one core implementation.
 | C | `kaya_tr(...)` and `kaya_fmt_date(&d, KAYA_FMT_MEDIUM, buf, cap)`, the explicit buffer shape |
 
 BUILT 2026-09-23 in all nine plus the floor (tools/check-sugar-surface.py's
-door census holds the twelve parts), with three spellings that are not the
+door census holds the original twelve parts), with three spellings that are not the
 table's, each for a reason the census records: Go answers `Direction()` as a
 `LayoutDirection` type, Swift's records are `KayaNumberSpec` and `KayaArg`
 (the C header holds `KayaNumberOptions` and `KayaTrArg`), and Java's and
@@ -139,12 +139,19 @@ Swift's statics live on `KayaApp` (`KayaApp.fmt().date(…)`,
 process-wide calls. OCaml's string argument is `` `Text `` rather than
 `` `Str ``, the wire's own constructor.
 
+BUILT extension 2026-10-05: timecode format and parse join the door in all
+nine bindings plus C, with typed rate/format selection in live and template
+number fields. This is locale-independent core arithmetic, not a platform
+formatter. docs/number-field-plan.md §10 holds the supported rates and strict
+grammar; check-sugar-surface's timecode census and check-verbs' core routes
+hold the extension, with counted negative tests.
+
 ### 1.5 The whole thing, and what is deliberately not in it
 
 IN: a text-scale knob and its two read-backs on every lane; a locale
 knob that decides direction the way the OS does, its read-backs, and
 the platform pickers following it; the four settings reported beside
-the locale; the formatter door (six calls, two queries) in all nine
+the locale; the original formatter door (six calls, two queries) in all nine
 bindings and the C floor; the catalog (Fluent files on the asset root,
 the resolver in the core, the lookup in all nine, a key-coverage gate);
 the task manager translated into Arabic and formatting through kaya;
@@ -238,7 +245,10 @@ process with the setting in its own argument domain and the knob unset.
 
 ### 2.3 The formatter, per platform
 
-Six calls — `date`, `time`, `date_time`, `number`, `percent`,
+The timecode extension uses pure core arithmetic on every platform; see
+docs/number-field-plan.md §10. The table below describes localized formatting.
+
+The original six localized calls — `date`, `time`, `date_time`, `number`, `percent`,
 `currency` — with `Length` `short | medium | long` for the date and time
 ones and a small options record for the numbers (`minimum_fraction_digits`,
 `maximum_fraction_digits`, `grouping`). Each is implemented in the core

@@ -34,7 +34,7 @@ SWIFT_ENTRIES = [
     # The formatter door and the catalog under three locales
     # (docs/compliance-plan.md §6): one app, three scripts (SCENE_LOCALE).
     "format", "formatde:format", "formatar:format",
-    "numberfield", "numberfieldde:numberfield",
+    "numberfield", "numberfieldde:numberfield", "timecode",
     "colorpicker",
     # The range and the rotated fader, and under ar-EG (docs/range-plan.md §4).
     "range", "rangertl:range",
@@ -60,7 +60,7 @@ GO_SCENES = [
     "save", "styling", "toolbar", "identity", "assets",
     "table", "dnd", "pickers", "sliders", "tooltips", "sheet",
     "format", "formatde", "formatar",
-    "numberfield", "numberfieldde",
+    "numberfield", "numberfieldde", "timecode",
     "colorpicker",
     "range", "rangertl",
     "media_formats", "media_delivery", "media_session", "media_tracks",
@@ -136,7 +136,7 @@ RUST_SCENES = [
     # reason; the copy's act is the harness's format verb, no keyboard.
     "richrows",
     # The number field (docs/number-field-plan.md §4.2), and under de-DE.
-    "numberfield", "numberfieldde", "numberfieldar",
+    "numberfield", "numberfieldde", "timecode", "numberfieldar",
     # The colour picker (docs/color-picker-plan.md §4.2).
     "colorpicker",
     # The range and the rotated fader, and under ar-EG (docs/range-plan.md
@@ -288,6 +288,9 @@ MODS = {
                            "extra": FULLSCREEN_APP_TAIL},
     ("rust-swiftui", "fullscreen"): {"cut": "user_fullscreen", "keep": "expect_fullscreen",
                                      "extra": FULLSCREEN_APP_TAIL},
+    ("swift", "timecode"): {"cut": "nudge", "keep": "expect_value"},
+    ("go", "timecode"): {"cut": "nudge", "keep": "expect_value"},
+    ("rust-swiftui", "timecode"): {"cut": "nudge", "keep": "expect_value"},
     ("swift", "numberfield"): NUMBER_FIELD_CUT,
     ("swift", "numberfieldde"): NUMBER_FIELD_CUT,
     ("go", "numberfield"): NUMBER_FIELD_CUT,

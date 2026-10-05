@@ -62,13 +62,14 @@ object KayaPresent {
     /** A number field's text at its step, and what a commit makes of typed
      * text: 0 revert, 1 unchanged, 2 moved with the value in [out]`[0]` —
      * the core's rules (crates/kaya/src/number_field.rs). */
-    @JvmStatic external fun numberText(value: Double, step: Double): String
+    @JvmStatic external fun numberText(value: Double, step: Double, format: String): String
     @JvmStatic external fun numberCommit(
         text: String,
         committed: Double,
         min: Double,
         max: Double,
         step: Double,
+        format: String,
         out: DoubleArray,
     ): Int
 

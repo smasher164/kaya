@@ -47,7 +47,7 @@ SCENES = [
     "dirty", "ranges", "save", "styling", "toolbar", "identity",
     "assets", "sizepolicy", "adaptive", "pickers", "sliders",
     "tooltips", "search", "richtext", "ownundo", "richlabel", "sheet",
-    "submit", "numberfield", "colorpicker", "range",
+    "submit", "numberfield", "timecode", "colorpicker", "range",
 ]
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed — built and run rust-only until their guests arrive,
@@ -55,7 +55,7 @@ SCENES = [
 DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows",
                 "format", "flexshrink", "listrow", "tints", "badge", "emoji", "media",
                 # The capture (docs/capture-plan.md §8), rust-only at depth.
-                "capture", "timecode"]
+                "capture"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -167,7 +167,7 @@ ORDER = [
     ("search", LANGS),
     # The number field in the everyday locale and in German
     # (docs/number-field-plan.md §5).
-    ("timecode", ("rust",)),
+    ("timecode", LANGS),
     ("numberfield", LANGS),
     ("numberfieldde", LANGS),
     ("numberfieldar", ("rust",)),

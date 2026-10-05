@@ -138,6 +138,8 @@ mod pickers;
 #[path = "sliders.rs"]
 mod sliders;
 
+#[path = "timecode.rs"]
+mod timecode;
 #[path = "numberfield.rs"]
 mod numberfield;
 
@@ -234,6 +236,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("pickers") => pickers::app(ctx),
         Ok("sliders") => sliders::app(ctx),
         // One guest under two locales, format's shape.
+        Ok("timecode") => timecode::app(ctx),
         Ok("numberfield") | Ok("numberfieldde") | Ok("numberfieldar") => numberfield::app(ctx),
         Ok("colorpicker") => colorpicker::app(ctx),
         Ok("range") | Ok("rangertl") => range::app(ctx),

@@ -2391,6 +2391,15 @@ func (tx *Tx) Slider(min, max, value float64, onChange func(*Tx, float64)) Widge
 	return w
 }
 
+func (tx *Tx) SetFormat(w Widget, format NumberFormat) {
+	tx.emit(TxSetFormat(w.id, format.wire()))
+}
+
+func (w Widget) Format(format NumberFormat) Widget {
+	w.tx.emit(TxSetFormat(w.id, format.wire()))
+	return w
+}
+
 // Step is the granularity a slider's thumb rests on: min + k * step
 // (docs/slider-plan.md S1). It divides the range evenly; 0 is
 // continuous, the default.
@@ -4877,6 +4886,10 @@ func (t *Tpl) BindTextElement(n Node, level uint32) {
 // align stay unreachable on a Node and stay ledgered (docs/deferred.md).
 func (t *Tpl) SetGrow(n Node, weight float64) {
 	t.tx.emit(TxSetGrow(n.id, weight))
+}
+
+func (t *Tpl) SetFormat(n Node, format NumberFormat) {
+	t.tx.emit(TxSetFormat(n.id, format.wire()))
 }
 
 // SetStep is a stamped slider's granularity (docs/slider-plan.md S1):

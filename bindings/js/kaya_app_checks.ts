@@ -5,6 +5,8 @@
 // surrenders it to kaya_run (runtime.ts), so this file spawns itself as
 // the app-thread worker and imports the binding there.
 
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { Worker, isMainThread } from "node:worker_threads";
 
 // Type-only, so the import is erased and nothing surrenders the main thread.
@@ -54,6 +56,10 @@ if (isMainThread) {
   });
 } else {
   const kaya: typeof K = await import("./kaya/index.ts");
+  if (process.env["KAYA_TIMECODE_RATE_REFUSAL"] === "1") {
+    kaya.fmt.parseTimecode("00:00:00:00\0junk", new kaya.TimecodeRate(25, 0));
+    throw new Error("invalid rate was hidden by NUL text");
+  }
   const runtime = await import("./kaya/runtime.ts");
   const wire: typeof W = kaya.wire;
 
@@ -2489,6 +2495,56 @@ if (isMainThread) {
   check("tr refuses a placeable that is none of the five", throws(() => kaya.tr("items", { count: true as unknown as K.TrArg }), /a placeable is/));
   check("tr refuses an empty key", throws(() => kaya.tr(""), /message's key/));
   check("fmt is still the derived-string template tag", typeof kaya.fmt === "function" && typeof kaya.fmt.date === "function");
+
+  const timecodeRefusal = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], {
+    env: { ...process.env, KAYA_TIMECODE_RATE_REFUSAL: "1" }, encoding: "utf8", timeout: 30000,
+  });
+  check("timecode parse validates the rate before refusing NUL text",
+    timecodeRefusal.status === 1 && timecodeRefusal.stderr.includes("format timecode rate 25/0"));
+  app.window(() => {
+    const formatField = kaya.numberField();
+    check("number format refuses an unknown kind", throws(() => formatField.numberFormat(
+      { kind: "currency", rate: new kaya.TimecodeRate(25) } as unknown as K.NumberFormat), /number or timecode/));
+  });
+  const malformedRates: unknown[] = [
+    null, undefined, {},
+    { numerator: 25, denominator: 1 },
+    { numerator: 25, denominator: 1, drop: "false" },
+    { numerator: 25, denominator: 1, drop: 0 },
+    { numerator: 25.5, denominator: 1, drop: false },
+    { numerator: 25, denominator: 1.5, drop: false },
+    { numerator: Number.MAX_SAFE_INTEGER + 1, denominator: 1, drop: false },
+    { numerator: 25, denominator: NaN, drop: false },
+  ];
+  app.window(() => {
+    const field = kaya.numberField();
+    for (const [i, value] of malformedRates.entries()) {
+      const rate = value as K.TimecodeRate;
+      check(`timecode factory refuses malformed structural rate ${i}`,
+        throws(() => kaya.NumberFormat.timecode(rate), /timecode rate/));
+      check(`timecode wire refuses malformed structural rate ${i}`,
+        throws(() => field.numberFormat({ kind: "timecode", rate }), /timecode rate/));
+      check(`timecode format refuses malformed structural rate ${i}`,
+        throws(() => kaya.fmt.timecode(0, rate), /timecode rate/));
+      check(`timecode parse refuses malformed structural rate ${i}`,
+        throws(() => kaya.fmt.parseTimecode("00:00:00:00", rate), /timecode rate/));
+    }
+  });
+  const structuralRate = { numerator: 25, denominator: 1, drop: false };
+  check("timecode accepts a valid structural rate",
+    kaya.fmt.timecode(25, structuralRate) === "00:00:01:00" &&
+    kaya.fmt.parseTimecode("00:00:01:00", structuralRate) === 25);
+  const timecodeRate = new kaya.TimecodeRate(30000, 1001, true);
+  check("timecode door crosses the first drop minute", kaya.fmt.timecode(1800, timecodeRate) === "00:01:00;02");
+  check("timecode parse returns frames and refuses nonexistent labels",
+    kaya.fmt.parseTimecode("00:01:00;02", timecodeRate) === 1800 &&
+    kaya.fmt.parseTimecode("00:01:00;00", timecodeRate) === null);
+  check("timecode parse refuses an embedded NUL instead of reading its prefix",
+    kaya.fmt.parseTimecode("00:01:00;02\0junk", timecodeRate) === null);
+  check("timecode frames cannot truncate at the addon boundary",
+    throws(() => kaya.fmt.timecode(1.5, timecodeRate), /safe integer/));
+  check("timecode rate parts cannot truncate at the addon boundary",
+    throws(() => new kaya.TimecodeRate(29.97), /safe integers/));
 
   // THE CAPTURE (docs/capture-plan.md §2-§4). The callbacks are a module
   // run in the capture's worker; no checks file can make a capture live

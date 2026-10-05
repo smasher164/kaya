@@ -159,8 +159,8 @@ at the root, per ruling 6, until an app asks for a vertical range.
    dragging that way).
 10. **Precision beside the control.** A trim needs finer steps than a
     thumb gives on a long clip; the pattern every editor surveyed uses is
-    number fields beside the range (the number field, and the timecode
-    formatter at video-editor time), which the editor's inspector will do.
+    number fields beside the range (the number field and its timecode
+    format, docs/number-field-plan.md §10), which the editor's inspector will do.
 11. **An app write is judged against the pair as it really stands.**
     RULED 2026-09-29 (the maintainer, option a). The core's record of the
     pair follows the user: every `range_committed` the user makes moves it

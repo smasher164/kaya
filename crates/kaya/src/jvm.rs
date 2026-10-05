@@ -151,6 +151,8 @@ pub(crate) fn register_ring_natives(env: &mut JNIEnv) -> jni::errors::Result<()>
                 sig: "(JJJ)[B".into(),
                 fn_ptr: ring_fmt_date_time as *mut _,
             },
+            NativeMethod { name: "fmtTimecode".into(), sig: "(JJJZ)[B".into(), fn_ptr: ring_fmt_timecode as *mut _ },
+            NativeMethod { name: "fmtParseTimecode".into(), sig: "(Ljava/lang/String;JJZ)J".into(), fn_ptr: ring_fmt_parse_timecode as *mut _ },
             NativeMethod { name: "fmtNumber".into(), sig: "(DIIZ)[B".into(), fn_ptr: ring_fmt_number as *mut _ },
             NativeMethod {
                 name: "fmtPercent".into(),
@@ -424,6 +426,25 @@ extern "system" fn ring_fmt_date_weekday<'a>(env: JNIEnv<'a>, _class: JClass<'a>
 
 extern "system" fn ring_fmt_time<'a>(env: JNIEnv<'a>, _class: JClass<'a>, packed: jlong, length: jlong) -> JByteArray<'a> {
     filled(&env, |out, cap| unsafe { crate::capi::kaya_fmt_time(packed, length, out, cap) })
+}
+
+extern "system" fn ring_fmt_timecode<'a>(env: JNIEnv<'a>, _class: JClass<'a>, frames: jlong, numerator: jlong, denominator: jlong, drop: jboolean) -> JByteArray<'a> {
+    filled(&env, |out, cap| unsafe { crate::capi::kaya_fmt_timecode(frames, numerator, denominator, u32::from(drop != 0), out, cap) })
+}
+
+extern "system" fn ring_fmt_parse_timecode<'a>(mut env: JNIEnv<'a>, _class: JClass<'a>, text: jni::objects::JString<'a>, numerator: jlong, denominator: jlong, drop: jboolean) -> jlong {
+    let text: String = match env.get_string(&text) {
+        Ok(text) => text.into(),
+        Err(e) => {
+            let _ = env.throw_new(
+                "java/lang/IllegalArgumentException",
+                format!("kaya: reading timecode text failed: {e}"),
+            );
+            return -1;
+        }
+    };
+    let Ok(text) = std::ffi::CString::new(text) else { return -1; };
+    unsafe { crate::capi::kaya_fmt_parse_timecode(text.as_ptr(), numerator, denominator, u32::from(drop != 0)) }
 }
 
 extern "system" fn ring_fmt_date_time<'a>(

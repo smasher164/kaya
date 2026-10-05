@@ -1740,6 +1740,7 @@ fn drain_transactions() {
             let mut failed = false;
             'drain: while let Ok(tx) = core.transactions.try_recv() {
                 drain_range_settled(core);
+                drain_number_settled(core);
                 for op in core.scene.apply(tx) {
                     let what = op_head(&op);
                     if let Err(e) = apply(core, op) {
@@ -16753,6 +16754,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         winui_number_shape(field, cell, &core.apply_quiet)?;
                     }
                 }
+                (NativeWidget::NumberField(field), Prop::Format, Value::Str(s)) => {
+                    if let Some(cell) = core.number_cells.get(&id.0) {
+                        *cell.format.lock().expect("number field format lock") =
+                            crate::fmt::NumberFormat::from_wire(&s)
+                                .expect("validated number field format");
+                        winui_number_shape(field, cell, &core.apply_quiet)?;
+                    }
+                }
                 (NativeWidget::NumberField(field), Prop::Placeholder, Value::Str(s)) => {
                     field.SetPlaceholderText(&HSTRING::from(&s))?;
                 }
@@ -27270,6 +27279,32 @@ fn winui_user_range_committed(tag: &[u8], low: f64, high: f64) {
     }
 }
 
+thread_local! {
+    static NUMBER_SETTLED: RefCell<Vec<(Vec<u8>, f64)>> = const { RefCell::new(Vec::new()) };
+}
+
+fn winui_user_number_committed(tag: &[u8], value: f64) {
+    let told = CORE.with(|slot| match slot.try_borrow_mut() {
+        Ok(mut core) => match core.as_mut() {
+            Some(core) => {
+                core.scene.user_number_committed(tag, value);
+                true
+            }
+            None => false,
+        },
+        Err(_) => false,
+    });
+    if !told {
+        NUMBER_SETTLED.with_borrow_mut(|queue| queue.push((tag.to_vec(), value)));
+    }
+}
+
+fn drain_number_settled(core: &mut CoreState) {
+    for (tag, value) in NUMBER_SETTLED.with_borrow_mut(std::mem::take) {
+        core.scene.user_number_committed(&tag, value);
+    }
+}
+
 fn drain_range_settled(core: &mut CoreState) {
     for (tag, low, high) in RANGE_SETTLED.with_borrow_mut(std::mem::take) {
         core.scene.user_range_committed(&tag, low, high);
@@ -27545,6 +27580,7 @@ fn winui_thumb_fraction(slider: &Slider) -> windows_core::Result<Option<f64>> {
 /// bits (docs/number-field-plan.md §2).
 struct NumberCell {
     tag: Vec<u8>,
+    format: std::sync::Mutex<crate::fmt::NumberFormat>,
     min: std::sync::atomic::AtomicU64,
     max: std::sync::atomic::AtomicU64,
     step: std::sync::atomic::AtomicU64,
@@ -27552,10 +27588,15 @@ struct NumberCell {
 }
 
 impl NumberCell {
+    fn format(&self) -> crate::fmt::NumberFormat {
+        *self.format.lock().expect("number field format lock")
+    }
+
     fn new(tag: Vec<u8>) -> Self {
         let bits = |v: f64| std::sync::atomic::AtomicU64::new(v.to_bits());
         Self {
             tag,
+            format: std::sync::Mutex::new(crate::fmt::NumberFormat::Number),
             min: bits(-crate::number_field::UNBOUNDED),
             max: bits(crate::number_field::UNBOUNDED),
             step: bits(1.0),
@@ -27564,14 +27605,14 @@ impl NumberCell {
     }
 
     fn numbers(&self) -> (f64, f64, f64) {
-        (SliderCell::get(&self.min), SliderCell::get(&self.max), SliderCell::get(&self.step))
+        let (min, max) = crate::number_field::bounds_for(
+            SliderCell::get(&self.min), SliderCell::get(&self.max), self.format(),
+        );
+        (min, max, SliderCell::get(&self.step))
     }
 }
 
-/// THE BOX'S TEXT IS KAYA'S (docs/number-field-plan.md §3 rule 5): NumberBox
-/// formats through its NumberFormatter and parses through the same object
-/// cast to INumberParser, so this is the only reader and writer of the text
-/// it shows — `number_field::text` out, `fmt::parse_number` in.
+/// docs/number-field-plan.md §3 rule 5 and §10.
 #[windows_core::implement(
     bindings::Windows::Globalization::NumberFormatting::INumberFormatter2,
     bindings::Windows::Globalization::NumberFormatting::INumberParser
@@ -27585,11 +27626,11 @@ impl KayaNumberText_Impl {
         if value.is_nan() {
             return HSTRING::new();
         }
-        HSTRING::from(crate::number_field::text(value, SliderCell::get(&self.cell.step)))
+        HSTRING::from(crate::number_field::text_for(value, SliderCell::get(&self.cell.step), self.cell.format()))
     }
 
-    fn read(text: &HSTRING) -> Option<f64> {
-        crate::fmt::parse_number(text.to_string().trim())
+    fn read(&self, text: &HSTRING) -> Option<f64> {
+        crate::number_field::parse_for(&text.to_string(), self.cell.format())
     }
 }
 
@@ -27609,19 +27650,19 @@ impl bindings::Windows::Globalization::NumberFormatting::INumberFormatter2_Impl 
 /// error (S_OK with no object); NumberBox asks ParseDouble alone.
 impl bindings::Windows::Globalization::NumberFormatting::INumberParser_Impl for KayaNumberText_Impl {
     fn ParseInt(&self, text: &HSTRING) -> windows_core::Result<IReference<i64>> {
-        match Self::read(text).filter(|v| v.fract() == 0.0) {
+        match self.read(text).filter(|v| v.fract() == 0.0) {
             Some(v) => PropertyValue::CreateInt64(v as i64)?.cast(),
             None => Err(windows_core::Error::empty()),
         }
     }
     fn ParseUInt(&self, text: &HSTRING) -> windows_core::Result<IReference<u64>> {
-        match Self::read(text).filter(|v| v.fract() == 0.0 && *v >= 0.0) {
+        match self.read(text).filter(|v| v.fract() == 0.0 && *v >= 0.0) {
             Some(v) => PropertyValue::CreateUInt64(v as u64)?.cast(),
             None => Err(windows_core::Error::empty()),
         }
     }
     fn ParseDouble(&self, text: &HSTRING) -> windows_core::Result<IReference<f64>> {
-        match Self::read(text) {
+        match self.read(text) {
             Some(v) => PropertyValue::CreateDouble(v)?.cast(),
             None => Err(windows_core::Error::empty()),
         }
@@ -27639,8 +27680,10 @@ fn winui_number_shape(
     quiet: &std::sync::atomic::AtomicBool,
 ) -> windows_core::Result<()> {
     let (min, max, step) = cell.numbers();
-    quiet.store(true, std::sync::atomic::Ordering::Relaxed);
+    if min > max { return Ok(()); }
+    let was = quiet.swap(true, std::sync::atomic::Ordering::Relaxed);
     let write = (|| {
+        field.SetMinWidth(if matches!(cell.format(), crate::fmt::NumberFormat::Timecode(_)) { 180.0 } else { 0.0 })?;
         field.SetMinimum(min)?;
         field.SetMaximum(max)?;
         field.SetSmallChange(step)?;
@@ -27650,7 +27693,7 @@ fn winui_number_shape(
             KayaNumberText { cell: cell.clone() }.into();
         field.SetNumberFormatter(&text)
     })();
-    quiet.store(false, std::sync::atomic::Ordering::Relaxed);
+    quiet.store(was, std::sync::atomic::Ordering::Relaxed);
     write
 }
 
@@ -27688,6 +27731,7 @@ fn winui_number_settle(
     }
     if let Commit::Moved(v) = answer {
         SliderCell::set(&cell.committed, v);
+        winui_user_number_committed(&cell.tag, v);
         sink.send_value_committed_tag(&cell.tag, v);
     }
     Ok(())

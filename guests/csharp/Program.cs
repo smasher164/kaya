@@ -82,6 +82,7 @@ static class Program
             case "assets": AssetsScene.Run(); break;
             case "sizepolicy": SizepolicyScene.Run(); break;
             case "sliders": SlidersScene.Run(); break;
+            case "timecode": TimecodeScene.Run(); break;
             case "numberfield": case "numberfieldde": NumberFieldScene.Run(); break;
             case "colorpicker": ColorPickerScene.Run(); break;
             case "range": case "rangertl": RangeScene.Run(); break;

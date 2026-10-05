@@ -2766,6 +2766,9 @@ struct GtkSlider {
 /// fires after the adjustment has moved, so the old value lives here.
 #[derive(Clone, Copy)]
 struct NumberState {
+    format: crate::fmt::NumberFormat,
+    min: f64,
+    max: f64,
     step: f64,
     declared: f64,
     committed: f64,
@@ -2810,6 +2813,7 @@ fn number_committed(
         state.committed = moved;
         state.declared = moved;
         field.state.set(state);
+        gtk_user_number_committed(tag, moved);
         sink.send_value_committed_tag(tag, moved);
     }
 }
@@ -2819,11 +2823,18 @@ fn number_committed(
 /// Under the caller's quiet guard: this is the app's write.
 fn number_reconfigure(field: &GtkNumberField) {
     let mut state = field.state.get();
+    let (min, max) = crate::number_field::bounds_for(state.min, state.max, state.format);
+    if min > max { return; }
+    field.spin.set_range(min, max);
+    field.spin.set_width_chars(if matches!(state.format, crate::fmt::NumberFormat::Timecode(_)) { 12 } else { -1 });
     field.spin.set_increments(state.step, state.step * 10.0);
     field.spin.set_digits(crate::number_field::digits(state.step) as u32);
     field.spin.set_value(state.declared);
     state.committed = field.spin.value();
     field.state.set(state);
+    gtk4::prelude::EditableExt::set_text(&field.spin, &crate::number_field::text_for(
+        state.committed, state.step, state.format,
+    ));
 }
 
 /// docs/color-picker-plan.md §6: GTK's own swatch button over its dialog.
@@ -3321,6 +3332,32 @@ fn gtk_user_range_committed(tag: &[u8], low: f64, high: f64) {
     });
     if !told {
         RANGE_SETTLED.with_borrow_mut(|queue| queue.push((tag.to_vec(), low, high)));
+    }
+}
+
+thread_local! {
+    static NUMBER_SETTLED: RefCell<Vec<(Vec<u8>, f64)>> = const { RefCell::new(Vec::new()) };
+}
+
+fn gtk_user_number_committed(tag: &[u8], value: f64) {
+    let told = CORE.with(|slot| match slot.try_borrow_mut() {
+        Ok(mut core) => match core.as_mut() {
+            Some(core) => {
+                core.scene.user_number_committed(tag, value);
+                true
+            }
+            None => false,
+        },
+        Err(_) => false,
+    });
+    if !told {
+        NUMBER_SETTLED.with_borrow_mut(|queue| queue.push((tag.to_vec(), value)));
+    }
+}
+
+fn drain_number_settled(core: &mut CoreState) {
+    for (tag, value) in NUMBER_SETTLED.with_borrow_mut(std::mem::take) {
+        core.scene.user_number_committed(&tag, value);
     }
 }
 
@@ -5755,6 +5792,7 @@ fn drain_transactions() {
         crate::fault::guard("draining a transaction", || {
             while let Ok(tx) = core.transactions.try_recv() {
                 drain_range_settled(core);
+                drain_number_settled(core);
                 for op in core.scene.apply(tx) {
                     apply(core, op);
                 }
@@ -12368,6 +12406,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let field = GtkNumberField {
                         spin: spin.clone(),
                         state: Rc::new(std::cell::Cell::new(NumberState {
+                            format: crate::fmt::NumberFormat::Number,
+                            min: -unbounded,
+                            max: unbounded,
                             step: 1.0,
                             declared: 0.0,
                             committed: 0.0,
@@ -12376,7 +12417,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     {
                         let state = field.state.clone();
                         spin.connect_output(move |sb| {
-                            let text = crate::number_field::text(sb.value(), state.get().step);
+                            let state = state.get();
+                            let text = crate::number_field::text_for(sb.value(), state.step, state.format);
                             gtk4::prelude::EditableExt::set_text(sb, &text);
                             glib::Propagation::Stop
                         });
@@ -12388,12 +12430,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                             let state = state.get();
                             let adjustment = sb.adjustment();
                             let text = gtk4::prelude::EditableExt::text(sb);
-                            Some(Ok(match crate::number_field::commit(
+                            Some(Ok(match crate::number_field::commit_for(
                                 &text,
                                 state.committed,
                                 adjustment.lower(),
                                 adjustment.upper(),
                                 state.step,
+                                state.format,
                             ) {
                                 Commit::Moved(value) => value,
                                 Commit::Unchanged | Commit::Revert => state.committed,
@@ -14255,6 +14298,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 (NativeWidget::Label(label), Prop::Text, Value::Str(s)) => {
                     let label = label.clone();
                     label.set_text(&s);
+                    #[cfg(feature = "harness")]
+                    gtk_media::caption_label_applied(id.0, &label.text());
                     // A PLAIN WRITE DROPS THE RUNS, the textarea's rule
                     // (docs/rich-text-plan.md §8, §15). `set_text` clears the
                     // markup a link was drawn through; the attribute list is a
@@ -14901,9 +14946,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     match prop {
                         Prop::Value => state.declared = v,
                         Prop::Step => state.step = v,
-                        Prop::Min => field.spin.adjustment().set_lower(v),
-                        _ => field.spin.adjustment().set_upper(v),
+                        Prop::Min => state.min = v,
+                        _ => state.max = v,
                     }
+                    field.state.set(state);
+                    let was = core.apply_quiet.replace(true);
+                    number_reconfigure(field);
+                    core.apply_quiet.set(was);
+                }
+                (NativeWidget::NumberField(field), Prop::Format, Value::Str(s)) => {
+                    let mut state = field.state.get();
+                    state.format = crate::fmt::NumberFormat::from_wire(&s)
+                        .expect("validated number field format");
                     field.state.set(state);
                     let was = core.apply_quiet.replace(true);
                     number_reconfigure(field);
@@ -19504,6 +19558,7 @@ impl crate::harness::Stage for GtkStage {
                     let mut n = 0usize;
                     while let Ok(tx) = core.transactions.try_recv() {
                         drain_range_settled(core);
+                        drain_number_settled(core);
                         for op in core.scene.apply(tx) {
                             apply(core, op);
                         }
@@ -21560,7 +21615,7 @@ impl crate::harness::Stage for GtkStage {
     fn caption(&self, target: crate::harness::Target) -> String {
         Self::on_main(move |core| {
             crate::harness::try_resolve(target.index, core.videos.len())
-                .map_or_else(String::new, |i| gtk_media::drawn_caption(&core.videos[i]))
+                .map_or_else(String::new, |i| gtk_media::drawn_caption(core, &core.videos[i]))
         })
     }
 
@@ -24912,13 +24967,30 @@ mod gtk_media {
         redraw_captions(core, id);
     }
 
+    #[cfg(feature = "harness")]
+    fn caption_wall_ms() -> Option<u128> {
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_millis())
+    }
+
+    #[cfg(feature = "harness")]
+    pub(super) fn caption_label_applied(widget: u64, text: &str) {
+        if std::env::var("KAYA_SELFTEST").as_deref() == Ok("media_tracks") {
+            eprintln!("KAYA_DIAG caption_label_apply wall_ms={:?} widget={widget} text={text:?}", caption_wall_ms());
+        }
+    }
+
     fn caption_ask(core: &mut CoreState, id: u64) {
         let Some(p) = player(id) else { return };
         if p.inner.borrow().caption_times.is_empty() {
             return;
         }
-        let at = position_ms(&p.pb());
+        let query_ms = p.pb().query_position::<gst::ClockTime>().map(|t| t.mseconds());
+        let at = query_ms.unwrap_or(0);
         let (text, published) = core.scene.caption_at(crate::protocol::PlayerId(id), at);
+        #[cfg(feature = "harness")]
+        eprintln!("KAYA_DIAG caption_publish wall_ms={:?} player={id} generation={} query_ms={query_ms:?} used_ms={at} before={:?} text={text:?} occurrences={} snapshot={:?}",
+            caption_wall_ms(), p.inner.borrow().generation, p.inner.borrow().kaya_caption,
+            published.len(), core.scene.caption_snapshot(crate::protocol::PlayerId(id), query_ms));
         for occ in published {
             core.occurrences.send(occ);
         }
@@ -25263,9 +25335,14 @@ mod gtk_media {
         let Some(next) = s.caption_times.iter().copied().find(|t| *t > now) else { return };
         let wait = ((next - now) as f64 / s.speed.max(0.01)).ceil() as u64 + 1;
         let id = p.id;
+        #[cfg(feature = "harness")]
+        eprintln!("KAYA_DIAG caption_schedule wall_ms={:?} player={id} generation={} clock_ms={now} next_ms={next} wait_ms={wait}", caption_wall_ms(), s.generation);
         s.boundary_timer = Some(glib::timeout_add_local_once(std::time::Duration::from_millis(wait), move || {
             if let Some(p) = player(id) {
                 p.inner.borrow_mut().boundary_timer = None;
+                #[cfg(feature = "harness")]
+                eprintln!("KAYA_DIAG caption_boundary wall_ms={:?} player={id} generation={} target_ms={next} query_ms={:?}", caption_wall_ms(), p.inner.borrow().generation,
+                    p.pb().query_position::<gst::ClockTime>().map(|t| t.mseconds()));
             }
             queue(Pending::Ask(id));
         }));
@@ -25984,9 +26061,19 @@ mod gtk_media {
 
     /// The caption kaya's renderer drew on this view, "" for none.
     #[cfg(feature = "harness")]
-    pub(super) fn drawn_caption(view: &GtkVideoView) -> String {
+    pub(super) fn drawn_caption(core: &CoreState, view: &GtkVideoView) -> String {
         use gtk4::prelude::WidgetExt;
-        if view.caption.is_visible() { view.caption.text().to_string() } else { String::new() }
+        let visible = view.caption.is_visible();
+        let native_text = view.caption.text().to_string();
+        let returned = if visible { native_text.clone() } else { String::new() };
+        let id = view.shown.get();
+        let p = id.and_then(player);
+        let query_ms = p.as_ref().and_then(|p| p.pb().query_position::<gst::ClockTime>()).map(|t| t.mseconds());
+        let snapshot = id.and_then(|id| core.scene.caption_snapshot(crate::protocol::PlayerId(id), query_ms));
+        let cached = p.as_ref().map(|p| p.inner.borrow().kaya_caption.clone());
+        let generation = p.as_ref().map(|p| p.inner.borrow().generation);
+        eprintln!("KAYA_DIAG caption_read wall_ms={:?} player={id:?} generation={generation:?} query_ms={query_ms:?} snapshot={snapshot:?} cached={cached:?} native_text={native_text:?} visible={visible} returned={returned:?}", caption_wall_ms());
+        returned
     }
 
     /// The view's centre as GTK's own renderer draws it: the picture is an

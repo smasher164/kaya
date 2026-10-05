@@ -11,6 +11,12 @@ import time
 from dataclasses import dataclass
 
 import kaya
+import subprocess
+
+if _timecode_refusal_kind := os.environ.get("KAYA_TIMECODE_RATE_REFUSAL"):
+    _timecode_bad_text = "00:00:00:00\0junk" if _timecode_refusal_kind == "NUL" else "00:00:00:00\ud800"
+    kaya.fmt.parse_timecode(_timecode_bad_text, kaya.TimecodeRate(25, 0))
+    raise AssertionError(f"invalid rate was hidden by {_timecode_refusal_kind} text")
 
 app = kaya.App()
 failures = []
@@ -4773,6 +4779,38 @@ check("fmt.locale answers a BCP-47 tag with a hyphen or a bare language",
 check("fmt.direction answers one of the two words",
       kaya.fmt.direction() in ("ltr", "rtl"))
 check("fmt.text_scale answers a factor", kaya.fmt.text_scale() >= 1.0)
+
+for _timecode_refusal_kind in ("NUL", "surrogate"):
+    _timecode_refusal = subprocess.run(
+        [sys.executable, __file__], env={**os.environ, "KAYA_TIMECODE_RATE_REFUSAL": _timecode_refusal_kind},
+        capture_output=True, text=True, encoding="utf-8", timeout=30)
+    check(f"timecode parse validates the rate before refusing {_timecode_refusal_kind} text",
+          _timecode_refusal.returncode == 1
+          and "format timecode rate 25/0" in _timecode_refusal.stderr)
+for _bad_rate in (None, "25", 25):
+    _fmt_said = ""
+    try:
+        kaya.NumberFormat.timecode(_bad_rate)
+    except kaya.KayaTypeError as e:
+        _fmt_said = str(e)
+    check(f"timecode format refuses a non-rate {_bad_rate!r}", "TimecodeRate" in _fmt_said)
+_timecode_rate = kaya.TimecodeRate(30000, 1001, True)
+check("timecode door crosses the first drop minute",
+      kaya.fmt.timecode(1800, _timecode_rate) == "00:01:00;02")
+check("timecode parse returns frames and refuses nonexistent labels",
+      kaya.fmt.parse_timecode("00:01:00;02", _timecode_rate) == 1800
+      and kaya.fmt.parse_timecode("00:01:00;00", _timecode_rate) is None)
+check("timecode parse refuses an embedded NUL instead of reading its prefix",
+      kaya.fmt.parse_timecode("00:01:00;02\0junk", _timecode_rate) is None)
+for _timecode_surrogate in ("\ud800", "\udfff"):
+    check(f"timecode parse refuses unpaired surrogate {ord(_timecode_surrogate):04x}",
+          kaya.fmt.parse_timecode("00:01:00;02" + _timecode_surrogate, _timecode_rate) is None)
+_fmt_said = ""
+try:
+    kaya.TimecodeRate(1 << 64)
+except kaya.KayaValueError as e:
+    _fmt_said = str(e)
+check("timecode rate cannot wrap at the C boundary", "signed 64-bit integer" in _fmt_said)
 
 # --- MEDIA (docs/media-plan.md): the three flat records through the
 # GENERATED decoder, the mirror absorbed before the handlers, the closed

@@ -174,6 +174,8 @@ pub unsafe extern "C" fn napi_register_module_v1(env: Env, exports: Value) -> Va
         ("fmtTime", fmt_time),
         ("fmtDateTime", fmt_date_time),
         ("fmtNumber", fmt_number),
+        ("fmtTimecode", fmt_timecode),
+        ("fmtParseTimecode", fmt_parse_timecode),
         ("fmtPercent", fmt_percent),
         ("fmtCurrency", fmt_currency),
         ("locale", locale),
@@ -527,6 +529,32 @@ unsafe extern "C" fn fmt_number(env: Env, info: CbInfo) -> Value {
     let value = try_or_throw!(env, unsafe { f64_arg(env, v, "fmtNumber value") });
     let options = try_or_throw!(env, unsafe { number_options(env, min, max, g, "fmtNumber options") });
     unsafe { filled(env, "fmtNumber", |out, cap| capi::kaya_fmt_number(value, &options, out, cap)) }
+}
+
+unsafe fn timecode_args(env: Env, n: Value, d: Value, drop: Value) -> Result<(i64, i64, u32), String> {
+    let numerator = unsafe { i64_arg(env, n, "format timecode numerator")? };
+    let denominator = unsafe { i64_arg(env, d, "format timecode denominator")? };
+    let drop = unsafe { i64_arg(env, drop, "format timecode drop flag")? };
+    if !(0..=1).contains(&drop) {
+        return Err(format!("kaya: format timecode drop flag {drop}: expected 0 or 1"));
+    }
+    Ok((numerator, denominator, drop as u32))
+}
+
+unsafe extern "C" fn fmt_timecode(env: Env, info: CbInfo) -> Value {
+    let [frames, n, d, drop] = unsafe { args::<4>(env, info) };
+    let frames = try_or_throw!(env, unsafe { i64_arg(env, frames, "format timecode frames") });
+    let (n, d, drop) = try_or_throw!(env, unsafe { timecode_args(env, n, d, drop) });
+    unsafe { filled(env, "fmtTimecode", |out, cap| capi::kaya_fmt_timecode(frames, n, d, drop, out, cap)) }
+}
+
+unsafe extern "C" fn fmt_parse_timecode(env: Env, info: CbInfo) -> Value {
+    let [text, n, d, drop] = unsafe { args::<4>(env, info) };
+    let (n, d, drop) = try_or_throw!(env, unsafe { timecode_args(env, n, d, drop) });
+    let text = try_or_throw!(env, unsafe { string_arg(env, text, "parse timecode text") });
+    let Ok(text) = CString::new(text) else { return unsafe { number(env, -1.0) }; };
+    let frames = unsafe { capi::kaya_fmt_parse_timecode(text.as_ptr(), n, d, drop) };
+    unsafe { number(env, frames as f64) }
 }
 
 unsafe extern "C" fn fmt_percent(env: Env, info: CbInfo) -> Value {

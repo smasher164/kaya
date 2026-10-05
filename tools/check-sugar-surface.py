@@ -4191,6 +4191,8 @@ L10N_DOOR = [
     ("number", "Number", "number", "fmtNumber"),
     ("percent", "Percent", "percent", "fmtPercent"),
     ("currency", "Currency", "currency", "fmtCurrency"),
+    ("timecode", "Timecode", "timecode", "fmtTimecode"),
+    ("parse_timecode", "ParseTimecode", "parseTimecode", "fmtParseTimecode"),
     ("locale", "Locale", "locale", "locale"),
     ("direction", "Direction", "direction", "direction"),
     ("text_scale", "TextScale", "textScale", "textScale"),
@@ -4202,7 +4204,8 @@ def l10n_rows(part, snake, pascal, camel, hs):
     a module of functions on Rust, Python, OCaml and Haskell, a `Format*`
     family on Go, a `Fmt` class on C#, Java and Swift, a frozen object on JS."""
     F = L10N_FILES
-    go = f"Format{pascal}" if part not in ("locale", "direction", "text_scale") else pascal
+    direct = ("locale", "direction", "text_scale", "parse_timecode")
+    go = pascal if part in direct else f"Format{pascal}"
     return [("rust", F["rust"][0], rf"^pub fn {snake}\("),
             ("python", F["python"][0], rf"^def {snake}\("),
             ("go", F["go"][0], rf"^func {go}\("),
@@ -6517,7 +6520,7 @@ discardable = tpl_discardable_probe()
 WANT_DISCARDABLE = """swift-row-member=applied:1 rc:1 named:True
 swift-arm-member=applied:1 rc:1 named:True
 swift-eliminator=applied:1 rc:1 named:True
-swift-census-floor=applied:17 rc:1 named:True"""
+swift-census-floor=applied:18 rc:1 named:True"""
 if discardable != WANT_DISCARDABLE:
     print("check-sugar-surface: SELF-TEST FAIL (the Swift generated-surface "
           "discard census did not catch its watched cuts). Wanted:",
@@ -10989,6 +10992,10 @@ if _rust_capture:
     selftest_exit(f"check-sugar-surface: the capture's reference row, Rust, reads nothing for "
                   f"{', '.join(_rust_capture)} — its patterns no longer match the binding they "
                   f"were calibrated against")
+
+from timecode_surface import run as check_timecode_surface
+
+check_timecode_surface()
 
 check_scene_sugar()
 

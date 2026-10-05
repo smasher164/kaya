@@ -1631,7 +1631,8 @@ def commit_record_findings(sources):
         if re.search(r"Occurrence::(?:Instance)?RangeCommitted", text):
             out.append(f"{name}: builds a RangeCommitted occurrence itself, past the recorder")
         applies = len(re.findall(r"core\.scene\.apply\(tx\)", text))
-        drained = len(re.findall(r"drain_range_settled\(core\);\s*\n\s*"
+        drained = len(re.findall(r"drain_range_settled\(core\);\s*"
+                                 r"(?:drain_[a-z_]+\(core\);\s*)*"
                                  r"(?:for op in )?core\.scene\.apply\(tx\)", text))
         if applies == 0 or drained != applies:
             out.append(f"{name}: {applies} transaction apply site(s), {drained} "
@@ -1660,15 +1661,28 @@ record_watched("a GTK range commit never recorded", GTK, "right after `gtk_user_
 record_watched("a WinUI range commit never recorded", WINUI,
                "right after `winui_user_range_committed`",
                r"winui_user_range_committed\(&cell\.tag, nlo, nhi\);\n", "")
-# U4/U5. A DRAIN THAT APPLIES BEFORE THE QUEUED COMMITS (gtk's harness drain
+# A DRAIN THAT APPLIES BEFORE THE QUEUED COMMITS (gtk's harness drain
 # was the second copy that missed it, found writing this clause).
-record_watched("a GTK harness drain skipping the queue", GTK, "draining RANGE_SETTLED first",
-               r"(\n *)drain_range_settled\(core\);"
-               r"(\n *for op in"
-               r" core\.scene\.apply\(tx\) \{\n *apply\(core, op\);\n *\}\n *for occ)",
-               r"\2")
-record_watched("a WinUI drain skipping the queue", WINUI, "draining RANGE_SETTLED first",
-               r"\n *drain_range_settled\(core\);(?=\n *for op in core\.scene\.apply)", "")
+for label, path, owner in (
+    ("a GTK harness drain", GTK, "fn type_text(&self, text: &str)"),
+    ("a GTK transaction drain", GTK, "fn drain_transactions("),
+    ("a WinUI drain", WINUI, "fn drain_transactions("),
+):
+    source = RECORD_SOURCES[path]
+    body = block_after(source, owner)
+    removed = gate.doctor(label + " skipping the queue", body,
+                          r"\n *drain_range_settled\(core\);", "")
+    late = gate.doctor(label + " recording after apply", removed,
+                       r"(for op in core\.scene\.apply\(tx\) \{)",
+                       r"\1\n drain_range_settled(core);")
+    for fault, changed in (("skipping the queue", removed), ("recording after apply", late)):
+        name = label + " " + fault
+        doctored = {**RECORD_SOURCES, path: gate.doctor(
+            name + " in its owner", source, re.escape(body), lambda _: changed)}
+        if gate.negative(name, lambda: commit_record_findings(doctored),
+                         want="draining RANGE_SETTLED first"):
+            print(f"check-slider-commit: watched refusing: {name}")
+
 
 # THE THUMB ON TOP WEARS AN OUTLINE AT A TIE (docs/range-plan.md §3 rule 4),
 # in the platform's own outline token. No scene can see it: the tie lines read
