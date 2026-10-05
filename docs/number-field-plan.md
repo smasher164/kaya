@@ -374,17 +374,16 @@ At the number-field slice, no timecode format was on the kind
 (`a_commit_reads_the_text_through_the_door`), so `value` is always a
 number.
 
-## §10. Timecode (2026-10-04, built-as-recommended choices awaiting confirmation)
+## §10. Timecode (2026-10-04, choices ratified as built 2026-10-05)
 
 The scope is the whole formatter, including drop-frame, by the maintainer’s
-2026-10-04 instruction. The choices below are recommendations to implement
-and review. Built on all five backends and all nine bindings plus C; the
+2026-10-04 instruction. The choices below were built as recommendations and
+ratified by the maintainer on 2026-10-05 ("that's fine"). Built on all five backends and all nine bindings plus C; the
 review page has ten viewed native captures. Core 923 tests and the filtered
 236-leg matrix passed; all 37 timecode legs passed in the full run. The full
 matrix itself remained red (2680 passed, one media failure, two idle skips,
 63/64 gates and duration overruns), with each failed/skipped check passing a
 separate control. docs/deferred.md records that open validation follow-up.
-The choices below still await the maintainer’s confirmation.
 
 The rate is an exact rational numerator/denominator with a drop flag, not a
 rounded decimal or an enum of common rates. Positive signed-32-bit parts

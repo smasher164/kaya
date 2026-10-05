@@ -24,17 +24,17 @@ clauses/87 watched negatives and three arithmetic cuts; check-sugar-surface's
 25 door/zone clauses/26 negatives; shared scene assertions. Caption diagnostic
 coverage adds 27 routes/33 negatives and a forced-expiry red bundle read-back.
 
-## RULING WANTED — confirm the built timecode rate, wire and input choices (2026-10-05)
+## ~~RULING WANTED — confirm the built timecode rate, wire and input choices (2026-10-05)~~ CLOSED 2026-10-05: the maintainer accepted all four as built ("that's fine", replying to the summary of rates, frame domain, strict input grammar and atomic typed format selection).
 KEY: timecode recommendations, TimecodeRate, NumberFormat, drop-frame grammar
 
-The §10 choices remain built as recommended awaiting the maintainer:
+The §10 choices are ratified as built:
 integer rates 1..120 plus the three exact fractional rates; nonnegative
 whole frames through 2^53-1; hours beyond 24; four complete fields; strict
 colon/non-drop and semicolon/drop punctuation; skipped labels refused;
 Unicode decimal input with ASCII output. The wire uses one atomic string
 selected by typed binding values. The review page groups these as rates,
-frame domain, input grammar and closed format selection. Validation does not
-ratify a design ruling. The independent number-field width ruling stays open.
+frame domain, input grammar and closed format selection. The ruling does not
+settle validation, and the independent number-field width ruling stays open.
 
 ## VALIDATION — timecode full-matrix run was red despite green focused controls (2026-10-05)
 KEY: timecode full matrix, duration ceilings, media_delivery_go, x265 encoder crash
