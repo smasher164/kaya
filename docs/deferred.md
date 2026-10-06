@@ -36,7 +36,7 @@ selected by typed binding values. The review page groups these as rates,
 frame domain, input grammar and closed format selection. The ruling does not
 settle validation, and the independent number-field width ruling stays open.
 
-## VALIDATION — timecode full-matrix run was red despite green focused controls (2026-10-05)
+## ~~VALIDATION — timecode full-matrix run was red despite green focused controls (2026-10-05)~~ CLOSED 2026-10-06: the plain full matrix on tree 3815e98e read ALL PASS, exit 0, 2098 s, every lane under its ceiling (mac 833 net/1100, linux 800/1250, windows 1485/1650, ios 1023/1350, android 809/870, sweep 436/600, android-quiet 201 with its three microphone legs green), no host Sleep/Wake; the fixes are listed in the update below and in docs/traps.md.
 KEY: timecode full matrix, duration ceilings, media_delivery_go, x265 encoder crash
 
 The final normal matrix exited 1 after 2635 s: 2680 passed, one Windows
