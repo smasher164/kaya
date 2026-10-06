@@ -258,6 +258,12 @@ if MODE == "parallel":
     # tools/check-gates.py holds the order.
     if subprocess.run(["tools/gates.py", "--build"]).returncode != 0:
         sys.exit(1)
+    # RUNG 1 RAN JUST NOW: the sweep skips its own run while these inputs
+    # still hold (tools/gates.py's rung1_ran_at_matrix_start).
+    rung1 = subprocess.run(["tools/build-id.py", "--gate", "unit-suite"],
+                           stdout=subprocess.PIPE, text=True, check=False)
+    if rung1.returncode == 0 and rung1.stdout.strip():
+        os.environ["KAYA_MATRIX_RUNG1_KEY"] = rung1.stdout.strip()
     got = subprocess.run(["tools/gates.py", "--fingerprint"],
                          stdout=subprocess.PIPE, text=True,
                          encoding="utf-8", errors="replace",

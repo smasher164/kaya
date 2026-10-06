@@ -477,13 +477,29 @@ def sweep(gates, label="gates", lib_root=None):
 RUNG1 = "the unit suite (rung 1)"
 
 
-def build(rung1=True):
-    """Build what the gates read, before any of them reads it; and rung 1,
-    except for validate-all's start, whose matrix sweeps later (docs/traps.md,
-    the sweep's second unit suite)."""
+def rung1_ran_at_matrix_start():
+    """The key validate-all took right after its own --build ran rung 1,
+    when it still names these inputs: the sweep then does not run it twice
+    in one matrix (docs/traps.md, the sweep's second unit suite). A hand
+    run has no key and runs it."""
+    handed = os.environ.get("KAYA_MATRIX_RUNG1_KEY", "")
+    if not handed:
+        return None
+    now = subprocess.run(["tools/build-id.py", "--gate", "unit-suite"], cwd=ROOT,
+                         stdout=subprocess.PIPE, text=True, check=False)
+    if now.returncode == 0 and now.stdout.strip() == handed:
+        return handed
+    print(f"build: rung 1's inputs moved since this matrix started (key {handed}, "
+          f"now {now.stdout.strip() or 'unreadable'}) — running it again", flush=True)
+    return None
+
+
+def build():
+    """Build what the gates read, before any of them reads it."""
     for what, cmd in BUILD:
-        if what == RUNG1 and not rung1:
-            print(f"build: {what} — left to this matrix's gate sweep", flush=True)
+        if what == RUNG1 and (key := rung1_ran_at_matrix_start()):
+            print(f"build: {what} — this matrix's start ran it over the same inputs "
+                  f"(key {key}); not run again", flush=True)
             continue
         print(f"build: {what} ({' '.join(cmd)})", flush=True)
         if subprocess.call(cmd, cwd=ROOT) != 0:
@@ -621,7 +637,7 @@ def main(args):
         # validate-all's t0: the keyed keys carry the artifacts' REAL
         # bytes, so the token is taken only after the same builds the
         # sweep itself starts with.
-        return 0 if build(rung1=False) else 1
+        return 0 if build() else 1
     if args == ["--fingerprint"]:
         # Line one is the token; line two the per-gate keys behind it, so
         # a lane whose token misses can name the gate that moved.

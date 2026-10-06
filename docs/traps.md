@@ -14185,7 +14185,13 @@ sweep skipped its run while a key of rung 1's inputs still matched the one
 taken at the matrix's start (ALL PASS at 2098 s, sweep 436 s); then, since the
 start's copy sat on the whole matrix's critical path and the sweep finished
 about 220 s before the Windows lane, rung 1 moved to the sweep alone:
-`gates.py --build` (validate-all's start, its only caller) leaves it out.
+`gates.py --build` (validate-all's start, its only caller) leaving it out.
+REVERTED the same day: the start's `cargo test` had been leaving kaya built
+from the example graph (dev-dependency features unified in), which is the
+graph the mac lane's `cargo build --lib --example ...` reads; with it gone the
+start's `cargo build --lib` left the lib graph, and the mac lane recompiled
+kaya twice (3m16s and 3m32s, core-build+gates 439 s against 136 s) on two
+matrices. The key handshake is back.
 
 ## The Windows foreign-drop witness dropped onto dnd.exe's own console window (measured 2026-10-06)
 
