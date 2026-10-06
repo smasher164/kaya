@@ -90,6 +90,11 @@ pub(super) struct WinPlayer {
     seek_held: Option<i64>,
     /// The app's last word was play: a frame step would pause it.
     play_asked: bool,
+    /// The source this load opened, and whether its stalled adaptive open
+    /// was already rebuilt once (`rebuild_stalled`).
+    url: String,
+    rebuilt: bool,
+    rebuilding: bool,
 }
 
 /// WHAT AN OPENING ITEM DID, per load, printed only when the open stalls
@@ -106,6 +111,17 @@ struct TrailLines {
     since: std::time::Instant,
     lines: Vec<String>,
     live: bool,
+    /// The adaptive downloads this load asked for, finished and lost.
+    requested: u32,
+    completed: u32,
+    failed: u32,
+}
+
+#[derive(Clone, Copy)]
+enum Download {
+    Requested,
+    Completed,
+    Failed,
 }
 
 const TRAIL_CAP: usize = 400;
@@ -118,6 +134,9 @@ impl Trail {
             since: std::time::Instant::now(),
             lines: Vec::new(),
             live: false,
+            requested: 0,
+            completed: 0,
+            failed: 0,
         })))
     }
 
@@ -127,6 +146,27 @@ impl Trail {
         t.since = std::time::Instant::now();
         t.lines.clear();
         t.live = false;
+        t.requested = 0;
+        t.completed = 0;
+        t.failed = 0;
+    }
+
+    fn count(&self, generation: u64, download: Download) {
+        let Ok(mut t) = self.0.lock() else { return };
+        if t.generation != generation {
+            return;
+        }
+        match download {
+            Download::Requested => t.requested += 1,
+            Download::Completed => t.completed += 1,
+            Download::Failed => t.failed += 1,
+        }
+    }
+
+    /// (requested, completed, failed) for this load's adaptive downloads.
+    fn downloads(&self, generation: u64) -> Option<(u32, u32, u32)> {
+        let t = self.0.lock().ok()?;
+        (t.generation == generation).then_some((t.requested, t.completed, t.failed))
     }
 
     fn note(&self, generation: u64, text: String) {
@@ -199,6 +239,7 @@ fn trail_adaptive(adaptive: &AdaptiveMediaSource, trail: &Trail, generation: u64
     let _ = adaptive.DownloadRequested(&TypedEventHandler::new(
         move |_: windows_core::Ref<'_, AdaptiveMediaSource>,
               args: windows_core::Ref<'_, AdaptiveMediaSourceDownloadRequestedEventArgs>| {
+            t.count(generation, Download::Requested);
             if let Some(a) = args.as_ref() {
                 t.note(
                     generation,
@@ -219,6 +260,7 @@ fn trail_adaptive(adaptive: &AdaptiveMediaSource, trail: &Trail, generation: u64
     let _ = adaptive.DownloadCompleted(&TypedEventHandler::new(
         move |_: windows_core::Ref<'_, AdaptiveMediaSource>,
               args: windows_core::Ref<'_, AdaptiveMediaSourceDownloadCompletedEventArgs>| {
+            t.count(generation, Download::Completed);
             if let Some(a) = args.as_ref() {
                 t.note(
                     generation,
@@ -238,6 +280,7 @@ fn trail_adaptive(adaptive: &AdaptiveMediaSource, trail: &Trail, generation: u64
     let _ = adaptive.DownloadFailed(&TypedEventHandler::new(
         move |_: windows_core::Ref<'_, AdaptiveMediaSource>,
               args: windows_core::Ref<'_, AdaptiveMediaSourceDownloadFailedEventArgs>| {
+            t.count(generation, Download::Failed);
             if let Some(a) = args.as_ref() {
                 t.note(
                     generation,
@@ -606,6 +649,9 @@ pub(super) fn create_player(core: &mut CoreState, id: u64) -> windows_core::Resu
             seek_in_flight: false,
             seek_held: None,
             play_asked: false,
+            url: String::new(),
+            rebuilt: false,
+            rebuilding: false,
         },
     );
     ensure_timer(core)?;
@@ -833,6 +879,9 @@ fn load(core: &mut CoreState, id: u64, url: &str) -> windows_core::Result<()> {
     p.seek_in_flight = false;
     p.seek_held = None;
     p.play_asked = false;
+    let rebuild = std::mem::take(&mut p.rebuilding);
+    p.rebuilt = rebuild;
+    p.url = url.to_owned();
     let path = url.split(['?', '#']).next().unwrap_or(url).to_ascii_lowercase();
     p.adaptive = path.ends_with(".m3u8") || path.ends_with(".mpd");
     let previous = p.source.take();
@@ -898,9 +947,13 @@ fn load(core: &mut CoreState, id: u64, url: &str) -> windows_core::Result<()> {
                     unix_ms()
                 );
                 p.trail.print(generation);
+                rebuild_stalled(core, id, generation);
             }
         });
-        std::thread::sleep(std::time::Duration::from_millis(crate::media::TIMEOUT_MS - OPEN_REPORT_MS));
+        // A REBUILT OPEN KEEPS THE FIRST ONE'S BOUND: it began OPEN_REPORT_MS
+        // after the source was set.
+        let spent = if rebuild { 2 * OPEN_REPORT_MS } else { OPEN_REPORT_MS };
+        std::thread::sleep(std::time::Duration::from_millis(crate::media::TIMEOUT_MS - spent));
         post(move |core| {
             if live(core, id, generation) {
                 report(core, id, Report::Overdue);
@@ -908,6 +961,33 @@ fn load(core: &mut CoreState, id: u64, url: &str) -> windows_core::Result<()> {
         });
     });
     Ok(())
+}
+
+/// THE ADAPTIVE OPEN THAT MEDIA FOUNDATION LOST (the maintainer's ruling of
+/// 2026-10-05; docs/traps.md, the WinUI adaptive pipeline that goes idle):
+/// every download answered, the source Opened and the session still Opening
+/// after OPEN_REPORT_MS is rebuilt once, inside the same TIMEOUT_MS bound.
+fn rebuild_stalled(core: &mut CoreState, id: u64, generation: u64) {
+    let Some(p) = core.media.players.get_mut(&id) else { return };
+    let source = p.source.as_ref().and_then(|s| s.State().ok()).map(|s| s.0);
+    let session = p.player.PlaybackSession().and_then(|s| s.PlaybackState()).ok().map(|s| s.0);
+    let downloads = p.trail.downloads(generation);
+    let stalled = matches!(downloads, Some((asked, done, 0)) if asked > 0 && done == asked);
+    if !p.adaptive || p.rebuilt || source != Some(2) || session != Some(1) || !stalled {
+        return;
+    }
+    let (asked, done, lost) = downloads.unwrap_or_default();
+    eprintln!(
+        "KAYA_DIAG winui player {id}: rebuilding the stalled adaptive open once — {done} of {asked} \
+         download(s) answered and {lost} lost, MediaSource.State {source:?}, session state {session:?} \
+         after {OPEN_REPORT_MS} ms; unix ms {}",
+        unix_ms()
+    );
+    p.rebuilding = true;
+    let url = p.url.clone();
+    if let Err(e) = load(core, id, &url) {
+        eprintln!("KAYA_DIAG winui player {id}: the rebuild's load failed: {}", e.message());
+    }
 }
 
 /// MEDIA FOUNDATION IGNORES AN MP4 EDIT LIST (docs/traps.md): a local file's

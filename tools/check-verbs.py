@@ -3773,6 +3773,24 @@ def winui_media_arms(media_src=None):
     if created is None or not (0 <= created.find("trail_adaptive(") < created.find("attach(")):
         bad.append("fn adaptive_created attaches the source without trail_adaptive — a "
                    "stalled open's trail would carry no download")
+    # THE LOST ADAPTIVE OPEN IS REBUILT ONCE (the maintainer's ruling of
+    # 2026-10-05; docs/traps.md): only on the measured shape, never twice, and
+    # inside the first open's bound. No scene can make Media Foundation lose
+    # the event, so the shape is read here.
+    rebuild = rust_fn(code, "rebuild_stalled")
+    if load is None or "rebuild_stalled(core, id, generation);" not in load:
+        bad.append("fn load's still-opening check never calls rebuild_stalled — the open "
+                   "Media Foundation lost fails at the bound (docs/traps.md)")
+    if rebuild is None or not all(part in rebuild for part in (
+            "if !p.adaptive || p.rebuilt || source != Some(2) || session != Some(1) || !stalled",
+            "Some((asked, done, 0)) if asked > 0 && done == asked", "p.rebuilding = true;")):
+        bad.append("fn rebuild_stalled is not keyed on the measured shape alone (adaptive, not yet "
+                   "rebuilt, MediaSource Opened, session Opening, every download answered and "
+                   "none lost)")
+    if load is None or "let rebuild = std::mem::take(&mut p.rebuilding);" not in load \
+            or "let spent = if rebuild { 2 * OPEN_REPORT_MS } else { OPEN_REPORT_MS };" not in load \
+            or "TIMEOUT_MS - spent" not in load:
+        bad.append("fn load's rebuilt open does not keep the first open's TIMEOUT_MS bound")
     if load is None or "trail.print(generation)" not in load:
         bad.append("fn load's still-opening line does not print the open trail — the "
                    "bundle of a stalled open would not say which download it waited on")
@@ -3850,10 +3868,21 @@ for pattern, repl, label, want in (
      "the adaptive source left to the in-box route", 1),
     (r"(\n +)trail_adaptive\(&adaptive, &trail, generation\);", "",
      "the adaptive downloads not watched", 1),
-    (r"(\n +)p\.trail\.print\(generation\);"
-     r"(?=\n +\}\n +\}\);\n +std::thread::sleep\(std::time::Duration::from_millis\(crate::media)",
+    (r"(\n +)p\.trail\.print\(generation\);(?=\n +rebuild_stalled\(core, id, generation\);)",
      "",
      "the stalled open's trail not printed", 1),
+    (r"(\n +)rebuild_stalled\(core, id, generation\);", "",
+     "the lost adaptive open never rebuilt", 1),
+    (r"(if !p\.adaptive \|\| )p\.rebuilt \|\| ", "",
+     "the lost adaptive open rebuilt more than once", 1),
+    (r"(\|\| source != Some\(2\) \|\| )session != Some\(1\) \|\| ", "",
+     "a rebuild not keyed on the session still Opening", 1),
+    (r"(let stalled = matches!\(downloads, Some\(\(asked, done, )0\)\) if asked > 0 && done == asked\);",
+     "_)) if asked > 0);",
+     "a rebuild over downloads still in flight or lost", 1),
+    (r"(let spent = )if rebuild \{ 2 \* OPEN_REPORT_MS \} else \{ OPEN_REPORT_MS \};",
+     "OPEN_REPORT_MS;",
+     "the rebuild restarting the open's bound", 1),
     (r"(\n +)p\.trail\.print\(generation\);(?=\n +\}\n +\}\);\n +\}\n +std::thread::sleep\("
      r"std::time::Duration::from_millis\(crate::media::TIMEOUT_MS - SEEK_REPORT_MS)", "",
      "the stalled seek's trail not printed", 1),

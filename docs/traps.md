@@ -13524,6 +13524,15 @@ That control establishes a successful separate run, not a repair or a green
 verdict for the failed matrix. The existing OPEN TRAIL, server recorder and
 scene assertion exposed the recurrence; no source fix was inferred.
 
+REBUILT ONCE SINCE 2026-10-05 (the maintainer's amendment to §7c of
+docs/media-plan.md): `rebuild_stalled` reopens an adaptive source on exactly
+that shape at the 5 s still-opening check, once per load, and the rebuilt open
+keeps the first one's 30 s bound. Forced in a copy (the first creation never
+attached, the shape forced true): all three adaptive items of media_delivery_go
+printed `rebuilding the stalled adaptive open once` at 5 s and the leg passed
+in 43 s. Whether a rebuild recovers the real lost-event stall has not been
+seen yet; the line names it when it happens.
+
 ## AVFoundation opens no next item on a host while an asset's load hangs (measured 2026-10-01)
 Against a server that accepts a connection and never answers (the media
 server's never-answering mode at the time), `replaceCurrentItem(with: nil)` and then a new

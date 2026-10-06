@@ -702,6 +702,16 @@ completed, `TIMEOUT_MS` after it was asked FAILS THE PLAYER with the reason
 decides whether to retry, and kaya never rebuilds a player by itself. What was
 chosen, and why:
 
+AMENDED 2026-10-05 (the maintainer): on WinUI alone, the one shape Media
+Foundation was measured losing — an adaptive source whose every download has
+answered, whose MediaSource reads Opened and whose session still reads Opening
+5 s after the hand-over — is rebuilt ONCE by the arm, inside the same 30 s
+bound, and the leg's log says so (crates/kaya/src/winui/media.rs,
+`rebuild_stalled`; tools/check-verbs.py holds the shape, the once and the
+bound). It recurred with the delivery legs already serial (docs/traps.md).
+The app still sees only `loading` then `ready`, or `timeout` at the bound;
+every other stall stays the app's to retry.
+
 - THE REASON is a new entry, `timeout` (7), in the closed vocabulary. None of
   the six fits honestly: the depth's ceiling had called a stall `network` for
   a remote source and `unsupported_container` for a local one, and the WinUI
