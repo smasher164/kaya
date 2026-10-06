@@ -14140,3 +14140,23 @@ upward-crossing gaps (min/median/max). The forced 3% run read `48000 samples
 arrived ... crossings every 2/109/111 samples`: full arrival, the tone's own
 median, and two-sample gaps from the gaps the emulator filled. A compressed
 tone would move the median instead. Cause of the 681 sighting: unproven.
+
+## The linux capture tone read low with the samples arriving at a quarter rate (sighted 2026-10-05)
+
+capture-java-wayland went red on the 19:05 PDT full matrix (1 of 144
+linux capture legs over nine matrices): after the switch to microphone 2,
+expect_capture read `samples 399 Hz` for 15 s where the scene wants 660, and
+the failure sentence added that morning said why it read low: `11264 samples
+arrived in the last 1000 ms at a declared 48000 Hz; the window's upward
+crossings every 37/73/5173 samples`. The tone itself was right (a median gap
+of 73 samples is 660 Hz) but it arrived at under a quarter of real time with
+gaps of 0.1 s, so the one-second window still held microphone 1's 440 Hz.
+The bundle could not say which part of the leg's private PipeWire graph was
+slow (pwsynth, the Dummy-Driver's cycle or the guest's stream), so
+tools/linux/capture-leg.py now samples `pw-top` about once a second while the
+guest runs and prints the last 30 readings with the load: the driver's
+quantum and rate and each node's wait, busy and ERR (xrun) count. Read back on
+a forced red (the scene's 660 changed to 700 in a copy): the Dummy-Driver at
+1024/48000 with microphone 2 and the guest's stream running and ERR 0, and
+the healthy sentence `48128 samples arrived ... every 72/73/73`. Cause of the
+sighting: unproven.

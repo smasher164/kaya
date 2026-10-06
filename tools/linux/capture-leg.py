@@ -32,7 +32,9 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+from collections import deque
 
 WORK = pathlib.Path("/work")
 PWSYNTH = os.environ.get("KAYA_PWSYNTH", "/tmp/pwsynth/pwsynth")
@@ -44,6 +46,7 @@ DEVICES = (
     ("microphone", "kaya-synthetic-microphone-2", "kaya Synthetic Microphone 2", "660"),
 )
 ROUTE = "KAYA_DIAG capture route: "
+GRAPH_KEEP = 30
 # The processes this leg may leave nothing of, by the name /proc gives.
 STACK = ("pipewire", "wireplumber", "pwsynth", "xdg-desktop-portal", "xdg-desktop-por",
          "xdg-permission-store", "xdg-permission-", "dbus-daemon", "python3")
@@ -182,6 +185,9 @@ def main(argv):
     guest_lines = []
     findings = []
     bus_pid = None
+    graph = deque(maxlen=GRAPH_KEEP)
+    graph_stop = threading.Event()
+    sampler = None
 
     def start(name, argv_, environ):
         log = open(home / f"{name}.log", "w", encoding="utf-8")
@@ -240,6 +246,19 @@ def main(argv):
                 findings.append(f"FAILED — a camera portal answered on the direct leg's bus: {portal[1]}")
                 return 1
             say("regime direct: no camera portal on this leg's bus")
+        # THE GRAPH WHILE THE GUEST RAN (docs/traps.md, the linux capture tone
+        # read low): pw-top's per-node cycle, once a second, the last GRAPH_KEEP.
+        def sample_graph():
+            while not graph_stop.is_set():
+                # The first of pw-top's iterations has measured nothing yet.
+                code, said = quiet(["pw-top", "--batch-mode", "--iterations", "2"], stack_env)
+                last = said[said.rfind("S   ID"):] if "S   ID" in said else said
+                load = os.getloadavg()[0]
+                graph.append(f"{time.strftime('%H:%M:%S')} load {load:.1f} (exit {code})\n{last}")
+                graph_stop.wait(0.5)
+
+        sampler = threading.Thread(target=sample_graph, daemon=True)
+        sampler.start()
         guest_proc = subprocess.Popen(guest, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                       text=True, errors="replace")
         for line in guest_proc.stdout:
@@ -252,6 +271,14 @@ def main(argv):
         say(f"{len(routes)} camera route(s) printed, every one checked against the {regime} regime")
         return status
     finally:
+        graph_stop.set()
+        if sampler is not None:
+            sampler.join(15)
+        if graph:
+            print(f"--- pipewire graph while the guest ran (pw-top, last {len(graph)} of one a "
+                  f"second) ---", file=sys.stderr)
+            for snapshot in graph:
+                print(snapshot, file=sys.stderr)
         print("--- pipewire (as the leg ended) ---", file=sys.stderr)
         for argv_ in (["pw-cli", "ls", "Node"], ["pw-cli", "ls", "Link"], ["pw-metadata", "-n", "default", "0"]):
             code, said = quiet(argv_, stack_env)

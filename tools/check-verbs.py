@@ -3788,7 +3788,8 @@ def winui_media_arms(media_src=None):
                    "rebuilt, MediaSource Opened, session Opening, every download answered and "
                    "none lost)")
     if load is None or "let rebuild = std::mem::take(&mut p.rebuilding);" not in load \
-            or "let spent = if rebuild { 2 * OPEN_REPORT_MS } else { OPEN_REPORT_MS };" not in load \
+            or ("let spent = if rebuild { 2 * OPEN_REPORT_MS } else "
+                "{ OPEN_REPORT_MS };") not in load \
             or "TIMEOUT_MS - spent" not in load:
         bad.append("fn load's rebuilt open does not keep the first open's TIMEOUT_MS bound")
     if load is None or "trail.print(generation)" not in load:
@@ -3877,7 +3878,8 @@ for pattern, repl, label, want in (
      "the lost adaptive open rebuilt more than once", 1),
     (r"(\|\| source != Some\(2\) \|\| )session != Some\(1\) \|\| ", "",
      "a rebuild not keyed on the session still Opening", 1),
-    (r"(let stalled = matches!\(downloads, Some\(\(asked, done, )0\)\) if asked > 0 && done == asked\);",
+    (r"(let stalled = matches!\(downloads, Some\(\(asked, done, )0\)\) "
+     r"if asked > 0 && done == asked\);",
      "_)) if asked > 0);",
      "a rebuild over downloads still in flight or lost", 1),
     (r"(let spent = )if rebuild \{ 2 \* OPEN_REPORT_MS \} else \{ OPEN_REPORT_MS \};",
