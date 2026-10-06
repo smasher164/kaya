@@ -14217,3 +14217,15 @@ for byte (run-emulator.py's reuse_built; an mtime test refused fresh apks,
 since gradle leaves an apk untouched when cargo relinks identical bytes).
 Filtered capture runs read the row at 87 s, then 63 s with all three suites
 reused.
+
+## The matrix-wide token's cost (measured 2026-10-06)
+
+On the clean full matrix of 2026-10-06 every lane waited out the other lanes'
+EXCLUSIVE legs: Windows 237 s, iOS 414, Linux 509, mac 267, Android 202. Of
+Windows' 237 s, 86 s went to Android's chat-go and 84 s to its three drags,
+which drive the emulator's own input and never the host's, yet held the token
+because they had flaked under a matrix (the dnd-compose WATCH). Since
+2026-10-06 (the maintainer) those four are lanes/android.py's ALONE: the
+Android pool empties around each and the token is not taken. A filtered
+dnd,chat,media_delivery run read the Android lane holding the token for 0
+legs, all green. Their flake rate under a matrix is the WATCH's to read.

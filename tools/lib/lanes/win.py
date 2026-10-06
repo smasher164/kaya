@@ -316,18 +316,16 @@ ORDER = [
      # fails `timeout`; progressive, so it pools.
      "media_timeout_rust",
     ],
-    # EACH media_delivery AND media_tracks LEG ALONE (RULED 2026-10-01,
-    # docs/media-plan.md §7c): Media Foundation's adaptive pipeline loses an
-    # event when media guests run beside each other on the loaded VM, so an
-    # HLS or DASH open never readies or a paused seek never completes;
-    # measured 1 in about 12 legs six wide, 1 in 48 two wide, 0 in 48 one at
-    # a time (docs/traps.md, the WinUI adaptive pipeline that goes idle).
-    ["media_delivery_rust"],
-    ["media_delivery_python"],
-    ["media_delivery_js"],
-    ["media_delivery_go"],
-    ["media_delivery_csharp"],
-    ["media_delivery_java"],
+    # media_delivery TWO AT A TIME, media_tracks ALONE (RULED 2026-10-01 and
+    # amended 2026-10-06, docs/media-plan.md §7c): Media Foundation's adaptive
+    # pipeline loses an event when media guests run beside each other on the
+    # loaded VM, measured 1 in about 12 legs six wide, 1 in 48 two wide, 0 in
+    # 48 one at a time (docs/traps.md, the WinUI adaptive pipeline that goes
+    # idle). The lost open is rebuilt once since 2026-10-05; the lost paused
+    # seek, media_tracks' face, has no such recovery.
+    ["media_delivery_rust", "media_delivery_python"],
+    ["media_delivery_js", "media_delivery_go"],
+    ["media_delivery_csharp", "media_delivery_java"],
     ["media_tracks_rust"],
     ["media_tracks_python"],
     ["media_tracks_js"],

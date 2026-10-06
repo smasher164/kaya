@@ -1893,6 +1893,11 @@ def queue_leg(name, script, args, tablet=False):
     if (mode == "only") != (name in lane.EXCLUSIVE) and mode in ("only", "skip"):
         return
     _leg_names.append(name)
+    if name in lane.ALONE:
+        for t in [*_leg_threads, *_tablet_threads]:
+            t.join()
+        _leg_worker(name, script, args, tablet)
+        return
     if name in lane.EXCLUSIVE:
         for t in [*_leg_threads, *_tablet_threads]:
             t.join()
@@ -3250,97 +3255,91 @@ def build_suite(suite):
     a Kotlin compile error produced a zero-verdict run)."""
     apk_rel, package, _activity = lane.SUITE_APPS[suite]
     apk = ROOT / apk_rel
-    if reuse_built(suite, apk):
-        if not (apk_icon_verify(apk) and apk_launch_verify(apk)
-                and apk_link_verify(apk, package) and apk_assets_verify(apk)):
-            return False
-        timing(f"build-{suite}")
-        targets = [*SERIALS, TABLET_SERIAL] if suite == "compose" else list(SERIALS)
-        return stage_suite_apk(suite, apk, package, targets)
-    if suite == "compose":
-        jnilibs = ROOT / "android/rusthost/src/main/jniLibs/arm64-v8a"
-        fresh_jnilibs(jnilibs)
-        if run(["cargo", "ndk", "-t", "arm64-v8a", "build", "--locked",
-                "--example", "rusthost"]).returncode != 0:
-            return False
-        shutil.copy2(ROOT / "target/aarch64-linux-android/debug/"
-                            "examples/librusthost.so", jnilibs)
-        if run([str(ROOT / "tools/build-id.py"), "--verify",
-                str(jnilibs / "librusthost.so")]).returncode != 0:
-            return False
-        kaya_write_compose_marker()
-        if not gradle_assemble("rusthost"):
-            return False
-    elif suite == "jvm":
-        jnilibs = ROOT / "android/javahost/src/main/jniLibs/arm64-v8a"
-        fresh_jnilibs(jnilibs)
-        if run(["cargo", "ndk", "-t", "arm64-v8a", "build", "--locked",
-                "--lib"]).returncode != 0:
-            return False
-        shutil.copy2(ROOT / "target/aarch64-linux-android/debug/"
-                            "libkaya.so", jnilibs)
-        if run([str(ROOT / "tools/build-id.py"), "--verify",
-                str(jnilibs / "libkaya.so")]).returncode != 0:
-            return False
-        kaya_write_compose_marker()
-        if not gradle_assemble("javahost"):
-            return False
-    elif suite == "go":
-        jnilibs = ROOT / "android/gohost/src/main/jniLibs/arm64-v8a"
-        fresh_jnilibs(jnilibs)
-        # The Go guest NEEDs libkaya.so by SONAME and the app's linker
-        # resolves it out of this directory.
-        if run(["cargo", "ndk", "-t", "arm64-v8a", "build", "--locked",
-                "--lib"]).returncode != 0:
-            return False
-        shutil.copy2(ROOT / "target/aarch64-linux-android/debug/"
-                            "libkaya.so", jnilibs)
-        if run([str(ROOT / "tools/build-id.py"), "--verify",
-                str(jnilibs / "libkaya.so")]).returncode != 0:
-            return False
-        # NO --verify ON THE GO .so: the build id lives inside libkaya,
-        # and here libkaya is a SHARED library the guest merely names,
-        # so the guest carries no marker. (On iOS the same Go sources DO
-        # carry it — there kaya is a static archive linked in.)
-        if not kaya_go_build("gohost", jnilibs):
-            return False
-        kaya_write_compose_marker()
-        if not gradle_assemble("gohost"):
-            return False
-    elif suite == "python":
-        cpy = os.environ.get("KAYA_CPYTHON_ANDROID_AARCH64", "")
-        if not cpy or not (pathlib.Path(cpy) / "prefix").is_dir():
-            print("run-emulator: KAYA_CPYTHON_ANDROID_AARCH64 is unset "
-                  "or not a", file=sys.stderr)
-            print("  directory — the dev shell exports it (flake.nix's "
-                  "cpythonAndroid);", file=sys.stderr)
-            print("  re-enter nix develop", file=sys.stderr)
-            return False
-        jnilibs = ROOT / "android/pyhost/src/main/jniLibs/arm64-v8a"
-        fresh_jnilibs(jnilibs)
-        if run(["cargo", "ndk", "-t", "arm64-v8a", "build", "--locked",
-                "--lib"]).returncode != 0:
-            return False
-        shutil.copy2(ROOT / "target/aarch64-linux-android/debug/"
-                            "libkaya.so", jnilibs)
-        if run([str(ROOT / "tools/build-id.py"), "--verify",
-                str(jnilibs / "libkaya.so")]).returncode != 0:
-            return False
-        pfx = pathlib.Path(cpy) / "prefix"
-        for so in ("libpython3.15.so", "libcrypto_python.so",
-                   "libssl_python.so", "libsqlite3_python.so"):
-            # rm first: the source is the read-only nix store, so a
-            # prior staging's copy has no write bit and a bare copy
-            # refuses it.
-            (jnilibs / so).unlink(missing_ok=True)
-            shutil.copy2(pfx / "lib" / so, jnilibs / so)
-            (jnilibs / so).chmod(0o644)
-        if not kaya_py_build(jnilibs):
-            return False
-        stage_python_assets()
-        kaya_write_compose_marker()
-        if not gradle_assemble("pyhost"):
-            return False
+    if not reuse_built(suite, apk):
+        if suite == "compose":
+            jnilibs = ROOT / "android/rusthost/src/main/jniLibs/arm64-v8a"
+            fresh_jnilibs(jnilibs)
+            if run(["cargo", "ndk", "-t", "arm64-v8a", "build", "--locked",
+                    "--example", "rusthost"]).returncode != 0:
+                return False
+            shutil.copy2(ROOT / "target/aarch64-linux-android/debug/"
+                                "examples/librusthost.so", jnilibs)
+            if run([str(ROOT / "tools/build-id.py"), "--verify",
+                    str(jnilibs / "librusthost.so")]).returncode != 0:
+                return False
+            kaya_write_compose_marker()
+            if not gradle_assemble("rusthost"):
+                return False
+        elif suite == "jvm":
+            jnilibs = ROOT / "android/javahost/src/main/jniLibs/arm64-v8a"
+            fresh_jnilibs(jnilibs)
+            if run(["cargo", "ndk", "-t", "arm64-v8a", "build", "--locked",
+                    "--lib"]).returncode != 0:
+                return False
+            shutil.copy2(ROOT / "target/aarch64-linux-android/debug/"
+                                "libkaya.so", jnilibs)
+            if run([str(ROOT / "tools/build-id.py"), "--verify",
+                    str(jnilibs / "libkaya.so")]).returncode != 0:
+                return False
+            kaya_write_compose_marker()
+            if not gradle_assemble("javahost"):
+                return False
+        elif suite == "go":
+            jnilibs = ROOT / "android/gohost/src/main/jniLibs/arm64-v8a"
+            fresh_jnilibs(jnilibs)
+            # The Go guest NEEDs libkaya.so by SONAME and the app's linker
+            # resolves it out of this directory.
+            if run(["cargo", "ndk", "-t", "arm64-v8a", "build", "--locked",
+                    "--lib"]).returncode != 0:
+                return False
+            shutil.copy2(ROOT / "target/aarch64-linux-android/debug/"
+                                "libkaya.so", jnilibs)
+            if run([str(ROOT / "tools/build-id.py"), "--verify",
+                    str(jnilibs / "libkaya.so")]).returncode != 0:
+                return False
+            # NO --verify ON THE GO .so: the build id lives inside libkaya,
+            # and here libkaya is a SHARED library the guest merely names,
+            # so the guest carries no marker. (On iOS the same Go sources DO
+            # carry it — there kaya is a static archive linked in.)
+            if not kaya_go_build("gohost", jnilibs):
+                return False
+            kaya_write_compose_marker()
+            if not gradle_assemble("gohost"):
+                return False
+        elif suite == "python":
+            cpy = os.environ.get("KAYA_CPYTHON_ANDROID_AARCH64", "")
+            if not cpy or not (pathlib.Path(cpy) / "prefix").is_dir():
+                print("run-emulator: KAYA_CPYTHON_ANDROID_AARCH64 is unset "
+                      "or not a", file=sys.stderr)
+                print("  directory — the dev shell exports it (flake.nix's "
+                      "cpythonAndroid);", file=sys.stderr)
+                print("  re-enter nix develop", file=sys.stderr)
+                return False
+            jnilibs = ROOT / "android/pyhost/src/main/jniLibs/arm64-v8a"
+            fresh_jnilibs(jnilibs)
+            if run(["cargo", "ndk", "-t", "arm64-v8a", "build", "--locked",
+                    "--lib"]).returncode != 0:
+                return False
+            shutil.copy2(ROOT / "target/aarch64-linux-android/debug/"
+                                "libkaya.so", jnilibs)
+            if run([str(ROOT / "tools/build-id.py"), "--verify",
+                    str(jnilibs / "libkaya.so")]).returncode != 0:
+                return False
+            pfx = pathlib.Path(cpy) / "prefix"
+            for so in ("libpython3.15.so", "libcrypto_python.so",
+                       "libssl_python.so", "libsqlite3_python.so"):
+                # rm first: the source is the read-only nix store, so a
+                # prior staging's copy has no write bit and a bare copy
+                # refuses it.
+                (jnilibs / so).unlink(missing_ok=True)
+                shutil.copy2(pfx / "lib" / so, jnilibs / so)
+                (jnilibs / so).chmod(0o644)
+            if not kaya_py_build(jnilibs):
+                return False
+            stage_python_assets()
+            kaya_write_compose_marker()
+            if not gradle_assemble("pyhost"):
+                return False
     if run([str(ROOT / "tools/build-id.py"), "--verify",
             "--component", "compose", str(apk)]).returncode != 0:
         return False
@@ -3447,7 +3446,8 @@ def run_suite_legs(suite):
     component = f"{package}/{activity}"
     # THE SUITE'S EXCLUSIVE LEGS RUN LAST, together (docs/traps.md, the
     # android pool's per-leg drains): each one empties the pool first.
-    for leg in sorted(selected_legs(suite), key=lambda leg: leg in lane.EXCLUSIVE):
+    for leg in sorted(selected_legs(suite),
+                      key=lambda leg: leg in lane.EXCLUSIVE or leg in lane.ALONE):
         _selected += 1
         flags = lane.FLAGS.get(leg, {})
         scene = lane.scene_of(leg)

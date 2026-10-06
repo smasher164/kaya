@@ -712,6 +712,10 @@ bound). It recurred with the delivery legs already serial (docs/traps.md).
 The app still sees only `loading` then `ready`, or `timeout` at the bound;
 every other stall stays the app's to retry.
 
+AMENDED 2026-10-06 (the maintainer), (a) TESTS: the Windows lane runs the
+media_delivery legs two at a time, since an open lost under that pairing is
+rebuilt; media_tracks stays alone, its lost paused seek having no recovery.
+
 - THE REASON is a new entry, `timeout` (7), in the closed vocabulary. None of
   the six fits honestly: the depth's ceiling had called a stall `network` for
   a remote source and `unsupported_container` for a local one, and the WinUI
