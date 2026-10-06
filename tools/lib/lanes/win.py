@@ -536,52 +536,20 @@ ORDER = [
     [
      "ownundo_rust",
     ],
-    # EACH search LEG ALONE, ranges' reason exactly: its `type` verb puts
-    # REAL KEYSTROKES on the system input queue and foregrounds the guest to
-    # do it, so a pooled neighbour taking the foreground mid-scene would eat
-    # the query (docs/search-plan.md §5).
+    # search AND submit POOL (the maintainer, 2026-10-06; docs/traps.md, the
+    # WinUI keystrokes posted to the input site): `type` and `press return`
+    # post to each guest's own window, so neighbours no longer eat each
+    # other's keys.
     [
-     "search_rust",
+     "search_rust", "search_python", "search_js", "search_go", "search_csharp", "search_java",
     ],
     [
-     "search_python",
+     "submit_rust", "submit_python", "submit_js", "submit_go", "submit_csharp", "submit_java",
     ],
-    [
-     "search_js",
-    ],
-    [
-     "search_go",
-    ],
-    [
-     "search_csharp",
-    ],
-    [
-     "search_java",
-    ],
-    # EACH submit LEG ALONE, search's reason: its `type` and `press return`
-    # are real keystrokes on the system queue (docs/submit-plan.md §5).
-    [
-     "submit_rust",
-    ],
-    [
-     "submit_python",
-    ],
-    [
-     "submit_js",
-    ],
-    [
-     "submit_go",
-    ],
-    [
-     "submit_csharp",
-    ],
-    [
-     "submit_java",
-    ],
-    # EACH numberfield LEG ALONE, submit's reason: `type`, `press return`
-    # and `unfocus` are real keystrokes on the system queue
-    # (docs/number-field-plan.md §5). The German legs are the same guests
-    # under KAYA_LOCALE=de-DE (their launchers).
+    # EACH number field LEG STILL ALONE (docs/traps.md, the WinUI keystrokes
+    # posted to the input site): a pooled neighbour's window taking the
+    # activation moves the box's focus, and its focus loss is a commit door,
+    # measured committing mid-scene in five pooled runs.
     [
      "timecode_rust",
     ],

@@ -10340,6 +10340,14 @@ fn sync_reorder_rows(core: &mut CoreState) {
 // sees the frame border and then a DragLeave.
 
 const ISLAND_CLASS: &str = "Microsoft.UI.Content.DesktopChildSiteBridge";
+const INPUT_SITE_CLASS: &str = "InputSiteWindowClass";
+
+/// One posted keystroke (`post_keys`).
+#[derive(Clone, Copy)]
+enum Key {
+    Char(char),
+    Vk(u8),
+}
 
 /// STGMEDIUM and its release, declared here rather than by enabling
 /// `Win32_Graphics_Gdi`: the union's HBITMAP arm is what gates the real
@@ -20119,6 +20127,79 @@ impl WinUiStage {
         );
     }
 
+    /// IN-PROCESS KEYS (docs/traps.md, the WinUI keystrokes posted to the
+    /// input site): messages posted to this window's own InputSiteWindowClass
+    /// HWND, which XAML routes whether or not the window is in front, so
+    /// pooled legs type at once. A character is its WM_CHAR, a key (Return,
+    /// Tab) its WM_KEYDOWN/WM_KEYUP pair, which XAML's key doors see and the
+    /// loop translates. All posted, so they land in order; no key table is
+    /// touched, since a table written between posts was measured landing on
+    /// the wrong keys. `shortcut` stays on the system queue: the thread's
+    /// keyboard hook sees no posted key.
+    fn post_keys(what: &str, keys: &[Key]) {
+        unsafe extern "system" {
+            fn MapVirtualKeyW(code: u32, map: u32) -> u32;
+        }
+        const WM_KEYDOWN: u32 = 0x0100;
+        const WM_KEYUP: u32 = 0x0101;
+        const WM_CHAR: u32 = 0x0102;
+        unsafe extern "system" {
+            fn GetFocus() -> isize;
+        }
+        // A WINDOW ANOTHER ONE DEACTIVATED HAS NO FOCUS WINDOW on its thread,
+        // and keys posted to the site then land nowhere (measured: a pooled
+        // neighbour's launch read GetFocus 0x0 and typed nothing), so the
+        // site is made the thread's focus window again first.
+        let (top, sites, focus, refocused) = Self::on_ui(|core| {
+            let native: IWindowNative = windows_core::Interface::cast(&core.window)?;
+            let top = native.window_handle()?;
+            let sites = child_windows_of_class(top, INPUT_SITE_CLASS);
+            // SAFETY: this thread's own windows.
+            let focus = unsafe { GetFocus() };
+            let refocused = match sites.first() {
+                Some(&site) if focus != site => {
+                    unsafe { SetFocus(site) };
+                    Some(unsafe { GetFocus() })
+                }
+                _ => None,
+            };
+            Ok((top, sites, focus, refocused))
+        });
+        let Some(&site) = sites.first() else {
+            panic!("kaya: {what}: this window has no {INPUT_SITE_CLASS} child to post keys to");
+        };
+        if let Some(now) = refocused {
+            crate::vtrace::note("post_keys", format_args!(
+                "{what}: the thread's focus window was {focus:#x}, not the site; SetFocus made it {now:#x}"
+            ));
+            assert_eq!(now, site, "kaya: {what}: SetFocus could not make the input site this thread's focus window");
+        }
+        // WHAT THE POSTED KEYS MET (docs/traps.md, the WinUI keystrokes posted
+        // to the input site): a pooled red needs to know whether this window
+        // was in front and whether its thread's focus window was the site.
+        let front = unsafe { GetForegroundWindow() };
+        crate::vtrace::note("post_keys", format_args!(
+            "{what}: posting {} key(s) to site {site:#x}; GetFocus {focus:#x}; foreground {}",
+            keys.len(),
+            if front == top { "is this window".to_owned() } else { format!("{front:#x}, another window") },
+        ));
+        for key in keys {
+            // SAFETY: posts to this process's own input-site window.
+            unsafe {
+                match *key {
+                    Key::Char(ch) => {
+                        PostMessageW(site, WM_CHAR, ch as usize, 1);
+                    }
+                    Key::Vk(vk) => {
+                        let scan = (MapVirtualKeyW(u32::from(vk), 0) as isize) << 16;
+                        PostMessageW(site, WM_KEYDOWN, usize::from(vk), 1 | scan);
+                        PostMessageW(site, WM_KEYUP, usize::from(vk), 1 | scan | (3 << 30));
+                    }
+                }
+            }
+        }
+    }
+
     fn foreground_guest(what: &str) {
         let hwnd = Self::on_ui(|core| {
             let native: IWindowNative = windows_core::Interface::cast(&core.window)?;
@@ -22897,7 +22978,7 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
-    /// Tab on the system input queue, the desktop user's way off a field;
+    /// Tab posted to the input site, the desktop user's way off a field;
     /// the box's LostFocus is its commit door.
     fn unfocus(&self, t: crate::harness::Target) {
         let focused = move || {
@@ -22915,13 +22996,8 @@ impl crate::harness::Stage for WinUiStage {
             Ok(false) => panic!("kaya: unfocus {t:?}: the field does not hold focus — click it first"),
             Err(why) => panic!("kaya: unfocus {t:?}: {why}"),
         }
-        Self::foreground_guest("unfocus");
         const VK_TAB: u8 = 0x09;
-        const KEYEVENTF_KEYUP: u32 = 0x2;
-        unsafe {
-            keybd_event(VK_TAB, 0, 0, 0);
-            keybd_event(VK_TAB, 0, KEYEVENTF_KEYUP, 0);
-        }
+        Self::post_keys("unfocus", &[Key::Vk(VK_TAB)]);
         for _ in 0..400 {
             if focused() == Ok(false) {
                 return;
@@ -22929,8 +23005,8 @@ impl crate::harness::Stage for WinUiStage {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         eprintln!(
-            "kaya: unfocus {t:?}: the field still reads {:?} for focus 2s after Tab went \
-             on the system input queue",
+            "kaya: unfocus {t:?}: the field still reads {:?} for focus 2s after Tab was \
+             posted to the input site",
             focused()
         );
     }
@@ -23062,46 +23138,16 @@ impl crate::harness::Stage for WinUiStage {
         } else {
             None
         };
-        Self::foreground_guest("type");
-        const KEYEVENTF_KEYUP: u32 = 0x2;
-        for ch in text.chars() {
-            // Return is a COMMAND, not a character: no layout maps U+000A to a
-            // key, so VkKeyScanW answers -1 for it and the assert below would
-            // refuse the newline `type` admits (crates/kaya/src/harness.rs
-            // check_typing). VK_RETURN rides the same injection sequence as the
-            // letters, so the control sees a real keystroke.
-            let (vk, shifts) = if ch == '\n' {
-                (0x0d_u8, 0_i16)
-            } else {
-                let scan = unsafe { VkKeyScanW(ch as u16) };
-                assert!(
-                    scan != -1,
-                    "kaya: type {text:?}: the active keyboard layout has no key for {ch:?} \
-                     (parse admits printable ASCII and Return, which every layout can type)"
-                );
-                ((scan & 0xff) as u8, (scan >> 8) & 0x7)
-            };
-            let mut mods: Vec<u8> = Vec::new();
-            if shifts & 1 != 0 {
-                mods.push(0x10); // VK_SHIFT
-            }
-            if shifts & 2 != 0 {
-                mods.push(0x11); // VK_CONTROL
-            }
-            if shifts & 4 != 0 {
-                mods.push(0x12); // VK_MENU
-            }
-            unsafe {
-                for &m in &mods {
-                    keybd_event(m, 0, 0, 0);
-                }
-                keybd_event(vk, 0, 0, 0);
-                keybd_event(vk, 0, KEYEVENTF_KEYUP, 0);
-                for &m in mods.iter().rev() {
-                    keybd_event(m, 0, KEYEVENTF_KEYUP, 0);
-                }
-            }
+        // Return is a COMMAND, not a character: VK_RETURN's key pair, so the
+        // control's key doors see it (crates/kaya/src/harness.rs check_typing).
+        if before.is_none() && number_before.is_none() {
+            crate::vtrace::note("type", format_args!("no editable or number field holds XAML focus"));
         }
+        let keys: Vec<Key> = text
+            .chars()
+            .map(|ch| if ch == '\n' { Key::Vk(0x0d) } else { Key::Char(ch) })
+            .collect();
+        Self::post_keys("type", &keys);
         // Point 4, and "processed" here means MORE THAN THE CONTROL SHOWING
         // IT: TextChanged is raised asynchronously and the action this verb
         // precedes is `menu_activate "Edit>Undo"`, whose routing asks the

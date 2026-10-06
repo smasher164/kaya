@@ -1,0 +1,38 @@
+diff --git a/crates/kaya/Cargo.toml b/crates/kaya/Cargo.toml
+index 772c2de2..a3eddfd9 100644
+--- a/crates/kaya/Cargo.toml
++++ b/crates/kaya/Cargo.toml
+@@ -551,3 +551,8 @@ crate-type = ["cdylib"]
+ [[example]]
+ name = "timecode"
+ path = "../../guests/rust/timecode.rs"
++
++# TEMPORARY: the throwaway keystroke-probe guest (tools/win/keyprobe) — revert.
++[[example]]
++name = "keyprobe"
++path = "../../tools/win/keyprobe/guest.rs"
+diff --git a/crates/kaya/src/winui/mod.rs b/crates/kaya/src/winui/mod.rs
+index 56f6a952..b8c31b58 100644
+--- a/crates/kaya/src/winui/mod.rs
++++ b/crates/kaya/src/winui/mod.rs
+@@ -8,6 +8,10 @@
+     clippy::all
+ )]
+ mod bindings;
++// TEMPORARY probe hook (tools/win/keyprobe/README.md) — revert.
++#[cfg(feature = "harness")]
++#[path = "../../../../tools/win/keyprobe/probe.rs"]
++mod keyprobe;
+ mod capture;
+ mod media;
+ mod reader;
+@@ -19663,6 +19667,9 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
+ 
+     // The first transaction may already be queued; drain now.
+     drain_transactions();
++    // TEMPORARY probe hook (tools/win/keyprobe/README.md) — revert.
++    #[cfg(feature = "harness")]
++    keyprobe::maybe_spawn();
+     Ok(())
+ }
+ 

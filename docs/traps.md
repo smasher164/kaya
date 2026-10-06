@@ -14229,3 +14229,41 @@ because they had flaked under a matrix (the dnd-compose WATCH). Since
 Android pool empties around each and the token is not taken. A filtered
 dnd,chat,media_delivery run read the Android lane holding the token for 0
 legs, all green. Their flake rate under a matrix is the WATCH's to read.
+
+## The WinUI keystrokes posted to the input site (measured 2026-10-06)
+
+The WinUI harness's `type`, `press return` and `unfocus` used to put real keys
+on the system input queue after making the guest the foreground window, so
+every leg that typed ran alone (about 250 s a matrix for search, submit,
+timecode and the number fields). tools/win/keyprobe (two guests, the witness
+holding the foreground, the driver behind it) measured the alternative: keys
+POSTED to the window's own `InputSiteWindowClass` grandchild (the top-level
+and the `DesktopChildSiteBridge` drop them) from a window that is not in front.
+WM_KEYDOWN/WM_KEYUP alone and WM_CHAR alone each put `milk` in a TextBox with
+CanUndo true, one Undo clearing the run and Redo restoring it; KEYDOWN plus
+WM_CHAR doubled every letter (the loop translates a posted KEYDOWN too);
+Return posted as a key pair fired submit_on_enter, Shift+Return with Shift in
+the UI thread's key table put the textarea's newline, the NumberBox committed
+on Return and on a posted Tab, a posted Escape cleared the search field, and
+the foreground witness counted no stray key. A posted Ctrl+Z did NOT reach the
+thread's WH_KEYBOARD hook, so `shortcut` stays on the system queue. Prior art:
+ArkDeck's App.UITests/KeyInput.cs and deblasis/wintty's frame-keybind-live-key
+post the same way.
+
+The first harness version posted every character as its key with Shift written
+into the key table between posts; all six timecode legs typed `0);0);0@;12`
+for `00:00:02:12`, since the table changed before the posted keys were
+processed. Characters are posted as WM_CHAR now, Return and Tab as key pairs,
+and nothing touches the key table. The 39 Windows legs whose scenes type then
+passed one at a time.
+
+POOLED, two more things showed, read off a `post_keys` line each post now
+writes to the verb trace (the thread's focus window, and whether this window
+was in front). A neighbour's launch takes the activation and leaves this
+thread with no focus window (`GetFocus 0x0`), and keys posted then land
+nowhere: post_keys makes the site the focus window again first (SetFocus on
+the UI thread, asserted). And a number field whose window is deactivated
+loses its focus, which is its commit door, so it committed mid-scene
+(`commits: 1, wanted commits: 0`) and dropped typed text in five pooled runs
+while search and submit never failed in any. So search and submit pool, and
+timecode and the number fields stay one at a time.

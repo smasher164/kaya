@@ -3836,6 +3836,50 @@ def winui_media_arms(media_src=None):
     return bad
 
 
+# THE WINUI TYPING VERBS POST TO THEIR OWN INPUT SITE (docs/traps.md, the WinUI
+# keystrokes posted to the input site): type and unfocus put no key on the
+# system queue, which went to the foreground window and kept every typing leg
+# alone; post_keys posts to this window's InputSiteWindowClass child. No scene
+# can see a verb that went back to keybd_event: alone it passes either way.
+def winui_key_clauses(src=None):
+    text = src if src is not None else real(WINUI)
+    bad = []
+    post = rust_fn_body(text, "post_keys")
+    site = "child_windows_of_class(top, INPUT_SITE_CLASS)"
+    if post is None or site not in post \
+            or "PostMessageW(site, WM_KEYDOWN" not in post or "keybd_event" in post:
+        bad.append("winui/mod.rs: post_keys does not post WM_KEYDOWN to this window's own "
+                   "InputSiteWindowClass child")
+    for verb, call in (("type_text", 'Self::post_keys("type", &keys);'),
+                       ("unfocus", 'Self::post_keys("unfocus", &[Key::Vk(VK_TAB)]);')):
+        body = rust_fn_body(text, verb)
+        if body is None or call not in body or "keybd_event" in body \
+                or "foreground_guest" in body:
+            bad.append(f"winui/mod.rs: {verb} does not reach its window through post_keys alone "
+                       f"— a key on the system queue goes to whichever window is in front")
+    return bad
+
+
+winui_key_out = winui_key_clauses()
+if winui_key_out:
+    media_status = 1
+    print("check-verbs: the WinUI typing verbs broke a rule no scene can see:", file=sys.stderr)
+    print("\n".join(winui_key_out), file=sys.stderr)
+for pattern, repl, label in (
+    (r'Self::post_keys\("type", &keys\);', 'Self::foreground_guest("type");',
+     "type back on the system queue"),
+    (r'Self::post_keys\("unfocus", &\[Key::Vk\(VK_TAB\)\]\);',
+     "unsafe { keybd_event(VK_TAB, 0, 0, 0) };", "unfocus back on the system queue"),
+    (r"child_windows_of_class\(top, INPUT_SITE_CLASS\)",
+     "child_windows_of_class(top, ISLAND_CLASS)",
+     "keys posted to the bridge, not the input site"),
+):
+    cut = g.doctor(f"winui keys: {label}", real(WINUI), pattern, repl, want=1)
+    found = winui_key_clauses(cut)
+    print(f"check-verbs: winui-keys negative ({label}): {len(found)} finding(s)")
+    if not found:
+        fail(f"check-verbs SELF-TEST: the WinUI typing clause passed with {label}")
+
 winui_media_out = winui_media_arms()
 if winui_media_out:
     media_status = 1
