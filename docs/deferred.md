@@ -66,6 +66,20 @@ was added and proven with a forced red leg, and the final full-run caption
 leg passed. GUARDS: existing leg deadlines, measured diagnostic snapshots,
 exit/verdict refusals, idle guard and duration ceilings all remain enabled.
 
+UPDATE 2026-10-05 evening, five more full matrices on an idle host, none
+green yet. Fixed or ruled: the iOS lane's serial example builds and
+rust-scoped's serial rustc cases (743ce47e), Android's per-leg pool drains
+(84fd34fb), the Android microphone legs moved to a quiet tail after every
+lane and the sweep (7bf82d5a, ruled), the WinUI adaptive open rebuilt once on
+the lost-event shape (d3d0ba6c, ruled). Instrumented, cause unproven: the
+Android 681 Hz reading (8e19b58e) and the linux capture-java-wayland 399 Hz
+reading at a quarter sample rate (b02e72b5). Left alone by ruling: the x265
+crash, unseen since. The latest matrix (19:05 PDT): every leg but
+capture-java-wayland passed, the quiet tail's three microphone legs green,
+the sweep red on two over-long lines (fixed in b02e72b5), and android 907 net
+against 870 with the sweep 611 against 600. The android row's remaining cost
+and the sweep's are the open duration work.
+
 ## DEFECT — iOS media_session-swiftui: a routed remote pause left the player playing, and the bundle cannot say why (seen once 2026-10-03, under a capture,media_ matrix)
 KEY: media_session-swiftui, session_send pause, routed 2, remote command action=2, expect_now_playing, ios media_session
 
