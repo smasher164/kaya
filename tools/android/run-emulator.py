@@ -66,10 +66,8 @@ def timing(phase):
     _t0 = time.monotonic()
 
 
-# Compile the android target before anything heavy: a missing match arm
-# should fail here, not after the emulator boots.
-if run([str(ROOT / "tools/check-targets.py"), "android"]).returncode != 0:
-    sys.exit(1)
+# NO check-targets HERE (the maintainer, 2026-10-06; docs/traps.md, the
+# lanes' duplicate target checks): each suite's build compiles the target.
 
 SUITE = sys.argv[1] if len(sys.argv) > 1 else "all"
 # An unknown suite name is refused rather than run as zero legs, which

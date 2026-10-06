@@ -107,11 +107,9 @@ def die(msg):
     sys.exit(1)
 
 
-# Compile the windows target before touching the VM.
-if subprocess.run([str(ROOT / "tools/check-targets.py"), "windows"],
-                  check=False).returncode != 0:
-    sys.exit(1)
-timing("check-targets")
+# NO check-targets HERE (the maintainer, 2026-10-06; docs/traps.md, the
+# lanes' duplicate target checks): the build below compiles the target
+# before the VM is touched.
 
 if len(sys.argv) < 2:
     die("usage: deploy-win.py user@host [--provision] [rust|python|go|all]")

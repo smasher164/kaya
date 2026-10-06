@@ -14160,3 +14160,16 @@ a forced red (the scene's 660 changed to 700 in a copy): the Dummy-Driver at
 1024/48000 with microphone 2 and the guest's stream running and ERR 0, and
 the healthy sentence `48128 samples arrived ... every 72/73/73`. Cause of the
 sighting: unproven.
+
+## The lanes' duplicate target checks (measured 2026-10-05, removed 2026-10-06)
+
+The Android and Windows lanes each began with `tools/check-targets.py
+android|windows`, a `cargo check` of their target in both feature
+configurations, before building that same target. After any core edit it cost
+the Android lane 60 s on a quiet host and 90-209 s under a matrix, and the
+Windows lane 87-177 s, all on the lane's own clock; the lane's build compiles
+the harness configuration a moment later, and the gate sweep's check-targets
+covers both configurations of every target in the same matrix. The
+maintainer had them removed on 2026-10-06. A lane run by hand no longer
+checks the configuration it does not build; `tools/gates.py` (or
+`tools/check-targets.py` alone) does.
