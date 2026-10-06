@@ -441,6 +441,21 @@ def census(texts, lanes=None, tools=None):
                            f"a window fullscreen ({takes[0].strip()!r}), which covers the VM's "
                            f"display and presses F11 on the system input queue "
                            f"(docs/fullscreen-plan.md §5)")
+    # 5c. THE ANDROID QUIET TAIL (the maintainer's ruling of 2026-10-05):
+    # every QUIET leg is an EXCLUSIVE leg the lane runs, and the runner's leg
+    # selection reads KAYA_QUIET; tools/check-gates.py holds validate-all's half.
+    android = lanes.get("android")
+    if android is not None and hasattr(android, "QUIET"):
+        for leg in sorted(android.QUIET - android.EXCLUSIVE):
+            out.append(f"tools/lib/lanes/android.py: QUIET leg {leg!r} is not EXCLUSIVE — "
+                       f"run in place by hand, it would share the host with the pool")
+        for leg in sorted(android.QUIET - set(roster("android", android))):
+            out.append(f"tools/lib/lanes/android.py: QUIET leg {leg!r} is no leg the lane runs")
+    selected = py_function(texts["tools/android/run-emulator.py"], "selected_legs")
+    if "lane.QUIET" not in selected or "QUIET_MODE" not in selected:
+        out.append("tools/android/run-emulator.py: selected_legs does not read lane.QUIET "
+                   "under KAYA_QUIET, so the matrix's two Android runs would each run every "
+                   "microphone leg or none (docs/traps.md, the emulator's audio input entry)")
     # 6. THE COORDINATOR HANDS THE DIRECTORY; THE SWEEP YIELDS.
     if 'os.environ["KAYA_EXCLUSIVE_DIR"] = ' not in texts["tools/validate-all.py"]:
         out.append("tools/validate-all.py: never sets KAYA_EXCLUSIVE_DIR — the lanes cannot share "
@@ -678,7 +693,24 @@ _admits_all_mod.write_text(_admits_all, encoding="utf-8")
 watched("a windows lane admitting the phantom second display", REAL,
         "admitted or misnamed the reading", lanes={**MODS, "windows": load_lane(_admits_all_mod)})
 
-gate.negatives_ran(23)
+# 24. THE ANDROID RUNNER STOPS READING KAYA_QUIET.
+_unquiet = gate.doctor("selected_legs' quiet filter cut", REAL["tools/android/run-emulator.py"],
+                       r"\n    if QUIET_MODE:\n        legs = \[leg for leg in legs if "
+                       r"\(leg in lane\.QUIET\) == \(QUIET_MODE == \"only\"\)\]",
+                       "")
+watched("an android runner that ignores KAYA_QUIET",
+        {**REAL, "tools/android/run-emulator.py": _unquiet},
+        "selected_legs does not read lane.QUIET")
+
+# 25. A QUIET LEG THAT IS NOT EXCLUSIVE.
+_loud = Ghost()
+_loud.LEGS = MODS["android"].LEGS
+_loud.EXCLUSIVE = MODS["android"].EXCLUSIVE - {"capture-go"}
+_loud.QUIET = MODS["android"].QUIET
+watched("an android QUIET leg outside EXCLUSIVE", REAL, "QUIET leg 'capture-go' is not EXCLUSIVE",
+        lanes={**MODS, "android": _loud})
+
+gate.negatives_ran(25)
 
 gate.counted("windows legs whose scene posts a notification",
              sorted(MODS["windows"].notification_legs(str(ROOT / "tools/scenes"))), floor=2)

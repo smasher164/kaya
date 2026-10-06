@@ -54,6 +54,13 @@ EXCLUSIVE = {"dnd-compose", "dnd-jvm", "dnd-go", "tasks-compose",
              # §4): no failed read in 8 quiet runs, most runs beside 14 spinning cores.
              "capture-compose", "capture-jvm", "capture-go"}
 
+# THE QUIET TAIL (the maintainer's ruling of 2026-10-05; docs/traps.md, the
+# emulator's audio input entry): the microphone legs run after every other lane
+# and the gate sweep, with nothing else on the host. validate-all runs this
+# lane with KAYA_QUIET=skip and then once more with KAYA_QUIET=only; a lane run
+# by hand runs them in place.
+QUIET = {"capture-compose", "capture-jvm", "capture-go"}
+
 # A device setting a scene runs under, `settings put <namespace> <key>
 # <value>` on every phone in the pool before the leg and deleted after
 # (docs/compliance-plan.md §4; U10 measured `time_12_24 24` reaching the

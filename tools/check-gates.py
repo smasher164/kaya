@@ -170,7 +170,7 @@ PLATFORM_LAUNCHES = [
     'run_lane("linux", ["tools/validate-linux.py"],',
     'run_lane("windows", ["tools/deploy-win.py", HOST, "all"],',
     'run_lane("ios", ["tools/ios/run-sim.py"])',
-    'run_lane("android", ["tools/android/run-emulator.py"])',
+    'run_lane("android", ["tools/android/run-emulator.py"],',
 ]
 GATE_LAUNCH = 'run_lane("gates", ["nice", "-n", "10", "tools/gates.py"])'
 ANDROID_PID = "android_lane_proc = lane_procs[-1]"
@@ -240,6 +240,40 @@ def matrix_parallel_problem(text):
         return ("tools/validate-all.py must invoke gates only for the "
                 "artifact build, the same-tree fingerprint taken after it, "
                 "and the one delayed niced sweep")
+    return None
+
+
+# THE QUIET TAIL (the maintainer's ruling of 2026-10-05; tools/lib/lanes/
+# android.py's QUIET): the parallel Android lane leaves its microphone legs
+# out, and they run alone once every waiter, the sweep's included, is joined.
+ANDROID_SKIP = 'env={"KAYA_QUIET": "skip"})'
+QUIET_LAUNCH = 'run_lane("android-quiet", ["tools/android/run-emulator.py"],'
+QUIET_ENV = 'env={"KAYA_QUIET": "only"})'
+JOIN = ["for waiter in lane_waiters:", "waiter.join()"]
+
+
+def quiet_tail_problem(text):
+    parallel = re.search(r'(?ms)^if MODE == "parallel":\n(.*?)^else:$', text)
+    if parallel is None:
+        return "tools/validate-all.py's parallel matrix block is missing"
+    lines = [line.strip() for line in code_lines(parallel.group(1)) if line.strip()]
+    launch = next((i for i, line in enumerate(lines)
+                   if line.startswith(PLATFORM_LAUNCHES[4])), None)
+    if launch is None or lines[launch + 1:launch + 2] != [ANDROID_SKIP]:
+        return ("tools/validate-all.py must launch the parallel Android lane with "
+                "KAYA_QUIET=skip, or its microphone legs run beside the other lanes "
+                "(docs/traps.md, the emulator's audio input entry)")
+    rest = text[parallel.end():]
+    tail = re.search(r'(?ms)^if MODE == "parallel":\n(.*?)^    for name in lane_names:', rest)
+    if tail is None:
+        return "tools/validate-all.py's collection block is missing"
+    body = [line.strip() for line in code_lines(tail.group(1)) if line.strip()]
+    at = next((i for i, line in enumerate(body) if line.startswith(QUIET_LAUNCH)), None)
+    if (at is None or body[:2] != JOIN or body[at + 1] != QUIET_ENV
+            or body[at + 2:at + 4] != JOIN or QUIET_LAUNCH in "".join(lines)):
+        return ("tools/validate-all.py must run the android-quiet lane with "
+                "KAYA_QUIET=only only after joining every lane and the sweep, and "
+                "join it before the collection")
     return None
 
 
@@ -729,6 +763,27 @@ if not census(on_disk + ["tools/check-invented-by-selftest.sh"],
     fail("self-test N4: a gate script in neither list was not reported — the "
          "census clause is vacuous")
 
+# NQ1 — the quiet tail launched before the lanes are joined.
+doctored, n = re.subn(
+    r'(?ms)^(    for waiter in lane_waiters:\n        waiter\.join\(\)\n)'
+    r'(    # THE QUIET TAIL.*?\n)(    if os\.environ)',
+    "\\2\\3", matrix_text, count=1)
+print(f"check-gates: self-test NQ1 removed the join before the quiet tail, {n} substitution(s)")
+if n != 1:
+    fail("self-test NQ1 did not remove exactly one join — the quiet-tail clause is "
+         "not reading the real collection block")
+elif quiet_tail_problem(doctored) is None:
+    fail("self-test NQ1: a quiet tail launched beside running lanes passed")
+
+# NQ2 — the parallel Android lane runs its microphone legs in place.
+doctored, n = re.subn(r'\n +env=\{"KAYA_QUIET": "skip"\}\)', ")", matrix_text, count=1)
+print(f"check-gates: self-test NQ2 cut the Android lane's KAYA_QUIET=skip, {n} substitution(s)")
+if n != 1:
+    fail("self-test NQ2 did not cut exactly one KAYA_QUIET=skip — the quiet-tail "
+         "clause is not reading the real launch")
+elif quiet_tail_problem(doctored) is None:
+    fail("self-test NQ2: a parallel Android lane with its microphone legs in place passed")
+
 # N5 — every one of the five platform lanes must be queued.
 doctored, n = re.subn(
     r'(?m)^    run_lane\("ios", \["tools/ios/run-sim\.py"\]\)\n', "",
@@ -965,6 +1020,9 @@ if problem is not None:
 for problem in lane_log_problems(matrix_text, report=True):
     fail(problem)
 problem = android_pool_problem(android_text, probe_text)
+if problem is not None:
+    fail(problem)
+problem = quiet_tail_problem(matrix_text)
 if problem is not None:
     fail(problem)
 problem = ios_pool_problem(ios_text, probe_text)

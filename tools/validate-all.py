@@ -101,11 +101,13 @@ def keep_lane_log(name, where=None):
 
 
 EXCLUSIVE_LEGS = {"mac": _mac.EXCLUSIVE, "windows": _win.EXCLUSIVE,
-                  "ios": _ios.EXCLUSIVE, "android": _android.EXCLUSIVE}
+                  "ios": _ios.EXCLUSIVE, "android": _android.EXCLUSIVE,
+                  "android-quiet": _android.QUIET}
 # The four rosters the filter can consult before a launch; linux has none
 # in python and refuses at run time instead (its setup is a cached image).
 ROSTERS = {"mac": lambda: [name for name, _s, _l in _mac.legs()],
-           "windows": _win.legs, "ios": _ios.legs, "android": _android.legs}
+           "windows": _win.legs, "ios": _ios.legs, "android": _android.legs,
+           "android-quiet": lambda: sorted(_android.QUIET)}
 ONLY_LEGS = {}
 
 
@@ -284,7 +286,8 @@ if MODE == "parallel":
     run_lane("windows", ["tools/deploy-win.py", HOST, "all"],
              env={"KAYA_WIN_JOBS": os.environ.get("KAYA_WIN_JOBS", "4")})
     run_lane("ios", ["tools/ios/run-sim.py"])
-    run_lane("android", ["tools/android/run-emulator.py"])
+    run_lane("android", ["tools/android/run-emulator.py"],
+             env={"KAYA_QUIET": "skip"})
     android_lane_proc = lane_procs[-1]
     mac_lane_proc = lane_procs[0]
     android_lane_proc.wait()
@@ -451,6 +454,17 @@ BUDGETS = {
 if MODE == "parallel":
     for waiter in lane_waiters:
         waiter.join()
+    # THE QUIET TAIL (the maintainer's ruling of 2026-10-05; lanes/android.py's
+    # QUIET): the emulator's microphone breaks when the host starves it, so its
+    # legs run once every other lane and the sweep have exited.
+    if os.environ.get("KAYA_EXCLUSIVE", "") == "skip":
+        print("quiet: the android microphone legs are exclusive and this run "
+              "leaves exclusive legs out; not launched", flush=True)
+    else:
+        run_lane("android-quiet", ["tools/android/run-emulator.py"],
+                 env={"KAYA_QUIET": "only"})
+        for waiter in lane_waiters:
+            waiter.join()
     for name in lane_names:
         verdict, secs = lane_done.get(name, ("FAIL", 0))
         log = LANES_DIR / f"{name}.log"

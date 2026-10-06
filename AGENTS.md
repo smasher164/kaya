@@ -2012,6 +2012,12 @@ in docs/deferred.md.
    in series, 654 + 422 = 1082s on the last such matrix; launched at t0
    beside the lanes it slowed every lane by 150-200s for a 116s gain
    (matrix #24), which is why it still waits.
+   THE ANDROID MICROPHONE LEGS RUN LAST (the maintainer, 2026-10-05): the
+   emulator's audio input breaks whenever the host starves it, so the
+   parallel Android lane runs with KAYA_QUIET=skip and the `android-quiet`
+   row runs its QUIET legs alone after every lane and the sweep
+   (docs/traps.md, the emulator's audio input entry; check-gates holds the
+   order, check-exclusive the set).
    `--serial` is for the special cases: single-lane benchmarking,
    debugging under contention, recording mode. The
    lanes remain individually runnable (`tools/validate-linux.py`,

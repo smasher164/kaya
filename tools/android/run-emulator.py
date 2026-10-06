@@ -3325,8 +3325,18 @@ def build_suite(suite):
 _selected = 0
 
 
+# THE QUIET TAIL (lanes/android.py's QUIET): validate-all's own two runs of
+# this lane, one leaving the microphone legs out and one running them alone.
+QUIET_MODE = os.environ.get("KAYA_QUIET", "")
+if QUIET_MODE not in ("", "skip", "only"):
+    die(f"run-emulator: KAYA_QUIET={QUIET_MODE!r} is neither skip nor only")
+
+
 def selected_legs(suite):
-    return only.matches(lane.suite_legs(suite))
+    legs = only.matches(lane.suite_legs(suite))
+    if QUIET_MODE:
+        legs = [leg for leg in legs if (leg in lane.QUIET) == (QUIET_MODE == "only")]
+    return legs
 
 
 # ---------------------------------------- the real preferences domain
@@ -3487,7 +3497,7 @@ if media_queued():
 for _suite in lane.SUITES:
     if SUITE not in (_suite, "all"):
         continue
-    if only.active() and not selected_legs(_suite):
+    if (only.active() or QUIET_MODE) and not selected_legs(_suite):
         continue
     if not build_suite(_suite):
         sys.exit(1)
