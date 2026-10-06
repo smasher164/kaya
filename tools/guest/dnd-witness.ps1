@@ -31,6 +31,9 @@ $Stock = "$Root\dragprobe\src\stock\bin\Release\net10.0-windows\win-arm64\StockO
 $FilesDir = "$Root\dndwitness"
 $StockLog = "$FilesDir\stock.txt"
 $Failures = New-Object System.Collections.ArrayList
+# The window class every drop of this direction must land on: kaya's, when
+# kaya is the destination; the stock reader's class carries a random suffix.
+$DropClass = if ($Direction -eq "in") { "WinUIDesktopWin32WindowClass" } else { "" }
 
 function Say($m) { Write-Host ((Get-Date).ToString("HH:mm:ss.fff") + " WITNESS " + $m) }
 function Fail($m) { [void]$Failures.Add($m); Say "FAIL $m" }
@@ -47,6 +50,13 @@ public class W {
   [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, IntPtr e);
   [DllImport("user32.dll")] public static extern int GetSystemMetrics(int i);
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
+  [StructLayout(LayoutKind.Sequential)] public struct PT { public int X; public int Y; }
+  [StructLayout(LayoutKind.Sequential)] public struct RC { public int L; public int T; public int R; public int B; }
+  [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(PT p);
+  [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint flags);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RC r);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, System.Text.StringBuilder sb, int max);
   public const uint MOVE = 0x0001, ABSOLUTE = 0x8000, LEFTDOWN = 0x0002, LEFTUP = 0x0004;
   public const uint SWP_NOZORDER = 0x0004;
 }
@@ -75,6 +85,40 @@ function MoveTo($x, $y) {
 # drag is a STOCK WIN32 READER in another process, which answers nothing
 # this script can read, so the dwells stay and stay guessed
 # (docs/deferred.md's witness-drag dwell entry).
+# WHAT IS UNDER THE DROP POINT, and where the visible top-level windows sit
+# (docs/traps.md, the Windows foreign-drop witness): a drop OLE answers with
+# effect 0 lands on whatever window is there, and the guest's own console
+# window is a top-level window too.
+function Describe($h) {
+    $c = New-Object System.Text.StringBuilder 256
+    [W]::GetClassName($h, $c, 256) | Out-Null
+    $t = New-Object System.Text.StringBuilder 256
+    [W]::GetWindowText($h, $t, 256) | Out-Null
+    $procId = [uint32]0
+    [W]::GetWindowThreadProcessId($h, [ref]$procId) | Out-Null
+    $r = New-Object W+RC
+    [W]::GetWindowRect($h, [ref]$r) | Out-Null
+    $name = (Get-Process -Id $procId -ErrorAction SilentlyContinue).ProcessName
+    return "hwnd=0x$('{0:x}' -f [int64]$h) pid=$procId proc=$name class='$c' title='$t' rect=$($r.L),$($r.T),$($r.R),$($r.B)"
+}
+
+function UnderPoint($x, $y, $expect) {
+    $p = New-Object W+PT
+    $p.X = $x; $p.Y = $y
+    $h = [W]::WindowFromPoint($p)
+    if ($h -eq [IntPtr]::Zero) { Say "under $x,${y}: no window"; return }
+    $top = [W]::GetAncestor($h, 2)
+    Say "under $x,${y}: $(Describe $top)"
+    if ($expect) {
+        $c = New-Object System.Text.StringBuilder 256
+        [W]::GetClassName($top, $c, 256) | Out-Null
+        if ($c.ToString() -ne $expect) { Fail "the drop point $x,$y is over $(Describe $top), not a $expect window" }
+    }
+    foreach ($cls in @("WinUIDesktopWin32WindowClass", "CASCADIA_HOSTING_WINDOW_CLASS", "ConsoleWindowClass")) {
+        foreach ($w in (WindowsOfClass $cls)) { Say "  visible: $(Describe $w)" }
+    }
+}
+
 function Drag($x1, $y1, $x2, $y2) {
     Say "drag $x1,$y1 -> $x2,$y2"
     MoveTo $x1 $y1
@@ -91,6 +135,7 @@ function Drag($x1, $y1, $x2, $y2) {
     Start-Sleep -Milliseconds 400
     MoveTo ($x2 + 2) ($y2 + 1)
     Start-Sleep -Milliseconds 300
+    UnderPoint ($x2 + 2) ($y2 + 1) $DropClass
     [W]::mouse_event([W]::LEFTUP, 0, 0, 0, [IntPtr]::Zero)
     Start-Sleep -Milliseconds 1500
 }
@@ -217,7 +262,11 @@ $env:KAYA_WIN_SLOT = "0"
 Remove-Item Env:\KAYA_SELFTEST -ErrorAction SilentlyContinue
 if ($Failures.Count -eq 0) {
     Say "starting kaya dnd.exe with no scene"
-    Start-Process -FilePath "$Root\dnd.exe" -WorkingDirectory $Root | Out-Null
+    # IN THIS SCRIPT'S OWN CONSOLE: dnd.exe is a console program, and a new
+    # console is a Windows Terminal window cascaded over kaya's tile, whose
+    # edge sat 14 px from the drop points (docs/traps.md, the Windows
+    # foreign-drop witness).
+    Start-Process -FilePath "$Root\dnd.exe" -WorkingDirectory $Root -NoNewWindow | Out-Null
 }
 $win = KayaWindow 60
 if (-not $win) { Fail "kaya's window never appeared (class WinUIDesktopWin32WindowClass)" }

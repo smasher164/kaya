@@ -14173,3 +14173,33 @@ covers both configurations of every target in the same matrix. The
 maintainer had them removed on 2026-10-06. A lane run by hand no longer
 checks the configuration it does not build; `tools/gates.py` (or
 `tools/check-targets.py` alone) does.
+
+## The sweep's second unit suite (measured 2026-10-06)
+
+Rung 1 ran twice in every matrix: once in validate-all's `gates.py --build`
+before the lanes start, and again in the gate sweep's own build, over the same
+tree. On a quiet host `tools/unit-suite.py` took 82-168 s (`cargo test` alone
+82 s, most of it system time), and the sweep had read 611 and 641 s against its
+600 s ceiling with check-abort's 241-271 s as its longest gate. validate-all now
+keys rung 1's inputs (tools/build-id.py's `unit-suite` set: the core, the two
+interpreters' sources, guests and bindings, plus tools/ and the flake) right
+after its own build ran it, and the sweep skips its run only while that key
+still holds, printing the key either way. A hand-run sweep has no key and
+runs it.
+
+## The Windows foreign-drop witness dropped onto dnd.exe's own console window (measured 2026-10-06)
+
+dndforeign_rust went red once in seven matrices: both foreign drags into kaya
+ended `DoDragDrop returned hr=0x00040100 effect=0` and kaya's labels never
+moved. The bundle's foreground ring showed two Windows Terminal windows titled
+`C:\kaya\dnd.exe` taking the foreground as the leg began, and nothing placed
+them. tools/guest/dnd-witness.ps1 now names the top-level window under every
+drop point and the rects of kaya's and the terminals' windows. Three passing
+runs read kaya at 6,6-562,384 and the console of the dnd.exe the witness had
+started (a console program started with Start-Process gets a console of its
+own, which Windows 11 hosts in a Terminal window) at 96,104-1225,739 for the
+`in` leg and 148,156-1277,791 for the `out` leg: cascaded by 52 px a window,
+ABOVE kaya, its left edge 14 px from the drop points at x 80. One position
+further up the cascade covers them. The witness now starts dnd.exe with
+-NoNewWindow, in its own console, and a drop point over any window but kaya's
+fails the leg naming that window.
