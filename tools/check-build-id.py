@@ -173,9 +173,11 @@ with scratch_dir("check-build-id-") as tmp:
     if "kaya_write_compose_marker" in unmarked:
         fail("self-test failed: the marker-write removal left a call "
              "behind")
+    # Two sites: the build's own verify and the quiet tail's reuse
+    # (run-emulator.py's reuse_built).
     uncomposed = g.doctor("2b-android's compose verify deleted", emulator,
                           r'"--component", "compose"',
-                          '"--frobnicate", "compose"', want=1)
+                          '"--frobnicate", "compose"', want=2)
     if not verifies_compose(emulator):
         fail("self-test failed: the runner's real compose verify is "
              "invisible to the clause")

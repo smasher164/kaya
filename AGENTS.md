@@ -218,10 +218,9 @@ in docs/deferred.md.
    under green lines, and for a COLLAPSE below a floor of 600, which is
    the `harness` feature's wall — without the feature the harness tests
    vanish rather than fail. Four watched negatives over doctored
-   transcripts, the count printed. ONCE A MATRIX since 2026-10-06:
-   validate-all's own --build runs it, keys its inputs (build-id's
-   `unit-suite` set) and hands the key to the sweep, which skips its run
-   only while the key still holds (check-gates holds both halves).
+   transcripts, the count printed. ONCE A MATRIX since 2026-10-06, IN THE
+   SWEEP: validate-all's own --build leaves it out, since the sweep runs it
+   over the same tree before any gate (check-gates holds both halves).
    transcripts, the count printed. It builds libkaya and the SwiftUI
    interpreter FIRST — a
    gate cannot verify an artifact the run has not built yet, and one

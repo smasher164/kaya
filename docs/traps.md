@@ -14180,12 +14180,12 @@ Rung 1 ran twice in every matrix: once in validate-all's `gates.py --build`
 before the lanes start, and again in the gate sweep's own build, over the same
 tree. On a quiet host `tools/unit-suite.py` took 82-168 s (`cargo test` alone
 82 s, most of it system time), and the sweep had read 611 and 641 s against its
-600 s ceiling with check-abort's 241-271 s as its longest gate. validate-all now
-keys rung 1's inputs (tools/build-id.py's `unit-suite` set: the core, the two
-interpreters' sources, guests and bindings, plus tools/ and the flake) right
-after its own build ran it, and the sweep skips its run only while that key
-still holds, printing the key either way. A hand-run sweep has no key and
-runs it.
+600 s ceiling with check-abort's 241-271 s as its longest gate. First the
+sweep skipped its run while a key of rung 1's inputs still matched the one
+taken at the matrix's start (ALL PASS at 2098 s, sweep 436 s); then, since the
+start's copy sat on the whole matrix's critical path and the sweep finished
+about 220 s before the Windows lane, rung 1 moved to the sweep alone:
+`gates.py --build` (validate-all's start, its only caller) leaves it out.
 
 ## The Windows foreign-drop witness dropped onto dnd.exe's own console window (measured 2026-10-06)
 
@@ -14203,3 +14203,17 @@ ABOVE kaya, its left edge 14 px from the drop points at x 80. One position
 further up the cascade covers them. The witness now starts dnd.exe with
 -NoNewWindow, in its own console, and a drop point over any window but kaya's
 fails the leg naming that window.
+
+## The quiet tail's rebuild (measured 2026-10-06)
+
+The first full matrices with the android-quiet row spent 201-204 s on it, of
+which build-compose 101 s and build-jvm 37 s: the tail ran each suite's build
+again, and cargo's lib/example feature swap (the android pool entry above)
+relinked kaya both times. That row runs after every other lane, so all of it
+was matrix wall. In KAYA_QUIET=only the runner now installs the apk the
+matrix's Android lane built when the copied library carries this tree's core
+id, the apk this tree's compose id, and the apk packages that library byte
+for byte (run-emulator.py's reuse_built; an mtime test refused fresh apks,
+since gradle leaves an apk untouched when cargo relinks identical bytes).
+Filtered capture runs read the row at 87 s, then 63 s with all three suites
+reused.

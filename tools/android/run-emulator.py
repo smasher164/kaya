@@ -23,6 +23,7 @@ import re
 import shutil
 import signal
 import subprocess
+import zipfile
 import tempfile
 import threading
 import time
@@ -3202,6 +3203,42 @@ def gradle_assemble(module):
                cwd=ROOT / "android").returncode == 0
 
 
+# THE QUIET TAIL INSTALLS WHAT THE MATRIX'S ANDROID LANE BUILT (docs/traps.md,
+# the quiet tail's rebuild): rebuilding there re-ran the lib/example graph
+# swap for 140 s of the matrix's last minutes. Reused only when the copied
+# library carries this tree's core id, the apk this tree's compose id, and
+# the apk packages that library byte for byte.
+QUIET_LIBS = {
+    "compose": "android/rusthost/src/main/jniLibs/arm64-v8a/librusthost.so",
+    "jvm": "android/javahost/src/main/jniLibs/arm64-v8a/libkaya.so",
+    "go": "android/gohost/src/main/jniLibs/arm64-v8a/libkaya.so",
+}
+
+
+def packaged(apk, lib):
+    """The bytes the apk carries for `lib`, or None."""
+    try:
+        with zipfile.ZipFile(apk) as z:
+            return z.read(f"lib/arm64-v8a/{lib.name}")
+    except (KeyError, OSError, zipfile.BadZipFile):
+        return None
+
+
+def reuse_built(suite, apk):
+    if QUIET_MODE != "only" or suite not in QUIET_LIBS:
+        return False
+    lib = ROOT / QUIET_LIBS[suite]
+    fresh = (apk.is_file() and lib.is_file()
+             and packaged(apk, lib) == lib.read_bytes()
+             and run([str(ROOT / "tools/build-id.py"), "--verify", str(lib)]).returncode == 0
+             and run([str(ROOT / "tools/build-id.py"), "--verify", "--component", "compose",
+                      str(apk)]).returncode == 0)
+    print(f"quiet: {suite} " + ("installs the apk this matrix built" if fresh
+                                else "builds its apk, since none of this tree's stands ready"),
+          flush=True)
+    return fresh
+
+
 def build_suite(suite):
     """The suite's build phase, ending in the artifact proofs in order:
     build-id --verify on the copied .so (the COPY, not the source —
@@ -3213,6 +3250,13 @@ def build_suite(suite):
     a Kotlin compile error produced a zero-verdict run)."""
     apk_rel, package, _activity = lane.SUITE_APPS[suite]
     apk = ROOT / apk_rel
+    if reuse_built(suite, apk):
+        if not (apk_icon_verify(apk) and apk_launch_verify(apk)
+                and apk_link_verify(apk, package) and apk_assets_verify(apk)):
+            return False
+        timing(f"build-{suite}")
+        targets = [*SERIALS, TABLET_SERIAL] if suite == "compose" else list(SERIALS)
+        return stage_suite_apk(suite, apk, package, targets)
     if suite == "compose":
         jnilibs = ROOT / "android/rusthost/src/main/jniLibs/arm64-v8a"
         fresh_jnilibs(jnilibs)

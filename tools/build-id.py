@@ -45,12 +45,6 @@ COMPONENTS = {
 # check-build-id stays absent forever: its whole job is catching a stale
 # artifact, and any cache of that answer is the defect it exists to find.
 GATES = {
-    # NOT A GATE: rung 1 (tools/unit-suite.py), keyed only so validate-all
-    # can tell the sweep the matrix's own start already ran it over these
-    # inputs (tools/gates.py's build). The tests read the interpreters'
-    # sources, the scenes and the assets beside the core.
-    "unit-suite": ["crates", "Cargo.toml", "Cargo.lock", "swift", "android",
-                   "guests", "bindings"],
     "gen-header": ["crates", "Cargo.toml", "Cargo.lock"],
     "gen-bindings": ["crates", "bindings"],
     "gen-guests": ["crates", "bindings", "guests"],

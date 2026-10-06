@@ -277,24 +277,21 @@ def quiet_tail_problem(text):
     return None
 
 
-# RUNG 1 RUNS ONCE A MATRIX (docs/traps.md, the sweep's second unit suite):
-# validate-all keys rung 1's inputs right after its own --build ran it, and
-# the sweep skips its run only while the current key equals that one.
-RUNG1_KEYED = ('rung1 = subprocess.run(["tools/build-id.py", "--gate", "unit-suite"],')
-RUNG1_SET = 'os.environ["KAYA_MATRIX_RUNG1_KEY"] = rung1.stdout.strip()'
-RUNG1_SAME = 'if now.returncode == 0 and now.stdout.strip() == handed:'
-RUNG1_ASKED = 'if what == RUNG1 and (key := rung1_ran_at_matrix_start()):'
+# RUNG 1 RUNS ONCE A MATRIX, IN THE SWEEP (docs/traps.md, the sweep's
+# second unit suite): only validate-all's --build leaves it out, and the
+# sweep's build always runs it.
+RUNG1_SKIP = 'if what == RUNG1 and not rung1:'
+RUNG1_BUILD_ONLY = 'return 0 if build(rung1=False) else 1'
+RUNG1_SWEEP = """    if not build():
+        return 1
+    return 0 if sweep(GATES) else 1"""
 
 
-def rung1_skip_problem(matrix, gates):
-    build = matrix.find('if subprocess.run(["tools/gates.py", "--build"]).returncode != 0:')
-    keyed, sets = matrix.find(RUNG1_KEYED), matrix.find(RUNG1_SET)
-    if not 0 <= build < keyed < sets:
-        return ("tools/validate-all.py must key rung 1's inputs only after its own "
-                "--build ran rung 1, and hand that key to the sweep")
-    if RUNG1_SAME not in gates or RUNG1_ASKED not in gates:
-        return ("tools/gates.py may skip rung 1 only when this matrix's start keyed the "
-                "same inputs (the current unit-suite key equal to the handed one)")
+def rung1_skip_problem(gates):
+    if RUNG1_SKIP not in gates or gates.count("build(rung1=False)") != 1 \
+            or RUNG1_BUILD_ONLY not in gates or RUNG1_SWEEP not in gates:
+        return ("tools/gates.py must leave rung 1 out of validate-all's --build alone and "
+                "run it in every sweep's build")
     return None
 
 
@@ -1047,28 +1044,17 @@ problem = quiet_tail_problem(matrix_text)
 if problem is not None:
     fail(problem)
 gates_text = (root / "tools" / "gates.py").read_text(encoding="utf-8")
-problem = rung1_skip_problem(matrix_text, gates_text)
+problem = rung1_skip_problem(gates_text)
 if problem is not None:
     fail(problem)
-# NR1 — the sweep skipping rung 1 on any handed key.
-doctored = gates_text.replace(RUNG1_SAME, "if now.returncode == 0:")
-print(f"check-gates: self-test NR1 cut rung 1's key comparison, "
+# NR1 — the sweep's own build leaving rung 1 out.
+doctored = gates_text.replace(RUNG1_SWEEP, RUNG1_SWEEP.replace("build()", "build(rung1=False)"))
+print(f"check-gates: self-test NR1 left rung 1 out of the sweep, "
       f"{int(doctored != gates_text)} substitution(s)")
 if doctored == gates_text:
     fail("self-test NR1 applied no substitution — the rung-1 clause is not reading gates.py")
-elif rung1_skip_problem(matrix_text, doctored) is None:
-    fail("self-test NR1: a sweep that skips rung 1 on a stale key passed")
-# NR2 — the key taken before the build that runs rung 1.
-_build = ('    if subprocess.run(["tools/gates.py", "--build"]).returncode != 0:\n'
-          '        sys.exit(1)\n')
-_set = '    os.environ["KAYA_MATRIX_RUNG1_KEY"]'
-doctored = matrix_text.replace(_build, "", 1).replace(_set, _build + _set, 1)
-print(f"check-gates: self-test NR2 moved the --build after the key, "
-      f"{int(doctored != matrix_text)} substitution(s)")
-if doctored == matrix_text:
-    fail("self-test NR2 applied no substitution")
-elif rung1_skip_problem(doctored, gates_text) is None:
-    fail("self-test NR2: a key taken before rung 1 ran passed")
+elif rung1_skip_problem(doctored) is None:
+    fail("self-test NR1: a sweep that never runs rung 1 passed")
 problem = ios_pool_problem(ios_text, probe_text)
 if problem is not None:
     fail(problem)
