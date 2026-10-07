@@ -2357,6 +2357,16 @@ def tap_notification(serial, title, log):
                  "/sdcard/kaya-shade.xml"], stdout=log, stderr=log)
             dump = adb_out(serial, "shell", "cat",
                            "/sdcard/kaya-shade.xml").replace("\r", "")
+            # AN EXPAND THAT DID NOT TAKE (docs/traps.md, the matrix-wide
+            # token's cost): `expand-notifications` answered 0 and four dumps
+            # read the app's own window, so a dump with no SystemUI node asks
+            # for the shade again.
+            if 'package="com.android.systemui"' not in dump:
+                print(f"run-emulator: the shade dump {attempt} on {serial} shows no "
+                      f"SystemUI window; expanding the shade again", file=log)
+                run(["adb", "-s", serial, "shell", "cmd", "statusbar",
+                     "expand-notifications"], stdout=log, stderr=log)
+                continue
             centre = shade_row_centre(dump, title)
             # A COLLAPSED GROUP TAKES THE TAP FOR ITSELF: two of an app's
             # notifications are bundled under its name with a count badge

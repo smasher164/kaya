@@ -14248,6 +14248,15 @@ Android pool empties around each and the token is not taken. A filtered
 dnd,chat,media_delivery run read the Android lane holding the token for 0
 legs, all green. Their flake rate under a matrix is the WATCH's to read.
 
+chat-go WENT BACK the same evening: on its second full matrix without the
+token it failed `notification_activate 7002: no activation reached this
+process in 20000ms`. The runner's first shade tap spent 13.7 s on four dumps
+that all read the app's own window, though `cmd statusbar expand-notifications`
+had answered 0; the second tap hit Sam's row and no activation followed; the
+third found no row. tap_notification now asks for the shade again when a dump
+carries no SystemUI node, and chat-go holds the token again. The drags stay
+ALONE.
+
 ## The WinUI keystrokes posted to the input site (measured 2026-10-06)
 
 The WinUI harness's `type`, `press return` and `unfocus` used to put real keys

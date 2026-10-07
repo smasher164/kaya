@@ -42,7 +42,7 @@ SUITES = ("compose", "jvm", "go", "python")
 # notify-compose and chat-go join them for the same reason one step further
 # out: their activation is a REAL tap on SystemUI's notification shade, driven
 # from the host (docs/tasks-s3-plan.md N5).
-EXCLUSIVE = {"tasks-compose", "notify-compose",
+EXCLUSIVE = {"tasks-compose", "notify-compose", "chat-go",
              # The device's own 24-hour setting is every process's
              # (SCENE_SETTINGS), so nothing else runs under it.
              "clock24-compose",
@@ -54,11 +54,14 @@ EXCLUSIVE = {"tasks-compose", "notify-compose",
              "capture-compose", "capture-jvm", "capture-go"}
 
 # ALONE IN THIS LANE, NOT ON THE HOST (the maintainer, 2026-10-06; docs/traps.md,
-# the matrix-wide token's cost): the drags and chat-go drive the emulator's own
-# input, never the host's, and held the matrix-wide token for 170 s a matrix
-# that every other lane waited out. The pool empties around each; the token is
+# the matrix-wide token's cost): the drags drive the emulator's own input, never
+# the host's, and held the matrix-wide token for 84 s a matrix that every other
+# lane waited out. The pool empties around each; the token is
 # not taken. Their sightings under a matrix are the dnd-compose WATCH's.
-ALONE = {"dnd-compose", "dnd-jvm", "dnd-go", "chat-go"}
+# chat-go went back to EXCLUSIVE after its first matrix without the token:
+# its shade tap ran out of the 20 s activation window (docs/traps.md, the
+# matrix-wide token's cost).
+ALONE = {"dnd-compose", "dnd-jvm", "dnd-go"}
 
 # THE QUIET TAIL (the maintainer's ruling of 2026-10-05; docs/traps.md, the
 # emulator's audio input entry): the microphone legs run after every other lane
