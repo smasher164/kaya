@@ -6890,50 +6890,77 @@ impl StepWatchdog {
     }
 }
 
-/// EVERY THREAD OF THIS PROCESS at the ceiling, through eu-stack, into the
-/// leg's log: the verdict cannot tell a wedged UI thread from a slow one,
-/// and the stacks can (docs/traps.md, the wedged media_feed leg). The
-/// process names any tracer allowed first, since the lane kernel's Yama
-/// scope lets a child trace its parent only when asked.
+/// EVERY THREAD OF THIS PROCESS at the ceiling, and the load the leg ran
+/// under, into the leg's log (docs/traps.md, the wedged media_feed leg). The
+/// process names any tracer allowed first, for Yama's scope.
 #[cfg(target_os = "linux")]
 fn wedge_stacks() {
     // SAFETY: prctl with integer arguments only.
     unsafe { libc::prctl(libc::PR_SET_PTRACER, libc::PR_SET_PTRACER_ANY, 0, 0, 0) };
+    let load = std::fs::read_to_string("/proc/loadavg").unwrap_or_else(|e| format!("unreadable: {e}\n"));
+    let pressure =
+        std::fs::read_to_string("/proc/pressure/cpu").unwrap_or_else(|e| format!("unreadable: {e}\n"));
+    eprint!("KAYA_HARNESS: loadavg at the ceiling: {load}KAYA_HARNESS: cpu pressure at the ceiling:\n{pressure}");
+    eprintln!(
+        "{}",
+        ceiling_capture("processes at the ceiling", "ps", &["-eo", "pid,stat,pcpu,etimes,nlwp,comm", "--sort=-pcpu"])
+    );
     let pid = std::process::id().to_string();
-    let child = std::process::Command::new("eu-stack")
-        .args(["-m", "-p", &pid])
+    eprintln!("{}", ceiling_capture("thread stacks at the ceiling", "eu-stack", &["-m", "-p", &pid]));
+}
+
+/// One diagnostic command at the ceiling, its pipes drained WHILE it runs
+/// and bounded at 10 s (docs/traps.md, the wedged media_feed leg: a pipe
+/// read only after exit).
+#[cfg(all(unix, any(target_os = "linux", test)))]
+fn ceiling_capture(what: &str, program: &str, args: &[&str]) -> String {
+    use std::io::Read;
+    let child = std::process::Command::new(program)
+        .args(args)
+        .env_remove("DEBUGINFOD_URLS")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn();
     let mut child = match child {
         Ok(c) => c,
-        Err(e) => {
-            eprintln!("KAYA_HARNESS: no thread stacks at the ceiling: eu-stack did not start: {e}");
-            return;
-        }
+        Err(e) => return format!("KAYA_HARNESS: no {what}: {program} did not start: {e}"),
     };
-    let until = Instant::now() + Duration::from_secs(10);
-    while Instant::now() < until {
-        if let Ok(Some(_)) = child.try_wait() {
+    fn drain<R: Read + Send + 'static>(pipe: Option<R>) -> std::thread::JoinHandle<Vec<u8>> {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            if let Some(mut pipe) = pipe {
+                let _ = pipe.read_to_end(&mut bytes);
+            }
+            bytes
+        })
+    }
+    let out = drain(child.stdout.take());
+    let err = drain(child.stderr.take());
+    let started = Instant::now();
+    let mut status = None;
+    while started.elapsed() < Duration::from_secs(10) {
+        if let Ok(Some(s)) = child.try_wait() {
+            status = Some(s);
             break;
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    if matches!(child.try_wait(), Ok(None)) {
-        let _ = child.kill();
-        eprintln!("KAYA_HARNESS: no thread stacks at the ceiling: eu-stack ran past 10 s and was killed");
-        return;
-    }
-    match child.wait_with_output() {
-        Ok(out) => eprintln!(
-            "KAYA_HARNESS: thread stacks at the ceiling (eu-stack, exit {}):\n{}{}",
-            out.status,
-            String::from_utf8_lossy(&out.stdout),
-            String::from_utf8_lossy(&out.stderr)
-        ),
-        Err(e) => eprintln!("KAYA_HARNESS: no thread stacks at the ceiling: eu-stack's output: {e}"),
-    }
+    let ended = match status {
+        Some(s) => format!("{program}, exit {s}, {} ms", started.elapsed().as_millis()),
+        None => {
+            let _ = child.kill();
+            let _ = child.wait();
+            format!("{program} ran past 10 s and was killed; what it wrote before that follows")
+        }
+    };
+    let out = out.join().unwrap_or_default();
+    let err = err.join().unwrap_or_default();
+    format!(
+        "KAYA_HARNESS: {what} ({ended}):\n{}{}",
+        String::from_utf8_lossy(&out),
+        String::from_utf8_lossy(&err)
+    )
 }
 
 /// The sentence a wedged step ends its run with. It prints only what it
@@ -7264,6 +7291,18 @@ pub fn resolve(index: isize, len: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
+    /// A ceiling command that writes more than a pipe holds still exits
+    /// and is read whole (docs/traps.md, the wedged media_feed leg).
+    #[cfg(unix)]
+    #[test]
+    fn ceiling_capture_drains_a_large_output() {
+        let started = Instant::now();
+        let text = ceiling_capture("bytes", "head", &["-c", "1000000", "/dev/zero"]);
+        assert!(started.elapsed() < Duration::from_secs(5), "{}", &text[..text.len().min(200)]);
+        assert!(text.contains("head, exit"), "{}", &text[..text.len().min(200)]);
+        assert!(text.len() >= 1_000_000, "read {} bytes", text.len());
+    }
+
     use super::*;
     use std::sync::Mutex;
     use std::sync::mpsc::Sender;

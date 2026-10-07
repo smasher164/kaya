@@ -123,6 +123,15 @@ notsdemux legs) and one formatar-java-wayland start that printed nothing
 for 180 s and passed four times alone. The floor question is not settled
 here: v4_14 stays.
 
+## ~~GAP — media_feed-ocaml never mounts its window on the forky image (docs/traps.md; 2026-10-07)~~ FIXED 2026-10-07 in kaya: gtk4paintablesink 0.15's NULL->READY waits for the main thread while playsink holds its lock on a streaming thread and the main thread's mute set waits for that lock; build_pipe now brings the sink to READY on the main thread (check-verbs' GTK sink READY clause), 0 of 3279 stressed runs wedged against 56 of 1941 before. The bundles had said only "eu-stack ran past 10 s": the harness read eu-stack's pipes after exit, now drained while it runs (check-flightrec's linux ceiling stacks clause).
+KEY: media_feed, scene-ready wait, gtk4paintablesink, invoke_on_main_thread, playsink, build_pipe, set_player_prop, mute, eu-stack, wedge_stacks, ceiling_capture
+
+media_feed-ocaml-wayland (full linux lane) and media_feed-ocaml-x11 (full
+matrix) each ended at the 60 s scene-ready ceiling with no verb record and
+no thread stacks. Both halves are in docs/traps.md: the wedged media_feed
+leg entry (the pipe the stacks were lost in) and the gtk4paintablesink entry
+after it (the deadlock).
+
 ## ~~GAP — stopping an HLS playbin3 aborts in libsoup on the forky image (docs/traps.md; 2026-10-07)~~ FIXED 2026-10-07 in kaya: the cause is GStreamer 1.28.7's adaptivedemux2 iterating its download context on the thread that stops the pipeline (gstreamer#5296, fixed upstream for 1.28.8, not yet released), and crates/kaya/src/gtk/soup_drain.rs makes that context the thread's default inside kaya's own stops; check-verbs' GTK download drain clause holds it, and notsdemux and media_tracks are green on forky.
 KEY: GStreamer 1.28, libsoup 3.6.6, soup_thread_default_context, message_completed, adaptivedemux2, hlsdemux2, notsdemux, media_tracks, set_playbin_state, gstreamer#947, gstreamer#5296, downloadhelper_stop, soup_drain
 

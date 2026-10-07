@@ -314,6 +314,55 @@ def display_refusal(mod):
     return out
 
 
+def shade_door(runner, tools):
+    out = []
+    rel = "tools/android/run-emulator.py"
+    door = py_function(runner, "open_shade")
+    expands = {name: text.count('"expand-notifications"') for name, text in tools.items()
+               if name not in (rel, "tools/check-exclusive.py")}
+    expands[rel] = runner.count('"expand-notifications"')
+    stray = {name: n for name, n in expands.items() if n}
+    if stray != {rel: 1} or door.count('"expand-notifications"') != 1:
+        out.append(f"{rel}: expand-notifications is sent outside open_shade ({stray}) — an expand "
+                   f"that lands before the last collapse is CLOSED opens the shade without focus "
+                   f"and uiautomator dumps the app")
+    at = door.find('"expand-notifications"')
+    gone = door.find('wait_shade(serial, "gone", SHADE_GONE_S)')
+    if not (0 <= door.find('"statusbar", "collapse"') < gone < at):
+        out.append(f"{rel}: open_shade does not collapse and wait for the shade's window to be "
+                   f"gone before it expands")
+    if door.find('wait_shade(serial, "open",') < at:
+        out.append(f"{rel}: open_shade does not wait for the shade's window to be open and "
+                   f"focusable after it expands")
+    for hand in ("tap_notification", "reply_notification"):
+        if "open_shade(serial, log)" not in py_function(runner, hand):
+            out.append(f"{rel}: {hand} does not open the shade through open_shade")
+    scope = {"re": re}
+    try:
+        exec(py_def(runner, "shade_state") + "\n" + py_def(runner, "SHADE_READINGS"), scope)
+        misread = {want: scope["shade_state"](text)
+                   for want, text in scope["SHADE_READINGS"].items()
+                   if scope["shade_state"](text) != want}
+        wanted = set(scope["SHADE_READINGS"])
+    except (KeyError, SyntaxError, NameError) as why:
+        misread, wanted = {"exec": repr(why)}, set()
+    if misread or wanted != {"gone", "open", "unfocusable", "unreadable"}:
+        out.append(f"{rel}: shade_state misread its measured readings {misread} "
+                   f"(readings {sorted(wanted)})")
+    return out
+
+
+def py_def(text, name):
+    """A top-level def or assignment's exact source, by ast."""
+    import ast
+    for node in ast.parse(text).body:
+        names = ([node.name] if isinstance(node, ast.FunctionDef)
+                 else [t.id for t in getattr(node, "targets", []) if isinstance(t, ast.Name)])
+        if name in names:
+            return ast.get_source_segment(text, node)
+    return ""
+
+
 def census(texts, lanes=None, tools=None):
     out = []
     lanes = lanes or {}
@@ -486,6 +535,10 @@ def census(texts, lanes=None, tools=None):
                                      or "DisplaySwitch.exe /internal" not in got):
                 out.append(f"tools/lib/lanes/win.py: screens_refusal admitted or misnamed the "
                            f"reading {reading.strip()!r} ({got!r})")
+    # 6c. THE ANDROID SHADE OPENS THROUGH ONE DOOR (docs/traps.md, the shade
+    # an expand reopens without focus).
+    out += shade_door(texts["tools/android/run-emulator.py"],
+                      TOOLS if tools is None else tools)
     # 7. THE MAC FUNNEL WAITS FOR AN IDLE HOST.
     mac_mod = lanes.get("mac")
     if mac_mod is not None:
@@ -710,7 +763,43 @@ _loud.QUIET = MODS["android"].QUIET
 watched("an android QUIET leg outside EXCLUSIVE", REAL, "QUIET leg 'capture-go' is not EXCLUSIVE",
         lanes={**MODS, "android": _loud})
 
-gate.negatives_ran(25)
+# 26-30. THE ANDROID SHADE'S DOOR.
+_runner = REAL["tools/android/run-emulator.py"]
+_bare = gate.doctor("an expand back in tap_notification", _runner,
+                    r"    try:\n        opened, said = open_shade\(serial, log\)\n"
+                    r"        if not opened:\n            return f\"the shade never opened with "
+                    r"focus \(\{said\}\)\"\n        for attempt in range\(1, 5\):",
+                    '    run(["adb", "-s", serial, "shell", "cmd", "statusbar",\n'
+                    '         "expand-notifications"], stdout=log, stderr=log)\n'
+                    '    try:\n        for attempt in range(1, 5):')
+watched("a shade tap that expands on its own", {**REAL, "tools/android/run-emulator.py": _bare},
+        "expand-notifications is sent outside open_shade",
+        tools={**TOOLS, "tools/android/run-emulator.py": _bare})
+_nogone = gate.doctor("the gone wait cut", _runner,
+                      r'before, ms, seen = wait_shade\(serial, "gone", SHADE_GONE_S\)',
+                      'before, ms, seen = "gone", 0, ["skipped"]')
+watched("a door that expands into an unfinished collapse",
+        {**REAL, "tools/android/run-emulator.py": _nogone},
+        "wait for the shade's window to be gone")
+_noopen = gate.doctor("the focus wait cut", _runner,
+                      r'state, ms, seen = wait_shade\(serial, "open",\n\s+SHADE_OPEN_S if '
+                      r'before == "gone" else SHADE_STALL_S\)',
+                      'state, ms, seen = "open", 0, ["assumed"]')
+watched("a door that dumps before the shade has focus",
+        {**REAL, "tools/android/run-emulator.py": _noopen}, "open and focusable after it expands")
+_blind = gate.doctor("shade_state blind to NOT_FOCUSABLE", _runner,
+                     r'return "unfocusable" if "NOT_FOCUSABLE" in flags\.group\(1\)\.split\(\) '
+                     r'else "open"', 'return "open"')
+watched("a shade reader that calls the unfocusable shade open",
+        {**REAL, "tools/android/run-emulator.py": _blind}, "shade_state misread")
+_reply = gate.doctor("the reply's door cut", _runner,
+                     r'(def reply_notification[\s\S]*?)opened, said = open_shade\(serial, log\)',
+                     r'\1opened, said = True, "assumed"')
+watched("a reply that opens the shade without the door",
+        {**REAL, "tools/android/run-emulator.py": _reply},
+        "reply_notification does not open the shade through open_shade")
+
+gate.negatives_ran(30)
 
 gate.counted("windows legs whose scene posts a notification",
              sorted(MODS["windows"].notification_legs(str(ROOT / "tools/scenes"))), floor=2)

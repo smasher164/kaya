@@ -58,9 +58,9 @@ EXCLUSIVE = {"tasks-compose", "notify-compose", "chat-go",
 # the host's, and held the matrix-wide token for 84 s a matrix that every other
 # lane waited out. The pool empties around each; the token is
 # not taken. Their sightings under a matrix are the dnd-compose WATCH's.
-# chat-go went back to EXCLUSIVE after its first matrix without the token:
-# its shade tap ran out of the 20 s activation window (docs/traps.md, the
-# matrix-wide token's cost).
+# chat-go went back to EXCLUSIVE after its first matrix without the token;
+# the cause was the shade's focus, not the token (docs/traps.md, the shade an
+# expand reopens without focus).
 ALONE = {"dnd-compose", "dnd-jvm", "dnd-go"}
 
 # THE QUIET TAIL (the maintainer's ruling of 2026-10-05; docs/traps.md, the

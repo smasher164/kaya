@@ -1792,6 +1792,15 @@ def run_apk_on(serial, name, apk, component, script, extras,
         sidecar.with_suffix(".anr-history").write_text(
             flightrec_lane.android_anr_history(package, anrs.stdout, anrs.returncode),
             encoding="utf-8")
+        shade = subprocess.run(
+            ["timeout", "20", "adb", "-s", serial, "shell", "dumpsys", "activity",
+             "service", "com.android.systemui/.SystemUIService", "ShadeLog",
+             "ShadeWindowLog", "NotifRemoteInputLog"],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding="utf-8", errors="replace", check=False)
+        sidecar.with_suffix(".shade-history").write_text(
+            flightrec_lane.android_shade_history(shade.stdout, shade.returncode),
+            encoding="utf-8")
         # THE VERB TRACE, out of the app's private files dir through
         # run-as (the debug APKs are debuggable).
         pulled = subprocess.run(
@@ -2366,37 +2375,134 @@ def shade_row_centre(dump, title):
     return None
 
 
+# THE SHADE'S OWN WINDOW, read before every dump (docs/traps.md, the shade
+# an expand reopens without focus).
+SHADE_GONE_S = 6.0
+SHADE_OPEN_S = 2.5
+SHADE_SETTLE_S = 1.0
+SHADE_STALL_S = 1.2
+SHADE_OPEN_ROUNDS = 3
+
+
+def shade_state(text):
+    """`dumpsys window NotificationShade` read as "gone", "open" (visible
+    and focusable, so uiautomator's active window), "unfocusable" (visible
+    and NOT_FOCUSABLE) or "unreadable"."""
+    head = re.search(r"Window\{\S+ u\d+ NotificationShade\}", text)
+    visible = re.search(r"\bisVisible=(true|false)\b", text)
+    flags = re.search(r"^\s*fl=(.*)$", text, re.M)
+    if not (head and visible and flags):
+        return "unreadable"
+    if visible.group(1) == "false":
+        return "gone"
+    return "unfocusable" if "NOT_FOCUSABLE" in flags.group(1).split() else "open"
+
+
+SHADE_READINGS = {
+    "gone": ("  Window #0 Window{ff0fb87 u0 NotificationShade}:\n"
+             "      fl=NOT_FOCUSABLE TOUCHABLE_WHEN_WAKING WATCH_OUTSIDE_TOUCH SPLIT_TOUCH\n"
+             "    mViewVisibility=0x4 mHaveFrame=true mObscured=false\n"
+             "    isVisible=false\n"),
+    "open": ("  Window #0 Window{ff0fb87 u0 NotificationShade}:\n"
+             "      fl=TOUCHABLE_WHEN_WAKING ALT_FOCUSABLE_IM WATCH_OUTSIDE_TOUCH SPLIT_TOUCH\n"
+             "    mViewVisibility=0x0 mHaveFrame=true mObscured=false\n"
+             "    isVisible=true\n"),
+    "unfocusable": ("  Window #0 Window{ff0fb87 u0 NotificationShade}:\n"
+                    "      fl=NOT_FOCUSABLE TOUCHABLE_WHEN_WAKING WATCH_OUTSIDE_TOUCH\n"
+                    "    mViewVisibility=0x0 mHaveFrame=true mObscured=false\n"
+                    "    isVisible=true\n"),
+    "unreadable": "",
+}
+
+
+def shade_state_selftest():
+    misread = {want: shade_state(text) for want, text in SHADE_READINGS.items()
+               if shade_state(text) != want}
+    if misread:
+        die(f"run-emulator: SELF-TEST FAIL — shade_state misread {misread} "
+            f"(wanted the keys of SHADE_READINGS)")
+
+
+shade_state_selftest()
+
+
+def wait_shade(serial, want, budget):
+    """Poll the shade's window until its state is `want` or `budget`
+    seconds pass: the last state, the time taken and every distinct
+    state seen, in order."""
+    began, seen = time.monotonic(), []
+    while True:
+        state = shade_state(out_of(["timeout", "10", "adb", "-s", serial, "shell",
+                                    "dumpsys", "window", "NotificationShade"]))
+        if not seen or seen[-1] != state:
+            seen.append(state)
+        spent = time.monotonic() - began
+        if state == want or spent >= budget:
+            return state, int(spent * 1000), seen
+        time.sleep(0.1)
+
+
+def open_shade(serial, log):
+    """THE ONE DOOR TO SYSTEMUI'S SHADE: expand and wait for the window to
+    be open AND focusable, since `uiautomator dump` reads the focused
+    window; a shade that stays unfocusable is collapsed until its window
+    is gone and expanded again. A heads-up banner is the same window,
+    visible and unfocusable, and expands in place. Returns (opened, what
+    each round read)."""
+    rounds, state, before = [], "unreadable", "gone"
+    for attempt in range(1, SHADE_OPEN_ROUNDS + 1):
+        if attempt == 1:
+            before, ms, seen = wait_shade(serial, "gone", SHADE_SETTLE_S)
+            if seen != ["gone"]:
+                rounds.append(f"round 1 settling: {'->'.join(seen)} in {ms}ms")
+        else:
+            adb(serial, "shell", "cmd", "statusbar", "collapse", stdout=log, stderr=log)
+            before, ms, seen = wait_shade(serial, "gone", SHADE_GONE_S)
+            rounds.append(f"round {attempt} collapsed: {'->'.join(seen)} in {ms}ms")
+        expanded = run(["adb", "-s", serial, "shell", "cmd", "statusbar",
+                        "expand-notifications"], stdout=log, stderr=log)
+        if expanded.returncode != 0:
+            rounds.append(f"round {attempt}: expand-notifications exited {expanded.returncode}")
+            continue
+        state, ms, seen = wait_shade(serial, "open",
+                                     SHADE_OPEN_S if before == "gone" else SHADE_STALL_S)
+        rounds.append(f"round {attempt} expanded: {'->'.join(seen)} in {ms}ms")
+        if state == "open":
+            break
+    said = "; ".join(rounds)
+    print(f"run-emulator: the shade on {serial}: {said}", file=log)
+    return state == "open", said
+
+
 def tap_notification(serial, title, log):
     """THE `notification_activate` VERB'S ONE HAND (docs/tasks-s3-plan.md
-    N5): expand the shade, find the row by its title, tap it, collapse.
+    N5): open the shade, find the row by its title, tap it, collapse.
     An app may not open SystemUI's shade or read its window, so this is
     the drag verb's shape one feature over — the app prints what it
     wants and the host drives the device.
 
     Returns the clause the injection line prints. The shade is collapsed
     on every path: left open it covers the next leg's first frame."""
-    expanded = run(["adb", "-s", serial, "shell", "cmd", "statusbar",
-                    "expand-notifications"], stdout=log, stderr=log)
-    if expanded.returncode != 0:
-        return "the shade refused to expand"
     try:
-        # The dump lands on the device and is read back: `uiautomator
-        # dump /dev/tty` interleaves with the tool's own chatter.
+        opened, said = open_shade(serial, log)
+        if not opened:
+            return f"the shade never opened with focus ({said})"
         for attempt in range(1, 5):
-            time.sleep(0.5 if attempt == 1 else 1.5)
+            time.sleep(0.3)
+            # The dump lands on the device and is read back: `uiautomator
+            # dump /dev/tty` interleaves with the tool's own chatter.
             run(["adb", "-s", serial, "shell", "uiautomator", "dump",
                  "/sdcard/kaya-shade.xml"], stdout=log, stderr=log)
             dump = adb_out(serial, "shell", "cat",
                            "/sdcard/kaya-shade.xml").replace("\r", "")
-            # AN EXPAND THAT DID NOT TAKE (docs/traps.md, the matrix-wide
-            # token's cost): `expand-notifications` answered 0 and four dumps
-            # read the app's own window, so a dump with no SystemUI node asks
-            # for the shade again.
             if 'package="com.android.systemui"' not in dump:
-                print(f"run-emulator: the shade dump {attempt} on {serial} shows no "
-                      f"SystemUI window; expanding the shade again", file=log)
-                run(["adb", "-s", serial, "shell", "cmd", "statusbar",
-                     "expand-notifications"], stdout=log, stderr=log)
+                packages = sorted(set(re.findall(r'package="([^"]+)"', dump)))
+                state, _, _ = wait_shade(serial, "open", 0)
+                print(f"run-emulator: the shade dump {attempt} on {serial} read {packages} "
+                      f"with the shade's window {state}; opening it again", file=log)
+                opened, said = open_shade(serial, log)
+                if not opened:
+                    return f"the shade never opened with focus again ({said})"
                 continue
             centre = shade_row_centre(dump, title)
             # A COLLAPSED GROUP TAKES THE TAP FOR ITSELF: two of an app's
@@ -2413,6 +2519,7 @@ def tap_notification(serial, title, log):
                 adb(serial, "shell", "input", "tap", str(bx), str(by), stdout=log, stderr=log)
                 print(f"run-emulator: {title!r} sits in a collapsed group; expanded it at "
                       f"{bx},{by}", file=log)
+                time.sleep(0.6)
                 continue
             if centre is not None:
                 width = max((n[3][2] for n in shade_nodes(dump)), default=centre[0] * 2)
@@ -2453,10 +2560,6 @@ def reply_notification(serial, title, text, log):
     when its actions are folded away), type the text into SystemUI's own
     field and send it. The shade is collapsed on every path."""
     import shlex
-    expanded = run(["adb", "-s", serial, "shell", "cmd", "statusbar",
-                    "expand-notifications"], stdout=log, stderr=log)
-    if expanded.returncode != 0:
-        return "the shade refused to expand"
 
     def dump():
         run(["adb", "-s", serial, "shell", "uiautomator", "dump",
@@ -2473,6 +2576,10 @@ def reply_notification(serial, title, text, log):
         return min(hits, key=lambda n: n[3][1] - row[1], default=None)
 
     try:
+        opened, said = open_shade(serial, log)
+        if not opened:
+            return f"the shade never opened with focus ({said})"
+        unfolded = False
         for attempt in range(1, 4):
             time.sleep(0.6)
             nodes = dump()
@@ -2489,7 +2596,12 @@ def reply_notification(serial, title, text, log):
                     texts = sorted({n[0] or n[1] for n in nodes if n[0] or n[1]})
                     return (f"the row {title!r} shows no Reply action and no expand "
                             f"button to reveal one; the shade reads {texts}")
-                tap(chevron[3])
+                did = "already unfolded" if unfolded else "unfolded it"
+                if not unfolded:
+                    tap(chevron[3])
+                    unfolded = True
+                print(f"run-emulator: the shade dump {attempt} on {serial} shows {title!r} "
+                      f"with no Reply action; {did}", file=log)
                 continue
             tap(button[3])
             time.sleep(0.8)

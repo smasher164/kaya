@@ -62,6 +62,7 @@ GUEST_PS1 = "tools/guest/flightrec.ps1"
 FOCUS_RING = "tools/linux/focus-ring.py"
 HAND = "tools/run-leg.py"
 WINLIST = "tools/mac/flightrec-winlist.swift"
+HARNESS = "crates/kaya/src/harness.rs"
 
 # The recorder class whose body IS each python lane's collect path.
 RECORDERS = {"mac": "MacRecorder", "windows": "WinRecorder",
@@ -74,7 +75,7 @@ UNIVERSAL = ("leg-log", "verb-trace", "shot")
 def sources():
     return {rel: gate.read(rel) for rel in
             (LANE_PY, LANE_SH, LINUX, IOS, ANDROID, WIN,
-             STEPS, WINUI, GUEST_PS1, FOCUS_RING, HAND, WINLIST)}
+             STEPS, WINUI, GUEST_PS1, FOCUS_RING, HAND, WINLIST, HARNESS)}
 
 
 def py_block(text, name):
@@ -572,7 +573,7 @@ def census_ios_stamp(src):
 def census_android_history(src):
     found = []
     sections = declared(src).get("android", ())
-    for name in ("system-events", "anr-history"):
+    for name in ("system-events", "anr-history", "shade-history"):
         if name not in sections:
             found.append(f"android: declares no {name} section")
     body = py_block(src[ANDROID], "run_apk_on")
@@ -586,7 +587,8 @@ def census_android_history(src):
                     for test in tests):
                 failures.append(ast.get_source_segment(body, node))
     for call, suffix in (("android_system_events", ".system-events"),
-                         ("android_anr_history", ".anr-history")):
+                         ("android_anr_history", ".anr-history"),
+                         ("android_shade_history", ".shade-history")):
         if not any(f"flightrec_lane.{call}(" in branch and f'"{suffix}"' in branch
                    for branch in failures):
             found.append(f"android: failure path does not write {suffix} through {call}")
@@ -853,7 +855,7 @@ def mac_power_checks(src, echo=False):
 
 def android_report_checks(src, echo=False):
     scope = {"re": re}
-    for name in ("android_system_events", "android_anr_history"):
+    for name in ("android_system_events", "android_anr_history", "android_shade_history"):
         body = py_block(src[LANE_PY], name)
         if not body:
             return [f"android: missing report renderer {name}"]
@@ -903,9 +905,85 @@ def android_report_checks(src, echo=False):
                      "or kept unrelated noise")
     if "Selected 0 line(s)" not in scope["android_system_events"]("unrelated noise"):
         found.append("android: empty system timeline did not report its zero count")
+    shade = scope["android_shade_history"]
+    buffers = ("    10-07 12:22:33.648 V systemui.shade: New panel State: CLOSED\n"
+               "    10-07 12:22:33.068 D systemui.shadewindow: Updating shade, should be "
+               "focusable : false\n"
+               "    10-07 12:22:33.680 D systemui.shadewindow: Updating shade, should be "
+               "visible and focusable: false\n"
+               "    10-07 12:22:19.367 V systemui.shade: NPVC mLastFlingWasExpanding set to: true\n"
+               "    10-07 12:22:18.994 D systemui.shade: onFlingEnd called\n"
+               "    10-07 12:22:19.352 D RemoteInputControllerLog: removeRemoteInput reason: "
+               "RemoteInputView#onDetachedFromWindow\n"
+               "    10-07 12:22:19.400 D systemui.shadewindow: Setting isExpanded to true\n")
+    history = shade(buffers, 0)
+    kept = [line.strip()[19:] for line in buffers.splitlines() if "isExpanded" not in line]
+    if any(event not in history for event in kept) or "Setting isExpanded" in history:
+        found.append("android: shade history dropped a panel, focus or remote-input event, "
+                     "or kept window noise")
+    stamps = re.findall(r"^10-07 (\d\d:\d\d:\d\d\.\d+) ", history, re.M)
+    if stamps != sorted(stamps) or len(stamps) != 6:
+        found.append(f"android: shade history is not oldest first across buffers: {stamps}")
+    if "History can predate this leg" not in history:
+        found.append("android: shade history claimed current-leg attribution")
+    failed = shade("Bad service", 124)
+    if "SystemUI dump exited 124; no shade history" not in failed or "Bad service" not in failed:
+        found.append("android: shade history read failure lost its measured result")
     if echo:
+        print(f"check-flightrec: Android shade history: {history.strip()}")
         print(f"check-flightrec: Android timeline: {timeline.strip()}")
         print(f"check-flightrec: Android history: {answer.strip()}")
+    return found
+
+
+def rust_fn(text, header):
+    at = text.find(header)
+    start = text.find("{", at) if at >= 0 else -1
+    if start < 0:
+        return ""
+    depth = 0
+    for i in range(start, len(text)):
+        depth += {"{": 1, "}": -1}.get(text[i], 0)
+        if depth == 0:
+            return text[start:i + 1]
+    return ""
+
+
+def census_wedge_capture(src):
+    """The linux harness's stacks at the ceiling (docs/traps.md, the wedged
+    media_feed leg): eu-stack's ~360 KB blocked on a pipe read only after
+    exit, so every wedged media leg's bundle said "ran past 10 s"."""
+    found = []
+    wedge = rust_fn(src[HARNESS], "fn wedge_stacks()")
+    cap = rust_fn(src[HARNESS], "fn ceiling_capture(")
+    if not wedge or not cap:
+        return ["harness.rs: wedge_stacks or ceiling_capture is gone — re-point "
+                "this clause at whatever prints the stacks at the ceiling"]
+    for needle, why in (('ceiling_capture("thread stacks at the ceiling", "eu-stack"',
+                         "no thread stacks"),
+                        ('ceiling_capture("processes at the ceiling", "ps"',
+                         "no process sample"),
+                        ('"/proc/loadavg"', "no load sample")):
+        if needle not in wedge:
+            found.append(f"harness.rs: wedge_stacks leaves {why} at the ceiling")
+    drained = [cap.find(f"drain(child.{p}.take())") for p in ("stdout", "stderr")]
+    waits = cap.find("try_wait()")
+    if min(drained) < 0 or "read_to_end" not in rust_fn(cap, "fn drain") \
+            or "std::thread::spawn" not in rust_fn(cap, "fn drain") \
+            or waits < 0 or max(drained) > waits:
+        found.append("harness.rs: ceiling_capture does not drain its pipes on "
+                     "threads before it waits — a pipe read only after exit "
+                     "blocks eu-stack past the bound")
+    if "wait_with_output" in cap:
+        found.append("harness.rs: ceiling_capture reads its output with "
+                     "wait_with_output, after the child exits")
+    if '.env_remove("DEBUGINFOD_URLS")' not in cap:
+        found.append("harness.rs: ceiling_capture lets eu-stack ask debuginfod "
+                     "servers inside its 10 s bound")
+    test = rust_fn(src[HARNESS], "fn ceiling_capture_drains_a_large_output()")
+    if 'ceiling_capture("bytes", "head", &["-c", "1000000"' not in test:
+        found.append("harness.rs: the unit test running ceiling_capture over "
+                     "more than a pipe holds is gone")
     return found
 
 
@@ -921,7 +999,8 @@ CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("linux focus ring", census_focus_ring),
             ("hand run", census_hand_run), ("iOS SDK stamp", census_ios_stamp),
             ("no frontmost shot", census_frontmost),
-            ("Android history", census_android_history))
+            ("Android history", census_android_history),
+            ("linux ceiling stacks", census_wedge_capture))
 TABLE = declared(REAL)
 gate.counted("lanes declaring a bundle shape", list(TABLE), floor=5)
 gate.counted("sections declared across the five lanes",
@@ -1151,12 +1230,12 @@ stamp_cut = doctored(LANE_PY, r'self\.adopt\(bundle, "binary-stamp",',
 gate.negative("iOS SDK section unwritten", lambda: census_sections(stamp_cut),
               want="`binary-stamp` is declared")
 
-for call in ("android_system_events", "android_anr_history"):
+for call in ("android_system_events", "android_anr_history", "android_shade_history"):
     changed = doctored(ANDROID, re.escape(f"flightrec_lane.{call}("),
                        f"flightrec_lane.unwired_{call}(", f"Android {call} capture cut")
     gate.negative(f"Android {call} capture unwritten",
                   lambda: census_android_history(changed), want="failure path does not write")
-for name in ("system-events", "anr-history"):
+for name in ("system-events", "anr-history", "shade-history"):
     changed = doctored(LANE_PY, re.escape(f'self.adopt(bundle, "{name}",'),
                        f'self.adopt(bundle, "wrong-{name}",', f"Android {name} adoption cut")
     gate.negative(f"Android {name} section unwritten",
@@ -1171,7 +1250,14 @@ for label, before, after, want in (
         ("focus", "input_focus:", "lost_focus:", "dropped a focus/ANR event"),
         ("native drag", "WindowManager:", "LostWindowManager:", "drag event"),
         ("view drop", "VRI", "LostView", "drag event"),
-        ("Kaya drag", "KAYA_DRAG_", "LOST_DRAG_", "drag event")):
+        ("Kaya drag", "KAYA_DRAG_", "LOST_DRAG_", "drag event"),
+        ("shade panel", "New panel State:|", "Lost panel State:|", "shade history dropped"),
+        ("shade focus", "should be (?:visible and )?focusable|", "should be lost|",
+         "shade history dropped"),
+        ("shade order", "lines = sorted({", "lines = list({", "not oldest first"),
+        ("shade status", "    if status:\n", "    if False:\n", "read failure lost"),
+        ("shade attribution", "oldest first. History can predate this leg",
+         "oldest first. History belongs to this leg", "current-leg attribution")):
     changed = doctored(LANE_PY, re.escape(before), after, f"Android {label} report mutation")
     gate.negative(f"Android {label} report corrupted",
                   lambda: android_report_checks(changed), want=want)
@@ -1257,6 +1343,22 @@ for call in ("xcuidrive_stop_all()", "xcuidrive_launch_all()", "xcuidrive_join()
     gate.negative(f"iOS recording recovery without {call}",
                   lambda: ios_recording_recovery(changed), want="driver lifecycle")
 
-gate.negatives_ran(61)
+# The ceiling's stacks: the pre-fix read-after-exit, the load sample and
+# the debuginfod lookup, each taken out of a copy.
+for label, pattern, repl, want in (
+        ("NW1 pipes read after exit",
+         r"    let out = drain\(child\.stdout\.take\(\)\);\n"
+         r"    let err = drain\(child\.stderr\.take\(\)\);\n",
+         "", "does not drain its pipes"),
+        ("NW2 no load sample", r'std::fs::read_to_string\("/proc/loadavg"\)',
+         'std::fs::read_to_string("/proc/version")', "no load sample"),
+        ("NW3 debuginfod asked", r'        \.env_remove\("DEBUGINFOD_URLS"\)\n', "",
+         "debuginfod"),
+        ("NW4 test gone", r"fn ceiling_capture_drains_a_large_output\(\)",
+         "fn ceiling_capture_small()", "unit test")):
+    changed = doctored(HARNESS, pattern, repl, label)
+    gate.negative(label, lambda: census_wedge_capture(changed), want=want)
+
+gate.negatives_ran(72)
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

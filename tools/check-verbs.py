@@ -3675,7 +3675,7 @@ def gtk_media_arms(src=None):
                    "ink tolerance")
     raw = [m.group(0) for m in re.finditer(r"[\w.()]*\.set_state\(", body)
            if not m.group(0).startswith(("playbin.set_state", "fetch.", "held.", "pipeline.",
-                                         "old.set_state"))]
+                                         "old.set_state", "sink.set_state", "self.sink.set_state"))]
     if raw or body.count("playbin.set_state(state)") != 2:
         bad.append(f"a playbin3 state change outside set_playbin_state ({raw}) — every "
                    f"one that can activate pads holds the typefinds off (docs/traps.md, "
@@ -3848,6 +3848,44 @@ for which, pattern, repl, label in (
     print(f"check-verbs: gtk-drain negative ({label}): {len(found)} finding(s)")
     if not found:
         fail(f"check-verbs SELF-TEST: the GTK download drain guard passed with {label}")
+
+# --- THE GTK SINK'S READY ON THE MAIN THREAD (docs/traps.md, gtk4paintablesink's
+# NULL->READY waits for the main thread). No scene can tell a sink brought READY
+# in build_pipe from one left NULL until a stressed lane deadlocks.
+def gtk_sink_ready(gtk_src=None):
+    bad = []
+    code = re.sub(r"//[^\n]*", "", gtk_src if gtk_src is not None else real(GTK))
+    build = re.search(r"\n    fn build_pipe\(id: u64\) -> Pipe \{\n(.*?)\n    \}\n", code, re.S)
+    body = build.group(1) if build else ""
+    at_ready = body.find("let _ = sink.set_state(gst::State::Ready);")
+    at_hand = body.find('playbin.set_property("video-sink", &sink);')
+    if build is None or at_ready < 0 or at_hand < 0 or at_ready > at_hand:
+        bad.append("build_pipe hands playbin3 a gtk4paintablesink still in NULL — playsink then "
+                   "brings it READY on a streaming thread under its lock, and the sink waits there "
+                   "for the main thread")
+    drop = re.search(r"\n    impl Drop for Pipe \{\n(.*?)\n    \}\n", code, re.S)
+    if drop is None or "self.sink.set_state(gst::State::Null)" not in drop.group(1):
+        bad.append("a Pipe is dropped without its sink set to NULL — a sink playsink never took "
+                   "is finalized in READY")
+    return bad
+
+
+gtk_sink_out = gtk_sink_ready()
+if gtk_sink_out:
+    media_status = 1
+    print("check-verbs: the GTK sink's READY broke a rule no scene can see:", file=sys.stderr)
+    print("\n".join(gtk_sink_out), file=sys.stderr)
+print("check-verbs: GTK sink READY read (build_pipe, Pipe's Drop)")
+for pattern, repl, label in (
+    (r"(\n)        let _ = sink\.set_state\(gst::State::Ready\);\n", "", "the sink left NULL"),
+    (r"(fn drop\(&mut self\) \{\n)            let _ = self\.sink\.set_state\(gst::State::Null\);\n",
+     "", "the sink dropped in READY"),
+):
+    cut = g.doctor(f"gtk sink: {label}", real(GTK), pattern, lambda m, repl=repl: m.group(1) + repl)
+    found = [f for f in gtk_sink_ready(gtk_src=cut) if f not in gtk_sink_out]
+    print(f"check-verbs: gtk-sink negative ({label}): {len(found)} finding(s)")
+    if not found:
+        fail(f"check-verbs SELF-TEST: the GTK sink READY guard passed with {label}")
 
 # --- THE WINUI MEDIA ARM (docs/media-plan.md §2, §3, §5, §7a) ----------
 # The same rules on Windows, none of which a scene can see: THE VIEW IS

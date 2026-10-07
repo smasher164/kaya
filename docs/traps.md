@@ -13667,6 +13667,53 @@ ceiling on media_delivery-rust, it printed the main thread in
 g_main_context_iteration and every GStreamer thread. One sighting; the next
 names the thread.
 
+THE STACKS NEVER CAME on the forky image (measured 2026-10-07): two wedged
+media_feed-ocaml legs each said "eu-stack ran past 10 s and was killed". Not
+eu-stack: the harness read its pipes only after it exited, and eu-stack -m
+over a media_feed guest writes about 360 KB (113 threads at the wedge, 312
+once playing) into a 64 KiB pipe, so it blocked until the bound killed it.
+The forced proof above used media_delivery-rust, whose stacks fit the pipe.
+crates/kaya/src/harness.rs's ceiling_capture now drains both pipes on threads
+while the child runs, prints what a killed command wrote, keeps
+DEBUGINFOD_URLS out of eu-stack's environment, and the ceiling also prints
+/proc/loadavg, /proc/pressure/cpu and a `ps` of the container. Forced again
+with an LD_PRELOAD shim wedging the main thread's 80th gst_element_set_state
+(the tenth player's PAUSED): the old harness printed the 10 s sentence and no
+stack, the new one every thread (113, `ps` NLWP 113) in 379 ms. Held by the
+unit test ceiling_capture_drains_a_large_output (watched failing at the 10 s
+bound with the drains moved after the wait) and check-flightrec's linux
+ceiling stacks clause (four watched cuts). The wedge those stacks then named
+is the next entry.
+
+## gtk4paintablesink's NULL->READY waits for the main thread, and playsink takes that step under its own lock (measured 2026-10-07)
+gstreamer1.0-gtk4 0.15.2 (forky; gst-plugins-rs commit b4caf40b, MR !2930,
+"Error out in NULL->READY if there is no default GDK display") asks the main
+thread whether a GDK display exists in every NULL->READY, through
+`invoke_on_main_thread`, a `MainContext::default().invoke` and a blocking
+receive. 0.13.5 (trixie) made no such call once the paintable existed. A
+playbin3 hands its video sink to playsink, and playsink brings that sink to
+READY inside its reconfigure, on a streaming thread, holding the playsink
+lock. A main-thread `mute` or `volume` set on the same playbin3 takes the
+playsink lock. So the streaming thread waits for the main thread and the main
+thread waits for the lock: the GTK arm never applies the rest of the
+transaction, the root never mounts, and the leg ends at the scene-ready
+ceiling. The OCaml binding sends a player's `source` before
+its `muted` (bindings/ocaml/kaya_app.ml `player`), so `load()` has already
+taken the pipeline to PAUSED when the mute arrives; that is why
+media_feed-ocaml (ten muted players) is the leg that met it. Stacks from the
+stress loop: main thread in set_player_prop -> g_object_set_property ->
+libgstplayback -> pthread_mutex_lock; four streaming threads in
+gst_pad_push_event -> a pad probe -> libgstplayback ->
+gst_element_change_state(gtk4paintablesink) -> futex. Measured with eight
+parallel media_feed-ocaml x11 guests and twelve CPU spinners for 900 s: 56
+of 1941 runs wedged, every one this pair; with the fix, 0 of 3279. No
+upstream report exists for it (searched gst-plugins-rs issues and MRs,
+2026-10-07). The GTK arm now brings the sink to READY itself in build_pipe,
+on the main thread, before handing it to playbin3, where the hop runs
+inline; playsink's own READY is then a no-op. Pipe's Drop sets the sink to
+NULL, since a sink playsink never took would otherwise be finalized in READY.
+check-verbs' GTK sink READY clause holds both, two cuts watched.
+
 ## The WinUI adaptive pipeline that goes idle under pooled load: an open that never prerolls, a paused seek that never completes (measured 2026-10-01)
 On the lane VM, six media guests pooled beside each other with the host
 loaded (18 CPU spinners), an HLS or DASH item sometimes stops making
@@ -14469,6 +14516,46 @@ had answered 0; the second tap hit Sam's row and no activation followed; the
 third found no row. tap_notification now asks for the shade again when a dump
 carries no SystemUI node, and chat-go holds the token again. The drags stay
 ALONE.
+
+THE TOKEN WAS NOT THE CAUSE (measured 2026-10-07, below): chat-go failed the
+same way holding it, and SystemUI's own logs name an expand that landed inside
+the reply's unfinished collapse.
+
+## The shade an expand reopens without focus (measured 2026-10-07)
+
+chat-go replies to Alex's notification (step 43) and then activates Sam's
+(step 46). The reply's hand taps Send and runs `cmd statusbar collapse`; about
+a second later the tap's hand ran `cmd statusbar expand-notifications`. SystemUI's
+ring buffers on the red's emulator (`dumpsys activity service
+com.android.systemui/.SystemUIService ShadeLog ShadeWindowLog
+NotifRemoteInputLog`) read: the collapse marks the shade window "should be
+focusable : false" at once (18.400); the remote input stays active until
+19.352, so the panel reached height 0 without reporting CLOSED; the expand at
+19.367 flung it back OPEN, and focusability is only restored on the
+CLOSED -> OPENING edge. The shade stayed OPEN, visible and NOT_FOCUSABLE for
+14 s. `uiautomator dump` reads the focused window, so four dumps read the
+app; every re-expand was a no-op on an open panel. The tap's own collapse
+closed it at 33.648, the next try's expand opened it with focus at once, and
+its row tap landed 5 s after the verb's 20 s window had closed.
+
+A plain collapse then expand does not reproduce it (gaps 0 to 0.6 s all
+reopened focusable): the stall is the sent reply's. Once measured it is
+deterministic, idle or loaded: an expand within a few seconds of the send
+stays unfocusable, a collapse during the stall does not close the shade (two
+in a row, 6 s, still unfocusable), and a collapse AFTER the stuck expand
+reaches gone in about 1.6 s, after which an expand opens with focus in
+0.15 s. A heads-up banner is the same window, visible and unfocusable, and
+expands in place. `uiautomator dump` costs about 1.9 s on an idle emulator
+and `dumpsys window NotificationShade` 17 ms.
+
+The rule: the shade opens through run-emulator.py's `open_shade` alone. It
+reads the NotificationShade window (`shade_state`: gone, open, or
+unfocusable, which is also a normal 150-430 ms transient of every expand),
+waits up to 1 s for gone, expands, and waits for open AND focusable (2.5 s
+from gone, 1.2 s from a stall or banner); a shade still unfocusable is
+collapsed to gone and expanded again, three rounds, every reading in the leg
+log. check-exclusive holds the door; a red Android leg's bundle carries
+`shade-history`, SystemUI's three buffers (check-flightrec).
 
 ## The WinUI keystrokes posted to the input site (measured 2026-10-06)
 

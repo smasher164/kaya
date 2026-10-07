@@ -50,7 +50,7 @@ SECTIONS = {
                 "toast-moment", "gesture-moment", "media-server", "capture-devices"),
     "ios": ("leg-log", "verb-trace", "shot", "panic", "app-log", "devices", "binary-stamp"),
     "android": ("leg-log", "verb-trace", "shot", "logcat", "devices",
-                "system-events", "anr-history"),
+                "system-events", "anr-history", "shade-history"),
     "linux": ("leg-log", "verb-trace", "shot", "desktop", "xvfb"),
 }
 
@@ -95,6 +95,23 @@ def android_anr_history(package, text, returncode):
                if f"Process: {package}" in entry.splitlines()]
     return (heading + f"Matched {len(matched)} of {len(entries)} report(s).\n"
             + "\n".join(reversed(matched)))
+
+
+def android_shade_history(text, status):
+    # docs/traps.md: the shade an expand reopens without focus.
+    heading = ("SystemUI's shade history (ShadeLog, ShadeWindowLog, NotifRemoteInputLog), "
+               "oldest first. History can predate this leg; match timestamps against "
+               "leg-log.txt and system-events.txt.\n")
+    if status:
+        return heading + f"SystemUI dump exited {status}; no shade history.\n{text}\n"
+    pattern = (r"New panel State:|should be (?:visible and )?focusable|"
+               r"should be visible : false|mLastFlingWasExpanding|onFlingEnd called|"
+               r"RemoteInputControllerLog:")
+    stamped = [re.match(r"\s*(\d\d-\d\d \d\d:\d\d:\d\d\.\d+) (.*)$", line)
+               for line in text.splitlines() if re.search(pattern, line)]
+    lines = sorted({(m.group(1), m.group(2)) for m in stamped if m})
+    return (heading + f"Selected {len(lines)} line(s); newest 400 retained.\n"
+            + "\n".join(f"{stamp} {rest}" for stamp, rest in lines[-400:]) + "\n")
 
 
 def _flightrec(root):
@@ -1168,6 +1185,9 @@ class AndroidRecorder(LaneRecorder):
                            why_absent="flightrec: no system-event timeline was kept for this leg")
                 self.adopt(bundle, "anr-history", log.with_suffix(".anr-history"),
                            why_absent="flightrec: no ANR history was kept for this leg")
+                self.adopt(bundle, "shade-history", log.with_suffix(".shade-history"),
+                           why_absent="flightrec: no SystemUI shade history was kept for "
+                                      "this leg")
                 self.adopt_shot(bundle, "shot", log.with_suffix(".shot.png"),
                                 why_absent=self.SHOT_ABSENT,
                                 note_src=log.with_suffix(".shotwhen"))

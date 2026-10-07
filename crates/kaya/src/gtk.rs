@@ -25103,8 +25103,15 @@ mod gtk_media {
     /// streamsynchronizer0"; measured on the TS-demuxer leg, 2026-09-30).
     struct Pipe {
         playbin: gst::Element,
+        sink: gst::Element,
         paintable: gdk::Paintable,
         _watch: gst::bus::BusWatchGuard,
+    }
+
+    impl Drop for Pipe {
+        fn drop(&mut self) {
+            let _ = self.sink.set_state(gst::State::Null);
+        }
     }
 
     struct GtkPlayer {
@@ -25333,6 +25340,8 @@ mod gtk_media {
         guard_downloads(&playbin);
         let sink = make("gtk4paintablesink");
         let paintable = sink.property::<gdk::Paintable>("paintable");
+        // docs/traps.md, gtk4paintablesink's NULL->READY waits for the main thread.
+        let _ = sink.set_state(gst::State::Ready);
         playbin.set_property("video-sink", &sink);
         let text_sink = gstreamer_app::AppSink::builder()
             .caps(&gst::Caps::builder("text/x-raw").build())
@@ -25359,7 +25368,7 @@ mod gtk_media {
                 glib::ControlFlow::Continue
             })
             .expect("kaya: a new pipeline's bus already had a watch");
-        Pipe { playbin, paintable, _watch: watch }
+        Pipe { playbin, sink, paintable, _watch: watch }
     }
 
     pub(super) fn release_player(core: &mut CoreState, id: u64) {
