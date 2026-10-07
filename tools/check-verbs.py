@@ -3730,6 +3730,125 @@ for pattern, repl, label, want in (
     if not found:
         fail(f"check-verbs SELF-TEST: the GTK media arm passed with {label}")
 
+# --- THE GTK DOWNLOAD DRAIN (docs/traps.md, gstreamer#5296) ------------
+# GStreamer 1.28.7's adaptivedemux2 iterates its download context on the
+# thread that stops the pipeline, and libsoup aborts unless that context is
+# the thread's default. soup_drain makes it so, inside kaya's own stops only.
+# The lane sees the abort only on an image with that GStreamer, and a guard
+# that pushes outside a stop or never pops is green on every lane.
+GTK_SOUP_DRAIN = "crates/kaya/src/gtk/soup_drain.rs"
+
+
+def gtk_soup_drain(gtk_src=None, drain_src=None):
+    bad = []
+    code = re.sub(r"//[^\n]*", "", gtk_src if gtk_src is not None else real(GTK))
+    drain = re.sub(r"//[^\n]*", "", drain_src if drain_src is not None else real(GTK_SOUP_DRAIN))
+    if not re.search(r"\nmod soup_drain;\n", code):
+        bad.append("gtk.rs does not declare mod soup_drain")
+    setter = re.search(r"\n    pub\(super\) fn set_playbin_state\([^\n]*\n(.*?)\n    \}\n",
+                       code, re.S)
+    if setter is None:
+        bad.append("gtk.rs has no set_playbin_state to read")
+    elif not re.search(r"\} else \{\s*super::soup_drain::scope\(\|\| \{\s*"
+                       r"let _ = playbin\.set_state\(state\);\s*\}\);\s*\}", setter.group(1)):
+        bad.append("set_playbin_state takes a playbin below PAUSED outside soup_drain::scope — "
+                   "GStreamer 1.28.7 then aborts in libsoup (docs/traps.md, gstreamer#5296)")
+    guard = re.search(r"\n    pub\(super\) fn guard_downloads\(playbin: &gst::Element\) \{\n"
+                      r"(.*?)\n    \}\n", code, re.S)
+    if guard is None or not re.search(r'connect\("deep-element-added", false, \|_\| \{\s*'
+                                      r"super::soup_drain::install\(\);", guard.group(1)):
+        bad.append("guard_downloads does not install the drain guard from deep-element-added")
+    build = re.search(r"\n    fn build_pipe\(id: u64\) -> Pipe \{\n(.*?)\n    \}\n", code, re.S)
+    if build is None or 'let playbin = make("playbin3");\n        guard_downloads(&playbin);' \
+            not in build.group(1):
+        bad.append("build_pipe's playbin3 is not handed to guard_downloads")
+    reader = re.search(r"\n    fn pipeline\(url: &str, kind: &str, sink: &gst::Element\)"
+                       r"[^\n]*\n(.*?)\n    \}\n", code, re.S)
+    if reader is None or "super::gtk_media::guard_downloads(&playbin);" not in reader.group(1):
+        bad.append("the reader's playbin3 is not handed to guard_downloads")
+    if re.search(r"\bpipeline\.set_state\(gst::State::Null\)", code):
+        bad.append("the reader stops its playbin3 outside set_playbin_state")
+    run = re.search(r"\n    let _ = app\.run_with_args::<&str>\(&\[\]\);\n(.*?)\n    \}\);\n",
+                    code, re.S)
+    if run is None or not re.search(r"gtk_media::release_all\(core\);\s*\}\s*core\.take\(\);",
+                                    run.group(1)):
+        bad.append("run_core drops the core without releasing every player first — a player "
+                   "mid-download at exit is finalized outside any stop")
+    ready = re.search(r"\nunsafe fn ready\(source: \*mut gffi::GSource\) -> bool \{\n(.*?)\n\}\n",
+                      drain, re.S)
+    if ready is None or "DEPTH.with(|d| d.get()) > 0" not in ready.group(1) \
+            or "g_main_context_get_thread_default() != gffi::g_source_get_context(source)" \
+            not in ready.group(1):
+        bad.append("the drain guard is ready outside a stop or on its own context's thread")
+    if "prepare: Some(prepare)" not in drain or "check: Some(check)" not in drain \
+            or drain.count("ready(source)") < 2:
+        bad.append("the drain guard's prepare and check do not both answer ready()")
+    if not re.search(r"const GUARD_PRIORITY: c_int = gffi::G_PRIORITY_HIGH - \d+;", drain):
+        bad.append("the drain guard's priority is not above every source libsoup attaches")
+    dispatch = re.search(r"\nunsafe extern \"C\" fn dispatch\(.*?\n\}\n", drain, re.S)
+    if dispatch is None or "g_main_context_push_thread_default(context)" not in dispatch.group(0) \
+            or "PUSHED.with_borrow_mut(|p| p.push(context as usize))" not in dispatch.group(0):
+        bad.append("the drain guard's dispatch does not push its context and record it")
+    hook = re.search(r"\nunsafe extern \"C\" fn request_queued\(.*?\n\}\n", drain, re.S)
+    if hook is None or "context.is_null() || context == gffi::g_main_context_default()" \
+            not in hook.group(0) \
+            or "g_main_context_find_source_by_funcs_user_data(" not in hook.group(0):
+        bad.append("request_queued attaches the guard to the default context or more than once")
+    if 'g_type_from_name(c"SoupSession"' not in drain \
+            or 'g_signal_lookup(c"request-queued"' not in drain:
+        bad.append("install() does not hook SoupSession::request-queued")
+    scope = re.search(r"\npub\(super\) fn scope<R>\(.*?\n\}\n", drain, re.S)
+    if scope is None or "g_main_context_pop_thread_default(" not in scope.group(0) \
+            or "impl Drop for Leave" not in scope.group(0):
+        bad.append("soup_drain::scope does not pop what the guard pushed when it ends")
+    return bad
+
+
+gtk_drain_out = gtk_soup_drain()
+if gtk_drain_out:
+    media_status = 1
+    print("check-verbs: the GTK download drain guard broke a rule no scene can see:",
+          file=sys.stderr)
+    print("\n".join(gtk_drain_out), file=sys.stderr)
+print("check-verbs: GTK download drain guard read (set_playbin_state, two playbin3s, "
+      "run_core, soup_drain.rs)")
+for which, pattern, repl, label in (
+    ("gtk", r"(\} else \{\n            )super::soup_drain::scope\(\|\| \{\n"
+     r"                let _ = playbin\.set_state\(state\);\n            \}\);",
+     "let _ = playbin.set_state(state);", "a stop outside the scope"),
+    ("gtk", r'(let playbin = make\("playbin3"\);\n)        guard_downloads\(&playbin\);\n', "",
+     "the player's playbin3 unguarded"),
+    ("gtk", r"(\n        )super::gtk_media::guard_downloads\(&playbin\);\n", "\n",
+     "the reader's playbin3 unguarded"),
+    ("gtk", r"(\|_\| \{\n            )super::soup_drain::install\(\);\n", "",
+     "deep-element-added installing nothing"),
+    ("gtk", r"(peaks_read\(&pipeline, &bus, &sink, out\);\n        )"
+     r"super::gtk_media::set_playbin_state\(&pipeline, gst::State::Null\);",
+     "let _ = pipeline.set_state(gst::State::Null);", "the reader's stop bare"),
+    ("gtk", r"(if let Some\(core\) = core\.as_mut\(\) \{\n)"
+     r"            gtk_media::release_all\(core\);\n", "",
+     "players dropped at exit unreleased"),
+    ("drain", r"(\n    )DEPTH\.with\(\|d\| d\.get\(\)\) > 0\n        && ", "",
+     "the guard ready outside a stop"),
+    ("drain", r"(const GUARD_PRIORITY: c_int = )gffi::G_PRIORITY_HIGH - 1000;",
+     "gffi::G_PRIORITY_DEFAULT;", "the guard at libsoup's priority"),
+    ("drain", r"(if )context\.is_null\(\) \|\| context == gffi::g_main_context_default\(\)",
+     "context.is_null()", "the guard on the default context"),
+    ("drain", r"(\n                )unsafe \{ gffi::g_main_context_pop_thread_default\("
+     r"context as \*mut gffi::GMainContext\) \};", "let _ = context;", "the scope never popping"),
+):
+    if which == "gtk":
+        cut = g.doctor(f"gtk drain: {label}", real(GTK), pattern,
+                       lambda m, repl=repl: m.group(1) + repl)
+        found = [f for f in gtk_soup_drain(gtk_src=cut) if f not in gtk_drain_out]
+    else:
+        cut = g.doctor(f"gtk drain: {label}", real(GTK_SOUP_DRAIN), pattern,
+                       lambda m, repl=repl: m.group(1) + repl)
+        found = [f for f in gtk_soup_drain(drain_src=cut) if f not in gtk_drain_out]
+    print(f"check-verbs: gtk-drain negative ({label}): {len(found)} finding(s)")
+    if not found:
+        fail(f"check-verbs SELF-TEST: the GTK download drain guard passed with {label}")
+
 # --- THE WINUI MEDIA ARM (docs/media-plan.md §2, §3, §5, §7a) ----------
 # The same rules on Windows, none of which a scene can see: THE VIEW IS
 # MediaPlayerElement WITH ITS TRANSPORT CONTROLS OFF, never MediaElement nor

@@ -1462,6 +1462,12 @@ in docs/deferred.md.
    each arm's one report door, and ONE site per backend reporting a missing
    track, so its reason, `no_track`, is one line (docs/media-plan.md §8
    ruling 4). Five more watched negatives, counts printed.
+   AND THE GTK DOWNLOAD DRAIN SINCE 2026-10-07 (docs/traps.md, GStreamer
+   1.28.7 drains an HLS download context on the thread that stops the
+   pipeline): every GTK stop below PAUSED, the reader's stops and the
+   players released at exit run inside soup_drain::scope, whose guard
+   pushes the download context only there and pops it when the stop
+   returns. Ten watched negatives, counts printed.
    AND THE CAPTURE WALL SINCE 2026-10-02 (docs/capture-plan.md §7): a
    lane's guest inherits its terminal's camera and microphone grant, so a
    leg reaching a real device opens the maintainer's camera with no prompt,

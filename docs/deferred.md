@@ -83,7 +83,7 @@ from 4.14. The gtk4 crate feature moved from v4_12 to v4_14 for it, so
 kaya's GTK floor is 4.14 (Ubuntu 24.04 ships 4.14.5). Guard:
 check-universal-props' gtk_secure_text, four watched negatives.
 
-## ~~RULING WANTED — the linux lane's GTK version (2026-10-07)~~ CLOSED 2026-10-07, ruled forky, reversibly ("go with forky, though let's do it in a way where if the upgrade fails, we can go back to what we have now"); the image is debian:forky by digest with apt frozen at snapshot 20261005T000000Z (GTK 4.24.0), rollback recipe in docs/HACKING.md's linux image section; the HLS teardown abort below keeps two to six legs red.
+## ~~RULING WANTED — the linux lane's GTK version (2026-10-07)~~ CLOSED 2026-10-07, ruled forky, reversibly ("go with forky, though let's do it in a way where if the upgrade fails, we can go back to what we have now"); the image is debian:forky by digest with apt frozen at snapshot 20261005T000000Z (GTK 4.24.0), rollback recipe in docs/HACKING.md's linux image section; the HLS teardown abort below kept two to six legs red until kaya's drain guard (the struck GStreamer 1.28.7 entry below).
 KEY: linux lane GTK version, debian trixie digest, GTK 4.20, GTK 4.22, GTK 4.24, forky, Ubuntu 26.04, tools/linux/Dockerfile, v4_14
 
 The lane runs GTK 4.18.6 (tools/linux/Dockerfile pins `debian:trixie` by
@@ -117,30 +117,29 @@ stream tags (declared_languages), x11 idle inhibition through the portal
 (REGISTERED_BUS), and the synthetic camera's transfer (pwsynth). The secure
 field's forwarder reads `masked N` on 4.24 (docs/secure-entry-plan.md §7).
 The full lane after them: 1148 of 1155 legs green, legs 665 s and
-container-suites 676 s on a warm build; the reds were the open GStreamer
-entry below (media_tracks python/java x11, haskell/java wayland, and both
+container-suites 676 s on a warm build; the reds were the GStreamer 1.28.7
+entry below, since fixed in kaya (media_tracks python/java x11, haskell/java wayland, and both
 notsdemux legs) and one formatar-java-wayland start that printed nothing
 for 180 s and passed four times alone. The floor question is not settled
 here: v4_14 stays.
 
-## GAP — stopping an HLS playbin3 aborts in libsoup on the forky image (docs/traps.md; 2026-10-07)
-KEY: GStreamer 1.28, libsoup 3.6.6, soup_thread_default_context, message_completed, adaptivedemux2, hlsdemux2, notsdemux, media_tracks, set_playbin_state, gstreamer#947
+## ~~GAP — stopping an HLS playbin3 aborts in libsoup on the forky image (docs/traps.md; 2026-10-07)~~ FIXED 2026-10-07 in kaya: the cause is GStreamer 1.28.7's adaptivedemux2 iterating its download context on the thread that stops the pipeline (gstreamer#5296, fixed upstream for 1.28.8, not yet released), and crates/kaya/src/gtk/soup_drain.rs makes that context the thread's default inside kaya's own stops; check-verbs' GTK download drain clause holds it, and notsdemux and media_tracks are green on forky.
+KEY: GStreamer 1.28, libsoup 3.6.6, soup_thread_default_context, message_completed, adaptivedemux2, hlsdemux2, notsdemux, media_tracks, set_playbin_state, gstreamer#947, gstreamer#5296, downloadhelper_stop, soup_drain
 
 GStreamer 1.28.7 with libsoup 3.6.6 aborts the process in
 `soup-session.c:1530:message_completed` when an HLS playbin3 is stopped
 while a download is in flight: reproduced without kaya (a python playbin3
 set to NULL 2-5 ms after PAUSED), never on trixie's 1.26.2 and 3.6.5, and
-seen in other apps that skip tracks quickly (high-tide#315; gstreamer#947
-is the shared-SoupSession thread-safety issue). On the lane it kills the
-media_delivery-rust-notsdemux legs every run and media_tracks legs when the
-host is busy. Waiting for the pending state change before NULL stopped the
-abort in the probe but wedged kaya's main thread, since the paintable
-sink's preroll needs that thread (an eu-stack taken while it hung: the
-main thread in set_playbin_state's NULL set_state waiting on a mutex, a
-streaming thread inside gst_element_change_state under a pad probe); not
-in the tree. Next: a
-snapshot with a fixed GStreamer or libsoup, or a teardown kaya runs off
-the main thread.
+seen in other apps that skip tracks quickly (high-tide#315). gstreamer#947
+was the wrong lead (souphttpsrc's shared session, fixed for 1.20); the bug
+is gstreamer#5296: 1.28.7's cookie-jar backport (!12438) made
+downloadhelper_stop iterate the download context on the calling thread
+without making it that thread's default, and upstream's !12472 adds the
+push for 1.28.8. Waiting for the pending state change before NULL wedged
+kaya's main thread against the paintable sink and is not in the tree. The
+fix pushes nothing outside kaya's stops and is inert on 1.26 and on a fixed
+1.28 (docs/traps.md). Measured: the lane's notsdemux and media_tracks legs
+15/18 with the scope removed, every red ending in the abort; 18/18 with it.
 
 ## DEFER — the secure field's autofill hint and reveal toggle (docs/secure-entry-plan.md P3, P8; 2026-10-07)
 KEY: secure field autofill, content type, textContentType, newPassword, oneTimeCode, ContentType.Password, reveal toggle, PasswordRevealMode, show-peek-icon, TextObfuscationMode

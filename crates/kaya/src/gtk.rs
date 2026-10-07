@@ -17614,6 +17614,9 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
     // GTK teardown is orderly; dropping CoreState here announces shutdown
     // through its Drop impl.
     CORE.with_borrow_mut(|core| {
+        if let Some(core) = core.as_mut() {
+            gtk_media::release_all(core);
+        }
         core.take();
     });
     EXIT_CODE.load(Ordering::Relaxed)
@@ -24696,6 +24699,7 @@ fn atspi_promoted_buttons(title: &str) -> Result<Vec<(String, bool)>, AtspiMiss>
 
 mod capture;
 mod secure_text;
+mod soup_drain;
 
 mod gtk_media {
     use super::*;
@@ -24800,8 +24804,18 @@ mod gtk_media {
                 let _ = playbin.set_state(state);
             });
         } else {
-            let _ = playbin.set_state(state);
+            super::soup_drain::scope(|| {
+                let _ = playbin.set_state(state);
+            });
         }
+    }
+
+    pub(super) fn guard_downloads(playbin: &gst::Element) {
+        use gstreamer::glib::prelude::ObjectExt;
+        playbin.connect("deep-element-added", false, |_| {
+            super::soup_drain::install();
+            None
+        });
     }
 
     pub(super) fn while_prerolling<R>(pipeline: &gst::Element, f: impl FnOnce() -> R) -> R {
@@ -25316,6 +25330,7 @@ mod gtk_media {
             })
         };
         let playbin = make("playbin3");
+        guard_downloads(&playbin);
         let sink = make("gtk4paintablesink");
         let paintable = sink.property::<gdk::Paintable>("paintable");
         playbin.set_property("video-sink", &sink);
@@ -25365,6 +25380,12 @@ mod gtk_media {
             view.caption.set_visible(false);
         }
         follow_keep_awake(core);
+    }
+
+    pub(super) fn release_all(core: &mut CoreState) {
+        for id in PLAYERS.with_borrow(|p| p.keys().copied().collect::<Vec<_>>()) {
+            release_player(core, id);
+        }
     }
 
     fn stop_timer(slot: &mut Option<glib::SourceId>) {
@@ -26849,6 +26870,7 @@ mod gtk_reader {
         let playbin = gst::ElementFactory::make("playbin3")
             .build()
             .map_err(|e| format!("kaya: the reader needs GStreamer's playbin3 ({e})"))?;
+        super::gtk_media::guard_downloads(&playbin);
         playbin.set_property_from_str("flags", kind);
         playbin.set_property(if kind == "video" { "video-sink" } else { "audio-sink" }, sink);
         playbin.set_property("uri", url);
@@ -26964,7 +26986,7 @@ mod gtk_reader {
             let _ = pipeline.set_state(gst::State::Paused);
         });
         frames_read(&pipeline, &bus, &sink, exact, max, times, out);
-        let _ = pipeline.set_state(gst::State::Null);
+        super::gtk_media::set_playbin_state(&pipeline, gst::State::Null);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -27094,7 +27116,7 @@ mod gtk_reader {
             let _ = pipeline.set_state(gst::State::Playing);
         });
         peaks_read(&pipeline, &bus, &sink, out);
-        let _ = pipeline.set_state(gst::State::Null);
+        super::gtk_media::set_playbin_state(&pipeline, gst::State::Null);
     }
 
     fn peaks_read(pipeline: &gst::Element, bus: &gst::Bus, sink: &gstreamer_app::AppSink, out: &Out) {

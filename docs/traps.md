@@ -70,21 +70,54 @@ Trixie's 1.20.3 delivered it anyway. gtk.rs keeps the registered
 connection for the life of the process (`REGISTERED_BUS`), so the
 GApplication's `g_bus_get` returns it. GUARD: chat-go on the linux lane.
 
-## Stopping an HLS playbin3 just after it starts aborts or wedges on GStreamer 1.28 (measured 2026-10-07; open)
+## GStreamer 1.28.7 drains an HLS download context on the thread that stops the pipeline (measured 2026-10-07)
 
 On the forky image (GStreamer 1.28.7, libsoup 3.6.6) a playbin3 on an HLS
 playlist set to NULL 2-5 ms after PAUSED aborts the process in libsoup:
 `soup-session.c:1530:message_completed: assertion failed: (item->context
 == soup_thread_default_context ())` (a standalone python probe, fakesinks,
-no kaya; trixie's 1.26.2 with libsoup 3.6.5 survived 60 of 60; reported in
-the wild as high-tide#315, "skipping tracks very fast"). Waiting for the
-pending state change first stopped the abort in the probe (400 of 400) but
-in kaya the main thread then wedged in the NULL set_state against a
-streaming thread inside gst_element_change_state from a pad probe: the
-paintable sink's preroll needs the main thread, which was waiting. The
-wait is not in the tree. The linux lane's media_delivery-rust-notsdemux
-legs, which skip to the next item at once, are red on forky for this
-(docs/deferred.md's GStreamer 1.28 HLS teardown entry).
+no kaya; trixie's 1.26.2 with libsoup 3.6.5 survived 60 of 60; seen in the
+wild as high-tide#315). gdb on the abort: libsoup's assertion under
+g_input_stream_close, under a g_object_unref dispatched by
+g_main_context_iteration, called from libgstadaptivedemux2 inside the
+demuxer's PAUSED->READY on the thread that called set_state, and once from
+downloadhelper_free when playbin3's READY->NULL finalized the demuxer. That
+is gstreamer#5296: 1.28.7's cookie-jar backport (!12438) added to
+downloadhelper_stop a loop that iterates the download context until
+nothing is pending, on the caller's thread, without making the context
+that thread's default, so libsoup finishes the cancelled transfers against
+the wrong context. Upstream pushes the context around the loop (!12472,
+merged for 1.28.8, unreleased on 2026-10-07); 1.26 never had the loop.
+
+kaya does the same from outside (crates/kaya/src/gtk/soup_drain.rs): an
+emission hook on SoupSession::request-queued, which runs on the download
+thread with the download context as its default, attaches one dormant
+GSource to that context; the source is ready only inside kaya's own stop
+(set_playbin_state below PAUSED, the reader's stops, and every player
+released at exit) on a thread whose default is some other context, which
+is exactly the drain; it runs before libsoup's sources and pushes the
+context, and the stop pops it when set_state returns (a push holds a ref,
+so the drain's unref in downloadhelper_free frees nothing under it).
+Popping inside the drain cannot work: the guard is ready again the moment
+it pops, so the drain's loop never ends, and a one-shot guard misses the
+second drain in downloadhelper_free (a python prototype of the one-shot
+form still aborted). It prints once per process,
+`kaya: GStreamer iterated a download context on the thread stopping its
+pipeline`. Measured on the lane: with the scope removed, 15 of 18
+notsdemux and media_tracks legs passed and every red ended in the abort;
+with it 18 of 18, each leg printing the line. On trixie the python form
+pushed 0 times in 240 stops: there is no drain there, and a fixed 1.28
+pushes the context itself before the guard can see it.
+
+Two shapes that do NOT fix it: waiting for the pending state change before
+NULL stopped the abort in the probe (400 of 400) but in kaya wedged the
+main thread against a streaming thread inside gst_element_change_state,
+since the paintable sink's preroll needs the main thread; and moving the
+stop to another thread moves the abort with it, because the drain runs on
+whichever thread calls set_state. Dropping a playbin that is not at NULL
+finalizes the demuxer outside any stop and crashes in several ways, which
+is why the core releases every player before it drops. GUARD: check-verbs'
+GTK download drain clause (docs/deferred.md's GStreamer 1.28.7 entry).
 
 ## Compose hands a secure field's real text to the accessibility node info (measured 2026-10-07)
 
