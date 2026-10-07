@@ -698,3 +698,22 @@ container already sees at `/flightrec-state/kaya/exclusive`.
   the token. What does shorten the wall is leaving the exclusive legs out
   (`--no-exclusive`) or, if the wall ever matters more than the isolation,
   a smaller EXCLUSIVE set — never a shorter wait.
+
+## Roadmap
+
+The roadmap page is generated: `tools/roadmap.py` renders
+target/roadmap/index.html (built) from docs/roadmap/*.toml.
+docs/roadmap/editorial.toml holds the judgment (the menu and its order, the
+demo apps, the archetypes' blockers, the cost calibration, the method text,
+the review links); docs/roadmap/features.toml holds the research data (each
+feature's need, parity, cost, lanes and card text). The changes since the
+last read, the open ledger, the latest matrix wall, the scores and the tiers
+are derived on every run. The script refuses when the data names a plan,
+scene, review file, commit or feature slug that does not exist, and prints a
+staleness list; `tools/roadmap.py --self-test` watches every refusal fire.
+
+A refresh: edit the toml if a judgment changed (and move editorial.toml's
+`base` to the HEAD of the read being published), run
+`tools/roadmap.py --diff`, read the diff, then publish
+target/roadmap/index.html (built) to the existing artifact,
+https://claude.ai/code/artifact/Lg1PBcYNgpdpnWWwpfX92K.

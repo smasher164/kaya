@@ -1,0 +1,777 @@
+# The hand-kept judgment behind the roadmap page, rendered by tools/roadmap.py
+# (docs/HACKING.md, Roadmap). Text fields are HTML. {review:<name>} names a [reviews] entry;
+# #item-<slug> must name a feature in features.toml; blockers and soft are feature slugs.
+
+base = '955d4106'
+title = 'What kaya builds next'
+lede = 'Every open item scored three ways: how many apps need it, how many of fifteen GUI frameworks ship it, and what a slice of that shape has cost kaya on its own record. The order below follows from the scores; the cards say why each one landed where it did.'
+state = "Since the 2026-10-04 read the timecode formatter shipped on five platforms, in nine bindings and on the C floor (2026-10-05), a drop's point is read on every lane (2026-10-06), and the day's matrix speed work took the full plain matrix from 2098 s to 1588 s, ALL PASS. With both pieces built, the video editor waits on nothing but the maintainer's choice of what to build before it."
+menu_heading = 'The menu: the pieces first, then the apps they unblock'
+menu_lede = "Every framework piece is its own entry, in the order recommended, and each names the demo app it unblocks; the apps follow, each listing what it still waits on, so an app is never picked with its pieces unbuilt. A star marks a piece that needs a ruling before any arm is written. With the task manager and the chat app shipped, the one demo app left is the video editor. Every ruling its plan asked is taken and every piece it names is built, the last two (the timecode formatter and a drop's point) on 2026-10-05 and 10-06, so the editor waits only on the maintainer's choice of what comes before it. The chat app's calls stage follows: capture and audio playback are built, and the one piece between them and a call is the far end, the peer's picture and voice. Read out of the surface promised against the surface built, the ledger's open headlines and the maintainer's own evidence order; the editor's pieces, the media reader and capture shipped between the reads and stay listed with their dates."
+recommended_next = ''
+recommended_note = "<b>Recommended next: open.</b> The maintainer said on 2026-10-06 that he wants more user-facing features before the video editor starts, and is choosing among them. The editor itself waits on nothing. The candidates are the far end of a call (ruled, the larger one), the three starred items (each needs a ruling first) and the Next tier's cards below, of which secure entry is the cheapest with full parity."
+demo_heading = 'The demo apps, and what each still waits on'
+proposed_heading = 'Proposed: more demo apps, as milestones'
+proposed_lede = "Proposed 2026-09-28 at the maintainer's ask, not ruled. Each demo is a milestone that forces a set of pieces no shipped app needs, taken from the archetype table below; the order puts the one that shares the most with the video editor first, so its pieces are built once for both. The webcam and the microphone (the maintainer, 2026-09-28: at least one demo must use them) go into the chat app as calls rather than a demo of their own, the way Signal and Slack carry them: the conversation, the simulated peer and the notifications are already there. The photo gallery and the video editor's voiceover would use the same capture piece more lightly. Nothing here starts until the maintainer picks."
+proposed_after = ['The dashboard and developer-tool archetypes are left off: the portfolio already is the dashboard, and a tree view and a chart vocabulary would extend it rather than need a new app.', "Left off on purpose: packaging part 2 (on hold; its first need is self-contained bundles for the Go and foreign-language hosts), animations, tree view and OS background work (no design pass yet), and the multicolumn reflowing grid (waits on the maintainer's answer on size). The settings-heavy utility archetype is shipped by its pieces and has no demo app of its own."]
+scored_lede = 'Score = 2×need + parity − 1.5×cost rank, for sorting only; the tier comes from rules stated under each tier heading, with a handful of overrides explained on the card. Click a column to sort, a chip to filter.'
+archetypes_lede = 'Fifteen archetypes from the needs survey, each grounded in shipping apps: what kaya already has for it, what still blocks it, and the tier at which the last blocker clears under the order above.'
+calibration_lede = 'Every cost class above is read off these: the shape of a shipped slice and the calendar days it took from design to a green five-lane matrix.'
+method = ['Parity counts first-party support over the ten full toolkits (SwiftUI, Compose, Flutter, Qt, GTK4, WinUI 3, Avalonia, MAUI, React Native, Uno). Electron and Tauri are shells around a webview and the three Rust natives are an order of magnitude smaller, so they stay in the matrix for the system rows but do not set the bar. A package-only route counts half.', "Kaya has no package ecosystem. For every other toolkit a third of this list is a package away; for kaya each is first-party work on five backends or a hole. That is the architecture's cost and also its clearest differentiator, since nobody ships these natively everywhere.", 'Need is scored over fifteen app archetypes, a 105-app GNOME corpus counted by hand, the four vendor catalogues, Stack Overflow volume, issue votes across eleven frameworks, pub.dev dependency counts and store and legal obligation. Where the sources disagree the row says so rather than averaging: notifications scores 5 on four sources and never appeared in the native trackers; reduced motion scores 3 on legal obligation with no developer demand at all; the segmented control rests on the vendor catalogues alone.', "Cost is read off kaya's own record, not estimated from first principles: the calibration table is the whole basis. The record is fast because every slice is depth-then-breadth with agents fanning the breadth out, so a day here is a maintainer-with-agents day.", 'Six rows are here for honesty rather than as proposals: three already shipped in substance (indeterminate progress, tree-order focus, the app-side post primitive folded into the background row) and three refused by DESIGN (the native escape hatch, styling beyond the brand tier, device APIs). Code push is declined on the record because it is the loudest voice in the corpus.', "The score sorts; the tier decides. Tiers follow the rules stated under each heading, with the overrides named on their cards. Where the video editor's own blockers fall below the table stakes, that is the evidence speaking; the maintainer's forcing-artifact order is a legitimate reason to override it."]
+
+[reviews]
+hscroll = 'https://claude.ai/artifact/7EaiAAwfPvvoJ6Xd2aMukq'
+fullscreen = 'https://claude.ai/artifact/1kpb8bL46DbjMobLkiBai6'
+number = 'https://claude.ai/artifact/7RbsBbeymH5M8RYq9xHbeb'
+color = 'https://claude.ai/artifact/79MLwMNtCeF251RFGmuikh'
+range = 'https://claude.ai/artifact/DhKKYPbfagTRMGWuaexPdR'
+media = 'https://claude.ai/artifact/WkW8D1Ba44qhMTnK3a7NLM'
+aspect = 'https://claude.ai/artifact/SR71ZiQgSF4QGMXX6WyLUL'
+reader = 'https://claude.ai/artifact/Gwtwpt5BogkAd8aTwswXRX'
+capture = 'https://claude.ai/artifact/5Pb49ub6dhKPfGaP7k8RHB'
+timecode = '~/Projects/kaya-handoffs/2026-10-04-timecode/review/index.html'
+
+[[menu]]
+title = '<a href="#item-hscroll">Horizontal scroll axis</a>'
+star = false
+status = 'shipped'
+size = 'S'
+unblocks = 'the video editor; mobile commerce'
+plan = 'docs/hscroll-plan.md'
+review = 'hscroll'
+text = "SHIPPED 2026-09-28 (0b2c8a0b; review {review:hscroll}): the `axis` a row and a column already take, now on a scroll, on five platforms and in nine bindings. Unblocks the video editor's timeline and filmstrip, and the commerce carousel."
+
+[[menu]]
+title = '<a href="#item-fullscreen">Fullscreen toggle</a>'
+star = false
+status = 'shipped'
+size = 'S'
+unblocks = 'the video editor; photo and media archetypes'
+plan = 'docs/fullscreen-plan.md'
+review = 'fullscreen'
+text = "SHIPPED 2026-09-28 (aa6493e4, e111eb62; review {review:fullscreen}): a <code>fullscreen</code> window setting and an event when the user changes it, on five platforms and in nine bindings; immersive mode on the phones, F11 on Linux and Windows. Unblocks the editor's program monitor, and the photo and media archetypes."
+
+[[menu]]
+title = '<a href="#item-number_field">Number / formatted field</a>'
+star = false
+status = 'shipped'
+size = 'M'
+unblocks = 'the video editor'
+plan = 'docs/number-field-plan.md'
+review = 'number'
+key = 'number field width'
+text = "SHIPPED 2026-09-28 (60b0819a, 9cd33cf9; review {review:number}): a number kind with range and step, committing on Return, focus loss or a step, kaya reading and writing the text in the user's locale; since 2026-10-02 the typed text is read by one rule in the core on all five platforms (1b48083d). The timecode formatter its <code>format</code> names was ruled for the editor and shipped 2026-10-05 (below); no empty state (a \"may be blank\" state for form fields is on the ledger). Open: the field's width, a ruling on the ledger."
+
+[[menu]]
+title = '<a href="#item-color_picker">Colour picker</a>'
+star = false
+status = 'shipped'
+size = 'M'
+unblocks = 'the video editor'
+plan = 'docs/color-picker-plan.md'
+review = 'color'
+key = 'pick_color'
+text = "SHIPPED 2026-09-28 (5e148d38, cfc4825d; review {review:color}): a swatch opening each platform's own picker, a small Material picker on Android, the app hearing settled choices only; the WinUI flyout now draws past its window (62f271a0). Open: the plan's two §8 recommendations are built as recommended and await confirmation."
+
+[[menu]]
+title = '<b>The range slider and the vertical slider</b>'
+star = false
+status = 'shipped'
+size = 'M'
+unblocks = 'the video editor'
+plan = 'docs/range-plan.md'
+review = 'range'
+text = "SHIPPED 2026-09-29 (ac14408b, e3c87d74, 269015f2; review {review:range}): a separate <code>range</code> kind (ruled), two of each platform's sliders stacked over a kaya-drawn track with presses routed by the midpoint (ruled, after a survey of thirty-five toolkits), an app write that would cross a user-moved thumb clamped and reported (ruled), and the slider taking <code>axis</code> for a vertical fader. A filmstrip trim bar is not this kind."
+
+[[menu]]
+title = '<a href="#item-video">The <code>video</code> kind, audio and the media session</a>'
+star = false
+status = 'shipped'
+size = 'XL'
+unblocks = 'the video editor; the media player'
+plan = 'docs/media-plan.md'
+review = 'media'
+text = "SHIPPED 2026-10-01 (a1f0ad45 to b2ebb713; plan docs/media-plan.md; review {review:media}): a media player object the app holds (audio too), the video view on each platform's own DRM-capable view with its controls off, the media session for media keys and Now Playing, captions (kaya's renderer for separate and web caption files), track switching, video in list rows, a timeout for stuck streams, and the media test suite across formats, HLS and DASH from a local server. Since 2026-10-04 the view takes an <code>aspect</code> the app chooses (9e9449a4, 955d4106; review {review:aspect}). Designed and not built: the surface widget in frames mode (media-plan §4)."
+
+[[menu]]
+title = '<b>The media reader: thumbnails and waveforms</b>'
+star = false
+status = 'shipped'
+size = 'L'
+unblocks = 'the video editor'
+plan = 'docs/media-plan.md'
+review = 'reader'
+text = "SHIPPED 2026-10-02 (c3178a7e ruling, c5f16872, c263f3bd, 8d823d90; review {review:reader}): ruled after a research pass that priced each platform against FFmpeg (docs/probes/media-extraction-2026-10-01.md): one reader object over each platform's own frameworks, no FFmpeg, answering frames as kaya-held images at exact or keyframe times and audio peaks computed in the core, cancellable, on five platforms and in nine bindings. The canvas gained an <code>image</code> op to draw them (media-plan §8 ruling 3), and a read for a track the source lacks answers <code>no_track</code> (ruled 2026-10-02). Unblocks the editor's filmstrip and waveform under each clip."
+
+[[menu]]
+title = '<b>Camera and microphone capture</b>'
+star = false
+status = 'shipped'
+size = 'XL'
+unblocks = "the chat app's calls"
+plan = 'docs/capture-plan.md'
+review = 'capture'
+text = "SHIPPED 2026-10-03 (a459c6e8 design, 503002c3 depth, 8f363563 breadth, e0223160 the Windows legs; review {review:capture}): a capture object the app holds, its live self-view shown by the same video view a player uses, frames and samples handed to the app on kaya's capture thread, device lists and the permission prompt, on five platforms and in nine bindings. The lanes run synthetic devices in each platform's own path (the emulator's cameras, PipeWire nodes, a virtual camera and loopback driver installed once on the Windows VM) and inside kaya on the mac and the iOS simulator, behind a wall that refuses a real device under the harness. All five design rulings and the build's eight choices were ruled 2026-10-02 and 10-03. The self-view's size became one core rule on 10-03 and the <code>aspect</code> tile on 10-04 (3423e045, 66352411, 9e9449a4, 955d4106; review {review:aspect}). Left: the C floor's parsers and the far end below."
+
+[[menu]]
+title = '<b>The timecode formatter</b>'
+star = false
+status = 'shipped'
+size = 'S to M'
+unblocks = 'the video editor'
+plan = 'docs/number-field-plan.md'
+review = 'timecode'
+key = 'timecode formatter'
+scene = 'tools/scenes/timecode.steps'
+text = "SHIPPED 2026-10-05 (ac80e5c2 depth, 15db3cda breadth, 39500a74 the four built choices accepted, 4afaccf9 the full matrix ALL PASS on 2026-10-06; review {review:timecode}): the number field's <code>format</code> prop names one of the formatter door's formatters, and <code>timecode(rate)</code> joined the door, non-drop and drop-frame, the value in whole frames, the step one frame, kaya formatting and parsing <code>HH:MM:SS:FF</code> itself, so the editor's playhead label and its timecode field share one formatter; on five platforms, in nine bindings and on the C floor (docs/number-field-plan.md §10). Unblocks the editor's playhead, in and out fields. No card: no ledger entry tracks it."
+
+[[menu]]
+title = "<b>A drop's point, proven on every lane</b>"
+star = false
+status = 'shipped'
+size = 'S'
+unblocks = 'the video editor'
+plan = 'docs/dnd-plan.md'
+scene = 'tools/scenes/dnd.steps'
+text = 'SHIPPED 2026-10-06 (f835b14b): <code>drag &lt;src&gt; to &lt;dst&gt; at N%</code> releases a drag N% of the way across its destination and <code>expect_drop_at</code> reads the x the backend delivered in the <code>dropped</code> occurrence, within ±5, on all four backends (docs/dnd-plan.md D1); the dnd scene drops at 25% and at 75% and <code>validate-all --only dnd</code> was ALL PASS, 43 legs on five lanes. Unblocks the editor placing a clip at a time on a track. No card.'
+
+[[menu]]
+title = '<b>The video editor itself</b>'
+star = false
+status = 'held'
+size = 'XL'
+unblocks = 'the third forcing app'
+plan = 'docs/video-editor-plan.md'
+held = 'the maintainer is choosing user-facing features to build first (2026-10-06)'
+text = "in Rust (ruling 1, 2026-09-29), one screen at a time with its scenes shared verbatim (docs/video-editor-plan.md §6): the media bin, a timeline drawn on one canvas with filmstrips and waveforms from the reader, range trim handles, a playhead in timecode, and a program monitor that cuts between two players at the playhead. Composition and export are not promised (plan §8). XL. Every ruling in the plan's §7 is taken and every piece it names is built, the last two on 2026-10-05 and 10-06. Held: the maintainer wants more user-facing features before the editor starts (2026-10-06), and is choosing which."
+
+[[menu]]
+title = "<b>The far end of a call: the peer's picture and voice</b>"
+star = false
+status = 'open'
+size = 'L to XL'
+unblocks = "the chat app's calls"
+plan = 'docs/capture-plan.md'
+key = 'far end'
+plan_built_part = "the plan's Status names the depth and breadth of capture as built; §5's far end is the unbuilt part"
+text = "ruled 2026-10-02 (docs/capture-plan.md §5, §9 ruling 4) and not built: the surface widget taking the app's CPU frames for the peer's picture, and a voice output object playing the peer's samples on the same voice path as the capture, so the platform's echo canceller has its reference (Apple's voice-processing I/O, Android's voice-communication path, Windows' Communications category; on Linux only where the desktop loads PipeWire's echo-cancel module, a carve-out stated once). L to XL. The surface in frames mode is media-plan §7's next piece too, so this builds it once for both. Unblocks the chat app's calls."
+
+[[menu]]
+title = "<b>The chat app's calls stage</b>"
+star = false
+status = 'open'
+size = 'M'
+unblocks = "the chat app's calls"
+plan = 'docs/capture-plan.md'
+plan_built_part = "stage C10 is capture-plan §8; the plan's BUILT is capture itself"
+text = "accepted 2026-09-28 (stage C10, docs/capture-plan.md §8): a voice and video call from a conversation in the Go app, the self-preview, the device pickers, mute and camera off, the simulated peer answering with a test pattern and a tone through the app's loopback transport, and an incoming call as an ordinary notification; CallKit and Android's call service stay out. M once the far end is built."
+
+[[menu]]
+title = '<b>Six more languages on a phone</b>'
+star = true
+status = 'needs ruling'
+size = 'L'
+unblocks = "no app; the framework's own promise"
+text = "only Rust, Go and Python run on all five lanes (Java runs on Android and Swift on iOS, each on its own platform only); OCaml, Haskell and C are desktop-only and absent from Windows, JS is desktop-only by ruling. C# is the natural third mobile binding. S per language, L for the set; proves the bet the design rests on. Unblocks no app; it is the framework's own promise. No card: no ledger entry tracks it."
+
+[[menu]]
+title = '<a href="#item-collection_pipelines">Rows that hide and lists that filter themselves</a>'
+star = true
+status = 'needs ruling'
+size = 'M'
+unblocks = 'search in the portfolio and the task manager'
+key = 'filtered view'
+text = "one hole under two ledger entries: no visible prop and no derived collection, so an app with a search box hand-writes a shadow reconciler (the portfolio and the task manager's search both do). The chat app searched its thread by jumping between matches and did not need it, so no demo app waits on it now. M. Fork to rule first: a derived collection stamped like a For, or a hide-without-forgetting prop (DESIGN.md prefers the prop)."
+
+[[menu]]
+title = '<a href="#item-restoration">Session restoration</a> and <a href="#item-bookmarks">durable file references</a>'
+star = true
+status = 'needs ruling'
+size = 'L'
+unblocks = 'every document app'
+key = 'Session restoration'
+text = "nothing restores an app the way the user left it, and a picked file cannot be reopened next launch. L; needs a design pass first, since the backends hold state the core never sees. Unblocks every document app, the editor's recent projects among them."
+
+[[menu]]
+title = '<b>The residue pass</b>'
+star = false
+status = 'open'
+size = 'S each'
+unblocks = 'no app'
+key = 'first line box'
+text = "S each: the checkbox that reads a touch high beside a title's first line on Android, iOS and Windows (deferred 2026-09-24; cap-height centring is the candidate), the Windows launchers derivation, the iOS typeface observation stub, the Windows dnd_java drag face, WinUI swipe items drawn as text only (SwipeItem takes an IconSource, which kaya does not lower symbols to yet), the Android save dialog's cancel door (instrumented 2026-09-28, a90e051c), the colour picker's panel scene (<code>pick_color</code>), capture's C floor parsers, and the iOS media session's remote pause seen once leaving the player playing, whose bundle could not say why. Two need a ruling first: how wide a number field is, and what a C# or Java host does when asked for a scene it does not carry."
+
+[[demo]]
+name = 'The text editor'
+grp = 'docs/editor-plan.md; written in Go on purpose, the first forcing app'
+shipped = 'everything it asked for: a textarea with find, highlight and select, undo, file dialogs, clipboard, menus and shortcuts, dirty titles, the toolbar'
+waits = 'nothing'
+then_tier = 'shipped'
+then = ''
+
+[[demo]]
+name = 'The portfolio dashboard'
+grp = 'docs/portfolio-plan.md; Python, the second forcing app'
+shipped = 'everything it asked for: sortable tables virtualized to 100k rows, charts drawn on the canvas, panes, the transactions view, currency formatting'
+waits = 'nothing on the desktops; the phones wait on Python packaging'
+then_tier = 'shipped'
+then = ''
+
+[[demo]]
+name = 'The task manager'
+grp = 'docs/tasks-plan.md; Todoist, Things 3'
+shipped = 'everything it asked for: collections with reorder, pickers, navigation, sections and badges, drag and drop, undo, menus, adaptive list-detail, notifications, the search field, the quick-add sheet, the catalog in Arabic and German, 200% text'
+waits = 'nothing'
+then_tier = 'shipped'
+then = ''
+
+[[demo]]
+name = 'The chat app'
+grp = 'docs/chat-plan.md; Slack, Signal'
+shipped = "everything it asked for: the submitted occurrence, scroll-to, tints on a filled container, a scroll that follows its end, a growing composer with icon-only buttons, notifications that open a conversation and take a reply, the unread count on the app's icon, the emoji picker, photo attachments, swipe actions, search inside a thread, and a queue for a dropped connection"
+waits = "nothing for what it shipped. Calls, accepted 2026-09-28 (a voice and video call from a conversation, a live self-preview, a choice of camera and microphone, the simulated peer answering with a test pattern and a tone, an incoming call as an ordinary notification): camera and microphone capture shipped 2026-10-03 and audio playback 2026-09-30; what is left is the far end (docs/capture-plan.md §5), the surface taking the app's frames for the peer's picture and a voice output object with the platform's echo cancelling for the peer's voice, neither built, then stage C10. The real webcam and microphone are tried by the maintainer by hand on his laptop."
+then_tier = 'shipped'
+then = ', calls next after the far end'
+
+[[demo]]
+name = 'The video editor'
+grp = 'docs/video-editor-plan.md, the ratified third forcing artifact'
+shipped = "canvas with an image op, horizontal scroll, fullscreen, the number field with one typed-number rule and the timecode formatter, the colour picker, the range and vertical slider, the media player and video view with audio, captions and the media session, the media reader's filmstrips and waveforms, sliders with step, ticks and the committed value, drag and drop (row reorder with its insertion indicator and auto-scroll, cross-app drags on the desktops, a drop's point read on every lane), undo, pickers, file dialogs and picked-file reads, collections and tables, sheets"
+waits = "nothing built: every ruling in the plan's §7 is taken, the app's language Rust. It is held while the maintainer picks user-facing features to build first (2026-10-06)"
+then = 'the app one screen at a time (XL), when the maintainer picks it'
+
+[[proposed]]
+name = '1. A media player'
+grp = 'VLC, Music'
+forces = 'audio playback, the <code>video</code> kind, fullscreen, media keys and Now Playing, playback that continues in the background, captions'
+shares = "the video editor's monitors and its audio track; horizontal scroll for a queue"
+size = 'M: its pieces shipped 2026-09-28 to 10-01 (the player with audio, the video view, fullscreen, captions, media keys and Now Playing, background audio on iOS); the app is what is left'
+
+[[proposed]]
+name = '2. A feed reader'
+grp = 'NetNewsWire, GNOME Feeds'
+forces = 'OS-scheduled background refresh, app lifecycle signals, a tree of folders, rich text with links for the article'
+shares = "the chat app's notifications and search"
+size = 'L to XL: background work is the new subsystem'
+
+[[proposed]]
+name = '3. A password manager'
+grp = 'Bitwarden, 1Password'
+forces = 'secure entry, biometrics and the keychain, lock on idle through lifecycle signals, a clipboard that clears itself'
+shares = "the reader's lifecycle signals"
+size = 'L: every piece is a system surface'
+
+[[proposed]]
+name = '4. A photo gallery'
+grp = 'Loupe, Apple Photos'
+forces = 'pinch and rotate gestures, fullscreen, file associations, the camera through capture (shipped 2026-10-03) beside the shipped photo picker'
+shares = 'horizontal scroll and fullscreen with the editor'
+size = 'L'
+
+[[archetype]]
+name = 'Task manager'
+grp = 'Todoist, Things 3, GNOME Errands'
+has = 'keyed collections with reorder, checkbox, date and time pickers, navigation, sidebar sections, drag and drop, undo, menus, adaptive list-detail'
+blocked = 'nothing: notifications, the search field and badges shipped September 6 to 8'
+blockers = []
+
+[[archetype]]
+name = 'Settings-heavy utility'
+grp = '22% of the GNOME catalogue'
+has = 'every form control but the switch, sections, adaptive layout, brand tier'
+blocked = 'nothing: the switch, the search field, settings persistence and localization with the text scale shipped, the last on 2026-09-24'
+blockers = []
+
+[[archetype]]
+name = 'Dashboard / data tool'
+grp = 'TablePlus, GNOME Resources, Graphs'
+has = 'sortable tables virtualized to 100k rows, canvas charts drawn by hand, panes'
+blocked = 'tree view, a chart vocabulary'
+blockers = ['tree', 'charts']
+
+[[archetype]]
+name = 'Notes / text editor'
+grp = 'Obsidian, Apple Notes, Apostrophe'
+has = 'textarea with find, highlight and select, undo, file dialogs, clipboard, menus, dirty titles'
+blocked = 'tree sidebar, spellcheck, session restoration (rich text and the search field shipped)'
+blockers = ['tree', 'spellcheck', 'restoration']
+
+[[archetype]]
+name = 'Chat / messaging'
+grp = 'Slack, Discord, Signal'
+has = 'the chat app: tints on a filled container, a thread that follows its end, a growing composer, notifications with a reply field, the icon badge, the emoji picker, photo attachments, swipe actions, thread search, a reconnect queue'
+blocked = "nothing for text chat; calls wait on the far end (the peer's picture and voice), voice notes later"
+blockers = []
+
+[[archetype]]
+name = 'Mobile commerce'
+grp = 'storefront and catalogue apps'
+has = 'grids, images, navigation, adaptive layout, date pickers'
+blocked = 'nothing for the storefront: horizontal scroll shipped 2026-09-28, after the search field, badges, app links, sheets and currency formatting; the payment webview later'
+blockers = []
+soft = ['webview']
+
+[[archetype]]
+name = 'File manager / sync client'
+grp = 'Nautilus, Syncthing clients'
+has = 'context menus, drag and drop, file dialogs, progress'
+blocked = 'tree view, background work (the search field and notifications shipped); the tray for the sync sub-kind later'
+blockers = ['tree', 'background']
+soft = ['tray']
+
+[[archetype]]
+name = 'Reader'
+grp = 'NetNewsWire, GNOME Feeds, e-book readers'
+has = 'sections, list-detail, images, scroll'
+blocked = 'background refresh (rich text with hyperlinks, the search field and dynamic type shipped)'
+blockers = ['background']
+
+[[archetype]]
+name = 'Photo viewer / gallery'
+grp = 'Loupe, Apple Photos'
+has = 'image, grid, scroll, file dialogs, canvas for light edits'
+blocked = 'file associations (fullscreen, horizontal scroll, the photo picker and the camera shipped)'
+blockers = ['file_assoc']
+
+[[archetype]]
+name = 'Developer tool'
+grp = 'TablePlus, Postman, git clients'
+has = 'panes to three columns, textarea with find, auxiliary windows, menus and shortcuts'
+blocked = 'tree view, syntax-highlighted text, document tabs, restoration, auto-update'
+blockers = ['tree', 'doctabs', 'restoration', 'auto_update']
+
+[[archetype]]
+name = 'Video editor'
+grp = 'the ratified third forcing artifact (docs/video-editor-plan.md)'
+has = "canvas with an image op, sliders with steps and ticks, the range, drag and drop, undo, pickers, the media player and video view, the media reader, horizontal scroll, the number field with the timecode formatter, a drop's point, the colour picker, fullscreen"
+blocked = "nothing: the timecode formatter (2026-10-05) and the drop point (2026-10-06) shipped; the app waits on the maintainer's choice of what comes first"
+blockers = []
+
+[[archetype]]
+name = 'Password manager'
+grp = 'Bitwarden, 1Password'
+has = 'collections, clipboard, sections, navigation'
+blocked = 'secure entry, biometrics and secure storage, idle lock, QR reading over the camera, auto-update'
+blockers = ['secure_entry', 'biometrics', 'lifecycle', 'auto_update']
+
+[[archetype]]
+name = 'Media player'
+grp = 'VLC, Music'
+has = 'sliders, menus, file dialogs, the media player with audio and video, fullscreen, captions, background audio on iOS, media keys and Now Playing'
+blocked = 'nothing for playback; file associations later'
+blockers = []
+soft = ['file_assoc']
+
+[[archetype]]
+name = 'Email client'
+grp = 'Thunderbird, Geary'
+has = 'list-detail panes, file dialogs, clipboard'
+blocked = 'HTML rendering (webview), tree, spellcheck, mailto (rich text editing, search, notifications and badges shipped)'
+blockers = ['webview', 'tree', 'spellcheck']
+
+[[archetype]]
+name = 'Mobile fitness'
+grp = 'workout and health trackers'
+has = 'date pickers, canvas, adaptive layout'
+blocked = 'a chart vocabulary, background work, haptics (notifications shipped); maps and health APIs stay outside'
+blockers = ['charts', 'background', 'haptics']
+
+[[calibration]]
+what = 'Tooltips (`help`)'
+shape = 'universal prop'
+dates = '2026-09-04 to 09-05'
+days = '1'
+note = 'native on the three desktops; phones publish the text as the AX hint; iPad measured drawing none'
+
+[[calibration]]
+what = 'Sliders (step, ticks, committed value)'
+shape = 'two props + one occurrence + a verb'
+dates = '2026-09-04'
+days = '1'
+note = 'native everywhere; iOS needed its own tick strip'
+
+[[calibration]]
+what = 'Date and time pickers'
+shape = 'two kinds'
+dates = '2026-09-03 to 09-04'
+days = '1.5'
+note = 'native everywhere; the GTK time field had to be composed from a spin row'
+
+[[calibration]]
+what = 'Drag and drop'
+shape = 'system surface (source, target, reorderable)'
+dates = '2026-09-02 to 09-03'
+days = '2'
+note = 'four platform models; cross-app drags on the desktops; phones take in-app and files only'
+
+[[calibration]]
+what = 'Canvas'
+shape = 'new kind + core rasterizer'
+dates = '2026-08-26 to 08-28'
+days = '3'
+note = 'kaya rasterizes, backends blit; the size policy and frame drive rode the same slice'
+
+[[calibration]]
+what = 'Undo and redo'
+shape = 'core-owned subsystem'
+dates = '2026-08-04 to 08-05'
+days = '2'
+note = 'one log of the transactions the core already materializes'
+
+[[calibration]]
+what = 'Clipboard'
+shape = 'system surface'
+dates = '2026-08-02 to 08-04'
+days = '3'
+note = 'synchronous on two platforms and asynchronous on one, so the API is async-shaped'
+
+[[calibration]]
+what = 'File dialogs (open)'
+shape = 'system surface'
+dates = '2026-07-28 to 07-31'
+days = '4'
+note = 'the first system surface; results are handles, since two platforms have no paths'
+
+[[calibration]]
+what = 'Save dialog'
+shape = 'system surface'
+dates = '2026-08-09 to 08-10'
+days = '2'
+note = "rode the open dialog's grammar"
+
+[[calibration]]
+what = 'Tables (columns, sort, virtualization to 100k rows)'
+shape = 'subsystem'
+dates = '2026-08-20 to 08-25'
+days = '5'
+note = 'iOS needed a synthesized tier and Android its grouped container'
+
+[[calibration]]
+what = 'Adaptive layout (breakpoints, size classes, folding)'
+shape = 'subsystem'
+dates = '2026-08-26 to 08-31'
+days = '4'
+note = "one wire record; the phones' own size classes are honoured"
+
+[[calibration]]
+what = 'Brand tier (accent, typeface, icons)'
+shape = 'three slices'
+dates = '2026-08-12 to 08-16'
+days = '3'
+note = 'one slot per slice, each with a platform trap that became a gate'
+
+[[calibration]]
+what = 'Menus and the command vocabulary'
+shape = 'subsystem'
+dates = '2026-07-23 to 07-24'
+days = '2'
+note = 'menubar, context menus, shortcuts, standard commands; chrome promotion on the phones'
+
+[[calibration]]
+what = 'JS/TS binding'
+shape = 'ninth binding'
+dates = '2026-09-01 to 09-02'
+days = '2'
+note = 'after a full design day; ruled desktop-only 2026-09-03'
+
+[[calibration]]
+what = 'Async dialogs (C#, Swift, Java, Rust)'
+shape = 'binding semantics, four typed bindings'
+dates = '2026-09-19 to 09-21'
+days = '2.5'
+note = 'one ruling (explicit scopes are atomic), then a tier per binding, each measured against the real binding before its executor was written'
+
+[[calibration]]
+what = 'Sheets'
+shape = 'root-hosting modal, a third surface kind'
+dates = '2026-09-21 to 09-22'
+days = '1.5'
+note = 'three unknowns measured before any arm; the GTK sheet had to be hosted inside an AdwApplicationWindow'
+
+[[calibration]]
+what = 'The compliance pass (text scale, mirroring, catalog and formatter door)'
+shape = 'a C API family in nine bindings, two knobs, three verbs, seven legs per lane'
+dates = '2026-09-21 to 09-24'
+days = '3'
+note = 'two days of design and twelve probes first; the review page then found three layout defects, each ruled and built the same day'
+
+[[calibration]]
+what = 'Flex cells, template align, the first line box'
+shape = 'one layout rule on four backends, three times'
+dates = '2026-09-24'
+days = '1'
+note = 'each rule measured through the layout trace on the lane that broke it before its arm was written; a rule is a day when the scene already exists'
+
+[[calibration]]
+what = 'Tints on a filled container'
+shape = 'a role and a closed colour vocabulary'
+dates = '2026-09-25'
+days = '1'
+note = "Windows' accent surface took three rounds of the maintainer's eye before it read as a surface"
+
+[[calibration]]
+what = 'The app icon badge'
+shape = 'one app-level call on five platforms'
+dates = '2026-09-25 to 09-26'
+days = '1'
+note = "each platform's own badge surface; iOS needs the real badge permission"
+
+[[calibration]]
+what = 'Swipe actions'
+shape = 'a prop on context items, one new verb'
+dates = '2026-09-26 to 09-27'
+days = '1.5'
+note = "Windows added the next day on the maintainer's ask; a touch tap too soon after a swipe never reaches the revealed button"
+
+[[calibration]]
+what = 'Notification reply'
+shape = "a system surface's second occurrence"
+dates = '2026-09-25 to 09-28'
+days = '3'
+note = 'probes first; Android runs the handler with no Activity; a cold reply on the mac found four faults only a platform-started launch shows'
+
+[[calibration]]
+what = 'The chat app (C0 to C9)'
+shape = 'a demo app over twelve framework pieces'
+dates = '2026-09-25 to 09-28'
+days = '4'
+note = 'design and rulings the first morning, then a piece per stage, each in nine bindings on five lanes with its own review'
+
+[[calibration]]
+what = 'Horizontal scroll'
+shape = 'a prop on an existing kind'
+dates = '2026-09-28'
+days = '0.5'
+note = "the arms were proved by the table's column scrolling; one gate for the sideways switch no scene could see"
+
+[[calibration]]
+what = 'Fullscreen'
+shape = 'a window prop and one occurrence'
+dates = '2026-09-28'
+days = '0.5'
+note = 'the phones hide their bars; GTK hides its header bar until the pointer reaches the top edge'
+
+[[calibration]]
+what = 'Number field'
+shape = "a new kind over the slider's props"
+dates = '2026-09-28'
+days = '0.5'
+note = 'the four platform parses it shipped with were replaced on 10-02 by one core rule, after a survey and a measurement on every platform'
+
+[[calibration]]
+what = 'Colour picker'
+shape = 'a new kind and a value type'
+dates = '2026-09-28 to 09-29'
+days = '0.5'
+note = "the platform's own surface everywhere but Android, which draws a small Material palette"
+
+[[calibration]]
+what = 'Range and the vertical slider'
+shape = 'a new kind and an axis on the slider'
+dates = '2026-09-29'
+days = '0.5'
+note = "two of the platform's sliders stacked, after a survey of about thirty-five toolkits"
+
+[[calibration]]
+what = 'Media (player, video view, session, captions, rows, test suite)'
+shape = "subsystem on each platform's own player"
+dates = '2026-09-29 to 10-01'
+days = '3'
+note = "research the first day reversed the headless design; the suite found a GStreamer deadlock and WinUI's audio track order"
+
+[[calibration]]
+what = 'The media reader'
+shape = "an object over each platform's decoders, a canvas op"
+dates = '2026-10-01 to 10-02'
+days = '1.5'
+note = 'a research pass priced each platform against FFmpeg first; GTK and WinUI hand kaya YCbCr and the core converts it'
+
+[[calibration]]
+what = 'Camera and microphone capture'
+shape = 'subsystem with a device per lane'
+dates = '2026-10-01 to 10-03'
+days = '2.5'
+note = "each lane's synthetic devices measured before its arm; the Windows VM needed a one-time virtual camera install and reboot"
+
+[[calibration]]
+what = 'Swift 6 guests'
+shape = 'language-mode migration, 52 guests'
+dates = '2026-09-18'
+days = '1'
+note = 'feasibility measured first; an app-thread custom executor replaced the @main respell'
+
+[[calibration]]
+what = "Timecode formatter (non-drop and drop-frame, the number field's <code>format</code>)"
+shape = "a formatter in the core's door and one prop in nine bindings"
+dates = '2026-10-04 to 10-06'
+days = '2'
+note = "depth and breadth inside a day (ac80e5c2, 15db3cda); the four built choices were accepted on 10-05 and the full matrix that recorded it green came on 10-06 (4afaccf9), after the evening's unrelated reds were fixed"
+
+[[calibration]]
+what = "A drop's point, read on every lane"
+shape = 'two harness verbs over a shipped occurrence, four backends'
+dates = '2026-10-06'
+days = '0.5'
+note = 'the <code>dropped</code> occurrence already carried the point; the work was a driver and a reader per backend and the ±5 band pinned in all three harnesses (f835b14b)'
+
+[[axis]]
+title = 'Need · 1 to 5'
+text = 'How many of fifteen app archetypes cannot ship without it, read against a 105-app corpus, the four vendor catalogues, Stack Overflow volume, issue votes in eleven frameworks and store or legal obligation.'
+
+[[axis]]
+title = 'Parity · 1 to 5'
+text = 'How many of the ten full toolkits (SwiftUI, Compose, Flutter, Qt, GTK4, WinUI 3, Avalonia, MAUI, React Native, Uno) ship it first-party, a package counting half; Electron, Tauri, egui, iced and Slint are in the matrix but do not set the bar. 5 means nine or ten.'
+
+[[axis]]
+title = 'Cost · S to XXL'
+text = "Calibrated on kaya's delivery record below, not guessed: a native-everywhere prop is a day, a system surface two to four, a subsystem with core semantics four to seven, the web platform weeks."
+
+[[tier]]
+id = 'shipped'
+lede = "Delivered since this page was first written on 2026-09-05, each with a review page and a matrix green on all five lanes. They came off the top of the order: the search field, the settings vocabulary (switch, badge, hyperlink, splash), notifications with the closed-app click, settings with window memory and the app's data, app links, and rich text (the editing surface, rich labels, named acts, the template zone), the compliance pass and sheets; then three the chat app pulled up from Later: the emoji picker, the badge on the app's icon and swipe actions on rows. From 2026-09-28 to 10-04 the video editor's pieces and media followed: horizontal scroll, fullscreen, the colour picker, the number field with its stepper, audio and video playback, and the camera, whose photo picker half shipped with the chat app and whose capture half on 2026-10-03. The timecode formatter and a drop's point followed on 2026-10-05 and 10-06, neither with a card of its own, and the full plain matrix was ALL PASS on 2026-10-06. Packaging shipped its first half and stays on hold for the second."
+
+[[tier]]
+id = 'now'
+lede = 'Need 4 or 5 at a cost of S or M, or need 5 at L. The three items that made up this tier on 2026-09-21 were the compliance pass, and it shipped on 2026-09-24: dynamic type, localization and RTL mirroring sit under Shipped now. Nothing else qualifies by the rule, so the next slice comes from the menu above, where the maintainer is choosing among user-facing features before the video editor; its three starred items need a ruling first.'
+
+[[tier]]
+id = 'next'
+lede = 'Need 4 at any cost up to XL, or need 3 when the slice is S or M and at least seven of ten toolkits ship it. These are the slices that open whole archetypes: the dashboard, the editor, the reader, commerce.'
+
+[[tier]]
+id = 'later'
+lede = 'Need 3 with a real cost, or need 2 and cheap. Each names the trigger that moves it up; none blocks an archetype the two tiers above do not already block.'
+
+[[tier]]
+id = 'hold'
+lede = "Need 2 or less with a carve-out or a subsystem's cost, plus the rows kept for honesty: already shipped in substance, or refused by DESIGN. Nothing here is proposed."
+
+[[source]]
+href = 'https://github.com/smasher164/kaya/blob/main/docs/probes/roadmap-app-needs-2026-09-05.md'
+title = 'The app-needs survey (15 archetypes, 7 evidence sources, 60-row ranking)'
+why = "the need column's record; every number above is cited there"
+
+[[source]]
+href = 'https://github.com/smasher164/kaya/blob/main/docs/probes/roadmap-framework-parity-2026-09-05.md'
+title = 'The framework parity survey (70 features x 15 frameworks, 730 sources)'
+why = "the parity column's record, one URL per cell"
+
+[[source]]
+href = 'https://developer.apple.com/design/human-interface-guidelines/components'
+title = 'Apple Human Interface Guidelines, Components'
+why = '64 components in 8 categories'
+
+[[source]]
+href = 'https://m3.material.io/components'
+title = 'Material 3 components'
+why = '45 component documents'
+
+[[source]]
+href = 'https://apps.gnome.org/'
+title = 'GNOME apps catalogue'
+why = 'the 105-app corpus the survey counted by hand'
+
+[[source]]
+href = 'https://gnome.pages.gitlab.gnome.org/libadwaita/doc/'
+title = 'libadwaita widget gallery'
+why = 'GNOME'
+
+[[source]]
+href = 'https://pub.dev/packages/flutter_local_notifications'
+title = 'flutter_local_notifications on pub.dev'
+why = '7,343 likes: the largest gap-filling package'
+
+[[source]]
+href = 'https://pub.dev/packages/flutter_native_splash'
+title = 'flutter_native_splash on pub.dev'
+why = '9,787 likes: the most-liked gap-filler'
+
+[[source]]
+href = 'https://github.com/flutter/flutter/issues/14330'
+title = 'Flutter issue #14330, code push'
+why = '1,239 votes; declined here on the record'
+
+[[source]]
+href = 'https://github.com/flutter/flutter/issues/41722'
+title = 'Flutter issue #41722, PlatformView on macOS'
+why = '463 votes; the native escape hatch'
+
+[[source]]
+href = 'https://github.com/JetBrains/compose-multiplatform/issues/344'
+title = 'Compose Multiplatform issue #344, data table'
+why = '134 votes; kaya ships it'
+
+[[source]]
+href = 'https://github.com/dotnet/maui/issues/6'
+title = '.NET MAUI issue #6, Transitions'
+why = '92 votes; the animations case'
+
+[[source]]
+href = 'https://learn.microsoft.com/en-us/windows/apps/publish/store-policies'
+title = 'Microsoft Store policies'
+why = '10.7 localization, 10.9 notifications'
+
+[[source]]
+href = 'https://eur-lex.europa.eu/eli/dir/2019/882/oj'
+title = 'Directive (EU) 2019/882, the European Accessibility Act'
+why = 'in force for apps since 28 June 2025'
+
+[[source]]
+href = 'https://developer.apple.com/documentation/swiftui/controls-and-indicators'
+title = 'SwiftUI controls and indicators'
+why = 'Apple'
+
+[[source]]
+href = 'https://developer.android.com/develop/ui/compose'
+title = 'Jetpack Compose'
+why = 'Google'
+
+[[source]]
+href = 'https://docs.flutter.dev/ui/widgets'
+title = 'Flutter widget catalog'
+why = 'Google'
+
+[[source]]
+href = 'https://doc.qt.io/qt-6/qtquickcontrols-index.html'
+title = 'Qt 6 Quick Controls'
+why = 'Qt Group'
+
+[[source]]
+href = 'https://learn.microsoft.com/en-us/windows/apps/design/controls/'
+title = 'WinUI 3 controls'
+why = 'Microsoft'
+
+[[source]]
+href = 'https://docs.avaloniaui.net/controls/'
+title = 'Avalonia controls (12.1)'
+why = 'Avalonia UI'
+
+[[source]]
+href = 'https://platform.uno/docs/articles/implemented-views.html'
+title = 'Uno Platform implemented views'
+why = 'Uno Platform'
+
+[[source]]
+href = 'https://learn.microsoft.com/dotnet/maui/'
+title = '.NET MAUI'
+why = 'Microsoft'
+
+[[source]]
+href = 'https://reactnative.dev/docs/components-and-apis'
+title = 'React Native components and APIs'
+why = 'Meta'
+
+[[source]]
+href = 'https://www.electronjs.org/docs/latest/api/'
+title = 'Electron API'
+why = 'OpenJS'
+
+[[source]]
+href = 'https://v2.tauri.app/plugin/'
+title = 'Tauri 2 plugins'
+why = 'Tauri'
+
+[[source]]
+href = 'https://docs.slint.dev/latest/docs/slint/'
+title = 'Slint reference'
+why = 'with egui and iced; iced 0.14 shipped the day before the survey'

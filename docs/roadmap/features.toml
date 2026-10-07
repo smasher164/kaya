@@ -1,0 +1,1078 @@
+# Research data behind the roadmap page, rendered by tools/roadmap.py (docs/HACKING.md, Roadmap).
+# lanes: macOS iOS Linux Windows Android; N native, S synthesized, C carve-out, x not on that form factor.
+# tier/tier_reason: placed by hand; without them the tier follows tools/roadmap.py's rule.
+
+[[feature]]
+slug = 'search_field'
+name = 'Search field'
+group = 'Controls'
+need = 5
+parity = 5
+cost = 'S'
+lanes = 'NNNNN'
+need_why = 'must-have in 11 of 15 archetypes; 30% of 105 GNOME apps; in all four vendor catalogues and all nine Electron apps checked'
+parity_why = 'first-party in 8 of 10 full toolkits, reachable in 10'
+shape = 'role on entry'
+kaya = 'NSSearchField / .searchable, SearchBar, GtkSearchEntry, AutoSuggestBox. A `role` on entry; the clear affordance and the magnifier come from the platform.'
+shipped = true
+shipped_note = '2026-09-06 (7b228406, fe1e93e2): kind 19, a role on entry, native on every lane; clears one way'
+
+[[feature]]
+slug = 'hyperlink'
+name = 'Hyperlink label'
+group = 'Controls'
+need = 4
+parity = 5
+cost = 'S'
+lanes = 'NNNNN'
+need_why = 'plain hyperlinks are shipped by all four Rust natives, so kaya is the outlier; readers, chat, mail, about screens'
+parity_why = 'first-party in 10 of 10 full toolkits, reachable in 10'
+shape = 'role on label + a `url` prop'
+kaya = "Link, ClickableText/LinkAnnotation, GtkLinkButton, HyperlinkButton. Opening the URL is the platform's own openURL."
+shipped = true
+shipped_note = "2026-09-07 (b8be1a25): a link in a task's notes, the platform's own open"
+
+[[feature]]
+slug = 'switch'
+name = 'Toggle switch'
+group = 'Controls'
+need = 4
+parity = 5
+cost = 'S'
+lanes = 'NNNNN'
+need_why = 'in all four vendor catalogues; the settings archetype is 22% of the GNOME catalogue and a checkbox is not a switch on either phone'
+parity_why = 'first-party in 10 of 10 full toolkits, reachable in 10'
+shape = 'prop or role on checkbox'
+kaya = 'Every toolkit draws a switch beside its checkbox (Toggle .switch, Switch, GtkSwitch, ToggleSwitch, Switch). A `role` on checkbox, not a kind: same semantics, one bit of presentation.'
+shipped = true
+shipped_note = "2026-09-07 (b8be1a25): a role on checkbox; the task manager's Settings screen"
+
+[[feature]]
+slug = 'badge'
+name = 'Badge / count on a section or button'
+group = 'Controls'
+need = 4
+parity = 4
+cost = 'S'
+lanes = 'NNNNN'
+need_why = 'must-have in 4, should-have in 4; Stack Overflow 903; unread counts in every chat and mail app'
+parity_why = 'first-party in 6 of 10 full toolkits, reachable in 9'
+shape = 'prop on section and button'
+kaya = '.badge on tab items, BadgedBox, AdwViewStackPage badge_number, InfoBadge. A number or a short string; zero hides it.'
+shipped = true
+shipped_note = '2026-09-07 (b8be1a25): the Today count on the section'
+
+[[feature]]
+slug = 'dynamic_type'
+name = 'Dynamic type / font scaling'
+group = 'Text and i18n'
+need = 4
+parity = 4
+cost = 'S'
+lanes = 'NNNNN'
+need_why = "compliance: Apple's Accessibility Nutrition Labels ('Larger Text') becoming mandatory; WCAG 1.4.4 through the EAA"
+parity_why = 'first-party in 7 of 10 full toolkits, reachable in 8'
+shape = 'verification scene + gate'
+kaya = "Free where kaya uses the platform's text styles, which it does. Owed: a scene at the largest accessibility size proving nothing clips, on the two phones especially. The App Store review expects it."
+shipped = true
+shipped_note = "2026-09-21 to 09-24 (bf3ae678, e5e6197c, 16fc8139, f1fe4924, 86348fe4, 6048838a): KAYA_TEXT_SCALE legs at 200% on the four lanes that have a text size (macOS has none, R4), expect_no_clipping's three clauses, and the two layout rules the captures asked for (880fe020, 24ae2bdc)"
+
+[[feature]]
+slug = 'l10n'
+name = 'Localization (string tables, plurals)'
+group = 'Text and i18n'
+need = 4
+parity = 5
+cost = 'M'
+lanes = 'NNNNN'
+need_why = "compliance: store policy 10.7; the strings are the app's, the number, date and currency formatting is kaya's"
+parity_why = 'first-party in 8 of 10 full toolkits, reachable in 10'
+shape = 'guest-side; framework proves formatting'
+kaya = "Strings are the app's; nine languages have their own catalog idioms. What kaya owes is locale-aware number/date formatting in the pickers and labels, and a ruling on whether the core formats at all."
+shipped = true
+shipped_note = "2026-09-21 to 09-24 (c0d4a57c, bf3ae678, 86348fe4, bea05668): kaya owns the catalog, Fluent on the asset root resolved in the core, and a six-call formatter door in all nine bindings over the platform's own formatters; the task manager speaks Arabic and German; one clock leg per lane flips 24-hour time through the OS setting"
+
+[[feature]]
+slug = 'rtl'
+name = 'RTL mirroring and locale-aware layout'
+group = 'Text and i18n'
+need = 4
+parity = 5
+cost = 'M'
+lanes = 'NNNNN'
+need_why = 'compliance: Microsoft Store policy 10.7 and the EU Accessibility Act; chat is where RTL bites first'
+parity_why = 'first-party in 10 of 10 full toolkits, reachable in 10'
+shape = 'audit + a scene under an RTL locale'
+kaya = 'All four toolkits mirror automatically when the locale is RTL and kaya already spells `start`/`end`, so the work is proving it: a scene run under an RTL locale on every lane, and a gate refusing `left`/`right` spellings.'
+shipped = true
+shipped_note = '2026-09-21 to 09-24 (bf3ae678, e5e6197c, 16fc8139, f1fe4924): the tasksrtl scene under ar-EG on all five lanes, expect_direction and expect_mirrored, the sidebar and rows mirrored on every backend'
+
+[[feature]]
+slug = 'hscroll'
+name = 'Horizontal scroll axis'
+group = 'Motion'
+need = 3
+parity = 5
+cost = 'S'
+lanes = 'NNNNN'
+need_why = 'must-have in 3: carousels, filmstrips, timelines, wide tables'
+parity_why = 'first-party in 10 of 10 full toolkits, reachable in 10'
+shape = 'prop on scroll'
+kaya = "An axis prop on <code>scroll</code>; the table's own column scrolling had already proved the arms (docs/hscroll-plan.md)."
+shipped = true
+shipped_note = "2026-09-28 (0b2c8a0b): the <code>axis</code> a row and a column already take, now on a scroll, on five platforms and in nine bindings; a gate holds each backend's sideways switch, since GTK's vertical-only policy widened the window with every verb still passing · <a href=\"https://claude.ai/artifact/7EaiAAwfPvvoJ6Xd2aMukq\">review page</a>"
+
+[[feature]]
+slug = 'focus_order'
+name = 'Keyboard focus order control'
+group = 'Motion'
+need = 3
+parity = 5
+cost = 'S'
+lanes = 'NNNNN'
+need_why = 'WCAG 2.4.3 through the EAA; iced still cannot tab between most widgets; kaya has tree order and a focus command'
+parity_why = 'first-party in 9 of 10 full toolkits, reachable in 10'
+shape = 'already shipped (focus command; tree order)'
+kaya = 'Focus follows the tree on every platform and the `focus` command exists. Owed only if an app needs an order that differs from its tree.'
+tier = 'hold'
+tier_reason = 'already shipped as tree order plus the focus command; owed only if an app needs a different order'
+
+[[feature]]
+slug = 'scroll_to'
+name = 'Programmatic scroll-to'
+group = 'Motion'
+need = 3
+parity = 5
+cost = 'S'
+lanes = 'NNNNN'
+need_why = 'jump-to-unread in every list app; Flutter #19941 (172) and #65504 (226)'
+parity_why = 'first-party in 10 of 10 full toolkits, reachable in 10'
+shape = 'widget command'
+kaya = 'SHIPPED 2026-09-24 (b3b6098b, docs/scroll-to-plan.md): `scroll_to_row(container, key)` in all nine bindings on four backends, held until the first layout, instant, silent on a missing key; <a href="https://claude.ai/artifact/Pqsu3AZ1GFpuJBi4BqYU4j">the review page</a>. · <a href="https://github.com/smasher164/kaya/blob/6205d9c8/docs/deferred.md#L1865">ledger line 1865</a>'
+shipped = true
+
+[[feature]]
+slug = 'secure_entry'
+name = 'Secure (password) entry'
+group = 'Controls'
+need = 3
+parity = 5
+cost = 'S'
+lanes = 'NNNNN'
+need_why = 'every login screen; shipped by all four of MAUI, egui, iced and Slint, so kaya is the outlier; tiny to build'
+parity_why = 'first-party in 10 of 10 full toolkits, reachable in 10'
+shape = 'prop on entry'
+kaya = 'SecureField, PasswordVisualTransformation, GtkPasswordEntry, PasswordBox. One boolean prop; the read-back verb must not print the text.'
+
+[[feature]]
+slug = 'splash'
+name = 'Splash screen / launch appearance'
+group = 'System'
+need = 4
+parity = 3
+cost = 'S'
+lanes = 'xNxxN'
+need_why = 'flutter_native_splash is the most-liked gap-filling package on pub.dev (9,787); every shipped phone app has one'
+parity_why = 'native on both phones; Flutter, React Native and MAUI configure it; the desktops have no concept'
+shape = 'identity.toml slot, applied by the two mobile packagings'
+kaya = 'iOS requires a launch storyboard and Android 12 has the SplashScreen API; the desktops have none. One slot beside the icon in the identity manifest, checked by check-app-identity the way the icon is.'
+shipped = true
+shipped_note = '2026-09-07 (b8be1a25): the launch slot from identity.toml on both phones'
+
+[[feature]]
+slug = 'notifications'
+name = 'Local notifications'
+group = 'System'
+need = 5
+parity = 4
+cost = 'L'
+lanes = 'NNNNN'
+need_why = 'must-have in 6 archetypes; flutter_local_notifications is the largest gap-filling package (7,343 likes); Microsoft Store policy 10.9; the native trackers did not surface it'
+parity_why = 'first-party in 3 of 10 full toolkits, reachable in 10'
+shape = 'system surface'
+kaya = 'UNUserNotificationCenter (mac and iOS), NotificationManager with the Android 13 runtime permission, GNotification/libnotify, AppNotificationManager. One request record and one occurrence (the user activated it); the permission prompt is the divergent half. · <a href="https://github.com/smasher164/kaya/blob/6205d9c8/docs/deferred.md#L1742">ledger line 1742</a>'
+shipped = true
+shipped_note = "2026-09-08 (891ad047, 4701a23a): local notifications with a scheduled `at` on five platforms, and S9's closed-app click through each platform's own door · <a href=\"https://claude.ai/code/artifact/a080246e-fc05-455d-a95a-13ecca075598\">review page</a>"
+
+[[feature]]
+slug = 'settings'
+name = 'Settings persistence (preferences store)'
+group = 'Core'
+need = 4
+parity = 4
+cost = 'M'
+lanes = 'NNNNN'
+need_why = 'every archetype stores preferences; shared_preferences is a top-10 pub.dev package; MAUI appsettings 47 votes'
+parity_why = "UserDefaults, SharedPreferences, QSettings, GSettings, ApplicationData, MAUI Preferences; Flutter's shared_preferences is a top-10 package"
+shape = 'core-owned key-value store'
+kaya = 'UserDefaults, SharedPreferences/DataStore, GSettings or a keyfile, ApplicationData.LocalSettings. The core owns state at rest already; a `preferences` record with typed values is where window memory and restoration would store too, and nine bindings stop re-deriving it.'
+shipped = true
+shipped_note = "2026-09-09 (2e25b603): a typed prefs() store on the platform's own backing, app_data_dir() with the app's data in SQLite · <a href=\"https://claude.ai/code/artifact/1e2411f6-ac7a-4dbc-a733-3fdda408afda\">review page</a>"
+
+[[feature]]
+slug = 'packaging'
+name = 'Packaging, signing and distribution'
+group = 'Tooling'
+need = 5
+parity = 5
+cost = 'XL'
+lanes = 'NNNNN'
+need_why = 'no app ships without it; unanimous in parity; kaya builds its five artifacts and signs, installs or submits none'
+parity_why = 'first-party in 10 of 10 full toolkits, reachable in 10'
+shape = 'per-platform pipelines'
+kaya = "kaya builds the five artifacts its lanes run; signing, notarization, installers (dmg, msix, flatpak) and store submission are unbuilt. The ledger's at-release list and the ratified mobile-packaging design are the record. · <a href=\"https://github.com/smasher164/kaya/blob/6205d9c8/docs/deferred.md#L3667\">ledger line 3667</a>"
+tier = 'next'
+tier_reason = 'need 5 and cost XL: the release milestone, already ratified for the phones'
+
+[[feature]]
+slug = 'fullscreen'
+name = 'Fullscreen toggle'
+group = 'System'
+need = 3
+parity = 4
+cost = 'S'
+lanes = 'NNNNN'
+need_why = 'must-have in 3: media, photo, reader and editor; Stack Overflow 536'
+parity_why = 'first-party in 7 of 10 full toolkits, reachable in 9'
+shape = 'window command'
+kaya = 'toggleFullScreen, gtk fullscreen(), FullScreenPresenter; on the phones the status and navigation bars hide (docs/fullscreen-plan.md).'
+shipped = true
+shipped_note = '2026-09-28 (aa6493e4, e111eb62): a <code>fullscreen</code> window prop the app writes and an event when the user changes it, on five platforms and in nine bindings; immersive mode on the phones, F11 on Linux and Windows, and GTK hiding its header bar until the pointer reaches the top edge, as GNOME Web does (7bdda964) · <a href="https://claude.ai/artifact/1kpb8bL46DbjMobLkiBai6">review page</a>'
+
+[[feature]]
+slug = 'nav_sugar'
+name = 'Navigation sugar remainder (pop to root, signal-bound titles)'
+group = 'Bindings'
+need = 3
+parity = 4
+cost = 'S'
+lanes = 'NNNNN'
+need_why = 'any app with a deep stack; pop-to-root after a save'
+parity_why = 'pop-to-root is on most navigation stacks (NavigationStack path, NavController popBackStack, Frame.GoBack)'
+shape = 'binding sugar'
+kaya = 'The wire has pop_entry; pop(n) and pop_to_root are sugar plus the stack mirror each binding keeps. · <a href="https://github.com/smasher164/kaya/blob/6205d9c8/docs/deferred.md#L1935">ledger line 1935</a>'
+
+[[feature]]
+slug = 'reduced_motion'
+name = 'Reduced motion / high contrast honoured'
+group = 'Text and i18n'
+need = 3
+parity = 4
+cost = 'S'
+lanes = 'NNNNN'
+need_why = "compliance only: Apple's labels and WCAG 2.3.3; nobody has ever filed for it in any native tracker"
+parity_why = 'first-party in 5 of 10 full toolkits, reachable in 9'
+shape = 'follows the platform'
+kaya = 'kaya animates nothing of its own, so today this is free; it becomes real work the day animations land.'
+tier = 'later'
+tier_reason = 'free until kaya animates; moves up with the animations slice'
+
+[[feature]]
+slug = 'component_fns'
+name = 'Component functions as the reusable unit'
+group = 'Bindings'
+need = 3
+parity = 5
+cost = 'M'
+lanes = 'NNNNN'
+need_why = 'every app past one screen wants a reusable unit; mostly a ruling for the typed bindings'
+parity_why = 'a reusable component unit is universal across the declarative toolkits'
+shape = 'ratification for the typed bindings'
+kaya = "Solid's model; slot proxies are the function signature. Mostly a ruling and a sweep across nine bindings. · <a href=\"https://github.com/smasher164/kaya/blob/6205d9c8/docs/deferred.md#L1921\">ledger line 1921</a>"
+
+[[feature]]
+slug = 'ime'
+name = 'IME / composition contract'
+group = 'Text and i18n'
+need = 3
+parity = 5
+cost = 'M'
+lanes = 'NNNNN'
+need_why = "cross-cutting: every text app in CJK markets; electron #33662 (86); kaya's native entries compose today, but no scene proves it"
+parity_why = 'first-party in 9 of 10 full toolkits, reachable in 10'
+shape = 'entry follow-up'
+kaya = 'Ledgered as the Windows entry follow-up: the harness types committed text, so composition (CJK, dead keys) is exercised by no scene. · <a href="https://github.com/smasher164/kaya/blob/6205d9c8/docs/deferred.md#L2852">ledger line 2852</a>'
+
+[[feature]]
+slug = 'text_layout'
+name = 'Text layout controls (line limit, ellipsis position, hyphenation)'
+group = 'Controls'
+need = 3
+parity = 5
+cost = 'M'
+lanes = 'NNNNN'
+need_why = 'Flutter soft hyphenation (305) plus ellipsis position (210): larger than any single widget ask there'
+parity_why = 'lineLimit and truncation, maxLines and overflow, Pango ellipsize, TextTrimming: every backend'
+shape = 'props on label'
+kaya = "lineLimit and truncationMode, maxLines and overflow, Pango ellipsize, TextTrimming and MaxLines. Every backend has them; kaya's label wraps freely and clips nowhere on purpose, so a two-line clamp in a list row is not spellable."
+
+[[feature]]
+slug = 'lifecycle'
+name = 'App lifecycle and idle signals'
+group = 'Core'
+need = 3
+parity = 4
+cost = 'M'
+lanes = 'NNNNN'
+need_why = "auto-lock on idle, pause in the background, wake on resume; MAUI's cross-platform lifecycle spec (45 votes); kaya has no lifecycle surface at all"
+parity_why = "scenePhase, the Android lifecycle, Qt's applicationStateChanged, MAUI lifecycle events; GTK partial"
+shape = 'occurrences (background, foreground, idle)'
+kaya = "scenePhase, the Android lifecycle, NSApplication's notifications, WinUI activation, GTK's window state. A password manager auto-locks on idle, a player pauses in the background, a sync client wakes on resume; kaya has no lifecycle surface at all."
+
+[[feature]]
+slug = 'color_picker'
+name = 'Colour picker'
+group = 'Controls'
+need = 3
+parity = 4
+cost = 'M'
+lanes = 'NNNNS'
+need_why = 'should-have in 5; Stack Overflow 629; flutter_colorpicker 1,024 likes; 6% of GNOME apps'
+parity_why = 'first-party in 6 of 10 full toolkits, reachable in 10'
+shape = 'new kind'
+kaya = 'ColorPicker (mac and iOS), GtkColorDialogButton, WinUI ColorPicker; Compose has none in Material 3 and synthesizes one.'
+shipped = true
+shipped_note = "2026-09-28 (5e148d38, cfc4825d, 62f271a0): one swatch opening the platform's own picker, a small Material palette on Android, the value a packed sRGB colour, the app hearing settled choices only · <a href=\"https://claude.ai/artifact/79MLwMNtCeF251RFGmuikh\">review page</a>"
+
+[[feature]]
+slug = 'expander'
+name = 'Disclosure / expander'
+group = 'Controls'
+need = 3
+parity = 4
+cost = 'M'
+lanes = 'NNNNS'
+need_why = "settings groups, inspectors; Apple's disclosure controls and Adw's expander row are in their catalogues"
+parity_why = 'DisclosureGroup, AdwExpanderRow, WinUI Expander, ExpansionTile; Compose composes one from AnimatedVisibility'
+shape = 'prop on column (collapsible, titled)'
+kaya = 'DisclosureGroup, AdwExpanderRow, WinUI Expander; Compose synthesizes with AnimatedVisibility. In nearly every catalogue; small.'
+
+[[feature]]
+slug = 'doctabs'
+name = 'Document tabs (dynamic, closable)'
+group = 'Presentation'
+need = 3
+parity = 4
+cost = 'M'
+lanes = 'NNNNN'
+need_why = "VS Code, Notion, Obsidian, Postman; MAUI tabbed windows (30 votes); kaya's sections cover the fixed-set half"
+parity_why = 'NSWindow tabbing, AdwTabBar, WinUI TabView, Material tabs; egui and iced compose their own'
+shape = 'window prop: a tab strip over pushed roots'
+kaya = 'NSWindow tabbing / TabView, AdwTabBar, WinUI TabView, Material tabs. Distinct from sections, which are a fixed set of app areas: these are opened and closed by the user, reordered by drag. An editor and a dev tool both want them.'
+
+[[feature]]
+slug = 'safe_area'
+name = 'Safe-area insets and keyboard avoidance'
+group = 'Motion'
+need = 3
+parity = 4
+cost = 'M'
+lanes = 'xNxxN'
+need_why = 'not scored by the survey; the chat composer at the bottom of a phone screen is the case'
+parity_why = 'every mobile-targeting toolkit; not a concept on the desktop-first ones'
+shape = 'scene proof + a scroll behaviour'
+kaya = 'SwiftUI and Compose (imePadding) avoid the keyboard when told; kaya reports iOS window metrics already. Owed: a scene with an entry at the bottom proving it stays visible with the keyboard up, on both phones.'
+
+[[feature]]
+slug = 'segmented'
+name = 'Segmented control'
+group = 'Controls'
+need = 3
+parity = 4
+cost = 'M'
+lanes = 'NNNNN'
+need_why = 'in three vendor catalogues; the weakest-evidence row at this score: no demand in any native tracker'
+parity_why = 'first-party in 5 of 10 full toolkits, reachable in 9'
+shape = 'presentation on radio group'
+kaya = 'Picker(.segmented), SegmentedButton, AdwToggleGroup (libadwaita 1.7), SelectorBar. A presentation of the radio group kaya already has, the way sections take `bar` or `sidebar`.'
+
+[[feature]]
+slug = 'toast'
+name = 'Toast / snackbar (the undo surface)'
+group = 'Presentation'
+need = 3
+parity = 4
+cost = 'M'
+lanes = 'SSNNN'
+need_why = "the 'saved, undo?' surface of the settings archetype; Material Snackbar and AdwToastOverlay"
+parity_why = 'first-party in Compose, Flutter, GTK, WinUI and Uno; Apple ships none, which is why the survey found it off-list'
+shape = 'presentation context'
+kaya = "AdwToast carries an undo action, WinUI has InfoBar and TeachingTip, Compose the Snackbar; Apple has no toast, so the two SwiftUI lanes draw kaya's own or map to a one-action alert. kaya's core-owned undo has no surface to offer 'Deleted. Undo?' on today."
+
+[[feature]]
+slug = 'animations'
+name = 'Animations and transitions'
+group = 'Motion'
+need = 4
+parity = 5
+cost = 'XL'
+lanes = 'NNSNN'
+need_why = "cross-cutting, so no archetype names it and every one has them; MAUI's top pure-feature request is Transitions (92 votes)"
+parity_why = 'first-party in 10 of 10 full toolkits, reachable in 10'
+shape = 'implicit animation on state change'
+kaya = 'withAnimation, animate*AsState, WinUI implicit animations; GTK has AdwAnimation and CSS transitions but no implicit layout animation. The uniform semantics is the hard part: one `animated` bit on a transaction.'
+
+[[feature]]
+slug = 'rich_text'
+name = 'Rich text editing (and rich labels)'
+group = 'Controls'
+need = 4
+parity = 5
+cost = 'XL'
+lanes = 'NNNNN'
+need_why = "must-have in 5; 12% of GNOME apps; Slint's highest open issue; the composer in every chat and mail client"
+parity_why = 'first-party in 10 of 10 full toolkits, reachable in 10'
+shape = 'a rich textarea with an addressed-edit protocol; labels second'
+kaya = 'AttributedString, AnnotatedString, Pango markup, RichTextBlock. The cost is choosing the subset (bold, italic, code, link) and one parser in the core; each arm maps to its own attributed type.'
+shipped = true
+shipped_note = "2026-09-11 to 2026-09-16 (2ec2748c, 5dfdcca7, 9fd9735c, 3011da1e, 8e247bf4): a rich textarea with the addressed-edit protocol and rich labels, native on every lane, in nine bindings; six named acts (bold, italic, underline, strike, code, link); the polish pass; the template zone, where a stamped row's document is a Blob field of its record; undo through blobs; the flight recorder grown on each red the slice met · <a href=\"https://claude.ai/code/artifact/caa7ca8b-b3d9-4de2-b9e6-cfe17023e2c6\">review page</a>"
+
+[[feature]]
+slug = 'sheet'
+name = 'Sheet / modal beyond the alert'
+group = 'Presentation'
+need = 4
+parity = 5
+cost = 'XL'
+lanes = 'NNNNN'
+need_why = 'Stack Overflow 1,525 for bottom sheet, the second-highest clean row; the standard secondary screen on mobile'
+parity_why = 'first-party in 10 of 10 full toolkits, reachable in 10'
+shape = 'root-hosting modal'
+kaya = "DESIGN names root-hosting modals as 'later'. .sheet, ModalBottomSheet/Dialog, AdwDialog, ContentDialog. A modal that hosts a kaya tree is a second root and a second window-like id space."
+shipped = true
+shipped_note = "2026-09-21 to 09-22 (9d7e5c6b, 6e1e77bf, ab31ec09, cda85275, 4af019b3): a sheet is a third surface kind in the id space beside windows, hosting a real scene root; .sheet, ModalBottomSheet, AdwDialog inside an AdwApplicationWindow, ContentDialog; the task manager's quick-add rides one"
+
+[[feature]]
+slug = 'haptics'
+name = 'Haptics'
+group = 'System'
+need = 2
+parity = 4
+cost = 'S'
+lanes = 'xNxxN'
+need_why = 'must-have in 1; the HIG pairs haptics with audio cues'
+parity_why = 'first-party in 6 of 10 full toolkits, reachable in 8'
+shape = 'app-level request'
+kaya = 'UIFeedbackGenerator, HapticFeedback. Phones only; a no-op elsewhere, stated.'
+
+[[feature]]
+slug = 'inspector'
+name = 'Inspector for a running tree'
+group = 'Tooling'
+need = 3
+parity = 5
+cost = 'L'
+lanes = 'NNNNN'
+need_why = 'developer need, not app need; eight of ten toolkits ship one'
+parity_why = 'first-party in 8 of 10 full toolkits, reachable in 10'
+shape = 'harness verb + viewer'
+kaya = "Eight of ten toolkits ship a live view-hierarchy inspector. kaya's harness already reads the tree on every lane; a dump verb plus a viewer page is the missing half."
+
+[[feature]]
+slug = 'background'
+name = 'OS-scheduled background work'
+group = 'System'
+need = 4
+parity = 3
+cost = 'L'
+lanes = 'NNNNN'
+need_why = 'must-have in 5, should-have in 4; 13% of GNOME apps; sync, refresh and record with the screen off'
+parity_why = 'first-party in 2 of 10 full toolkits, reachable in 7'
+shape = 'system surface (schedule + lifecycle)'
+kaya = 'The app-side half shipped 2026-07-28 (`post` and `kaya_wake`). What is missing is the OS half: BGTaskScheduler, WorkManager, Windows BackgroundTaskBuilder, and on the desktops simply staying alive when hidden; sync, refresh and record-with-screen-off need it.'
+
+[[feature]]
+slug = 'popover'
+name = 'Popover'
+group = 'Presentation'
+need = 3
+parity = 5
+cost = 'L'
+lanes = 'NNNNN'
+need_why = 'should-have in 4; an Apple idiom (SwiftUI Stack Overflow 316 vs Flutter 18); VS Code, Notion, Slack'
+parity_why = 'first-party in 8 of 10 full toolkits, reachable in 10'
+shape = 'presentation context'
+kaya = ".popover, Popup/DropdownMenu, GtkPopover, Flyout. iPhone shows a sheet instead by platform rule, which is the carve-out to state. Anchored to a widget; the alert grammar's one-live rule applies."
+
+[[feature]]
+slug = 'deep_links'
+name = 'URL schemes / deep links'
+group = 'System'
+need = 3
+parity = 5
+cost = 'L'
+lanes = 'NNNNN'
+need_why = 'must-have in 2, should-have in 4; tauri #323 (104 votes, shipped); mandatory for commerce'
+parity_why = 'first-party in 10 of 10 full toolkits, reachable in 10'
+shape = 'occurrence + packaging'
+kaya = 'An `opened_url` occurrence is small; registering the scheme lives in five packaging manifests, which is why it sits behind the packaging milestone.'
+shipped = true
+shipped_note = '2026-09-09 (f94353a5, 0851accb): declared routes matched once in the core, warm and cold doors on five platforms, a `*` catch-all; web links generated by shape and unmeasured for want of a served domain · <a href="https://claude.ai/code/artifact/e6495cf6-00cb-4fc3-8e8f-4505ad88e880">review page</a>'
+
+[[feature]]
+slug = 'number_field'
+name = 'Number / formatted field'
+group = 'Controls'
+need = 2
+parity = 5
+cost = 'M'
+lanes = 'NNNNN'
+need_why = 'must-have in 1 (timecode entry); Apple digit entry views, GTK spin button'
+parity_why = 'first-party in 7 of 10 full toolkits, reachable in 10'
+shape = 'new kind'
+kaya = 'TextField with a formatter, KeyboardType.Number, GtkSpinButton, NumberBox. The core owns the parse so the value is a number on the wire, not a string an app re-parses in nine languages.'
+shipped = true
+shipped_note = "2026-09-28 (60b0819a, 9cd33cf9): a number kind over the slider's value, min, max and step, committing on Return, focus loss or a step; since 2026-10-02 the typed text is read by one rule in the core on all five platforms (1b48083d). Open: the field's width, a ruling on the ledger · <a href=\"https://claude.ai/artifact/7RbsBbeymH5M8RYq9xHbeb\">review page</a>"
+
+[[feature]]
+slug = 'share'
+name = 'Share sheet'
+group = 'System'
+need = 3
+parity = 3
+cost = 'M'
+lanes = 'NNCNN'
+need_why = 'should-have in 10 of 15, the highest should-count of any feature; share_plus 4,023 likes'
+parity_why = 'first-party in 4 of 10 full toolkits, reachable in 7'
+shape = 'system surface'
+kaya = 'NSSharingServicePicker, UIActivityViewController, Intent.ACTION_SEND, DataTransferManager; GTK has no share sheet (the file portal is the nearest), a stated carve-out.'
+
+[[feature]]
+slug = 'tree'
+name = 'Tree view / outline'
+group = 'Controls'
+need = 4
+parity = 4
+cost = 'XL'
+lanes = 'NNNNS'
+need_why = 'must-have in 6; 19% of GNOME apps; a sidebar tree in all nine Electron apps; absent from egui, iced and Slint'
+parity_why = 'first-party in 7 of 10 full toolkits, reachable in 9'
+shape = 'For with children'
+kaya = "NSOutlineView / OutlineGroup, GtkTreeListModel, WinUI TreeView; Compose has none and synthesizes an indented lazy column. The core's collection model gains a parent key; expansion state is per row."
+
+[[feature]]
+slug = 'activity'
+name = 'Activity indicator (distinct from progress)'
+group = 'Controls'
+need = 1
+parity = 5
+cost = 'S'
+lanes = 'NNNNN'
+need_why = 'shipped as indeterminate progress; listed for the parity column'
+parity_why = 'first-party in 10 of 10 full toolkits, reachable in 10'
+shape = 'already shipped'
+kaya = "kaya's `indeterminate` progress is the spinner on every platform (ProgressView, CircularProgressIndicator, GtkSpinner, ProgressRing). Nothing to build; listed so the parity column reads right."
+tier = 'hold'
+tier_reason = 'already shipped as indeterminate progress; here so the parity column reads honestly'
+
+[[feature]]
+slug = 'spellcheck'
+name = 'Spellcheck in text areas'
+group = 'Text and i18n'
+need = 2
+parity = 3
+cost = 'S'
+lanes = 'NNSNN'
+need_why = 'must-have in 2 (notes, mail); zero hits in the four native trackers'
+parity_why = 'first-party in 3 of 10 full toolkits, reachable in 7'
+shape = 'prop on textarea'
+kaya = 'NSTextView has it on, Android keyboards do it, WinUI IsSpellCheckEnabled; GTK needs libspelling (a new dependency). One boolean prop.'
+
+[[feature]]
+slug = 'camera'
+name = 'Camera / photo picker'
+group = 'System'
+need = 3
+parity = 4
+cost = 'L'
+lanes = 'NNCNN'
+need_why = 'must-have in 2, should-have in 3; MAUI multi-image picker 104 votes; camera plugin 2,598 likes'
+parity_why = 'first-party in 5 of 10 full toolkits, reachable in 9'
+shape = 'presentation context (picker grammar)'
+kaya = "PHPickerViewController (iOS, macOS 13+), Android Photo Picker, Windows FileOpenPicker with image filters; GTK has no photo picker beyond the file portal. Rides the file dialog's result grammar."
+shipped = true
+shipped_note = "the photo picker 2026-09-26 (64f16d0c); camera and microphone capture 2026-10-03 (503002c3, 8f363563, e0223160): a capture object with its live self-view in the video view, frames and samples to the app, device lists and the permission prompt, on five lanes over synthetic devices in each platform's own path. Not built: a photo taken through the system camera screen, a separate smaller slice (docs/capture-plan.md §8) · <a href=\"https://claude.ai/artifact/5Pb49ub6dhKPfGaP7k8RHB\">capture review</a> · <a href=\"https://claude.ai/artifact/SR71ZiQgSF4QGMXX6WyLUL\">aspect review</a>"
+
+[[feature]]
+slug = 'swipe_actions'
+name = 'Swipe actions on rows'
+group = 'Motion'
+need = 3
+parity = 4
+cost = 'L'
+lanes = 'NNSNN'
+need_why = 'should-have in 7 of 15; an iOS list idiom (SwiftUI Stack Overflow 166 vs Flutter 70)'
+parity_why = 'first-party in 6 of 10 full toolkits, reachable in 9'
+shape = 'prop on For rows'
+kaya = "List swipeActions (mac and iOS), SwipeToDismissBox, WinUI SwipeControl; GTK has none. Actions are the row's own buttons, revealed by gesture; a context menu is the desktop twin kaya already has."
+shipped = true
+shipped_note = "2026-09-26 to 09-27 (116b24f9, f8fd153b): a context item declares a swipe edge; SwipeToDismissBox on Android, SwipeControl on Windows, the row's context menu on Apple and GTK (R1 to R3); <code>expect_swipe_actions</code> reads a row's swipes back on every lane; the chat app archives and marks unread · <a href=\"https://claude.ai/artifact/AJnJYozbyhRN7jvHzEcua3\">review page</a>"
+
+[[feature]]
+slug = 'blob_vector'
+name = 'Vector images (SVG) and DPI'
+group = 'Controls'
+need = 3
+parity = 4
+cost = 'L'
+lanes = 'NNNNN'
+need_why = 'icons and illustrations at 2x and 3x on the phones'
+parity_why = 'SVG decodes natively on Apple, Qt, GTK (librsvg) and WinUI (SvgImageSource); Compose and Flutter need a package'
+shape = 'core-side resvg raster'
+kaya = 'All four decoders are raster-only; Android cannot inflate a vector from bytes. Rasterizing in the core with resvg fits the canvas doctrine and needs the target scale, which the canvas slice already taught the core. · <a href="https://github.com/smasher164/kaya/blob/6205d9c8/docs/deferred.md#L1457">ledger line 1457</a>'
+
+[[feature]]
+slug = 'pull_refresh'
+name = 'Pull to refresh'
+group = 'Motion'
+need = 2
+parity = 4
+cost = 'M'
+lanes = 'xNxxN'
+need_why = 'must-have in 2 (mobile reader, commerce); Stack Overflow 309'
+parity_why = 'first-party in 8 of 10 full toolkits, reachable in 8'
+shape = 'prop on scroll (phones)'
+kaya = '.refreshable, PullToRefreshBox; desktops have no gesture (Windows has RefreshContainer for touch). A phone idiom, stated as such.'
+
+[[feature]]
+slug = 'stepper'
+name = 'Stepper / spin field'
+group = 'Controls'
+need = 2
+parity = 4
+cost = 'M'
+lanes = 'NNNNS'
+need_why = 'should-have in 3; Apple steppers, GTK spin button; Stack Overflow 398'
+parity_why = 'first-party in 7 of 10 full toolkits, reachable in 8'
+shape = 'prop on a number field'
+kaya = 'Stepper / NSStepper, GtkSpinButton, NumberBox spin buttons; Compose has none and synthesizes two icon buttons. Rides the number field below.'
+shipped = true
+shipped_note = "2026-09-28 with the number field (9cd33cf9): a step moves the value by the field's <code>step</code> on every platform; the buttons are drawn where the platform draws them, GTK's spin button and WinUI's inline NumberBox, and not on Apple or Android, as ruled in docs/number-field-plan.md §3 rule 7 · <a href=\"https://claude.ai/artifact/7RbsBbeymH5M8RYq9xHbeb\">review page</a>"
+
+[[feature]]
+slug = 'window_memory'
+name = 'Window position and size memory'
+group = 'System'
+need = 3
+parity = 2
+cost = 'M'
+lanes = 'NxNNx'
+need_why = 'should-have in 4; window_manager 1,123 likes; not built in anywhere in the Rust stack'
+parity_why = 'first-party in 1 of 10 full toolkits, reachable in 5'
+shape = 'core-owned, rides restoration'
+kaya = "Part of session restoration below: the core knows every window's frame, so persisting it is the same log. · <a href=\"https://github.com/smasher164/kaya/blob/6205d9c8/docs/deferred.md#L1721\">ledger line 1721</a>"
+shipped = true
+shipped_note = "2026-09-09 (2e25b603): the desktops restore a window's frame, clamped, with remember_frame(false) the opt-out · <a href=\"https://claude.ai/code/artifact/1e2411f6-ac7a-4dbc-a733-3fdda408afda\">review page</a>"
+
+[[feature]]
+slug = 'window_styles'
+name = 'Window presentation styles (utility panel, always-on-top)'
+group = 'System'
+need = 2
+parity = 4
+cost = 'M'
+lanes = 'NxNNx'
+need_why = "must-have in 1 (the editor's inspector panels); electron click-through transparency 155 votes"
+parity_why = 'first-party in 4 of 10 full toolkits, reachable in 9'
+shape = 'window prop enum'
+kaya = 'NSPanel/.utility, GtkWindow set_modal/keep-above is window-manager advisory on Wayland, WinUI OverlappedPresenter.IsAlwaysOnTop. Ledgered with its trigger: a tool-shaped app wanting a floating inspector. · <a href="https://github.com/smasher164/kaya/blob/6205d9c8/docs/deferred.md#L1411">ledger line 1411</a>'
+
+[[feature]]
+slug = 'native_escape'
+name = 'Escape hatch to a native view'
+group = 'Bindings'
+need = 3
+parity = 5
+cost = 'XL'
+lanes = 'NNNNN'
+need_why = "Flutter's three desktop PlatformView issues total 968 votes; the escape hatch that makes every other gap an app problem"
+parity_why = "every mature toolkit documents a drop-to-native view; Flutter's three desktop PlatformView issues carry 968 votes"
+shape = 'per-platform guest code'
+kaya = "Every mature toolkit documents one (NSViewRepresentable, AndroidView, NativeControlHost). DESIGN refuses it as the default answer because it breaks the cross-platform promise per widget; kaya's own drop-downs are interpreter-internal. Listed so the parity column is honest."
+tier = 'hold'
+tier_reason = 'refused as the default answer by DESIGN; a ruling to restate, not a slice to build'
+
+[[feature]]
+slug = 'emoji'
+name = 'Emoji picker'
+group = 'Controls'
+need = 2
+parity = 2
+cost = 'S'
+lanes = 'NNNNN'
+need_why = "chat and notes; GTK's EmojiChooser; the other four platforms ship a system palette"
+parity_why = "GTK's EmojiChooser is the only toolkit-level picker; the OS palettes cover the rest"
+shape = 'prop on entry (GTK); free elsewhere'
+kaya = 'The mac, both phones and Windows ship a system emoji palette every text field gets for free; GtkEntry has show-emoji-icon. One boolean for the one lane that needs asking.'
+shipped = true
+shipped_note = "2026-09-26 (98457f57, 229cef3c): an <code>emoji</code> prop on the text fields opens the platform's own picker on all five lanes, in nine bindings; the chat app's emoji button · <a href=\"https://claude.ai/artifact/AJnJYozbyhRN7jvHzEcua3\">review page</a>"
+
+[[feature]]
+slug = 'auto_update'
+name = 'Auto-update'
+group = 'System'
+need = 3
+parity = 3
+cost = 'L'
+lanes = 'NxNNx'
+need_why = 'must-have in 2 (a security product must self-patch), should-have in 3; 5 of 9 Electron apps'
+parity_why = 'first-party in 1 of 10 full toolkits, reachable in 8'
+shape = 'per-platform, rides packaging'
+kaya = "Only the desktop shells (Electron, Tauri) ship it first-party. Sparkle, MSIX's own updater, flatpak's; rides the packaging milestone."
+
+[[feature]]
+slug = 'biometrics'
+name = 'Biometrics and secure storage (keychain)'
+group = 'System'
+need = 3
+parity = 3
+cost = 'L'
+lanes = 'NNSNN'
+need_why = 'flutter_secure_storage 4,488 likes; must-have for the password manager, should-have for anything that signs in'
+parity_why = 'first-party in 2 of 10 full toolkits, reachable in 9'
+shape = 'system surface'
+kaya = "LocalAuthentication + Keychain, BiometricPrompt + Keystore, Windows Hello + Credential Locker, libsecret on GTK (no biometric prompt). A password-manager archetype's must-have."
+
+[[feature]]
+slug = 'file_assoc'
+name = 'File type associations (open with)'
+group = 'System'
+need = 3
+parity = 3
+cost = 'L'
+lanes = 'NNNNN'
+need_why = 'must-have in 3, should-have in 4; every document app'
+parity_why = 'first-party in 4 of 10 full toolkits, reachable in 6'
+shape = 'occurrence + packaging'
+kaya = 'Same shape as deep links: one `opened_files` occurrence carrying handles, five manifests.'
+
+[[feature]]
+slug = 'gestures'
+name = 'Gestures beyond drag (pinch, rotate, long press)'
+group = 'Motion'
+need = 2
+parity = 5
+cost = 'L'
+lanes = 'NNNNN'
+need_why = 'photo, map and canvas archetypes; kaya has click and drag and nothing else'
+parity_why = 'gesture recognizers beyond drag in every full toolkit'
+shape = 'occurrences on canvas and image'
+kaya = "MagnifyGesture/RotateGesture, pointerInput transformable, GtkGestureZoom/Rotate, ManipulationDelta. A zoomable canvas or image is the consumer; the video editor's timeline is the first."
+
+[[feature]]
+slug = 'printing'
+name = 'Printing'
+group = 'System'
+need = 3
+parity = 3
+cost = 'L'
+lanes = 'NNNNN'
+need_why = 'should-have in 6; electron #17523 (82); pdf and printing packages 4,845 likes between them'
+parity_why = 'first-party in 2 of 10 full toolkits, reachable in 7'
+shape = 'system surface'
+kaya = "NSPrintOperation / UIPrintInteractionController, PrintManager, GtkPrintOperation, Windows PrintManager. The uniform content is a canvas raster or a document's pages; printing a live view is not portable. · <a href=\"https://github.com/smasher164/kaya/blob/6205d9c8/docs/deferred.md#L1742\">ledger line 1742</a>"
+
+[[feature]]
+slug = 'tray'
+name = 'System tray / status item'
+group = 'System'
+need = 3
+parity = 3
+cost = 'L'
+lanes = 'NxCNx'
+need_why = "Slint's highest-reaction closed issue; iced #124 open at 36; the whole UI of a sync client"
+parity_why = 'first-party in 4 of 10 full toolkits, reachable in 7'
+shape = 'system surface'
+kaya = 'NSStatusItem, Shell_NotifyIcon through Win32 interop (WinUI has no control); GNOME dropped tray icons and StatusNotifierItem needs an extension, so Linux is a stated carve-out; phones have none.'
+tier = 'later'
+tier_reason = 'need 3 with a Linux carve-out and no phone; waits for the sync-client shape'
+
+[[feature]]
+slug = 'webview'
+name = 'Web view'
+group = 'Embedders'
+need = 4
+parity = 4
+cost = 'XXL'
+lanes = 'NNNNN'
+need_why = "the highest clean Stack Overflow row (2,431); Flutter desktop webview 291/268/118 votes; 12% of GNOME apps; the reader's and the mail client's article body"
+parity_why = 'first-party in 5 of 10 full toolkits, reachable in 10'
+shape = 'new kind, four embedders'
+kaya = 'WKWebView, WebView2 (Evergreen runtime is a packaging payload), Android WebView, WebKitGTK (distro variance). Load URL/HTML plus a navigation veto is the uniform surface; the JS bridge is not. · <a href="https://github.com/smasher164/kaya/blob/6205d9c8/docs/deferred.md#L3612">ledger line 3612</a>'
+tier = 'later'
+tier_reason = 'need 4 but XXL and four embedders; the reader and mail archetypes wait on it, the rest do not'
+
+[[feature]]
+slug = 'dock_badge'
+name = 'Dock / taskbar badge'
+group = 'System'
+need = 2
+parity = 3
+cost = 'M'
+lanes = 'NNxNS'
+need_why = 'subsumed by badges; electron dock.badge and Linux taskbar badges (56)'
+parity_why = 'first-party in 3 of 10 full toolkits, reachable in 7'
+shape = 'app-level prop'
+kaya = 'NSApp.dockTile.badgeLabel, UIApplication badge (with notification permission), Windows BadgeNotification (packaged apps), Android launcher badges ride notifications only; Linux has no such concept in GTK, so the lane is not applicable rather than a carve-out.'
+shipped = true
+shipped_note = "2026-09-26 (f75941b1): <code>set_badge(count)</code> on the app on all five lanes, in nine bindings; 0 clears and the call never fails (ruled); the Dock tile, the iOS home screen, the Windows taskbar overlay, the launcher entry on Linux and the notification count on Android; the chat app's unread total · <a href=\"https://claude.ai/artifact/AJnJYozbyhRN7jvHzEcua3\">review page</a>"
+
+[[feature]]
+slug = 'switch_sugar'
+name = 'Switch sugar (one-of-N over a signal)'
+group = 'Bindings'
+need = 2
+parity = 3
+cost = 'M'
+lanes = 'NNNNN'
+need_why = 'onboarding flows and empty states; waits on the comparison vocabulary'
+parity_why = 'one-of-N over state is idiomatic control flow in the declarative toolkits; a named construct in few'
+shape = 'binding sugar; wants the comparison vocabulary'
+kaya = 'Sum-typed rows already cover collections; the app-level form waits on the derived-signal comparison ruling (eq/ne) owed for Python. · <a href="https://github.com/smasher164/kaya/blob/6205d9c8/docs/deferred.md#L1924">ledger line 1924</a>'
+
+[[feature]]
+slug = 'audio'
+name = 'Audio playback'
+group = 'Embedders'
+need = 3
+parity = 4
+cost = 'XL'
+lanes = 'NNNNN'
+need_why = 'must-have in 3; 8% of GNOME apps; media, chat voice notes, fitness'
+parity_why = 'first-party in 5 of 10 full toolkits, reachable in 10'
+shape = 'a player object the app holds'
+kaya = "The media player object (docs/media-plan.md §2): AVPlayer, GStreamer's playbin3, MediaPlayer and media3, each through one state machine and failure table in the core."
+shipped = true
+shipped_note = '2026-09-30 (a1f0ad45, 55d0653c): the media player plays audio sources as well as video, with speed, volume, loop and mute, the media session for media keys and Now Playing, and background audio on iOS. Not built: the voice output object a call needs (docs/capture-plan.md §5) · <a href="https://claude.ai/artifact/WkW8D1Ba44qhMTnK3a7NLM">review page</a>'
+
+[[feature]]
+slug = 'canvas_gpu'
+name = 'Canvas engine: vello_cpu, then a GPU display path'
+group = 'Core'
+need = 3
+parity = 4
+cost = 'XL'
+lanes = 'NNNNN'
+need_why = 'canvas animation and games are in scope (docs/canvas-plan.md ruling 14); the single-threaded phone frame measured 171% of budget, and the maintainer named GPU performance as left on the table'
+parity_why = 'every full toolkit rasterizes on the GPU by default (Skia under Flutter, Compose and Qt; Metal and DirectComposition under the natives); a CPU raster blitted per change is the outlier'
+shape = 'core rasterizer swap, then per-backend presentation'
+kaya = "Design pass and rulings taken 2026-09-10 (docs/canvas-gpu-plan.md). Slice 1 BUILT the same day: vello_cpu 0.2.0 rasterizes, byte-exact across SIMD levels, threads and ISAs, the canonical hash one string, no blit arm moved. Slice 2's measurement took its named stop: the GPU path lost to threaded vello_cpu at every size (3 to 20x), so no GPU display path and no slice 3. What remains is small: threads on the screen raster above a megapixel on a reused context, and the aliasing knob as a prop."
+shipped = true
+shipped_note = "2026-09-10 (5d9806e4): vello_cpu replaces tiny-skia with the frozen hash one string; the GPU path measured 3 to 20x slower at every size and was not taken, by the plan's own rule · <a href=\"https://claude.ai/code/artifact/be854c4d-408b-4732-93a7-2b53c3bbfc83\">review page</a>"
+
+[[feature]]
+slug = 'hot_reload'
+name = 'Hot reload'
+group = 'Tooling'
+need = 3
+parity = 4
+cost = 'XL'
+lanes = 'NNNNN'
+need_why = 'developer need; the top developer-experience request in the Flutter surveys'
+parity_why = 'first-party in 6 of 10 full toolkits, reachable in 9'
+shape = 'per-language guest restart with state'
+kaya = "Six of ten toolkits. kaya's scene is owned by the guest process, so reload is a guest restart that replays the model; session restoration is its prerequisite."
+
+[[feature]]
+slug = 'video'
+name = 'Video playback (`video` kind)'
+group = 'Embedders'
+need = 3
+parity = 4
+cost = 'XL'
+lanes = 'NNNNN'
+need_why = 'must-have in 3; 10% of GNOME apps; blocks the media archetype entirely; the native-side demand is thin'
+parity_why = 'first-party in 6 of 10 full toolkits, reachable in 10'
+shape = "a player object and a view on the platform's own player view"
+kaya = "Redesigned 2026-09-29 (docs/media-plan.md) after research showed the platform's own view composites with kaya's widgets: a bare AVPlayerLayer on Apple, a GtkPicture on GTK, MediaPlayerElement on WinUI, media3 on a SurfaceView on Android. Captions ride it, mandatory under Apple's Accessibility Nutrition Labels and the EAA once video ships."
+shipped = true
+shipped_note = "2026-09-30 to 10-01 (a1f0ad45, 231459e9, 55d0653c, through b2ebb713): a player object shown by a <code>video</code> view on each platform's own view with its controls off; captions, track switching, video in rows, a bound on a stuck open or seek, and a test suite of formats, HLS and DASH; the media reader followed on 2026-10-02 and the <code>aspect</code> prop on 10-04. Designed and not built: the surface widget in frames mode · <a href=\"https://claude.ai/artifact/WkW8D1Ba44qhMTnK3a7NLM\">review page</a> · <a href=\"https://claude.ai/artifact/Gwtwpt5BogkAd8aTwswXRX\">reader review</a> · <a href=\"https://claude.ai/artifact/SR71ZiQgSF4QGMXX6WyLUL\">aspect review</a>"
+
+[[feature]]
+slug = 'charts'
+name = 'Chart kind over the canvas'
+group = 'Controls'
+need = 3
+parity = 2
+cost = 'L'
+lanes = 'NNNNN'
+need_why = "must-have in 2 (dashboard, fitness); Compose Multiplatform's highest-reaction issue ever is the data table, the same shape of ask"
+parity_why = 'Swift Charts and Qt Graphs first-party; paid or third-party elsewhere'
+shape = "new kind over kaya's raster"
+kaya = "Swift Charts, Qt Graphs and the paid packs elsewhere. kaya's canvas already draws the portfolio's chart; a kind would fix a series vocabulary and axis rules so nine bindings do not each re-derive them."
+
+[[feature]]
+slug = 'bookmarks'
+name = 'Recent files (durable file bookmarks)'
+group = 'System'
+need = 2
+parity = 3
+cost = 'L'
+lanes = 'NNNNN'
+need_why = "should-have in 4: every document archetype's recent-files menu"
+parity_why = 'first-party in 4 of 10 full toolkits, reachable in 7'
+shape = 'system surface'
+kaya = "Security-scoped bookmarks, plain iOS bookmarks, Android persistable URI permissions, paths on GTK and Windows: three spellings behind one durable-handle record. Trigger: the editor's recent-files menu. · <a href=\"https://github.com/smasher164/kaya/blob/6205d9c8/docs/deferred.md#L634\">ledger line 634</a>"
+
+[[feature]]
+slug = 'crash_reporting'
+name = 'Crash reporting'
+group = 'Tooling'
+need = 2
+parity = 1
+cost = 'M'
+lanes = 'NNNNN'
+need_why = 'should-have in 2; 28 Electron and Tauri title matches'
+parity_why = 'Electron alone ships a crash reporter first-party'
+shape = 'ship the flight recorder'
+kaya = "The flight-recorder rings and the panic log exist on every lane since 2026-09-02; writing them to a file an app can upload is the remaining step. Uploading is the app's business."
+
+[[feature]]
+slug = 'restoration'
+name = 'Session / state restoration'
+group = 'Core'
+need = 3
+parity = 2
+cost = 'XL'
+lanes = 'NNNNN'
+need_why = 'must-have in 2, should-have in 5; electron #37494 (81 votes); every document and dev tool'
+parity_why = 'first-party in 2 of 10 full toolkits, reachable in 6'
+shape = 'core-owned serialization'
+kaya = 'Ledgered as cheap only here: the core owns all state at rest, so restoration is serializing the scene. macOS/iOS have NSUserActivity / scene restoration to hook; the other three have nothing portable, which is why it belongs in the core. · <a href="https://github.com/smasher164/kaya/blob/6205d9c8/docs/deferred.md#L1721">ledger line 1721</a>'
+
+[[feature]]
+slug = 'styling'
+name = 'Styling beyond the brand tier'
+group = 'Bindings'
+need = 2
+parity = 4
+cost = 'XL'
+lanes = 'NNNNN'
+need_why = "refused by DESIGN's styling ceiling; the brand tier covers the need surveyed"
+parity_why = "a cascade or token set in most; SwiftUI and Compose stay closest to kaya's roles-only stance"
+shape = 'a cascade or token set'
+kaya = "GTK CSS, Avalonia selectors, MAUI styles. Refused by DESIGN's styling ceiling: zero arbitrary styling, roles plus a brand tier. Listed for parity honesty; the ruling stands unless an app forces it."
+tier = 'hold'
+tier_reason = "refused by DESIGN's styling ceiling"
+amended = "2026-09-25 (60faea36, 4d000f54): a closed vocabulary of platform tints on a filled container role, for the chat app's bubbles; arbitrary styling stays refused"
+
+[[feature]]
+slug = 'collection_pipelines'
+name = 'Filter, sort and selection as model objects'
+group = 'Bindings'
+need = 2
+parity = 2
+cost = 'L'
+lanes = 'NNNNN'
+need_why = 'tables that sort and filter themselves; Qt and GTK model objects'
+parity_why = "Qt's proxy models and GTK's list models; the rest leave it to the app"
+shape = 'binding-level derived collections'
+kaya = 'QSortFilterProxyModel, GtkFilterListModel/GtkSortListModel. kaya has collection-derived signals and tables that emit sort_requested; a derived, filtered VIEW of a collection would let the table sort itself.'
+
+[[feature]]
+slug = 'global_hotkeys'
+name = 'Global hotkeys'
+group = 'System'
+need = 2
+parity = 2
+cost = 'L'
+lanes = 'NxCNx'
+need_why = 'Discord push-to-talk, Bitwarden autofill, media keys; hotkey_manager 147 likes'
+parity_why = 'first-party in 0 of 10 full toolkits, reachable in 5'
+shape = 'system surface'
+kaya = 'RegisterEventHotKey, RegisterHotKey; Wayland forbids global grabs (the GlobalShortcuts portal is opt-in and rare), phones have none. A background-utility feature with a two-platform carve-out.'
+
+[[feature]]
+slug = 'launch_login'
+name = 'Launch at login'
+group = 'System'
+need = 1
+parity = 2
+cost = 'M'
+lanes = 'NxNNx'
+need_why = 'background utilities only'
+parity_why = 'first-party in 2 of 10 full toolkits, reachable in 4'
+shape = 'app-level request'
+kaya = 'SMAppService, XDG autostart, StartupTask (packaged). Desktop-only by nature.'
+
+[[feature]]
+slug = 'titlebar'
+name = 'Custom title bar and window material'
+group = 'System'
+need = 1
+parity = 3
+cost = 'L'
+lanes = 'NxNNx'
+need_why = 'brand-heavy desktop apps; where the platforms look most different'
+parity_why = 'WinUI, MAUI and Electron first-party; GTK header bars; Apple through toolbar styles'
+shape = 'window props'
+kaya = "WinUI TitleBar and Mica/Acrylic backdrops, SwiftUI's unified toolbar, GTK header bars. kaya's chrome promotion already fills the header; a custom title bar is where platforms look most different, so it waits for an app that needs it."
+
+[[feature]]
+slug = 'text_ranges_entry'
+name = 'Text ranges on the entry widget'
+group = 'Controls'
+need = 1
+parity = 3
+cost = 'L'
+lanes = 'NSCNN'
+need_why = 'no consumer; the editor uses the textarea'
+parity_why = "every toolkit's entry selects text; few expose highlight ranges on a single-line field"
+shape = 'extend three requests'
+kaya = "Deferred with measured reasons: GTK cannot observe an entry's highlight over AT-SPI and iOS has three gaps; no consumer yet. · <a href=\"https://github.com/smasher164/kaya/blob/6205d9c8/docs/deferred.md#L878\">ledger line 878</a>"
+
+[[feature]]
+slug = 'map'
+name = 'Map view'
+group = 'Embedders'
+need = 2
+parity = 4
+cost = 'XXL'
+lanes = 'NNCNN'
+need_why = 'must-have in 1; google_maps_flutter 4,627 likes; a vendor SDK dependency on every platform'
+parity_why = 'first-party in 5 of 10 full toolkits, reachable in 9'
+shape = 'new kind, per-platform providers'
+kaya = "MapKit on Apple, Google Maps SDK on Android (a key and a dependency), WinUI's MapControl (Azure key), nothing native on GTK. The providers' terms and keys make this a per-app dependency rather than a framework kind."
+
+[[feature]]
+slug = 'pdf'
+name = 'PDF rendering'
+group = 'Embedders'
+need = 2
+parity = 2
+cost = 'XL'
+lanes = 'NNNNN'
+need_why = "pdf package 3,037 likes; electron PDF viewer (59, shipped); GNOME's Document Viewer is a core app"
+parity_why = 'PDFKit and Windows.Data.Pdf native; Qt PDF module; packages elsewhere'
+shape = 'new kind over the platform renderers'
+kaya = "PDFKit, Android PdfRenderer, Poppler through GTK, Windows.Data.Pdf. Distinct from printing. A document viewer's whole UI; nothing in the tree needs it."
+
+[[feature]]
+slug = 'device_apis'
+name = 'Device and sensor APIs'
+group = 'System'
+need = 1
+parity = 2
+cost = 'XXL'
+lanes = 'NNNNN'
+need_why = "outside the GUI's premise; three frameworks answered yes"
+parity_why = "MAUI Essentials, Tauri plugins, Uno's WinRT shims; the others say no"
+shape = "out of a GUI library's scope"
+kaya = "MAUI Essentials and Tauri plugins ship geolocation, contacts, battery and sensors. Three frameworks answered yes; kaya's premise is the GUI, and a guest language's own libraries reach the OS."
+tier = 'hold'
+tier_reason = "outside the GUI's premise"
+
+[[feature]]
+slug = 'code_push'
+name = 'Code push / over-the-air update'
+group = 'System'
+need = 1
+parity = 1
+cost = 'XXL'
+lanes = 'NNNNN'
+need_why = 'the loudest open issue in the Flutter tracker (1,239 votes) and the wrong layer for kaya'
+parity_why = "Flutter's loudest open issue at 1,239 votes; only Expo ships it"
+shape = 'distribution, not GUI'
+kaya = "The loudest open issue in the Flutter tracker. Out of kaya's layer: the guest language's own distribution decides; recorded so the roadmap declines it on the record rather than never having seen it."
+tier = 'hold'
+tier_reason = 'declined on the record: distribution belongs to the guest language'
