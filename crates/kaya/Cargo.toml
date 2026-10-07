@@ -48,6 +48,12 @@ intl-memoizer = "0.5.3"
 # IDCT is the same scalar arithmetic on every ISA.
 png = "0.18.1"
 zune-jpeg = { version = "0.5.15", default-features = false, features = ["std"] }
+# THE EXAMPLES' FEATURES, NAMED HERE TOO (docs/traps.md, the android pool's
+# lib/example rebuild): rusqlite and automerge turn these on, and a library
+# graph without them recompiled kaya on every --lib/--example switch.
+either = { version = "1", features = ["use_std"] }
+flate2 = { version = "1.1", features = ["zlib-rs"] }
+once_cell = { version = "1", features = ["std"] }
 
 [dev-dependencies]
 # THE EXAMPLES' DEPENDENCIES, never the library's. The task manager's
@@ -63,6 +69,7 @@ rusqlite = { version = "0.40.2", features = ["bundled"] }
 automerge = "=0.11.0"
 
 [build-dependencies]
+syn = { version = "2", features = ["extra-traits", "visit-mut"] }
 # Emits msvc linker directives at build time; no-op for other targets.
 static_vcruntime = "2"
 

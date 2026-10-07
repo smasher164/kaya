@@ -14122,6 +14122,18 @@ otherwise quiet host). The iOS lane's `--lib`/`--example` pair does the same.
 A separate target directory for the example graph would end it, but costs a
 second 8 GB android tree on a disk that had 20 GB free; not done.
 
+FIXED 2026-10-06 at the root, measured with `--message-format=json` over a
+`-p kaya --lib` build and a `-p kaya --example milestone2` build: the units
+whose features differed were either (std, use_std), flate2 (zlib-rs),
+once_cell (std) and syn (extra-traits, visit-mut), the example graph's
+dev-dependencies turning them on, and every crate above them (rayon, png,
+skrifa, jni, thiserror, kaya_derive) took a different hash from it. kaya's
+Cargo.toml now names those features itself (syn as a build-dependency, which
+is unified with the proc-macros' host graph), and the two builds produce
+identical units; `--lib`, `--lib --example ...` and `--lib` again rebuild no
+kaya. On the mac lane this was core-build+gates 439 s on the matrices where
+nothing else left the example graph built.
+
 ## The android capture tone read high with no HAL failure (sighted 2026-10-05)
 
 capture-compose went red on the 18:07Z full matrix reading `samples 681 Hz`
