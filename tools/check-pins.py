@@ -741,8 +741,8 @@ print(f"check-pins: java language level: {_java_read} javac site(s) and "
       f"{'/'.join(jcounts)})", file=sys.stderr)
 
 # --- The linux image's JDK: by version AND by bytes --------------------
-# The Dockerfile's own apt policy leaves package versions to trixie on
-# purpose, and exempts nothing that decides a LANGUAGE LEVEL: this is the
+# Apt is frozen at a snapshot (the clause below), and nothing that decides
+# a LANGUAGE LEVEL is left to Debian's default-java either: this is the
 # node/Go/winappsdk rule one toolchain over.
 JDK_FETCH = re.compile(
     r"OpenJDK(\d+)U-jdk_(?:aarch64|x64)_linux_hotspot_"
@@ -849,6 +849,77 @@ for label, old, new, expect in JDK_NEGATIVES:
                    f"refused naming {expect!r} (findings: {got})")
 print(f"check-pins: linux jdk: {drefused}/{len(JDK_NEGATIVES)} watched "
       f"negatives refused (substitutions {'/'.join(dcounts)})",
+      file=sys.stderr)
+
+# --- The linux image's base and apt: digest and ONE snapshot date -------
+# forky is testing and rolls daily, so a tag or an unfrozen archive is a
+# toolchain nobody chose (tools/linux/Dockerfile's header).
+def scan_apt_pin(text):
+    bad = []
+    body = code_only(text)
+    joined = body.replace("\\\n", " ")
+    froms = re.findall(r"^FROM\s+(\S+)", body, re.M)
+    if not froms or any(not re.match(r"^[\w./-]+@sha256:[0-9a-f]{64}$", f)
+                        for f in froms):
+        bad.append(f"{dockerfile}: base image {froms} is not pinned by "
+                   f"digest")
+    snap = re.findall(r"^ARG SNAPSHOT=(\S*)", body, re.M)
+    if len(snap) != 1 or not re.match(r"^\d{8}T\d{6}Z$", snap[0]):
+        bad.append(f"{dockerfile}: ARG SNAPSHOT is {snap}, not one "
+                   f"YYYYMMDDTHHMMSSZ snapshot.debian.org date")
+    uris = re.findall(r"URIs:\s*(\S+?)[\"']", joined)
+    want = {"http://snapshot.debian.org/archive/debian/${SNAPSHOT}",
+            "http://snapshot.debian.org/archive/debian-security/${SNAPSHOT}"}
+    if set(uris) != want:
+        bad.append(f"{dockerfile}: apt sources {sorted(set(uris))} are not "
+                   f"the two snapshot archives at ${{SNAPSHOT}}")
+    if "deb.debian.org" in body:
+        bad.append(f"{dockerfile}: names deb.debian.org, the rolling "
+                   f"archive the snapshot replaces")
+    if 'Check-Valid-Until "false"' not in joined:
+        bad.append(f"{dockerfile}: no Check-Valid-Until false — a snapshot's "
+                   f"Release file is expired by design and apt refuses it")
+    write = joined.find("> /etc/apt/sources.list.d/debian.sources")
+    update = joined.find("apt-get update")
+    if write < 0 or update < 0 or update < write:
+        bad.append(f"{dockerfile}: the first apt-get update runs before "
+                   f"the snapshot sources are written")
+    return bad
+
+
+out += scan_apt_pin(text)
+
+APT_NEGATIVES = [
+    ("the base back on a tag",
+     "FROM debian@sha256:", "FROM debian:forky@nothing", "not pinned by digest"),
+    ("the snapshot date unfrozen",
+     "ARG SNAPSHOT=2", "ARG SNAPSHOT=latest-2", "not one"),
+    ("the rolling archive back",
+     '"URIs: http://snapshot.debian.org/archive/debian/${SNAPSHOT}"',
+     "'URIs: http://deb.debian.org/debian'", "deb.debian.org"),
+    ("valid-until left on",
+     """'Acquire::Check-Valid-Until "false";' """, "", "Check-Valid-Until"),
+    ("the sources written after the first update",
+     "        > /etc/apt/sources.list.d/debian.sources",
+     "        > /etc/apt/sources.list.d/unused.sources", "before the snapshot"),
+]
+acounts, arefused = [], 0
+for label, old, new, expect in APT_NEGATIVES:
+    sites = text.count(old)
+    acounts.append(f"{sites}")
+    if sites != 1:
+        out.append(f"check-pins: watched negative '{label}' matches "
+                   f"{sites} sites in the Dockerfile — an unchanged file "
+                   f"is a failed test")
+        continue
+    got = scan_apt_pin(text.replace(old, new, 1))
+    if any(expect in g for g in got):
+        arefused += 1
+    else:
+        out.append(f"check-pins: watched negative '{label}' was NOT "
+                   f"refused naming {expect!r} (findings: {got})")
+print(f"check-pins: linux apt snapshot: {arefused}/{len(APT_NEGATIVES)} "
+      f"watched negatives refused (substitutions {'/'.join(acounts)})",
       file=sys.stderr)
 
 SWIFTPM = re.compile(r"swift\s+(?:run|build|test)\b")

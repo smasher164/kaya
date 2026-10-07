@@ -3,31 +3,50 @@
 # display. Built and run by tools/validate-linux.sh; the repo is mounted
 # at /work and built inside the container (no cross-compilation: the GTK
 # libraries live here).
-# PINNED BY DIGEST, not by tag. `debian:trixie` is a moving target: the
+# PINNED BY DIGEST, not by tag. `debian:forky` is a moving target: the
 # same tag resolves to a different image whenever the base is rebuilt,
 # so the one lane whose entire toolchain world lives in this file could
 # change under a run nobody touched. A digest makes "it passed
 # yesterday" mean something, and makes a red lane attributable to a
 # change in the repo rather than to Debian.
 #
-# To move deliberately: docker pull debian:trixie && docker image
-# inspect debian:trixie --format '{{index .RepoDigests 0}}', paste it
-# here, and re-run the lane so the bump is a reviewed diff.
+# To move deliberately: docker pull debian:forky && docker image
+# inspect debian:forky --format '{{index .RepoDigests 0}}', paste it
+# here, move SNAPSHOT below to the date in the new base's own
+# /etc/apt/sources.list.d/debian.sources comment, and re-run the lane so
+# the bump is a reviewed diff. Rolling back to trixie: docs/HACKING.md,
+# "The linux image".
 #
-# NOT pinned, deliberately: the apt package versions below. trixie is
-# STABLE, so they move only on point releases and security updates —
-# slow, and the security half is drift we want. Freezing them would
-# mean snapshot.debian.org, which is slow and periodically unavailable,
-# and that turns "rebuild the image" into a coin flip. The rolling
-# indexes are the ones pinned here and below, because those move hourly.
-FROM debian@sha256:fac46bff2e02f51425b6e33b0e1169f55dfb053d83511ca28aa50c09fd5ed7a4
+# APT IS FROZEN at one snapshot.debian.org date, because forky is
+# TESTING and rolls daily. Snapshot is slow and sometimes down, but the
+# image rebuilds only when this file changes, so that cost falls on a
+# deliberate bump alone. SNAPSHOT is the base image's own build date, so
+# the base's packages and the archive agree.
+FROM debian@sha256:716a7ceeaf1557c357a3c484839176dab750fbda0c5d0530dbbb18f94ccf826b
+
+ARG SNAPSHOT=20261005T000000Z
+RUN printf '%s\n' \
+        'Types: deb' \
+        "URIs: http://snapshot.debian.org/archive/debian/${SNAPSHOT}" \
+        'Suites: forky forky-updates' \
+        'Components: main' \
+        'Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp' \
+        '' \
+        'Types: deb' \
+        "URIs: http://snapshot.debian.org/archive/debian-security/${SNAPSHOT}" \
+        'Suites: forky-security' \
+        'Components: main' \
+        'Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp' \
+        > /etc/apt/sources.list.d/debian.sources \
+    && printf '%s\n' 'Acquire::Check-Valid-Until "false";' 'Acquire::Retries "5";' \
+        > /etc/apt/apt.conf.d/99kaya-snapshot
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential clang pkg-config libgtk-4-dev \
     curl ca-certificates git \
     python3 \
-    ocaml-nox opam libffi-dev \
+    ocaml opam libffi-dev \
     ghc cabal-install \
     xvfb xauth imagemagick x11-utils \
     weston sway ffmpeg \
@@ -232,14 +251,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # frontend answers the interface and every AddNotification fails, which is
 # regime 3 (the post refused). The Registry portal kaya registers its id
 # through arrived in 1.19, so the version is the thing to read after any
-# base-image move: trixie ships 1.20.3 (frontend) and 1.15.3 (gtk backend),
-# recorded here so a regression in either is a diff.
+# base-image move: trixie shipped 1.20.3 (frontend) and 1.15.3 (gtk backend),
+# the forky snapshot 1.22.1 and 1.15.3, recorded here so a regression in
+# either is a diff.
 #
 # A trailing layer on purpose, per the note above.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     xdg-desktop-portal xdg-desktop-portal-gtk \
     && rm -rf /var/lib/apt/lists/* \
-    && test "$(dpkg-query -W -f='${Version}' xdg-desktop-portal | cut -d. -f1-2)" = "1.20" \
+    && test "$(dpkg-query -W -f='${Version}' xdg-desktop-portal | cut -d. -f1-2)" = "1.22" \
 # INSTALLED, AND NOT ON THE DEFAULT BUS: the portal's two D-Bus service
 # files move to a directory only a notify leg puts on XDG_DATA_DIRS, so no
 # other leg's session can activate it. MEASURED 2026-09-08, which is why:
@@ -273,13 +293,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # `-libav` (avdec_h264/h265 over the first two). The dev headers are what
 # the gstreamer crates' pkg-config builds need; `-tools` is the read-back
 # below and gst-inspect for a red leg. The version is READ because the
-# failure table's GStreamer rows were measured against 1.26.
+# failure table's GStreamer rows were measured against 1.26 (trixie) and
+# the lane re-run green on 1.28 (the forky snapshot).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
     gstreamer1.0-plugins-bad gstreamer1.0-libav gstreamer1.0-gtk4 \
     gstreamer1.0-tools \
     && rm -rf /var/lib/apt/lists/* \
-    && test "$(dpkg-query -W -f='${Version}' gstreamer1.0-plugins-bad | cut -d. -f1-2)" = "1.26" \
+    && test "$(dpkg-query -W -f='${Version}' gstreamer1.0-plugins-bad | cut -d. -f1-2)" = "1.28" \
     && gst-inspect-1.0 --exists gtk4paintablesink \
     && gst-inspect-1.0 --exists playbin3 \
     && gst-inspect-1.0 --exists av1dec \
@@ -300,11 +321,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # and the lane's synthetic devices (tools/linux/pwsynth, built against the
 # -dev headers) through tools/linux/capture-leg.py; pipewiresrc is the GTK
 # arm's source. Versions read because the measurements were taken on 1.4
-# and 0.5.
+# and 0.5 (trixie) and the lane re-run green on 1.6 and 0.5 (forky).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pipewire pipewire-bin wireplumber gstreamer1.0-pipewire libpipewire-0.3-dev \
     && rm -rf /var/lib/apt/lists/* \
-    && case "$(dpkg-query -W -f='${Version}' pipewire)" in 1.4.*) ;; *) exit 1 ;; esac \
+    && case "$(dpkg-query -W -f='${Version}' pipewire)" in 1.6.*) ;; *) exit 1 ;; esac \
     && case "$(dpkg-query -W -f='${Version}' wireplumber)" in 0.5.*) ;; *) exit 1 ;; esac \
     && gst-inspect-1.0 --exists pipewiresrc
 

@@ -154,9 +154,9 @@ route open to a bare binary that was never installed anywhere, which is
 precisely what the Linux test lane runs. It works today under X11: a PNG
 decoded in the process reaches the window, and the lane can read the
 pixels back with `xprop` (I4a). It does nothing under Wayland until GTK
-4.20 or newer (the lane container has 4.18.6) and a compositor that
-supports the `xdg-toplevel-icon` protocol (the lane's sway 1.10.1 does
-not).
+4.20 or newer (the lane container has 4.24.0 since 2026-10-07) and a
+compositor that supports the `xdg-toplevel-icon` protocol (the lane's
+sway, 1.12 since that date, still does not: the witness leg stays green).
 
 So the sentence "the Linux icon waits for GTK 4.20" is true only of the
 second route, and only on the lane. An installed kaya app gets its icon

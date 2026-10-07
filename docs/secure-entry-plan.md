@@ -265,6 +265,10 @@ kind (14 findings, all `secure_field`).
   (docs/traps.md; docs/deferred.md's struck GTK 4.18 GAP and the lane's
   GTK version ruling). GTK keeps no undo history for invisible text, and
   the arm turns it off as well.
+- MEASURED 2026-10-07 (GTK 4.24.0, the linux lane's forky image): GTK's
+  own editable handler masks from 4.20, and with kaya's subtype answering
+  first the read is still `masked N`; all 18 secure legs and 18 gallery
+  legs green on both protocols, so the forwarder holds on both branches.
 - MEASURED 2026-10-07 (WinUI, the lane VM): a PasswordBox's peer
   implements no Value pattern at all, so the read requires IsPassword and
   counts the box's own text; PasswordChanged is raised after SetPassword

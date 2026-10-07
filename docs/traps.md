@@ -4,6 +4,88 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## GTK 4.20 publishes a switch as ATSPI_ROLE_SWITCH (measured 2026-10-07)
+
+GTK 4.18.6's gtkatspiutils.c mapped GTK_ACCESSIBLE_ROLE_SWITCH to
+ATSPI_ROLE_CHECK_BOX (7); 4.24.0 maps it to ATSPI_ROLE_SWITCH (130). The atspi
+crate (atspi-common 0.14, the newest on crates.io) decodes roles only up to
+129, so `get_role()` returned an error for every switch, kaya's bus walks
+skipped the node, and on the forky image the tasks legs read the switch as
+"<not in the accessibility tree>". gtk.rs's `bus_role` reads GetRole as a
+raw number and counts 130 in the check box's family, where kaya's own walk
+(`atspi_role_of`) already counts a GtkSwitch; the word `switch` still comes
+from the widget kaya built. GUARD: check-universal-props' gtk_newer_reads
+refuses a `.get_role()` call in gtk.rs, one cut watched red.
+
+## GTK 4.20 renders a node to its drawn bounds (measured 2026-10-07)
+
+`GskRenderer::render_texture(node, None)` renders the node's own bounds.
+On GTK 4.24 a widget paintable's snapshot of a row holding only a label
+is the label's bounds: a 378x20 row came back as a 31x12 texture, so the
+fill reader's right-edge probe, scaled into it, landed on the glyphs
+(`27272727` premultiplied) and tintsdark read the plain row as `neutral`.
+4.18 gave the widget's full size. Every GTK reader passes the viewport
+(0, 0, width, height). GUARD: check-universal-props' gtk_newer_reads
+refuses `render_texture(.., None)` in gtk.rs; the fill reader's cut is
+watched red.
+
+## GStreamer 1.28 replaces a stream's tags with its later tag events (measured 2026-10-07)
+
+Under 1.28.7 decodebin3 updates each GstStream's tags from the stream's
+tag events, and a later list REPLACES the earlier one. The HLS subtitle
+rendition's `language-code=en` (from the playlist's LANGUAGE) becomes
+`subtitle-codec=WebVTT` alone once the WebVTT parser posts its tags, so
+media_tracks read `captions und`. 1.26.2 kept the language (the probe was
+the same playbin3 in both images). kaya's GTK arm remembers the first
+language each stream id declared (`declared_languages`), and a later list
+that names a language still wins. GUARD: media_tracks on the linux lane.
+
+## GTK 4.20 inhibits idle only through the portal (measured 2026-10-07)
+
+GTK 4.24's gtkapplication-dbus.c no longer talks to org.gnome.SessionManager
+("Rely on the portal instead of talking to session managers", GTK NEWS):
+`gtk_application_inhibit` on x11 goes to org.freedesktop.portal.Inhibit,
+and only when the portal is ACTIVATABLE on the bus (gdk.c,
+`environment_has_portals` reads ListActivatableNames). The x11 media and
+capture legs read `display awake false` with the session manager answering
+on the bus. tools/linux/sessionmgr.py `--portal-inhibit` plays the portal's
+Inhibit on those legs and records it where IsInhibited reads, as
+xdg-desktop-portal-gtk forwards to gnome-session; `--write-service` makes
+the name activatable. It is not the real portal because the capture leg's
+direct regime must have no camera portal. Wayland's inhibitor is the
+compositor's and is unchanged. GUARD: media_session and capture on x11.
+
+## The portal Registry is per connection (measured 2026-10-07)
+
+`org.freedesktop.host.portal.Registry.Register` names the app for the
+CONNECTION that called it. kaya registered on the shared session bus
+connection while deciding the notification route, before the
+GApplication existed; nothing else held that connection, so it closed,
+and the GApplication opened a new one that had registered nothing.
+xdg-desktop-portal 1.22.1 then passed an empty app id to the backend, and
+xdg-desktop-portal-gtk could not deliver a click on an `app.` action: the
+chat leg's notification activation reached nobody (dbus-monitor on the
+leg's bus: ActionInvoked from the daemon, no impl ActionInvoked after it).
+Trixie's 1.20.3 delivered it anyway. gtk.rs keeps the registered
+connection for the life of the process (`REGISTERED_BUS`), so the
+GApplication's `g_bus_get` returns it. GUARD: chat-go on the linux lane.
+
+## Stopping an HLS playbin3 just after it starts aborts or wedges on GStreamer 1.28 (measured 2026-10-07; open)
+
+On the forky image (GStreamer 1.28.7, libsoup 3.6.6) a playbin3 on an HLS
+playlist set to NULL 2-5 ms after PAUSED aborts the process in libsoup:
+`soup-session.c:1530:message_completed: assertion failed: (item->context
+== soup_thread_default_context ())` (a standalone python probe, fakesinks,
+no kaya; trixie's 1.26.2 with libsoup 3.6.5 survived 60 of 60; reported in
+the wild as high-tide#315, "skipping tracks very fast"). Waiting for the
+pending state change first stopped the abort in the probe (400 of 400) but
+in kaya the main thread then wedged in the NULL set_state against a
+streaming thread inside gst_element_change_state from a pad probe: the
+paintable sink's preroll needs the main thread, which was waiting. The
+wait is not in the tree. The linux lane's media_delivery-rust-notsdemux
+legs, which skip to the next item at once, are red on forky for this
+(docs/deferred.md's GStreamer 1.28 HLS teardown entry).
+
 ## Compose hands a secure field's real text to the accessibility node info (measured 2026-10-07)
 
 On the pool's API 35 emulators, under foundation 1.11.4, a
@@ -62,6 +144,9 @@ x11 and wayland. Do not "fix" the read by counting the model's text, and
 do not make a GtkPasswordEntry with `PasswordEntry::new()`. GUARD:
 check-universal-props' gtk_secure_text; the interface registration cut
 was watched red on the lane (docs/deferred.md, the struck GTK 4.18 GAP).
+Measured again on GTK 4.24.0 (the forky image, 2026-10-07): the subtype's
+read is `masked N`, all 18 secure legs green, so the forwarder serves both
+branches.
 
 ## WinUI's PasswordBox raises PasswordChanged late and publishes no Value (measured 2026-10-07)
 
@@ -13295,6 +13380,11 @@ whatever the file is tagged, so a flat colour has to be built as RGB
 in tools/gen-media.py; the numbers are docs/probes/media-mac-2026-09-30.md.
 expect_video_ink compares in sRGB within 2 per channel (harness.rs
 VIDEO_INK_TOLERANCE, held by check-verbs).
+GTK colour-manages the same way from 4.20 (measured on 4.24 with
+gtk4paintablesink 0.15, 2026-10-07): the linux lane's synthetic camera
+declared no transfer, GStreamer defaulted its NV12 to the BT.709 transfer,
+and C83C1E drew CF4C2E. tools/linux/pwsynth declares the sRGB transfer and
+BT.709 primaries, as the media files do.
 
 ## MediaRemote drops a command from an unentitled process and answers true (measured 2026-09-30)
 `MRMediaRemoteSendCommand` called from kaya's own process returns true and

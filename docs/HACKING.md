@@ -384,6 +384,27 @@ collection keys. See DESIGN.md's transport section for the doctrine.
   interpreter dylib (KAYA_SWIFTUI_LIB — see validate-mac.py for the
   exact pattern).
 
+## The linux image (tools/linux/Dockerfile)
+
+The lane's image is Debian forky, pinned by digest, with apt frozen at
+one snapshot.debian.org date (`ARG SNAPSHOT`); tools/check-pins.py holds
+both. tools/validate-linux.py builds it as `kaya-linux:latest` on every
+run, from cache unless the Dockerfile moved.
+
+ROLLING BACK TO TRIXIE (GTK 4.18.6), the maintainer's condition on the
+2026-10-07 move: `git revert` the commit that moved the image, then run
+the lane. Its build comes back from cache because the image
+`kaya-linux:trixie-4.18-backup` (d12861649f0d) still holds those layers:
+measured 2026-10-07, the lane's own `docker build` of the trixie
+Dockerfile took 3.6 s with every step cached and gave the backup's 26
+layers exactly (the image id differs, since buildx's manifest wrapper is
+new on each build). Never delete that tag or prune images: a forky build
+whose image lost its tag was rebuilt from scratch at the next build
+(about 5 minutes against snapshot.debian.org), so an untagged image's
+cache cannot be counted on. The revert also takes back the code changes
+the move needed (docs/deferred.md's ruling entry lists them), which leaves
+the tree that passed on trixie.
+
 ## Reading a failed lane leg (the instruments, 2026-09-06)
 
 Every runner prints the verdict; what follows it is where the cause is,

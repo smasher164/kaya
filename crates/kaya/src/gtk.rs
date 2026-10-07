@@ -14723,8 +14723,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     }
                 }
                 // (The IDENTIFIER has no GTK setter and no reader below
-                // 4.22; this build pins v4_10 and Debian trixie ships 4.18,
-                // so it goes on the widget NAME instead.)
+                // 4.22; this build pins v4_14, so it goes on the widget
+                // NAME instead.)
                 //
                 // The HINT: GTK's DESCRIPTION property, which AT-SPI
                 // publishes as the description. Same empty-means-unset rule
@@ -16064,6 +16064,8 @@ fn name_is_activatable(conn: &gio::DBusConnection, name: &str) -> bool {
     .is_some_and(|names| names.iter().any(|held| held == name))
 }
 
+static REGISTERED_BUS: std::sync::OnceLock<gio::DBusConnection> = std::sync::OnceLock::new();
+
 /// Set by the route decision; read at every post (R5).
 static RELAUNCH_DOOR: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 
@@ -16083,6 +16085,12 @@ fn notification_route() -> Option<NotifyRoute> {
                 (Some(conn), Some(id)) => register_host_app(conn, id),
                 _ => false,
             };
+        // docs/traps.md, "The portal Registry is per connection".
+        if registered {
+            if let Some(conn) = &bus {
+                let _ = REGISTERED_BUS.set(conn.clone());
+            }
+        }
         let gnome = bus.as_ref().is_some_and(|conn| name_has_owner(conn, GNOME_NAME));
         let route = if registered {
             Some(NotifyRoute::Portal)
@@ -21018,7 +21026,9 @@ impl crate::harness::Stage for GtkStage {
             let Some(node) = snapshot.to_node() else {
                 return format!("<the container snapshotted to nothing at {w}x{h}>");
             };
-            let shot = renderer.render_texture(&node, None);
+            // docs/traps.md, "GTK 4.20 renders a node to its drawn bounds".
+            let whole = gtk4::graphene::Rect::new(0.0, 0.0, w as f32, h as f32);
+            let shot = renderer.render_texture(&node, Some(&whole));
             let (tw, th) = (shot.width(), shot.height());
             if tw < 1 || th < 1 {
                 return format!("<the container rendered to {tw}x{th} pixels>");
@@ -22891,7 +22901,8 @@ impl crate::harness::Stage for GtkStage {
             let Some(node) = snapshot.to_node() else {
                 return format!("<the toplevel snapshotted to nothing at {rw}x{rh}>");
             };
-            let shot = renderer.render_texture(&node, None);
+            let whole = gtk4::graphene::Rect::new(0.0, 0.0, rw as f32, rh as f32);
+            let shot = renderer.render_texture(&node, Some(&whole));
             // THE RATIO IS MEASURED, NOT ASSUMED: the texture's pixel
             // size over the toplevel's logical size is whatever this
             // display's scale turned out to be, and reading it here means
@@ -23456,13 +23467,9 @@ fn atspi_role_of(w: &gtk4::Widget) -> Option<atspi::Role> {
             atspi::Role::CheckBox
         });
     }
-    // THE SWITCH SHARES THE CHECK BOX'S FAMILY ON THIS TOOLKIT, measured
-    // 2026-09-07 in the lane's own image: GTK maps GTK_ACCESSIBLE_ROLE_SWITCH
-    // onto ATSPI_ROLE_CHECK_BOX (7) — the same number a GtkCheckButton
-    // publishes — and never ATSPI_ROLE_SWITCH (130), which the atspi 0.30
-    // crate's enum could not decode anyway (it ends at 129). So the ordinal
-    // family is the check box's, and the WORD `switch` comes from the widget
-    // this backend built (`composed_control_role`), the picker's route.
+    // THE SWITCH COUNTS IN THE CHECK BOX'S FAMILY: docs/traps.md, "GTK 4.20
+    // publishes a switch as ATSPI_ROLE_SWITCH". The WORD `switch` comes from
+    // the widget this backend built (`composed_control_role`).
     if w.is::<gtk4::Switch>() {
         return Some(atspi::Role::CheckBox);
     }
@@ -23731,7 +23738,7 @@ fn file_dialog_atspi(op: DialogOp<'_>) -> Option<DialogRead> {
             if depth > 26 {
                 return;
             }
-            let (Ok(role), Ok(name)) = (node.get_role().await, node.name().await) else {
+            let (Ok(role), Ok(name)) = (bus_role(&node).await, node.name().await) else {
                 return;
             };
             let in_dialog = in_dialog || role == atspi::Role::Dialog;
@@ -23975,7 +23982,7 @@ fn atspi_range_read(index: usize, read: RangeRead) -> Option<String> {
             if depth > 24 {
                 return;
             }
-            if let Ok(role) = node.get_role().await {
+            if let Ok(role) = bus_role(&node).await {
                 out.push((
                     role,
                     node.inner().destination().to_string(),
@@ -24141,7 +24148,7 @@ fn atspi_text_of(want: atspi::Role, index: usize) -> Option<String> {
             if depth > 24 {
                 return;
             }
-            if let Ok(role) = node.get_role().await {
+            if let Ok(role) = bus_role(&node).await {
                 out.push((
                     role,
                     node.inner().destination().to_string(),
@@ -24242,7 +24249,7 @@ fn atspi_collect(want: atspi::Role, index: usize, want_description: bool) -> Opt
                 return;
             }
             if let (Ok(role), Ok(name), Ok(description)) =
-                (node.get_role().await, node.name().await, node.description().await)
+                (bus_role(&node).await, node.name().await, node.description().await)
             {
                 // A text field with no authored label publishes an EMPTY name;
                 // its content lives on the Text interface, which is what a
@@ -24339,7 +24346,7 @@ fn atspi_act(want: atspi::Role, index: usize, name: &str) -> Result<(), String> 
             if depth > 24 {
                 return;
             }
-            if node.get_role().await.ok() == Some(want) {
+            if bus_role(&node).await.ok() == Some(want) {
                 out.push(node.clone());
             }
             let Ok(children) = node.get_children().await else { return };
@@ -24431,6 +24438,17 @@ fn atspi_absent() -> Option<String> {
     })
 }
 
+/// docs/traps.md, "GTK 4.20 publishes a switch as ATSPI_ROLE_SWITCH".
+#[cfg(all(feature = "harness", target_os = "linux"))]
+async fn bus_role(node: &atspi::proxy::accessible::AccessibleProxy<'_>) -> Result<atspi::Role, String> {
+    const ATSPI_ROLE_SWITCH: u32 = 130;
+    let raw: u32 = node.inner().call("GetRole", &()).await.map_err(|e| e.to_string())?;
+    if raw == ATSPI_ROLE_SWITCH {
+        return Ok(atspi::Role::CheckBox);
+    }
+    atspi::Role::try_from(raw).map_err(|e| format!("role {raw}: {e}"))
+}
+
 /// The sentence for a bus read that came back empty — the bus's absence
 /// where that is the cause, the missing node otherwise.
 #[cfg(all(feature = "harness", target_os = "linux"))]
@@ -24491,7 +24509,7 @@ fn atspi_window_marker(title: &str, marker: &str) -> Result<bool, AtspiMiss> {
                 return;
             }
             let mut inside = in_frame;
-            if let (Ok(role), Ok(name)) = (node.get_role().await, node.name().await) {
+            if let (Ok(role), Ok(name)) = (bus_role(&node).await, node.name().await) {
                 if role == atspi::Role::Frame {
                     out.names.push(name.clone());
                     if name == want_frame {
@@ -24603,7 +24621,7 @@ fn atspi_promoted_buttons(title: &str) -> Result<Vec<(String, bool)>, AtspiMiss>
                 return;
             }
             let mut inside = in_frame;
-            if let (Ok(role), Ok(name)) = (node.get_role().await, node.name().await) {
+            if let (Ok(role), Ok(name)) = (bus_role(&node).await, node.name().await) {
                 if role == atspi::Role::Frame {
                     out.names.push(name.clone());
                     if name == want_frame {
@@ -25041,6 +25059,8 @@ mod gtk_media {
         seeks: u32,
         /// The stream collection, in playbin3's order: (id, kind, BCP 47 tag).
         streams: Vec<(String, gst::StreamType, gst::Stream)>,
+        /// docs/traps.md, "GStreamer 1.28 replaces a stream's tags".
+        declared_languages: std::collections::HashMap<String, String>,
         selected: Vec<String>,
         /// The text stream whose cues kaya draws and reports, None for
         /// captions off. The text stream keeps flowing while it is off: a
@@ -25266,6 +25286,7 @@ mod gtk_media {
                 pending_seek: None,
                 seeks: 0,
                 streams: Vec::new(),
+                declared_languages: std::collections::HashMap::new(),
                 selected: Vec::new(),
                 caption_shown: None,
                 requested: None,
@@ -25641,11 +25662,15 @@ mod gtk_media {
 
     /// The BCP 47 tag of a stream: GStreamer's own ISO 639-1 canonicalizer
     /// (gst_tag_get_language_code_iso_639_1, "eng" reads "en"), `und` for none.
-    fn language_tag(stream: &gst::Stream) -> String {
-        let raw = stream
+    fn stream_language(stream: &gst::Stream) -> Option<String> {
+        stream
             .tags()
             .and_then(|t| t.get::<gst::tags::LanguageCode>().map(|v| v.get().to_owned()))
-            .unwrap_or_default();
+            .filter(|l| !l.is_empty() && l != "und")
+    }
+
+    fn language_tag(stream: &gst::Stream, declared: Option<&String>) -> String {
+        let raw = stream_language(stream).or_else(|| declared.cloned()).unwrap_or_default();
         if raw.is_empty() || raw == "und" {
             return "und".to_owned();
         }
@@ -25670,7 +25695,7 @@ mod gtk_media {
             let of: Vec<&(String, gst::StreamType, gst::Stream)> =
                 s.streams.iter().filter(|(_, k, _)| k.contains(t)).collect();
             let at = of.iter().position(|(sid, _, _)| s.selected.contains(sid));
-            (of.iter().map(|(_, _, stream)| language_tag(stream)).collect(), at)
+            (of.iter().map(|(sid, _, stream)| language_tag(stream, s.declared_languages.get(sid))).collect(), at)
         };
         let (audio, audio_selected) = list(gst::StreamType::AUDIO);
         let (captions, _) = list(gst::StreamType::TEXT);
@@ -25746,6 +25771,14 @@ mod gtk_media {
                         v.iter().map(|(i, _, _)| i.clone()).collect()
                     };
                     let moved = ids(&s.streams) != ids(&streams);
+                    if moved {
+                        s.declared_languages.clear();
+                    }
+                    for (sid, _, stream) in &streams {
+                        if let Some(lang) = stream_language(stream) {
+                            s.declared_languages.entry(sid.clone()).or_insert(lang);
+                        }
+                    }
                     s.streams = streams;
                     if moved {
                         s.requested = None;
@@ -26393,7 +26426,8 @@ mod gtk_media {
         let Some(node) = snapshot.to_node() else {
             return format!("<the {rw}x{rh} toplevel snapshotted to nothing>");
         };
-        let shot = renderer.render_texture(&node, None);
+        let whole = gtk4::graphene::Rect::new(0.0, 0.0, rw as f32, rh as f32);
+        let shot = renderer.render_texture(&node, Some(&whole));
         let (tw, th) = (shot.width(), shot.height());
         let px = (f64::from(at.x()) * f64::from(tw) / rw) as i64;
         let py = (f64::from(at.y()) * f64::from(th) / rh) as i64;

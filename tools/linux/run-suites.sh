@@ -1184,7 +1184,8 @@ for proto in x11 wayland; do
     # 4.18.6's wayland backend drops the icon-list property and sway
     # 1.10.1 advertises no xdg_toplevel_icon_manager_v1, so the wayland
     # ring runs a WITNESS requiring the leg to fail on the icon steps AND
-    # ONLY on them — RED the day GTK reaches 4.20.
+    # ONLY on them — RED the day the compositor carries the protocol too
+    # (GTK is 4.24 since 2026-10-07 and the witness stayed green on sway 1.12).
     #
     # THE CLASS IS ASSERTED ON BOTH RINGS, outside the leg, since no
     # harness verb reads `WM_CLASS`/`app_id`

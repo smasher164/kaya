@@ -470,6 +470,7 @@ def census(files):
     bad += compose_slider_names(read(compose))
     bad += secure_identity(read(gtk), read(winui))
     bad += gtk_secure_text(read(gtk), read(GTK_SECURE))
+    bad += gtk_newer_reads(read(gtk))
     bad += secure_identity_interpreters(read(swiftui), read(compose))
     return bad
 
@@ -559,7 +560,7 @@ def fill_reads_rust_and_compose(gtk_text, winui_text, compose_text):
     bad = []
     for path, text, start_at, needle, forbidden in (
         (GTK, gtk_text, "fn fill_tint(&self, t: crate::harness::Target)",
-         "renderer.render_texture(&node, None)",
+         "renderer.render_texture(&node, Some(&whole))",
          r"Prop::Filled|FILLED_CLASS|TINT_CLASSES|kaya-tint-"),
         (WINUI, winui_text, "fn fill_tint(&self, t: crate::harness::Target)",
          "grab_canvas(&at)", r"core\.filled\b"),
@@ -723,6 +724,23 @@ def gtk_secure_text(gtk_text, secure_text):
                 or f"(*i).{vfunc}.map(" not in secure_text:
             bad.append(f"{GTK_SECURE}: {vfunc} is not forwarded to the entry's GtkText, so GTK "
                        f"answers it from its editable handler")
+    return bad
+
+
+# GTK 4.20 AND LATER, read on the lane's forky image (docs/traps.md, "GTK 4.20
+# publishes a switch as ATSPI_ROLE_SWITCH" and "GTK 4.20 renders a node to
+# its drawn bounds"): every bus role goes through bus_role, which decodes the
+# role the atspi crate cannot, and every reader renders a fixed viewport.
+def gtk_newer_reads(gtk_text):
+    bad = []
+    if ".get_role()" in gtk_text:
+        bad.append(f"{GTK}: a bus role read through the atspi crate's get_role(), which "
+                   f"fails on GTK 4.20's switch role (130) — read it through bus_role")
+    if "if raw == ATSPI_ROLE_SWITCH {" not in gtk_text:
+        bad.append(f"{GTK}: bus_role no longer folds ATSPI_ROLE_SWITCH into the check box's family")
+    if re.search(r"render_texture\([^)]*,\s*None\)", gtk_text):
+        bad.append(f"{GTK}: a reader renders with no viewport, so the texture is the node's "
+                   f"drawn bounds on GTK 4.20 and a sample lands on the wrong pixel")
     return bad
 
 
@@ -976,7 +994,7 @@ def drag_waits(winui_text):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 119
+DECLARED = 121
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -1139,6 +1157,16 @@ for label, path, pattern, repl in (
      r"\n\s*field\.SetPasswordRevealMode\(PasswordRevealMode::Hidden\)\?;", ""),
     ("WinUI's masked read trusting a peer that is no password", WINUI,
      r"if !peer\.IsPassword\(\)\? \{", "if false {"),
+    ("GTK's bus walk back on the crate's role decoder", GTK,
+     r"\(bus_role\(&node\)\.await, node\.name\(\)\.await\) else \{\n\s+return;\n\s+\};"
+     r"\n\s+let in_dialog",
+     "(node.get_role().await, node.name().await) else {\n                return;\n"
+     "            };\n            let in_dialog"),
+    ("GTK's fill reader rendering the node's own bounds", GTK,
+     r"render_texture\(&node, Some\(&whole\)\);\n(\s+)let \(tw, th\) = \(shot\.width\(\), "
+     r"shot\.height\(\)\);\n\s+if tw < 1 \|\| th < 1 \{",
+     "render_texture(&node, None);\n\\1let (tw, th) = (shot.width(), shot.height());\n"
+     "\\1if tw < 1 || th < 1 {"),
 ):
     doctored = g.doctor(label, real[path], pattern, repl, want=1)
     findings = census(load({path: doctored}))

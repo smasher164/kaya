@@ -83,7 +83,7 @@ from 4.14. The gtk4 crate feature moved from v4_12 to v4_14 for it, so
 kaya's GTK floor is 4.14 (Ubuntu 24.04 ships 4.14.5). Guard:
 check-universal-props' gtk_secure_text, four watched negatives.
 
-## RULING WANTED — the linux lane's GTK version (2026-10-07)
+## ~~RULING WANTED — the linux lane's GTK version (2026-10-07)~~ CLOSED 2026-10-07, ruled forky, reversibly ("go with forky, though let's do it in a way where if the upgrade fails, we can go back to what we have now"); the image is debian:forky by digest with apt frozen at snapshot 20261005T000000Z (GTK 4.24.0), rollback recipe in docs/HACKING.md's linux image section; the HLS teardown abort below keeps two to six legs red.
 KEY: linux lane GTK version, debian trixie digest, GTK 4.20, GTK 4.22, GTK 4.24, forky, Ubuntu 26.04, tools/linux/Dockerfile, v4_14
 
 The lane runs GTK 4.18.6 (tools/linux/Dockerfile pins `debian:trixie` by
@@ -100,6 +100,47 @@ updates), a stable base with a newer GTK, at the cost of moving the
 whole image's toolchain (ghc, opam, sway, gstreamer, the portal) off
 Debian; (d) a second, smaller GTK-only lane on (b) or (c). Also yours:
 whether kaya states a GTK floor (4.14 now, by the v4_14 feature).
+
+CLOSED 2026-10-07: option (b), frozen. tools/linux/Dockerfile pins
+debian:forky by digest and writes apt's sources to snapshot.debian.org at
+`ARG SNAPSHOT=20261005T000000Z`, the base image's own build date
+(libgtk-4-dev 4.24.0+ds-2, libadwaita 1.9.2, GStreamer 1.28.7, PipeWire
+1.6.9, xdg-desktop-portal 1.22.1, sway 1.12, ghc 9.10.3, OCaml 5.4.1);
+check-pins' apt clause holds the digest, the one date, the two snapshot
+archives and the order, five cuts watched. Forky renamed one package
+(`ocaml-nox` is gone; `ocaml` is the compiler) and moved three version
+reads (portal 1.22, GStreamer 1.28, PipeWire 1.6). The move needed five
+code fixes, each in docs/traps.md under its own 2026-10-07 entry: the
+switch's AT-SPI role (bus_role), the render viewport, GStreamer's replaced
+stream tags (declared_languages), x11 idle inhibition through the portal
+(sessionmgr.py --portal-inhibit), the portal Registry's connection
+(REGISTERED_BUS), and the synthetic camera's transfer (pwsynth). The secure
+field's forwarder reads `masked N` on 4.24 (docs/secure-entry-plan.md §7).
+The full lane after them: 1148 of 1155 legs green, legs 665 s and
+container-suites 676 s on a warm build; the reds were the open GStreamer
+entry below (media_tracks python/java x11, haskell/java wayland, and both
+notsdemux legs) and one formatar-java-wayland start that printed nothing
+for 180 s and passed four times alone. The floor question is not settled
+here: v4_14 stays.
+
+## GAP — stopping an HLS playbin3 aborts in libsoup on the forky image (docs/traps.md; 2026-10-07)
+KEY: GStreamer 1.28, libsoup 3.6.6, soup_thread_default_context, message_completed, adaptivedemux2, hlsdemux2, notsdemux, media_tracks, set_playbin_state, gstreamer#947
+
+GStreamer 1.28.7 with libsoup 3.6.6 aborts the process in
+`soup-session.c:1530:message_completed` when an HLS playbin3 is stopped
+while a download is in flight: reproduced without kaya (a python playbin3
+set to NULL 2-5 ms after PAUSED), never on trixie's 1.26.2 and 3.6.5, and
+seen in other apps that skip tracks quickly (high-tide#315; gstreamer#947
+is the shared-SoupSession thread-safety issue). On the lane it kills the
+media_delivery-rust-notsdemux legs every run and media_tracks legs when the
+host is busy. Waiting for the pending state change before NULL stopped the
+abort in the probe but wedged kaya's main thread, since the paintable
+sink's preroll needs that thread (an eu-stack taken while it hung: the
+main thread in set_playbin_state's NULL set_state waiting on a mutex, a
+streaming thread inside gst_element_change_state under a pad probe); not
+in the tree. Next: a
+snapshot with a fixed GStreamer or libsoup, or a teardown kaya runs off
+the main thread.
 
 ## DEFER — the secure field's autofill hint and reveal toggle (docs/secure-entry-plan.md P3, P8; 2026-10-07)
 KEY: secure field autofill, content type, textContentType, newPassword, oneTimeCode, ContentType.Password, reveal toggle, PasswordRevealMode, show-peek-icon, TextObfuscationMode
@@ -4806,7 +4847,9 @@ reach.
     rebuild the image at all. trixie is stable, so the drift is point
     releases and security updates, and the security half is drift we
     want. Revisit if a Debian update ever breaks a lane; the fix would
-    be to pin the snapshot only for the release that broke.
+    be to pin the snapshot only for the release that broke. REVISITED
+    2026-10-07: the image moved to forky, which rolls, so apt is frozen
+    at one snapshot date now (the linux lane GTK version ruling above).
   - GRADLE DEPENDENCY LOCKING and NUGET packages.lock.json. Both
     ecosystems already name exact versions and resolve them from
     immutable repositories, so a lockfile adds regeneration ceremony
@@ -6899,7 +6942,9 @@ whose Wayland backend answers the icon-list property with a literal
 on an X11 window's `_NET_WM_ICON` and nothing at all on Wayland. The
 lowering is already protocol-agnostic — GTK 4.20 lowers this same texture
 list into `xdg_toplevel_icon_v1.add_buffer` — so what closes this is the
-lane image moving, not code in crates/kaya/src/gtk.rs.
+lane image moving, not code in crates/kaya/src/gtk.rs. The image moved to
+GTK 4.24 on 2026-10-07 and the witness leg stayed green: the compositor,
+sway 1.12, is the half still missing.
 
 THIS IS NOT A DEPTH STUB AND IT IS NOT HELD OPEN BY ONE. gtk.rs has the
 feature; what it has not got is a protocol, and a depth stub is

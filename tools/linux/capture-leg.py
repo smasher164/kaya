@@ -175,8 +175,16 @@ def main(argv):
     stack_env["XDG_CONFIG_HOME"] = str(home / "config")
     stack_env["KAYA_CAPTURE_LEG"] = marker
     dirs = env.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share"
+    sessionmgr = [sys.executable, str(WORK / "tools/linux/sessionmgr.py")]
     if regime == "portal":
         dirs = f"{PORTAL_DIRS}:{dirs}"
+    else:
+        code, said = quiet(sessionmgr + ["--write-service", str(home / "inhibit")], env)
+        if code != 0:
+            say(f"FAILED — sessionmgr.py could not write the inhibit portal's service file: {said}")
+            return 1
+        dirs = f"{home / 'inhibit'}:{dirs}"
+        sessionmgr.append("--portal-inhibit")
     stack_env["XDG_DATA_DIRS"] = dirs
     env["KAYA_CAPTURE_LEG"] = marker
     logs = {}
@@ -204,7 +212,7 @@ def main(argv):
             return 1
         for e in (env, stack_env):
             e["DBUS_SESSION_BUS_ADDRESS"] = address
-        start("sessionmgr", [sys.executable, str(WORK / "tools/linux/sessionmgr.py")], stack_env)
+        start("sessionmgr", sessionmgr, stack_env)
         start("pipewire", ["pipewire"], stack_env)
         if not wait_for("PipeWire's socket", lambda: (runtime / "pipewire-0").exists(), 10):
             findings.append("FAILED — PipeWire never made its socket")

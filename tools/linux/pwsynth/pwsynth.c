@@ -7,7 +7,9 @@
  * A PipeWire node a real camera's or microphone's consumer finds by its
  * node.name: a camera is a Video/Source with media.role=Camera (what the
  * camera portal counts) offering NV12 at 640x480 and 1280x720, each at 15
- * and 30 fps, video-range BT.601 frames of one flat colour; a microphone
+ * and 30 fps, video-range BT.601 frames of one flat colour tagged with the
+ * sRGB transfer and primaries (docs/traps.md, "A video's TRANSFER tag decides
+ * the colour the window shows"); a microphone
  * is an Audio/Source of F32 stereo at 48 kHz, one sine on both channels.
  * Not gst-launch's pipewiresink: its provide mode offers one format and
  * exits when its consumer unlinks (docs/probes/capture-2026-10-01/
@@ -237,7 +239,9 @@ int main(int argc, char *argv[]) {
                     SPA_FORMAT_VIDEO_size, SPA_POD_Rectangle(&SPA_RECTANGLE(SIZES[i][0], SIZES[i][1])),
                     SPA_FORMAT_VIDEO_framerate, SPA_POD_Fraction(&SPA_FRACTION(RATES[j], 1)),
                     SPA_FORMAT_VIDEO_colorRange, SPA_POD_Id(SPA_VIDEO_COLOR_RANGE_16_235),
-                    SPA_FORMAT_VIDEO_colorMatrix, SPA_POD_Id(SPA_VIDEO_COLOR_MATRIX_BT601));
+                    SPA_FORMAT_VIDEO_colorMatrix, SPA_POD_Id(SPA_VIDEO_COLOR_MATRIX_BT601),
+                    SPA_FORMAT_VIDEO_transferFunction, SPA_POD_Id(SPA_VIDEO_TRANSFER_SRGB),
+                    SPA_FORMAT_VIDEO_colorPrimaries, SPA_POD_Id(SPA_VIDEO_COLOR_PRIMARIES_BT709));
             }
         }
         flags |= PW_STREAM_FLAG_DRIVER;
