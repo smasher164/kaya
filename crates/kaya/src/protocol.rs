@@ -3052,6 +3052,10 @@ impl OccSink {
         allow(dead_code)
     )]
     pub(crate) fn send(&self, occurrence: Occurrence) {
+        #[cfg(all(feature = "harness", any(target_os = "windows", target_os = "linux", test)))]
+        if let Occurrence::Dropped { id, point, .. } = &occurrence {
+            crate::harness::note_drop(id.0, point.0);
+        }
         match self {
             OccSink::Mpsc(tx) => {
                 crate::stall::enqueued();

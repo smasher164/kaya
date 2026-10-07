@@ -2028,7 +2028,7 @@ struct KayaDragPayload {
         return "(\(Int(screen.origin.x)), \(Int(height - screen.origin.y - screen.height)), \(Int(screen.width)), \(Int(screen.height)))"
     }
 
-    func kayaDriveDrag(source: KayaNode, destination: KayaNode, reorder: Bool?) -> String? {
+    func kayaDriveDrag(source: KayaNode, destination: KayaNode, reorder: Bool?, across: Int?) -> String? {
         guard let view = kayaDragSurfaces[destination.id] else {
             return "\(destination.kind == kindLabel ? "label" : "widget") \(destination.id) is not a drop destination — it declares no drop_target and sits in no reorderable For"
         }
@@ -2060,11 +2060,12 @@ struct KayaDragPayload {
         defer { board.releaseGlobally() }
         kayaWriteDragPayload(board, payload)
         // A reorder lands where the scene says: before is the upper half.
+        let x = across.map { view.bounds.minX + view.bounds.width * CGFloat($0) / 100 } ?? view.bounds.midX
         let point: NSPoint
         if let before = reorder {
-            point = NSPoint(x: view.bounds.midX, y: before ? view.bounds.maxY - 1 : view.bounds.minY + 1)
+            point = NSPoint(x: x, y: before ? view.bounds.maxY - 1 : view.bounds.minY + 1)
         } else {
-            point = NSPoint(x: view.bounds.midX, y: view.bounds.midY)
+            point = NSPoint(x: x, y: view.bounds.midY)
         }
         let inWindow = view.convert(point, to: nil)
         let info = KayaDragInfo(board: board, mask: kayaNSDragOperation(ops), location: inWindow, window: view.window)
@@ -2543,7 +2544,7 @@ struct KayaDragPayload {
     /// arms called in UIKit's order, the source told the outcome. nil when it
     /// ran (a refusal included — the source reads `none`), else the sentence
     /// naming what stopped it. Main thread.
-    func kayaDriveDrag(source: KayaNode, destination: KayaNode, reorder: Bool?) -> String? {
+    func kayaDriveDrag(source: KayaNode, destination: KayaNode, reorder: Bool?, across: Int?) -> String? {
         guard let view = kayaDragSurfaces[destination.id], let site = view.dropSite else {
             return "\(destination.kind == kindLabel ? "label" : "widget") \(destination.id) is not a drop destination — it declares no drop_target and sits in no reorderable For"
         }
@@ -2565,12 +2566,12 @@ struct KayaDragPayload {
         }
         // A reorder lands where the scene says: before is the upper half, the
         // small y on UIKit's top-left origin.
+        let x = across.map { view.bounds.minX + view.bounds.width * CGFloat($0) / 100 } ?? view.bounds.midX
         let point: CGPoint
         if let before = reorder {
-            point = CGPoint(
-                x: view.bounds.midX, y: before ? view.bounds.minY + 1 : view.bounds.maxY - 1)
+            point = CGPoint(x: x, y: before ? view.bounds.minY + 1 : view.bounds.maxY - 1)
         } else {
-            point = CGPoint(x: view.bounds.midX, y: view.bounds.midY)
+            point = CGPoint(x: x, y: view.bounds.midY)
         }
         let items = [UIDragItem(itemProvider: kayaDragItemProvider(payload))]
         let dragging = KayaDragSessionDouble(items: items, point: point, ops: ops)
@@ -4942,6 +4943,27 @@ let kayaScene = KayaSceneModel()
 /// The presentation-side functions, handed over by the host kaya rather than
 /// resolved through the dynamic linker: hosts may carry kaya statically or
 /// load it RTLD_LOCAL, so the vtable pins the one live instance.
+/// The last drop the harness's own drag reached, for expect_drop_at: the
+/// destination's tag and the x of the point it reported. Main thread only.
+nonisolated(unsafe) var kayaLastDrop: (tag: [UInt8], x: CGFloat)? = nil
+
+/// expect_drop_at's tolerance in percent of the target's width; the
+/// harness.rs twin is DROP_ACROSS_TOLERANCE.
+let kayaDropAcrossTolerance = 5
+
+/// A whole percent from 1% to 99%, `drag`'s `at` and expect_drop_at's.
+func kayaPercent<S: StringProtocol>(_ word: S) -> Int? {
+    guard word.hasSuffix("%"), let n = Int(word.dropLast()), (1...99).contains(n) else { return nil }
+    return n
+}
+
+/// `<x> of <width>` as a whole percent across, or nil.
+func kayaDropAcrossRead(_ got: String) -> Int? {
+    let halves = got.components(separatedBy: " of ")
+    guard halves.count == 2, let x = Double(halves[0]), let width = Double(halves[1]), width > 0 else { return nil }
+    return Int(min(max((x / width * 100).rounded(), 0), 100))
+}
+
 enum KayaHost {
     nonisolated(unsafe) static var api: KayaHostApi!
 
@@ -5366,6 +5388,7 @@ enum KayaHost {
         _ tag: [UInt8], _ point: CGPoint, _ op: UInt32, anchor: [UInt8], before: Bool,
         _ value: KayaClipValue
     ) {
+        kayaLastDrop = (tag, point.x)
         kayaWithRepresentation(value) { rep in
             tag.withUnsafeBufferPointer { t in
                 anchor.withUnsafeBufferPointer { a in
@@ -9321,6 +9344,15 @@ private func kayaRunScript(_ script: String) {
                 // own arms driven in-process (docs/dnd-plan.md D10). A refused
                 // drop is not this verb's failure: the source reads `none`.
                 var words = Array(parts[1...])
+                var across: Int? = nil
+                if words.count >= 2, words[words.count - 2] == "at" {
+                    guard let n = kayaPercent(words[words.count - 1]) else {
+                        failures.append("drag's `at` wants a whole percent from 1% to 99%")
+                        break
+                    }
+                    across = n
+                    words.removeLast(2)
+                }
                 var reorder: Bool? = nil
                 if words.last == "before" {
                     reorder = true
@@ -9330,7 +9362,7 @@ private func kayaRunScript(_ script: String) {
                     words.removeLast()
                 }
                 if words.count != 3 || words[1] != "to" {
-                    failures.append("drag wants `<source> to <destination> [before|onto]`")
+                    failures.append("drag wants `<source> to <destination> [before|onto] [at N%]`")
                     break
                 }
                 let ends: (KayaNode, KayaNode)? = DispatchQueue.main.sync {
@@ -9350,7 +9382,7 @@ private func kayaRunScript(_ script: String) {
                 _ = kayaAwaitOnMain { kayaDragSurfaces[dst.id] != nil ? true : nil }
                 kayaAwaitQuiet()
                 let answered = kayaAnswers()
-                if let off = DispatchQueue.main.sync(execute: { kayaDriveDrag(source: src, destination: dst, reorder: reorder) }) {
+                if let off = DispatchQueue.main.sync(execute: { kayaDriveDrag(source: src, destination: dst, reorder: reorder, across: across) }) {
                     failures.append("drag: \(off)")
                 } else {
                     kayaAwaitAnswer(answered)
@@ -10499,6 +10531,24 @@ private func kayaRunScript(_ script: String) {
                         failures.append("video ink \(got), wanted \(want) within \(kayaVideoInkTolerance) per channel")
                     }
                 #endif
+            case "expect_drop_at":
+                // expect_drop_at <target> N%: where across the destination's
+                // width the last drop's reported point landed.
+                guard parts.count == 3, let want = kayaPercent(parts[2]) else {
+                    failures.append("expect_drop_at wants `<target> N%`")
+                    break
+                }
+                let got: String = DispatchQueue.main.sync {
+                    guard let node = kayaAnyTarget(parts[1]) else { return "<no such target>" }
+                    guard let view = kayaDragSurfaces[node.id] else { return "<not a drop destination>" }
+                    guard let last = kayaLastDrop, last.tag == node.identityTag else { return "no drop on it yet" }
+                    return "\(last.x) of \(view.bounds.width)"
+                }
+                if let pct = kayaDropAcrossRead(got), abs(pct - want) <= kayaDropAcrossTolerance {
+                    observed.append("drop at \(want)%")
+                } else {
+                    failures.append("the last drop on \(parts[1]) reads \(got), wanted \(want)% across within \(kayaDropAcrossTolerance)")
+                }
             case "expect_video_box":
                 // docs/media-plan.md §3: the box the platform laid out, its ratio ("16:9")
                 // or its size ("320x180").

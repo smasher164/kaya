@@ -1092,6 +1092,45 @@ if not any("cannot read" in b and "KayaCompose.kt" in b for b in gone):
           + "\n".join(gone), file=sys.stderr)
     raise SystemExit(1)
 
+# THE DROP POINT'S TOLERANCE (docs/dnd-plan.md D1): expect_drop_at reads
+# the drop's x as a percent of the target's width, three harnesses copy
+# the band by hand, and a widened copy passes a centred drop as 25%.
+DROP_RULED = 5
+DROP_MIRRORS = [
+    ("harness.rs", HARNESS,
+     r"const DROP_ACROSS_TOLERANCE\s*:\s*\w+\s*=\s*(\d+)\s*;"),
+    ("KayaSwiftUI.swift", SWIFT, r"let kayaDropAcrossTolerance = (\d+)\b"),
+    ("KayaCompose.kt", KOTLIN,
+     r"internal const val KAYA_DROP_ACROSS_TOLERANCE = (\d+)\b"),
+]
+
+
+def drop_tolerance(**srcs):
+    bad = []
+    for label, rel, pattern in DROP_MIRRORS:
+        m = re.search(pattern, srcs.get(label) or real(rel))
+        if not m:
+            bad.append(label + " declares no drop tolerance constant")
+        elif int(m.group(1)) != DROP_RULED:
+            bad.append(label + " sets its drop tolerance to "
+                       + m.group(1) + ", not " + str(DROP_RULED)
+                       + " — a drop at the middle would pass as 25%")
+    return bad
+
+
+drop_out = drop_tolerance()
+drop_tol_status = 1 if drop_out else 0
+if drop_out:
+    print("check-verbs: the expect_drop_at tolerance moved:\n"
+          + "\n".join(drop_out), file=sys.stderr)
+for label, rel, pattern in DROP_MIRRORS:
+    drifted = perturb(f"drop-tolerance ({label} widened to 25)", rel,
+                      "(" + pattern.split(r"(\d+)")[0] + r")\d+", "25")
+    score_or_die(introduced(drop_tolerance(**{label: drifted}), drop_out,
+                            "^" + re.escape(label)
+                            + " sets its drop tolerance to 25, "),
+                 f"widening {label}'s drop tolerance to 25")
+
 # An ABSENT mirror is a failure that NAMES IT, never a skip.
 gone = clip_mirrors(kotlin_src=g.scratch() / "no-such-mirror.kt")
 if not any("cannot read" in b and "KayaCompose.kt" in b for b in gone):
@@ -2045,8 +2084,8 @@ norm_status = 1 if norm_out else 0
 # variant over. Each on a doctored copy, count printed, red demanded.
 NORM_NEGATIVES = [
     ("the Drag verb's destination dropped again",
-     r"Step::Drag\(source, destination, _\) => vec!\[source, destination\],",
-     "Step::Drag(source, _, _) => vec![source],", "Step::Drag"),
+     r"Step::Drag\(source, destination, \.\.\) => vec!\[source, destination\],",
+     "Step::Drag(source, ..) => vec![source],", "Step::Drag"),
     # NOT a rename of the binding: `_table` still reads as a binding
     # handed over, so the census could not see it and this negative
     # passed VACUOUSLY — invisibly, because every SELF-TEST `fail()`
@@ -5322,6 +5361,7 @@ from timecode_routes import run as check_timecode_routes
 check_timecode_routes(g)
 
 if (clip_status or window_status or ink_status or ax_status
+        or drop_tol_status
         or words_status or label_status or polish_status
         or metrics_status or keyed_status or drop_line_status
         or vtrace_status or norm_status or ind_status

@@ -150,6 +150,12 @@ rides `drag_ended`.
 - `dropped` is `pasted`'s layout plus three fields (point, operation,
   and the reorder anchor of D8). Same blob table, same nine-binding
   spelling of the representation sum.
+- The point is in the destination's own top-left space. The shared
+  scene holds it with `drag <src> to <dst> at N%`, which releases N% of
+  the way across the destination, and `expect_drop_at <dst> N%`, which
+  reads the last delivered x over the destination's width within ±5
+  (check-verbs pins the band in all three harnesses). A backend that
+  reported the centre, or the window's space, passed every other step.
 
 Why not `on_paste` with a flag: a drop has a position and can be
 refused; a paste has neither. The payload model is shared; the

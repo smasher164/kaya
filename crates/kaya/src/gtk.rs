@@ -11539,6 +11539,7 @@ fn drag_points(
     source: crate::harness::Target,
     destination: crate::harness::Target,
     reorder: Option<bool>,
+    across: Option<u32>,
 ) -> Result<((f64, f64), (f64, f64), String), String> {
     let src = target_widget(core, source)
         .ok_or_else(|| format!("no such source {:?}", source))?;
@@ -11587,7 +11588,7 @@ fn drag_points(
         None => 0.5,
     };
     let to = (
-        f64::from(db.x()) + f64::from(db.width()) / 2.0,
+        f64::from(db.x()) + f64::from(db.width()) * across.map_or(0.5, |n| f64::from(n) / 100.0),
         f64::from(db.y()) + f64::from(db.height()) * share,
     );
     Ok((from, to, source_name(core, &src)))
@@ -20196,6 +20197,7 @@ impl crate::harness::Stage for GtkStage {
         source: crate::harness::Target,
         destination: crate::harness::Target,
         reorder: Option<bool>,
+        across: Option<u32>,
     ) -> String {
         let driver = match std::env::var(DRAG_DRIVER_VAR) {
             Ok(path) if !path.is_empty() => path,
@@ -20219,7 +20221,7 @@ impl crate::harness::Stage for GtkStage {
         // spent and the reading itself is the failure.
         let deadline = std::time::Instant::now() + std::time::Duration::from_millis(2000);
         let points = loop {
-            match Self::on_main(move |core| drag_points(core, source, destination, reorder)) {
+            match Self::on_main(move |core| drag_points(core, source, destination, reorder, across)) {
                 Ok(points) => break Ok(points),
                 Err(why) if std::time::Instant::now() >= deadline => break Err(why),
                 Err(_) => std::thread::sleep(std::time::Duration::from_millis(20)),
@@ -20360,6 +20362,24 @@ impl crate::harness::Stage for GtkStage {
     /// answer copy (D2). The picked-table registration is `materialize`'s,
     /// so a dropped file is redeemed exactly as a pasted one is. The REAL
     /// foreign gesture is the witness leg (tools/linux/dragwitness.py).
+    fn drop_across(&self, target: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let Some(widget) = target_widget(core, target) else {
+                return format!("no such target {target:?}");
+            };
+            let id = core.dnd.clip.widgets.borrow().iter().find_map(|(id, (weak, _))| {
+                (weak.upgrade().as_ref() == Some(&widget)).then_some(*id)
+            });
+            let Some(id) = id else {
+                return format!("{target:?} is no widget the drop arms know");
+            };
+            match crate::harness::last_drop_x(id) {
+                Some(x) => format!("{x} of {}", widget.width()),
+                None => "no drop on it yet".to_owned(),
+            }
+        })
+    }
+
     fn drag_file(&self, path: &str, destination: crate::harness::Target) -> String {
         // The destination's box is the last frame's, as the drag verb's is.
         Self::await_frames(2);

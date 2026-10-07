@@ -21267,6 +21267,7 @@ fn drag_plan(
     source: crate::harness::Target,
     destination: crate::harness::Target,
     reorder: Option<bool>,
+    across: Option<u32>,
 ) -> windows_core::Result<Result<((i32, i32), (i32, i32)), String>> {
     type Aim = Result<((i32, i32), (i32, i32)), String>;
     WinUiStage::on_ui_read(move |core| -> windows_core::Result<Aim> {
@@ -21323,7 +21324,10 @@ fn drag_plan(
         };
         Ok(Ok((
             ((src.0 + src.2 / 2.0) as i32, (src.1 + src.3 / 2.0) as i32),
-            ((dst.0 + dst.2 / 2.0) as i32, (dst.1 + dst.3 * share) as i32),
+            (
+                (dst.0 + dst.2 * across.map_or(0.5, |n| f64::from(n) / 100.0)) as i32,
+                (dst.1 + dst.3 * share) as i32,
+            ),
         )))
     })
 }
@@ -23681,11 +23685,30 @@ impl crate::harness::Stage for WinUiStage {
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
+    fn drop_across(&self, target: crate::harness::Target) -> String {
+        use bindings::Microsoft::UI::Xaml::FrameworkElement;
+        Self::on_ui_read(move |core| {
+            let Some(id) = target_widget_id(core, target) else {
+                return Ok(format!("no such target {target:?}"));
+            };
+            let Some(element) = core.widgets.get(&WidgetId(id)).and_then(|w| w.element().ok()) else {
+                return Ok(format!("{target:?} has no element"));
+            };
+            let width = element.cast::<FrameworkElement>()?.ActualWidth()?;
+            Ok(match crate::harness::last_drop_x(id) {
+                Some(x) => format!("{x} of {width}"),
+                None => "no drop on it yet".to_owned(),
+            })
+        })
+        .unwrap_or_else(|e| format!("the width read failed: {}", e.message()))
+    }
+
     fn drag(
         &self,
         source: crate::harness::Target,
         destination: crate::harness::Target,
         reorder: Option<bool>,
+        across: Option<u32>,
     ) -> String {
         // REAL INPUT, from the leg's own process (docs/dnd-plan.md D10):
         // WinUI's own remarks say there is no generalized DoDragDrop for a
@@ -23707,7 +23730,7 @@ impl crate::harness::Stage for WinUiStage {
         let mut aimed: Aim = Err(UNLAID.to_owned());
         let mut last: Option<((i32, i32), (i32, i32))> = None;
         for _ in 0..80 {
-            aimed = match drag_plan(source, destination, reorder) {
+            aimed = match drag_plan(source, destination, reorder, across) {
                 Ok(aim) => aim,
                 Err(e) => return format!("<unreadable: {e}>"),
             };

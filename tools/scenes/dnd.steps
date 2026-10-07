@@ -8,6 +8,12 @@ drag label#0 to label#1
 expect label#4 "text target got text hello (copy)"
 expect label#5 "drag ended copy"
 expect label#1 "hello"
+# WHERE ACROSS THE TARGET A DROP LANDS (docs/dnd-plan.md D1): the point the
+# backend reports, as a percent of the destination's width, at two places.
+drag label#0 to label#1 at 25%
+expect_drop_at label#1 25%
+drag label#0 to label#1 at 75%
+expect_drop_at label#1 75%
 # THE TEMPLATE ZONE (docs/dnd-plan.md §4): a stamped row is a source with
 # its own per-copy payload and a destination with the template's accept
 # list, and both ends report with the copy's keys.

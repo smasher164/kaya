@@ -282,8 +282,14 @@ pub enum Step {
     /// Drag the source onto the destination through the platform's own
     /// drag arms, in-process where real input is refused (docs/dnd-plan.md
     /// D10). `Some(before)` marks a REORDER: the destination is a row of
-    /// the source's own For and the bit says before or onto it.
-    Drag(Target, Target, Option<bool>),
+    /// the source's own For and the bit says before or onto it. The last
+    /// field is where across the destination's width the drop lands, in
+    /// percent (`at 25%`); none means its centre.
+    Drag(Target, Target, Option<bool>, Option<u32>),
+    /// Where across the destination's width the last drop on it landed, as
+    /// the `dropped` point the backend reported, in percent of its width
+    /// within DROP_ACROSS_TOLERANCE.
+    ExpectDropAt(Target, u32),
     /// `drag_file "<path>" to <destination>`: a FOREIGN file drop (D6) —
     /// the path, $TMP/$PID expanded, dropped on the destination as a
     /// source outside this app would drop it, so the picked-table
@@ -894,7 +900,8 @@ impl Step {
             // interpreter parses the script itself (tools/check-verbs.py
             // holds every variant's Target fields against these arms).
             // docs/traps.md: A Step's SECOND Target was never normalized
-            Step::Drag(source, destination, _) => vec![source, destination],
+            Step::Drag(source, destination, ..) => vec![source, destination],
+            Step::ExpectDropAt(t, _) => vec![t],
             Step::DragFile(_, destination) => vec![destination],
             Step::ExpectFolded(child, table) => {
                 let mut out = vec![child];
@@ -1024,6 +1031,7 @@ impl Step {
             Step::ExpectWindow { .. } => true,
             Step::ScrollToRow { .. } => false,
             Step::Drag { .. } => false,
+            Step::ExpectDropAt(..) => true,
             Step::DragFile { .. } => false,
             Step::HeaderClick { .. } => false,
             Step::ExpectFocused { .. } => true,
@@ -1174,6 +1182,38 @@ pub const VIDEO_CORNER_BARS: &str = "bars";
 /// Whether a box read as `"<width> <height>"` (Stage::video_box, in the
 /// platform's own units) has the aspect `width:height`, its height within
 /// one unit of its width at that ratio.
+/// expect_drop_at's tolerance, in percent of the target's width: a
+/// pointer lands on a whole pixel and a backend's drop point is rounded.
+pub(crate) const DROP_ACROSS_TOLERANCE: u32 = 5;
+
+/// A whole percent from 1% to 99%: `drag`'s `at` and `expect_drop_at`.
+fn parse_percent(word: &str) -> Option<u32> {
+    let n: u32 = word.strip_suffix('%')?.parse().ok()?;
+    (1..=99).contains(&n).then_some(n)
+}
+
+/// `<x> of <width>` as a whole percent across, or None.
+pub(crate) fn drop_across_read(got: &str) -> Option<u32> {
+    let (x, width) = got.split_once(" of ")?;
+    let (x, width): (f64, f64) = (x.trim().parse().ok()?, width.trim().parse().ok()?);
+    (width > 0.0 && x.is_finite()).then(|| (x / width * 100.0).round().clamp(0.0, 100.0) as u32)
+}
+
+/// What the GTK and WinUI backends' dropped occurrences reported last, per
+/// widget: the point's x, for expect_drop_at.
+static LAST_DROP: std::sync::Mutex<Option<(u64, f64)>> = std::sync::Mutex::new(None);
+
+pub(crate) fn note_drop(widget: u64, x: f64) {
+    if let Ok(mut last) = LAST_DROP.lock() {
+        *last = Some((widget, x));
+    }
+}
+
+/// The x of the last drop on `widget`, if the last drop was on it.
+pub(crate) fn last_drop_x(widget: u64) -> Option<f64> {
+    LAST_DROP.lock().ok().and_then(|last| last.filter(|(id, _)| *id == widget).map(|(_, x)| x))
+}
+
 pub fn video_box_shaped(got: &str, aspect: (u32, u32)) -> bool {
     video_box_read(got).is_some_and(|(w, h)| (h - w * f64::from(aspect.1) / f64::from(aspect.0)).abs() <= 1.0)
 }
@@ -1369,9 +1409,17 @@ pub trait Stage: Send + 'static {
     /// landing on a row of its own For. The empty string when it ran,
     /// otherwise the sentence naming what stopped it. Defaulted, so a
     /// backend that has not grown its arms says so by name.
-    fn drag(&self, source: Target, destination: Target, reorder: Option<bool>) -> String {
-        let _ = (source, destination, reorder);
+    fn drag(&self, source: Target, destination: Target, reorder: Option<bool>, across: Option<u32>) -> String {
+        let _ = (source, destination, reorder, across);
         "drag is a depth slice on this backend (docs/dnd-plan.md §5)".to_owned()
+    }
+
+    /// The last drop on `target` as `<x> of <width>`, the x the backend
+    /// reported in its `dropped` point and the target's width in the same
+    /// units; anything else is the sentence saying why there is none.
+    fn drop_across(&self, target: Target) -> String {
+        let _ = target;
+        "expect_drop_at is a depth slice on this backend".to_owned()
     }
 
     /// Drop `path` on `destination` as a source OUTSIDE this app would
@@ -3043,8 +3091,18 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 Step::ScrollToRow(parse_target(target)?, key)
             }
             "drag" => {
-                // drag <source> to <destination> [before|onto]
+                // drag <source> to <destination> [before|onto] [at N%]
                 let mut words: Vec<&str> = rest.split_whitespace().collect();
+                let across = match words.as_slice() {
+                    [.., "at", pct] => {
+                        let n = parse_percent(pct).ok_or_else(|| {
+                            format!("drag's `at` wants a whole percent from 1% to 99%: {line:?}")
+                        })?;
+                        words.truncate(words.len() - 2);
+                        Some(n)
+                    }
+                    _ => None,
+                };
                 let reorder = match words.last().copied() {
                     Some("before") => {
                         words.pop();
@@ -3058,10 +3116,21 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 };
                 if words.len() != 3 || words[1] != "to" {
                     return Err(format!(
-                        "drag wants `<source> to <destination> [before|onto]`: {line:?}"
+                        "drag wants `<source> to <destination> [before|onto] [at N%]`: {line:?}"
                     ));
                 }
-                Step::Drag(parse_target(words[0])?, parse_target(words[2])?, reorder)
+                Step::Drag(parse_target(words[0])?, parse_target(words[2])?, reorder, across)
+            }
+            "expect_drop_at" => {
+                // expect_drop_at <target> N%
+                let words: Vec<&str> = rest.split_whitespace().collect();
+                let [target, pct] = words.as_slice() else {
+                    return Err(format!("expect_drop_at wants `<target> N%`: {line:?}"));
+                };
+                let n = parse_percent(pct).ok_or_else(|| {
+                    format!("expect_drop_at wants a whole percent from 1% to 99%: {line:?}")
+                })?;
+                Step::ExpectDropAt(parse_target(target)?, n)
             }
             "drag_file" => {
                 // drag_file "<path>" to <destination> — the path quoted like
@@ -5319,14 +5388,14 @@ fn run_with_log(
                     Some(Err(format!("scroll_to_row {key:?}: {off}")))
                 }
             }
-            Step::Drag(source, destination, reorder) => {
+            Step::Drag(source, destination, reorder, across) => {
                 // An action; the guest's own writes after `dropped` and
                 // `drag_ended` are the observables. A refused drop is not
                 // a failure here: the source learns `none` through
                 // drag_ended and the scene reads that.
                 await_quiet();
                 let answered = crate::scene::answers();
-                let off = stage.drag(*source, *destination, *reorder);
+                let off = stage.drag(*source, *destination, *reorder, *across);
                 if off.is_empty() {
                     await_answer(answered);
                     None
@@ -5334,6 +5403,15 @@ fn run_with_log(
                     Some(Err(format!("drag: {off}")))
                 }
             }
+            Step::ExpectDropAt(t, want) => Some(poll(|| {
+                let got = stage.drop_across(*t);
+                match drop_across_read(&got) {
+                    Some(pct) if pct.abs_diff(*want) <= DROP_ACROSS_TOLERANCE => Ok(format!("drop at {want}%")),
+                    _ => Err(format!(
+                        "the last drop on {t:?} reads {got}, wanted {want}% across within {DROP_ACROSS_TOLERANCE}"
+                    )),
+                }
+            })),
             Step::DragFile(path, destination) => {
                 await_quiet();
                 let answered = crate::scene::answers();
@@ -7162,6 +7240,28 @@ mod tests {
             vec![(Some("row"), Some("c")), (Some("row"), Some("a"))],
             "a drag's source AND destination must both be normalizable"
         );
+    }
+
+    /// Where a drop lands across its target: `drag ... at N%` and
+    /// `expect_drop_at`, and the reading both harness halves compare.
+    #[test]
+    fn a_drop_lands_at_a_percent_across() {
+        let step = parse("drag label#0 to label#1 at 25%").unwrap().pop().unwrap();
+        assert!(matches!(step, Step::Drag(_, _, None, Some(25))), "{step:?}");
+        let step = parse("drag label@row[c] to label@row[a] before at 75%").unwrap().pop().unwrap();
+        assert!(matches!(step, Step::Drag(_, _, Some(true), Some(75))), "{step:?}");
+        let step = parse("drag label#0 to label#1").unwrap().pop().unwrap();
+        assert!(matches!(step, Step::Drag(_, _, None, None)), "{step:?}");
+        for bad in ["drag label#0 to label#1 at 0%", "drag label#0 to label#1 at 100%",
+                    "drag label#0 to label#1 at 25", "drag label#0 to label#1 at x%"] {
+            parse(bad).unwrap_err();
+        }
+        assert!(matches!(parse("expect_drop_at label#1 25%").unwrap()[0], Step::ExpectDropAt(_, 25)));
+        parse("expect_drop_at label#1").unwrap_err();
+        assert_eq!(drop_across_read("50 of 200"), Some(25));
+        assert_eq!(drop_across_read("149.6 of 200"), Some(75));
+        assert_eq!(drop_across_read("no drop on it yet"), None);
+        assert_eq!(drop_across_read("5 of 0"), None);
     }
 
     /// The panes grammar and the two-pane derivation

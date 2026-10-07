@@ -1662,6 +1662,27 @@ internal class KayaDragBox(
 
 internal val kayaDragBoxes = java.util.concurrent.ConcurrentHashMap<Long, KayaDragBox>()
 
+/** The last drop the backend took, for expect_drop_at: the destination's tag
+ * and the x of the point it reported, in dp. UI thread. */
+internal var kayaLastDrop: Pair<ByteArray, Double>? = null
+
+/** expect_drop_at's tolerance in percent of the target's width; the
+ * harness.rs twin is DROP_ACROSS_TOLERANCE. */
+internal const val KAYA_DROP_ACROSS_TOLERANCE = 5
+
+/** A whole percent from 1% to 99%, `drag`'s `at` and expect_drop_at's. */
+internal fun kayaPercent(word: String): Int? =
+    word.removeSuffix("%").takeIf { word.endsWith("%") }?.toIntOrNull()?.takeIf { it in 1..99 }
+
+/** `<x> of <width>` as a whole percent across, or null. */
+internal fun kayaDropAcrossRead(got: String): Int? {
+    val halves = got.split(" of ")
+    if (halves.size != 2) return null
+    val x = halves[0].toDoubleOrNull() ?: return null
+    val width = halves[1].toDoubleOrNull()?.takeIf { it > 0 } ?: return null
+    return Math.round(x / width * 100).toInt().coerceIn(0, 100)
+}
+
 /// A layout trace, off unless asked for (KAYA_LAYOUT_TRACE=1), matching
 /// the SwiftUI interpreter's channel of the same name.
 val kayaLayoutTrace: Boolean = System.getenv("KAYA_LAYOUT_TRACE") != null
@@ -4718,6 +4739,7 @@ object KayaCompose {
         destinationSpec: String,
         reorder: Boolean?,
         settled: List<Float>?,
+        across: Int?,
     ): KayaDragPlan {
         val source = kayaWidgetTarget(sourceSpec)
             ?: return KayaDragPlan("no such source $sourceSpec")
@@ -4733,7 +4755,7 @@ object KayaCompose {
         activity.window.decorView.getLocationOnScreen(corner)
         val x1 = (corner[0] + from.windowLeft + from.width / 2f).toInt()
         val y1 = (corner[1] + from.windowTop + from.height / 2f).toInt()
-        val x2 = (corner[0] + to.windowLeft + to.width / 2f).toInt()
+        val x2 = (corner[0] + to.windowLeft + to.width * (across ?: 50) / 100f).toInt()
         val landing = when (reorder) {
             true -> to.height / 4f
             false -> to.height * 3f / 4f
@@ -8995,6 +9017,34 @@ object KayaCompose {
                             }
                         }
                     }
+                    "expect_drop_at" -> {
+                        // expect_drop_at <target> N%: where across the
+                        // destination's width the last drop's reported point
+                        // landed, the point in dp and the box in px.
+                        val want = parts.getOrNull(2)?.let { kayaPercent(it) }
+                        if (parts.size != 3 || want == null) {
+                            failures.add("expect_drop_at wants `<target> N%`")
+                        } else {
+                            val got = onUi(activity) {
+                                val node = kayaWidgetTarget(parts[1])
+                                val box = node?.let { kayaDragBoxes[it.id] }
+                                val last = kayaLastDrop
+                                val density = if (kayaDensity > 0.0) kayaDensity else 1.0
+                                when {
+                                    node == null -> "<no such target>"
+                                    box == null -> "<not a drop destination>"
+                                    last == null || !last.first.contentEquals(node.identityTag) -> "no drop on it yet"
+                                    else -> "${last.second} of ${box.width / density}"
+                                }
+                            }
+                            val pct = kayaDropAcrossRead(got)
+                            if (pct != null && Math.abs(pct - want) <= KAYA_DROP_ACROSS_TOLERANCE) {
+                                observed.add("drop at $want%")
+                            } else {
+                                failures.add("the last drop on ${parts[1]} reads $got, wanted $want% across within $KAYA_DROP_ACROSS_TOLERANCE")
+                            }
+                        }
+                    }
                     "expect_video_box" -> {
                         // docs/media-plan.md §3: the box Compose laid out, its ratio ("16:9")
                         // or its size ("320x180").
@@ -9853,6 +9903,13 @@ object KayaCompose {
                         // refused drop is not this verb's failure — the
                         // source reads `none`.
                         var words = parts.drop(1)
+                        var across: Int? = null
+                        var badAt = false
+                        if (words.size >= 2 && words[words.size - 2] == "at") {
+                            across = kayaPercent(words.last())
+                            badAt = across == null
+                            words = words.dropLast(2)
+                        }
                         var reorder: Boolean? = null
                         if (words.lastOrNull() == "before") {
                             reorder = true
@@ -9861,9 +9918,11 @@ object KayaCompose {
                             reorder = false
                             words = words.dropLast(1)
                         }
-                        if (words.size != 3 || words[1] != "to") {
+                        if (badAt) {
+                            failures.add("drag's `at` wants a whole percent from 1% to 99%")
+                        } else if (words.size != 3 || words[1] != "to") {
                             failures.add(
-                                "drag wants `<source> to <destination> [before|onto]`")
+                                "drag wants `<source> to <destination> [before|onto] [at N%]`")
                         } else {
                             kayaAwaitQuiet()
                             kayaAwaitFrames(activity, 2)
@@ -9878,7 +9937,7 @@ object KayaCompose {
                                 if (destinationId == null) null
                                 else kayaAwaitSettledBox(activity, destinationId)
                             val plan = onUi(activity) {
-                                kayaDragPlan(activity, words[0], words[2], reorder, settled)
+                                kayaDragPlan(activity, words[0], words[2], reorder, settled, across)
                             }
                             if (plan.error != null) {
                                 failures.add("drag: ${plan.error}")
@@ -14296,6 +14355,7 @@ private fun kayaPerformDrop(
         val before = (drag.y - (box?.rootTop ?: 0f)) < (box?.height ?: 0f) / 2f
         // THE LANDING'S IDENTITY IS THE CONTAINER, the moved key rides in
         // the clip and the landed row's own tag is the anchor (D8).
+        kayaLastDrop = reorderIn.identityTag to localX.toDouble()
         KayaPresent.emitDropped(
             reorderIn.identityTag, localX, localY, KayaCompose.DRAG_OP_MOVE,
             node.identityTag, before, KayaCompose.CLIP_CUSTOM, moved.first,
@@ -14303,6 +14363,7 @@ private fun kayaPerformDrop(
         return true
     }
     val value = kayaReadDropValue(node.accepts, drag) ?: return false
+    kayaLastDrop = node.identityTag to localX.toDouble()
     KayaPresent.emitDropped(
         node.identityTag, localX, localY, operation, ByteArray(0), false,
         value.clip, value.text, value.bytes, value.locators, value.names)
