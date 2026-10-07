@@ -4,6 +4,74 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## Compose hands a secure field's real text to the accessibility node info (measured 2026-10-07)
+
+On the pool's API 35 emulators, under foundation 1.11.4, a
+BasicSecureTextField's AccessibilityNodeInfo answers `getText()` with the
+real text (six unmasked characters for a six-character secret) beside
+`isPassword() == true`. The source says why: TextFieldDecoratorModifier's
+semantics set `editableText` to the untransformed output text (the
+codepoint transformation that draws U+2022 is not applied), and the node
+info's text, and the TYPE_VIEW_TEXT_CHANGED events' before and after text,
+are that EditableText (androidx-main is unchanged). The framework EditText
+hands accessibility its transformed text, the dots
+(TextView.getTextForAccessibility). kaya masks: KayaSecureField's modifier
+sets `editableText` to one U+2022 per UTF-16 unit, and since that modifier
+is the head of BasicTextField's chain, applied after the decorator's
+(LayoutNode walks semantics tail to head), its value wins; `password()`,
+the setText action and `inputText` (which autofill reads) are untouched.
+Measured: before, secure-compose/jvm read "the platform presents 6 of the
+secure field's characters unmasked"; after, `masked 6`. Do not move the
+read onto the drawn layout: that is a different observable from every
+other backend's, and it hides this leak. GUARD: check-universal-props
+holds the override and the node-info read, each cut watched red.
+
+## XCUIApplication.typeText logs its text; a secure text field element's typeText does not (measured 2026-10-07)
+
+Under Xcode 26.6 and iOS 26.5 the resident driver's xcodebuild log carried
+`Type 'Zq7vKe' into Application '…'` for every `type_secret`, which the
+iOS lane's secure scan refused on the first run. Typed through the focused
+secure field's own element (`app.secureTextFields` matching
+`hasKeyboardFocus == true`), XCTest logs `Type '<redacted>' into
+SecureTextField`. The driver's verb is `type_secure_b64`, and drive.log
+names a typing verb's argument by its length. GUARD: run-sim's
+`secure_refusals` reads the driver's logs for each secret as typed and in
+base64 (tools/lib/secure_scan.py).
+
+## An empty iOS secure field's accessibilityValue is its placeholder (measured 2026-10-07)
+
+After `clear`, the SwiftUI SecureField's element answered
+accessibilityValue "Password", its placeholder, so the masked read counted
+eight unmasked characters. The control's own `UIKeyInput.hasText` decides
+empty (KayaSwiftUI.swift's iOS kayaAxMaskedRead).
+
+## GTK 4.18 hands a password entry's text to every AT-SPI client (measured 2026-10-07)
+
+On the linux lane's GTK 4.18.6 the bus node of a plain GtkPasswordEntry
+answers `GetText` with the real password (six distinct characters for a
+six-character secret), while the role is password text and the screen
+shows dots. gtkatspitext.c's editable handler calls
+`gtk_editable_get_text` through the gtk-4-18 branch; 4.20.0 calls
+`gtk_text_get_display_text`, which substitutes the invisible character.
+GTK asks a GtkAccessibleText implementation first, so kaya's secure field
+is a run-time subtype of GtkPasswordEntry (it is not registered final)
+implementing it by forwarding to the entry's own GtkText, whose
+implementation reads the display text (crates/kaya/src/gtk/secure_text.rs).
+Measured: plain entry "presents 6 ... unmasked", the subtype `masked 6`,
+x11 and wayland. Do not "fix" the read by counting the model's text, and
+do not make a GtkPasswordEntry with `PasswordEntry::new()`. GUARD:
+check-universal-props' gtk_secure_text; the interface registration cut
+was watched red on the lane (docs/deferred.md, the struck GTK 4.18 GAP).
+
+## WinUI's PasswordBox raises PasswordChanged late and publishes no Value (measured 2026-10-07)
+
+On the lane VM a `SetPassword` returns before its `PasswordChanged` is
+raised, as TextBox's TextChanged does, so a programmatic write needs the
+entry's swallow counter, not a flag around the call (winui/mod.rs's
+secure field arm). The box's automation peer implements no
+`IValueProvider`, so UIA has no value to mask; the masked read requires
+`IsPassword` and counts the box's own text.
+
 ## A sub-gate's verdict ended check-sugar-surface green (found 2026-10-07)
 
 From 15db3cda (2026-10-05) check-sugar-surface called

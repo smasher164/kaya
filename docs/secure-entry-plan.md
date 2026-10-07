@@ -24,7 +24,7 @@ the macOS accessibility row, which was measured on this slice's first run
 |---|---|---|---|---|---|---|
 | macOS | SwiftUI `SecureField`, an `NSSecureTextField` underneath | refused by the control; paste works | none | AXTextField, subrole AXSecureTextField; AXValue one U+F79A per character (MEASURED), no AXNumberOfCharacters | `.textContentType(.password)` / `.newPassword` asks the system's password autofill | n/a; while the field has focus macOS turns on Secure Event Input, so other processes cannot read the keystrokes, and input methods other than Roman are off |
 | iOS | SwiftUI `SecureField`, a `UITextField` with `isSecureTextEntry` | refused; paste works | none, but the last typed character shows for a moment (the platform's convention, not switchable on UITextField) | the secure-text trait; accessibilityValue masked | `.textContentType(.password / .newPassword / .oneTimeCode)` drives Password AutoFill and strong-password suggestions; saving needs associated domains | autocorrection, prediction and dictation are off for secure entry; capitalization follows `.textInputAutocapitalization`; the field's content is left out of screen recordings |
-| GTK 4 | `GtkPasswordEntry` | refused (a GtkText with `visibility` false refuses copy and cut); paste works | `show-peek-icon`, default off; a caps-lock warning icon is built in | GTK publishes the password-text role and the invisible characters (U+25CF by default) as the text | `input-purpose` PASSWORD or PIN, which tells input methods not to learn the text | n/a |
+| GTK 4 | `GtkPasswordEntry` | refused (a GtkText with `visibility` false refuses copy and cut); paste works | `show-peek-icon`, default off; a caps-lock warning icon is built in | GTK publishes the password-text role; the text is the invisible characters (U+25CF by default) from 4.20, and the REAL text on 4.18 for a plain entry (measured, §7) | `input-purpose` PASSWORD or PIN, which tells input methods not to learn the text | n/a |
 | WinUI 3 | `PasswordBox` | refused; paste works | `PasswordRevealMode`, default `Peek`: an eye button while the box has text and focus; `Hidden` removes it | UIA Edit control with `IsPassword` true; ValuePattern's value is withheld | `InputScope` Password; no system password manager reaches a desktop app's box | n/a |
 | Android, Compose | at the pinned foundation 1.11.4, `BasicSecureTextField` (material3 1.3.1 has no `SecureTextField`); the older form is a text field with `PasswordVisualTransformation` | refused by BasicSecureTextField; a field with PasswordVisualTransformation also withholds copy and cut | `TextObfuscationMode`: `RevealLastTyped` (default, honours the system's "show passwords" setting), `Hidden`, `Visible` | the `password()` semantics property; TalkBack reads characters only when the user turned spoken passwords on | `ContentType.Password` semantics for the autofill framework (compose-ui 1.8+) | `KeyboardType.Password`: no suggestions, no learning; `KeyboardCapitalization.None` |
 
@@ -187,10 +187,10 @@ own label instead.
 | backend | control | reveal | text_changed | submitted | expect_masked reads | secure_focused |
 |---|---|---|---|---|---|---|
 | SwiftUI, macOS (BUILT) | `SecureField(placeholder, text:)`, rounded border, KayaEntry's width and focus binding | none | the binding's setter, a no-op set refused | `.onSubmit` | AXValue by the field's a11y_id (U+F79A each) | the model's focusedId in `secureFields` |
-| SwiftUI, iOS (BUILT, legs unwired) | the same view, no capitalization, no autocorrection | none | as macOS | `.onSubmit` | the element's accessibilityValue (unmeasured) | as macOS |
-| GTK 4 | `gtk4::PasswordEntry`, `show-peek-icon` false, `input-purpose` PASSWORD | none | `changed` under the quiet guard | `activate`, check-submit's GTK row | the AT-SPI text through `harness::mask_count` | the window's focus widget is a PasswordEntry |
+| SwiftUI, iOS (BUILT) | the same view, no capitalization, no autocorrection; `type_secret` through the driver's `type_secure_b64` | none | as macOS | `.onSubmit` | the element's accessibilityValue, zero when the control's `hasText` is false (an empty field's value is its placeholder, measured) | as macOS |
+| GTK 4 | kaya's `GtkPasswordEntry` subtype (crates/kaya/src/gtk/secure_text.rs), `show-peek-icon` false, `input-purpose` PASSWORD | none | `changed` under the quiet guard | `activate`, check-submit's GTK row | the AT-SPI text through `harness::mask_count` | the window's focus widget is a PasswordEntry |
 | WinUI 3 | `PasswordBox`, `PasswordRevealMode::Hidden` (the class joins tools/winui-bindgen's filter) | none | `PasswordChanged` under the quiet guard | the `submit_on_enter` KeyDown door | UIA withholds the value, so the box's own `Password` length, computed in Rust and returned as a number | FocusManager's element is a PasswordBox |
-| Compose | `BasicSecureTextField` (foundation 1.11.4), `TextObfuscationMode.RevealLastTyped`, `KeyboardType.Password` | none | the state's text flow | the keyboard action and a hardware Return, as the entry | the node's EditableText, masked by the obfuscation (unmeasured) | the focused node's kind |
+| Compose (BUILT) | `BasicSecureTextField` (foundation 1.11.4), `TextObfuscationMode.RevealLastTyped`, `KeyboardType.Password`, capitalization None, autocorrect off | none | the state's text flow | the keyboard action and a hardware Return, as the entry | the node info's `isPassword` required, then its text, which kaya masks by overriding EditableText (Compose hands the real text otherwise, measured; §7) | the model's focusedId in `secureFields` |
 
 The Rust Stage methods are `masked_len(target) -> Result<usize, MaskRead>`
 and `secure_focused() -> bool`, both without defaults; `MaskRead`'s
@@ -256,3 +256,27 @@ kind (14 findings, all `secure_field`).
   accessibilityValue for a secure field and what a screen recording shows
   of it (the review page's iOS capture depends on it); whether any arm's
   native undo can bring back secure text.
+- MEASURED 2026-10-07 (GTK 4.18.6, the linux lane): the node's role is
+  password text and a plain GtkPasswordEntry's Text interface answers the
+  REAL password (4.20 and later answer the invisible character). kaya's
+  field is a GtkPasswordEntry subtype implementing GtkAccessibleText by
+  its GtkText's display text, so the read is `masked N` on 4.18 too
+  (docs/traps.md; docs/deferred.md's struck GTK 4.18 GAP and the lane's
+  GTK version ruling). GTK keeps no undo history for invisible text, and
+  the arm turns it off as well.
+- MEASURED 2026-10-07 (WinUI, the lane VM): a PasswordBox's peer
+  implements no Value pattern at all, so the read requires IsPassword and
+  counts the box's own text; PasswordChanged is raised after SetPassword
+  returns (docs/traps.md).
+- MEASURED 2026-10-07 (Compose foundation 1.11.4, API 35 emulators): the
+  secure field's AccessibilityNodeInfo carries the REAL text beside
+  `isPassword` true, because the semantics EditableText is the
+  untransformed text; only the drawn layout is masked. kaya overrides
+  EditableText with one U+2022 per character in the field's own modifier,
+  and the read counts the node info's text as every other backend does:
+  `masked 6` after, "presents 6 ... unmasked" before (docs/traps.md).
+- MEASURED 2026-10-07 (iOS 26.5, Xcode 26.6): an empty SecureField's
+  accessibilityValue is its placeholder, so the read takes zero from the
+  control's `hasText`; `XCUIApplication.typeText` logs its text in the
+  driver's xcodebuild log, and the focused secure text field element's
+  `typeText` logs `<redacted>` (docs/traps.md).

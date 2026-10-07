@@ -3723,6 +3723,8 @@ enum NativeWidget {
     /// S2): `GtkSearchEntry` is a `GtkWidget` implementing `GtkEditable`, NOT
     /// a `GtkEntry` subclass, so no `is::<gtk4::Entry>()` site sees it.
     Search(gtk4::SearchEntry),
+    /// docs/secure-entry-plan.md §3.
+    Secure(gtk4::PasswordEntry),
     Row(gtk4::Box),
     Checkbox(gtk4::CheckButton),
     /// The checkbox kind wearing `role switch` (docs/tasks-s2-plan.md T1):
@@ -3774,6 +3776,7 @@ impl NativeWidget {
             NativeWidget::Link(w) => w.clone().upcast(),
             NativeWidget::Entry(w) => w.clone().upcast(),
             NativeWidget::Search(w) => w.clone().upcast(),
+            NativeWidget::Secure(w) => w.clone().upcast(),
             NativeWidget::Row(w) => w.clone().upcast(),
             NativeWidget::Checkbox(w) => w.clone().upcast(),
             NativeWidget::Switch(w) => w.clone().upcast(),
@@ -4472,7 +4475,7 @@ fn kind_registry(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<gtk4
         K::Search => core.searches.iter().map(|w| w.clone().upcast()).collect(),
         K::Range => core.ranges.iter().map(|p| p.group.clone().upcast()).collect(),
         K::Video => core.videos.iter().map(|v| v.overlay.clone().upcast()).collect(),
-        K::SecureField => crate::depth_stub("secure"),
+        K::SecureField => core.secure_fields.iter().map(|w| w.clone().upcast()).collect(),
         K::ColorPicker => core.color_pickers.iter().map(|f| f.button.clone().upcast()).collect(),
         K::NumberField => core.number_fields.iter().map(|f| f.spin.clone().upcast()).collect(),
         K::Label => core.labels.clone(),
@@ -5427,6 +5430,7 @@ struct CoreState {
     widget_tags: HashMap<u64, Vec<u8>>,
     entries: Vec<gtk4::Entry>,
     searches: Vec<gtk4::SearchEntry>,
+    secure_fields: Vec<gtk4::PasswordEntry>,
     sliders: Vec<GtkSlider>,
     number_fields: Vec<GtkNumberField>,
     color_pickers: Vec<GtkColorField>,
@@ -10097,6 +10101,9 @@ impl CoreState {
             Some(NativeWidget::NumberField(field)) => {
                 Some(gtk4::prelude::EditableExt::text(&field.spin).to_string())
             }
+            Some(NativeWidget::Secure(field)) => {
+                Some(lf(gtk4::prelude::EditableExt::text(field).to_string()))
+            }
             Some(NativeWidget::Textarea(_, view)) => {
                 let b = view.buffer();
                 Some(lf(b.text(&b.start_iter(), &b.end_iter(), false).to_string()))
@@ -12258,7 +12265,40 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.grids.push(grid.clone());
                     NativeWidget::Grid(grid)
                 }
-                WidgetKind::SecureField => crate::depth_stub("secure"),
+                WidgetKind::SecureField => {
+// docs/secure-entry-plan.md §3: GTK's own password entry, no reveal (P3) — the
+// peek icon off and the context menu's "Show Text" item taken out with its
+// action — and the text to the app alone, never banked (P2). Its AT-SPI text is
+// the display text (docs/traps.md, GTK 4.18's password entry).
+                    let field = secure_text::password_entry();
+                    field.set_show_peek_icon(false);
+                    if let Some(text) = gtk4::prelude::EditableExt::delegate(&field)
+                        .and_then(|d| d.downcast::<gtk4::Text>().ok())
+                    {
+                        text.set_input_purpose(gtk4::InputPurpose::Password);
+                        text.set_extra_menu(None::<&gtk4::gio::MenuModel>);
+                        text.action_set_enabled("misc.toggle-visibility", false);
+                    }
+                    gtk4::prelude::EditableExt::set_enable_undo(&field, false);
+                    set_text_field(field.clone().upcast_ref());
+                    let sink = core.occurrences.clone();
+                    let tag = tag.expect("secure fields carry a tag");
+                    let submit_tag = tag.clone();
+                    let quiet = core.apply_quiet.clone();
+                    gtk4::prelude::EditableExt::connect_changed(&field, move |e| {
+                        if !quiet.get() {
+                            sink.send_text_tag(&tag, &lf(gtk4::prelude::EditableExt::text(e).to_string()));
+                        }
+                    });
+                    // RETURN SUBMITS (docs/submit-plan.md S2), the entry's door.
+                    let submit_sink = core.occurrences.clone();
+                    field.connect_activate(move |e| {
+                        let text = lf(gtk4::prelude::EditableExt::text(e).to_string());
+                        submit_sink.send_submitted_tag(&submit_tag, &text);
+                    });
+                    core.secure_fields.push(field.clone());
+                    NativeWidget::Secure(field)
+                }
                 WidgetKind::Video => {
                     let view = gtk_media::build_video_view(id);
                     core.videos.push(view.clone());
@@ -12926,6 +12966,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 core.labels.retain(|w| !gone(w));
                 core.entries.retain(|e| !gone(e.upcast_ref()));
                 core.searches.retain(|s| !gone(s.upcast_ref()));
+                core.secure_fields.retain(|s| !gone(s.upcast_ref()));
                 core.sliders.retain(|s| !gone(s.scale.upcast_ref()));
                 core.number_fields.retain(|f| !gone(f.spin.upcast_ref()));
                 core.color_pickers.retain(|f| !gone(f.button.upcast_ref()));
@@ -14369,6 +14410,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 (NativeWidget::Search(search), Prop::Placeholder, Value::Str(s)) => {
                     search.set_placeholder_text((!s.is_empty()).then_some(s.as_str()));
                 }
+                (NativeWidget::Secure(field), Prop::Placeholder, Value::Str(s)) => {
+                    field.set_placeholder_text((!s.is_empty()).then_some(s.as_str()));
+                }
+                (NativeWidget::Secure(field), Prop::Text, Value::Str(s)) => {
+                    core.apply_quiet.set(true);
+                    gtk4::prelude::EditableExt::set_text(field, &s);
+                    core.apply_quiet.set(false);
+                }
                 (NativeWidget::Textarea(_, view), Prop::Placeholder, Value::Str(s)) => {
                     use gtk4::prelude::{
                         AccessibleExt, Cast, TextBufferExt, TextViewExt, WidgetExt,
@@ -15555,6 +15604,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         NativeWidget::Search(search) => {
                             gtk4::prelude::EditableExt::set_text(search, "")
                         }
+                        NativeWidget::Secure(field) => gtk4::prelude::EditableExt::set_text(field, ""),
                         NativeWidget::Textarea(_, view) => view.buffer().set_text(""),
                         _ => panic!("kaya: clear on a non-text widget (scene validates kinds)"),
                     }
@@ -17489,6 +17539,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 labels: Vec::new(),
                 entries: Vec::new(),
                 searches: Vec::new(),
+                secure_fields: Vec::new(),
                 sliders: Vec::new(),
                 number_fields: Vec::new(),
                 color_pickers: Vec::new(),
@@ -18275,7 +18326,10 @@ impl crate::harness::Stage for GtkStage {
                     // Both text controls fold to the closed set's one name
                     // (docs/search-plan.md S7): UIA and Compose have no search
                     // identity, so `search` cannot join it without lying.
-                    atspi::Role::Text | atspi::Role::Entry | atspi::Role::SpinButton => "field",
+                    atspi::Role::Text
+                    | atspi::Role::Entry
+                    | atspi::Role::SpinButton
+                    | atspi::Role::PasswordText => "field",
                     atspi::Role::Label => "label",
                     // The heading role, spelled the way every other backend
                     // spells it: `heading/<the label's text>`.
@@ -18536,13 +18590,28 @@ impl crate::harness::Stage for GtkStage {
             }
         })
     }
-    fn masked_len(&self, _: crate::harness::Target) -> Result<usize, crate::harness::MaskRead> {
-        crate::depth_stub("secure")
+    /// The Text interface of the field's own node on the bus, through the one
+    /// mask rule (docs/secure-entry-plan.md §3, P6).
+    fn masked_len(&self, target: crate::harness::Target) -> Result<usize, crate::harness::MaskRead> {
+        use crate::harness::MaskRead;
+        let Some((want, rank)) = Self::on_main(move |core| {
+            target_widget(core, target).and_then(|widget| {
+                atspi_rank(&core.window, &widget).map(|rank| (atspi_role_of(&widget), rank))
+            })
+        }) else {
+            return Err(MaskRead::NoSuchTarget);
+        };
+        let Some(want) = want else {
+            return Err(MaskRead::Unreadable("the field publishes no role on the bus"));
+        };
+        match atspi_text_of(want, rank) {
+            Some(shown) => crate::harness::mask_count(&shown),
+            None => Err(MaskRead::Unreadable("the bus published no text for the field")),
+        }
     }
 
-    /// No secure field exists on this backend before the breadth (docs/secure-entry-plan.md §6).
     fn secure_focused(&self) -> bool {
-        false
+        Self::on_main(|core| core.secure_fields.iter().any(widget_focused))
     }
 
     fn placeholder_text(&self, target: crate::harness::Target) -> String {
@@ -18563,6 +18632,15 @@ impl crate::harness::Stage for GtkStage {
                         .map(|s| s.to_string())
                         .unwrap_or_default(),
                 },
+                K::SecureField => {
+                    match crate::harness::try_resolve(target.index, core.secure_fields.len()) {
+                        None => "<no such target>".to_owned(),
+                        Some(i) => core.secure_fields[i]
+                            .placeholder_text()
+                            .map(|s| s.to_string())
+                            .unwrap_or_default(),
+                    }
+                }
                 K::Textarea => {
                     match crate::harness::try_resolve(target.index, core.textareas.len()) {
                         None => "<no such target>".to_owned(),
@@ -19211,6 +19289,10 @@ impl crate::harness::Stage for GtkStage {
                     let i = crate::harness::resolve(t.index, core.searches.len());
                     core.searches[i].grab_focus();
                 }
+                crate::harness::TargetKind::SecureField => {
+                    let i = crate::harness::resolve(t.index, core.secure_fields.len());
+                    core.secure_fields[i].grab_focus();
+                }
                 crate::harness::TargetKind::NumberField => {
                     let i = crate::harness::resolve(t.index, core.number_fields.len());
                     core.number_fields[i].spin.grab_focus();
@@ -19543,10 +19625,18 @@ impl crate::harness::Stage for GtkStage {
         // EVERY LINE is checked, not just the first: the '-' both tools read
         // as an option can begin any of them.
         let lines: Vec<&str> = text.split('\n').collect();
+        // docs/secure-entry-plan.md P6: no sentence below may print what is
+        // typed into a secure field, nor the field's text.
+        let secret = Self::on_main(|core| core.secure_fields.iter().any(widget_focused));
+        let shown = if secret {
+            format!("<secret: {} chars>", text.chars().count())
+        } else {
+            format!("{text:?}")
+        };
         for line in &lines {
             assert!(
                 !line.starts_with('-'),
-                "kaya: type {text:?} has a line beginning with '-', which both injection \
+                "kaya: type {shown} has a line beginning with '-', which both injection \
                  tools read as an option — type text that does not, or teach this verb a \
                  tool that takes a payload on stdin"
             );
@@ -19603,6 +19693,10 @@ impl crate::harness::Stage for GtkStage {
                 }
                 Some(NativeWidget::Search(search)) => {
                     gtk4::prelude::EditableExt::set_position(search, -1);
+                    true
+                }
+                Some(NativeWidget::Secure(field)) => {
+                    gtk4::prelude::EditableExt::set_position(field, -1);
                     true
                 }
                 Some(NativeWidget::NumberField(field)) => {
@@ -19737,7 +19831,7 @@ impl crate::harness::Stage for GtkStage {
             let now = Self::on_main(move |core| core.text_of(id).unwrap_or_default());
             if !resent && now == before && std::time::Instant::now() >= deadline {
                 eprintln!(
-                    "KAYA_UNDO_TRACE: type {text:?} did not land within 2s and the field \
+                    "KAYA_UNDO_TRACE: type {shown} did not land within 2s and the field \
                      is untouched — re-asserting focus and sending once more"
                 );
                 resent = true;
@@ -19753,12 +19847,15 @@ impl crate::harness::Stage for GtkStage {
                 // AN APP-OWNED FIELD HAS NO SUCH HISTORY BY DESIGN
                 // (docs/rich-text-plan.md §14): R6's lever turned it off, so
                 // this proof is unavailable there and is not asked for.
-                let filled = Self::on_main(move |core| {
-                    core.own_undo.borrow().contains(&id.0) || core.native_undo_filled(id)
-                });
+                // NOR A SECURE FIELD (docs/secure-entry-plan.md P2): GTK keeps
+                // no history for invisible text, and kaya asks it for none.
+                let filled = secret
+                    || Self::on_main(move |core| {
+                        core.own_undo.borrow().contains(&id.0) || core.native_undo_filled(id)
+                    });
                 assert!(
                     filled,
-                    "kaya: type {text:?} landed but the field's NATIVE undo history is \
+                    "kaya: type {shown} landed but the field's NATIVE undo history is \
                      still empty — the characters did not travel the platform's own \
                      input path (harness.rs Stage::type_text, point 1), and a \
                      native-tier scene would pass having observed nothing"
@@ -19815,9 +19912,17 @@ impl crate::harness::Stage for GtkStage {
                             .join(" ")
                     })
                     .unwrap_or_else(|e| format!("<{e}>"));
+                let (now, want) = if secret {
+                    (
+                        format!("<secret: {} chars>", now.chars().count()),
+                        format!("<secret: {} chars>", want.chars().count()),
+                    )
+                } else {
+                    (format!("{now:?}"), format!("{want:?}"))
+                };
                 eprintln!(
-                    "KAYA_UNDO_TRACE: type {text:?} never landed: the field holds {now:?}, \
-                     expected {want:?} after {tool} reported success; toplevels: \
+                    "KAYA_UNDO_TRACE: type {shown} never landed: the field holds {now}, \
+                     expected {want} after {tool} reported success; toplevels: \
                      [{toplevels}]; x focus window: {xfocus:?}; this pid's visible x \
                      windows: [{mine}]"
                 );
@@ -19951,6 +20056,13 @@ impl crate::harness::Stage for GtkStage {
                         return false;
                     };
                     widget_focused(&core.searches[i])
+                }
+                crate::harness::TargetKind::SecureField => {
+                    let Some(i) = crate::harness::try_resolve(t.index, core.secure_fields.len())
+                    else {
+                        return false;
+                    };
+                    widget_focused(&core.secure_fields[i])
                 }
                 crate::harness::TargetKind::NumberField => {
                     let Some(i) = crate::harness::try_resolve(t.index, core.number_fields.len())
@@ -23269,7 +23381,7 @@ fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk
         K::Range => try_resolve(target.index, core.ranges.len())
             .map(|i| core.ranges[i].group.clone().upcast()),
         K::Video => try_resolve(target.index, core.videos.len()).map(|i| core.videos[i].overlay.clone().upcast()),
-        K::SecureField => crate::depth_stub("secure"),
+        K::SecureField => nth!(core.secure_fields),
         K::ColorPicker => try_resolve(target.index, core.color_pickers.len())
             .map(|i| core.color_pickers[i].swatch.clone().upcast()),
         K::NumberField => try_resolve(target.index, core.number_fields.len())
@@ -23380,6 +23492,9 @@ fn atspi_role_of(w: &gtk4::Widget) -> Option<atspi::Role> {
     // GTK 4.18 in the image). So the two never share an ordinal family.
     if w.is::<gtk4::SearchEntry>() {
         return Some(atspi::Role::Entry);
+    }
+    if w.is::<gtk4::PasswordEntry>() {
+        return Some(atspi::Role::PasswordText);
     }
     if w.is::<gtk4::Scale>() {
         return Some(atspi::Role::Slider);
@@ -24002,6 +24117,88 @@ fn atspi_range_read(index: usize, read: RangeRead) -> Option<String> {
     })
 }
 
+/// The Text interface's content at our process's `index`th node of role `want`
+/// — what an assistive client reads as the field's value. A miss prints the
+/// ROLES the bus published and never a node's text: the one caller reads a
+/// secure field (docs/secure-entry-plan.md P6).
+#[cfg(all(feature = "harness", target_os = "linux"))]
+fn atspi_text_of(want: atspi::Role, index: usize) -> Option<String> {
+    use atspi::proxy::accessible::AccessibleProxy;
+    use atspi::proxy::text::TextProxy;
+    atspi::zbus::block_on(async move {
+        let conn = atspi::connection::AccessibilityConnection::new().await.ok()?;
+        let root = AccessibleProxy::builder(conn.connection())
+            .destination("org.a11y.atspi.Registry")
+            .ok()?
+            .path("/org/a11y/atspi/accessible/root")
+            .ok()?
+            .build()
+            .await
+            .ok()?;
+        async fn walk(
+            node: AccessibleProxy<'_>, out: &mut Vec<(atspi::Role, String, String)>, depth: usize,
+        ) {
+            if depth > 24 {
+                return;
+            }
+            if let Ok(role) = node.get_role().await {
+                out.push((
+                    role,
+                    node.inner().destination().to_string(),
+                    node.inner().path().to_string(),
+                ));
+            }
+            let Ok(children) = node.get_children().await else {
+                return;
+            };
+            for child in children {
+                let Some(dest) = child.name() else { continue };
+                let Ok(proxy) = AccessibleProxy::builder(node.inner().connection())
+                    .destination(dest.to_owned())
+                    .and_then(|b| b.path(child.path().to_owned()))
+                else {
+                    continue;
+                };
+                if let Ok(proxy) = proxy.build().await {
+                    Box::pin(walk(proxy, out, depth + 1)).await;
+                }
+            }
+        }
+        let mut found: Vec<(atspi::Role, String, String)> = Vec::new();
+        for app in root.get_children().await.ok()? {
+            let Some(dest) = app.name() else { continue };
+            let Ok(builder) = AccessibleProxy::builder(conn.connection())
+                .destination(dest.to_owned())
+                .and_then(|b| b.path(app.path().to_owned()))
+            else {
+                continue;
+            };
+            let Ok(proxy) = builder.build().await else { continue };
+            if proxy.get_application().await.is_err() {
+                continue;
+            }
+            Box::pin(walk(proxy, &mut found, 0)).await;
+        }
+        let Some((_, dest, path)) = found.iter().filter(|(r, _, _)| *r == want).nth(index) else {
+            eprintln!(
+                "KAYA_AX_TRACE: no {want:?}#{index} on the bus; it published the roles {:?}",
+                found.iter().map(|(r, _, _)| *r).collect::<Vec<_>>()
+            );
+            return None;
+        };
+        let text = TextProxy::builder(conn.connection())
+            .destination(dest.to_owned())
+            .ok()?
+            .path(path.to_owned())
+            .ok()?
+            .build()
+            .await
+            .ok()?;
+        let count = text.character_count().await.ok()?;
+        text.get_text(0, count).await.ok()
+    })
+}
+
 #[cfg(all(feature = "harness", target_os = "linux"))]
 fn atspi_collect(want: atspi::Role, index: usize, want_description: bool) -> Option<String> {
     use atspi::proxy::accessible::AccessibleProxy;
@@ -24480,6 +24677,7 @@ fn atspi_promoted_buttons(title: &str) -> Result<Vec<(String, bool)>, AtspiMiss>
 }
 
 mod capture;
+mod secure_text;
 
 mod gtk_media {
     use super::*;

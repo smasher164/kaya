@@ -62,6 +62,7 @@ object GuestStart : KayaGuestStart {
             "grid" -> GridScene::app
             "textarea" -> TextareaScene::app
             "search" -> Search::app
+            "secure" -> Secure::app
             "sections" -> Sections::app
             "menus" -> Menus::app
             "commands" -> Commands::app

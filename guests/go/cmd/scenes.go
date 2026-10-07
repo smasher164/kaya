@@ -51,6 +51,7 @@ import (
 	"dev.kaya/guests/go/scroll"
 	"dev.kaya/guests/go/scrollto"
 	"dev.kaya/guests/go/search"
+	"dev.kaya/guests/go/secure"
 	"dev.kaya/guests/go/sections"
 	selectscene "dev.kaya/guests/go/select"
 	"dev.kaya/guests/go/sheet"
@@ -141,6 +142,7 @@ var scenes = map[string]func() *kaya.App{
 	"chat":           chat.App,
 	"sections":       sections.App,
 	"search":         search.App,
+	"secure":         secure.App,
 	"select":         selectscene.App,
 	"sizepolicy":     sizepolicy.App,
 	"split":          split.App,

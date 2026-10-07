@@ -23,6 +23,7 @@
 #define W_LEVEL_LABEL 13
 #define W_LEVEL 14
 #define W_FIND 15
+#define W_SECRET 16
 
 /* A 2x2 RGB PNG (red/green over blue/white), embedded as source. */
 static const uint8_t TEST_PNG[75] = {
@@ -73,6 +74,9 @@ static void build_scene(void) {
     kaya_tx_create_widget(&tx, W_FIND, KAYA_KIND_SEARCH);
     kaya_tx_set_placeholder(&tx, W_FIND, "Search");
     kaya_tx_set_a11y_id(&tx, W_FIND, "find");
+    kaya_tx_create_widget(&tx, W_SECRET, KAYA_KIND_SECURE_FIELD);
+    kaya_tx_set_placeholder(&tx, W_SECRET, "Password");
+    kaya_tx_set_a11y_id(&tx, W_SECRET, "secret");
 
     /* The labelled row: the control's accessibility name IS the label's
      * text, with no a11y label of its own. */
@@ -93,6 +97,7 @@ static void build_scene(void) {
     kaya_tx_add_child(&tx, W_VOLUME_ROW, W_QUARTER);
     kaya_tx_add_child(&tx, W_COLUMN, W_VOLUME_ROW);
     kaya_tx_add_child(&tx, W_COLUMN, W_FIND);
+    kaya_tx_add_child(&tx, W_COLUMN, W_SECRET);
     kaya_tx_add_child(&tx, W_IMAGE_ROW, W_IMAGE_OK);
     kaya_tx_add_child(&tx, W_IMAGE_ROW, W_IMAGE_BAD);
     kaya_tx_add_child(&tx, W_COLUMN, W_IMAGE_ROW);

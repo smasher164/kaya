@@ -5446,6 +5446,22 @@ public final class KayaApp {
             return t.search(f);
         }
 
+        public Node secureField() {
+            return t.secureField();
+        }
+
+        public Node secureField(String text) {
+            return t.secureField(text);
+        }
+
+        public Node secureField(Signal<String> s) {
+            return t.secureField(s);
+        }
+
+        public Node secureField(KayaRecords.Field<String> f) {
+            return t.secureField(f);
+        }
+
         public Node row(Runnable body) {
             return t.row(body);
         }
@@ -7510,6 +7526,19 @@ public final class KayaApp {
             return w;
         }
 
+        /** A secure field: the entry's contract with the platform masking
+         * what is typed (docs/secure-entry-plan.md). Its handlers receive
+         * the real text. */
+        public Widget secureField() {
+            return widget(KayaWire.KIND_SECURE_FIELD);
+        }
+
+        public Widget secureField(BiConsumer<Tx, String> onChange) {
+            Widget w = secureField();
+            KayaApp.this.onChange(w, onChange);
+            return w;
+        }
+
         /**
          * An image displaying encoded bytes (PNG, JPEG, ...): the
          * toolkit decodes natively, and decode failure renders the
@@ -9408,6 +9437,30 @@ public final class KayaApp {
 
         public Node search(KayaRecords.Field<String> f) {
             Node n = widget(KayaWire.KIND_SEARCH);
+            bindTextField(n, 0, f);
+            return n;
+        }
+
+        /** A secure field per stamped copy, with search's three seeding
+         * overloads (docs/secure-entry-plan.md P9). */
+        public Node secureField() {
+            return widget(KayaWire.KIND_SECURE_FIELD);
+        }
+
+        public Node secureField(String text) {
+            Node n = widget(KayaWire.KIND_SECURE_FIELD);
+            setText(n, text);
+            return n;
+        }
+
+        public Node secureField(Signal<String> s) {
+            Node n = widget(KayaWire.KIND_SECURE_FIELD);
+            tx.emit(KayaWire.txBindText(n.id, s.id));
+            return n;
+        }
+
+        public Node secureField(KayaRecords.Field<String> f) {
+            Node n = widget(KayaWire.KIND_SECURE_FIELD);
             bindTextField(n, 0, f);
             return n;
         }

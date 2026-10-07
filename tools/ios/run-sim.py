@@ -47,6 +47,7 @@ from lanes import ios as lane
 import exclusive
 import only  # noqa: E402
 import scene_cut
+import secure_scan
 import flightrec_lane
 import media_server
 from swift_sdk import require_ios_sdk
@@ -1409,7 +1410,7 @@ def media_verb(udid, parts):
 # the picker's, the save sheet's, the pasteboard's, and the keys of `type`
 # and `compose` (swift/KayaSwiftUI.swift, the `#else` arms).
 BRIDGE_VERBS = frozenset((
-    "type", "compose", "file_dialog_goto", "file_choose", "file_dialog_name",
+    "type", "type_secret", "compose", "file_dialog_goto", "file_choose", "file_dialog_name",
     "file_save", "expect_file_dialog", "expect_save_dialog", "clipboard_seed",
     "expect_clipboard", "drag_file",
     # The sheet's cancel path is the driver's swipe (docs/sheet-plan.md §4).
@@ -1869,6 +1870,8 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
     drive_dir = _drive_dirs.get(udid) or pathlib.Path("/nonexistent")
     drive_log = drive_dir / "drive.log"
     drive_log_at = drive_log.stat().st_size if drive_log.is_file() else 0
+    xcode_log = drive_dir / "xcodebuild.log"
+    xcode_log_at = xcode_log.stat().st_size if xcode_log.is_file() else 0
     # THE LEG'S OWN CEILING, HANDED TO THE DRIVER: `timeout 120` below kills
     # the guest with its log, so the driver's waits are clamped to 100s from
     # here and the harness keeps the last 20 to publish a verdict. Without
@@ -1938,7 +1941,35 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
             print(f"whole simdrive timing log kept at "
                   f"target/validate-failures/ios-{name}-simdrive.log",
                   file=log)
+    refused = secure_refusals(script, name, log, out, {
+        "driver log": (drive_log, drive_log_at),
+        "driver's xcodebuild log": (xcode_log, xcode_log_at),
+        "simdrive log": (simdrive_log, 0)})
+    if refused:
+        print("\n".join(refused), file=log)
+        ok = False
     return ok
+
+
+def secure_refusals(script, name, log, out, slices):
+    """tools/lib/secure_scan.py over everything this leg wrote: its console,
+    its log and the sidecars the flight recorder adopts, and the slices of
+    the device's driver logs written while it ran."""
+    log.flush()
+    leg_log = LEGS_DIR / f"{name}.log"
+    transcripts = {"console": out}
+    for label, path in (("leg log", leg_log),
+                        ("verb trace", leg_log.with_suffix(".vtrace")),
+                        ("app log", leg_log.with_suffix(".applog")),
+                        ("panic log", leg_log.with_suffix(".panic"))):
+        if path.is_file():
+            transcripts[label] = path.read_text(encoding="utf-8", errors="replace")
+    for label, (path, at) in slices.items():
+        if path is not None and path.is_file():
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                f.seek(at)
+                transcripts[label] = f.read()
+    return secure_scan.refusals(script, transcripts)
 
 
 def device_capture(udid, executable, name, log):

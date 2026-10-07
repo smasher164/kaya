@@ -954,6 +954,20 @@ val search :
   ?on_change:(string -> unit) ->
   ?on_submit:(string -> unit) -> unit -> widget
 
+val secure_field :
+  ?grow:float ->
+  ?fill:bool ->
+  ?a11y_id:string ->
+  ?a11y_id_bind:string signal ->
+  ?a11y_label:string ->
+  ?a11y_label_bind:string signal ->
+  ?help:string ->
+  ?help_bind:string signal ->
+  ?placeholder:string ->
+  ?placeholder_bind:string signal ->
+  ?on_change:(string -> unit) ->
+  ?on_submit:(string -> unit) -> unit -> widget
+
 val progress :
   ?grow:float ->
   ?fill:bool ->
@@ -2071,6 +2085,30 @@ module Tpl : sig
     ?on_submit:(key list -> string -> unit) -> unit -> node
 
   val search :
+    ?grow:float ->
+    ?fill:bool ->
+    ?a11y_id:string ->
+    ?a11y_id_bind:string signal ->
+    ?a11y_id_field:('a, string) field ->
+    ?a11y_label:string ->
+    ?a11y_label_bind:string signal ->
+    ?a11y_label_field:('b, string) field ->
+    ?help:string ->
+    ?help_bind:string signal ->
+    ?help_field:('c, string) field ->
+    ?placeholder:string ->
+    ?placeholder_bind:string signal ->
+    ?placeholder_field:('d, string) field ->
+    ?accepts:string list ->
+    ?text:string ->
+    ?bind:string signal ->
+    ?bind_field:('e, string) field ->
+    ?level:int ->
+    ?a11y_level:int ->
+    ?on_change:(key list -> string -> unit) ->
+    ?on_submit:(key list -> string -> unit) -> unit -> node
+
+  val secure_field :
     ?grow:float ->
     ?fill:bool ->
     ?a11y_id:string ->

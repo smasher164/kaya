@@ -169,6 +169,8 @@ mod tooltips;
 
 #[path = "search.rs"]
 mod search;
+#[path = "secure.rs"]
+mod secure;
 
 #[cfg(target_os = "android")]
 #[path = "tasks.rs"]
@@ -255,6 +257,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("submit") => submit::app(ctx),
         Ok("tooltips") => tooltips::app(ctx),
         Ok("search") => search::app(ctx),
+        Ok("secure") => secure::app(ctx),
         Ok("tasks") => tasks::app(ctx),
         Ok("taskspersist") => tasks::app(ctx),
         // The same app under KAYA_LOCALE=ar-EG (tools/scenes/tasksrtl.steps).

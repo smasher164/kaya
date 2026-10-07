@@ -29,6 +29,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 msgs.on_click(quarter, Msg::Quarter);
             });
             tx.search().placeholder("Search").a11y_id("find");
+            tx.secure_field().placeholder("Password").a11y_id("secret");
             tx.row(|tx| {
                 // A decode failure is the placeholder class, never a crash.
                 tx.image(&TEST_PNG[..]);

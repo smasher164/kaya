@@ -100,6 +100,10 @@ def swift_findings(source):
     if ".onSubmit { KayaHost.emitSubmitted(node, node.text) }" not in entry:
         out.append(f"{SWIFT}: KayaEntry has no `.onSubmit` emit — Return on an entry submits "
                    f"nothing, the entry's activate door (S2)")
+    secure = block_after(src, "struct KayaSecureField: View {")
+    if ".onSubmit { KayaHost.emitSubmitted(node, node.text) }" not in secure:
+        out.append(f"{SWIFT}: KayaSecureField has no `.onSubmit` emit — Return in a secure "
+                   f"field submits nothing (docs/secure-entry-plan.md P7)")
     search = block_after(src, "struct KayaSearch: View {")
     if search.count(emit) < 2:
         out.append(f"{SWIFT}: KayaSearch must emit from `.onSubmit` on BOTH the mac and the "
@@ -149,6 +153,11 @@ def gtk_findings(source):
     search_door = block_after(search, "search.connect_activate(")
     if emit not in search_door:
         out.append(f"{GTK}: the search arm's `activate` does not emit (S2)")
+    secure = block_after(src, "WidgetKind::SecureField => {")
+    secure_door = block_after(secure, "field.connect_activate(")
+    if emit not in secure_door:
+        out.append(f"{GTK}: the secure field arm's `activate` does not emit — Return in a "
+                   f"secure field submits nothing (docs/secure-entry-plan.md P7)")
     area = block_after(src, "WidgetKind::Textarea => {")
     if "keys.set_propagation_phase(gtk4::PropagationPhase::Capture);" not in area:
         out.append(f"{GTK}: the textarea's key controller is not in the capture phase — the "
@@ -170,7 +179,7 @@ def gtk_findings(source):
     if "(NativeWidget::Textarea(..), Prop::Submits, Value::Bool(on)) => {" not in src:
         out.append(f"{GTK}: no Prop::Submits apply arm — the set the key controller reads is "
                    f"never written")
-    out.extend(only_through_doors(GTK, src, emit, [entry_door, search_door, key]))
+    out.extend(only_through_doors(GTK, src, emit, [entry_door, search_door, secure_door, key]))
     return out
 
 
@@ -198,12 +207,16 @@ def winui_findings(source):
     if not re.search(r"send_submitted_tag\(&tag, &text\);\s*args\.SetHandled\(true\)\?;", door):
         out.append(f"{WINUI}: the emit is not followed by SetHandled(true) — a handled Enter "
                    f"inserts nothing, and this one inserts (S2)")
-    calls = re.findall(r"submit_on_enter\(Editable::(Entry|Textarea)\(field\.clone\(\)\), "
+    calls = re.findall(r"submit_on_enter\(Editable::(Entry|Textarea|Secure)\(field\.clone\(\)\), "
                        r"tag\.clone\(\), core\.occurrences\.clone\(\), (None|Some\(id\.0\))\)",
                        src)
     if calls.count(("Entry", "None")) != 2:
         out.append(f"{WINUI}: the entry and search arms must each wire submit_on_enter ungated "
                    f"({calls.count(('Entry', 'None'))} of 2 found)")
+    if calls.count(("Secure", "None")) != 1:
+        out.append(f"{WINUI}: the secure field arm must wire submit_on_enter ungated "
+                   f"({calls.count(('Secure', 'None'))} of 1 found) — Return in a secure field "
+                   f"submits nothing (docs/secure-entry-plan.md P7)")
     if ("Textarea", "Some(id.0)") not in calls:
         out.append(f"{WINUI}: the textarea arm must wire submit_on_enter GATED on its own id "
                    f"(Some(id.0)) — ungated, a plain textarea submits (S2)")
@@ -261,7 +274,21 @@ def compose_findings(source):
     if not re.search(r"PROP_SUBMITS ->\s*KayaSceneModel\.nodes\[id\]!!\.submits = readBool\(b\)",
                      src):
         out.append(f"{COMPOSE}: no PROP_SUBMITS apply arm — node.submits is never written")
-    out.extend(only_through_doors(COMPOSE, src, emit, [action, preview]))
+    secure = block_after(src, "\nprivate fun KayaSecureField(")
+    secure_action = block_after(secure, "onKeyboardAction = {")
+    if emit not in secure_action or "performDefaultAction()" not in secure_action:
+        out.append(f"{COMPOSE}: the secure field's keyboard action must emit and then do the "
+                   f"platform's default — the phone's key submits nothing "
+                   f"(docs/secure-entry-plan.md P7)")
+    secure_preview = ""
+    for cand in blocks_after(secure, ".onPreviewKeyEvent { event ->"):
+        if "Key.Enter" in cand:
+            secure_preview = cand
+    if emit not in secure_preview:
+        out.append(f"{COMPOSE}: the secure field's hardware Return does not emit — a key event "
+                   f"never reaches onKeyboardAction (§7.3, docs/secure-entry-plan.md P7)")
+    out.extend(only_through_doors(COMPOSE, src, emit,
+                                  [action, preview, secure_action, secure_preview]))
     return out
 
 
@@ -617,6 +644,31 @@ n16 = gate.doctor("an emit planted outside submit_on_enter", REAL[WINUI],
 watched("a WinUI emit from a path that is not the KeyDown door", {**REAL, WINUI: n16},
         "outside a gesture door")
 
+n_gtk_secure = gate.doctor("the gtk secure field's activate emit cut", REAL[GTK],
+                           r"(field\.connect_activate\(move \|e\| \{\n.*\n)\s*submit_sink\."
+                           r"send_submitted_tag\(&submit_tag, &text\);\n",
+                           r"\1let _ = (&submit_sink, &submit_tag);\n")
+watched("a GTK secure field whose Return submits nothing", {**REAL, GTK: n_gtk_secure},
+        "secure field arm's `activate` does not emit")
+n_win_secure = gate.doctor("the winui secure field's submit door cut", REAL[WINUI],
+                           r"\n\s*submit_on_enter\(Editable::Secure\(field\.clone\(\)\), "
+                           r"tag\.clone\(\), core\.occurrences\.clone\(\), None\)\?;", "")
+watched("a WinUI secure field whose Return submits nothing", {**REAL, WINUI: n_win_secure},
+        "secure field arm must wire submit_on_enter ungated")
+
+n_swift_secure = gate.doctor("the swiftui secure field's onSubmit cut", REAL[SWIFT],
+                             r"(\.autocorrectionDisabled\(\)\n\s*#endif\n)\s*\.onSubmit "
+                             r"\{ KayaHost\.emitSubmitted\(node, node\.text\) \}\n", r"\1")
+watched("a SwiftUI secure field whose Return submits nothing", {**REAL, SWIFT: n_swift_secure},
+        "KayaSecureField has no `.onSubmit` emit")
+n_compose_secure = gate.doctor("the compose secure field's hardware Return emit cut",
+                               REAL[COMPOSE],
+                               r"(if \(hardwareReturn\) \{\n)\s*KayaPresent\.emitSubmitted\("
+                               r"node\.tag, kayaLf\(node\.textState\.text\.toString\(\)\)\)\n",
+                               r"\1")
+watched("a Compose secure field whose hardware Return submits nothing",
+        {**REAL, COMPOSE: n_compose_secure}, "secure field's hardware Return does not emit")
+
 # COMPOSE
 n17 = gate.doctor("the compose Send action cut", REAL[COMPOSE],
                   r"\} else if \(!singleLine && node\.submits\) \{\n\s*"
@@ -821,7 +873,7 @@ n_win_verb = gate.doctor("the harness's nudge committing past the door", REAL[WI
 watched("a WinUI verb that commits without the user's door", {**REAL, WINUI: n_win_verb},
         "winui_number_settle is called")
 
-gate.negatives_ran(50)
+gate.negatives_ran(54)
 
 for line in census(REAL):
     gate.finding(line)

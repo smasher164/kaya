@@ -210,6 +210,22 @@ sealed class ClipRow
         System.Action<Tx, System.Collections.Generic.List<object>, string>? onSubmit = null) =>
         t.Search(text, onChange, onSubmit);
 
+    public Node SecureField(System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null,
+        System.Action<Tx, System.Collections.Generic.List<object>, string>? onSubmit = null) =>
+        t.SecureField(onChange, onSubmit);
+
+    public Node SecureField(string text, System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null,
+        System.Action<Tx, System.Collections.Generic.List<object>, string>? onSubmit = null) =>
+        t.SecureField(text, onChange, onSubmit);
+
+    public Node SecureField(Signal text, System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null,
+        System.Action<Tx, System.Collections.Generic.List<object>, string>? onSubmit = null) =>
+        t.SecureField(text, onChange, onSubmit);
+
+    public Node SecureField(Field<string> text, System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null,
+        System.Action<Tx, System.Collections.Generic.List<object>, string>? onSubmit = null) =>
+        t.SecureField(text, onChange, onSubmit);
+
     public Node Progress(double value) => t.Progress(value);
 
     public Node Progress(Signal value) => t.Progress(value);

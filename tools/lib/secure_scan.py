@@ -5,6 +5,7 @@ runner reads its transcripts for each one. An argument too weak to scan for
 (it could occur in a log by accident) is refused before the leg counts.
 """
 
+import base64
 import re
 
 STATEMENT = re.compile(r'(?:^|;)[ \t]*type_secret[ \t]+"((?:[^"\\]|\\.)*)"', re.M)
@@ -34,10 +35,17 @@ def weakness(secret):
     return out
 
 
+def spellings(secret):
+    """The argument as typed, and as the iOS lane's driver request carries
+    it (`type_b64`, tools/ios/xcuidrive)."""
+    return {"as typed": secret,
+            "base64": base64.b64encode(secret.encode("utf-8")).decode("ascii").rstrip("=")}
+
+
 def refusals(script, transcripts):
     """Sentences refusing the leg: a weak argument, or an argument found in
-    one of `transcripts` ({name: text}). Each names the argument by its
-    position and length alone."""
+    one of `transcripts` ({name: text}) in any of its spellings. Each names
+    the argument by its position and length alone."""
     out = []
     for n, secret in enumerate(secrets_in(script), 1):
         weak = weakness(secret)
@@ -46,8 +54,9 @@ def refusals(script, transcripts):
                        f"{', '.join(weak)} (docs/secure-entry-plan.md P6)")
             continue
         for name, text in transcripts.items():
-            if text and secret in text:
-                out.append(f"secure-scan: the leg's {name} carries type_secret #{n} "
-                           f"({len(secret)} characters) — a secure field's text "
-                           f"reached a transcript (docs/secure-entry-plan.md P6)")
+            for spelled, form in spellings(secret).items():
+                if text and form in text:
+                    out.append(f"secure-scan: the leg's {name} carries type_secret #{n} "
+                               f"({len(secret)} characters, {spelled}) — a secure field's "
+                               f"text reached a transcript (docs/secure-entry-plan.md P6)")
     return out

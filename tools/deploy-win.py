@@ -50,6 +50,7 @@ from packaging import windows as win_package
 import exclusive
 import only  # noqa: E402
 import flightrec_lane
+import secure_scan
 import media_server
 import contextlib
 
@@ -2185,6 +2186,24 @@ def run_one_suite(name, slot, log):
     return "EXIT=0" in out
 
 
+def secure_refusals(name, log):
+    """A SECURE FIELD'S TEXT REACHES NO TRANSCRIPT (docs/secure-entry-plan.md
+    P6): tools/lib/secure_scan.py over the leg's log and, when its script types
+    a secret, the verb trace the guest wrote on the VM."""
+    steps = ROOT / "tools/scenes" / f"{lane.scene_lang(name)[0]}.steps"
+    script = steps.read_text(encoding="utf-8") if steps.is_file() else ""
+    if not secure_scan.secrets_in(script):
+        return []
+    log.flush()
+    transcripts = {"leg log": (LEGS_DIR / f"{name}.log").read_text(
+        encoding="utf-8", errors="replace")}
+    path = f"C:\\kaya\\flightrec\\{name}-vtrace.txt"
+    trace = run_ssh_out(f"cmd /c if exist {path} type {path}", log=log)
+    if trace:
+        transcripts["verb trace"] = trace
+    return secure_scan.refusals(script, transcripts)
+
+
 def _leg_worker(name):
     # Line-buffered: a lane killed mid-leg keeps the evidence so far.
     with open(LEGS_DIR / f"{name}.log", "w", encoding="utf-8",
@@ -2194,6 +2213,10 @@ def _leg_worker(name):
         t0 = time.monotonic()
         leg_epoch = int(time.time())
         ok = run_one_suite(name, slot, log)
+        refused = secure_refusals(name, log)
+        for line in refused:
+            print(f"{name}: {line}", file=log)
+        ok = ok and not refused
         secs = int(time.monotonic() - t0)
         (LEGS_DIR / f"{name}.secs").write_text(f"{secs}\n", encoding="utf-8")
         _release_slot(slot)

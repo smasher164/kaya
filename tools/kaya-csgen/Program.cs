@@ -403,6 +403,14 @@ static class Program
             "text, onChange, onSubmit");
         Fwd("Search", ["Field<string> text", $"{onText} onChange = null", $"{onText} onSubmit = null"],
             "text, onChange, onSubmit");
+        Fwd("SecureField", [$"{onText} onChange = null", $"{onText} onSubmit = null"],
+            "onChange, onSubmit");
+        Fwd("SecureField", ["string text", $"{onText} onChange = null", $"{onText} onSubmit = null"],
+            "text, onChange, onSubmit");
+        Fwd("SecureField", ["Signal text", $"{onText} onChange = null", $"{onText} onSubmit = null"],
+            "text, onChange, onSubmit");
+        Fwd("SecureField", ["Field<string> text", $"{onText} onChange = null", $"{onText} onSubmit = null"],
+            "text, onChange, onSubmit");
         Fwd("Progress", ["double value"], "value");
         Fwd("Progress", ["Signal value"], "value");
         Fwd("Progress", ["Field<double> value"], "value");

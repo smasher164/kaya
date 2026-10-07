@@ -340,6 +340,11 @@ executable submit
   main-is: submit.hs
   build-depends: kaya-guests
 
+executable secure
+  import: shared
+  main-is: secure.hs
+  build-depends: kaya-guests
+
 executable scrollto
   import: shared
   main-is: scrollto.hs

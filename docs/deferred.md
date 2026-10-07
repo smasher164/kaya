@@ -19,35 +19,87 @@ the SwiftUI arm on macOS and iOS, the harness's `type_secret` and
 `expect_masked` and their refusals, and tools/scenes/secure.steps green on
 the mac lane for Rust. The rulings in the plan's §2 are built as
 recommended and await the maintainer. What breadth owes:
-  - **DEPTH STUB: secure on gtk** — a `GtkPasswordEntry` (show-peek-icon
-    off, the plan's P3), `changed` for text_changed and `activate` for
-    submitted beside the entry's, the AT-SPI masked read for
-    `masked_len` and `secure_focused` from the window's focus (plan §3).
-  - **DEPTH STUB: secure on winui** — a `PasswordBox` with
-    PasswordRevealMode Hidden, PasswordChanged under the quiet guard,
-    the Return door check-submit holds, the masked read off UIA (the
-    platform answers no value for a password control, so the count is
-    the box's own length, computed in Rust and returned as a number;
-    plan §3), `secure_focused` from the focus manager. PasswordBox is
-    not in tools/winui-bindgen's filter yet.
-  - **DEPTH STUB: secure on compose** — KayaTextField with
-    PasswordVisualTransformation, KeyboardType.Password, autoCorrect
-    off, capitalization None, ImeAction.Done submitting, the semantics
-    `password()` property; the harness arms `type_secret` and
-    `expect_masked` (plan §3).
-  - **The iOS legs** — the arm is built (SecureField, no capitalization,
-    no autocorrection) and `expect_masked` reads the element's
-    accessibilityValue; the masked read and the typing route are
-    unmeasured. `type_secret` reaches the simulator through the XCUITest
-    driver's `type_b64`, so the driver's own transcript must be shown not
-    to record the command before the legs are wired.
+  - ~~**DEPTH STUB: secure on gtk**~~ — LANDED 2026-10-07: a
+    `GtkPasswordEntry` with the peek icon off and its context menu's
+    "Show Text" item and action taken out (P3), `changed` under the quiet
+    guard and `activate` beside the entry's, `masked_len` off the AT-SPI
+    Text interface, `secure_focused` from the focus. The field is kaya's
+    own GtkPasswordEntry subtype whose AT-SPI text is the display text,
+    since the lane's GTK 4.18.6 publishes the real password otherwise
+    (the struck GAP entry below); the 16 linux secure legs are green.
+  - ~~**DEPTH STUB: secure on winui**~~ — LANDED 2026-10-07: a
+    `PasswordBox` (and `PasswordRevealMode`, `IValueProvider` in
+    tools/winui-bindgen's filter) with the reveal button Hidden,
+    PasswordChanged under the entry's swallow counter (it is raised
+    asynchronously after SetPassword, measured), the ungated
+    `submit_on_enter` door, `masked_len` requiring the peer's IsPassword
+    (the peer publishes no Value pattern at all, measured, so the count
+    is the box's own length), `secure_focused` from the box's FocusState.
+    secure_rust green on the windows lane.
+  - ~~**DEPTH STUB: secure on compose**~~ — LANDED 2026-10-07:
+    `BasicSecureTextField` (RevealLastTyped, KeyboardType.Password,
+    capitalization None, autocorrect off, the entry's two submit doors),
+    `type_secret` through the in-process key dispatch, `expect_masked`
+    off the node info's text with its `isPassword` required; Compose
+    hands the node info the real text, so kaya overrides the field's
+    EditableText with the mask (docs/traps.md, measured).
+    secure-compose, secure-jvm and secure-go green.
+  - ~~**The iOS legs**~~ — LANDED 2026-10-07: `type_secret` goes through
+    the driver's `type_secure_b64` into the focused secure text field
+    element, which XCTest logs as `Type '<redacted>'` where the
+    application-level `typeText` logged the text (docs/traps.md,
+    measured); the empty field's accessibilityValue is its placeholder,
+    so the control's `hasText` decides zero. secure-swiftui, secure-swift
+    and secure-go green.
   - **`secure_field` in the other eight bindings** — both zones, the
     entry's handlers, a secure guest per language, rusthost's arm; the
     gallery scene and its ten guests take the kind with them.
   - **The leak scan on the other four lanes** — the mac lane refuses a leg
     whose transcript carries a `type_secret` argument (plan §5); the
     linux, windows, iOS and android runners owe the same scan before
-    their legs are wired.
+    their legs are wired. iOS and android run it since 2026-10-07
+    (run-sim's and run-emulator's `secure_refusals`, which also read the
+    base64 spelling the iOS driver request carries), and linux and windows
+    the same day (run-suites.sh's `secure_clean` over every leg through
+    tools/linux/secure-scan.py, deploy-win's `secure_refusals`; a planted
+    leak watched red on each).
+
+## ~~GAP — GTK 4.18 publishes a password entry's text over AT-SPI (docs/secure-entry-plan.md §7; 2026-10-07)~~ FIXED 2026-10-07: kaya's secure field is a GtkPasswordEntry subtype implementing GtkAccessibleText by its own GtkText's, which reads the display text (crates/kaya/src/gtk/secure_text.rs); KAYA_ONLY=secure on the linux lane 16/16 green, the registration cut watched red.
+KEY: GtkPasswordEntry AT-SPI, gtkatspitext, gtk_editable_get_text, gtk_text_get_display_text, GTK 4.20, secure-rust linux, platform presents unmasked, KayaPasswordEntry, secure_text.rs
+
+Measured on the linux lane's image (Debian trixie, GTK 4.18.6): the
+Text interface of a GtkPasswordEntry's bus node answered the real
+password, because gtkatspitext.c's editable handler calls
+`gtk_editable_get_text` at 4.18.6 and on the gtk-4-18 branch, and
+`gtk_text_get_display_text` (the invisible character) from 4.20.0. The
+same file consults an implementation of GtkAccessibleText BEFORE the
+editable handler (`gtk_atspi_get_text_vtable`) and skips its editable
+signal hookup for one (`gtk_atspi_connect_text_signals`), while
+`GTK_IS_PASSWORD_ENTRY` keeps the password text role. GtkPasswordEntry is
+registered without G_TYPE_FLAG_FINAL, so kaya registers a subtype at run
+time (sizes from g_type_query) whose eight 4.18 vfuncs forward to the
+entry's GtkText, whose implementation reads the display text on every GTK
+from 4.14. The gtk4 crate feature moved from v4_12 to v4_14 for it, so
+kaya's GTK floor is 4.14 (Ubuntu 24.04 ships 4.14.5). Guard:
+check-universal-props' gtk_secure_text, four watched negatives.
+
+## RULING WANTED — the linux lane's GTK version (2026-10-07)
+KEY: linux lane GTK version, debian trixie digest, GTK 4.20, GTK 4.22, GTK 4.24, forky, Ubuntu 26.04, tools/linux/Dockerfile, v4_14
+
+The lane runs GTK 4.18.6 (tools/linux/Dockerfile pins `debian:trixie` by
+digest and leaves apt versions to trixie's point releases). The secure
+field no longer needs a newer GTK, but the lane exercises only the 4.18
+branch of GTK's AT-SPI text, and the forwarder's behaviour on 4.20 and
+later (where GTK's own editable handler also masks) is read from source,
+not run. Options, researched 2026-10-07: (a) stay on trixie (4.18.6; no
+trixie-backports gtk4); (b) Debian forky/testing (4.24.0) or sid
+(4.24.1), both rolling, which breaks the Dockerfile's "pinned base moves
+only when we move it" premise unless apt is frozen at a
+snapshot.debian.org date; (c) Ubuntu 26.04 LTS (4.22.2, 4.22.4 in
+updates), a stable base with a newer GTK, at the cost of moving the
+whole image's toolchain (ghc, opam, sway, gstreamer, the portal) off
+Debian; (d) a second, smaller GTK-only lane on (b) or (c). Also yours:
+whether kaya states a GTK floor (4.14 now, by the v4_14 feature).
 
 ## DEFER — the secure field's autofill hint and reveal toggle (docs/secure-entry-plan.md P3, P8; 2026-10-07)
 KEY: secure field autofill, content type, textContentType, newPassword, oneTimeCode, ContentType.Password, reveal toggle, PasswordRevealMode, show-peek-icon, TextObfuscationMode

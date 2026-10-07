@@ -4507,6 +4507,19 @@ sealed class Tx : IDisposable
         return w;
     }
 
+    /// A secure field: the entry's contract with the platform masking
+    /// what is typed (docs/secure-entry-plan.md). onChange and onSubmit
+    /// receive the real text.
+    public Widget SecureField(Action<Tx, string>? onChange = null, double? grow = null,
+        Action<Tx, string>? onSubmit = null)
+    {
+        var w = Widget(KayaWire.KindSecureField);
+        if (onChange != null) App.OnChange(w, onChange);
+        if (onSubmit != null) App.OnSubmitted(w, onSubmit);
+        if (grow is double g) SetGrow(w, g);
+        return w;
+    }
+
     /// `role:` is this label's place in the text hierarchy
     /// (Role.Heading) — the platform's heading text style AND the
     /// accessibility heading trait, which is why it is a role and not a
@@ -7034,6 +7047,41 @@ sealed class Tpl
         Action<Tx, List<object>, string>? onSubmit = null)
     {
         var n = Search(onChange, onSubmit);
+        BindTextField(n, 0, text);
+        return n;
+    }
+
+    /// A secure field in the blueprint: Search's four arms, one kind over
+    /// (docs/secure-entry-plan.md P9).
+    public Node SecureField(Action<Tx, List<object>, string>? onChange = null,
+        Action<Tx, List<object>, string>? onSubmit = null)
+    {
+        var n = Widget(KayaWire.KindSecureField);
+        if (onChange != null) tx.App.OnChange(n, onChange);
+        if (onSubmit != null) tx.App.OnSubmitted(n, onSubmit);
+        return n;
+    }
+
+    public Node SecureField(string text, Action<Tx, List<object>, string>? onChange = null,
+        Action<Tx, List<object>, string>? onSubmit = null)
+    {
+        var n = SecureField(onChange, onSubmit);
+        SetText(n, text);
+        return n;
+    }
+
+    public Node SecureField(Signal text, Action<Tx, List<object>, string>? onChange = null,
+        Action<Tx, List<object>, string>? onSubmit = null)
+    {
+        var n = SecureField(onChange, onSubmit);
+        tx.Records.Add(KayaWire.TxBindText(n.Id, text.Id));
+        return n;
+    }
+
+    public Node SecureField(Field<string> text, Action<Tx, List<object>, string>? onChange = null,
+        Action<Tx, List<object>, string>? onSubmit = null)
+    {
+        var n = SecureField(onChange, onSubmit);
         BindTextField(n, 0, text);
         return n;
     }

@@ -35,6 +35,7 @@ from lanes import android as lane
 import exclusive
 import only  # noqa: E402
 import scene_cut
+import secure_scan
 import flightrec_lane
 import media_server
 import emulator_capture
@@ -1803,9 +1804,39 @@ def run_apk_on(serial, name, apk, component, script, extras,
             print(f"verb trace kept beside the log ({len(pulled.stdout)} "
                   f"bytes)", file=log)
         failed = True
+    refused = secure_refusals(serial, name, extras, dump, log, failed)
+    if refused:
+        print("\n".join(refused), file=log)
+        failed = True
     if needs_a11y and not a11y_disarm(serial, package, a11y, out=log):
         failed = True
     return not failed
+
+
+def secure_refusals(serial, name, extras, dump, log, failed):
+    """tools/lib/secure_scan.py over everything this leg wrote: the app's
+    log at the verdict, the device's whole log buffer, the leg's log and
+    the sidecars the flight recorder adopts."""
+    script = ""
+    for flag, value in zip(extras, extras[1:]):
+        if flag == "KAYA_SELFTEST_SCRIPT":
+            script = value.removeprefix("'").removesuffix("'")
+    if not secure_scan.secrets_in(script):
+        return []
+    log.flush()
+    leg_log = LEGS_DIR / f"{name}.log"
+    transcripts = {"app log": dump,
+                   "device log": out_of(["timeout", "20", "adb", "-s", serial,
+                                         "logcat", "-d", "-b", "all"])}
+    for label, path in (("leg log", leg_log),
+                        ("verb trace", leg_log.with_suffix(".vtrace")),
+                        ("logcat tail", leg_log.with_suffix(".logcat")),
+                        ("system events", leg_log.with_suffix(".system-events")),
+                        ("kept buffers",
+                         ROOT / f"target/validate-failures/android-{name}-buffers.log")):
+        if path.is_file() and (failed or label != "kept buffers"):
+            transcripts[label] = path.read_text(encoding="utf-8", errors="replace")
+    return secure_scan.refusals(script, transcripts)
 
 
 # ------------------------------------------------------------ the pool

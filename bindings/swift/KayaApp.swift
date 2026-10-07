@@ -4647,6 +4647,22 @@ public final class KayaAppTx {
         return w
     }
 
+    /// A secure field: the entry's contract with the platform masking what
+    /// is typed (docs/secure-entry-plan.md). Its handlers receive the real
+    /// text.
+    @discardableResult
+    public func secureField(
+        onChange: ((KayaAppTx, String) throws -> Void)? = nil,
+        onSubmit: ((KayaAppTx, String) throws -> Void)? = nil,
+        grow: Double? = nil
+    ) -> KayaWidget {
+        let w = widget(UInt32(KAYA_KIND_SECURE_FIELD))
+        if let onChange { app.onChange(w, onChange) }
+        if let onSubmit { app.onSubmitted(w, onSubmit) }
+        if let grow { setGrow(w, grow) }
+        return w
+    }
+
     /// `role:` is this label's place in the text hierarchy — `.heading`
     /// or `.caption`, a semantic fact and not a font size. `rich: true`
     /// draws the label's attribute runs over the role's own font,
@@ -6745,6 +6761,49 @@ public final class KayaTpl {
         onSubmit: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
     ) -> KayaNodeHandle {
         let n = textFieldOf(UInt32(KAYA_KIND_SEARCH), onChange, onSubmit)
+        bindTextField(n, f)
+        return n
+    }
+
+    /// A secure field per stamped copy, with search's four spellings
+    /// (docs/secure-entry-plan.md P9).
+    @discardableResult
+    public func secureField(
+        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil,
+        onSubmit: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        textFieldOf(UInt32(KAYA_KIND_SECURE_FIELD), onChange, onSubmit)
+    }
+
+    @discardableResult
+    public func secureField(
+        _ text: String,
+        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil,
+        onSubmit: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = textFieldOf(UInt32(KAYA_KIND_SECURE_FIELD), onChange, onSubmit)
+        setText(n, text)
+        return n
+    }
+
+    @discardableResult
+    public func secureField(
+        _ s: KayaSignal,
+        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil,
+        onSubmit: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = textFieldOf(UInt32(KAYA_KIND_SECURE_FIELD), onChange, onSubmit)
+        tx.tx.bindText(n.id, s.id)
+        return n
+    }
+
+    @discardableResult
+    public func secureField(
+        _ f: KayaField<String>,
+        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil,
+        onSubmit: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = textFieldOf(UInt32(KAYA_KIND_SECURE_FIELD), onChange, onSubmit)
         bindTextField(n, f)
         return n
     }

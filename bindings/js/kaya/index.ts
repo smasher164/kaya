@@ -4623,6 +4623,19 @@ export function search(opts: TextInputOptions = {}): Widget {
   return handle;
 }
 
+/** A secure field (docs/secure-entry-plan.md): the entry's contract with
+ * the platform masking what is typed. onChange and onSubmit receive the
+ * real text. */
+export function secureField(opts: TextInputOptions = {}): Widget {
+  const handle = widget(wire.KIND_SECURE_FIELD);
+  if (opts.text !== undefined) records().push(wire.tx_set_text(handle.id, textValue("secureField text", opts.text)));
+  if (opts.placeholder !== undefined) handle.placeholder(opts.placeholder);
+  if (opts.onChange !== undefined) app()._register(handle, wire.OCC_TEXT_CHANGED, opts.onChange);
+  if (opts.onSubmit !== undefined) app()._register(handle, wire.OCC_SUBMITTED, opts.onSubmit);
+  setGrow(handle, opts);
+  return handle;
+}
+
 export type LabelOptions = GrowOption & { bind?: Bindable; href?: Bindable | string; rich?: boolean };
 
 /** A label: a constant, or `{bind}` for a Signal or the enclosing For's

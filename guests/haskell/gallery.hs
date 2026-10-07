@@ -46,6 +46,7 @@ main = kayaMain $ \app -> do
               buttonOn "quarter" onQuarter
             ],
           search [Placeholder "Search", A11yId "find"],
+          secureField [Placeholder "Password", A11yId "secret"],
           {- Deliberately invalid bytes: a decode failure reads 0x0. -}
           row [imageBytes testPng, imageBytes (BC.pack "not an image")],
           {- The labelled row: the control's accessibility name IS the

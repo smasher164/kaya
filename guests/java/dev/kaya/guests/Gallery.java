@@ -30,6 +30,7 @@ public final class Gallery {
                     tx.button("quarter", t -> t.write(pos, 0.25));
                 });
                 tx.search().placeholder("Search").a11yId("find");
+                tx.secureField().placeholder("Password").a11yId("secret");
                 tx.row(row3 -> {
                     // Invalid bytes on purpose: a decode failure reads 0x0.
                     tx.image(TEST_PNG);

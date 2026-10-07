@@ -124,6 +124,10 @@ fn main() {
         "Windows.UI.Text.TextDecorations".to_string(),
         "Microsoft.UI.Text.FontWeights".to_string(),
         "Microsoft.UI.Xaml.Controls.TextBox".to_string(),
+        // THE SECURE FIELD'S CONTROL (docs/secure-entry-plan.md §3), with the
+        // enum its reveal setter takes (P3 sets it Hidden).
+        "Microsoft.UI.Xaml.Controls.PasswordBox".to_string(),
+        "Microsoft.UI.Xaml.Controls.PasswordRevealMode".to_string(),
         // THE TEXTAREA'S CONTROL (docs/textarea-foundation-plan.md):
         // RichEditBox is the rich-CAPABLE control kaya pins to plain
         // text; TextBox stays the entry's. It has no Text property and
@@ -484,6 +488,9 @@ fn main() {
         "Microsoft.UI.Xaml.Automation.Provider.IInvokeProvider".to_string(),
         "Microsoft.UI.Xaml.Automation.Provider.IToggleProvider".to_string(),
         "Microsoft.UI.Xaml.Automation.Provider.IExpandCollapseProvider".to_string(),
+        // The secure field's masked read asks the peer's Value pattern
+        // what it publishes (docs/secure-entry-plan.md §3).
+        "Microsoft.UI.Xaml.Automation.Provider.IValueProvider".to_string(),
         // THE SEMANTIC ICONS (docs/styling-plan.md D6): every `Icon`
         // setter takes an IconElement, and BOTH routes are needed —
         // `Symbol` covers 17 of kaya's 20 concepts, and info, warning and

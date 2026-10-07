@@ -22,7 +22,7 @@ body's IOS_*_SCENES assignments.
 # naming a different one where two scenes share an app: a scene selects a
 # SCRIPT, never an app (`listdetail:split` is the only such pair).
 SWIFT_ENTRIES = [
-    "milestone2", "stall", "entry", "search", "submit", "scrollto", "fullscreen", "gallery",
+    "milestone2", "stall", "entry", "search", "secure", "submit", "scrollto", "fullscreen", "gallery",
     "todos", "reorder", "feed", "grow", "align", "layout",
     "confirm", "nav", "listdetail:split", "scroll", "progress",
     "select", "radio", "grid", "textarea", "sections",
@@ -51,7 +51,7 @@ SWIFT_ENTRIES = [
 # rust-only canvas scenes, plus `editor` off-list below — a Go app with
 # no swift guest to mirror (docs/editor-plan.md).
 GO_SCENES = [
-    "milestone2", "stall", "entry", "search", "submit", "scrollto", "fullscreen", "gallery",
+    "milestone2", "stall", "entry", "search", "secure", "submit", "scrollto", "fullscreen", "gallery",
     "todos", "reorder", "feed", "grow", "align", "layout",
     "confirm", "nav", "listdetail", "scroll", "progress",
     "select", "radio", "grid", "textarea", "sections",
@@ -105,6 +105,8 @@ RUST_SCENES = [
     "tints",
     # The submit gesture on the three text kinds (docs/submit-plan.md §5).
     "submit",
+    # The secure field (docs/secure-entry-plan.md §5).
+    "secure",
     # The notification conformance scene: the activation is a REAL tap on
     # SpringBoard's own shade, driven by the xcui driver's notify_tap
     # (docs/tasks-s3-plan.md N5).
@@ -182,9 +184,7 @@ DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes"]
 # tooltips with its own (docs/tooltip-plan.md §5) — the iOS arm is the
 # shared interpreter's `.help`, which lands on the accessibility hint,
 # and expect_help reads it there.
-# The secure field's iOS arm is built; its legs are the breadth slice's to
-# measure (docs/secure-entry-plan.md §6).
-UNWIRED_SCENES = ["secure"]
+UNWIRED_SCENES = []
 
 # The fullscreen scene's app-only way back after the cut, the same steps as
 # tools/lib/lanes/android.py's FULLSCREEN_APP_TAIL: no user change arrives.

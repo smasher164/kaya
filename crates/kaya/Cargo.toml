@@ -209,7 +209,9 @@ atspi = { version = "0.30", optional = true, features = ["zbus"] }
 # fraction, while `gtk_widget_get_scale_factor` "returns the next higher
 # integer value" under fractional scaling, so a 1.25 display would raster
 # at 2 and blit a stale-size buffer.
-gtk4 = { version = "0.11.4", features = ["v4_12"] }
+# v4_14 is GtkAccessibleText, which the secure field's mask implements
+# (crates/kaya/src/gtk/secure_text.rs; docs/traps.md, GTK 4.18's password entry).
+gtk4 = { version = "0.11.4", features = ["v4_14"] }
 # Pango named DIRECTLY (gtk4 already pulls it in) for `v1_56`, which gates
 # `PangoFontMap::add_font_file` — the route a brand typeface's FONT BYTES
 # take on this platform (docs/styling-plan.md Slice 2b, gtk.rs's

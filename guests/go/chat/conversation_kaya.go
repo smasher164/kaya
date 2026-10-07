@@ -80,6 +80,10 @@ func (r conversationRow) Entry(onChange func(*kaya.Tx, string, string)) kaya.Nod
 	return r.c.Entry(r.t, onChange)
 }
 
+func (r conversationRow) SecureField(onChange func(*kaya.Tx, string, string)) kaya.Node {
+	return r.c.SecureField(r.t, onChange)
+}
+
 func (r conversationRow) TextareaRich(f kaya.Field[kaya.Document], onEdit func(*kaya.Tx, string, kaya.Edit), onFormat func(*kaya.Tx, string, kaya.Format)) kaya.Node {
 	return r.c.TextareaRich(r.t, f, onEdit, onFormat)
 }

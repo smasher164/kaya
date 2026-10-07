@@ -2225,7 +2225,6 @@ REFUSALS = {
     # A phone's number field has no stepping door (docs/number-field-plan.md
     # §3 rule 7), so the phone lanes cut the scene at the steps.
     (KOTLIN, "nudge"): "nudge: a phone's number field has no stepping door",
-    (KOTLIN, "type_secret"): 'depthStub("secure")',
 }
 # A DEPTH STUB on an action verb is a refusal too, for as long as it stands:
 # its row here reads `(KOTLIN, "<verb>"): 'depthStub("<scene>")'` and the
@@ -5363,6 +5362,8 @@ def timecode_arithmetic():
 timecode_arithmetic()
 from timecode_routes import run as check_timecode_routes
 check_timecode_routes(g)
+from secure_sentences import run as check_secure_sentences
+check_secure_sentences(g)
 
 if (clip_status or window_status or ink_status or ax_status
         or drop_tol_status

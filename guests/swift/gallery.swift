@@ -39,6 +39,9 @@ KayaApp.run { app in
             let find = tx.search()
             tx.setPlaceholder(find, "Search")
             tx.setA11yId(find, "find")
+            let secret = tx.secureField()
+            tx.setPlaceholder(secret, "Password")
+            tx.setA11yId(secret, "secret")
             tx.row { _ in
                 // Invalid bytes read 0x0: decode failure is the placeholder
                 // class, never a crash, on every backend.

@@ -46,6 +46,7 @@ with app.window():
             kaya.label(bind=volume)
             kaya.button("quarter", on_click=on_quarter)
         kaya.search(placeholder="Search").a11y_id("find")
+        kaya.secure_field(placeholder="Password").a11y_id("secret")
         with kaya.row():
             # A decode failure is the placeholder class, never a crash.
             kaya.image(TEST_PNG)

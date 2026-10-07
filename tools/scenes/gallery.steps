@@ -21,3 +21,5 @@ expect_ax slider#1 "slider/Level"
 # The search field (docs/search-plan.md S3): the prompt as the platform shows
 # it, read off the control by the field's a11y_id.
 expect_placeholder search#0 "Search"
+# The secure field's prompt (docs/secure-entry-plan.md P7).
+expect_placeholder secure_field#0 "Password"

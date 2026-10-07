@@ -7626,6 +7626,15 @@ private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
     /// — a trait bitmask plus the element's class — so `unknown/…` is never
     /// self-explaining, and it is one simulator round-trip per answer without
     /// this.
+    private func kayaKeyInput(_ node: NSObject, _ depth: Int = 0) -> UIKeyInput? {
+        if let input = node as? UIKeyInput { return input }
+        guard depth < 8, let view = node as? UIView else { return nil }
+        for sub in view.subviews {
+            if let input = kayaKeyInput(sub, depth + 1) { return input }
+        }
+        return nil
+    }
+
     /// The iOS half of the masked read: the element's accessibilityValue,
     /// which may hold only the mask (docs/secure-entry-plan.md P6).
     private func kayaAxMaskedRead(_ identifier: String) -> (Int?, String) {
@@ -7633,6 +7642,12 @@ private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
             for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
                 for window in scene.windows {
                     guard let hit = kayaAxFind(window, identifier) else { continue }
+                    // An empty field's accessibilityValue is its placeholder
+                    // (docs/traps.md, the iOS secure field's empty value).
+                    guard let input = kayaKeyInput(hit) else {
+                        return (nil, "the mask could not be read: no text input at the element (\(type(of: hit)))")
+                    }
+                    if !input.hasText { return (0, "") }
                     return kayaMaskCount(hit.accessibilityValue ?? "")
                 }
             }
@@ -9129,8 +9144,8 @@ private func kayaRunScript(_ script: String) {
                         failures.append("type_secret reached no window — nothing was typed")
                     }
                 #else
-                    if kayaTypeThroughHost(secret.expose) != nil {
-                        failures.append("type_secret reached no editable field — nothing was typed")
+                    if let why = kayaTypeThroughHost(secret.expose, verb: "type_secure_b64") {
+                        failures.append("type_secret: \(why)")
                     } else {
                         kayaAwaitAnswer(secretAnswered)
                     }
@@ -20923,7 +20938,7 @@ func kayaUndoInertNote(_ item: KayaMenuItemModel, verb: String) {
     /// to the end in process (point 3), the KEYS from the host's resident
     /// XCUITest driver through the simulator's keyboard, which the field must
     /// hold, and the settle (point 4). Nil on success, the sentence otherwise.
-    func kayaTypeThroughHost(_ text: String) -> String? {
+    func kayaTypeThroughHost(_ text: String, verb: String = "type_b64") -> String? {
         guard let input = kayaAwaitFocusedTextInput() else {
             return "reached no editable first responder — nothing was typed"
         }
@@ -20934,7 +20949,7 @@ func kayaUndoInertNote(_ item: KayaMenuItemModel, verb: String) {
             return kayaScene.focusedId.flatMap { kayaScene.nodes[$0]?.text }
         }
         let payload = Data(text.utf8).base64EncodedString()
-        let (ok, lines) = KayaSimdrive.ask("type_b64 \(payload)", timeout: 60)
+        let (ok, lines) = KayaSimdrive.ask("\(verb) \(payload)", timeout: 60)
         if !ok {
             return lines.first ?? "the host refused to type without saying why"
         }

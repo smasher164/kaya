@@ -484,7 +484,10 @@ final class KayaDrive: XCTestCase {
             let words = text.split(whereSeparator: { $0 == " " || $0 == "\n" }).map(String.init)
             guard let verb = words.first else { answer(false, "empty request"); continue }
             let rest = words.dropFirst().joined(separator: " ")
-            note("verb `\(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(60))`")
+            // A typed argument may be a secure field's (docs/secure-entry-plan.md P6).
+            note(verb.hasSuffix("_b64") && verb.hasPrefix("type")
+                 ? "verb `\(verb) <\(rest.count) base64 characters>`"
+                 : "verb `\(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(60))`")
             let started = Date()
             let (ok, body) = handle(verb, words, rest, coordinate)
             let why = ok ? "" : ": " + String((body.split(separator: "\n").first ?? "").prefix(160))
@@ -583,6 +586,19 @@ final class KayaDrive: XCTestCase {
                   let text = String(data: data, encoding: .utf8) else { return (false, "type_b64 <base64>") }
             if let why = typingRefusal(a, "the app") { return (false, why) }
             a.typeText(text)
+            return (true, "typed \(text.count) character(s)")
+        case "type_secure_b64":
+            // type_secret's keys, typed through the focused secure field's own
+            // element (docs/secure-entry-plan.md P6, docs/traps.md).
+            guard words.count == 2, let data = Data(base64Encoded: words[1]),
+                  let text = String(data: data, encoding: .utf8) else { return (false, "type_secure_b64 <base64>") }
+            if let why = typingRefusal(a, "the app") { return (false, why) }
+            let field = a.secureTextFields.matching(NSPredicate(format: "hasKeyboardFocus == true")).firstMatch
+            guard field.exists else {
+                return (false, "no secure text field holds the keyboard focus "
+                    + "(secure fields=\(a.secureTextFields.count))")
+            }
+            field.typeText(text)
             return (true, "typed \(text.count) character(s)")
         case "keyboard_done":
             // The number field's Done on the keyboard's toolbar

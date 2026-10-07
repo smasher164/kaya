@@ -76,9 +76,11 @@ import androidx.compose.foundation.interaction.PressInteraction
 // The entry/textarea path (docs/undo-plan.md §1.4). `undoState` and its
 // five members are the ONLY experimental surface here at foundation
 // 1.7.5.
+import androidx.compose.foundation.text.BasicSecureTextField
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.TextObfuscationMode
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
@@ -288,6 +290,7 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.editableText
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
@@ -1438,13 +1441,14 @@ object KayaSceneModel {
     val colorPickers = ArrayList<KayaNode>()
     val ranges = ArrayList<KayaNode>()
     val videos = ArrayList<KayaNode>()
+    val secureFields = ArrayList<KayaNode>()
 
     // Every kind registry, so a destroyed node leaves all of them at once
     // (docs/traps.md 2026-09-14: a torn-down copy stayed addressable).
     private val registries = listOf(
         buttons, checkboxes, labels, entryWidgets, sliders, images, columns, rows, scrolls,
         progresses, selects, radios, grids, textareas, canvases, datePickers, timePickers,
-        labeleds, searches, numberFields, colorPickers, ranges, videos,
+        labeleds, searches, numberFields, colorPickers, ranges, videos, secureFields,
     )
 
     fun forget(id: Long) {
@@ -3357,7 +3361,7 @@ object KayaCompose {
                         KIND_COLOR_PICKER -> KayaSceneModel.colorPickers.add(node)
                         KIND_RANGE -> KayaSceneModel.ranges.add(node)
                         KIND_VIDEO -> KayaSceneModel.videos.add(node)
-                        KIND_SECURE_FIELD -> depthStub("secure")
+                        KIND_SECURE_FIELD -> KayaSceneModel.secureFields.add(node)
                         KIND_NUMBER_FIELD -> {
                             // docs/number-field-plan.md §2: unset bounds are
                             // ±2^53, the step 1, and the field shows its
@@ -4928,7 +4932,11 @@ object KayaCompose {
      * it APPENDS with NO caret move, since `edit {}` commits and CLEARS
      * that history; it blocks past this backend's own observation.
      */
-    private fun kayaTypeAtFocus(activity: ComponentActivity, text: String): String? {
+    private fun kayaTypeAtFocus(
+        activity: ComponentActivity,
+        text: String,
+        secure: Boolean = false,
+    ): String? {
         if (text.isEmpty()) return "type wants some text to type"
         // CONTRACT POINT 3: TYPING APPENDS, so the caret is collapsed
         // to the end BEFORE the keys and not between them — a selection
@@ -4981,7 +4989,8 @@ object KayaCompose {
             android.view.KeyCharacterMap.VIRTUAL_KEYBOARD)
         for (c in text) {
             val events = map.getEvents(charArrayOf(c))
-                ?: return "type: this keyboard layout cannot generate ${c.code} ($c)"
+                ?: return if (secure) "type_secret: this keyboard layout cannot generate a character"
+                else "type: this keyboard layout cannot generate ${c.code} ($c)"
             // A KEY NOTHING CONSUMED WAS NOT TYPED, so it is sent again
             // (measured 2026-08-06, two runs in six: a leg's FIRST
             // key-down came back handled=false with the model already
@@ -5021,7 +5030,7 @@ object KayaCompose {
                 if (tries >= 10) {
                     Log.e(
                         "kaya",
-                        "KAYA_UNDO_TRACE: the keystroke '$c' was dispatched 10 times and " +
+                        "KAYA_UNDO_TRACE: the keystroke '${if (secure) "<secret>" else c}' was dispatched 10 times and " +
                             "the focused field's text never moved — either nothing is " +
                             "taking keys or this key does not insert"
                     )
@@ -7340,7 +7349,7 @@ object KayaCompose {
             "color_picker" -> KayaSceneModel.colorPickers
             "range" -> KayaSceneModel.ranges
             "video" -> KayaSceneModel.videos
-            "secure_field" -> depthStub("secure")
+            "secure_field" -> KayaSceneModel.secureFields
             "textarea" -> KayaSceneModel.textareas
             "date_picker" -> KayaSceneModel.datePickers
             "time_picker" -> KayaSceneModel.timePickers
@@ -8161,6 +8170,66 @@ object KayaCompose {
     }
 
     /**
+     * A type_secret's text leaves the statement HERE, before the runner
+     * logs, traces or arms the watchdog with it (docs/secure-entry-plan.md
+     * P6; KayaSwiftUI's kayaSecretOut).
+     */
+    private fun kayaSecretOut(statement: String): Pair<String, KayaSecret?> {
+        if (statement != "type_secret" && !statement.startsWith("type_secret ")) {
+            return Pair(statement, null)
+        }
+        val rest = statement.removePrefix("type_secret").trim()
+        var close = -1
+        var i = 1
+        while (rest.startsWith("\"") && i < rest.length) {
+            if (rest[i] == '\\') {
+                i += 2
+                continue
+            }
+            if (rest[i] == '"') {
+                close = i
+                break
+            }
+            i += 1
+        }
+        if (close < 0 || close != rest.length - 1) return Pair("type_secret <unreadable>", null)
+        val secret = KayaSecret(quoted(listOf(rest)))
+        return Pair("type_secret $secret", secret)
+    }
+
+    /**
+     * How many characters the node info hands an accessibility client
+     * masked (docs/secure-entry-plan.md P6; docs/traps.md, the Compose
+     * secure field's accessibility text).
+     */
+    private fun kayaMaskedRead(activity: ComponentActivity, spec: String): Pair<Int?, String> {
+        val field = onUi(activity) {
+            target(spec, "secure_field", KayaSceneModel.secureFields)
+        } ?: return Pair(null, "no such target")
+        if (field.a11yId.isEmpty()) {
+            return Pair(null, "the mask could not be read: no a11y_id authored on this field")
+        }
+        return onUi(activity) {
+            val view = kayaComposeRoot(activity.window.decorView)
+                ?: return@onUi Pair(null, "the mask could not be read: no Compose root in the window")
+            val tagged = kayaSemanticsByTag(activity, field.a11yId)
+                ?: return@onUi Pair(null,
+                    "the mask could not be read: the field is not in the accessibility tree")
+            val node = kayaSemanticsWith(tagged) {
+                it.config.contains(SemanticsProperties.EditableText)
+            } ?: tagged
+            val info = view.accessibilityNodeProvider?.createAccessibilityNodeInfo(node.id)
+                ?: return@onUi Pair(null,
+                    "the mask could not be read: the accessibility provider served no node info")
+            if (!info.isPassword) {
+                return@onUi Pair(null,
+                    "the field is not published to assistive technology as a password")
+            }
+            kayaMaskCount(info.text?.toString() ?: "")
+        } ?: Pair(null, "the mask could not be read: the UI thread did not answer")
+    }
+
+    /**
      * The script's statements, in order, comments and blanks gone — the
      * loop's own flattening taken once, so the `relaunch` arm can hand
      * act two the steps after it verbatim (docs/tasks-s9-plan.md R6).
@@ -8483,7 +8552,7 @@ object KayaCompose {
             val trimmedLine = rawLine.trim()
             if (trimmedLine.isEmpty() || trimmedLine.startsWith("#")) continue
             for (raw in kayaSplitStatements(trimmedLine)) {
-                val line = raw.trim()
+                val (line, secret) = kayaSecretOut(raw.trim())
                 if (line.isEmpty() || line.startsWith("#")) continue
                 val parts = line.split(' ').filter { it.isNotEmpty() }
                 val offset = (System.nanoTime() - start) / 1_000_000
@@ -8569,6 +8638,7 @@ object KayaCompose {
                                 ?: target(parts[1], "textarea", KayaSceneModel.textareas)
                                 ?: target(parts[1], "search", KayaSceneModel.searches)
                                 ?: target(parts[1], "number_field", KayaSceneModel.numberFields)
+                                ?: target(parts[1], "secure_field", KayaSceneModel.secureFields)
                             if (text != null) {
                                 KayaDiag.note(
                                     "click ${parts[1]} -> focus node=${text.id} " +
@@ -9497,8 +9567,39 @@ object KayaCompose {
                     // A8). A stand-in would LIE: writing the text
                     // CLEARS the native history the scene came to
                     // observe, and the leg would pass anyway.
-                    "type_secret", "expect_masked" -> {
-                        depthStub("secure")
+                    "type_secret" -> {
+                        // `type` for a secure field (docs/secure-entry-plan.md
+                        // P6): the text is `secret`'s alone; `line` and
+                        // `parts` never held it.
+                        if (secret == null) {
+                            failures.add("type_secret wants one quoted string")
+                        } else if (onUi(activity) { kayaSecureFocused() } != true) {
+                            failures.add(KAYA_TYPE_SECRET_ELSEWHERE)
+                        } else if (!secret.expose.all { it.code in 0x20..0x7e }) {
+                            failures.add(KAYA_TYPE_SECRET_ASCII)
+                        } else {
+                            kayaAwaitQuiet()
+                            val answered = kayaBatches
+                            val why = kayaTypeAtFocus(activity, secret.expose, secure = true)
+                            if (why != null) failures.add(why)
+                            else kayaAwaitAnswer(answered)
+                        }
+                    }
+                    "expect_masked" -> {
+                        // How many characters the platform shows masked, read
+                        // off what it presents to assistive technology, never
+                        // the text (docs/secure-entry-plan.md P6).
+                        val wantMasked = parts.getOrNull(2)?.toIntOrNull()
+                        if (parts.size != 3 || wantMasked == null) {
+                            failures.add("expect_masked wants a secure field and a count: $line")
+                        } else {
+                            val (got, why) = kayaMaskedRead(activity, parts[1])
+                            when {
+                                got == wantMasked -> observed.add("masked $got")
+                                got != null -> failures.add("masked $got, wanted $wantMasked")
+                                else -> failures.add("${parts[1]}: $why")
+                            }
+                        }
                     }
                     "type" -> {
                         // The driver blocks until the keys have landed IN
@@ -9508,6 +9609,8 @@ object KayaCompose {
                         val typed = kayaExpandTemplate(activity, quoted(parts.drop(1)))
                         if (typed.refused != null) {
                             failures.add(typed.refused)
+                        } else if (onUi(activity) { kayaSecureFocused() } == true) {
+                            failures.add(KAYA_TYPE_INTO_SECURE)
                         } else {
                             kayaAwaitQuiet()
                             val answered = kayaBatches
@@ -9550,69 +9653,77 @@ object KayaCompose {
                         else kayaAwaitAnswer(answered)
                     }
                     "set_text" -> {
-                        kayaAwaitQuiet()
-                        val answered = kayaBatches
-                        val ok = onUi(activity) {
-                            val node = kayaTextTarget(parts[1])
-                            node?.also {
-                                // Through kayaWriteText like every other
-                                // programmatic write, so it carries D7
-                                // with it.
-                                kayaWriteText(it, kayaLf(quoted(parts.drop(2))))
-                                // A number field's text is a draft until it
-                                // commits (docs/number-field-plan.md §2).
-                                if (it.kind != KIND_NUMBER_FIELD) {
-                                    KayaPresent.emitTextChanged(
-                                        it.tag, it.text, KayaSceneModel.focusedId == it.id, false)
-                                }
-                            } != null
+                        if (parts[1].startsWith("secure_field")) {
+                            failures.add(KAYA_SECURE_SET_TEXT)
+                        } else {
+                            kayaAwaitQuiet()
+                            val answered = kayaBatches
+                            val ok = onUi(activity) {
+                                val node = kayaTextTarget(parts[1])
+                                node?.also {
+                                    // Through kayaWriteText like every other
+                                    // programmatic write, so it carries D7
+                                    // with it.
+                                    kayaWriteText(it, kayaLf(quoted(parts.drop(2))))
+                                    // A number field's text is a draft until it
+                                    // commits (docs/number-field-plan.md §2).
+                                    if (it.kind != KIND_NUMBER_FIELD) {
+                                        KayaPresent.emitTextChanged(
+                                            it.tag, it.text, KayaSceneModel.focusedId == it.id, false)
+                                    }
+                                } != null
+                            }
+                            if (!ok) failures.add("no such target ${parts[1]}")
+                            else kayaAwaitAnswer(answered)
                         }
-                        if (!ok) failures.add("no such target ${parts[1]}")
-                        else kayaAwaitAnswer(answered)
                     }
                     "expect" -> {
-                        // `{fmt:…}` is this platform's own formatter's answer,
-                        // asked independently of the door (kayaExpandTemplate).
-                        val template = kayaExpandTemplate(activity, quoted(parts.drop(2)))
-                        val want = template.text
-                        // The target kind picks the observation —
-                        // harness.rs's routing. THE TEXT KINDS READ THE
-                        // WIDGET, not the model mirror: `TextFieldState`
-                        // IS what the field renders from, and a model
-                        // read could not see a native undo that moved
-                        // the widget and not yet the mirror.
-                        val got = onUi(activity) {
-                            if (parts[1].startsWith("textarea") ||
-                                parts[1].startsWith("entry") ||
-                                parts[1].startsWith("search") ||
-                                parts[1].startsWith("number_field")
-                            )
-                                kayaTextTarget(parts[1])?.let {
-                                    kayaLf(it.textState.text.toString())
-                                }
-                            else if (parts[1].startsWith("image"))
-                                target(parts[1], "image", KayaSceneModel.images)?.imageSize
-                            else if (parts[1].startsWith("progress"))
-                                target(parts[1], "progress", KayaSceneModel.progresses)?.let {
-                                    if (it.indeterminate) "indeterminate"
-                                    else "${Math.round(it.value * 100)}%"
-                                }
-                            else if (parts[1].startsWith("select") || parts[1].startsWith("radio"))
-                                // The selected option's LABEL — what
-                                // the control shows (child order is
-                                // option order).
-                                (if (parts[1].startsWith("radio"))
-                                    target(parts[1], "radio", KayaSceneModel.radios)
-                                else target(parts[1], "select", KayaSceneModel.selects))?.let {
-                                    it.children.getOrNull(it.value.toInt())?.text ?: ""
-                                }
-                            else target(parts[1], "label", KayaSceneModel.labels)?.text
-                        }
-                        when {
-                            template.refused != null -> failures.add(template.refused)
-                            got == null -> failures.add("no such target ${parts[1]}")
-                            got == want -> observed.add(got)
-                            else -> failures.add("${parts[1]} reads \"$got\", wanted \"$want\"")
+                        if (parts[1].startsWith("secure_field")) {
+                            failures.add(KAYA_SECURE_EXPECT)
+                        } else {
+                            // `{fmt:…}` is this platform's own formatter's answer,
+                            // asked independently of the door (kayaExpandTemplate).
+                            val template = kayaExpandTemplate(activity, quoted(parts.drop(2)))
+                            val want = template.text
+                            // The target kind picks the observation —
+                            // harness.rs's routing. THE TEXT KINDS READ THE
+                            // WIDGET, not the model mirror: `TextFieldState`
+                            // IS what the field renders from, and a model
+                            // read could not see a native undo that moved
+                            // the widget and not yet the mirror.
+                            val got = onUi(activity) {
+                                if (parts[1].startsWith("textarea") ||
+                                    parts[1].startsWith("entry") ||
+                                    parts[1].startsWith("search") ||
+                                    parts[1].startsWith("number_field")
+                                )
+                                    kayaTextTarget(parts[1])?.let {
+                                        kayaLf(it.textState.text.toString())
+                                    }
+                                else if (parts[1].startsWith("image"))
+                                    target(parts[1], "image", KayaSceneModel.images)?.imageSize
+                                else if (parts[1].startsWith("progress"))
+                                    target(parts[1], "progress", KayaSceneModel.progresses)?.let {
+                                        if (it.indeterminate) "indeterminate"
+                                        else "${Math.round(it.value * 100)}%"
+                                    }
+                                else if (parts[1].startsWith("select") || parts[1].startsWith("radio"))
+                                    // The selected option's LABEL — what
+                                    // the control shows (child order is
+                                    // option order).
+                                    (if (parts[1].startsWith("radio"))
+                                        target(parts[1], "radio", KayaSceneModel.radios)
+                                    else target(parts[1], "select", KayaSceneModel.selects))?.let {
+                                        it.children.getOrNull(it.value.toInt())?.text ?: ""
+                                    }
+                                else target(parts[1], "label", KayaSceneModel.labels)?.text
+                            }
+                            when {
+                                template.refused != null -> failures.add(template.refused)
+                                got == null -> failures.add("no such target ${parts[1]}")
+                                got == want -> observed.add(got)
+                                else -> failures.add("${parts[1]} reads \"$got\", wanted \"$want\"")
+                            }
                         }
                     }
                     "expect_focused" -> {
@@ -9622,9 +9733,9 @@ object KayaCompose {
                         // Counts as an expect for the zero-expect
                         // rule, exactly as in harness.rs.
                         val focused = onUi(activity) {
-                            kayaTextTarget(parts[1])?.let {
-                                KayaSceneModel.focusedId == it.id
-                            }
+                            (kayaTextTarget(parts[1])
+                                ?: target(parts[1], "secure_field", KayaSceneModel.secureFields))
+                                ?.let { KayaSceneModel.focusedId == it.id }
                         }
                         when (focused) {
                             true -> observed.add("${parts[1]} focused")
@@ -11665,6 +11776,7 @@ object KayaCompose {
                         // one prop over.
                         val want = quoted(parts.drop(2))
                         val node = kayaTextTarget(parts[1])
+                            ?: target(parts[1], "secure_field", KayaSceneModel.secureFields)
                         if (node == null) {
                             failures.add("no such target ${parts[1]}")
                         } else {
@@ -12373,7 +12485,8 @@ internal fun kayaWriteText(node: KayaNode, next: String) {
  * model mirror alone (a LABEL's, docs/rich-text-plan.md §15). */
 internal fun kayaIsTextField(node: KayaNode): Boolean =
     node.kind == KayaCompose.KIND_ENTRY || node.kind == KayaCompose.KIND_TEXTAREA ||
-        node.kind == KayaCompose.KIND_SEARCH || node.kind == KayaCompose.KIND_NUMBER_FIELD
+        node.kind == KayaCompose.KIND_SEARCH || node.kind == KayaCompose.KIND_NUMBER_FIELD ||
+        node.kind == KayaCompose.KIND_SECURE_FIELD
 
 /** The arm's run table and its pending attributes, dropped together; the
  * display is remembered on [KayaNode.richSeq]. */
@@ -13199,7 +13312,44 @@ internal fun kayaFocusedTextNode(): KayaNode? {
 internal fun kayaFocusedTypingNode(): KayaNode? =
     kayaFocusedTextNode() ?: KayaSceneModel.focusedId
         ?.let { KayaSceneModel.nodes[it] }
-        ?.takeIf { it.kind == KayaCompose.KIND_NUMBER_FIELD }
+        ?.takeIf {
+            it.kind == KayaCompose.KIND_NUMBER_FIELD || it.kind == KayaCompose.KIND_SECURE_FIELD
+        }
+
+/** Text bound for a secure field (docs/secure-entry-plan.md P6): its string
+ * form names its length alone. */
+internal class KayaSecret(private val held: String) {
+    val expose: String get() = held
+    override fun toString(): String = "<secret: ${held.length} chars>"
+}
+
+/** The secure field's refusals, harness.rs's bytes. */
+internal const val KAYA_SECURE_EXPECT =
+    "expect never reads a secure field's text; expect_masked reads how many characters it masks"
+internal const val KAYA_SECURE_SET_TEXT =
+    "set_text never writes a secure field; type_secret types into one"
+internal const val KAYA_TYPE_INTO_SECURE =
+    "type would print a secure field's text in the step log and the verb trace; type_secret types into one"
+internal const val KAYA_TYPE_SECRET_ELSEWHERE =
+    "type_secret types into a secure field, and the focus is not on one"
+internal const val KAYA_TYPE_SECRET_ASCII =
+    "type_secret types printable ASCII alone (0x20..0x7e), and its text is not"
+
+/** How many characters a masked value shows (docs/secure-entry-plan.md P6):
+ * harness.rs's mask_count. */
+internal fun kayaMaskCount(value: String): Pair<Int?, String> {
+    val points = value.codePoints().toArray()
+    val unmasked = points.count { it in 0x20..0x7e }
+    if (unmasked > 0) {
+        return Pair(null, "the platform presents $unmasked of the secure field's characters unmasked")
+    }
+    if (points.toSet().size > 1) return Pair(null, "the mask could not be read: the value mixes glyphs")
+    return Pair(points.size, "")
+}
+
+/** Whether a secure field holds the focus (docs/secure-entry-plan.md P6). */
+internal fun kayaSecureFocused(): Boolean =
+    KayaSceneModel.focusedId?.let { id -> KayaSceneModel.secureFields.any { it.id == id } } == true
 
 /**
  * A4's ONE named query — "can the focused widget undo?" — answered in
@@ -14853,6 +15003,7 @@ private fun KayaRenderCore(
             (node.kind == KayaCompose.KIND_ENTRY || node.kind == KayaCompose.KIND_TEXTAREA ||
                 node.kind == KayaCompose.KIND_SEARCH ||
                 node.kind == KayaCompose.KIND_NUMBER_FIELD ||
+                node.kind == KayaCompose.KIND_SECURE_FIELD ||
                 node.kind == KayaCompose.KIND_DATE_PICKER ||
                 node.kind == KayaCompose.KIND_TIME_PICKER ||
                 node.kind == KayaCompose.KIND_SELECT)
@@ -15353,7 +15504,7 @@ private fun KayaRenderCore(
         KayaCompose.KIND_COLOR_PICKER -> KayaColorButton(node, a11y, boxFill)
         KayaCompose.KIND_RANGE -> KayaRangeSurface(node, boxFill, a11y)
         KayaCompose.KIND_VIDEO -> KayaVideoView(node, a11y, boxFill)
-        KayaCompose.KIND_SECURE_FIELD -> depthStub("secure")
+        KayaCompose.KIND_SECURE_FIELD -> KayaSecureField(node, a11y, boxFill)
         KayaCompose.KIND_LABELED -> {
             // THE LABELLED ROW (docs/forms-plan.md §3): Material's own
             // labelled row, the value trailing and a WIDE control folded
@@ -19270,6 +19421,87 @@ internal fun kayaNumberKeyboard(min: Double, step: Double, format: String = "num
         step == Math.rint(step) -> KeyboardType.Number
         else -> KeyboardType.Decimal
     }
+
+/**
+ * The secure field (docs/secure-entry-plan.md §3): the platform's own
+ * BasicSecureTextField, which masks, refuses cut and copy and publishes
+ * password(); no reveal (P3), the phone's last-character flash kept.
+ * KayaTextField's single-line contract otherwise, without its undo tier.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun KayaSecureField(node: KayaNode, a11y: Modifier, fill: Modifier) {
+    val focusRequester = remember { FocusRequester() }
+    val interaction = remember { MutableInteractionSource() }
+    LaunchedEffect(node) {
+        snapshotFlow { node.textState.text.toString() }.collect { read ->
+            val value = kayaLf(read)
+            if (value != node.text) {
+                node.text = value
+                KayaPresent.emitTextChanged(
+                    node.tag, value, KayaSceneModel.focusedId == node.id, false)
+            }
+        }
+    }
+    BasicSecureTextField(
+        state = node.textState,
+        textObfuscationMode = TextObfuscationMode.RevealLastTyped,
+        keyboardOptions = KeyboardOptions(
+            capitalization = KeyboardCapitalization.None,
+            autoCorrectEnabled = false,
+            keyboardType = KeyboardType.Password,
+        ),
+        onKeyboardAction = { performDefaultAction ->
+            KayaPresent.emitSubmitted(node.tag, kayaLf(node.textState.text.toString()))
+            performDefaultAction()
+        },
+        onTextLayout = { layout -> kayaTextLayouts[node.id] = layout },
+        interactionSource = interaction,
+        textStyle = LocalTextStyle.current.copy(color = LocalContentColor.current),
+        // docs/traps.md, the Compose secure field's accessibility text.
+        modifier = Modifier
+            .semantics { editableText = AnnotatedString("\u2022".repeat(node.textState.text.length)) }
+            .then(a11y)
+            .then(fill)
+            .focusRequester(focusRequester)
+            .onPreviewKeyEvent { event ->
+                val hardwareReturn = event.type == KeyEventType.KeyDown &&
+                    (event.key == Key.Enter || event.key == Key.NumPadEnter)
+                if (hardwareReturn) {
+                    KayaPresent.emitSubmitted(node.tag, kayaLf(node.textState.text.toString()))
+                    true
+                } else {
+                    false
+                }
+            }
+            .onFocusChanged { state ->
+                if (state.isFocused) {
+                    KayaSceneModel.focusedId = node.id
+                    KayaSceneModel.composeFocusedId = node.id
+                } else if (KayaSceneModel.composeFocusedId == node.id) {
+                    KayaSceneModel.composeFocusedId = null
+                }
+            },
+        decorator = { inner ->
+            val prompt: (@Composable () -> Unit)? =
+                if (node.placeholder.isEmpty()) null else { { Text(node.placeholder) } }
+            TextFieldDefaults.DecorationBox(
+                value = node.textState.text.toString(),
+                innerTextField = inner,
+                enabled = true,
+                singleLine = true,
+                visualTransformation = VisualTransformation.None,
+                interactionSource = interaction,
+                placeholder = prompt,
+                contentPadding = TextFieldDefaults.contentPaddingWithoutLabel(),
+                colors = TextFieldDefaults.colors(),
+            )
+        },
+    )
+    LaunchedEffect(KayaSceneModel.focusedId) {
+        if (KayaSceneModel.focusedId == node.id) focusRequester.requestFocus()
+    }
+}
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable

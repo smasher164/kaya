@@ -32,6 +32,7 @@ func App() *kaya.App {
 				})
 			})
 			tx.Search(nil).Placeholder("Search").A11yID("find")
+			tx.SecureField(nil).Placeholder("Password").A11yID("secret")
 			tx.Row(func() {
 				// A decode failure is the placeholder class, never a crash.
 				tx.Image(testPNG)

@@ -32,6 +32,9 @@ static class GalleryScene
                 var find = tx.Search();
                 tx.SetPlaceholder(find, "Search");
                 tx.SetA11yId(find, "find");
+                var secret = tx.SecureField();
+                tx.SetPlaceholder(secret, "Password");
+                tx.SetA11yId(secret, "secret");
                 tx.Row(_ =>
                 {
                     // Invalid bytes: a decode failure is a placeholder, never a crash.

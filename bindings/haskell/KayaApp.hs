@@ -273,6 +273,8 @@ module KayaApp
     textareaOn,
     search,
     searchOn,
+    secureField,
+    secureFieldOn,
     labelText,
     labelBound,
     headingText,
@@ -436,6 +438,7 @@ module KayaApp
     textareaBound,
     textareaRichBound,
     searchBound,
+    secureFieldBound,
     progressBound,
     slider,
     range,
@@ -3213,6 +3216,19 @@ searchOn handler = leafish $ do
   pendB (PChange n handler)
   return w
 
+-- | A secure field, in either zone: the entry's contract with the
+-- platform masking what is typed (docs/secure-entry-plan.md). The
+-- handlers receive the real text.
+secureField :: (BothZones r) => r
+secureField = bothish (widget W.kindSecureField)
+
+-- | A secure field with its change handler co-located.
+secureFieldOn :: (LeafArgs r) => (Text -> IO ()) -> r
+secureFieldOn handler = leafish $ do
+  w@(Widget n) <- widget W.kindSecureField
+  pendB (PChange n handler)
+  return w
+
 -- | A labeled checkbox with its toggle handler co-located.
 checkboxOn :: (LeafArgs r) => Text -> (Bool -> IO ()) -> r
 checkboxOn txt handler = leafish $ do
@@ -4488,6 +4504,14 @@ openFor level = gets $ \s -> listToMaybe (drop (fromIntegral level) (s.bOpenFors
 searchBound :: TplStrSource s => s -> Tpl Node
 searchBound src = do
   n <- widget W.kindSearch
+  bindTextSource n src
+  return n
+
+-- | A stamped secure field seeded from an addressable source
+-- (docs/secure-entry-plan.md P9).
+secureFieldBound :: TplStrSource s => s -> Tpl Node
+secureFieldBound src = do
+  n <- widget W.kindSecureField
   bindTextSource n src
   return n
 

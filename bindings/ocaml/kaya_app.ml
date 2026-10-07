@@ -2580,6 +2580,28 @@ let search ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help
   | None -> ());
   w
 
+(* A secure field: the entry's contract with the platform masking what is
+   typed (docs/secure-entry-plan.md). The handlers receive the real text. *)
+let secure_field ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?placeholder ?placeholder_bind ?on_change ?on_submit () =
+  let tx = the_tx () in
+  let w = widget Kaya_wire.kind_secure_field in
+  Option.iter (fun g -> set_grow w g) grow;
+  Option.iter (fun v -> set_fill w v) fill;
+  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
+  Option.iter (fun v -> set_placeholder w v) placeholder;
+  Option.iter (fun s -> bind_placeholder w s) placeholder_bind;
+  (match on_change with
+  | Some handler ->
+      let (Widget id) = w in
+      Hashtbl.replace tx.app.widget_changes id handler
+  | None -> ());
+  (match on_submit with
+  | Some handler ->
+      let (Widget id) = w in
+      Hashtbl.replace tx.app.widget_submits id handler
+  | None -> ());
+  w
+
 (* A progress bar: display-only, like label and image. [~value] is
    the determinate fraction (0..=1); [~indeterminate:true] switches
    to the platform's activity mode. *)
@@ -5364,6 +5386,37 @@ module Tpl = struct
       ?placeholder_bind ?placeholder_field ?accepts ?text ?bind ?bind_field
       ?(level = 0) ?(a11y_level = level) ?on_change ?on_submit () =
     let n = Floor.widget Kaya_wire.kind_search in
+    Option.iter (fun g -> Floor.set_grow n g) grow;
+    Option.iter (fun v -> Floor.set_fill n v) fill;
+    Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~a11y_level n;
+    Option.iter (fun v -> Floor.set_placeholder n v) placeholder;
+    Option.iter (fun s -> Floor.bind_placeholder n s) placeholder_bind;
+    Option.iter (fun fd -> Floor.bind_placeholder_field ~level n fd) placeholder_field;
+    Option.iter (fun kinds -> Floor.set_accepts n kinds) accepts;
+    Option.iter (fun x -> Floor.set_text n x) text;
+    Option.iter (fun s -> Floor.bind_text n s) bind;
+    Option.iter (fun fd -> Floor.bind_text_field ~level n fd) bind_field;
+    (match on_change with
+    | Some handler ->
+        let (Node id) = n in
+        Hashtbl.replace (the_tx ()).app.node_changes id (fun keys s ->
+            handler (List.map key_of_wire keys) s)
+    | None -> ());
+    (match on_submit with
+    | Some handler ->
+        let (Node id) = n in
+        Hashtbl.replace (the_tx ()).app.node_submits id (fun keys s ->
+            handler (List.map key_of_wire keys) s)
+    | None -> ());
+    n
+
+  (* A secure field per stamped copy (docs/secure-entry-plan.md P9). *)
+  let secure_field ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?placeholder
+      ?placeholder_bind ?placeholder_field ?accepts ?text ?bind ?bind_field
+      ?(level = 0) ?(a11y_level = level) ?on_change ?on_submit () =
+    let n = Floor.widget Kaya_wire.kind_secure_field in
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Option.iter (fun v -> Floor.set_fill n v) fill;
     Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label

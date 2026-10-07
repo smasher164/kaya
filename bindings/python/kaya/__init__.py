@@ -5343,6 +5343,27 @@ def search(text: str | None = None, *, on_change: Handler | None = None,
     return handle
 
 
+def secure_field(text: str | None = None, *,
+                 on_change: Handler | None = None,
+                 on_submit: Handler | None = None,
+                 grow: float | None = None,
+                 placeholder: TextSource | None = None) -> Widget:
+    """A secure field (docs/secure-entry-plan.md): the entry's contract
+    with the platform masking what is typed. `on_change` and `on_submit`
+    receive the real text."""
+    handle = _widget(wire.KIND_SECURE_FIELD)
+    if text is not None:
+        _records().append(wire.tx_set_text(handle.id, _text_value("secure_field text", text)))
+    if placeholder is not None:
+        handle.placeholder(placeholder)
+    if on_change is not None:
+        _app._register(handle, wire.OCC_TEXT_CHANGED, on_change)
+    if on_submit is not None:
+        _app._register(handle, wire.OCC_SUBMITTED, on_submit)
+    _set_grow(handle, grow)
+    return handle
+
+
 def label(text: str | None = None, bind: TextSource | None = None, *,
           grow: float | None = None, href: TextSource | None = None,
           rich: bool = False) -> Widget:

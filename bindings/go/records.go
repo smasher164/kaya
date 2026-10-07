@@ -913,6 +913,15 @@ func (c RecordCollection[K, T]) EntryBound[S interface {
 	return n
 }
 
+// SecureField creates an empty secure field with its change handler (nil
+// for none), Entry's contract with the platform masking what is typed
+// (docs/secure-entry-plan.md P9).
+func (c RecordCollection[K, T]) SecureField(t *Tpl, onChange func(*Tx, K, string)) Node {
+	n := t.Widget(KindSecureField)
+	c.onChangeOf(t, n, onChange)
+	return n
+}
+
 // Textarea creates an empty multi-line editor with its change handler
 // (nil for none) — Entry's contract, one kind over.
 func (c RecordCollection[K, T]) Textarea(t *Tpl, onChange func(*Tx, K, string)) Node {

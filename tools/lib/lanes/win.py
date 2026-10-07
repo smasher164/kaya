@@ -26,7 +26,7 @@ SCENES = [
     "reorder", "feed", "grow", "layout", "align", "window", "panels",
     "confirm", "nav", "split", "panes", "table", "scroll",
     "progress", "select", "radio", "grid", "textarea", "search", "submit", "scrollto", "fullscreen",
-    "numberfield", "timecode", "colorpicker", "range",
+    "numberfield", "timecode", "colorpicker", "range", "secure",
     "sections",
     "menus", "commands", "a11y", "a11yrows", "filedialog",
     "clipboard", "undo", "dirty", "ranges", "save", "styling",
@@ -545,6 +545,11 @@ ORDER = [
     ],
     [
      "submit_rust", "submit_python", "submit_js", "submit_go", "submit_csharp", "submit_java",
+    ],
+    # The secure field (docs/secure-entry-plan.md): type_secret posts to the
+    # guest's own input site, as `type` does.
+    [
+     "secure_rust", "secure_python", "secure_js", "secure_go", "secure_csharp", "secure_java",
     ],
     # EACH number field LEG STILL ALONE (docs/traps.md, the WinUI keystrokes
     # posted to the input site): a pooled neighbour's window taking the

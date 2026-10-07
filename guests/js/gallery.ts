@@ -43,6 +43,7 @@ const { urgent, status, volume, pos } = app.window(() => {
       kaya.button("quarter", { onClick: onQuarter });
     });
     kaya.search({ placeholder: "Search" }).a11yId("find");
+    kaya.secureField({ placeholder: "Password" }).a11yId("secret");
     kaya.row(() => {
       // A decode failure is the placeholder class, never a crash.
       kaya.image(TEST_PNG);

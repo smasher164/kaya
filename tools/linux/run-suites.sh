@@ -30,7 +30,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) the foreign suites load;
 # --example alone would build only the rlib it depends on.
-SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen numberfield timecode colorpicker range media capture"
+SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen numberfield timecode colorpicker range media capture secure"
 # Depth-slice scenes, rust only. `windowed` and `canvas` are rust BY
 # DESIGN rather than by depth — the compiled conformance scenes every
 # lane runs (docs/virtualization-plan.md §6.3, docs/canvas-plan.md
@@ -435,6 +435,16 @@ kaya_wanted() { # name proto
 # still unspelled (2026-09-21; the android runner's rule).
 KAYA_LEGS_TAKEN=0
 
+# A SECURE FIELD'S TEXT REACHES NO TRANSCRIPT (docs/secure-entry-plan.md P6):
+# every leg's log and verb trace, scanned for its script's type_secret
+# arguments before the leg may pass.
+secure_clean() { # <leg> <the leg's command...>
+    local leg="$1"
+    shift
+    python3 /work/tools/linux/secure-scan.py "$LEGS_DIR/$leg.log" \
+        "$LEGS_DIR/$leg.vtrace" -- "$@"
+}
+
 run() {
     local proto="$1" name="$2"
     shift 2
@@ -457,12 +467,15 @@ run() {
         kaya_exclusive_hold_begin linux "$name-$proto"
         (
             local t0=$SECONDS
+            local kaya_verdict=FAIL
             if run_one "$proto" "$name" "$@" >"$LEGS_DIR/$name-$proto.log" 2>&1 \
                 && gtk_layout_clean "$LEGS_DIR/$name-$proto.log" >>"$LEGS_DIR/$name-$proto.log"; then
-                echo PASS >"$LEGS_DIR/$name-$proto.verdict"
-            else
-                echo FAIL >"$LEGS_DIR/$name-$proto.verdict"
+                kaya_verdict=PASS
             fi
+            if ! secure_clean "$name-$proto" "$@" >>"$LEGS_DIR/$name-$proto.log"; then
+                kaya_verdict=FAIL
+            fi
+            echo "$kaya_verdict" >"$LEGS_DIR/$name-$proto.verdict"
             echo $((SECONDS - t0)) >"$LEGS_DIR/$name-$proto.secs"
         )
         leg_names+=("$name-$proto")
@@ -474,26 +487,34 @@ run() {
         echo "== $name ($proto) =="
         local t0=$SECONDS
         local serial_verdict=PASS
-        if run_one "$proto" "$name" "$@"; then
+        run_one "$proto" "$name" "$@" 2>&1 | tee "$LEGS_DIR/$name-$proto.log"
+        local serial_rc=${PIPESTATUS[0]}
+        if ! secure_clean "$name-$proto" "$@"; then
+            serial_rc=1
+        fi
+        if [ "$serial_rc" -eq 0 ]; then
             echo "$name ($proto): PASS ($((SECONDS - t0))s)"
         else
             serial_verdict=FAIL
             echo "$name ($proto): FAIL ($((SECONDS - t0))s)"
             status=1
         fi
-        # SERIAL LEGS JOURNAL TOO: this path keeps no log file, so a
-        # bundle has nothing to carry, but the record still rides.
+        # SERIAL LEGS JOURNAL TOO: the bundle carries no log on this path,
+        # but the record still rides.
         flightrec_leg linux "$name-$proto" "$serial_verdict" "$((SECONDS - t0))" "" ""
         return
     fi
     (
         local t0=$SECONDS
+        local kaya_verdict=FAIL
         if run_one "$proto" "$name" "$@" >"$LEGS_DIR/$name-$proto.log" 2>&1 \
             && gtk_layout_clean "$LEGS_DIR/$name-$proto.log" >>"$LEGS_DIR/$name-$proto.log"; then
-            echo PASS >"$LEGS_DIR/$name-$proto.verdict"
-        else
-            echo FAIL >"$LEGS_DIR/$name-$proto.verdict"
+            kaya_verdict=PASS
         fi
+        if ! secure_clean "$name-$proto" "$@" >>"$LEGS_DIR/$name-$proto.log"; then
+            kaya_verdict=FAIL
+        fi
+        echo "$kaya_verdict" >"$LEGS_DIR/$name-$proto.verdict"
         echo $((SECONDS - t0)) >"$LEGS_DIR/$name-$proto.secs"
     ) &
     leg_pids+=($!)
@@ -1445,6 +1466,24 @@ for proto in x11 wayland; do
         tools/linux/notify-leg.sh portal "$CARGO_TARGET_DIR/debug/examples/badge"
     # The emoji button (docs/emoji-picker-plan.md): GtkEmojiChooser.
     run "$proto" emoji-rust env KAYA_SELFTEST=emoji "$CARGO_TARGET_DIR/debug/examples/emoji"
+    # THE SECURE FIELD (docs/secure-entry-plan.md), through a11y-leg.sh: its
+    # masked read and expect_ax are the AT-SPI bus's.
+    run "$proto" secure-rust env KAYA_SELFTEST=secure \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/secure"
+    run "$proto" secure-python env KAYA_SELFTEST=secure KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/secure.py
+    run "$proto" secure-js env KAYA_SELFTEST=secure KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/secure.ts
+    run "$proto" secure-go env KAYA_SELFTEST=secure \
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" secure-csharp env KAYA_SELFTEST=secure KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" secure-ocaml env KAYA_SELFTEST=secure KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/secure.exe
+    run "$proto" secure-haskell env KAYA_SELFTEST=secure \
+        tools/linux/a11y-leg.sh "$(hs_bin secure)"
+    run "$proto" secure-java env KAYA_SELFTEST=secure KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     # THE FLOOR'S OTHER HALF, which no shared scene can assert: on a bus
     # with a plain freedesktop daemon and no registry at all, kaya posts
     # NOTHING and answers the guest `refused` (docs/tasks-s3-plan.md §0's

@@ -30,7 +30,8 @@ SWIFTUI = "swift/KayaSwiftUI.swift"
 GTK = "crates/kaya/src/gtk.rs"
 WINUI = "crates/kaya/src/winui/mod.rs"
 WIRE = "bindings/python/kaya/wire.py"
-SOURCES = (COMPOSE, SWIFTUI, GTK, WINUI, WIRE)
+GTK_SECURE = "crates/kaya/src/gtk/secure_text.rs"
+SOURCES = (COMPOSE, SWIFTUI, GTK, WINUI, WIRE, GTK_SECURE)
 
 
 def load(over=None):
@@ -467,6 +468,9 @@ def census(files):
     bad += composers(read(swiftui), read(compose), read(gtk), read(winui))
     bad += swipes(read(compose), read(winui))
     bad += compose_slider_names(read(compose))
+    bad += secure_identity(read(gtk), read(winui))
+    bad += gtk_secure_text(read(gtk), read(GTK_SECURE))
+    bad += secure_identity_interpreters(read(swiftui), read(compose))
     return bad
 
 
@@ -654,6 +658,123 @@ def growing_textareas(swiftui_text, compose_text, gtk_text, winui_text):
         for needle in needles:
             if needle not in text:
                 bad.append(f"{path}: a growing textarea lost {needle!r}")
+    return bad
+
+
+# THE SECURE FIELD'S PLATFORM IDENTITY (docs/secure-entry-plan.md P3, P4, P5):
+# no scene can see a reveal affordance, a cut or copy the kaya menu enables,
+# or an identity the shared verdict `field` folds away. GTK's PasswordEntry
+# with its peek icon off and its context menu's "Show Text" taken out with
+# its action, published on the bus as password text; WinUI's PasswordBox with
+# its reveal button Hidden and the masked read refusing a peer that is not a
+# password; neither backend's clipboard enablement counting the kind.
+def secure_identity(gtk_text, winui_text):
+    bad = []
+    for path, text, needles in (
+        (GTK, gtk_text, ("let field = secure_text::password_entry();",
+                         "field.set_show_peek_icon(false);",
+                         "text.set_extra_menu(None::<&gtk4::gio::MenuModel>);",
+                         'text.action_set_enabled("misc.toggle-visibility", false);',
+                         "if w.is::<gtk4::PasswordEntry>() {\n"
+                         "        return Some(atspi::Role::PasswordText);")),
+        (WINUI, winui_text, ("let field = PasswordBox::new()?;",
+                             "field.SetPasswordRevealMode(PasswordRevealMode::Hidden)?;",
+                             "if !peer.IsPassword()? {")),
+    ):
+        for needle in needles:
+            if needle not in text:
+                bad.append(f"{path}: the secure field lost {needle!r}")
+    clip = re.search(r"let clip_editable =\s*matches!\(kind, ([^)]*)\);", gtk_text)
+    if not clip or "SecureField" in clip.group(1):
+        bad.append(f"{GTK}: cut and copy's enablement no longer leaves the secure field out "
+                   f"(clip_editable) — Edit>Copy would be enabled on a password (P4)")
+    focused = re.search(r"fn focused_editable_id\(core: &CoreState\) -> Option<u64> \{(.*?)\n\}",
+                        winui_text, re.S)
+    if not focused or "secure" in focused.group(1):
+        bad.append(f"{WINUI}: focused_editable_id names the secure field — cut and copy's "
+                   f"enablement would count a password (P4)")
+    return bad
+
+
+# GTK's AT-SPI TEXT IS THE DISPLAY TEXT ON EVERY GTK (docs/traps.md, GTK 4.18's
+# password entry): 4.18's editable handler answers the real password, and
+# GTK consults an implementation of GtkAccessibleText before it, so the
+# secure field is kaya's GtkPasswordEntry subtype implementing it by its own
+# GtkText's, which reads the display text. No GtkPasswordEntry is made any
+# other way, and every vfunc 4.18 declares is forwarded.
+GTK_TEXT_VFUNCS = ("get_contents", "get_contents_at", "get_caret_position", "get_selection",
+                   "get_attributes", "get_default_attributes", "get_extents", "get_offset")
+
+
+def gtk_secure_text(gtk_text, secure_text):
+    bad = []
+    made = r"PasswordEntry::(new|builder)\(|gtk_password_entry_new\("
+    if re.search(made, gtk_text + secure_text):
+        bad.append(f"{GTK}: a plain GtkPasswordEntry is made, whose AT-SPI text is the real "
+                   f"password on GTK 4.18 (docs/traps.md)")
+    for needle in ("g_type_add_interface_static(ty, ffi::gtk_accessible_text_get_type(), &info);",
+                   "let text = ffi::gtk_editable_get_delegate(this as *mut ffi::GtkEditable);",
+                   "ffi::gtk_text_get_type(),",
+                   "forward_updates(&entry);"):
+        if needle not in secure_text:
+            bad.append(f"{GTK_SECURE}: the masked entry lost {needle!r}")
+    for vfunc in GTK_TEXT_VFUNCS:
+        if f"(*iface).{vfunc} = Some({vfunc});" not in secure_text \
+                or f"(*i).{vfunc}.map(" not in secure_text:
+            bad.append(f"{GTK_SECURE}: {vfunc} is not forwarded to the entry's GtkText, so GTK "
+                       f"answers it from its editable handler")
+    return bad
+
+
+# AND ON THE TWO INTERPRETERS: SwiftUI's SecureField and Compose's
+# BasicSecureTextField (the password() semantics and the drawn mask), Compose's
+# masked read refusing a node that is no password, and neither file's cut and
+# copy enablement counting the kind (docs/secure-entry-plan.md P4, P5).
+# Compose's node info carries the real text unless kaya masks it, and the legs
+# see that only while the read stays on the node info (docs/traps.md, the
+# Compose secure field's accessibility text): the mask in the modifier the
+# field is handed, the head of BasicTextField's chain, whose EditableText is
+# applied after the decorator's, and the read on the node info's text.
+def secure_identity_interpreters(swiftui_text, compose_text):
+    bad = []
+    swift_view = re.search(r"struct KayaSecureField: View \{(.*?)\n\}", swiftui_text, re.S)
+    if not swift_view or "SecureField(" not in swift_view.group(1) \
+            or re.search(r"\bTextField\(", swift_view.group(1)):
+        bad.append(f"{SWIFTUI}: KayaSecureField no longer draws the platform's SecureField — "
+                   f"the field would show its text and publish no secure subrole (P5)")
+    for block in re.findall(r'case "cut", "copy":\n\s*guard let id = kayaScene\.focusedId '
+                            r'else \{ return false \}\n(.*?)\n\s*case "paste":',
+                            swiftui_text, re.S):
+        if "secureFields" in block:
+            bad.append(f"{SWIFTUI}: kayaRoleEnabled's cut and copy count the secure field — "
+                       f"Edit>Copy would be enabled on a password (P4)")
+    compose_view = re.search(r"\nprivate fun KayaSecureField\((.*?)\n\}", compose_text, re.S)
+    for needle in ("BasicSecureTextField(", "TextObfuscationMode.RevealLastTyped",
+                   "keyboardType = KeyboardType.Password"):
+        if not compose_view or needle not in compose_view.group(1):
+            bad.append(f"{COMPOSE}: KayaSecureField lost {needle!r} (P3, P5, P7)")
+    if compose_view and re.search(r"\bBasicTextField\(", compose_view.group(1)):
+        bad.append(f"{COMPOSE}: KayaSecureField draws a plain BasicTextField (P5)")
+    mask = ('modifier = Modifier\n            .semantics { editableText = '
+            'AnnotatedString("\\u2022".repeat(node.textState.text.length)) }\n'
+            '            .then(a11y)')
+    if not compose_view or mask not in compose_view.group(1):
+        bad.append(f"{COMPOSE}: KayaSecureField no longer masks its EditableText at the head of "
+                   f"its modifier, so the node info hands an accessibility client the real "
+                   f"text (docs/traps.md)")
+    if compose_view and "clearAndSetSemantics" in compose_view.group(1):
+        bad.append(f"{COMPOSE}: KayaSecureField clears its semantics, which drops password() (P5)")
+    read = re.search(r"private fun kayaMaskedRead\((.*?)\n    \}", compose_text, re.S)
+    if not read or "if (!info.isPassword) {" not in read.group(1):
+        bad.append(f"{COMPOSE}: the masked read no longer refuses a node published without "
+                   f"isPassword (P5)")
+    if not read or 'kayaMaskCount(info.text?.toString() ?: "")' not in read.group(1) \
+            or "kayaTextLayouts" in read.group(1):
+        bad.append(f"{COMPOSE}: the masked read no longer counts the node info's text, the "
+                   f"observable every other backend reads (P6)")
+    role = re.search(r'"cut", "copy" -> \{(.*?)\n            \}', compose_text, re.S)
+    if not role or "secureFields" in role.group(1):
+        bad.append(f"{COMPOSE}: kayaRoleEnabled's cut and copy count the secure field (P4)")
     return bad
 
 
@@ -855,7 +976,7 @@ def drag_waits(winui_text):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 98
+DECLARED = 119
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -984,6 +1105,77 @@ for label, pattern, repl in (
 ):
     doctored = g.doctor(label, real[COMPOSE], pattern, repl, want=1)
     findings = census(load({COMPOSE: doctored}))
+    if not findings:
+        raise SystemExit(f"check-universal-props: self-test failed: {label} still passed")
+    print(f"check-universal-props: {label}: {findings[0]}")
+    RAN += 1
+
+# THE SECURE FIELD's twelve: each identity link cut from a copy.
+for label, path, pattern, repl in (
+    ("GTK's secure field built as a plain entry", GTK,
+     r"let field = secure_text::password_entry\(\);", "let field = gtk4::Entry::new();"),
+    ("GTK's secure field built as GTK's own password entry (the 4.18 leak)", GTK,
+     r"let field = secure_text::password_entry\(\);", "let field = gtk4::PasswordEntry::new();"),
+    ("GTK's masked entry implementing no GtkAccessibleText", GTK_SECURE,
+     r"\n\s*gobject_ffi::g_type_add_interface_static\(ty, ffi::gtk_accessible_text_get_type\(\), "
+     r"&info\);", ""),
+    ("GTK's masked entry leaving get_contents to the editable handler", GTK_SECURE,
+     r"\n\s*\(\*iface\)\.get_contents = Some\(get_contents\);", ""),
+    ("GTK's masked entry answering get_contents_at itself", GTK_SECURE,
+     r"\(\*i\)\.get_contents_at\.map\(", "None::<fn()>.map("),
+    ("GTK's peek icon left to its default", GTK,
+     r"\n\s*field\.set_show_peek_icon\(false\);", ""),
+    ("GTK's Show Text menu item kept", GTK,
+     r"\n\s*text\.set_extra_menu\(None::<&gtk4::gio::MenuModel>\);", ""),
+    ("GTK's toggle-visibility action kept", GTK,
+     r'\n\s*text\.action_set_enabled\("misc\.toggle-visibility", false\);', ""),
+    ("GTK's password entry counted as a plain text node", GTK,
+     r"return Some\(atspi::Role::PasswordText\);", "return Some(atspi::Role::Text);"),
+    ("GTK's clipboard enablement counting the secure field", GTK,
+     r"matches!\(kind, WidgetKind::Entry \| WidgetKind::Textarea \| WidgetKind::Search\)",
+     "matches!(kind, WidgetKind::Entry | WidgetKind::Textarea | WidgetKind::Search "
+     "| WidgetKind::SecureField)"),
+    ("WinUI's reveal button left in place", WINUI,
+     r"\n\s*field\.SetPasswordRevealMode\(PasswordRevealMode::Hidden\)\?;", ""),
+    ("WinUI's masked read trusting a peer that is no password", WINUI,
+     r"if !peer\.IsPassword\(\)\? \{", "if false {"),
+):
+    doctored = g.doctor(label, real[path], pattern, repl, want=1)
+    findings = census(load({path: doctored}))
+    if not findings:
+        raise SystemExit(f"check-universal-props: self-test failed: {label} still passed")
+    print(f"check-universal-props: {label}: {findings[0]}")
+    RAN += 1
+
+# THE INTERPRETERS' SECURE FIELD nine: each identity link cut from a copy.
+for label, path, pattern, repl, *want in (
+    ("SwiftUI's secure field drawn as a TextField", SWIFTUI,
+     r"(struct KayaSecureField: View \{.*?)\bSecureField\(", r"\1TextField("),
+    ("SwiftUI's cut and copy counting the secure field", SWIFTUI,
+     r"(case \"cut\", \"copy\":\n\s*guard let id = kayaScene\.focusedId else "
+     r"\{ return false \}\n\s*return )", r"\1kayaScene.secureFields.contains(where: "
+     r"{ $0.id == id }) || ", 2),
+    ("Compose's secure field drawn as a BasicTextField", COMPOSE,
+     r"(\nprivate fun KayaSecureField\(.*?)BasicSecureTextField\(", r"\1BasicTextField("),
+    ("Compose's last-character flash replaced", COMPOSE,
+     r"TextObfuscationMode\.RevealLastTyped", "TextObfuscationMode.Visible"),
+    ("Compose's masked read trusting a node that is no password", COMPOSE,
+     r"if \(!info\.isPassword\) \{", "if (false) {"),
+    ("Compose's secure field handing the node info its real text", COMPOSE,
+     r"            \.semantics \{ editableText = AnnotatedString\(\"\\u2022\"\.repeat\("
+     r"node\.textState\.text\.length\)\) \}\n", ""),
+    ("Compose's override carrying the real text", COMPOSE,
+     r'AnnotatedString\("\\u2022"\.repeat\(node\.textState\.text\.length\)\)',
+     "AnnotatedString(node.textState.text.toString())"),
+    ("Compose's masked read counting the drawn layout (the divergent observable)", COMPOSE,
+     r'kayaMaskCount\(info\.text\?\.toString\(\) \?: ""\)',
+     r"kayaMaskCount(kayaTextLayouts[field.id]?.invoke()?.layoutInput?.text?.text ?: \"\")"),
+    ("Compose's cut and copy counting the secure field", COMPOSE,
+     r'("cut", "copy" -> \{\n\s*val id = KayaSceneModel\.focusedId \?: return false\n'
+     r'\s*return )', r"\1KayaSceneModel.secureFields.any { it.id == id } || "),
+):
+    doctored = g.doctor(label, real[path], pattern, repl, want=(want or [1])[0], flags=re.S)
+    findings = census(load({path: doctored}))
     if not findings:
         raise SystemExit(f"check-universal-props: self-test failed: {label} still passed")
     print(f"check-universal-props: {label}: {findings[0]}")

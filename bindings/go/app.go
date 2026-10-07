@@ -2077,6 +2077,17 @@ func (tx *Tx) Search(onChange func(*Tx, string)) Widget {
 	return w
 }
 
+// SecureField creates a secure field with its change handler (nil for
+// none): Entry's contract with the platform masking what is typed
+// (docs/secure-entry-plan.md). The handlers receive the real text.
+func (tx *Tx) SecureField(onChange func(*Tx, string)) Widget {
+	w := tx.Widget(KindSecureField)
+	if onChange != nil {
+		w.OnChange(onChange)
+	}
+	return w
+}
+
 // Progress is a progress bar: display-only. value is the determinate
 // fraction (0..=1, domain-checked at the root); chain .Indeterminate()
 // for the platform's activity mode.
@@ -5410,6 +5421,22 @@ func (t *Tpl) SearchBound[S interface {
 	Signal[string] | Field[string]
 }](src S) Node {
 	n := t.Widget(KindSearch)
+	t.applyText(n, src)
+	return n
+}
+
+// SecureField creates an empty secure field in the blueprint: the
+// template twin of Tx.SecureField (docs/secure-entry-plan.md P9).
+func (t *Tpl) SecureField() Node {
+	return t.Widget(KindSecureField)
+}
+
+// SecureFieldBound seeds each stamped copy's secure field from a varying
+// source, Tpl.EntryBound's reasoning one kind over.
+func (t *Tpl) SecureFieldBound[S interface {
+	Signal[string] | Field[string]
+}](src S) Node {
+	n := t.Widget(KindSecureField)
 	t.applyText(n, src)
 	return n
 }

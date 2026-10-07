@@ -40,6 +40,9 @@ public final class Main {
             case "search":
                 app = Search::app;
                 break;
+            case "secure":
+                app = Secure::app;
+                break;
             case "table":
                 app = Table::app;
                 break;

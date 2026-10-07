@@ -43,6 +43,7 @@ use bindings::Microsoft::UI::Xaml::Controls::{
     MenuBarItem, MenuFlyout,
     MenuFlyoutItem, MenuFlyoutItemBase, MenuFlyoutSeparator, MenuFlyoutSubItem, NavigationView,
     NavigationViewItem, NavigationViewPaneDisplayMode, NumberBox, NumberBoxSpinButtonPlacementMode,
+    PasswordBox, PasswordRevealMode,
     NumberBoxValidationMode, NumberBoxValueChangedEventArgs, ProgressBar, RadioMenuFlyoutItem,
     RichEditBox, RichEditClipboardFormat, RowDefinition,
     RadioButtons, ScrollBarVisibility, ScrollMode, ScrollViewer, SelectionChangedEventHandler,
@@ -180,6 +181,9 @@ enum NativeWidget {
     /// The number field (docs/number-field-plan.md §6): a NumberBox whose
     /// NumberFormatter is kaya's own, so its text is the door's both ways.
     NumberField(NumberBox),
+    /// The secure field (docs/secure-entry-plan.md §3): a PasswordBox with its
+    /// reveal button removed (P3).
+    Secure(PasswordBox),
     /// The colour picker (docs/color-picker-plan.md §6): a Button faced with
     /// a swatch, whose Flyout holds the inline ColorPicker.
     ColorPicker(ColorSwatch),
@@ -232,6 +236,7 @@ impl NativeWidget {
             // what carries the identity — see `identity_element`.
             NativeWidget::Search { host, .. } => host.cast(),
             NativeWidget::NumberField(field) => field.cast(),
+            NativeWidget::Secure(field) => field.cast(),
             NativeWidget::ColorPicker(swatch) => swatch.button.cast(),
             NativeWidget::Range(pair) => pair.root.cast(),
             NativeWidget::Video { host, .. } => host.cast(),
@@ -273,6 +278,7 @@ impl NativeWidget {
             // The search field IS a TextBox, so it takes the entry's whole
             // text contract with no third variant (docs/search-plan.md S2).
             NativeWidget::Search { field, .. } => Some(Editable::Entry(field.clone())),
+            NativeWidget::Secure(field) => Some(Editable::Secure(field.clone())),
             _ => None,
         }
     }
@@ -298,6 +304,8 @@ fn selection_range(
 enum Editable {
     Entry(TextBox),
     Textarea(RichEditBox),
+    /// docs/secure-entry-plan.md: no native undo, and copy and cut refused (P2, P4).
+    Secure(PasswordBox),
 }
 
 impl Editable {
@@ -320,6 +328,7 @@ impl Editable {
                     .GetText(TextGetOptions::AdjustCrlf | TextGetOptions::NoHidden, &mut out)?;
                 Ok(out.to_string())
             }
+            Editable::Secure(field) => Ok(field.Password()?.to_string()),
         }
     }
 
@@ -334,6 +343,7 @@ impl Editable {
             Editable::Textarea(field) => field
                 .TextDocument()?
                 .SetText(TextSetOptions::None, &HSTRING::from(text)),
+            Editable::Secure(field) => field.SetPassword(&HSTRING::from(text)),
         }
     }
 
@@ -341,6 +351,7 @@ impl Editable {
         match self {
             Editable::Entry(field) => field.FocusState(),
             Editable::Textarea(field) => field.FocusState(),
+            Editable::Secure(field) => field.FocusState(),
         }
     }
 
@@ -348,6 +359,7 @@ impl Editable {
         match self {
             Editable::Entry(field) => field.CanUndo(),
             Editable::Textarea(field) => field.TextDocument()?.CanUndo(),
+            Editable::Secure(_) => Ok(false),
         }
     }
 
@@ -355,6 +367,7 @@ impl Editable {
         match self {
             Editable::Entry(field) => field.CanRedo(),
             Editable::Textarea(field) => field.TextDocument()?.CanRedo(),
+            Editable::Secure(_) => Ok(false),
         }
     }
 
@@ -362,6 +375,7 @@ impl Editable {
         match self {
             Editable::Entry(field) => field.Undo(),
             Editable::Textarea(field) => field.TextDocument()?.Undo(),
+            Editable::Secure(_) => Ok(()),
         }
     }
 
@@ -369,6 +383,7 @@ impl Editable {
         match self {
             Editable::Entry(field) => field.Redo(),
             Editable::Textarea(field) => field.TextDocument()?.Redo(),
+            Editable::Secure(_) => Ok(()),
         }
     }
 
@@ -376,6 +391,7 @@ impl Editable {
         match self {
             Editable::Entry(field) => field.ClearUndoRedoHistory(),
             Editable::Textarea(field) => field.TextDocument()?.ClearUndoRedoHistory(),
+            Editable::Secure(_) => Ok(()),
         }
     }
 
@@ -383,6 +399,7 @@ impl Editable {
         match self {
             Editable::Entry(field) => field.CutSelectionToClipboard(),
             Editable::Textarea(field) => selection_range(&field.TextDocument()?)?.Cut(),
+            Editable::Secure(_) => Ok(()),
         }
     }
 
@@ -390,6 +407,7 @@ impl Editable {
         match self {
             Editable::Entry(field) => field.CopySelectionToClipboard(),
             Editable::Textarea(field) => selection_range(&field.TextDocument()?)?.Copy(),
+            Editable::Secure(_) => Ok(()),
         }
     }
 
@@ -408,6 +426,7 @@ impl Editable {
                 };
                 selection_range(&field.TextDocument()?)?.SetText(&HSTRING::from(text))
             }
+            Editable::Secure(field) => field.PasteFromClipboard(),
         }
     }
 
@@ -419,6 +438,7 @@ impl Editable {
                 field.SetSelectionLength(0)
             }
             Editable::Textarea(field) => field.TextDocument()?.Selection()?.SetRange(at, at),
+            Editable::Secure(_) => Ok(()),
         }
     }
 }
@@ -546,6 +566,8 @@ struct CoreState {
     /// against (docs/number-field-plan.md §6).
     number_fields: Vec<NumberBox>,
     number_field_ids: Vec<u64>,
+    secure_fields: Vec<PasswordBox>,
+    secure_ids: Vec<u64>,
     number_cells: HashMap<u64, std::sync::Arc<NumberCell>>,
     /// The colour pickers' buttons in creation order, their ids, and each
     /// one's parts and cell by id.
@@ -3067,6 +3089,7 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
                         | NativeWidget::Textarea(_)
                         | NativeWidget::Search { .. }
                         | NativeWidget::NumberField(_)
+                        | NativeWidget::Secure(_)
                 ));
         // An auto grid is width-driven, so it takes its column's width
         // (docs/layout-knobs-plan.md §3).
@@ -8830,6 +8853,7 @@ fn submit_on_enter(
     let element: UIElement = match &field {
         Editable::Entry(f) => f.cast()?,
         Editable::Textarea(f) => f.cast()?,
+        Editable::Secure(f) => f.cast()?,
     };
     element.PreviewKeyDown(&KeyEventHandler::new(move |_, args| {
         let Some(args) = args.as_ref() else { return Ok(()) };
@@ -14635,7 +14659,42 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.rows.push(grid.clone());
                     NativeWidget::Row(grid)
                 }
-                WidgetKind::SecureField => crate::depth_stub("secure"),
+                WidgetKind::SecureField => {
+                    // docs/secure-entry-plan.md §3: no reveal button (P3), and
+                    // the text goes to the app alone, never to the ledger or a
+                    // banked copy (P2). A programmatic write's raise is
+                    // swallowed by the entry's counter (see entry_swallow).
+                    let field = PasswordBox::new()?;
+                    field.SetPasswordRevealMode(PasswordRevealMode::Hidden)?;
+                    let sink = core.occurrences.clone();
+                    let tag = tag.expect("secure fields carry a tag");
+                    let handler_tag = tag.clone();
+                    let field_for_handler = field.clone();
+                    let swallow =
+                        std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+                    let handler_swallow = swallow.clone();
+                    field.PasswordChanged(&RoutedEventHandler::new(move |_, _| {
+                        if handler_swallow
+                            .fetch_update(
+                                std::sync::atomic::Ordering::Relaxed,
+                                std::sync::atomic::Ordering::Relaxed,
+                                |n| n.checked_sub(1),
+                            )
+                            .is_ok()
+                        {
+                            return Ok(());
+                        }
+                        let text = lf(field_for_handler.Password()?.to_string());
+                        sink.send_text_tag(&handler_tag, &text);
+                        Ok(())
+                    }))?;
+                    submit_on_enter(Editable::Secure(field.clone()), tag.clone(), core.occurrences.clone(), None)?;
+                    core.secure_fields.push(field.clone());
+                    core.secure_ids.push(id.0);
+                    core.entry_swallow.insert(id.0, swallow);
+                    core.entry_tags.insert(id.0, tag);
+                    NativeWidget::Secure(field)
+                }
                 // THE SEARCH FIELD (docs/search-plan.md §3, the WinUI row): a
                 // plain TextBox under a one-cell Grid carrying the Fluent Find
                 // glyph in the leading slot. The clear affordance is the
@@ -15447,6 +15506,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             drop_pair(&mut core.canvas_ids, &mut core.canvases, id.0);
             drop_pair(&mut core.search_ids, &mut core.searches, id.0);
             drop_pair(&mut core.number_field_ids, &mut core.number_fields, id.0);
+            drop_pair(&mut core.secure_ids, &mut core.secure_fields, id.0);
             core.number_cells.remove(&id.0);
             drop_pair(&mut core.color_picker_ids, &mut core.color_pickers, id.0);
             core.color_swatches.remove(&id.0);
@@ -16518,6 +16578,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                             .SetAt(*row, &PropertyValue::CreateString(&HSTRING::from(&s))?)?;
                     }
                 }
+                (NativeWidget::Secure(field), Prop::Text, Value::Str(s)) => {
+                    if field.Password()?.to_string() != s {
+                        if let Some(swallow) = core.entry_swallow.get(&id.0) {
+                            swallow.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        field.SetPassword(&HSTRING::from(&s))?;
+                    }
+                }
                 (NativeWidget::Entry(_), Prop::Text, Value::Str(s))
                 | (NativeWidget::Textarea(_), Prop::Text, Value::Str(s))
                 | (NativeWidget::Search { .. }, Prop::Text, Value::Str(s)) => {
@@ -16691,6 +16759,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     field.SetPlaceholderText(&HSTRING::from(&s))?;
                 }
                 (NativeWidget::Search { field, .. }, Prop::Placeholder, Value::Str(s)) => {
+                    field.SetPlaceholderText(&HSTRING::from(&s))?;
+                }
+                (NativeWidget::Secure(field), Prop::Placeholder, Value::Str(s)) => {
                     field.SetPlaceholderText(&HSTRING::from(&s))?;
                 }
                 (NativeWidget::Checkbox { check, switch, .. }, Prop::Checked, Value::Bool(b)) => {
@@ -19567,6 +19638,8 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             search_ids: Vec::new(),
             number_fields: Vec::new(),
             number_field_ids: Vec::new(),
+            secure_fields: Vec::new(),
+            secure_ids: Vec::new(),
             number_cells: HashMap::new(),
             color_pickers: Vec::new(),
             color_picker_ids: Vec::new(),
@@ -20578,7 +20651,7 @@ fn registry_widget_at(core: &CoreState, kind: crate::harness::TargetKind, i: usi
         K::Search => core.search_ids.get(i).copied(),
         K::Range => core.range_ids.get(i).copied(),
         K::Video => core.media.video_ids.get(i).copied(),
-        K::SecureField => crate::depth_stub("secure"),
+        K::SecureField => core.secure_ids.get(i).copied(),
         K::ColorPicker => core.color_picker_ids.get(i).copied(),
         K::NumberField => core.number_field_ids.get(i).copied(),
         K::Canvas => core.canvas_ids.get(i).copied(),
@@ -20875,7 +20948,7 @@ fn target_element(
         K::Search => nth!(core.searches),
         K::Range => nth!(core.ranges),
         K::Video => nth!(media::elements(core)),
-        K::SecureField => crate::depth_stub("secure"),
+        K::SecureField => nth!(core.secure_fields),
         K::ColorPicker => nth!(core.color_pickers),
         K::NumberField => nth!(core.number_fields),
         K::DatePicker => nth!(core.date_pickers),
@@ -20999,7 +21072,7 @@ fn registry_ids(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<u64> 
         K::Search => core.search_ids.clone(),
         K::Range => core.range_ids.clone(),
         K::Video => core.media.video_ids.clone(),
-        K::SecureField => crate::depth_stub("secure"),
+        K::SecureField => core.secure_ids.clone(),
         K::ColorPicker => core.color_picker_ids.clone(),
         K::NumberField => core.number_field_ids.clone(),
         K::Canvas => core.canvas_ids.clone(),
@@ -22144,13 +22217,42 @@ impl crate::harness::Stage for WinUiStage {
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
-    fn masked_len(&self, _: crate::harness::Target) -> Result<usize, crate::harness::MaskRead> {
-        crate::depth_stub("secure")
+    /// docs/secure-entry-plan.md §3: the peer must say IsPassword, and a value
+    /// its Value pattern publishes is held to the mask rule.
+    fn masked_len(&self, t: crate::harness::Target) -> Result<usize, crate::harness::MaskRead> {
+        use crate::harness::MaskRead;
+        Self::on_ui_read(move |core| {
+            use bindings::Microsoft::UI::Xaml::Automation::Peers::FrameworkElementAutomationPeer;
+            use bindings::Microsoft::UI::Xaml::Automation::Provider::IValueProvider;
+            let Some(i) = crate::harness::try_resolve(t.index, core.secure_fields.len()) else {
+                return Ok(Err(MaskRead::NoSuchTarget));
+            };
+            let field = &core.secure_fields[i];
+            let fe: FrameworkElement = field.cast()?;
+            let peer = FrameworkElementAutomationPeer::CreatePeerForElement(&fe)?;
+            if !peer.IsPassword()? {
+                return Ok(Err(MaskRead::Unreadable("UIA does not mark the box a password")));
+            }
+            if let Some(Ok(shown)) = peer.cast::<IValueProvider>().ok().map(|p| p.Value()) {
+                if !shown.is_empty() {
+                    return Ok(crate::harness::mask_count(&shown.to_string()));
+                }
+            }
+            Ok(Ok(field.Password()?.to_string().chars().count()))
+        })
+        .unwrap_or(Err(MaskRead::Unreadable("the accessibility read failed")))
     }
 
-    /// No secure field exists on this backend before the breadth (docs/secure-entry-plan.md §6).
     fn secure_focused(&self) -> bool {
-        false
+        Self::on_ui_read(|core| {
+            for field in &core.secure_fields {
+                if field.FocusState()? != FocusState::Unfocused {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        })
+        .unwrap_or(false)
     }
 
     fn placeholder_text(&self, t: crate::harness::Target) -> String {
@@ -22176,6 +22278,13 @@ impl crate::harness::Stage for WinUiStage {
                         return Ok("<no such target>".to_owned());
                     };
                     return Ok(core.textareas[i].PlaceholderText()?.to_string());
+                }
+                crate::harness::TargetKind::SecureField => {
+                    let Some(i) = crate::harness::try_resolve(t.index, core.secure_fields.len())
+                    else {
+                        return Ok("<no such target>".to_owned());
+                    };
+                    return Ok(core.secure_fields[i].PlaceholderText()?.to_string());
                 }
                 other => return Ok(format!("<{other:?} carries no placeholder>")),
             };
@@ -22721,6 +22830,10 @@ impl crate::harness::Stage for WinUiStage {
                     let i = crate::harness::resolve(t.index, core.searches.len());
                     focus_told(core, "search", i, &core.searches[i])?;
                 }
+                crate::harness::TargetKind::SecureField => {
+                    let i = crate::harness::resolve(t.index, core.secure_fields.len());
+                    focus_told(core, "secure_field", i, &core.secure_fields[i])?;
+                }
                 // THE BOX'S TEXT BOX, where a user's click lands; before the
                 // template is applied, the box itself, which forwards it.
                 crate::harness::TargetKind::NumberField => {
@@ -23155,9 +23268,23 @@ impl crate::harness::Stage for WinUiStage {
         } else {
             None
         };
+        // docs/secure-entry-plan.md P6: the box's text is compared here and
+        // never printed; nothing below names it.
+        let secure_before = if before.is_none() && number_before.is_none() {
+            Self::on_ui(|core| {
+                for (i, field) in core.secure_fields.iter().enumerate() {
+                    if field.FocusState()? != FocusState::Unfocused {
+                        return Ok(Some((i, field.Password()?.to_string())));
+                    }
+                }
+                Ok(None)
+            })
+        } else {
+            None
+        };
         // Return is a COMMAND, not a character: VK_RETURN's key pair, so the
         // control's key doors see it (crates/kaya/src/harness.rs check_typing).
-        if before.is_none() && number_before.is_none() {
+        if before.is_none() && number_before.is_none() && secure_before.is_none() {
             crate::vtrace::note("type", format_args!("no editable or number field holds XAML focus"));
         }
         let keys: Vec<Key> = text
@@ -23165,6 +23292,29 @@ impl crate::harness::Stage for WinUiStage {
             .map(|ch| if ch == '\n' { Key::Vk(0x0d) } else { Key::Char(ch) })
             .collect();
         Self::post_keys("type", &keys);
+        if let Some((i, was)) = secure_before {
+            if text.contains('\n') {
+                return;
+            }
+            let want = format!("{was}{text}");
+            let landed = move || {
+                let want = want.clone();
+                Self::on_ui_read(move |core| Ok(core.secure_fields[i].Password()?.to_string() == want))
+                    .unwrap_or(false)
+            };
+            for _ in 0..400 {
+                if landed() {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            eprintln!(
+                "kaya: type_secret: secure_field#{i} did not show its {} typed character(s) \
+                 within 2s of injection",
+                text.chars().count()
+            );
+            return;
+        }
         // Point 4, and "processed" here means MORE THAN THE CONTROL SHOWING
         // IT: TextChanged is raised asynchronously and the action this verb
         // precedes is `menu_activate "Edit>Undo"`, whose routing asks the
@@ -23427,6 +23577,13 @@ impl crate::harness::Stage for WinUiStage {
                         return Ok(false);
                     };
                     Ok(core.searches[i].FocusState()? != FocusState::Unfocused)
+                }
+                crate::harness::TargetKind::SecureField => {
+                    let Some(i) = crate::harness::try_resolve(t.index, core.secure_fields.len())
+                    else {
+                        return Ok(false);
+                    };
+                    Ok(core.secure_fields[i].FocusState()? != FocusState::Unfocused)
                 }
                 crate::harness::TargetKind::NumberField => {
                     let Some(i) = crate::harness::try_resolve(t.index, core.number_fields.len())
@@ -24033,7 +24190,7 @@ impl crate::harness::Stage for WinUiStage {
                 K::Search => find(core, K::Search, &core.searches, &id),
                 K::Range => find(core, K::Range, &core.ranges, &id),
                 K::Video => find(core, K::Video, &media::elements(core), &id),
-                K::SecureField => crate::depth_stub("secure"),
+                K::SecureField => find(core, K::SecureField, &core.secure_fields, &id),
                 K::ColorPicker => find(core, K::ColorPicker, &core.color_pickers, &id),
                 K::NumberField => find(core, K::NumberField, &core.number_fields, &id),
                 K::Canvas => find(core, K::Canvas, &core.canvases, &id),

@@ -5183,6 +5183,7 @@ _cases = [
     ("a planted leak", {"leg log": "x Ab3dEf9 y"}, 1),
     ("a clean log", {"leg log": "type_secret <secret: 7 chars>"}, 0),
     ("a planted trace leak", {"leg log": "", "verb trace": "Ab3dEf9"}, 1),
+    ("a planted base64 leak", {"leg log": "verb `type_b64 QWIzZEVmOQ==`"}, 1),
 ]
 for _label, _transcripts, _want in _cases:
     _got = secure_scan.refusals(_plant, _transcripts)
@@ -5213,6 +5214,33 @@ _scan_cut, _n = sub_count(r"        refused = self\.secure_scan\(env, log_file, 
 print(f"check-steps: secure scan wiring self-test applied {_n} substitution(s)")
 if _n != 1 or not secure_scan_wiring(_scan_cut):
     selftest_fail("the secure scan's wiring cut was not refused")
+
+# The phone lanes decide a leg's verdict in their runners, so the scan sits
+# there: run-sim's run_swiftui_on and run-emulator's run_apk_on.
+PHONE_SCANS = (("tools/ios/run-sim.py", "def run_swiftui_on(",
+                "    refused = secure_refusals(script, name, log, out, {"),
+               ("tools/android/run-emulator.py", "def run_apk_on(",
+                "    refused = secure_refusals(serial, name, extras, dump, log, failed)"))
+
+
+def phone_scan_wiring(rel, text, owner, call):
+    start = text.find(owner)
+    body = text[start:text.find("\ndef ", start + 1)]
+    if start < 0 or call not in body or "secure_scan.refusals(" not in text:
+        return [f"{rel}'s {owner[4:-1]} no longer runs the secure scan, so a secure "
+                f"field's text could reach that lane's transcripts unread"]
+    return []
+
+
+for _rel, _owner, _call in PHONE_SCANS:
+    _text = read_rel(_rel)
+    for _line in phone_scan_wiring(_rel, _text, _owner, _call):
+        print(f"check-steps: {_line}", file=sys.stderr)
+        status = 1
+    _cut, _n = sub_count(re.escape(_call), "    refused = []", _text)
+    print(f"check-steps: secure scan wiring self-test ({_rel}) applied {_n} substitution(s)")
+    if _n != 1 or not phone_scan_wiring(_rel, _cut, _owner, _call):
+        selftest_fail(f"the secure scan's wiring cut in {_rel} was not refused")
 
 if status == 0:
     print("check-steps: OK")
