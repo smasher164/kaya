@@ -9,7 +9,7 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
-## BUILD — the secure field (docs/secure-entry-plan.md), depth on the mac (2026-10-07); the GTK, WinUI and Compose arms, the iOS legs and the other eight bindings are the breadth slice
+## ~~BUILD — the secure field (docs/secure-entry-plan.md), depth on the mac (2026-10-07); the GTK, WinUI and Compose arms, the iOS legs and the other eight bindings are the breadth slice~~ COMPLETE 2026-10-07: breadth built in c1c25d0c on all five platforms and in all nine bindings; the full matrix on c1c25d0c ran every secure and gallery leg green (37 and 39); review page NzHtTqPdSgUPsAZVVm23He. The rulings stay open in the plan.
 KEY: secure field, secure_field, KIND_SECURE_FIELD, secure.steps, type_secret, expect_masked, Secret, MaskRead, masked_len, secure_focused, is_secure_field, KayaSecret, kayaSecretOut, kayaAxMaskedRead, DEPTH STUB secure
 
 The depth slice: kind 24 with the entry's text contract (text_changed and

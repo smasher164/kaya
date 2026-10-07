@@ -163,6 +163,8 @@ need_why = 'every login screen; shipped by all four of MAUI, egui, iced and Slin
 parity_why = 'first-party in 10 of 10 full toolkits, reachable in 10'
 shape = 'prop on entry'
 kaya = 'SecureField, PasswordVisualTransformation, GtkPasswordEntry, PasswordBox. One boolean prop; the read-back verb must not print the text.'
+shipped = true
+shipped_note = '2026-10-07 (76f87836, c1c25d0c): kind 24 `secure_field`, not a prop, on five platforms and in nine bindings; tests read a count of dots, never the text; kaya masks the password GTK 4.18 and Compose handed to accessibility · <a href="https://claude.ai/artifact/NzHtTqPdSgUPsAZVVm23He">review page</a>'
 
 [[feature]]
 slug = 'splash'

@@ -1,10 +1,11 @@
-# The secure field: the design pass and the depth slice (2026-10-07)
+# The secure field: the design pass and the build (2026-10-07)
 
-Status: DEPTH BUILT 2026-10-07 on the mac (the spec, the core, the SwiftUI
-interpreter on macOS and iOS, the Rust binding in both zones, the harness,
-tools/scenes/secure.steps green for Rust). Every ruling in §2 is
-RECOMMENDED, built as recommended, awaiting the maintainer's ruling. The
-maintainer was asleep when this was written; nothing here is his word yet.
+Status: BUILT 2026-10-07 on all five platforms and in all nine bindings
+(76f87836 depth, c1c25d0c breadth; full matrix on c1c25d0c: every secure and
+gallery leg green, one unrelated media leg red once; review page
+https://claude.ai/artifact/NzHtTqPdSgUPsAZVVm23He). Every ruling in §2 is
+RECOMMENDED, built as recommended, awaiting the maintainer's ruling; so are
+the GTK 4.14 minimum and the WinUI reading (§7).
 
 The roadmap card (docs/roadmap/features.toml, `secure_entry`) asks for it:
 every login screen needs one, all four of MAUI, egui, iced and Slint ship
