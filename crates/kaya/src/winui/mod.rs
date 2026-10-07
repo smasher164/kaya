@@ -14635,6 +14635,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.rows.push(grid.clone());
                     NativeWidget::Row(grid)
                 }
+                WidgetKind::SecureField => crate::depth_stub("secure"),
                 // THE SEARCH FIELD (docs/search-plan.md §3, the WinUI row): a
                 // plain TextBox under a one-cell Grid carrying the Fluent Find
                 // glyph in the leading slot. The clear affordance is the
@@ -20577,6 +20578,7 @@ fn registry_widget_at(core: &CoreState, kind: crate::harness::TargetKind, i: usi
         K::Search => core.search_ids.get(i).copied(),
         K::Range => core.range_ids.get(i).copied(),
         K::Video => core.media.video_ids.get(i).copied(),
+        K::SecureField => crate::depth_stub("secure"),
         K::ColorPicker => core.color_picker_ids.get(i).copied(),
         K::NumberField => core.number_field_ids.get(i).copied(),
         K::Canvas => core.canvas_ids.get(i).copied(),
@@ -20873,6 +20875,7 @@ fn target_element(
         K::Search => nth!(core.searches),
         K::Range => nth!(core.ranges),
         K::Video => nth!(media::elements(core)),
+        K::SecureField => crate::depth_stub("secure"),
         K::ColorPicker => nth!(core.color_pickers),
         K::NumberField => nth!(core.number_fields),
         K::DatePicker => nth!(core.date_pickers),
@@ -20996,6 +20999,7 @@ fn registry_ids(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<u64> 
         K::Search => core.search_ids.clone(),
         K::Range => core.range_ids.clone(),
         K::Video => core.media.video_ids.clone(),
+        K::SecureField => crate::depth_stub("secure"),
         K::ColorPicker => core.color_picker_ids.clone(),
         K::NumberField => core.number_field_ids.clone(),
         K::Canvas => core.canvas_ids.clone(),
@@ -22140,6 +22144,15 @@ impl crate::harness::Stage for WinUiStage {
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
+    fn masked_len(&self, _: crate::harness::Target) -> Result<usize, crate::harness::MaskRead> {
+        crate::depth_stub("secure")
+    }
+
+    /// No secure field exists on this backend before the breadth (docs/secure-entry-plan.md §6).
+    fn secure_focused(&self) -> bool {
+        false
+    }
+
     fn placeholder_text(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
             let field: TextBox = match t.kind {
@@ -24020,6 +24033,7 @@ impl crate::harness::Stage for WinUiStage {
                 K::Search => find(core, K::Search, &core.searches, &id),
                 K::Range => find(core, K::Range, &core.ranges, &id),
                 K::Video => find(core, K::Video, &media::elements(core), &id),
+                K::SecureField => crate::depth_stub("secure"),
                 K::ColorPicker => find(core, K::ColorPicker, &core.color_pickers, &id),
                 K::NumberField => find(core, K::NumberField, &core.number_fields, &id),
                 K::Canvas => find(core, K::Canvas, &core.canvases, &id),

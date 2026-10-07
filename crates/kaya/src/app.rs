@@ -3407,6 +3407,14 @@ impl<'a> Tx<'a> {
         Widget { id: w, out: (), tx: self }
     }
 
+    /// A secure field (docs/secure-entry-plan.md): the entry's contract with
+    /// the platform masking what is typed. Its text still reaches
+    /// [`Messages::on_change`] and [`Messages::on_submit`].
+    pub fn secure_field(&mut self) -> Widget<'_, 'a> {
+        let w = self.widget(WidgetKind::SecureField);
+        Widget { id: w, out: (), tx: self }
+    }
+
     /// A number field holding `value` (docs/number-field-plan.md): typed,
     /// committed on Return, focus loss or a step, each commit one
     /// [`Messages::on_commit`]. `.min()`, `.max()` and `.step()` chain.
@@ -4701,6 +4709,14 @@ impl<'b> Row<'_, 'b> {
 
     pub fn search_bound(&mut self, src: impl Into<TplSource<StrKind>>) -> TemplateNodeId {
         self.tpl().search_bound(src)
+    }
+
+    pub fn secure_field(&mut self) -> TemplateNodeId {
+        self.tpl().secure_field()
+    }
+
+    pub fn secure_field_bound(&mut self, src: impl Into<TplSource<StrKind>>) -> TemplateNodeId {
+        self.tpl().secure_field_bound(src)
     }
 
     pub fn scroll<R>(&mut self, body: impl FnOnce(&mut Tpl<'_, 'b>) -> R) -> (TemplateNodeId, R) {
@@ -8130,6 +8146,19 @@ impl<'b> Tpl<'_, 'b> {
     /// [`Self::entry_bound`]'s reasoning, one kind over.
     pub fn search_bound(&mut self, src: impl Into<TplSource<StrKind>>) -> TemplateNodeId {
         let n = self.widget(WidgetKind::Search);
+        self.apply_source(n, Prop::Text, src.into().inner);
+        n
+    }
+
+    /// A secure field per stamped copy (docs/secure-entry-plan.md).
+    pub fn secure_field(&mut self) -> TemplateNodeId {
+        self.widget(WidgetKind::SecureField)
+    }
+
+    /// A secure field seeded from any addressable source;
+    /// [`Self::entry_bound`]'s reasoning, one kind over.
+    pub fn secure_field_bound(&mut self, src: impl Into<TplSource<StrKind>>) -> TemplateNodeId {
+        let n = self.widget(WidgetKind::SecureField);
         self.apply_source(n, Prop::Text, src.into().inner);
         n
     }

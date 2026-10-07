@@ -313,6 +313,10 @@ name = "search"
 path = "../../guests/rust/search.rs"
 
 [[example]]
+name = "secure"
+path = "../../guests/rust/secure.rs"
+
+[[example]]
 name = "numberfield"
 path = "../../guests/rust/numberfield.rs"
 

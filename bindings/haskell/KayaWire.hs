@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xb28d4a0fddd60b2b
+specHash = 0x904824951724780f
 
 valueBool :: Word32
 valueBool = 1
@@ -98,6 +98,8 @@ kindRange :: Word32
 kindRange = 22
 kindVideo :: Word32
 kindVideo = 23
+kindSecureField :: Word32
+kindSecureField = 24
 drawOpMoveTo :: Word32
 drawOpMoveTo = 1
 drawOpLineTo :: Word32

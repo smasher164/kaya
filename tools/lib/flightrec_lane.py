@@ -27,6 +27,8 @@ import threading
 import re
 import time
 
+import secure_scan
+
 SECTION_CAP = int(os.environ.get("KAYA_FLIGHTREC_SECTION_CAP", "2097152"))
 BUNDLE_CAP = int(os.environ.get("KAYA_FLIGHTREC_BUNDLE_CAP", "33554432"))
 
@@ -1399,7 +1401,25 @@ class MacRecorder(LaneRecorder):
                 log_file.write(line)
         rc = proc.wait()
         self.sampler_stop(sampler)
+        refused = self.secure_scan(env, log_file, scratch)
+        if refused:
+            log_file.write("\n".join(refused) + "\n")
+            log_file.flush()
+            if echo:
+                echo.write("\n".join(refused) + "\n")
+                echo.flush()
+            rc = rc or 1
         return rc
+
+    def secure_scan(self, env, log_file, scratch):
+        """tools/lib/secure_scan.py over this leg's own transcripts."""
+        log_file.flush()
+        transcripts = {"leg log": pathlib.Path(log_file.name).read_text(
+            encoding="utf-8", errors="replace")}
+        trace = pathlib.Path(scratch) / "verb-trace.txt"
+        if trace.is_file():
+            transcripts["verb trace"] = trace.read_text(encoding="utf-8", errors="replace")
+        return secure_scan.refusals(env.get("KAYA_SELFTEST_SCRIPT", ""), transcripts)
 
     def _text_section(self, bundle, name, text):
         dest = bundle / f"{name}.txt"

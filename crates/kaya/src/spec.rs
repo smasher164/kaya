@@ -219,7 +219,7 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     ("wrap", 29, PropKind::Bool),
     // THE PROMPT AN EMPTY TEXT FIELD SHOWS (docs/search-plan.md S3): the
     // platform's own placeholder, never part of the text and never
-    // emitted. Legal on the three text kinds; the root refuses an empty one.
+    // emitted. Legal on the text kinds; the root refuses an empty one.
     ("placeholder", 30, PropKind::Str),
     // docs/tasks-s2-plan.md T3.
     ("href", 31, PropKind::Str),
@@ -3668,7 +3668,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             payload: Some(PropKind::Str),
             doc: "path_len key values follow, then the field's text as one \
                   value: the user SUBMITTED it (docs/submit-plan.md S1) — \
-                  Return in an entry or a search field, the send gesture on a \
+                  Return in an entry, a search field or a secure field, the send gesture on a \
                   textarea that says `submits`. The gesture alone publishes, \
                   never an edit; the field keeps its text and its focus, and \
                   a programmatic write never echoes — text_changed's stance.",
@@ -4032,6 +4032,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("color_picker", 21),
                 ("range", 22),
                 ("video", 23),
+                ("secure_field", 24),
             ],
         },
         EnumSpec {
@@ -5144,6 +5145,7 @@ mod tests {
                     ("kind", "labeled") => wire::KIND_LABELED,
                     ("kind", "search") => wire::KIND_SEARCH,
                     ("kind", "number_field") => wire::KIND_NUMBER_FIELD,
+                    ("kind", "secure_field") => wire::KIND_SECURE_FIELD,
                     ("kind", "color_picker") => wire::KIND_COLOR_PICKER,
                     ("kind", "range") => wire::KIND_RANGE,
                     ("kind", "video") => wire::KIND_VIDEO,

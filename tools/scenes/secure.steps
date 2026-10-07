@@ -1,0 +1,25 @@
+# The secure field (docs/secure-entry-plan.md): the platform masks what is
+# typed, and the harness reads only how many characters it masks; the app
+# receives the real text and answers with its length and whether it matches.
+# Every type_secret argument is one the leg's transcripts are scanned for
+# (tools/lib/secure_scan.py), so each is six characters or more, mixed.
+expect_placeholder secure_field@password "Password"
+expect label@status "empty"
+click secure_field@password
+expect_focused secure_field@password
+type_secret "Zq7vKe"
+expect_masked secure_field@password 6
+expect label@status "6 characters, no match"
+type_secret "Xw9pLm"
+expect_masked secure_field@password 12
+expect label@status "12 characters, match"
+press return
+expect label@sent "sent: 12 characters, match"
+expect_ax secure_field@password "field/Password"
+click button@clear
+expect_masked secure_field@password 0
+expect label@status "empty"
+# A stamped copy's edits name its row.
+click secure_field@pin[b]
+type_secret "Pn8tQr"
+expect label@pin_status "pin b: 6"

@@ -107,6 +107,75 @@ pub enum TargetKind {
     /// The video view (docs/media-plan.md §3): `expect_video_ink` reads its
     /// picture from the window server, `ax_action` runs its play and pause.
     Video,
+    /// The secure field (docs/secure-entry-plan.md P6): typed by
+    /// `type_secret`, read by `expect_masked`, and never by `expect` or
+    /// `set_text`.
+    SecureField,
+}
+
+/// Text bound for a secure field (docs/secure-entry-plan.md P6). It has no
+/// Display, and its Debug names its length alone, so a step echo, a verb
+/// trace note or a failure sentence formatting it cannot print it.
+#[derive(Clone, PartialEq)]
+pub struct Secret(String);
+
+impl Secret {
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+
+    pub fn chars(&self) -> usize {
+        self.0.chars().count()
+    }
+}
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<secret: {} chars>", self.chars())
+    }
+}
+
+/// Why a backend could not answer how many characters a secure field masks.
+/// Fixed sentences only: nothing read off the field can ride one
+/// (docs/secure-entry-plan.md P6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MaskRead {
+    NoSuchTarget,
+    /// The platform presented this many of the field's characters as
+    /// something other than its mask.
+    Unmasked(usize),
+    Unreadable(&'static str),
+}
+
+/// How many characters a masked value shows: a character `type_secret` could
+/// have typed is unmasked by definition, and the mask is one glyph (U+F79A
+/// on macOS 26, measured 2026-10-07). KayaSwiftUI.swift's kayaMaskCount is
+/// the same rule (docs/secure-entry-plan.md P6).
+pub fn mask_count(value: &str) -> Result<usize, MaskRead> {
+    let unmasked = value.chars().filter(|c| matches!(c, ' '..='~')).count();
+    if unmasked > 0 {
+        return Err(MaskRead::Unmasked(unmasked));
+    }
+    let mut glyphs = value.chars();
+    if let Some(first) = glyphs.next() {
+        if glyphs.any(|c| c != first) {
+            return Err(MaskRead::Unreadable("the value mixes glyphs"));
+        }
+    }
+    Ok(value.chars().count())
+}
+
+impl std::fmt::Display for MaskRead {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MaskRead::NoSuchTarget => write!(f, "no such target"),
+            MaskRead::Unmasked(n) => write!(
+                f,
+                "the platform presents {n} of the secure field's characters unmasked"
+            ),
+            MaskRead::Unreadable(why) => write!(f, "the mask could not be read: {why}"),
+        }
+    }
 }
 
 /// Which of a range's two thumbs a step drives or reads
@@ -241,6 +310,10 @@ pub enum Step {
     ClearSearch(Target),
     /// The empty field's prompt as the platform shows it (docs/search-plan.md S3).
     ExpectPlaceholder(Target, String),
+    /// `type`, for a secure field alone (docs/secure-entry-plan.md P6).
+    TypeSecret(Secret),
+    /// How many characters the platform shows masked in a secure field.
+    ExpectMasked(Target, usize),
     ExpectHref(Target, String),
     /// Type the text at the FOCUSED widget as REAL PLATFORM KEYSTROKES. A
     /// programmatic write CLEARS the field's native undo history on every
@@ -881,6 +954,7 @@ impl Step {
             | Step::ExpectAxHint(t, _)
             | Step::ExpectHelp(t, _)
             | Step::ExpectPlaceholder(t, _)
+            | Step::ExpectMasked(t, _)
             | Step::ExpectHref(t, _)
             | Step::ExpectMirrored(t)
             | Step::ExpectScript(t, _)
@@ -918,6 +992,7 @@ impl Step {
             | Step::ExpectStall
             | Step::ExpectNoStall
             | Step::Type(..)
+            | Step::TypeSecret(..)
             | Step::Press(..)
             | Step::ExpectRootFills
             | Step::ExpectTypeface(..)
@@ -1019,6 +1094,8 @@ impl Step {
             Step::SetText { .. } => false,
             Step::ClearSearch { .. } => false,
             Step::ExpectPlaceholder { .. } => true,
+            Step::TypeSecret { .. } => false,
+            Step::ExpectMasked { .. } => true,
             Step::ExpectHref { .. } => true,
             Step::Type { .. } => false,
             Step::Expect { .. } => true,
@@ -1360,6 +1437,13 @@ pub trait Stage: Send + 'static {
     /// The prompt the platform shows in the empty field, read off the
     /// control, never kaya's model (docs/search-plan.md S3).
     fn placeholder_text(&self, target: Target) -> String;
+    /// How many characters a secure field shows, each as the platform's
+    /// mask, read off what the platform presents (its accessibility value
+    /// where it publishes one), never the text (docs/secure-entry-plan.md P6).
+    fn masked_len(&self, target: Target) -> Result<usize, MaskRead>;
+    /// Whether keyboard focus is on a secure field: `type` refuses there and
+    /// `type_secret` refuses anywhere else (docs/secure-entry-plan.md P6).
+    fn secure_focused(&self) -> bool;
     /// A `role link` label's destination, off the control (docs/tasks-s2-plan.md T3).
     fn href(&self, target: Target) -> String;
     /// Whether the widget holds keyboard focus, read from the toolkit
@@ -2275,18 +2359,46 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 let (target, text) = rest
                     .split_once(char::is_whitespace)
                     .ok_or_else(|| format!("set_text wants a target and a string: {line:?}"))?;
-                Step::SetText(parse_target(target)?, parse_string(text)?)
+                let target = parse_target(target)?;
+                if target.kind == TargetKind::SecureField {
+                    return Err(SECURE_SET_TEXT.to_owned());
+                }
+                Step::SetText(target, parse_string(text)?)
             }
             "type" => {
                 let text = parse_string(rest)?;
                 check_typing(&text).map_err(|e| format!("{e}: {line:?}"))?;
                 Step::Type(text)
             }
+            "type_secret" => {
+                let text = parse_string(rest)
+                    .map_err(|_| "type_secret wants one quoted string".to_owned())?;
+                check_typing(&text).map_err(|_| TYPE_SECRET_ASCII.to_owned())?;
+                Step::TypeSecret(Secret(text))
+            }
+            "expect_masked" => {
+                let (target, n) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_masked wants a secure field and a count: {line:?}")
+                })?;
+                let target = parse_target(target)?;
+                if target.kind != TargetKind::SecureField {
+                    return Err(format!("expect_masked reads a secure field, not {target:?}"));
+                }
+                let n = n
+                    .trim()
+                    .parse::<usize>()
+                    .map_err(|_| format!("expect_masked wants a count, got {n:?}"))?;
+                Step::ExpectMasked(target, n)
+            }
             "expect" => {
                 let (target, text) = rest
                     .split_once(char::is_whitespace)
                     .ok_or_else(|| format!("expect wants a target and a string: {line:?}"))?;
-                Step::Expect(parse_target(target)?, parse_string(text)?)
+                let target = parse_target(target)?;
+                if target.kind == TargetKind::SecureField {
+                    return Err(SECURE_EXPECT.to_owned());
+                }
+                Step::Expect(target, parse_string(text)?)
             }
             "expect_focused" => Step::ExpectFocused(parse_target(rest)?),
             "expect_order" => {
@@ -3227,7 +3339,10 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 let target = parse_target(target)?;
                 if !matches!(
                     target.kind,
-                    TargetKind::Entry | TargetKind::Textarea | TargetKind::Search
+                    TargetKind::Entry
+                        | TargetKind::Textarea
+                        | TargetKind::Search
+                        | TargetKind::SecureField
                 ) {
                     return Err(format!("expect_placeholder reads a text field, not {target:?}"));
                 }
@@ -3574,6 +3689,7 @@ fn parse_target_kind(kind: &str, spec: &str) -> Result<TargetKind, String> {
         "color_picker" => TargetKind::ColorPicker,
         "range" => TargetKind::Range,
         "video" => TargetKind::Video,
+        "secure_field" => TargetKind::SecureField,
         other => return Err(format!("unknown target kind {other:?} in {spec:?}")),
     })
 }
@@ -4566,6 +4682,24 @@ fn run_with_log(
                 await_answer(answered);
                 None
             }
+            Step::TypeSecret(secret) => {
+                if !stage.secure_focused() {
+                    Some(Err(TYPE_SECRET_ELSEWHERE.to_owned()))
+                } else {
+                    await_quiet();
+                    let answered = crate::scene::answers();
+                    vtrace::note("type_secret", format_args!("-> stage.type_text {secret:?}"));
+                    stage.type_text(secret.expose());
+                    vtrace::note("type_secret", format_args!("<- stage.type_text {secret:?}"));
+                    await_answer(answered);
+                    None
+                }
+            }
+            Step::ExpectMasked(target, want) => Some(poll(|| match stage.masked_len(*target) {
+                Ok(got) if got == *want => Ok(format!("masked {want}")),
+                Ok(got) => Err(format!("masked {got}, wanted {want}")),
+                Err(why) => Err(format!("{}: {why}", target_spec(target))),
+            })),
             Step::ExpectPlaceholder(target, want) => Some(poll(|| {
                 let got = stage.placeholder_text(*target);
                 if got == *want {
@@ -4587,6 +4721,7 @@ fn run_with_log(
                 // own separator reaches the field (docs/number-field-plan.md §5).
                 match expand_template(&stage, s) {
                     Err(why) => Some(Err(why)),
+                    Ok(_) if stage.secure_focused() => Some(Err(TYPE_INTO_SECURE.to_owned())),
                     Ok(s) => {
                         // POINT 4 IS NOT THIS RULE: it blocks until the keys
                         // have landed IN THE CONTROL, which is a different
@@ -6075,7 +6210,11 @@ fn run_with_log(
                 // exist.
                 if matches!(
                     t.kind,
-                    TargetKind::Entry | TargetKind::Textarea | TargetKind::Search | TargetKind::NumberField
+                    TargetKind::Entry
+                        | TargetKind::Textarea
+                        | TargetKind::Search
+                        | TargetKind::NumberField
+                        | TargetKind::SecureField
                 ) {
                     Some(Err(format!(
                         "{t:?} is editable text — its context menu is dress, not a context_open target"
@@ -6453,6 +6592,7 @@ fn target_spec(t: &Target) -> String {
         TargetKind::ColorPicker => "color_picker",
         TargetKind::Range => "range",
         TargetKind::Video => "video",
+        TargetKind::SecureField => "secure_field",
     };
     if let Some(id) = t.id {
         t.keys.map_or_else(
@@ -6617,6 +6757,15 @@ fn await_quiet() {
         std::thread::sleep(ANSWER_POLL);
     }
 }
+
+/// The secure field's refusals (docs/secure-entry-plan.md P6), the same
+/// bytes in the SwiftUI harness.
+pub const SECURE_EXPECT: &str = "expect never reads a secure field's text; expect_masked reads how many characters it masks";
+pub const SECURE_SET_TEXT: &str = "set_text never writes a secure field; type_secret types into one";
+pub const TYPE_INTO_SECURE: &str =
+    "type would print a secure field's text in the step log and the verb trace; type_secret types into one";
+pub const TYPE_SECRET_ELSEWHERE: &str = "type_secret types into a secure field, and the focus is not on one";
+pub const TYPE_SECRET_ASCII: &str = "type_secret types printable ASCII alone (0x20..0x7e), and its text is not";
 
 /// The scene-ready wait's one sentence (tools/check-harness-ceiling.py
 /// holds the three harnesses to it, flattened).
@@ -7783,6 +7932,81 @@ mod tests {
         assert_eq!(code, 0, "{verdict}");
     }
 
+    thread_local! {
+        static MOCK_SECURE_FOCUS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        static MOCK_TYPED: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+        static MOCK_LOG: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    /// THE SECURE FIELD'S TEXT REACHES NO TRANSCRIPT (docs/secure-entry-plan.md
+    /// P6): not the step log, not a step's Debug (what the verb trace and the
+    /// watchdog print), not the verdict, not a parse refusal; while the stage
+    /// itself is handed the real keys.
+    #[test]
+    fn secure_field_text_reaches_no_transcript() {
+        const SECRET: &str = "hunter2-kaya";
+        fn log(line: &str) {
+            MOCK_LOG.with(|l| l.borrow_mut().push(line.to_owned()));
+        }
+        let script = format!(
+            "click secure_field#0\ntype_secret \"{SECRET}\"\nexpect_masked secure_field#0 12\n\
+             expect_masked secure_field#0 3"
+        );
+        let steps = parse(&script).unwrap();
+        let echoed = format!("{steps:?}");
+        assert!(!echoed.contains(SECRET), "a step's Debug printed the secret: {echoed}");
+        assert!(echoed.contains("<secret: 12 chars>"), "{echoed}");
+        MOCK_TYPED.with(|t| t.borrow_mut().clear());
+        MOCK_LOG.with(|l| l.borrow_mut().clear());
+        let (tx, rx) = std::sync::mpsc::channel();
+        let code = run_with_log(steps, MockStage { seen: &SEEN, verdict: tx }, Some(log), None);
+        let (_, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 1, "the last expect_masked must fail: {verdict}");
+        assert_eq!(MOCK_TYPED.with(|t| t.borrow().clone()), SECRET, "the keys reached the stage");
+        assert!(verdict.contains("masked 12"), "{verdict}");
+        assert!(verdict.contains("masked 12, wanted 3"), "{verdict}");
+        assert!(!verdict.contains(SECRET), "the verdict printed the secret: {verdict}");
+        let logged = MOCK_LOG.with(|l| l.borrow().join("\n"));
+        assert!(logged.contains("TypeSecret"), "the step log is the one read: {logged}");
+        assert!(!logged.contains(SECRET), "the step log printed the secret: {logged}");
+        for bad in [
+            format!("type_secret {SECRET}"),
+            format!("type_secret \"{SECRET}\u{e9}\""),
+        ] {
+            let why = parse(&bad).unwrap_err();
+            assert!(!why.contains(SECRET), "a parse refusal printed the secret: {why}");
+        }
+        assert_eq!(parse("expect secure_field#0 \"x\"").unwrap_err(), SECURE_EXPECT);
+        assert_eq!(parse("set_text secure_field#0 \"x\"").unwrap_err(), SECURE_SET_TEXT);
+        assert!(parse("expect_masked entry#0 3").is_err());
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(parse("click secure_field#0\ntype \"abc\"\nexpect_masked secure_field#0 0").unwrap(),
+            MockStage { seen: &SEEN, verdict: tx });
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 1, "{verdict}");
+        assert!(verdict.contains(TYPE_INTO_SECURE), "{verdict}");
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(parse("click entry#0\ntype_secret \"abc\"\nexpect_focused entry#0").unwrap(),
+            MockStage { seen: &SEEN, verdict: tx });
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 1, "{verdict}");
+        assert!(verdict.contains(TYPE_SECRET_ELSEWHERE), "{verdict}");
+    }
+
+    #[test]
+    fn mask_count_reads_one_glyph_and_refuses_typed_characters() {
+        assert_eq!(mask_count(""), Ok(0));
+        assert_eq!(mask_count("\u{f79a}\u{f79a}\u{f79a}"), Ok(3));
+        assert_eq!(mask_count("\u{2022}\u{2022}"), Ok(2));
+        assert_eq!(mask_count("ab\u{2022}"), Err(MaskRead::Unmasked(2)));
+        assert_eq!(
+            mask_count("\u{2022}\u{25cf}"),
+            Err(MaskRead::Unreadable("the value mixes glyphs"))
+        );
+        let shown = MaskRead::Unmasked(4).to_string();
+        assert_eq!(shown, "the platform presents 4 of the secure field's characters unmasked");
+    }
+
     /// A stage that records interactions and reports the verdict back
     /// through a channel, so tests can watch a whole run.
     struct MockStage {
@@ -7792,6 +8016,7 @@ mod tests {
 
     impl Stage for MockStage {
         fn click(&self, t: Target) {
+            MOCK_SECURE_FOCUS.with(|f| f.set(t.kind == TargetKind::SecureField));
             self.seen.lock().unwrap().push(format!("click {t:?}"));
         }
         fn toggle(&self, _: Target, _: bool) {}
@@ -7829,6 +8054,7 @@ mod tests {
         }
         fn set_text(&self, _: Target, _: &str) {}
         fn type_text(&self, text: &str) {
+            MOCK_TYPED.with(|t| t.borrow_mut().push_str(text));
             self.seen.lock().unwrap().push(format!("type {text}"));
         }
         fn read_label(&self, _: Target) -> String {
@@ -8202,6 +8428,12 @@ mod tests {
         fn clear_search(&self, _: Target) {}
         fn placeholder_text(&self, _: Target) -> String {
             String::new()
+        }
+        fn masked_len(&self, _: Target) -> Result<usize, MaskRead> {
+            Ok(MOCK_TYPED.with(|t| t.borrow().chars().count()))
+        }
+        fn secure_focused(&self) -> bool {
+            MOCK_SECURE_FOCUS.with(|f| f.get())
         }
         fn href(&self, _: Target) -> String {
             String::new()
@@ -9169,6 +9401,12 @@ mod tests {
         fn placeholder_text(&self, _: Target) -> String {
             String::new()
         }
+        fn masked_len(&self, _: Target) -> Result<usize, MaskRead> {
+            Err(MaskRead::NoSuchTarget)
+        }
+        fn secure_focused(&self) -> bool {
+            false
+        }
         fn href(&self, _: Target) -> String {
             String::new()
         }
@@ -9569,6 +9807,12 @@ mod tests {
         fn clear_search(&self, _: Target) {}
         fn placeholder_text(&self, _: Target) -> String {
             String::new()
+        }
+        fn masked_len(&self, _: Target) -> Result<usize, MaskRead> {
+            Err(MaskRead::NoSuchTarget)
+        }
+        fn secure_focused(&self) -> bool {
+            false
         }
         fn href(&self, _: Target) -> String {
             String::new()

@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xb28d4a0fddd60b2b
+	SpecHash uint64 = 0x904824951724780f
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -52,6 +52,7 @@ const (
 	KindColorPicker = 21
 	KindRange = 22
 	KindVideo = 23
+	KindSecureField = 24
 	DrawOpMoveTo = 1
 	DrawOpLineTo = 2
 	DrawOpClose = 3

@@ -1564,6 +1564,10 @@ pub enum WidgetKind {
     /// A VIDEO VIEW (docs/media-plan.md §3): shows one player through the
     /// platform's own view, its controls off. Reports nothing itself.
     Video,
+    /// A SECURE FIELD (docs/secure-entry-plan.md): the entry's text contract
+    /// with the platform masking what is typed; the harness never reads its
+    /// text back, only how many characters the platform masks.
+    SecureField,
 }
 
 /// A video view's box ratio, width:height (docs/media-plan.md §3, RULED
@@ -1860,7 +1864,7 @@ impl WidgetKind {
     /// export `WidgetKind` into the public header as an opaque handle no C
     /// caller can use. `cfg(test)` because the sweeps that walk it are tests.
     #[cfg(test)]
-    pub(crate) const ALL: [WidgetKind; 23] = [
+    pub(crate) const ALL: [WidgetKind; 24] = [
         WidgetKind::Column,
         WidgetKind::Button,
         WidgetKind::Label,
@@ -1884,6 +1888,7 @@ impl WidgetKind {
         WidgetKind::ColorPicker,
         WidgetKind::Range,
         WidgetKind::Video,
+        WidgetKind::SecureField,
     ];
 
     /// Whether a widget of this kind carries an identity tag — the
@@ -1907,7 +1912,8 @@ impl WidgetKind {
             | WidgetKind::Search
             | WidgetKind::NumberField
             | WidgetKind::ColorPicker
-            | WidgetKind::Range => true,
+            | WidgetKind::Range
+            | WidgetKind::SecureField => true,
             // Exhaustive on purpose — no wildcard. A kind added to the
             // spec lands here as a compile error, which is the moment to
             // decide whether it reports.

@@ -22,7 +22,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xb28d4a0fddd60b2b
+let kayaSpecHash: UInt64 = 0x904824951724780f
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -217,6 +217,7 @@ private let kindNumberField: UInt32 = 20
 private let kindColorPicker: UInt32 = 21
 private let kindRange: UInt32 = 22
 private let kindVideo: UInt32 = 23
+private let kindSecureField: UInt32 = 24
 private let propText: UInt32 = 1
 private let propChecked: UInt32 = 2
 private let propColumns: UInt32 = 11
@@ -1193,13 +1194,14 @@ final class KayaSceneModel {
     var colorPickers: [KayaNode] = []
     var ranges: [KayaNode] = []
     var videos: [KayaNode] = []
+    var secureFields: [KayaNode] = []
 
     /// Every kind registry, so a destroyed node leaves all of them at once.
     static let registries: [ReferenceWritableKeyPath<KayaSceneModel, [KayaNode]>] = [
         \.buttons, \.checkboxes, \.labels, \.entryWidgets, \.sliders, \.datePickers,
         \.timePickers, \.images, \.canvases, \.columns, \.rows, \.scrolls, \.progresses,
         \.selects, \.radios, \.grids, \.textareas, \.labeleds, \.searches, \.numberFields,
-        \.colorPickers, \.ranges, \.videos,
+        \.colorPickers, \.ranges, \.videos, \.secureFields,
     ]
 
     func forget(_ id: UInt64) {
@@ -5608,6 +5610,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case kindColorPicker: kayaScene.colorPickers.append(node)
                 case kindRange: kayaScene.ranges.append(node)
                 case kindVideo: kayaScene.videos.append(node)
+                case kindSecureField: kayaScene.secureFields.append(node)
                 case kindNumberField:
                     // docs/number-field-plan.md §2: unset bounds are ±2^53, the
                     // step 1, and the field shows its value from the start.
@@ -7321,6 +7324,27 @@ private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
         }
     }
 
+    /// A secure field's masked presentation (docs/secure-entry-plan.md P6):
+    /// AXValue, one U+F79A per character on macOS 26 (measured 2026-10-07).
+    private func kayaAxMaskedRead(_ identifier: String) -> (Int?, String) {
+        _ = kayaAwaitWindow(0)
+        return DispatchQueue.main.sync { () -> (Int?, String) in
+            let app = AXUIElementCreateApplication(getpid())
+            AXUIElementSetMessagingTimeout(app, 2.0)
+            if !kayaAxAnnounced {
+                kayaAxAnnounced = true
+                AXUIElementSetAttributeValue(
+                    app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+                AXUIElementSetAttributeValue(
+                    app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+            }
+            guard let hit = kayaAxFind(app, identifier) else {
+                return (nil, "the mask could not be read: the field is not in the accessibility tree")
+            }
+            return kayaMaskCount(kayaAxCopy(hit, kAXValueAttribute as String) as? String ?? "")
+        }
+    }
+
     /// The HINT as the platform publishes it: AXHelp is where
     /// `.accessibilityHint()` lands on macOS.
     private func kayaAxHintRead(_ identifier: String) -> String? {
@@ -7602,6 +7626,20 @@ private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
     /// — a trait bitmask plus the element's class — so `unknown/…` is never
     /// self-explaining, and it is one simulator round-trip per answer without
     /// this.
+    /// The iOS half of the masked read: the element's accessibilityValue,
+    /// which may hold only the mask (docs/secure-entry-plan.md P6).
+    private func kayaAxMaskedRead(_ identifier: String) -> (Int?, String) {
+        DispatchQueue.main.sync { () -> (Int?, String) in
+            for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+                for window in scene.windows {
+                    guard let hit = kayaAxFind(window, identifier) else { continue }
+                    return kayaMaskCount(hit.accessibilityValue ?? "")
+                }
+            }
+            return (nil, "the mask could not be read: the field is not in the accessibility tree")
+        }
+    }
+
     private func kayaAxWhy(_ identifier: String) -> String {
         // ON THE MAIN THREAD for kayaAxRead's reason — this one calls
         // accessibilityElementCount(), the very call in that crash's stack.
@@ -8016,6 +8054,60 @@ private func kayaLF(_ s: String) -> String {
         : s
 }
 
+/// Text bound for a secure field (docs/secure-entry-plan.md P6): its
+/// description, debug description and mirror name its length alone.
+struct KayaSecret: CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
+    private let held: String
+    init(_ held: String) { self.held = held }
+    var expose: String { held }
+    var description: String { "<secret: \(held.count) chars>" }
+    var debugDescription: String { description }
+    var customMirror: Mirror { Mirror(self, children: [:]) }
+}
+
+/// The secure field's refusals, harness.rs's bytes.
+let kayaSecureExpect = "expect never reads a secure field's text; expect_masked reads how many characters it masks"
+let kayaSecureSetText = "set_text never writes a secure field; type_secret types into one"
+let kayaTypeIntoSecure =
+    "type would print a secure field's text in the step log and the verb trace; type_secret types into one"
+let kayaTypeSecretElsewhere = "type_secret types into a secure field, and the focus is not on one"
+let kayaTypeSecretAscii = "type_secret types printable ASCII alone (0x20..0x7e), and its text is not"
+
+/// How many characters a masked value shows (docs/secure-entry-plan.md P6).
+/// A character `type_secret` could have typed is unmasked by definition; the
+/// mask is one glyph. The sentence is fixed: nothing read off the field rides it.
+func kayaMaskCount(_ value: String) -> (Int?, String) {
+    let scalars = Array(value.unicodeScalars)
+    let unmasked = scalars.filter { (0x20...0x7e).contains($0.value) }.count
+    if unmasked > 0 {
+        return (nil, "the platform presents \(unmasked) of the secure field's characters unmasked")
+    }
+    if Set(scalars).count > 1 {
+        return (nil, "the mask could not be read: the value mixes glyphs")
+    }
+    return (scalars.count, "")
+}
+
+/// A type_secret's text leaves the statement HERE, before the runner prints,
+/// traces or arms the watchdog with it (docs/secure-entry-plan.md P6).
+private func kayaSecretOut(_ statement: String) -> (String, KayaSecret?) {
+    guard statement == "type_secret" || statement.hasPrefix("type_secret ") else {
+        return (statement, nil)
+    }
+    guard let (text, rest) = kayaQuotedPrefix(String(statement.dropFirst("type_secret".count))),
+        rest.trimmingCharacters(in: .whitespaces).isEmpty
+    else {
+        return ("type_secret <unreadable>", nil)
+    }
+    let secret = KayaSecret(text)
+    return ("type_secret \(secret)", secret)
+}
+
+private func kayaSecureFocused() -> Bool {
+    guard let id = kayaScene.focusedId else { return false }
+    return kayaScene.secureFields.contains { $0.id == id }
+}
+
 private func kayaQuoted(_ rest: [Substring]) -> String {
     let joined = rest.joined(separator: " ")
     let inner = String(joined.dropFirst().dropLast())
@@ -8146,6 +8238,7 @@ private func kayaAnyTarget(_ spec: Substring) -> KayaNode? {
     case "color_picker": return kayaTarget(spec, "color_picker", kayaScene.colorPickers)
     case "range": return kayaTarget(spec, "range", kayaScene.ranges)
     case "video": return kayaTarget(spec, "video", kayaScene.videos)
+    case "secure_field": return kayaTarget(spec, "secure_field", kayaScene.secureFields)
     default: return nil
     }
 }
@@ -8214,6 +8307,9 @@ private func kayaTextTarget(_ spec: Substring) -> KayaNode? {
     if spec.hasPrefix("textarea") { return kayaTarget(spec, "textarea", kayaScene.textareas) }
     if spec.hasPrefix("label") { return kayaTarget(spec, "label", kayaScene.labels) }
     if spec.hasPrefix("search") { return kayaTarget(spec, "search", kayaScene.searches) }
+    if spec.hasPrefix("secure_field") {
+        return kayaTarget(spec, "secure_field", kayaScene.secureFields)
+    }
     if spec.hasPrefix("number_field") {
         return kayaTarget(spec, "number_field", kayaScene.numberFields)
     }
@@ -8473,7 +8569,7 @@ private func kayaRunScript(_ script: String) {
         let trimmedLine = rawLine.trimmingCharacters(in: .whitespaces)
         if trimmedLine.isEmpty || trimmedLine.hasPrefix("#") { continue }
         for raw in kayaSplitStatements(trimmedLine) {
-            let line = raw.trimmingCharacters(in: .whitespaces)
+            let (line, secret) = kayaSecretOut(raw.trimmingCharacters(in: .whitespaces))
             if line.isEmpty || line.hasPrefix("#") { continue }
             let parts = line.split(separator: " ", omittingEmptySubsequences: true)
             let offset = Int(Date().timeIntervalSince(start) * 1000)
@@ -8511,6 +8607,7 @@ private func kayaRunScript(_ script: String) {
                         ?? kayaTarget(parts[1], "textarea", kayaScene.textareas)
                         ?? kayaTarget(parts[1], "search", kayaScene.searches)
                         ?? kayaTarget(parts[1], "number_field", kayaScene.numberFields)
+                        ?? kayaTarget(parts[1], "secure_field", kayaScene.secureFields)
                     {
                         kayaScene.focusedId = node.id
                         return true
@@ -8946,6 +9043,10 @@ private func kayaRunScript(_ script: String) {
                     failures.append("placeholder \"\(gotPrompt)\", wanted \"\(wantPrompt)\"")
                 }
             case "set_text":
+                if parts[1].hasPrefix("secure_field") {
+                    failures.append(kayaSecureSetText)
+                    break
+                }
                 kayaAwaitQuiet()
                 let answered = kayaAnswers()
                 let ok = DispatchQueue.main.sync { () -> Bool in
@@ -8980,6 +9081,10 @@ private func kayaRunScript(_ script: String) {
                     if case .failure(let refusal) = kayaExpandTemplate(typedSpec) { failures.append(refusal.why) }
                     break
                 }
+                if DispatchQueue.main.sync(execute: { kayaSecureFocused() }) {
+                    failures.append(kayaTypeIntoSecure)
+                    break
+                }
                 kayaAwaitQuiet()
                 let answered = kayaAnswers()
                 #if os(macOS)
@@ -9000,6 +9105,61 @@ private func kayaRunScript(_ script: String) {
                         kayaAwaitAnswer(answered)
                     }
                 #endif
+            case "type_secret":
+                // `type` for a secure field (docs/secure-entry-plan.md P6): the
+                // text is `secret`'s alone; `line` and `parts` never held it.
+                guard let secret else {
+                    failures.append("type_secret wants one quoted string")
+                    break
+                }
+                guard DispatchQueue.main.sync(execute: { kayaSecureFocused() }) else {
+                    failures.append(kayaTypeSecretElsewhere)
+                    break
+                }
+                guard secret.expose.unicodeScalars.allSatisfy({ (0x20...0x7e).contains($0.value) }) else {
+                    failures.append(kayaTypeSecretAscii)
+                    break
+                }
+                kayaAwaitQuiet()
+                let secretAnswered = kayaAnswers()
+                #if os(macOS)
+                    if kayaTypeAtFocus(secret.expose) {
+                        kayaAwaitAnswer(secretAnswered)
+                    } else {
+                        failures.append("type_secret reached no window — nothing was typed")
+                    }
+                #else
+                    if kayaTypeThroughHost(secret.expose) != nil {
+                        failures.append("type_secret reached no editable field — nothing was typed")
+                    } else {
+                        kayaAwaitAnswer(secretAnswered)
+                    }
+                #endif
+            case "expect_masked":
+                // How many characters the platform shows masked, read off what
+                // it presents to assistive technology, never the text
+                // (docs/secure-entry-plan.md P6).
+                guard parts.count == 3, let wantMasked = Int(parts[2]) else {
+                    failures.append("expect_masked wants a secure field and a count: \(line)")
+                    break
+                }
+                let maskIdent = DispatchQueue.main.sync { () -> String? in
+                    kayaTarget(parts[1], "secure_field", kayaScene.secureFields)?.a11yId
+                }
+                let masked: (Int?, String)
+                switch maskIdent {
+                case .none: masked = (nil, "no such target")
+                case .some(let ident) where ident.isEmpty:
+                    masked = (nil, "the mask could not be read: no a11y_id authored on this field")
+                case .some(let ident): masked = kayaAxMaskedRead(ident)
+                }
+                if let got = masked.0, got == wantMasked {
+                    observed.append("masked \(got)")
+                } else if let got = masked.0 {
+                    failures.append("masked \(got), wanted \(wantMasked)")
+                } else {
+                    failures.append("\(parts[1]): \(masked.1)")
+                }
             case "press":
                 // The Return key as its own verb (docs/rich-text-plan.md R10),
                 // through the same key path `type` takes.
@@ -9023,6 +9183,10 @@ private func kayaRunScript(_ script: String) {
                     }
                 #endif
             case "expect":
+                if parts[1].hasPrefix("secure_field") {
+                    failures.append(kayaSecureExpect)
+                    break
+                }
                 // `{fmt:…}` in the expectation is this platform's own formatter's
                 // answer (docs/compliance-plan.md §4, R9), asked before the compare.
                 guard case .success(let want) = kayaExpandTemplate(kayaQuoted(Array(parts[2...]))) else {
@@ -19900,6 +20064,8 @@ struct KayaRender: View {
             KayaEntry(node: node, flexVertical: flexVertical)
         case kindSearch:
             KayaSearch(node: node, flexVertical: flexVertical)
+        case kindSecureField:
+            KayaSecureField(node: node, flexVertical: flexVertical)
         case kindNumberField:
             KayaNumberField(node: node, flexVertical: flexVertical)
         case kindTextarea:
@@ -23973,6 +24139,50 @@ struct KayaEntry: View {
         .focused($focused)
         // Return SUBMITS (docs/submit-plan.md S2): the platform's own gesture,
         // never an edit; the field keeps its text and its focus.
+        .onSubmit { KayaHost.emitSubmitted(node, node.text) }
+        .onAppear { focused = kayaScene.focusedId == node.id }
+        .onChange(of: kayaScene.focusedId) { _, newValue in
+            focused = newValue == node.id
+        }
+        .onChange(of: focused) { _, newValue in
+            if newValue {
+                kayaScene.focusedId = node.id
+            } else if kayaScene.focusedId == node.id {
+                kayaScene.focusedId = nil
+            }
+        }
+    }
+}
+
+/// The secure field (docs/secure-entry-plan.md §3): the platform's own
+/// SecureField, which masks, refuses copy and cut, publishes the secure
+/// subrole and offers no reveal. KayaEntry's contract otherwise.
+struct KayaSecureField: View {
+    let node: KayaNode
+    var flexVertical: Bool? = nil
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        SecureField(
+            node.placeholder,
+            text: Binding(
+                get: { node.text },
+                set: { newValue in
+                    let value = kayaLF(newValue)
+                    if value == node.text { return }
+                    kayaUserWrite { node.text = value }
+                    KayaHost.emitText(node, value)
+                })
+        )
+        .textFieldStyle(.roundedBorder)
+        .frame(
+            maxWidth: (node.grow > 0 || (flexVertical == true && node.fill != false))
+                ? .infinity : 200)
+        .focused($focused)
+        #if os(iOS)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+        #endif
         .onSubmit { KayaHost.emitSubmitted(node, node.text) }
         .onAppear { focused = kayaScene.focusedId == node.id }
         .onChange(of: kayaScene.focusedId) { _, newValue in

@@ -121,6 +121,9 @@ VERB_FEATURE = {
     # the number field's scene under another name.
     "unfocus": "numberfield",
     "nudge": "numberfield",
+    # docs/secure-entry-plan.md §5, the same reasoning.
+    "type_secret": "secure",
+    "expect_masked": "secure",
     # docs/color-picker-plan.md §5, the same reasoning.
     "set_color": "colorpicker",
     "expect_color": "colorpicker",

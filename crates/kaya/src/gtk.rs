@@ -4472,6 +4472,7 @@ fn kind_registry(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<gtk4
         K::Search => core.searches.iter().map(|w| w.clone().upcast()).collect(),
         K::Range => core.ranges.iter().map(|p| p.group.clone().upcast()).collect(),
         K::Video => core.videos.iter().map(|v| v.overlay.clone().upcast()).collect(),
+        K::SecureField => crate::depth_stub("secure"),
         K::ColorPicker => core.color_pickers.iter().map(|f| f.button.clone().upcast()).collect(),
         K::NumberField => core.number_fields.iter().map(|f| f.spin.clone().upcast()).collect(),
         K::Label => core.labels.clone(),
@@ -9588,7 +9589,7 @@ fn context_anchor_id(core: &CoreState, t: crate::harness::Target) -> u64 {
             .button
             .clone()
             .upcast(),
-        K::Entry | K::Textarea | K::Search | K::NumberField => {
+        K::Entry | K::Textarea | K::Search | K::NumberField | K::SecureField => {
             panic!("kaya: editable text is not a context anchor (v1)")
         }
         K::DatePicker => core.date_pickers[resolve(t.index, core.date_pickers.len())]
@@ -12257,6 +12258,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.grids.push(grid.clone());
                     NativeWidget::Grid(grid)
                 }
+                WidgetKind::SecureField => crate::depth_stub("secure"),
                 WidgetKind::Video => {
                     let view = gtk_media::build_video_view(id);
                     core.videos.push(view.clone());
@@ -18534,6 +18536,15 @@ impl crate::harness::Stage for GtkStage {
             }
         })
     }
+    fn masked_len(&self, _: crate::harness::Target) -> Result<usize, crate::harness::MaskRead> {
+        crate::depth_stub("secure")
+    }
+
+    /// No secure field exists on this backend before the breadth (docs/secure-entry-plan.md §6).
+    fn secure_focused(&self) -> bool {
+        false
+    }
+
     fn placeholder_text(&self, target: crate::harness::Target) -> String {
         Self::on_main(move |core| {
             use crate::harness::TargetKind as K;
@@ -23258,6 +23269,7 @@ fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk
         K::Range => try_resolve(target.index, core.ranges.len())
             .map(|i| core.ranges[i].group.clone().upcast()),
         K::Video => try_resolve(target.index, core.videos.len()).map(|i| core.videos[i].overlay.clone().upcast()),
+        K::SecureField => crate::depth_stub("secure"),
         K::ColorPicker => try_resolve(target.index, core.color_pickers.len())
             .map(|i| core.color_pickers[i].swatch.clone().upcast()),
         K::NumberField => try_resolve(target.index, core.number_fields.len())

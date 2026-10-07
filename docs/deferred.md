@@ -9,6 +9,59 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
+## BUILD — the secure field (docs/secure-entry-plan.md), depth on the mac (2026-10-07); the GTK, WinUI and Compose arms, the iOS legs and the other eight bindings are the breadth slice
+KEY: secure field, secure_field, KIND_SECURE_FIELD, secure.steps, type_secret, expect_masked, Secret, MaskRead, masked_len, secure_focused, is_secure_field, KayaSecret, kayaSecretOut, kayaAxMaskedRead, DEPTH STUB secure
+
+The depth slice: kind 24 with the entry's text contract (text_changed and
+submitted carry the real text to the app; clear, focus, placeholder), its
+text kept out of the core's undo ledger, the Rust binding in both zones,
+the SwiftUI arm on macOS and iOS, the harness's `type_secret` and
+`expect_masked` and their refusals, and tools/scenes/secure.steps green on
+the mac lane for Rust. The rulings in the plan's §2 are built as
+recommended and await the maintainer. What breadth owes:
+  - **DEPTH STUB: secure on gtk** — a `GtkPasswordEntry` (show-peek-icon
+    off, the plan's P3), `changed` for text_changed and `activate` for
+    submitted beside the entry's, the AT-SPI masked read for
+    `masked_len` and `secure_focused` from the window's focus (plan §3).
+  - **DEPTH STUB: secure on winui** — a `PasswordBox` with
+    PasswordRevealMode Hidden, PasswordChanged under the quiet guard,
+    the Return door check-submit holds, the masked read off UIA (the
+    platform answers no value for a password control, so the count is
+    the box's own length, computed in Rust and returned as a number;
+    plan §3), `secure_focused` from the focus manager. PasswordBox is
+    not in tools/winui-bindgen's filter yet.
+  - **DEPTH STUB: secure on compose** — KayaTextField with
+    PasswordVisualTransformation, KeyboardType.Password, autoCorrect
+    off, capitalization None, ImeAction.Done submitting, the semantics
+    `password()` property; the harness arms `type_secret` and
+    `expect_masked` (plan §3).
+  - **The iOS legs** — the arm is built (SecureField, no capitalization,
+    no autocorrection) and `expect_masked` reads the element's
+    accessibilityValue; the masked read and the typing route are
+    unmeasured. `type_secret` reaches the simulator through the XCUITest
+    driver's `type_b64`, so the driver's own transcript must be shown not
+    to record the command before the legs are wired.
+  - **`secure_field` in the other eight bindings** — both zones, the
+    entry's handlers, a secure guest per language, rusthost's arm; the
+    gallery scene and its ten guests take the kind with them.
+  - **The leak scan on the other four lanes** — the mac lane refuses a leg
+    whose transcript carries a `type_secret` argument (plan §5); the
+    linux, windows, iOS and android runners owe the same scan before
+    their legs are wired.
+
+## DEFER — the secure field's autofill hint and reveal toggle (docs/secure-entry-plan.md P3, P8; 2026-10-07)
+KEY: secure field autofill, content type, textContentType, newPassword, oneTimeCode, ContentType.Password, reveal toggle, PasswordRevealMode, show-peek-icon, TextObfuscationMode
+
+Two props the depth left out on purpose. A `content` word (password, new
+password, one-time code) reaching iOS's textContentType and Android's
+autofill content type; GTK and WinUI have nothing for it to drive, and
+saving a credential on iOS needs associated domains (the packaging
+milestone). And an app-declared `reveal` toggle, since every platform
+shows the text on request differently (WinUI's eye button, GTK's peek
+icon, Compose's Visible mode, a SecureField swapped for a TextField on the
+Apple platforms). Trigger for both: the password-manager archetype, or the
+first app with a login screen.
+
 ## ~~BUILD — timecode formatter and number-field format (2026-10-04)~~ COMPLETE implementation 2026-10-05: all nine bindings plus C, all five backends, viewed review page; full-matrix validation follow-up remains open below.
 KEY: timecode, TimecodeRate, NumberFormat, drop-frame, number-field format
 

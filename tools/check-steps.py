@@ -35,6 +35,7 @@ from lanes import win as win_lane
 from packaging import identity as app_identity
 from packaging import windows as win_package
 import scene_cut
+import secure_scan
 
 # Line-buffered stdout: the probes and helper scripts write to the same
 # fd, and block-buffered prints would land AFTER output they preceded.
@@ -84,6 +85,7 @@ TARGET_KINDS = (
     "image", "scroll", "progress", "select", "radio", "grid",
     "textarea", "canvas", "date_picker", "time_picker", "labeled",
     "search", "number_field", "color_picker", "range", "video",
+    "secure_field",
 )
 TARGET_RE = re.compile(r"\b(" + "|".join(TARGET_KINDS) + r")@([^\s;]*)")
 INDEX_RE = re.compile(r"\b(" + "|".join(TARGET_KINDS) + r")#([^\s;]*)")
@@ -5160,6 +5162,57 @@ _bundle_cut, _n = sub_count(r"    if runs_bundle\(argv\):\n        with _bundle_
 print(f"check-steps: bundle-lock self-test applied {_n} substitution(s)")
 if _n != 1 or not bundle_lock_problems(_bundle_cut):
     selftest_fail("the mac bundle lock cut was not refused")
+
+# A SECURE FIELD'S TEXT REACHES NO TRANSCRIPT (docs/secure-entry-plan.md P6):
+# every type_secret argument is strong enough to scan for, the scan finds a
+# planted one and stays quiet on a clean log, its sentences never carry the
+# argument, and MacRecorder.watched_leg runs it on every mac leg.
+
+_secrets_seen = 0
+for _p in STEPS:
+    for _n, _secret in enumerate(secure_scan.secrets_in(STEPS_TEXT[_p]), 1):
+        _secrets_seen += 1
+        _weak = secure_scan.weakness(_secret)
+        if _weak:
+            print(f"check-steps: {steps_rel(_p)}: type_secret #{_n} is too weak to scan for: "
+                  f"{', '.join(_weak)}", file=sys.stderr)
+            status = 1
+print(f"check-steps: {_secrets_seen} type_secret argument(s) strong enough to scan for")
+_plant = 'click secure_field#0\ntype_secret "Ab3dEf9"\n'
+_cases = [
+    ("a planted leak", {"leg log": "x Ab3dEf9 y"}, 1),
+    ("a clean log", {"leg log": "type_secret <secret: 7 chars>"}, 0),
+    ("a planted trace leak", {"leg log": "", "verb trace": "Ab3dEf9"}, 1),
+]
+for _label, _transcripts, _want in _cases:
+    _got = secure_scan.refusals(_plant, _transcripts)
+    print(f"check-steps: secure scan self-test {_label}: {len(_got)} refusal(s)")
+    if len(_got) != _want or any("Ab3dEf9" in _line for _line in _got):
+        selftest_fail(f"the secure scan answered {_got!r} for {_label}")
+_weak = secure_scan.refusals('type_secret "abc"', {"leg log": ""})
+print(f"check-steps: secure scan self-test a weak argument: {len(_weak)} refusal(s)")
+if len(_weak) != 1 or "abc" in _weak[0]:
+    selftest_fail(f"a weak type_secret argument was not refused: {_weak!r}")
+
+
+def secure_scan_wiring(text):
+    start = text.find("    def watched_leg(")
+    body = text[start:text.find("\n    def ", start + 1)]
+    if start < 0 or "self.secure_scan(env, log_file, scratch)" not in body:
+        return ["tools/lib/flightrec_lane.py's watched_leg no longer runs the secure "
+                "scan, so a secure field's text could reach a mac leg's log unread"]
+    return []
+
+
+_flightrec = read_rel("tools/lib/flightrec_lane.py")
+for _line in secure_scan_wiring(_flightrec):
+    print(f"check-steps: {_line}", file=sys.stderr)
+    status = 1
+_scan_cut, _n = sub_count(r"        refused = self\.secure_scan\(env, log_file, scratch\)\n",
+                          "        refused = []\n", _flightrec)
+print(f"check-steps: secure scan wiring self-test applied {_n} substitution(s)")
+if _n != 1 or not secure_scan_wiring(_scan_cut):
+    selftest_fail("the secure scan's wiring cut was not refused")
 
 if status == 0:
     print("check-steps: OK")

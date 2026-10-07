@@ -2181,6 +2181,9 @@ ACTION_VERBS = (
     # The colour picker's settled choice (docs/color-picker-plan.md §5),
     # answered by color_changed.
     "set_color",
+    # The secure field's typing (docs/secure-entry-plan.md P6), answered by
+    # the text_changed the keys raise.
+    "type_secret",
 )
 
 # A VERB THE GUEST IS NEVER ASKED ABOUT HAS NO ANSWER TO WAIT FOR.
@@ -2222,6 +2225,7 @@ REFUSALS = {
     # A phone's number field has no stepping door (docs/number-field-plan.md
     # §3 rule 7), so the phone lanes cut the scene at the steps.
     (KOTLIN, "nudge"): "nudge: a phone's number field has no stepping door",
+    (KOTLIN, "type_secret"): 'depthStub("secure")',
 }
 # A DEPTH STUB on an action verb is a refusal too, for as long as it stands:
 # its row here reads `(KOTLIN, "<verb>"): 'depthStub("<scene>")'` and the

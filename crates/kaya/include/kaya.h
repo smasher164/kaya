@@ -1014,6 +1014,8 @@
 
 #define KAYA_KIND_VIDEO 23
 
+#define KAYA_KIND_SECURE_FIELD 24
+
 /**
  * Property keys.
  */

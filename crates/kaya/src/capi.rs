@@ -947,6 +947,7 @@ pub const KAYA_KIND_NUMBER_FIELD: u32 = 20;
 pub const KAYA_KIND_COLOR_PICKER: u32 = 21;
 pub const KAYA_KIND_RANGE: u32 = 22;
 pub const KAYA_KIND_VIDEO: u32 = 23;
+pub const KAYA_KIND_SECURE_FIELD: u32 = 24;
 const _: () = assert!(
     KAYA_KIND_COLUMN == wire::KIND_COLUMN
         && KAYA_KIND_BUTTON == wire::KIND_BUTTON
@@ -971,6 +972,7 @@ const _: () = assert!(
         && KAYA_KIND_COLOR_PICKER == wire::KIND_COLOR_PICKER
         && KAYA_KIND_RANGE == wire::KIND_RANGE
         && KAYA_KIND_VIDEO == wire::KIND_VIDEO
+        && KAYA_KIND_SECURE_FIELD == wire::KIND_SECURE_FIELD
 );
 // Completeness, not just agreement: a value pin cannot see a FORGOTTEN
 // export (docs/traps.md, "A value pin cannot see a FORGOTTEN sibling").
@@ -988,7 +990,7 @@ const _: () = {
         n
     };
     assert!(
-        kinds == 23,
+        kinds == 24,
         "the spec kind enum grew: export the new KAYA_KIND_* above, extend the pin, and bump          this count"
     );
 };

@@ -1093,12 +1093,17 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
                 | WidgetKind::Checkbox
                 | WidgetKind::Textarea
                 | WidgetKind::Search
+                | WidgetKind::SecureField
         ),
         // The prompt an empty field shows: the text kinds alone
         // (docs/search-plan.md S3).
         Prop::Placeholder => matches!(
             kind,
-            WidgetKind::Entry | WidgetKind::Textarea | WidgetKind::Search | WidgetKind::NumberField
+            WidgetKind::Entry
+                | WidgetKind::Textarea
+                | WidgetKind::Search
+                | WidgetKind::NumberField
+                | WidgetKind::SecureField
         ),
         // A link's destination: the label alone (docs/tasks-s2-plan.md T3).
         Prop::Href => matches!(kind, WidgetKind::Label),
@@ -1233,7 +1238,12 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
 /// target can legitimately vanish under rebuild.)
 fn check_command(kind: WidgetKind, command: CommandKind) {
     let ok = match command {
-        CommandKind::Clear | CommandKind::EmojiPicker => {
+        CommandKind::Clear => matches!(
+            kind,
+            WidgetKind::Entry | WidgetKind::Textarea | WidgetKind::Search | WidgetKind::SecureField
+        ),
+        // docs/secure-entry-plan.md P2: no emoji picker in a secure field.
+        CommandKind::EmojiPicker => {
             matches!(kind, WidgetKind::Entry | WidgetKind::Textarea | WidgetKind::Search)
         }
         CommandKind::Focus => matches!(
@@ -1248,6 +1258,7 @@ fn check_command(kind: WidgetKind, command: CommandKind) {
                 | WidgetKind::Search
                 | WidgetKind::NumberField
                 | WidgetKind::ColorPicker
+                | WidgetKind::SecureField
         ),
     };
     assert!(ok, "kaya: command {command:?} does not apply to {kind:?}");
@@ -4275,6 +4286,7 @@ impl Scene {
                                 | WidgetKind::Textarea
                                 | WidgetKind::Search
                                 | WidgetKind::NumberField
+                                | WidgetKind::SecureField
                         ),
                         "kaya: context_attach rejected on {wkind:?} — the editable text \
                          controls keep their native edit menus (dress)"
@@ -5565,7 +5577,7 @@ impl Scene {
                 Some(kind) => {
                     matches!(kind, WidgetKind::Entry | WidgetKind::Textarea | WidgetKind::Search)
                 }
-                None => id.0 & INTERNAL_BIT != 0,
+                None => id.0 & INTERNAL_BIT != 0 && !self.is_secure_field(id),
             };
             // A plain text write on ANY `rich` widget is a whole-document
             // write with no runs (docs/rich-text-plan.md §8, §15 for the
@@ -5618,6 +5630,11 @@ impl Scene {
         text: &str,
         focused: bool,
     ) {
+        // docs/secure-entry-plan.md P2: a secure field's text is never banked
+        // and the core keeps no copy of it.
+        if self.is_secure_field(field) {
+            return;
+        }
         let before = self
             .field_text
             .get(&field)
@@ -5958,6 +5975,19 @@ impl Scene {
     /// (docs/traps.md 2026-09-14). A live widget (empty path) is always live.
     pub(crate) fn stamped_copy_is_live(&self, node: u64, path: &[Value]) -> bool {
         path.is_empty() || self.instance_widget(node, path).is_some()
+    }
+
+    /// A live secure field, or a stamped copy of a secure field's template
+    /// node (docs/secure-entry-plan.md P2).
+    pub(crate) fn is_secure_field(&self, field: WidgetId) -> bool {
+        if let Some(kind) = self.widgets.get(&field) {
+            return *kind == WidgetKind::SecureField;
+        }
+        self.stamps.values().any(|stamp| {
+            stamp.nodes.iter().any(|(node, w)| {
+                *w == field && self.template_nodes.get(node) == Some(&WidgetKind::SecureField)
+            })
+        })
     }
 
     fn instance_widget(&self, node: u64, path: &[Value]) -> Option<WidgetId> {
@@ -7689,6 +7719,7 @@ impl Scene {
                             | WidgetKind::Textarea
                             | WidgetKind::Search
                             | WidgetKind::NumberField
+                            | WidgetKind::SecureField
                     ),
                     "kaya: context_attach_node rejected on {node_kind:?} — the editable \
                      text controls keep their native edit menus (dress)"
@@ -17433,6 +17464,28 @@ mod tests {
         assert_eq!(episode(&scene, DEFAULT_WINDOW), Some(("", "milk", "milk", true)));
     }
 
+    /// docs/secure-entry-plan.md P2: the ledger banks no secure field's text
+    /// and the core keeps no copy of it, typed or written.
+    #[test]
+    fn a_secure_field_is_never_banked() {
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(20), kind: WidgetKind::SecureField },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(20) },
+        ]);
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(20), "Zq7vKe", true);
+        assert_eq!(depth(&scene, DEFAULT_WINDOW), 0, "a secure field's typing became an undo step");
+        scene.apply(vec![TxOp::SetProperty {
+            widget: WidgetId(20),
+            prop: Prop::Text,
+            value: PropValue::Const(v("Xw9pLm")),
+        }]);
+        assert!(!scene.field_text.contains_key(&WidgetId(20)), "the core kept a secure field's text");
+        assert!(scene.is_secure_field(WidgetId(20)));
+        assert!(!scene.is_secure_field(WidgetId(2)));
+    }
+
     #[test]
     fn typing_back_to_the_start_of_a_run_removes_it() {
         let mut scene = Scene::new();
@@ -17969,6 +18022,29 @@ mod tests {
             "one template node, two copies, two widgets — which is the whole \
              reason the app cannot be handed the internal id"
         );
+    }
+
+    /// docs/secure-entry-plan.md P2, a stamped copy: its typing banks nothing.
+    #[test]
+    fn a_stamped_secure_field_is_never_banked() {
+        let mut ops = stamped_field_scene();
+        let mut swapped = 0;
+        for op in &mut ops {
+            if let TxOp::CreateWidget { id: WidgetId(11), kind } = op {
+                *kind = WidgetKind::SecureField;
+                swapped += 1;
+            }
+        }
+        assert_eq!(swapped, 1);
+        let mut scene = Scene::new();
+        scene.apply(ops);
+        scene.apply(vec![insert_row("r1")]);
+        let field = scene
+            .text_field_of_tag(&crate::wire::click_tag(11, &[v("r1")]))
+            .expect("the copy's field resolves");
+        assert!(scene.is_secure_field(field));
+        scene.note_text_changed(DEFAULT_WINDOW, field, "Pn8tQr", true);
+        assert_eq!(depth(&scene, DEFAULT_WINDOW), 0, "a stamped secure field's typing was banked");
     }
 
     /// THE ITEM THIS SLICE EXISTS FOR: a row's field banks a typing episode

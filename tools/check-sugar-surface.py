@@ -10995,7 +10995,8 @@ if _rust_capture:
 
 from timecode_surface import run as check_timecode_surface
 
-check_timecode_surface()
+if check_timecode_surface():
+    status = 1
 
 check_scene_sugar()
 

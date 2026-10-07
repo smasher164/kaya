@@ -277,6 +277,7 @@ pub(crate) const KIND_NUMBER_FIELD: u32 = 20;
 pub(crate) const KIND_COLOR_PICKER: u32 = 21;
 pub(crate) const KIND_RANGE: u32 = 22;
 pub(crate) const KIND_VIDEO: u32 = 23;
+pub(crate) const KIND_SECURE_FIELD: u32 = 24;
 
 // Draw opcodes (docs/canvas-plan.md §3.3). The op stream is a flat run
 // of tagged values: one of these as an i64, then its operands.
@@ -1657,6 +1658,7 @@ fn widget_kind(raw: u32) -> WidgetKind {
         KIND_COLOR_PICKER => WidgetKind::ColorPicker,
         KIND_RANGE => WidgetKind::Range,
         KIND_VIDEO => WidgetKind::Video,
+        KIND_SECURE_FIELD => WidgetKind::SecureField,
         other => panic!("kaya: unknown widget kind {other}"),
     }
 }
@@ -5251,6 +5253,7 @@ fn kind_raw(kind: WidgetKind) -> u32 {
         WidgetKind::ColorPicker => KIND_COLOR_PICKER,
         WidgetKind::Range => KIND_RANGE,
         WidgetKind::Video => KIND_VIDEO,
+        WidgetKind::SecureField => KIND_SECURE_FIELD,
     }
 }
 

@@ -95,6 +95,21 @@ def converted():
     return out
 
 
+def lib_verdicts(texts):
+    """A module under tools/lib never leaves through Gate.verdict, which
+    raises SystemExit and so ends the gate that imported it (docs/traps.md,
+    the timecode sub-gate that ended check-sugar-surface)."""
+    out = []
+    for path, text in sorted(texts.items()):
+        if not path.startswith("tools/lib/"):
+            continue
+        for n, line in enumerate(text.splitlines(), 1):
+            if re.search(r"\.verdict\(", line) and "def verdict" not in line:
+                out.append(f"{path}:{n}: a tools/lib module calls .verdict(, which ends "
+                           f"the gate that imported it; return the status instead")
+    return out
+
+
 def unconverted():
     """Every OTHER tools/**/*.py: the lane tables, the lib helpers, the
     probes. They carry no prelude header — a lanes/ module is imported,
@@ -135,6 +150,8 @@ def command_census(files):
 # Rule 9's deliberate fakes: a self-test that needs a script which must
 # NOT exist names it here, with the reason.
 SCRIPT_EXEMPT = {
+    "tools/lib/sub_gate.py":
+        "this gate's N23: a library module that leaves through a verdict",
     "tools/check-there-is-no-such-gate.sh":
         "gates.py's census negative: a gate the list names but the tree lacks",
     "tools/x.sh":
@@ -572,7 +589,18 @@ gate.negative("N22 rule 11 — an unquoted cmd /c if over ssh",
               lambda b=_unquoted: command_census({"tools/deploy-win.py": b}),
               want="an unquoted cmd-if with brackets")
 
-gate.negatives_ran(21)
+# N23 — a sub-gate's verdict put back into the timecode census, the shape
+# that ended check-sugar-surface's run green from 2026-10-05.
+_sub_verdict = gate.doctor(
+    "N23 a tools/lib module leaving through a verdict",
+    "def run():\n    gate = Gate(\"sub\")\n    return gate.status\n",
+    r"^    return gate\.status\n\Z",
+    "    gate.verdict(\"sub\")\n", want=1, flags=re.M)
+gate.negative("N23 a tools/lib module leaving through a verdict",
+              lambda b=_sub_verdict: lib_verdicts({"tools/lib/sub_gate.py": b}),
+              want="a tools/lib module calls .verdict(")
+
+gate.negatives_ran(22)
 
 # --------------------------------------------------------------- clauses
 
@@ -584,6 +612,8 @@ for line in census(files):
 others = unconverted()
 gate.counted("other tools/ python bodies (rule 11 only)", others, floor=20)
 for line in command_census(others):
+    gate.finding(line)
+for line in lib_verdicts(others):
     gate.finding(line)
 
 # Every exemption must name a file that still exists, or it has rotted

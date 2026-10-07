@@ -4,6 +4,28 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## A sub-gate's verdict ended check-sugar-surface green (found 2026-10-07)
+
+From 15db3cda (2026-10-05) check-sugar-surface called
+tools/lib/timecode_surface.py's `run()`, which left through
+`Gate.verdict`, and `verdict` raises SystemExit. So every run after it
+ended with `check-timecode-surface: OK` and exit 0: the parent's own
+`status`, its `check_scene_sugar()` and its FAIL line never ran. Found when
+the secure field's depth slice printed fourteen constructor findings under
+exit 0. `run()` now answers its status and the parent folds it in.
+GUARD: check-python refuses `.verdict(` in any tools/lib module (N23
+watched red).
+
+## macOS publishes a SwiftUI SecureField's value as U+F79A per character (measured 2026-10-07)
+
+The secure field's element is AXTextField with subrole AXSecureTextField;
+its AXValue is one U+F79A (a private-use glyph) per character, never the
+text, and it publishes no AXNumberOfCharacters. A mask set naming U+2022
+and U+25CF alone read every character as unmasked. kaya's mask rule is
+therefore not a glyph list: a character `type_secret` could have typed
+(printable ASCII) is unmasked, and the mask is one glyph
+(harness::mask_count, kayaMaskCount; docs/secure-entry-plan.md P6).
+
 ## A decoder moved onto a SurfaceView with setOutputSurface draws black on the pool's emulators (measured 2026-09-30)
 
 On the pool's API 35 emulators every row of media_feed showed black while

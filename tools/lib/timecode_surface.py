@@ -62,13 +62,16 @@ def findings(texts, rows=ROWS):
 
 
 def run():
+    """Answers the sub-gate's status rather than leaving through a verdict:
+    a verdict here ended check-sugar-surface's own run (docs/traps.md)."""
     gate = Gate("check-timecode-surface")
     texts = {rel: (ROOT / rel).read_text(encoding="utf-8") for _, rel, _, _ in ROWS}
     baseline = findings(texts)
     for problem in baseline:
         gate.fail(problem)
     if baseline:
-        gate.verdict("timecode format surface")
+        print("check-timecode-surface: FINDINGS ABOVE")
+        return gate.status
     for label, rel, pattern, token in ROWS:
         start, end = region(texts[rel], label)
         source = texts[rel][start:end]
@@ -81,4 +84,6 @@ def run():
                       want=f"timecode format {label} absent")
     gate.negative("empty reader", lambda: findings(texts, []), want="fewer than 25")
     gate.negatives_ran(len(ROWS) + 1)
-    gate.verdict(f"{len(ROWS)} timecode format surfaces")
+    if gate.status == 0:
+        print(f"check-timecode-surface: OK ({len(ROWS)} timecode format surfaces)")
+    return gate.status

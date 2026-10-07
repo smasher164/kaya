@@ -27,7 +27,8 @@ ROOT = "."
 DEFAULT_KINDS = (
     "column button label entry row checkbox slider image "
     "scroll progress select radio grid textarea canvas "
-    "date_picker time_picker labeled search number_field color_picker range video"
+    "date_picker time_picker labeled search number_field color_picker range video "
+    "secure_field"
 ).split()
 
 def wire_kinds(root):
