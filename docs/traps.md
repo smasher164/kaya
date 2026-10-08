@@ -6498,10 +6498,15 @@ The four hashes above stand as the measurement of what a dropped run
 costs.
 
 RELATED, and fixed: `assets::tests` move the process-wide
-`KAYA_ASSET_DIR`, so EVERY test in the crate that resolves an asset now
-takes `crate::assets::serially()` — see that function. Before it, the
-same pin test failed with the resolver's own sentence rather than a
-hash.
+`KAYA_ASSET_DIR`, so every test that SETS it takes `crate::assets::serially()`,
+the write side of a lock. "Every test that resolves an asset takes it" was
+the rule here and was not kept: on 2026-10-08 `edit_list::tests::the_suite_clips`
+resolved its clip under canvas's temporary root, red at the matrix's rung 1,
+and an assert making the rule a wall found dozens more readers. So the
+resolver itself takes the READ side for its one read of the variable, unless
+its own thread holds the write side; readers stay parallel and no test has to
+remember. `assets::tests::a_reader_never_sees_a_root_another_test_is_setting`
+is the race, watched red with the read side cut (1 substitution).
 
 THREE THINGS THIS MEANS.
 

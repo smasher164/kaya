@@ -65,6 +65,9 @@ impl Place {
 /// python, go, csharp, java — `current_exe()` names the HOST interpreter's
 /// binary (docs/deferred.md, "DLL-hosted guest").
 pub(crate) fn root() -> Root {
+    #[cfg(test)]
+    let _reading = (!SERIAL_HELD.with(|h| h.get()))
+        .then(|| ENV.read().unwrap_or_else(|e| e.into_inner()));
     if let Ok(dir) = std::env::var(ENV_VAR) {
         if !dir.trim().is_empty() {
             return Root { place: Place::Dir(PathBuf::from(dir)), route: ENV_VAR };
@@ -372,18 +375,53 @@ pub(crate) fn font_bytes(name: &str) -> Result<std::sync::Arc<[u8]>, String> {
 /// a full suite with the resolver's sentence and then passed 33
 /// consecutive runs; docs/traps.md).
 #[cfg(test)]
-static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static ENV: std::sync::RwLock<()> = std::sync::RwLock::new(());
 
 #[cfg(test)]
-pub(crate) fn serially() -> std::sync::MutexGuard<'static, ()> {
+thread_local! {
+    static SERIAL_HELD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+pub(crate) struct Serial(#[allow(dead_code)] std::sync::RwLockWriteGuard<'static, ()>);
+
+#[cfg(test)]
+impl Drop for Serial {
+    fn drop(&mut self) {
+        SERIAL_HELD.with(|h| h.set(false));
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn serially() -> Serial {
     // A poisoned lock means a sibling test panicked; take the guard
     // rather than cascading the failure.
-    ENV.lock().unwrap_or_else(|e| e.into_inner())
+    let guard = ENV.write().unwrap_or_else(|e| e.into_inner());
+    SERIAL_HELD.with(|h| h.set(true));
+    Serial(guard)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_reader_never_sees_a_root_another_test_is_setting() {
+        let writer = serially();
+        let tmp = std::env::temp_dir().join(format!("kaya-assets-race-{}", std::process::id()));
+        // SAFETY: the variable is only read under ENV, which `writer` holds.
+        unsafe { std::env::set_var(ENV_VAR, &tmp) };
+        let reader = std::thread::spawn(|| match root().place {
+            Place::Dir(dir) => dir,
+            #[allow(unreachable_patterns)]
+            _ => PathBuf::new(),
+        });
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        unsafe { std::env::remove_var(ENV_VAR) };
+        drop(writer);
+        let seen = reader.join().unwrap();
+        assert_ne!(seen, tmp, "a reader resolved the root while a test was setting {ENV_VAR}");
+    }
 
     #[test]
     fn a_file_url_keeps_a_windows_drive_and_turns_its_backslashes() {
