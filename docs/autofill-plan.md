@@ -1,6 +1,6 @@
 # The content type: the design pass and the depth slice (2026-10-07)
 
-Status: RECOMMENDED 2026-10-07, every ruling in §2 awaiting the maintainer.
+Status: BUILT on all five platforms and in all nine bindings (b7ad7af0); every ruling in §2 RULED 2026-10-08.
 The DEPTH SLICE is built as recommended (§6 step 1): prop 56 `content_type`,
 the core's wall, the Rust binding in both zones, the SwiftUI arm on macOS and
 iOS, the harness's `expect_content_type`, and tools/scenes/autofill.steps
@@ -68,7 +68,7 @@ Four facts decide the design:
 - The SwiftUI secure field already turns off capitalization and
   autocorrection on iOS (secure P7); the entry sets no keyboard at all.
 
-## §2 — The rulings (RECOMMENDED, the depth built as recommended)
+## §2 — The rulings (RULED 2026-10-08)
 
 ### A1 — A prop, `content_type`, on the entry and the secure field, in both zones (RULED 2026-10-07 as built: "i'm cool with your rulings")
 
