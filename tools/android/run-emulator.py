@@ -1357,6 +1357,66 @@ def recording_duration_ms(video, log):
     return duration
 
 
+TOUCH_MODE = re.compile(r"Display: 0 TouchMode: ([01])")
+SETTINGS_ACTIVITY = "com.android.settings/.Settings"
+
+
+def restore_touch_mode(serial, log):
+    """docs/traps.md: A key event leaves the emulator out of touch mode"""
+    def mode():
+        dump = adb_out(serial, "shell", "dumpsys", "input")
+        found = TOUCH_MODE.search(dump)
+        return (found.group(1) if found else None), len(dump)
+
+    before, size = mode()
+    if before == "1":
+        print(f"touch mode at leg start: 1 on {serial}", file=log)
+        return True
+    if before is None:
+        print(f"touch mode at leg start: unreadable on {serial} — `dumpsys "
+              f"input` ({size} bytes) carried no `Display: 0 TouchMode:` "
+              f"line", file=log)
+        return False
+
+    def focus():
+        windows = adb_out(serial, "shell", "dumpsys", "window")
+        return next((line.strip() for line in windows.splitlines()
+                     if "mCurrentFocus=" in line), "no mCurrentFocus line")
+
+    def touch():
+        for kind in ("DOWN", "CANCEL"):
+            adb(serial, "shell", "input", "motionevent", kind, "100", "300",
+                stdout=log, stderr=log)
+        time.sleep(0.3)
+        return mode()
+
+    settings = SETTINGS_ACTIVITY.split("/")[0]
+    routes = []
+    held = focus()
+    after, size = touch()
+    routes.append(f"a cancelled touch with {held} read back {after}")
+    for _ in range(2):
+        if after == "1":
+            break
+        adb(serial, "shell", "am", "start", "-W", "-n", SETTINGS_ACTIVITY,
+            stdout=log, stderr=log)
+        for _ in range(15):
+            held = focus()
+            if settings in held:
+                break
+            time.sleep(0.2)
+        after, size = touch()
+        adb(serial, "shell", "am", "force-stop", settings,
+            stdout=log, stderr=log)
+        routes.append(f"a cancelled touch on a fresh Settings window with "
+                      f"{held} read back {after}")
+    print(f"touch mode at leg start: 0 on {serial}; "
+          f"{', then '.join(routes)}"
+          f"{f' (dumpsys input {size} bytes)' if after is None else ''}",
+          file=log)
+    return after == "1"
+
+
 def run_apk_on(serial, name, apk, component, script, extras,
                remount_expect, two_act, log, rebooted=False):
     """One leg on one device, everything it prints going to its own
@@ -1383,6 +1443,8 @@ def run_apk_on(serial, name, apk, component, script, extras,
                    "com.android.documentsui"):
         adb(serial, "shell", "am", "force-stop", picker,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if not restore_touch_mode(serial, log):
+        return False
     adb(serial, "logcat", "-c", stdout=log, stderr=log)
     # THE HARNESS'S EYES OUTSIDE THIS APP: the picker is a separate APK
     # and the platform stops one app reading another's UI, so picker

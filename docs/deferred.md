@@ -14798,8 +14798,8 @@ forward one. Route them all through `stamped_tag_is_live` (capi.rs) and
 add the drop to each. KEY: stamped_tag_is_live, torn-down copy, dead copy,
 lingering registry.
 
-## WATCH — the android save leg's cancel door under a matrix: Back pressed once, then withheld 29 looks "until a new stable picker path" (first sighting 2026-09-14)
-KEY: save-compose, cancel door, pickerBackGate, withheld until a new stable picker path, would not dismiss
+## ~~WATCH — the android save leg's cancel door under a matrix: Back pressed once, then withheld 29 looks "until a new stable picker path" (first sighting 2026-09-14)~~ FIXED 2026-10-08 AT THE CAUSE, after all three save legs failed it in one matrix and jvm again alone: a key event from the runner (`press tab`'s `input keyevent` since 45772b71, the notification reply's `input text` since 2026-09-27) left the emulator out of touch mode for every later leg, and there DocumentsUI's save picker raises the keyboard and the door's one Back is spent on it (docs/traps.md, A key event leaves the emulator out of touch mode). Measured: pool at touch mode 0, save 3/3 red; at 1, 3/3 green; reveal then save on HEAD, 2 of 3 red. run_apk_on restores touch mode before every leg and prints the reading; with the pool forced to 0 before each of 20 runs of the reveal and save legs, 120 of 120 passed. GUARD: android-leg-order's `restore touch mode` step, its removal and misplacement watched red. The 2026-09-14 sighting predates every runner key event and stays unattributed; a recurrence now carries the leg's touch mode in its leg log and the ImeTracker lines in its system events.
+KEY: save-compose, cancel door, pickerBackGate, withheld until a new stable picker path, would not dismiss, touch mode
 
 Matrix 5 of 2026-09-14 (fb084de4, the Return-key commit): `save-compose`
 failed `file_save cancel` with the door's own count — "the picker would not
@@ -15440,3 +15440,15 @@ KEY: edit list, elst, Media Foundation, two frames early, WinUI position, IMFSou
 The capture guests' nine buttons in their flowing row: on Windows the first line shows Ask camera, Start, Switch, Mute and Camera off with wide gaps, and Stop is drawn past the window's right edge (the capture legs still pass, since the harness clicks through UI Automation). Read in `reflow_wrap` (crates/kaya/src/winui/mod.rs): `wrap_lines` breaks the lines from each child's own desired width, but every line's children share one Grid's Auto COLUMN tracks, so each column is as wide as its widest child on ANY line, and a line that fit by its own widths no longer fits once the columns widen. The gaps the 2026-10-03 capture review called "the flowing row's own spacing" are the same cause. A fix gives each line its own track set (a per-line horizontal panel, or columns per line) and is held by a scene reading a wrapped row's right edge against its parent on the windows lane.
 KEY: flowing row, wrap, reflow_wrap, wrap_lines, Auto column, WinUI wrap, capture buttons
 
+
+## DEFECT — a warm Android pool fills its data partition one staged APK at a time (measured 2026-10-08)
+KEY: INSUFFICIENT_STORAGE, nexuslauncher, deleted base.apk, stage_suite_apk, warm pool storage
+
+docs/traps.md, The emulator launcher pins every replaced APK. Every suite
+staging leaves the replaced APK pinned by the launcher, so a pool kept warm
+across matrices loses about one APK's size per suite per run until an
+install fails. Seen when twenty hand runs of the save and reveal legs
+filled the tablet. Nothing in stage_suite_apk restarts the launcher or
+reads free space. The fix belongs on that path: restart the launcher
+after install, or refuse with the free space and the launcher's pinned
+count named, and it is held by android-leg-order's staging clause.

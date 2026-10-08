@@ -199,7 +199,7 @@ status = 'open'
 size = 'S each'
 unblocks = 'no app'
 key = 'first line box'
-text = "S each: the checkbox that reads a touch high beside a title's first line on Android, iOS and Windows (deferred 2026-09-24; cap-height centring is the candidate), the Windows launchers derivation, the iOS typeface observation stub, the Windows dnd_java drag face, WinUI swipe items drawn as text only (SwipeItem takes an IconSource, which kaya does not lower symbols to yet), the Android save dialog's cancel door (instrumented 2026-09-28, a90e051c), the colour picker's panel scene (<code>pick_color</code>), capture's C floor parsers, and the iOS media session's remote pause seen once leaving the player playing, whose bundle could not say why. Two need a ruling first: how wide a number field is, and what a C# or Java host does when asked for a scene it does not carry."
+text = "S each: the checkbox that reads a touch high beside a title's first line on Android, iOS and Windows (deferred 2026-09-24; cap-height centring is the candidate), the Windows launchers derivation, the iOS typeface observation stub, the Windows dnd_java drag face, WinUI swipe items drawn as text only (SwipeItem takes an IconSource, which kaya does not lower symbols to yet), the colour picker's panel scene (<code>pick_color</code>), capture's C floor parsers, and the iOS media session's remote pause seen once leaving the player playing, whose bundle could not say why. Two need a ruling first: how wide a number field is, and what a C# or Java host does when asked for a scene it does not carry."
 
 [[demo]]
 name = 'The text editor'

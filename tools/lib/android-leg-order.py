@@ -58,6 +58,15 @@ STEPS = [
         "the activity — no onCreate, no scene, and it reads as a clean run",
     ),
     (
+        "restore touch mode",
+        r"if not restore_touch_mode\(serial, log\):\s*return False",
+        "any key event (`press`'s `input keyevent`, the reply path's "
+        "`input text`) leaves the display out of touch mode for every "
+        "later leg, and there DocumentsUI's save picker raises the "
+        "keyboard and spends the cancel door's one Back on it; it must "
+        "follow the picker's force-stop so the touch lands on no picker",
+    ),
+    (
         "logcat -c",
         r'adb\(serial, "logcat", "-c", stdout=log, stderr=log\)',
         "the force-stop's own noise must not land in this leg's verdict",
@@ -366,6 +375,26 @@ def ime_problem(text: str, lane_ns: dict) -> str | None:
     return None
 
 
+def steps_problems(body: str) -> list[str]:
+    found = []
+    for label, pattern, why in STEPS:
+        match = re.search(pattern, body)
+        if match is None:
+            return [f"no `{label}` step in run_apk_on — either it was "
+                    f"removed or its spelling changed, and this gate can "
+                    f"no longer police the order it sits in"]
+        found.append((match.start(), label, why))
+    problems = []
+    for i in range(1, len(found)):
+        if found[i][0] > found[i - 1][0]:
+            continue
+        _, label, why = found[i]
+        prev = found[i - 1][1]
+        problems.append(f"`{label}` comes BEFORE `{prev}` in run_apk_on, "
+                        f"and it must come after: {why}.")
+    return problems
+
+
 def main() -> int:
     for path, label in ((RUNNER, "runner"), (LANE, "lane module")):
         if not path.exists():
@@ -432,31 +461,12 @@ def main() -> int:
         )
         return 1
 
-    found = []
-    for label, pattern, why in STEPS:
-        match = re.search(pattern, body)
-        if match is None:
-            print(
-                f"android-leg-order: no `{label}` step in run_apk_on — "
-                f"either it was removed or its spelling changed, and "
-                f"this gate can no longer police the order it sits in",
-                file=sys.stderr,
-            )
-            return 1
-        found.append((match.start(), label, why))
-
-    status = 0
-    for i in range(1, len(found)):
-        if found[i][0] > found[i - 1][0]:
-            continue
-        _, label, why = found[i]
-        prev = found[i - 1][1]
-        print(
-            f"android-leg-order: `{label}` comes BEFORE `{prev}` in "
-            f"run_apk_on, and it must come after: {why}.",
-            file=sys.stderr,
-        )
-        status = 1
+    problems = steps_problems(body)
+    for problem in problems:
+        print(f"android-leg-order: {problem}", file=sys.stderr)
+    if problems and problems[0].startswith("no `"):
+        return 1
+    status = 1 if problems else 0
 
     status |= no_restart_flag("run_apk_on", body)
     status |= no_empty_setting("run-emulator", text)
@@ -795,6 +805,29 @@ def main() -> int:
     if n != 1 or bad_ns is None or len(bad_ns["legs"]()) >= 100:
         print("android-leg-order: SELF-TEST FAIL (an empty roster "
               "passed the floor)", file=sys.stderr)
+        return 1
+
+    # N28/N29: the touch-mode restore removed, then moved above the
+    # picker's force-stop, must each red the steps clause.
+    restore = ("    if not restore_touch_mode(serial, log):\n"
+               "        return False\n")
+    doctored, n = doctor("touch-mode restore removed", body,
+                         re.escape(restore), "")
+    if n != 1 or not steps_problems(doctored):
+        print("android-leg-order: SELF-TEST FAIL (a leg with no "
+              "touch-mode restore read as good)", file=sys.stderr)
+        return 1
+    picker_loop = '    for picker in ("com.google.android.documentsui",\n'
+    moved = body.replace(restore, "", 1)
+    removed = int(moved != body)
+    doctored, n = doctor("touch-mode restore moved", moved,
+                         re.escape(picker_loop),
+                         (restore + picker_loop).replace("\\", r"\\"))
+    if n != 1 or removed != 1 or not any(
+            "`restore touch mode` comes BEFORE" in p
+            for p in steps_problems(doctored)):
+        print("android-leg-order: SELF-TEST FAIL (a restore above the "
+              "picker's force-stop read as good)", file=sys.stderr)
         return 1
 
     return status

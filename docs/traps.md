@@ -14979,3 +14979,52 @@ shown". With the switch guard cut, all six Windows reveal legs fail at that
 step. GUARD: tools/lib/reveal_routes.py's "no content change" and "mode
 switch" rows, with six cuts watched. The verb trace shows each send with the
 ring's cursors before and after it, and each dropped raise.
+
+## A key event leaves the emulator out of touch mode (measured 2026-10-08)
+
+Touch mode is one value per display (`dumpsys input`: `Display: 0
+TouchMode: N`), and it outlives the leg that moved it. Any `adb shell
+input keyevent` sets it to 0, TAB and DPAD and ENTER alike, and so does
+`input text`; `input motionevent DOWN` then `CANCEL` sets it back to 1
+with no click. The harness drives every app through accessibility, which
+touches nothing, so after `press tab` (docs/reveal-plan.md V10) or the
+notification reply's typing, the device stayed at 0 for every later leg.
+
+Out of touch mode, DocumentsUI's CREATE_DOCUMENT picker raises the soft
+keyboard on its name field (ImeTracker `onRequestShow ... reason
+SHOW_AUTO_EDITOR_FORWARD_NAV`). The cancel door's one BACK goes to that
+keyboard (`HIDE_SOFT_INPUT_ON_ANIMATION_STATE_CHANGED`, cancelled), the
+picker's path does not move, and the gate (A changed event is not a changed
+picker path) withholds every later look: "1 backs in 30 looks ... 29
+withheld". All four pool devices at 0: save 3/3 red on compose, jvm and go;
+at 1: 3/3 green. The accessibility window list showed NO input-method
+window at the press while ImeTracker said `onShown`, because the keyboard's
+show animation never ran (FrameTracker IME_INSETS_SHOW_ANIMATION timeout).
+So a keyboard reading from the service cannot name this cause; the
+ImeTracker lines in the bundle's system events can.
+
+run_apk_on restores touch mode before every leg and prints `touch mode at
+leg start: N` into the leg log. One cancelled touch is not always
+enough. After reveal-compose exits, the launcher holds the focus and no
+touch on it moves the value: five cancelled touches, `input tap` and a
+swipe all read back 0, 10 runs of 10, and the shade's expand and collapse
+did not help either. A touch on a freshly
+started window (Settings) read back 1, so that is the fallback, and
+Settings is force-stopped after it. That route read back 0 once in 20
+runs, with the focus at the touch unrecorded, so the touch now waits for
+Settings to hold the focus and the leg log names the focus at every
+touch. GUARD: tools/lib/android-leg-order.py's
+`restore touch mode` step, with its removal and its move above the
+picker's force-stop watched red.
+
+## The emulator launcher pins every replaced APK (measured 2026-10-08)
+
+`adb install -r` deletes the old APK, but the Pixel launcher
+(com.google.android.apps.nexuslauncher) keeps its file descriptor open, so
+the space is never freed while the launcher runs. On the warm pool the
+tablet's /data read 95% used (510 MB free) against 2.5 GB that `du` could
+find; the launcher held 19 deleted `base.apk` files and system_server one.
+The next compose staging failed with INSTALL_FAILED_INSUFFICIENT_STORAGE.
+`am force-stop com.google.android.apps.nexuslauncher` freed 7 GB on the
+tablet and 3.6 to 5.9 GB on each pool device; the launcher restarts by
+itself. `pm trim-caches` and `sm idle-maint run` freed nothing.
