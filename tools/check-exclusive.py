@@ -574,8 +574,8 @@ watched("an iOS funnel that starts legs under a held token",
 
 # 2. A RUNNER STOPS HOLDING.
 no_hold = gate.doctor("the android hold renamed", REAL["tools/android/run-emulator.py"],
-                      r'with exclusive\.hold\("android", name\):',
-                      'with exclusive.hold("droid", name):')
+                      r'with exclusive\.hold\("android", name\)',
+                      'with exclusive.hold("droid", name)')
 watched("an android funnel that never holds",
         {**REAL, "tools/android/run-emulator.py": no_hold}, "never holds the token")
 

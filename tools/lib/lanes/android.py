@@ -36,16 +36,8 @@ SUITE_APPS = {
 
 SUITES = ("compose", "jvm", "go", "python")
 
-# THE LEGS THAT RUN AS THE ONLY INPUT-DRIVING LEG ON THE HOST (tools/lib/
-# exclusive.py): the emulator drags, twenty-five sightings under a matrix and
-# green alone (docs/deferred.md, the dnd-compose WATCH).
-# notify-compose joins them for the same reason one step further out: its
-# activation is a REAL tap on SystemUI's notification shade, driven from the
-# host (docs/tasks-s3-plan.md N5).
-EXCLUSIVE = {"tasks-compose", "notify-compose",
-             # The device's own 24-hour setting is every process's
-             # (SCENE_SETTINGS), so nothing else runs under it.
-             "clock24-compose",
+# THE LEGS THAT RUN AS THE ONLY LEG ON THE HOST (tools/lib/exclusive.py).
+EXCLUSIVE = {
              # THE EMULATOR'S AUDIO INPUT BREAKS UNDER HOST LOAD: the guest
              # HAL's reads fail with EIO for the rest of the input's life,
              # with or without the injected tone, read as `samples silent`
@@ -58,9 +50,13 @@ EXCLUSIVE = {"tasks-compose", "notify-compose",
 # the host's, and held the matrix-wide token for 84 s a matrix that every other
 # lane waited out. The pool empties around each; the token is
 # not taken. Their sightings under a matrix are the dnd-compose WATCH's.
-# chat-go joined them on 2026-10-07 (the maintainer): its reds were the shade's
-# focus, not the token (docs/traps.md, the shade an expand reopens without focus).
-ALONE = {"dnd-compose", "dnd-jvm", "dnd-go", "chat-go"}
+# The notification-shade legs joined them on 2026-10-07 (the maintainer: anything
+# that can be parallelized should be): their reds were the shade's focus, not
+# the token (docs/traps.md, the shade an expand reopens without focus).
+# clock24-compose sets the device's own 24-hour setting, every process's on
+# that emulator (SCENE_SETTINGS), and nothing on the host's.
+ALONE = {"dnd-compose", "dnd-jvm", "dnd-go", "chat-go", "notify-compose",
+         "tasks-compose", "clock24-compose"}
 
 # THE QUIET TAIL (the maintainer's ruling of 2026-10-05; docs/traps.md, the
 # emulator's audio input entry): the microphone legs run after every other lane
@@ -451,3 +447,17 @@ def legs():
 def wired_scenes():
     """The scenes some leg runs — the gates' census surface."""
     return {scene_of(leg) for leg in legs()}
+
+
+def unisolated_setting_legs(alone=None, exclusive=None):
+    """Setting legs in neither isolated set: a pooled one would change the
+    device under its neighbours (the runner's scene_setting)."""
+    isolated = (ALONE if alone is None else alone) | (EXCLUSIVE if exclusive is None else exclusive)
+    return sorted(leg for leg in legs()
+                  if scene_of(leg) in SCENE_SETTINGS and leg not in isolated)
+
+
+if unisolated_setting_legs():
+    raise SystemExit(f"lanes/android.py: {', '.join(unisolated_setting_legs())} "
+                     f"run(s) under a SCENE_SETTINGS device setting but sit in "
+                     f"neither ALONE nor EXCLUSIVE; add each to one of them")
