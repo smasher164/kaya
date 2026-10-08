@@ -51,6 +51,7 @@ static class Program
             case "scrollto": ScrollTo.ScrollToScene.Run(); break;
             case "search": SearchScene.Run(); break;
             case "secure": SecureScene.Run(); break;
+            case "autofill": AutofillScene.Run(); break;
             case "submit": SubmitScene.Run(); break;
             case "progress": ProgressScene.Run(); break;
             case "select": SelectScene.Run(); break;

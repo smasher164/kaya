@@ -93566,8 +93566,16 @@ pub mod Microsoft {
                         -> windows_core::HRESULT,
                     TextReadingOrder: usize,
                     SetTextReadingOrder: usize,
-                    InputScope: usize,
-                    SetInputScope: usize,
+                    pub InputScope: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetInputScope: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
                     pub CanPasteClipboardContent:
                         unsafe extern "system" fn(
                             *mut core::ffi::c_void,
@@ -94053,8 +94061,16 @@ pub mod Microsoft {
                         *mut *mut core::ffi::c_void,
                     )
                         -> windows_core::HRESULT,
-                    InputScope: usize,
-                    SetInputScope: usize,
+                    pub InputScope: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetInputScope: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
                     pub Header: unsafe extern "system" fn(
                         *mut core::ffi::c_void,
                         *mut *mut core::ffi::c_void,
@@ -96188,8 +96204,16 @@ pub mod Microsoft {
                             *mut core::ffi::c_void,
                             bool,
                         ) -> windows_core::HRESULT,
-                    InputScope: usize,
-                    SetInputScope: usize,
+                    pub InputScope: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetInputScope: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
                     pub Header: unsafe extern "system" fn(
                         *mut core::ffi::c_void,
                         *mut *mut core::ffi::c_void,
@@ -160134,6 +160158,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn InputScope(&self) -> windows_core::Result<super::Input::InputScope> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).InputScope)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetInputScope<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::InputScope>,
+                    {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetInputScope)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CanPasteClipboardContent(&self) -> windows_core::Result<bool> {
                         let this = self;
                         unsafe {
@@ -175771,6 +175819,30 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn InputScope(&self) -> windows_core::Result<super::Input::InputScope> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).InputScope)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetInputScope<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::InputScope>,
+                    {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetInputScope)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn Header(&self) -> windows_core::Result<windows_core::IInspectable> {
@@ -201228,6 +201300,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetIsTextPredictionEnabled)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn InputScope(&self) -> windows_core::Result<super::Input::InputScope> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).InputScope)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetInputScope<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::InputScope>,
+                    {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetInputScope)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -263017,6 +263113,69 @@ pub mod Microsoft {
                         ) -> windows_core::HRESULT,
                 }
                 windows_core::imp::define_interface!(
+                    IInputScope,
+                    IInputScope_Vtbl,
+                    0x76ea58b1_e910_5176_9147_695cc95e7da2
+                );
+                impl windows_core::RuntimeType for IInputScope {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IInputScope_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub Names: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    IInputScopeName,
+                    IInputScopeName_Vtbl,
+                    0xee99a66d_28d0_53cb_82ee_1b6ee58bcc35
+                );
+                impl windows_core::RuntimeType for IInputScopeName {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IInputScopeName_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub NameValue: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut InputScopeNameValue,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetNameValue: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        InputScopeNameValue,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    IInputScopeNameFactory,
+                    IInputScopeNameFactory_Vtbl,
+                    0xfeec2efd_bc09_5cd6_9b47_6d35d1d87c61
+                );
+                impl windows_core::RuntimeType for IInputScopeNameFactory {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IInputScopeNameFactory_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub CreateInstance: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        InputScopeNameValue,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
                     IKeyRoutedEventArgs,
                     IKeyRoutedEventArgs_Vtbl,
                     0xee357007_a2d6_5c75_9431_05fd66ec7915
@@ -263191,6 +263350,235 @@ pub mod Microsoft {
                         -> windows_core::HRESULT,
                     GetCurrentPoint: usize,
                     GetIntermediatePoints: usize,
+                }
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct InputScope(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    InputScope,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                windows_core::imp::required_hierarchy!(InputScope, super::DependencyObject);
+                impl InputScope {
+                    pub fn new() -> windows_core::Result<Self> {
+                        Self::IActivationFactory(|f| f.ActivateInstance::<Self>())
+                    }
+                    fn IActivationFactory<
+                        R,
+                        F: FnOnce(&windows_core::imp::IGenericFactory) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            InputScope,
+                            windows_core::imp::IGenericFactory,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                    pub fn DispatcherQueue(
+                        &self,
+                    ) -> windows_core::Result<super::super::Dispatching::DispatcherQueue>
+                    {
+                        let this =
+                            &windows_core::Interface::cast::<super::IDependencyObject>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).DispatcherQueue)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn Names(
+                        &self,
+                    ) -> windows_core::Result<windows_collections::IVector<InputScopeName>>
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Names)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                }
+                impl windows_core::RuntimeType for InputScope {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<Self, IInputScope>();
+                }
+                unsafe impl windows_core::Interface for InputScope {
+                    type Vtable = <IInputScope as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID = <IInputScope as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for InputScope {
+                    const NAME: &'static str = "Microsoft.UI.Xaml.Input.InputScope";
+                }
+                unsafe impl Send for InputScope {}
+                unsafe impl Sync for InputScope {}
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct InputScopeName(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    InputScopeName,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                windows_core::imp::required_hierarchy!(InputScopeName, super::DependencyObject);
+                impl InputScopeName {
+                    pub fn new() -> windows_core::Result<Self> {
+                        Self::IActivationFactory(|f| f.ActivateInstance::<Self>())
+                    }
+                    fn IActivationFactory<
+                        R,
+                        F: FnOnce(&windows_core::imp::IGenericFactory) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            InputScopeName,
+                            windows_core::imp::IGenericFactory,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                    pub fn DispatcherQueue(
+                        &self,
+                    ) -> windows_core::Result<super::super::Dispatching::DispatcherQueue>
+                    {
+                        let this =
+                            &windows_core::Interface::cast::<super::IDependencyObject>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).DispatcherQueue)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn NameValue(&self) -> windows_core::Result<InputScopeNameValue> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).NameValue)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetNameValue(
+                        &self,
+                        value: InputScopeNameValue,
+                    ) -> windows_core::Result<()> {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetNameValue)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn CreateInstance(
+                        namevalue: InputScopeNameValue,
+                    ) -> windows_core::Result<InputScopeName> {
+                        Self::IInputScopeNameFactory(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).CreateInstance)(
+                                windows_core::Interface::as_raw(this),
+                                namevalue,
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        })
+                    }
+                    fn IInputScopeNameFactory<
+                        R,
+                        F: FnOnce(&IInputScopeNameFactory) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            InputScopeName,
+                            IInputScopeNameFactory,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                }
+                impl windows_core::RuntimeType for InputScopeName {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<Self, IInputScopeName>();
+                }
+                unsafe impl windows_core::Interface for InputScopeName {
+                    type Vtable = <IInputScopeName as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID =
+                        <IInputScopeName as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for InputScopeName {
+                    const NAME: &'static str = "Microsoft.UI.Xaml.Input.InputScopeName";
+                }
+                unsafe impl Send for InputScopeName {}
+                unsafe impl Sync for InputScopeName {}
+                #[repr(transparent)]
+                #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+                pub struct InputScopeNameValue(pub i32);
+                impl InputScopeNameValue {
+                    pub const Default: Self = Self(0i32);
+                    pub const Url: Self = Self(1i32);
+                    pub const EmailSmtpAddress: Self = Self(5i32);
+                    pub const PersonalFullName: Self = Self(7i32);
+                    pub const CurrencyAmountAndSymbol: Self = Self(20i32);
+                    pub const CurrencyAmount: Self = Self(21i32);
+                    pub const DateMonthNumber: Self = Self(23i32);
+                    pub const DateDayNumber: Self = Self(24i32);
+                    pub const DateYear: Self = Self(25i32);
+                    pub const Digits: Self = Self(28i32);
+                    pub const Number: Self = Self(29i32);
+                    pub const Password: Self = Self(31i32);
+                    pub const TelephoneNumber: Self = Self(32i32);
+                    pub const TelephoneCountryCode: Self = Self(33i32);
+                    pub const TelephoneAreaCode: Self = Self(34i32);
+                    pub const TelephoneLocalNumber: Self = Self(35i32);
+                    pub const TimeHour: Self = Self(37i32);
+                    pub const TimeMinutesOrSeconds: Self = Self(38i32);
+                    pub const NumberFullWidth: Self = Self(39i32);
+                    pub const AlphanumericHalfWidth: Self = Self(40i32);
+                    pub const AlphanumericFullWidth: Self = Self(41i32);
+                    pub const Hiragana: Self = Self(44i32);
+                    pub const KatakanaHalfWidth: Self = Self(45i32);
+                    pub const KatakanaFullWidth: Self = Self(46i32);
+                    pub const Hanja: Self = Self(47i32);
+                    pub const HangulHalfWidth: Self = Self(48i32);
+                    pub const HangulFullWidth: Self = Self(49i32);
+                    pub const Search: Self = Self(50i32);
+                    pub const Formula: Self = Self(51i32);
+                    pub const SearchIncremental: Self = Self(52i32);
+                    pub const ChineseHalfWidth: Self = Self(53i32);
+                    pub const ChineseFullWidth: Self = Self(54i32);
+                    pub const NativeScript: Self = Self(55i32);
+                    pub const Text: Self = Self(57i32);
+                    pub const Chat: Self = Self(58i32);
+                    pub const NameOrPhoneNumber: Self = Self(59i32);
+                    pub const EmailNameOrAddress: Self = Self(60i32);
+                    pub const Maps: Self = Self(62i32);
+                    pub const NumericPassword: Self = Self(63i32);
+                    pub const NumericPin: Self = Self(64i32);
+                    pub const AlphanumericPin: Self = Self(65i32);
+                    pub const FormulaNumber: Self = Self(67i32);
+                    pub const ChatWithoutEmoji: Self = Self(68i32);
+                }
+                impl windows_core::TypeKind for InputScopeNameValue {
+                    type TypeKind = windows_core::CopyType;
+                }
+                impl windows_core::RuntimeType for InputScopeNameValue {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::from_slice(
+                            b"enum(Microsoft.UI.Xaml.Input.InputScopeNameValue;i4)",
+                        );
                 }
                 windows_core::imp::define_interface!(
                     KeyEventHandler,

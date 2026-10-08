@@ -10,6 +10,7 @@ import (
 	"dev.kaya/guests/go/adaptive"
 	"dev.kaya/guests/go/align"
 	"dev.kaya/guests/go/assets"
+	"dev.kaya/guests/go/autofill"
 	"dev.kaya/guests/go/background"
 	"dev.kaya/guests/go/capture"
 	"dev.kaya/guests/go/chat"
@@ -51,8 +52,8 @@ import (
 	"dev.kaya/guests/go/scroll"
 	"dev.kaya/guests/go/scrollto"
 	"dev.kaya/guests/go/search"
-	"dev.kaya/guests/go/secure"
 	"dev.kaya/guests/go/sections"
+	"dev.kaya/guests/go/secure"
 	selectscene "dev.kaya/guests/go/select"
 	"dev.kaya/guests/go/sheet"
 	"dev.kaya/guests/go/sizepolicy"
@@ -85,6 +86,7 @@ var scenes = map[string]func() *kaya.App{
 	"adaptive":       adaptive.App,
 	"align":          align.App,
 	"assets":         assets.App,
+	"autofill":       autofill.App,
 	"background":     background.App,
 	"capture":        capture.App,
 	"capture_denied": capture.App,

@@ -344,13 +344,13 @@ const (
 	FitContain Fit = 0
 	FitCover Fit = 1
 	FitFill Fit = 2
-	ContentTypeNone = 0
-	ContentTypeUsername = 1
-	ContentTypePassword = 2
-	ContentTypeNewPassword = 3
-	ContentTypeOneTimeCode = 4
-	ContentTypeEmail = 5
-	ContentTypePhone = 6
+	ContentTypeNone ContentType = 0
+	ContentTypeUsername ContentType = 1
+	ContentTypePassword ContentType = 2
+	ContentTypeNewPassword ContentType = 3
+	ContentTypeOneTimeCode ContentType = 4
+	ContentTypeEmail ContentType = 5
+	ContentTypePhone ContentType = 6
 	TrackKindAudio = 0
 	TrackKindCaption = 1
 	PpropSource = 1
@@ -852,6 +852,26 @@ func (f Fit) String() string {
 		return "fill"
 	}
 	return "Fit(" + strconv.FormatInt(int64(f), 10) + ")"
+}
+
+func (c ContentType) String() string {
+	switch c {
+	case ContentTypeNone:
+		return "none"
+	case ContentTypeUsername:
+		return "username"
+	case ContentTypePassword:
+		return "password"
+	case ContentTypeNewPassword:
+		return "new_password"
+	case ContentTypeOneTimeCode:
+		return "one_time_code"
+	case ContentTypeEmail:
+		return "email"
+	case ContentTypePhone:
+		return "phone"
+	}
+	return "ContentType(" + strconv.FormatInt(int64(c), 10) + ")"
 }
 
 func pad8(b []byte) []byte {

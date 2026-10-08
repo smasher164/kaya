@@ -128,6 +128,12 @@ fn main() {
         // enum its reveal setter takes (P3 sets it Hidden).
         "Microsoft.UI.Xaml.Controls.PasswordBox".to_string(),
         "Microsoft.UI.Xaml.Controls.PasswordRevealMode".to_string(),
+        // THE CONTENT TYPE (docs/autofill-plan.md §3, the WinUI column):
+        // TextBox's and PasswordBox's InputScope are pads until the scope,
+        // its name and the name's enum are named.
+        "Microsoft.UI.Xaml.Input.InputScope".to_string(),
+        "Microsoft.UI.Xaml.Input.InputScopeName".to_string(),
+        "Microsoft.UI.Xaml.Input.InputScopeNameValue".to_string(),
         // THE TEXTAREA'S CONTROL (docs/textarea-foundation-plan.md):
         // RichEditBox is the rich-CAPABLE control kaya pins to plain
         // text; TextBox stays the entry's. It has no Text property and

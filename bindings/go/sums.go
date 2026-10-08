@@ -537,6 +537,10 @@ func (sc SumCase[K, V]) SetWrap(n Node, on bool) { sc.t.SetWrap(n, on) }
 // Return (Tpl.SetSubmits; docs/submit-plan.md S2).
 func (sc SumCase[K, V]) SetSubmits(n Node, on bool) { sc.t.SetSubmits(n, on) }
 
+// SetContentType says what every stamped copy of this arm's field holds
+// (Tpl.SetContentType; docs/autofill-plan.md A1).
+func (sc SumCase[K, V]) SetContentType(n Node, content ContentType) { sc.t.SetContentType(n, content) }
+
 // SetAccepts declares what a copy of this arm takes from a paste; const
 // only, and the declaration App.OnPasteNode needs (Tpl.SetAccepts).
 func (sc SumCase[K, V]) SetAccepts(n Node, kinds ...string) { sc.t.SetAccepts(n, kinds...) }

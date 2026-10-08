@@ -768,15 +768,21 @@ def secure_identity_interpreters(swiftui_text, compose_text):
                        f"Edit>Copy would be enabled on a password (P4)")
     compose_view = re.search(r"\nprivate fun KayaSecureField\((.*?)\n\}", compose_text, re.S)
     for needle in ("BasicSecureTextField(", "TextObfuscationMode.RevealLastTyped",
-                   "keyboardType = KeyboardType.Password"):
+                   "keyboardOptions = kayaContentKeyboard(node.contentType, secure = true)"):
         if not compose_view or needle not in compose_view.group(1):
             bad.append(f"{COMPOSE}: KayaSecureField lost {needle!r} (P3, P5, P7)")
+    keyboard = re.search(r"\ninternal fun kayaContentKeyboard\((.*?)\n\}", compose_text, re.S)
+    if not keyboard or "else -> if (secure) KeyboardType.Password" not in keyboard.group(1):
+        bad.append(f"{COMPOSE}: kayaContentKeyboard no longer gives a secure field the password "
+                   f"keyboard (P7)")
     if compose_view and re.search(r"\bBasicTextField\(", compose_view.group(1)):
         bad.append(f"{COMPOSE}: KayaSecureField draws a plain BasicTextField (P5)")
     mask = ('modifier = Modifier\n            .semantics { editableText = '
-            'AnnotatedString("\\u2022".repeat(node.textState.text.length)) }\n'
-            '            .then(a11y)')
-    if not compose_view or mask not in compose_view.group(1):
+            'AnnotatedString("\\u2022".repeat(node.textState.text.length)) }\n')
+    hint = re.search(r"\ninternal fun kayaContentHint\((.*?)\n\}", compose_text, re.S)
+    if not compose_view or mask not in compose_view.group(1) \
+            or compose_view.group(1).count("editableText") != 1 \
+            or not hint or "editableText" in hint.group(1):
         bad.append(f"{COMPOSE}: KayaSecureField no longer masks its EditableText at the head of "
                    f"its modifier, so the node info hands an accessibility client the real "
                    f"text (docs/traps.md)")
@@ -994,7 +1000,7 @@ def drag_waits(winui_text):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 121
+DECLARED = 124
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -1195,6 +1201,15 @@ for label, path, pattern, repl, *want in (
     ("Compose's override carrying the real text", COMPOSE,
      r'AnnotatedString\("\\u2022"\.repeat\(node\.textState\.text\.length\)\)',
      "AnnotatedString(node.textState.text.toString())"),
+    ("Compose's secure keyboard plain in the helper", COMPOSE,
+     r"else -> if \(secure\) KeyboardType\.Password", "else -> if (secure) KeyboardType.Text"),
+    ("Compose's real text set after the mask", COMPOSE,
+     r"(            \.then\(kayaContentHint\(node\.id, node\.contentType\)\)\n)",
+     r"\1            .semantics { editableText = "
+     r"AnnotatedString(node.textState.text.toString()) }\n"),
+    ("Compose's content hint setting the editable text", COMPOSE,
+     r"(        if \(platform != null\) contentType = platform\n)",
+     r"\1        editableText = AnnotatedString(\"\")\n"),
     ("Compose's masked read counting the drawn layout (the divergent observable)", COMPOSE,
      r'kayaMaskCount\(info\.text\?\.toString\(\) \?: ""\)',
      r"kayaMaskCount(kayaTextLayouts[field.id]?.invoke()?.layoutInput?.text?.text ?: \"\")"),

@@ -179,6 +179,9 @@ func (r conversationRow) SetWrap(n kaya.Node, on bool) { r.t.SetWrap(n, on) }
 
 func (r conversationRow) SetFormat(n kaya.Node, format kaya.NumberFormat) { r.t.SetFormat(n, format) }
 func (r conversationRow) SetSubmits(n kaya.Node, on bool)                 { r.t.SetSubmits(n, on) }
+func (r conversationRow) SetContentType(n kaya.Node, content kaya.ContentType) {
+	r.t.SetContentType(n, content)
+}
 
 func (r conversationRow) Draggable(n kaya.Node) kaya.TplDragRef { return r.t.Draggable(n) }
 

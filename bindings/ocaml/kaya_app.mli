@@ -447,6 +447,13 @@ module Fit : sig
   type t = Contain | Cover | Fill
 end
 
+(* What a credential field holds (docs/autofill-plan.md A2): the passwords
+   on a secure field only, username, email and phone on an entry only, a
+   one-time code on either (A3), refused at the root otherwise. *)
+module Content_type : sig
+  type t = None | Username | Password | New_password | One_time_code | Email | Phone
+end
+
 (* Where a player reads its media: an asset name, an http(s) URL, or a
    picked file — never bytes. *)
 module Media_source : sig
@@ -937,6 +944,7 @@ val entry :
   ?help_bind:string signal ->
   ?placeholder:string ->
   ?placeholder_bind:string signal ->
+  ?content_type:Content_type.t ->
   ?on_change:(string -> unit) ->
   ?on_submit:(string -> unit) -> unit -> widget
 
@@ -965,6 +973,7 @@ val secure_field :
   ?help_bind:string signal ->
   ?placeholder:string ->
   ?placeholder_bind:string signal ->
+  ?content_type:Content_type.t ->
   ?on_change:(string -> unit) ->
   ?on_submit:(string -> unit) -> unit -> widget
 
@@ -1164,6 +1173,9 @@ val select_audio : player -> int -> unit
 val select_captions : player -> int option -> unit
 
 val set_fit : widget -> Fit.t -> unit
+
+(* What a live entry or secure field holds (docs/autofill-plan.md A1). *)
+val set_content_type : widget -> Content_type.t -> unit
 
 (* The width:height ratio of a live video view's box, whatever its
    picture's own shape; its fit places the picture in it. *)
@@ -2075,6 +2087,7 @@ module Tpl : sig
     ?placeholder:string ->
     ?placeholder_bind:string signal ->
     ?placeholder_field:('d, string) field ->
+    ?content_type:Content_type.t ->
     ?accepts:string list ->
     ?text:string ->
     ?bind:string signal ->
@@ -2123,6 +2136,7 @@ module Tpl : sig
     ?placeholder:string ->
     ?placeholder_bind:string signal ->
     ?placeholder_field:('d, string) field ->
+    ?content_type:Content_type.t ->
     ?accepts:string list ->
     ?text:string ->
     ?bind:string signal ->

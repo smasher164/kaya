@@ -26,7 +26,7 @@ SCENES = [
     "reorder", "feed", "grow", "layout", "align", "window", "panels",
     "confirm", "nav", "split", "panes", "table", "scroll",
     "progress", "select", "radio", "grid", "textarea", "search", "submit", "scrollto", "fullscreen",
-    "numberfield", "timecode", "colorpicker", "range", "secure",
+    "numberfield", "timecode", "colorpicker", "range", "secure", "autofill",
     "sections",
     "menus", "commands", "a11y", "a11yrows", "filedialog",
     "clipboard", "undo", "dirty", "ranges", "save", "styling",
@@ -694,6 +694,11 @@ ORDER = [
     # emoji_rust ALONE: it types into the system's emoji panel.
     [
      "emoji_rust",
+    ],
+    # The content type (docs/autofill-plan.md): clicks only, pooled.
+    [
+     "autofill_rust", "autofill_python", "autofill_js", "autofill_go", "autofill_csharp",
+     "autofill_java",
     ],
     # The background scene, pooled between drains: its worker parks
     # until a click releases it, so a binding that ran the work ON the

@@ -520,6 +520,7 @@ static class Program
         Set("SetFill", ["Node n", "bool on"], "n, on");
         Set("SetFormat", ["Node n", "NumberFormat format"], "n, format");
         Set("SetSubmits", ["Node n", "bool on"], "n, on");
+        Set("SetContentType", ["Node n", "ContentType contentType"], "n, contentType");
         Set("SetAlign", ["Node n", "Align align"], "n, align");
         Set("SetFilled", ["Node n", "Tint tint"], "n, tint");
         Set("SetMaxWidth", ["Node n", "double points"], "n, points");

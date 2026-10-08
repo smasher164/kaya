@@ -163,6 +163,9 @@ func (r threadRow) SetWrap(n kaya.Node, on bool) { r.t.SetWrap(n, on) }
 
 func (r threadRow) SetFormat(n kaya.Node, format kaya.NumberFormat) { r.t.SetFormat(n, format) }
 func (r threadRow) SetSubmits(n kaya.Node, on bool)                 { r.t.SetSubmits(n, on) }
+func (r threadRow) SetContentType(n kaya.Node, content kaya.ContentType) {
+	r.t.SetContentType(n, content)
+}
 
 func (r threadRow) Draggable(n kaya.Node) kaya.TplDragRef { return r.t.Draggable(n) }
 

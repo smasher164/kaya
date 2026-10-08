@@ -231,12 +231,14 @@ module KayaApp
     setA11yHint,
     setHelp,
     setPlaceholder,
+    setContentType,
     setHref,
     setRole,
     setSymbol,
     Align (..),
     Tint (..),
     Axis (..),
+    ContentType (..),
     SizeClass (..),
     Role (..),
     Attr (..),
@@ -2828,6 +2830,36 @@ setPlaceholder (Widget w) v = emitB (W.txSetPlaceholder w (T.unpack v))
 bindPlaceholder :: Widget -> Signal Text -> Build ()
 bindPlaceholder (Widget w) (Signal s) = emitB (W.txBindPlaceholder w s)
 
+-- | What a credential field holds (docs\/autofill-plan.md A2): the
+-- passwords on a secure field only, username, email and phone on an entry
+-- only, a one-time code on either (A3), refused at the root otherwise.
+-- 'ContentTypeNone' takes the hint away.
+data ContentType
+  = ContentTypeNone
+  | ContentTypeUsername
+  | ContentTypePassword
+  | ContentTypeNewPassword
+  | ContentTypeOneTimeCode
+  | ContentTypeEmail
+  | ContentTypePhone
+  deriving (Eq, Show)
+
+contentTypeWire :: ContentType -> Int64
+contentTypeWire c = fromIntegral $ case c of
+  ContentTypeNone -> W.contentTypeNone
+  ContentTypeUsername -> W.contentTypeUsername
+  ContentTypePassword -> W.contentTypePassword
+  ContentTypeNewPassword -> W.contentTypeNewPassword
+  ContentTypeOneTimeCode -> W.contentTypeOneTimeCode
+  ContentTypeEmail -> W.contentTypeEmail
+  ContentTypePhone -> W.contentTypePhone
+
+-- | What an entry or secure field holds, so the platform's password
+-- manager, one-time-code autofill and keyboard can act on it
+-- (docs\/autofill-plan.md A1).
+setContentType :: Widget -> ContentType -> Build ()
+setContentType (Widget w) c = emitB (W.txSetContentType w (contentTypeWire c))
+
 -- | The DESTINATION a 'Link' label opens (docs\/tasks-s2-plan.md T3): the
 -- platform's own opener takes it and nothing is emitted.
 setHref :: Widget -> Text -> Build ()
@@ -2913,6 +2945,9 @@ data Attr (c :: WClass) where
   -- refuses it elsewhere, and an empty one by name.
   Placeholder :: Text -> Attr 'LeafW
   PlaceholderBound :: Signal Text -> Attr 'LeafW
+  -- | What this entry or secure field holds — 'setContentType' at
+  -- construction.
+  ContentType :: ContentType -> Attr 'LeafW
   -- | The DESTINATION this 'Link' label opens
   -- (docs\/tasks-s2-plan.md T3): the platform's own opener takes it, and
   -- nothing is emitted.
@@ -3000,6 +3035,7 @@ applyAttr (OwnUndo on) w = setOwnUndo w on
 applyAttr (Submits on) w = setSubmits w on
 applyAttr (Placeholder p) w = setPlaceholder w p
 applyAttr (PlaceholderBound sig) w = bindPlaceholder w sig
+applyAttr (ContentType c) w = setContentType w c
 applyAttr (Href u) w = setHref w u
 applyAttr (HrefBound sig) w = bindHref w sig
 applyAttr (MinDate d) (Widget n) =
@@ -4233,6 +4269,9 @@ data TplAttr where
   -- CONSTANT and not a source, for 'TplGrow''s reason: every copy of one
   -- blueprint has the same gesture.
   TplSubmits :: Bool -> TplAttr
+  -- | What this stamped field holds (the live 'ContentType'), a CONSTANT
+  -- for 'TplSubmits''s reason.
+  TplContentType :: ContentType -> TplAttr
   TplNumberFormat :: NumberFormat -> TplAttr
   -- | A stamped slider's granularity (docs\/slider-plan.md S1): constant
   -- across the copies, like the range.
@@ -4309,6 +4348,7 @@ applyTplAttr (TplHrefBound src) n = bindStrSource hrefProp n src
 applyTplAttr (TplHrefField src) n = bindStrSource hrefProp n src
 applyTplAttr (TplRole r) n = setNodeRole n r
 applyTplAttr (TplSubmits on) n = setNodeSubmits n on
+applyTplAttr (TplContentType c) (Node n) = emitT (W.txSetContentType n (contentTypeWire c))
 applyTplAttr (TplNumberFormat format) n = setNodeNumberFormat n format
 applyTplAttr (TplStep step) (Node n) = emitT (W.txSetStep n step)
 applyTplAttr (TplMinGap gap) (Node n) = emitT (W.txSetMinGap n gap)

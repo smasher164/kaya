@@ -169,6 +169,32 @@ public enum KayaAxis: Int64 {
     case vertical = 1
 }
 
+/// What a credential field holds (docs/autofill-plan.md A2): the
+/// passwords on a secure field only, username, email and phone on an entry
+/// only, a one-time code on either (A3), refused at the root otherwise.
+/// `.none` takes the hint away. The numbers come from the core's header.
+public enum KayaContentType: Sendable {
+    case none
+    case username
+    case password
+    case newPassword
+    case oneTimeCode
+    case email
+    case phone
+
+    var wire: Int64 {
+        switch self {
+        case .none: return Int64(KAYA_CONTENT_TYPE_NONE)
+        case .username: return Int64(KAYA_CONTENT_TYPE_USERNAME)
+        case .password: return Int64(KAYA_CONTENT_TYPE_PASSWORD)
+        case .newPassword: return Int64(KAYA_CONTENT_TYPE_NEW_PASSWORD)
+        case .oneTimeCode: return Int64(KAYA_CONTENT_TYPE_ONE_TIME_CODE)
+        case .email: return Int64(KAYA_CONTENT_TYPE_EMAIL)
+        case .phone: return Int64(KAYA_CONTENT_TYPE_PHONE)
+        }
+    }
+}
+
 /// A canvas's coordinate system AND its natural size in
 /// device-independent points (docs/canvas-plan.md §3.2).
 public struct KayaViewbox {
@@ -4336,6 +4362,13 @@ public final class KayaAppTx {
         tx.bindPlaceholder(w.id, s.id)
     }
 
+    /// What an entry or secure field holds, so the platform's password
+    /// manager, one-time-code autofill and keyboard can act on it
+    /// (docs/autofill-plan.md A1).
+    public func setContentType(_ w: KayaWidget, _ contentType: KayaContentType) {
+        tx.setContentType(w.id, contentType.wire)
+    }
+
     /// The DESTINATION a `.link` label opens (docs/tasks-s2-plan.md T3):
     /// the platform's own opener takes it and nothing is emitted.
     func setHref(_ w: KayaWidget, _ url: String) {
@@ -4591,11 +4624,13 @@ public final class KayaAppTx {
     public func entry(
         onChange: ((KayaAppTx, String) throws -> Void)? = nil,
         onSubmit: ((KayaAppTx, String) throws -> Void)? = nil,
+        contentType: KayaContentType? = nil,
         grow: Double? = nil
     ) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_ENTRY))
         if let onChange { app.onChange(w, onChange) }
         if let onSubmit { app.onSubmitted(w, onSubmit) }
+        if let contentType { setContentType(w, contentType) }
         if let grow { setGrow(w, grow) }
         return w
     }
@@ -4654,11 +4689,13 @@ public final class KayaAppTx {
     public func secureField(
         onChange: ((KayaAppTx, String) throws -> Void)? = nil,
         onSubmit: ((KayaAppTx, String) throws -> Void)? = nil,
+        contentType: KayaContentType? = nil,
         grow: Double? = nil
     ) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_SECURE_FIELD))
         if let onChange { app.onChange(w, onChange) }
         if let onSubmit { app.onSubmitted(w, onSubmit) }
+        if let contentType { setContentType(w, contentType) }
         if let grow { setGrow(w, grow) }
         return w
     }
@@ -6294,6 +6331,12 @@ public final class KayaTpl {
     /// A stamped textarea that SUBMITS on Return (docs/submit-plan.md S2).
     public func setSubmits(_ n: KayaNodeHandle, _ on: Bool) {
         tx.tx.setSubmits(n.id, on)
+    }
+
+    /// What every stamped copy of this field holds
+    /// (KayaAppTx.setContentType).
+    public func setContentType(_ n: KayaNodeHandle, _ contentType: KayaContentType) {
+        tx.tx.setContentType(n.id, contentType.wire)
     }
 
     /// What ACTIVATING a stamped copy does. Write a VERB PHRASE.

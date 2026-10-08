@@ -767,6 +767,14 @@ export class Handle {
     return this;
   }
 
+  /** What this entry or secure field holds, so the platform's password
+   * manager, one-time-code autofill and keyboard can act on it
+   * (docs/autofill-plan.md A1-A3); "none" takes the hint away. Chains. */
+  contentType(content: ContentType): this {
+    records().push(wire.tx_set_content_type(this.id, contentTypeValue(content)));
+    return this;
+  }
+
   /** The DESTINATION a `role("link")` label opens
    * (docs/tasks-s2-plan.md T3): the platform's own opener takes it and
    * nothing is emitted. Chains. */
@@ -4533,15 +4541,39 @@ export function timePicker(opts: TimePickerOptions = {}): Widget {
 
 export type TextInputOptions = GrowOption & { text?: string; onChange?: Handler; onSubmit?: Handler; placeholder?: string };
 
+/** What a credential field holds (docs/autofill-plan.md A2): the passwords
+ * on a secure field only, username, email and phone on an entry only, a
+ * one-time code on either (A3), refused at the root otherwise. */
+export type ContentType = "none" | "username" | "password" | "new_password" | "one_time_code" | "email" | "phone";
+
+const CONTENT_TYPES: Record<ContentType, number> = {
+  none: wire.CONTENT_TYPE_NONE,
+  username: wire.CONTENT_TYPE_USERNAME,
+  password: wire.CONTENT_TYPE_PASSWORD,
+  new_password: wire.CONTENT_TYPE_NEW_PASSWORD,
+  one_time_code: wire.CONTENT_TYPE_ONE_TIME_CODE,
+  email: wire.CONTENT_TYPE_EMAIL,
+  phone: wire.CONTENT_TYPE_PHONE,
+};
+
+function contentTypeValue(name: ContentType): number {
+  const content = Object.hasOwn(CONTENT_TYPES, name) ? CONTENT_TYPES[name] : undefined;
+  if (content === undefined) throw new Error(`kaya: contentType must be one of ${JSON.stringify(Object.keys(CONTENT_TYPES))}, got ${JSON.stringify(name)}`);
+  return content;
+}
+
+export type CredentialInputOptions = TextInputOptions & { contentType?: ContentType };
+
 /** A single-line text field. Uncontrolled, by doctrine: the widget owns
  * its text and reports each edit to onChange; there is no read-back.
  *
  * `onSubmit(text)` — fn(row, text) for a stamped copy — is the text the
  * user SUBMITTED, Return here (docs/submit-plan.md S1). */
-export function entry(opts: TextInputOptions = {}): Widget {
+export function entry(opts: CredentialInputOptions = {}): Widget {
   const handle = widget(wire.KIND_ENTRY);
   if (opts.text !== undefined) records().push(wire.tx_set_text(handle.id, textValue("entry text", opts.text)));
   if (opts.placeholder !== undefined) handle.placeholder(opts.placeholder);
+  if (opts.contentType !== undefined) handle.contentType(opts.contentType);
   if (opts.onChange !== undefined) app()._register(handle, wire.OCC_TEXT_CHANGED, opts.onChange);
   if (opts.onSubmit !== undefined) app()._register(handle, wire.OCC_SUBMITTED, opts.onSubmit);
   setGrow(handle, opts);
@@ -4626,10 +4658,11 @@ export function search(opts: TextInputOptions = {}): Widget {
 /** A secure field (docs/secure-entry-plan.md): the entry's contract with
  * the platform masking what is typed. onChange and onSubmit receive the
  * real text. */
-export function secureField(opts: TextInputOptions = {}): Widget {
+export function secureField(opts: CredentialInputOptions = {}): Widget {
   const handle = widget(wire.KIND_SECURE_FIELD);
   if (opts.text !== undefined) records().push(wire.tx_set_text(handle.id, textValue("secureField text", opts.text)));
   if (opts.placeholder !== undefined) handle.placeholder(opts.placeholder);
+  if (opts.contentType !== undefined) handle.contentType(opts.contentType);
   if (opts.onChange !== undefined) app()._register(handle, wire.OCC_TEXT_CHANGED, opts.onChange);
   if (opts.onSubmit !== undefined) app()._register(handle, wire.OCC_SUBMITTED, opts.onSubmit);
   setGrow(handle, opts);

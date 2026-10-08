@@ -63,6 +63,7 @@ fn enum_go_type(name: &str) -> Option<&'static str> {
         "session_action" => Some("SessionActionKind"),
         "playback_state" => Some("PlaybackState"),
         "fit" => Some("Fit"),
+        "content_type" => Some("ContentType"),
         _ => None,
     }
 }

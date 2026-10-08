@@ -667,6 +667,23 @@ module Fit = struct
     | Fill -> Kaya_wire.fit_fill
 end
 
+(* What a credential field holds (docs/autofill-plan.md A2): the passwords
+   on a secure field only, username, email and phone on an entry only, a
+   one-time code on either (A3), refused at the root otherwise. [None]
+   takes the hint away. *)
+module Content_type = struct
+  type t = None | Username | Password | New_password | One_time_code | Email | Phone
+
+  let wire = function
+    | None -> Kaya_wire.content_type_none
+    | Username -> Kaya_wire.content_type_username
+    | Password -> Kaya_wire.content_type_password
+    | New_password -> Kaya_wire.content_type_new_password
+    | One_time_code -> Kaya_wire.content_type_one_time_code
+    | Email -> Kaya_wire.content_type_email
+    | Phone -> Kaya_wire.content_type_phone
+end
+
 (* Where a player reads its media: an asset name, an http(s) URL, or a
    picked file itself, which the platform's player opens however the
    platform names it — never bytes (docs/media-plan.md §2). *)
@@ -1859,6 +1876,12 @@ let bind_help (Widget id) (s : string signal) = emit (the_tx ()) (Kaya_wire.tx_b
 let set_placeholder (Widget id) value =
   emit (the_tx ()) (Kaya_wire.tx_set_placeholder id value)
 
+(* What an entry or secure field holds, so the platform's password manager,
+   one-time-code autofill and keyboard can act on it
+   (docs/autofill-plan.md A1). *)
+let set_content_type (Widget id) c =
+  emit (the_tx ()) (Kaya_wire.tx_set_content_type id (Int64.of_int (Content_type.wire c)))
+
 let bind_placeholder (Widget id) (s : string signal) =
   emit (the_tx ()) (Kaya_wire.tx_bind_placeholder id s.sig_id)
 
@@ -2537,7 +2560,7 @@ let heading ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?hel
 let caption ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?text ?bind () =
   label ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ~role:Caption ?text ?bind ()
 
-let entry ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?placeholder ?placeholder_bind ?on_change ?on_submit () =
+let entry ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?placeholder ?placeholder_bind ?content_type ?on_change ?on_submit () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_entry in
   Option.iter (fun g -> set_grow w g) grow;
@@ -2545,6 +2568,7 @@ let entry ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help 
   set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
   Option.iter (fun v -> set_placeholder w v) placeholder;
   Option.iter (fun s -> bind_placeholder w s) placeholder_bind;
+  Option.iter (fun c -> set_content_type w c) content_type;
   (match on_change with
   | Some handler ->
       let (Widget id) = w in
@@ -2582,7 +2606,7 @@ let search ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help
 
 (* A secure field: the entry's contract with the platform masking what is
    typed (docs/secure-entry-plan.md). The handlers receive the real text. *)
-let secure_field ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?placeholder ?placeholder_bind ?on_change ?on_submit () =
+let secure_field ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?placeholder ?placeholder_bind ?content_type ?on_change ?on_submit () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_secure_field in
   Option.iter (fun g -> set_grow w g) grow;
@@ -2590,6 +2614,7 @@ let secure_field ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind
   set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
   Option.iter (fun v -> set_placeholder w v) placeholder;
   Option.iter (fun s -> bind_placeholder w s) placeholder_bind;
+  Option.iter (fun c -> set_content_type w c) content_type;
   (match on_change with
   | Some handler ->
       let (Widget id) = w in
@@ -5080,6 +5105,11 @@ module Tpl = struct
     let set_submits (Node id) on =
       emit (the_tx ()) (Kaya_wire.tx_set_submits id on)
 
+    (* What every stamped copy of this field holds (the live
+       [set_content_type]). *)
+    let set_content_type (Node id) c =
+      emit (the_tx ()) (Kaya_wire.tx_set_content_type id (Int64.of_int (Content_type.wire c)))
+
     (* Bind a stamped rich textarea's whole document to one field of the
        element; a (_, document) field only. The core refuses [document]
        without [rich] before it, which is why [Tpl.textarea] sends the
@@ -5351,7 +5381,7 @@ module Tpl = struct
      [~on_change] with that copy's keys first. *)
   let entry ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?placeholder
-      ?placeholder_bind ?placeholder_field ?accepts ?text ?bind ?bind_field
+      ?placeholder_bind ?placeholder_field ?content_type ?accepts ?text ?bind ?bind_field
       ?(level = 0) ?(a11y_level = level) ?on_change ?on_submit () =
     let n = Floor.widget Kaya_wire.kind_entry in
     Option.iter (fun g -> Floor.set_grow n g) grow;
@@ -5361,6 +5391,7 @@ module Tpl = struct
     Option.iter (fun v -> Floor.set_placeholder n v) placeholder;
     Option.iter (fun s -> Floor.bind_placeholder n s) placeholder_bind;
     Option.iter (fun fd -> Floor.bind_placeholder_field ~level n fd) placeholder_field;
+    Option.iter (fun c -> Floor.set_content_type n c) content_type;
     Option.iter (fun kinds -> Floor.set_accepts n kinds) accepts;
     Option.iter (fun x -> Floor.set_text n x) text;
     Option.iter (fun s -> Floor.bind_text n s) bind;
@@ -5414,7 +5445,7 @@ module Tpl = struct
   (* A secure field per stamped copy (docs/secure-entry-plan.md P9). *)
   let secure_field ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?placeholder
-      ?placeholder_bind ?placeholder_field ?accepts ?text ?bind ?bind_field
+      ?placeholder_bind ?placeholder_field ?content_type ?accepts ?text ?bind ?bind_field
       ?(level = 0) ?(a11y_level = level) ?on_change ?on_submit () =
     let n = Floor.widget Kaya_wire.kind_secure_field in
     Option.iter (fun g -> Floor.set_grow n g) grow;
@@ -5424,6 +5455,7 @@ module Tpl = struct
     Option.iter (fun v -> Floor.set_placeholder n v) placeholder;
     Option.iter (fun s -> Floor.bind_placeholder n s) placeholder_bind;
     Option.iter (fun fd -> Floor.bind_placeholder_field ~level n fd) placeholder_field;
+    Option.iter (fun c -> Floor.set_content_type n c) content_type;
     Option.iter (fun kinds -> Floor.set_accepts n kinds) accepts;
     Option.iter (fun x -> Floor.set_text n x) text;
     Option.iter (fun s -> Floor.bind_text n s) bind;

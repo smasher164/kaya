@@ -286,6 +286,8 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.contentType
+import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.onClick
@@ -497,6 +499,9 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
      * box's placeholder slot draws from it, and so does the search field's
      * accessibility name (S7). */
     var placeholder by mutableStateOf("")
+
+    /** The content type (docs/autofill-plan.md §3), 0 none. */
+    var contentType by mutableLongStateOf(0L)
 
     /** THE DESTINATION A `role link` LABEL OPENS (docs/tasks-s2-plan.md
      * T3), never spoken and never emitted. Composition state — the link
@@ -3460,7 +3465,7 @@ object KayaCompose {
                         PROP_LOW_LABEL -> KayaSceneModel.nodes[id]!!.lowLabel = readString(b)
                         PROP_HIGH_LABEL -> KayaSceneModel.nodes[id]!!.highLabel = readString(b)
                         PROP_FIT -> KayaSceneModel.nodes[id]!!.fit = readI64(b)
-                        PROP_CONTENT_TYPE -> depthStub("autofill")
+                        PROP_CONTENT_TYPE -> KayaSceneModel.nodes[id]!!.contentType = readI64(b)
                         PROP_ASPECT -> KayaSceneModel.nodes[id]!!.aspect = readI64(b)
                         PROP_PLAYER -> error("kaya: a video view's player arrives as set_video_player; the core never forwards the player prop")
                         PROP_CAPTURE -> error("kaya: a video view's capture arrives as set_video_capture; the core never forwards the capture prop")
@@ -8204,6 +8209,28 @@ object KayaCompose {
      * masked (docs/secure-entry-plan.md P6; docs/traps.md, the Compose
      * secure field's accessibility text).
      */
+    /** A field's content type as Compose's autofill manager reads it: the
+     * semantics node's own ContentType, mapped back through
+     * [kayaContentTypes] (docs/autofill-plan.md A6). */
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    private fun kayaContentTypeRead(activity: ComponentActivity, id: Long): Pair<String?, String> =
+        onUi(activity) {
+            val view = kayaComposeRoot(activity.window.decorView)
+                ?: return@onUi Pair(null, "the content type could not be read: no Compose root in the window")
+            val root = view as RootForTest
+            root.measureAndLayoutForTest()
+            val field = kayaSemanticsWith(root.semanticsOwner.unmergedRootSemanticsNode) {
+                it.config.getOrNull(KayaNodeId) == id
+            } ?: return@onUi Pair(null,
+                "the content type could not be read: the field is not in the semantics tree")
+            val type = field.config.getOrNull(SemanticsProperties.ContentType)
+                ?: return@onUi Pair("none", "")
+            val hit = kayaContentTypes().firstOrNull { it.platform == type }
+                ?: return@onUi Pair(null,
+                    "the field's semantics carry a content type no kaya word names ($type)")
+            Pair(hit.reads, "")
+        }
+
     private fun kayaMaskedRead(activity: ComponentActivity, spec: String): Pair<Int?, String> {
         val field = onUi(activity) {
             target(spec, "secure_field", KayaSceneModel.secureFields)
@@ -9587,7 +9614,31 @@ object KayaCompose {
                             else kayaAwaitAnswer(answered)
                         }
                     }
-                    "expect_content_type" -> depthStub("autofill")
+                    "expect_content_type" -> {
+                        // The class the platform's own property names, mapped
+                        // back through the one table that applied it
+                        // (docs/autofill-plan.md A6).
+                        val wantContent = parts.getOrNull(2)
+                        if (parts.size != 3 || wantContent == null) {
+                            failures.add("expect_content_type wants a field and a content type: $line")
+                        } else if (wantContent == "new_password") {
+                            failures.add(KAYA_CONTENT_READS_NEW_PASSWORD)
+                        } else if (wantContent !in KAYA_CONTENT_READS) {
+                            failures.add("$KAYA_CONTENT_READS_WANTS, got \"$wantContent\"")
+                        } else {
+                            val field = onUi(activity) {
+                                target(parts[1], "entry", KayaSceneModel.entryWidgets)
+                                    ?: target(parts[1], "secure_field", KayaSceneModel.secureFields)
+                            }
+                            val (got, why) = if (field == null) Pair(null, "no such target")
+                            else kayaContentTypeRead(activity, field.id)
+                            when {
+                                got == wantContent -> observed.add("content_type $got")
+                                got != null -> failures.add("content_type $got, wanted $wantContent")
+                                else -> failures.add("${parts[1]}: $why")
+                            }
+                        }
+                    }
                     "expect_masked" -> {
                         // How many characters the platform shows masked, read
                         // off what it presents to assistive technology, never
@@ -13338,6 +13389,63 @@ internal const val KAYA_TYPE_SECRET_ELSEWHERE =
 internal const val KAYA_TYPE_SECRET_ASCII =
     "type_secret types printable ASCII alone (0x20..0x7e), and its text is not"
 
+internal const val CONTENT_TYPE_USERNAME = 1L
+internal const val CONTENT_TYPE_PASSWORD = 2L
+internal const val CONTENT_TYPE_NEW_PASSWORD = 3L
+internal const val CONTENT_TYPE_ONE_TIME_CODE = 4L
+internal const val CONTENT_TYPE_EMAIL = 5L
+internal const val CONTENT_TYPE_PHONE = 6L
+
+internal class KayaContentRow(val word: Long, val platform: ContentType, val reads: String)
+
+/** THE ONE TABLE (docs/autofill-plan.md §3): the apply and the read both go
+ * through it (tools/lib/content_type_routes.py holds its rows). */
+internal fun kayaContentTypes(): List<KayaContentRow> = listOf(
+    KayaContentRow(CONTENT_TYPE_USERNAME, ContentType.Username, "username"),
+    KayaContentRow(CONTENT_TYPE_PASSWORD, ContentType.Password, "password"),
+    KayaContentRow(CONTENT_TYPE_NEW_PASSWORD, ContentType.NewPassword, "password"),
+    KayaContentRow(CONTENT_TYPE_ONE_TIME_CODE, ContentType.SmsOtpCode, "one_time_code"),
+    KayaContentRow(CONTENT_TYPE_EMAIL, ContentType.EmailAddress, "email"),
+    KayaContentRow(CONTENT_TYPE_PHONE, ContentType.PhoneNumber, "phone"),
+)
+
+/** The keyboard the word asks for (docs/autofill-plan.md A5). */
+internal fun kayaContentKeyboard(word: Long, secure: Boolean): KeyboardOptions {
+    val type = when (word) {
+        CONTENT_TYPE_EMAIL -> KeyboardType.Email
+        CONTENT_TYPE_PHONE -> KeyboardType.Phone
+        CONTENT_TYPE_ONE_TIME_CODE -> if (secure) KeyboardType.NumberPassword else KeyboardType.Number
+        else -> if (secure) KeyboardType.Password else KeyboardType.Unspecified
+    }
+    val plain = secure || word == CONTENT_TYPE_USERNAME || word == CONTENT_TYPE_EMAIL ||
+        word == CONTENT_TYPE_ONE_TIME_CODE
+    return if (plain) {
+        KeyboardOptions(
+            capitalization = KeyboardCapitalization.None,
+            autoCorrectEnabled = false,
+            keyboardType = type,
+        )
+    } else {
+        KeyboardOptions(keyboardType = type)
+    }
+}
+
+/** The field's content type in its semantics, where the autofill framework
+ * reads it, beside the node id the harness finds it by. */
+internal fun kayaContentHint(id: Long, word: Long): Modifier {
+    val platform = kayaContentTypes().firstOrNull { it.word == word }?.platform
+    return Modifier.semantics {
+        this[KayaNodeId] = id
+        if (platform != null) contentType = platform
+    }
+}
+
+internal val KAYA_CONTENT_READS = listOf("none", "username", "password", "one_time_code", "email", "phone")
+internal const val KAYA_CONTENT_READS_WANTS =
+    "expect_content_type wants one of none, username, password, one_time_code, email, phone"
+internal const val KAYA_CONTENT_READS_NEW_PASSWORD =
+    "expect_content_type reads what every platform tells apart, and a new_password field reads as password"
+
 /** How many characters a masked value shows (docs/secure-entry-plan.md P6):
  * harness.rs's mask_count. */
 internal fun kayaMaskCount(value: String): Pair<Int?, String> {
@@ -16085,6 +16193,8 @@ fun KayaTextField(
                 )
             } else if (!singleLine && node.submits) {
                 KeyboardOptions(imeAction = ImeAction.Send)
+            } else if (singleLine) {
+                kayaContentKeyboard(node.contentType, secure = false)
             } else {
                 KeyboardOptions.Default
             },
@@ -16113,6 +16223,7 @@ fun KayaTextField(
         interactionSource = interaction,
         textStyle = LocalTextStyle.current.copy(color = LocalContentColor.current),
         modifier = a11y
+            .then(if (singleLine && !search) kayaContentHint(node.id, node.contentType) else Modifier)
             .then(fill)
             .focusRequester(focusRequester)
             // ESCAPE IS THE CLEAR ACT ON A DESKTOP KEYBOARD (S5), and an
@@ -19449,11 +19560,7 @@ private fun KayaSecureField(node: KayaNode, a11y: Modifier, fill: Modifier) {
     BasicSecureTextField(
         state = node.textState,
         textObfuscationMode = TextObfuscationMode.RevealLastTyped,
-        keyboardOptions = KeyboardOptions(
-            capitalization = KeyboardCapitalization.None,
-            autoCorrectEnabled = false,
-            keyboardType = KeyboardType.Password,
-        ),
+        keyboardOptions = kayaContentKeyboard(node.contentType, secure = true),
         onKeyboardAction = { performDefaultAction ->
             KayaPresent.emitSubmitted(node.tag, kayaLf(node.textState.text.toString()))
             performDefaultAction()
@@ -19464,6 +19571,7 @@ private fun KayaSecureField(node: KayaNode, a11y: Modifier, fill: Modifier) {
         // docs/traps.md, the Compose secure field's accessibility text.
         modifier = Modifier
             .semantics { editableText = AnnotatedString("\u2022".repeat(node.textState.text.length)) }
+            .then(kayaContentHint(node.id, node.contentType))
             .then(a11y)
             .then(fill)
             .focusRequester(focusRequester)

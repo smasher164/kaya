@@ -4,9 +4,10 @@ Status: RECOMMENDED 2026-10-07, every ruling in §2 awaiting the maintainer.
 The DEPTH SLICE is built as recommended (§6 step 1): prop 56 `content_type`,
 the core's wall, the Rust binding in both zones, the SwiftUI arm on macOS and
 iOS, the harness's `expect_content_type`, and tools/scenes/autofill.steps
-green on the mac for Rust. GTK, WinUI and Compose are depth stubs and the iOS
-legs are unwired, each on the ledger (docs/deferred.md, the content type's
-BUILD entry).
+green on the mac for Rust. The breadth (§6 step 2) has built the GTK and
+WinUI arms, green on the linux and windows lanes in every language they run;
+what remains is on the ledger (docs/deferred.md, the content type's BUILD
+entry).
 
 The maintainer asked for it on 2026-10-07: "prioritize ... the auto-fill hints
 from a password manager or the messages app". A text field says what it holds
@@ -194,10 +195,10 @@ property:
 | backend | where the read looks | built |
 |---|---|---|
 | SwiftUI, macOS | the one NSTextField under the accessibility element the field's a11y_id names; its `contentType` | yes |
-| SwiftUI, iOS | the UITextField at the element the a11y_id names; its `textContentType` | compiled, legs unwired |
-| Compose | the field's semantics node, its `ContentType`'s Android hint strings | breadth |
-| GTK | the inner GtkText's `input-purpose` and `input-hints` | breadth |
-| WinUI | the box's `InputScope` name, and for a TextBox its spell check and text prediction | breadth |
+| SwiftUI, iOS | the UITextField at the element the a11y_id names; its `textContentType` | yes |
+| Compose | the unmerged semantics node carrying the field's node id, its `ContentType` compared with the table's constants (the hint strings are internal to compose-ui 1.11.4) | yes |
+| GTK | the field's delegate GtkText's `input-purpose` and `input-hints`, through gtk.rs's `content_hints()` | yes |
+| WinUI | the box's `InputScope` (exactly one name), and for a TextBox its spell check and text prediction, through winui's `content_scopes()` | yes |
 
 macOS 13 (kaya's floor) has no constant for new_password, email or phone, so
 those three words apply nothing there and read `none`; every lane host runs
@@ -273,9 +274,31 @@ keyboard strip, where each shows one without credentials.
   accessory app and its window was not key, which is where AppKit offers
   AutoFill; making it key would take the keyboard from the person at the
   machine, so no capture shows the key button yet.
-- To measure at breadth: whether the iOS simulator's QuickType bar shows the
-  key or a "From Messages" chip with no credentials; Compose's semantics read
-  and whether the emulator's autofill service offers anything on a
-  `ContentType.Password` field; GTK's and WinUI's purpose and scope as read
-  back; whether a key window on macOS shows the Passwords key with an empty
+- MEASURED 2026-10-07 (linux lane, Debian forky, GTK 4.24.0): the GtkText's
+  `input-purpose` and `input-hints` read back exactly as §3's GTK column
+  applied them, on x11 and wayland, the stamped secure field's PIN included;
+  the autofill legs are green in all eight languages, and with the two
+  setters cut the rust leg read `content_type none, wanted username`. The window draws nothing for any word: no
+  autofill service exists on that desktop, and the hint reaches only an input
+  method or on-screen keyboard, neither of which the lane runs.
+- MEASURED 2026-10-07 (iOS 26.5 simulator, autofill-swiftui green): the
+  username field's QuickType bar shows the key and "Passwords" with no saved
+  credential; the code field shows the number pad and no chip, since no
+  message has arrived; the new-password field offers no strong password,
+  which needs the associated domain (A8).
+- MEASURED 2026-10-07 (Android emulator, autofill-compose green): Gboard
+  shows its text keyboard on the username field and its number pad on the
+  code field. The framework opens a request to Google's autofill service for
+  the focused field (dumpsys autofill), which offers nothing with no saved
+  credential. With the hint cut, Compose still reports email, phone and
+  password from the keyboard type alone, and username and the code read
+  `none`, so the leg goes red; a secure field with no word reads `password`
+  here, as on GTK and WinUI.
+- MEASURED 2026-10-07 (windows lane VM, WinUI 2.2.1): a TextBox or
+  PasswordBox nothing names carries NO InputScope (the read is null), so
+  creation applies `none`'s scope; without it every `none` read failed with
+  "the box carries no InputScope". A fresh TextBox's spell check and text
+  prediction both read true, the `none` row's value. The six autofill legs
+  are green.
+- To measure: whether a key window on macOS shows the Passwords key with an empty
   Passwords app.

@@ -177,6 +177,9 @@ func (r clipRow) SetWrap(n kaya.Node, on bool) { r.t.SetWrap(n, on) }
 
 func (r clipRow) SetFormat(n kaya.Node, format kaya.NumberFormat) { r.t.SetFormat(n, format) }
 func (r clipRow) SetSubmits(n kaya.Node, on bool)                 { r.t.SetSubmits(n, on) }
+func (r clipRow) SetContentType(n kaya.Node, content kaya.ContentType) {
+	r.t.SetContentType(n, content)
+}
 
 func (r clipRow) Draggable(n kaya.Node) kaya.TplDragRef { return r.t.Draggable(n) }
 

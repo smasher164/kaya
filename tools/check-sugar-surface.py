@@ -2479,47 +2479,97 @@ for _lang, _rel, _templates in SCROLL_AXIS_SURFACES:
 print(f"check-sugar-surface: scroll-axis cuts watched red {_axis_cuts}/{_axis_want}")
 
 # --- THE CONTENT TYPE, live zone, in all nine (docs/autofill-plan.md §5) -
-# tpl-surfaces holds the template zone's setter; this holds the live one.
-# Rust's row is the built shape; the other eight are the binding's own name
-# for it and are tightened to the shape each builds at the breadth.
+# tpl-surfaces holds the template zone's setter; this holds the live one,
+# each binding's own spelling read out of its file with the name inside the
+# pattern: the chained setter, or the constructor argument where the
+# binding's text fields take their options there.
 CONTENT_TYPE_SURFACES = [
-    ("rust", "crates/kaya/src/app.rs",
-     r"pub fn {0}\(self, content: crate::protocol::ContentType\) -> Self"),
-    ("python", "bindings/python/kaya/__init__.py", r"\b{0}\b"),
-    ("go", "bindings/go/app.go", r"func \(w Widget\) {0}\("),
-    ("csharp", "bindings/csharp/KayaApp.cs", r"\b{0}\b"),
-    ("java", "bindings/java/dev/kaya/KayaApp.java", r"public Widget {0}\("),
-    ("swift", "bindings/swift/KayaApp.swift", r"\b{0}\b"),
-    ("haskell", "bindings/haskell/KayaApp.hs", r"^{0} ::"),
-    ("ocaml", "bindings/ocaml/kaya_app.ml", r"\b{0}\b"),
-    ("js", "bindings/js/kaya/index.ts", r"\b{0}\b"),
+    ("rust", "crates/kaya/src/app.rs", [
+        r"pub fn {0}\(self, content: crate::protocol::ContentType\) -> Self"]),
+    ("python", "bindings/python/kaya/__init__.py", [
+        r"def {0}\(self: H, content: ContentType \| str\) -> H:",
+        r"^def entry\([^)]*\b{0}: ContentType \| str \| None = None\)",
+        r"^def secure_field\([^)]*\b{0}: ContentType \| str \| None = None\)"]),
+    ("go", "bindings/go/app.go", [
+        r"func \(w Widget\) {0}\(content ContentType\) Widget"]),
+    ("csharp", "bindings/csharp/KayaApp.cs", [
+        r"public Widget Entry\([^)]*ContentType\? {0} = null, ",
+        r"public Widget SecureField\([^)]*ContentType\? {0} = null, "]),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", [
+        r"public Widget {0}\(ContentType content\)"]),
+    ("swift", "bindings/swift/KayaApp.swift", [
+        r"public func entry\((?:\n[^\n]*){{1,3}}?\n +{0}: KayaContentType\? = nil,",
+        r"public func secureField\((?:\n[^\n]*){{1,3}}?\n +{0}: KayaContentType\? = nil,"]),
+    ("haskell", "bindings/haskell/KayaApp.hs", [
+        r"^  {0} :: ContentType -> Attr 'LeafW$",
+        r"^applyAttr \({0} c\) w = setContentType w c$"]),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", [
+        r"\?placeholder_bind \?{0} \?on_change \?on_submit \(\) =\n  let tx = the_tx \(\) in\n"
+        r"  let w = widget Kaya_wire\.kind_entry in",
+        r"\?placeholder_bind \?{0} \?on_change \?on_submit \(\) =\n  let tx = the_tx \(\) in\n"
+        r"  let w = widget Kaya_wire\.kind_secure_field in"]),
+    ("js", "bindings/js/kaya/index.ts", [
+        r"^  {0}\(content: ContentType\): this \{{",
+        r"type CredentialInputOptions = TextInputOptions & \{{ {0}\?: ContentType \}};"]),
 ]
 CONTENT_TYPE_NAMES = {"rust": "content_type", "python": "content_type", "go": "ContentType",
                       "csharp": "contentType", "java": "contentType", "swift": "contentType",
-                      "haskell": "contentType", "ocaml": "content_type", "js": "contentType"}
+                      "haskell": "ContentType", "ocaml": "content_type", "js": "contentType"}
 
 
-def check_content_type(fake_name=None):
+def check_content_type(fake_name=None, text_for=None):
     out = []
-    for lang, rel, template in CONTENT_TYPE_SURFACES:
-        pat = template.format(fake_name or CONTENT_TYPE_NAMES[lang])
-        if not re.search(pat, read_rel(rel), re.M):
-            out.append(f"check-sugar-surface: {lang}'s LIVE zone cannot spell `content_type` on an "
-                       f"entry or secure field (wanted /{pat}/ in {rel})")
+    for lang, rel, templates in CONTENT_TYPE_SURFACES:
+        text = text_for(lang, rel) if text_for else read_rel(rel)
+        for template in templates:
+            pat = template.format(fake_name or CONTENT_TYPE_NAMES[lang])
+            if not re.search(pat, text, re.M):
+                out.append(f"check-sugar-surface: {lang}'s LIVE zone cannot spell `content_type` "
+                           f"on an entry or secure field (wanted /{pat}/ in {rel})")
     return out
 
 
 for _line in check_content_type():
     print(_line)
     status = 1
+_ct_want = sum(len(ts) for _, _, ts in CONTENT_TYPE_SURFACES)
 _ct_fake = check_content_type("kayaFakeContentType")
-print(f"check-sugar-surface: fake content-type spellings fired "
-      f"{len(_ct_fake)}/{len(CONTENT_TYPE_SURFACES)}")
-if len(_ct_fake) != len(CONTENT_TYPE_SURFACES):
+print(f"check-sugar-surface: fake content-type spellings fired {len(_ct_fake)}/{_ct_want}")
+if len(_ct_fake) != _ct_want:
     selftest_exit(f"check-sugar-surface: self-test failed ({len(_ct_fake)}/"
-                  f"{len(CONTENT_TYPE_SURFACES)} content-type patterns fired for a name "
+                  f"{_ct_want} content-type patterns fired for a name "
                   f"that exists nowhere)")
 
+# RENAME-IN-A-COPY per pattern, the scroll-axis clause's shape: exactly one
+# finding naming the binding, the file re-read from disk afterwards.
+_ct_cuts = 0
+for _lang, _rel, _templates in CONTENT_TYPE_SURFACES:
+    _name = CONTENT_TYPE_NAMES[_lang]
+    for _template in _templates:
+        _real = read_rel(_rel)
+        _pat = _template.format(_name)
+        _m = re.search(_pat, _real, re.M)
+        if _m is None:
+            selftest_exit(f"check-sugar-surface: content-type cut found no match "
+                          f"for /{_pat}/ in {_rel} to cut")
+        _mangled, _n = sub_count(rf"\b{re.escape(_name)}\b", "kayaCutContentType", _m.group(0))
+        print(f"check-sugar-surface: content-type cut {_lang} /{_template[:40]}.../: "
+              f"{_n} substitution(s)")
+        if _n == 0:
+            selftest_exit(f"check-sugar-surface: self-test failed (the {_lang} "
+                          f"content-type cut applied nothing)")
+        _copy = _real[:_m.start()] + _mangled + _real[_m.end():]
+        _found = check_content_type(
+            text_for=lambda lang, rel, _c=_copy, _r=_rel: _c if rel == _r else read_rel(rel))
+        if len(_found) != 1 or f" {_lang}'s " not in _found[0]:
+            selftest_exit(f"check-sugar-surface: self-test failed (the {_lang} "
+                          f"content-type cut gave {len(_found)} finding(s), wanted "
+                          f"exactly one naming {_lang})")
+        if read_rel(_rel) != (ROOT / _rel).read_text(encoding="utf-8"):
+            selftest_exit(f"check-sugar-surface: self-test failed ({_rel} "
+                          f"changed on disk under the content-type cut)")
+        _ct_cuts += 1
+print(f"check-sugar-surface: content-type cuts watched red {_ct_cuts}/{_ct_want}")
 
 # --- THE MEDIA ROW, TRACKS AND VISIBILITY (docs/media-plan.md §3, §7b) --
 # Neither a KIND nor a WINDOW PROP: a row's PLAYER FIELD (the type a stamped
@@ -6562,7 +6612,7 @@ discardable = tpl_discardable_probe()
 WANT_DISCARDABLE = """swift-row-member=applied:1 rc:1 named:True
 swift-arm-member=applied:1 rc:1 named:True
 swift-eliminator=applied:1 rc:1 named:True
-swift-census-floor=applied:19 rc:1 named:True"""
+swift-census-floor=applied:20 rc:1 named:True"""
 if discardable != WANT_DISCARDABLE:
     print("check-sugar-surface: SELF-TEST FAIL (the Swift generated-surface "
           "discard census did not catch its watched cuts). Wanted:",
@@ -7327,7 +7377,7 @@ def csharp_facade_probe():
     run("csharp-twin-reader",
         src.replace("sealed class TableItemRow\n",
                     "sealed class TableItemRowGone\n")
-        if n == 1 else src, n, "typed-row reader found only 17")
+        if n == 1 else src, n, "typed-row reader found only 18")
     return "\n".join(lines)
 
 

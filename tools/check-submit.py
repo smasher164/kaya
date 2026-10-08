@@ -672,8 +672,8 @@ watched("a Compose secure field whose hardware Return submits nothing",
 # COMPOSE
 n17 = gate.doctor("the compose Send action cut", REAL[COMPOSE],
                   r"\} else if \(!singleLine && node\.submits\) \{\n\s*"
-                  r"KeyboardOptions\(imeAction = ImeAction\.Send\)\n\s*\} else \{",
-                  "} else {")
+                  r"KeyboardOptions\(imeAction = ImeAction\.Send\)\n\s*\} else ",
+                  "} else ")
 watched("a Compose textarea whose phone key never says Send", {**REAL, COMPOSE: n17},
         "phone key must say Send")
 n18 = gate.doctor("the compose Shift read cut", REAL[COMPOSE],

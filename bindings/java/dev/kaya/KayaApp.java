@@ -1645,6 +1645,33 @@ public final class KayaApp {
         return ((long) width << 32) | (height & 0xFFFFFFFFL);
     }
 
+    /** What a credential field holds (docs/autofill-plan.md A2): the
+     * passwords on a secure field only, username, email and phone on an
+     * entry only, a one-time code on either (A3), refused at the root
+     * otherwise. {@link #NONE} takes the hint away. */
+    public enum ContentType {
+        NONE(KayaWire.CONTENT_TYPE_NONE, "none"),
+        USERNAME(KayaWire.CONTENT_TYPE_USERNAME, "username"),
+        PASSWORD(KayaWire.CONTENT_TYPE_PASSWORD, "password"),
+        NEW_PASSWORD(KayaWire.CONTENT_TYPE_NEW_PASSWORD, "new_password"),
+        ONE_TIME_CODE(KayaWire.CONTENT_TYPE_ONE_TIME_CODE, "one_time_code"),
+        EMAIL(KayaWire.CONTENT_TYPE_EMAIL, "email"),
+        PHONE(KayaWire.CONTENT_TYPE_PHONE, "phone");
+
+        final int wire;
+        final String word;
+
+        ContentType(int wire, String word) {
+            this.wire = wire;
+            this.word = word;
+        }
+
+        @Override
+        public String toString() {
+            return word;
+        }
+    }
+
     /** How a video view fits its picture (docs/media-plan.md §3). */
     public enum Fit {
         CONTAIN(KayaWire.FIT_CONTAIN, "contain"),
@@ -4545,6 +4572,17 @@ public final class KayaApp {
             return this;
         }
 
+        /** What this field holds ({@link Tx#setContentType}). */
+        public Widget contentType(ContentType content) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: contentType on a widget outside its build transaction"
+                    + " — use Tx.setContentType inside a live transaction");
+            }
+            tx.setContentType(this, content);
+            return this;
+        }
+
         /** The DESTINATION this {@link Role#LINK} label opens
          * (docs/tasks-s2-plan.md T3): the platform's own opener takes it
          * and nothing is emitted. */
@@ -5687,6 +5725,12 @@ public final class KayaApp {
             t.setFit(n, fit);
         }
 
+        /** This row's copy of that field's content type
+         * (Tpl.setContentType). */
+        public void setContentType(Node n, ContentType content) {
+            t.setContentType(n, content);
+        }
+
         /** This row's copy of that video view's box ratio (Tpl.setAspect). */
         public void setAspect(Node n, int width, int height) {
             t.setAspect(n, width, height);
@@ -6598,6 +6642,16 @@ public final class KayaApp {
 
         public void setPlaceholder(Widget w, Signal<String> s) {
             emit(KayaWire.txBindPlaceholder(w.id, s.id));
+        }
+
+        /**
+         * What an entry or secure field holds, so the platform's password
+         * manager, one-time-code autofill and keyboard can act on it
+         * (docs/autofill-plan.md A1).
+         */
+        public void setContentType(Widget w, ContentType content) {
+            emit(KayaWire.txSetContentType(w.id, Objects.requireNonNull(content,
+                    "kaya: setContentType takes a ContentType; NONE takes the hint away").wire));
         }
 
         /**
@@ -8701,6 +8755,13 @@ public final class KayaApp {
         /** How every stamped copy's video view fits its picture. */
         public void setFit(Node n, Fit fit) {
             tx.emit(KayaWire.txSetFit(n.id, fit.wire));
+        }
+
+        /** What every stamped copy of this field holds, the blueprint
+         * twin of {@link Tx#setContentType}. */
+        public void setContentType(Node n, ContentType content) {
+            tx.emit(KayaWire.txSetContentType(n.id, Objects.requireNonNull(content,
+                    "kaya: setContentType takes a ContentType; NONE takes the hint away").wire));
         }
 
         /** Every stamped copy's video view box ratio. */

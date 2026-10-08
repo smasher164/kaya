@@ -649,6 +649,18 @@ class _Handle:
             wire.tx_bind_placeholder, wire.tx_bind_placeholder_element))
         return self
 
+    def content_type(self: H, content: ContentType | str) -> H:
+        """Say what this entry or secure field holds (kaya.ContentType or
+        its name), so the platform's password manager, one-time-code
+        autofill and keyboard can act on it (docs/autofill-plan.md A1-A3).
+        `none` takes the hint away. Returns the handle."""
+        if isinstance(content, bool) or not isinstance(content, (str, int)):
+            raise KayaTypeError(
+                f"kaya: content_type takes kaya.ContentType.USERNAME or its "
+                f"name, not {type(content).__name__}")
+        _records().append(wire.tx_set_content_type(self.id, int(ContentType(content))))
+        return self
+
     def href(self: H, url: TextSource) -> H:
         """Set the DESTINATION a `role="link"` label opens
         (docs/tasks-s2-plan.md T3): the platform's own opener takes it and
@@ -4438,6 +4450,26 @@ class Align(enum.IntEnum):
         )
 
 
+class ContentType(enum.IntEnum):
+    """What a credential field holds (docs/autofill-plan.md A2): the
+    passwords on a secure field only, username, email and phone on an
+    entry only, a one-time code on either (A3). A code with letters in it
+    is an entry with no content type (A5)."""
+
+    NONE = wire.CONTENT_TYPE_NONE
+    USERNAME = wire.CONTENT_TYPE_USERNAME
+    PASSWORD = wire.CONTENT_TYPE_PASSWORD
+    NEW_PASSWORD = wire.CONTENT_TYPE_NEW_PASSWORD
+    ONE_TIME_CODE = wire.CONTENT_TYPE_ONE_TIME_CODE
+    EMAIL = wire.CONTENT_TYPE_EMAIL
+    PHONE = wire.CONTENT_TYPE_PHONE
+
+    @classmethod
+    def _missing_(cls, value: object) -> Any:
+        return _vocab_missing(cls, value, "a content type",
+                              "kaya.ContentType.USERNAME")
+
+
 class Axis(enum.IntEnum):
     """The axis enum: a container's arrangement direction — row and
     column are one node whose constructor names the initial value
@@ -5224,18 +5256,23 @@ def time_picker(value: datetime.time | Source | None = None, *,
 def entry(text: str | None = None, *, on_change: Handler | None = None,
           on_submit: Handler | None = None,
           grow: float | None = None,
-          placeholder: TextSource | None = None) -> Widget:
+          placeholder: TextSource | None = None,
+          content_type: ContentType | str | None = None) -> Widget:
     """A single-line text field. UNCONTROLLED: the widget owns its text
     and reports each edit to `on_change`, template copies getting their
     `Row` first. There is no read-back.
 
     `on_submit(text)` is the Return gesture (docs/submit-plan.md S1): the
-    field's text at the press, the field keeping its text and focus."""
+    field's text at the press, the field keeping its text and focus.
+
+    `content_type` says what it holds (see kaya.ContentType)."""
     handle = _widget(wire.KIND_ENTRY)
     if text is not None:
         _records().append(wire.tx_set_text(handle.id, _text_value("entry text", text)))
     if placeholder is not None:
         handle.placeholder(placeholder)
+    if content_type is not None:
+        handle.content_type(content_type)
     if on_change is not None:
         _app._register(handle, wire.OCC_TEXT_CHANGED, on_change)
     if on_submit is not None:
@@ -5347,15 +5384,19 @@ def secure_field(text: str | None = None, *,
                  on_change: Handler | None = None,
                  on_submit: Handler | None = None,
                  grow: float | None = None,
-                 placeholder: TextSource | None = None) -> Widget:
+                 placeholder: TextSource | None = None,
+                 content_type: ContentType | str | None = None) -> Widget:
     """A secure field (docs/secure-entry-plan.md): the entry's contract
     with the platform masking what is typed. `on_change` and `on_submit`
-    receive the real text."""
+    receive the real text; `content_type` says what it holds (see
+    kaya.ContentType)."""
     handle = _widget(wire.KIND_SECURE_FIELD)
     if text is not None:
         _records().append(wire.tx_set_text(handle.id, _text_value("secure_field text", text)))
     if placeholder is not None:
         handle.placeholder(placeholder)
+    if content_type is not None:
+        handle.content_type(content_type)
     if on_change is not None:
         _app._register(handle, wire.OCC_TEXT_CHANGED, on_change)
     if on_submit is not None:

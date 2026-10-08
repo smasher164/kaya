@@ -4438,7 +4438,8 @@ with _f3_app.window():
 for _cls, _bad_name, _bad_int in (
         (kaya.Align, "bogus", 999),
         (kaya.Axis, "bogus", 999),
-        (kaya.FileMode, "bogus", 999)):
+        (kaya.FileMode, "bogus", 999),
+        (kaya.ContentType, "bogus", 999)):
     try:
         _cls(_bad_name)
         check(f"{_cls.__name__} refuses an unknown name", False)
@@ -4455,6 +4456,27 @@ for _cls, _bad_name, _bad_int in (
               isinstance(e, kaya.KayaValueError) and "is not a" in str(e))
 check("kaya.FileMode.WRITE is the wire's own number",
       kaya.FileMode.WRITE == kaya.wire.FILE_MODE_WRITE == 1)
+
+# docs/autofill-plan.md A1-A3: content_type packs the word on both kinds
+# and refuses a bool before IntEnum reads it as username.
+_ct_app = kaya.App()
+with _ct_app.window():
+    with kaya.column():
+        _ct_before = len(kaya._tx)
+        _ct_user = kaya.entry(content_type="username")
+        _ct_new = kaya.secure_field(content_type=kaya.ContentType.NEW_PASSWORD)
+        _ct_records = kaya._tx[_ct_before:]
+        _ct_refused = ""
+        try:
+            _ct_user.content_type(True)  # type: ignore[arg-type]
+        except kaya.KayaTypeError as e:
+            _ct_refused = str(e)
+check("content_type packs as the generated setter does on both kinds",
+      kaya.wire.tx_set_content_type(_ct_user.id, kaya.wire.CONTENT_TYPE_USERNAME)
+      in _ct_records
+      and kaya.wire.tx_set_content_type(_ct_new.id, kaya.wire.CONTENT_TYPE_NEW_PASSWORD)
+      in _ct_records)
+check("content_type refuses a bool", "content_type takes" in _ct_refused)
 
 # F5: local_path is a pathlib.Path, None where the wire sent no
 # re-openable name (an empty string, never Path("") — Path("") would

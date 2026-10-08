@@ -1287,6 +1287,29 @@ func (w Widget) BindPlaceholder(s Signal[string]) Widget {
 	return w
 }
 
+// ContentType is what a credential field holds (docs/autofill-plan.md
+// A2): the passwords on a secure field only, username, email and phone on
+// an entry only, a one-time code on either (A3), refused at the root
+// otherwise. ContentTypeNone takes the hint away.
+type ContentType int64
+
+// SetContentType says what an entry or secure field holds, so the
+// platform's password manager, one-time-code autofill and keyboard can
+// act on it (docs/autofill-plan.md A1).
+func (tx *Tx) SetContentType(w Widget, content ContentType) {
+	tx.emit(TxSetContentType(w.id, int64(content)))
+}
+
+// ContentType says what this field holds at construction. Same
+// transaction discipline as Grow.
+func (w Widget) ContentType(content ContentType) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: ContentType on a widget outside its build transaction — use Tx.SetContentType inside a live transaction")
+	}
+	w.tx.SetContentType(w, content)
+	return w
+}
+
 // SetHref sets the DESTINATION a RoleLink label opens
 // (docs/tasks-s2-plan.md T3): the platform's own opener takes it and
 // nothing is emitted.
@@ -5098,6 +5121,12 @@ func (t *Tpl) SetWrap(n Node, on bool) {
 // (Widget.Submits, docs/submit-plan.md S2), or opts it out.
 func (t *Tpl) SetSubmits(n Node, on bool) {
 	t.tx.emit(TxSetSubmits(n.id, on))
+}
+
+// SetContentType says what every stamped copy of this field holds
+// (Tx.SetContentType).
+func (t *Tpl) SetContentType(n Node, content ContentType) {
+	t.tx.emit(TxSetContentType(n.id, int64(content)))
 }
 
 // SetAccepts declares what each stamped copy takes from a paste. Entry

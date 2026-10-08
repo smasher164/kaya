@@ -43,6 +43,9 @@ public final class Main {
             case "secure":
                 app = Secure::app;
                 break;
+            case "autofill":
+                app = Autofill::app;
+                break;
             case "table":
                 app = Table::app;
                 break;

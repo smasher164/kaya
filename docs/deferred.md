@@ -162,22 +162,38 @@ text content type, and on the phone the keyboard the word asks for), the
 harness's `expect_content_type` reading the platform's own property, and
 tools/scenes/autofill.steps green on the mac lane for Rust. The rulings in
 the plan's §2 are recommended and await the maintainer. What breadth owes:
-  - **DEPTH STUB: autofill on gtk** — the inner GtkText's input-purpose and
-    input-hints per the plan's §3 table, and `content_type` reading them
-    back through the same table (plan A6).
-  - **DEPTH STUB: autofill on winui** — the TextBox's and PasswordBox's
-    InputScope, with spell check and text prediction off for a username,
-    read back through the same table (plan §3).
-  - **DEPTH STUB: autofill on compose** — the field's semantics
-    `contentType` (compose-ui 1.11.4's ContentType), the keyboard type per
-    word, and `expect_content_type` reading the node's ContentType hints
-    (plan §3).
-  - **The iOS legs** — the arm is built in the shared interpreter and the
-    read takes the UITextField's textContentType; the legs and the review
-    page's QuickType capture are unmeasured (plan §5).
-  - **`content_type` in the other eight bindings** — both zones;
-    check-sugar-surface and tpl-surfaces are red for them by design (15
-    findings, all `content_type`).
+  - ~~**DEPTH STUB: autofill on gtk**~~ — LANDED 2026-10-07: the field's
+    delegate GtkText takes input-purpose and input-hints from one table
+    (gtk.rs `content_hints()`) and `content_type` reads them back through
+    it; autofill legs 16/16 on the forky lane (x11 and wayland, eight
+    languages), and with the two setters cut the rust leg read
+    `content_type none, wanted username`. content_type_routes pins the rows.
+  - ~~**DEPTH STUB: autofill on winui**~~ — LANDED 2026-10-07: TextBox and
+    PasswordBox InputScope (one name) from `content_scopes()`, a TextBox's
+    spell check and text prediction off for a username, `none`'s scope set
+    at creation (a box nothing names carries no InputScope at all, measured
+    red on the lane); autofill legs 6/6 on the windows lane.
+  - ~~**DEPTH STUB: autofill on compose**~~ — LANDED 2026-10-07: the
+    field's semantics `contentType` and the keyboard per word from one
+    table (`kayaContentTypes`), read back off the unmerged semantics node's
+    ContentType (its hint strings are internal to compose-ui 1.11.4, so the
+    read compares the constant); content_type_routes.py's Compose row
+    (tools/lib/content_type_compose.py, seven watched negatives);
+    autofill-compose green. Compose fills ContentType from a keyboard type
+    itself, so with the hint cut the email, phone and secure fields still
+    read their class and username and code read `none` (plan §7).
+  - ~~**The iOS legs**~~ — LANDED 2026-10-07: autofill-swiftui in the
+    rust-swiftui suite, green; the QuickType bar shows the Passwords key on
+    the username field and the number pad on the code field (plan §7).
+  - ~~**`content_type` in the other eight bindings**~~ — LANDED 2026-10-07:
+    both zones in all eight, each word set typed the binding's way (Python
+    and Java enums, Go's typed constants, C#'s and Swift's enums, Haskell's
+    sum as an `Attr` and a `TplAttr`, OCaml's `Content_type.t`, JS's closed
+    literal type), an `autofill` guest per language with its registry rows
+    and the six Windows launchers; `run-leg autofill <lang>` green on the
+    mac for all nine; check-sugar-surface's clause holds each binding's
+    built spelling with a rename-in-a-copy cut per pattern. The C floor
+    needs nothing past kaya.h's KAYA_CONTENT_TYPE_*.
   - **tools/lib/content_type_routes.py's BACKENDS** — each backend whose
     stub goes takes a pinned table row there, as the SwiftUI arm has.
 

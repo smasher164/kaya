@@ -63,6 +63,7 @@ object GuestStart : KayaGuestStart {
             "textarea" -> TextareaScene::app
             "search" -> Search::app
             "secure" -> Secure::app
+            "autofill" -> Autofill::app
             "sections" -> Sections::app
             "menus" -> Menus::app
             "commands" -> Commands::app

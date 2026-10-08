@@ -75,6 +75,7 @@ use bindings::Windows::UI::Text::{FontStyle, TextDecorations};
 // markup — see `caption_title_text`.
 use bindings::Microsoft::UI::Xaml::Markup::XamlReader;
 use bindings::Microsoft::UI::Xaml::Input::KeyboardAccelerator;
+use bindings::Microsoft::UI::Xaml::Input::{InputScope, InputScopeName, InputScopeNameValue};
 use bindings::Windows::System::{VirtualKey, VirtualKeyModifiers};
 use bindings::Microsoft::UI::Xaml::{
     GridLength, GridUnitType, HorizontalAlignment, Style, Thickness, Visibility, XamlRoot,
@@ -14632,6 +14633,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         Ok(())
                     });
                     field.LostFocus(&blur_handler)?;
+                    field.SetInputScope(&input_scope(content_scope(false, 0).0)?)?;
                     core.entries.push(field.clone());
                     core.entry_ids.push(id.0);
                     core.entry_swallow.insert(id.0, swallow);
@@ -14689,6 +14691,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         Ok(())
                     }))?;
                     submit_on_enter(Editable::Secure(field.clone()), tag.clone(), core.occurrences.clone(), None)?;
+                    field.SetInputScope(&input_scope(content_scope(true, 0).0)?)?;
                     core.secure_fields.push(field.clone());
                     core.secure_ids.push(id.0);
                     core.entry_swallow.insert(id.0, swallow);
@@ -16764,7 +16767,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (NativeWidget::Secure(field), Prop::Placeholder, Value::Str(s)) => {
                     field.SetPlaceholderText(&HSTRING::from(&s))?;
                 }
-                (_, Prop::ContentType, _) => crate::depth_stub("autofill"),
+                (NativeWidget::Entry(field), Prop::ContentType, Value::I64(word)) => {
+                    let (scope, suggest) = content_scope(false, word);
+                    field.SetInputScope(&input_scope(scope)?)?;
+                    field.SetIsSpellCheckEnabled(suggest)?;
+                    field.SetIsTextPredictionEnabled(suggest)?;
+                }
+                (NativeWidget::Secure(field), Prop::ContentType, Value::I64(word)) => {
+                    field.SetInputScope(&input_scope(content_scope(true, word).0)?)?;
+                }
                 (NativeWidget::Checkbox { check, switch, .. }, Prop::Checked, Value::Bool(b)) => {
                     let boxed: IReference<bool> = PropertyValue::CreateBoolean(b)?.cast()?;
                     core.apply_quiet
@@ -21093,6 +21104,42 @@ fn automation_id_of(core: &CoreState, id: u64) -> Option<windows_core::HSTRING> 
     AutomationProperties::GetAutomationId(&object).ok()
 }
 
+/// docs/autofill-plan.md §3, the WinUI column, applied and read through this
+/// one table (tools/lib/content_type_routes.py pins its rows): the kaya word,
+/// on a PasswordBox, the scope's name, a TextBox's spell check and text
+/// prediction, the class the harness reads.
+#[allow(clippy::type_complexity)]
+fn content_scopes() -> [(&'static str, bool, InputScopeNameValue, bool, &'static str); 9] {
+    use InputScopeNameValue as N;
+    [
+        ("none", false, N::Default, true, "none"),
+        ("username", false, N::Default, false, "username"),
+        ("one_time_code", false, N::Digits, true, "one_time_code"),
+        ("email", false, N::EmailSmtpAddress, true, "email"),
+        ("phone", false, N::TelephoneNumber, true, "phone"),
+        ("none", true, N::Password, true, "password"),
+        ("password", true, N::Password, true, "password"),
+        ("new_password", true, N::Password, true, "password"),
+        ("one_time_code", true, N::NumericPin, true, "one_time_code"),
+    ]
+}
+
+fn content_scope(secure: bool, word: i64) -> (InputScopeNameValue, bool) {
+    let name = crate::wire::vocab_name(crate::wire::CONTENT_TYPES, word)
+        .unwrap_or_else(|| panic!("kaya: content type {word} is not in the spec's vocabulary"));
+    let row = content_scopes()
+        .into_iter()
+        .find(|row| row.0 == name && row.1 == secure)
+        .unwrap_or_else(|| panic!("kaya: content type {name} has no row for this kind in content_scopes()"));
+    (row.2, row.3)
+}
+
+fn input_scope(name: InputScopeNameValue) -> windows_core::Result<InputScope> {
+    let scope = InputScope::new()?;
+    scope.Names()?.Append(&InputScopeName::CreateInstance(name)?)?;
+    Ok(scope)
+}
+
 #[cfg(feature = "harness")]
 fn target_widget_id(core: &CoreState, target: crate::harness::Target) -> Option<u64> {
     let ids = registry_ids(core, target.kind);
@@ -22218,11 +22265,47 @@ impl crate::harness::Stage for WinUiStage {
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
+    fn content_type(&self, t: crate::harness::Target) -> Result<&'static str, String> {
+        let secure = t.kind == crate::harness::TargetKind::SecureField;
+        let read = Self::on_ui_read(move |core| {
+            let Some(id) = target_widget_id(core, t) else {
+                return Ok(Err("no such field".to_owned()));
+            };
+            let (scope, suggest) = match core.widgets.get(&WidgetId(id)) {
+                Some(NativeWidget::Entry(field)) => (
+                    field.InputScope(),
+                    field.IsSpellCheckEnabled()? && field.IsTextPredictionEnabled()?,
+                ),
+                Some(NativeWidget::Secure(field)) => (field.InputScope(), true),
+                _ => return Ok(Err("the target is neither a TextBox nor a PasswordBox".to_owned())),
+            };
+            let names = match scope {
+                Ok(scope) => scope.Names()?,
+                Err(e) if e.code().is_ok() => {
+                    return Ok(Err("the box carries no InputScope".to_owned()));
+                }
+                Err(e) => return Err(e),
+            };
+            if names.Size()? != 1 {
+                return Ok(Err(format!("the box's InputScope holds {} names", names.Size()?)));
+            }
+            let name = names.GetAt(0)?.NameValue()?;
+            Ok(content_scopes()
+                .into_iter()
+                .find(|row| row.1 == secure && row.2 == name && row.3 == suggest)
+                .map(|row| row.4)
+                .ok_or_else(|| {
+                    format!(
+                        "the box's InputScope is {name:?} with spell check and prediction \
+                         {suggest}, which no row of winui's content_scopes() names"
+                    )
+                }))
+        });
+        read.unwrap_or_else(|e| Err(format!("the InputScope could not be read: {e}")))
+    }
+
     /// docs/secure-entry-plan.md §3: the peer must say IsPassword, and a value
     /// its Value pattern publishes is held to the mask rule.
-    fn content_type(&self, _: crate::harness::Target) -> Result<&'static str, String> {
-        crate::depth_stub("autofill")
-    }
 
     fn masked_len(&self, t: crate::harness::Target) -> Result<usize, crate::harness::MaskRead> {
         use crate::harness::MaskRead;

@@ -875,6 +875,21 @@ enum PlaybackState : uint
     Paused = KayaWire.PlaybackStatePaused,
 }
 
+/// What a credential field holds (docs/autofill-plan.md A2): the
+/// passwords on a secure field only, username, email and phone on an entry
+/// only, a one-time code on either (A3), refused at the root otherwise.
+/// None takes the hint away.
+enum ContentType : long
+{
+    None = KayaWire.ContentTypeNone,
+    Username = KayaWire.ContentTypeUsername,
+    Password = KayaWire.ContentTypePassword,
+    NewPassword = KayaWire.ContentTypeNewPassword,
+    OneTimeCode = KayaWire.ContentTypeOneTimeCode,
+    Email = KayaWire.ContentTypeEmail,
+    Phone = KayaWire.ContentTypePhone,
+}
+
 /// How a video view fits its picture (docs/media-plan.md §3).
 enum Fit : uint
 {
@@ -4234,6 +4249,12 @@ sealed class Tx : IDisposable
     public void SetPlaceholder(Widget w, Signal s) =>
         Records.Add(KayaWire.TxBindPlaceholder(w.Id, s.Id));
 
+    /// What an entry or secure field holds, so the platform's password
+    /// manager, one-time-code autofill and keyboard can act on it
+    /// (docs/autofill-plan.md A1).
+    public void SetContentType(Widget w, ContentType contentType) =>
+        Records.Add(KayaWire.TxSetContentType(w.Id, (long)contentType));
+
     /// The DESTINATION a Role.Link label opens (docs/tasks-s2-plan.md
     /// T3): the platform's own opener takes it and nothing is emitted.
     public void SetHref(Widget w, string url) =>
@@ -4462,12 +4483,13 @@ sealed class Tx : IDisposable
     }
 
     public Widget Entry(Action<Tx, string>? onChange = null, double? grow = null,
-        Action<Tx, string>? onSubmit = null)
+        ContentType? contentType = null, Action<Tx, string>? onSubmit = null)
     {
         var w = Widget(KayaWire.KindEntry);
         if (onChange != null) App.OnChange(w, onChange);
         if (onSubmit != null) App.OnSubmitted(w, onSubmit);
         if (grow is double g) SetGrow(w, g);
+        if (contentType is ContentType c) SetContentType(w, c);
         return w;
     }
 
@@ -4511,12 +4533,13 @@ sealed class Tx : IDisposable
     /// what is typed (docs/secure-entry-plan.md). onChange and onSubmit
     /// receive the real text.
     public Widget SecureField(Action<Tx, string>? onChange = null, double? grow = null,
-        Action<Tx, string>? onSubmit = null)
+        ContentType? contentType = null, Action<Tx, string>? onSubmit = null)
     {
         var w = Widget(KayaWire.KindSecureField);
         if (onChange != null) App.OnChange(w, onChange);
         if (onSubmit != null) App.OnSubmitted(w, onSubmit);
         if (grow is double g) SetGrow(w, g);
+        if (contentType is ContentType c) SetContentType(w, c);
         return w;
     }
 
@@ -6594,6 +6617,10 @@ sealed class Tpl
     /// A stamped textarea that SENDS on Return (docs/submit-plan.md S2).
     public void SetSubmits(Node n, bool on) =>
         tx.Records.Add(KayaWire.TxSetSubmits(n.Id, on));
+
+    /// What every stamped copy of this field holds (Tx.SetContentType).
+    public void SetContentType(Node n, ContentType contentType) =>
+        tx.Records.Add(KayaWire.TxSetContentType(n.Id, (long)contentType));
 
     /// A stamped container's cross-axis child placement (Tx.SetAlign).
     public void SetAlign(Node n, Align align) =>

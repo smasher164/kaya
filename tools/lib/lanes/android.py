@@ -121,6 +121,8 @@ LEGS = {
         "search-compose",
         # The secure field (docs/secure-entry-plan.md §5).
         "secure-compose",
+        # The content type (docs/autofill-plan.md §5).
+        "autofill-compose",
         "submit-compose",
         # The notification conformance scene: rust-only for now, so it
         # rides the compose suite alone (docs/tasks-s3-plan.md §5).
@@ -189,7 +191,7 @@ LEGS = {
         "align-jvm", "layout-jvm", "stall-jvm",
         "confirm-jvm", "nav-jvm", "scroll-jvm",
         "progress-jvm", "select-jvm", "radio-jvm",
-        "grid-jvm", "textarea-jvm", "search-jvm", "secure-jvm", "submit-jvm", "scrollto-jvm", "fullscreen-jvm", "sections-jvm",
+        "grid-jvm", "textarea-jvm", "search-jvm", "secure-jvm", "autofill-jvm", "submit-jvm", "scrollto-jvm", "fullscreen-jvm", "sections-jvm",
         "menus-jvm", "toolbar-jvm", "identity-jvm",
         "listdetail-jvm", "commands-jvm", "clipboard-jvm",
         "background-jvm", "undo-jvm", "filedialog-jvm",
@@ -214,7 +216,7 @@ LEGS = {
         "layout-go", "stall-go", "confirm-go",
         "nav-go", "scroll-go", "progress-go",
         "select-go", "radio-go", "grid-go",
-        "textarea-go", "search-go", "secure-go", "submit-go", "scrollto-go", "fullscreen-go", "sections-go", "menus-go",
+        "textarea-go", "search-go", "secure-go", "autofill-go", "submit-go", "scrollto-go", "fullscreen-go", "sections-go", "menus-go",
         "toolbar-go", "identity-go", "listdetail-go",
         "commands-go", "clipboard-go", "background-go",
         "undo-go", "filedialog-go", "save-go",

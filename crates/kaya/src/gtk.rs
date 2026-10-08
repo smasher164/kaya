@@ -14413,7 +14413,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 (NativeWidget::Secure(field), Prop::Placeholder, Value::Str(s)) => {
                     field.set_placeholder_text((!s.is_empty()).then_some(s.as_str()));
                 }
-                (_, Prop::ContentType, _) => crate::depth_stub("autofill"),
+                (NativeWidget::Entry(entry), Prop::ContentType, Value::I64(word)) => {
+                    apply_content_type(entry.upcast_ref(), false, word);
+                }
+                (NativeWidget::Secure(field), Prop::ContentType, Value::I64(word)) => {
+                    apply_content_type(field.upcast_ref(), true, word);
+                }
                 (NativeWidget::Secure(field), Prop::Text, Value::Str(s)) => {
                     core.apply_quiet.set(true);
                     gtk4::prelude::EditableExt::set_text(field, &s);
@@ -18602,11 +18607,27 @@ impl crate::harness::Stage for GtkStage {
             }
         })
     }
+    fn content_type(&self, target: crate::harness::Target) -> Result<&'static str, String> {
+        let secure = target.kind == crate::harness::TargetKind::SecureField;
+        Self::on_main(move |core| {
+            let widget = target_widget(core, target).ok_or("no such field")?;
+            let text = content_text(&widget).ok_or("the field has no GtkText delegate")?;
+            let (purpose, hints) = (text.input_purpose(), text.input_hints());
+            content_hints()
+                .into_iter()
+                .find(|row| row.1 == secure && row.2 == purpose && row.3 == hints)
+                .map(|row| row.4)
+                .ok_or_else(|| {
+                    format!(
+                        "the field's GtkText has input-purpose {purpose:?} and input-hints \
+                         {hints:?}, which no row of gtk.rs's content_hints() names"
+                    )
+                })
+        })
+    }
+
     /// The Text interface of the field's own node on the bus, through the one
     /// mask rule (docs/secure-entry-plan.md §3, P6).
-    fn content_type(&self, _: crate::harness::Target) -> Result<&'static str, String> {
-        crate::depth_stub("autofill")
-    }
 
     fn masked_len(&self, target: crate::harness::Target) -> Result<usize, crate::harness::MaskRead> {
         use crate::harness::MaskRead;
@@ -23375,6 +23396,45 @@ fn rich_target_id(
     }
     let widget = target_widget(core, target)?;
     core.widgets.iter().find(|(_, w)| w.control() == widget).map(|(id, _)| *id)
+}
+
+/// docs/autofill-plan.md §3, the GTK column, applied and read through this one
+/// table (tools/lib/content_type_routes.py pins its rows): the kaya word, on a
+/// secure field, the GtkText's purpose and hints, the class the harness reads.
+#[allow(clippy::type_complexity)]
+fn content_hints() -> [(&'static str, bool, gtk4::InputPurpose, gtk4::InputHints, &'static str); 9] {
+    use gtk4::{InputHints as H, InputPurpose as P};
+    [
+        ("none", false, P::FreeForm, H::NONE, "none"),
+        ("username", false, P::FreeForm, H::NO_SPELLCHECK | H::NO_EMOJI, "username"),
+        ("one_time_code", false, P::Digits, H::PRIVATE, "one_time_code"),
+        ("email", false, P::Email, H::NO_SPELLCHECK, "email"),
+        ("phone", false, P::Phone, H::NONE, "phone"),
+        ("none", true, P::Password, H::NONE, "password"),
+        ("password", true, P::Password, H::NONE, "password"),
+        ("new_password", true, P::Password, H::NONE, "password"),
+        ("one_time_code", true, P::Pin, H::NONE, "one_time_code"),
+    ]
+}
+
+/// The GtkText both kinds delegate to, the widget the input method reads.
+fn content_text(widget: &gtk4::Widget) -> Option<gtk4::Text> {
+    use gtk4::prelude::Cast;
+    gtk4::prelude::EditableExt::delegate(widget.downcast_ref::<gtk4::Editable>()?)?
+        .downcast::<gtk4::Text>()
+        .ok()
+}
+
+fn apply_content_type(widget: &gtk4::Widget, secure: bool, word: i64) {
+    let name = crate::wire::vocab_name(crate::wire::CONTENT_TYPES, word)
+        .unwrap_or_else(|| panic!("kaya: content type {word} is not in the spec's vocabulary"));
+    let (_, _, purpose, hints, _) = content_hints()
+        .into_iter()
+        .find(|row| row.0 == name && row.1 == secure)
+        .unwrap_or_else(|| panic!("kaya: content type {name} has no row for this kind in content_hints()"));
+    let text = content_text(widget).expect("an entry and a secure field delegate to a GtkText");
+    text.set_input_purpose(purpose);
+    text.set_input_hints(hints);
 }
 
 /// The widget a `kind#index` target names, from the per-kind registry
