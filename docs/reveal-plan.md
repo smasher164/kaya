@@ -8,6 +8,7 @@ SwiftUI arm on macOS and iOS (compiled for both, run on macOS), the harness's
 tools/scenes/reveal.steps green on the mac for Rust. GTK, WinUI and Compose are
 depth stubs, the iOS legs unwired and the eight other bindings the breadth
 (docs/deferred.md, the reveal toggle's BUILD entry).
+RULED 2026-10-08 (the maintainer: "im fine with everything except ... the keyboard navigation"): V1-V9 as built, and the platform divergences accepted save one: the eye must be reachable with Tab on every platform ("it makes it more accessible"), built in the keyboard-reach slice.
 
 The maintainer asked for it on 2026-10-08: "maybe we do show password now? i
 want to finish password entry before moving onto the next feature". The secure
@@ -64,7 +65,7 @@ Four facts decide the design:
 
 ## §2 — The rulings (RECOMMENDED 2026-10-08, built as recommended)
 
-### V1 — Two props on the secure field, `revealed` and `revealable`, both zones (RECOMMEND)
+### V1 — Two props on the secure field, `revealed` and `revealable`, both zones (RULED 2026-10-08)
 
 `revealed` (Bool, PROPS 57): the field shows its text. The app writes it as
 configuration; a write never echoes. `revealable` (Bool, PROPS 58): the field
@@ -79,7 +80,7 @@ icon wants the state alone. Legal on the secure field only, in both zones (a
 stamped account row's PIN). The names are the state's adjective and its
 capability, not a platform's word (GTK's "peek", WinUI's "reveal mode").
 
-### V2 — The user's toggle reaches the app as `toggled`, the checkbox's record (RECOMMEND)
+### V2 — The user's toggle reaches the app as `toggled`, the checkbox's record (RULED 2026-10-08)
 
 The secure field's toggle IS a boolean the user flips, with the checkbox's
 ownership and stance: the field owns the state, the user's flip reports with
@@ -89,7 +90,7 @@ existing toggle handler on the field's handle is the API (`on_toggle` in Rust,
 `on_toggle_node` for a stamped copy). An app that keeps its own model writes
 `revealed` back, which is idempotent.
 
-### V3 — Revealed, the platform shows plain text; kaya adds no mask of its own (RECOMMEND)
+### V3 — Revealed, the platform shows plain text; kaya adds no mask of its own (RULED 2026-10-08)
 
 Each backend uses its platform's own way to show the text (§3): GTK's
 visibility, WinUI's `Visible` mode, Compose's `Visible` obfuscation, and on
@@ -97,7 +98,7 @@ the Apple platforms a plain field over the same text. Hidden again, the
 platform's masking returns, the phones' last-character flash included (P3 and
 P7 unchanged).
 
-### V4 — The assistive reader reads the text while shown; the harness reads a count (RECOMMEND)
+### V4 — The assistive reader reads the text while shown; the harness reads a count (RULED 2026-10-08)
 
 A shown password is plain text to the platform's assistive reader, which is
 what a sighted user is shown, so no backend masks the accessibility value of a
@@ -118,7 +119,7 @@ flips it through the one door the toggle's own action takes; it is an action
 verb, so its answer is the app's `toggled`. Every `type_secret` in the scene is
 still scanned for in the leg's transcripts, with the text shown on screen.
 
-### V5 — Copy and cut stay refused while shown; so do the text services and the undo stack (RECOMMEND)
+### V5 — Copy and cut stay refused while shown; so do the text services and the undo stack (RULED 2026-10-08)
 
 The masked field refuses copy and cut on every platform (secure P4); showing
 the text is about the user's eyes, not the clipboard, and §0 fact 3 makes
@@ -133,7 +134,7 @@ with no undo manager and Writing Tools off. GTK's arm blocks the GtkText's copy 
 while shown; WinUI and Compose refuse natively. Paste keeps working (a password
 manager pastes).
 
-### V6 — Focus, caret and the content type survive the toggle (RECOMMEND)
+### V6 — Focus, caret and the content type survive the toggle (RULED 2026-10-08)
 
 The toggle never moves the focus: a field that held it holds it after, and the
 caret stays where it was. Three platforms keep both by construction (the same
@@ -145,7 +146,7 @@ arriving field's editor holds the window's focus, or says it never came back.
 The shown field carries the same content type as the masked one, so Password
 AutoFill still offers on it.
 
-### V7 — The eye: the platform's glyph, at the field's trailing edge, labelled by what it will do (RECOMMEND)
+### V7 — The eye: the platform's glyph, at the field's trailing edge, labelled by what it will do (RULED 2026-10-08)
 
 GTK's own peek icon (`view-reveal-symbolic`, `view-conceal-symbolic`); WinUI's
 reveal glyph U+F78D in the template's own ToggleButton style; Compose's
@@ -158,12 +159,12 @@ own translated "Show Text" / "Hide Text". GTK's icon is not keyboard-reachable
 (an image with a gesture); the breadth decides whether kaya wraps it in a
 button or ledgers the gap.
 
-### V8 — The phones' last-character flash is unchanged (RECOMMEND)
+### V8 — The phones' last-character flash is unchanged (RULED 2026-10-08)
 
 Hidden, iOS and Compose keep their platform's flash of the last typed
 character (P3); shown, there is nothing to flash. Nothing new.
 
-### V9 — A new scene, not more lines in secure.steps (RECOMMEND)
+### V9 — A new scene, not more lines in secure.steps (RULED 2026-10-08)
 
 secure.steps runs on five lanes in nine languages, so extending it would
 redden every one of those legs until the breadth; a new scene rides the depth
