@@ -4,8 +4,9 @@ Status: BUILT 2026-10-07 on all five platforms and in all nine bindings
 (76f87836 depth, c1c25d0c breadth; full matrix on c1c25d0c: every secure and
 gallery leg green, one unrelated media leg red once; review page
 https://claude.ai/artifact/NzHtTqPdSgUPsAZVVm23He). Every ruling in §2 is
-RECOMMENDED, built as recommended, awaiting the maintainer's ruling; so are
-the GTK 4.14 minimum and the WinUI reading (§7).
+RULED 2026-10-07 as built (the maintainer: "accept all"), together with the
+GTK 4.14 minimum and the WinUI reading (§7); P8's deferral is lifted, the
+autofill hint being the next slice he asked for.
 
 The roadmap card (docs/roadmap/features.toml, `secure_entry`) asks for it:
 every login screen needs one, all four of MAUI, egui, iced and Slint ship
@@ -59,9 +60,9 @@ Three facts decide the design:
 Two of those are wrong for a password: an undo step that brings back a
 cleared password, and a transcript that carries one.
 
-## §2 — The rulings (RECOMMENDED, built as recommended, awaiting the maintainer)
+## §2 — The rulings (RULED 2026-10-07 as built: "accept all")
 
-### P1 — A KIND, `secure_field` (wire 24), not a prop on the entry (RECOMMEND: kind)
+### P1 — A KIND, `secure_field` (wire 24), not a prop on the entry (RULED: kind)
 
 The search pass ruled this already in principle (S2: "the entry variants
 the parity survey found missing, `secure` ... and `number`: they are kinds
@@ -77,7 +78,7 @@ boolean prop" is superseded by S2's precedent.
 The NAME follows `number_field`: `secure_field`, SwiftUI's own word, and
 broader than `password` (a PIN, an API key, a recovery code).
 
-### P2 — The entry's contract, minus the undo ledger and the emoji picker (RECOMMEND: yes)
+### P2 — The entry's contract, minus the undo ledger and the emoji picker (RULED: yes)
 
 The kind takes the entry's text contract whole: `text_changed` carries the
 REAL text to the app on every edit, `submitted` carries it on Return, the
@@ -92,7 +93,7 @@ field's typing and the core keeps no copy of its text
 password the user cleared), and the `emoji_picker` command is refused on
 it. Context menus are refused as on every editable kind.
 
-### P3 — No reveal affordance on any platform (RECOMMEND: none)
+### P3 — No reveal affordance on any platform (RULED: none)
 
 One observable semantics (invariant 1): no eye button anywhere. WinUI sets
 `PasswordRevealMode = Hidden`, GTK leaves `show-peek-icon` off, the Apple
@@ -102,7 +103,7 @@ cannot turn it off), since that is the platform's own convention and not an
 affordance. An app-declared `reveal` toggle is ledgered for the day an app
 asks for one.
 
-### P4 — Copy and cut refused natively, paste allowed (RECOMMEND: yes)
+### P4 — Copy and cut refused natively, paste allowed (RULED: yes)
 
 Every platform's control already refuses copy and cut and accepts paste (a
 password manager pastes). kaya adds nothing but keeps its own Edit menu
@@ -110,7 +111,7 @@ honest: the SwiftUI arm's cut and copy enablement lists name the entry,
 textarea, search and number field and NOT the secure field, so Edit>Copy is
 disabled while one has focus. The breadth holds the same on every arm.
 
-### P5 — The a11y verdict is `field`; the platform's identity is kept (RECOMMEND: yes)
+### P5 — The a11y verdict is `field`; the platform's identity is kept (RULED: yes)
 
 `expect_ax secure_field@password` reads `field/Password` by the
 normalize-down rule (S7's reasoning): UIA has no secure control type, only
@@ -119,7 +120,7 @@ the platform's own identity: AXSecureTextField (measured), GTK's password
 text, UIA's IsPassword, Compose's `password()`. The VALUE is never exposed:
 every platform masks it, and P6's read asserts that mask.
 
-### P6 — What the harness may print: a count of masked characters, never the text (RECOMMEND: the count, read off the platform's mask)
+### P6 — What the harness may print: a count of masked characters, never the text (RULED: the count, read off the platform's mask)
 
 The text must reach no verdict, observation, step log, verb trace,
 watchdog sentence or flight-recorder bundle. Built:
@@ -156,7 +157,7 @@ digit) fails the leg too. check-steps holds the scene's arguments, the
 scan's three answers and its wiring. The other four lanes owe the same
 scan before their legs are wired (§6).
 
-### P7 — Placeholder, submit and phone keyboards (RECOMMEND: as the entry, with no capitalization and no autocorrection on phones)
+### P7 — Placeholder, submit and phone keyboards (RULED: as the entry, with no capitalization and no autocorrection on phones)
 
 `placeholder` is legal on the kind (PROPS 30, which the search pass made a
 text-kind prop). Return publishes `submitted` with the text, as on an
@@ -165,7 +166,7 @@ entry. iOS: `.textInputAutocapitalization(.never)` and
 default. Compose: `KeyboardType.Password`, no capitalization, the entry's
 IME action.
 
-### P8 — The autofill hint is deferred to the ledger (RECOMMEND: defer)
+### P8 — The autofill hint is deferred to the ledger (RULED: defer)
 
 Not free: iOS distinguishes `password`, `newPassword` and `oneTimeCode`,
 and saving a credential needs associated domains, which is the packaging
@@ -175,7 +176,7 @@ an app. A `content` prop with those three words is the likely shape; its
 trigger is the password-manager archetype or the first app with a login
 screen (docs/deferred.md).
 
-### P9 — Stamped secure fields exist (RECOMMEND: both zones, as every kind)
+### P9 — Stamped secure fields exist (RULED: both zones, as every kind)
 
 The template zone has `secure_field()` and `secure_field_bound()`, as the
 search field has. A stamped copy is never banked either. Its masked read is
