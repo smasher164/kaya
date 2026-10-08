@@ -322,7 +322,9 @@ in docs/deferred.md.
    (docs/measurements/gate-sweep-2026-09-07.md). It holds the runner and environment probe to the
    same four-phone pool; its self-tests watch lane count, pool width,
    concurrent platform launch, pid provenance, the mac wait and its
-   provenance, single-sweep shape and niceness red. AND THE HAND RUN AND THE LANE LAUNCH A LEG THROUGH ONE
+   provenance, single-sweep shape and niceness red. gates.py's BUILD ends with
+   tools/prune-objects.py and validate-mac runs it after its cargo build
+   (docs/traps.md, the stale split-debuginfo objects), two cuts watched. AND THE HAND RUN AND THE LANE LAUNCH A LEG THROUGH ONE
    WIRING since 2026-09-18: tools/run-leg.py and validate-mac's pool both
    run their leg through the MacRecorder method that wraps it in the
    pool's `timeout 120` (also the sampler's pid anchor) and samples it,
@@ -950,7 +952,7 @@ in docs/deferred.md.
    DESKTOP IS PHOTOGRAPHED ONLY ON AN IDLE HOST since 2026-09-28 (the
    maintainer's screen is his while he is at it): shot_desktop is run
    against a doubled idle clock, two cuts watched.
-   Eighty-eight watched negatives, counts printed),
+   Ninety-six watched negatives, counts printed),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer

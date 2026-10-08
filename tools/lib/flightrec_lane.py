@@ -49,7 +49,7 @@ SECTIONS = {
                 "foreground", "foreground-text", "desktop-live", "notifications",
                 "toast-moment", "gesture-moment", "media-server", "capture-devices"),
     "ios": ("leg-log", "verb-trace", "shot", "panic", "app-log", "devices", "binary-stamp",
-            "notifications"),
+            "notifications", "stacks"),
     "android": ("leg-log", "verb-trace", "shot", "logcat", "devices",
                 "system-events", "anr-history", "shade-history"),
     "linux": ("leg-log", "verb-trace", "shot", "desktop", "xvfb"),
@@ -1206,6 +1206,12 @@ class IosRecorder(LaneRecorder):
                 self.adopt(bundle, "notifications", log.with_suffix(".notifications"),
                            why_absent="flightrec: run-sim.py's notification_capture "
                                       "kept no file for this leg")
+                self.adopt(bundle, "stacks", log.with_suffix(".stacks"),
+                           why_absent="flightrec: no stacks were taken — run-sim.py's "
+                                      "stacks_watch samples the app only when the "
+                                      "harness's step ceiling fires and asks, so this "
+                                      "leg failed some other way, or its second act or "
+                                      "probe ran outside that watcher")
                 self.adopt_shot(bundle, "shot", log.with_suffix(".shot.png"),
                                 why_absent=self.SHOT_ABSENT,
                                 note_src=log.with_suffix(".shotwhen"))

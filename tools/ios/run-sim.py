@@ -1502,6 +1502,66 @@ def simdrive_watch(udid, bundle_id, docs_dir, log_path, stop):
             time.sleep(0.05)
 
 
+STACKS_SAMPLE_CAP = 20
+
+
+def stacks_pids(udid, app_pid):
+    """The app the harness named and this device's xcui driver runner."""
+    got = subprocess.run(["pgrep", "-f", f"Devices/{udid}/.*KayaDrive-Runner"],
+                         capture_output=True, check=False, **TEXT)
+    drivers = [p for p in got.stdout.split() if p.isdigit()]
+    return [("app", app_pid)] + [("xcui driver runner", p) for p in drivers]
+
+
+def stacks_take(udid, app_pid, step, dest, deadline):
+    """docs/traps.md, the iOS ceiling's stacks: a cold symbol cache made one
+    `sample` take 11 s, so the bound is the cap or what the leg has left."""
+    bound = max(2, min(STACKS_SAMPLE_CAP, int(deadline - time.time())))
+    parts, said = [], []
+    with tempfile.TemporaryDirectory() as tmp:
+        live = []
+        for who, pid in stacks_pids(udid, app_pid):
+            out = pathlib.Path(tmp) / f"{pid}.txt"
+            live.append((who, pid, out, subprocess.Popen(
+                ["timeout", str(bound), "sample", pid, "1", "-file", str(out)],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **TEXT)))
+        for who, pid, out, proc in live:
+            told, _ = proc.communicate()
+            body = (out.read_text(encoding="utf-8", errors="replace")
+                    if out.is_file() else "(sample wrote no report)")
+            parts.append(f"== `sample {pid} 1` ({who}) exited {proc.returncode} "
+                         f"under a {bound} s bound ==\n{told}\n{body}")
+            said.append(f"{who} {pid} exit {proc.returncode}")
+    dest.write_text(
+        f"Every thread of each process below, sampled for 1 s by the host the moment "
+        f"the harness's step ceiling fired on step {step!r}, before the app left.\n\n"
+        + "\n".join(parts), encoding="utf-8")
+    return "; ".join(said)
+
+
+def stacks_watch(udid, docs_dir, dest, deadline, stop):
+    """Answer the harness's one stack request (kayaCeilingStacks)."""
+    docs = pathlib.Path(docs_dir)
+    request = docs / "kaya-stacks-request"
+    done = docs / "kaya-stacks-done"
+    request.unlink(missing_ok=True)
+    done.unlink(missing_ok=True)
+    dest.unlink(missing_ok=True)
+    while not stop.is_set():
+        if request.is_file():
+            lines = request.read_text(encoding="utf-8",
+                                      errors="replace").splitlines()
+            request.unlink(missing_ok=True)
+            pid = lines[0].strip() if lines else ""
+            step = lines[1] if len(lines) > 1 else ""
+            said = (stacks_take(udid, pid, step, dest, deadline) if pid.isdigit()
+                    else f"the request named no pid: {lines!r}")
+            part = docs / "kaya-stacks-done.part"
+            part.write_text(f"{said} -> {dest.name}\n", encoding="utf-8")
+            part.rename(done)
+        time.sleep(0.1)
+
+
 # --------------------------------------------- scene script transforms
 def scene_script_cut(scene, cut, keep, extra):
     """The phone-expressible prefix, decided in tools/lib/scene_cut.py —
@@ -1823,9 +1883,16 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
         _act2 = act2_dir_on(udid, bundle_id)
         for _name in ("marker", "act2.verdict"):
             (_act2 / _name).unlink(missing_ok=True)
+    data_container = out_of(["xcrun", "simctl", "get_app_container",
+                             udid, bundle_id, "data"]).strip()
+    stacks_stop = threading.Event()
+    stacks = threading.Thread(
+        target=stacks_watch,
+        args=(udid, f"{data_container}/Documents",
+              (LEGS_DIR / f"{name}.log").with_suffix(".stacks"),
+              time.time() + 100, stacks_stop))
+    stacks.start()
     if needs_bridge(script):
-        data_container = out_of(["xcrun", "simctl", "get_app_container",
-                                 udid, bundle_id, "data"]).strip()
         simdrive_log = SIMDRIVE_LOG_DIR / f"{name}.log"
         simdrive_log.write_text("", encoding="utf-8")
         watcher_stop = threading.Event()
@@ -1887,6 +1954,8 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env,
         check=False, **TEXT)
     out = got.stdout
+    stacks_stop.set()
+    stacks.join()
     if watcher is not None:
         watcher_stop.set()
         watcher.join()
@@ -1917,6 +1986,15 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
                   f"{name} ({len(mine)} line(s)) ==", file=log)
             print("\n".join(mine[-40:]) if mine else
                   "(the driver was never asked for anything)", file=log)
+        if xcode_log.is_file():
+            with open(xcode_log, "r", encoding="utf-8",
+                      errors="replace") as xl:
+                xl.seek(xcode_log_at)
+                said = xl.read().splitlines()
+            print(f"== XCTest's own account on {udid} during {name}, its idle "
+                  f"waits included ({len(said)} line(s), last 60) ==", file=log)
+            print("\n".join(said[-60:]) if said else
+                  "(XCTest wrote nothing while this leg ran)", file=log)
     if simdrive_log is not None:
         lines = (len(simdrive_log.read_text(
             encoding="utf-8", errors="replace").splitlines())

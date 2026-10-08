@@ -8463,6 +8463,84 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
         + "returns.)"
 }
 
+#if os(iOS)
+    /// docs/traps.md, the iOS ceiling's stacks: tools/ios/run-sim.py's stacks_watch
+    /// answers, and the wait stays inside the leg's `timeout 120`.
+    let kayaCeilingStacksWait: TimeInterval = 25
+
+    /// Every layer still carrying an animation, read on the main thread within
+    /// 2 s: XCTest waits for animations to go idle before it acts.
+    func kayaCeilingAnimations() -> String {
+        let lock = NSLock()
+        var said: String?
+        DispatchQueue.main.async {
+            var lines: [String] = []
+            var layers = 0
+            func walk(_ layer: CALayer, _ depth: Int) {
+                layers += 1
+                for key in layer.animationKeys() ?? [] where lines.count < 200 {
+                    let anim = layer.animation(forKey: key)
+                    let owner = layer.delegate.map { String(describing: type(of: $0)) } ?? "-"
+                    lines.append(
+                        "  \(type(of: layer)) of \(owner) depth \(depth) frame \(layer.frame) key \(key) "
+                            + "\(anim.map { "\(type(of: $0)) duration \($0.duration) repeat \($0.repeatCount) begin \($0.beginTime) removed \($0.isRemovedOnCompletion)" } ?? "nil")"
+                    )
+                }
+                for sub in layer.sublayers ?? [] { walk(sub, depth + 1) }
+            }
+            let windows = UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }.flatMap { $0.windows }
+            for window in windows { walk(window.layer, 0) }
+            let text =
+                "\(lines.count) animation(s) on \(layers) layer(s) in \(windows.count) window(s), "
+                + "now \(CACurrentMediaTime())"
+                + (lines.isEmpty ? "" : "\n" + lines.joined(separator: "\n"))
+            lock.lock()
+            said = text
+            lock.unlock()
+        }
+        let until = Date().addingTimeInterval(2)
+        while Date() < until {
+            lock.lock()
+            let got = said
+            lock.unlock()
+            if let got { return got }
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        return "the main thread did not answer within 2 s, so no layer was read"
+    }
+
+    func kayaCeilingStacks(_ step: String) {
+        FileHandle.standardError.write(
+            Data("KAYA_HARNESS: animations at the ceiling: \(kayaCeilingAnimations())\n".utf8))
+        let dir = kayaTempDir() as NSString
+        let done = dir.appendingPathComponent("kaya-stacks-done")
+        let part = dir.appendingPathComponent("kaya-stacks-request.part")
+        unlink(done)
+        guard FileManager.default.createFile(
+            atPath: part, contents: Data("\(getpid())\n\(step)\n".utf8)),
+            rename(part, dir.appendingPathComponent("kaya-stacks-request")) == 0
+        else {
+            FileHandle.standardError.write(
+                Data("KAYA_HARNESS: could not write the stack request into \(dir)\n".utf8))
+            return
+        }
+        let until = Date().addingTimeInterval(kayaCeilingStacksWait)
+        while Date() < until {
+            if let said = try? String(contentsOfFile: done, encoding: .utf8) {
+                FileHandle.standardError.write(
+                    Data("KAYA_HARNESS: host stacks at the ceiling: \(said)\n".utf8))
+                return
+            }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        FileHandle.standardError.write(
+            Data(
+                ("KAYA_HARNESS: no host answered the stack request in "
+                    + "\(Int(kayaCeilingStacksWait))s\n").utf8))
+    }
+#endif
+
 /// The thread that makes those two ceilings real. NOT the harness thread: the
 /// failure class IS that thread stuck in a call that never returns. `_exit`,
 /// never `exit`: atexit handlers and stdio teardown run in a state where the
@@ -8500,6 +8578,9 @@ final class KayaStepWatchdog {
                     _exit(leaving)
                 }
                 if let step, waited >= ceiling {
+                    #if os(iOS)
+                        kayaCeilingStacks(step)
+                    #endif
                     // THE WEDGE IS WHAT THE TRACE IS FOR (crates/kaya/src/
                     // vtrace.rs); the failed-verdict path dumps its own.
                     KayaVTrace.dump("the step ceiling fired: no verdict")

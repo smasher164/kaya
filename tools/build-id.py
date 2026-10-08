@@ -94,7 +94,8 @@ GATES = {
     # The recorder and all five lanes' collects live under tools/, which
     # rides every key (gate_key); the one file it reads outside is the
     # WinUI guest's own toast-moment capture (the file names it writes).
-    "check-flightrec": ["crates/kaya/src/winui/mod.rs", "crates/kaya/src/harness.rs"],
+    "check-flightrec": ["crates/kaya/src/winui/mod.rs", "crates/kaya/src/harness.rs",
+                        "swift/KayaSwiftUI.swift"],
     # No binding: the card is a lowering. swift/ is an input because the
     # iOS synthesized tier draws it and the mac clause reads that file.
     "check-table-card": ["crates", "swift", "android"],

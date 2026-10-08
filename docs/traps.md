@@ -14361,6 +14361,68 @@ case's expected error renamed in a copy was watched refused. The next
 largest steps are haskell-build (17 s) and ten swift probe builds of about
 6.5 s each, still serial.
 
+## The rust-scoped readdir stall (measured 2026-10-08)
+
+tools/checks/rust-scoped.py timed out a case at 60 s in a full matrix's gate
+sweep and once more alone (real 96 s, user 2.9 s, sys 12.5 s), and the
+TimeoutExpired came out as a traceback. The cause was not the 62 MB rlib:
+rustc reads every entry of each `-L` directory, and target/debug/deps held
+897,058 entries, 865,536 of them `kaya.<cgu>.rcgu.o`. kaya's lib is also a
+cdylib and staticlib, so cargo gives it no `-C extra-filename`, and macOS's
+default `split-debuginfo=unpacked` keeps each incremental build's objects
+in deps with nothing removing them (6k to 75k a day since 2026-08-30). One
+trivial case took 3.5 s (user 0.2 s); 20 cases six wide took 26 s quiet and
+126 s with a thread rewriting a 6 GB file, one rustc 34 s. With `-L` at a
+directory of symlinks to the 434 `.rlib`/`.rmeta`/`.dylib` files the same
+runs took 0.2 s and 0.3 s, and the gate whole 11 s quiet and 17 s under the
+writer (9.8 s of it its one scandir). The gate now builds that directory,
+and a case past its bound is sampled before it is killed: one sentence
+naming the case, its seconds, sample's top frames, its open directories,
+load, memory and whether libkaya.rlib moved, proven every run on a const
+evaluation that never ends, each failure branch forced by hand.
+Every rustc cargo starts is given `-L dependency=target/debug/deps` and paid
+the same read; the stale objects are pruned now (the next entry). Spotlight
+still indexes target/ (`mdfind -onlyin target/debug/deps` answers;
+CACHEDIR.TAG does not exclude it).
+
+## The stale split-debuginfo objects (measured 2026-10-08)
+
+On Apple targets the dev profile's `split-debuginfo=unpacked` leaves a
+binary's DWARF in its objects, named `<stem>.<cgu>.<session>.rcgu.o` beside
+the binary, and every incremental compile of a unit writes ALL its codegen
+units again under a new session tag: kaya's lib +256 per rebuild, its test
+binary +256 per `cargo test` after an edit, each example ~33. Nothing removes
+the old ones (rust-lang/rust#161824; the fix, rust-lang/rust#162561, is open
+and rustc here is 1.97). On 2026-10-08, after the readdir stall's cleanup,
+the tree still held 989,083: 690,024 in target/debug/examples, 215,624 in
+target/aarch64-apple-ios-sim/debug/deps, 53,471 in its examples, 29,964 more
+in target/debug/deps under the test binaries' stems. A trivial rustc against
+the iOS deps took 0.15 s warm and 0.02 s after; against 600k planted entries
+0.45 s and 0.02 s; cold, the stall above. An out-dir's size costs nothing
+(rustc does not read it), only disk: target/ went 79 GB to 65 GB.
+
+`tools/prune-objects.py` deletes them, last in tools/gates.py's BUILD and
+after validate-mac's cargo build (check-gates holds both). AN OBJECT'S MTIME
+SAYS NOTHING ABOUT ITS SESSION: the incremental cache hard-links unchanged
+codegen units into deps (st_nlink 3), so every session of a stem shares
+inodes, and a first draft that kept each stem's newest-mtime session kept
+the OLDEST, deleted the 248 objects libkaya.dylib's debug map named, and the
+test binary's backtrace lost `at ./src/fmt.rs:1856` — and cargo then calls
+the unit fresh, so nothing writes them back until the next edit. The prune
+keeps what the stem's own artifact (`<stem>`, `lib<stem>.dylib`) names in
+its N_OSO stabs, under cargo's `.cargo-lock` for that profile (a build
+holding it for 5 s skips the directory and says so); non-incremental names
+are deterministic, overwritten in place and never touched. Its self-test
+plants a lib whose artifact names the MIDDLE of three same-mtime sessions
+and watches six cuts fail on every run.
+
+The profile was measured first, in a scratch target, and rejected:
+`split-debuginfo = "packed"` leaves nothing but runs dsymutil per linked
+artifact (+1.5 s a lib rebuild, +5 s an example link, 75 examples on the mac
+lane); `"off"` leaves nothing at the same speed but takes file:line out of
+every backtrace frame and source out of lldb; `incremental = false` makes
+the names deterministic and gives up the 2 s lib rebuild.
+
 ## The android pool's per-leg drains, and its lib/example rebuild (measured 2026-10-05)
 
 Each Android EXCLUSIVE leg waits for every running leg to finish before it
@@ -14715,3 +14777,47 @@ failed links-rust-wayland's "delivered to a process that is not tasks"
 check once under load. door_record.py `--self-test` pushes four doors at a
 real bus and refuses a `gio launch` door outright; check-flightrec's
 "linux door record" clause holds both legs to it (ND3 to ND8).
+
+## The iOS ceiling's stacks, and XCTest's 60 s animations-idle wait (measured 2026-10-08)
+
+Matrix 20261008T065443Z: ios `timecode-swift` entered `press return` on
+`number_field@rowtime[a]` and the step ceiling fired 60 s later. The bundle
+had no stacks, but the app's own log slice already named the wait: the
+driver's `typeText("\n")` (`type_b64 ... ok in 59.94s` in the driver log)
+sat in XCTest's quiescence check. The app's XCTest agent logged "Received
+request to notify when the main run loop is idle" and replied in the same
+millisecond, so the MAIN THREAD WAS IDLE, not wedged; it then logged
+"Received request to notify when animations are idle" and never replied
+until the app left. XCTest bounds that wait at 60 s ("App animations
+complete notification not received, will attempt to continue"), the same
+60 s as the harness step ceiling, so a leg cannot outlive one such stall.
+The window metrics around the failing Return are the same as the passing
+Return on the live field two steps earlier, so nothing visible was specific
+to the row. It did not come back: 63 of 63 timecode legs passed (swift, go
+and rust-swiftui) across 10 idle runs, 3 runs at load 167 to 314 and 8 runs
+at load 20 to 47. Over every kept simdrive log, no other `type_b64` took
+more than 20 s.
+
+So every iOS leg now carries what the next sighting needs (check-flightrec,
+census_ios_stacks, NS1 to NS8). At the step ceiling the SwiftUI harness's
+watchdog prints `KAYA_HARNESS: animations at the ceiling:`, which lists every
+CALayer in every window that still carries an animation (owner view, frame,
+key, duration, repeat, begin) and is read on the main thread within 2 s.
+If the main thread does not answer, the line says so. The harness then
+writes `kaya-stacks-request` into its Documents and waits up to 25 s.
+run-sim.py's `stacks_watch` runs `sample <pid> 1` on the app and on the
+device's KayaDrive-Runner, bounded by the smaller of 20 s and what is left
+of the leg's `timeout 120`, and writes `<leg>.stacks`, adopted as the
+`stacks` section. A cold symbol cache made one `sample` of a simulator
+process take 11 s (1.4 s warm), and an 8 s bound lost both stacks on the
+first forced red. A failed leg's log also carries the driver's xcodebuild
+slice: XCTest's own "Wait for <app> to idle" lines and their `t =` clock.
+In a forced read-back, a caret's
+`_uitcvba` keyframe animation with an infinite repeat was present while
+XCTest still went idle, so a repeating animation alone is not the cause.
+Next time, look for the layer that is present only in the stalled one. If
+the stall comes back as XCTest's animation half, prior art for
+bypassing it is Appium WebDriverAgent's swizzle of
+`XCUIApplicationProcess -waitForQuiescenceIncludingAnimationsIdle:isPreEvent:`
+(that signature since Xcode 16 beta 5; present in Xcode 26.6's
+XCUIAutomation).

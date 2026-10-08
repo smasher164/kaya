@@ -64,6 +64,7 @@ FOCUS_RING = "tools/linux/focus-ring.py"
 HAND = "tools/run-leg.py"
 WINLIST = "tools/mac/flightrec-winlist.swift"
 HARNESS = "crates/kaya/src/harness.rs"
+SWIFTUI = "swift/KayaSwiftUI.swift"
 DOOR_RECORD = "tools/linux/door_record.py"
 ACT2_EXEC = "tools/linux/act2-exec.sh"
 DOOR_LEGS = ("tools/linux/persist-leg.py", "tools/linux/link-leg.py")
@@ -79,7 +80,7 @@ UNIVERSAL = ("leg-log", "verb-trace", "shot")
 def sources():
     return {rel: gate.read(rel) for rel in
             (LANE_PY, LANE_SH, LINUX, IOS, ANDROID, WIN,
-             STEPS, WINUI, GUEST_PS1, FOCUS_RING, HAND, WINLIST, HARNESS,
+             STEPS, WINUI, GUEST_PS1, FOCUS_RING, HAND, WINLIST, HARNESS, SWIFTUI,
              DOOR_RECORD, ACT2_EXEC, *DOOR_LEGS)}
 
 
@@ -1085,6 +1086,52 @@ def census_wedge_capture(src):
     return found
 
 
+def census_ios_stacks(src):
+    """THE iOS CEILING'S STACKS (docs/traps.md): the app leaves at its own
+    ceiling, so the host must sample it while the watchdog holds the exit,
+    and the two ends meet through two file names in the app's Documents."""
+    found = []
+    swift = src[SWIFTUI]
+    at = swift.find("final class KayaStepWatchdog")
+    fire = swift[at:swift.find("_exit(1)", at)] if at >= 0 else ""
+    if "kayaCeilingStacks(step)" not in fire or \
+            fire.find("kayaCeilingStacks(step)") > fire.find("KayaVTrace.dump"):
+        found.append("swift: the step watchdog's fire path no longer asks the host for "
+                     "stacks before it dumps the trace and leaves")
+    ask = swift[swift.find("func kayaCeilingStacks("):]
+    ask = ask[:ask.find("\n    }\n")]
+    wait = re.search(r"kayaCeilingStacksWait: TimeInterval = (\d+)", swift)
+    leg = py_block(src[IOS], "run_swiftui_on")
+    watch = py_block(src[IOS], "stacks_watch")
+    take = py_block(src[IOS], "stacks_take")
+    for name in ("kaya-stacks-request", "kaya-stacks-done"):
+        if f'"{name}"' not in ask or f'"{name}"' not in watch:
+            found.append(f"ios: {name} is not the one file name kayaCeilingStacks and "
+                         f"stacks_watch both use")
+    if "target=stacks_watch" not in leg or '.with_suffix(".stacks")' not in leg \
+            or "stacks.start()" not in leg or "stacks_stop.set()" not in leg:
+        found.append("ios: run_swiftui_on does not run stacks_watch around the launch")
+    cap = re.search(r"^STACKS_SAMPLE_CAP = (\d+)$", src[IOS], re.M)
+    if not cap or "min(STACKS_SAMPLE_CAP, int(deadline - time.time()))" not in take \
+            or '["timeout", str(bound), "sample", pid,' not in take:
+        found.append("ios: stacks_take does not run `sample` on the app under the cap "
+                     "and the leg's deadline")
+    elif not wait or int(cap.group(1)) >= int(wait.group(1)):
+        found.append("ios: stacks_take's bound is not inside the harness's wait for it, "
+                     "so the app can leave before its stacks are written")
+    if 'log.with_suffix(".stacks")' not in py_block(src[LANE_PY], "IosRecorder"):
+        found.append("ios: stacks does not adopt the runner's sidecar")
+    census = swift[swift.find("func kayaCeilingAnimations("):]
+    if "animations at the ceiling: \\(kayaCeilingAnimations())" not in ask \
+            or "layer.animationKeys()" not in census:
+        found.append("swift: the ceiling no longer prints every layer's animations, which "
+                     "is what XCTest's animations-idle wait is waiting on")
+    fail = leg[leg.find("if not ok:"):]
+    if "xl.seek(xcode_log_at)" not in fail:
+        found.append("ios: a failed leg's log no longer carries XCTest's own idle waits")
+    return found
+
+
 def census_door_record(src):
     """THE LINUX RELAUNCH DOORS' RECORD (docs/traps.md, the plain door's
     lost Activate): a door leg that started its bus with dbus-launch
@@ -1153,7 +1200,8 @@ CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("Android history", census_android_history),
             ("iOS notification side", census_ios_notifications),
             ("linux ceiling stacks", census_wedge_capture),
-            ("linux door record", census_door_record))
+            ("linux door record", census_door_record),
+            ("iOS ceiling stacks", census_ios_stacks))
 TABLE = declared(REAL)
 gate.counted("lanes declaring a bundle shape", list(TABLE), floor=5)
 gate.counted("sections declared across the five lanes",
@@ -1563,6 +1611,36 @@ for label, rel, pattern, repl, want in (
     changed = doctored(rel, pattern, repl, label)
     gate.negative(label, lambda: census_door_record(changed), want=want)
 
-gate.negatives_ran(88)
+for label, rel, pattern, repl, want in (
+        ("NS1 the watchdog leaving without the stacks", SWIFTUI,
+         r"^( +)kayaCeilingStacks\(step\)\n", "", "no longer asks the host"),
+        ("NS2 the request renamed on the host side", IOS,
+         r'docs / "kaya-stacks-request"', 'docs / "kaya-stack-request"',
+         "kaya-stacks-request is not the one file name"),
+        ("NS3 no watcher around the launch", IOS,
+         r"^    stacks\.start\(\)\n", "    pass\n",
+         "does not run stacks_watch"),
+        ("NS4 a sample bound past the harness's wait", IOS,
+         r"^STACKS_SAMPLE_CAP = 20$", "STACKS_SAMPLE_CAP = 30",
+         "not inside the harness's wait"),
+        ("NS5 the sidecar adopted under another name", LANE_PY,
+         r'log\.with_suffix\("\.stacks"\)', 'log.with_suffix(".stack")',
+         "does not adopt")):
+    changed = doctored(rel, pattern, repl, label)
+    gate.negative(label, lambda: census_ios_stacks(changed), want=want)
+for label, rel, pattern, repl, want in (
+        ("NS7 the ceiling without the animation census", SWIFTUI,
+         r"animations at the ceiling: \\\(kayaCeilingAnimations\(\)\)",
+         "animations at the ceiling: none", "every layer's animations"),
+        ("NS8 the leg log without XCTest's idle waits", IOS,
+         r"xl\.seek\(xcode_log_at\)", "xl.seek(0)", "XCTest's own idle waits")):
+    changed = doctored(rel, pattern, repl, label)
+    gate.negative(label, lambda: census_ios_stacks(changed), want=want)
+stacks_section = doctored(LANE_PY, r'self\.adopt\(bundle, "stacks",',
+                          'self.adopt(bundle, "lost-stacks",', "NS6 iOS stacks section cut")
+gate.negative("NS6 iOS stacks section unwritten", lambda: census_sections(stacks_section),
+              want="`stacks` is declared")
+
+gate.negatives_ran(96)
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")
