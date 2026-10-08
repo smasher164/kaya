@@ -15,6 +15,7 @@ dev_shell_or_die()
 #   tools/package.py windows <exe> [--out DIR] [--arch A] [--lib PATH]
 #   tools/package.py android        [--out DIR]
 #   tools/package.py ios            [--out DIR]
+#   tools/package.py site --team-id T --package P --cert-sha256 F [--out DIR]
 #
 # The arms live in tools/lib/packaging/ and are IMPORTED, never launched,
 # so the mac lane's bundle wrapper and this command are one code path
@@ -26,10 +27,10 @@ dev_shell_or_die()
 
 import argparse
 
-from packaging import android, ios, linux, mac
+from packaging import android, ios, linux, mac, site
 
 WRAPS_A_PROGRAM = {"mac", "linux", "windows"}
-PLATFORMS = ("android", "ios", "linux", "mac", "windows")
+PLATFORMS = ("android", "ios", "linux", "mac", "site", "windows")
 
 
 def out_dir(args):
@@ -57,6 +58,12 @@ def main(argv):
                     help="windows: a kaya.dll to stage in place of the "
                          "cross-built one (the App SDK bootstrap dll and "
                          "the MRT index come with it either way)")
+    ap.add_argument("--team-id", default="",
+                    help="site: the Apple team id the association names")
+    ap.add_argument("--package", default="",
+                    help="site: the APK's package name")
+    ap.add_argument("--cert-sha256", action="append", default=[],
+                    help="site: the APK signing certificate's SHA-256")
     args = ap.parse_args(argv)
 
     if args.platform in WRAPS_A_PROGRAM and not args.exe:
@@ -99,6 +106,10 @@ def main(argv):
     elif args.platform == "android":
         written = android.write_res(ROOT, out)
         print(f"package android: {len(written)} mipmap files under {out}")
+    elif args.platform == "site":
+        written = site.write(ROOT, out, args.team_id, args.package,
+                             args.cert_sha256)
+        print(f"package site: {len(written)} files under {out}")
     else:
         base = ios.write_icon_family(ROOT, out)
         print(f"package ios: icon family {base} under {out}")

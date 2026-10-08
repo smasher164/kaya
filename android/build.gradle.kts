@@ -221,7 +221,19 @@ subprojects {
             )
         }
 
+        val linksOverlay = File(rootDir.parentFile, "target/android-identity/links/AndroidManifest.xml")
+        if (!linksOverlay.isFile) {
+            throw GradleException(
+                "kaya: ${linksOverlay.path} is not there, so this APK would claim none of " +
+                    "the web hosts ${kayaIdentity.manifest.path} declares, as links or " +
+                    "as saved-login domains (docs/autofill-plan.md A8): run " +
+                    "`tools/package.py android --out ${generatedRes.path}` first."
+            )
+        }
+
         extensions.configure<com.android.build.api.dsl.ApplicationExtension>("android") {
+            sourceSets.getByName("debug").manifest.srcFile(linksOverlay)
+            sourceSets.getByName("release").manifest.srcFile(linksOverlay)
             defaultConfig {
                 manifestPlaceholders["kayaAppLabel"] = kayaIdentity.name
                 // The app-link scheme every host manifest's VIEW filter

@@ -46,10 +46,10 @@ Four facts decide the design:
 3. **Matching a credential to the app needs a domain the app claims**, on
    every platform that saves credentials: Apple's `webcredentials:` entry in
    the associated domains entitlement and Android's `get_login_creds` asset
-   link, each verified against a file the domain serves. kaya already
-   generates `applinks:` entries and Android's autoVerify filter from the
-   identity manifest's `[links] hosts` (docs/app-links-plan.md), and the
-   domain-side files are still open on the ledger.
+   link, each verified against a file the domain serves. Since A8's ruling
+   (2026-10-07) every `[links] hosts` entry is claimed for both web links
+   and saved logins (docs/app-links-plan.md L1). Until then nothing had
+   generated the web half at all, whatever the ledger said.
 4. **A one-time code from a text message needs no domain** on iOS and
    Android: the field's word is enough for the platform to offer the code.
 
@@ -61,9 +61,9 @@ Four facts decide the design:
 - Enum-valued props exist as one I64 slot checked at the root against the
   spec enum (`fit`, `axis`, `symbol`, `filled`), and every binding reaches a
   new one through its generated wire file.
-- The identity manifest (guests/assets/identity.toml) generates the Apple
-  associated-domains entitlement for `[links] hosts`; no `webcredentials:`
-  entry exists.
+- The identity manifest (guests/assets/identity.toml) declares `[links]
+  hosts`. Before A8 nothing read the list: no entitlement, no autoVerify
+  filter, no site file.
 - The SwiftUI secure field already turns off capitalization and
   autocorrection on iOS (secure P7); the entry sets no keyboard at all.
 
@@ -149,16 +149,36 @@ them to. iOS's strong passwords default to 20 characters with upper, lower
 and digits, which most services accept. Ledgered for the first app whose
 service refuses them.
 
-### A8 — Saving and matching credentials: a `[credentials] hosts` declaration, in the packaging milestone (RECOMMEND: separate from this slice)
+### A8 — Saving and matching credentials: RULED 2026-10-07, reuse `[links] hosts`
 
 Without a claimed domain, macOS and iOS still offer the Passwords key and
 every saved login for the user to search, and Android's service still offers
 its suggestions; what a domain adds is matching the right login first and
-offering to save a new one. The declaration belongs beside `[links] hosts`
-in the identity manifest: a `webcredentials:` entry in the Apple entitlement
-and the `get_login_creds` relation for the domain's assetlinks.json, with the
-domain-side files on the maintainer's side as the app links' are. Not built
-here; ledgered with the app links' domain work.
+offering to save a new one. THE MAINTAINER RULED (2026-10-07) that no new
+declaration is added: every host in `[links] hosts` is claimed for saved
+logins as well as web links. BUILT the same day:
+
+- Apple: `webcredentials:<host>` beside `applinks:<host>` in the
+  `com.apple.developer.associated-domains` entitlement
+  (tools/lib/packaging/identity.py `associated_domains`). The mac arm writes
+  it BESIDE the bundle as `<name>.entitlements` for a team-identity re-sign,
+  because an ad-hoc bundle carrying it is killed at exec (docs/traps.md).
+- Android: the APK side of `get_login_creds` is an `asset_statements`
+  meta-data on `<application>` naming a string that includes each host's
+  assetlinks.json (Google's credential-sharing setup calls it required).
+  tools/lib/packaging/android.py writes the string and a manifest overlay
+  carrying it and the autoVerify https filter; android/build.gradle.kts
+  lays the overlay over every host APK.
+- The site files: `tools/package.py site --team-id T --package P
+  --cert-sha256 F` writes each host's `apple-app-site-association`
+  (applinks and webcredentials) and `assetlinks.json` (`handle_all_urls`
+  and `get_login_creds` for the app, `get_login_creds` for the site).
+
+Held by check-app-identity's C15 (tools/lib/web_claims.py, seven watched
+negatives) and, on every APK the android lane builds, by run-emulator's
+`web_declaration`. NO LANE CAN VERIFY A CREDENTIAL MATCH: it needs a served
+domain, the same limit as web links (docs/deferred.md, the web links
+entry).
 
 ### A9 — The reveal toggle stays out of this slice (RECOMMEND: separate)
 
@@ -257,7 +277,8 @@ keyboard strip, where each shows one without credentials.
    row in content_type_routes.py's BACKENDS; the iOS legs and a QuickType
    capture; the eight bindings in both zones, an autofill guest each.
 3. The matrix once, then the review page with every lane's capture.
-4. Separately, in the packaging milestone: A8's `[credentials] hosts`.
+4. A8 BUILT 2026-10-07 on `[links] hosts` (above); its verification waits
+   on a served domain with the web links'.
 
 ## §7 — Measured, and to be measured
 

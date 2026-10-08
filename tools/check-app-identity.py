@@ -82,6 +82,7 @@ dev_shell_or_die()
 #       life, and no scene can see that either (every kaya surface
 #       paints its own ground). Beside them the packaging steps' own
 #       byte checks, which is where the comparison lives.
+#   C15 [links] hosts CLAIM WEB LINKS AND SAVED LOGINS: tools/lib/web_claims.py.
 # The self-test runs the real checker over a shadow root of symlinks
 # (CLAUDE.md invariant 3: the wayland seat guard passed vacuously twice).
 
@@ -97,6 +98,9 @@ import zlib
 # `[links] scheme` DEFAULT is a rule, not a value, and a second copy of a
 # rule is what C9 exists to stop.
 from packaging import identity as app_identity
+import web_claims
+
+_web_tag = 0
 
 g = Gate("check-app-identity")
 
@@ -1027,6 +1031,9 @@ def check(root):
                 f"{MANIFEST} there, on the path nobody can avoid, and "
                 f"this gate is only the static half of that")
 
+    global _web_tag
+    _web_tag += 1
+    bad += web_claims.check(root, g.scratch(), _web_tag)
     return bad
 
 
@@ -1482,7 +1489,37 @@ for _n, _tool in enumerate(sorted(ONE_GENERATOR)):
     g.negative(f"a second copy of {_tool!r} outside the arms",
                lambda p=s: check(p), want="belongs to one arm alone")
 
-g.negatives_ran(30)
+# N31-N37 — C15's own: each cut leaves one half of a host's claim out
+# (docs/autofill-plan.md A8).
+for _tag, _rel, _pat, _repl, _want in (
+    ("nowebcreds", "tools/lib/packaging/identity.py",
+     r'\n            \+ \[f"webcredentials:\{h\}" for h in declared\.hosts\]',
+     "", "missing `webcredentials:"),
+    ("nologincreds", "tools/lib/packaging/identity.py",
+     r',\n                     "delegate_permission/common\.get_login_creds"',
+     "", "no delegate_permission/common.get_login_creds"),
+    ("nostatements", "tools/lib/packaging/android.py",
+     r"""            '        <meta-data android:name="asset_statements" '\n"""
+     r"""            f'android:resource="@string/\{STATEMENTS\}" />\\n'\n""",
+     "", "declares no asset_statements"),
+    ("noverify", "tools/lib/packaging/android.py",
+     r' android:autoVerify="true"', "", "is not autoVerify"),
+    ("noaasacreds", "tools/lib/packaging/identity.py",
+     r'"webcredentials": \{"apps": \[app\]\}', '"webcredentials": {}',
+     "names no webcredentials app"),
+    ("noreleaseoverlay", "android/build.gradle.kts",
+     r'            sourceSets\.getByName\("release"\)\.manifest\.srcFile\(linksOverlay\)\n',
+     "", "over the release build"),
+    ("adhocentitlement", "tools/lib/packaging/mac.py",
+     r'\["codesign", "--force", "--sign", "-", str\(app\)\]',
+     '["codesign", "--force", "--sign", "-", "--entitlements", "e", str(app)]',
+     "signs an entitlement in ad hoc"),
+):
+    s = fresh(_tag)
+    doctor_shadow(f"the {_tag} cut", s, _rel, _pat, _repl)
+    g.negative(f"C15 with the {_tag} cut", lambda p=s: check(p), want=_want)
+
+g.negatives_ran(37)
 
 # The vacuity floor rule 5 asks for: the census below walks these six
 # roots, and a walk that found almost nothing agrees with everything.

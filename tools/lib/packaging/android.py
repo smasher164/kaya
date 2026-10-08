@@ -102,4 +102,56 @@ def write_res(root, out_dir):
         path = out / source / MARK_RESOURCE
         mark.write(path, data)
         written.append(path)
+    declared = load(root)
+    if declared.hosts:
+        path = out / "values" / LINKS_RESOURCE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(links_values(declared), encoding="utf-8")
+        written.append(path)
+    overlay = links_overlay_path(out)
+    overlay.parent.mkdir(parents=True, exist_ok=True)
+    overlay.write_text(links_overlay(declared), encoding="utf-8")
+    written.append(overlay)
     return written
+
+
+# docs/app-links-plan.md L1 and docs/autofill-plan.md A8: every declared
+# host is a verified web link AND a saved-login domain. Gradle lays the
+# overlay over each host APK's main manifest (android/build.gradle.kts);
+# run-emulator's apk_link_verify reads the merged result back.
+LINKS_RESOURCE = "kaya_links.xml"
+STATEMENTS = "kaya_asset_statements"
+LINK_ACTIVITY = ".MainActivity"
+
+
+def links_overlay_path(res_dir):
+    return pathlib.Path(res_dir).parent / "links" / "AndroidManifest.xml"
+
+
+def links_values(declared):
+    body = (identity.asset_statements(declared).replace("&", "&amp;")
+            .replace("<", "&lt;").replace('"', '\\"'))
+    return ('<?xml version="1.0" encoding="utf-8"?>\n<resources>\n'
+            f'    <string name="{STATEMENTS}" translatable="false">'
+            f'{body}</string>\n</resources>\n')
+
+
+def links_overlay(declared):
+    head = ('<?xml version="1.0" encoding="utf-8"?>\n<manifest '
+            'xmlns:android="http://schemas.android.com/apk/res/android">\n')
+    if not declared.hosts:
+        return head + "</manifest>\n"
+    hosts = "".join(f'                <data android:host="{h}" />\n'
+                    for h in declared.hosts)
+    return (head + "    <application>\n"
+            '        <meta-data android:name="asset_statements" '
+            f'android:resource="@string/{STATEMENTS}" />\n'
+            f'        <activity android:name="{LINK_ACTIVITY}">\n'
+            '            <intent-filter android:autoVerify="true">\n'
+            '                <action android:name="android.intent.action.VIEW" />\n'
+            '                <category android:name="android.intent.category.DEFAULT" />\n'
+            '                <category android:name="android.intent.category.BROWSABLE" />\n'
+            '                <data android:scheme="https" />\n'
+            + hosts +
+            "            </intent-filter>\n        </activity>\n"
+            "    </application>\n</manifest>\n")

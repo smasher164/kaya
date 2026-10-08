@@ -18,7 +18,7 @@ import shutil
 import subprocess
 
 from . import mark
-from .identity import load
+from .identity import apple_entitlements, load
 
 # What iconutil wants, and the size each member is resampled to. Two
 # members share a size on purpose — an iconset names a POINT size and a
@@ -119,6 +119,26 @@ def carry_interpreter(root, macos):
     shutil.copy2(lib, macos / lib.name)
 
 
+def entitlements_path(app):
+    return pathlib.Path(app).with_suffix(".entitlements")
+
+
+def write_entitlements(declared, app):
+    """The associated-domains entitlement for `[links] hosts`, written
+    BESIDE the bundle for a team-identity re-sign and never signed in
+    ad hoc, which the kernel kills at exec (docs/traps.md)."""
+    text = apple_entitlements(declared)
+    path = entitlements_path(app)
+    if text is None:
+        path.unlink(missing_ok=True)
+        return None
+    path.write_text(text, encoding="utf-8")
+    print(f"package mac: {path.name} claims {len(declared.hosts)} web "
+          f"host(s); re-sign with `codesign --sign <team identity> "
+          f"--entitlements {path} {app}` to carry it")
+    return path
+
+
 def bundle(root, executable, out_dir, *, stem=None, accessory=False,
            register=True):
     """Wrap `executable` in a .app under `out_dir` and return its path.
@@ -147,6 +167,7 @@ def bundle(root, executable, out_dir, *, stem=None, accessory=False,
         info_plist(declared, name, accessory), encoding="utf-8")
     _run(["codesign", "--force", "--sign", "-", str(app)],
          f"ad-hoc signing {app.name}")
+    write_entitlements(declared, app)
     if register:
         _run([LSREGISTER, "-f", str(app)],
              f"registering {app.name} with LaunchServices")

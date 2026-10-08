@@ -58,10 +58,16 @@ alike (measured facts in §2).
   `windows.protocol`), and the RUNNING APP reads it once at startup for
   the one registration a build cannot make — the unpackaged Windows
   protocol registration beside the identity key S3 already writes. Web
-  hosts are DECLARED AND GENERATED (the associated-domains entitlement,
-  the `autoVerify` filter, the `windows.appUriHandler` extension) and NOT
-  DRIVEN BY ANY LANE, since verification needs a served domain; §2 names
-  the one-time hand measurement. RECOMMEND.
+  hosts are DECLARED AND GENERATED and NOT DRIVEN BY ANY LANE, since
+  verification needs a served domain; §2 names the one-time hand
+  measurement. RECOMMEND. AMENDED 2026-10-07: the slice of 2026-09-09
+  generated NOTHING from `hosts` (the list was parsed and never read);
+  since then each host is claimed for web links AND saved logins
+  (docs/autofill-plan.md A8): `applinks:` and `webcredentials:` in the
+  Apple entitlement, the autoVerify https filter and `asset_statements`
+  in the APK, and both site files from `tools/package.py site`. Windows'
+  `windows.appUriHandler` is still not generated (docs/deferred.md, the
+  web links entry).
 - **L2. Declared routes, matched once in the core.** TAKEN AS AMENDED by
   the maintainer ("the ultimate surface is declaring the route that
   corresponds to a window"): the app declares a pattern on the handler it
@@ -157,9 +163,11 @@ a served domain.
    remembered per device and survives reinstalls. Then cold ≈ 720 ms (after
    the root view appeared) and warm 101 ms; `.onOpenURL` is the ONLY door
    that fires. `UIApplication.open` of the app's own scheme is unprompted.
-6. **Web links: SKIPPED** — a served HTTPS domain is needed; the generated
-   entitlement, `autoVerify` filter and `windows.appUriHandler` are checked
-   by shape and the ledger says so.
+6. **Web links: SKIPPED** — a served HTTPS domain is needed. The Apple
+   entitlement, the APK's overlay and the site files are generated and
+   checked by shape (check-app-identity C15, run-emulator's
+   `web_declaration`); `windows.appUriHandler` is not generated, and the
+   ledger says so.
 
 What the five say together: cold delivery beats the scene on macOS and
 Windows and loses to it on iOS and Linux, so L2's early queue is

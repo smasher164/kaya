@@ -2997,10 +2997,11 @@ def xmltree_attr(block, name):
     return None if m is None else m.group(1)
 
 
-def link_declaration(tree, package, want):
+def link_declaration(tree, package, want, hosts=()):
     """The app-link door inside a COMPILED manifest: [] when it is there,
-    otherwise the failures. Pure, so the reader itself is watched."""
-    errs = []
+    otherwise the failures. Pure, so the reader itself is watched.
+    `hosts` are the declared web hosts (docs/autofill-plan.md A8)."""
+    errs = web_declaration(tree, package, hosts)
     activity = [a for a in xmltree_blocks(tree, "activity")
                 if f'"{package}.MainActivity"' in a]
     if len(activity) != 1:
@@ -3016,7 +3017,8 @@ def link_declaration(tree, package, want):
                     f"COMPILED manifest, so a link tapped while it runs "
                     f"would stack a second activity")
     view = [f for f in xmltree_blocks(activity, "intent-filter")
-            if "android.intent.action.VIEW" in f]
+            if "android.intent.action.VIEW" in f
+            and not re.search(r':scheme\(0x[0-9a-f]+\)="https"', f)]
     if not view:
         errs.append(f"{package}.MainActivity carries no VIEW "
                     f"intent-filter, so this package resolves no app link "
@@ -3034,6 +3036,40 @@ def link_declaration(tree, package, want):
             errs.append(f"the VIEW filter declares no {category} — an "
                         f"implicit intent is matched against DEFAULT and "
                         f"a followed link carries BROWSABLE")
+    return errs
+
+
+def web_declaration(tree, package, hosts):
+    """Every declared host a verified web link on MainActivity and a
+    saved-login domain through `asset_statements`, and nothing claimed
+    when none is declared (docs/app-links-plan.md L1)."""
+    errs = []
+    activity = [a for a in xmltree_blocks(tree, "activity")
+                if f'"{package}.MainActivity"' in a]
+    web = [f for a in activity for f in xmltree_blocks(a, "intent-filter")
+           if re.search(r':scheme\(0x[0-9a-f]+\)="https"', f)]
+    got = sorted(h for f in web for h in
+                 re.findall(r':host\(0x[0-9a-f]+\)="([^"]*)"', f))
+    if got != sorted(hosts):
+        errs.append(f"MainActivity's https filters claim {got} and "
+                    f"[links] hosts declares {sorted(hosts)} (the overlay "
+                    f"tools/lib/packaging/android.py writes and "
+                    f"android/build.gradle.kts lays over each host)")
+    for f in web:
+        verify = xmltree_attr(f, "autoVerify")
+        if verify is None or verify.lower() not in ("true", "-1",
+                                                    "0xffffffff"):
+            errs.append("an https filter is not android:autoVerify, so "
+                        "Android never checks the site's assetlinks.json "
+                        "and the link opens a chooser instead")
+    statements = len(re.findall(r':name\(0x[0-9a-f]+\)="asset_statements"',
+                                tree))
+    if statements != (1 if hosts else 0):
+        errs.append(f"the compiled manifest declares asset_statements "
+                    f"{statements} time(s) with {len(hosts)} web host(s) "
+                    f"declared; the password manager finds a host's "
+                    f"saved logins only through it (docs/autofill-plan.md "
+                    f"A8)")
     return errs
 
 
@@ -3090,11 +3126,44 @@ def link_declaration_selftest():
         ("no activity by that name", good.replace("p.MainActivity", "q.Other"),
          "holds 0 activity"),
     )
+    web = good.replace(
+        '          E: service (line=98)\n',
+        '              E: intent-filter (line=90)\n'
+        '                A: android:autoVerify(0x010104ee)=true\n'
+        '                  E: action (line=91)\n'
+        '                    A: android:name(0x01010003)="android.intent.action.VIEW"\n'
+        '                  E: data (line=94)\n'
+        '                    A: android:scheme(0x01010027)="https" (Raw: "https")\n'
+        '                  E: data (line=95)\n'
+        '                    A: android:host(0x01010028)="example.com" (Raw: "example.com")\n'
+        '        E: meta-data (line=60)\n'
+        '          A: android:name(0x01010003)="asset_statements" (Raw: "asset_statements")\n'
+        '          E: service (line=98)\n')
+    if link_declaration(web, "p", "s.c", ["example.com"]):
+        die(f"run-emulator: SELF-TEST FAIL — link_declaration refused a "
+            f"correct web-host manifest: "
+            f"{link_declaration(web, 'p', 's.c', ['example.com'])}")
+    hosts_for = {}
+    web_cases = (
+        ("a declared host the APK does not claim", good, "claim []"),
+        ("autoVerify off", web.replace("autoVerify(0x010104ee)=true",
+                                       "autoVerify(0x010104ee)=false"),
+         "not android:autoVerify"),
+        ("asset_statements gone", web.replace('"asset_statements"',
+                                              '"other_statements"'),
+         "asset_statements 0 time"),
+        ("a host claimed with none declared", web, "declares []"),
+    )
+    for label, doctored, needle in web_cases:
+        hosts_for[label] = ([] if label.startswith("a host claimed")
+                            else ["example.com"])
+    cases = cases + web_cases
     for label, doctored, needle in cases:
-        if doctored == good:
+        if doctored == good and label not in hosts_for:
             die(f"run-emulator: SELF-TEST BROKEN — the link negative "
                 f"{label!r} changed nothing")
-        errs = link_declaration(doctored, "p", "s.c")
+        errs = link_declaration(doctored, "p", "s.c",
+                                hosts_for.get(label, []))
         if not any(needle in e for e in errs):
             die(f"run-emulator: SELF-TEST FAIL — link_declaration passed "
                 f"{label} (wanted {needle!r}; got {errs})")
@@ -3124,7 +3193,8 @@ def apk_link_verify(apk, package):
                    "--file", "AndroidManifest.xml"],
                   stderr=subprocess.STDOUT)
     want = packaging_android.link_scheme(ROOT)
-    errs = link_declaration(tree, package, want)
+    hosts = app_identity.load(ROOT).hosts
+    errs = link_declaration(tree, package, want, hosts)
     for e in errs:
         print(f"run-emulator: {apk}: {e}", file=sys.stderr)
     if errs:

@@ -55,11 +55,8 @@ class Identity:
         # `[links] scheme`, or the declared id (docs/app-links-plan.md
         # L1): resolved here so no consumer has to know the default.
         self.scheme = scheme
-        # `[links] hosts`, the web links this app claims — EMPTY unless
-        # declared, since a web link needs a served HTTPS domain to
-        # verify against and no lane has one (L6). The mac and iOS
-        # bundles' CFBundleURLTypes and associated-domains entitlement
-        # are written from these two together.
+        # `[links] hosts`: web links AND saved logins
+        # (docs/autofill-plan.md A8), empty unless declared.
         self.hosts = hosts
 
     @property
@@ -203,5 +200,79 @@ def load(root):
                 f"a list of domain names the app claims web links for "
                 f"(docs/app-links-plan.md L1), and every entry must be a "
                 f"non-empty string")
+        for host in hosts:
+            if not WEB_HOST.fullmatch(host):
+                raise Undeclared(
+                    f"kaya: {rel} declares the web host {host!r}, which is "
+                    f"not a domain name — the Apple entitlement, the APK's "
+                    f"verified filter and the site files each take a bare "
+                    f"host (`example.com`, or `*.example.com`), with no "
+                    f"scheme, port or path (docs/app-links-plan.md L1)")
+        if hosts and not re.search(r"(?m)^\s*hosts\s*=\s*\[[^\]\n]*\]",
+                                   path.read_text(encoding="utf-8")):
+            raise Undeclared(
+                f"kaya: {rel} spreads `[links] hosts` over several lines; "
+                f"the running app's reader (crates/kaya/src/scene.rs "
+                f"`declared_links`) reads the one line, so it would claim "
+                f"none of the hosts this build declares. Write the list "
+                f"on one line")
     return Identity(root, name, icon, app_id, background, launch_image,
                     scheme or app_id, hosts)
+
+
+WEB_HOST = re.compile(r"(\*\.)?[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+")
+
+
+def associated_domains(declared):
+    """docs/app-links-plan.md L1 and docs/autofill-plan.md A8: one host
+    claims both the web links and the saved logins."""
+    return ([f"applinks:{h}" for h in declared.hosts]
+            + [f"webcredentials:{h}" for h in declared.hosts])
+
+
+def apple_entitlements(declared):
+    """The associated-domains entitlement, or None when no host is
+    declared (docs/traps.md, the ad-hoc associated-domains kill)."""
+    if not declared.hosts:
+        return None
+    entries = "".join(f"    <string>{d}</string>\n"
+                      for d in associated_domains(declared))
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+            '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+            '<plist version="1.0">\n<dict>\n'
+            '  <key>com.apple.developer.associated-domains</key>\n'
+            '  <array>\n' + entries + '  </array>\n'
+            '</dict>\n</plist>\n')
+
+
+def apple_site_association(declared, team_id):
+    """/.well-known/apple-app-site-association for every declared host."""
+    app = f"{team_id}.{declared.id}"
+    return {"applinks": {"details": [{"appIDs": [app],
+                                      "components": [{"/": "*"}]}]},
+            "webcredentials": {"apps": [app]}}
+
+
+ANDROID_RELATIONS = ("delegate_permission/common.handle_all_urls",
+                     "delegate_permission/common.get_login_creds")
+
+
+def asset_links(declared, host, package, fingerprints):
+    """/.well-known/assetlinks.json for `host`: the app's two relations,
+    and the site's own get_login_creds statement."""
+    return [{"relation": list(ANDROID_RELATIONS),
+             "target": {"namespace": "android_app",
+                        "package_name": package,
+                        "sha256_cert_fingerprints": list(fingerprints)}},
+            {"relation": [ANDROID_RELATIONS[1]],
+             "target": {"namespace": "web", "site": f"https://{host}"}}]
+
+
+def asset_statements(declared):
+    """The APK's `asset_statements` string: what Android's password
+    manager reads to find each host's assetlinks.json."""
+    import json
+    return json.dumps([{"include": f"https://{h.removeprefix('*.')}"
+                                   f"/.well-known/assetlinks.json"}
+                       for h in declared.hosts])

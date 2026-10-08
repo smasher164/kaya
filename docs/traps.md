@@ -14521,6 +14521,28 @@ THE TOKEN WAS NOT THE CAUSE (measured 2026-10-07, below): chat-go failed the
 same way holding it, and SystemUI's own logs name an expand that landed inside
 the reply's unfinished collapse.
 
+## The idle waits held the token (measured 2026-10-07)
+
+The mac funnel waited for an idle host INSIDE the matrix-wide token, as
+check-exclusive then demanded. On the autofill matrix of 2026-10-07 the
+maintainer was at the machine when the fullscreen legs came up:
+fullscreen-java-swiftui held the token 120.9 s and fullscreen-js-swiftui
+120.5 s, both waiting for 120 s of idle that never came, and both were then
+NOT RUN. Every other lane waited behind them: Android 266.5 s to admit
+tasks-compose, Linux 270.0 s to admit split-ocaml-x11, Windows 227.8 s to
+admit media_formats_rust, iOS 235.7 s to hold for save-swift (each lane's
+log names a fullscreen leg as the holder). The matrix wall went from 1763 s
+to 2030 s. The mac lane's own summary read `0 leg(s) waited 0s`, because the
+display wait sat outside the budget it counted.
+
+Since then the wait runs BEFORE the token and the clock is read once more
+inside it without sleeping (tools/lib/lanes/mac.py's idle_admit); a busy
+display leg is deferred to the lane's end, where the deferred legs share one
+120 s bound; idle_wait and display_wait raise while this process holds the
+token; and the summary prints the display seconds and the deferred count.
+Guard: tools/check-exclusive.py's clause 7 and idle_under_token, negatives
+10, 11 and 20b-20f.
+
 ## The shade an expand reopens without focus (measured 2026-10-07)
 
 chat-go replies to Alex's notification (step 43) and then activates Sam's
@@ -14556,6 +14578,56 @@ from gone, 1.2 s from a stall or banner); a shade still unfocusable is
 collapsed to gone and expanded again, three rounds, every reading in the leg
 log. check-exclusive holds the door; a red Android leg's bundle carries
 `shade-history`, SystemUI's three buffers (check-flightrec).
+
+## The week-old notification that takes a reinstall's (measured 2026-10-07)
+
+ios `notify-swiftui` read "the platform holds no delivered notification 12"
+for 15 s after `UNUserNotificationCenter.add` answered without error. The
+simulator's persistent log still held the leg's window (`simctl spawn <udid>
+log show --start ...`, SpringBoard and usernotificationsd). SpringBoard saved
+and posted kaya-12 (its log digest is 95E0-BD98), and 2 ms later logged
+"Received response to 95E0-BD98 for action (null) (5)" and "Removing record
+with identifier 95E0-BD98 from notification repository". The withdraw that
+followed was stamped 2026-09-30 22:01:44 UTC: SpringBoard was expiring a
+kaya-12 left by an EARLIER install, older than its 7-day window ("Returning 0
+bulletins since Wed Sep 30 20:11:54"). The expiry removes by identifier, and
+the fresh install's kaya-12 had that identifier. The same response fired on
+sim-0 at 17:14:30, 7 days and 3 s after a kaya-12 stamped 2026-10-01
+00:14:27 UTC, with no leg running. Across 10 days of the pool's logs those
+are the only three such responses.
+
+How a notification outlives its app is NOT measured. Every pool SpringBoard
+has run since 2026-09-29, and the lane uninstalls every `dev.kaya.` app at
+device preparation. On the day of the red, SpringBoard still held a
+DAEC-0809 of 2026-10-01 from the uninstalled dev.kaya.tasksswiftui ("Failed
+to retrieve bundle record"). An uninstall normally withdraws the app's
+notifications: a `simctl push` probe on sim-1 was withdrawn at the next
+uninstall. Each install gets a new section directory under
+`data/Library/UserNotifications/`. kaya's identifiers are `kaya-<id>` with ids that the scenes fix,
+so every reinstall reuses them. Legs that ended with a delivered
+notification at the time of the red: chat-go (kaya-7003) and
+badge-swiftui (kaya-21) on sim-1.
+
+The rule: an iOS leg leaves nothing for an uninstall to orphan, and starts
+with nothing in its own section. Between the scene's mount and the first
+step, the harness removes every pending and delivered notification whether
+or not the app has asked for authorization, and reads both lists back. That
+reaches only this install's section. In the red, the new section held nothing
+("No data found ... DeliveredNotifications.plist") and the old kaya-12 was
+held only by SpringBoard's list, so removing at the leg's start would not
+have saved it. What it covers is a leftover in the same install, such as one
+from a leg the 120 s timeout killed before a later leg of that bundle. At
+the final verdict (every verdict except act one's pass; act two runs in the same
+install and retires it), the SwiftUI harness removes every pending and delivered notification
+and reads both lists back for up to 2 s. A notification still held fails the
+leg, and the failure names it (`kayaRetireNotifications`). check-verbs holds
+the start call and the verdict call, with seven watched negatives. iOS only: on the mac
+two concurrent legs can share a bundle id, and the mac lane uninstalls
+nothing. A leftover that is already held only by SpringBoard's list (no app can reach it) clears
+itself within 7 days of its date, and until then it can cost one more red of this shape. A red iOS leg's bundle carries
+`notifications`: every section's stored records with owner, identifier,
+title and age, plus SpringBoard's and usernotificationsd's log from the leg's
+install (check-flightrec).
 
 ## The WinUI keystrokes posted to the input site (measured 2026-10-06)
 
@@ -14594,3 +14666,15 @@ loses its focus, which is its commit door, so it committed mid-scene
 (`commits: 1, wanted commits: 0`) and dropped typed text in five pooled runs
 while search and submit never failed in any. So search and submit pool, and
 timecode and the number fields stay one at a time.
+
+## An ad-hoc mac bundle carrying associated domains is killed at exec (measured 2026-10-07)
+
+A bundle signed `codesign --sign - --entitlements` with
+`com.apple.developer.associated-domains` (`applinks:` and `webcredentials:`
+entries) is SIGKILLed before main: exit 137, and amfid logs "The file is adhoc
+signed or signed by an unknown certificate chain" (macOS 26). The same binary
+signed ad hoc without the entitlement exits normally. So
+tools/lib/packaging/mac.py writes the entitlement BESIDE the bundle as
+`<name>.entitlements` for a team-identity re-sign and never signs it in;
+check-app-identity's C15 refuses an `--entitlements` in the ad-hoc call
+(docs/autofill-plan.md A8).
