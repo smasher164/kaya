@@ -12266,8 +12266,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     NativeWidget::Grid(grid)
                 }
                 WidgetKind::SecureField => {
-// docs/secure-entry-plan.md §3 and docs/reveal-plan.md §3: GTK's own password
-// entry, the peek icon off until `revealable`, the context menu's "Show Text"
+// docs/secure-entry-plan.md §3 and docs/reveal-plan.md §3, V10: GTK's own password
+// entry, its peek icon replaced by kaya's eye, the context menu's "Show Text"
 // taken out, the text to the app alone (P2). Its AT-SPI text is the display
 // text (docs/traps.md, GTK 4.18's password entry).
                     let field = secure_text::password_entry();
@@ -12286,6 +12286,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let submit_tag = tag.clone();
                     let quiet = core.apply_quiet.clone();
                     secure_text::reveal_doors(&field, &tag, &core.occurrences, &quiet);
+                    secure_text::eye(&field);
                     gtk4::prelude::EditableExt::connect_changed(&field, move |e| {
                         if !quiet.get() {
                             sink.send_text_tag(&tag, &lf(gtk4::prelude::EditableExt::text(e).to_string()));
@@ -14418,15 +14419,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         core.apply_quiet.set(false);
                     }
                 }
-                // Turning GTK's peek icon off also hides the text
-                // (gtkpasswordentry.c), and `revealed` is its own prop.
                 (NativeWidget::Secure(field), Prop::Revealable, Value::Bool(on)) => {
-                    if let Some(text) = content_text(field.upcast_ref()) {
-                        let shown = gtk4::Text::is_visible(&text);
-                        core.apply_quiet.set(true);
-                        field.set_show_peek_icon(on);
-                        text.set_visibility(shown);
-                        core.apply_quiet.set(false);
+                    if let Some(eye) = secure_text::eye_of(field) {
+                        eye.set_visible(on);
                     }
                 }
                 (NativeWidget::Secure(field), Prop::Placeholder, Value::Str(s)) => {
@@ -18109,6 +18104,36 @@ impl GtkStage {
 
 #[cfg(feature = "harness")]
 impl GtkStage {
+    /// One key through the injector `type_text` uses, at whatever holds the
+    /// focus, with no caret move (docs/reveal-plan.md V10).
+    fn press_key(key: &str) {
+        let hold = if TYPED_ONCE.swap(true, std::sync::atomic::Ordering::SeqCst) { "150" } else { "800" };
+        let (tool, args): (&str, Vec<String>) = if linux_wayland_session() {
+            ("wtype", ["-P", "F24", "-s", hold, "-p", "F24", "-s", "20", "-k", key]
+                .iter().map(|a| (*a).to_owned()).collect())
+        } else {
+            let pid = std::process::id().to_string();
+            let found = std::process::Command::new("xdotool")
+                .args(["search", "--onlyvisible", "--pid", pid.as_str()])
+                .output()
+                .ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+                .unwrap_or_default();
+            let window = found.split_whitespace().next().unwrap_or("").to_owned();
+            let mut args: Vec<String> = Vec::new();
+            if !window.is_empty() {
+                args.extend(["mousemove", "--window", &window, "40", "40", "windowfocus", &window]
+                    .iter().map(|a| (*a).to_owned()));
+            }
+            args.extend(["key".to_owned(), key.to_owned()]);
+            ("xdotool", args)
+        };
+        let out = std::process::Command::new(tool).args(&args).output().unwrap_or_else(|e| {
+            panic!("kaya: press {key}: the key verb needs {tool}: {e} (tools/linux/Dockerfile)")
+        });
+        assert!(out.status.success(), "kaya: press {key}: {tool} failed: {}", String::from_utf8_lossy(&out.stderr));
+    }
+
     /// Wait, from the HARNESS thread, for `frames` of the window's own frame
     /// clock — the only way to know a queued reallocation has actually been
     /// laid out, since `compute_bounds` answers with the last frame's
@@ -18543,9 +18568,14 @@ impl crate::harness::Stage for GtkStage {
     /// the RESET on any programmatic cursor or selection move, which is the
     /// D4 hazard this scene proves.
     fn press(&self, key: &str) {
-        debug_assert_eq!(key, "return");
-        // The Return key rides type_text's own key path (docs/rich-text-plan.md §10).
-        self.type_text("\n");
+        match key {
+            // The Return key rides type_text's own key path (docs/rich-text-plan.md §10).
+            "return" => self.type_text("\n"),
+            // Focus keys move no caret (docs/reveal-plan.md V10).
+            "tab" => Self::press_key("Tab"),
+            "space" => Self::press_key("space"),
+            other => panic!("kaya: press {other:?}: not one of harness::PRESS_KEYS"),
+        }
     }
 
     fn compose(&self, target: crate::harness::Target, text: &str) {
@@ -18664,11 +18694,11 @@ impl crate::harness::Stage for GtkStage {
         }
     }
 
-    /// The peek icon's own click gesture, released over the icon: the door
-    /// GTK's `released` handler takes for a user's click (docs/reveal-plan.md V4).
+    /// The eye's own `clicked`, the door a pointer's click and a key's
+    /// activation both take (docs/reveal-plan.md V4, V10).
     fn toggle_reveal(&self, target: crate::harness::Target, on: bool) {
         let refused = Self::on_main(move |core| {
-            use gtk4::prelude::{Cast, ListModelExt, WidgetExt};
+            use gtk4::prelude::{ButtonExt, Cast, WidgetExt};
             let Some(field) = crate::harness::try_resolve(target.index, core.secure_fields.len())
                 .map(|i| core.secure_fields[i].clone())
             else {
@@ -18680,47 +18710,40 @@ impl crate::harness::Stage for GtkStage {
             if gtk4::Text::is_visible(&text) == on {
                 return None;
             }
-            let mut child = field.first_child();
-            let icon = loop {
-                let Some(widget) = child else {
-                    return Some(format!(
-                        "the secure field draws no peek icon (show-peek-icon is {})",
-                        field.shows_peek_icon()
-                    ));
-                };
-                if let Some(image) = widget.downcast_ref::<gtk4::Image>() {
-                    let name = image.icon_name().map(|n| n.to_string()).unwrap_or_default();
-                    if name == "view-reveal-symbolic" || name == "view-conceal-symbolic" {
-                        break image.clone();
-                    }
-                }
-                child = widget.next_sibling();
+            let Some(eye) = secure_text::eye_of(&field) else {
+                return Some("the secure field carries no eye".to_owned());
             };
-            let inside = icon
+            let inside = eye
                 .compute_bounds(&field)
                 .is_some_and(|b| b.x() >= 0.0 && b.x() + b.width() <= field.width() as f32);
-            if !icon.is_drawable() || !inside {
+            if !eye.is_drawable() || !inside {
                 return Some(format!(
-                    "the peek icon is not drawn inside the field (drawable {}, inside {inside})",
-                    icon.is_drawable()
+                    "the eye is not drawn inside the field (drawable {}, inside {inside})",
+                    eye.is_drawable()
                 ));
             }
-            let controllers = icon.observe_controllers();
-            let gesture = (0..controllers.n_items())
-                .filter_map(|i| controllers.item(i))
-                .find_map(|c| c.downcast::<gtk4::GestureClick>().ok());
-            let Some(gesture) = gesture else {
-                return Some("the peek icon carries no click gesture".to_owned());
-            };
-            let (x, y) = (f64::from(icon.width()) / 2.0, f64::from(icon.height()) / 2.0);
-            gesture.emit_by_name::<()>("released", &[&1i32, &x, &y]);
+            eye.emit_clicked();
             (gtk4::Text::is_visible(&text) != on).then(|| {
-                format!("the peek icon's release left the text {}", if on { "masked" } else { "shown" })
+                format!("the eye's click left the text {}", if on { "masked" } else { "shown" })
             })
         });
         if let Some(why) = refused {
             panic!("kaya: toggle secure_field: {why}");
         }
+    }
+
+    fn eye_focused(&self, target: crate::harness::Target) -> Result<bool, String> {
+        Self::on_main(move |core| {
+            let Some(field) = crate::harness::try_resolve(target.index, core.secure_fields.len())
+                .map(|i| core.secure_fields[i].clone())
+            else {
+                return Err("no such secure field".to_owned());
+            };
+            let Some(eye) = secure_text::eye_of(&field) else {
+                return Err("the secure field carries no eye".to_owned());
+            };
+            Ok(widget_focused(&eye))
+        })
     }
 
     /// The Text interface of the field's own node on the bus, through the one

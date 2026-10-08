@@ -209,7 +209,7 @@ Trigger: the password-manager archetype, or the first app with a login
 screen that asks to show its password.
 
 ## BUILD — the reveal toggle (docs/reveal-plan.md), depth on the mac (2026-10-08); the GTK, WinUI and Compose arms, the iOS legs and the other eight bindings are the breadth slice
-KEY: revealed, revealable, PROP_REVEALED, PROP_REVEALABLE, expect_unmasked, unmasked_count, kayaUnmaskedCount, toggle_reveal, kayaRevealToggle, kayaRevealSwap, KayaRevealedField, KayaRevealEditor, reveal.steps, reveal_routes, DEPTH STUB reveal
+KEY: revealed, revealable, PROP_REVEALED, PROP_REVEALABLE, expect_unmasked, KayaRevealEyeButton, press tab, unmasked_count, kayaUnmaskedCount, toggle_reveal, kayaRevealToggle, kayaRevealSwap, KayaRevealedField, KayaRevealEditor, reveal.steps, reveal_routes, DEPTH STUB reveal
 
 The depth slice: props 57 `revealed` and 58 `revealable` on the secure field
 in both zones, the user's flip reported as `toggled`, the Rust binding, the
@@ -223,7 +223,9 @@ in the plan's §2 are recommended and await the maintainer. What breadth owes:
     GTK's own peek icon for `revealable` (the visibility put back after it,
     since turning it off hides the text), copy and cut stopped, PRIMARY and a
     drag out refused while shown (docs/traps.md), `unmasked_len` through the
-    AT-SPI text and `toggle_reveal` through the icon gesture's own `released`.
+    AT-SPI text and `toggle_reveal` through the icon gesture's own `released`
+    (since V10 the peek icon is replaced by kaya's eye button, and
+    `toggle_reveal` takes its `clicked`).
     reveal_routes.py holds the GTK rows; reveal-* green on x11 and wayland in
     all eight linux languages.
   - ~~**DEPTH STUB: reveal on winui**~~ — LANDED 2026-10-08: Hidden/Visible,
@@ -232,10 +234,10 @@ in the plan's §2 are recommended and await the maintainer. What breadth owes:
     (docs/traps.md, the echo); the read off the box's mode and length, and
     `expect_masked` refusing a Visible box. reveal_routes.py holds the WinUI
     rows; reveal_* green in all six windows languages.
-  - **The eye on GTK and WinUI, for the maintainer** — neither platform's own
-    eye takes the keyboard (GTK's is an image with a click gesture, WinUI's
-    template button is `IsTabStop="False"`), kept as each platform ships it
-    (plan V7 left the choice to the breadth); WinUI's eye is one glyph
+  - **The eye on GTK and WinUI, for the maintainer** — the keyboard half is
+    BUILT 2026-10-08 (docs/reveal-plan.md V10: Tab reaches the eye on macOS,
+    GTK, WinUI and Android; the iPhone carve-out awaits his ruling). Still
+    open: WinUI's eye is one glyph
     (U+F78D) in both states where V7 asks for a struck eye while shown; and a
     shown PasswordBox still reads as a password to UIA with no Value pattern,
     so Narrator reads none of the shown text (measured, plan §7), where V4

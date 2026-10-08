@@ -3914,6 +3914,20 @@ pub fn decode_toggled_tag(tag: &[u8], checked: bool) -> Occurrence {
     }
 }
 
+/// Which widget, or which node at which row, a stored tag names, for the
+/// verb trace (it carries no payload, so a secure field's tag prints safely).
+#[allow(dead_code)]
+pub fn tag_target(tag: &[u8]) -> String {
+    let mut r = Reader { buf: tag, at: 0, blobs: &|_| None };
+    let id = r.u64();
+    let path = r.path();
+    if path.is_empty() {
+        format!("widget {id}")
+    } else {
+        format!("node {id} at {path:?}")
+    }
+}
+
 pub fn decode_text_changed_tag(tag: &[u8], text: &str) -> Occurrence {
     let mut r = Reader { buf: tag, at: 0, blobs: &|_| None };
     let id = r.u64();

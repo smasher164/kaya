@@ -43,7 +43,7 @@ use bindings::Microsoft::UI::Xaml::Controls::{
     MenuBarItem, MenuFlyout,
     MenuFlyoutItem, MenuFlyoutItemBase, MenuFlyoutSeparator, MenuFlyoutSubItem, NavigationView,
     NavigationViewItem, NavigationViewPaneDisplayMode, NumberBox, NumberBoxSpinButtonPlacementMode,
-    PasswordBox, PasswordRevealMode,
+    PasswordBox, PasswordBoxPasswordChangingEventArgs, PasswordRevealMode,
     NumberBoxValidationMode, NumberBoxValueChangedEventArgs, ProgressBar, RadioMenuFlyoutItem,
     RichEditBox, RichEditClipboardFormat, RowDefinition,
     RadioButtons, ScrollBarVisibility, ScrollMode, ScrollViewer, SelectionChangedEventHandler,
@@ -108,7 +108,7 @@ use bindings::Microsoft::UI::Xaml::Controls::Primitives::{
     ToggleButton,
 };
 use bindings::Microsoft::UI::Xaml::Input::{
-    KeyEventHandler, PointerEventHandler, PointerRoutedEventArgs,
+    CharacterReceivedRoutedEventArgs, KeyEventHandler, PointerEventHandler, PointerRoutedEventArgs,
 };
 use windows::Win32::System::WinRT::IBufferByteAccess;
 use bindings::Windows::Foundation::{IReference, PropertyValue, Uri};
@@ -6306,6 +6306,18 @@ struct RevealDoor {
     button: std::sync::Arc<std::sync::Mutex<Option<ToggleButton>>>,
     tag: std::sync::Arc<[u8]>,
     sink: OccSink,
+    switching: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl RevealDoor {
+    /// No edit (docs/traps.md, the WinUI PasswordChanged tail).
+    fn set_mode(&self, field: &PasswordBox, mode: PasswordRevealMode) -> windows_core::Result<()> {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.switching.store(true, Relaxed);
+        let set = field.SetPasswordRevealMode(mode);
+        self.switching.store(false, Relaxed);
+        set
+    }
 }
 
 fn dress_reveal_button(field: &PasswordBox, door: &RevealDoor) -> windows_core::Result<()> {
@@ -6314,6 +6326,8 @@ fn dress_reveal_button(field: &PasswordBox, door: &RevealDoor) -> windows_core::
         return Ok(());
     };
     let button: ToggleButton = button.cast()?;
+    // The template's button is no tab stop (docs/reveal-plan.md V10).
+    button.SetIsTabStop(true)?;
     let shown = field.PasswordRevealMode()? == PasswordRevealMode::Visible;
     button.SetVisibility(if door.revealable.load(Relaxed) {
         Visibility::Visible
@@ -6337,8 +6351,19 @@ fn dress_reveal_button(field: &PasswordBox, door: &RevealDoor) -> windows_core::
                     return Ok(());
                 }
                 let mode = if on { PasswordRevealMode::Visible } else { PasswordRevealMode::Hidden };
-                field.SetPasswordRevealMode(mode)?;
+                door.set_mode(&field, mode)?;
+                #[cfg(feature = "harness")]
+                let before = crate::vtrace::on().then(crate::stall::transport);
                 door.sink.send_toggle_tag(&door.tag, on);
+                #[cfg(feature = "harness")]
+                if let Some(before) = before {
+                    crate::vtrace::note("reveal_button", format_args!(
+                        "-> toggled {on} for {}: {before} -> {}; the app has applied {} transactions",
+                        crate::wire::tag_target(&door.tag),
+                        crate::stall::transport(),
+                        crate::scene::answers()
+                    ));
+                }
                 Ok(())
             });
             if on {
@@ -6347,6 +6372,30 @@ fn dress_reveal_button(field: &PasswordBox, door: &RevealDoor) -> windows_core::
                 button.Unchecked(&flipped)?;
             }
         }
+        // A key at the focused button reaches the box's text too and types
+        // into the password (measured 2026-10-08, docs/traps.md), so Space
+        // takes the button's own Toggle here and no character leaves the
+        // button (docs/reveal-plan.md V10).
+        let toggled = button.clone();
+        button.PreviewKeyDown(&KeyEventHandler::new(move |_, args| {
+            use bindings::Microsoft::UI::Xaml::Automation::Peers::FrameworkElementAutomationPeer;
+            use bindings::Microsoft::UI::Xaml::Automation::Provider::IToggleProvider;
+            let Some(args) = args.as_ref() else { return Ok(()) };
+            if args.Key()? != VirtualKey::Space {
+                return Ok(());
+            }
+            args.SetHandled(true)?;
+            let peer = FrameworkElementAutomationPeer::CreatePeerForElement(&toggled.cast::<UIElement>()?)?;
+            peer.cast::<IToggleProvider>()?.Toggle()
+        }))?;
+        button.CharacterReceived(&TypedEventHandler::<UIElement, CharacterReceivedRoutedEventArgs>::new(
+            |_, args| {
+                if let Some(args) = args.as_ref() {
+                    args.SetHandled(true)?;
+                }
+                Ok(())
+            },
+        ))?;
         *wired = Some(button.clone());
     }
     drop(wired);
@@ -14738,7 +14787,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         button: Default::default(),
                         tag: tag.clone().expect("secure fields carry a tag").into(),
                         sink: core.occurrences.clone(),
+                        switching: Default::default(),
                     };
+                    let switching = door.switching.clone();
                     let (dressed, dressing) = (field.clone(), door.clone());
                     field.Loaded(&RoutedEventHandler::new(move |_, _| {
                         dress_reveal_button(&dressed, &dressing)
@@ -14751,6 +14802,27 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     let swallow =
                         std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
                     let handler_swallow = swallow.clone();
+                    // A PasswordChanged with no content change since the last
+                    // text_changed is no edit (docs/traps.md, the WinUI
+                    // PasswordChanged tail).
+                    let edited = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                    let changing = edited.clone();
+                    field.PasswordChanging(&TypedEventHandler::<PasswordBox, PasswordBoxPasswordChangingEventArgs>::new(
+                        move |_, args| {
+                            if let Some(args) = args.as_ref() {
+                                if switching.load(std::sync::atomic::Ordering::Relaxed) {
+                                    #[cfg(feature = "harness")]
+                                    crate::vtrace::note("secure_text", format_args!(
+                                        "<- PasswordChanging (content {}) inside kaya's mode switch: no edit",
+                                        args.IsContentChanging()?
+                                    ));
+                                } else if args.IsContentChanging()? {
+                                    changing.store(true, std::sync::atomic::Ordering::Relaxed);
+                                }
+                            }
+                            Ok(())
+                        },
+                    ))?;
                     field.PasswordChanged(&RoutedEventHandler::new(move |_, _| {
                         if handler_swallow
                             .fetch_update(
@@ -14760,10 +14832,30 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                             )
                             .is_ok()
                         {
+                            edited.store(false, std::sync::atomic::Ordering::Relaxed);
+                            return Ok(());
+                        }
+                        if !edited.swap(false, std::sync::atomic::Ordering::Relaxed) {
+                            #[cfg(feature = "harness")]
+                            crate::vtrace::note("secure_text", format_args!(
+                                "<- PasswordChanged with no content change since the last text_changed for {}: not sent",
+                                crate::wire::tag_target(&handler_tag)
+                            ));
                             return Ok(());
                         }
                         let text = lf(field_for_handler.Password()?.to_string());
+                        #[cfg(feature = "harness")]
+                        let before = crate::vtrace::on().then(crate::stall::transport);
                         sink.send_text_tag(&handler_tag, &text);
+                        #[cfg(feature = "harness")]
+                        if let Some(before) = before {
+                            crate::vtrace::note("secure_text", format_args!(
+                                "-> text_changed of {} characters for {}: {before} -> {}",
+                                text.chars().count(),
+                                crate::wire::tag_target(&handler_tag),
+                                crate::stall::transport()
+                            ));
+                        }
                         Ok(())
                     }))?;
                     submit_on_enter(Editable::Secure(field.clone()), tag.clone(), core.occurrences.clone(), None)?;
@@ -16843,8 +16935,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 (NativeWidget::Secure(field), Prop::Revealed, Value::Bool(on)) => {
                     let mode = if on { PasswordRevealMode::Visible } else { PasswordRevealMode::Hidden };
-                    field.SetPasswordRevealMode(mode)?;
                     if let Some(door) = core.secure_reveal.get(&id.0) {
+                        door.set_mode(field, mode)?;
                         dress_reveal_button(field, door)?;
                     }
                 }
@@ -22212,9 +22304,14 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     fn press(&self, key: &str) {
-        debug_assert_eq!(key, "return");
-        // The Return key rides type_text's own key path (docs/rich-text-plan.md §10).
-        self.type_text("\n");
+        match key {
+            // The Return key rides type_text's own key path (docs/rich-text-plan.md §10).
+            "return" => self.type_text("\n"),
+            // Focus keys move no caret (docs/reveal-plan.md V10).
+            "tab" => Self::post_keys("press tab", &[Key::Vk(0x09)]),
+            "space" => Self::post_keys("press space", &[Key::Vk(0x20)]),
+            other => panic!("kaya: press {other:?}: not one of harness::PRESS_KEYS"),
+        }
     }
 
     fn compose(&self, t: crate::harness::Target, text: &str) {
@@ -22457,6 +22554,19 @@ impl crate::harness::Stage for WinUiStage {
         if let Some(why) = refused {
             panic!("kaya: toggle secure_field: {why}");
         }
+    }
+
+    fn eye_focused(&self, t: crate::harness::Target) -> Result<bool, String> {
+        Self::on_ui_read(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.secure_fields.len()) else {
+                return Ok(Err("no such secure field".to_owned()));
+            };
+            let Some(button) = named_descendant(&core.secure_fields[i].cast()?, "RevealButton")? else {
+                return Ok(Err("the PasswordBox template published no RevealButton".to_owned()));
+            };
+            Ok(Ok(button.cast::<ToggleButton>()?.FocusState()? != FocusState::Unfocused))
+        })
+        .unwrap_or_else(|e| Err(format!("the RevealButton could not be read: {e}")))
     }
 
     /// docs/secure-entry-plan.md §3: the peer must say IsPassword, and a value

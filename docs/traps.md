@@ -14919,3 +14919,63 @@ kaya's U+2022 EditableText override dropped while shown, the node info keeps
 not the placeholder), and its actions carry no ACTION_COPY or ACTION_CUT, so
 BasicSecureTextField's DisableCutCopy holds while shown. check-universal-props
 holds the override in both states.
+
+## The show-password eye and the Tab key, per platform (measured 2026-10-08)
+
+docs/reveal-plan.md V10. macOS: with the system's Keyboard navigation off
+(the default, and the lane host's), Tab from a SwiftUI SecureField's field
+editor skips a SwiftUI Button and lands in the next text field, with or
+without `.focusable(interactions: .activate)`; in a never-key lane window the
+window itself ended first responder. A volatile `AppleKeyboardUIMode=2` in
+the argument domain leaves `NSApp.isFullKeyboardAccessEnabled` false, so no
+per-process switch exists. An NSButton with `canBecomeKeyView` true is
+reached. SwiftUI then makes a NEW eye NSView at every masked/shown swap of
+the field's view, and the old one leaves the window with no
+`resignFirstResponder`, leaving the window first responder; an eye that held
+the focus hands it to its successor in `viewDidMoveToWindow`.
+
+GTK 4.20: GtkPasswordEntry's measure and size_allocate handle only its text,
+caps-lock icon and peek icon (gtkpasswordentry.c), so a child set_parent'ed
+onto it is never allocated ("Trying to snapshot ... without a current
+allocation"); kaya's subtype overrides both. GtkWindow drops focus-visible 3 s
+after the last key (gtkwindow.c VISIBLE_FOCUS_DURATION), so a capture of a
+keyboard focus ring must be taken inside that window.
+
+WinUI: with the template's RevealButton a tab stop, a character typed at the
+focused button reached the PasswordBox around it and went into the password
+(13 characters for 12), even with Space handled in the button's
+PreviewKeyDown; the button's CharacterReceived marked handled stops it.
+
+Compose (API 35): `clickable` is focusable only outside touch mode, and a key
+the app passes to `Activity.dispatchKeyEvent` reaches no ViewRootImpl input
+stage, so the window stays in touch mode and Tab skipped the focusable eye;
+`input keyevent` from the runner leaves touch mode as a keyboard does.
+
+iPhone simulator: a hardware Tab (XCUITest `typeKey`) moves between text
+fields only; the SwiftUI eye is skipped with or without `.focusable()`.
+
+## The WinUI PasswordChanged tail (measured 2026-10-08)
+
+WinUI raises a PasswordBox's `PasswordChanged` after the edit, about one raise
+per frame (17 to 25 ms apart on the lane VM), and every raise reads the box's
+final text. Six typed keys gave raises spread over 100 ms. The harness's
+answer wait settles after 15 ms without a new transaction, so the last raises
+arrived after the next step's eye flip, and the app heard `toggled false` and
+then `text_changed` twice with unchanged text. The reveal guests' row
+handlers write one label for both, so it read "pin b: 6" instead of "pin b:
+hidden". This failed in 3 of 30 legs (csharp, python, java). Every switch from
+Hidden to Visible, whether the user's flip or the app's `revealed` write, also
+raised one `PasswordChanged` with unchanged text. A switch from Visible to
+Hidden raised none. The bundles were
+flightrec runs 20261008T210348Z-080276 and 20261008T210449Z-080659.
+`PasswordChanging` is raised synchronously for each edit. It is also raised
+inside `SetPasswordRevealMode(Visible)`, with `IsContentChanging` true even
+though the content did not move. So the secure field arm marks an edit only
+on a content change outside kaya's own mode switch (`RevealDoor::set_mode`),
+and it sends `text_changed` only when an edit is marked since the last one.
+This uses a flag and keeps no copy of the text (docs/secure-entry-plan.md
+P2). reveal.steps now flips the stamped field back on and reads "pin b:
+shown". With the switch guard cut, all six Windows reveal legs fail at that
+step. GUARD: tools/lib/reveal_routes.py's "no content change" and "mode
+switch" rows, with six cuts watched. The verb trace shows each send with the
+ring's cursors before and after it, and each dropped raise.

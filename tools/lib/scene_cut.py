@@ -1,5 +1,5 @@
 """The phone-expressible prefix of a shared scene: everything above the
-first `cut` verb. One copy for both phone runners AND tools/check-steps.py,
+first `cut` verb (or `verb target`, for a verb the scene also uses earlier). One copy for both phone runners AND tools/check-steps.py,
 which runs the same census over every lane table's cut in the fast sweep
 (docs/traps.md, "A cut refusal only the lane could print", 2026-09-07).
 
@@ -28,13 +28,14 @@ def scene_prefix(path, cut, keep, extra="", who="scene-cut"):
             f"can be trimmed until it asserts nothing")
     lines = [line for line in path.read_text(encoding="utf-8").splitlines()
              if not line.lstrip().startswith("#")]
-    verbs = [(line.split() or [""])[0] for line in lines]
-    if cut not in verbs:
+    words = cut.split()
+    heads = [line.split()[:len(words)] for line in lines]
+    if words not in heads:
         raise CutRefused(
             f"{who}: {path} has no `{cut}` step, so this lane's cut is "
             f"stale — the scene was reshaped and nobody re-read what the "
             f"phone can express. Fix the leg, do not widen the cut.")
-    at = verbs.index(cut)
+    at = heads.index(words)
     prefix, dropped = lines[:at], lines[at:]
 
     def asserted(seq, verb, target=None):

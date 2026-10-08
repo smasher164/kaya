@@ -43,3 +43,19 @@ expect_unmasked secure_field@pin[b] 6
 toggle secure_field@pin[b] off
 expect label@pin_status "pin b: hidden"
 expect_masked secure_field@pin[b] 6
+toggle secure_field@pin[b] on
+expect label@pin_status "pin b: shown"
+expect_unmasked secure_field@pin[b] 6
+# The eye is reachable from the keyboard (docs/reveal-plan.md V10): Tab from
+# the field reaches it, Space flips it and keeps it focused, and the app hears
+# the user's flip. Last, so a phone's cut at `press tab` takes this alone.
+click secure_field@password
+type_secret "Kp7wZe"
+press tab
+expect_focused secure_field@password eye
+press space
+expect_masked secure_field@password 6
+expect_focused secure_field@password eye
+press space
+expect label@heard "heard: shown"
+expect_unmasked secure_field@password 6

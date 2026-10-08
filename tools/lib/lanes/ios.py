@@ -289,6 +289,12 @@ MODS = {
                            "extra": FULLSCREEN_APP_TAIL},
     ("rust-swiftui", "fullscreen"): {"cut": "user_fullscreen", "keep": "expect_fullscreen",
                                      "extra": FULLSCREEN_APP_TAIL},
+    # THE EYE'S KEYBOARD REACH (docs/reveal-plan.md V10): an iPhone's Tab
+    # moves between text fields only (measured 2026-10-08, docs/traps.md),
+    # so the scene's last block, from `press tab`, is not run here.
+    ("swift", "reveal"): {"cut": "press tab", "keep": "expect_unmasked expect_masked"},
+    ("go", "reveal"): {"cut": "press tab", "keep": "expect_unmasked expect_masked"},
+    ("rust-swiftui", "reveal"): {"cut": "press tab", "keep": "expect_unmasked expect_masked"},
     ("swift", "timecode"): {"cut": "nudge", "keep": "expect_value"},
     ("go", "timecode"): {"cut": "nudge", "keep": "expect_value"},
     ("rust-swiftui", "timecode"): {"cut": "nudge", "keep": "expect_value"},

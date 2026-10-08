@@ -5,7 +5,7 @@
 use gtk4::glib::{self, ffi::gpointer, gobject_ffi, translate::*};
 use gtk4::prelude::*;
 use gtk4::{ffi, AccessibleTextContentChange};
-use std::ffi::{c_char, c_uint};
+use std::ffi::{c_char, c_int, c_uint};
 use std::sync::OnceLock;
 
 fn masked_type() -> glib::ffi::GType {
@@ -19,7 +19,7 @@ fn masked_type() -> glib::ffi::GType {
             parent,
             c"KayaPasswordEntry".as_ptr(),
             query.class_size,
-            None,
+            Some(class_init),
             query.instance_size,
             None,
             0,
@@ -32,6 +32,70 @@ fn masked_type() -> glib::ffi::GType {
         gobject_ffi::g_type_add_interface_static(ty, ffi::gtk_accessible_text_get_type(), &info);
         ty
     })
+}
+
+type Allocate = unsafe extern "C" fn(*mut ffi::GtkWidget, c_int, c_int, c_int);
+type Measure =
+    unsafe extern "C" fn(*mut ffi::GtkWidget, ffi::GtkOrientation, c_int, *mut c_int, *mut c_int, *mut c_int, *mut c_int);
+static PARENT_ALLOCATE: OnceLock<Allocate> = OnceLock::new();
+static PARENT_MEASURE: OnceLock<Measure> = OnceLock::new();
+/// The entry's `border-spacing` in GTK's theme, the gap GtkPasswordEntry
+/// leaves before its own icons (gtkpasswordentry.c's size_allocate).
+const EYE_SPACING: i32 = 6;
+
+/// GtkPasswordEntry allocates only the children it knows (gtkpasswordentry.c,
+/// 4.20.3), so the eye takes the trailing slot its peek icon would.
+unsafe extern "C" fn class_init(klass: gpointer, _data: gpointer) {
+    unsafe {
+        let parent = gobject_ffi::g_type_class_peek_parent(klass) as *const ffi::GtkWidgetClass;
+        let _ = PARENT_ALLOCATE.set((*parent).size_allocate.expect("GtkPasswordEntry allocates"));
+        let _ = PARENT_MEASURE.set((*parent).measure.expect("GtkPasswordEntry measures"));
+        let class = klass as *mut ffi::GtkWidgetClass;
+        (*class).size_allocate = Some(size_allocate);
+        (*class).measure = Some(measure);
+    }
+}
+
+fn shown_eye(widget: *mut ffi::GtkWidget) -> Option<gtk4::Button> {
+    let entry: glib::translate::Borrowed<gtk4::Widget> = unsafe { from_glib_borrow(widget) };
+    eye_of(&*entry).filter(|eye| eye.is_visible())
+}
+
+unsafe extern "C" fn size_allocate(widget: *mut ffi::GtkWidget, width: c_int, height: c_int, baseline: c_int) {
+    let parent = PARENT_ALLOCATE.get().expect("class_init ran");
+    let Some(eye) = shown_eye(widget) else {
+        return unsafe { parent(widget, width, height, baseline) };
+    };
+    let (_, natural, _, _) = eye.measure(gtk4::Orientation::Horizontal, -1);
+    unsafe { parent(widget, (width - natural - EYE_SPACING).max(0), height, baseline) };
+    eye.size_allocate(&gtk4::Allocation::new(width - natural, 0, natural, height), baseline);
+}
+
+unsafe extern "C" fn measure(
+    widget: *mut ffi::GtkWidget,
+    orientation: ffi::GtkOrientation,
+    for_size: c_int,
+    minimum: *mut c_int,
+    natural: *mut c_int,
+    minimum_baseline: *mut c_int,
+    natural_baseline: *mut c_int,
+) {
+    unsafe {
+        (PARENT_MEASURE.get().expect("class_init ran"))(
+            widget, orientation, for_size, minimum, natural, minimum_baseline, natural_baseline,
+        );
+        let Some(eye) = shown_eye(widget) else { return };
+        let horizontal = orientation == ffi::GTK_ORIENTATION_HORIZONTAL;
+        let (eye_min, eye_nat, _, _) =
+            eye.measure(if horizontal { gtk4::Orientation::Horizontal } else { gtk4::Orientation::Vertical }, -1);
+        if horizontal {
+            *minimum += eye_min + EYE_SPACING;
+            *natural += eye_nat + EYE_SPACING;
+        } else {
+            *minimum = (*minimum).max(eye_min);
+            *natural = (*natural).max(eye_nat);
+        }
+    }
 }
 
 pub(super) fn password_entry() -> gtk4::PasswordEntry {
@@ -90,6 +154,62 @@ pub(super) fn reveal_doors(
             refuse_while_shown(&content, &t);
         }
     });
+}
+
+/// docs/reveal-plan.md V10: GTK's peek icon is an image no key reaches, so the
+/// eye is a button of kaya's, the peek icon's glyphs and GTK's own words for
+/// them, at the entry's trailing edge. A pointer click leaves the focus where
+/// it was (V6); Tab reaches it.
+pub(super) fn eye(entry: &gtk4::PasswordEntry) {
+    let Some(text) = inner_text(entry) else { return };
+    let eye = gtk4::Button::new();
+    eye.set_widget_name(EYE);
+    eye.add_css_class("flat");
+    eye.add_css_class("image-button");
+    eye.set_focus_on_click(false);
+    eye.set_valign(gtk4::Align::Center);
+    eye.set_visible(false);
+    eye.set_parent(entry);
+    dress_eye(&eye, gtk4::Text::is_visible(&text));
+    let weak = text.downgrade();
+    eye.connect_clicked(move |_| {
+        if let Some(t) = weak.upgrade() {
+            t.set_visibility(!gtk4::Text::is_visible(&t));
+        }
+    });
+    let weak = eye.downgrade();
+    text.connect_notify_local(Some("visibility"), move |t, _| {
+        if let Some(eye) = weak.upgrade() {
+            dress_eye(&eye, gtk4::Text::is_visible(t));
+        }
+    });
+    entry.connect_destroy(|entry| {
+        if let Some(eye) = eye_of(entry) {
+            eye.unparent();
+        }
+    });
+}
+
+const EYE: &str = "kaya-reveal-eye";
+
+pub(super) fn eye_of(entry: &impl IsA<gtk4::Widget>) -> Option<gtk4::Button> {
+    let mut child = entry.as_ref().first_child();
+    while let Some(widget) = child {
+        if widget.widget_name() == EYE {
+            return widget.downcast::<gtk4::Button>().ok();
+        }
+        child = widget.next_sibling();
+    }
+    None
+}
+
+fn dress_eye(eye: &gtk4::Button, shown: bool) {
+    let (icon, words) =
+        if shown { ("view-conceal-symbolic", "Hide Text") } else { ("view-reveal-symbolic", "Show Text") };
+    let words = glib::dgettext(Some("gtk40"), words);
+    eye.set_icon_name(icon);
+    eye.set_tooltip_text(Some(&words));
+    eye.update_property(&[gtk4::accessible::Property::Label(&words)]);
 }
 
 thread_local! {

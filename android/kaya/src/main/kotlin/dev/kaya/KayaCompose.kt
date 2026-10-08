@@ -4949,6 +4949,16 @@ object KayaCompose {
      * it APPENDS with NO caret move, since `edit {}` commits and CLEARS
      * that history; it blocks past this backend's own observation.
      */
+    /** `press tab|space` (docs/reveal-plan.md V10): the runner's `input keyevent`, since a key
+     * the app dispatches itself leaves the window in touch mode, where no button takes focus. */
+    private fun kayaPressKey(activity: ComponentActivity, code: Int): String? {
+        kayaHostRequests += 1
+        val seq = kayaHostRequests
+        Log.i("kaya", "KAYA_REQUEST: key $seq $code")
+        val said = kayaHostAnswer(activity, seq) ?: return "the runner sent no key $code within 8 s"
+        return if (said.startsWith("sent exit 0")) null else "the runner's key $code: $said"
+    }
+
     private fun kayaTypeAtFocus(
         activity: ComponentActivity,
         text: String,
@@ -9789,12 +9799,15 @@ object KayaCompose {
                     }
                     "press" -> {
                         // The Return key as its own verb (docs/rich-text-plan.md
-                        // R10), through the same key path `type` takes.
+                        // R10), through the same key path `type` takes; Tab and
+                        // Space move no caret (docs/reveal-plan.md V10).
                         kayaAwaitQuiet()
                         val answered = kayaBatches
                         val why =
                             if (parts.size == 2 && parts[1] == "return") kayaTypeAtFocus(activity, "\n")
-                            else "press wants one of the named keys (return): $line"
+                            else if (parts.size == 2 && parts[1] == "tab") kayaPressKey(activity, KeyEvent.KEYCODE_TAB)
+                            else if (parts.size == 2 && parts[1] == "space") kayaPressKey(activity, KeyEvent.KEYCODE_SPACE)
+                            else "press wants one of the named keys (return, tab, space): $line"
                         if (why != null) failures.add(why)
                         else kayaAwaitAnswer(answered)
                     }
@@ -9872,7 +9885,19 @@ object KayaCompose {
                             }
                         }
                     }
-                    "expect_focused" -> {
+                    "expect_focused" -> if (parts.size == 3) {
+                        val eye = onUi(activity) {
+                            target(parts[1], "secure_field", KayaSceneModel.secureFields)
+                                ?.let { kayaRevealEyeFocused.contains(it.id) }
+                        }
+                        when {
+                            parts[2] != "eye" || !parts[1].startsWith("secure_field") ->
+                                failures.add("expect_focused wants a target and optionally eye: $line")
+                            eye == true -> observed.add("${parts[1]} eye focused")
+                            eye == false -> failures.add("${parts[1]} eye does not hold focus")
+                            else -> failures.add("no such target ${parts[1]}")
+                        }
+                    } else {
                         // The model's focusedId is the observation the
                         // focus command lands as (the entry's
                         // FocusRequester walks it into the platform).
@@ -19648,6 +19673,9 @@ internal fun kayaRevealToggle(node: KayaNode, on: Boolean) {
 
 internal fun kayaRevealName(revealed: Boolean): String = if (revealed) "Hide password" else "Show password"
 
+/** The secure fields whose eye holds the keyboard focus, as Compose reports it (docs/reveal-plan.md V10). */
+internal val kayaRevealEyeFocused = mutableSetOf<Long>()
+
 /**
  * The secure field (docs/secure-entry-plan.md §3, docs/reveal-plan.md §3):
  * the platform's own BasicSecureTextField, which masks, refuses cut and copy
@@ -19716,7 +19744,10 @@ private fun KayaSecureField(node: KayaNode, a11y: Modifier, fill: Modifier) {
                     {
                         IconButton(
                             onClick = { kayaRevealToggle(node, !node.revealed) },
-                            modifier = Modifier.focusProperties { canFocus = false },
+                            modifier = Modifier.onFocusChanged { state ->
+                                if (state.isFocused) kayaRevealEyeFocused.add(node.id)
+                                else kayaRevealEyeFocused.remove(node.id)
+                            },
                         ) {
                             Icon(
                                 if (revealed) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,

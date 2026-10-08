@@ -114,6 +114,21 @@ impl Reading {
     }
 }
 
+/// Both transports' positions, for the verb trace: an occurrence sent at one
+/// reading and consumed by another is told apart from one still waiting.
+#[allow(dead_code)]
+pub(crate) fn transport() -> String {
+    let r = read();
+    let ring = match r.ring {
+        Some((head, tail)) => format!(
+            "ring head {head} tail {tail} ({} waiting)",
+            RING.get().map_or(0, |ring| ring.pending_records())
+        ),
+        None => "no ring".to_owned(),
+    };
+    format!("{ring}, mpsc {} sent {} taken", r.enqueued, r.taken)
+}
+
 fn read() -> Reading {
     Reading {
         enqueued: ENQUEUED.load(Ordering::Acquire),

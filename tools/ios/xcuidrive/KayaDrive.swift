@@ -600,6 +600,12 @@ final class KayaDrive: XCTestCase {
             }
             field.typeText(text)
             return (true, "typed \(text.count) character(s)")
+        case "key":
+            // `press tab|space` (docs/reveal-plan.md V10): a hardware key.
+            let keys = ["tab": XCUIKeyboardKey.tab.rawValue, "space": XCUIKeyboardKey.space.rawValue]
+            guard words.count == 2, let key = keys[words[1]] else { return (false, "key tab|space") }
+            a.typeKey(key, modifierFlags: [])
+            return (true, "pressed \(words[1])")
         case "keyboard_done":
             // The number field's Done on the keyboard's toolbar
             // (docs/number-field-plan.md §4.2), a real tap on the toolbar's

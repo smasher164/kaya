@@ -401,6 +401,9 @@ pub enum Step {
     /// Expect the widget to hold keyboard focus — the observation the
     /// focus command is verified by.
     ExpectFocused(Target),
+    /// `expect_focused secure_field@x eye`: the field's own show/hide toggle
+    /// holds keyboard focus (docs/reveal-plan.md V10).
+    ExpectEyeFocused(Target),
     /// Expect the container's children to occupy the given `,`-joined
     /// percentages of the main axis.
     ///
@@ -925,6 +928,7 @@ impl Step {
         match self {
             Step::Click(t)
             | Step::ExpectFocused(t)
+            | Step::ExpectEyeFocused(t)
             | Step::ExpectFills(t)
             | Step::ExpectBreadth(t)
             | Step::ExpectHugs(t)
@@ -1141,6 +1145,7 @@ impl Step {
             Step::DragFile { .. } => false,
             Step::HeaderClick { .. } => false,
             Step::ExpectFocused { .. } => true,
+            Step::ExpectEyeFocused { .. } => true,
             Step::ExpectShares { .. } => true,
             Step::ExpectRootFills { .. } => true,
             Step::ExpectInset { .. } => true,
@@ -1477,6 +1482,10 @@ pub trait Stage: Send + 'static {
     /// Flip a secure field's own show/hide toggle, the user's gesture
     /// (docs/reveal-plan.md V4): its `toggled` is the app's answer.
     fn toggle_reveal(&self, target: Target, on: bool);
+    /// Whether a secure field's own show/hide toggle holds keyboard focus,
+    /// read from the toolkit; Err names why the field has no eye to ask
+    /// (docs/reveal-plan.md V10).
+    fn eye_focused(&self, target: Target) -> Result<bool, String>;
     /// The content type an entry or secure field carries, read off the
     /// platform's own property and mapped back through the one table that
     /// applied it, never kaya's model: one of [`CONTENT_READS`], or a
@@ -2103,7 +2112,7 @@ pub trait Stage: Send + 'static {
     /// The last text_edited the core published for the widget, spelled by
     /// the core (`Scene::last_edit_string`).
     fn last_edit(&self, target: Target) -> String;
-    /// One named key (`return` today) as a REAL keystroke at whatever holds
+    /// One named key ([`PRESS_KEYS`]) as a REAL keystroke at whatever holds
     /// focus, under `type_text`'s five contract points — the caret goes to
     /// the END first, as for text; a caret-preserving key is the split
     /// case's verb and is not written (docs/rich-text-plan.md §11). The
@@ -2475,7 +2484,17 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 }
                 Step::Expect(target, parse_string(text)?)
             }
-            "expect_focused" => Step::ExpectFocused(parse_target(rest)?),
+            "expect_focused" => match rest.trim().split_once(char::is_whitespace) {
+                Some((target, "eye")) => {
+                    let target = parse_target(target)?;
+                    if target.kind != TargetKind::SecureField {
+                        return Err(format!("only a secure field has an eye, not {target:?}: {line:?}"));
+                    }
+                    Step::ExpectEyeFocused(target)
+                }
+                Some(_) => return Err(format!("expect_focused wants a target and optionally eye: {line:?}")),
+                None => Step::ExpectFocused(parse_target(rest)?),
+            },
             "expect_order" => {
                 let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
                     format!("expect_order wants a target and a string: {line:?}")
@@ -3651,9 +3670,9 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
             }
             "press" => {
                 let key = rest.trim();
-                if key != "return" {
+                if !PRESS_KEYS.contains(&key) {
                     return Err(format!(
-                        "press wants one of the named keys (return), got {key:?}: {line:?}"
+                        "press wants one of the named keys (return, tab, space), got {key:?}: {line:?}"
                     ));
                 }
                 Step::Press(key.to_owned())
@@ -6262,6 +6281,11 @@ fn run_with_log(
                     Err(format!("{t:?} does not hold focus"))
                 }
             })),
+            Step::ExpectEyeFocused(t) => Some(poll_named("expect_focused", || match stage.eye_focused(*t) {
+                Ok(true) => Ok(format!("{} eye focused", target_spec(t))),
+                Ok(false) => Err(format!("{} eye does not hold focus", target_spec(t))),
+                Err(why) => Err(format!("{} eye: {why}", target_spec(t))),
+            })),
             Step::MenuActivate(path) => {
                 // An action, silent like click: the fold's reaction (or
                 // the next expect_menu) is the observable. Where the path
@@ -6572,6 +6596,16 @@ fn run_with_log(
                 if let Some((log, _)) = log {
                     log(&format!("KAYA_HARNESS: step-failed {e}"));
                 }
+                if vtrace::on() {
+                    vtrace::note(
+                        "step_failed",
+                        format_args!(
+                            "the app has applied {} transactions; {}",
+                            crate::scene::answers(),
+                            crate::stall::transport()
+                        ),
+                    );
+                }
                 failures.push(e);
             }
             None => {}
@@ -6803,6 +6837,20 @@ const ANSWER_SILENCE: Duration = Duration::from_secs(1);
 /// bound is a CLOCK as well as a poll count: 60 sleeps of 5ms ran to
 /// 2400ms under load (docs/traps.md).
 fn await_answer(seen: u64) {
+    let why = answer_wait(seen);
+    if vtrace::on() {
+        vtrace::note(
+            "answer",
+            format_args!(
+                "<- {why}: the app has applied {seen} -> {} transactions; {}",
+                crate::scene::answers(),
+                crate::stall::transport()
+            ),
+        );
+    }
+}
+
+fn answer_wait(seen: u64) -> &'static str {
     let mut last = seen;
     let mut quiet = 0;
     let silent_until = Instant::now() + ANSWER_SILENCE;
@@ -6818,14 +6866,15 @@ fn await_answer(seen: u64) {
             // in flight. Wait for the count to STOP rather than to move.
             quiet += 1;
             if quiet >= 3 {
-                return;
+                return "answered";
             }
         } else if Instant::now() > silent_until {
             // Nothing has arrived at all, so nothing is in flight.
-            return;
+            return "silent";
         }
         std::thread::sleep(ANSWER_POLL);
     }
+    if last == seen { "no answer by the bound" } else { "still answering at the bound" }
 }
 
 /// The app has nothing left to say. Called BEFORE an action so the wait
@@ -6850,6 +6899,9 @@ fn await_quiet() {
 
 /// The secure field's refusals (docs/secure-entry-plan.md P6), the same
 /// bytes in the SwiftUI harness.
+/// The keys `press` names: Return, and Tab and Space for keyboard reach
+/// (docs/reveal-plan.md V10).
+pub const PRESS_KEYS: [&str; 3] = ["return", "tab", "space"];
 pub const SECURE_EXPECT: &str = "expect never reads a secure field's text; expect_masked reads how many characters it masks";
 pub const SECURE_SET_TEXT: &str = "set_text never writes a secure field; type_secret types into one";
 pub const TYPE_INTO_SECURE: &str =
@@ -7785,6 +7837,18 @@ mod tests {
     /// The payload floor, refused at PARSE so no backend has to invent
     /// a keycode the five platforms do not agree on; the Return key has its
     /// own verb, `press return` (2026-09-14, docs/rich-text-plan.md R10).
+    /// docs/reveal-plan.md V10: the eye is a secure field's alone.
+    #[test]
+    fn expect_focused_names_a_secure_fields_eye() {
+        assert!(matches!(
+            parse("expect_focused secure_field@password eye").unwrap()[0],
+            Step::ExpectEyeFocused(Target { kind: TargetKind::SecureField, .. })
+        ));
+        assert!(matches!(parse("expect_focused entry@name").unwrap()[0], Step::ExpectFocused(_)));
+        assert!(parse("expect_focused entry@name eye").is_err());
+        assert!(parse("expect_focused secure_field@password ear").is_err());
+    }
+
     #[test]
     fn type_refuses_what_a_keystroke_cannot_carry() {
         assert!(parse("type \"a\\nb\"").is_err());
@@ -7792,6 +7856,8 @@ mod tests {
         assert_eq!(parse("press return").unwrap()[0], Step::Press("return".into()));
         assert!(parse("press enter").is_err());
         assert!(parse("press").is_err());
+        assert_eq!(parse("press tab").unwrap()[0], Step::Press("tab".into()));
+        assert_eq!(parse("press space").unwrap()[0], Step::Press("space".into()));
         assert!(parse("type \"héllo\"").is_err());
         assert!(parse("type \"\"").is_err());
         assert!(parse("type").is_err());
@@ -8652,6 +8718,9 @@ mod tests {
         fn unmasked_len(&self, _: Target) -> Result<usize, MaskRead> {
             let n = MOCK_TYPED.with(|t| t.borrow().chars().count());
             if MOCK_REVEALED.with(|r| r.get()) { Ok(n) } else { Err(MaskRead::Masked(n)) }
+        }
+        fn eye_focused(&self, _: Target) -> Result<bool, String> {
+            Ok(false)
         }
         fn toggle_reveal(&self, _: Target, on: bool) {
             MOCK_REVEALED.with(|r| r.set(on));
@@ -9639,6 +9708,9 @@ mod tests {
             Err(MaskRead::NoSuchTarget)
         }
         fn toggle_reveal(&self, _: Target, _: bool) {}
+        fn eye_focused(&self, _: Target) -> Result<bool, String> {
+            Ok(false)
+        }
         fn content_type(&self, _: Target) -> Result<&'static str, String> {
             Err("no such target".to_owned())
         }
@@ -10053,6 +10125,9 @@ mod tests {
             Err(MaskRead::NoSuchTarget)
         }
         fn toggle_reveal(&self, _: Target, _: bool) {}
+        fn eye_focused(&self, _: Target) -> Result<bool, String> {
+            Ok(false)
+        }
         fn content_type(&self, _: Target) -> Result<&'static str, String> {
             Err("no such target".to_owned())
         }

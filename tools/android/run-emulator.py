@@ -1510,6 +1510,7 @@ def run_apk_on(serial, name, apk, component, script, extras,
     replied = {}
     keyed = {}
     held = set()
+    pressed = set()
     # 240 ROUNDS, roughly 0.7s each: the budget has to outlast a leg that
     # is FAILING, and a failing step costs this backend up to 15s now
     # (KayaCompose.kt's stepDeadline, the core's own POLL_DEADLINE). At
@@ -1576,6 +1577,15 @@ def run_apk_on(serial, name, apk, component, script, extras,
             told = dispatch_media_key(serial, key, log)
             keyed[seq] = (tries + 1, time.monotonic())
             print(f"{name}: media_key #{seq} {key} try {tries + 1} -> {told}", file=log)
+        # `press tab|space` (docs/reveal-plan.md V10): a key through the
+        # system's input pipeline, which leaves touch mode as a keyboard
+        # does; the app's own dispatch reaches no ViewRootImpl stage.
+        for seq, code in re.findall(r"KAYA_REQUEST: key (\d+) (\d+)", dump):
+            if seq in pressed:
+                continue
+            pressed.add(seq)
+            told = answer_key(serial, package, seq, code)
+            print(f"{name}: key #{seq} {code} -> {told}", file=log)
         for seq in re.findall(r"KAYA_REQUEST: hold_screen (\d+)", dump):
             if seq in held:
                 continue
@@ -2271,6 +2281,22 @@ def lane_capture_state(serial):
     return (f"capture lane: hw.camera.front={have.get('hw.camera.front')} "
             f"hw.camera.back={have.get('hw.camera.back')}; the guest lists "
             f"{len(facings)} camera(s) {facings}; {grpc}")
+
+
+def answer_key(serial, package, seq, code):
+    """`press`'s hand: `input keyevent` to the focused window, its exit
+    written into the app's files directory for the verb to read."""
+    sent = subprocess.run(["timeout", "20", "adb", "-s", serial, "shell", "input",
+                           "keyevent", code],
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False, **TEXT)
+    line = f"sent exit {sent.returncode} {sent.stdout.strip()!r}"
+    name = f"files/kaya-host-{seq}.txt"
+    got = subprocess.run(
+        ["timeout", "20", "adb", "-s", serial, "exec-in",
+         f"run-as {package} sh -c 'cat > {name}'"],
+        input=line + "\n", stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        check=False, **TEXT)
+    return f"{line}, written exit {got.returncode} {got.stdout.strip()!r}"
 
 
 def answer_hold_screen(serial, package, seq, log):

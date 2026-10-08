@@ -128,6 +128,9 @@ fn main() {
         // enum its reveal setter takes (P3 sets it Hidden).
         "Microsoft.UI.Xaml.Controls.PasswordBox".to_string(),
         "Microsoft.UI.Xaml.Controls.PasswordRevealMode".to_string(),
+        // A raise that changed no content is no edit (docs/traps.md, the
+        // WinUI PasswordChanged tail).
+        "Microsoft.UI.Xaml.Controls.PasswordBoxPasswordChangingEventArgs".to_string(),
         // THE CONTENT TYPE (docs/autofill-plan.md §3, the WinUI column):
         // TextBox's and PasswordBox's InputScope are pads until the scope,
         // its name and the name's enum are named.
@@ -291,6 +294,9 @@ fn main() {
         // an AutoSuggestBox does not (docs/measurements/search-winui-2026-09-06.md).
         "Microsoft.UI.Xaml.Input.KeyEventHandler".to_string(),
         "Microsoft.UI.Xaml.Input.KeyRoutedEventArgs".to_string(),
+        // THE REVEAL BUTTON'S SPACE (docs/reveal-plan.md V10): a character
+        // typed at the focused button reaches the PasswordBox around it.
+        "Microsoft.UI.Xaml.Input.CharacterReceivedRoutedEventArgs".to_string(),
         // And the search field's GLYPH out of the assistive tree, the twin of
         // the SwiftUI arm's `accessibilityHidden`: without the enum
         // `AutomationProperties.SetAccessibilityView` is a `usize` vtable pad.

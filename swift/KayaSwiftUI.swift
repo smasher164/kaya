@@ -9640,13 +9640,22 @@ private func kayaRunScript(_ script: String) {
                 }
             case "press":
                 // The Return key as its own verb (docs/rich-text-plan.md R10),
-                // through the same key path `type` takes.
-                guard parts.count == 2, parts[1] == "return" else {
-                    failures.append("press wants one of the named keys (return): \(line)")
+                // through the same key path `type` takes; Tab and Space move
+                // no caret (docs/reveal-plan.md V10).
+                guard parts.count == 2, ["return", "tab", "space"].contains(parts[1]) else {
+                    failures.append("press wants one of the named keys (return, tab, space): \(line)")
                     break
                 }
                 kayaAwaitQuiet()
                 let pressAnswered = kayaAnswers()
+                if parts[1] != "return" {
+                    if let why = kayaPressFocusKey(String(parts[1])) {
+                        failures.append("press \(parts[1]): \(why)")
+                    } else {
+                        kayaAwaitAnswer(pressAnswered)
+                    }
+                    break
+                }
                 #if os(macOS)
                     if kayaTypeAtFocus("\n") {
                         kayaAwaitAnswer(pressAnswered)
@@ -9738,6 +9747,32 @@ private func kayaRunScript(_ script: String) {
                             + "about an app that is answering this scene — either the app "
                             + "thread really is gone, or the watchdog cannot see this "
                             + "guest's transport (crates/kaya/src/stall.rs)")
+                }
+            case "expect_focused" where parts.count == 3:
+                guard parts[2] == "eye", parts[1].hasPrefix("secure_field") else {
+                    failures.append("expect_focused wants a target and optionally eye: \(line)")
+                    break
+                }
+                let eye = DispatchQueue.main.sync { () -> Bool? in
+                    guard let node = kayaTarget(parts[1], "secure_field", kayaScene.secureFields) else {
+                        return nil
+                    }
+                    return kayaRevealEyeHoldsFocus(node.id)
+                }
+                switch eye {
+                case true?:
+                    observed.append("\(parts[1]) eye focused")
+                case false?:
+                    #if os(macOS)
+                        let holder = DispatchQueue.main.sync { () -> String in
+                            kayaNSWindows[0]?.firstResponder.map { String(describing: type(of: $0)) } ?? "no responder"
+                        }
+                        failures.append("\(parts[1]) eye does not hold focus (the window's first responder is \(holder))")
+                    #else
+                        failures.append("\(parts[1]) eye does not hold focus")
+                    #endif
+                case nil:
+                    failures.append("no such target \(parts[1])")
                 }
             case "expect_focused":
                 // The model's focusedId is the observation the focus command
@@ -21321,6 +21356,30 @@ func kayaUndoInertNote(_ item: KayaMenuItemModel, verb: String) {
     /// One named key, keyDown then keyUp, at the window whose first responder
     /// is editing text — kayaTypeAtFocus's route without the caret move or
     /// the text settle, for the keys that commit or step rather than type.
+    /// `press tab|space` (docs/reveal-plan.md V10): one key, in-process, at the
+    /// window whose first responder edits text, else the primary window, so a
+    /// key reaches a focused button too.
+    func kayaPressFocusKey(_ name: String) -> String? {
+        let (key, code): (String, UInt16) = name == "tab" ? ("\t", 48) : (" ", 49)
+        let sent = DispatchQueue.main.sync { () -> Bool in
+            guard let window = kayaFocusedTextWindow() ?? kayaNSWindows[0] else { return false }
+            for kind in [NSEvent.EventType.keyDown, .keyUp] {
+                guard
+                    let event = NSEvent.keyEvent(
+                        with: kind, location: .zero, modifierFlags: [],
+                        timestamp: ProcessInfo.processInfo.systemUptime,
+                        windowNumber: window.windowNumber, context: nil,
+                        characters: key, charactersIgnoringModifiers: key,
+                        isARepeat: false, keyCode: code)
+                else { return false }
+                NSApp.sendEvent(event)
+            }
+            return true
+        }
+        DispatchQueue.main.sync {}
+        return sent ? nil : "reached no window — no key was sent"
+    }
+
     func kayaKeyAtFocus(_ key: String, code: UInt16, flags: NSEvent.ModifierFlags) -> Bool {
         guard let window = kayaAwaitTextWindow() else { return false }
         let sent = DispatchQueue.main.sync { () -> Bool in
@@ -21457,6 +21516,13 @@ func kayaUndoInertNote(_ item: KayaMenuItemModel, verb: String) {
     /// to the end in process (point 3), the KEYS from the host's resident
     /// XCUITest driver through the simulator's keyboard, which the field must
     /// hold, and the settle (point 4). Nil on success, the sentence otherwise.
+    /// `press tab|space` (docs/reveal-plan.md V10): a hardware key through the
+    /// lane's driver.
+    func kayaPressFocusKey(_ name: String) -> String? {
+        let (ok, lines) = KayaSimdrive.ask("key \(name)", timeout: 30)
+        return ok ? nil : (lines.first ?? "the host refused the key without saying why")
+    }
+
     func kayaTypeThroughHost(_ text: String, verb: String = "type_b64") -> String? {
         guard let input = kayaAwaitFocusedTextInput() else {
             return "reached no editable first responder — nothing was typed"
@@ -24830,6 +24896,7 @@ struct KayaSecureField: View {
     // One focus state per view, so the swap's two halves never coalesce: the
     // leaving view's drop and the arriving view's take are separate changes.
     @FocusState private var maskedFocus: Bool
+    @FocusState private var eyeFocus: Bool
 
     private var text: Binding<String> {
         Binding(
@@ -24896,13 +24963,21 @@ struct KayaSecureField: View {
         )
         .overlay(alignment: .trailing) {
             if node.revealable {
-                Button(action: { kayaRevealToggle(node, !node.revealed) }) {
-                    Image(systemName: node.revealed ? "eye.slash" : "eye")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .padding(.trailing, 6)
-                .accessibilityLabel(kayaRevealName(node.revealed))
+                #if os(macOS)
+                    KayaRevealEye(node: node, revealed: node.revealed)
+                        .fixedSize()
+                        .padding(.trailing, 6)
+                #else
+                    Button(action: { kayaRevealToggle(node, !node.revealed) }) {
+                        Image(systemName: node.revealed ? "eye.slash" : "eye")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .focused($eyeFocus)
+                    .onChange(of: eyeFocus) { _, on in kayaRevealEyeFocus(node, on) }
+                    .padding(.trailing, 6)
+                    .accessibilityLabel(kayaRevealName(node.revealed))
+                #endif
             }
         }
         .frame(
@@ -24920,6 +24995,87 @@ struct KayaSecureField: View {
         }
         .onChange(of: maskedFocus) { _, on in focusMoved(on, revealedView: false) }
     }
+}
+
+/// The secure fields whose eye holds the keyboard focus, as the toolkit
+/// reports it (docs/reveal-plan.md V10).
+var kayaRevealEyeFocused: Set<UInt64> = []
+
+#if os(macOS)
+    /// The mac eye (docs/reveal-plan.md V10): an NSButton in the key view loop
+    /// whatever the system's keyboard navigation setting, since neither a
+    /// SwiftUI Button nor `.focusable()` takes Tab from an AppKit field editor
+    /// (measured 2026-10-08, docs/traps.md).
+    final class KayaRevealEyeButton: NSButton {
+        var nodeId: UInt64 = 0
+        override var canBecomeKeyView: Bool { true }
+        /// A pointer's click leaves the focus where it was (V6).
+        override var acceptsFirstResponder: Bool { NSApp.currentEvent?.type != .leftMouseDown }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard window != nil, kayaRevealEyeOwed.contains(nodeId) else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let window = self.window, window.makeFirstResponder(self) else { return }
+                kayaRevealEyeOwed.remove(self.nodeId)
+            }
+        }
+    }
+
+    /// The eye holds the focus when its window's first responder is that eye.
+    func kayaRevealEyeHoldsFocus(_ id: UInt64) -> Bool {
+        kayaNSWindows.values.contains { ($0.firstResponder as? KayaRevealEyeButton)?.nodeId == id }
+    }
+
+    /// SwiftUI makes a new eye at every swap of the field's view (measured
+    /// 2026-10-08), so an eye that held the focus leaves it owed to its
+    /// successor, which takes it on reaching the window (V6).
+    var kayaRevealEyeOwed: Set<UInt64> = []
+
+    struct KayaRevealEye: NSViewRepresentable {
+        let node: KayaNode
+        let revealed: Bool
+
+        final class Coordinator: NSObject {
+            var node: KayaNode
+            init(node: KayaNode) { self.node = node }
+            @objc func flip(_ sender: Any?) {
+                let held = (sender as? NSView).map { $0.window?.firstResponder === $0 } ?? false
+                kayaRevealToggle(node, !node.revealed)
+                guard held else { return }
+                let id = node.id
+                kayaRevealEyeOwed.insert(id)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { kayaRevealEyeOwed.remove(id) }
+            }
+        }
+
+        func makeCoordinator() -> Coordinator { Coordinator(node: node) }
+
+        func makeNSView(context: Context) -> KayaRevealEyeButton {
+            let button = KayaRevealEyeButton()
+            button.nodeId = node.id
+            button.isBordered = false
+            button.bezelStyle = .regularSquare
+            button.imagePosition = .imageOnly
+            button.contentTintColor = .secondaryLabelColor
+            button.target = context.coordinator
+            button.action = #selector(Coordinator.flip(_:))
+            return button
+        }
+
+        func updateNSView(_ button: KayaRevealEyeButton, context: Context) {
+            context.coordinator.node = node
+            button.nodeId = node.id
+            let name = kayaRevealName(revealed)
+            button.image = NSImage(systemSymbolName: revealed ? "eye.slash" : "eye", accessibilityDescription: name)
+            button.setAccessibilityLabel(name)
+        }
+    }
+#else
+    func kayaRevealEyeHoldsFocus(_ id: UInt64) -> Bool { kayaRevealEyeFocused.contains(id) }
+#endif
+
+func kayaRevealEyeFocus(_ node: KayaNode, _ on: Bool) {
+    if on { kayaRevealEyeFocused.insert(node.id) } else { kayaRevealEyeFocused.remove(node.id) }
 }
 
 /// A revealed field's focus change, from its own view (docs/reveal-plan.md V6).

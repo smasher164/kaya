@@ -9,6 +9,7 @@ tools/scenes/reveal.steps green on the mac for Rust. GTK, WinUI and Compose are
 depth stubs, the iOS legs unwired and the eight other bindings the breadth
 (docs/deferred.md, the reveal toggle's BUILD entry).
 RULED 2026-10-08 (the maintainer: "im fine with everything except ... the keyboard navigation"): V1-V9 as built, and the platform divergences accepted save one: the eye must be reachable with Tab on every platform ("it makes it more accessible"), built in the keyboard-reach slice.
+KEYBOARD REACH BUILT 2026-10-08 (V10): Tab reaches the eye and Space flips it on macOS, GTK, WinUI and Android; iPhone is a proposed carve-out awaiting the maintainer (V10).
 
 The maintainer asked for it on 2026-10-08: "maybe we do show password now? i
 want to finish password entry before moving onto the next feature". The secure
@@ -155,9 +156,8 @@ SwiftUI's SF Symbols `eye` and `eye.slash`. Each shows the open eye while the
 text is hidden and the struck eye while it is shown (GTK's and Material's
 convention). Its spoken name is "Show password" or "Hide password", English on
 SwiftUI and Compose as the search field's "Clear text" is; GTK's tooltip is its
-own translated "Show Text" / "Hide Text". GTK's icon is not keyboard-reachable
-(an image with a gesture); the breadth decides whether kaya wraps it in a
-button or ledgers the gap.
+own translated "Show Text" / "Hide Text". GTK's peek icon is not
+keyboard-reachable (an image with a gesture), so V10 replaces it with a button.
 
 ### V8 — The phones' last-character flash is unchanged (RULED 2026-10-08)
 
@@ -170,15 +170,55 @@ secure.steps runs on five lanes in nine languages, so extending it would
 redden every one of those legs until the breadth; a new scene rides the depth
 stubs and iOS's unwired declaration like every depth slice before it (§5).
 
+### V10 — Tab reaches the eye; Space flips it (BUILT 2026-10-08, the iPhone carve-out PROPOSED)
+
+The maintainer's one exception to the accepted divergences. With the field
+focused, Tab moves the keyboard focus to the eye, Space flips the reveal, the
+app hears `toggled`, and the focus stays on the eye. A pointer click on the
+eye still leaves the focus in the field (V6). Per platform:
+
+- macOS: a SwiftUI Button is not a key view: with the system's Keyboard
+  navigation setting off (the default), Tab from the field skipped it, and
+  `.focusable(interactions: .activate)` changed nothing (MEASURED). The eye
+  is `KayaRevealEyeButton`, an NSButton that is always in the key view loop
+  and refuses the first responder on a mouse-down. SwiftUI makes a new eye
+  at every masked/shown swap (MEASURED), so an eye that held the focus hands
+  it to its successor.
+- GTK: the peek icon is never shown; the eye is a GtkButton with the peek
+  icon's glyphs and GTK's own "Show Text" / "Hide Text" as its label and
+  tooltip, `focus-on-click` off. GtkPasswordEntry allocates only the children
+  it knows (gtkpasswordentry.c), so kaya's subtype allocates the eye in the
+  trailing slot after the theme's 6px spacing.
+- WinUI: the template's RevealButton is made a tab stop. A key at the focused
+  button reached the PasswordBox around it and typed into the password
+  (MEASURED), so the button handles its own characters and takes Space through
+  its own Toggle.
+- Android: the eye is focusable (Compose's `clickable` focuses only outside
+  touch mode). The harness's Tab and Space go through the system's input
+  (`input keyevent`), since a key the app dispatches itself never leaves
+  touch mode (MEASURED).
+- iPhone (PROPOSED CARVE-OUT, for the maintainer): a hardware Tab moves
+  between text fields only; the SwiftUI eye, with or without `.focusable()`,
+  is skipped (MEASURED on the simulator). On iPhone a button is reached from
+  the keyboard only under Full Keyboard Access, as every iOS button is, and
+  the lane cannot turn that on without changing the simulator pool's
+  settings. The iOS lane cuts reveal.steps at `press tab`.
+
+The divergence this leaves on the mac: every other mac button is reached
+with Tab only under Keyboard navigation, and the eye always is. The
+alternative is to follow the system setting, which leaves the eye
+unreachable on a default mac and untestable on the lane, since a
+per-process `AppleKeyboardUIMode` does not turn it on (MEASURED).
+
 ## §3 — The lowering, per backend
 
 | backend | revealed | revealable | the user's flip | unmasked read | copy and cut while shown |
 |---|---|---|---|---|---|
-| SwiftUI, macOS (BUILT) | SecureField swapped for `KayaRevealedField`, an NSTextField whose cell's field editor is `KayaRevealEditor` | an overlay Button at the trailing edge, SF `eye` / `eye.slash` | the button calls `kayaRevealToggle`, which swaps and emits `toggled` | AXValue of the field's element through `kayaUnmaskedCount` | refused by KayaRevealEditor (validation, `cut:`/`copy:`, menu, pasteboard types, Services, Writing Tools, undo) |
+| SwiftUI, macOS (BUILT) | SecureField swapped for `KayaRevealedField`, an NSTextField whose cell's field editor is `KayaRevealEditor` | an overlay NSButton (`KayaRevealEyeButton`, V10) at the trailing edge, SF `eye` / `eye.slash` | the button calls `kayaRevealToggle`, which swaps and emits `toggled` | AXValue of the field's element through `kayaUnmaskedCount` | refused by KayaRevealEditor (validation, `cut:`/`copy:`, menu, pasteboard types, Services, Writing Tools, undo) |
 | SwiftUI, iOS (BUILT) | SecureField swapped for `KayaRevealUITextField` in a UIViewRepresentable | as macOS | as macOS | the element's accessibilityValue, zero when `hasText` is false | `canPerformAction` allows paste, selectAll and delete alone, the masked field's menu (MEASURED); no `undoManager`; Writing Tools off |
-| GTK 4 (BUILT) | `gtk_text_set_visibility` on the delegate GtkText, under the quiet guard | `show-peek-icon`, the visibility put back after it since turning the icon off hides the text; the image's keyboard gap kept (docs/deferred.md) | `notify::visibility` outside the quiet guard emits `toggled`; the harness emits the icon gesture's own `released` | the AT-SPI text through `harness::unmasked_count` | `copy-clipboard` and `cut-clipboard` stopped while shown, the PRIMARY selection's value refused for a shown field, a shown selection collapsed before a press can drag it (docs/traps.md) |
-| WinUI 3 (BUILT) | `PasswordRevealMode::Visible` / `Hidden`, never Peek | the template's `RevealButton`, given a local Visible while `revealable`, its IsChecked mirroring the mode | the button's Checked/Unchecked, taken as a flip only when it disagrees with the box's mode (docs/traps.md, the echo); the harness takes the button peer's Toggle | the box's own `PasswordRevealMode` must be Visible, then its Password length (no Value pattern); `expect_masked` refuses a Visible box | refused natively |
-| Compose (BUILT) | `TextObfuscationMode.Visible`, else RevealLastTyped; kaya's EditableText override only while masked | Material trailing IconButton (Visibility / VisibilityOff) in the decorator, never focusable | the button's onClick takes `kayaRevealToggle`, which emits `toggled`; the harness's `toggle` invokes the eye's own click action | the node info's text through the unmasked rule | refused natively (`DisableCutCopy`) |
+| GTK 4 (BUILT) | `gtk_text_set_visibility` on the delegate GtkText, under the quiet guard | kaya's eye button (V10), the peek icon never shown | `notify::visibility` outside the quiet guard emits `toggled`; the harness emits the eye's own `clicked` | the AT-SPI text through `harness::unmasked_count` | `copy-clipboard` and `cut-clipboard` stopped while shown, the PRIMARY selection's value refused for a shown field, a shown selection collapsed before a press can drag it (docs/traps.md) |
+| WinUI 3 (BUILT) | `PasswordRevealMode::Visible` / `Hidden`, never Peek | the template's `RevealButton`, given a local Visible while `revealable`, its IsChecked mirroring the mode, a tab stop (V10) | the button's Checked/Unchecked, taken as a flip only when it disagrees with the box's mode (docs/traps.md, the echo); the harness takes the button peer's Toggle | the box's own `PasswordRevealMode` must be Visible, then its Password length (no Value pattern); `expect_masked` refuses a Visible box | refused natively |
+| Compose (BUILT) | `TextObfuscationMode.Visible`, else RevealLastTyped; kaya's EditableText override only while masked | Material trailing IconButton (Visibility / VisibilityOff) in the decorator, focusable from the keyboard (V10) | the button's onClick takes `kayaRevealToggle`, which emits `toggled`; the harness's `toggle` invokes the eye's own click action | the node info's text through the unmasked rule | refused natively (`DisableCutCopy`) |
 
 The Rust Stage methods are `unmasked_len(target) -> Result<usize, MaskRead>`
 and `toggle_reveal(target, on)`, both without defaults; `MaskRead::Masked`
@@ -208,9 +248,10 @@ password, which proves the order); Return submitting; the toggle off
 (`masked 12`); the app's own Show and Hide (`unmasked 12`, `masked 12`) with
 `heard:` unmoved, since an app write never echoes; Clear while shown
 (`unmasked 0`); and a stamped copy that starts shown from its row's field and
-whose toggle names its row. Rust only on the mac lane until the bindings
-arrive (tools/lib/lanes/mac.py DEPTH_SCENES and ORDER); declared unwired on
-iOS.
+whose toggle names its row; and last, V10's keyboard block: `press tab`
+from the field, `expect_focused secure_field@password eye`, `press space`
+twice with the state, the eye's focus and `heard: shown` read between. The
+iOS lane cuts at `press tab` (V10).
 
 Gates that grew: check-verbs (tools/lib/reveal_routes.py: the one door and its
 callers, the unmasked read reaching the platform and not the model, the mac
@@ -287,3 +328,15 @@ check-sugar-surface is red by design until the eight bindings take the props:
   `type_secret` keys go in-process (watched: the driver's plain route made the
   secure scan refuse two secrets); one keyboard at the first typing after the
   swap (docs/traps.md).
+- MEASURED 2026-10-08 (V10): the mac with Keyboard navigation off sent Tab
+  from the SecureField to the next text field past a SwiftUI Button, with or
+  without `.focusable(interactions: .activate)`; a volatile
+  `AppleKeyboardUIMode=2` in the argument domain left
+  `isFullKeyboardAccessEnabled` false. GtkPasswordEntry never allocated a
+  child it did not create. WinUI's tab-stop RevealButton passed a typed
+  character to the PasswordBox. Compose's eye stayed out of the Tab order
+  under an app-dispatched key (touch mode). The iPhone simulator's hardware
+  Tab moved between text fields only. WATCHED: the mac eye's
+  `canBecomeKeyView` cut to false (1 substitution, tools/mac/scene-negative.py)
+  turned reveal-rust red with "secure_field@password eye does not hold focus",
+  restored with its sha256 compared (docs/traps.md).
