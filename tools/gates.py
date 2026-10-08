@@ -277,6 +277,9 @@ BUILD = [
     # four commits while every matrix read ALL PASS (2026-09-24).
     ("the unit suite (rung 1)", ["tools/unit-suite.py"]),
     ("SwiftUI interpreter", ["tools/swiftui/build-dylib.sh"]),
+    # Last, after every cargo build above (docs/traps.md, the stale
+    # split-debuginfo objects).
+    ("stale objects", ["tools/prune-objects.py"]),
 ]
 
 

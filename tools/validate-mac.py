@@ -86,6 +86,9 @@ if run(["cargo", "build", "--locked", "--lib",
 if run([str(ROOT / "tools/build-id.py"), "--verify",
         "target/debug/libkaya.dylib"]).returncode != 0:
     sys.exit(1)
+# docs/traps.md, the stale split-debuginfo objects.
+if run([str(ROOT / "tools/prune-objects.py")]).returncode != 0:
+    sys.exit(1)
 
 # ONE FILE UNDER THE ASSET ROOT IS DERIVED and never committed, so a
 # fresh clone's root is incomplete until this runs. A lane may not

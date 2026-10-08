@@ -298,6 +298,25 @@ def rung1_skip_problem(matrix, gates):
     return None
 
 
+PRUNE_BUILD = '("stale objects", ["tools/prune-objects.py"]),'
+PRUNE_MAC = 'if run([str(ROOT / "tools/prune-objects.py")]).returncode != 0:'
+MAC_CARGO = 'if run(["cargo", "build", "--locked", "--lib",'
+
+
+def prune_problem(gates, mac):
+    """docs/traps.md, the stale split-debuginfo objects."""
+    start = gates.find("\nBUILD = [")
+    build = gates[start:gates.find("\n]", start)] if start >= 0 else ""
+    if not build.rstrip().endswith(PRUNE_BUILD):
+        return ("tools/gates.py's BUILD must end with tools/prune-objects.py, after "
+                "every cargo build in it (docs/traps.md, the stale split-debuginfo "
+                "objects)")
+    if not 0 <= mac.find(MAC_CARGO) < mac.find(PRUNE_MAC):
+        return ("tools/validate-mac.py must run tools/prune-objects.py after its "
+                "cargo build (docs/traps.md, the stale split-debuginfo objects)")
+    return None
+
+
 def android_pool_problem(runner, probe):
     if runner.count(ANDROID_RUNNER_POOL) != 1:
         return ("tools/android/run-emulator.py must default to the guarded "
@@ -1069,6 +1088,25 @@ if doctored == matrix_text:
     fail("self-test NR2 applied no substitution")
 elif rung1_skip_problem(doctored, gates_text) is None:
     fail("self-test NR2: a key taken before rung 1 ran passed")
+problem = prune_problem(gates_text, mac_text)
+if problem is not None:
+    fail(problem)
+# NP1 — the prune moved ahead of the cargo builds it cleans up after.
+doctored, n = re.subn(r'(\n    \("libkaya", )',
+                      "\n    " + PRUNE_BUILD.replace("\\", "\\\\") + r"\1",
+                      gates_text.replace("\n    " + PRUNE_BUILD, "", 1), count=1)
+print(f"check-gates: self-test NP1 moved the prune ahead of libkaya's build, {n} substitution(s)")
+if n != 1:
+    fail("self-test NP1 applied no substitution — the prune clause is not reading gates.py")
+elif prune_problem(doctored, mac_text) is None:
+    fail("self-test NP1: a BUILD pruning before its cargo builds passed")
+# NP2 — validate-mac no longer pruning.
+doctored, n = re.subn(re.escape(PRUNE_MAC), "if False:", mac_text, count=1)
+print(f"check-gates: self-test NP2 cut validate-mac's prune, {n} substitution(s)")
+if n != 1:
+    fail("self-test NP2 applied no substitution — the prune clause is not reading validate-mac.py")
+elif prune_problem(gates_text, doctored) is None:
+    fail("self-test NP2: a mac lane that never prunes passed")
 problem = ios_pool_problem(ios_text, probe_text)
 if problem is not None:
     fail(problem)
