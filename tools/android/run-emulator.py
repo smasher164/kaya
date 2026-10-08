@@ -1019,6 +1019,90 @@ def photo_library_stage(serial):
     return True
 
 
+LAUNCHER = "com.google.android.apps.nexuslauncher"
+STORAGE_FLOOR_MB = 1024
+PINNED_READ = r"""ls -l /proc/[0-9]*/fd 2>/dev/null | grep -e '^/proc/' -e 'apk (deleted)$' |
+while read perms links user group size day clock fd rest; do
+  case "$perms" in
+    /proc/*) p=${perms%/fd:} ;;
+    *) echo "$(stat -L -c %s $p/fd/$fd) $(cat $p/cmdline)" ;;
+  esac
+done
+echo kaya-pinned-read-done
+"""
+
+
+def data_free_mb(serial):
+    lines = adb_out(serial, "shell", "df", "/data").strip().splitlines()
+    fields = lines[-1].split() if lines else []
+    if len(fields) < 4 or not fields[3].isdigit():
+        return None
+    return int(fields[3]) // 1024
+
+
+def pinned_apks(serial):
+    got = subprocess.run(["adb", "-s", serial, "shell", "su 0 sh"],
+                         input=PINNED_READ, capture_output=True, text=True,
+                         errors="replace")
+    if "kaya-pinned-read-done" not in got.stdout:
+        return None
+    held = {}
+    for line in got.stdout.splitlines():
+        size, _, cmd = line.partition(" ")
+        if not size.isdigit():
+            continue
+        name = cmd.split("\0")[0].strip() or "?"
+        count, total = held.get(name, (0, 0))
+        held[name] = (count + 1, total + int(size))
+    return held
+
+
+def storage_reading(serial):
+    free = data_free_mb(serial)
+    held = pinned_apks(serial)
+    if held is None:
+        pins = "deleted APKs held open: unreadable (`su 0` read no /proc)"
+    elif not held:
+        pins = "deleted APKs held open: none"
+    else:
+        pins = "deleted APKs held open: " + ", ".join(
+            f"{name} {count} ({total // 2**20} MB)"
+            for name, (count, total) in sorted(held.items()))
+    return free, held, (f"{'unreadable' if free is None else free} MB free "
+                        f"on /data, {pins}")
+
+
+def release_pinned_apks(serial, out):
+    """docs/traps.md: The emulator launcher pins every replaced APK"""
+    before, held, said = storage_reading(serial)
+    if held is None or LAUNCHER in held:
+        adb(serial, "shell", "am", "force-stop", LAUNCHER,
+            stdout=out, stderr=out)
+        after, _, said_after = storage_reading(serial)
+        print(f"storage on {serial}: {said}; force-stopped {LAUNCHER}: "
+              f"{said_after}", file=out)
+        return after
+    print(f"storage on {serial}: {said}", file=out)
+    return before
+
+
+def storage_preflight(serial):
+    free = release_pinned_apks(serial, sys.stdout)
+    if free is None:
+        die(f"run-emulator: {serial}'s free space on /data is unreadable "
+            f"(`df /data` answered no available column)")
+    if free < STORAGE_FLOOR_MB:
+        die(f"run-emulator: {serial} has {free} MB free on /data, under "
+            f"the {STORAGE_FLOOR_MB} MB a suite install needs (the "
+            f"platform's 500 MB low-storage reserve plus the largest suite "
+            f"APK); `adb -s {serial} emu kill` and rerun, and the lane "
+            f"boots it fresh from its snapshot")
+
+
+for _serial in [*SERIALS, TABLET_SERIAL]:
+    storage_preflight(_serial)
+timing("storage")
+
 for _serial in SERIALS:
     if not cliphelper_prepare(_serial):
         sys.exit(1)
@@ -1232,12 +1316,16 @@ def stage_suite_apk(label, apk, package, targets):
                                       f"{package} said {said.strip()!r} — "
                                       f"the capture legs would read denied",
                                       file=slog)
+                    release_pinned_apks(serial, slog)
                     target_verdict = "OK"
                 else:
                     print(f"run-emulator: {package} is not on {serial} "
                           f"after an install that", file=slog)
                     print(f"  reported success — every {label} leg on "
                           f"this device would start nothing", file=slog)
+            if target_verdict != "OK":
+                print(f"storage on {serial}: {storage_reading(serial)[2]}",
+                      file=slog)
             (stage_dir / f"{serial}.verdict").write_text(
                 target_verdict + "\n", encoding="utf-8")
 

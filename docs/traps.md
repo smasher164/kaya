@@ -15028,3 +15028,20 @@ The next compose staging failed with INSTALL_FAILED_INSUFFICIENT_STORAGE.
 `am force-stop com.google.android.apps.nexuslauncher` freed 7 GB on the
 tablet and 3.6 to 5.9 GB on each pool device; the launcher restarts by
 itself. `pm trim-caches` and `sm idle-maint run` freed nothing.
+
+Measured on 5554 the same day: the launcher pins a package's APK once it
+has opened it (at its start, or on PACKAGE_REPLACED), so each install
+after that leaves one APK held, 211 MB per javahost and 375 MB per
+rusthost install; a force-stop BEFORE an install frees nothing the install
+then pins, since the launcher restarts within seconds and opens the new
+one. An install needs the platform's low-storage reserve (5% of /data,
+capped at 500 MB, about 496 MB here) plus the APK it writes, its peak.
+systemui also holds one or two deleted APKs per device (215 to 590 MB),
+presumably notification icons of a replaced install; it is not stopped,
+and the reading counts it. FIXED 2026-10-08 in tools/android/run-emulator.py:
+every suite staging force-stops the launcher after the install is re-read
+(`release_pinned_apks`), each stage log carries `storage on <serial>:` with
+free /data and the holders, and the lane's start releases the same way on
+every device, tablet included, and refuses one under 1024 MB naming
+`adb -s <serial> emu kill`. GUARD: tools/lib/android-leg-order.py's
+storage clause, six cuts watched red.

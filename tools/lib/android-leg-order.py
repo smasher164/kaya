@@ -324,6 +324,43 @@ def staging_problem(text: str) -> str | None:
     return None
 
 
+STORAGE_RELEASE = "release_pinned_apks(serial, slog)"
+STORAGE_PREFLIGHT = ("for _serial in [*SERIALS, TABLET_SERIAL]:\n"
+                     "    storage_preflight(_serial)\n")
+
+
+def storage_problem(text: str) -> str | None:
+    """docs/traps.md: The emulator launcher pins every replaced APK"""
+    stage = py_function(text, "stage_suite_apk")
+    release = py_function(text, "release_pinned_apks")
+    preflight = py_function(text, "storage_preflight")
+    if stage is None or release is None or preflight is None:
+        return ("stage_suite_apk, release_pinned_apks or storage_preflight "
+                "is missing or unreadable")
+    if stage.count(STORAGE_RELEASE) != 1:
+        return ("every suite install must release the APKs the launcher "
+                "pins, once per target, inside stage_suite_apk")
+    reread = stage.find('"pm", "list",')
+    release_at = stage.find(STORAGE_RELEASE)
+    verdict_at = stage.find('target_verdict = "OK"')
+    if not reread < release_at < verdict_at:
+        return ("the launcher's pins must be released after the install is "
+                "re-read and before the target's OK — a release before the "
+                "install frees nothing the install is about to pin")
+    if '"am", "force-stop", LAUNCHER' not in release:
+        return "release_pinned_apks no longer force-stops the launcher"
+    if not re.search(r"if free < STORAGE_FLOOR_MB:\s*die\(", preflight):
+        return "storage_preflight no longer refuses a device under the floor"
+    if text.count(STORAGE_PREFLIGHT) != 1:
+        return ("the lane must read every device's free /data, tablet "
+                "included, once at its start")
+    first_install = text.find("if not cliphelper_prepare(_serial):")
+    if first_install < 0 or text.find(STORAGE_PREFLIGHT) > first_install:
+        return ("the storage preflight must run before the lane's first "
+                "install (the clipboard helper's)")
+    return None
+
+
 def ime_problem(text: str, lane_ns: dict) -> str | None:
     actual = set(lane_ns.get("IME_SCENES", []))
     expected = {
@@ -429,6 +466,10 @@ def main() -> int:
         print(f"android-leg-order: {problem}", file=sys.stderr)
         return 1
     problem = staging_problem(text)
+    if problem is not None:
+        print(f"android-leg-order: {problem}", file=sys.stderr)
+        return 1
+    problem = storage_problem(text)
     if problem is not None:
         print(f"android-leg-order: {problem}", file=sys.stderr)
         return 1
@@ -829,6 +870,43 @@ def main() -> int:
         print("android-leg-order: SELF-TEST FAIL (a restore above the "
               "picker's force-stop read as good)", file=sys.stderr)
         return 1
+
+    # N30..N35: each storage link cut, or moved, must red the clause.
+    def move(label, source, piece, before):
+        cut = source.replace(piece, "", 1)
+        indent = before[:len(before) - len(before.lstrip(" "))]
+        moved = cut.replace(before, indent + piece.lstrip(" ") + before, 1)
+        n = int(cut != source and moved != cut)
+        print(f"android-leg-order: {label} self-test applied {n} move(s)")
+        return moved, n
+
+    release_line = "                    release_pinned_apks(serial, slog)\n"
+    reread_line = "                pkgs = adb_out(serial, \"shell\", \"pm\", \"list\",\n"
+    storage_cuts = [
+        ("storage release removed",
+         lambda l: doctor(l, text, re.escape(release_line), "")),
+        ("storage release above the re-read",
+         lambda l: move(l, text, release_line, reread_line)),
+        ("launcher force-stop removed",
+         lambda l: doctor(l, text, re.escape('"am", "force-stop", LAUNCHER'),
+                          '"am", "force-stop", "com.example.none"')),
+        ("storage floor refusal removed",
+         lambda l: doctor(l, text, r"if free < STORAGE_FLOOR_MB:",
+                          "if free < 0:")),
+        ("storage preflight removed",
+         lambda l: doctor(l, text, re.escape(STORAGE_PREFLIGHT), "")),
+        ("storage preflight below the first install",
+         lambda l: move(l, text, STORAGE_PREFLIGHT,
+                        'timing("cliphelper")\n')),
+    ]
+    for label, cut in storage_cuts:
+        doctored, n = cut(label)
+        problem = storage_problem(doctored)
+        if n != 1 or problem is None:
+            print(f"android-leg-order: SELF-TEST FAIL ({label} read as "
+                  f"good)", file=sys.stderr)
+            return 1
+        print(f"android-leg-order: {label} -> {problem}")
 
     return status
 

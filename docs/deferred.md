@@ -15441,7 +15441,7 @@ The capture guests' nine buttons in their flowing row: on Windows the first line
 KEY: flowing row, wrap, reflow_wrap, wrap_lines, Auto column, WinUI wrap, capture buttons
 
 
-## DEFECT — a warm Android pool fills its data partition one staged APK at a time (measured 2026-10-08)
+## ~~DEFECT — a warm Android pool fills its data partition one staged APK at a time (measured 2026-10-08)~~ FIXED 2026-10-08: every suite staging force-stops the launcher once the install is re-read (`release_pinned_apks` in tools/android/run-emulator.py), each stage log names `storage on <serial>:` with free /data and every process holding a deleted APK, and the lane's start releases the same way on all five devices and refuses one under 1024 MB (the platform's ~500 MB low-storage reserve plus the largest suite APK, 375 MB) naming `adb -s <serial> emu kill`. Four filtered runs of save, reveal, secure and autofill (48/48 PASS) left every device's free /data where it began and the launcher pinning nothing; before, each install pinned one APK (211 MB javahost, 375 MB rusthost on 5554). systemui's own one or two held APKs are counted, not reclaimed (docs/traps.md). GUARD: tools/lib/android-leg-order.py's storage clause, six cuts watched red with counts printed; the floor refusal and the unreadable reading each made to print on a real device.
 KEY: INSUFFICIENT_STORAGE, nexuslauncher, deleted base.apk, stage_suite_apk, warm pool storage
 
 docs/traps.md, The emulator launcher pins every replaced APK. Every suite
