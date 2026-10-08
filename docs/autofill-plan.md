@@ -8,6 +8,7 @@ green on the mac for Rust. The breadth (§6 step 2) has built the GTK and
 WinUI arms, green on the linux and windows lanes in every language they run;
 what remains is on the ledger (docs/deferred.md, the content type's BUILD
 entry).
+Every ruling A1-A10 RULED 2026-10-08 (A8 as reuse of [links] hosts; the rest as built: "i'm cool with your rulings").
 
 The maintainer asked for it on 2026-10-07: "prioritize ... the auto-fill hints
 from a password manager or the messages app". A text field says what it holds
@@ -69,7 +70,7 @@ Four facts decide the design:
 
 ## §2 — The rulings (RECOMMENDED, the depth built as recommended)
 
-### A1 — A prop, `content_type`, on the entry and the secure field, in both zones (RECOMMEND)
+### A1 — A prop, `content_type`, on the entry and the secure field, in both zones (RULED 2026-10-07 as built: "i'm cool with your rulings")
 
 A word on the field, not a kind: no platform changes the control's class for
 it (an NSTextField stays an NSTextField, a TextBox a TextBox), and a kind per
@@ -81,7 +82,7 @@ textarea prose, and a password manager fills none of them. The template zone
 carries it too (a stamped account row's code field), as every prop on these
 kinds does.
 
-### A2 — The vocabulary: none, username, password, new_password, one_time_code, email, phone (RECOMMEND)
+### A2 — The vocabulary: none, username, password, new_password, one_time_code, email, phone (RULED 2026-10-07 as built: "i'm cool with your rulings")
 
 A closed spec enum, `none` (0, the default and the way back) and six words:
 the maintainer's three (a saved username and password, a new password, a
@@ -92,7 +93,7 @@ enum row and one table row per backend), and Compose's NewUsername, which
 Apple has no word for. Adding a word later moves the spec hash and nothing
 else.
 
-### A3 — Which word fits which kind (RECOMMEND)
+### A3 — Which word fits which kind (RULED 2026-10-07 as built: "i'm cool with your rulings")
 
 `password` and `new_password` on the secure field only; `username`, `email`
 and `phone` on the entry only; `one_time_code` and `none` on either. A
@@ -103,7 +104,7 @@ Android fill a plain field) and some apps mask them. The root refuses any
 other pairing in one sentence naming the rule (scene.rs
 `check_content_type`, watched in its unit test).
 
-### A4 — Every backend accepts every word; the effect is the platform's (RECOMMEND)
+### A4 — Every backend accepts every word; the effect is the platform's (RULED 2026-10-07 as built: "i'm cool with your rulings")
 
 One semantics (invariant 1): the word states what the field holds, and each
 backend hands the platform its own word for it. What the platform then does
@@ -112,7 +113,7 @@ Android offer saved credentials, strong passwords and codes; GTK and WinUI
 tell the input method and the on-screen keyboard. The table is §3. No
 backend refuses a word and no backend draws anything of its own.
 
-### A5 — The phone keyboard follows the word (RECOMMEND)
+### A5 — The phone keyboard follows the word (RULED 2026-10-07 as built: "i'm cool with your rulings")
 
 `email` takes the platform's email keyboard, `phone` the phone pad,
 `one_time_code` the number pad (iOS `.numberPad`, Compose
@@ -123,7 +124,7 @@ secure field's P7 rule. A code with letters in it is an entry with no word,
 said so in the binding docs. There is no separate keyboard prop in kaya, and
 pairing the two is what Apple's and Google's own samples do.
 
-### A6 — The observation: `expect_content_type <target> <word>`, read off the platform's own property (RECOMMEND)
+### A6 — The observation: `expect_content_type <target> <word>`, read off the platform's own property (RULED 2026-10-07 as built: "i'm cool with your rulings")
 
 The verb answers `content_type <word>` where the word is what the PLATFORM's
 own property says, mapped back through the one table that applied it (§3),
@@ -141,7 +142,7 @@ watched negatives). A secure field with no word reads `none` on the Apple
 platforms and `password` on GTK and WinUI, whose password control carries
 the password purpose by default; the shared scene asserts no such field.
 
-### A7 — No password rules in this slice (RECOMMEND)
+### A7 — No password rules in this slice (RULED 2026-10-07 as built: "i'm cool with your rulings")
 
 Only iOS takes password rules (UITextInputPasswordRules), SwiftUI has no
 modifier for them, and macOS, Android, GTK and WinUI have nothing to pass
@@ -180,7 +181,7 @@ negatives) and, on every APK the android lane builds, by run-emulator's
 domain, the same limit as web links (docs/deferred.md, the web links
 entry).
 
-### A9 — The reveal toggle stays out of this slice (RECOMMEND: separate)
+### A9 — The reveal toggle stays out of this slice (RULED 2026-10-07 as built: "i'm cool with your rulings")
 
 The secure field's ledger entry paired the two. They share nothing: the
 toggle is a visible affordance with a different control on every platform
@@ -189,7 +190,7 @@ swapped for a TextField on the Apple platforms) and a harness question of its
 own (what may a transcript print once the text is shown). It keeps its
 ledger entry and its trigger.
 
-### A10 — No SMS Retriever, no app-side code reading (RECOMMEND)
+### A10 — No SMS Retriever, no app-side code reading (RULED 2026-10-07 as built: "i'm cool with your rulings")
 
 Android's SMS Retriever and SMS User Consent APIs let an app read the code
 itself; they need Google Play services, a hash of the app's signing key in
