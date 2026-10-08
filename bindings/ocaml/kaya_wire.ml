@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x904824951724780fL
+let spec_hash = 0x000c0323f11ef52fL
 
 let value_bool = 1
 let value_i64 = 2
@@ -150,6 +150,7 @@ let prop_player = 52
 let prop_capture = 53
 let prop_aspect = 54
 let prop_format = 55
+let prop_content_type = 56
 let wprop_title = 1
 let wprop_width = 2
 let wprop_height = 3
@@ -359,6 +360,13 @@ let playback_state_paused = 2
 let fit_contain = 0
 let fit_cover = 1
 let fit_fill = 2
+let content_type_none = 0
+let content_type_username = 1
+let content_type_password = 2
+let content_type_new_password = 3
+let content_type_one_time_code = 4
+let content_type_email = 5
+let content_type_phone = 6
 let track_kind_audio = 0
 let track_kind_caption = 1
 let pprop_source = 1
@@ -2654,6 +2662,32 @@ let tx_bind_format_element ?(level = 0) ?(field = 0) widget_id =
   finish tx_kind_set_property (fun b ->
       Buffer.add_int64_le b widget_id;
       Buffer.add_int32_le b (Int32.of_int prop_format);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
+(* set_property with a constant content_type value. *)
+let tx_set_content_type widget_id content_type =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_content_type);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (I64 content_type))
+
+(* set_property with a signal-bound content_type value. *)
+let tx_bind_content_type widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_content_type);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_content_type_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_content_type);
       Buffer.add_int32_le b (Int32.of_int source_element);
       Buffer.add_int32_le b (Int32.of_int level);
       Buffer.add_int32_le b (Int32.of_int field))

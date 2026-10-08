@@ -124,6 +124,8 @@ VERB_FEATURE = {
     # docs/secure-entry-plan.md §5, the same reasoning.
     "type_secret": "secure",
     "expect_masked": "secure",
+    # docs/autofill-plan.md §5, the same reasoning.
+    "expect_content_type": "autofill",
     # docs/color-picker-plan.md §5, the same reasoning.
     "set_color": "colorpicker",
     "expect_color": "colorpicker",

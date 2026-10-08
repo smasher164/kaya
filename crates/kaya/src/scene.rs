@@ -1145,6 +1145,8 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         Prop::Color | Prop::Alpha => matches!(kind, WidgetKind::ColorPicker),
         // docs/media-plan.md §3.
         Prop::Fit | Prop::Player | Prop::Capture | Prop::Aspect => matches!(kind, WidgetKind::Video),
+        // docs/autofill-plan.md A1: the two single-line credential kinds.
+        Prop::ContentType => matches!(kind, WidgetKind::Entry | WidgetKind::SecureField),
         Prop::Indeterminate => matches!(kind, WidgetKind::Progress),
         Prop::Source => matches!(kind, WidgetKind::Image),
         // Layout weight is kind-agnostic: any child of a row/column may
@@ -1230,6 +1232,29 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         Prop::MaxWidth | Prop::MaxHeight => kind == WidgetKind::Image,
     };
     assert!(ok, "kaya: {kind:?} has no property {prop:?}");
+}
+
+/// Which content type fits which credential kind (docs/autofill-plan.md
+/// A3): a password belongs in a secure field and a username, address or
+/// number in an entry; a one-time code may be either, and `none` returns
+/// either to no hint.
+pub(crate) fn check_content_type(kind: WidgetKind, word: i64) {
+    let name = crate::wire::vocab_name(crate::wire::CONTENT_TYPES, word).unwrap_or_else(|| {
+        panic!(
+            "kaya: content_type is none (0), username (1), password (2), new_password (3), \
+             one_time_code (4), email (5) or phone (6), got {word}"
+        )
+    });
+    let fits = match name {
+        "none" | "one_time_code" => true,
+        "password" | "new_password" => kind == WidgetKind::SecureField,
+        _ => kind == WidgetKind::Entry,
+    };
+    assert!(
+        fits,
+        "kaya: content_type {name} does not fit {kind:?} — password and new_password are a \
+         secure field's, username, email and phone an entry's, one_time_code either's"
+    );
 }
 
 /// A command is momentary and kind-scoped. The check_prop class —
@@ -1744,6 +1769,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::MaxWidth | Prop::MaxHeight => ValueType::F64,
         Prop::Axis => ValueType::I64,
         Prop::Fit | Prop::Player | Prop::Capture | Prop::Aspect => ValueType::I64,
+        Prop::ContentType => ValueType::I64,
         Prop::Role => ValueType::I64,
         Prop::Symbol => ValueType::I64,
         Prop::Indeterminate | Prop::Fill | Prop::Wrap | Prop::Rich | Prop::Submits => ValueType::Bool,
@@ -2538,6 +2564,9 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
         if let Err(why) = crate::protocol::Aspect::from_packed(*packed) {
             panic!("kaya: {prop:?} on {kind:?}: {why}");
         }
+    }
+    if let (Prop::ContentType, Value::I64(word)) = (prop, value) {
+        check_content_type(kind, *word);
     }
     if let (Prop::Fit, Value::I64(fit)) = (prop, value) {
         assert!(
@@ -10217,6 +10246,47 @@ mod tests {
             ),
             "a plain container's axis must still lower, got {ops:?}"
         );
+    }
+
+    /// docs/autofill-plan.md A3: the root takes each content type on its own
+    /// kind and refuses the rest by name.
+    #[test]
+    fn content_type_fits_its_kind() {
+        for (kind, word) in [
+            (WidgetKind::Entry, 1),
+            (WidgetKind::Entry, 4),
+            (WidgetKind::Entry, 5),
+            (WidgetKind::Entry, 6),
+            (WidgetKind::Entry, 0),
+            (WidgetKind::SecureField, 2),
+            (WidgetKind::SecureField, 3),
+            (WidgetKind::SecureField, 4),
+            (WidgetKind::SecureField, 0),
+        ] {
+            check_content_type(kind, word);
+        }
+        for (kind, word) in [(WidgetKind::Entry, 2), (WidgetKind::Entry, 3), (WidgetKind::SecureField, 1),
+            (WidgetKind::SecureField, 5), (WidgetKind::SecureField, 6), (WidgetKind::Entry, 7)]
+        {
+            let why = std::panic::catch_unwind(|| check_content_type(kind, word)).unwrap_err();
+            let why = why.downcast_ref::<String>().cloned().unwrap_or_default();
+            assert!(why.contains("content_type"), "{kind:?} {word}: {why}");
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "has no property ContentType")]
+    fn content_type_on_a_search_field_fails_the_batch() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Search },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::ContentType,
+                value: crate::protocol::PropValue::Const(Value::I64(1)),
+            },
+        ]);
     }
 
     /// Every chained binding puts `stack_when` on the generic widget

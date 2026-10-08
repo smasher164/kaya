@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x904824951724780fn;
+export const SPEC_HASH = 0x000c0323f11ef52fn;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -127,6 +127,7 @@ export const PROP_PLAYER = 52;
 export const PROP_CAPTURE = 53;
 export const PROP_ASPECT = 54;
 export const PROP_FORMAT = 55;
+export const PROP_CONTENT_TYPE = 56;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -336,6 +337,13 @@ export const PLAYBACK_STATE_PAUSED = 2;
 export const FIT_CONTAIN = 0;
 export const FIT_COVER = 1;
 export const FIT_FILL = 2;
+export const CONTENT_TYPE_NONE = 0;
+export const CONTENT_TYPE_USERNAME = 1;
+export const CONTENT_TYPE_PASSWORD = 2;
+export const CONTENT_TYPE_NEW_PASSWORD = 3;
+export const CONTENT_TYPE_ONE_TIME_CODE = 4;
+export const CONTENT_TYPE_EMAIL = 5;
+export const CONTENT_TYPE_PHONE = 6;
 export const TRACK_KIND_AUDIO = 0;
 export const TRACK_KIND_CAPTION = 1;
 export const PPROP_SOURCE = 1;
@@ -2430,6 +2438,24 @@ export function tx_bind_format(widget_id: number, signal_id: number): Uint8Array
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_format_element(widget_id: number, level = 0, field = 0): Uint8Array {
   enc.begin(); enc.u64(widget_id); enc.u32(PROP_FORMAT); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant content_type value. */
+export function tx_set_content_type(widget_id: number, content_type: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_CONTENT_TYPE); enc.u32(SOURCE_CONST); enc.value(new I64(content_type));
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound content_type value. */
+export function tx_bind_content_type(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_CONTENT_TYPE); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_content_type_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_CONTENT_TYPE); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
   return enc.end(TX_SET_PROPERTY);
 }
 

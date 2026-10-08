@@ -395,6 +395,16 @@ pub(crate) const PLAYBACK_STATES: &[(i64, &str)] = &[(0, "none"), (1, "playing")
 
 pub(crate) const FITS: &[(i64, &str)] = &[(0, "contain"), (1, "cover"), (2, "fill")];
 
+pub(crate) const CONTENT_TYPES: &[(i64, &str)] = &[
+    (0, "none"),
+    (1, "username"),
+    (2, "password"),
+    (3, "new_password"),
+    (4, "one_time_code"),
+    (5, "email"),
+    (6, "phone"),
+];
+
 pub(crate) const PPROPS: &[(i64, &str)] = &[
     (1, "source"),
     (2, "speed"),
@@ -1169,6 +1179,7 @@ pub(crate) const PROP_PLAYER: u32 = 52;
 pub(crate) const PROP_CAPTURE: u32 = 53;
 pub(crate) const PROP_ASPECT: u32 = 54;
 pub(crate) const PROP_FORMAT: u32 = 55;
+pub(crate) const PROP_CONTENT_TYPE: u32 = 56;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
@@ -1720,6 +1731,7 @@ fn prop(raw: u32) -> Prop {
         PROP_CAPTURE => Prop::Capture,
         PROP_ASPECT => Prop::Aspect,
         PROP_FORMAT => Prop::Format,
+        PROP_CONTENT_TYPE => Prop::ContentType,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -5527,6 +5539,7 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::Capture => PROP_CAPTURE,
         Prop::Aspect => PROP_ASPECT,
         Prop::Format => PROP_FORMAT,
+        Prop::ContentType => PROP_CONTENT_TYPE,
     }
 }
 

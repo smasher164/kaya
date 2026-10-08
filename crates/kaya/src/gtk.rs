@@ -14413,6 +14413,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 (NativeWidget::Secure(field), Prop::Placeholder, Value::Str(s)) => {
                     field.set_placeholder_text((!s.is_empty()).then_some(s.as_str()));
                 }
+                (_, Prop::ContentType, _) => crate::depth_stub("autofill"),
                 (NativeWidget::Secure(field), Prop::Text, Value::Str(s)) => {
                     core.apply_quiet.set(true);
                     gtk4::prelude::EditableExt::set_text(field, &s);
@@ -18603,6 +18604,10 @@ impl crate::harness::Stage for GtkStage {
     }
     /// The Text interface of the field's own node on the bus, through the one
     /// mask rule (docs/secure-entry-plan.md §3, P6).
+    fn content_type(&self, _: crate::harness::Target) -> Result<&'static str, String> {
+        crate::depth_stub("autofill")
+    }
+
     fn masked_len(&self, target: crate::harness::Target) -> Result<usize, crate::harness::MaskRead> {
         use crate::harness::MaskRead;
         let Some((want, rank)) = Self::on_main(move |core| {

@@ -314,6 +314,9 @@ pub enum Step {
     TypeSecret(Secret),
     /// How many characters the platform shows masked in a secure field.
     ExpectMasked(Target, usize),
+    /// The content type a credential field carries, read off the platform's
+    /// own property (docs/autofill-plan.md A6): one of [`CONTENT_READS`].
+    ExpectContentType(Target, &'static str),
     ExpectHref(Target, String),
     /// Type the text at the FOCUSED widget as REAL PLATFORM KEYSTROKES. A
     /// programmatic write CLEARS the field's native undo history on every
@@ -955,6 +958,7 @@ impl Step {
             | Step::ExpectHelp(t, _)
             | Step::ExpectPlaceholder(t, _)
             | Step::ExpectMasked(t, _)
+            | Step::ExpectContentType(t, _)
             | Step::ExpectHref(t, _)
             | Step::ExpectMirrored(t)
             | Step::ExpectScript(t, _)
@@ -1096,6 +1100,7 @@ impl Step {
             Step::ExpectPlaceholder { .. } => true,
             Step::TypeSecret { .. } => false,
             Step::ExpectMasked { .. } => true,
+            Step::ExpectContentType { .. } => true,
             Step::ExpectHref { .. } => true,
             Step::Type { .. } => false,
             Step::Expect { .. } => true,
@@ -1441,6 +1446,11 @@ pub trait Stage: Send + 'static {
     /// mask, read off what the platform presents (its accessibility value
     /// where it publishes one), never the text (docs/secure-entry-plan.md P6).
     fn masked_len(&self, target: Target) -> Result<usize, MaskRead>;
+    /// The content type an entry or secure field carries, read off the
+    /// platform's own property and mapped back through the one table that
+    /// applied it, never kaya's model: one of [`CONTENT_READS`], or a
+    /// sentence naming what the platform reported (docs/autofill-plan.md A6).
+    fn content_type(&self, target: Target) -> Result<&'static str, String>;
     /// Whether keyboard focus is on a secure field: `type` refuses there and
     /// `type_secret` refuses anywhere else (docs/secure-entry-plan.md P6).
     fn secure_focused(&self) -> bool;
@@ -2389,6 +2399,26 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     .parse::<usize>()
                     .map_err(|_| format!("expect_masked wants a count, got {n:?}"))?;
                 Step::ExpectMasked(target, n)
+            }
+            "expect_content_type" => {
+                let (target, word) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_content_type wants a field and a content type: {line:?}")
+                })?;
+                let target = parse_target(target)?;
+                if !matches!(target.kind, TargetKind::Entry | TargetKind::SecureField) {
+                    return Err(format!(
+                        "expect_content_type reads an entry or a secure field, not {target:?}"
+                    ));
+                }
+                let word = word.trim();
+                if word == "new_password" {
+                    return Err(CONTENT_READS_NEW_PASSWORD.to_owned());
+                }
+                let word = CONTENT_READS
+                    .iter()
+                    .find(|w| **w == word)
+                    .ok_or_else(|| format!("{CONTENT_READS_WANTS}, got {word:?}"))?;
+                Step::ExpectContentType(target, word)
             }
             "expect" => {
                 let (target, text) = rest
@@ -4700,6 +4730,11 @@ fn run_with_log(
                 Ok(got) => Err(format!("masked {got}, wanted {want}")),
                 Err(why) => Err(format!("{}: {why}", target_spec(target))),
             })),
+            Step::ExpectContentType(target, want) => Some(poll(|| match stage.content_type(*target) {
+                Ok(got) if got == *want => Ok(format!("content_type {want}")),
+                Ok(got) => Err(format!("content_type {got}, wanted {want}")),
+                Err(why) => Err(format!("{}: {why}", target_spec(target))),
+            })),
             Step::ExpectPlaceholder(target, want) => Some(poll(|| {
                 let got = stage.placeholder_text(*target);
                 if got == *want {
@@ -6767,6 +6802,16 @@ pub const TYPE_INTO_SECURE: &str =
 pub const TYPE_SECRET_ELSEWHERE: &str = "type_secret types into a secure field, and the focus is not on one";
 pub const TYPE_SECRET_ASCII: &str = "type_secret types printable ASCII alone (0x20..0x7e), and its text is not";
 
+/// What `expect_content_type` answers (docs/autofill-plan.md A6): the class
+/// every platform's own property tells apart. A `new_password` field reads
+/// `password`, since only the phones and the Apple platforms tell the two
+/// apart. The same bytes in the SwiftUI harness.
+pub const CONTENT_READS: [&str; 6] = ["none", "username", "password", "one_time_code", "email", "phone"];
+pub const CONTENT_READS_WANTS: &str =
+    "expect_content_type wants one of none, username, password, one_time_code, email, phone";
+pub const CONTENT_READS_NEW_PASSWORD: &str =
+    "expect_content_type reads what every platform tells apart, and a new_password field reads as password";
+
 /// The scene-ready wait's one sentence (tools/check-harness-ceiling.py
 /// holds the three harnesses to it, flattened).
 pub const SCENE_READY_MISS: &str =
@@ -8032,6 +8077,30 @@ mod tests {
         assert!(verdict.contains(TYPE_SECRET_ELSEWHERE), "{verdict}");
     }
 
+    /// docs/autofill-plan.md A6: the verb answers the platform's class, refuses
+    /// a word no platform can tell apart, and reads the two credential kinds alone.
+    #[test]
+    fn content_type_reads_the_platform_class() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(parse("expect_content_type entry#0 username\nexpect_content_type secure_field#0 password")
+            .unwrap(), MockStage { seen: &SEEN, verdict: tx });
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 0, "{verdict}");
+        assert!(verdict.contains("content_type username"), "{verdict}");
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(parse("expect_content_type entry#0 email").unwrap(), MockStage { seen: &SEEN, verdict: tx });
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 1, "{verdict}");
+        assert!(verdict.contains("content_type username, wanted email"), "{verdict}");
+        assert_eq!(
+            parse("expect_content_type secure_field#0 new_password").unwrap_err(),
+            CONTENT_READS_NEW_PASSWORD
+        );
+        assert!(parse("expect_content_type entry#0 pin").unwrap_err().starts_with(CONTENT_READS_WANTS));
+        assert!(parse("expect_content_type search#0 none").is_err());
+        assert!(parse("expect_content_type entry#0").is_err());
+    }
+
     #[test]
     fn mask_count_reads_one_glyph_and_refuses_typed_characters() {
         assert_eq!(mask_count(""), Ok(0));
@@ -8470,6 +8539,13 @@ mod tests {
         }
         fn masked_len(&self, _: Target) -> Result<usize, MaskRead> {
             Ok(MOCK_TYPED.with(|t| t.borrow().chars().count()))
+        }
+        fn content_type(&self, target: Target) -> Result<&'static str, String> {
+            match target.kind {
+                TargetKind::Entry => Ok("username"),
+                TargetKind::SecureField => Ok("password"),
+                _ => Err("no such target".to_owned()),
+            }
         }
         fn secure_focused(&self) -> bool {
             MOCK_SECURE_FOCUS.with(|f| f.get())
@@ -9443,6 +9519,9 @@ mod tests {
         fn masked_len(&self, _: Target) -> Result<usize, MaskRead> {
             Err(MaskRead::NoSuchTarget)
         }
+        fn content_type(&self, _: Target) -> Result<&'static str, String> {
+            Err("no such target".to_owned())
+        }
         fn secure_focused(&self) -> bool {
             false
         }
@@ -9849,6 +9928,9 @@ mod tests {
         }
         fn masked_len(&self, _: Target) -> Result<usize, MaskRead> {
             Err(MaskRead::NoSuchTarget)
+        }
+        fn content_type(&self, _: Target) -> Result<&'static str, String> {
+            Err("no such target".to_owned())
         }
         fn secure_focused(&self) -> bool {
             false

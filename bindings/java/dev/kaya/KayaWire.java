@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x904824951724780fL;
+    public static final long SPEC_HASH = 0x000c0323f11ef52fL;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -133,6 +133,7 @@ public final class KayaWire {
     public static final int PROP_CAPTURE = 53;
     public static final int PROP_ASPECT = 54;
     public static final int PROP_FORMAT = 55;
+    public static final int PROP_CONTENT_TYPE = 56;
     public static final int WPROP_TITLE = 1;
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
@@ -342,6 +343,13 @@ public final class KayaWire {
     public static final int FIT_CONTAIN = 0;
     public static final int FIT_COVER = 1;
     public static final int FIT_FILL = 2;
+    public static final int CONTENT_TYPE_NONE = 0;
+    public static final int CONTENT_TYPE_USERNAME = 1;
+    public static final int CONTENT_TYPE_PASSWORD = 2;
+    public static final int CONTENT_TYPE_NEW_PASSWORD = 3;
+    public static final int CONTENT_TYPE_ONE_TIME_CODE = 4;
+    public static final int CONTENT_TYPE_EMAIL = 5;
+    public static final int CONTENT_TYPE_PHONE = 6;
     public static final int TRACK_KIND_AUDIO = 0;
     public static final int TRACK_KIND_CAPTION = 1;
     public static final int PPROP_SOURCE = 1;
@@ -2695,6 +2703,29 @@ public final class KayaWire {
     public static byte[] txBindFormatElement(long widgetId, int level, int field) {
         Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_FORMAT).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant content_type value. */
+    public static byte[] txSetContentType(long widgetId, long contentType) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_CONTENT_TYPE).putInt(SOURCE_CONST);
+        encodeValue(b, contentType);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound content_type value. */
+    public static byte[] txBindContentType(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_CONTENT_TYPE).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindContentTypeElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_CONTENT_TYPE).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
     }

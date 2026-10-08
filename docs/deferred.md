@@ -150,18 +150,47 @@ fix pushes nothing outside kaya's stops and is inert on 1.26 and on a fixed
 1.28 (docs/traps.md). Measured: the lane's notsdemux and media_tracks legs
 15/18 with the scope removed, every red ending in the abort; 18/18 with it.
 
-## DEFER — the secure field's autofill hint and reveal toggle (docs/secure-entry-plan.md P3, P8; 2026-10-07)
-KEY: secure field autofill, content type, textContentType, newPassword, oneTimeCode, ContentType.Password, reveal toggle, PasswordRevealMode, show-peek-icon, TextObfuscationMode
+## BUILD — the content type (docs/autofill-plan.md), depth on the mac (2026-10-07); the GTK, WinUI and Compose arms, the iOS legs and the other eight bindings are the breadth slice
+KEY: content_type, ContentType, CONTENT_TYPES, PROP_CONTENT_TYPE, expect_content_type, CONTENT_READS, KayaContentHint, kayaContentTypes, kayaContentTypeRead, autofill.steps, content_type_routes, DEPTH STUB autofill
 
-Two props the depth left out on purpose. A `content` word (password, new
-password, one-time code) reaching iOS's textContentType and Android's
-autofill content type; GTK and WinUI have nothing for it to drive, and
-saving a credential on iOS needs associated domains (the packaging
-milestone). And an app-declared `reveal` toggle, since every platform
-shows the text on request differently (WinUI's eye button, GTK's peek
-icon, Compose's Visible mode, a SecureField swapped for a TextField on the
-Apple platforms). Trigger for both: the password-manager archetype, or the
-first app with a login screen.
+The maintainer asked for it 2026-10-07 ("the auto-fill hints from a password
+manager or the messages app"). The depth slice: prop 56 `content_type` on
+the entry and the secure field in both zones (none, username, password,
+new_password, one_time_code, email, phone; the root holds each word to its
+kind), the Rust binding, the SwiftUI arm on macOS and iOS (the platform's
+text content type, and on the phone the keyboard the word asks for), the
+harness's `expect_content_type` reading the platform's own property, and
+tools/scenes/autofill.steps green on the mac lane for Rust. The rulings in
+the plan's §2 are recommended and await the maintainer. What breadth owes:
+  - **DEPTH STUB: autofill on gtk** — the inner GtkText's input-purpose and
+    input-hints per the plan's §3 table, and `content_type` reading them
+    back through the same table (plan A6).
+  - **DEPTH STUB: autofill on winui** — the TextBox's and PasswordBox's
+    InputScope, with spell check and text prediction off for a username,
+    read back through the same table (plan §3).
+  - **DEPTH STUB: autofill on compose** — the field's semantics
+    `contentType` (compose-ui 1.11.4's ContentType), the keyboard type per
+    word, and `expect_content_type` reading the node's ContentType hints
+    (plan §3).
+  - **The iOS legs** — the arm is built in the shared interpreter and the
+    read takes the UITextField's textContentType; the legs and the review
+    page's QuickType capture are unmeasured (plan §5).
+  - **`content_type` in the other eight bindings** — both zones;
+    check-sugar-surface and tpl-surfaces are red for them by design (15
+    findings, all `content_type`).
+  - **tools/lib/content_type_routes.py's BACKENDS** — each backend whose
+    stub goes takes a pinned table row there, as the SwiftUI arm has.
+
+## DEFER — the secure field's reveal toggle (docs/secure-entry-plan.md P3; 2026-10-07)
+KEY: reveal toggle, PasswordRevealMode, show-peek-icon, TextObfuscationMode
+
+An app-declared `reveal` toggle the depth left out on purpose, since every
+platform shows the text on request differently (WinUI's eye button, GTK's
+peek icon, Compose's Visible mode, a SecureField swapped for a TextField on
+the Apple platforms). The autofill hint that shared this entry is the BUILD
+entry above (docs/autofill-plan.md A9 keeps the toggle out of that slice).
+Trigger: the password-manager archetype, or the first app with a login
+screen that asks to show its password.
 
 ## ~~BUILD — timecode formatter and number-field format (2026-10-04)~~ COMPLETE implementation 2026-10-05: all nine bindings plus C, all five backends, viewed review page; full-matrix validation follow-up remains open below.
 KEY: timecode, TimecodeRate, NumberFormat, drop-frame, number-field format

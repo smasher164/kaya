@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x904824951724780f
+	SpecHash uint64 = 0x000c0323f11ef52f
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -134,6 +134,7 @@ const (
 	PropCapture = 53
 	PropAspect = 54
 	PropFormat = 55
+	PropContentType = 56
 	WpropTitle = 1
 	WpropWidth = 2
 	WpropHeight = 3
@@ -343,6 +344,13 @@ const (
 	FitContain Fit = 0
 	FitCover Fit = 1
 	FitFill Fit = 2
+	ContentTypeNone = 0
+	ContentTypeUsername = 1
+	ContentTypePassword = 2
+	ContentTypeNewPassword = 3
+	ContentTypeOneTimeCode = 4
+	ContentTypeEmail = 5
+	ContentTypePhone = 6
 	TrackKindAudio = 0
 	TrackKindCaption = 1
 	PpropSource = 1
@@ -3445,6 +3453,38 @@ func TxBindFormatElement(widgetID uint64, level uint32, field uint32) []byte {
 	b := beginRecord(txSetProperty)
 	b = binary.LittleEndian.AppendUint64(b, widgetID)
 	b = binary.LittleEndian.AppendUint32(b, PropFormat)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetContentType: set_property with a constant content_type value.
+func TxSetContentType(widgetID uint64, contentType int64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropContentType)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, contentType)
+	return endRecord(b)
+}
+
+// TxBindContentType: set_property with a signal-bound content_type value.
+func TxBindContentType(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropContentType)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindContentTypeElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindContentTypeElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropContentType)
 	b = binary.LittleEndian.AppendUint32(b, SourceElement)
 	b = binary.LittleEndian.AppendUint32(b, level)
 	b = binary.LittleEndian.AppendUint32(b, field)

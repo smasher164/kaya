@@ -453,6 +453,37 @@ pub enum PlaybackState {
     Paused,
 }
 
+/// What a credential field holds, so the platform's password manager, code
+/// autofill and keyboard can act on it (spec enum "content_type";
+/// docs/autofill-plan.md A2, A3). `password` and `new_password` are a secure
+/// field's, `username`, `email` and `phone` an entry's, and `one_time_code`
+/// either's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum ContentType {
+    #[default]
+    None,
+    Username,
+    Password,
+    NewPassword,
+    OneTimeCode,
+    Email,
+    Phone,
+}
+
+impl ContentType {
+    pub(crate) fn wire(self) -> i64 {
+        match self {
+            ContentType::None => 0,
+            ContentType::Username => 1,
+            ContentType::Password => 2,
+            ContentType::NewPassword => 3,
+            ContentType::OneTimeCode => 4,
+            ContentType::Email => 5,
+            ContentType::Phone => 6,
+        }
+    }
+}
+
 /// A video view's fit (spec enum "fit").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Fit {
@@ -2158,6 +2189,9 @@ pub enum Prop {
     /// docs/media-plan.md §3).
     Aspect,
     Format,
+    /// What a credential field holds (spec enum "content_type", I64 on the
+    /// wire; docs/autofill-plan.md A1-A3).
+    ContentType,
     /// The app owns a rich textarea's undo (Bool-valued; docs/rich-text-plan.md
     /// R6, §14): the native stack is off, the ledger never banks it, and
     /// Edit>Undo/Redo reach the app through the role item's own activation.

@@ -2478,6 +2478,48 @@ for _lang, _rel, _templates in SCROLL_AXIS_SURFACES:
         _axis_cuts += 1
 print(f"check-sugar-surface: scroll-axis cuts watched red {_axis_cuts}/{_axis_want}")
 
+# --- THE CONTENT TYPE, live zone, in all nine (docs/autofill-plan.md §5) -
+# tpl-surfaces holds the template zone's setter; this holds the live one.
+# Rust's row is the built shape; the other eight are the binding's own name
+# for it and are tightened to the shape each builds at the breadth.
+CONTENT_TYPE_SURFACES = [
+    ("rust", "crates/kaya/src/app.rs",
+     r"pub fn {0}\(self, content: crate::protocol::ContentType\) -> Self"),
+    ("python", "bindings/python/kaya/__init__.py", r"\b{0}\b"),
+    ("go", "bindings/go/app.go", r"func \(w Widget\) {0}\("),
+    ("csharp", "bindings/csharp/KayaApp.cs", r"\b{0}\b"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", r"public Widget {0}\("),
+    ("swift", "bindings/swift/KayaApp.swift", r"\b{0}\b"),
+    ("haskell", "bindings/haskell/KayaApp.hs", r"^{0} ::"),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", r"\b{0}\b"),
+    ("js", "bindings/js/kaya/index.ts", r"\b{0}\b"),
+]
+CONTENT_TYPE_NAMES = {"rust": "content_type", "python": "content_type", "go": "ContentType",
+                      "csharp": "contentType", "java": "contentType", "swift": "contentType",
+                      "haskell": "contentType", "ocaml": "content_type", "js": "contentType"}
+
+
+def check_content_type(fake_name=None):
+    out = []
+    for lang, rel, template in CONTENT_TYPE_SURFACES:
+        pat = template.format(fake_name or CONTENT_TYPE_NAMES[lang])
+        if not re.search(pat, read_rel(rel), re.M):
+            out.append(f"check-sugar-surface: {lang}'s LIVE zone cannot spell `content_type` on an "
+                       f"entry or secure field (wanted /{pat}/ in {rel})")
+    return out
+
+
+for _line in check_content_type():
+    print(_line)
+    status = 1
+_ct_fake = check_content_type("kayaFakeContentType")
+print(f"check-sugar-surface: fake content-type spellings fired "
+      f"{len(_ct_fake)}/{len(CONTENT_TYPE_SURFACES)}")
+if len(_ct_fake) != len(CONTENT_TYPE_SURFACES):
+    selftest_exit(f"check-sugar-surface: self-test failed ({len(_ct_fake)}/"
+                  f"{len(CONTENT_TYPE_SURFACES)} content-type patterns fired for a name "
+                  f"that exists nowhere)")
+
 
 # --- THE MEDIA ROW, TRACKS AND VISIBILITY (docs/media-plan.md §3, §7b) --
 # Neither a KIND nor a WINDOW PROP: a row's PLAYER FIELD (the type a stamped

@@ -56,7 +56,9 @@ SCENES = [
 DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows",
                 "format", "flexshrink", "listrow", "tints", "badge", "emoji", "media",
                 # The capture (docs/capture-plan.md §8), rust-only at depth.
-                "capture"]
+                "capture",
+                # The content type (docs/autofill-plan.md §6), rust-only at depth.
+                "autofill"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -167,6 +169,9 @@ ORDER = [
     ("entry", LANGS),
     ("search", LANGS),
     ("secure", LANGS),
+    # RUST ALONE while the eight bindings' sugar is the breadth slice
+    # (docs/autofill-plan.md §6).
+    ("autofill", ("rust",)),
     # The number field in the everyday locale and in German
     # (docs/number-field-plan.md §5).
     ("timecode", LANGS),

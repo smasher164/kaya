@@ -178,13 +178,10 @@ PAD_EXTRAS = {
 # drive chrome no phone has; split/panes drive resize_window, which this
 # host rejects by design (DESIGN.md, Windows).
 DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes"]
-# Scenes whose GUEST cannot run here yet. Empty since 2026-08-28 (the
-# packaging milestone wired the two python scenes); sliders joined the
-# three suites with the breadth slice (docs/slider-plan.md §5), and
-# tooltips with its own (docs/tooltip-plan.md §5) — the iOS arm is the
-# shared interpreter's `.help`, which lands on the accessibility hint,
-# and expect_help reads it there.
-UNWIRED_SCENES = []
+# Scenes whose legs are not run here yet: the content type's iOS arm is
+# built in the shared interpreter and its legs are the breadth slice's
+# (docs/autofill-plan.md §6).
+UNWIRED_SCENES = ["autofill"]
 
 # The fullscreen scene's app-only way back after the cut, the same steps as
 # tools/lib/lanes/android.py's FULLSCREEN_APP_TAIL: no user change arrives.

@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x904824951724780f;
+    public const ulong SpecHash = 0x000c0323f11ef52f;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -132,6 +132,7 @@ static class KayaWire
     public const uint PropCapture = 53;
     public const uint PropAspect = 54;
     public const uint PropFormat = 55;
+    public const uint PropContentType = 56;
     public const uint WpropTitle = 1;
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
@@ -341,6 +342,13 @@ static class KayaWire
     public const uint FitContain = 0;
     public const uint FitCover = 1;
     public const uint FitFill = 2;
+    public const uint ContentTypeNone = 0;
+    public const uint ContentTypeUsername = 1;
+    public const uint ContentTypePassword = 2;
+    public const uint ContentTypeNewPassword = 3;
+    public const uint ContentTypeOneTimeCode = 4;
+    public const uint ContentTypeEmail = 5;
+    public const uint ContentTypePhone = 6;
     public const uint TrackKindAudio = 0;
     public const uint TrackKindCaption = 1;
     public const uint PpropSource = 1;
@@ -2854,6 +2862,31 @@ static class KayaWire
     {
         var w = Begin(out var stream);
         w.Write(widgetId); w.Write(PropFormat); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant content_type value.
+    public static byte[] TxSetContentType(ulong widgetId, long contentType)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropContentType); w.Write(SourceConst);
+        EncodeValue(w, contentType);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound content_type value.
+    public static byte[] TxBindContentType(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropContentType); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindContentTypeElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropContentType); w.Write(SourceElement); w.Write(level); w.Write(field);
         return Finish(stream, w, TxKindSetProperty);
     }
 

@@ -1,0 +1,19 @@
+# The content type (docs/autofill-plan.md): each credential field says what it
+# holds, and the harness reads the class off the platform's own property. A
+# new_password field reads as password, the class every platform tells apart.
+expect_content_type entry@user username
+expect_content_type secure_field@password password
+expect_content_type entry@email email
+expect_content_type secure_field@new password
+expect_content_type entry@code one_time_code
+expect_content_type entry@phone phone
+expect_content_type entry@note none
+# The app's write moves the hint on a live field, and back.
+click button@switch
+expect label@mode "sign in with an email address"
+expect_content_type entry@user email
+click button@switch
+expect label@mode "sign in with a username"
+expect_content_type entry@user username
+# A stamped copy carries its template's hint.
+expect_content_type secure_field@pin[a] one_time_code

@@ -1975,6 +1975,12 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// What this field holds — [`Tx::content_type`] chained.
+    pub fn content_type(self, content: crate::protocol::ContentType) -> Self {
+        self.tx.content_type(self.id, content);
+        self
+    }
+
     /// A `role link` label's destination (docs/tasks-s2-plan.md T3).
     pub fn href(self, url: impl Into<LiveSource<StrKind>>) -> Self {
         self.tx.href(self.id, url);
@@ -3043,6 +3049,13 @@ impl<'a> Tx<'a> {
     /// platform's own placeholder, never the text, never emitted.
     pub fn placeholder(&mut self, widget: WidgetId, text: impl Into<LiveSource<StrKind>>) {
         self.set_live(widget, Prop::Placeholder, text.into());
+    }
+
+    /// What an entry or secure field holds, so the platform's password
+    /// manager, one-time-code autofill and keyboard can act on it
+    /// (docs/autofill-plan.md A1-A3). `ContentType::None` takes the hint away.
+    pub fn content_type(&mut self, widget: WidgetId, content: crate::protocol::ContentType) {
+        self.set(widget, Prop::ContentType, content.wire());
     }
 
     /// A `role link` label's destination (docs/tasks-s2-plan.md T3).
@@ -4868,6 +4881,10 @@ impl<'b> Row<'_, 'b> {
 
     pub fn fit(&mut self, node: TemplateNodeId, fit: crate::protocol::Fit) {
         self.tpl().fit(node, fit)
+    }
+
+    pub fn content_type(&mut self, node: TemplateNodeId, content: crate::protocol::ContentType) {
+        self.tpl().content_type(node, content)
     }
 
     pub fn aspect(&mut self, node: TemplateNodeId, width: i32, height: i32) {
@@ -8248,6 +8265,11 @@ impl<'b> Tpl<'_, 'b> {
     /// A stamped video view's fit, the blueprint twin of [`Tx::video_fit`].
     pub fn fit(&mut self, node: TemplateNodeId, fit: crate::protocol::Fit) {
         self.set(node, Prop::Fit, media::fit_wire(fit));
+    }
+
+    /// A stamped field's content type, the blueprint twin of [`Tx::content_type`].
+    pub fn content_type(&mut self, node: TemplateNodeId, content: crate::protocol::ContentType) {
+        self.set(node, Prop::ContentType, content.wire());
     }
 
     /// A stamped video view's box ratio, the blueprint twin of

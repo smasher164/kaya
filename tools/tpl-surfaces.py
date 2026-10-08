@@ -275,7 +275,9 @@ TPL_PROPS = ["format", "grow", "a11y_id", "a11y_label", "a11y_hint", "accepts", 
              # OVERLOAD or a labelled argument of the bound-text textarea, so
              # their readers spell a member with its first parameter too — a
              # bare `Textarea` would be satisfied by the text overload.
-             "document"]
+             "document",
+             # docs/autofill-plan.md A1: a stamped credential field's content type.
+             "content_type"]
 
 # Rust's `grow` is the generic floor `set(node, prop, value)` and not a
 # named setter, so that one row cannot tell grow from any other generic
@@ -290,6 +292,7 @@ PROP_MEMBERS = {
         "columns_auto": "columns_auto", "wrap": "wrap",
         "document": "textarea_rich_bound",
         "submits": "submits",
+        "content_type": "content_type",
     },
     "go": {
         "format": "SetFormat",
@@ -301,6 +304,7 @@ PROP_MEMBERS = {
         "columns_auto": "SetColumnsAuto", "wrap": "SetWrap",
         "document": "TextareaRichBound",
         "submits": "SetSubmits",
+        "content_type": "SetContentType",
     },
     "csharp": {
         "format": "SetFormat",
@@ -312,6 +316,7 @@ PROP_MEMBERS = {
         "columns_auto": "SetColumnsAuto", "wrap": "SetWrap",
         "document": "Textarea(Field<Document>",
         "submits": "SetSubmits",
+        "content_type": "SetContentType",
     },
     "java": {
         "format": "setFormat",
@@ -323,6 +328,7 @@ PROP_MEMBERS = {
         "columns_auto": "setColumnsAuto", "wrap": "setWrap",
         "document": "textareaRich",
         "submits": "setSubmits",
+        "content_type": "setContentType",
     },
     "swift": {
         "format": "setFormat",
@@ -334,6 +340,7 @@ PROP_MEMBERS = {
         "columns_auto": "setColumnsAuto", "wrap": "setWrap",
         "document": "textarea(document:",
         "submits": "setSubmits",
+        "content_type": "setContentType",
     },
     "ocaml": {
         "format": "set_format",
@@ -345,6 +352,7 @@ PROP_MEMBERS = {
         "columns_auto": "set_columns_auto", "wrap": "set_wrap",
         "document": "bind_document_field",
         "submits": "set_submits",
+        "content_type": "set_content_type",
     },
     # Haskell's template props are not methods but CONSTRUCTORS of the
     # `TplAttr` GADT, applied by `applyTplAttr`.
@@ -358,6 +366,7 @@ PROP_MEMBERS = {
         "columns_auto": "TplColumnsAuto", "wrap": "TplWrap",
         "document": "bindDocumentField",
         "submits": "TplSubmits",
+        "content_type": "TplContentType",
     },
     # JS spells five of the seven as chainable methods on the base handle
     # and the other two as CONSTRUCTOR OPTIONS; members_js says why the
@@ -371,6 +380,7 @@ PROP_MEMBERS = {
         "columns_auto": "columnsAuto", "wrap": "wrap",
         "document": "document",
         "submits": "submits",
+        "content_type": "contentType",
     },
 }
 

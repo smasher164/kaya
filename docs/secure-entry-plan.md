@@ -174,7 +174,8 @@ milestone's territory; Android's autofill framework needs the content type
 and a service; GTK and WinUI have no system password manager that reaches
 an app. A `content` prop with those three words is the likely shape; its
 trigger is the password-manager archetype or the first app with a login
-screen (docs/deferred.md).
+screen (docs/deferred.md). LIFTED 2026-10-07: docs/autofill-plan.md is the
+design and its depth slice, `content_type` on the entry and this kind.
 
 ### P9 — Stamped secure fields exist (RULED: both zones, as every kind)
 

@@ -1100,6 +1100,8 @@ pub const KAYA_PROP_CAPTURE: u32 = 53;
 /// 32 bits and the height in the low 32, each a signed 32-bit integer.
 pub const KAYA_PROP_ASPECT: u32 = 54;
 pub const KAYA_PROP_FORMAT: u32 = 55;
+/// What a credential field holds, a KAYA_CONTENT_TYPE_* (docs/autofill-plan.md A2).
+pub const KAYA_PROP_CONTENT_TYPE: u32 = 56;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -1351,6 +1353,7 @@ const _: () = assert!(
         && KAYA_PROP_CAPTURE == wire::PROP_CAPTURE
         && KAYA_PROP_ASPECT == wire::PROP_ASPECT
         && KAYA_PROP_FORMAT == wire::PROP_FORMAT
+        && KAYA_PROP_CONTENT_TYPE == wire::PROP_CONTENT_TYPE
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -1675,6 +1678,13 @@ pub const KAYA_PLAYBACK_STATE_PAUSED: u32 = 2;
 pub const KAYA_FIT_CONTAIN: u32 = 0;
 pub const KAYA_FIT_COVER: u32 = 1;
 pub const KAYA_FIT_FILL: u32 = 2;
+pub const KAYA_CONTENT_TYPE_NONE: u32 = 0;
+pub const KAYA_CONTENT_TYPE_USERNAME: u32 = 1;
+pub const KAYA_CONTENT_TYPE_PASSWORD: u32 = 2;
+pub const KAYA_CONTENT_TYPE_NEW_PASSWORD: u32 = 3;
+pub const KAYA_CONTENT_TYPE_ONE_TIME_CODE: u32 = 4;
+pub const KAYA_CONTENT_TYPE_EMAIL: u32 = 5;
+pub const KAYA_CONTENT_TYPE_PHONE: u32 = 6;
 /// The reader's two vocabularies (docs/media-plan.md §8 ruling 4).
 pub const KAYA_FRAME_ACCURACY_KEYFRAME: u32 = 0;
 pub const KAYA_FRAME_ACCURACY_EXACT: u32 = 1;
@@ -1788,6 +1798,13 @@ const _: () = assert!(
         && vocab_is(wire::FITS, "contain", KAYA_FIT_CONTAIN)
         && vocab_is(wire::FITS, "cover", KAYA_FIT_COVER)
         && vocab_is(wire::FITS, "fill", KAYA_FIT_FILL)
+        && vocab_is(wire::CONTENT_TYPES, "none", KAYA_CONTENT_TYPE_NONE)
+        && vocab_is(wire::CONTENT_TYPES, "username", KAYA_CONTENT_TYPE_USERNAME)
+        && vocab_is(wire::CONTENT_TYPES, "password", KAYA_CONTENT_TYPE_PASSWORD)
+        && vocab_is(wire::CONTENT_TYPES, "new_password", KAYA_CONTENT_TYPE_NEW_PASSWORD)
+        && vocab_is(wire::CONTENT_TYPES, "one_time_code", KAYA_CONTENT_TYPE_ONE_TIME_CODE)
+        && vocab_is(wire::CONTENT_TYPES, "email", KAYA_CONTENT_TYPE_EMAIL)
+        && vocab_is(wire::CONTENT_TYPES, "phone", KAYA_CONTENT_TYPE_PHONE)
         && vocab_is(wire::FRAME_ACCURACIES, "keyframe", KAYA_FRAME_ACCURACY_KEYFRAME)
         && vocab_is(wire::FRAME_ACCURACIES, "exact", KAYA_FRAME_ACCURACY_EXACT)
         && vocab_is(wire::READ_OUTCOMES, "completed", KAYA_READ_OUTCOME_COMPLETED)
@@ -1860,6 +1877,7 @@ const _: () = {
         "the spec playback_state enum grew: export KAYA_PLAYBACK_STATE_*"
     );
     assert!(spec_enum_variants("fit") == 3, "the spec fit enum grew: export KAYA_FIT_*");
+    assert!(spec_enum_variants("content_type") == 7, "the spec content_type enum grew: export KAYA_CONTENT_TYPE_*");
     assert!(spec_enum_variants("capture_state") == 5, "the spec capture_state enum grew: export KAYA_CAPTURE_STATE_*");
     assert!(spec_enum_variants("capture_failure") == 8, "the spec capture_failure enum grew: export KAYA_CAPTURE_FAILURE_*");
     assert!(spec_enum_variants("capture_interruption") == 4, "the spec capture_interruption enum grew: export KAYA_CAPTURE_INTERRUPTION_*");
@@ -1872,7 +1890,7 @@ const _: () = {
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 55,
+    crate::spec::PROPS.len() == 56,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(

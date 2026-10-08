@@ -284,6 +284,9 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     ("aspect", 54, PropKind::Aspect),
     // docs/number-field-plan.md §10.
     ("format", 55, PropKind::Str),
+    // docs/autofill-plan.md A1-A3: what a credential field holds, so the
+    // platform's password manager, code autofill and keyboard can act on it.
+    ("content_type", 56, PropKind::Enum("content_type")),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -4155,6 +4158,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("capture", 53),
                 ("aspect", 54),
                 ("format", 55),
+                ("content_type", 56),
             ],
         },
         EnumSpec {
@@ -4547,6 +4551,19 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             // docs/media-plan.md §3: the video view's fit.
             name: "fit",
             variants: &[("contain", 0), ("cover", 1), ("fill", 2)],
+        },
+        EnumSpec {
+            // docs/autofill-plan.md A2.
+            name: "content_type",
+            variants: &[
+                ("none", 0),
+                ("username", 1),
+                ("password", 2),
+                ("new_password", 3),
+                ("one_time_code", 4),
+                ("email", 5),
+                ("phone", 6),
+            ],
         },
         EnumSpec {
             // docs/media-plan.md §3: which of a player's track lists.
@@ -5155,6 +5172,7 @@ mod tests {
                     ("session_action", _) => canvas_pin(wire::SESSION_ACTIONS, name),
                     ("playback_state", _) => canvas_pin(wire::PLAYBACK_STATES, name),
                     ("fit", _) => canvas_pin(wire::FITS, name),
+                    ("content_type", _) => canvas_pin(wire::CONTENT_TYPES, name),
                     ("pprop", _) => canvas_pin(wire::PPROPS, name),
                     ("track_kind", _) => canvas_pin(wire::TRACK_KINDS, name),
                     ("frame_accuracy", _) => canvas_pin(wire::FRAME_ACCURACIES, name),
@@ -5231,6 +5249,7 @@ mod tests {
                     ("prop", "capture") => wire::PROP_CAPTURE,
                     ("prop", "aspect") => wire::PROP_ASPECT,
                     ("prop", "format") => wire::PROP_FORMAT,
+                    ("prop", "content_type") => wire::PROP_CONTENT_TYPE,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,
@@ -5404,6 +5423,7 @@ mod tests {
             ("session_action", wire::SESSION_ACTIONS),
             ("playback_state", wire::PLAYBACK_STATES),
             ("fit", wire::FITS),
+            ("content_type", wire::CONTENT_TYPES),
             ("pprop", wire::PPROPS),
             ("track_kind", wire::TRACK_KINDS),
             ("frame_accuracy", wire::FRAME_ACCURACIES),

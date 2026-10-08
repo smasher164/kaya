@@ -16764,6 +16764,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (NativeWidget::Secure(field), Prop::Placeholder, Value::Str(s)) => {
                     field.SetPlaceholderText(&HSTRING::from(&s))?;
                 }
+                (_, Prop::ContentType, _) => crate::depth_stub("autofill"),
                 (NativeWidget::Checkbox { check, switch, .. }, Prop::Checked, Value::Bool(b)) => {
                     let boxed: IReference<bool> = PropertyValue::CreateBoolean(b)?.cast()?;
                     core.apply_quiet
@@ -22219,6 +22220,10 @@ impl crate::harness::Stage for WinUiStage {
     }
     /// docs/secure-entry-plan.md §3: the peer must say IsPassword, and a value
     /// its Value pattern publishes is held to the mask rule.
+    fn content_type(&self, _: crate::harness::Target) -> Result<&'static str, String> {
+        crate::depth_stub("autofill")
+    }
+
     fn masked_len(&self, t: crate::harness::Target) -> Result<usize, crate::harness::MaskRead> {
         use crate::harness::MaskRead;
         Self::on_ui_read(move |core| {

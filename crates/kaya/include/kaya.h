@@ -1199,6 +1199,11 @@
 #define KAYA_PROP_FORMAT 55
 
 /**
+ * What a credential field holds, a KAYA_CONTENT_TYPE_* (docs/autofill-plan.md A2).
+ */
+#define KAYA_PROP_CONTENT_TYPE 56
+
+/**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
  * windows are not widgets. Window 0 is the primary surface.
  */
@@ -1682,6 +1687,20 @@
 #define KAYA_FIT_COVER 1
 
 #define KAYA_FIT_FILL 2
+
+#define KAYA_CONTENT_TYPE_NONE 0
+
+#define KAYA_CONTENT_TYPE_USERNAME 1
+
+#define KAYA_CONTENT_TYPE_PASSWORD 2
+
+#define KAYA_CONTENT_TYPE_NEW_PASSWORD 3
+
+#define KAYA_CONTENT_TYPE_ONE_TIME_CODE 4
+
+#define KAYA_CONTENT_TYPE_EMAIL 5
+
+#define KAYA_CONTENT_TYPE_PHONE 6
 
 /**
  * The reader's two vocabularies (docs/media-plan.md §8 ruling 4).

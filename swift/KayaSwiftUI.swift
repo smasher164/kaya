@@ -22,7 +22,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x904824951724780f
+let kayaSpecHash: UInt64 = 0x000c0323f11ef52f
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -320,6 +320,7 @@ private let propPlayer: UInt32 = 52
 private let propCapture: UInt32 = 53
 private let propAspect: UInt32 = 54
 private let propFormat: UInt32 = 55
+private let propContentType: UInt32 = 56
 private let fileContentImages: UInt32 = 1
 private let tintAccent: Int64 = 1
 private let tintSuccess: Int64 = 2
@@ -798,6 +799,8 @@ final class KayaNode: Identifiable {
     /// and a bump for when that player's picture size is learned.
     var videoPlayer: UInt64 = 0
     var fit: Int64 = 0
+    /// What an entry or secure field holds (docs/autofill-plan.md A2).
+    var contentType: Int64 = 0
     /// The packed box ratio the app chose (0 none; docs/media-plan.md §3).
     var aspect: Int64 = 0
     var videoSeq = 0
@@ -6275,6 +6278,9 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaScene.nodes[id]!.highLabel = String(decoding: bytes, as: UTF8.self)
                 case (propFit, valueI64):
                     kayaScene.nodes[id]!.fit = raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
+                case (propContentType, valueI64):
+                    kayaScene.nodes[id]!.contentType =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
                 case (propAspect, valueI64):
                     kayaScene.nodes[id]!.aspect = raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
                 case (propPlayer, _):
@@ -7345,6 +7351,60 @@ private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
         }
     }
 
+    /// A field's content type as AppKit holds it: the `contentType` of the one
+    /// NSTextField under the accessibility element the field's a11y_id names.
+    /// SwiftUI puts the identifier on its own accessibility node and not on the
+    /// NSTextField (measured 2026-10-07), so the two meet by screen position
+    /// (docs/autofill-plan.md A6).
+    private func kayaContentTypeRead(_ identifier: String) -> (String?, String) {
+        _ = kayaAwaitWindow(0)
+        return DispatchQueue.main.sync { () -> (String?, String) in
+            let app = AXUIElementCreateApplication(getpid())
+            AXUIElementSetMessagingTimeout(app, 2.0)
+            if !kayaAxAnnounced {
+                kayaAxAnnounced = true
+                AXUIElementSetAttributeValue(
+                    app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+                AXUIElementSetAttributeValue(
+                    app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+            }
+            var matches: [AXUIElement] = []
+            kayaAxFindAll(app, identifier, 0, &matches)
+            guard matches.count == 1, let hit = matches.first else {
+                return (nil, "the content type could not be read: \(matches.count) accessibility elements carry the identifier")
+            }
+            var p = CGPoint.zero
+            var size = CGSize.zero
+            guard let posRef = kayaAxCopy(hit, kAXPositionAttribute),
+                let sizeRef = kayaAxCopy(hit, kAXSizeAttribute),
+                CFGetTypeID(posRef) == AXValueGetTypeID(),
+                CFGetTypeID(sizeRef) == AXValueGetTypeID(),
+                AXValueGetValue(posRef as! AXValue, .cgPoint, &p),
+                AXValueGetValue(sizeRef as! AXValue, .cgSize, &size),
+                let primary = NSScreen.screens.first
+            else {
+                return (nil, "the content type could not be read: the element publishes no frame")
+            }
+            let center = NSPoint(x: p.x + size.width / 2, y: primary.frame.maxY - p.y - size.height / 2)
+            var fields: [NSTextField] = []
+            func walk(_ view: NSView, _ window: NSWindow) {
+                if let field = view as? NSTextField,
+                    window.convertToScreen(field.convert(field.bounds, to: nil)).contains(center)
+                {
+                    fields.append(field)
+                }
+                for sub in view.subviews { walk(sub, window) }
+            }
+            for window in kayaNSWindows.values {
+                if let content = window.contentView { walk(content, window) }
+            }
+            if fields.count != 1 {
+                return (nil, "the content type could not be read: \(fields.count) text fields lie under the element")
+            }
+            return kayaContentRead(fields[0].contentType?.rawValue)
+        }
+    }
+
     /// The HINT as the platform publishes it: AXHelp is where
     /// `.accessibilityHint()` lands on macOS.
     private func kayaAxHintRead(_ identifier: String) -> String? {
@@ -7596,6 +7656,23 @@ private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
                 }
             }
             return nil
+        }
+    }
+
+    /// A field's content type as UIKit holds it: the UITextField's own
+    /// `textContentType`, found by the field's a11y_id (docs/autofill-plan.md A6).
+    private func kayaContentTypeRead(_ identifier: String) -> (String?, String) {
+        DispatchQueue.main.sync { () -> (String?, String) in
+            for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+                for window in scene.windows {
+                    guard let hit = kayaAxFind(window, identifier) else { continue }
+                    guard let field = kayaKeyInput(hit) as? UITextField else {
+                        return (nil, "the content type could not be read: no text field at the element (\(type(of: hit)))")
+                    }
+                    return kayaContentRead(field.textContentType?.rawValue)
+                }
+            }
+            return (nil, "the content type could not be read: the field is not in the accessibility tree")
         }
     }
 
@@ -9150,6 +9227,40 @@ private func kayaRunScript(_ script: String) {
                         kayaAwaitAnswer(secretAnswered)
                     }
                 #endif
+            case "expect_content_type":
+                // The class the platform's own property names, mapped back
+                // through the one table that applied it (docs/autofill-plan.md A6).
+                guard parts.count == 3 else {
+                    failures.append("expect_content_type wants a field and a content type: \(line)")
+                    break
+                }
+                let wantContent = String(parts[2])
+                if wantContent == "new_password" {
+                    failures.append(kayaContentReadsNewPassword)
+                    break
+                }
+                guard kayaContentReads.contains(wantContent) else {
+                    failures.append("\(kayaContentReadsWants), got \"\(wantContent)\"")
+                    break
+                }
+                let contentIdent = DispatchQueue.main.sync { () -> String? in
+                    (kayaTarget(parts[1], "entry", kayaScene.entryWidgets)
+                        ?? kayaTarget(parts[1], "secure_field", kayaScene.secureFields))?.a11yId
+                }
+                let content: (String?, String)
+                switch contentIdent {
+                case .none: content = (nil, "no such target")
+                case .some(let ident) where ident.isEmpty:
+                    content = (nil, "the content type could not be read: no a11y_id authored on this field")
+                case .some(let ident): content = kayaContentTypeRead(ident)
+                }
+                if let got = content.0, got == wantContent {
+                    observed.append("content_type \(got)")
+                } else if let got = content.0 {
+                    failures.append("content_type \(got), wanted \(wantContent)")
+                } else {
+                    failures.append("\(parts[1]): \(content.1)")
+                }
             case "expect_masked":
                 // How many characters the platform shows masked, read off what
                 // it presents to assistive technology, never the text
@@ -24151,6 +24262,7 @@ struct KayaEntry: View {
         .frame(
             maxWidth: (node.grow > 0 || (flexVertical == true && node.fill != false))
                 ? .infinity : 200)
+        .modifier(KayaContentHint(word: node.contentType))
         .focused($focused)
         // Return SUBMITS (docs/submit-plan.md S2): the platform's own gesture,
         // never an edit; the field keeps its text and its focus.
@@ -24168,6 +24280,92 @@ struct KayaEntry: View {
         }
     }
 }
+
+// MARK: - Content type (docs/autofill-plan.md A4, A6)
+
+#if os(macOS)
+    typealias KayaPlatformContentType = NSTextContentType
+#else
+    typealias KayaPlatformContentType = UITextContentType
+#endif
+
+/// THE ONE TABLE: each kaya word, the platform's own constant, and the class
+/// the harness reads that constant back as. The apply and the read both go
+/// through it (tools/lib/content_type_routes.py holds its rows).
+func kayaContentTypes() -> [(word: Int32, platform: KayaPlatformContentType, reads: String)] {
+    #if os(macOS)
+        var table: [(word: Int32, platform: KayaPlatformContentType, reads: String)] = [
+            (KAYA_CONTENT_TYPE_USERNAME, .username, "username"),
+            (KAYA_CONTENT_TYPE_PASSWORD, .password, "password"),
+            (KAYA_CONTENT_TYPE_ONE_TIME_CODE, .oneTimeCode, "one_time_code"),
+        ]
+        if #available(macOS 14, *) {
+            table += [
+                (KAYA_CONTENT_TYPE_NEW_PASSWORD, .newPassword, "password"),
+                (KAYA_CONTENT_TYPE_EMAIL, .emailAddress, "email"),
+                (KAYA_CONTENT_TYPE_PHONE, .telephoneNumber, "phone"),
+            ]
+        }
+        return table
+    #else
+        return [
+            (KAYA_CONTENT_TYPE_USERNAME, .username, "username"),
+            (KAYA_CONTENT_TYPE_PASSWORD, .password, "password"),
+            (KAYA_CONTENT_TYPE_NEW_PASSWORD, .newPassword, "password"),
+            (KAYA_CONTENT_TYPE_ONE_TIME_CODE, .oneTimeCode, "one_time_code"),
+            (KAYA_CONTENT_TYPE_EMAIL, .emailAddress, "email"),
+            (KAYA_CONTENT_TYPE_PHONE, .telephoneNumber, "phone"),
+        ]
+    #endif
+}
+
+/// The class the harness reads, from the platform's raw value alone.
+func kayaContentRead(_ raw: String?) -> (String?, String) {
+    guard let raw else { return ("none", "") }
+    if let hit = kayaContentTypes().first(where: { $0.platform.rawValue == raw }) {
+        return (hit.reads, "")
+    }
+    return (nil, "the platform reports content type \"\(raw)\", which no kaya word names")
+}
+
+/// The harness's answers, harness.rs's bytes (docs/autofill-plan.md A6).
+let kayaContentReads = ["none", "username", "password", "one_time_code", "email", "phone"]
+let kayaContentReadsWants =
+    "expect_content_type wants one of none, username, password, one_time_code, email, phone"
+let kayaContentReadsNewPassword =
+    "expect_content_type reads what every platform tells apart, and a new_password field reads as password"
+
+/// The hint on an entry or secure field: the platform's content type, and on
+/// the phone the keyboard the word asks for (docs/autofill-plan.md A4, A5).
+struct KayaContentHint: ViewModifier {
+    let word: Int64
+
+    func body(content: Content) -> some View {
+        let platform = kayaContentTypes().first { Int64($0.word) == word }?.platform
+        #if os(iOS)
+            let plain = [KAYA_CONTENT_TYPE_USERNAME, KAYA_CONTENT_TYPE_EMAIL, KAYA_CONTENT_TYPE_ONE_TIME_CODE]
+                .contains { Int64($0) == word }
+            content
+                .textContentType(platform)
+                .keyboardType(kayaContentKeyboard(word))
+                .textInputAutocapitalization(plain ? .never : nil)
+                .autocorrectionDisabled(plain)
+        #else
+            content.textContentType(platform)
+        #endif
+    }
+}
+
+#if os(iOS)
+    func kayaContentKeyboard(_ word: Int64) -> UIKeyboardType {
+        switch Int32(word) {
+        case KAYA_CONTENT_TYPE_EMAIL: return .emailAddress
+        case KAYA_CONTENT_TYPE_PHONE: return .phonePad
+        case KAYA_CONTENT_TYPE_ONE_TIME_CODE: return .numberPad
+        default: return .default
+        }
+    }
+#endif
 
 /// The secure field (docs/secure-entry-plan.md §3): the platform's own
 /// SecureField, which masks, refuses copy and cut, publishes the secure
@@ -24193,6 +24391,7 @@ struct KayaSecureField: View {
         .frame(
             maxWidth: (node.grow > 0 || (flexVertical == true && node.fill != false))
                 ? .infinity : 200)
+        .modifier(KayaContentHint(word: node.contentType))
         .focused($focused)
         #if os(iOS)
             .textInputAutocapitalization(.never)

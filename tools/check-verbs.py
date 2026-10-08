@@ -5521,6 +5521,8 @@ from timecode_routes import run as check_timecode_routes
 check_timecode_routes(g)
 from secure_sentences import run as check_secure_sentences
 check_secure_sentences(g)
+from content_type_routes import run as check_content_type_routes
+check_content_type_routes(g)
 
 if (clip_status or window_status or ink_status or ax_status
         or drop_tol_status
@@ -5564,4 +5566,5 @@ g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"the runner's one launch) "
           f"+ a self-view's natural size through the core's one rule on 5 arms "
           f"+ the app's aspect through the core's box rule on 5 arms "
+          f"+ the content type's one table, its platform read and its answers "
           f"+ spec hash against 2 interpreters")

@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x904824951724780f
+specHash = 0x000c0323f11ef52f
 
 valueBool :: Word32
 valueBool = 1
@@ -262,6 +262,8 @@ propAspect :: Word32
 propAspect = 54
 propFormat :: Word32
 propFormat = 55
+propContentType :: Word32
+propContentType = 56
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -680,6 +682,20 @@ fitCover :: Word32
 fitCover = 1
 fitFill :: Word32
 fitFill = 2
+contentTypeNone :: Word32
+contentTypeNone = 0
+contentTypeUsername :: Word32
+contentTypeUsername = 1
+contentTypePassword :: Word32
+contentTypePassword = 2
+contentTypeNewPassword :: Word32
+contentTypeNewPassword = 3
+contentTypeOneTimeCode :: Word32
+contentTypeOneTimeCode = 4
+contentTypeEmail :: Word32
+contentTypeEmail = 5
+contentTypePhone :: Word32
+contentTypePhone = 6
 trackKindAudio :: Word32
 trackKindAudio = 0
 trackKindCaption :: Word32
@@ -2539,6 +2555,25 @@ txBindFormat widgetId signalId = wireRecord txKindSetProperty
 txBindFormatElement :: Word64 -> Word32 -> Word32 -> Builder
 txBindFormatElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propFormat <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant content_type value.
+txSetContentType :: Word64 -> Int64 -> Builder
+txSetContentType widgetId contentType = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propContentType <> word32LE sourceConst
+    <> encodeValue (VI64 contentType))
+
+-- set_property with a signal-bound content_type value.
+txBindContentType :: Word64 -> Word64 -> Builder
+txBindContentType widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propContentType <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindContentTypeElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindContentTypeElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propContentType <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
 -- set_window_prop with a constant title value (window 0, the primary surface).

@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x904824951724780f
+SPEC_HASH = 0x000c0323f11ef52f
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -134,6 +134,7 @@ PROP_PLAYER = 52
 PROP_CAPTURE = 53
 PROP_ASPECT = 54
 PROP_FORMAT = 55
+PROP_CONTENT_TYPE = 56
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -343,6 +344,13 @@ PLAYBACK_STATE_PAUSED = 2
 FIT_CONTAIN = 0
 FIT_COVER = 1
 FIT_FILL = 2
+CONTENT_TYPE_NONE = 0
+CONTENT_TYPE_USERNAME = 1
+CONTENT_TYPE_PASSWORD = 2
+CONTENT_TYPE_NEW_PASSWORD = 3
+CONTENT_TYPE_ONE_TIME_CODE = 4
+CONTENT_TYPE_EMAIL = 5
+CONTENT_TYPE_PHONE = 6
 TRACK_KIND_AUDIO = 0
 TRACK_KIND_CAPTION = 1
 PPROP_SOURCE = 1
@@ -1790,6 +1798,21 @@ def tx_bind_format(widget_id: int, signal_id: int) -> bytes:
 def tx_bind_format_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_FORMAT, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_content_type(widget_id: int, content_type: int) -> bytes:
+    """set_property with a constant content_type value (int)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_CONTENT_TYPE, SOURCE_CONST) + _enc.value(int(content_type)))
+
+
+def tx_bind_content_type(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound content_type value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_CONTENT_TYPE, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_content_type_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_CONTENT_TYPE, SOURCE_ELEMENT, level, field))
 
 
 def tx_set_window_title(window: int, title: str) -> bytes:
