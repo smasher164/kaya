@@ -705,6 +705,27 @@ def _not_run(name, sentence):
 
 
 _only_selected = 0
+_deferred = []
+
+
+def _admit(name, argv, env, scene):
+    return lane.idle_admit(name, lambda: exclusive.hold("mac", name),
+                           lambda: _leg_worker(name, argv, env, scene))
+
+
+def run_deferred():
+    """The display legs a busy host deferred, once more at the lane's end,
+    under one shared bound (lane.display_deadline)."""
+    if not _deferred:
+        return
+    lane.display_deadline()
+    for name, argv, env, scene in _deferred:
+        outcome, said = _admit(name, argv, env, scene)
+        _leg_names.append(name)
+        if outcome != "ran":
+            _not_run(name, said)
+    _deferred.clear()
+    drain()
 
 
 def queue_leg(name, argv, env, scene=None):
@@ -723,16 +744,16 @@ def queue_leg(name, argv, env, scene=None):
     if name in lane.EXCLUSIVE:
         for t in _leg_threads:
             t.join()
+        # AND THE HOST'S OWN IDLE CLOCK, read before the token and once more
+        # inside it (lane.idle_admit; docs/traps.md, the idle waits held the
+        # token).
+        outcome, said = _admit(name, argv, env, scene)
+        if outcome == "deferred":
+            _deferred.append((name, argv, env, scene))
+            return
         _leg_names.append(name)
-        with exclusive.hold("mac", name):
-            # AND THE HOST'S OWN IDLE CLOCK, inside the hold so no other
-            # lane admits an input-driving leg into the same busy host while
-            # this one waits (docs/deferred.md, the swallowed-press entry).
-            refused = lane.idle_wait(name)
-            if refused:
-                _not_run(name, refused)
-            else:
-                _leg_worker(name, argv, env, scene)
+        if outcome == "not-run":
+            _not_run(name, said)
         return
     if JOBS == 1 and not os.environ.get("KAYA_RECORD"):
         # STILL STREAMED — serial mode exists to watch a leg live —
@@ -945,6 +966,7 @@ for _entry in lane.ORDER:
                       leg_argv(_scene, _lang), leg_env(_scene, _lang),
                       _scene)
 drain()
+run_deferred()
 timing("legs")
 try:
     MEDIA.close()

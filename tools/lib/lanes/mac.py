@@ -32,6 +32,7 @@ import sys
 import threading
 import time
 
+import exclusive
 import media_server
 
 # THE scene list: the mechanical per-scene surfaces derive from it —
@@ -514,6 +515,9 @@ DISPLAY_BOUND_S = 120.0
 DESKTOP_SHOT_IDLE_S = 120.0
 IDLE_TELL_S = 30.0
 IDLE_POLL_S = 1.0
+# How often a leg that found the host busy again inside the token releases it
+# and waits again before the last reading decides (idle_admit).
+IDLE_RECHECKS = 2
 # A SELF-TEST DOOR, and _hid_idle_ns() below is its ONLY reader
 # (tools/check-exclusive.py refuses any other): nanosecond values, comma
 # separated, answered one per poll with the last repeating, instead of
@@ -540,10 +544,29 @@ IDLE_SENTENCES = {
                        "cannot be read ({why}) — NOT RUN, since nothing says "
                        "the host is idle",
     "summary": "mac: idle waits — {legs} leg(s) waited {secs}s of the "
-               "{budget}s budget for an idle host",
+               "{budget}s budget for an idle host; display legs waited "
+               "{display}s, {deferred} deferred to the lane's end",
+    "returned": "mac: {leg} took the token and the host is in use again "
+                "(HIDIdleTime {idle}, wants {want}s) — released it to wait "
+                "again{door}",
+    "returned-anyway": "mac: {leg} took the token and the host is in use "
+                       "again (HIDIdleTime {idle}, wants {want}s) after "
+                       "{tries} waits — running it anyway, so a red here is "
+                       "the host's{door}",
+    "returned-held": "mac: {leg} moves the host's display and the host was in "
+                     "use again each of the {tries} times it took the token "
+                     "(HIDIdleTime {idle}, wants {want}s) — NOT RUN{door}",
+    "deferred": "mac: {leg} moves the host's display and the host is in use "
+                "(HIDIdleTime {idle}, wants {want}s) — deferred to the lane's "
+                "end{door}",
+    "under-token": "mac: {leg} would wait for an idle host while this process "
+                   "holds the matrix-wide token for {held} — every other lane "
+                   "would wait on the human too; wait before exclusive.hold() "
+                   "and re-read the clock inside it (idle_admit)",
 }
 
-_idle = {"spent": 0.0, "legs": 0, "door": []}
+_idle = {"spent": 0.0, "legs": 0, "door": [], "cleared": False,
+         "display": 0.0, "deferred": 0, "deadline": None}
 
 
 def _hid_idle_ns():
@@ -581,17 +604,25 @@ def _idle_say(text):
     print(text, file=sys.stderr, flush=True)
 
 
+def _not_under_token(leg):
+    holder = exclusive.held()
+    if holder is not None:
+        raise RuntimeError(IDLE_SENTENCES["under-token"].format(leg=leg, held=holder))
+
+
 def idle_wait(leg, say=None):
     """Hold an input-driving leg until the host has been idle IDLE_S seconds.
 
-    Called INSIDE the exclusive hold (tools/validate-mac.py's queue_leg), so
-    no other lane can admit its own input-driving leg into the same busy host
-    while this one waits. An unreadable clock, an expired bound and a spent
-    budget each print one sentence and the leg runs (tools/lib/exclusive.py's
-    rule, one file over), EXCEPT a DISPLAY_LEGS leg, which display_wait holds.
-    Returns None when the leg may run, or the sentence saying it did not.
+    Called BEFORE the matrix-wide token is taken (idle_admit), and refused
+    while this process holds it: a wait on a human inside the token made
+    every other lane wait on him too (docs/traps.md, the idle waits held the
+    token). An unreadable clock, an expired bound and a spent budget each
+    print one sentence and the leg runs, EXCEPT a DISPLAY_LEGS leg, which
+    display_wait holds. Returns None when the leg may run, or the sentence.
     """
     say = say or _idle_say
+    _not_under_token(leg)
+    _idle["cleared"] = False
     if leg in DISPLAY_LEGS:
         return display_wait(leg, say)
     door = " (doctored)" if os.environ.get(IDLE_DOOR, "") else ""
@@ -600,6 +631,7 @@ def idle_wait(leg, say=None):
         say(IDLE_SENTENCES["unreadable"].format(leg=leg, why=why))
         return None
     if ns / 1e9 >= IDLE_S:
+        _idle["cleared"] = True
         return None
     if _idle["spent"] >= IDLE_BUDGET_S:
         say(IDLE_SENTENCES["spent"].format(
@@ -626,6 +658,7 @@ def idle_wait(leg, say=None):
             say(IDLE_SENTENCES["cleared"].format(
                 leg=leg, waited=int(waited), idle=idle, door=door))
             done(waited)
+            _idle["cleared"] = True
             return None
         if waited >= bound:
             say(IDLE_SENTENCES["expired"].format(
@@ -643,10 +676,14 @@ def idle_wait(leg, say=None):
 def display_wait(leg, say=None):
     """A DISPLAY_LEGS leg's wait: idle for DISPLAY_IDLE_S within DISPLAY_BOUND_S, or
     the leg does not run. Outside the lane's budget, since a leg that waits
-    and is then refused costs the lane no run. Returns None or the sentence."""
+    and is then refused costs the lane no run; the lane's end shares ONE bound
+    across its deferred legs (display_deadline). Returns None or the sentence."""
     say = say or _idle_say
+    _not_under_token(leg)
     door = " (doctored)" if os.environ.get(IDLE_DOOR, "") else ""
     started = time.monotonic()
+    bound = (DISPLAY_BOUND_S if _idle["deadline"] is None
+             else max(0.0, _idle["deadline"] - started))
     told = 0
     while True:
         waited = time.monotonic() - started
@@ -654,14 +691,18 @@ def display_wait(leg, say=None):
         if ns is None:
             refused = IDLE_SENTENCES["held-unreadable"].format(leg=leg, why=why)
             say(refused)
+            _idle["display"] += waited
             return refused
         idle = int(ns / 1e9)
         if ns / 1e9 >= DISPLAY_IDLE_S:
             if waited >= IDLE_POLL_S:
                 say(IDLE_SENTENCES["cleared"].format(
                     leg=leg, waited=int(waited), idle=idle, door=door))
+            _idle["display"] += waited
+            _idle["cleared"] = True
             return None
-        if waited >= DISPLAY_BOUND_S:
+        if waited >= bound:
+            _idle["display"] += waited
             refused = IDLE_SENTENCES["held"].format(
                 leg=leg, waited=int(waited), idle=idle, want=int(DISPLAY_IDLE_S),
                 door=door)
@@ -671,15 +712,81 @@ def display_wait(leg, say=None):
             told += 1
             say(IDLE_SENTENCES["waiting"].format(
                 leg=leg, idle=idle, want=int(DISPLAY_IDLE_S), waited=int(waited),
-                bound=int(DISPLAY_BOUND_S), door=door))
+                bound=int(bound), door=door))
         time.sleep(IDLE_POLL_S)
+
+
+def _reading(leg):
+    """(idle seconds as text, met) for the leg's own threshold: ONE reading."""
+    want = DISPLAY_IDLE_S if leg in DISPLAY_LEGS else IDLE_S
+    ns, why = _hid_idle_ns()
+    if ns is None:
+        return f"unreadable: {why}", False, want
+    return f"{int(ns / 1e9)}s", ns / 1e9 >= want, want
+
+
+def _defer(leg, idle, want, say):
+    door = " (doctored)" if os.environ.get(IDLE_DOOR, "") else ""
+    said = IDLE_SENTENCES["deferred"].format(leg=leg, idle=idle, want=int(want), door=door)
+    say(said)
+    _idle["deferred"] += 1
+    return "deferred", said
+
+
+def display_deadline():
+    """Start the lane's end: the deferred legs share one DISPLAY_BOUND_S."""
+    _idle["deadline"] = time.monotonic() + DISPLAY_BOUND_S
+
+
+def idle_admit(leg, hold, run, say=None):
+    """An EXCLUSIVE leg's admission, as (outcome, sentence): "ran", "not-run"
+    or "deferred". The wait runs BEFORE the token; inside it the clock is read
+    ONCE, without sleeping, since the human may have come back while hold()
+    waited on another lane, and busy again releases the token and waits again,
+    IDLE_RECHECKS times, before the last reading decides. A DISPLAY_LEGS leg
+    in its queue position never waits: a busy reading defers it to the lane's
+    end (display_deadline). `hold` makes the token's context manager, `run`
+    runs the leg."""
+    say = say or _idle_say
+    door = " (doctored)" if os.environ.get(IDLE_DOOR, "") else ""
+    in_place = leg in DISPLAY_LEGS and _idle["deadline"] is None
+    for tries in range(1, IDLE_RECHECKS + 2):
+        if in_place:
+            idle, met, want = _reading(leg)
+            if not met:
+                return _defer(leg, idle, want, say)
+        refused = idle_wait(leg, say)
+        if refused:
+            return "not-run", refused
+        with hold():
+            idle, met, want = _reading(leg)
+            if met or not _idle["cleared"]:
+                run()
+                return "ran", None
+            if in_place:
+                return _defer(leg, idle, want, say)
+            if tries > IDLE_RECHECKS:
+                if leg in DISPLAY_LEGS:
+                    said = IDLE_SENTENCES["returned-held"].format(
+                        leg=leg, tries=tries, idle=idle, want=int(want), door=door)
+                    say(said)
+                    return "not-run", said
+                say(IDLE_SENTENCES["returned-anyway"].format(
+                    leg=leg, tries=tries, idle=idle, want=int(want), door=door))
+                run()
+                return "ran", None
+            say(IDLE_SENTENCES["returned"].format(
+                leg=leg, idle=idle, want=int(want), door=door))
+    raise AssertionError("idle_admit's last try always decides")
+
 
 def idle_summary(say=None):
     """What waiting for a quiet host cost this lane, printed on EVERY run —
     zero on a quiet host, which is the number the everyday matrix pays."""
     (say or _idle_say)(IDLE_SENTENCES["summary"].format(
         legs=_idle["legs"], secs=int(_idle["spent"]),
-        budget=int(IDLE_BUDGET_S)))
+        budget=int(IDLE_BUDGET_S), display=int(_idle["display"]),
+        deferred=_idle["deferred"]))
 
 
 def hid_idle_seconds():

@@ -66,6 +66,13 @@ SENTENCES = {
 }
 
 _tally = {"held_n": 0, "held_s": 0.0, "waited_n": 0, "waited_s": 0.0}
+_holding = []
+
+
+def held():
+    """The leg THIS process holds the token for, or None — what a wait on a
+    human asks before it waits (tools/lib/lanes/mac.py's idle waits)."""
+    return _holding[-1] if _holding else None
 
 
 def exclusive_dir():
@@ -203,11 +210,14 @@ def hold(lane, leg, *, wait_s=None, stale_s=None, exclusive_dir_=None, scope="ho
         else:
             _say(SENTENCES["held"].format(lane=lane, leg=leg))
     t0 = time.monotonic()
+    if taken:
+        _holding.append(leg)
     try:
         yield waited
     finally:
         held = time.monotonic() - t0
         if taken:
+            _holding.remove(leg)
             _tally["held_n"] += 1
             _tally["held_s"] += held
             if not _remove(lock):
@@ -279,7 +289,9 @@ def selftest(where=None):
             holder = _holder(lock)
             out.append(("the holder names its taker", holder.startswith("lane=selftest leg=w "),
                         holder))
+            out.append(("held() names the leg inside the hold", held() == "w", held()))
         out.append(("the release removes the lock", not lock.exists(), lock.exists()))
+        out.append(("held() is None after the release", held() is None, held()))
         _tally["held_n"] -= 1
         # 5. THE SUMMARY IS READ BACK THROUGH ITS OWN TEMPLATE, for the
         # matrix's duration ceilings (validate-all nets the waits out):

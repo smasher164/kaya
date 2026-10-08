@@ -821,12 +821,19 @@ in docs/deferred.md.
    the whole class, since the interpreter's only three
    `AXUIElementPerformAction` sites are those drives while `type` is
    in-process `NSApp.sendEvent` and a drag is a private pasteboard — and
-   the funnel reads HIDIdleTime INSIDE the hold, before the leg, waiting
-   bounded for twenty seconds of neither key nor pointer. A wait that
-   expires RUNS THE LEG ANYWAY and says so, so a red then reads as the
-   host's; on a quiet host the wait is skipped and the everyday matrix
-   pays nothing. The gate holds the call between the hold and the leg,
-   the three numbers as literals that fit the mac ceiling (a threshold
+   the funnel reads HIDIdleTime BEFORE the token, waiting bounded for
+   twenty seconds of neither key nor pointer, then reads it once more
+   INSIDE the hold without sleeping, releasing the token to wait again if
+   the human came back. A wait that expires RUNS THE LEG ANYWAY and says
+   so, so a red then reads as the host's; on a quiet host the wait is
+   skipped and the everyday matrix pays nothing. NO WAIT ON A HUMAN EVER
+   SITS INSIDE THE TOKEN since 2026-10-07 (a RULE CHANGE: until then the
+   gate demanded the wait inside the hold, and the matrix of that day held
+   every other lane 230-270s on two fullscreen legs that were then NOT
+   RUN, docs/traps.md, the idle waits held the token): the wait itself
+   refuses while this process holds the token, and the gate runs
+   idle_admit against a doubled clock and refuses a sleep under its hold.
+   The gate holds the order in lane.idle_admit, the three numbers as literals that fit the mac ceiling (a threshold
    under the bound, a bound under the budget, a budget under half the
    ceiling), each sentence still saying what it measured, the self-test
    door `KAYA_HID_IDLE_NS_OVERRIDE` to its ONE reader across every
@@ -836,16 +843,18 @@ in docs/deferred.md.
    AND A LEG THAT MOVES THE HOST'S DISPLAY NEVER RUNS WHILE THE MAINTAINER
    IS ACTIVE (his ruling, 2026-09-28): fullscreen switches the screen to
    the guest's own Space and takes the keyboard, so its legs are
-   `DISPLAY_LEGS`, whose wait wants 120s idle within 120s and on expiry or
-   an unreadable clock reports the leg NOT RUN instead of running it; the
-   funnel and tools/run-leg.py both honour the refusal, and the wait is
-   RUN against a doubled clock. AND THE WINDOWS LANE REFUSES A DISPLAY ITS
+   `DISPLAY_LEGS`, which never wait in their queue position: a busy
+   reading DEFERS the leg to the lane's end, where every deferred leg
+   shares ONE 120s bound for 120s idle and on expiry or an unreadable
+   clock is reported NOT RUN instead of run; the funnel and
+   tools/run-leg.py both honour the refusal, and the deferral, the shared
+   bound and the refusal are RUN against a doubled clock. AND THE WINDOWS LANE REFUSES A DISPLAY ITS
    LEGS DO NOT ASSUME since 2026-10-03 (docs/traps.md, the UTM entry): the
    desktop warm-up reads `Screen.AllScreens` in the interactive session and
    deploy-win's desk_warm refuses unless lane.screens_refusal finds exactly
    one 1280x800 screen, naming what it read and `DisplaySwitch.exe
-   /internal`; run here against four readings. Twenty-two watched negatives,
-   counts printed),
+   /internal`; run here against four readings. Thirty-five watched
+   negatives, counts printed),
    `tools/check-flightrec.py` (A RED LEG'S BUNDLE NAMES ITS CAUSE ON
    EVERY LANE, or says what it measured instead (the maintainer's
    2026-09-16 ruling): the bundle shape is ONE declaration —

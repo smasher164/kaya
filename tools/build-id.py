@@ -90,7 +90,7 @@ GATES = {
     "check-submit": ["crates", "swift", "android"],
     "check-scroll-to": ["crates", "swift", "android"],
     # The exclusive token is wired in tools/ alone, which every key already carries.
-    "check-exclusive": [],
+    "check-exclusive": ["docs/deferred.md"],
     # The recorder and all five lanes' collects live under tools/, which
     # rides every key (gate_key); the one file it reads outside is the
     # WinUI guest's own toast-moment capture (the file names it writes).

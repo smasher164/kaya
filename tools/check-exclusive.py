@@ -24,14 +24,18 @@ dev_shell_or_die()
 # token holds the other four lanes off, and nothing held off the HUMAN at
 # the keyboard — matrix #38's save-java-swiftui died with every press
 # swallowed while a browser was frontmost, and AX reported success for all
-# three (docs/deferred.md, the swallowed-press entry). The wait sits INSIDE
-# the hold and before the leg, its three numbers are literals that fit the
+# three (docs/deferred.md, the swallowed-press entry). The wait sits BEFORE
+# the hold, the clock read once more inside it without sleeping, and a wait
+# under a held token is refused by the wait itself (docs/traps.md, the idle
+# waits held the token); its three numbers are literals that fit the
 # mac ceiling, its sentences say what they measured and that the leg runs
 # anyway, its self-test door has exactly one reader, and a red mac leg's
 # verdict line names the frontmost app AT THE MOMENT OF THE RED.
 
+import contextlib
 import importlib.util
 import re
+import tempfile
 
 gate = Gate("check-exclusive")
 
@@ -139,8 +143,17 @@ IDLE_SAYS = {
     "expired": ("HIDIdleTime {idle}s", "running it anyway"),
     "spent": ("idle-wait budget", "HIDIdleTime {idle}s"),
     "unreadable": ("cannot read HIDIdleTime", "running without the idle wait"),
-    "summary": ("idle waits", "budget"),
+    "summary": ("idle waits", "budget", "display legs waited", "deferred"),
+    "returned": ("in use again", "HIDIdleTime {idle}", "released it"),
+    "returned-anyway": ("in use again", "running it anyway"),
+    "returned-held": ("in use again", "NOT RUN"),
+    "deferred": ("HIDIdleTime {idle}", "deferred to the lane's end"),
+    "under-token": ("holds the matrix-wide token", "before exclusive.hold()"),
 }
+# Which function must print each key; the rest are idle_wait's.
+IDLE_SAYS_IN = {"summary": "idle_summary", "returned": "idle_admit",
+                "returned-anyway": "idle_admit", "returned-held": "idle_admit",
+                "deferred": "_defer", "under-token": "_not_under_token"}
 
 
 def literal(text, name):
@@ -154,18 +167,34 @@ def mac_idle(texts, mod, tools):
     out = []
     runner, lane_text = texts[MAC_RUNNER], texts[MAC_LANE]
     body = py_function(runner, "queue_leg")
-    hold = body.find('with exclusive.hold("mac", name):')
-    call = body.find("lane.idle_wait(name)")
-    worker = body.find("_leg_worker(name", hold + 1) if hold >= 0 else -1
-    if call < 0:
-        out.append(f"{MAC_RUNNER}: queue_leg never calls lane.idle_wait(name) — an "
-                   f"input-driving leg is admitted without asking whether a human is at "
-                   f"the host, which is matrix #38's swallowed-press red "
-                   f"(docs/deferred.md, that entry)")
-    elif not (0 <= hold < call < worker):
-        out.append(f"{MAC_RUNNER}: lane.idle_wait(name) is not between the token's hold "
-                   f"and the leg — outside the hold another lane admits its own "
-                   f"input-driving leg into the same busy host while this one waits")
+    deferred = py_function(runner, "run_deferred")
+    admit_body = py_function(runner, "_admit")
+    if not re.search(r'lane\.idle_admit\(name, lambda: exclusive\.hold\("mac", name\),'
+                     r'\s*lambda: _leg_worker\(name, argv, env, scene\)\)', admit_body):
+        out.append(f"{MAC_RUNNER}: _admit does not hand lane.idle_admit the token's hold and "
+                   f"the leg as two callables — the order of the wait and the token is "
+                   f"idle_admit's alone, and a wait inside the token makes every lane wait "
+                   f"on the human (docs/traps.md, the idle waits held the token)")
+    for fn, text in (("queue_leg", body), ("run_deferred", deferred)):
+        if "_admit(name, argv, env, scene)" not in text:
+            out.append(f"{MAC_RUNNER}: {fn} never admits through _admit(name, argv, env, "
+                       f"scene) — an input-driving leg is admitted without asking whether a "
+                       f"human is at the host (matrix #38's swallowed-press red, "
+                       f"docs/deferred.md)")
+    for fn, text in (("queue_leg", body), ("run_deferred", deferred), ("_admit", admit_body)):
+        for direct in ("lane.idle_wait(", "lane.display_wait(", "exclusive.hold(\"mac\", name):"):
+            if direct in text:
+                out.append(f"{MAC_RUNNER}: {fn} calls {direct.rstrip(':')} itself — the "
+                           f"order of the idle wait and the token is lane.idle_admit's, "
+                           f"and a wait inside the token makes every lane wait on the human "
+                           f"(docs/traps.md, the idle waits held the token)")
+    if not re.search(r"\ndrain\(\)\nrun_deferred\(\)\n", runner):
+        out.append(f"{MAC_RUNNER}: run_deferred() does not follow the lane's last drain() — "
+                   f"a display leg a busy host deferred is never run or reported")
+    if "lane.display_deadline()" not in deferred:
+        out.append(f"{MAC_RUNNER}: run_deferred never starts lane.display_deadline() — "
+                   f"each deferred leg would wait its own "
+                   f"{getattr(mod, 'DISPLAY_BOUND_S', 0):.0f}s")
     if "lane.idle_summary()" not in runner:
         out.append(f"{MAC_RUNNER}: never prints lane.idle_summary() — what waiting for a "
                    f"quiet host cost this lane would stand nowhere")
@@ -196,14 +225,11 @@ def mac_idle(texts, mod, tools):
                        f"its budget waiting for a human, and a duration anomaly then "
                        f"names the wait instead of the code")
     # THE SENTENCES SAY WHAT THEY MEASURED.
-    wait_body = py_function(lane_text, "idle_wait")
-    summary_body = py_function(lane_text, "idle_summary")
     for key, phrases in IDLE_SAYS.items():
-        where = summary_body if key == "summary" else wait_body
-        if f'IDLE_SENTENCES["{key}"]' not in where:
-            out.append(f"{MAC_LANE}: {'idle_summary' if key == 'summary' else 'idle_wait'} "
-                       f"never prints IDLE_SENTENCES[{key!r}] — a branch that says nothing "
-                       f"is a state nobody can read")
+        fn = IDLE_SAYS_IN.get(key, "idle_wait")
+        if f'IDLE_SENTENCES["{key}"]' not in py_function(lane_text, fn):
+            out.append(f"{MAC_LANE}: {fn} never prints IDLE_SENTENCES[{key!r}] — a branch "
+                       f"that says nothing is a state nobody can read")
         text = getattr(mod, "IDLE_SENTENCES", {}).get(key, "")
         for phrase in phrases:
             if phrase not in text:
@@ -268,8 +294,8 @@ def mac_idle(texts, mod, tools):
                 and name not in getattr(mod, "DISPLAY_LEGS", set()):
             out.append(f"{MAC_LANE}: {name!r} is not a DISPLAY_LEGS leg, so an expired idle "
                        f"wait runs it anyway and moves a present maintainer's display")
-    if not re.search(r"if refused:\n\s+_not_run\(name, refused\)\n\s+else:\n"
-                     r"\s+_leg_worker\(name", body):
+    if not (re.search(r'if outcome == "not-run":\n\s+_not_run\(name, said\)', body)
+            and re.search(r'if outcome != "ran":\n\s+_not_run\(name, said\)', deferred)):
         out.append(f"{MAC_RUNNER}: queue_leg does not report a leg the idle wait refused "
                    f"as NOT RUN — it runs it, or loses it without a verdict")
     hand = texts["tools/run-leg.py"]
@@ -278,6 +304,7 @@ def mac_idle(texts, mod, tools):
         out.append("tools/run-leg.py: a hand run of a DISPLAY_SCENES leg does not wait for "
                    "an idle host and stop when refused")
     out += display_refusal(mod)
+    out += idle_under_token(mod)
     if "_mac.hid_idle_seconds()" not in texts["tools/validate-all.py"]:
         out.append("tools/validate-all.py: the launch line carries no HIDIdleTime — load "
                    "says how busy the machine is, never whether a human is at it")
@@ -311,6 +338,111 @@ def display_refusal(mod):
                            f"{legs[0]!r} on a host nothing says is idle ({got!r})")
     finally:
         mod._hid_idle_ns, mod.time = saved
+    return out
+
+
+def idle_under_token(mod):
+    """The rule the 2026-10-07 matrix broke, RUN: a wait under a held token
+    refuses, and idle_admit never sleeps while its hold is open, defers a
+    busy display leg in its queue position, re-waits outside the token when
+    the human returns, and shares one bound across the lane's end."""
+    import types
+    out = []
+    panel = sorted(getattr(mod, "EXCLUSIVE", set()) - getattr(mod, "DISPLAY_LEGS", set()))
+    display = sorted(getattr(mod, "DISPLAY_LEGS", ()))
+    if not panel or len(display) < 2 or not hasattr(mod, "idle_admit"):
+        return [f"{MAC_LANE}: no idle_admit, or too few EXCLUSIVE and DISPLAY_LEGS legs "
+                f"to run the token's idle rule against"]
+    import exclusive
+    saved = (mod._hid_idle_ns, mod.time, dict(mod._idle))
+    quiet = exclusive._say
+    exclusive._say = lambda _s: None
+    with tempfile.TemporaryDirectory(prefix="check-exclusive-") as td:
+        for fn, leg in (("idle_wait", panel[0]), ("display_wait", display[0])):
+            try:
+                with exclusive.hold("check-exclusive", leg, exclusive_dir_=pathlib.Path(td)):
+                    getattr(mod, fn)(leg, say=lambda _s: None)
+                out.append(f"{MAC_LANE}: {fn} waited for the human while this process "
+                           f"held the matrix-wide token — every other lane waits with it "
+                           f"(docs/traps.md, the idle waits held the token)")
+            except RuntimeError as e:
+                if "holds the matrix-wide token" not in str(e):
+                    out.append(f"{MAC_LANE}: {fn} under a held token raised {e!r}, not "
+                               f"the under-token sentence")
+    state = {"held": False, "holds": 0, "slept_held": 0, "slept": 0, "ran": 0}
+    now = [0.0]
+
+    def sleep(secs):
+        state["slept"] += 1
+        state["slept_held"] += state["held"]
+        now[0] += secs
+
+    @contextlib.contextmanager
+    def hold():
+        state["held"] = True
+        state["holds"] += 1
+        try:
+            yield 0.0
+        finally:
+            state["held"] = False
+
+    def run_case(leg, idles, deadline=None):
+        state.update(held=False, holds=0, slept_held=0, slept=0, ran=0)
+        seq = list(idles)
+        mod._idle.update(saved[2], spent=0.0, legs=0, deadline=deadline)
+        mod._hid_idle_ns = lambda: ((int(seq.pop(0) * 1e9) if len(seq) > 1
+                                     else int(seq[0] * 1e9)), None)
+        said = []
+        try:
+            got = mod.idle_admit(leg, hold, lambda: state.__setitem__("ran", state["ran"] + 1),
+                                 say=said.append)
+        except RuntimeError as e:
+            got = ("raised", str(e))
+        return got, said, dict(state)
+
+    mod.time = types.SimpleNamespace(monotonic=lambda: now[0], sleep=sleep)
+    try:
+        cases = (
+            ("a panel leg on a busy host that clears", panel[0], [3, 3, 60, 60], None,
+             "ran", 1),
+            ("a panel leg whose human returns inside the token", panel[0], [60, 2, 60, 60], None,
+             "ran", 2),
+            ("a display leg on a busy host in its queue position", display[0], [5], None,
+             "deferred", 0),
+            ("a display leg at the lane's end on a host that stays busy", display[0], [5],
+             "start", "not-run", 0),
+            ("a second display leg after the shared bound", display[1], [5], "spent",
+             "not-run", 0),
+            ("a display leg at the lane's end on an idle host", display[0], [10_000], "start",
+             "ran", 1),
+        )
+        for label, leg, idles, deadline, want, holds in cases:
+            at = (None if deadline is None else
+                  now[0] + mod.DISPLAY_BOUND_S if deadline == "start" else now[0] - 1)
+            t0 = now[0]
+            got, said, st = run_case(leg, idles, at)
+            waited = now[0] - t0
+            if got[0] != want:
+                out.append(f"{MAC_LANE}: idle_admit, {label}: answered {got!r}, wanted "
+                           f"{want!r} ({said})")
+            if st["slept_held"]:
+                out.append(f"{MAC_LANE}: idle_admit, {label}: slept {st['slept_held']} "
+                           f"time(s) while holding the token — every other lane waits on the "
+                           f"human with it (docs/traps.md, the idle waits held the token)")
+            if st["holds"] != holds:
+                out.append(f"{MAC_LANE}: idle_admit, {label}: took the token {st['holds']} "
+                           f"time(s), wanted {holds}")
+            if want == "deferred" and st["slept"]:
+                out.append(f"{MAC_LANE}: idle_admit, {label}: waited {waited:.0f}s in its "
+                           f"queue position instead of deferring to the lane's end")
+            if deadline == "spent" and waited > mod.IDLE_POLL_S:
+                out.append(f"{MAC_LANE}: idle_admit, {label}: waited {waited:.0f}s after "
+                           f"the lane's end had spent its shared {mod.DISPLAY_BOUND_S:.0f}s")
+    finally:
+        exclusive._say = quiet
+        mod._hid_idle_ns, mod.time = saved[0], saved[1]
+        mod._idle.clear()
+        mod._idle.update(saved[2])
     return out
 
 
@@ -375,7 +507,10 @@ def census(texts, lanes=None, tools=None):
         if f'exclusive.wait("{lane}", name)' not in body:
             out.append(f"{runner}: {funnel} does not call exclusive.wait(\"{lane}\", name) — the "
                        f"lane starts legs while another holds the token")
-        if f'exclusive.hold("{lane}", name)' not in body:
+        # The mac funnel holds through _admit, which idle_admit orders.
+        held_in = body + (py_function(texts[runner], "_admit")
+                          if "_admit(name, argv, env, scene)" in body else "")
+        if f'exclusive.hold("{lane}", name)' not in held_in:
             out.append(f"{runner}: {funnel} never holds the token for the lane's exclusive legs")
         if 'os.environ.get("KAYA_EXCLUSIVE", "")' not in body:
             out.append(f"{runner}: {funnel} does not read KAYA_EXCLUSIVE — --exclusive and "
@@ -638,20 +773,25 @@ watched("a windows pool whose notification leg the exclusive funnel drains", REA
         lanes={**MODS, "windows": load_lane(_ghost_win)})
 
 # 10. THE MAC WAIT CUT OUT — the state the tree was in until 2026-09-18.
-_no_idle = gate.doctor("the mac idle wait cut from queue_leg", REAL[MAC_RUNNER],
-                       r"refused = lane\.idle_wait\(name\)", "refused = None")
+_no_idle = gate.doctor("the mac idle admission cut from queue_leg", REAL[MAC_RUNNER],
+                       r'outcome, said = _admit\(name, argv, env, scene\)\n'
+                       r'(\s+)if outcome == "deferred":',
+                       r'outcome, said = "ran", _leg_worker(name, argv, env, scene)\n'
+                       r'\1if outcome == "deferred":')
 watched("a mac funnel that admits an input-driving leg without asking about the human",
-        {**REAL, MAC_RUNNER: _no_idle}, "never calls lane.idle_wait(name)")
+        {**REAL, MAC_RUNNER: _no_idle}, "queue_leg never admits through _admit")
 
-# 11. THE WAIT MOVED OUT OF THE HOLD — it would then wait while the other
-# four lanes are free to admit their own input-driving legs.
-_outside = gate.doctor("the mac idle wait lifted above the hold", REAL[MAC_RUNNER],
-                       r'( *)(with exclusive\.hold\("mac", name\):)',
-                       r"\1lane.idle_wait(name)\n\1\2")
-_outside = gate.doctor("the mac idle wait removed from inside the hold", _outside,
-                       r"refused = lane\.idle_wait\(name\)", "refused = None")
-watched("a mac idle wait outside the token's hold",
-        {**REAL, MAC_RUNNER: _outside}, "is not between the token's hold and the leg")
+# 11. THE WAIT PUT BACK INSIDE THE HOLD — the shape the 2026-10-07 matrix
+# ran, which held every other lane on the human for 241s.
+_inside = gate.doctor("the mac idle wait put back inside the hold", REAL[MAC_RUNNER],
+                      r'    return lane\.idle_admit\(name, lambda: exclusive\.hold\("mac", name\),'
+                      r'\n\s+lambda: _leg_worker\(name, argv, env, scene\)\)\n',
+                      '    with exclusive.hold("mac", name):\n'
+                      '        refused = lane.idle_wait(name)\n'
+                      '        return (("not-run", refused) if refused\n'
+                      '                else ("ran", _leg_worker(name, argv, env, scene)))\n')
+watched("a mac idle wait inside the token's hold",
+        {**REAL, MAC_RUNNER: _inside}, "_admit calls lane.idle_wait( itself")
 
 # 12. A BUDGET THE CEILING CANNOT PAY.
 _fat = gate.doctor("the mac idle budget raised past half the ceiling", REAL[MAC_LANE],
@@ -704,13 +844,15 @@ watched("a mac fullscreen leg an expired wait runs anyway", {**REAL, MAC_LANE: _
 
 # 18. THE FUNNEL RUNNING A REFUSED LEG.
 _ignored = gate.doctor("queue_leg running a refused leg", REAL[MAC_RUNNER],
-                       r"_not_run\(name, refused\)", "_leg_worker(name, argv, env, scene)")
+                       r'(if outcome == "not-run":\n\s+)_not_run\(name, said\)',
+                       r"\1_leg_worker(name, argv, env, scene)")
 watched("a mac funnel that runs a leg its idle wait refused",
         {**REAL, MAC_RUNNER: _ignored}, "does not report a leg the idle wait refused")
 
 # 19. THE WAIT ADMITTING A BUSY HOST.
 _admits = gate.doctor("display_wait admitting on expiry", REAL[MAC_LANE],
-                      r"(        if waited >= DISPLAY_BOUND_S:\n[\s\S]*?)return refused\n",
+                      r'(        if waited >= bound:\n            _idle\["display"\] \+= waited\n'
+                      r"[\s\S]*?)return refused\n",
                       r"\1return None\n")
 _admits_mod = gate.scratch() / "mac-display-admits.py"
 _admits_mod.write_text(_admits, encoding="utf-8")
@@ -722,6 +864,54 @@ _hand = gate.doctor("run-leg's display wait cut", REAL["tools/run-leg.py"],
                     r"refused = lane\.display_wait\(name\)", "refused = None")
 watched("a hand run of a display leg that never waits", {**REAL, "tools/run-leg.py": _hand},
         "a hand run of a DISPLAY_SCENES leg")
+
+# 20b. THE WAIT'S OWN WALL CUT: a wait under a held token no longer refuses.
+_LANE_TEXT = gate.read(MAC_LANE)
+_unwalled = gate.doctor("the under-token wall cut from both waits", _LANE_TEXT,
+                        r"\n    _not_under_token\(leg\)\n", "\n", want=2)
+_unwalled_mod = gate.scratch() / "mac-unwalled.py"
+_unwalled_mod.write_text(_unwalled, encoding="utf-8")
+watched("an idle wait that runs under a held token", REAL,
+        "idle_wait waited for the human while this process held the matrix-wide token",
+        lanes={**MODS, "mac": load_lane(_unwalled_mod)})
+
+# 20c. idle_admit WAITING INSIDE ITS HOLD, the wall cut too so the sleep is
+# what the clause sees.
+_slept = gate.doctor("idle_admit's wait moved inside its hold", _unwalled,
+                     r'        refused = idle_wait\(leg, say\)\n        if refused:\n'
+                     r'            return "not-run", refused\n        with hold\(\):\n',
+                     '        with hold():\n            refused = idle_wait(leg, say)\n'
+                     '            if refused:\n                return "not-run", refused\n')
+_slept_mod = gate.scratch() / "mac-slept-held.py"
+_slept_mod.write_text(_slept, encoding="utf-8")
+watched("idle_admit sleeping while it holds the token", REAL,
+        "time(s) while holding the token", lanes={**MODS, "mac": load_lane(_slept_mod)})
+
+# 20d. A BUSY DISPLAY LEG WAITING IN ITS QUEUE POSITION.
+_in_place = gate.doctor("the display deferral cut", _LANE_TEXT,
+                        r'in_place = leg in DISPLAY_LEGS and _idle\["deadline"\] is None',
+                        "in_place = False")
+_in_place_mod = gate.scratch() / "mac-display-in-place.py"
+_in_place_mod.write_text(_in_place, encoding="utf-8")
+watched("a busy display leg that waits where it is queued", REAL,
+        "in its queue position: answered", lanes={**MODS, "mac": load_lane(_in_place_mod)})
+
+# 20e. EVERY DEFERRED LEG ITS OWN BOUND.
+_own_bound = gate.doctor("the shared deadline ignored", _LANE_TEXT,
+                         r'bound = \(DISPLAY_BOUND_S if _idle\["deadline"\] is None\n'
+                         r'\s+else max\(0\.0, _idle\["deadline"\] - started\)\)',
+                         "bound = DISPLAY_BOUND_S")
+_own_bound_mod = gate.scratch() / "mac-own-bound.py"
+_own_bound_mod.write_text(_own_bound, encoding="utf-8")
+watched("deferred display legs each waiting a whole bound", REAL,
+        "after the lane's end had spent its shared",
+        lanes={**MODS, "mac": load_lane(_own_bound_mod)})
+
+# 20f. THE DEFERRED LEGS NEVER RUN.
+_no_end = gate.doctor("run_deferred() cut from the lane's end", REAL[MAC_RUNNER],
+                      r"\ndrain\(\)\nrun_deferred\(\)\n", "\ndrain()\n")
+watched("a mac lane that never runs its deferred display legs",
+        {**REAL, MAC_RUNNER: _no_end}, "run_deferred() does not follow the lane's last drain()")
 
 # 21. A WINDOWS FULLSCREEN LEG BACK IN THE POOL.
 _win_pooled = gate.doctor("fullscreen_go taken out of the windows EXCLUSIVE set",
@@ -799,7 +989,7 @@ watched("a reply that opens the shade without the door",
         {**REAL, "tools/android/run-emulator.py": _reply},
         "reply_notification does not open the shade through open_shade")
 
-gate.negatives_ran(30)
+gate.negatives_ran(35)
 
 gate.counted("windows legs whose scene posts a notification",
              sorted(MODS["windows"].notification_legs(str(ROOT / "tools/scenes"))), floor=2)
