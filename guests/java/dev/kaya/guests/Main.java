@@ -46,6 +46,9 @@ public final class Main {
             case "autofill":
                 app = Autofill::app;
                 break;
+            case "reveal":
+                app = Reveal::app;
+                break;
             case "table":
                 app = Table::app;
                 break;

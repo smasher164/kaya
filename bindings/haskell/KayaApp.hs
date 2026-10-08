@@ -232,6 +232,8 @@ module KayaApp
     setHelp,
     setPlaceholder,
     setContentType,
+    setRevealed,
+    setRevealable,
     setHref,
     setRole,
     setSymbol,
@@ -2860,6 +2862,16 @@ contentTypeWire c = fromIntegral $ case c of
 setContentType :: Widget -> ContentType -> Build ()
 setContentType (Widget w) c = emitB (W.txSetContentType w (contentTypeWire c))
 
+-- | Whether a secure field shows its text (docs\/reveal-plan.md V1); the
+-- write never echoes as a toggle.
+setRevealed :: Widget -> Bool -> Build ()
+setRevealed (Widget w) on = emitB (W.txSetRevealed w on)
+
+-- | Gives a secure field its own show\/hide toggle; each flip reaches
+-- 'onToggle' (docs\/reveal-plan.md V1, V2).
+setRevealable :: Widget -> Build ()
+setRevealable (Widget w) = emitB (W.txSetRevealable w True)
+
 -- | The DESTINATION a 'Link' label opens (docs\/tasks-s2-plan.md T3): the
 -- platform's own opener takes it and nothing is emitted.
 setHref :: Widget -> Text -> Build ()
@@ -2948,6 +2960,11 @@ data Attr (c :: WClass) where
   -- | What this entry or secure field holds — 'setContentType' at
   -- construction.
   ContentType :: ContentType -> Attr 'LeafW
+  -- | Whether this secure field shows its text — 'setRevealed' at
+  -- construction.
+  Revealed :: Bool -> Attr 'LeafW
+  -- | This secure field carries its own show\/hide toggle — 'setRevealable'.
+  Revealable :: Attr 'LeafW
   -- | The DESTINATION this 'Link' label opens
   -- (docs\/tasks-s2-plan.md T3): the platform's own opener takes it, and
   -- nothing is emitted.
@@ -3036,6 +3053,8 @@ applyAttr (Submits on) w = setSubmits w on
 applyAttr (Placeholder p) w = setPlaceholder w p
 applyAttr (PlaceholderBound sig) w = bindPlaceholder w sig
 applyAttr (ContentType c) w = setContentType w c
+applyAttr (Revealed on) w = setRevealed w on
+applyAttr Revealable w = setRevealable w
 applyAttr (Href u) w = setHref w u
 applyAttr (HrefBound sig) w = bindHref w sig
 applyAttr (MinDate d) (Widget n) =
@@ -4272,6 +4291,14 @@ data TplAttr where
   -- | What this stamped field holds (the live 'ContentType'), a CONSTANT
   -- for 'TplSubmits''s reason.
   TplContentType :: ContentType -> TplAttr
+  -- | Whether each stamped secure field shows its text (the live
+  -- 'Revealed'): a constant, a signal, or the row's own field.
+  TplRevealed :: Bool -> TplAttr
+  TplRevealedBound :: Signal Bool -> TplAttr
+  TplRevealedField :: KField Bool -> TplAttr
+  -- | Each stamped copy carries its own show\/hide toggle (the live
+  -- 'Revealable'); its flips reach 'onToggle' with the copy's keys.
+  TplRevealable :: TplAttr
   TplNumberFormat :: NumberFormat -> TplAttr
   -- | A stamped slider's granularity (docs\/slider-plan.md S1): constant
   -- across the copies, like the range.
@@ -4349,6 +4376,10 @@ applyTplAttr (TplHrefField src) n = bindStrSource hrefProp n src
 applyTplAttr (TplRole r) n = setNodeRole n r
 applyTplAttr (TplSubmits on) n = setNodeSubmits n on
 applyTplAttr (TplContentType c) (Node n) = emitT (W.txSetContentType n (contentTypeWire c))
+applyTplAttr (TplRevealed on) (Node n) = emitT (W.txSetRevealed n on)
+applyTplAttr (TplRevealedBound (Signal s)) (Node n) = emitT (W.txBindRevealed n s)
+applyTplAttr (TplRevealedField (KField i)) (Node n) = emitT (W.txBindRevealedElement n 0 i)
+applyTplAttr TplRevealable (Node n) = emitT (W.txSetRevealable n True)
 applyTplAttr (TplNumberFormat format) n = setNodeNumberFormat n format
 applyTplAttr (TplStep step) (Node n) = emitT (W.txSetStep n step)
 applyTplAttr (TplMinGap gap) (Node n) = emitT (W.txSetMinGap n gap)

@@ -521,6 +521,10 @@ static class Program
         Set("SetFormat", ["Node n", "NumberFormat format"], "n, format");
         Set("SetSubmits", ["Node n", "bool on"], "n, on");
         Set("SetContentType", ["Node n", "ContentType contentType"], "n, contentType");
+        Set("SetRevealed", ["Node n", "bool on"], "n, on");
+        Set("SetRevealed", ["Node n", "Signal s"], "n, s");
+        Set("SetRevealed", ["Node n", "Field<bool> f", "uint level = 0"], "n, f, level");
+        Set("SetRevealable", ["Node n"], "n");
         Set("SetAlign", ["Node n", "Align align"], "n, align");
         Set("SetFilled", ["Node n", "Tint tint"], "n, tint");
         Set("SetMaxWidth", ["Node n", "double points"], "n, points");

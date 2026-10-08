@@ -400,6 +400,15 @@ sealed class NoteRow
     public void SetContentType(Node n, ContentType contentType) =>
         t.SetContentType(n, contentType);
 
+    public void SetRevealed(Node n, bool on) => t.SetRevealed(n, on);
+
+    public void SetRevealed(Node n, Signal s) => t.SetRevealed(n, s);
+
+    public void SetRevealed(Node n, Field<bool> f, uint level = 0) =>
+        t.SetRevealed(n, f, level);
+
+    public void SetRevealable(Node n) => t.SetRevealable(n);
+
     public void SetAlign(Node n, Align align) => t.SetAlign(n, align);
 
     public void SetFilled(Node n, Tint tint) => t.SetFilled(n, tint);

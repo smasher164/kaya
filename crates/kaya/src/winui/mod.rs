@@ -105,6 +105,7 @@ use bindings::Microsoft::UI::Xaml::Controls::Primitives::LayoutInformation;
 use bindings::Microsoft::UI::Xaml::Controls::Primitives::Popup;
 use bindings::Microsoft::UI::Xaml::Controls::Primitives::{
     RangeBaseValueChangedEventArgs, RangeBaseValueChangedEventHandler, SliderSnapsTo, TickPlacement,
+    ToggleButton,
 };
 use bindings::Microsoft::UI::Xaml::Input::{
     KeyEventHandler, PointerEventHandler, PointerRoutedEventArgs,
@@ -182,8 +183,8 @@ enum NativeWidget {
     /// The number field (docs/number-field-plan.md §6): a NumberBox whose
     /// NumberFormatter is kaya's own, so its text is the door's both ways.
     NumberField(NumberBox),
-    /// The secure field (docs/secure-entry-plan.md §3): a PasswordBox with its
-    /// reveal button removed (P3).
+    /// The secure field (docs/secure-entry-plan.md §3): a PasswordBox whose
+    /// reveal button is kaya's toggle (docs/reveal-plan.md §3).
     Secure(PasswordBox),
     /// The colour picker (docs/color-picker-plan.md §6): a Button faced with
     /// a swatch, whose Flyout holds the inline ColorPicker.
@@ -569,6 +570,7 @@ struct CoreState {
     number_field_ids: Vec<u64>,
     secure_fields: Vec<PasswordBox>,
     secure_ids: Vec<u64>,
+    secure_reveal: HashMap<u64, RevealDoor>,
     number_cells: HashMap<u64, std::sync::Arc<NumberCell>>,
     /// The colour pickers' buttons in creation order, their ids, and each
     /// one's parts and cell by id.
@@ -6293,6 +6295,68 @@ fn caption_command_button_box() -> windows_core::Result<f64> {
             ),
         }
     })
+}
+
+/// docs/reveal-plan.md §3, the WinUI row: the template's RevealButton is the
+/// secure field's toggle. Peek is press-and-hold, so the box runs Hidden or
+/// Visible and the button, shown while `revealable`, flips it.
+#[derive(Clone)]
+struct RevealDoor {
+    revealable: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    button: std::sync::Arc<std::sync::Mutex<Option<ToggleButton>>>,
+    tag: std::sync::Arc<[u8]>,
+    sink: OccSink,
+}
+
+fn dress_reveal_button(field: &PasswordBox, door: &RevealDoor) -> windows_core::Result<()> {
+    use std::sync::atomic::Ordering::Relaxed;
+    let Some(button) = named_descendant(&field.cast()?, "RevealButton")? else {
+        return Ok(());
+    };
+    let button: ToggleButton = button.cast()?;
+    let shown = field.PasswordRevealMode()? == PasswordRevealMode::Visible;
+    button.SetVisibility(if door.revealable.load(Relaxed) {
+        Visibility::Visible
+    } else {
+        Visibility::Collapsed
+    })?;
+    let mut wired = door.button.lock().unwrap();
+    if wired.as_ref() != Some(&button) {
+        for on in [true, false] {
+            let (field, door) = (field.clone(), door.clone());
+            let flipped = RoutedEventHandler::new(move |_, _| {
+                let flip = (field.PasswordRevealMode()? == PasswordRevealMode::Visible) != on;
+                #[cfg(feature = "harness")]
+                crate::vtrace::note("reveal_button", format_args!(
+                    "{} raised with the box {}; {}",
+                    if on { "Checked" } else { "Unchecked" },
+                    if flip != on { "visible" } else { "hidden" },
+                    if flip { "the user's flip" } else { "the box's own mode, no flip" }
+                ));
+                if !flip {
+                    return Ok(());
+                }
+                let mode = if on { PasswordRevealMode::Visible } else { PasswordRevealMode::Hidden };
+                field.SetPasswordRevealMode(mode)?;
+                door.sink.send_toggle_tag(&door.tag, on);
+                Ok(())
+            });
+            if on {
+                button.Checked(&flipped)?;
+            } else {
+                button.Unchecked(&flipped)?;
+            }
+        }
+        *wired = Some(button.clone());
+    }
+    drop(wired);
+    // A Checked that agrees with the box's mode is no flip (docs/traps.md,
+    // the WinUI reveal button's echo).
+    let held = button.IsChecked().ok().and_then(|b| b.Value().ok()).unwrap_or(false);
+    if held != shown {
+        button.SetIsChecked(&PropertyValue::CreateBoolean(shown)?.cast::<IReference<bool>>()?)?;
+    }
+    Ok(())
 }
 
 /// The first descendant of `root` carrying `name` as its template name.
@@ -14662,12 +14726,24 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     NativeWidget::Row(grid)
                 }
                 WidgetKind::SecureField => {
-                    // docs/secure-entry-plan.md §3: no reveal button (P3), and
-                    // the text goes to the app alone, never to the ledger or a
-                    // banked copy (P2). A programmatic write's raise is
-                    // swallowed by the entry's counter (see entry_swallow).
+                    // docs/secure-entry-plan.md §3: the text goes to the app
+                    // alone, never to the ledger or a banked copy (P2). A
+                    // programmatic write's raise is swallowed by the entry's
+                    // counter (see entry_swallow). Never Peek
+                    // (docs/reveal-plan.md §3).
                     let field = PasswordBox::new()?;
                     field.SetPasswordRevealMode(PasswordRevealMode::Hidden)?;
+                    let door = RevealDoor {
+                        revealable: Default::default(),
+                        button: Default::default(),
+                        tag: tag.clone().expect("secure fields carry a tag").into(),
+                        sink: core.occurrences.clone(),
+                    };
+                    let (dressed, dressing) = (field.clone(), door.clone());
+                    field.Loaded(&RoutedEventHandler::new(move |_, _| {
+                        dress_reveal_button(&dressed, &dressing)
+                    }))?;
+                    core.secure_reveal.insert(id.0, door);
                     let sink = core.occurrences.clone();
                     let tag = tag.expect("secure fields carry a tag");
                     let handler_tag = tag.clone();
@@ -15510,6 +15586,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             drop_pair(&mut core.search_ids, &mut core.searches, id.0);
             drop_pair(&mut core.number_field_ids, &mut core.number_fields, id.0);
             drop_pair(&mut core.secure_ids, &mut core.secure_fields, id.0);
+            core.secure_reveal.remove(&id.0);
             core.number_cells.remove(&id.0);
             drop_pair(&mut core.color_picker_ids, &mut core.color_pickers, id.0);
             core.color_swatches.remove(&id.0);
@@ -16764,7 +16841,19 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (NativeWidget::Search { field, .. }, Prop::Placeholder, Value::Str(s)) => {
                     field.SetPlaceholderText(&HSTRING::from(&s))?;
                 }
-                (_, Prop::Revealed | Prop::Revealable, _) => crate::depth_stub("reveal"),
+                (NativeWidget::Secure(field), Prop::Revealed, Value::Bool(on)) => {
+                    let mode = if on { PasswordRevealMode::Visible } else { PasswordRevealMode::Hidden };
+                    field.SetPasswordRevealMode(mode)?;
+                    if let Some(door) = core.secure_reveal.get(&id.0) {
+                        dress_reveal_button(field, door)?;
+                    }
+                }
+                (NativeWidget::Secure(field), Prop::Revealable, Value::Bool(on)) => {
+                    if let Some(door) = core.secure_reveal.get(&id.0) {
+                        door.revealable.store(on, std::sync::atomic::Ordering::Relaxed);
+                        dress_reveal_button(field, door)?;
+                    }
+                }
                 (NativeWidget::Secure(field), Prop::Placeholder, Value::Str(s)) => {
                     field.SetPlaceholderText(&HSTRING::from(&s))?;
                 }
@@ -19653,6 +19742,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             number_field_ids: Vec::new(),
             secure_fields: Vec::new(),
             secure_ids: Vec::new(),
+            secure_reveal: HashMap::new(),
             number_cells: HashMap::new(),
             color_pickers: Vec::new(),
             color_picker_ids: Vec::new(),
@@ -22305,12 +22395,68 @@ impl crate::harness::Stage for WinUiStage {
         read.unwrap_or_else(|e| Err(format!("the InputScope could not be read: {e}")))
     }
 
-    fn unmasked_len(&self, _: crate::harness::Target) -> Result<usize, crate::harness::MaskRead> {
-        crate::depth_stub("reveal")
+    /// masked_len's read through the opposite rule (docs/reveal-plan.md V4): a
+    /// value the peer publishes through the unmasked rule, else the box's own
+    /// reveal mode, then its length.
+    fn unmasked_len(&self, t: crate::harness::Target) -> Result<usize, crate::harness::MaskRead> {
+        use crate::harness::MaskRead;
+        Self::on_ui_read(move |core| {
+            use bindings::Microsoft::UI::Xaml::Automation::Peers::FrameworkElementAutomationPeer;
+            use bindings::Microsoft::UI::Xaml::Automation::Provider::IValueProvider;
+            let Some(i) = crate::harness::try_resolve(t.index, core.secure_fields.len()) else {
+                return Ok(Err(MaskRead::NoSuchTarget));
+            };
+            let field = &core.secure_fields[i];
+            let fe: FrameworkElement = field.cast()?;
+            let peer = FrameworkElementAutomationPeer::CreatePeerForElement(&fe)?;
+            if let Some(Ok(shown)) = peer.cast::<IValueProvider>().ok().map(|p| p.Value()) {
+                if !shown.is_empty() {
+                    return Ok(crate::harness::unmasked_count(&shown.to_string()));
+                }
+            }
+            let length = field.Password()?.to_string().chars().count();
+            if field.PasswordRevealMode()? != PasswordRevealMode::Visible {
+                return Ok(Err(MaskRead::Masked(length)));
+            }
+            Ok(Ok(length))
+        })
+        .unwrap_or(Err(MaskRead::Unreadable("the accessibility read failed")))
     }
 
-    fn toggle_reveal(&self, _: crate::harness::Target, _: bool) {
-        crate::depth_stub("reveal")
+    /// The RevealButton's own Toggle pattern, the route an assistive client
+    /// takes, whose Checked/Unchecked is the door a click takes
+    /// (docs/reveal-plan.md V4).
+    fn toggle_reveal(&self, t: crate::harness::Target, on: bool) {
+        let refused = Self::on_ui_read(move |core| {
+            use bindings::Microsoft::UI::Xaml::Automation::Peers::FrameworkElementAutomationPeer;
+            use bindings::Microsoft::UI::Xaml::Automation::Provider::IToggleProvider;
+            let Some(i) = crate::harness::try_resolve(t.index, core.secure_fields.len()) else {
+                return Ok(Some("no such secure field".to_owned()));
+            };
+            let field = core.secure_fields[i].clone();
+            if (field.PasswordRevealMode()? == PasswordRevealMode::Visible) == on {
+                return Ok(None);
+            }
+            let Some(button) = named_descendant(&field.cast()?, "RevealButton")? else {
+                return Ok(Some("the PasswordBox template published no RevealButton".to_owned()));
+            };
+            let (shown, width) = (button.Visibility()? == Visibility::Visible, button.ActualWidth()?);
+            if !shown || width <= 0.0 {
+                return Ok(Some(format!(
+                    "the RevealButton is not drawn (visible {shown}, width {width})"
+                )));
+            }
+            let peer = FrameworkElementAutomationPeer::CreatePeerForElement(&button.cast::<UIElement>()?)?;
+            peer.cast::<IToggleProvider>()?.Toggle()?;
+            let now = field.PasswordRevealMode()? == PasswordRevealMode::Visible;
+            Ok((now != on).then(|| {
+                format!("the RevealButton's toggle left the box {}", if on { "hidden" } else { "visible" })
+            }))
+        })
+        .unwrap_or_else(|e| Some(format!("the RevealButton could not be read: {e}")));
+        if let Some(why) = refused {
+            panic!("kaya: toggle secure_field: {why}");
+        }
     }
 
     /// docs/secure-entry-plan.md §3: the peer must say IsPassword, and a value
@@ -22326,6 +22472,9 @@ impl crate::harness::Stage for WinUiStage {
             let field = &core.secure_fields[i];
             let fe: FrameworkElement = field.cast()?;
             let peer = FrameworkElementAutomationPeer::CreatePeerForElement(&fe)?;
+            if field.PasswordRevealMode()? == PasswordRevealMode::Visible {
+                return Ok(Err(MaskRead::Unmasked(field.Password()?.to_string().chars().count())));
+            }
             if !peer.IsPassword()? {
                 return Ok(Err(MaskRead::Unreadable("UIA does not mark the box a password")));
             }

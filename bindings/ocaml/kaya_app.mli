@@ -974,8 +974,11 @@ val secure_field :
   ?placeholder:string ->
   ?placeholder_bind:string signal ->
   ?content_type:Content_type.t ->
+  ?revealed:bool ->
+  ?revealable:bool ->
   ?on_change:(string -> unit) ->
-  ?on_submit:(string -> unit) -> unit -> widget
+  ?on_submit:(string -> unit) ->
+  ?on_toggle:(bool -> unit) -> unit -> widget
 
 val progress :
   ?grow:float ->
@@ -1176,6 +1179,14 @@ val set_fit : widget -> Fit.t -> unit
 
 (* What a live entry or secure field holds (docs/autofill-plan.md A1). *)
 val set_content_type : widget -> Content_type.t -> unit
+
+(* Whether a secure field shows its text (docs/reveal-plan.md V1); the
+   write never echoes as a toggle. *)
+val set_revealed : widget -> bool -> unit
+
+(* Gives a secure field its own show/hide toggle; each flip reaches its
+   [~on_toggle] (docs/reveal-plan.md V1, V2). *)
+val set_revealable : widget -> unit
 
 (* The width:height ratio of a live video view's box, whatever its
    picture's own shape; its fit places the picture in it. *)
@@ -2137,6 +2148,10 @@ module Tpl : sig
     ?placeholder_bind:string signal ->
     ?placeholder_field:('d, string) field ->
     ?content_type:Content_type.t ->
+    ?revealed:bool ->
+    ?revealed_bind:bool signal ->
+    ?revealed_field:('f, bool) field ->
+    ?revealable:bool ->
     ?accepts:string list ->
     ?text:string ->
     ?bind:string signal ->
@@ -2144,7 +2159,8 @@ module Tpl : sig
     ?level:int ->
     ?a11y_level:int ->
     ?on_change:(key list -> string -> unit) ->
-    ?on_submit:(key list -> string -> unit) -> unit -> node
+    ?on_submit:(key list -> string -> unit) ->
+    ?on_toggle:(key list -> bool -> unit) -> unit -> node
 
   val progress :
     ?grow:float ->

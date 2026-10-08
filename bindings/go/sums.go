@@ -541,6 +541,19 @@ func (sc SumCase[K, V]) SetSubmits(n Node, on bool) { sc.t.SetSubmits(n, on) }
 // (Tpl.SetContentType; docs/autofill-plan.md A1).
 func (sc SumCase[K, V]) SetContentType(n Node, content ContentType) { sc.t.SetContentType(n, content) }
 
+// SetRevealed says whether every stamped copy of this arm's secure field
+// shows its text (Tpl.SetRevealed; docs/reveal-plan.md V1).
+func (sc SumCase[K, V]) SetRevealed(n Node, on bool) { sc.t.SetRevealed(n, on) }
+
+// BindRevealed shows each copy's text by the field the selector names.
+func (sc SumCase[K, V]) BindRevealed(n Node, sel func(*V) *bool) {
+	sc.t.BindRevealed(n, FieldBy(sel))
+}
+
+// SetRevealable gives every stamped copy its own show/hide toggle
+// (Tpl.SetRevealable).
+func (sc SumCase[K, V]) SetRevealable(n Node) { sc.t.SetRevealable(n) }
+
 // SetAccepts declares what a copy of this arm takes from a paste; const
 // only, and the declaration App.OnPasteNode needs (Tpl.SetAccepts).
 func (sc SumCase[K, V]) SetAccepts(n Node, kinds ...string) { sc.t.SetAccepts(n, kinds...) }

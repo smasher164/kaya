@@ -218,23 +218,42 @@ secure view refuses refused, the eye at the trailing edge), the harness's
 `expect_unmasked` and the secure field's arm of `toggle`, and
 tools/scenes/reveal.steps green on the mac lane for Rust. The rulings V1-V9
 in the plan's §2 are recommended and await the maintainer. What breadth owes:
-  - **DEPTH STUB: reveal on gtk** — the delegate GtkText's visibility under
-    the quiet guard, `notify::visibility` emitting `toggled`, the peek icon
-    (or a kaya button over it, plan V7) for `revealable`, copy and cut stopped
-    on the GtkText while shown, `unmasked_len` through the AT-SPI text and
-    `toggle_reveal` through the icon's own toggle.
-  - **DEPTH STUB: reveal on winui** — `PasswordRevealMode` Visible/Hidden,
-    the RevealButton driven as a toggle (Peek is press-and-hold), the read off
-    the box's mode and its Password length. check-universal-props holds
-    `SetPasswordRevealMode(PasswordRevealMode::Hidden)` as the secure field's
-    creation, which stays and gains the shown arm.
-  - **DEPTH STUB: reveal on compose** — `TextObfuscationMode.Visible`, the
-    EditableText override following the reveal, the Material trailing
-    IconButton, the `toggle` and `expect_unmasked` verbs. check-universal-props
-    holds `RevealLastTyped` on the hidden field, which stays.
-  - **The iOS legs** — measure the shown field's accessibilityValue and whether
-    the swap keeps the keyboard up, then take `reveal` out of
-    tools/lib/lanes/ios.py's UNWIRED_SCENES.
+  - ~~**DEPTH STUB: reveal on gtk**~~ — LANDED 2026-10-08: the GtkText's
+    visibility under the quiet guard, `notify::visibility` emitting `toggled`,
+    GTK's own peek icon for `revealable` (the visibility put back after it,
+    since turning it off hides the text), copy and cut stopped, PRIMARY and a
+    drag out refused while shown (docs/traps.md), `unmasked_len` through the
+    AT-SPI text and `toggle_reveal` through the icon gesture's own `released`.
+    reveal_routes.py holds the GTK rows; reveal-* green on x11 and wayland in
+    all eight linux languages.
+  - ~~**DEPTH STUB: reveal on winui**~~ — LANDED 2026-10-08: Hidden/Visible,
+    never Peek; the template's RevealButton shown while `revealable`, its
+    Checked/Unchecked a flip only when it disagrees with the box's mode
+    (docs/traps.md, the echo); the read off the box's mode and length, and
+    `expect_masked` refusing a Visible box. reveal_routes.py holds the WinUI
+    rows; reveal_* green in all six windows languages.
+  - **The eye on GTK and WinUI, for the maintainer** — neither platform's own
+    eye takes the keyboard (GTK's is an image with a click gesture, WinUI's
+    template button is `IsTabStop="False"`), kept as each platform ships it
+    (plan V7 left the choice to the breadth); WinUI's eye is one glyph
+    (U+F78D) in both states where V7 asks for a struck eye while shown; and a
+    shown PasswordBox still reads as a password to UIA with no Value pattern,
+    so Narrator reads none of the shown text (measured, plan §7), where V4
+    says the reader reads it.
+  - ~~**DEPTH STUB: reveal on compose**~~ — LANDED 2026-10-08:
+    `TextObfuscationMode.Visible` keyed on `revealed`, kaya's EditableText
+    override only while masked (the platform's own text while shown, V4), the
+    Material trailing IconButton through `kayaRevealToggle`, `toggle` pressing
+    the eye's own click action and `expect_unmasked` off the node info.
+    check-universal-props holds the mask in both states, reveal_routes.py the
+    Compose rows; reveal-compose green.
+  - ~~**The iOS legs**~~ — LANDED 2026-10-08: reveal-swiftui, reveal-swift and
+    reveal-go green. The eye was found twice in the field's frame until the
+    walk deduped by frame; the shown field refuses Select and keeps no undo
+    manager, matching the masked field's menu; and `type_secret` types a shown
+    field's keys in-process, since XCTest logs a plain element's typed text
+    (docs/traps.md, both 2026-10-08 entries). The accessibilityValue carries
+    the text; XCUI read one keyboard at the first typing after the swap.
   - **`revealed` and `revealable` in the other eight bindings** — both zones,
     a `reveal` guest each; check-sugar-surface's REVEAL_SURFACES are tightened
     to each binding's built shape with a cut per pattern, and tpl-surfaces'
@@ -247,6 +266,8 @@ in the plan's §2 are recommended and await the maintainer. What breadth owes:
     reads true while a masked field is focused (measured 2026-10-08), where
     GTK turns its history off and the revealed view refuses one; whether the
     masked view should refuse it too is a ruling for the secure field's P2.
+    The masked iOS SecureField's UITextField also reads `canUndo` true after
+    typing (measured 2026-10-08, docs/traps.md), so the ruling covers both.
 
 ## ~~BUILD — timecode formatter and number-field format (2026-10-04)~~ COMPLETE implementation 2026-10-05: all nine bindings plus C, all five backends, viewed review page; full-matrix validation follow-up remains open below.
 KEY: timecode, TimecodeRate, NumberFormat, drop-frame, number-field format

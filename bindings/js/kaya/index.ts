@@ -775,6 +775,24 @@ export class Handle {
     return this;
   }
 
+  /** Whether this secure field shows its text (docs/reveal-plan.md V1): a
+   * constant, a Signal, or the row's own field. The write never echoes as
+   * a toggle. Chains. */
+  revealed(on: boolean | Signal<boolean> | FieldRef = true): this {
+    if (on instanceof Signal) records().push(wire.tx_bind_revealed(this.id, on.id));
+    else if (on instanceof FieldRef) records().push(wire.tx_bind_revealed_element(this.id, on._level(), on._index));
+    else if (typeof on === "boolean") records().push(wire.tx_set_revealed(this.id, on));
+    else throw new Error(`kaya: revealed takes a boolean, a Signal or one of the row's fields, got ${typeof on}`);
+    return this;
+  }
+
+  /** Gives this secure field its own show/hide toggle; each flip reaches
+   * the field's onToggle (docs/reveal-plan.md V1, V2). Chains. */
+  revealable(): this {
+    records().push(wire.tx_set_revealable(this.id, true));
+    return this;
+  }
+
   /** The DESTINATION a `role("link")` label opens
    * (docs/tasks-s2-plan.md T3): the platform's own opener takes it and
    * nothing is emitted. Chains. */
@@ -4655,16 +4673,27 @@ export function search(opts: TextInputOptions = {}): Widget {
   return handle;
 }
 
+export type SecureFieldOptions = CredentialInputOptions & {
+  revealed?: boolean | Signal<boolean> | FieldRef;
+  revealable?: boolean;
+  onToggle?: Handler;
+};
+
 /** A secure field (docs/secure-entry-plan.md): the entry's contract with
  * the platform masking what is typed. onChange and onSubmit receive the
- * real text. */
-export function secureField(opts: CredentialInputOptions = {}): Widget {
+ * real text; `revealed` shows it, and `revealable: true` gives the field
+ * its own show/hide toggle, whose flips reach onToggle(on) — fn(row, on)
+ * for a stamped copy (docs/reveal-plan.md V1, V2). */
+export function secureField(opts: SecureFieldOptions = {}): Widget {
   const handle = widget(wire.KIND_SECURE_FIELD);
   if (opts.text !== undefined) records().push(wire.tx_set_text(handle.id, textValue("secureField text", opts.text)));
   if (opts.placeholder !== undefined) handle.placeholder(opts.placeholder);
   if (opts.contentType !== undefined) handle.contentType(opts.contentType);
+  if (opts.revealed !== undefined) handle.revealed(opts.revealed);
+  if (opts.revealable === true) handle.revealable();
   if (opts.onChange !== undefined) app()._register(handle, wire.OCC_TEXT_CHANGED, opts.onChange);
   if (opts.onSubmit !== undefined) app()._register(handle, wire.OCC_SUBMITTED, opts.onSubmit);
+  if (opts.onToggle !== undefined) app()._register(handle, wire.OCC_TOGGLED, opts.onToggle);
   setGrow(handle, opts);
   return handle;
 }

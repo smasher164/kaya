@@ -26,7 +26,7 @@ SCENES = [
     "reorder", "feed", "grow", "layout", "align", "window", "panels",
     "confirm", "nav", "split", "panes", "table", "scroll",
     "progress", "select", "radio", "grid", "textarea", "search", "submit", "scrollto", "fullscreen",
-    "numberfield", "timecode", "colorpicker", "range", "secure", "autofill",
+    "numberfield", "timecode", "colorpicker", "range", "secure", "autofill", "reveal",
     "sections",
     "menus", "commands", "a11y", "a11yrows", "filedialog",
     "clipboard", "undo", "dirty", "ranges", "save", "styling",
@@ -694,6 +694,11 @@ ORDER = [
     # emoji_rust ALONE: it types into the system's emoji panel.
     [
      "emoji_rust",
+    ],
+    # The reveal toggle (docs/reveal-plan.md): type_secret posts to the guest's
+    # own input site, as the secure field's legs do.
+    [
+     "reveal_rust", "reveal_python", "reveal_js", "reveal_go", "reveal_csharp", "reveal_java",
     ],
     # The content type (docs/autofill-plan.md): clicks only, pooled.
     [

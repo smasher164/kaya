@@ -128,6 +128,7 @@ def generate(tmp):
                        "guests/swift/search.swift",
                        "guests/swift/secure.swift",
                        "guests/swift/autofill.swift",
+                       "guests/swift/reveal.swift",
                        "guests/swift/submit.swift",
                        "guests/swift/scrollto.swift",
                        "guests/swift/dnd.swift",

@@ -64,6 +64,7 @@ object GuestStart : KayaGuestStart {
             "search" -> Search::app
             "secure" -> Secure::app
             "autofill" -> Autofill::app
+            "reveal" -> Reveal::app
             "sections" -> Sections::app
             "menus" -> Menus::app
             "commands" -> Commands::app

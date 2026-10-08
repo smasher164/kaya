@@ -22,7 +22,7 @@ body's IOS_*_SCENES assignments.
 # naming a different one where two scenes share an app: a scene selects a
 # SCRIPT, never an app (`listdetail:split` is the only such pair).
 SWIFT_ENTRIES = [
-    "milestone2", "stall", "entry", "search", "secure", "autofill", "submit", "scrollto", "fullscreen", "gallery",
+    "milestone2", "stall", "entry", "search", "secure", "reveal", "autofill", "submit", "scrollto", "fullscreen", "gallery",
     "todos", "reorder", "feed", "grow", "align", "layout",
     "confirm", "nav", "listdetail:split", "scroll", "progress",
     "select", "radio", "grid", "textarea", "sections",
@@ -51,7 +51,7 @@ SWIFT_ENTRIES = [
 # rust-only canvas scenes, plus `editor` off-list below — a Go app with
 # no swift guest to mirror (docs/editor-plan.md).
 GO_SCENES = [
-    "milestone2", "stall", "entry", "search", "secure", "autofill", "submit", "scrollto", "fullscreen", "gallery",
+    "milestone2", "stall", "entry", "search", "secure", "reveal", "autofill", "submit", "scrollto", "fullscreen", "gallery",
     "todos", "reorder", "feed", "grow", "align", "layout",
     "confirm", "nav", "listdetail", "scroll", "progress",
     "select", "radio", "grid", "textarea", "sections",
@@ -107,6 +107,8 @@ RUST_SCENES = [
     "submit",
     # The secure field (docs/secure-entry-plan.md §5).
     "secure",
+    # The reveal toggle (docs/reveal-plan.md §5).
+    "reveal",
     # The content type (docs/autofill-plan.md §5).
     "autofill",
     # The notification conformance scene: the activation is a REAL tap on
@@ -180,10 +182,8 @@ PAD_EXTRAS = {
 # drive chrome no phone has; split/panes drive resize_window, which this
 # host rejects by design (DESIGN.md, Windows).
 DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes"]
-# Scenes whose legs are not run here yet: the reveal toggle's iOS arm is
-# built in the shared interpreter and its legs are the breadth slice's
-# (docs/reveal-plan.md §6).
-UNWIRED_SCENES = ["reveal"]
+# Scenes whose legs are not run here yet.
+UNWIRED_SCENES = []
 
 # The fullscreen scene's app-only way back after the cut, the same steps as
 # tools/lib/lanes/android.py's FULLSCREEN_APP_TAIL: no user change arrives.

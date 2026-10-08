@@ -12266,10 +12266,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     NativeWidget::Grid(grid)
                 }
                 WidgetKind::SecureField => {
-// docs/secure-entry-plan.md §3: GTK's own password entry, no reveal (P3) — the
-// peek icon off and the context menu's "Show Text" item taken out with its
-// action — and the text to the app alone, never banked (P2). Its AT-SPI text is
-// the display text (docs/traps.md, GTK 4.18's password entry).
+// docs/secure-entry-plan.md §3 and docs/reveal-plan.md §3: GTK's own password
+// entry, the peek icon off until `revealable`, the context menu's "Show Text"
+// taken out, the text to the app alone (P2). Its AT-SPI text is the display
+// text (docs/traps.md, GTK 4.18's password entry).
                     let field = secure_text::password_entry();
                     field.set_show_peek_icon(false);
                     if let Some(text) = gtk4::prelude::EditableExt::delegate(&field)
@@ -12285,6 +12285,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let tag = tag.expect("secure fields carry a tag");
                     let submit_tag = tag.clone();
                     let quiet = core.apply_quiet.clone();
+                    secure_text::reveal_doors(&field, &tag, &core.occurrences, &quiet);
                     gtk4::prelude::EditableExt::connect_changed(&field, move |e| {
                         if !quiet.get() {
                             sink.send_text_tag(&tag, &lf(gtk4::prelude::EditableExt::text(e).to_string()));
@@ -14410,7 +14411,24 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 (NativeWidget::Search(search), Prop::Placeholder, Value::Str(s)) => {
                     search.set_placeholder_text((!s.is_empty()).then_some(s.as_str()));
                 }
-                (_, Prop::Revealed | Prop::Revealable, _) => crate::depth_stub("reveal"),
+                (NativeWidget::Secure(field), Prop::Revealed, Value::Bool(on)) => {
+                    if let Some(text) = content_text(field.upcast_ref()) {
+                        core.apply_quiet.set(true);
+                        text.set_visibility(on);
+                        core.apply_quiet.set(false);
+                    }
+                }
+                // Turning GTK's peek icon off also hides the text
+                // (gtkpasswordentry.c), and `revealed` is its own prop.
+                (NativeWidget::Secure(field), Prop::Revealable, Value::Bool(on)) => {
+                    if let Some(text) = content_text(field.upcast_ref()) {
+                        let shown = gtk4::Text::is_visible(&text);
+                        core.apply_quiet.set(true);
+                        field.set_show_peek_icon(on);
+                        text.set_visibility(shown);
+                        core.apply_quiet.set(false);
+                    }
+                }
                 (NativeWidget::Secure(field), Prop::Placeholder, Value::Str(s)) => {
                     field.set_placeholder_text((!s.is_empty()).then_some(s.as_str()));
                 }
@@ -18627,12 +18645,82 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
-    fn unmasked_len(&self, _: crate::harness::Target) -> Result<usize, crate::harness::MaskRead> {
-        crate::depth_stub("reveal")
+    /// masked_len's read through the opposite rule (docs/reveal-plan.md V4).
+    fn unmasked_len(&self, target: crate::harness::Target) -> Result<usize, crate::harness::MaskRead> {
+        use crate::harness::MaskRead;
+        let Some((want, rank)) = Self::on_main(move |core| {
+            target_widget(core, target).and_then(|widget| {
+                atspi_rank(&core.window, &widget).map(|rank| (atspi_role_of(&widget), rank))
+            })
+        }) else {
+            return Err(MaskRead::NoSuchTarget);
+        };
+        let Some(want) = want else {
+            return Err(MaskRead::Unreadable("the field publishes no role on the bus"));
+        };
+        match atspi_text_of(want, rank) {
+            Some(shown) => crate::harness::unmasked_count(&shown),
+            None => Err(MaskRead::Unreadable("the bus published no text for the field")),
+        }
     }
 
-    fn toggle_reveal(&self, _: crate::harness::Target, _: bool) {
-        crate::depth_stub("reveal")
+    /// The peek icon's own click gesture, released over the icon: the door
+    /// GTK's `released` handler takes for a user's click (docs/reveal-plan.md V4).
+    fn toggle_reveal(&self, target: crate::harness::Target, on: bool) {
+        let refused = Self::on_main(move |core| {
+            use gtk4::prelude::{Cast, ListModelExt, WidgetExt};
+            let Some(field) = crate::harness::try_resolve(target.index, core.secure_fields.len())
+                .map(|i| core.secure_fields[i].clone())
+            else {
+                return Some("no such secure field".to_owned());
+            };
+            let Some(text) = content_text(field.upcast_ref()) else {
+                return Some("the secure field has no GtkText delegate".to_owned());
+            };
+            if gtk4::Text::is_visible(&text) == on {
+                return None;
+            }
+            let mut child = field.first_child();
+            let icon = loop {
+                let Some(widget) = child else {
+                    return Some(format!(
+                        "the secure field draws no peek icon (show-peek-icon is {})",
+                        field.shows_peek_icon()
+                    ));
+                };
+                if let Some(image) = widget.downcast_ref::<gtk4::Image>() {
+                    let name = image.icon_name().map(|n| n.to_string()).unwrap_or_default();
+                    if name == "view-reveal-symbolic" || name == "view-conceal-symbolic" {
+                        break image.clone();
+                    }
+                }
+                child = widget.next_sibling();
+            };
+            let inside = icon
+                .compute_bounds(&field)
+                .is_some_and(|b| b.x() >= 0.0 && b.x() + b.width() <= field.width() as f32);
+            if !icon.is_drawable() || !inside {
+                return Some(format!(
+                    "the peek icon is not drawn inside the field (drawable {}, inside {inside})",
+                    icon.is_drawable()
+                ));
+            }
+            let controllers = icon.observe_controllers();
+            let gesture = (0..controllers.n_items())
+                .filter_map(|i| controllers.item(i))
+                .find_map(|c| c.downcast::<gtk4::GestureClick>().ok());
+            let Some(gesture) = gesture else {
+                return Some("the peek icon carries no click gesture".to_owned());
+            };
+            let (x, y) = (f64::from(icon.width()) / 2.0, f64::from(icon.height()) / 2.0);
+            gesture.emit_by_name::<()>("released", &[&1i32, &x, &y]);
+            (gtk4::Text::is_visible(&text) != on).then(|| {
+                format!("the peek icon's release left the text {}", if on { "masked" } else { "shown" })
+            })
+        });
+        if let Some(why) = refused {
+            panic!("kaya: toggle secure_field: {why}");
+        }
     }
 
     /// The Text interface of the field's own node on the bus, through the one

@@ -2489,7 +2489,7 @@ CONTENT_TYPE_SURFACES = [
     ("python", "bindings/python/kaya/__init__.py", [
         r"def {0}\(self: H, content: ContentType \| str\) -> H:",
         r"^def entry\([^)]*\b{0}: ContentType \| str \| None = None\)",
-        r"^def secure_field\([^)]*\b{0}: ContentType \| str \| None = None\)"]),
+        r"^def secure_field\([^)]*\b{0}: ContentType \| str \| None = None[,)]"]),
     ("go", "bindings/go/app.go", [
         r"func \(w Widget\) {0}\(content ContentType\) Widget"]),
     ("csharp", "bindings/csharp/KayaApp.cs", [
@@ -2506,7 +2506,8 @@ CONTENT_TYPE_SURFACES = [
     ("ocaml", "bindings/ocaml/kaya_app.ml", [
         r"\?placeholder_bind \?{0} \?on_change \?on_submit \(\) =\n  let tx = the_tx \(\) in\n"
         r"  let w = widget Kaya_wire\.kind_entry in",
-        r"\?placeholder_bind \?{0} \?on_change \?on_submit \(\) =\n  let tx = the_tx \(\) in\n"
+        r"\?placeholder_bind \?{0} \?revealed \?\(revealable = false\) \?on_change \?on_submit"
+        r" \?on_toggle \(\) =\n  let tx = the_tx \(\) in\n"
         r"  let w = widget Kaya_wire\.kind_secure_field in"]),
     ("js", "bindings/js/kaya/index.ts", [
         r"^  {0}\(content: ContentType\): this \{{",
@@ -2573,25 +2574,38 @@ print(f"check-sugar-surface: content-type cuts watched red {_ct_cuts}/{_ct_want}
 
 # --- THE REVEAL, live zone, in all nine (docs/reveal-plan.md §5) --------
 # tpl-surfaces holds the template zone's two setters; this holds the live
-# ones. Rust's rows are the built shape; the other eight are the binding's own
-# name for each and are tightened to the shape each builds at the breadth.
+# ones, each row the shape that binding built.
 REVEAL_SURFACES = [
     ("rust", "crates/kaya/src/app.rs",
      [r"pub fn {0}\(self, on: bool\) -> Self", r"pub fn {1}\(self\) -> Self"]),
-    ("python", "bindings/python/kaya/__init__.py", [r"\b{0}\b", r"\b{1}\b"]),
-    ("go", "bindings/go/app.go", [r"func \(w Widget\) {0}\(", r"func \(w Widget\) {1}\("]),
-    ("csharp", "bindings/csharp/KayaApp.cs", [r"\b{0}\b", r"\b{1}\b"]),
+    ("python", "bindings/python/kaya/__init__.py",
+     [r"^    def {0}\(self: H, on: FlagSource = True\) -> H:",
+      r"^    def {1}\(self: H\) -> H:"]),
+    ("go", "bindings/go/app.go",
+     [r"^func \(w Widget\) {0}\(on bool\) Widget", r"^func \(w Widget\) {1}\(\) Widget"]),
+    ("csharp", "bindings/csharp/KayaApp.cs",
+     [r"bool\? {0} = null, bool {1} = false, Action<Tx, bool>\? onToggle = null",
+      r"if \({1}\) SetRevealable\(w\);"]),
     ("java", "bindings/java/dev/kaya/KayaApp.java",
-     [r"public Widget {0}\(", r"public Widget {1}\("]),
-    ("swift", "bindings/swift/KayaApp.swift", [r"\b{0}\b", r"\b{1}\b"]),
-    ("haskell", "bindings/haskell/KayaApp.hs", [r"^  {0} ::", r"^  {1} ::"]),
-    ("ocaml", "bindings/ocaml/kaya_app.ml", [r"\?{0}\b", r"\?{1}\b"]),
-    ("js", "bindings/js/kaya/index.ts", [r"^  {0}\(", r"^  {1}\("]),
+     [r"public Widget {0}\(boolean on\)", r"public Widget {1}\(\)"]),
+    ("swift", "bindings/swift/KayaApp.swift",
+     [r"^        {0}: Bool\? = nil,\n        {1}: Bool = false,\n"
+      r"        onToggle: \(\(KayaAppTx, Bool\) throws -> Void\)\? = nil,",
+      r"if {1} {{ setRevealable\(w\) }}"]),
+    ("haskell", "bindings/haskell/KayaApp.hs",
+     [r"^  {0} :: Bool -> Attr 'LeafW", r"^  {1} :: Attr 'LeafW"]),
+    ("ocaml", "bindings/ocaml/kaya_app.ml",
+     [r"^let secure_field .*\?content_type \?{0} \?\({1} = false\) "
+      r"\?on_change \?on_submit \?on_toggle",
+      r"^let set_{1} \(Widget id\) ="]),
+    ("js", "bindings/js/kaya/index.ts",
+     [r"^  {0}\(on: boolean \| Signal<boolean> \| FieldRef = true\): this",
+      r"^  {1}\(\): this"]),
 ]
 REVEAL_NAMES = {"rust": ("revealed", "revealable"), "python": ("revealed", "revealable"),
                 "go": ("Revealed", "Revealable"), "csharp": ("revealed", "revealable"),
                 "java": ("revealed", "revealable"), "swift": ("revealed", "revealable"),
-                "haskell": ("revealed", "revealable"), "ocaml": ("revealed", "revealable"),
+                "haskell": ("Revealed", "Revealable"), "ocaml": ("revealed", "revealable"),
                 "js": ("revealed", "revealable")}
 
 
@@ -2617,23 +2631,32 @@ print(f"check-sugar-surface: fake reveal spellings fired {len(_rv_fake)}/{_rv_wa
 if len(_rv_fake) != _rv_want:
     selftest_exit(f"check-sugar-surface: self-test failed ({len(_rv_fake)}/{_rv_want} reveal "
                   f"patterns fired for names that exist nowhere)")
+# Rename-in-a-copy: every match of each pattern, the names inside it mangled,
+# must leave that binding's clause red.
 _rv_cuts = 0
-for _template in REVEAL_SURFACES[0][2]:
-    _rel = REVEAL_SURFACES[0][1]
+for _lang, _rel, _templates in REVEAL_SURFACES:
     _real = read_rel(_rel)
-    _m = re.search(_template.format(*REVEAL_NAMES["rust"]), _real, re.M)
-    if _m is None:
-        selftest_exit(f"check-sugar-surface: the reveal cut found no match for {_template} "
-                      f"in {_rel}")
-    _mangled, _n = sub_count(r"\breveal(ed|able)\b", r"kayaCut\1", _m.group(0))
-    print(f"check-sugar-surface: reveal cut rust /{_template[:30]}.../: {_n} substitution(s)")
-    _copy = _real[:_m.start()] + _mangled + _real[_m.end():]
-    _found = check_reveal(
-        text_for=lambda lang, rel, _c=_copy, _r=_rel: _c if rel == _r else read_rel(rel))
-    if _n != 1 or not any(" rust's " in _f for _f in _found):
-        selftest_exit("check-sugar-surface: self-test failed (the rust reveal cut was not refused)")
-    _rv_cuts += 1
-print(f"check-sugar-surface: reveal cuts watched red {_rv_cuts}/2")
+    for _template in _templates:
+        _pat = _template.format(*REVEAL_NAMES[_lang])
+        _n = 0
+
+        def _mangle(m):
+            global _n
+            _inner, _k = sub_count(r"(?i)reveal(ed|able)\b", r"kayaCut\1", m.group(0))
+            _n += _k
+            return _inner
+        _copy = re.sub(_pat, _mangle, _real, flags=re.M)
+        print(f"check-sugar-surface: reveal cut {_lang} /{_template[:30]}.../: "
+              f"{_n} substitution(s)")
+        _found = check_reveal(
+            text_for=lambda lang, rel, _c=_copy, _r=_rel: _c if rel == _r else read_rel(rel))
+        if _n < 1 or not any(f" {_lang}'s " in _f for _f in _found):
+            selftest_exit(f"check-sugar-surface: self-test failed (the {_lang} reveal cut "
+                          f"/{_template[:30]}.../ was not refused)")
+        if (ROOT / _rel).read_text(encoding="utf-8") != _real:
+            selftest_exit(f"check-sugar-surface: {_rel} changed on disk under the reveal cut")
+        _rv_cuts += 1
+print(f"check-sugar-surface: reveal cuts watched red {_rv_cuts}/{_rv_want}")
 
 # --- THE MEDIA ROW, TRACKS AND VISIBILITY (docs/media-plan.md §3, §7b) --
 # Neither a KIND nor a WINDOW PROP: a row's PLAYER FIELD (the type a stamped
@@ -6676,7 +6699,7 @@ discardable = tpl_discardable_probe()
 WANT_DISCARDABLE = """swift-row-member=applied:1 rc:1 named:True
 swift-arm-member=applied:1 rc:1 named:True
 swift-eliminator=applied:1 rc:1 named:True
-swift-census-floor=applied:20 rc:1 named:True"""
+swift-census-floor=applied:21 rc:1 named:True"""
 if discardable != WANT_DISCARDABLE:
     print("check-sugar-surface: SELF-TEST FAIL (the Swift generated-surface "
           "discard census did not catch its watched cuts). Wanted:",
@@ -7441,7 +7464,7 @@ def csharp_facade_probe():
     run("csharp-twin-reader",
         src.replace("sealed class TableItemRow\n",
                     "sealed class TableItemRowGone\n")
-        if n == 1 else src, n, "typed-row reader found only 18")
+        if n == 1 else src, n, "typed-row reader found only 19")
     return "\n".join(lines)
 
 

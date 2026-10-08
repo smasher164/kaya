@@ -14853,3 +14853,69 @@ stock TextField: the mac's revealed secure field is an NSTextField whose cell
 returns `KayaRevealEditor`, which refuses what NSSecureTextView refuses
 (tools/lib/reveal_routes.py holds each refusal). NSSecureTextView's own
 `allowsUndo` reads true (docs/deferred.md, the reveal toggle's BUILD entry).
+
+## A shown GtkText hands its password to PRIMARY and the clipboard (measured 2026-10-08)
+
+GtkText refuses copy and cut only while `visibility` is false
+(gtktext.c, 4.20.3 source). Shown, on the linux lane's GTK 4.24 under x11,
+select-all put the password on PRIMARY and Ctrl+C and Ctrl+X put it on the
+CLIPBOARD (`xclip -o` read all three back with kaya's guards cut out of a
+copy of gtk/secure_text.rs). PRIMARY needs no copy at all: GtkText offers
+its selection there whenever it holds the focus, and a drag out of a
+selection starts only while visible. kaya's arm stops `copy-clipboard` and
+`cut-clipboard` while shown, refuses the selection provider's value for a
+shown field it owns, and collapses a shown selection before a press can
+start a drag (tools/lib/reveal_routes.py's GTK rows). With the guards, all
+three reads came back empty; masked, PRIMARY carries the bullets, as GTK
+intends. Turning `show-peek-icon` off also hides the text (gtkpasswordentry.c),
+so the `revealable` arm puts the visibility back after it.
+
+## The WinUI reveal button's echo (measured 2026-10-08)
+
+kaya drives the PasswordBox template's `RevealButton` as a toggle between
+`Hidden` and `Visible` (Peek is press-and-hold). The app's own write echoed
+as the user's flip twice: once with the quiet flag around the button's
+`SetIsChecked`, and again with the mirror counted, where the verb trace read
+`Checked raised; the user's flip` after the app's Show with nothing counted —
+by the time kaya read the button, it was already checked, so the box moves
+its own RevealButton when `PasswordRevealMode` changes. The handler now takes
+a Checked or Unchecked that agrees with the box's mode as no flip, and the
+verb trace carries every raise with the box's mode (`reveal_button`).
+Revealed, the box's peer still says IsPassword, control type Edit, with no
+Value pattern (the lane VM, a `Visible` box), so UIA reads none of the shown
+text; the unmasked read is the box's own mode, then its length.
+
+## XCTest logs what it types into a shown password (measured 2026-10-08)
+
+`type_secret` on iOS types through the focused SecureTextField element's
+`typeText`, which XCTest logs as `<redacted>`. A revealed field is a plain
+UITextField (KayaRevealUITextField), so the driver finds no secure element
+(`secure fields=0`); falling back to the focused TextField element's
+`typeText` made the secure scan refuse type_secret #2 and #3 in the driver's
+xcodebuild log, the two typed while shown. So the harness types a revealed
+field's keys in-process: `kayaTypeIntoRevealed` calls UIKeyInput's
+`insertText` per character on the first responder, refusing unless it is
+that field's own view, and a masked field's keys stay on XCTest's redacted
+route (tools/lib/reveal_routes.py's iOS rows).
+
+## The iOS shown field's menu and undo against the masked one's (measured 2026-10-08)
+
+iOS 26.5 simulator, the reveal leg, the first responder's
+`canPerformAction` with the field's own selection: the masked SecureField's
+UITextField answers Paste and Select All, and its `undoManager.canUndo`
+reads true after typing, so the masked iOS field keeps an undo stack as the
+mac's NSSecureTextView does (docs/deferred.md, the reveal toggle's BUILD
+entry). KayaRevealUITextField answered Paste, Select and Select All and kept
+an undo stack until it refused Select and returned no `undoManager`; it now
+answers what the masked field answers, with no undo. Its
+`writingToolsBehavior` reads `.none` (-1). The revealed element's
+accessibilityValue is the text, which the unmasked read counts.
+
+## Compose's revealed secure field (measured 2026-10-08)
+
+foundation 1.11.4, API 35 emulators: with `TextObfuscationMode.Visible` and
+kaya's U+2022 EditableText override dropped while shown, the node info keeps
+`isPassword` true, its text is the field's text (an empty field's is empty,
+not the placeholder), and its actions carry no ACTION_COPY or ACTION_CUT, so
+BasicSecureTextField's DisableCutCopy holds while shown. check-universal-props
+holds the override in both states.

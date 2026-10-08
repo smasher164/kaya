@@ -166,6 +166,9 @@ func (r itemRow) SetSubmits(n kaya.Node, on bool)                 { r.t.SetSubmi
 func (r itemRow) SetContentType(n kaya.Node, content kaya.ContentType) {
 	r.t.SetContentType(n, content)
 }
+func (r itemRow) SetRevealed(n kaya.Node, on bool)         { r.t.SetRevealed(n, on) }
+func (r itemRow) Revealed(n kaya.Node, f kaya.Field[bool]) { r.t.BindRevealed(n, f) }
+func (r itemRow) SetRevealable(n kaya.Node)                { r.t.SetRevealable(n) }
 
 func (r itemRow) Draggable(n kaya.Node) kaya.TplDragRef { return r.t.Draggable(n) }
 

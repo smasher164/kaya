@@ -2769,8 +2769,9 @@ sealed class KayaApp
     public void OnSubmitted(Node n, Action<Tx, List<object>, string> handler) =>
         nodeSubmits[n.Id] = handler;
 
-    /// Register a toggle handler for a live checkbox: the box owns its
-    /// checked bit and reports each flip here.
+    /// Register a toggle handler for a live checkbox or a revealable
+    /// secure field (docs/reveal-plan.md V2): the widget owns its bit and
+    /// reports each flip here.
     public void OnToggle(Widget w, Action<Tx, bool> handler) => widgetToggles[w.Id] = handler;
 
     /// A live slider's change handler: the bar owns its position and
@@ -2778,8 +2779,9 @@ sealed class KayaApp
     public void OnValueChanged(Widget w, Action<Tx, double> handler) =>
         widgetValues[w.Id] = handler;
 
-    /// Register a toggle handler for a template checkbox; it also
-    /// receives the stamped copy's keys, outermost first.
+    /// Register a toggle handler for a template checkbox or revealable
+    /// secure field; it also receives the stamped copy's keys, outermost
+    /// first.
     public void OnToggle(Node n, Action<Tx, List<object>, bool> handler) =>
         nodeToggles[n.Id] = handler;
 
@@ -4255,6 +4257,16 @@ sealed class Tx : IDisposable
     public void SetContentType(Widget w, ContentType contentType) =>
         Records.Add(KayaWire.TxSetContentType(w.Id, (long)contentType));
 
+    /// Whether a secure field shows its text (docs/reveal-plan.md V1).
+    /// The write never echoes as a toggle.
+    public void SetRevealed(Widget w, bool on) =>
+        Records.Add(KayaWire.TxSetRevealed(w.Id, on));
+
+    /// Gives a secure field its own show/hide toggle; each flip reaches
+    /// KayaApp.OnToggle (docs/reveal-plan.md V1, V2).
+    public void SetRevealable(Widget w) =>
+        Records.Add(KayaWire.TxSetRevealable(w.Id, true));
+
     /// The DESTINATION a Role.Link label opens (docs/tasks-s2-plan.md
     /// T3): the platform's own opener takes it and nothing is emitted.
     public void SetHref(Widget w, string url) =>
@@ -4531,15 +4543,21 @@ sealed class Tx : IDisposable
 
     /// A secure field: the entry's contract with the platform masking
     /// what is typed (docs/secure-entry-plan.md). onChange and onSubmit
-    /// receive the real text.
+    /// receive the real text; `revealed` shows it, and `revealable: true`
+    /// gives the field its own show/hide toggle, whose flips reach
+    /// onToggle (docs/reveal-plan.md V1, V2).
     public Widget SecureField(Action<Tx, string>? onChange = null, double? grow = null,
-        ContentType? contentType = null, Action<Tx, string>? onSubmit = null)
+        ContentType? contentType = null, Action<Tx, string>? onSubmit = null,
+        bool? revealed = null, bool revealable = false, Action<Tx, bool>? onToggle = null)
     {
         var w = Widget(KayaWire.KindSecureField);
         if (onChange != null) App.OnChange(w, onChange);
         if (onSubmit != null) App.OnSubmitted(w, onSubmit);
+        if (onToggle != null) App.OnToggle(w, onToggle);
         if (grow is double g) SetGrow(w, g);
         if (contentType is ContentType c) SetContentType(w, c);
+        if (revealed is bool on) SetRevealed(w, on);
+        if (revealable) SetRevealable(w);
         return w;
     }
 
@@ -6621,6 +6639,22 @@ sealed class Tpl
     /// What every stamped copy of this field holds (Tx.SetContentType).
     public void SetContentType(Node n, ContentType contentType) =>
         tx.Records.Add(KayaWire.TxSetContentType(n.Id, (long)contentType));
+
+    /// Whether every stamped copy of this secure field shows its text
+    /// (Tx.SetRevealed): a constant, a signal, or the row's own field.
+    public void SetRevealed(Node n, bool on) =>
+        tx.Records.Add(KayaWire.TxSetRevealed(n.Id, on));
+
+    public void SetRevealed(Node n, Signal s) =>
+        tx.Records.Add(KayaWire.TxBindRevealed(n.Id, s.Id));
+
+    public void SetRevealed(Node n, Field<bool> f, uint level = 0) =>
+        tx.Records.Add(KayaWire.TxBindRevealedElement(n.Id, level, f.Index));
+
+    /// Every stamped copy carries its own show/hide toggle; each flip
+    /// reaches KayaApp.OnToggle(Node) with the copy's keys (Tx.SetRevealable).
+    public void SetRevealable(Node n) =>
+        tx.Records.Add(KayaWire.TxSetRevealable(n.Id, true));
 
     /// A stamped container's cross-axis child placement (Tx.SetAlign).
     public void SetAlign(Node n, Align align) =>

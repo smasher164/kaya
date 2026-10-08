@@ -171,6 +171,9 @@ func (r clipRow) SetSubmits(n kaya.Node, on bool)                 { r.t.SetSubmi
 func (r clipRow) SetContentType(n kaya.Node, content kaya.ContentType) {
 	r.t.SetContentType(n, content)
 }
+func (r clipRow) SetRevealed(n kaya.Node, on bool)         { r.t.SetRevealed(n, on) }
+func (r clipRow) Revealed(n kaya.Node, f kaya.Field[bool]) { r.t.BindRevealed(n, f) }
+func (r clipRow) SetRevealable(n kaya.Node)                { r.t.SetRevealable(n) }
 
 func (r clipRow) Draggable(n kaya.Node) kaya.TplDragRef { return r.t.Draggable(n) }
 

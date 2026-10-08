@@ -3111,8 +3111,9 @@ public final class KayaApp {
         kayaFoldFormat(&doc, start, end, name, value)
         documents[widget] = doc
     }
-    /// Register a toggle handler for a live checkbox: the box owns its
-    /// checked bit and reports each flip here.
+    /// Register a toggle handler for a live checkbox or a revealable
+    /// secure field (docs/reveal-plan.md V2): the widget owns its bit and
+    /// reports each flip here.
     func onToggle(_ w: KayaWidget, _ handler: @escaping (KayaAppTx, Bool) throws -> Void) {
         widgetToggles[w.id] = handler
     }
@@ -3170,8 +3171,9 @@ public final class KayaApp {
         nodeRangeCommits[n.id] = handler
     }
 
-    /// Register a toggle handler for a template checkbox; it also
-    /// receives the stamped copy's keys, outermost first.
+    /// Register a toggle handler for a template checkbox or revealable
+    /// secure field; it also receives the stamped copy's keys, outermost
+    /// first.
     func onToggle(
         _ n: KayaNodeHandle, _ handler: @escaping (KayaAppTx, [KayaValue], Bool) throws -> Void
     ) {
@@ -4369,6 +4371,18 @@ public final class KayaAppTx {
         tx.setContentType(w.id, contentType.wire)
     }
 
+    /// Whether a secure field shows its text (docs/reveal-plan.md V1); the
+    /// write never echoes as a toggle.
+    public func setRevealed(_ w: KayaWidget, _ on: Bool) {
+        tx.setRevealed(w.id, on)
+    }
+
+    /// Gives a secure field its own show/hide toggle; each flip reaches
+    /// `onToggle` (docs/reveal-plan.md V1, V2).
+    public func setRevealable(_ w: KayaWidget) {
+        tx.setRevealable(w.id, true)
+    }
+
     /// The DESTINATION a `.link` label opens (docs/tasks-s2-plan.md T3):
     /// the platform's own opener takes it and nothing is emitted.
     func setHref(_ w: KayaWidget, _ url: String) {
@@ -4684,18 +4698,26 @@ public final class KayaAppTx {
 
     /// A secure field: the entry's contract with the platform masking what
     /// is typed (docs/secure-entry-plan.md). Its handlers receive the real
-    /// text.
+    /// text; `revealed` shows it, and `revealable: true` gives the field its
+    /// own show/hide toggle, whose flips reach `onToggle`
+    /// (docs/reveal-plan.md V1, V2).
     @discardableResult
     public func secureField(
         onChange: ((KayaAppTx, String) throws -> Void)? = nil,
         onSubmit: ((KayaAppTx, String) throws -> Void)? = nil,
         contentType: KayaContentType? = nil,
+        revealed: Bool? = nil,
+        revealable: Bool = false,
+        onToggle: ((KayaAppTx, Bool) throws -> Void)? = nil,
         grow: Double? = nil
     ) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_SECURE_FIELD))
         if let onChange { app.onChange(w, onChange) }
         if let onSubmit { app.onSubmitted(w, onSubmit) }
+        if let onToggle { app.onToggle(w, onToggle) }
         if let contentType { setContentType(w, contentType) }
+        if let revealed { setRevealed(w, revealed) }
+        if revealable { setRevealable(w) }
         if let grow { setGrow(w, grow) }
         return w
     }
@@ -6339,6 +6361,26 @@ public final class KayaTpl {
         tx.tx.setContentType(n.id, contentType.wire)
     }
 
+    /// Whether every stamped copy of this secure field shows its text
+    /// (KayaAppTx.setRevealed): a constant, a signal, or the row's own field.
+    public func setRevealed(_ n: KayaNodeHandle, _ on: Bool) {
+        tx.tx.setRevealed(n.id, on)
+    }
+
+    public func setRevealed(_ n: KayaNodeHandle, _ s: KayaSignal) {
+        tx.tx.bindRevealed(n.id, s.id)
+    }
+
+    public func setRevealed(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<Bool>) {
+        tx.tx.bindRevealedElement(n.id, level: level, field: f.index)
+    }
+
+    /// Every stamped copy carries its own show/hide toggle; each flip
+    /// reaches `onToggle` with the copy's keys (KayaAppTx.setRevealable).
+    public func setRevealable(_ n: KayaNodeHandle) {
+        tx.tx.setRevealable(n.id, true)
+    }
+
     /// What ACTIVATING a stamped copy does. Write a VERB PHRASE.
     /// Activation kinds only, refused by the ROOT at DECLARE time.
     public func setA11yHint(_ n: KayaNodeHandle, _ hint: String) {
@@ -6809,22 +6851,28 @@ public final class KayaTpl {
     }
 
     /// A secure field per stamped copy, with search's four spellings
-    /// (docs/secure-entry-plan.md P9).
+    /// (docs/secure-entry-plan.md P9); `onToggle` hears a revealable
+    /// copy's own toggle, keys first (docs/reveal-plan.md V2).
     @discardableResult
     public func secureField(
         onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil,
-        onSubmit: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+        onSubmit: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil,
+        onToggle: ((KayaAppTx, [KayaValue], Bool) throws -> Void)? = nil
     ) -> KayaNodeHandle {
-        textFieldOf(UInt32(KAYA_KIND_SECURE_FIELD), onChange, onSubmit)
+        let n = textFieldOf(UInt32(KAYA_KIND_SECURE_FIELD), onChange, onSubmit)
+        if let onToggle { tx.app.onToggle(n, onToggle) }
+        return n
     }
 
     @discardableResult
     public func secureField(
         _ text: String,
         onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil,
-        onSubmit: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+        onSubmit: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil,
+        onToggle: ((KayaAppTx, [KayaValue], Bool) throws -> Void)? = nil
     ) -> KayaNodeHandle {
         let n = textFieldOf(UInt32(KAYA_KIND_SECURE_FIELD), onChange, onSubmit)
+        if let onToggle { tx.app.onToggle(n, onToggle) }
         setText(n, text)
         return n
     }
@@ -6833,9 +6881,11 @@ public final class KayaTpl {
     public func secureField(
         _ s: KayaSignal,
         onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil,
-        onSubmit: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+        onSubmit: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil,
+        onToggle: ((KayaAppTx, [KayaValue], Bool) throws -> Void)? = nil
     ) -> KayaNodeHandle {
         let n = textFieldOf(UInt32(KAYA_KIND_SECURE_FIELD), onChange, onSubmit)
+        if let onToggle { tx.app.onToggle(n, onToggle) }
         tx.tx.bindText(n.id, s.id)
         return n
     }
@@ -6844,9 +6894,11 @@ public final class KayaTpl {
     public func secureField(
         _ f: KayaField<String>,
         onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil,
-        onSubmit: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+        onSubmit: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil,
+        onToggle: ((KayaAppTx, [KayaValue], Bool) throws -> Void)? = nil
     ) -> KayaNodeHandle {
         let n = textFieldOf(UInt32(KAYA_KIND_SECURE_FIELD), onChange, onSubmit)
+        if let onToggle { tx.app.onToggle(n, onToggle) }
         bindTextField(n, f)
         return n
     }

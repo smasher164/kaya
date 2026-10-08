@@ -43,6 +43,112 @@ pub(super) fn password_entry() -> gtk4::PasswordEntry {
     entry
 }
 
+/// docs/reveal-plan.md V2 and V5: the user's flip reaches the app as `toggled`,
+/// and a shown password leaves by no route the masked one refuses — the
+/// clipboard, the PRIMARY selection, a drag.
+pub(super) fn reveal_doors(
+    entry: &gtk4::PasswordEntry,
+    tag: &[u8],
+    sink: &crate::protocol::OccSink,
+    quiet: &std::rc::Rc<std::cell::Cell<bool>>,
+) {
+    let Some(text) = inner_text(entry) else { return };
+    let (tag, sink, quiet) = (tag.to_vec(), sink.clone(), quiet.clone());
+    text.connect_notify_local(Some("visibility"), move |t, _| {
+        if !quiet.get() {
+            sink.send_toggle_tag(&tag, gtk4::Text::is_visible(t));
+        }
+    });
+    for signal in ["copy-clipboard", "cut-clipboard"] {
+        text.connect_local(signal, false, move |values| {
+            let t = values.first()?.get::<gtk4::Text>().ok()?;
+            if gtk4::Text::is_visible(&t) {
+                t.stop_signal_emission_by_name(signal);
+                t.error_bell();
+            }
+            None
+        });
+    }
+    let press = gtk4::GestureClick::new();
+    press.set_button(gtk4::gdk::BUTTON_PRIMARY);
+    press.set_propagation_phase(gtk4::PropagationPhase::Capture);
+    press.connect_pressed(|g, n, _, _| {
+        let Some(t) = g.widget().and_then(|w| w.downcast::<gtk4::Text>().ok()) else { return };
+        let extending = g.current_event_state().contains(gtk4::gdk::ModifierType::SHIFT_MASK);
+        if n == 1 && !extending && gtk4::Text::is_visible(&t) {
+            if let Some((start, _)) = gtk4::prelude::EditableExt::selection_bounds(&t) {
+                gtk4::prelude::EditableExt::select_region(&t, start, start);
+            }
+        }
+    });
+    text.add_controller(press);
+    let weak = text.downgrade();
+    text.primary_clipboard().connect_changed(move |clipboard| {
+        let Some(t) = weak.upgrade() else { return };
+        let Some(content) = clipboard.content() else { return };
+        if clipboard.is_local() && t.has_focus() && content.type_().name() == "GtkTextContent" {
+            refuse_while_shown(&content, &t);
+        }
+    });
+}
+
+thread_local! {
+    static SELECTIONS: std::cell::RefCell<Vec<(usize, glib::WeakRef<gtk4::Text>)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+type GetValue = unsafe extern "C" fn(
+    *mut gtk4::gdk::ffi::GdkContentProvider,
+    *mut gobject_ffi::GValue,
+    *mut *mut glib::ffi::GError,
+) -> glib::ffi::gboolean;
+
+static TEXT_GET_VALUE: OnceLock<GetValue> = OnceLock::new();
+
+fn refuse_while_shown(content: &gtk4::gdk::ContentProvider, text: &gtk4::Text) {
+    let at = content.as_ptr() as usize;
+    SELECTIONS.with(|s| {
+        let mut s = s.borrow_mut();
+        s.retain(|(_, w)| w.upgrade().is_some());
+        if !s.iter().any(|(p, _)| *p == at) {
+            s.push((at, text.downgrade()));
+        }
+    });
+    TEXT_GET_VALUE.get_or_init(|| unsafe {
+        let class = gobject_ffi::g_type_class_peek(content.type_().into_glib())
+            as *mut gtk4::gdk::ffi::GdkContentProviderClass;
+        let original = (*class).get_value.expect("GtkTextContent reads its selection");
+        (*class).get_value = Some(selection_value);
+        original
+    });
+}
+
+unsafe extern "C" fn selection_value(
+    provider: *mut gtk4::gdk::ffi::GdkContentProvider,
+    value: *mut gobject_ffi::GValue,
+    error: *mut *mut glib::ffi::GError,
+) -> glib::ffi::gboolean {
+    let shown = SELECTIONS.with(|s| {
+        s.borrow()
+            .iter()
+            .find(|(p, _)| *p == provider as usize)
+            .and_then(|(_, w)| w.upgrade())
+            .is_some_and(|t| gtk4::Text::is_visible(&t))
+    });
+    unsafe {
+        if shown {
+            glib::ffi::g_set_error_literal(
+                error,
+                gtk4::gio::ffi::g_io_error_quark(),
+                gtk4::gio::ffi::G_IO_ERROR_PERMISSION_DENIED,
+                c"a revealed secure field's selection is not offered".as_ptr(),
+            );
+            return glib::ffi::GFALSE;
+        }
+        (TEXT_GET_VALUE.get().expect("patched before any read"))(provider, value, error)
+    }
+}
+
 fn inner_text(entry: &gtk4::PasswordEntry) -> Option<gtk4::Text> {
     gtk4::prelude::EditableExt::delegate(entry).and_then(|d| d.downcast::<gtk4::Text>().ok())
 }

@@ -27,10 +27,10 @@ from the vendors' documentation. The breadth measures what is marked so.
 | | how the text is shown | the platform's own toggle | copy and cut while shown | what assistive technology reads while shown |
 |---|---|---|---|---|
 | macOS | nothing: SecureField, NSSecureTextField and NSSecureTextFieldCell have no reveal (only `echosBullets`); the common answer is a plain field over the same text | none | a SwiftUI TextField's editor offers Cut, Copy, Look Up, Translate, Search with Google, Share, Writing Tools and Speech over the shown text, and keeps an undo stack (MEASURED); NSSecureTextView's menu is Cut and Copy disabled, Paste, Delete, Select All (MEASURED) | a plain field: AXTextField with no AXSecureTextField subrole, AXValue the text, AXNumberOfCharacters set (MEASURED) |
-| iOS | nothing: SecureField has none; UIKit's answer is `isSecureTextEntry = false` on the same UITextField, which apps know for clearing the text on the next edit after it is turned back on; SwiftUI's is a TextField swapped in | none | a plain UITextField's edit menu offers Cut, Copy, Share, Look Up, Translate, Writing Tools | a plain text field: the value is the text (to measure at breadth) |
-| GTK 4 | `gtk_text_set_visibility(TRUE)` on the GtkPasswordEntry's own GtkText: the same control, caret and selection kept | `show-peek-icon`: a GtkImage (`view-reveal-symbolic` / `view-conceal-symbolic`, tooltip "Show Text" / "Hide Text") whose click gesture toggles on RELEASE; it is an image with a gesture, not a button, so no keyboard reaches it; turning the icon off also hides the text | GtkText's copy and cut refuse with an error bell only while `visibility` is false; shown, both work; undo history is enabled while shown unless `enable-undo` is off (kaya's arm turns it off) | kaya's subtype answers AT-SPI with its GtkText's display text, which while shown is the text; the role stays password text (to measure at breadth) |
-| WinUI 3 | `PasswordRevealMode`: `Peek` (the default) shows the reveal button while the box has text and focus, and shows the text only while it is HELD; `Visible` shows it; `Hidden` never | the template's `RevealButton`, a ToggleButton (glyph U+F78D, 30px wide, collapsed outside the ButtonVisible state); press-and-hold, never a toggle, and nothing tells the app | a PasswordBox has no copy or cut in any mode | UIA: an Edit with `IsPassword`, no Value pattern (measured at the secure field's breadth); what Narrator reads in `Visible` is to measure |
-| Android, Compose | `TextObfuscationMode.Visible` on BasicSecureTextField: the same field, no codepoint transformation | none in foundation; Material's guidance is a trailing icon button (Icons.Filled.Visibility / VisibilityOff, both in material-icons-extended, already a dependency) the app draws | refused in every mode: BasicSecureTextField wraps its content in `DisableCutCopy` unconditionally (bytecode, 1.11.4) | the `password()` semantics stays; kaya overrides EditableText with U+2022 per character (docs/traps.md), which must follow the reveal (to measure at breadth) |
+| iOS | nothing: SecureField has none; UIKit's answer is `isSecureTextEntry = false` on the same UITextField, which apps know for clearing the text on the next edit after it is turned back on; SwiftUI's is a TextField swapped in | none | a plain UITextField's edit menu offers Cut, Copy, Share, Look Up, Translate, Writing Tools | a plain text field: the accessibilityValue is the text (MEASURED) |
+| GTK 4 | `gtk_text_set_visibility(TRUE)` on the GtkPasswordEntry's own GtkText: the same control, caret and selection kept | `show-peek-icon`: a GtkImage (`view-reveal-symbolic` / `view-conceal-symbolic`, tooltip "Show Text" / "Hide Text") whose click gesture toggles on RELEASE; it is an image with a gesture, not a button, so no keyboard reaches it; turning the icon off also hides the text | GtkText's copy and cut refuse with an error bell only while `visibility` is false; shown, both work; undo history is enabled while shown unless `enable-undo` is off (kaya's arm turns it off) | kaya's subtype answers AT-SPI with its GtkText's display text, which while shown is the text; the role stays password text (MEASURED, GTK 4.24) |
+| WinUI 3 | `PasswordRevealMode`: `Peek` (the default) shows the reveal button while the box has text and focus, and shows the text only while it is HELD; `Visible` shows it; `Hidden` never | the template's `RevealButton`, a ToggleButton (glyph U+F78D, 30px wide, collapsed outside the ButtonVisible state); press-and-hold, never a toggle, and nothing tells the app | a PasswordBox has no copy or cut in any mode | UIA: an Edit with `IsPassword`, no Value pattern (measured at the secure field's breadth); in `Visible` the peer still says IsPassword with no Value pattern, so UIA reads none of the shown text (MEASURED) |
+| Android, Compose | `TextObfuscationMode.Visible` on BasicSecureTextField: the same field, no codepoint transformation | none in foundation; Material's guidance is a trailing icon button (Icons.Filled.Visibility / VisibilityOff, both in material-icons-extended, already a dependency) the app draws | refused in every mode: BasicSecureTextField wraps its content in `DisableCutCopy` unconditionally (bytecode, 1.11.4) | the `password()` semantics stays; kaya overrides EditableText with U+2022 per character (docs/traps.md) only while masked; shown, the node info's text is the text, `isPassword` true, no copy or cut action (MEASURED) |
 
 Four facts decide the design:
 
@@ -127,8 +127,9 @@ synced pasteboard would otherwise keep a password the user only meant to
 check. On the mac the shown field's editor refuses what NSSecureTextView
 refuses, item for item: Cut and Copy disabled, the context menu NSSecureTextView's
 own (Paste, Delete, Select All, MEASURED identical), no Services, no Writing
-Tools, no drag out and no undo stack. The iOS field allows Paste, Select,
-Select All and Delete alone (`canPerformAction`) with Writing Tools off. GTK's arm blocks the GtkText's copy and cut
+Tools, no drag out and no undo stack. The iOS field allows Paste,
+Select All and Delete alone (`canPerformAction`, the masked field's menu, MEASURED),
+with no undo manager and Writing Tools off. GTK's arm blocks the GtkText's copy and cut
 while shown; WinUI and Compose refuse natively. Paste keeps working (a password
 manager pastes).
 
@@ -173,10 +174,10 @@ stubs and iOS's unwired declaration like every depth slice before it (§5).
 | backend | revealed | revealable | the user's flip | unmasked read | copy and cut while shown |
 |---|---|---|---|---|---|
 | SwiftUI, macOS (BUILT) | SecureField swapped for `KayaRevealedField`, an NSTextField whose cell's field editor is `KayaRevealEditor` | an overlay Button at the trailing edge, SF `eye` / `eye.slash` | the button calls `kayaRevealToggle`, which swaps and emits `toggled` | AXValue of the field's element through `kayaUnmaskedCount` | refused by KayaRevealEditor (validation, `cut:`/`copy:`, menu, pasteboard types, Services, Writing Tools, undo) |
-| SwiftUI, iOS (BUILT, legs unwired) | SecureField swapped for `KayaRevealUITextField` in a UIViewRepresentable | as macOS | as macOS | the element's accessibilityValue, zero when `hasText` is false | `canPerformAction` allows paste, select, selectAll and delete alone; Writing Tools off |
-| GTK 4 | `gtk_text_set_visibility` on the delegate GtkText, under the quiet guard | `show-peek-icon`, or a kaya button over the same toggle if the image's keyboard gap is ruled out (V7) | `notify::visibility` outside the quiet guard emits `toggled` | the AT-SPI text through `harness::unmasked_count` | `copy-clipboard` and `cut-clipboard` stopped on the GtkText while shown |
-| WinUI 3 | `PasswordRevealMode::Visible` / `Hidden` | the template's `RevealButton` (or a ToggleButton in its style) driven as a TOGGLE, since Peek is press-and-hold | the button's Click outside the quiet guard | the box's own `PasswordRevealMode` must be Visible, then its Password length (no Value pattern) | refused natively |
-| Compose | `TextObfuscationMode.Visible`, else RevealLastTyped; the EditableText override shows the text while shown | Material trailing IconButton (Visibility / VisibilityOff) in the decorator | the button's onClick emits `toggled` | the node info's text through the unmasked rule | refused natively (`DisableCutCopy`) |
+| SwiftUI, iOS (BUILT) | SecureField swapped for `KayaRevealUITextField` in a UIViewRepresentable | as macOS | as macOS | the element's accessibilityValue, zero when `hasText` is false | `canPerformAction` allows paste, selectAll and delete alone, the masked field's menu (MEASURED); no `undoManager`; Writing Tools off |
+| GTK 4 (BUILT) | `gtk_text_set_visibility` on the delegate GtkText, under the quiet guard | `show-peek-icon`, the visibility put back after it since turning the icon off hides the text; the image's keyboard gap kept (docs/deferred.md) | `notify::visibility` outside the quiet guard emits `toggled`; the harness emits the icon gesture's own `released` | the AT-SPI text through `harness::unmasked_count` | `copy-clipboard` and `cut-clipboard` stopped while shown, the PRIMARY selection's value refused for a shown field, a shown selection collapsed before a press can drag it (docs/traps.md) |
+| WinUI 3 (BUILT) | `PasswordRevealMode::Visible` / `Hidden`, never Peek | the template's `RevealButton`, given a local Visible while `revealable`, its IsChecked mirroring the mode | the button's Checked/Unchecked, taken as a flip only when it disagrees with the box's mode (docs/traps.md, the echo); the harness takes the button peer's Toggle | the box's own `PasswordRevealMode` must be Visible, then its Password length (no Value pattern); `expect_masked` refuses a Visible box | refused natively |
+| Compose (BUILT) | `TextObfuscationMode.Visible`, else RevealLastTyped; kaya's EditableText override only while masked | Material trailing IconButton (Visibility / VisibilityOff) in the decorator, never focusable | the button's onClick takes `kayaRevealToggle`, which emits `toggled`; the harness's `toggle` invokes the eye's own click action | the node info's text through the unmasked rule | refused natively (`DisableCutCopy`) |
 
 The Rust Stage methods are `unmasked_len(target) -> Result<usize, MaskRead>`
 and `toggle_reveal(target, on)`, both without defaults; `MaskRead::Masked`
@@ -264,8 +265,24 @@ check-sugar-surface is red by design until the eight bindings take the props:
   secrets in the leg log and the verb trace; the shown view cut (`if false`, 1
   substitution) read "the platform masks 6 of the revealed secure field's
   characters". Both restored from saved copies, sha256 checked.
-- To measure at breadth: GTK's AT-SPI role and text while shown; WinUI's
-  Narrator in `Visible` and whether the template's RevealButton can be driven
-  as a toggle; Compose's node info under `Visible` with kaya's override
-  following it; iOS's accessibilityValue for the shown field and whether the
-  swap keeps the keyboard up.
+- MEASURED 2026-10-08 (GTK 4.24, the linux lane, x11 and wayland): shown, the
+  node's role stays password text (`field/Password`) and its Text interface
+  answers the text (`unmasked 6`, `unmasked 12`); with the shown arm's
+  `set_visibility` cut (1 substitution) the leg read "the platform masks 12
+  of the revealed secure field's characters" on both protocols. Shown, GTK
+  hands the password to PRIMARY, Ctrl+C and Ctrl+X; with kaya's guards all
+  three read back empty (docs/traps.md).
+- MEASURED 2026-10-08 (WinUI, the lane VM): a `Visible` PasswordBox's peer
+  says IsPassword, control type Edit, no Value pattern; the box moves its own
+  RevealButton's IsChecked when its mode changes (docs/traps.md, the echo).
+- MEASURED 2026-10-08 (Compose foundation 1.11.4, API 35): shown, the node
+  info keeps `isPassword`, carries the text (an empty field's is empty) and no
+  copy or cut action; the override kept while shown (1 substitution) read "the
+  platform masks 6 of the revealed secure field's characters" (docs/traps.md).
+- MEASURED 2026-10-08 (iOS 26.5 simulator): the eye was reached twice by the
+  toggle walk until it deduped by frame; the masked field's menu is Paste and
+  Select All with an undo stack, and the shown field now answers the same with
+  none; XCTest logs a plain element's typed text, so a shown field's
+  `type_secret` keys go in-process (watched: the driver's plain route made the
+  secure scan refuse two secrets); one keyboard at the first typing after the
+  swap (docs/traps.md).

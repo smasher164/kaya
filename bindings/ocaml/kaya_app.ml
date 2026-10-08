@@ -1882,6 +1882,14 @@ let set_placeholder (Widget id) value =
 let set_content_type (Widget id) c =
   emit (the_tx ()) (Kaya_wire.tx_set_content_type id (Int64.of_int (Content_type.wire c)))
 
+(* Whether a secure field shows its text (docs/reveal-plan.md V1); the
+   write never echoes as a toggle. *)
+let set_revealed (Widget id) on = emit (the_tx ()) (Kaya_wire.tx_set_revealed id on)
+
+(* Gives a secure field its own show/hide toggle; each flip reaches its
+   [~on_toggle] (docs/reveal-plan.md V1, V2). *)
+let set_revealable (Widget id) = emit (the_tx ()) (Kaya_wire.tx_set_revealable id true)
+
 let bind_placeholder (Widget id) (s : string signal) =
   emit (the_tx ()) (Kaya_wire.tx_bind_placeholder id s.sig_id)
 
@@ -2605,8 +2613,11 @@ let search ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help
   w
 
 (* A secure field: the entry's contract with the platform masking what is
-   typed (docs/secure-entry-plan.md). The handlers receive the real text. *)
-let secure_field ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?placeholder ?placeholder_bind ?content_type ?on_change ?on_submit () =
+   typed (docs/secure-entry-plan.md). The handlers receive the real text;
+   [~revealed] shows it and [~revealable:true] gives the field its own
+   show/hide toggle, whose flips reach [~on_toggle] (docs/reveal-plan.md
+   V1, V2). *)
+let secure_field ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?placeholder ?placeholder_bind ?content_type ?revealed ?(revealable = false) ?on_change ?on_submit ?on_toggle () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_secure_field in
   Option.iter (fun g -> set_grow w g) grow;
@@ -2615,6 +2626,13 @@ let secure_field ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind
   Option.iter (fun v -> set_placeholder w v) placeholder;
   Option.iter (fun s -> bind_placeholder w s) placeholder_bind;
   Option.iter (fun c -> set_content_type w c) content_type;
+  Option.iter (fun on -> set_revealed w on) revealed;
+  if revealable then set_revealable w;
+  (match on_toggle with
+  | Some handler ->
+      let (Widget id) = w in
+      Hashtbl.replace tx.app.widget_toggles id handler
+  | None -> ());
   (match on_change with
   | Some handler ->
       let (Widget id) = w in
@@ -5110,6 +5128,20 @@ module Tpl = struct
     let set_content_type (Node id) c =
       emit (the_tx ()) (Kaya_wire.tx_set_content_type id (Int64.of_int (Content_type.wire c)))
 
+    (* Whether every stamped copy of this secure field shows its text (the
+       live [set_revealed]); [bind_revealed_field] reads it from the row. *)
+    let set_revealed (Node id) on = emit (the_tx ()) (Kaya_wire.tx_set_revealed id on)
+
+    let bind_revealed (Node id) (s : bool signal) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_revealed id s.sig_id)
+
+    let bind_revealed_field ?(level = 0) (Node id) (fd : (_, bool) field) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_revealed_element ~level ~field:fd.fd_index id)
+
+    (* Every stamped copy carries its own show/hide toggle (the live
+       [set_revealable]). *)
+    let set_revealable (Node id) = emit (the_tx ()) (Kaya_wire.tx_set_revealable id true)
+
     (* Bind a stamped rich textarea's whole document to one field of the
        element; a (_, document) field only. The core refuses [document]
        without [rich] before it, which is why [Tpl.textarea] sends the
@@ -5442,11 +5474,15 @@ module Tpl = struct
     | None -> ());
     n
 
-  (* A secure field per stamped copy (docs/secure-entry-plan.md P9). *)
+  (* A secure field per stamped copy (docs/secure-entry-plan.md P9);
+     [~revealed], [~revealed_bind] or [~revealed_field] shows each copy's
+     text, and [~revealable:true]'s flips reach [~on_toggle] with the copy's
+     keys (docs/reveal-plan.md V1, V2). *)
   let secure_field ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?placeholder
-      ?placeholder_bind ?placeholder_field ?content_type ?accepts ?text ?bind ?bind_field
-      ?(level = 0) ?(a11y_level = level) ?on_change ?on_submit () =
+      ?placeholder_bind ?placeholder_field ?content_type ?revealed ?revealed_bind
+      ?revealed_field ?(revealable = false) ?accepts ?text ?bind ?bind_field
+      ?(level = 0) ?(a11y_level = level) ?on_change ?on_submit ?on_toggle () =
     let n = Floor.widget Kaya_wire.kind_secure_field in
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Option.iter (fun v -> Floor.set_fill n v) fill;
@@ -5456,6 +5492,16 @@ module Tpl = struct
     Option.iter (fun s -> Floor.bind_placeholder n s) placeholder_bind;
     Option.iter (fun fd -> Floor.bind_placeholder_field ~level n fd) placeholder_field;
     Option.iter (fun c -> Floor.set_content_type n c) content_type;
+    Option.iter (fun on -> Floor.set_revealed n on) revealed;
+    Option.iter (fun sg -> Floor.bind_revealed n sg) revealed_bind;
+    Option.iter (fun fd -> Floor.bind_revealed_field ~level n fd) revealed_field;
+    if revealable then Floor.set_revealable n;
+    (match on_toggle with
+    | Some handler ->
+        let (Node id) = n in
+        Hashtbl.replace (the_tx ()).app.node_toggles id (fun keys on ->
+            handler (List.map key_of_wire keys) on)
+    | None -> ());
     Option.iter (fun kinds -> Floor.set_accepts n kinds) accepts;
     Option.iter (fun x -> Floor.set_text n x) text;
     Option.iter (fun s -> Floor.bind_text n s) bind;

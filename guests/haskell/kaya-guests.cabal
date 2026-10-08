@@ -350,6 +350,11 @@ executable autofill
   main-is: autofill.hs
   build-depends: kaya-guests
 
+executable reveal
+  import: shared
+  main-is: reveal.hs
+  build-depends: kaya-guests
+
 executable scrollto
   import: shared
   main-is: scrollto.hs

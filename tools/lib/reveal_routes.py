@@ -22,11 +22,85 @@ STUBBED = {
     "crates/kaya/src/winui/mod.rs": 'depth_stub("reveal")',
     "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt": 'depthStub("reveal")',
 }
-BACKENDS = {SWIFT: "the SwiftUI arm"}
+GTK = "crates/kaya/src/gtk.rs"
+GTK_SECURE = "crates/kaya/src/gtk/secure_text.rs"
+WINUI = "crates/kaya/src/winui/mod.rs"
+COMPOSE = "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
+BACKENDS = {SWIFT: "the SwiftUI arm", GTK: "the GTK arm", WINUI: "the WinUI arm", COMPOSE: "the Compose arm"}
+# (label, file, the block's opener, what it must hold, what it may not)
+ARMS = [
+    ("GTK: the user's flip emits outside the quiet guard", GTK_SECURE, "pub(super) fn reveal_doors(",
+     ['connect_notify_local(Some("visibility"), move |t, _| {\n        if !quiet.get() {\n'
+      "            sink.send_toggle_tag(&tag, gtk4::Text::is_visible(t));"], []),
+    ("GTK: copy and cut refused while shown", GTK_SECURE, "pub(super) fn reveal_doors(",
+     ['for signal in ["copy-clipboard", "cut-clipboard"]', "t.stop_signal_emission_by_name(signal);"], []),
+    ("GTK: no drag out of a shown selection", GTK_SECURE, "pub(super) fn reveal_doors(",
+     ["press.set_propagation_phase(gtk4::PropagationPhase::Capture);",
+      "gtk4::prelude::EditableExt::select_region(&t, start, start);", "text.add_controller(press);"], []),
+    ("GTK: the PRIMARY selection refuses a shown password", GTK_SECURE, "unsafe extern \"C\" fn selection_value(",
+     ["if shown {", "return glib::ffi::GFALSE;"], []),
+    ("GTK: the PRIMARY refusal is installed", GTK_SECURE, "fn refuse_while_shown(",
+     ["(*class).get_value = Some(selection_value);"], []),
+    ("GTK: every secure field takes the doors", GTK, "WidgetKind::SecureField => {",
+     ["secure_text::reveal_doors(&field, &tag, &core.occurrences, &quiet);"], []),
+    ("GTK: the app's write is quiet", GTK, "(NativeWidget::Secure(field), Prop::Revealed, Value::Bool(on)) => {",
+     ["core.apply_quiet.set(true);\n                        text.set_visibility(on);"], ["send_toggle_tag"]),
+    ("GTK: the eye's removal keeps `revealed`", GTK,
+     "(NativeWidget::Secure(field), Prop::Revealable, Value::Bool(on)) => {",
+     ["field.set_show_peek_icon(on);\n                        text.set_visibility(shown);"], ["send_toggle_tag"]),
+    ("GTK: the harness's toggle takes the peek icon's own release", GTK, "fn toggle_reveal(",
+     ['gesture.emit_by_name::<()>("released", &[&1i32, &x, &y]);'], ["set_visibility"]),
+    ("GTK: the unmasked read is the bus's", GTK, "fn unmasked_len(",
+     ["atspi_text_of(want, rank)", "crate::harness::unmasked_count(&shown)"],
+     ["is_visible", "EditableExt::text"]),
+    ("WinUI: the button's flip emits unless it agrees with the box's mode", WINUI, "fn dress_reveal_button(",
+     ["let flip = (field.PasswordRevealMode()? == PasswordRevealMode::Visible) != on;",
+      "if !flip {\n                    return Ok(());",
+      "field.SetPasswordRevealMode(mode)?;\n                door.sink.send_toggle_tag(&door.tag, on);",
+      "button.Checked(&flipped)?;", "button.Unchecked(&flipped)?;"], []),
+    ("WinUI: the app's write moves the button after the mode", WINUI, "fn dress_reveal_button(",
+     ["let shown = field.PasswordRevealMode()? == PasswordRevealMode::Visible;",
+      "if held != shown {\n        button.SetIsChecked("], []),
+    ("WinUI: every secure field dresses its button", WINUI, "WidgetKind::SecureField => {",
+     ["field.SetPasswordRevealMode(PasswordRevealMode::Hidden)?;",
+      "dress_reveal_button(&dressed, &dressing)"], ["PasswordRevealMode::Peek"]),
+    ("WinUI: the app's write never emits", WINUI,
+     "(NativeWidget::Secure(field), Prop::Revealed, Value::Bool(on)) => {",
+     ["field.SetPasswordRevealMode(mode)?;"], ["send_toggle_tag"]),
+    ("WinUI: the harness's toggle takes the button's Toggle pattern", WINUI, "fn toggle_reveal(",
+     ["peer.cast::<IToggleProvider>()?.Toggle()?;"], ["SetPasswordRevealMode", "SetIsChecked"]),
+    ("WinUI: the unmasked read is the box's own mode", WINUI, "fn unmasked_len(",
+     ["crate::harness::unmasked_count(&shown.to_string())",
+      "if field.PasswordRevealMode()? != PasswordRevealMode::Visible {\n"
+      "                return Ok(Err(MaskRead::Masked(length)));"], ["secure_reveal", "revealable"]),
+    ("WinUI: the masked read refuses a shown box", WINUI, "fn masked_len(",
+     ["if field.PasswordRevealMode()? == PasswordRevealMode::Visible {\n"
+      "                return Ok(Err(MaskRead::Unmasked("], []),
+    ("Compose: the door emits", COMPOSE, "internal fun kayaRevealToggle(",
+     ["node.revealed = on\n    KayaPresent.emitToggled(node.tag, on)"], []),
+    ("Compose: the eye takes the door and leaves the focus", COMPOSE, "private fun KayaSecureField(",
+     ["onClick = { kayaRevealToggle(node, !node.revealed) },\n"
+      "                            modifier = Modifier.focusProperties { canFocus = false },",
+      "contentDescription = kayaRevealName(revealed),", "trailingIcon = eye,"], ["emitToggled(node.tag, on)"]),
+    ("Compose: the harness's toggle presses the eye's own click", COMPOSE, '"toggle" -> {',
+     ['kayaRevealPress(activity, parts[1], parts[2] == "on")'], []),
+    ("Compose: the press finds the eye inside the field and takes its action", COMPOSE,
+     "private fun kayaRevealPress(",
+     ["frame.contains(n.boundsInRoot.center)", "eye.config[SemanticsActions.OnClick].action"],
+     ["kayaRevealToggle", "revealed ="]),
+    ("Compose: the unmasked read is the node info's", COMPOSE, "private fun kayaUnmaskedRead(",
+     ['kayaUnmaskedCount(info.text?.toString() ?: "")'], ["textState", "field.text", ".revealed", "kayaTextLayouts"]),
+    ("Compose: expect_unmasked reads through it", COMPOSE, '"expect_unmasked" -> {',
+     ["kayaUnmaskedRead(activity, parts[1])"], []),
+]
+# The app's write is configuration (V2): it sets the state and never reaches
+# the door, whose callers are the eye alone.
+COMPOSE_WRITE = "PROP_REVEALED -> KayaSceneModel.nodes[id]!!.revealed = readBool(b)"
 
 MASKED_SENTENCE = {
     HARNESS: "the platform masks {n} of the revealed secure field's characters",
     SWIFT: "the platform masks \\(masked) of the revealed secure field's characters",
+    COMPOSE: "the platform masks $masked of the revealed secure field's characters",
 }
 # The one door and who may call it: the user's routes emit, the app's never.
 DOOR = [
@@ -43,6 +117,27 @@ CALLS = [
      "DispatchQueue.main.sync(execute: { kayaRevealSettled(revealNode) })"),
     ("the app's write swaps without a toggle",
      "case (propRevealed, valueBool):\n                    kayaRevealSwap(kayaScene.nodes[id]!, raw[body + 24] != 0)"),
+]
+# iOS (measured 2026-10-08, docs/traps.md): the shown field's menu is the masked
+# one's, Paste and Select All, it banks no undo, and type_secret's keys reach it
+# in-process at its own first responder, since XCTest redacts only what it types
+# through a secure element; a masked field's keys stay on that redacted route.
+ARMS += [
+    ("iOS: the shown field refuses select and keeps no undo stack", SWIFT,
+     "final class KayaRevealUITextField: UITextField {", ["override var undoManager: UndoManager? { nil }"],
+     ["UIResponderStandardEditActions.select(_:)", "UIResponderStandardEditActions.copy(",
+      "UIResponderStandardEditActions.cut("]),
+    ("iOS: Writing Tools off on the shown field", SWIFT, "struct KayaRevealedField: UIViewRepresentable {",
+     ["if #available(iOS 18.0, *) { view.writingToolsBehavior = .none }"], []),
+    ("iOS: a shown field's keys reach its own first responder", SWIFT, "private func kayaTypeIntoRevealed(",
+     ["let node = kayaScene.secureFields.first(where: { $0.id == id }), node.revealed",
+      "field.isFirstResponder", "(field.delegate as? KayaRevealedField.Coordinator)?.node === node",
+      "responder.insertText(String(character))"], ["kayaTypeThroughHost"]),
+]
+CALLS += [
+    ("type_secret asks the shown route first", "kayaTypeIntoRevealed(secret.expose)"),
+    ("a masked field's keys stay on XCTest's redacted route",
+     'kayaTypeThroughHost(secret.expose, verb: "type_secure_b64")'),
 ]
 # The revealed editor on the mac refuses what NSSecureTextView refuses
 # (measured, docs/reveal-plan.md §0), and the iOS field what a secure
@@ -65,7 +160,6 @@ MAC_CELL = ("final class KayaRevealCell: NSTextFieldCell {", [
 ])
 IOS_FIELD = ("final class KayaRevealUITextField: UITextField {", [
     "#selector(UIResponderStandardEditActions.paste(_:)),"
-    "#selector(UIResponderStandardEditActions.select(_:)),"
     "#selector(UIResponderStandardEditActions.selectAll(_:)),"
     "#selector(UIResponderStandardEditActions.delete(_:)),]",
 ])
@@ -97,7 +191,8 @@ def blocks(text, opener):
     return out
 
 
-def findings(sources):
+def findings(sources, backends=None):
+    backends = BACKENDS if backends is None else backends
     out = []
     swift = sources[SWIFT]
     for label, opener, needs in DOOR:
@@ -141,18 +236,36 @@ def findings(sources):
         if spelled not in sources[rel]:
             out.append(f"reveal: {rel} no longer says {MASKED_SENTENCE[HARNESS]!r} for a revealed "
                        f"field the platform still masks")
+    for label, rel, opener, needs, refused in ARMS:
+        body = blocks(sources[rel], opener)
+        if len(body) != 1:
+            out.append(f"reveal: {rel}'s {opener} is found {len(body)} times, wanted once ({label})")
+            continue
+        for need in needs:
+            if flat(need) not in flat(body[0]):
+                out.append(f"reveal: {label} no longer holds — {opener}...}} lacks {need.splitlines()[0]}")
+        for name in refused:
+            if flat(name) in flat(body[0]):
+                out.append(f"reveal: {label} no longer holds — {opener}...}} names {name}")
+    if COMPOSE_WRITE not in sources[COMPOSE]:
+        out.append(f"reveal: {COMPOSE}: the app's `revealed` write no longer sets the state alone "
+                   f"({COMPOSE_WRITE})")
+    callers = sources[COMPOSE].count("kayaRevealToggle(") - 1
+    if callers != 1:
+        out.append(f"reveal: {COMPOSE}: kayaRevealToggle is called from {callers} sites, wanted the eye "
+                   f"alone, so something other than the user's flip emits toggled")
     for rel, stub in STUBBED.items():
-        if stub not in sources[rel] and rel not in BACKENDS:
+        if stub not in sources[rel] and rel not in backends:
             out.append(f"reveal: {rel} no longer stubs the reveal and has no row in "
                        f"tools/lib/reveal_routes.py's BACKENDS")
     return out
 
 
 def run(g):
-    rels = [HARNESS, SWIFT, *STUBBED]
+    rels = [HARNESS, SWIFT, GTK_SECURE, *STUBBED]
     sources = {rel: (ROOT / rel).read_text(encoding="utf-8") for rel in rels}
     still = [rel for rel, stub in STUBBED.items() if stub in sources[rel]]
-    g.counted("reveal clauses held", len(DOOR) + len(CALLS) + 3 + len(HINTS) + 2, floor=12)
+    g.counted("reveal clauses held", len(DOOR) + len(CALLS) + 3 + len(HINTS) + 4 + len(ARMS), floor=43)
     g.counted("reveal backends still stubbed", len(still), floor=0)
     for line in findings(sources):
         g.finding(line)
@@ -188,17 +301,102 @@ def run(g):
          "#selector(UIResponderStandardEditActions.paste(_:)),\n"
          "                #selector(UIResponderStandardEditActions.copy(_:)),\n",
          "KayaRevealUITextField: lost"),
+        ("the iOS field offering Select", SWIFT,
+         r"(#selector\(UIResponderStandardEditActions\.paste\(_:\)\),\n)",
+         r"\1                #selector(UIResponderStandardEditActions.select(_:)),\n",
+         "refuses select and keeps no undo"),
+        ("the iOS field keeping an undo stack", SWIFT,
+         r"\n        override var undoManager: UndoManager\? \{ nil \}", "",
+         "refuses select and keeps no undo"),
+        ("Writing Tools left on in the iOS field", SWIFT,
+         r"if #available\(iOS 18\.0, \*\) \{ view\.writingToolsBehavior = \.none \}", "",
+         "Writing Tools off on the shown field"),
+        ("a masked field's keys typed in-process", SWIFT,
+         r"(\$0\.id == id \}\)), node\.revealed\n", r"\1\n", "keys reach its own first responder"),
+        ("the shown field's keys sent to any field", SWIFT,
+         r"field\.isFirstResponder,\n", "true,\n", "keys reach its own first responder"),
+        ("type_secret on iOS forgetting the shown route", SWIFT,
+         r"kayaTypeIntoRevealed\(secret\.expose\)", "Optional<(typed: Bool, why: String)>.none",
+         "asks the shown route first"),
         ("the mac revealed field dropping its hint", SWIFT,
          r"field\.contentType = kayaContentTypes\(\)", "field.toolTip = kayaContentTypes()",
          "no longer carries its content type"),
         ("the masked sentence reworded in Swift", SWIFT,
          r"of the revealed secure field's characters\"\)", "of the field's characters\")",
          "no longer says"),
-        ("GTK's stub gone with no row", "crates/kaya/src/gtk.rs", r'depth_stub\("reveal"\)',
-         'depth_stub("revealed")', "has no row"),
+        ("GTK: the user's flip swallowed as quiet", GTK_SECURE,
+         r"(move \|t, _\| \{\n        if )!quiet\.get\(\)", r"\1quiet.get()", "emits outside the quiet guard"),
+        ("GTK: a shown password copied", GTK_SECURE, r"\n                t\.stop_signal_emission_by_name\(signal\);", "",
+         "copy and cut refused"),
+        ("GTK: a shown selection dragged out", GTK_SECURE, r"\n    text\.add_controller\(press\);", "",
+         "no drag out"),
+        ("GTK: a shown selection offered as PRIMARY", GTK_SECURE, r"if shown \{", "if false {",
+         "PRIMARY selection refuses"),
+        ("GTK: the PRIMARY refusal never installed", GTK_SECURE,
+         r"\(\*class\)\.get_value = Some\(selection_value\);", "", "PRIMARY refusal is installed"),
+        ("GTK: the app's write echoing", GTK,
+         r"(core\.apply_quiet\.set\(true\);\n                        text\.set_visibility\(on\);\n)"
+         r"                        core\.apply_quiet\.set\(false\);",
+         r"\1                        core.apply_quiet.set(false); core.occurrences.send_toggle_tag(&[], on);",
+         "the app's write is quiet"),
+        ("GTK: the eye's removal hiding the text", GTK,
+         r"\n                        text\.set_visibility\(shown\);", "", "removal keeps"),
+        ("GTK: the harness's toggle writing the visibility", GTK,
+         r'gesture\.emit_by_name::<\(\)>\("released", &\[&1i32, &x, &y\]\);', "text.set_visibility(on);",
+         "peek icon's own release"),
+        ("GTK: the unmasked read counting the model", GTK,
+         r"Some\(shown\) => crate::harness::unmasked_count\(&shown\)",
+         "Some(shown) => crate::harness::unmasked_count(&gtk4::prelude::EditableExt::text(&f))",
+         "the unmasked read is the bus's"),
+        ("WinUI: the button's flip swallowed", WINUI,
+         r"\n                door\.sink\.send_toggle_tag\(&door\.tag, on\);", "", "flip emits"),
+        ("WinUI: every Checked taken as the user's flip", WINUI,
+         r"if !flip \{\n                    return Ok\(\(\)\);\n                \}\n", "", "agrees with the box's mode"),
+        ("WinUI: the box left on Peek", WINUI,
+         r"(let field = PasswordBox::new\(\)\?;\n                    field\.SetPasswordRevealMode\(PasswordRevealMode::)Hidden",
+         r"\1Peek", "dresses its button"),
+        ("WinUI: the app's write echoing", WINUI,
+         r"(Prop::Revealed, Value::Bool\(on\)\) => \{\n.*\n                    field\.SetPasswordRevealMode\(mode\)\?;)",
+         r"\1 core.occurrences.send_toggle_tag(&[], on);", "the app's write never emits"),
+        ("WinUI: the harness's toggle setting the mode", WINUI,
+         r"peer\.cast::<IToggleProvider>\(\)\?\.Toggle\(\)\?;",
+         "field.SetPasswordRevealMode(PasswordRevealMode::Visible)?;", "Toggle pattern"),
+        ("WinUI: the unmasked read trusting the length", WINUI,
+         r"if field\.PasswordRevealMode\(\)\? != PasswordRevealMode::Visible \{", "if false {",
+         "the box's own mode"),
+        ("WinUI: the masked read blind to a shown box", WINUI,
+         r"if field\.PasswordRevealMode\(\)\? == PasswordRevealMode::Visible \{\n                return Ok\(Err\(MaskRead::Unmasked\(",
+         "if false {\n                return Ok(Err(MaskRead::Unmasked(", "refuses a shown box"),
+        ("Compose: the eye flipping the state without the door", COMPOSE,
+         r"onClick = \{ kayaRevealToggle\(node, !node\.revealed\) \},",
+         "onClick = { node.revealed = !node.revealed },", "the eye takes the door"),
+        ("Compose: the eye taking the focus", COMPOSE,
+         r"(onClick = \{ kayaRevealToggle\(node, !node\.revealed\) \},\n)"
+         r"\s*modifier = Modifier\.focusProperties \{ canFocus = false \},\n", r"\1",
+         "leaves the focus"),
+        ("Compose: the door forgetting to emit", COMPOSE,
+         r"(node\.revealed = on\n)    KayaPresent\.emitToggled\(node\.tag, on\)\n", r"\1",
+         "the door emits"),
+        ("Compose: the app's write echoing", COMPOSE,
+         r"PROP_REVEALED -> KayaSceneModel\.nodes\[id\]!!\.revealed = readBool\(b\)",
+         "PROP_REVEALED -> kayaRevealToggle(KayaSceneModel.nodes[id]!!, readBool(b))",
+         "called from 2 sites"),
+        ("Compose: the harness's toggle writing the state", COMPOSE,
+         r"(val press = eye\.config\[SemanticsActions\.OnClick\]\.action\n[^\n]*\n\s*)press\(\)",
+         r"\1kayaRevealToggle(field, on)", "takes its action"),
+        ("Compose: the unmasked read counting the model", COMPOSE,
+         r'kayaUnmaskedCount\(info\.text\?\.toString\(\) \?: ""\)',
+         "kayaUnmaskedCount(field.textState.text.toString())", "the node info's"),
+        ("the masked sentence reworded in Kotlin", COMPOSE,
+         r"masks \$masked of the revealed secure field's characters", "masks $masked of the field's characters",
+         "no longer says"),
     ]
     for label, rel, pattern, repl, want in cuts:
         broken = g.doctor(f"reveal: {label}", sources[rel], pattern, repl,
                           want=len(re.findall(pattern, sources[rel])) or 1)
         g.negative(f"reveal: {label}", lambda rel=rel, broken=broken: findings({**sources, rel: broken}),
                    want=want)
+    for rel in (GTK, WINUI, COMPOSE):
+        g.negative(f"reveal: {BACKENDS[rel]}'s row withheld",
+                   lambda rel=rel: findings(sources, {k: v for k, v in BACKENDS.items() if k != rel}),
+                   want="has no row")

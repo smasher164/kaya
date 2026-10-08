@@ -661,6 +661,29 @@ class _Handle:
         _records().append(wire.tx_set_content_type(self.id, int(ContentType(content))))
         return self
 
+    def revealed(self: H, on: FlagSource = True) -> H:
+        """Whether this secure field shows its text (docs/reveal-plan.md
+        V1): a constant, a Bool Signal, or a row's field. The write never
+        echoes as a toggle. Returns the handle."""
+        if isinstance(on, Signal):
+            _records().append(wire.tx_bind_revealed(self.id, on.id))
+        elif isinstance(on, FieldRef):
+            _records().append(wire.tx_bind_revealed_element(self.id, on._level(), on._index))
+        elif isinstance(on, bool):
+            _records().append(wire.tx_set_revealed(self.id, on))
+        else:
+            raise KayaTypeError(
+                f"kaya: revealed takes a bool, a Signal or one of the row's "
+                f"fields, not {type(on).__name__}")
+        return self
+
+    def revealable(self: H) -> H:
+        """Give this secure field its own show/hide toggle
+        (docs/reveal-plan.md V1); each flip reaches the field's
+        `on_toggle`. Returns the handle."""
+        _records().append(wire.tx_set_revealable(self.id, True))
+        return self
+
     def href(self: H, url: TextSource) -> H:
         """Set the DESTINATION a `role="link"` label opens
         (docs/tasks-s2-plan.md T3): the platform's own opener takes it and
@@ -5385,11 +5408,16 @@ def secure_field(text: str | None = None, *,
                  on_submit: Handler | None = None,
                  grow: float | None = None,
                  placeholder: TextSource | None = None,
-                 content_type: ContentType | str | None = None) -> Widget:
+                 content_type: ContentType | str | None = None,
+                 revealed: FlagSource | None = None,
+                 revealable: bool = False,
+                 on_toggle: Handler | None = None) -> Widget:
     """A secure field (docs/secure-entry-plan.md): the entry's contract
     with the platform masking what is typed. `on_change` and `on_submit`
     receive the real text; `content_type` says what it holds (see
-    kaya.ContentType)."""
+    kaya.ContentType); `revealed` shows the text, `revealable=True` gives
+    the field its own show/hide toggle, whose flips reach `on_toggle`
+    (docs/reveal-plan.md V1, V2)."""
     handle = _widget(wire.KIND_SECURE_FIELD)
     if text is not None:
         _records().append(wire.tx_set_text(handle.id, _text_value("secure_field text", text)))
@@ -5397,10 +5425,16 @@ def secure_field(text: str | None = None, *,
         handle.placeholder(placeholder)
     if content_type is not None:
         handle.content_type(content_type)
+    if revealed is not None:
+        handle.revealed(revealed)
+    if revealable:
+        handle.revealable()
     if on_change is not None:
         _app._register(handle, wire.OCC_TEXT_CHANGED, on_change)
     if on_submit is not None:
         _app._register(handle, wire.OCC_SUBMITTED, on_submit)
+    if on_toggle is not None:
+        _app._register(handle, wire.OCC_TOGGLED, on_toggle)
     _set_grow(handle, grow)
     return handle
 

@@ -121,6 +121,8 @@ LEGS = {
         "search-compose",
         # The secure field (docs/secure-entry-plan.md §5).
         "secure-compose",
+        # The reveal toggle (docs/reveal-plan.md §5).
+        "reveal-compose",
         # The content type (docs/autofill-plan.md §5).
         "autofill-compose",
         "submit-compose",
@@ -191,7 +193,7 @@ LEGS = {
         "align-jvm", "layout-jvm", "stall-jvm",
         "confirm-jvm", "nav-jvm", "scroll-jvm",
         "progress-jvm", "select-jvm", "radio-jvm",
-        "grid-jvm", "textarea-jvm", "search-jvm", "secure-jvm", "autofill-jvm", "submit-jvm", "scrollto-jvm", "fullscreen-jvm", "sections-jvm",
+        "grid-jvm", "textarea-jvm", "search-jvm", "secure-jvm", "reveal-jvm", "autofill-jvm", "submit-jvm", "scrollto-jvm", "fullscreen-jvm", "sections-jvm",
         "menus-jvm", "toolbar-jvm", "identity-jvm",
         "listdetail-jvm", "commands-jvm", "clipboard-jvm",
         "background-jvm", "undo-jvm", "filedialog-jvm",
@@ -216,7 +218,7 @@ LEGS = {
         "layout-go", "stall-go", "confirm-go",
         "nav-go", "scroll-go", "progress-go",
         "select-go", "radio-go", "grid-go",
-        "textarea-go", "search-go", "secure-go", "autofill-go", "submit-go", "scrollto-go", "fullscreen-go", "sections-go", "menus-go",
+        "textarea-go", "search-go", "secure-go", "reveal-go", "autofill-go", "submit-go", "scrollto-go", "fullscreen-go", "sections-go", "menus-go",
         "toolbar-go", "identity-go", "listdetail-go",
         "commands-go", "clipboard-go", "background-go",
         "undo-go", "filedialog-go", "save-go",

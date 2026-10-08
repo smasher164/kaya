@@ -1310,6 +1310,38 @@ func (w Widget) ContentType(content ContentType) Widget {
 	return w
 }
 
+// SetRevealed says whether a secure field shows its text
+// (docs/reveal-plan.md V1). The write never echoes as a toggle.
+func (tx *Tx) SetRevealed(w Widget, on bool) {
+	tx.emit(TxSetRevealed(w.id, on))
+}
+
+// SetRevealable gives a secure field its own show/hide toggle; each flip
+// reaches the field's OnToggle (docs/reveal-plan.md V1, V2).
+func (tx *Tx) SetRevealable(w Widget) {
+	tx.emit(TxSetRevealable(w.id, true))
+}
+
+// Revealed says whether this secure field shows its text at
+// construction. Same transaction discipline as Grow.
+func (w Widget) Revealed(on bool) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: Revealed on a widget outside its build transaction — use Tx.SetRevealed inside a live transaction")
+	}
+	w.tx.SetRevealed(w, on)
+	return w
+}
+
+// Revealable gives this secure field its own show/hide toggle at
+// construction (Tx.SetRevealable).
+func (w Widget) Revealable() Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: Revealable on a widget outside its build transaction — use Tx.SetRevealable inside a live transaction")
+	}
+	w.tx.SetRevealable(w)
+	return w
+}
+
 // SetHref sets the DESTINATION a RoleLink label opens
 // (docs/tasks-s2-plan.md T3): the platform's own opener takes it and
 // nothing is emitted.
@@ -5129,6 +5161,31 @@ func (t *Tpl) SetContentType(n Node, content ContentType) {
 	t.tx.emit(TxSetContentType(n.id, int64(content)))
 }
 
+// SetRevealed says whether every stamped copy of this secure field shows
+// its text (Tx.SetRevealed); BindRevealed reads it from the row.
+func (t *Tpl) SetRevealed(n Node, on bool) {
+	t.tx.emit(TxSetRevealed(n.id, on))
+}
+
+// BindRevealed reads whether each stamped copy shows its text from a
+// varying source, the row's own field or a signal.
+func (t *Tpl) BindRevealed[S interface {
+	Signal[bool] | Field[bool]
+}](n Node, src S) {
+	switch v := any(src).(type) {
+	case Signal[bool]:
+		t.tx.emit(TxBindRevealed(n.id, v.id))
+	case Field[bool]:
+		t.tx.emit(TxBindRevealedElement(n.id, 0, v.index))
+	}
+}
+
+// SetRevealable gives every stamped copy its own show/hide toggle; each
+// flip reaches the node's OnToggle with the copy's keys (Tx.SetRevealable).
+func (t *Tpl) SetRevealable(n Node) {
+	t.tx.emit(TxSetRevealable(n.id, true))
+}
+
 // SetAccepts declares what each stamped copy takes from a paste. Entry
 // and textarea only, checked at the root. CONST ONLY: an accept list
 // describes the PROTOTYPE, not the row. THIS IS THE DECLARATION THAT
@@ -6563,8 +6620,9 @@ func (n Node) OnTime(fn func(*Tx, []any, Time)) Node {
 	return n
 }
 
-// OnToggle registers a handler for a live checkbox's toggles: the box
-// owns its checked bit and reports each flip here.
+// OnToggle registers a handler for a live checkbox's toggles, or a
+// revealable secure field's (docs/reveal-plan.md V2): the widget owns
+// its bit and reports each flip here.
 func (w Widget) OnToggle(fn func(*Tx, bool)) Widget {
 	w.tx.app.widgetToggles[w.id] = fn
 	return w

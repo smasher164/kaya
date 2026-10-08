@@ -752,7 +752,10 @@ def gtk_newer_reads(gtk_text):
 # see that only while the read stays on the node info (docs/traps.md, the
 # Compose secure field's accessibility text): the mask in the modifier the
 # field is handed, the head of BasicTextField's chain, whose EditableText is
-# applied after the decorator's, and the read on the node info's text.
+# applied after the decorator's, and the read on the node info's text. The
+# mask holds in BOTH states of the reveal (docs/reveal-plan.md V3, V4): masked,
+# the override and the flash; revealed, neither, so the node info shows the
+# text the field shows, each keyed on the one `revealed` the obfuscation reads.
 def secure_identity_interpreters(swiftui_text, compose_text):
     bad = []
     swift_view = re.search(r"struct KayaSecureField: View \{(.*?)\n\}", swiftui_text, re.S)
@@ -767,7 +770,9 @@ def secure_identity_interpreters(swiftui_text, compose_text):
             bad.append(f"{SWIFTUI}: kayaRoleEnabled's cut and copy count the secure field — "
                        f"Edit>Copy would be enabled on a password (P4)")
     compose_view = re.search(r"\nprivate fun KayaSecureField\((.*?)\n\}", compose_text, re.S)
-    for needle in ("BasicSecureTextField(", "TextObfuscationMode.RevealLastTyped",
+    for needle in ("BasicSecureTextField(", "    val revealed = node.revealed\n",
+                   "textObfuscationMode = if (revealed) TextObfuscationMode.Visible "
+                   "else TextObfuscationMode.RevealLastTyped,",
                    "keyboardOptions = kayaContentKeyboard(node.contentType, secure = true)"):
         if not compose_view or needle not in compose_view.group(1):
             bad.append(f"{COMPOSE}: KayaSecureField lost {needle!r} (P3, P5, P7)")
@@ -777,7 +782,11 @@ def secure_identity_interpreters(swiftui_text, compose_text):
                    f"keyboard (P7)")
     if compose_view and re.search(r"\bBasicTextField\(", compose_view.group(1)):
         bad.append(f"{COMPOSE}: KayaSecureField draws a plain BasicTextField (P5)")
-    mask = ('modifier = Modifier\n            .semantics { editableText = '
+    if compose_view and ".semantics { editableText = " in compose_view.group(1):
+        bad.append(f"{COMPOSE}: KayaSecureField masks its node info while revealed, so an "
+                   f"accessibility client is not read the text the field shows "
+                   f"(docs/reveal-plan.md V4)")
+    mask = ('modifier = Modifier\n            .semantics { if (!revealed) editableText = '
             'AnnotatedString("\\u2022".repeat(node.textState.text.length)) }\n')
     hint = re.search(r"\ninternal fun kayaContentHint\((.*?)\n\}", compose_text, re.S)
     if not compose_view or mask not in compose_view.group(1) \
@@ -1000,7 +1009,7 @@ def drag_waits(winui_text):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 124
+DECLARED = 128
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -1196,8 +1205,17 @@ for label, path, pattern, repl, *want in (
     ("Compose's masked read trusting a node that is no password", COMPOSE,
      r"if \(!info\.isPassword\) \{", "if (false) {"),
     ("Compose's secure field handing the node info its real text", COMPOSE,
-     r"            \.semantics \{ editableText = AnnotatedString\(\"\\u2022\"\.repeat\("
-     r"node\.textState\.text\.length\)\) \}\n", ""),
+     r"            \.semantics \{ if \(!revealed\) editableText = "
+     r"AnnotatedString\(\"\\u2022\"\.repeat\(node\.textState\.text\.length\)\) \}\n", ""),
+    ("Compose's revealed field still masking its node info", COMPOSE,
+     r"\.semantics \{ if \(!revealed\) editableText = ", ".semantics { editableText = "),
+    ("Compose's masked field handing the node info its real text", COMPOSE,
+     r"\.semantics \{ if \(!revealed\) editableText = ",
+     ".semantics { if (revealed) editableText = "),
+    ("Compose's masked field drawn with no mask", COMPOSE,
+     r"if \(revealed\) TextObfuscationMode\.Visible", "if (true) TextObfuscationMode.Visible"),
+    ("Compose's mask and drawing keyed on different states", COMPOSE,
+     r"    val revealed = node\.revealed\n", "    val revealed = node.revealable\n"),
     ("Compose's override carrying the real text", COMPOSE,
      r'AnnotatedString\("\\u2022"\.repeat\(node\.textState\.text\.length\)\)',
      "AnnotatedString(node.textState.text.toString())"),

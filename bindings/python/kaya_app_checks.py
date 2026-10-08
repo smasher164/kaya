@@ -4478,6 +4478,24 @@ check("content_type packs as the generated setter does on both kinds",
       in _ct_records)
 check("content_type refuses a bool", "content_type takes" in _ct_refused)
 
+# docs/reveal-plan.md V1: revealed and revealable pack as the generated
+# setters do, and revealed refuses a string before it reads as truthy.
+_rv_app = kaya.App()
+with _rv_app.window():
+    with kaya.column():
+        _rv_before = len(kaya._tx)
+        _rv_field = kaya.secure_field(revealed=True, revealable=True)
+        _rv_records = kaya._tx[_rv_before:]
+        _rv_refused = ""
+        try:
+            _rv_field.revealed("no")  # type: ignore[arg-type]
+        except kaya.KayaTypeError as e:
+            _rv_refused = str(e)
+check("revealed and revealable pack as the generated setters do",
+      kaya.wire.tx_set_revealed(_rv_field.id, True) in _rv_records
+      and kaya.wire.tx_set_revealable(_rv_field.id, True) in _rv_records)
+check("revealed refuses a string", "revealed takes" in _rv_refused)
+
 # F5: local_path is a pathlib.Path, None where the wire sent no
 # re-openable name (an empty string, never Path("") — Path("") would
 # normalize to ".", a real path).

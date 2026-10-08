@@ -133,6 +133,8 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
@@ -502,6 +504,10 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
 
     /** The content type (docs/autofill-plan.md §3), 0 none. */
     var contentType by mutableLongStateOf(0L)
+
+    /** docs/reveal-plan.md V1: the secure field shows its text, and carries its eye. */
+    var revealed by mutableStateOf(false)
+    var revealable by mutableStateOf(false)
 
     /** THE DESTINATION A `role link` LABEL OPENS (docs/tasks-s2-plan.md
      * T3), never spoken and never emitted. Composition state — the link
@@ -3468,7 +3474,8 @@ object KayaCompose {
                         PROP_HIGH_LABEL -> KayaSceneModel.nodes[id]!!.highLabel = readString(b)
                         PROP_FIT -> KayaSceneModel.nodes[id]!!.fit = readI64(b)
                         PROP_CONTENT_TYPE -> KayaSceneModel.nodes[id]!!.contentType = readI64(b)
-                        PROP_REVEALED, PROP_REVEALABLE -> depthStub("reveal")
+                        PROP_REVEALED -> KayaSceneModel.nodes[id]!!.revealed = readBool(b)
+                        PROP_REVEALABLE -> KayaSceneModel.nodes[id]!!.revealable = readBool(b)
                         PROP_ASPECT -> KayaSceneModel.nodes[id]!!.aspect = readI64(b)
                         PROP_PLAYER -> error("kaya: a video view's player arrives as set_video_player; the core never forwards the player prop")
                         PROP_CAPTURE -> error("kaya: a video view's capture arrives as set_video_capture; the core never forwards the capture prop")
@@ -8261,6 +8268,66 @@ object KayaCompose {
         } ?: Pair(null, "the mask could not be read: the UI thread did not answer")
     }
 
+    private fun kayaUnmaskedRead(activity: ComponentActivity, spec: String): Pair<Int?, String> {
+        val field = onUi(activity) {
+            target(spec, "secure_field", KayaSceneModel.secureFields)
+        } ?: return Pair(null, "no such target")
+        if (field.a11yId.isEmpty()) {
+            return Pair(null, "the text could not be counted: no a11y_id authored on this field")
+        }
+        return onUi(activity) {
+            val view = kayaComposeRoot(activity.window.decorView)
+                ?: return@onUi Pair(null, "the text could not be counted: no Compose root in the window")
+            val tagged = kayaSemanticsByTag(activity, field.a11yId)
+                ?: return@onUi Pair(null,
+                    "the text could not be counted: the field is not in the accessibility tree")
+            val node = kayaSemanticsWith(tagged) {
+                it.config.contains(SemanticsProperties.EditableText)
+            } ?: tagged
+            val info = view.accessibilityNodeProvider?.createAccessibilityNodeInfo(node.id)
+                ?: return@onUi Pair(null,
+                    "the text could not be counted: the accessibility provider served no node info")
+            kayaUnmaskedCount(info.text?.toString() ?: "")
+        } ?: Pair(null, "the text could not be counted: the UI thread did not answer")
+    }
+
+    /** Presses the secure field's own eye (docs/reveal-plan.md V4): the one button
+     * published inside the field's frame whose name shows or hides the password,
+     * through the click action the platform gives assistive technology. */
+    private fun kayaRevealPress(activity: ComponentActivity, spec: String, on: Boolean): String? {
+        val field = onUi(activity) {
+            target(spec, "secure_field", KayaSceneModel.secureFields)
+        } ?: return "no such target"
+        if (field.a11yId.isEmpty()) return "the eye could not be found: no a11y_id authored on this field"
+        val refused = onUi(activity) {
+            val tagged = kayaSemanticsByTag(activity, field.a11yId)
+                ?: return@onUi "the eye could not be found: the field is not in the accessibility tree"
+            val frame = tagged.boundsInRoot
+            val names = listOf(kayaRevealName(false), kayaRevealName(true))
+            val root = (kayaComposeRoot(activity.window.decorView) as RootForTest).semanticsOwner.rootSemanticsNode
+            val eyes = ArrayList<SemanticsNode>()
+            fun walk(n: SemanticsNode, depth: Int) {
+                if (depth > 64) return
+                val named = n.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty()
+                if (n.config.contains(SemanticsActions.OnClick) && named.any { it in names } &&
+                    frame.contains(n.boundsInRoot.center)
+                ) eyes.add(n)
+                for (child in n.children) walk(child, depth + 1)
+            }
+            walk(root, 0)
+            val eye = eyes.singleOrNull()
+                ?: return@onUi "the eye could not be found: ${eyes.size} buttons named " +
+                    "${names.joinToString(" or ")} inside the field's frame"
+            val said = eye.config[SemanticsProperties.ContentDescription]
+            if (said.contains(kayaRevealName(on))) return@onUi ""
+            val press = eye.config[SemanticsActions.OnClick].action
+                ?: return@onUi "the eye could not be pressed: its click action is empty"
+            press()
+            ""
+        } ?: "the eye could not be found: the UI thread did not answer"
+        return refused.ifEmpty { null }
+    }
+
     /**
      * The script's statements, in order, comments and blanks gone — the
      * loop's own flattening taken once, so the `relaunch` arm can hand
@@ -8707,16 +8774,22 @@ object KayaCompose {
                         }
                     }
                     "toggle" -> {
-                        if (parts[1].startsWith("secure_field")) depthStub("reveal")
                         kayaAwaitQuiet()
                         val answered = kayaBatches
-                        val ok = onUi(activity) {
-                            target(parts[1], "checkbox", KayaSceneModel.checkboxes)?.also { node ->
-                                node.checked = parts[2] == "on"
-                                KayaPresent.emitToggled(node.tag, node.checked)
-                            } != null
+                        // A secure field's own eye (docs/reveal-plan.md V4): published
+                        // inside the field, pressed through its own click action.
+                        val why = if (parts[1].startsWith("secure_field")) {
+                            kayaRevealPress(activity, parts[1], parts[2] == "on")?.let { "${parts[1]}: $it" }
+                        } else {
+                            val ok = onUi(activity) {
+                                target(parts[1], "checkbox", KayaSceneModel.checkboxes)?.also { node ->
+                                    node.checked = parts[2] == "on"
+                                    KayaPresent.emitToggled(node.tag, node.checked)
+                                } != null
+                            }
+                            if (ok) null else "no such target ${parts[1]}"
                         }
-                        if (!ok) failures.add("no such target ${parts[1]}")
+                        if (why != null) failures.add(why)
                         else kayaAwaitAnswer(answered)
                     }
                     "expect_thumb" -> {
@@ -9643,7 +9716,21 @@ object KayaCompose {
                             }
                         }
                     }
-                    "expect_unmasked" -> depthStub("reveal")
+                    "expect_unmasked" -> {
+                        // How many characters a revealed field shows, none as a
+                        // mask, off the same node info; never the text (V4).
+                        val wantUnmasked = parts.getOrNull(2)?.toIntOrNull()
+                        if (parts.size != 3 || wantUnmasked == null) {
+                            failures.add("expect_unmasked wants a secure field and a count: $line")
+                        } else {
+                            val (got, why) = kayaUnmaskedRead(activity, parts[1])
+                            when {
+                                got == wantUnmasked -> observed.add("unmasked $got")
+                                got != null -> failures.add("unmasked $got, wanted $wantUnmasked")
+                                else -> failures.add("${parts[1]}: $why")
+                            }
+                        }
+                    }
                     "expect_masked" -> {
                         // How many characters the platform shows masked, read
                         // off what it presents to assistive technology, never
@@ -13460,6 +13547,17 @@ internal fun kayaMaskCount(value: String): Pair<Int?, String> {
         return Pair(null, "the platform presents $unmasked of the secure field's characters unmasked")
     }
     if (points.toSet().size > 1) return Pair(null, "the mask could not be read: the value mixes glyphs")
+    return Pair(points.size, "")
+}
+
+/** How many characters a REVEALED value shows, none as a mask: kayaMaskCount's
+ * opposite over the same line, harness.rs's unmasked_count (docs/reveal-plan.md V4). */
+internal fun kayaUnmaskedCount(value: String): Pair<Int?, String> {
+    val points = value.codePoints().toArray()
+    val masked = points.count { it !in 0x20..0x7e }
+    if (masked > 0) {
+        return Pair(null, "the platform masks $masked of the revealed secure field's characters")
+    }
     return Pair(points.size, "")
 }
 
@@ -19541,15 +19639,25 @@ internal fun kayaNumberKeyboard(min: Double, step: Double, format: String = "num
         else -> KeyboardType.Decimal
     }
 
+/** The one door the eye's tap takes (docs/reveal-plan.md V2); an app write never comes here. */
+internal fun kayaRevealToggle(node: KayaNode, on: Boolean) {
+    if (node.revealed == on) return
+    node.revealed = on
+    KayaPresent.emitToggled(node.tag, on)
+}
+
+internal fun kayaRevealName(revealed: Boolean): String = if (revealed) "Hide password" else "Show password"
+
 /**
- * The secure field (docs/secure-entry-plan.md §3): the platform's own
- * BasicSecureTextField, which masks, refuses cut and copy and publishes
- * password(); no reveal (P3), the phone's last-character flash kept.
+ * The secure field (docs/secure-entry-plan.md §3, docs/reveal-plan.md §3):
+ * the platform's own BasicSecureTextField, which masks, refuses cut and copy
+ * and publishes password(), the phone's last-character flash kept.
  * KayaTextField's single-line contract otherwise, without its undo tier.
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun KayaSecureField(node: KayaNode, a11y: Modifier, fill: Modifier) {
+    val revealed = node.revealed
     val focusRequester = remember { FocusRequester() }
     val interaction = remember { MutableInteractionSource() }
     LaunchedEffect(node) {
@@ -19564,7 +19672,7 @@ private fun KayaSecureField(node: KayaNode, a11y: Modifier, fill: Modifier) {
     }
     BasicSecureTextField(
         state = node.textState,
-        textObfuscationMode = TextObfuscationMode.RevealLastTyped,
+        textObfuscationMode = if (revealed) TextObfuscationMode.Visible else TextObfuscationMode.RevealLastTyped,
         keyboardOptions = kayaContentKeyboard(node.contentType, secure = true),
         onKeyboardAction = { performDefaultAction ->
             KayaPresent.emitSubmitted(node.tag, kayaLf(node.textState.text.toString()))
@@ -19575,7 +19683,7 @@ private fun KayaSecureField(node: KayaNode, a11y: Modifier, fill: Modifier) {
         textStyle = LocalTextStyle.current.copy(color = LocalContentColor.current),
         // docs/traps.md, the Compose secure field's accessibility text.
         modifier = Modifier
-            .semantics { editableText = AnnotatedString("\u2022".repeat(node.textState.text.length)) }
+            .semantics { if (!revealed) editableText = AnnotatedString("\u2022".repeat(node.textState.text.length)) }
             .then(kayaContentHint(node.id, node.contentType))
             .then(a11y)
             .then(fill)
@@ -19601,6 +19709,22 @@ private fun KayaSecureField(node: KayaNode, a11y: Modifier, fill: Modifier) {
         decorator = { inner ->
             val prompt: (@Composable () -> Unit)? =
                 if (node.placeholder.isEmpty()) null else { { Text(node.placeholder) } }
+            val eye: (@Composable () -> Unit)? =
+                if (!node.revealable) {
+                    null
+                } else {
+                    {
+                        IconButton(
+                            onClick = { kayaRevealToggle(node, !node.revealed) },
+                            modifier = Modifier.focusProperties { canFocus = false },
+                        ) {
+                            Icon(
+                                if (revealed) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                contentDescription = kayaRevealName(revealed),
+                            )
+                        }
+                    }
+                }
             TextFieldDefaults.DecorationBox(
                 value = node.textState.text.toString(),
                 innerTextField = inner,
@@ -19609,6 +19733,7 @@ private fun KayaSecureField(node: KayaNode, a11y: Modifier, fill: Modifier) {
                 visualTransformation = VisualTransformation.None,
                 interactionSource = interaction,
                 placeholder = prompt,
+                trailingIcon = eye,
                 contentPadding = TextFieldDefaults.contentPaddingWithoutLabel(),
                 colors = TextFieldDefaults.colors(),
             )

@@ -7842,13 +7842,16 @@ private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
                     guard let field = kayaAxFind(window, identifier) else { continue }
                     let frame = field.accessibilityFrame
                     var found: [String] = []
+                    var frames: [CGRect] = []
                     func walk(_ node: NSObject, _ depth: Int) {
                         if depth > 64 || found.count > 4 { return }
+                        let at = node.accessibilityFrame
                         if node.accessibilityTraits.contains(.button), let name = node.accessibilityLabel,
-                            names.contains(name),
-                            frame.contains(CGPoint(x: node.accessibilityFrame.midX, y: node.accessibilityFrame.midY))
+                            names.contains(name), frame.contains(CGPoint(x: at.midX, y: at.midY)),
+                            !frames.contains(at)
                         {
                             found.append(name)
+                            frames.append(at)
                         }
                         let count = node.accessibilityElementCount()
                         if count != NSNotFound && count > 0 {
@@ -8362,6 +8365,38 @@ private func kayaSecureFocused() -> Bool {
     guard let id = kayaScene.focusedId else { return false }
     return kayaScene.secureFields.contains { $0.id == id }
 }
+
+#if os(iOS)
+    /// type_secret into a REVEALED field on iOS (docs/reveal-plan.md V4,
+    /// docs/traps.md): XCTest redacts only what it types through a secure
+    /// element, which the shown field is not, so the keys go in-process to the
+    /// first responder, which must be the focused field's own view (V6). Nil
+    /// when the focused field is masked, whose keys stay XCTest's.
+    private func kayaTypeIntoRevealed(_ text: String) -> (typed: Bool, why: String)? {
+        guard let id = kayaScene.focusedId,
+            let node = kayaScene.secureFields.first(where: { $0.id == id }), node.revealed
+        else { return nil }
+        var responder: KayaRevealUITextField?
+        func walk(_ view: UIView) {
+            if responder != nil { return }
+            if let field = view as? KayaRevealUITextField, field.isFirstResponder,
+                (field.delegate as? KayaRevealedField.Coordinator)?.node === node
+            {
+                responder = field
+                return
+            }
+            for sub in view.subviews { walk(sub) }
+        }
+        for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+            for window in scene.windows { walk(window) }
+        }
+        guard let responder else {
+            return (false, "the revealed field's own view does not hold the first responder — nothing was typed")
+        }
+        for character in text { responder.insertText(String(character)) }
+        return (true, "")
+    }
+#endif
 
 private func kayaQuoted(_ rest: [Substring]) -> String {
     let joined = rest.joined(separator: " ")
@@ -9507,7 +9542,13 @@ private func kayaRunScript(_ script: String) {
                         failures.append("type_secret reached no window — nothing was typed")
                     }
                 #else
-                    if let why = kayaTypeThroughHost(secret.expose, verb: "type_secure_b64") {
+                    if let revealed = DispatchQueue.main.sync(execute: { kayaTypeIntoRevealed(secret.expose) }) {
+                        if revealed.typed {
+                            kayaAwaitAnswer(secretAnswered)
+                        } else {
+                            failures.append("type_secret: \(revealed.why)")
+                        }
+                    } else if let why = kayaTypeThroughHost(secret.expose, verb: "type_secure_b64") {
                         failures.append("type_secret: \(why)")
                     } else {
                         kayaAwaitAnswer(secretAnswered)
@@ -25067,14 +25108,15 @@ func kayaRevealedFocus(_ node: KayaNode, _ on: Bool) {
     }
 #else
     /// The revealed field's text field (docs/reveal-plan.md V5): what a secure
-    /// UITextField refuses (cut, copy, share, look up, translate, Writing Tools)
-    /// is refused here too, over the shown text.
+    /// UITextField refuses (cut, copy, select, share, look up, translate, Writing
+    /// Tools) is refused here too, over the shown text, and it keeps no undo
+    /// stack (measured, docs/traps.md).
     final class KayaRevealUITextField: UITextField {
         var onFocusChange: ((Bool) -> Void)?
+        override var undoManager: UndoManager? { nil }
         override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
             let allowed: [Selector] = [
                 #selector(UIResponderStandardEditActions.paste(_:)),
-                #selector(UIResponderStandardEditActions.select(_:)),
                 #selector(UIResponderStandardEditActions.selectAll(_:)),
                 #selector(UIResponderStandardEditActions.delete(_:)),
             ]

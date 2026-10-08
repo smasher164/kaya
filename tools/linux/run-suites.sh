@@ -30,7 +30,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) the foreign suites load;
 # --example alone would build only the rlib it depends on.
-SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen numberfield timecode colorpicker range media capture secure autofill"
+SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen numberfield timecode colorpicker range media capture secure autofill reveal"
 # Depth-slice scenes, rust only. `windowed` and `canvas` are rust BY
 # DESIGN rather than by depth — the compiled conformance scenes every
 # lane runs (docs/virtualization-plan.md §6.3, docs/canvas-plan.md
@@ -1488,6 +1488,24 @@ for proto in x11 wayland; do
     run "$proto" secure-haskell env KAYA_SELFTEST=secure \
         tools/linux/a11y-leg.sh "$(hs_bin secure)"
     run "$proto" secure-java env KAYA_SELFTEST=secure KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    # THE REVEAL TOGGLE (docs/reveal-plan.md), through a11y-leg.sh: both
+    # counts are the AT-SPI bus's.
+    run "$proto" reveal-rust env KAYA_SELFTEST=reveal \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/reveal"
+    run "$proto" reveal-python env KAYA_SELFTEST=reveal KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/reveal.py
+    run "$proto" reveal-js env KAYA_SELFTEST=reveal KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/reveal.ts
+    run "$proto" reveal-go env KAYA_SELFTEST=reveal \
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" reveal-csharp env KAYA_SELFTEST=reveal KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" reveal-ocaml env KAYA_SELFTEST=reveal KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/reveal.exe
+    run "$proto" reveal-haskell env KAYA_SELFTEST=reveal \
+        tools/linux/a11y-leg.sh "$(hs_bin reveal)"
+    run "$proto" reveal-java env KAYA_SELFTEST=reveal KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     # The content type (docs/autofill-plan.md), read off the GtkText.
     run "$proto" autofill-rust env KAYA_SELFTEST=autofill "$CARGO_TARGET_DIR/debug/examples/autofill"

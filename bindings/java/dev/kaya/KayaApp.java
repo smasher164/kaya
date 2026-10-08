@@ -4583,6 +4583,29 @@ public final class KayaApp {
             return this;
         }
 
+        /** Whether this secure field shows its text ({@link Tx#setRevealed}). */
+        public Widget revealed(boolean on) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: revealed on a widget outside its build transaction"
+                    + " — use Tx.setRevealed inside a live transaction");
+            }
+            tx.setRevealed(this, on);
+            return this;
+        }
+
+        /** This secure field carries its own show/hide toggle
+         * ({@link Tx#setRevealable}). */
+        public Widget revealable() {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: revealable on a widget outside its build transaction"
+                    + " — use Tx.setRevealable inside a live transaction");
+            }
+            tx.setRevealable(this);
+            return this;
+        }
+
         /** The DESTINATION this {@link Role#LINK} label opens
          * (docs/tasks-s2-plan.md T3): the platform's own opener takes it
          * and nothing is emitted. */
@@ -5731,6 +5754,24 @@ public final class KayaApp {
             t.setContentType(n, content);
         }
 
+        /** This row's copy of that secure field's reveal (Tpl.setRevealed). */
+        public void setRevealed(Node n, boolean on) {
+            t.setRevealed(n, on);
+        }
+
+        public void setRevealed(Node n, Signal<Boolean> s) {
+            t.setRevealed(n, s);
+        }
+
+        public void setRevealed(Node n, KayaRecords.Field<Boolean> f) {
+            t.setRevealed(n, f);
+        }
+
+        /** This row's copy of that secure field's own toggle (Tpl.setRevealable). */
+        public void setRevealable(Node n) {
+            t.setRevealable(n);
+        }
+
         /** This row's copy of that video view's box ratio (Tpl.setAspect). */
         public void setAspect(Node n, int width, int height) {
             t.setAspect(n, width, height);
@@ -6652,6 +6693,18 @@ public final class KayaApp {
         public void setContentType(Widget w, ContentType content) {
             emit(KayaWire.txSetContentType(w.id, Objects.requireNonNull(content,
                     "kaya: setContentType takes a ContentType; NONE takes the hint away").wire));
+        }
+
+        /** Whether a secure field shows its text (docs/reveal-plan.md V1);
+         * the write never echoes as a toggle. */
+        public void setRevealed(Widget w, boolean on) {
+            emit(KayaWire.txSetRevealed(w.id, on));
+        }
+
+        /** Gives a secure field its own show/hide toggle; each flip reaches
+         * {@link KayaApp#onToggle(Widget, BiConsumer)} (docs/reveal-plan.md V2). */
+        public void setRevealable(Widget w) {
+            emit(KayaWire.txSetRevealable(w.id, true));
         }
 
         /**
@@ -8764,6 +8817,28 @@ public final class KayaApp {
                     "kaya: setContentType takes a ContentType; NONE takes the hint away").wire));
         }
 
+        /** Whether every stamped copy of this secure field shows its text,
+         * the blueprint twin of {@link Tx#setRevealed}. */
+        public void setRevealed(Node n, boolean on) {
+            tx.emit(KayaWire.txSetRevealed(n.id, on));
+        }
+
+        public void setRevealed(Node n, Signal<Boolean> s) {
+            tx.emit(KayaWire.txBindRevealed(n.id, s.id));
+        }
+
+        /** The row's own field: each copy shows its text by its row. */
+        public void setRevealed(Node n, KayaRecords.Field<Boolean> f) {
+            tx.emit(KayaWire.txBindRevealedElement(n.id, 0, f.index));
+        }
+
+        /** Every stamped copy carries its own show/hide toggle; each flip
+         * reaches {@link KayaApp#onToggle(Node, ToggleHandler)} with the
+         * copy's keys. */
+        public void setRevealable(Node n) {
+            tx.emit(KayaWire.txSetRevealable(n.id, true));
+        }
+
         /** Every stamped copy's video view box ratio. */
         public void setAspect(Node n, int width, int height) {
             tx.emit(KayaWire.txSetAspect(n.id, aspectWire(width, height)));
@@ -10430,8 +10505,9 @@ public final class KayaApp {
     }
 
     /**
-     * Register a toggle handler for a live checkbox: the box owns its
-     * checked bit and reports each flip here.
+     * Register a toggle handler for a live checkbox or a revealable
+     * secure field (docs/reveal-plan.md V2): the widget owns its bit and
+     * reports each flip here.
      */
     public void onToggle(Widget w, BiConsumer<Tx, Boolean> handler) {
         widgetToggles.put(w.id, handler);
@@ -10445,8 +10521,9 @@ public final class KayaApp {
     }
 
     /**
-     * Register a toggle handler for a template checkbox; it also
-     * receives the stamped copy's keys, outermost first.
+     * Register a toggle handler for a template checkbox or revealable
+     * secure field; it also receives the stamped copy's keys, outermost
+     * first.
      */
     public void onToggle(Node n, ToggleHandler handler) {
         nodeToggles.put(n.id, handler);

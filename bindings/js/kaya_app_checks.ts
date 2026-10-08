@@ -156,6 +156,22 @@ if (isMainThread) {
     app.window({ windowId: 2620 }, () => { kaya.column(() => { kaya.label("idiom"); }); return "wo"; }) === "wo",
   );
   check("window(opts) with no body returns nothing to destructure (void)", app.window({ windowId: 2620, dirty: true }) === undefined);
+
+  // docs/reveal-plan.md V1: revealed and revealable pack as the generated
+  // setters do, and revealed refuses a string before it reads as truthy.
+  {
+    const before = shipped.length;
+    let rv!: K.Widget;
+    app.window({ windowId: 2620 }, () => {
+      kaya.column(() => { rv = kaya.secureField({ revealed: true, revealable: true }); });
+    });
+    const recs = shipped.slice(before).flat().map(r => Buffer.from(r).toString("hex"));
+    check("revealed and revealable pack as the generated setters do",
+      recs.includes(Buffer.from(wire.tx_set_revealed(rv.id, true)).toString("hex"))
+      && recs.includes(Buffer.from(wire.tx_set_revealable(rv.id, true)).toString("hex")));
+    check("revealed refuses a string",
+      throws(() => app.window({ windowId: 2620 }, () => { rv.revealed("no" as never); }), /revealed takes/));
+  }
   check(
     "pushEntry(id, opts, body) returns the body's value",
     app.pushEntry(5170, { title: "idiom entry" }, () => { kaya.column(() => { kaya.label("idiom entry"); }); return "e"; }) === "e",
