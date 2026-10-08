@@ -8647,6 +8647,14 @@ private func kayaRunScript(_ script: String) {
         Thread.sleep(forTimeInterval: 0.05)
     }
     print("KAYA_HARNESS: scene ready after \(Int(Date().timeIntervalSince(start) * 1000))ms")
+    #if os(iOS)
+    watchdog.enter("<the leg start's notification retirement>")
+    if let left = kayaRetireNotifications(at: "the leg's start", unasked: true) {
+        print("KAYA_SELFTEST: FAILED (\(left))")
+        watchdog.published(1)
+        exit(1)
+    }
+    #endif
     var stepOrdinal = 0
     // Whether `relaunch` ended this run: the verdict says ACT 1 and the
     // runner then pushes the platform's door (docs/tasks-s9-plan.md R6a).
@@ -12903,6 +12911,15 @@ private func kayaRunScript(_ script: String) {
         failures.append(fault)
         print("KAYA_HARNESS: step-failed \(fault)")
     }
+    #if os(iOS)
+    if !actOne || !failures.isEmpty {
+        watchdog.enter("<the verdict's notification retirement>")
+        if let left = kayaRetireNotifications(at: "the verdict", unasked: false) {
+            failures.append(left)
+            print("KAYA_HARNESS: step-failed \(left)")
+        }
+    }
+    #endif
     if failures.isEmpty && observed.isEmpty {
         failures.append("script has no expects")
     }
@@ -18843,6 +18860,53 @@ func kayaPlatformBadge() -> String {
     return enabled ? "\(number)" : "<\(number) held, but badges are not enabled for this app (setting \(setting))>"
     #endif
 }
+
+#if os(iOS)
+/// docs/traps.md, the week-old notification that takes a reinstall's.
+func kayaRetireNotifications(at moment: String, unasked: Bool) -> String? {
+    guard kayaCanPostNotifications() else { return nil }
+    let centre = UNUserNotificationCenter.current()
+    let done = DispatchSemaphore(value: 0)
+    var asked = true
+    centre.getNotificationSettings { settings in
+        asked = settings.authorizationStatus != .notDetermined
+        done.signal()
+    }
+    if done.wait(timeout: .now() + 1) == .timedOut {
+        return "the notification centre did not answer its settings within 1s at \(moment), "
+            + "so the harness could not retire this leg's notifications (docs/traps.md)"
+    }
+    guard asked || unasked else { return nil }
+    centre.removeAllPendingNotificationRequests()
+    centre.removeAllDeliveredNotifications()
+    let deadline = Date().addingTimeInterval(2)
+    var left: [String] = []
+    repeat {
+        var held: [String] = []
+        centre.getDeliveredNotifications { delivered in
+            held = delivered.map { "delivered \($0.request.identifier)" }
+            done.signal()
+        }
+        if done.wait(timeout: .now() + 1) == .timedOut {
+            return "the notification centre did not answer its delivered list within 1s "
+                + "of the harness retiring notifications at \(moment) (docs/traps.md)"
+        }
+        centre.getPendingNotificationRequests { pending in
+            held += pending.map { "pending \($0.identifier)" }
+            done.signal()
+        }
+        if done.wait(timeout: .now() + 1) == .timedOut {
+            return "the notification centre did not answer its pending list within 1s "
+                + "of the harness retiring notifications at \(moment) (docs/traps.md)"
+        }
+        left = held.sorted()
+        if left.isEmpty { return nil }
+        Thread.sleep(forTimeInterval: 0.05)
+    } while Date() < deadline
+    return "the notification centre still holds \(left.joined(separator: ", ")) 2s after "
+        + "the harness removed every notification at \(moment) (docs/traps.md)"
+}
+#endif
 
 func kayaCancelNotification(_ id: UInt64) {
     let centre = UNUserNotificationCenter.current()

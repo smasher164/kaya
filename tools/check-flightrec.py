@@ -46,6 +46,7 @@ import io
 import re
 import subprocess
 import tempfile
+import time
 import types
 
 gate = Gate("check-flightrec")
@@ -570,6 +571,99 @@ def census_ios_stamp(src):
     return found
 
 
+def census_ios_notifications(src):
+    found = []
+    if "notifications" not in declared(src).get("ios", ()):
+        found.append("ios: declares no notifications section")
+    leg = py_block(src[IOS], "run_swiftui_on")
+    install = leg.find('"simctl", "install", udid')
+    stamp = leg.find("installed_at = time.time()")
+    if stamp < 0 or install < 0 or stamp > install:
+        found.append("ios: the notification log's window does not start at the leg's install")
+    if "notification_capture(udid, bundle_id, name, installed_at, log)" not in leg:
+        found.append("ios: the failure path does not keep the notification side")
+    capture = py_block(src[IOS], "notification_capture")
+    if not all(s in capture for s in ("ios_notification_store(", '"--start", start',
+                                      "IOS_NOTIFICATION_PREDICATE", '".notifications"')):
+        found.append("ios: notification_capture no longer reads the store and the log window")
+    text = src[LANE_PY]
+    at = text.find("IOS_NOTIFICATION_PREDICATE = (")
+    predicate = text[at:text.find("\n\n", at)] if at >= 0 else ""
+    if not all(s in predicate for s in (
+            'process == "usernotificationsd"', 'process == "SpringBoard" AND ',
+            'subsystem BEGINSWITH "com.apple.UserNotifications"')):
+        found.append("ios: the notification predicate lost SpringBoard or usernotificationsd")
+    if 'log.with_suffix(".notifications")' not in py_block(src[LANE_PY], "IosRecorder"):
+        found.append("ios: notifications does not adopt the runner's sidecar")
+    return found
+
+
+def ios_notification_checks(src, echo=False):
+    import plistlib
+    scope = {"pathlib": pathlib, "time": time}
+    for name in ("_keyed_root", "ios_notification_store"):
+        body = py_block(src[LANE_PY], name)
+        if not body:
+            return [f"ios: missing notification renderer {name}"]
+        exec(compile(body, LANE_PY, "exec"), scope)
+
+    def keyed(path, value):
+        objs = ["$null"]
+
+        def put(x):
+            if isinstance(x, dict) and set(x) == {"date"}:
+                objs.append({"NS.time": x["date"] - 978307200})
+            elif isinstance(x, dict):
+                slot = len(objs)
+                objs.append(None)
+                objs[slot] = {"NS.keys": [put(k) for k in x],
+                              "NS.objects": [put(v) for v in x.values()]}
+                return plistlib.UID(slot)
+            elif isinstance(x, list):
+                slot = len(objs)
+                objs.append(None)
+                objs[slot] = {"NS.objects": [put(v) for v in x]}
+                return plistlib.UID(slot)
+            else:
+                objs.append(x)
+            return plistlib.UID(len(objs) - 1)
+        root = put(value)
+        with open(path, "wb") as f:
+            plistlib.dump({"$archiver": "NSKeyedArchiver", "$objects": objs,
+                           "$top": {"root": root}, "$version": 100000}, f,
+                          fmt=plistlib.FMT_BINARY)
+
+    now = 1791429114.0
+    found = []
+    with tempfile.TemporaryDirectory(prefix="kaya-notif-store-") as d:
+        root = pathlib.Path(d)
+        (root / "LIVE").mkdir()
+        (root / "GONE").mkdir()
+        keyed(root / "Library.plist", {"dev.kaya.notifyswiftui": "LIVE"})
+        keyed(root / "LIVE" / "DeliveredNotifications.plist", [
+            {"AppNotificationIdentifier": "kaya-12", "AppNotificationTitle": "fresh",
+             "AppNotificationCreationDate": {"date": now - 60}}])
+        keyed(root / "GONE" / "DeliveredNotifications.plist", [
+            {"AppNotificationIdentifier": "kaya-12", "AppNotificationTitle": "stale",
+             "AppNotificationCreationDate": {"date": now - 8 * 86400}}])
+        said = scope["ios_notification_store"](root, "dev.kaya.notifyswiftui", now=now)
+        (root / "GONE" / "PendingNotifications.plist").write_bytes(b"not a plist")
+        broken = scope["ios_notification_store"](root, "dev.kaya.notifyswiftui", now=now)
+    if echo:
+        print("check-flightrec: iOS notification store:\n" + said.rstrip())
+    if "maps to section LIVE" not in said:
+        found.append("ios: the store lost the leg's own section")
+    if "2 record(s) held; 1 in a section no bundle maps" not in said:
+        found.append("ios: the store lost the orphaned record")
+    if "1 older than 7 days" not in said or "8.00 days old" not in said:
+        found.append("ios: the store lost the expiry age")
+    if "'kaya-12'" not in said or "stale" not in said:
+        found.append("ios: the store lost the identifier or title")
+    if "PendingNotifications.plist did not decode" not in broken:
+        found.append("ios: the store hid an undecodable file")
+    return found
+
+
 def census_android_history(src):
     found = []
     sections = declared(src).get("android", ())
@@ -1000,6 +1094,7 @@ CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("hand run", census_hand_run), ("iOS SDK stamp", census_ios_stamp),
             ("no frontmost shot", census_frontmost),
             ("Android history", census_android_history),
+            ("iOS notification side", census_ios_notifications),
             ("linux ceiling stacks", census_wedge_capture))
 TABLE = declared(REAL)
 gate.counted("lanes declaring a bundle shape", list(TABLE), floor=5)
@@ -1019,6 +1114,8 @@ for line in mac_power_checks(REAL, echo=True):
     gate.finding(line, at="Mac power history")
 for line in ios_recording_recovery(REAL):
     gate.finding(line, at="iOS recording recovery")
+for line in ios_notification_checks(REAL, echo=True):
+    gate.finding(line, at="iOS notification store")
 
 
 def doctored(rel, pattern, repl, label, *, flags=re.M, want=1):
@@ -1230,6 +1327,37 @@ stamp_cut = doctored(LANE_PY, r'self\.adopt\(bundle, "binary-stamp",',
 gate.negative("iOS SDK section unwritten", lambda: census_sections(stamp_cut),
               want="`binary-stamp` is declared")
 
+for label, rel, before, after, want in (
+        ("capture cut", IOS, "notification_capture(udid, bundle_id, name, installed_at, log)",
+         "pass", "does not keep the notification side"),
+        ("window from the verdict", IOS, "    installed_at = time.time()\n", "",
+         "does not start at the leg's install"),
+        ("log window dropped", IOS, '"--start", start,', '"--last", "1m",',
+         "no longer reads the store and the log window"),
+        ("SpringBoard dropped", LANE_PY, 'OR (process == "SpringBoard" AND ',
+         "OR (", "lost SpringBoard"),
+        ("adoption cut", LANE_PY, 'log.with_suffix(".notifications")',
+         'log.with_suffix(".notifs")', "does not adopt")):
+    changed = doctored(rel, re.escape(before), after, f"iOS notifications {label}")
+    gate.negative(f"iOS notifications {label}",
+                  lambda: census_ios_notifications(changed), want=want)
+notif_section = doctored(LANE_PY, r'self\.adopt\(bundle, "notifications",',
+                         'self.adopt(bundle, "lost-notifications",',
+                         "iOS notifications section cut")
+gate.negative("iOS notifications section unwritten", lambda: census_sections(notif_section),
+              want="`notifications` is declared")
+for label, before, after, want in (
+        ("orphan", "orphaned += owner is None", "orphaned += 0", "orphaned record"),
+        ("age", "age is not None and age > 7", "age is not None and age > 70", "expiry age"),
+        ("own section", "maps to section {mapping.get(bundle_id) or 'NONE'}",
+         "maps to section NONE", "own section"),
+        ("decode", 'out.append(f"  {d.name}/{store} did not decode',
+         'print(f"  {d.name}/{store} did not decode',
+         "hid an undecodable file")):
+    changed = doctored(LANE_PY, re.escape(before), after, f"iOS store {label} mutation")
+    gate.negative(f"iOS store {label} corrupted",
+                  lambda: ios_notification_checks(changed), want=want)
+
 for call in ("android_system_events", "android_anr_history", "android_shade_history"):
     changed = doctored(ANDROID, re.escape(f"flightrec_lane.{call}("),
                        f"flightrec_lane.unwired_{call}(", f"Android {call} capture cut")
@@ -1359,6 +1487,6 @@ for label, pattern, repl, want in (
     changed = doctored(HARNESS, pattern, repl, label)
     gate.negative(label, lambda: census_wedge_capture(changed), want=want)
 
-gate.negatives_ran(72)
+gate.negatives_ran(82)
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

@@ -604,6 +604,58 @@ def notify_auth(swift_src=None):
     return bad
 
 
+# --- AN iOS LEG LEAVES NO NOTIFICATION FOR AN UNINSTALL TO ORPHAN --------
+# docs/traps.md, the week-old notification that takes a reinstall's.
+def notify_retire(swift_src=None):
+    bad = []
+    code = re.sub(r"//[^\n]*", "", swift_src if swift_src is not None
+                  else real(SWIFT))
+    fn = re.search(r"^#if os\(iOS\)\s*\nfunc kayaRetireNotifications\(at moment: String, "
+                   r"unasked: Bool\) -> String\? \{"
+                   r"(.*?)^\}\n#endif", code, re.M | re.S)
+    if not fn:
+        bad.append("KayaSwiftUI.swift has no iOS kayaRetireNotifications this "
+                   "clause can read (a finding, never a skip)")
+        return bad
+    body = fn.group(1)
+    order = [body.find(s) for s in (
+        "centre.removeAllPendingNotificationRequests()",
+        "centre.removeAllDeliveredNotifications()",
+        "centre.getDeliveredNotifications {",
+        "centre.getPendingNotificationRequests {")]
+    if min(order) < 0 or order != sorted(order):
+        bad.append("kayaRetireNotifications does not remove every pending and "
+                   "delivered notification and then read both lists back")
+    if not re.search(r"return \"the notification centre still holds "
+                     r"\\\(left\.joined", body):
+        bad.append("kayaRetireNotifications does not name what the centre "
+                   "still holds")
+    verdict = re.search(r"#if os\(iOS\)\n    if !actOne \|\| !failures\.isEmpty \{\n"
+                        r"        watchdog\.enter\(\"<the verdict's notification retirement>\"\)\n"
+                        r"        if let left = kayaRetireNotifications\(at: \"the verdict\", "
+                        r"unasked: false\) \{\n"
+                        r"            failures\.append\(left\)", code)
+    pins = code.find('watchdog.enter("<the verdict\'s plain-text pin read>")')
+    published = [m.start() for m in re.finditer(r"watchdog\.published\(", code)
+                 if m.start() > pins >= 0]
+    ready = code.find('print("KAYA_HARNESS: scene ready after')
+    start = re.search(r"#if os\(iOS\)\n    watchdog\.enter\(\"<the leg start's notification "
+                      r"retirement>\"\)\n    if let left = kayaRetireNotifications\(at: "
+                      r"\"the leg's start\", unasked: true\) \{\n        print\(\"KAYA_SELFTEST: "
+                      r"FAILED", code)
+    steps = code.find("var stepOrdinal = 0")
+    if not start or not ready < start.start() < steps:
+        bad.append("the iOS harness does not retire every notification, asked or not, "
+                   "between the scene's mount and its first step")
+    if not verdict:
+        bad.append("the iOS verdict does not retire its notifications, failing "
+                   "the leg on what remains, outside act one's pass")
+    elif len(published) != 2 or min(published) < verdict.start():
+        bad.append(f"the notification retirement does not precede both verdict "
+                   f"publishes ({len(published)} publish site(s))")
+    return bad
+
+
 # --- THE PUMP STARTS WITHOUT A WINDOW -----------------------------------
 # A launch for a notification reply opens no window, so a pump started only
 # by the primary root's appearance never applies the reply's answer
@@ -997,6 +1049,12 @@ if pump_out:
 
 notify_auth_out = notify_auth()
 notify_auth_status = 1 if notify_auth_out else 0
+notify_retire_out = notify_retire()
+notify_retire_status = 1 if notify_retire_out else 0
+if notify_retire_out:
+    print("check-verbs: an iOS leg can leave a notification for the lane's "
+          "uninstall to orphan:", file=sys.stderr)
+    print("\n".join(notify_retire_out), file=sys.stderr)
 immersive_out = compose_immersive()
 immersive_status = 1 if immersive_out else 0
 if immersive_out:
@@ -1413,6 +1471,39 @@ for pattern, repl, label, finding in (
 ):
     drifted = perturb(f"notify-auth ({label})", SWIFT, pattern, repl)
     score = introduced(notify_auth(swift_src=drifted), notify_auth_out,
+                       finding)
+    named, total = score.split("/")
+    if named == "0" or named != total:
+        print(f"check-verbs: SELF-TEST FAIL ({label} scored {score} "
+              f"named/introduced findings, want them equal and "
+              f"nonzero)", file=sys.stderr)
+        raise SystemExit(1)
+
+# AND THE RETIREMENT'S OWN, seven negatives, each watched.
+for pattern, repl, label, finding in (
+    (r"(    if let left = kayaRetireNotifications\(at: \"the leg's start\", unasked: )true",
+     "false", "the start retiring only an asked centre", "asked or not"),
+    (r"(    )watchdog\.enter\(\"<the leg start's notification retirement>\"\)\n"
+     r"    if let left = kayaRetireNotifications\(at: \"the leg's start\", unasked: true\) \{"
+     r"\n        print\(\"KAYA_SELFTEST: FAILED \(\\\(left\)\)\"\)\n"
+     r"        watchdog\.published\(1\)\n        exit\(1\)\n    \}\n", "",
+     "no retirement at the leg's start", "between the scene's mount"),
+    (r"(    )centre\.removeAllDeliveredNotifications\(\)\n", "",
+     "the delivered list never removed", "read both lists back"),
+    (r"(        )centre\.getDeliveredNotifications \{", "centre.getNotificationCategories {",
+     "the delivered list never read back", "read both lists back"),
+    (r"(    if )!actOne \|\| !failures\.isEmpty \{", "true {",
+     "act one's notification retired before act two", "outside act one's pass"),
+    (r"(        if let left = kayaRetireNotifications\(at: \"the verdict\", "
+     r"unasked: false\) \{\n            )"
+     r"failures\.append\(left\)",
+     "_ = left", "what remains not failing the leg", "outside act one's pass"),
+    (r"(        )watchdog\.published\(0\)\n        exit\(0\)",
+     "watchdog.published(0)\n        exit(0)\n    }\n    if false {\n        watchdog.published(2)",
+     "a third publish before the retirement", "precede both verdict publishes"),
+):
+    drifted = perturb(f"notify-retire ({label})", SWIFT, pattern, repl)
+    score = introduced(notify_retire(swift_src=drifted), notify_retire_out,
                        finding)
     named, total = score.split("/")
     if named == "0" or named != total:
@@ -5530,6 +5621,7 @@ if (clip_status or window_status or ink_status or ax_status
         or metrics_status or keyed_status or drop_line_status
         or vtrace_status or norm_status or ind_status
         or answer_status or seed_focus_status or notify_auth_status
+        or notify_retire_status
         or pump_status or immersive_status or kind_status
         or range_status or media_status or timeout_status or frame_status
         or capture_status or capture_gtk_status or capture_compose_status):

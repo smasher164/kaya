@@ -1783,6 +1783,7 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
         print(f"run-sim: {name} asks for both a cut at `{cut}` and a "
               f"drop of {drops} — pick one", file=log)
         return False
+    installed_at = time.time()
     run(["xcrun", "simctl", "install", udid, str(app)],
         stdout=log, stderr=log)
     # THE LINK SCENE RUNS AS THE ONLY CLAIMANT OF ITS SCHEME, from act
@@ -1905,6 +1906,7 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
         # between here and the screen, and what is on it is the one
         # thing that does not keep.
         device_capture(udid, pathlib.Path(app).stem, name, log)
+        notification_capture(udid, bundle_id, name, installed_at, log)
         pull_container_files(udid, bundle_id, name, log)
         if drive_log.is_file():
             with open(drive_log, "r", encoding="utf-8",
@@ -2020,6 +2022,30 @@ def device_capture(udid, executable, name, log):
         applog.unlink()
         print(f"run-sim: {name}: `simctl spawn {udid} log show` for "
               f"process {executable!r} answered nothing", file=log)
+
+
+def notification_capture(udid, bundle_id, name, since, log):
+    """docs/traps.md, the week-old notification that takes a reinstall's."""
+    dest = (LEGS_DIR / f"{name}.log").with_suffix(".notifications")
+    data = pathlib.Path(out_of(["xcrun", "simctl", "get_app_container", udid,
+                                bundle_id, "data"]).strip() or "/nonexistent")
+    device = next((p for p in data.parents
+                   if p.name == "data" and p.parent.name == udid), None)
+    start = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(since - 2))
+    with open(dest, "w", encoding="utf-8") as f:
+        f.write(flightrec_lane.ios_notification_store(
+            device / "Library" / "UserNotifications" if device else None,
+            bundle_id))
+        f.write(f"\n== SpringBoard and usernotificationsd on {udid} from {start} "
+                f"(the leg's install), predicate {flightrec_lane.IOS_NOTIFICATION_PREDICATE} ==\n")
+        f.flush()
+        got = run(["timeout", "60", "xcrun", "simctl", "spawn", udid, "log",
+                   "show", "--start", start, "--style", "compact",
+                   "--predicate", flightrec_lane.IOS_NOTIFICATION_PREDICATE],
+                  stdout=f, stderr=subprocess.STDOUT, **TEXT)
+        f.write(f"\n== log show exited {got.returncode} ==\n")
+    print(f"run-sim: {name} kept the simulator's notification side "
+          f"({dest.stat().st_size} bytes, log show exit {got.returncode})", file=log)
 
 
 def pull_container_files(udid, bundle_id, name, log):

@@ -48,7 +48,8 @@ SECTIONS = {
     "windows": ("leg-log", "verb-trace", "shot", "desktop-shot", "desktop",
                 "foreground", "foreground-text", "desktop-live", "notifications",
                 "toast-moment", "gesture-moment", "media-server", "capture-devices"),
-    "ios": ("leg-log", "verb-trace", "shot", "panic", "app-log", "devices", "binary-stamp"),
+    "ios": ("leg-log", "verb-trace", "shot", "panic", "app-log", "devices", "binary-stamp",
+            "notifications"),
     "android": ("leg-log", "verb-trace", "shot", "logcat", "devices",
                 "system-events", "anr-history", "shade-history"),
     "linux": ("leg-log", "verb-trace", "shot", "desktop", "xvfb"),
@@ -112,6 +113,78 @@ def android_shade_history(text, status):
     lines = sorted({(m.group(1), m.group(2)) for m in stamped if m})
     return (heading + f"Selected {len(lines)} line(s); newest 400 retained.\n"
             + "\n".join(f"{stamp} {rest}" for stamp, rest in lines[-400:]) + "\n")
+
+
+IOS_NOTIFICATION_PREDICATE = (
+    'process == "usernotificationsd" OR (process == "SpringBoard" AND '
+    'subsystem BEGINSWITH "com.apple.UserNotifications" AND NOT '
+    '(eventMessage CONTAINS "ffective section info" OR '
+    'eventMessage CONTAINS "effectiveSectionInfo"))')
+
+
+def _keyed_root(path):
+    import plistlib
+    with open(path, "rb") as f:
+        archive = plistlib.load(f)
+    objs = archive["$objects"]
+
+    def deref(x):
+        return objs[x.data] if isinstance(x, plistlib.UID) else x
+
+    def native(x):
+        x = deref(x)
+        if isinstance(x, dict) and "NS.keys" in x:
+            return {deref(k): native(v) for k, v in zip(x["NS.keys"], x["NS.objects"])}
+        if isinstance(x, dict) and "NS.objects" in x:
+            return [native(v) for v in x["NS.objects"]]
+        if isinstance(x, dict) and "NS.time" in x:
+            return x["NS.time"] + 978307200
+        return x
+
+    return native(archive["$top"]["root"])
+
+
+def ios_notification_store(root, bundle_id, now=None):
+    # docs/traps.md, the week-old notification that takes a reinstall's.
+    now = time.time() if now is None else now
+    out = [f"The simulator's notification stores under {root}, read at fail time.\n"]
+    library = pathlib.Path(root) / "Library.plist" if root else None
+    if library is None or not library.is_file():
+        return out[0] + f"No Library.plist at {library}; no store was read.\n"
+    try:
+        mapping = _keyed_root(library)
+    except Exception as e:
+        return out[0] + f"Library.plist did not decode: {type(e).__name__}: {e}\n"
+    owners = {v: k for k, v in mapping.items()} if isinstance(mapping, dict) else {}
+    out.append(f"{bundle_id} maps to section {mapping.get(bundle_id) or 'NONE'}; "
+               f"{len(owners)} bundle(s) mapped.\n")
+    held = orphaned = expired = 0
+    for d in sorted(p for p in pathlib.Path(root).iterdir() if p.is_dir()):
+        for store in ("DeliveredNotifications.plist", "PendingNotifications.plist"):
+            path = d / store
+            if not path.is_file():
+                continue
+            try:
+                records = _keyed_root(path)
+            except Exception as e:
+                out.append(f"  {d.name}/{store} did not decode: {type(e).__name__}: {e}\n")
+                continue
+            for rec in records if isinstance(records, list) else []:
+                held += 1
+                owner = owners.get(d.name)
+                orphaned += owner is None
+                created = rec.get("AppNotificationCreationDate")
+                age = (now - created) / 86400 if isinstance(created, (int, float)) else None
+                expired += age is not None and age > 7
+                when = (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(created))
+                        + f", {age:.2f} days old" if age is not None else "no creation date")
+                out.append(f"  {store.split('Notifications')[0].lower()} {d.name} "
+                           f"{owner or '<no bundle maps here: an uninstalled install>'} "
+                           f"{rec.get('AppNotificationIdentifier')!r} "
+                           f"title={rec.get('AppNotificationTitle')!r} ({when})\n")
+    out.append(f"{held} record(s) held; {orphaned} in a section no bundle maps; "
+               f"{expired} older than 7 days.\n")
+    return "".join(out)
 
 
 def _flightrec(root):
@@ -1130,6 +1203,9 @@ class IosRecorder(LaneRecorder):
                                       "show` slice was kept for this leg")
                 self.adopt(bundle, "binary-stamp", log.with_suffix(".sdk"),
                            why_absent="flightrec: no binary stamp was kept before this leg")
+                self.adopt(bundle, "notifications", log.with_suffix(".notifications"),
+                           why_absent="flightrec: run-sim.py's notification_capture "
+                                      "kept no file for this leg")
                 self.adopt_shot(bundle, "shot", log.with_suffix(".shot.png"),
                                 why_absent=self.SHOT_ABSENT,
                                 note_src=log.with_suffix(".shotwhen"))
