@@ -323,6 +323,10 @@ name = "autofill"
 path = "../../guests/rust/autofill.rs"
 
 [[example]]
+name = "reveal"
+path = "../../guests/rust/reveal.rs"
+
+[[example]]
 name = "numberfield"
 path = "../../guests/rust/numberfield.rs"
 

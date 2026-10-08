@@ -24,7 +24,7 @@ public enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x000c0323f11ef52f
+let kayaSpecHash: UInt64 = 0xad557b5075ff50eb
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
 func kayaPackDate(_ year: Int, _ month: Int, _ day: Int) -> Int64 {
@@ -2653,6 +2653,70 @@ struct KayaTx {
         let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_CONTENT_TYPE))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
+    /// set_property with a constant revealed value.
+    mutating func setRevealed(_ widgetId: UInt64, _ revealed: Bool) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_REVEALED))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.bool(revealed))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound revealed value.
+    mutating func bindRevealed(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_REVEALED))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindRevealedElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_REVEALED))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
+    /// set_property with a constant revealable value.
+    mutating func setRevealable(_ widgetId: UInt64, _ revealable: Bool) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_REVEALABLE))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.bool(revealable))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound revealable value.
+    mutating func bindRevealable(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_REVEALABLE))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindRevealableElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_REVEALABLE))
         self.u32(UInt32(KAYA_SOURCE_ELEMENT))
         self.u32(level)
         self.u32(field)

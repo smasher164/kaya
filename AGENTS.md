@@ -749,7 +749,7 @@ in docs/deferred.md.
    all four backends since the breadth (GTK's activate, focus leaving for
    another widget and the stepper around value-changed; WinUI's
    ValueChanged door; Compose's keyboard action, hardware Return and focus
-   loss). 50 watched negatives, counts printed),
+   loss). 55 watched negatives, counts printed),
    `tools/check-scroll-to.py` (THE APP'S SCROLL LANDS INSTANTLY, HOLDS
    UNTIL LAYOUT AND SHARES THE TIERS' PARK (docs/scroll-to-plan.md S4, S6,
    §3): tools/scenes/scrollto.steps asserts where a row lands and its

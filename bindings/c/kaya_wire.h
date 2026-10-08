@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x000c0323f11ef52fULL
+#define KAYA_SPEC_HASH 0xad557b5075ff50ebULL
 
 
 /* Create a signal holding `initial`. */
@@ -2759,6 +2759,70 @@ static inline void kaya_tx_bind_content_type_element(KayaTx *tx, uint64_t widget
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_CONTENT_TYPE);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a constant revealed value. */
+static inline void kaya_tx_set_revealed(KayaTx *tx, uint64_t widget_id, int revealed) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_REVEALED);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_bool(revealed));
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a signal-bound revealed value. */
+static inline void kaya_tx_bind_revealed(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_REVEALED);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_revealed_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_REVEALED);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a constant revealable value. */
+static inline void kaya_tx_set_revealable(KayaTx *tx, uint64_t widget_id, int revealable) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_REVEALABLE);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_bool(revealable));
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a signal-bound revealable value. */
+static inline void kaya_tx_bind_revealable(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_REVEALABLE);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_revealable_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_REVEALABLE);
     kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
     kaya_wire_u32(tx, level);
     kaya_wire_u32(tx, field);

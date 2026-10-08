@@ -197,7 +197,7 @@ the plan's §2 are recommended and await the maintainer. What breadth owes:
   - **tools/lib/content_type_routes.py's BACKENDS** — each backend whose
     stub goes takes a pinned table row there, as the SwiftUI arm has.
 
-## DEFER — the secure field's reveal toggle (docs/secure-entry-plan.md P3; 2026-10-07)
+## ~~DEFER — the secure field's reveal toggle (docs/secure-entry-plan.md P3; 2026-10-07)~~ CLOSED 2026-10-08: the maintainer asked for it ("maybe we do show password now? i want to finish password entry"); designed in docs/reveal-plan.md, the depth built, the breadth is the BUILD entry below.
 KEY: reveal toggle, PasswordRevealMode, show-peek-icon, TextObfuscationMode
 
 An app-declared `reveal` toggle the depth left out on purpose, since every
@@ -207,6 +207,46 @@ the Apple platforms). The autofill hint that shared this entry is the BUILD
 entry above (docs/autofill-plan.md A9 keeps the toggle out of that slice).
 Trigger: the password-manager archetype, or the first app with a login
 screen that asks to show its password.
+
+## BUILD — the reveal toggle (docs/reveal-plan.md), depth on the mac (2026-10-08); the GTK, WinUI and Compose arms, the iOS legs and the other eight bindings are the breadth slice
+KEY: revealed, revealable, PROP_REVEALED, PROP_REVEALABLE, expect_unmasked, unmasked_count, kayaUnmaskedCount, toggle_reveal, kayaRevealToggle, kayaRevealSwap, KayaRevealedField, KayaRevealEditor, reveal.steps, reveal_routes, DEPTH STUB reveal
+
+The depth slice: props 57 `revealed` and 58 `revealable` on the secure field
+in both zones, the user's flip reported as `toggled`, the Rust binding, the
+SwiftUI arm on macOS and iOS (a plain field over the same text with what the
+secure view refuses refused, the eye at the trailing edge), the harness's
+`expect_unmasked` and the secure field's arm of `toggle`, and
+tools/scenes/reveal.steps green on the mac lane for Rust. The rulings V1-V9
+in the plan's §2 are recommended and await the maintainer. What breadth owes:
+  - **DEPTH STUB: reveal on gtk** — the delegate GtkText's visibility under
+    the quiet guard, `notify::visibility` emitting `toggled`, the peek icon
+    (or a kaya button over it, plan V7) for `revealable`, copy and cut stopped
+    on the GtkText while shown, `unmasked_len` through the AT-SPI text and
+    `toggle_reveal` through the icon's own toggle.
+  - **DEPTH STUB: reveal on winui** — `PasswordRevealMode` Visible/Hidden,
+    the RevealButton driven as a toggle (Peek is press-and-hold), the read off
+    the box's mode and its Password length. check-universal-props holds
+    `SetPasswordRevealMode(PasswordRevealMode::Hidden)` as the secure field's
+    creation, which stays and gains the shown arm.
+  - **DEPTH STUB: reveal on compose** — `TextObfuscationMode.Visible`, the
+    EditableText override following the reveal, the Material trailing
+    IconButton, the `toggle` and `expect_unmasked` verbs. check-universal-props
+    holds `RevealLastTyped` on the hidden field, which stays.
+  - **The iOS legs** — measure the shown field's accessibilityValue and whether
+    the swap keeps the keyboard up, then take `reveal` out of
+    tools/lib/lanes/ios.py's UNWIRED_SCENES.
+  - **`revealed` and `revealable` in the other eight bindings** — both zones,
+    a `reveal` guest each; check-sugar-surface's REVEAL_SURFACES are tightened
+    to each binding's built shape with a cut per pattern, and tpl-surfaces'
+    PROP_MEMBERS names are confirmed. The C floor needs nothing past kaya.h's
+    KAYA_PROP_REVEALED / KAYA_PROP_REVEALABLE and the generated
+    `kaya_tx_set_revealed` / `kaya_tx_set_revealable`.
+  - **tools/lib/reveal_routes.py's BACKENDS** — each backend whose stub goes
+    takes its clauses there, as the SwiftUI arm has.
+  - **The masked mac field's native undo** — NSSecureTextView's `allowsUndo`
+    reads true while a masked field is focused (measured 2026-10-08), where
+    GTK turns its history off and the revealed view refuses one; whether the
+    masked view should refuse it too is a ruling for the secure field's P2.
 
 ## ~~BUILD — timecode formatter and number-field format (2026-10-04)~~ COMPLETE implementation 2026-10-05: all nine bindings plus C, all five backends, viewed review page; full-matrix validation follow-up remains open below.
 KEY: timecode, TimecodeRate, NumberFormat, drop-frame, number-field format

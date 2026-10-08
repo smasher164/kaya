@@ -14826,3 +14826,30 @@ bypassing it is Appium WebDriverAgent's swizzle of
 `XCUIApplicationProcess -waitForQuiescenceIncludingAnimationsIdle:isPreEvent:`
 (that signature since Xcode 16 beta 5; present in Xcode 26.6's
 XCUIAutomation).
+
+## One SwiftUI focus state across a view swap focuses nothing half the time (measured 2026-10-08)
+
+A secure field swapped between SwiftUI's SecureField and a plain field under
+ONE `@FocusState` lost the focus on about half the runs of the reveal leg: the
+leaving view's drop and the arriving view's take land in one transaction and
+coalesce, the arriving view is not always in the tree on the first turn, and
+the window ends as its own first responder, so the harness's next
+`type_secret` "reached no window". Setting the state false then true in one
+turn changes nothing either. What held five runs of five: one focus state per
+view, the arriving view's take retried each 50 ms until its editor is the
+window's first responder, and the leaving view's loss ignored while the swap
+is marked (docs/reveal-plan.md V6). The harness's `toggle` waits for that
+first responder, so a swap that loses the focus is a red step and not a later
+"nothing was typed".
+
+## A SwiftUI TextField's editor hands its text to every text service (measured 2026-10-08)
+
+Over a selection, the stock TextField's field editor
+(`_SystemTextFieldFieldEditor`) offers Cut and Copy enabled, Look Up and
+Translate naming the selected text, Search with Google, Share, Writing Tools
+and Speech, and keeps an undo stack; NSSecureTextView offers Cut and Copy
+disabled, Paste, Delete and Select All. So a shown password must not be a
+stock TextField: the mac's revealed secure field is an NSTextField whose cell
+returns `KayaRevealEditor`, which refuses what NSSecureTextView refuses
+(tools/lib/reveal_routes.py holds each refusal). NSSecureTextView's own
+`allowsUndo` reads true (docs/deferred.md, the reveal toggle's BUILD entry).

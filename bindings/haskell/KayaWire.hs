@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x000c0323f11ef52f
+specHash = 0xad557b5075ff50eb
 
 valueBool :: Word32
 valueBool = 1
@@ -264,6 +264,10 @@ propFormat :: Word32
 propFormat = 55
 propContentType :: Word32
 propContentType = 56
+propRevealed :: Word32
+propRevealed = 57
+propRevealable :: Word32
+propRevealable = 58
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -2574,6 +2578,44 @@ txBindContentType widgetId signalId = wireRecord txKindSetProperty
 txBindContentTypeElement :: Word64 -> Word32 -> Word32 -> Builder
 txBindContentTypeElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propContentType <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant revealed value.
+txSetRevealed :: Word64 -> Bool -> Builder
+txSetRevealed widgetId revealed = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propRevealed <> word32LE sourceConst
+    <> encodeValue (VBool revealed))
+
+-- set_property with a signal-bound revealed value.
+txBindRevealed :: Word64 -> Word64 -> Builder
+txBindRevealed widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propRevealed <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindRevealedElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindRevealedElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propRevealed <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant revealable value.
+txSetRevealable :: Word64 -> Bool -> Builder
+txSetRevealable widgetId revealable = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propRevealable <> word32LE sourceConst
+    <> encodeValue (VBool revealable))
+
+-- set_property with a signal-bound revealable value.
+txBindRevealable :: Word64 -> Word64 -> Builder
+txBindRevealable widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propRevealable <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindRevealableElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindRevealableElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propRevealable <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
 -- set_window_prop with a constant title value (window 0, the primary surface).

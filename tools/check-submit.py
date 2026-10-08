@@ -135,7 +135,19 @@ def swift_findings(source):
             or "let key: UIReturnKeyType = node.submits ? .send : .default" not in src:
         out.append(f"{SWIFT}: the iOS textarea's key is not keyed on submits — a submitting "
                    f"textarea's phone key must say Send, at creation and on update (S4)")
-    doors = blocks_after(src, ".onSubmit {") + [mac, ios_door]
+    # The revealed secure field's own Return doors (docs/reveal-plan.md §3).
+    shown_mac = block_after(src, "func control(_ control: NSControl, textView: NSTextView, "
+                                 "doCommandBy selector: Selector) -> Bool {")
+    shown_guard = ("guard let node, selector == #selector(NSResponder.insertNewline(_:)) "
+                   "else { return false }")
+    if shown_guard not in shown_mac or emit not in shown_mac:
+        out.append(f"{SWIFT}: the mac revealed secure field's Return no longer submits through its "
+                   f"insertNewline: door (docs/reveal-plan.md §3)")
+    shown_ios = block_after(src, "func textFieldShouldReturn(_ field: UITextField) -> Bool {")
+    if emit not in shown_ios:
+        out.append(f"{SWIFT}: the iOS revealed secure field's Return no longer submits "
+                   f"(docs/reveal-plan.md §3)")
+    doors = blocks_after(src, ".onSubmit {") + [mac, ios_door, shown_mac, shown_ios]
     out.extend(only_through_doors(SWIFT, src, emit, doors))
     return out
 
@@ -658,9 +670,15 @@ watched("a WinUI secure field whose Return submits nothing", {**REAL, WINUI: n_w
 
 n_swift_secure = gate.doctor("the swiftui secure field's onSubmit cut", REAL[SWIFT],
                              r"(\.autocorrectionDisabled\(\)\n\s*#endif\n)\s*\.onSubmit "
-                             r"\{ KayaHost\.emitSubmitted\(node, node\.text\) \}\n", r"\1")
+                             r"\{ KayaHost\.emitSubmitted\(node, node\.text\) \},?\n", r"\1")
 watched("a SwiftUI secure field whose Return submits nothing", {**REAL, SWIFT: n_swift_secure},
         "KayaSecureField has no `.onSubmit` emit")
+n_shown_mac = gate.doctor("the mac revealed secure field's insertNewline guard cut", REAL[SWIFT],
+                         r"guard let node, selector == "
+                         r"#selector\(NSResponder\.insertNewline\(_:\)\) "
+                         r"else \{ return false \}", "guard let node else { return false }")
+watched("a revealed mac secure field submitting on every command", {**REAL, SWIFT: n_shown_mac},
+        "revealed secure field's Return no longer submits")
 n_compose_secure = gate.doctor("the compose secure field's hardware Return emit cut",
                                REAL[COMPOSE],
                                r"(if \(hardwareReturn\) \{\n)\s*KayaPresent\.emitSubmitted\("
@@ -873,7 +891,7 @@ n_win_verb = gate.doctor("the harness's nudge committing past the door", REAL[WI
 watched("a WinUI verb that commits without the user's door", {**REAL, WINUI: n_win_verb},
         "winui_number_settle is called")
 
-gate.negatives_ran(54)
+gate.negatives_ran(55)
 
 for line in census(REAL):
     gate.finding(line)

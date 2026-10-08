@@ -1981,6 +1981,19 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// Whether this secure field shows its text — [`Tx::revealed`] chained.
+    pub fn revealed(self, on: bool) -> Self {
+        self.tx.revealed(self.id, on);
+        self
+    }
+
+    /// This secure field carries the platform's own show/hide toggle —
+    /// [`Tx::revealable`] chained.
+    pub fn revealable(self) -> Self {
+        self.tx.revealable(self.id);
+        self
+    }
+
     /// A `role link` label's destination (docs/tasks-s2-plan.md T3).
     pub fn href(self, url: impl Into<LiveSource<StrKind>>) -> Self {
         self.tx.href(self.id, url);
@@ -3056,6 +3069,19 @@ impl<'a> Tx<'a> {
     /// (docs/autofill-plan.md A1-A3). `ContentType::None` takes the hint away.
     pub fn content_type(&mut self, widget: WidgetId, content: crate::protocol::ContentType) {
         self.set(widget, Prop::ContentType, content.wire());
+    }
+
+    /// Whether a secure field shows its text (docs/reveal-plan.md V1). A
+    /// write never echoes; the user's own toggle reaches
+    /// [`Messages::on_toggle`] with the new state.
+    pub fn revealed(&mut self, widget: WidgetId, on: bool) {
+        self.set(widget, Prop::Revealed, on);
+    }
+
+    /// A secure field carries the platform's own show/hide toggle
+    /// (docs/reveal-plan.md V1); each flip reaches [`Messages::on_toggle`].
+    pub fn revealable(&mut self, widget: WidgetId) {
+        self.set(widget, Prop::Revealable, true);
     }
 
     /// A `role link` label's destination (docs/tasks-s2-plan.md T3).
@@ -4885,6 +4911,14 @@ impl<'b> Row<'_, 'b> {
 
     pub fn content_type(&mut self, node: TemplateNodeId, content: crate::protocol::ContentType) {
         self.tpl().content_type(node, content)
+    }
+
+    pub fn revealed(&mut self, node: TemplateNodeId, src: impl Into<TplSource<BoolKind>>) {
+        self.tpl().revealed(node, src)
+    }
+
+    pub fn revealable(&mut self, node: TemplateNodeId) {
+        self.tpl().revealable(node)
     }
 
     pub fn aspect(&mut self, node: TemplateNodeId, width: i32, height: i32) {
@@ -8270,6 +8304,18 @@ impl<'b> Tpl<'_, 'b> {
     /// A stamped field's content type, the blueprint twin of [`Tx::content_type`].
     pub fn content_type(&mut self, node: TemplateNodeId, content: crate::protocol::ContentType) {
         self.set(node, Prop::ContentType, content.wire());
+    }
+
+    /// Whether a stamped secure field shows its text, the blueprint twin of
+    /// [`Tx::revealed`]; a row field gives each copy its own.
+    pub fn revealed(&mut self, node: TemplateNodeId, src: impl Into<TplSource<BoolKind>>) {
+        self.apply_source(node, Prop::Revealed, src.into().inner);
+    }
+
+    /// A stamped secure field's own toggle, the blueprint twin of
+    /// [`Tx::revealable`]; each flip reaches [`Messages::on_toggle_node`].
+    pub fn revealable(&mut self, node: TemplateNodeId) {
+        self.apply_source(node, Prop::Revealable, SourceInner::Const(Value::Bool(true)));
     }
 
     /// A stamped video view's box ratio, the blueprint twin of

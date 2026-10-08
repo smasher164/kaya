@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x000c0323f11ef52fL
+let spec_hash = 0xad557b5075ff50ebL
 
 let value_bool = 1
 let value_i64 = 2
@@ -151,6 +151,8 @@ let prop_capture = 53
 let prop_aspect = 54
 let prop_format = 55
 let prop_content_type = 56
+let prop_revealed = 57
+let prop_revealable = 58
 let wprop_title = 1
 let wprop_width = 2
 let wprop_height = 3
@@ -2688,6 +2690,58 @@ let tx_bind_content_type_element ?(level = 0) ?(field = 0) widget_id =
   finish tx_kind_set_property (fun b ->
       Buffer.add_int64_le b widget_id;
       Buffer.add_int32_le b (Int32.of_int prop_content_type);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
+(* set_property with a constant revealed value. *)
+let tx_set_revealed widget_id revealed =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_revealed);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Bool revealed))
+
+(* set_property with a signal-bound revealed value. *)
+let tx_bind_revealed widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_revealed);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_revealed_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_revealed);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
+(* set_property with a constant revealable value. *)
+let tx_set_revealable widget_id revealable =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_revealable);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Bool revealable))
+
+(* set_property with a signal-bound revealable value. *)
+let tx_bind_revealable widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_revealable);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_revealable_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_revealable);
       Buffer.add_int32_le b (Int32.of_int source_element);
       Buffer.add_int32_le b (Int32.of_int level);
       Buffer.add_int32_le b (Int32.of_int field))

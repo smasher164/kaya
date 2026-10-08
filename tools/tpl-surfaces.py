@@ -277,7 +277,9 @@ TPL_PROPS = ["format", "grow", "a11y_id", "a11y_label", "a11y_hint", "accepts", 
              # bare `Textarea` would be satisfied by the text overload.
              "document",
              # docs/autofill-plan.md A1: a stamped credential field's content type.
-             "content_type"]
+             "content_type",
+             # docs/reveal-plan.md V1: a stamped secure field's reveal and toggle.
+             "revealed", "revealable"]
 
 # Rust's `grow` is the generic floor `set(node, prop, value)` and not a
 # named setter, so that one row cannot tell grow from any other generic
@@ -293,6 +295,7 @@ PROP_MEMBERS = {
         "document": "textarea_rich_bound",
         "submits": "submits",
         "content_type": "content_type",
+        "revealed": "revealed", "revealable": "revealable",
     },
     "go": {
         "format": "SetFormat",
@@ -305,6 +308,7 @@ PROP_MEMBERS = {
         "document": "TextareaRichBound",
         "submits": "SetSubmits",
         "content_type": "SetContentType",
+        "revealed": "SetRevealed", "revealable": "SetRevealable",
     },
     "csharp": {
         "format": "SetFormat",
@@ -317,6 +321,7 @@ PROP_MEMBERS = {
         "document": "Textarea(Field<Document>",
         "submits": "SetSubmits",
         "content_type": "SetContentType",
+        "revealed": "SetRevealed", "revealable": "SetRevealable",
     },
     "java": {
         "format": "setFormat",
@@ -329,6 +334,7 @@ PROP_MEMBERS = {
         "document": "textareaRich",
         "submits": "setSubmits",
         "content_type": "setContentType",
+        "revealed": "setRevealed", "revealable": "setRevealable",
     },
     "swift": {
         "format": "setFormat",
@@ -341,6 +347,7 @@ PROP_MEMBERS = {
         "document": "textarea(document:",
         "submits": "setSubmits",
         "content_type": "setContentType",
+        "revealed": "setRevealed", "revealable": "setRevealable",
     },
     "ocaml": {
         "format": "set_format",
@@ -353,6 +360,7 @@ PROP_MEMBERS = {
         "document": "bind_document_field",
         "submits": "set_submits",
         "content_type": "set_content_type",
+        "revealed": "set_revealed", "revealable": "set_revealable",
     },
     # Haskell's template props are not methods but CONSTRUCTORS of the
     # `TplAttr` GADT, applied by `applyTplAttr`.
@@ -367,6 +375,7 @@ PROP_MEMBERS = {
         "document": "bindDocumentField",
         "submits": "TplSubmits",
         "content_type": "TplContentType",
+        "revealed": "TplRevealed", "revealable": "TplRevealable",
     },
     # JS spells five of the seven as chainable methods on the base handle
     # and the other two as CONSTRUCTOR OPTIONS; members_js says why the
@@ -381,6 +390,7 @@ PROP_MEMBERS = {
         "document": "document",
         "submits": "submits",
         "content_type": "contentType",
+        "revealed": "revealed", "revealable": "revealable",
     },
 }
 

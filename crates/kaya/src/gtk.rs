@@ -14410,6 +14410,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 (NativeWidget::Search(search), Prop::Placeholder, Value::Str(s)) => {
                     search.set_placeholder_text((!s.is_empty()).then_some(s.as_str()));
                 }
+                (_, Prop::Revealed | Prop::Revealable, _) => crate::depth_stub("reveal"),
                 (NativeWidget::Secure(field), Prop::Placeholder, Value::Str(s)) => {
                     field.set_placeholder_text((!s.is_empty()).then_some(s.as_str()));
                 }
@@ -18626,9 +18627,16 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
+    fn unmasked_len(&self, _: crate::harness::Target) -> Result<usize, crate::harness::MaskRead> {
+        crate::depth_stub("reveal")
+    }
+
+    fn toggle_reveal(&self, _: crate::harness::Target, _: bool) {
+        crate::depth_stub("reveal")
+    }
+
     /// The Text interface of the field's own node on the bus, through the one
     /// mask rule (docs/secure-entry-plan.md §3, P6).
-
     fn masked_len(&self, target: crate::harness::Target) -> Result<usize, crate::harness::MaskRead> {
         use crate::harness::MaskRead;
         let Some((want, rank)) = Self::on_main(move |core| {

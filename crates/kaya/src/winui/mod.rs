@@ -16764,6 +16764,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (NativeWidget::Search { field, .. }, Prop::Placeholder, Value::Str(s)) => {
                     field.SetPlaceholderText(&HSTRING::from(&s))?;
                 }
+                (_, Prop::Revealed | Prop::Revealable, _) => crate::depth_stub("reveal"),
                 (NativeWidget::Secure(field), Prop::Placeholder, Value::Str(s)) => {
                     field.SetPlaceholderText(&HSTRING::from(&s))?;
                 }
@@ -22304,9 +22305,16 @@ impl crate::harness::Stage for WinUiStage {
         read.unwrap_or_else(|e| Err(format!("the InputScope could not be read: {e}")))
     }
 
+    fn unmasked_len(&self, _: crate::harness::Target) -> Result<usize, crate::harness::MaskRead> {
+        crate::depth_stub("reveal")
+    }
+
+    fn toggle_reveal(&self, _: crate::harness::Target, _: bool) {
+        crate::depth_stub("reveal")
+    }
+
     /// docs/secure-entry-plan.md §3: the peer must say IsPassword, and a value
     /// its Value pattern publishes is held to the mask rule.
-
     fn masked_len(&self, t: crate::harness::Target) -> Result<usize, crate::harness::MaskRead> {
         use crate::harness::MaskRead;
         Self::on_ui_read(move |core| {

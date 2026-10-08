@@ -1,0 +1,45 @@
+# The reveal toggle (docs/reveal-plan.md): the secure field shows its text on
+# the user's own toggle or the app's write, the harness reads only how many
+# characters it shows unmasked, and the app hears the user's toggle alone.
+# Every type_secret argument is one the leg's transcripts are scanned for
+# (tools/lib/secure_scan.py), so the revealed text must reach no transcript.
+expect_placeholder secure_field@password "Password"
+expect_content_type secure_field@password password
+click secure_field@password
+expect_focused secure_field@password
+type_secret "Rv4tNb"
+expect_masked secure_field@password 6
+expect label@status "6 characters, no match"
+toggle secure_field@password on
+expect label@heard "heard: shown"
+expect_unmasked secure_field@password 6
+expect_focused secure_field@password
+expect_ax secure_field@password "field/Password"
+expect_content_type secure_field@password password
+# Focus and the typing survive the swap: the second half lands after the first.
+type_secret "Hy2mQc"
+expect_unmasked secure_field@password 12
+expect label@status "12 characters, match"
+press return
+expect label@sent "sent: 12 characters, match"
+toggle secure_field@password off
+expect label@heard "heard: hidden"
+expect_masked secure_field@password 12
+# The app's own write reveals and hides; it never echoes as a toggle.
+click button@show
+expect_unmasked secure_field@password 12
+expect label@heard "heard: hidden"
+click button@hide
+expect_masked secure_field@password 12
+click button@show
+click button@clear
+expect_unmasked secure_field@password 0
+expect label@status "empty"
+# A stamped copy starts revealed by its row's field, and its toggle names its row.
+click secure_field@pin[b]
+type_secret "Wd5sKj"
+expect label@pin_status "pin b: 6"
+expect_unmasked secure_field@pin[b] 6
+toggle secure_field@pin[b] off
+expect label@pin_status "pin b: hidden"
+expect_masked secure_field@pin[b] 6

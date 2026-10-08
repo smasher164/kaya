@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x000c0323f11ef52f;
+    public const ulong SpecHash = 0xad557b5075ff50eb;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -133,6 +133,8 @@ static class KayaWire
     public const uint PropAspect = 54;
     public const uint PropFormat = 55;
     public const uint PropContentType = 56;
+    public const uint PropRevealed = 57;
+    public const uint PropRevealable = 58;
     public const uint WpropTitle = 1;
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
@@ -2887,6 +2889,56 @@ static class KayaWire
     {
         var w = Begin(out var stream);
         w.Write(widgetId); w.Write(PropContentType); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant revealed value.
+    public static byte[] TxSetRevealed(ulong widgetId, bool revealed)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropRevealed); w.Write(SourceConst);
+        EncodeValue(w, revealed);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound revealed value.
+    public static byte[] TxBindRevealed(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropRevealed); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindRevealedElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropRevealed); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant revealable value.
+    public static byte[] TxSetRevealable(ulong widgetId, bool revealable)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropRevealable); w.Write(SourceConst);
+        EncodeValue(w, revealable);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound revealable value.
+    public static byte[] TxBindRevealable(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropRevealable); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindRevealableElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropRevealable); w.Write(SourceElement); w.Write(level); w.Write(field);
         return Finish(stream, w, TxKindSetProperty);
     }
 

@@ -126,6 +126,8 @@ VERB_FEATURE = {
     "expect_masked": "secure",
     # docs/autofill-plan.md §5, the same reasoning.
     "expect_content_type": "autofill",
+    # docs/reveal-plan.md §5, the same reasoning.
+    "expect_unmasked": "reveal",
     # docs/color-picker-plan.md §5, the same reasoning.
     "set_color": "colorpicker",
     "expect_color": "colorpicker",

@@ -188,7 +188,8 @@ toggle is a visible affordance with a different control on every platform
 (WinUI's eye button, GTK's peek icon, Compose's Visible mode, a SecureField
 swapped for a TextField on the Apple platforms) and a harness question of its
 own (what may a transcript print once the text is shown). It keeps its
-ledger entry and its trigger.
+ledger entry and its trigger. Designed, and its depth built, 2026-10-08 in
+docs/reveal-plan.md.
 
 ### A10 — No SMS Retriever, no app-side code reading (RULED 2026-10-07 as built: "i'm cool with your rulings")
 

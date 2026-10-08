@@ -22,7 +22,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x000c0323f11ef52f
+let kayaSpecHash: UInt64 = 0xad557b5075ff50eb
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -321,6 +321,8 @@ private let propCapture: UInt32 = 53
 private let propAspect: UInt32 = 54
 private let propFormat: UInt32 = 55
 private let propContentType: UInt32 = 56
+private let propRevealed: UInt32 = 57
+private let propRevealable: UInt32 = 58
 private let fileContentImages: UInt32 = 1
 private let tintAccent: Int64 = 1
 private let tintSuccess: Int64 = 2
@@ -801,6 +803,10 @@ final class KayaNode: Identifiable {
     var fit: Int64 = 0
     /// What an entry or secure field holds (docs/autofill-plan.md A2).
     var contentType: Int64 = 0
+    /// A secure field shows its text, and carries its own show/hide toggle
+    /// (docs/reveal-plan.md V1).
+    var revealed = false
+    var revealable = false
     /// The packed box ratio the app chose (0 none; docs/media-plan.md §3).
     var aspect: Int64 = 0
     var videoSeq = 0
@@ -6204,6 +6210,10 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaScene.nodes[id]!.rich = raw[body + 24] != 0
                 case (propSubmits, valueBool):
                     kayaScene.nodes[id]!.submits = raw[body + 24] != 0
+                case (propRevealed, valueBool):
+                    kayaRevealSwap(kayaScene.nodes[id]!, raw[body + 24] != 0)
+                case (propRevealable, valueBool):
+                    kayaScene.nodes[id]!.revealable = raw[body + 24] != 0
                 case (propOwnUndo, valueBool):
                     kayaScene.nodes[id]!.ownUndo = raw[body + 24] != 0
                 case (propCanUndo, valueBool):
@@ -6999,6 +7009,10 @@ func kayaA11y(_ view: some View, _ node: KayaNode, leaf: Bool = false) -> some V
     // and AXButton), so KayaSearch calls back in with `leaf: true`.
     if node.kind == kindSearch && !leaf {
         view
+    } else if node.kind == kindSecureField && !leaf {
+        // The secure field's props go on its field, not on the eye beside it
+        // (docs/reveal-plan.md V7), the search row's reason.
+        view
     } else if node.kind == kindRange {
         // THE RANGE CARRIES ITS PROPS ON ITS OWN VIEWS (docs/range-plan.md §3
         // rule 7): the container is the group and each thumb its own slider,
@@ -7348,6 +7362,74 @@ private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
                 return (nil, "the mask could not be read: the field is not in the accessibility tree")
             }
             return kayaMaskCount(kayaAxCopy(hit, kAXValueAttribute as String) as? String ?? "")
+        }
+    }
+
+    /// A REVEALED secure field's presentation (docs/reveal-plan.md V4): the
+    /// same AXValue through the opposite rule, a count and never the text.
+    private func kayaAxUnmaskedRead(_ identifier: String) -> (Int?, String) {
+        _ = kayaAwaitWindow(0)
+        return DispatchQueue.main.sync { () -> (Int?, String) in
+            let app = AXUIElementCreateApplication(getpid())
+            AXUIElementSetMessagingTimeout(app, 2.0)
+            if !kayaAxAnnounced {
+                kayaAxAnnounced = true
+                AXUIElementSetAttributeValue(
+                    app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+                AXUIElementSetAttributeValue(
+                    app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+            }
+            guard let hit = kayaAxFind(app, identifier) else {
+                return (nil, "the text could not be counted: the field is not in the accessibility tree")
+            }
+            return kayaUnmaskedCount(kayaAxCopy(hit, kAXValueAttribute as String) as? String ?? "")
+        }
+    }
+
+    private func kayaAxFrame(_ element: AXUIElement) -> CGRect? {
+        var p = CGPoint.zero
+        var size = CGSize.zero
+        guard let posRef = kayaAxCopy(element, kAXPositionAttribute),
+            let sizeRef = kayaAxCopy(element, kAXSizeAttribute),
+            CFGetTypeID(posRef) == AXValueGetTypeID(),
+            CFGetTypeID(sizeRef) == AXValueGetTypeID(),
+            AXValueGetValue(posRef as! AXValue, .cgPoint, &p),
+            AXValueGetValue(sizeRef as! AXValue, .cgSize, &size)
+        else { return nil }
+        return CGRect(origin: p, size: size)
+    }
+
+    /// The field's own reveal toggle as the platform publishes it: the spoken
+    /// name of the one button inside the field's frame that shows or hides the
+    /// password, or why there is none (docs/reveal-plan.md V4).
+    private func kayaAxRevealToggleName(_ identifier: String) -> (String?, String) {
+        _ = kayaAwaitWindow(0)
+        return DispatchQueue.main.sync { () -> (String?, String) in
+            let app = AXUIElementCreateApplication(getpid())
+            AXUIElementSetMessagingTimeout(app, 2.0)
+            guard let field = kayaAxFind(app, identifier), let frame = kayaAxFrame(field) else {
+                return (nil, "the field is not in the accessibility tree")
+            }
+            let names = [kayaRevealName(false), kayaRevealName(true)]
+            var found: [String] = []
+            func walk(_ element: AXUIElement, _ depth: Int) {
+                if depth > 64 || found.count > 4 { return }
+                if kayaAxCopy(element, kAXRoleAttribute) as? String == kAXButtonRole,
+                    let name = (kayaAxCopy(element, kAXDescriptionAttribute) as? String)
+                        ?? (kayaAxCopy(element, kAXTitleAttribute) as? String),
+                    names.contains(name), let box = kayaAxFrame(element),
+                    frame.contains(CGPoint(x: box.midX, y: box.midY))
+                {
+                    found.append(name)
+                }
+                for child in kayaAxKids(element) { walk(child, depth + 1) }
+            }
+            walk(app, 0)
+            switch found.count {
+            case 1: return (found[0], "")
+            case 0: return (nil, "the field carries no reveal toggle inside its frame")
+            default: return (nil, "\(found.count) reveal toggles lie inside the field's frame")
+            }
         }
     }
 
@@ -7729,6 +7811,64 @@ private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
                 }
             }
             return (nil, "the mask could not be read: the field is not in the accessibility tree")
+        }
+    }
+
+    /// The iOS half of the revealed read (docs/reveal-plan.md V4): the same
+    /// element's accessibilityValue through the opposite rule, a count alone.
+    private func kayaAxUnmaskedRead(_ identifier: String) -> (Int?, String) {
+        DispatchQueue.main.sync { () -> (Int?, String) in
+            for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+                for window in scene.windows {
+                    guard let hit = kayaAxFind(window, identifier) else { continue }
+                    guard let input = kayaKeyInput(hit) else {
+                        return (nil, "the text could not be counted: no text input at the element (\(type(of: hit)))")
+                    }
+                    if !input.hasText { return (0, "") }
+                    return kayaUnmaskedCount(hit.accessibilityValue ?? "")
+                }
+            }
+            return (nil, "the text could not be counted: the field is not in the accessibility tree")
+        }
+    }
+
+    /// The field's own reveal toggle on iOS: the one button element inside the
+    /// field's frame whose label shows or hides the password (docs/reveal-plan.md V4).
+    private func kayaAxRevealToggleName(_ identifier: String) -> (String?, String) {
+        DispatchQueue.main.sync { () -> (String?, String) in
+            let names = [kayaRevealName(false), kayaRevealName(true)]
+            for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+                for window in scene.windows {
+                    guard let field = kayaAxFind(window, identifier) else { continue }
+                    let frame = field.accessibilityFrame
+                    var found: [String] = []
+                    func walk(_ node: NSObject, _ depth: Int) {
+                        if depth > 64 || found.count > 4 { return }
+                        if node.accessibilityTraits.contains(.button), let name = node.accessibilityLabel,
+                            names.contains(name),
+                            frame.contains(CGPoint(x: node.accessibilityFrame.midX, y: node.accessibilityFrame.midY))
+                        {
+                            found.append(name)
+                        }
+                        let count = node.accessibilityElementCount()
+                        if count != NSNotFound && count > 0 {
+                            for i in 0..<count {
+                                if let child = node.accessibilityElement(at: i) as? NSObject { walk(child, depth + 1) }
+                            }
+                        }
+                        if let view = node as? UIView {
+                            for sub in view.subviews { walk(sub, depth + 1) }
+                        }
+                    }
+                    walk(window, 0)
+                    switch found.count {
+                    case 1: return (found[0], "")
+                    case 0: return (nil, "the field carries no reveal toggle inside its frame")
+                    default: return (nil, "\(found.count) reveal toggles lie inside the field's frame")
+                    }
+                }
+            }
+            return (nil, "the field is not in the accessibility tree")
         }
     }
 
@@ -8176,6 +8316,29 @@ func kayaMaskCount(_ value: String) -> (Int?, String) {
     }
     if Set(scalars).count > 1 {
         return (nil, "the mask could not be read: the value mixes glyphs")
+    }
+    return (scalars.count, "")
+}
+
+/// Whether a swap that began with the field focused has finished: the other
+/// view holds the focus, and on the mac its field editor is the window's first
+/// responder, where the next key lands (docs/reveal-plan.md V6).
+func kayaRevealSettled(_ node: KayaNode) -> Bool {
+    if kayaRevealSwapping.contains(node.id) { return false }
+    #if os(macOS)
+        return kayaScene.focusedId != node.id || kayaFocusedTextWindow() != nil
+    #else
+        return true
+    #endif
+}
+
+/// How many characters a REVEALED value shows, none as a mask: kayaMaskCount's
+/// opposite over the same line (docs/reveal-plan.md V4). The sentence is fixed.
+func kayaUnmaskedCount(_ value: String) -> (Int?, String) {
+    let scalars = Array(value.unicodeScalars)
+    let masked = scalars.filter { !(0x20...0x7e).contains($0.value) }.count
+    if masked > 0 {
+        return (nil, "the platform masks \(masked) of the revealed secure field's characters")
     }
     return (scalars.count, "")
 }
@@ -8813,6 +8976,40 @@ private func kayaRunScript(_ script: String) {
             case "toggle":
                 kayaAwaitQuiet()
                 let answered = kayaAnswers()
+                // A secure field's own show/hide toggle (docs/reveal-plan.md V4):
+                // the platform must publish it inside the field, and it flips
+                // through the one reveal path the button takes.
+                if parts[1].hasPrefix("secure_field") {
+                    let revealNode = DispatchQueue.main.sync {
+                        kayaTarget(parts[1], "secure_field", kayaScene.secureFields)
+                    }
+                    guard let revealNode, !revealNode.a11yId.isEmpty else {
+                        failures.append("no such target \(parts[1])")
+                        break
+                    }
+                    let toggleName = kayaAxRevealToggleName(revealNode.a11yId)
+                    guard toggleName.0 != nil else {
+                        failures.append("\(parts[1]): \(toggleName.1)")
+                        break
+                    }
+                    DispatchQueue.main.sync { kayaRevealToggle(revealNode, parts[2] == "on") }
+                    kayaAwaitAnswer(answered)
+                    // The swap returns the focus it found (V6): the action ends
+                    // once the other view holds it, or says it never came back.
+                    let settleBy = Date().addingTimeInterval(2)
+                    var settled = false
+                    while Date() < settleBy {
+                        if DispatchQueue.main.sync(execute: { kayaRevealSettled(revealNode) }) {
+                            settled = true
+                            break
+                        }
+                        Thread.sleep(forTimeInterval: 0.005)
+                    }
+                    if !settled {
+                        failures.append("\(parts[1]): the field did not take the focus back within 2s of the swap")
+                    }
+                    break
+                }
                 let ok = DispatchQueue.main.sync { () -> Bool in
                     guard let node = kayaTarget(parts[1], "checkbox", kayaScene.checkboxes) else {
                         return false
@@ -9349,6 +9546,31 @@ private func kayaRunScript(_ script: String) {
                     failures.append("content_type \(got), wanted \(wantContent)")
                 } else {
                     failures.append("\(parts[1]): \(content.1)")
+                }
+            case "expect_unmasked":
+                // How many characters a REVEALED field shows, none as its mask,
+                // read off what it presents to assistive technology; a count,
+                // never the text (docs/reveal-plan.md V4).
+                guard parts.count == 3, let wantUnmasked = Int(parts[2]) else {
+                    failures.append("expect_unmasked wants a secure field and a count: \(line)")
+                    break
+                }
+                let unmaskIdent = DispatchQueue.main.sync { () -> String? in
+                    kayaTarget(parts[1], "secure_field", kayaScene.secureFields)?.a11yId
+                }
+                let unmasked: (Int?, String)
+                switch unmaskIdent {
+                case .none: unmasked = (nil, "no such target")
+                case .some(let ident) where ident.isEmpty:
+                    unmasked = (nil, "the text could not be counted: no a11y_id authored on this field")
+                case .some(let ident): unmasked = kayaAxUnmaskedRead(ident)
+                }
+                if let got = unmasked.0, got == wantUnmasked {
+                    observed.append("unmasked \(got)")
+                } else if let got = unmasked.0 {
+                    failures.append("unmasked \(got), wanted \(wantUnmasked)")
+                } else {
+                    failures.append("\(parts[1]): \(unmasked.1)")
                 }
             case "expect_masked":
                 // How many characters the platform shows masked, read off what
@@ -24512,50 +24734,438 @@ struct KayaContentHint: ViewModifier {
     }
 #endif
 
+/// Secure fields mid-swap between their masked and revealed views: the leaving
+/// view's focus loss is the swap's, not the user's (docs/reveal-plan.md V6).
+var kayaRevealSwapping: Set<UInt64> = []
+/// The caret each swapping field held, put back once the other view has focus.
+var kayaRevealCaret: [UInt64: NSRange] = [:]
+
+/// THE ONE REVEAL PATH (docs/reveal-plan.md V2, V6): the field's own toggle,
+/// the harness's `toggle` and the app's `revealed` write all swap here, so focus
+/// and caret survive every route. Only the user's routes emit `toggled`.
+func kayaRevealSwap(_ node: KayaNode, _ on: Bool) {
+    guard node.revealed != on else { return }
+    if kayaScene.focusedId == node.id {
+        kayaRevealSwapping.insert(node.id)
+        #if os(macOS)
+            if let editor = kayaFocusedTextResponder() {
+                kayaRevealCaret[node.id] = editor.selectedRange
+            }
+        #endif
+    }
+    node.revealed = on
+}
+
+func kayaRevealToggle(_ node: KayaNode, _ on: Bool) {
+    guard node.revealed != on else { return }
+    kayaUserWrite { kayaRevealSwap(node, on) }
+    KayaHost.emitToggled(node.tag, on)
+}
+
+/// The swapped-in view took the focus: put the caret back where it was.
+private func kayaRevealSettle(_ node: KayaNode) {
+    kayaRevealSwapping.remove(node.id)
+    #if os(macOS)
+        guard let caret = kayaRevealCaret.removeValue(forKey: node.id) else { return }
+        DispatchQueue.main.async {
+            guard kayaScene.focusedId == node.id, let editor = kayaFocusedTextResponder() else { return }
+            let length = (editor.string as NSString).length
+            editor.selectedRange = NSRange(location: min(caret.location, length), length: 0)
+        }
+    #endif
+}
+
+/// The toggle's spoken name, by the state it would change to.
+func kayaRevealName(_ revealed: Bool) -> String { revealed ? "Hide password" : "Show password" }
+
 /// The secure field (docs/secure-entry-plan.md §3): the platform's own
-/// SecureField, which masks, refuses copy and cut, publishes the secure
-/// subrole and offers no reveal. KayaEntry's contract otherwise.
+/// SecureField, which masks, refuses copy and cut and publishes the secure
+/// subrole. Revealed (docs/reveal-plan.md §3, V5), it is KayaRevealedField
+/// over the same text; `revealable` adds the eye inside the field.
+/// KayaEntry's contract otherwise.
 struct KayaSecureField: View {
     let node: KayaNode
     var flexVertical: Bool? = nil
-    @FocusState private var focused: Bool
+    // One focus state per view, so the swap's two halves never coalesce: the
+    // leaving view's drop and the arriving view's take are separate changes.
+    @FocusState private var maskedFocus: Bool
+
+    private var text: Binding<String> {
+        Binding(
+            get: { node.text },
+            set: { newValue in
+                let value = kayaLF(newValue)
+                if value == node.text { return }
+                kayaUserWrite { node.text = value }
+                KayaHost.emitText(node, value)
+            })
+    }
+
+    @ViewBuilder
+    private var field: some View {
+        if node.revealed {
+            KayaRevealedField(
+                node: node, text: node.text, placeholder: node.placeholder,
+                focused: kayaScene.focusedId == node.id, a11yId: node.a11yId,
+                a11yLabel: node.a11yLabel, a11yHint: node.a11yHint, contentType: node.contentType)
+        } else {
+            SecureField(node.placeholder, text: text).focused($maskedFocus)
+        }
+    }
+
+    private func focus(_ on: Bool) {
+        if !node.revealed { maskedFocus = on }
+    }
+
+    /// The arriving view is not always in the tree on the first turn, and a
+    /// focus state set before it is drops nothing and takes nothing (measured
+    /// 2026-10-08, the reveal leg), so the take is retried until it lands.
+    private func takeFocus(_ tries: Int) {
+        guard tries > 0, kayaRevealSwapping.contains(node.id) else { return }
+        focus(true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            guard kayaRevealSwapping.contains(node.id) else { return }
+            focus(false)
+            DispatchQueue.main.async { takeFocus(tries - 1) }
+        }
+    }
+
+    /// A focus change of the view the field shows; the other view's are the swap's.
+    private func focusMoved(_ on: Bool, revealedView: Bool) {
+        guard revealedView == node.revealed else { return }
+        if on {
+            kayaScene.focusedId = node.id
+            if kayaRevealSwapping.contains(node.id) { kayaRevealSettle(node) }
+        } else if kayaScene.focusedId == node.id && !kayaRevealSwapping.contains(node.id) {
+            kayaScene.focusedId = nil
+        }
+    }
 
     var body: some View {
-        SecureField(
-            node.placeholder,
-            text: Binding(
-                get: { node.text },
-                set: { newValue in
-                    let value = kayaLF(newValue)
-                    if value == node.text { return }
-                    kayaUserWrite { node.text = value }
-                    KayaHost.emitText(node, value)
-                })
+        kayaA11y(
+            field
+                .textFieldStyle(.roundedBorder)
+                .modifier(KayaContentHint(word: node.contentType))
+                #if os(iOS)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                #endif
+                .onSubmit { KayaHost.emitSubmitted(node, node.text) },
+            node, leaf: true
         )
-        .textFieldStyle(.roundedBorder)
+        .overlay(alignment: .trailing) {
+            if node.revealable {
+                Button(action: { kayaRevealToggle(node, !node.revealed) }) {
+                    Image(systemName: node.revealed ? "eye.slash" : "eye")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, 6)
+                .accessibilityLabel(kayaRevealName(node.revealed))
+            }
+        }
         .frame(
             maxWidth: (node.grow > 0 || (flexVertical == true && node.fill != false))
                 ? .infinity : 200)
-        .modifier(KayaContentHint(word: node.contentType))
-        .focused($focused)
-        #if os(iOS)
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
-        #endif
-        .onSubmit { KayaHost.emitSubmitted(node, node.text) }
-        .onAppear { focused = kayaScene.focusedId == node.id }
+        .onAppear { focus(kayaScene.focusedId == node.id) }
         .onChange(of: kayaScene.focusedId) { _, newValue in
-            focused = newValue == node.id
+            focus(newValue == node.id)
         }
-        .onChange(of: focused) { _, newValue in
-            if newValue {
-                kayaScene.focusedId = node.id
-            } else if kayaScene.focusedId == node.id {
-                kayaScene.focusedId = nil
+        // The arriving view takes the focus the leaving one held, once it is
+        // in the tree (docs/reveal-plan.md V6).
+        .onChange(of: node.revealed) { _, revealed in
+            guard !revealed, kayaRevealSwapping.contains(node.id) else { return }
+            DispatchQueue.main.async { takeFocus(40) }
+        }
+        .onChange(of: maskedFocus) { _, on in focusMoved(on, revealedView: false) }
+    }
+}
+
+/// A revealed field's focus change, from its own view (docs/reveal-plan.md V6).
+func kayaRevealedFocus(_ node: KayaNode, _ on: Bool) {
+    guard node.revealed else { return }
+    if on {
+        if kayaScene.focusedId != node.id { kayaScene.focusedId = node.id }
+        if kayaRevealSwapping.contains(node.id) { kayaRevealSettle(node) }
+    } else if kayaScene.focusedId == node.id && !kayaRevealSwapping.contains(node.id) {
+        kayaScene.focusedId = nil
+    }
+}
+
+#if os(macOS)
+    /// The revealed field's editor (docs/reveal-plan.md V5): the platform's plain
+    /// text view with what NSSecureTextView refuses refused here too. A stock
+    /// TextField's editor offers Cut, Copy, Look Up, Translate, Search with
+    /// Google, Share, Writing Tools and Speech over the shown password
+    /// (measured 2026-10-08, docs/reveal-plan.md §0), and keeps an undo stack.
+    final class KayaRevealEditor: NSTextView {
+        var onFocusChange: ((Bool) -> Void)?
+
+        override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+            if item.action == #selector(NSText.cut(_:)) || item.action == #selector(NSText.copy(_:)) {
+                return false
+            }
+            return super.validateUserInterfaceItem(item)
+        }
+        /// The field's setup turns undo back on for every edit session
+        /// (measured), so the refusal is the property itself.
+        override var allowsUndo: Bool {
+            get { false }
+            set {}
+        }
+        override func cut(_ sender: Any?) { NSSound.beep() }
+        override func copy(_ sender: Any?) { NSSound.beep() }
+        /// NSSecureTextView's own menu, item for item (measured).
+        override func menu(for event: NSEvent) -> NSMenu? {
+            let menu = NSMenu()
+            for (title, action) in [
+                ("Cut", #selector(NSText.cut(_:))), ("Copy", #selector(NSText.copy(_:))),
+                ("Paste", #selector(NSText.paste(_:))), ("Delete", #selector(NSText.delete(_:))),
+                ("Select All", #selector(NSText.selectAll(_:))),
+            ] {
+                menu.addItem(NSMenuItem(title: title, action: action, keyEquivalent: ""))
+            }
+            return menu
+        }
+        override var writablePasteboardTypes: [NSPasteboard.PasteboardType] { [] }
+        override func writeSelection(to pboard: NSPasteboard, types: [NSPasteboard.PasteboardType]) -> Bool {
+            false
+        }
+        override func validRequestor(
+            forSendType sendType: NSPasteboard.PasteboardType?, returnType: NSPasteboard.PasteboardType?
+        ) -> Any? {
+            sendType == nil ? super.validRequestor(forSendType: sendType, returnType: returnType) : nil
+        }
+        override func becomeFirstResponder() -> Bool {
+            let took = super.becomeFirstResponder()
+            if took { onFocusChange?(true) }
+            return took
+        }
+        override func resignFirstResponder() -> Bool {
+            let gave = super.resignFirstResponder()
+            if gave { onFocusChange?(false) }
+            return gave
+        }
+    }
+
+    final class KayaRevealCell: NSTextFieldCell {
+        let editor: KayaRevealEditor = {
+            let editor = KayaRevealEditor()
+            editor.isFieldEditor = true
+            if #available(macOS 15.0, *) { editor.writingToolsBehavior = .none }
+            return editor
+        }()
+        override func fieldEditor(for controlView: NSView) -> NSTextView? { editor }
+    }
+
+    final class KayaRevealTextField: NSTextField {
+        override class var cellClass: AnyClass? {
+            get { KayaRevealCell.self }
+            set {}
+        }
+    }
+
+    /// A revealed secure field on the mac: an NSTextField whose editor is
+    /// KayaRevealEditor, focus driven by the model as the textarea's is.
+    struct KayaRevealedField: NSViewRepresentable {
+        let node: KayaNode
+        let text: String
+        let placeholder: String
+        let focused: Bool
+        let a11yId: String
+        let a11yLabel: String
+        let a11yHint: String
+        let contentType: Int64
+
+        final class Coordinator: NSObject, NSTextFieldDelegate {
+            var node: KayaNode?
+
+            func controlTextDidChange(_ notification: Notification) {
+                guard let node, let field = notification.object as? NSTextField else { return }
+                let value = kayaLF(field.stringValue)
+                if value == node.text { return }
+                kayaUserWrite { node.text = value }
+                KayaHost.emitText(node, value)
+            }
+
+            func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+                guard let node, selector == #selector(NSResponder.insertNewline(_:)) else { return false }
+                KayaHost.emitSubmitted(node, node.text)
+                return true
+            }
+        }
+
+        func makeCoordinator() -> Coordinator { Coordinator() }
+
+        /// The field is not always in its window on the first turn, and the
+        /// masked view it replaced can still be giving the focus up, so the
+        /// take is retried until the field's editor holds it (the masked
+        /// view's takeFocus, one toolkit down).
+        static func take(_ field: NSTextField, _ node: KayaNode, tries: Int) {
+            guard tries > 0, kayaScene.focusedId == node.id, node.revealed else { return }
+            let holds = { field.currentEditor() != nil && field.window?.firstResponder === field.currentEditor() }
+            if !holds() { field.window?.makeFirstResponder(field) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak field] in
+                guard let field else { return }
+                if !(field.currentEditor() != nil && field.window?.firstResponder === field.currentEditor()) {
+                    take(field, node, tries: tries - 1)
+                }
+            }
+        }
+
+        func makeNSView(context: Context) -> KayaRevealTextField {
+            let field = KayaRevealTextField()
+            field.bezelStyle = .roundedBezel
+            field.isBezeled = true
+            field.isEditable = true
+            field.isSelectable = true
+            field.usesSingleLineMode = true
+            field.lineBreakMode = .byClipping
+            field.cell?.isScrollable = true
+            field.delegate = context.coordinator
+            field.stringValue = text
+            if let cell = field.cell as? KayaRevealCell {
+                cell.editor.onFocusChange = { took in
+                    DispatchQueue.main.async {
+                        guard let node = context.coordinator.node else { return }
+                        kayaRevealedFocus(node, took)
+                    }
+                }
+            }
+            return field
+        }
+
+        func updateNSView(_ field: KayaRevealTextField, context: Context) {
+            context.coordinator.node = node
+            if field.stringValue != text {
+                if let editor = field.currentEditor() {
+                    let selection = editor.selectedRange
+                    field.stringValue = text
+                    let end = (text as NSString).length
+                    editor.selectedRange = NSRange(location: min(selection.location, end), length: 0)
+                } else {
+                    field.stringValue = text
+                }
+            }
+            field.placeholderString = placeholder.isEmpty ? nil : placeholder
+            field.contentType = kayaContentTypes().first { Int64($0.word) == contentType }?.platform
+            field.setAccessibilityIdentifier(a11yId.isEmpty ? nil : a11yId)
+            field.setAccessibilityLabel(a11yLabel.isEmpty ? nil : a11yLabel)
+            field.setAccessibilityHelp(a11yHint.isEmpty ? nil : a11yHint)
+            if focused, field.currentEditor() == nil {
+                DispatchQueue.main.async { [weak field] in
+                    guard let field else { return }
+                    Self.take(field, node, tries: 40)
+                }
+            } else if !focused, field.currentEditor() != nil {
+                DispatchQueue.main.async { [weak field] in
+                    guard let field, kayaScene.focusedId != node.id, field.currentEditor() != nil else { return }
+                    field.window?.makeFirstResponder(nil)
+                }
             }
         }
     }
-}
+#else
+    /// The revealed field's text field (docs/reveal-plan.md V5): what a secure
+    /// UITextField refuses (cut, copy, share, look up, translate, Writing Tools)
+    /// is refused here too, over the shown text.
+    final class KayaRevealUITextField: UITextField {
+        var onFocusChange: ((Bool) -> Void)?
+        override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+            let allowed: [Selector] = [
+                #selector(UIResponderStandardEditActions.paste(_:)),
+                #selector(UIResponderStandardEditActions.select(_:)),
+                #selector(UIResponderStandardEditActions.selectAll(_:)),
+                #selector(UIResponderStandardEditActions.delete(_:)),
+            ]
+            return allowed.contains(action) && super.canPerformAction(action, withSender: sender)
+        }
+        override func becomeFirstResponder() -> Bool {
+            let took = super.becomeFirstResponder()
+            if took { onFocusChange?(true) }
+            return took
+        }
+        override func resignFirstResponder() -> Bool {
+            let gave = super.resignFirstResponder()
+            if gave { onFocusChange?(false) }
+            return gave
+        }
+    }
+
+    struct KayaRevealedField: UIViewRepresentable {
+        let node: KayaNode
+        let text: String
+        let placeholder: String
+        let focused: Bool
+        let a11yId: String
+        let a11yLabel: String
+        let a11yHint: String
+        let contentType: Int64
+
+        final class Coordinator: NSObject, UITextFieldDelegate {
+            var node: KayaNode?
+
+            @objc func changed(_ view: UITextField) {
+                guard let node else { return }
+                let value = kayaLF(view.text ?? "")
+                if value == node.text { return }
+                kayaUserWrite { node.text = value }
+                KayaHost.emitText(node, value)
+            }
+
+            func textFieldShouldReturn(_ field: UITextField) -> Bool {
+                guard let node else { return false }
+                KayaHost.emitSubmitted(node, node.text)
+                return false
+            }
+        }
+
+        func makeCoordinator() -> Coordinator { Coordinator() }
+
+        func makeUIView(context: Context) -> KayaRevealUITextField {
+            let view = KayaRevealUITextField()
+            view.borderStyle = .roundedRect
+            view.autocapitalizationType = .none
+            view.autocorrectionType = .no
+            view.spellCheckingType = .no
+            if #available(iOS 18.0, *) { view.writingToolsBehavior = .none }
+            view.text = text
+            view.delegate = context.coordinator
+            view.addTarget(context.coordinator, action: #selector(Coordinator.changed(_:)), for: .editingChanged)
+            view.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            view.onFocusChange = { took in
+                DispatchQueue.main.async {
+                    guard let node = context.coordinator.node else { return }
+                    kayaRevealedFocus(node, took)
+                }
+            }
+            return view
+        }
+
+        func updateUIView(_ view: KayaRevealUITextField, context: Context) {
+            context.coordinator.node = node
+            if view.text != text { view.text = text }
+            view.placeholder = placeholder.isEmpty ? nil : placeholder
+            view.textContentType = kayaContentTypes().first { Int64($0.word) == contentType }?.platform
+            view.keyboardType = kayaContentKeyboard(contentType)
+            view.accessibilityIdentifier = a11yId.isEmpty ? nil : a11yId
+            view.accessibilityLabel = a11yLabel.isEmpty ? nil : a11yLabel
+            view.accessibilityHint = a11yHint.isEmpty ? nil : a11yHint
+            if focused, !view.isFirstResponder {
+                DispatchQueue.main.async { [weak view] in
+                    guard let view, kayaScene.focusedId == node.id, !view.isFirstResponder else { return }
+                    _ = view.becomeFirstResponder()
+                }
+            } else if !focused, view.isFirstResponder {
+                DispatchQueue.main.async { [weak view] in
+                    guard let view, kayaScene.focusedId != node.id, view.isFirstResponder else { return }
+                    _ = view.resignFirstResponder()
+                }
+            }
+        }
+    }
+#endif
 
 /// ONE CLEAR PATH for the search field (docs/search-plan.md S5): the clear
 /// button, Escape and the harness's clear_search all come here, so the app

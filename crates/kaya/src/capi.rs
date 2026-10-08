@@ -1102,6 +1102,10 @@ pub const KAYA_PROP_ASPECT: u32 = 54;
 pub const KAYA_PROP_FORMAT: u32 = 55;
 /// What a credential field holds, a KAYA_CONTENT_TYPE_* (docs/autofill-plan.md A2).
 pub const KAYA_PROP_CONTENT_TYPE: u32 = 56;
+/// A secure field shows its text (docs/reveal-plan.md V1).
+pub const KAYA_PROP_REVEALED: u32 = 57;
+/// A secure field carries the platform's show/hide toggle (docs/reveal-plan.md V1).
+pub const KAYA_PROP_REVEALABLE: u32 = 58;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -1354,6 +1358,8 @@ const _: () = assert!(
         && KAYA_PROP_ASPECT == wire::PROP_ASPECT
         && KAYA_PROP_FORMAT == wire::PROP_FORMAT
         && KAYA_PROP_CONTENT_TYPE == wire::PROP_CONTENT_TYPE
+        && KAYA_PROP_REVEALED == wire::PROP_REVEALED
+        && KAYA_PROP_REVEALABLE == wire::PROP_REVEALABLE
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -1890,7 +1896,7 @@ const _: () = {
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 56,
+    crate::spec::PROPS.len() == 58,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(

@@ -1180,6 +1180,8 @@ pub(crate) const PROP_CAPTURE: u32 = 53;
 pub(crate) const PROP_ASPECT: u32 = 54;
 pub(crate) const PROP_FORMAT: u32 = 55;
 pub(crate) const PROP_CONTENT_TYPE: u32 = 56;
+pub(crate) const PROP_REVEALED: u32 = 57;
+pub(crate) const PROP_REVEALABLE: u32 = 58;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
@@ -1732,6 +1734,8 @@ fn prop(raw: u32) -> Prop {
         PROP_ASPECT => Prop::Aspect,
         PROP_FORMAT => Prop::Format,
         PROP_CONTENT_TYPE => Prop::ContentType,
+        PROP_REVEALED => Prop::Revealed,
+        PROP_REVEALABLE => Prop::Revealable,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -5540,6 +5544,8 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::Aspect => PROP_ASPECT,
         Prop::Format => PROP_FORMAT,
         Prop::ContentType => PROP_CONTENT_TYPE,
+        Prop::Revealed => PROP_REVEALED,
+        Prop::Revealable => PROP_REVEALABLE,
     }
 }
 

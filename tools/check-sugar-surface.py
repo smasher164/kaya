@@ -2571,6 +2571,70 @@ for _lang, _rel, _templates in CONTENT_TYPE_SURFACES:
         _ct_cuts += 1
 print(f"check-sugar-surface: content-type cuts watched red {_ct_cuts}/{_ct_want}")
 
+# --- THE REVEAL, live zone, in all nine (docs/reveal-plan.md §5) --------
+# tpl-surfaces holds the template zone's two setters; this holds the live
+# ones. Rust's rows are the built shape; the other eight are the binding's own
+# name for each and are tightened to the shape each builds at the breadth.
+REVEAL_SURFACES = [
+    ("rust", "crates/kaya/src/app.rs",
+     [r"pub fn {0}\(self, on: bool\) -> Self", r"pub fn {1}\(self\) -> Self"]),
+    ("python", "bindings/python/kaya/__init__.py", [r"\b{0}\b", r"\b{1}\b"]),
+    ("go", "bindings/go/app.go", [r"func \(w Widget\) {0}\(", r"func \(w Widget\) {1}\("]),
+    ("csharp", "bindings/csharp/KayaApp.cs", [r"\b{0}\b", r"\b{1}\b"]),
+    ("java", "bindings/java/dev/kaya/KayaApp.java",
+     [r"public Widget {0}\(", r"public Widget {1}\("]),
+    ("swift", "bindings/swift/KayaApp.swift", [r"\b{0}\b", r"\b{1}\b"]),
+    ("haskell", "bindings/haskell/KayaApp.hs", [r"^  {0} ::", r"^  {1} ::"]),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", [r"\?{0}\b", r"\?{1}\b"]),
+    ("js", "bindings/js/kaya/index.ts", [r"^  {0}\(", r"^  {1}\("]),
+]
+REVEAL_NAMES = {"rust": ("revealed", "revealable"), "python": ("revealed", "revealable"),
+                "go": ("Revealed", "Revealable"), "csharp": ("revealed", "revealable"),
+                "java": ("revealed", "revealable"), "swift": ("revealed", "revealable"),
+                "haskell": ("revealed", "revealable"), "ocaml": ("revealed", "revealable"),
+                "js": ("revealed", "revealable")}
+
+
+def check_reveal(fake=None, text_for=None):
+    out = []
+    for lang, rel, templates in REVEAL_SURFACES:
+        text = text_for(lang, rel) if text_for else read_rel(rel)
+        names = fake or REVEAL_NAMES[lang]
+        for template in templates:
+            pat = template.format(*names)
+            if not re.search(pat, text, re.M):
+                out.append(f"check-sugar-surface: {lang}'s LIVE zone cannot spell "
+                           f"`revealed`/`revealable` on a secure field (wanted /{pat}/ in {rel})")
+    return out
+
+
+for _line in check_reveal():
+    print(_line)
+    status = 1
+_rv_want = sum(len(ts) for _, _, ts in REVEAL_SURFACES)
+_rv_fake = check_reveal(("kayaFakeRevealed", "kayaFakeRevealable"))
+print(f"check-sugar-surface: fake reveal spellings fired {len(_rv_fake)}/{_rv_want}")
+if len(_rv_fake) != _rv_want:
+    selftest_exit(f"check-sugar-surface: self-test failed ({len(_rv_fake)}/{_rv_want} reveal "
+                  f"patterns fired for names that exist nowhere)")
+_rv_cuts = 0
+for _template in REVEAL_SURFACES[0][2]:
+    _rel = REVEAL_SURFACES[0][1]
+    _real = read_rel(_rel)
+    _m = re.search(_template.format(*REVEAL_NAMES["rust"]), _real, re.M)
+    if _m is None:
+        selftest_exit(f"check-sugar-surface: the reveal cut found no match for {_template} "
+                      f"in {_rel}")
+    _mangled, _n = sub_count(r"\breveal(ed|able)\b", r"kayaCut\1", _m.group(0))
+    print(f"check-sugar-surface: reveal cut rust /{_template[:30]}.../: {_n} substitution(s)")
+    _copy = _real[:_m.start()] + _mangled + _real[_m.end():]
+    _found = check_reveal(
+        text_for=lambda lang, rel, _c=_copy, _r=_rel: _c if rel == _r else read_rel(rel))
+    if _n != 1 or not any(" rust's " in _f for _f in _found):
+        selftest_exit("check-sugar-surface: self-test failed (the rust reveal cut was not refused)")
+    _rv_cuts += 1
+print(f"check-sugar-surface: reveal cuts watched red {_rv_cuts}/2")
+
 # --- THE MEDIA ROW, TRACKS AND VISIBILITY (docs/media-plan.md §3, §7b) --
 # Neither a KIND nor a WINDOW PROP: a row's PLAYER FIELD (the type a stamped
 # video view binds), the visibility handlers in both zones, the track

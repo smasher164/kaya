@@ -287,6 +287,10 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // docs/autofill-plan.md A1-A3: what a credential field holds, so the
     // platform's password manager, code autofill and keyboard can act on it.
     ("content_type", 56, PropKind::Enum("content_type")),
+    // docs/reveal-plan.md V1: a secure field shows its text, and carries
+    // the platform's own show/hide toggle.
+    ("revealed", 57, PropKind::Bool),
+    ("revealable", 58, PropKind::Bool),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -3064,8 +3068,10 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             ],
             payload: Some(PropKind::Bool),
             doc: "path_len key values follow, then the checkbox's new state \
-                  as one Bool value. Same shape, ownership, and \
-                  user-only-emits stance as text_changed.",
+                  as one Bool value, or a secure field's new revealed state \
+                  when the user flipped its own toggle (docs/reveal-plan.md \
+                  V2). Same shape, ownership, and user-only-emits stance as \
+                  text_changed.",
         },
         Record {
             kind: 4,
@@ -4159,6 +4165,8 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("aspect", 54),
                 ("format", 55),
                 ("content_type", 56),
+                ("revealed", 57),
+                ("revealable", 58),
             ],
         },
         EnumSpec {
@@ -5250,6 +5258,8 @@ mod tests {
                     ("prop", "aspect") => wire::PROP_ASPECT,
                     ("prop", "format") => wire::PROP_FORMAT,
                     ("prop", "content_type") => wire::PROP_CONTENT_TYPE,
+                    ("prop", "revealed") => wire::PROP_REVEALED,
+                    ("prop", "revealable") => wire::PROP_REVEALABLE,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,

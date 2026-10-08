@@ -180,7 +180,10 @@ PAD_EXTRAS = {
 # drive chrome no phone has; split/panes drive resize_window, which this
 # host rejects by design (DESIGN.md, Windows).
 DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes"]
-UNWIRED_SCENES = []
+# Scenes whose legs are not run here yet: the reveal toggle's iOS arm is
+# built in the shared interpreter and its legs are the breadth slice's
+# (docs/reveal-plan.md §6).
+UNWIRED_SCENES = ["reveal"]
 
 # The fullscreen scene's app-only way back after the cut, the same steps as
 # tools/lib/lanes/android.py's FULLSCREEN_APP_TAIL: no user change arrives.

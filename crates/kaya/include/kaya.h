@@ -1204,6 +1204,16 @@
 #define KAYA_PROP_CONTENT_TYPE 56
 
 /**
+ * A secure field shows its text (docs/reveal-plan.md V1).
+ */
+#define KAYA_PROP_REVEALED 57
+
+/**
+ * A secure field carries the platform's show/hide toggle (docs/reveal-plan.md V1).
+ */
+#define KAYA_PROP_REVEALABLE 58
+
+/**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
  * windows are not widgets. Window 0 is the primary surface.
  */

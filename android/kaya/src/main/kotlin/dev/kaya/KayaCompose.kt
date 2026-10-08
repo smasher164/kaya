@@ -2153,7 +2153,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0x000c0323f11ef52fuL
+    private const val SPEC_HASH: ULong = 0xad557b5075ff50ebuL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -2458,6 +2458,8 @@ object KayaCompose {
     private const val PROP_ASPECT = 54
     private const val PROP_FORMAT = 55
     private const val PROP_CONTENT_TYPE = 56
+    private const val PROP_REVEALED = 57
+    private const val PROP_REVEALABLE = 58
     private const val FILE_CONTENT_IMAGES = 1
     private const val PROP_COLUMNS = 11
     // The accessibility identifier (never spoken) and label (spoken).
@@ -3466,6 +3468,7 @@ object KayaCompose {
                         PROP_HIGH_LABEL -> KayaSceneModel.nodes[id]!!.highLabel = readString(b)
                         PROP_FIT -> KayaSceneModel.nodes[id]!!.fit = readI64(b)
                         PROP_CONTENT_TYPE -> KayaSceneModel.nodes[id]!!.contentType = readI64(b)
+                        PROP_REVEALED, PROP_REVEALABLE -> depthStub("reveal")
                         PROP_ASPECT -> KayaSceneModel.nodes[id]!!.aspect = readI64(b)
                         PROP_PLAYER -> error("kaya: a video view's player arrives as set_video_player; the core never forwards the player prop")
                         PROP_CAPTURE -> error("kaya: a video view's capture arrives as set_video_capture; the core never forwards the capture prop")
@@ -8704,6 +8707,7 @@ object KayaCompose {
                         }
                     }
                     "toggle" -> {
+                        if (parts[1].startsWith("secure_field")) depthStub("reveal")
                         kayaAwaitQuiet()
                         val answered = kayaBatches
                         val ok = onUi(activity) {
@@ -9639,6 +9643,7 @@ object KayaCompose {
                             }
                         }
                     }
+                    "expect_unmasked" -> depthStub("reveal")
                     "expect_masked" -> {
                         // How many characters the platform shows masked, read
                         // off what it presents to assistive technology, never

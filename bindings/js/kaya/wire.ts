@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x000c0323f11ef52fn;
+export const SPEC_HASH = 0xad557b5075ff50ebn;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -128,6 +128,8 @@ export const PROP_CAPTURE = 53;
 export const PROP_ASPECT = 54;
 export const PROP_FORMAT = 55;
 export const PROP_CONTENT_TYPE = 56;
+export const PROP_REVEALED = 57;
+export const PROP_REVEALABLE = 58;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -2456,6 +2458,42 @@ export function tx_bind_content_type(widget_id: number, signal_id: number): Uint
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_content_type_element(widget_id: number, level = 0, field = 0): Uint8Array {
   enc.begin(); enc.u64(widget_id); enc.u32(PROP_CONTENT_TYPE); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant revealed value. */
+export function tx_set_revealed(widget_id: number, revealed: boolean): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_REVEALED); enc.u32(SOURCE_CONST); enc.value(revealed);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound revealed value. */
+export function tx_bind_revealed(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_REVEALED); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_revealed_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_REVEALED); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant revealable value. */
+export function tx_set_revealable(widget_id: number, revealable: boolean): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_REVEALABLE); enc.u32(SOURCE_CONST); enc.value(revealable);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound revealable value. */
+export function tx_bind_revealable(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_REVEALABLE); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_revealable_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_REVEALABLE); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
   return enc.end(TX_SET_PROPERTY);
 }
 

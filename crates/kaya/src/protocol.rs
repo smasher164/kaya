@@ -2192,6 +2192,12 @@ pub enum Prop {
     /// What a credential field holds (spec enum "content_type", I64 on the
     /// wire; docs/autofill-plan.md A1-A3).
     ContentType,
+    /// A secure field shows its text (Bool; docs/reveal-plan.md V1). The
+    /// user's own toggle reports as a Toggled occurrence.
+    Revealed,
+    /// A secure field carries the platform's show/hide toggle (Bool;
+    /// docs/reveal-plan.md V1).
+    Revealable,
     /// The app owns a rich textarea's undo (Bool-valued; docs/rich-text-plan.md
     /// R6, §14): the native stack is off, the ledger never banks it, and
     /// Edit>Undo/Redo reach the app through the role item's own activation.

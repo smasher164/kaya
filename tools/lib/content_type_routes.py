@@ -245,7 +245,7 @@ def run(g):
         ("the mac hint applied nowhere", SWIFT, r"            content\.textContentType\(platform\)\n",
          "            content\n", "on both macOS and iOS"),
         ("the secure field without its hint", SWIFT,
-         r"(\? \.infinity : 200\)\n)        \.modifier\(KayaContentHint\(word: node\.contentType\)\)\n(        \.focused\(\$focused\)\n        #if os\(iOS\))",
+         r"(                \.textFieldStyle\(\.roundedBorder\)\n)                \.modifier\(KayaContentHint\(word: node\.contentType\)\)\n(                #if os\(iOS\))",
          r"\1\2",
          "KayaSecureField does not wear"),
         ("the mac read echoing the model", SWIFT,

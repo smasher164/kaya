@@ -144,6 +144,9 @@ pub enum MaskRead {
     /// The platform presented this many of the field's characters as
     /// something other than its mask.
     Unmasked(usize),
+    /// The platform presented this many of a REVEALED field's characters as
+    /// a mask (docs/reveal-plan.md V4).
+    Masked(usize),
     Unreadable(&'static str),
 }
 
@@ -165,6 +168,18 @@ pub fn mask_count(value: &str) -> Result<usize, MaskRead> {
     Ok(value.chars().count())
 }
 
+/// How many characters a REVEALED value shows, none of them as a mask: the
+/// opposite read of [`mask_count`], over the same line between what
+/// `type_secret` can type and what it cannot. KayaSwiftUI.swift's
+/// kayaUnmaskedCount is the same rule (docs/reveal-plan.md V4).
+pub fn unmasked_count(value: &str) -> Result<usize, MaskRead> {
+    let masked = value.chars().filter(|c| !matches!(c, ' '..='~')).count();
+    if masked > 0 {
+        return Err(MaskRead::Masked(masked));
+    }
+    Ok(value.chars().count())
+}
+
 impl std::fmt::Display for MaskRead {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -172,6 +187,10 @@ impl std::fmt::Display for MaskRead {
             MaskRead::Unmasked(n) => write!(
                 f,
                 "the platform presents {n} of the secure field's characters unmasked"
+            ),
+            MaskRead::Masked(n) => write!(
+                f,
+                "the platform masks {n} of the revealed secure field's characters"
             ),
             MaskRead::Unreadable(why) => write!(f, "the mask could not be read: {why}"),
         }
@@ -314,6 +333,9 @@ pub enum Step {
     TypeSecret(Secret),
     /// How many characters the platform shows masked in a secure field.
     ExpectMasked(Target, usize),
+    /// How many characters a REVEALED secure field shows, none as its mask:
+    /// a count, never the text (docs/reveal-plan.md V4).
+    ExpectUnmasked(Target, usize),
     /// The content type a credential field carries, read off the platform's
     /// own property (docs/autofill-plan.md A6): one of [`CONTENT_READS`].
     ExpectContentType(Target, &'static str),
@@ -958,6 +980,7 @@ impl Step {
             | Step::ExpectHelp(t, _)
             | Step::ExpectPlaceholder(t, _)
             | Step::ExpectMasked(t, _)
+            | Step::ExpectUnmasked(t, _)
             | Step::ExpectContentType(t, _)
             | Step::ExpectHref(t, _)
             | Step::ExpectMirrored(t)
@@ -1100,6 +1123,7 @@ impl Step {
             Step::ExpectPlaceholder { .. } => true,
             Step::TypeSecret { .. } => false,
             Step::ExpectMasked { .. } => true,
+            Step::ExpectUnmasked { .. } => true,
             Step::ExpectContentType { .. } => true,
             Step::ExpectHref { .. } => true,
             Step::Type { .. } => false,
@@ -1446,6 +1470,13 @@ pub trait Stage: Send + 'static {
     /// mask, read off what the platform presents (its accessibility value
     /// where it publishes one), never the text (docs/secure-entry-plan.md P6).
     fn masked_len(&self, target: Target) -> Result<usize, MaskRead>;
+    /// How many characters a REVEALED secure field shows, none as its mask,
+    /// read off what the platform presents, never kaya's model and never the
+    /// text (docs/reveal-plan.md V4).
+    fn unmasked_len(&self, target: Target) -> Result<usize, MaskRead>;
+    /// Flip a secure field's own show/hide toggle, the user's gesture
+    /// (docs/reveal-plan.md V4): its `toggled` is the app's answer.
+    fn toggle_reveal(&self, target: Target, on: bool);
     /// The content type an entry or secure field carries, read off the
     /// platform's own property and mapped back through the one table that
     /// applied it, never kaya's model: one of [`CONTENT_READS`], or a
@@ -2399,6 +2430,20 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     .parse::<usize>()
                     .map_err(|_| format!("expect_masked wants a count, got {n:?}"))?;
                 Step::ExpectMasked(target, n)
+            }
+            "expect_unmasked" => {
+                let (target, n) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_unmasked wants a secure field and a count: {line:?}")
+                })?;
+                let target = parse_target(target)?;
+                if target.kind != TargetKind::SecureField {
+                    return Err(format!("expect_unmasked reads a secure field, not {target:?}"));
+                }
+                let n = n
+                    .trim()
+                    .parse::<usize>()
+                    .map_err(|_| format!("expect_unmasked wants a count, got {n:?}"))?;
+                Step::ExpectUnmasked(target, n)
             }
             "expect_content_type" => {
                 let (target, word) = rest.split_once(char::is_whitespace).ok_or_else(|| {
@@ -4581,7 +4626,12 @@ fn run_with_log(
             Step::Toggle(t, on) => {
                 await_quiet();
                 let answered = crate::scene::answers();
-                stage.toggle(*t, *on);
+                // A secure field's own show/hide toggle (docs/reveal-plan.md V4).
+                if t.kind == TargetKind::SecureField {
+                    stage.toggle_reveal(*t, *on);
+                } else {
+                    stage.toggle(*t, *on);
+                }
                 await_answer(answered);
                 None
             }
@@ -4728,6 +4778,11 @@ fn run_with_log(
             Step::ExpectMasked(target, want) => Some(poll(|| match stage.masked_len(*target) {
                 Ok(got) if got == *want => Ok(format!("masked {want}")),
                 Ok(got) => Err(format!("masked {got}, wanted {want}")),
+                Err(why) => Err(format!("{}: {why}", target_spec(target))),
+            })),
+            Step::ExpectUnmasked(target, want) => Some(poll(|| match stage.unmasked_len(*target) {
+                Ok(got) if got == *want => Ok(format!("unmasked {want}")),
+                Ok(got) => Err(format!("unmasked {got}, wanted {want}")),
                 Err(why) => Err(format!("{}: {why}", target_spec(target))),
             })),
             Step::ExpectContentType(target, want) => Some(poll(|| match stage.content_type(*target) {
@@ -8019,6 +8074,7 @@ mod tests {
     thread_local! {
         static MOCK_SECURE_FOCUS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
         static MOCK_TYPED: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+        static MOCK_REVEALED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
         static MOCK_LOG: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
     }
 
@@ -8075,6 +8131,58 @@ mod tests {
         let (code, verdict) = rx.recv().unwrap();
         assert_eq!(code, 1, "{verdict}");
         assert!(verdict.contains(TYPE_SECRET_ELSEWHERE), "{verdict}");
+    }
+
+    /// A REVEALED FIELD'S TEXT REACHES NO TRANSCRIPT EITHER (docs/reveal-plan.md
+    /// V4): the stage reads the shown text and the harness prints its count;
+    /// a field that stayed masked, or that shows its text where the scene
+    /// wants a mask, fails in a sentence that names counts alone.
+    #[test]
+    fn revealed_field_prints_a_count_never_the_text() {
+        const SECRET: &str = "Qk4mWz9xLp2v";
+        fn log(line: &str) {
+            MOCK_LOG.with(|l| l.borrow_mut().push(line.to_owned()));
+        }
+        MOCK_TYPED.with(|t| t.borrow_mut().clear());
+        MOCK_REVEALED.with(|r| r.set(false));
+        MOCK_LOG.with(|l| l.borrow_mut().clear());
+        let script = format!(
+            "click secure_field#0\ntype_secret \"{SECRET}\"\nexpect_unmasked secure_field#0 12\n\
+             toggle secure_field#0 on\nexpect_unmasked secure_field#0 12\n\
+             expect_masked secure_field#0 12"
+        );
+        let (tx, rx) = std::sync::mpsc::channel();
+        let code = run_with_log(parse(&script).unwrap(), MockStage { seen: &SEEN, verdict: tx }, Some(log), None);
+        let (_, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 1, "{verdict}");
+        assert!(verdict.contains("the platform masks 12 of the revealed secure field's characters"), "{verdict}");
+        let (tx, rx) = std::sync::mpsc::channel();
+        MOCK_TYPED.with(|t| t.borrow_mut().clear());
+        MOCK_REVEALED.with(|r| r.set(false));
+        let script = format!(
+            "click secure_field#0\ntype_secret \"{SECRET}\"\ntoggle secure_field#0 on\n\
+             expect_unmasked secure_field#0 12\nexpect_masked secure_field#0 12"
+        );
+        let code = run_with_log(parse(&script).unwrap(), MockStage { seen: &SEEN, verdict: tx }, Some(log), None);
+        let (_, shown) = rx.recv().unwrap();
+        assert_eq!(code, 1, "{shown}");
+        assert!(shown.contains("the platform presents 12 of the secure field's characters unmasked"), "{shown}");
+        let (tx, rx) = std::sync::mpsc::channel();
+        let code = run_with_log(
+            parse("toggle secure_field#0 off\ntoggle secure_field#0 on\nexpect_unmasked secure_field#0 12").unwrap(),
+            MockStage { seen: &SEEN, verdict: tx }, Some(log), None);
+        let (_, passed) = rx.recv().unwrap();
+        assert_eq!(code, 0, "{passed}");
+        assert!(passed.contains("unmasked 12"), "{passed}");
+        let logged = MOCK_LOG.with(|l| l.borrow().join("\n"));
+        for (what, text) in [("verdict", &verdict), ("verdict", &shown), ("verdict", &passed), ("step log", &logged)] {
+            assert!(!text.contains(SECRET), "the {what} printed the revealed secret: {text}");
+        }
+        assert!(parse("expect_unmasked entry#0 3").is_err());
+        assert_eq!(unmasked_count("Zq7"), Ok(3));
+        assert_eq!(unmasked_count(""), Ok(0));
+        assert_eq!(unmasked_count("Zq\u{f79a}\u{f79a}"), Err(MaskRead::Masked(2)));
+        MOCK_REVEALED.with(|r| r.set(false));
     }
 
     /// docs/autofill-plan.md A6: the verb answers the platform's class, refuses
@@ -8538,7 +8646,15 @@ mod tests {
             String::new()
         }
         fn masked_len(&self, _: Target) -> Result<usize, MaskRead> {
-            Ok(MOCK_TYPED.with(|t| t.borrow().chars().count()))
+            let n = MOCK_TYPED.with(|t| t.borrow().chars().count());
+            if MOCK_REVEALED.with(|r| r.get()) { Err(MaskRead::Unmasked(n)) } else { Ok(n) }
+        }
+        fn unmasked_len(&self, _: Target) -> Result<usize, MaskRead> {
+            let n = MOCK_TYPED.with(|t| t.borrow().chars().count());
+            if MOCK_REVEALED.with(|r| r.get()) { Ok(n) } else { Err(MaskRead::Masked(n)) }
+        }
+        fn toggle_reveal(&self, _: Target, on: bool) {
+            MOCK_REVEALED.with(|r| r.set(on));
         }
         fn content_type(&self, target: Target) -> Result<&'static str, String> {
             match target.kind {
@@ -9519,6 +9635,10 @@ mod tests {
         fn masked_len(&self, _: Target) -> Result<usize, MaskRead> {
             Err(MaskRead::NoSuchTarget)
         }
+        fn unmasked_len(&self, _: Target) -> Result<usize, MaskRead> {
+            Err(MaskRead::NoSuchTarget)
+        }
+        fn toggle_reveal(&self, _: Target, _: bool) {}
         fn content_type(&self, _: Target) -> Result<&'static str, String> {
             Err("no such target".to_owned())
         }
@@ -9929,6 +10049,10 @@ mod tests {
         fn masked_len(&self, _: Target) -> Result<usize, MaskRead> {
             Err(MaskRead::NoSuchTarget)
         }
+        fn unmasked_len(&self, _: Target) -> Result<usize, MaskRead> {
+            Err(MaskRead::NoSuchTarget)
+        }
+        fn toggle_reveal(&self, _: Target, _: bool) {}
         fn content_type(&self, _: Target) -> Result<&'static str, String> {
             Err("no such target".to_owned())
         }

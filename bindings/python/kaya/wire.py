@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x000c0323f11ef52f
+SPEC_HASH = 0xad557b5075ff50eb
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -135,6 +135,8 @@ PROP_CAPTURE = 53
 PROP_ASPECT = 54
 PROP_FORMAT = 55
 PROP_CONTENT_TYPE = 56
+PROP_REVEALED = 57
+PROP_REVEALABLE = 58
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -1813,6 +1815,36 @@ def tx_bind_content_type(widget_id: int, signal_id: int) -> bytes:
 def tx_bind_content_type_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_CONTENT_TYPE, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_revealed(widget_id: int, revealed: bool) -> bytes:
+    """set_property with a constant revealed value (bool)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_REVEALED, SOURCE_CONST) + _enc.value(revealed))
+
+
+def tx_bind_revealed(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound revealed value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_REVEALED, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_revealed_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_REVEALED, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_revealable(widget_id: int, revealable: bool) -> bytes:
+    """set_property with a constant revealable value (bool)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_REVEALABLE, SOURCE_CONST) + _enc.value(revealable))
+
+
+def tx_bind_revealable(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound revealable value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_REVEALABLE, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_revealable_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_REVEALABLE, SOURCE_ELEMENT, level, field))
 
 
 def tx_set_window_title(window: int, title: str) -> bytes:

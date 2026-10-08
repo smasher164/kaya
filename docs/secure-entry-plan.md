@@ -101,7 +101,9 @@ platforms have none. The phones keep their platform's last-character flash
 (Compose's `RevealLastTyped`, which follows the user's system setting; iOS
 cannot turn it off), since that is the platform's own convention and not an
 affordance. An app-declared `reveal` toggle is ledgered for the day an app
-asks for one.
+asks for one. THE DEFAULT STANDS SINCE 2026-10-08: docs/reveal-plan.md adds the
+reveal as two opt-in props (`revealed`, `revealable`), so a secure field that
+declares neither is still this field.
 
 ### P4 — Copy and cut refused natively, paste allowed (RULED: yes)
 

@@ -1147,6 +1147,8 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         Prop::Fit | Prop::Player | Prop::Capture | Prop::Aspect => matches!(kind, WidgetKind::Video),
         // docs/autofill-plan.md A1: the two single-line credential kinds.
         Prop::ContentType => matches!(kind, WidgetKind::Entry | WidgetKind::SecureField),
+        // docs/reveal-plan.md V1.
+        Prop::Revealed | Prop::Revealable => matches!(kind, WidgetKind::SecureField),
         Prop::Indeterminate => matches!(kind, WidgetKind::Progress),
         Prop::Source => matches!(kind, WidgetKind::Image),
         // Layout weight is kind-agnostic: any child of a row/column may
@@ -1770,6 +1772,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Axis => ValueType::I64,
         Prop::Fit | Prop::Player | Prop::Capture | Prop::Aspect => ValueType::I64,
         Prop::ContentType => ValueType::I64,
+        Prop::Revealed | Prop::Revealable => ValueType::Bool,
         Prop::Role => ValueType::I64,
         Prop::Symbol => ValueType::I64,
         Prop::Indeterminate | Prop::Fill | Prop::Wrap | Prop::Rich | Prop::Submits => ValueType::Bool,
@@ -10272,6 +10275,22 @@ mod tests {
             let why = why.downcast_ref::<String>().cloned().unwrap_or_default();
             assert!(why.contains("content_type"), "{kind:?} {word}: {why}");
         }
+    }
+
+    /// docs/reveal-plan.md V1: the two reveal props are a secure field's alone.
+    #[test]
+    fn reveal_props_belong_to_the_secure_field() {
+        check_prop(WidgetKind::SecureField, Prop::Revealed);
+        check_prop(WidgetKind::SecureField, Prop::Revealable);
+        for (kind, prop) in [(WidgetKind::Entry, Prop::Revealed), (WidgetKind::Search, Prop::Revealable),
+            (WidgetKind::Checkbox, Prop::Revealed)]
+        {
+            let why = std::panic::catch_unwind(|| check_prop(kind, prop)).unwrap_err();
+            let why = why.downcast_ref::<String>().cloned().unwrap_or_default();
+            assert!(why.contains("has no property"), "{kind:?} {prop:?}: {why}");
+        }
+        assert_eq!(prop_value_type(Prop::Revealed), ValueType::Bool);
+        assert_eq!(prop_value_type(Prop::Revealable), ValueType::Bool);
     }
 
     #[test]
