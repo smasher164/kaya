@@ -10,8 +10,8 @@ carries no dev-shell guard: the container is not the nix shell
 
 S9's door is a notification tap. S4's scenes relaunch with nothing
 pending, so the door here is the one a user pushes from a launcher: the
-app's own desktop entry, started through `gio launch`, which is
-`g_app_info_launch` on a `GDesktopAppInfo` — the same reader the portal
+app's own desktop entry, started through tools/linux/launch-entry.py,
+which is `g_app_info_launch_uris_async` on a `GDesktopAppInfo` — the same reader the portal
 resolves an app id with. Everything else is the notify leg's shape: a
 private XDG home so the preferences keyfile, the app data directory and
 the act-two marker belong to this leg alone; the generator's activation
@@ -29,9 +29,12 @@ import sys
 import tempfile
 import time
 
+import door_record
+
 WORK = pathlib.Path("/work")
 INSTALL_DESKTOP = WORK / "tools/linux/install-desktop.py"
 ACT2_EXEC = WORK / "tools/linux/act2-exec.sh"
+LAUNCH_ENTRY = WORK / "tools/linux/launch-entry.py"
 MARKER = "marker"
 VERDICT = "act2.verdict"
 # The door this leg pushes, and the name act one prints for it. ONE
@@ -81,7 +84,7 @@ def entry_findings(app_id, data_home):
 
     install-desktop.py already refuses a relative Exec; this is the other
     half, and it is what turns "the door did nothing" into a sentence:
-    `gio launch` on an entry GLib will not load exits 1 with no cause.
+    a launcher on an entry GLib will not load exits 1 with no cause.
     """
     path = pathlib.Path(data_home) / "applications" / f"{app_id}.desktop"
     if not path.is_file():
@@ -92,8 +95,8 @@ def entry_findings(app_id, data_home):
     from gi.repository import Gio
     info = Gio.DesktopAppInfo.new_from_filename(str(path))
     if info is None:
-        return [f"FAILED — GLib will not load {path}, so `gio launch` on it "
-                f"starts nothing:\n{path.read_text(encoding='utf-8')}"], None
+        return [f"FAILED — GLib will not load {path}, so the plain door on "
+                f"it starts nothing:\n{path.read_text(encoding='utf-8')}"], None
     return [], path
 
 
@@ -154,34 +157,17 @@ def run_leg(argv, home):
 
     # THE SESSION BUS, with KAYA_SELFTEST stripped from what an activated
     # process inherits (S9 R6): DBusActivatable=true is on the generator's
-    # entry, so `gio launch` takes D-Bus activation and the started
+    # entry, so the door takes D-Bus activation and the started
     # process's environ is the daemon's.
-    launched = subprocess.run(
-        ["dbus-launch", "--sh-syntax"], env=door_env(env), text=True,
-        capture_output=True, check=False)
-    if launched.returncode != 0:
-        say(f"no session bus: {launched.stderr.strip()}")
+    bus = door_record.Bus(door_env(env), home / "bus.log")
+    if bus.refusal:
+        say(f"no session bus: {bus.refusal}")
         return 1
-    bus = dict(bus_variables(launched.stdout))
-    env.update(bus)
+    env.update(bus.variables)
     try:
-        return act_one_then_door(argv, env, app_id, entry, home)
+        return act_one_then_door(argv, env, app_id, entry, home, bus)
     finally:
-        pid = bus.get("DBUS_SESSION_BUS_PID")
-        if pid:
-            subprocess.run(["kill", pid], check=False,
-                           stderr=subprocess.DEVNULL)
-
-
-def bus_variables(sh_syntax):
-    """dbus-launch --sh-syntax, read as assignments rather than eval'd."""
-    for line in sh_syntax.splitlines():
-        line = line.strip().removeprefix("export ").rstrip(";")
-        if "=" not in line:
-            continue
-        name, _, value = line.partition("=")
-        if name.startswith("DBUS_"):
-            yield name, value.strip().strip("'\"").rstrip(";")
+        bus.stop()
 
 
 def tee(argv, env):
@@ -220,7 +206,7 @@ def door_findings(act_one_output, wanted):
             f"{asked or ['no KAYA_RELAUNCH line at all']}"]
 
 
-def act_one_then_door(argv, env, app_id, entry, home):
+def act_one_then_door(argv, env, app_id, entry, home, bus):
     act_one_rc, act_one_output = tee(argv, env)
     directory = pathlib.Path(env["XDG_STATE_HOME"]) / "kaya/act2" / app_id
     bad = marker_findings(directory)
@@ -249,28 +235,29 @@ def act_one_then_door(argv, env, app_id, entry, home):
     started = time.monotonic()
     # THE PLAIN DOOR: the app's own entry, started the way a launcher
     # starts it. Nothing here spells the guest's command a second time.
-    say(f"the plain door: gio launch {entry}")
-    pushed = subprocess.run(
-        ["gio", "launch", str(entry)], env=door_env(env), text=True,
-        capture_output=True, check=False)
-    if pushed.returncode != 0:
-        say(f"`gio launch` refused the entry ({pushed.returncode}): "
-            f"{pushed.stdout.strip()} {pushed.stderr.strip()}")
-        return 1
-
-    status = poll_verdict(verdict, started, 90.0, app_id)
+    launcher = [sys.executable, str(LAUNCH_ENTRY), str(entry)]
+    say(f"the plain door: {' '.join(launcher)}")
+    watch = door_record.Watch(env["XDG_STATE_HOME"],
+                              bus.variables["DBUS_SESSION_BUS_PID"], started)
+    pushed = door_record.push(launcher, door_env(env), home / "door.log",
+                              watch=watch)
+    status = poll_verdict(verdict, started, 90.0, app_id, watch)
+    door_record.report("plain", launcher, pushed,
+                       door_record.exec_record(entry, env["XDG_DATA_HOME"],
+                                               app_id),
+                       bus, watch, env["KAYA_ACT2_LOG"], app_id)
     log = pathlib.Path(env["KAYA_ACT2_LOG"])
     print("--- act two ---", file=sys.stderr)
     if log.is_file():
         sys.stderr.write(log.read_text(encoding="utf-8", errors="replace"))
     else:
         say("no act-two log at all, so nothing was started")
-    _ = home
     return status
 
 
-def poll_verdict(verdict, started, ceiling, app_id):
+def poll_verdict(verdict, started, ceiling, app_id, watch):
     while time.monotonic() - started < ceiling:
+        watch.sample()
         if verdict.is_file():
             text = verdict.read_text(encoding="utf-8")
             if not text.endswith("\n"):
@@ -287,11 +274,10 @@ def poll_verdict(verdict, started, ceiling, app_id):
                 "in the act-two log below.")
             return 1
         time.sleep(0.1)
-    say(f"FAILED — no {verdict} within {ceiling:.0f}s. The door was pushed "
-        f"and answered; either the launcher started no process through "
-        f"{app_id}'s entry, or the process it started never reached its "
-        f"verdict. The act-two log below is that process's own output, and "
-        f"it is EMPTY when nothing started.")
+    say(f"FAILED — no {verdict} within {ceiling:.0f}s of pushing the "
+        f"plain door at {app_id}'s entry. The door record below says what "
+        f"the launcher answered, whether the bus was asked to activate "
+        f"{app_id}, and what the activated Exec ran.")
     return 1
 
 

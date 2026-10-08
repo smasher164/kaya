@@ -64,6 +64,9 @@ FOCUS_RING = "tools/linux/focus-ring.py"
 HAND = "tools/run-leg.py"
 WINLIST = "tools/mac/flightrec-winlist.swift"
 HARNESS = "crates/kaya/src/harness.rs"
+DOOR_RECORD = "tools/linux/door_record.py"
+ACT2_EXEC = "tools/linux/act2-exec.sh"
+DOOR_LEGS = ("tools/linux/persist-leg.py", "tools/linux/link-leg.py")
 
 # The recorder class whose body IS each python lane's collect path.
 RECORDERS = {"mac": "MacRecorder", "windows": "WinRecorder",
@@ -76,7 +79,8 @@ UNIVERSAL = ("leg-log", "verb-trace", "shot")
 def sources():
     return {rel: gate.read(rel) for rel in
             (LANE_PY, LANE_SH, LINUX, IOS, ANDROID, WIN,
-             STEPS, WINUI, GUEST_PS1, FOCUS_RING, HAND, WINLIST, HARNESS)}
+             STEPS, WINUI, GUEST_PS1, FOCUS_RING, HAND, WINLIST, HARNESS,
+             DOOR_RECORD, ACT2_EXEC, *DOOR_LEGS)}
 
 
 def py_block(text, name):
@@ -1081,6 +1085,59 @@ def census_wedge_capture(src):
     return found
 
 
+def census_door_record(src):
+    """THE LINUX RELAUNCH DOORS' RECORD (docs/traps.md, the plain door's
+    lost Activate): a door leg that started its bus with dbus-launch
+    threw the daemon's activation log away, and one that pushed its
+    launcher itself kept no rc, output or Exec, so a missing act two named
+    no place it stopped. Each door leg goes through tools/linux/
+    door_record.py for all four, samples its watch while it polls, and
+    act2-exec.sh writes its start and exit lines."""
+    found = []
+    for leg in DOOR_LEGS:
+        text = src[leg]
+        for call, why in (
+                ("door_record.Bus(", "its bus daemon's activation log"),
+                ("door_record.push(", "the launcher's rc and output"),
+                ("door_record.exec_record(", "the Exec lines it can run"),
+                ("door_record.Watch(", "the processes the bus started"),
+                ("door_record.report(", "the record in the leg log")):
+            if call not in text:
+                found.append(f"{leg}: never calls {call.rstrip('(')}, so a "
+                             f"red second act carries no {why}")
+        if '"dbus-launch"' in text:
+            found.append(f"{leg}: starts a bus through dbus-launch, which "
+                         f"points the daemon's log at /dev/null")
+        if "watch.sample()" not in py_block(text, "poll_verdict"):
+            found.append(f"{leg}: poll_verdict never samples the watch, so a "
+                         f"process that started and died is never seen")
+    shell = src[ACT2_EXEC]
+    prefix = re.search(r'^EXEC_LOG_PREFIX = "([^"]+)"', src[DOOR_RECORD], re.M)
+    start = shell.find('started at')
+    run = shell.find('\n"$@" ')
+    if not prefix or f'echo "{prefix.group(1)} pid $$ started' not in shell:
+        found.append(f"{ACT2_EXEC}: writes no start line under "
+                     f"{DOOR_RECORD}'s EXEC_LOG_PREFIX, so a door that ran "
+                     f"nothing reads like one whose process wrote nothing")
+    elif run < 0 or start > run:
+        found.append(f"{ACT2_EXEC}: the start line is not written before "
+                     f"the launcher runs")
+    if re.search(r'^exec "\$@"', shell, re.M) \
+            or "exited $kaya_rc" not in shell:
+        found.append(f"{ACT2_EXEC}: execs or drops the launcher's exit "
+                     f"status, so a process that died leaves no status")
+    if "LAUNCH_ENTRY" not in src[DOOR_LEGS[0]] \
+            or re.search(r'"gio",\s*"launch"', src[DOOR_LEGS[0]]):
+        found.append(f"{DOOR_LEGS[0]}: its plain door is not "
+                     f"tools/linux/launch-entry.py — `gio launch` exits "
+                     f"before its Activate call is written and loses it "
+                     f"under load")
+    if "door_record.py --self-test" not in src[LINUX]:
+        found.append(f"{LINUX}: never runs {DOOR_RECORD}'s self-test, the "
+                     f"one place its record is read back off real doors")
+    return found
+
+
 # ---------------------------------------------------------------- run it
 
 REAL = sources()
@@ -1095,7 +1152,8 @@ CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("no frontmost shot", census_frontmost),
             ("Android history", census_android_history),
             ("iOS notification side", census_ios_notifications),
-            ("linux ceiling stacks", census_wedge_capture))
+            ("linux ceiling stacks", census_wedge_capture),
+            ("linux door record", census_door_record))
 TABLE = declared(REAL)
 gate.counted("lanes declaring a bundle shape", list(TABLE), floor=5)
 gate.counted("sections declared across the five lanes",
@@ -1487,6 +1545,24 @@ for label, pattern, repl, want in (
     changed = doctored(HARNESS, pattern, repl, label)
     gate.negative(label, lambda: census_wedge_capture(changed), want=want)
 
-gate.negatives_ran(82)
+for label, rel, pattern, repl, want in (
+        ("ND3 persist-leg pushing its launcher itself", DOOR_LEGS[0],
+         r"door_record\.push\(", "subprocess_run(", "door_record.push"),
+        ("ND4 link-leg printing no record", DOOR_LEGS[1],
+         r"door_record\.report\(", "print_nothing(", "door_record.report"),
+        ("ND5 persist-leg polling without its watch", DOOR_LEGS[0],
+         r"^        watch\.sample\(\)\n", "", "never samples the watch"),
+        ("ND6 act2-exec.sh exec'ing again", ACT2_EXEC,
+         r'^"\$@" >>', 'exec "$@" >>', "drops the launcher's exit status"),
+        ("ND7 the lane skipping the record's self-test", LINUX,
+         r"^python3 /work/tools/linux/door_record\.py --self-test.*\n", "",
+         "never runs"),
+        ("ND8 persist-leg's door back on gio launch", DOOR_LEGS[0],
+         r"launcher = \[sys\.executable, str\(LAUNCH_ENTRY\), str\(entry\)\]",
+         'launcher = ["gio", "launch", str(entry)]', "launch-entry.py")):
+    changed = doctored(rel, pattern, repl, label)
+    gate.negative(label, lambda: census_door_record(changed), want=want)
+
+gate.negatives_ran(88)
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

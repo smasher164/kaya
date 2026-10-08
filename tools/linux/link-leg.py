@@ -33,6 +33,8 @@ import sys
 import tempfile
 import time
 
+import door_record
+
 WORK = pathlib.Path("/work")
 INSTALL_DESKTOP = WORK / "tools/linux/install-desktop.py"
 ACT2_EXEC = WORK / "tools/linux/act2-exec.sh"
@@ -167,33 +169,6 @@ def activated_findings(seen, binary):
             f"{want}. What this leg's bus started: {listed}"]
 
 
-def bus_started(state_home):
-    """Every live process this leg's session bus started, read off /proc.
-
-    The discriminator is the leg's own XDG_STATE_HOME in the process's
-    environ: dbus-launch was given it, and an activated process inherits
-    the daemon's environment.
-    """
-    needle = f"XDG_STATE_HOME={state_home}".encode()
-    out = []
-    proc = pathlib.Path("/proc")
-    if not proc.is_dir():
-        return out
-    for entry in proc.iterdir():
-        if not entry.name.isdigit():
-            continue
-        try:
-            if needle not in (entry / "environ").read_bytes():
-                continue
-            exe = os.path.realpath(entry / "exe")
-            cmdline = (entry / "cmdline").read_bytes().replace(
-                b"\0", b" ").decode("utf-8", "replace").strip()
-        except OSError:
-            continue
-        out.append((int(entry.name), exe, cmdline))
-    return out
-
-
 def scheme_findings(url, declared_scheme):
     """The URL act one named against the scheme this leg registered.
 
@@ -291,33 +266,16 @@ def run_leg(argv, home):
     # daemon reads its activation directories out of the environment it
     # starts with, and an activated process inherits the daemon's
     # environ, so KAYA_SELFTEST is stripped here (persist-leg.py's rule).
-    launched = subprocess.run(
-        ["dbus-launch", "--sh-syntax"], env=door_env(env), text=True,
-        capture_output=True, check=False)
-    if launched.returncode != 0:
-        say(f"no session bus: {launched.stderr.strip()}")
+    bus = door_record.Bus(door_env(env), home / "bus.log")
+    if bus.refusal:
+        say(f"no session bus: {bus.refusal}")
         return 1
-    bus = dict(bus_variables(launched.stdout))
-    env.update(bus)
+    env.update(bus.variables)
     try:
         return act_one_then_door(argv, env, app_id, declared_scheme, home,
-                                 argv[0])
+                                 argv[0], bus)
     finally:
-        pid = bus.get("DBUS_SESSION_BUS_PID")
-        if pid:
-            subprocess.run(["kill", pid], check=False,
-                           stderr=subprocess.DEVNULL)
-
-
-def bus_variables(sh_syntax):
-    """dbus-launch --sh-syntax, read as assignments rather than eval'd."""
-    for line in sh_syntax.splitlines():
-        line = line.strip().removeprefix("export ").rstrip(";")
-        if "=" not in line:
-            continue
-        name, _, value = line.partition("=")
-        if name.startswith("DBUS_"):
-            yield name, value.strip().strip("'\"").rstrip(";")
+        bus.stop()
 
 
 def tee(argv, env):
@@ -333,7 +291,8 @@ def tee(argv, env):
     return process.wait(), "".join(lines)
 
 
-def act_one_then_door(argv, env, app_id, declared_scheme, home, binary):
+def act_one_then_door(argv, env, app_id, declared_scheme, home, binary,
+                      bus):
     act_one_rc, act_one_output = tee(argv, env)
     directory = pathlib.Path(env["XDG_STATE_HOME"]) / "kaya/act2" / app_id
     bad = marker_findings(directory)
@@ -366,20 +325,23 @@ def act_one_then_door(argv, env, app_id, declared_scheme, home, binary):
     # THE LINK DOOR: the platform's own open of a URL nobody is running
     # to receive. Output to a FILE — a pipe here is a pipe on the app.
     say(f"the link door: gio open {url}")
-    door_log = home / "gio-open.log"
-    with door_log.open("w", encoding="utf-8") as sink:
-        pushed = subprocess.run(
-            ["gio", "open", url], env=door_env(env), text=True,
-            stdout=sink, stderr=subprocess.STDOUT, check=False)
-    said = door_log.read_text(encoding="utf-8", errors="replace").strip()
-    if pushed.returncode != 0:
-        say(f"`gio open` refused the URL ({pushed.returncode}): {said}")
-        return 1
-    if said:
-        say(f"`gio open` said: {said}")
-
-    status, seen = poll_verdict(verdict, started, 90.0, app_id, url,
-                                env["XDG_STATE_HOME"])
+    launcher = ["gio", "open", url]
+    watch = door_record.Watch(env["XDG_STATE_HOME"],
+                              bus.variables["DBUS_SESSION_BUS_PID"], started)
+    pushed = door_record.push(launcher, door_env(env), home / "gio-open.log",
+                              watch=watch)
+    if pushed[0] != 0:
+        say(f"`gio open` refused the URL ({pushed[0]}): {pushed[1]}")
+        status, seen = 1, []
+    else:
+        status, seen = poll_verdict(verdict, started, 90.0, app_id, url,
+                                    watch)
+    door_record.report("link", launcher, pushed,
+                       door_record.exec_record(
+                           pathlib.Path(env["XDG_DATA_HOME"]) / "applications"
+                           / f"{app_id}.desktop", env["XDG_DATA_HOME"],
+                           app_id),
+                       bus, watch, env["KAYA_ACT2_LOG"], app_id)
     if status == 0:
         # BEFORE ACT TWO IS JOINED: a verdict written by a process that is
         # not this leg's binary is what a shared scheme produces, and from
@@ -398,14 +360,12 @@ def act_one_then_door(argv, env, app_id, declared_scheme, home, binary):
     return status
 
 
-def poll_verdict(verdict, started, ceiling, app_id, url, state_home):
+def poll_verdict(verdict, started, ceiling, app_id, url, watch):
     """The verdict, and every process this leg's bus had running while it
     was waited for — sampled as it polls, because the process that took
     the link may be gone by the time the verdict lands."""
-    seen = {}
     while time.monotonic() - started < ceiling:
-        for pid, exe, cmdline in bus_started(state_home):
-            seen[pid] = (pid, exe, cmdline)
+        watch.sample()
         if verdict.is_file():
             text = verdict.read_text(encoding="utf-8")
             if not text.endswith("\n"):
@@ -417,21 +377,17 @@ def poll_verdict(verdict, started, ceiling, app_id, url, state_home):
             say(f"act two answered after {time.monotonic() - started:.1f}s: "
                 f"{line}")
             if line.startswith("KAYA_SELFTEST: OK"):
-                return 0, sorted(seen.values())
+                return 0, watch.processes()
             say("FAILED — act two ran and did not pass; its own output is "
                 "in the act-two log below.")
-            return 1, sorted(seen.values())
+            return 1, watch.processes()
         time.sleep(0.1)
-    listed = "; ".join(f"pid {pid} exe {exe}"
-                       for pid, exe, _ in sorted(seen.values())) or "nothing"
     say(f"FAILED — no {verdict} within {ceiling:.0f}s. `gio open {url}` "
         f"returned 0, which on the D-Bus route means the method call was "
         f"SENT and nothing more; either the bus started no process under "
         f"{app_id}'s service file, or the process it started never reached "
-        f"its verdict. What this leg's bus had running meanwhile: {listed}. "
-        f"The act-two log below is that process's own output, and it is "
-        f"EMPTY when nothing started.")
-    return 1, sorted(seen.values())
+        f"its verdict. The door record below says which.")
+    return 1, watch.processes()
 
 
 def self_test():

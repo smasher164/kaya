@@ -180,6 +180,15 @@ ONE_GENERATOR = {
         "app has rather than a hand-written entry beside it",
 }
 
+# A file that names a generator's tool for something that is not this app's
+# identity, each with its reason; held to still existing and still naming it.
+ONE_GENERATOR_EXEMPT = {
+    "tools/linux/door_record.py": (
+        "[Desktop " + "Entry]",
+        "its self-test writes a throwaway entry for dev.kaya.DoorSelfTest, the "
+        "fake app the launcher door is measured against, never this app's"),
+}
+
 
 def tree_walk(base):
     """Every file under `base`, artifact directories pruned."""
@@ -307,6 +316,11 @@ def check(root):
     real one at the end."""
     root = pathlib.Path(root)
     bad = []
+    for rel, (tool, why) in sorted(ONE_GENERATOR_EXEMPT.items()):
+        held = root / rel
+        if not held.is_file() or tool not in held.read_text(encoding="utf-8"):
+            bad.append(f"{rel}: exempt from naming {tool!r} ({why}) but no longer "
+                       f"does — drop the stale exemption")
 
     # ------------------------------------------------------------- C1
     man_path = root / MANIFEST
@@ -472,7 +486,7 @@ def check(root):
                         f"`from packaging.identity import load`")
                 if not rel.startswith(PACKAGING_DIR + "/"):
                     for tool, why in sorted(ONE_GENERATOR.items()):
-                        if tool in text:
+                        if tool in text and ONE_GENERATOR_EXEMPT.get(rel, ("",))[0] != tool:
                             bad.append(
                                 f"{rel}: names {tool!r}, which belongs to "
                                 f"one arm alone — {why}")
@@ -1519,7 +1533,14 @@ for _tag, _rel, _pat, _repl, _want in (
     doctor_shadow(f"the {_tag} cut", s, _rel, _pat, _repl)
     g.negative(f"C15 with the {_tag} cut", lambda p=s: check(p), want=_want)
 
-g.negatives_ran(37)
+# N38 — THE EXEMPTION'S STALENESS: the exempt file stops naming its tool.
+s = fresh("staleexempt")
+doctor_shadow("the exempt door record no longer writing a desktop entry", s,
+              "tools/linux/door_record.py", r"\[Desktop Entry\]", "[Door Entry]")
+g.negative("an exemption whose file no longer names the tool",
+           lambda p=s: check(p), want="drop the stale exemption")
+
+g.negatives_ran(38)
 
 # The vacuity floor rule 5 asks for: the census below walks these six
 # roots, and a walk that found almost nothing agrees with everything.

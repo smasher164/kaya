@@ -14678,3 +14678,40 @@ tools/lib/packaging/mac.py writes the entitlement BESIDE the bundle as
 `<name>.entitlements` for a team-identity re-sign and never signs it in;
 check-app-identity's C15 refuses an `--entitlements` in the ad-hoc call
 (docs/autofill-plan.md A8).
+
+## The plain door's lost Activate (measured 2026-10-07)
+
+`gio launch <entry>` on a `DBusActivatable=true` entry LOSES its
+`org.freedesktop.Application.Activate` call under CPU load, exits 0 and
+prints nothing. GLib 2.90's `g_desktop_app_info_launch_uris_internal`
+queues the call with `g_dbus_connection_call`, starts an ASYNCHRONOUS
+`g_dbus_connection_flush` and returns, and gio-tool-launch.c then exits;
+nothing waits for the GDBus worker thread to write the message. `gio open`
+does not have this: it runs `launch_default_for_uri_async` and iterates the
+main context until the answer. Measured in the linux image against its own
+dbus-daemon, one launch at a time, the daemon's log counted: 300/300 calls
+arrived at 12 spinners in the container, 148/200 and 101/150 at 40 (after a
+10 s settle the daemon still held 101 requests for 150 launches, so the
+call is lost, not late); the same GLib launch followed by a synchronous
+flush, and tools/linux/launch-entry.py (`launch_uris_async` held until GLib
+answers), each arrived 150/150 under the same load. The taskspersist leg
+went red this way in matrix 20261008T045331Z (`no act-two log at all`), and
+with a 40-spinner container beside the filtered lane it failed 2 of 12 legs,
+each record showing an activation request for `org.a11y.Bus` and none for
+the app; with launch-entry.py it passed 32 of 32 loaded and 6 of 6 idle.
+
+The record that named it (tools/linux/door_record.py, printed into the leg
+log of persist-leg.py and link-leg.py on every run) holds what the old leg
+log could not: the launcher's exit status and output, the entry's and the
+D-Bus service file's Exec with whether its program exists, the bus daemon's
+own log (`dbus-launch` daemonizes the daemon onto /dev/null, so the legs
+start `dbus-daemon --session --nofork` with its stderr kept), a count of
+activation requests for the app, act2-exec.sh's start and exit lines (it no
+longer `exec`s, so the activated process's exit status is kept), and every
+process the bus started. A `/proc` sample can catch a pid between fork and
+exec, when it still reads as its parent's program (`bash act2-exec.sh`), so
+the watch keeps every program a pid showed: a first-reading-only watch
+failed links-rust-wayland's "delivered to a process that is not tasks"
+check once under load. door_record.py `--self-test` pushes four doors at a
+real bus and refuses a `gio launch` door outright; check-flightrec's
+"linux door record" clause holds both legs to it (ND3 to ND8).

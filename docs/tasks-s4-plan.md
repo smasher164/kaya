@@ -190,7 +190,8 @@ back through the platform's own record.
 - **`relaunch launch` is the plain door.** The runner starts the same
   artifact the way a user would — the bundle again on macOS and iOS,
   `am start` with no extras on Android, the desktop entry through
-  `gio launch` (or the leg's launcher when the lane has no gio) on Linux,
+  GLib's own launcher held until it answers (tools/linux/launch-entry.py;
+  `gio launch` loses its call under load, docs/traps.md) on Linux,
   the exe or the packaged app on Windows — with no notification pending;
   every runner names it in `RELAUNCH_DOOR` beside the notification door,
   and check-steps' shape clause admits the one argument. ONE `relaunch` per

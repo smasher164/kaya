@@ -285,6 +285,9 @@ python3 /work/tools/linux/persist-leg.py --self-test || exit 1
 # an activatable entry with no service file, and a service file carrying
 # `--gapplication-service` all pass every warm assertion on this lane.
 python3 /work/tools/linux/link-leg.py --self-test || exit 1
+# The door record both legs print, read back off three real doors
+# (docs/traps.md, the plain door's lost Activate).
+python3 /work/tools/linux/door_record.py --self-test || exit 1
 # THE CAPTURE LEG'S REGIME AND ITS STOP (docs/capture-plan.md §7): a portal
 # leg that quietly took the direct route measures the wrong half of §9
 # ruling 5 and stays green.
@@ -1430,8 +1433,9 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/tasks"
     # WHAT SURVIVES A RELAUNCH (docs/tasks-s4-plan.md §4), the SAME guest
     # under its own scene: the door here is the plain one — the app's
-    # desktop entry through `gio launch`, with nothing pending — so this
-    # leg names its own door and tools/linux/persist-leg.py pushes it.
+    # desktop entry through tools/linux/launch-entry.py, with nothing
+    # pending — so this leg names its own door and tools/linux/persist-leg.py
+    # pushes it.
     # No a11y bus: the scene asserts no `expect_ax`.
     export RELAUNCH_DOOR_TASKSPERSIST=launch
     run "$proto" taskspersist-rust env KAYA_SELFTEST=taskspersist \
