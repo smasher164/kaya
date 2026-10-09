@@ -112,6 +112,9 @@ if lang == "rust":
     lane.stage_rust(ROOT, [stem])
 
 argv = lane.leg_argv(scene, lang, lambda name: lane.hs_bin(ROOT, name))
+for _line in lane.scene_cut_lines(ROOT, scene)[1]:
+    if _line.strip():
+        print(f"run-leg: NOT RUN on this lane: {_line}", flush=True)
 env = dict(os.environ)
 env.update(lane.leg_env(ROOT, scene, lang, appearance))
 # THE SCENE OVERRIDE (docs/HACKING.md, "hold a scene still for a

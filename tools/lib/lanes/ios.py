@@ -289,9 +289,8 @@ MODS = {
                            "extra": FULLSCREEN_APP_TAIL},
     ("rust-swiftui", "fullscreen"): {"cut": "user_fullscreen", "keep": "expect_fullscreen",
                                      "extra": FULLSCREEN_APP_TAIL},
-    # THE EYE'S KEYBOARD REACH (docs/reveal-plan.md V10): an iPhone's Tab
-    # moves between text fields only (measured 2026-10-08, docs/traps.md),
-    # so the scene's last block, from `press tab`, is not run here.
+    # THE EYE'S KEYBOARD REACH is Full Keyboard Access's, which no lane turns
+    # on; the mac lane cuts the same block (docs/reveal-plan.md V10).
     ("swift", "reveal"): {"cut": "press tab", "keep": "expect_unmasked expect_masked"},
     ("go", "reveal"): {"cut": "press tab", "keep": "expect_unmasked expect_masked"},
     ("rust-swiftui", "reveal"): {"cut": "press tab", "keep": "expect_unmasked expect_masked"},

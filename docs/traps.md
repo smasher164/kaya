@@ -14929,7 +14929,11 @@ without `.focusable(interactions: .activate)`; in a never-key lane window the
 window itself ended first responder. A volatile `AppleKeyboardUIMode=2` in
 the argument domain leaves `NSApp.isFullKeyboardAccessEnabled` false, so no
 per-process switch exists. An NSButton with `canBecomeKeyView` true is
-reached. SwiftUI then makes a NEW eye NSView at every masked/shown swap of
+reached. A stock NSButton is not, and AppKit's rule does not go through
+`NSApp.isFullKeyboardAccessEnabled`: a subclass answering it true left
+`canBecomeKeyView` false, so an in-process stand-in for the setting can only
+force the button (measured 2026-10-08; the eye now follows the setting, V10's
+ruling). SwiftUI then makes a NEW eye NSView at every masked/shown swap of
 the field's view, and the old one leaves the window with no
 `resignFirstResponder`, leaving the window first responder; an eye that held
 the focus hands it to its successor in `viewDidMoveToWindow`.

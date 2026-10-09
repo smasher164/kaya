@@ -48,7 +48,9 @@ expect label@pin_status "pin b: shown"
 expect_unmasked secure_field@pin[b] 6
 # The eye is reachable from the keyboard (docs/reveal-plan.md V10): Tab from
 # the field reaches it, Space flips it and keeps it focused, and the app hears
-# the user's flip. Last, so a phone's cut at `press tab` takes this alone.
+# the user's flip. On macOS and iOS a button joins the Tab loop only under the
+# system's keyboard setting, which no lane turns on, so both Apple lanes cut
+# here at `press tab`; this block is last so the cut takes it alone.
 click secure_field@password
 type_secret "Kp7wZe"
 press tab

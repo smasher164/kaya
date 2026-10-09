@@ -235,8 +235,9 @@ in the plan's §2 are recommended and await the maintainer. What breadth owes:
     `expect_masked` refusing a Visible box. reveal_routes.py holds the WinUI
     rows; reveal_* green in all six windows languages.
   - **The eye on GTK and WinUI, for the maintainer** — the keyboard half is
-    BUILT 2026-10-08 (docs/reveal-plan.md V10: Tab reaches the eye on macOS,
-    GTK, WinUI and Android; the iPhone carve-out awaits his ruling). Still
+    RULED 2026-10-08 (docs/reveal-plan.md V10: Tab reaches the eye on GTK,
+    WinUI and Android; on macOS and iOS it follows the system's keyboard
+    setting like every Apple button, and both Apple lanes cut at `press tab`). Still
     open: WinUI's eye is one glyph
     (U+F78D) in both states where V7 asks for a struck eye while shown; and a
     shown PasswordBox still reads as a password to UIA with no Value pattern,

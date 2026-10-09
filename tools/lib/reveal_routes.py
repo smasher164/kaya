@@ -165,24 +165,31 @@ CALLS = [
     ("the app's write swaps without a toggle",
      "case (propRevealed, valueBool):\n                    kayaRevealSwap(kayaScene.nodes[id]!, raw[body + 24] != 0)"),
 ]
-# The mac eye (docs/reveal-plan.md V10, measured 2026-10-08): a SwiftUI Button
-# is no key view, so the eye is an NSButton that Tab reaches whatever the
-# system's keyboard navigation says, a click that leaves the field's focus, and
-# a focus that survives SwiftUI remaking the eye at every swap.
+# The mac eye (docs/reveal-plan.md V10, ruled 2026-10-08): an NSButton whose
+# key-view membership AppKit decides from the system's Keyboard navigation
+# setting, as for every mac button, neither forced in nor out, since no lane
+# can turn the setting on and see it; a click leaves the field's focus, and a
+# held focus survives SwiftUI remaking the eye at every swap.
+KEY_VIEW_FORCING = ["canBecomeKeyView", "nextKeyView", "refusesFirstResponder", "isFullKeyboardAccessEnabled"]
 ARMS += [
-    ("mac: the eye is in the key view loop and a click leaves the focus", SWIFT,
+    ("mac: the eye's key-view membership is AppKit's and a click leaves the focus", SWIFT,
      "final class KayaRevealEyeButton: NSButton {",
-     ["override var canBecomeKeyView: Bool { true }",
-      "override var acceptsFirstResponder: Bool { NSApp.currentEvent?.type != .leftMouseDown }",
-      "window.makeFirstResponder(self)", "kayaRevealEyeOwed.contains(nodeId)"], ["refusesFirstResponder = true"]),
+     ["override var acceptsFirstResponder: Bool { NSApp.currentEvent?.type != .leftMouseDown }",
+      "window.makeFirstResponder(self)", "kayaRevealEyeOwed.contains(nodeId)"], KEY_VIEW_FORCING),
     ("mac: the eye takes the door and owes a held focus to its successor", SWIFT,
      "struct KayaRevealEye: NSViewRepresentable {",
      ["let button = KayaRevealEyeButton()", "kayaRevealToggle(node, !node.revealed)",
-      "$0.window?.firstResponder === $0", "kayaRevealEyeOwed.insert(id)"], []),
+      "$0.window?.firstResponder === $0", "kayaRevealEyeOwed.insert(id)"], KEY_VIEW_FORCING),
     ("mac: expect_focused's eye reads the window's first responder", SWIFT,
      "func kayaRevealEyeHoldsFocus(_ id: UInt64) -> Bool {\n        kayaNSWindows",
      ["($0.firstResponder as? KayaRevealEyeButton)?.nodeId == id"], ["kayaRevealEyeFocused"]),
 ]
+# The iOS eye (docs/reveal-plan.md V10, ruled 2026-10-08): a plain SwiftUI
+# Button, which Full Keyboard Access reaches as every iOS button and a hardware
+# Tab without it does not; nothing forces it in or out.
+IOS_EYE = ("Button(action: { kayaRevealToggle(node, !node.revealed) })", "#endif",
+           [".accessibilityLabel(kayaRevealName(node.revealed))", ".focused($eyeFocus)"],
+           [".focusable(", ".focusEffectDisabled(", ".accessibilityHidden("])
 # iOS (measured 2026-10-08, docs/traps.md): the shown field's menu is the masked
 # one's, Paste and Select All, it banks no undo, and type_secret's keys reach it
 # in-process at its own first responder, since XCTest redacts only what it types
@@ -312,6 +319,17 @@ def findings(sources, backends=None):
         for name in refused:
             if flat(name) in flat(body[0]):
                 out.append(f"reveal: {label} no longer holds — {opener}...}} names {name}")
+    opener, closer, needs, refused = IOS_EYE
+    at = swift.find(opener)
+    eye = swift[at:swift.find(closer, at)] if at >= 0 and swift.count(opener) == 1 else ""
+    if not eye:
+        out.append(f"reveal: the iOS eye ({opener}) is found {swift.count(opener)} times, wanted once")
+    for need in needs:
+        if eye and need not in eye:
+            out.append(f"reveal: the iOS eye no longer holds — it lacks {need}")
+    for name in refused:
+        if name in eye:
+            out.append(f"reveal: the iOS eye is forced in or out of the keyboard's loop — it names {name}")
     if COMPOSE_WRITE not in sources[COMPOSE]:
         out.append(f"reveal: {COMPOSE}: the app's `revealed` write no longer sets the state alone "
                    f"({COMPOSE_WRITE})")
@@ -330,7 +348,7 @@ def run(g):
     rels = [HARNESS, SWIFT, GTK_SECURE, *STUBBED]
     sources = {rel: (ROOT / rel).read_text(encoding="utf-8") for rel in rels}
     still = [rel for rel, stub in STUBBED.items() if stub in sources[rel]]
-    g.counted("reveal clauses held", len(DOOR) + len(CALLS) + 3 + len(HINTS) + 4 + len(ARMS), floor=54)
+    g.counted("reveal clauses held", len(DOOR) + len(CALLS) + 3 + len(HINTS) + 5 + len(ARMS), floor=55)
     g.counted("reveal backends still stubbed", len(still), floor=0)
     for line in findings(sources):
         g.finding(line)
@@ -423,11 +441,22 @@ def run(g):
          "leaves touch mode"),
         ("WinUI: the eye's focus read off something else", WINUI,
          r"FocusState\(\)\? != FocusState::Unfocused\)\)\n", "IsTabStop()?))\n", "reads the button's FocusState"),
-        ("mac: the eye no key view", SWIFT, r"\n        override var canBecomeKeyView: Bool \{ true \}", "",
-         "in the key view loop"),
+        ("mac: the eye forced into the key view loop", SWIFT,
+         r"(final class KayaRevealEyeButton: NSButton \{\n        var nodeId: UInt64 = 0\n)",
+         r"\1        override var canBecomeKeyView: Bool { true }\n", "names canBecomeKeyView"),
+        ("mac: the eye forced out of the key view loop", SWIFT,
+         r"(let button = KayaRevealEyeButton\(\)\n)", r"\1            button.refusesFirstResponder = true\n",
+         "names refusesFirstResponder"),
         ("mac: a click on the eye taking the field's focus", SWIFT,
          r"override var acceptsFirstResponder: Bool \{ NSApp\.currentEvent\?\.type != \.leftMouseDown \}",
-         "override var acceptsFirstResponder: Bool { true }", "in the key view loop"),
+         "override var acceptsFirstResponder: Bool { true }", "a click leaves the focus"),
+        ("iOS: the eye forced into the Tab loop", SWIFT, r"(\.buttonStyle\(\.plain\)\n)(\s+\.focused\(\$eyeFocus\))",
+         r"\1                    .focusable()\n\2", "names .focusable("),
+        ("iOS: the eye forced out of the Tab loop", SWIFT, r"(\.buttonStyle\(\.plain\)\n)(\s+\.focused\(\$eyeFocus\))",
+         r"\1                    .focusable(false)\n\2", "names .focusable("),
+        ("iOS: the eye hidden from Full Keyboard Access", SWIFT,
+         r"(\.accessibilityLabel\(kayaRevealName\(node\.revealed\)\))",
+         r"\1\n                    .accessibilityHidden(true)", "names .accessibilityHidden("),
         ("mac: the eye's focus lost at the swap", SWIFT, r"\n                kayaRevealEyeOwed\.insert\(id\)", "",
          "owes a held focus"),
         ("mac: the eye's focus read off kaya's own set", SWIFT,

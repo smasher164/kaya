@@ -9,7 +9,7 @@ tools/scenes/reveal.steps green on the mac for Rust. GTK, WinUI and Compose are
 depth stubs, the iOS legs unwired and the eight other bindings the breadth
 (docs/deferred.md, the reveal toggle's BUILD entry).
 RULED 2026-10-08 (the maintainer: "im fine with everything except ... the keyboard navigation"): V1-V9 as built, and the platform divergences accepted save one: the eye must be reachable with Tab on every platform ("it makes it more accessible"), built in the keyboard-reach slice.
-KEYBOARD REACH BUILT 2026-10-08 (V10): Tab reaches the eye and Space flips it on macOS, GTK, WinUI and Android; iPhone is a proposed carve-out awaiting the maintainer (V10).
+KEYBOARD REACH RULED 2026-10-08 (V10): Tab reaches the eye and Space flips it on GTK, WinUI and Android; on macOS and iOS the eye follows Apple's keyboard convention like every other button there (the maintainer: "im okay with your recommendation on the apple keyboard").
 
 The maintainer asked for it on 2026-10-08: "maybe we do show password now? i
 want to finish password entry before moving onto the next feature". The secure
@@ -170,20 +170,33 @@ secure.steps runs on five lanes in nine languages, so extending it would
 redden every one of those legs until the breadth; a new scene rides the depth
 stubs and iOS's unwired declaration like every depth slice before it (§5).
 
-### V10 — Tab reaches the eye; Space flips it (BUILT 2026-10-08, the iPhone carve-out PROPOSED)
+### V10 — The eye takes the keyboard as the platform's buttons do (RULED 2026-10-08)
 
-The maintainer's one exception to the accepted divergences. With the field
-focused, Tab moves the keyboard focus to the eye, Space flips the reveal, the
-app hears `toggled`, and the focus stays on the eye. A pointer click on the
-eye still leaves the focus in the field (V6). Per platform:
+The maintainer's one exception to the accepted divergences, and his ruling on
+the Apple half ("im okay with your recommendation on the apple keyboard"):
+the eye is reached from the keyboard exactly as the platform reaches its
+other buttons. Where that is Tab (GTK, WinUI, Android), with the field
+focused Tab moves the keyboard focus to the eye, Space flips the reveal, the
+app hears `toggled`, and the focus stays on the eye. On macOS and iOS a
+button joins the keyboard's loop only under the system's keyboard setting
+(Keyboard navigation, Full Keyboard Access), and the eye follows it. A
+pointer click on the eye still leaves the focus in the field (V6). Per
+platform:
 
 - macOS: a SwiftUI Button is not a key view: with the system's Keyboard
   navigation setting off (the default), Tab from the field skipped it, and
   `.focusable(interactions: .activate)` changed nothing (MEASURED). The eye
-  is `KayaRevealEyeButton`, an NSButton that is always in the key view loop
-  and refuses the first responder on a mouse-down. SwiftUI makes a new eye
-  at every masked/shown swap (MEASURED), so an eye that held the focus hands
-  it to its successor.
+  is `KayaRevealEyeButton`, an NSButton whose key-view membership AppKit
+  decides as for every NSButton (`canBecomeKeyView` not overridden), and
+  which refuses the first responder on a mouse-down. With the setting off a
+  plain NSButton answers `canBecomeKeyView` false and the field's
+  `nextValidKeyView` skips it, and on the lane Tab from the field left the
+  eye unfocused (MEASURED, §7). The on-state is not measured, since the
+  setting is the host's and no per-process switch reaches AppKit's rule
+  (§7); it rests on the eye being a stock NSButton, which the setting puts
+  in the loop as it does every mac button. SwiftUI makes a new eye at every
+  masked/shown swap (MEASURED), so an eye that held the focus hands it to its
+  successor.
 - GTK: the peek icon is never shown; the eye is a GtkButton with the peek
   icon's glyphs and GTK's own "Show Text" / "Hide Text" as its label and
   tooltip, `focus-on-click` off. GtkPasswordEntry allocates only the children
@@ -197,18 +210,24 @@ eye still leaves the focus in the field (V6). Per platform:
   touch mode). The harness's Tab and Space go through the system's input
   (`input keyevent`), since a key the app dispatches itself never leaves
   touch mode (MEASURED).
-- iPhone (PROPOSED CARVE-OUT, for the maintainer): a hardware Tab moves
-  between text fields only; the SwiftUI eye, with or without `.focusable()`,
-  is skipped (MEASURED on the simulator). On iPhone a button is reached from
-  the keyboard only under Full Keyboard Access, as every iOS button is, and
-  the lane cannot turn that on without changing the simulator pool's
-  settings. The iOS lane cuts reveal.steps at `press tab`.
+- iOS: a hardware Tab moves between text fields only; the SwiftUI eye, with
+  or without `.focusable()`, is skipped (MEASURED on the simulator). The eye
+  is a plain SwiftUI Button with its spoken name and no `.focusable`,
+  `.focusEffectDisabled` or `.accessibilityHidden`, so Full Keyboard Access
+  reaches it as it reaches every iOS button (iOS's documented behaviour, not
+  measured: turning it on would change the simulator pool's settings).
 
-The divergence this leaves on the mac: every other mac button is reached
-with Tab only under Keyboard navigation, and the eye always is. The
-alternative is to follow the system setting, which leaves the eye
-unreachable on a default mac and untestable on the lane, since a
-per-process `AppleKeyboardUIMode` does not turn it on (MEASURED).
+THE CARVE-OUT, uniform on both Apple lanes: neither lane can turn the
+system's keyboard setting on, so both cut reveal.steps at `press tab`
+(tools/lib/lanes/mac.py's CUTS, tools/lib/lanes/ios.py's MODS, both held by
+check-steps' cut census, which refuses a stale cut). What they still assert
+above the cut: every `toggle secure_field@...` finds the eye as exactly one
+button inside the field's frame named "Show password" or "Hide password" in
+the platform's own accessibility tree. That the eye is neither forced into
+nor out of the keyboard's loop is held statically by
+tools/lib/reveal_routes.py (five watched negatives: `canBecomeKeyView`
+forced, `refusesFirstResponder`, `.focusable()`, `.focusable(false)`,
+`.accessibilityHidden(true)`).
 
 ## §3 — The lowering, per backend
 
@@ -250,8 +269,8 @@ password, which proves the order); Return submitting; the toggle off
 (`unmasked 0`); and a stamped copy that starts shown from its row's field and
 whose toggle names its row; and last, V10's keyboard block: `press tab`
 from the field, `expect_focused secure_field@password eye`, `press space`
-twice with the state, the eye's focus and `heard: shown` read between. The
-iOS lane cuts at `press tab` (V10).
+twice with the state, the eye's focus and `heard: shown` read between. Both
+Apple lanes cut at `press tab` (V10).
 
 Gates that grew: check-verbs (tools/lib/reveal_routes.py: the one door and its
 callers, the unmasked read reaching the platform and not the model, the mac
@@ -340,3 +359,16 @@ check-sugar-surface is red by design until the eight bindings take the props:
   `canBecomeKeyView` cut to false (1 substitution, tools/mac/scene-negative.py)
   turned reveal-rust red with "secure_field@password eye does not hold focus",
   restored with its sha256 compared (docs/traps.md).
+- MEASURED 2026-10-08 (V10's ruling, macOS 26.5, the host's Keyboard
+  navigation off: `AppleKeyboardUIMode` absent from the global domain): a
+  stock borderless NSButton between two NSTextFields answers
+  `canBecomeKeyView` false with `acceptsFirstResponder` true, and the first
+  field's `nextValidKeyView` is the second field. An NSApplication subclass
+  answering `isFullKeyboardAccessEnabled` true left `canBecomeKeyView` false,
+  as did `-AppleKeyboardUIMode 2` in the argument domain, so AppKit's rule
+  reads neither and a test-only switch could only force the eye, which is
+  the state the ruling removed. With `canBecomeKeyView` no longer overridden,
+  the full reveal.steps on the mac read "secure_field@password eye does not
+  hold focus (the window's first responder is KayaRevealEditor)" after
+  `press tab`; with the cut, reveal green in all nine languages on the mac
+  and 3/3 on iOS (docs/traps.md).

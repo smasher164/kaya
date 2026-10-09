@@ -34,6 +34,7 @@ import time
 
 import exclusive
 import media_server
+import scene_cut
 
 # THE scene list: the mechanical per-scene surfaces derive from it —
 # the cargo --example flags, the rust-guest staging, build_swift's
@@ -93,6 +94,12 @@ GUEST_STEM = {"listdetail": "split", "taskspersist": "tasks",
 SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG",
                 "scrollrtl": "ar-EG", "numberfieldde": "de-DE", "numberfieldar": "ar-EG",
                 "rangertl": "ar-EG"}
+
+# THE SCENES THIS LANE CUTS, through tools/lib/scene_cut.py, the phones'
+# census, which check-steps runs over this table too. The eye's Tab reach is
+# the system's Keyboard navigation setting's, which no lane turns on
+# (docs/reveal-plan.md V10).
+CUTS = {"reveal": {"cut": "press tab", "keep": "expect_unmasked expect_masked"}}
 
 # The scenes this lane DECLARES OFF, each with its reason, read by
 # tools/check-steps.py beside the phones' declarations: macOS has no text
@@ -1133,12 +1140,19 @@ def leg_argv(scene, lang, hs_bin):
 def scene_script(root, scene):
     """The scene script's TEXT for the interpreter's environment, comments
     stripped: some transports fold newlines into `;`, and a leading
-    comment must not swallow the folded script. Newlines are kept."""
-    lines = [line for line in
-             (root / f"tools/scenes/{scene}.steps").read_text(
-                 encoding="utf-8").splitlines()
-             if not line.startswith("#")]
-    return "\n".join(lines)
+    comment must not swallow the folded script. Newlines are kept. A scene
+    in CUTS is its prefix (scene_cut raises CutRefused for a stale cut)."""
+    return "\n".join(scene_cut_lines(root, scene)[0])
+
+
+def scene_cut_lines(root, scene):
+    """(the lines the leg runs, the lines this lane does not run)."""
+    path = root / f"tools/scenes/{scene}.steps"
+    if scene in CUTS:
+        cut = CUTS[scene]
+        return scene_cut.scene_prefix(path, cut["cut"], cut["keep"], who="mac")
+    return [line for line in path.read_text(encoding="utf-8").splitlines()
+            if not line.startswith("#")], []
 
 
 MEDIA_URL = f"http://{media_server.HOST}:{media_server.PORT}"

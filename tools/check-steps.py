@@ -5064,7 +5064,7 @@ if kinds_out is not None:
 # lane, 36s into android's and 513s into iOS's (docs/traps.md, "A cut
 # refusal only the lane could print", 2026-09-07). The runners' own census
 # (tools/lib/scene_cut.py) runs here over both lane tables.
-def phone_cuts(root, android_mods, ios_mods):
+def phone_cuts(root, android_mods, ios_mods, mac_cuts=None):
     bad, seen = [], 0
     root = pathlib.Path(root)
     for scene, mods in android_mods.items():
@@ -5085,6 +5085,13 @@ def phone_cuts(root, android_mods, ios_mods):
             scene_cut.scene_prefix(root / f"tools/scenes/{scene}.steps",
                                    mods["cut"], mods.get("keep", ""),
                                    mods.get("extra", ""), who=f"ios {suite}")
+        except scene_cut.CutRefused as exc:
+            bad.append(str(exc))
+    for scene, mods in (mac_cuts or {}).items():
+        seen += 1
+        try:
+            scene_cut.scene_prefix(root / f"tools/scenes/{scene}.steps",
+                                   mods["cut"], mods["keep"], who="mac")
         except scene_cut.CutRefused as exc:
             bad.append(str(exc))
     if seen < 4:
@@ -5124,7 +5131,22 @@ for label, doctor, want in (
     print(f"check-steps: phone-cut self-test ({label}): {len(named)}/"
           f"{expected} lanes refused")
 
-cuts_out, cuts_seen = phone_cuts(ROOT, android_lane.MODS, ios_lane.MODS)
+with tempfile.TemporaryDirectory(prefix="kaya-cut-") as td:
+    shadow = pathlib.Path(td)
+    (shadow / "tools/scenes").mkdir(parents=True)
+    doctored, n = sub_count(r"^press tab$", "press tabz", read_rel("tools/scenes/reveal.steps"),
+                            flags=re.M)
+    print(f"check-steps: mac-cut self-test (a stale cut verb) applied {n} substitution(s)")
+    if n < 1:
+        selftest_fail("mac-cut perturbation applied nothing (a stale cut verb)")
+    (shadow / "tools/scenes/reveal.steps").write_text(doctored, encoding="utf-8")
+    out, _ = phone_cuts(shadow, {}, {}, {"reveal": mac_lane.CUTS["reveal"]})
+    if not any(b.startswith("mac: ") and "has no `press tab` step" in b for b in out):
+        selftest_fail("mac-cut census with a stale cut verb: no mac refusal named:\n"
+                      + "\n".join(out))
+    print("check-steps: mac-cut self-test (a stale cut verb): the mac's cut refused")
+
+cuts_out, cuts_seen = phone_cuts(ROOT, android_lane.MODS, ios_lane.MODS, mac_lane.CUTS)
 if cuts_out:
     print("check-steps: a phone cut takes an assertion its leg exists for, "
           "or is stale:", file=sys.stderr)
@@ -5132,8 +5154,8 @@ if cuts_out:
         print("  " + line, file=sys.stderr)
     status = 1
 else:
-    print(f"check-steps: {cuts_seen} phone cuts hold (both lane tables, "
-          "the runners' own census)")
+    print(f"check-steps: {cuts_seen} lane cuts hold (both phone tables and the "
+          "mac's, the runners' own census)")
 
 # ONE BUNDLED APP AT A TIME ON THE MAC (docs/traps.md, "Two bundled legs
 # cancelled each other's notification"): every .app the lane runs declares

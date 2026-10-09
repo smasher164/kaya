@@ -25002,13 +25002,10 @@ struct KayaSecureField: View {
 var kayaRevealEyeFocused: Set<UInt64> = []
 
 #if os(macOS)
-    /// The mac eye (docs/reveal-plan.md V10): an NSButton in the key view loop
-    /// whatever the system's keyboard navigation setting, since neither a
-    /// SwiftUI Button nor `.focusable()` takes Tab from an AppKit field editor
-    /// (measured 2026-10-08, docs/traps.md).
+    /// The mac eye: AppKit decides its key-view membership as for every
+    /// NSButton (docs/reveal-plan.md V10, docs/traps.md).
     final class KayaRevealEyeButton: NSButton {
         var nodeId: UInt64 = 0
-        override var canBecomeKeyView: Bool { true }
         /// A pointer's click leaves the focus where it was (V6).
         override var acceptsFirstResponder: Bool { NSApp.currentEvent?.type != .leftMouseDown }
         override func viewDidMoveToWindow() {

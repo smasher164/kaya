@@ -901,10 +901,11 @@ def scene_script(scene):
     leading comment must not swallow the folded script. Newlines are
     KEPT on this lane."""
     if scene not in _scripts:
-        lines = [line for line in
-                 (ROOT / f"tools/scenes/{scene}.steps").read_text(
-                     encoding="utf-8").splitlines()
-                 if not line.startswith("#")]
+        lines, dropped = lane.scene_cut_lines(ROOT, scene)
+        for line in dropped:
+            if line.strip():
+                print(f"validate-mac: NOT RUN on this lane ({scene}): {line}",
+                      file=sys.stderr)
         _scripts[scene] = "\n".join(lines)
     return _scripts[scene]
 
