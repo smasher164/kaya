@@ -942,6 +942,16 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 sig: "(JI)V".into(),
                 fn_ptr: present_emit_alert_result as *mut _,
             },
+            NativeMethod {
+                name: "toastAction".into(),
+                sig: "(J)V".into(),
+                fn_ptr: present_toast_action as *mut _,
+            },
+            NativeMethod {
+                name: "emitToastClosed".into(),
+                sig: "(J)V".into(),
+                fn_ptr: present_emit_toast_closed as *mut _,
+            },
             // Local notifications (docs/tasks-s3-plan.md N1, N6).
             NativeMethod {
                 name: "emitNotificationResult".into(),
@@ -1923,6 +1933,16 @@ extern "system" fn present_emit_alert_result(
     choice: jint,
 ) {
     crate::capi::kaya_emit_alert_result(alert as u64, choice as u32);
+}
+
+/// KayaPresent.toastAction: kaya_toast_action (docs/toast-plan.md §3).
+extern "system" fn present_toast_action(_env: JNIEnv, _class: JClass, toast: jlong) {
+    crate::capi::kaya_toast_action(toast as u64);
+}
+
+/// KayaPresent.emitToastClosed: kaya_emit_toast_result with `closed`.
+extern "system" fn present_emit_toast_closed(_env: JNIEnv, _class: JClass, toast: jlong) {
+    crate::capi::kaya_emit_toast_result(toast as u64, crate::wire::TOAST_OUTCOME_CLOSED);
 }
 
 /// KayaPresent.emitFileDialogResult: `uris` and `names` are parallel

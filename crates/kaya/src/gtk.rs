@@ -5706,6 +5706,10 @@ struct CoreState {
     /// actions. `window_content`/`set_window_content` route through it.
     toolbar_views: HashMap<u64, adw::ToolbarView>,
     header_bars: HashMap<u64, adw::HeaderBar>,
+    /// docs/toast-plan.md §3: the overlay around each window's shell, and
+    /// the one toast it shows (T7).
+    toast_overlays: HashMap<u64, adw::ToastOverlay>,
+    shown_toasts: HashMap<u64, (u64, adw::Toast)>,
     /// The promotion group: one box packed into the header after the back
     /// button, holding one button per promoted catalog action. MEASURED
     /// (2026-08-17, the lane image): a button inside this box is allocated
@@ -6905,7 +6909,9 @@ fn install_nav_chrome(window: &gtk4::Window, id: u64) -> WindowChrome {
         view.add_top_bar(&header);
     }
     autohide_bar(window, &view, &header);
-    let hosted = tight::host(&view);
+    let toasts = adw::ToastOverlay::new();
+    toasts.set_child(Some(&view));
+    let hosted = tight::host(&toasts);
     if let Some(primary) = window.downcast_ref::<adw::ApplicationWindow>() {
         primary.set_content(Some(&hosted));
     } else if let Some(aux) = window.downcast_ref::<adw::Window>() {
@@ -6918,7 +6924,7 @@ fn install_nav_chrome(window: &gtk4::Window, id: u64) -> WindowChrome {
             window.type_().name()
         );
     }
-    WindowChrome { view, header, promoted, back, marker }
+    WindowChrome { view, toasts, header, promoted, back, marker }
 }
 
 /// The fullscreen header bar (docs/fullscreen-plan.md §9): hidden over the
@@ -7039,6 +7045,7 @@ fn autohide_bar(window: &gtk4::Window, view: &adw::ToolbarView, header: &adw::He
 /// can put the pieces in CoreState.
 struct WindowChrome {
     view: adw::ToolbarView,
+    toasts: adw::ToastOverlay,
     header: adw::HeaderBar,
     promoted: gtk4::Box,
     back: gtk4::Button,
@@ -10193,6 +10200,7 @@ fn note_native_undo(core: &mut CoreState, field: WidgetId, moved: bool) {
             apply(core, op);
         }
         core.occurrences.send(occurrence);
+        send_asks(core);
     }
 }
 
@@ -10291,6 +10299,7 @@ fn perform_undo_role(role: &str, tag: &[u8], sink: &OccSink) -> bool {
                             apply(core, op);
                         }
                         core.occurrences.send(occurrence);
+                        send_asks(core);
                     }
                 }
 // The app's door is this item's own activation, the plain path's
@@ -10308,6 +10317,78 @@ fn perform_undo_role(role: &str, tag: &[u8], sink: &OccSink) -> bool {
     true
 }
 
+fn send_asks(core: &mut CoreState) {
+    for occ in core.scene.take_asks() {
+        core.occurrences.send(occ);
+    }
+}
+
+/// docs/toast-plan.md §3's GTK row. T7: the shown toast is dismissed before
+/// the next is added, and HIGH so nothing waits behind another.
+fn present_toast(core: &mut CoreState, spec: crate::protocol::ToastSpec) {
+    let window = spec.window.0;
+    let Some(overlay) = core.toast_overlays.get(&window).cloned() else {
+        panic!("kaya: present_toast {} names window#{window}, which has no toast overlay", spec.toast.0)
+    };
+    if let Some((_, old)) = core.shown_toasts.remove(&window) {
+        old.dismiss();
+    }
+    let id = spec.toast.0;
+    let toast = adw::Toast::new(&spec.text);
+    toast.set_priority(adw::ToastPriority::High);
+    toast.set_timeout(match spec.duration {
+        crate::protocol::ToastDuration::Short => 5,
+        crate::protocol::ToastDuration::Long => 10,
+    });
+    if spec.action != crate::protocol::ToastAction::None {
+        toast.set_button_label(Some(&spec.action_label));
+        toast.connect_button_clicked(move |_| toast_pressed(window, id));
+    }
+    toast.connect_dismissed(move |_| toast_dismissed(window, id));
+    overlay.add_toast(toast.clone());
+    core.shown_toasts.insert(window, (id, toast));
+}
+
+fn withdraw_toast(core: &mut CoreState, window: u64, id: u64) {
+    if core.shown_toasts.get(&window).is_some_and(|(shown, _)| *shown == id) {
+        let (_, toast) = core.shown_toasts.remove(&window).expect("just found");
+        toast.dismiss();
+    }
+}
+
+/// THE ACTION'S ONE DOOR on GTK: `button-clicked` comes before `dismissed`
+/// (measured, libadwaita 1.9.2), and both run inside `dismiss()` or a
+/// harness press that holds the CORE borrow, so each is deferred; idle
+/// sources run FIFO.
+fn toast_pressed(window: u64, id: u64) {
+    glib::idle_add_local_once(move || {
+        CORE.with_borrow_mut(|core| {
+            let Some(core) = core.as_mut() else { return };
+            if core.shown_toasts.get(&window).is_some_and(|(shown, _)| *shown == id) {
+                core.shown_toasts.remove(&window);
+            }
+            for op in core.scene.toast_action(crate::protocol::ToastId(id)) {
+                apply(core, op);
+            }
+            send_asks(core);
+            refresh_roles(core);
+        });
+    });
+}
+
+fn toast_dismissed(window: u64, id: u64) {
+    glib::idle_add_local_once(move || {
+        CORE.with_borrow_mut(|core| {
+            let Some(core) = core.as_mut() else { return };
+            if core.shown_toasts.get(&window).is_some_and(|(shown, _)| *shown == id) {
+                core.shown_toasts.remove(&window);
+            }
+            core.scene.toast_closed(crate::protocol::ToastId(id));
+            send_asks(core);
+        });
+    });
+}
+
 /// Bank one text edit into the ledger (§3's episode banking), off the
 /// occurrence the widget just emitted. THE TAG RESOLVES THE FIELD, not a
 /// captured id: the ledger keys on the widget id a programmatic write would
@@ -10323,6 +10404,10 @@ fn bank_text_changed(tag: Vec<u8>, text: String, focused: bool) {
             };
             let window = core.window_of_widget(field).unwrap_or(WindowId(0));
             core.scene.note_text_changed(window, field, &text, focused);
+            for op in core.scene.take_toast_out() {
+                apply(core, op);
+            }
+            send_asks(core);
             // A banked edit moves the ledger, and the ledger is what
             // Edit>Undo's enablement reads.
             refresh_roles(core);
@@ -13195,6 +13280,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             }
             let chrome = install_nav_chrome(&aux, window.0);
             core.toolbar_views.insert(window.0, chrome.view);
+            core.toast_overlays.insert(window.0, chrome.toasts);
             core.header_bars.insert(window.0, chrome.header);
             core.toolbar_groups.insert(window.0, chrome.promoted);
             core.back_buttons.insert(window.0, chrome.back);
@@ -13238,6 +13324,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             core.app_titled.remove(&window.0);
             core.identity_icon_on.remove(&window.0);
             core.back_buttons.remove(&window.0);
+            core.toast_overlays.remove(&window.0);
+            core.shown_toasts.remove(&window.0);
             core.dirty_markers.remove(&window.0);
             // ... and its sections, each with ITS stack (the one way
             // a section dies).
@@ -14304,7 +14392,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
         }
         ApplyOp::PostNotification(spec) => post_notification(core.occurrences.clone(), spec),
         ApplyOp::CancelNotification(id) => cancel_notification(id.0),
-        ApplyOp::PresentToast(_) | ApplyOp::WithdrawToast { .. } => crate::depth_stub("toast"),
+        ApplyOp::PresentToast(spec) => present_toast(core, spec),
+        ApplyOp::WithdrawToast { window, toast } => withdraw_toast(core, window.0, toast.0),
         ApplyOp::SetBadge { count } => set_badge(count),
         ApplyOp::CreatePlayer(player) => gtk_media::create_player(core, player.0),
         ApplyOp::SetPlayerProp { player, prop, value } => gtk_media::set_player_prop(player.0, prop, &value),
@@ -17520,7 +17609,11 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
 
         #[cfg(feature = "harness")]
         if let Ok(scene) = std::env::var("KAYA_SELFTEST") {
-            crate::harness::spawn(&scene, GtkStage, |line| println!("{line}"));
+            if crate::harness::script(&scene).is_some_and(|t| t.contains("expect_toast_announced")) {
+                toast_ear::install_then(move || crate::harness::spawn(&scene, GtkStage, |line| println!("{line}")));
+            } else {
+                crate::harness::spawn(&scene, GtkStage, |line| println!("{line}"));
+            }
         }
         // A build WITHOUT the harness feature must not silently ignore
         // KAYA_SELFTEST: a runner that forgets `--features harness` would
@@ -17624,6 +17717,8 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 identity_icon: IdentityIcon::Undeclared,
                 identity_icon_on: BTreeSet::new(),
                 toolbar_views: HashMap::from([(0, primary_chrome.view)]),
+                toast_overlays: HashMap::from([(0, primary_chrome.toasts)]),
+                shown_toasts: HashMap::new(),
                 header_bars: HashMap::from([(0, primary_chrome.header)]),
                 toolbar_groups: HashMap::from([(0, primary_chrome.promoted)]),
                 back_buttons: {
@@ -18219,6 +18314,152 @@ impl GtkStage {
             glib::ControlFlow::Break
         });
         rx.recv().expect("the main context applied the step")
+    }
+}
+
+/// The toast the overlays show (docs/toast-plan.md T13): an overlay's
+/// newest AdwToastWidget, since a replaced one stays a child while it hides.
+#[cfg(feature = "harness")]
+fn shown_toast_widget(core: &CoreState) -> Option<gtk4::Widget> {
+    let mut windows: Vec<&u64> = core.toast_overlays.keys().collect();
+    windows.sort();
+    windows.into_iter().find_map(|w| {
+        let overlay = &core.toast_overlays[w];
+        let mut newest = None;
+        let mut child = overlay.first_child();
+        while let Some(widget) = child {
+            if widget.type_().name() == "AdwToastWidget" {
+                newest = Some(widget.clone());
+            }
+            child = widget.next_sibling();
+        }
+        newest
+    })
+}
+
+/// The toast widget's title, its action button (mapped only when the toast
+/// has a label) and its close button (the `circular` one).
+#[cfg(feature = "harness")]
+fn toast_widget_parts(widget: &gtk4::Widget) -> (String, Option<gtk4::Button>, Option<gtk4::Button>) {
+    let (mut text, mut action, mut close) = (String::new(), None, None);
+    let mut child = widget.first_child();
+    while let Some(part) = child {
+        if let Some(button) = part.downcast_ref::<gtk4::Button>() {
+            if button.has_css_class("circular") {
+                close = Some(button.clone());
+            } else if button.is_mapped() {
+                action = Some(button.clone());
+            }
+        } else if let Some(label) = part.first_child().and_then(|l| l.downcast::<gtk4::Label>().ok()) {
+            text = label.text().to_string();
+        }
+        child = part.next_sibling();
+    }
+    (text, action, close)
+}
+
+/// The AT-SPI announcements this process published (docs/toast-plan.md
+/// T12, T13): libadwaita 1.9.2 announces a toast on its overlay itself,
+/// "A toast appeared: <title>, has a button: <label>" (measured), but only
+/// from an accessible a client has already walked to, as a screen reader
+/// does (docs/traps.md, the unannounced AdwToast).
+#[cfg(feature = "harness")]
+mod toast_ear {
+    use atspi::proxy::accessible::AccessibleProxy;
+    use atspi::zbus::export::futures_core::Stream;
+
+    static HEARD: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+    pub fn heard() -> Vec<String> {
+        HEARD.lock().unwrap().clone()
+    }
+
+    fn deaf(why: String) {
+        HEARD.lock().unwrap().push(format!("<the toast listener is deaf: {why}>"));
+    }
+
+    async fn walk(node: AccessibleProxy<'_>, depth: usize) -> usize {
+        if depth > 32 {
+            return 0;
+        }
+        let Ok(children) = node.get_children().await else { return 1 };
+        let mut seen = 1;
+        for child in children {
+            let Some(dest) = child.name() else { continue };
+            let Ok(builder) = AccessibleProxy::builder(node.inner().connection())
+                .destination(dest.to_owned())
+                .and_then(|b| b.path(child.path().to_owned()))
+            else {
+                continue;
+            };
+            if let Ok(proxy) = builder.build().await {
+                seen += Box::pin(walk(proxy, depth + 1)).await;
+            }
+        }
+        seen
+    }
+
+    /// Registers, walks this process's tree once the window is in it, and
+    /// only then starts the script, so the first toast is heard.
+    pub fn install_then(start: impl FnOnce() + Send + 'static) {
+        std::thread::spawn(move || {
+            let mut start = Some(start);
+            atspi::zbus::block_on(async {
+                let conn = match atspi::connection::AccessibilityConnection::new().await {
+                    Ok(conn) => conn,
+                    Err(e) => return deaf(format!("no accessibility bus: {e}")),
+                };
+                if let Err(e) = conn.register_event::<atspi::events::object::AnnouncementEvent>().await {
+                    return deaf(format!("the registry refused the listener: {e}"));
+                }
+                let mut messages = std::pin::pin!(atspi::zbus::MessageStream::from(conn.connection()));
+                let started = std::time::Instant::now();
+                let mut walked = 0;
+                while walked < 8 && started.elapsed() < std::time::Duration::from_secs(10) {
+                    walked = 0;
+                    if let Ok(root) = AccessibleProxy::builder(conn.connection())
+                        .destination("org.a11y.atspi.Registry")
+                        .and_then(|b| b.path("/org/a11y/atspi/accessible/root"))
+                    {
+                        if let Ok(root) = root.build().await {
+                            walked = walk(root, 0).await;
+                        }
+                    }
+                    if walked < 8 {
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                }
+                if walked < 8 {
+                    deaf(format!("the window never reached the bus ({walked} nodes after 10 s)"));
+                }
+                if let Some(start) = start.take() {
+                    start();
+                }
+                while let Some(message) = std::future::poll_fn(|cx| messages.as_mut().poll_next(cx)).await {
+                    let Ok(message) = message else { continue };
+                    let header = message.header();
+                    if header.member().map(|m| m.as_str()) != Some("Announcement") {
+                        continue;
+                    }
+                    type Body = (
+                        String,
+                        i32,
+                        i32,
+                        atspi::zbus::zvariant::OwnedValue,
+                        std::collections::HashMap<String, atspi::zbus::zvariant::OwnedValue>,
+                    );
+                    let said = message
+                        .body()
+                        .deserialize::<Body>()
+                        .map_err(|e| e.to_string())
+                        .and_then(|(_, _, _, value, _)| String::try_from(value).map_err(|e| e.to_string()));
+                    HEARD.lock().unwrap().push(said.unwrap_or_else(|e| format!("<an announcement that did not parse: {e}>")));
+                }
+            });
+            if let Some(start) = start.take() {
+                start();
+            }
+        });
     }
 }
 
@@ -22386,16 +22627,34 @@ impl crate::harness::Stage for GtkStage {
         "none".to_owned()
     }
     fn toast(&self) -> Option<(String, String)> {
-        crate::depth_stub("toast")
+        Self::on_main(|core| {
+            let widget = shown_toast_widget(core)?;
+            let (text, action, _) = toast_widget_parts(&widget);
+            Some((text, action.map(|b| b.label().map(String::from).unwrap_or_default()).unwrap_or_default()))
+        })
     }
-    fn toast_announced(&self, _: &str, _: &str) -> Result<(), Vec<String>> {
-        crate::depth_stub("toast")
+    fn toast_announced(&self, text: &str, action: &str) -> Result<(), Vec<String>> {
+        let said = if action.is_empty() {
+            format!("A toast appeared: {text}")
+        } else {
+            format!("A toast appeared: {text}, has a button: {action}")
+        };
+        let heard = toast_ear::heard();
+        if heard.iter().any(|h| *h == said) { Ok(()) } else { Err(heard) }
     }
     fn toast_action(&self) -> bool {
-        crate::depth_stub("toast")
+        Self::on_main(|core| {
+            let Some(widget) = shown_toast_widget(core) else { return false };
+            let Some(button) = toast_widget_parts(&widget).1 else { return false };
+            button.activate()
+        })
     }
     fn toast_close(&self) -> bool {
-        crate::depth_stub("toast")
+        Self::on_main(|core| {
+            let Some(widget) = shown_toast_widget(core) else { return false };
+            let Some(button) = toast_widget_parts(&widget).2 else { return false };
+            button.activate()
+        })
     }
     fn dismiss_sheet(&self) {
         // The platform's own cancel path on the topmost sheet: Esc through

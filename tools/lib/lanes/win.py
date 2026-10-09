@@ -28,6 +28,7 @@ SCENES = [
     "progress", "select", "radio", "grid", "textarea", "search", "submit", "scrollto", "fullscreen",
     "numberfield", "timecode", "colorpicker", "range", "secure", "autofill", "reveal",
     "segmented",
+    "toast",
     "sections",
     "menus", "commands", "a11y", "a11yrows", "filedialog",
     "clipboard", "undo", "dirty", "ranges", "save", "styling",
@@ -304,6 +305,10 @@ ORDER = [
      # The sheet pool: the modal Popup and the close button's own route,
      # no real mouse and no OS-global key (docs/sheet-plan.md U1).
      "sheet_rust", "sheet_python", "sheet_js", "sheet_go", "sheet_csharp", "sheet_java",
+     # The toast pool: the InfoBar's own buttons pressed through their
+     # peers and Edit>Undo through menu_activate's invoke pipeline, no real
+     # mouse and no OS-global key (docs/toast-plan.md T10).
+     "toast_rust", "toast_python", "toast_js", "toast_go", "toast_csharp", "toast_java",
     ],
     # THE MEDIA SUITE (docs/media-plan.md §7a), pooled: every player is
     # muted, nothing is typed or pointed at, and the picture is read out of

@@ -227,6 +227,14 @@ object KayaPresent {
      * native dismissal. kaya_emit_alert_result's JNI spelling. */
     @JvmStatic external fun emitAlertResult(alert: Long, choice: Int)
 
+    /** A press of the toast's action (docs/toast-plan.md §3):
+     * kaya_toast_action's JNI spelling. The core decides what it does. */
+    @JvmStatic external fun toastAction(toast: Long)
+
+    /** The toast went any other way: kaya_emit_toast_result with
+     * `closed`, its JNI spelling. */
+    @JvmStatic external fun emitToastClosed(toast: Long)
+
     /** A notification's ONE answer (docs/tasks-s3-plan.md N1): the user
      * activated it, or the platform refused to post it.
      * kaya_emit_notification_result's JNI spelling. */

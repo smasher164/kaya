@@ -13154,6 +13154,12 @@ fn bank_text_changed_on(core: &mut CoreState, id: u64, text: &str) -> bool {
     let window = ledger_window(core);
     core.scene
         .note_text_changed(window, WidgetId(id), text, focused);
+    for op in core.scene.take_toast_out() {
+        if let Err(e) = apply(core, op) {
+            crate::fault::report(format!("kaya: withdrawing a toast after an edit failed: {e}"));
+        }
+    }
+    info_bar_send_asks(core);
     true
 }
 
@@ -13427,6 +13433,269 @@ fn deliver_undo(core: &mut CoreState, ops: Vec<ApplyOp>, occurrence: Occurrence)
         refresh_role_enablement(core);
     }
     core.occurrences.send(occurrence);
+    info_bar_send_asks(core);
+}
+
+fn info_bar_send_asks(core: &mut CoreState) {
+    for occ in core.scene.take_asks() {
+        core.occurrences.send(occ);
+    }
+}
+
+// ---- THE TOAST (docs/toast-plan.md T10): one InfoBar per window, in a
+// popup over the window's bottom edge, timed by kaya. The window's ground
+// holds the content alone (`window_ground`), so the bar rides the popup
+// layer the sheets use.
+
+struct InfoBarToast {
+    popup: Popup,
+    bar: bindings::Microsoft::UI::Xaml::Controls::InfoBar,
+    action: Button,
+    timer: bindings::Microsoft::UI::Dispatching::DispatcherQueueTimer,
+    shown: Option<u64>,
+    left_ms: i64,
+    hovered: bool,
+    focused: bool,
+}
+
+thread_local! {
+    static INFO_BAR_TOASTS: RefCell<HashMap<u64, InfoBarToast>> = RefCell::new(HashMap::new());
+}
+
+const INFO_BAR_TICK_MS: i64 = 100;
+const INFO_BAR_MAX_WIDTH: f64 = 560.0;
+const INFO_BAR_MARGIN: f64 = 16.0;
+
+/// T6: 5 s and 10 s, with the user's "dismiss notifications after" setting
+/// as the floor.
+fn info_bar_ms(duration: crate::protocol::ToastDuration) -> i64 {
+    let floor = windows::UI::ViewManagement::UISettings::new()
+        .and_then(|s| s.MessageDuration())
+        .map(i64::from)
+        .unwrap_or(0);
+    let own = match duration {
+        crate::protocol::ToastDuration::Short => 5,
+        crate::protocol::ToastDuration::Long => 10,
+    };
+    own.max(floor) * 1000
+}
+
+fn info_bar_place(popup: &Popup, bar: &bindings::Microsoft::UI::Xaml::Controls::InfoBar) -> windows_core::Result<()> {
+    let Ok(root) = popup.XamlRoot() else { return Ok(()) };
+    let size = root.Size()?;
+    let (w, h) = (f64::from(size.Width), f64::from(size.Height));
+    let widest = (w - 2.0 * INFO_BAR_MARGIN).clamp(0.0, INFO_BAR_MAX_WIDTH);
+    let element: FrameworkElement = bar.cast()?;
+    if (element.MaxWidth()? - widest).abs() > 0.5 {
+        element.SetMaxWidth(widest)?;
+    }
+    let x = ((w - element.ActualWidth()?) / 2.0).max(0.0);
+    let y = (h - element.ActualHeight()? - INFO_BAR_MARGIN).max(0.0);
+    if (popup.HorizontalOffset()? - x).abs() > 0.5 {
+        popup.SetHorizontalOffset(x)?;
+    }
+    if (popup.VerticalOffset()? - y).abs() > 0.5 {
+        popup.SetVerticalOffset(y)?;
+    }
+    Ok(())
+}
+
+/// Takes the shown toast off screen and answers which one it was. Every
+/// close goes through here; the platform calls run after the borrow drops,
+/// since `SetIsOpen(false)` raises `Closed` synchronously.
+fn info_bar_take(window: u64) -> Option<u64> {
+    let (shown, popup, bar, timer) = INFO_BAR_TOASTS.with_borrow_mut(|bars| {
+        let toast = bars.get_mut(&window)?;
+        Some((toast.shown.take(), toast.popup.clone(), toast.bar.clone(), toast.timer.clone()))
+    })?;
+    let _ = timer.Stop();
+    let _ = bar.SetIsOpen(false);
+    let _ = popup.SetIsOpen(false);
+    shown
+}
+
+/// The bar's three doors (the action, the user's X, the timer), each
+/// deferred one tick: they fire inside a harness hop or a WinRT call that
+/// holds the CORE borrow.
+fn info_bar_answer(id: u64, pressed: bool) {
+    let Some(dispatcher) = DISPATCHER.get() else { return };
+    let handler = DispatcherQueueHandler::new(move || {
+        CORE.with_borrow_mut(|core| {
+            let Some(core) = core.as_mut() else { return Ok(()) };
+            if pressed {
+                for op in core.scene.toast_action(crate::protocol::ToastId(id)) {
+                    let what = op_head(&op);
+                    if let Err(e) = apply(core, op) {
+                        crate::fault::report(format!("kaya: applying the toast's {what} failed: {e}"));
+                    }
+                }
+                if core.roles_armed {
+                    refresh_role_enablement(core);
+                }
+            } else {
+                core.scene.toast_closed(crate::protocol::ToastId(id));
+            }
+            info_bar_send_asks(core);
+            Ok(())
+        })
+    });
+    let _ = dispatcher.0.TryEnqueue(&handler);
+}
+
+fn info_bar_make(window: u64) -> windows_core::Result<InfoBarToast> {
+    use bindings::Microsoft::UI::Xaml::Controls::{InfoBar, InfoBarCloseReason, InfoBarClosedEventArgs, InfoBarSeverity};
+    let bar = InfoBar::new()?;
+    bar.SetSeverity(InfoBarSeverity::Informational)?;
+    bar.SetIsIconVisible(false)?;
+    bar.SetIsClosable(true)?;
+    let action = Button::new()?;
+    action.Click(&RoutedEventHandler::new(move |_, _| {
+        if let Some(id) = info_bar_take(window) {
+            info_bar_answer(id, true);
+        }
+        Ok(())
+    }))?;
+    bar.Closed(&TypedEventHandler::<InfoBar, InfoBarClosedEventArgs>::new(move |_, args| {
+        let Some(args) = args.as_ref() else { return Ok(()) };
+        if args.Reason()? == InfoBarCloseReason::CloseButton {
+            if let Some(id) = info_bar_take(window) {
+                info_bar_answer(id, false);
+            }
+        }
+        Ok(())
+    }))?;
+    let element: UIElement = bar.cast()?;
+    let hover = |on: bool| {
+        PointerEventHandler::new(move |_, _| {
+            INFO_BAR_TOASTS.with_borrow_mut(|bars| {
+                if let Some(toast) = bars.get_mut(&window) {
+                    toast.hovered = on;
+                }
+            });
+            Ok(())
+        })
+    };
+    element.PointerEntered(&hover(true))?;
+    element.PointerExited(&hover(false))?;
+    let focus = |on: bool| {
+        RoutedEventHandler::new(move |_, _| {
+            INFO_BAR_TOASTS.with_borrow_mut(|bars| {
+                if let Some(toast) = bars.get_mut(&window) {
+                    toast.focused = on;
+                }
+            });
+            Ok(())
+        })
+    };
+    element.GotFocus(&focus(true))?;
+    element.LostFocus(&focus(false))?;
+    let popup = Popup::new()?;
+    popup.SetChild(&element)?;
+    popup.SetIsLightDismissEnabled(false)?;
+    popup.SetShouldConstrainToRootBounds(true)?;
+    let placed = popup.clone();
+    let laid = bar.clone();
+    let fe: FrameworkElement = bar.cast()?;
+    fe.LayoutUpdated(&EventHandler::new(move |_, _| info_bar_place(&placed, &laid)))?;
+    let timer = DISPATCHER.get().expect("the dispatcher is up").0.CreateTimer()?;
+    timer.SetInterval(bindings::Windows::Foundation::TimeSpan { Duration: INFO_BAR_TICK_MS * 10_000 })?;
+    timer.SetIsRepeating(true)?;
+    timer.Tick(&TypedEventHandler::new(move |_, _| {
+        let due = INFO_BAR_TOASTS.with_borrow_mut(|bars| {
+            let toast = bars.get_mut(&window)?;
+            toast.shown?;
+            if !(toast.hovered || toast.focused) {
+                toast.left_ms -= INFO_BAR_TICK_MS;
+            }
+            (toast.left_ms <= 0).then_some(())
+        });
+        if due.is_some() {
+            if let Some(id) = info_bar_take(window) {
+                info_bar_answer(id, false);
+            }
+        }
+        Ok(())
+    }))?;
+    Ok(InfoBarToast { popup, bar, action, timer, shown: None, left_ms: 0, hovered: false, focused: false })
+}
+
+/// T7: the shown toast is closed and the bar re-opened with the new one,
+/// so its notification fires again.
+fn info_bar_present(core: &mut CoreState, spec: crate::protocol::ToastSpec) -> windows_core::Result<()> {
+    let window = spec.window.0;
+    let host = winui_window(core, window)?;
+    let root: FrameworkElement = windows_core::Interface::cast(&host.Content()?)?;
+    let Ok(xaml_root) = root.XamlRoot() else {
+        let cell = std::sync::Mutex::new(Some(spec));
+        root.Loaded(&RoutedEventHandler::new(move |_, _| {
+            if let Some(spec) = cell.lock().unwrap().take() {
+                CORE.with_borrow_mut(|core| {
+                    let core = core.as_mut().expect("core state initialized");
+                    let _ = apply(core, ApplyOp::PresentToast(spec));
+                });
+            }
+            Ok(())
+        }))?;
+        return Ok(());
+    };
+    if !INFO_BAR_TOASTS.with_borrow(|bars| bars.contains_key(&window)) {
+        let made = info_bar_make(window)?;
+        made.popup.SetXamlRoot(&xaml_root)?;
+        INFO_BAR_TOASTS.with_borrow_mut(|bars| bars.insert(window, made));
+    }
+    info_bar_take(window);
+    let (popup, bar, action, timer) = INFO_BAR_TOASTS.with_borrow_mut(|bars| {
+        let toast = bars.get_mut(&window).expect("just made");
+        toast.shown = Some(spec.toast.0);
+        toast.left_ms = info_bar_ms(spec.duration);
+        (toast.popup.clone(), toast.bar.clone(), toast.action.clone(), toast.timer.clone())
+    });
+    bar.SetMessage(&HSTRING::from(spec.text.as_str()))?;
+    if spec.action == crate::protocol::ToastAction::None {
+        bar.SetActionButton(None::<&bindings::Microsoft::UI::Xaml::Controls::Primitives::ButtonBase>)?;
+    } else {
+        action.SetContent(&PropertyValue::CreateString(&HSTRING::from(spec.action_label.as_str()))?)?;
+        bar.SetActionButton(&action)?;
+    }
+    popup.SetIsOpen(true)?;
+    bar.SetIsOpen(true)?;
+    info_bar_place(&popup, &bar)?;
+    timer.Start()?;
+    info_bar_announce(&bar, &spec)
+}
+
+/// T12: the text, then the action's label, the sentence every arm hands
+/// its reader; InfoBar's own names its severity and no action, under the
+/// activity this one shares so a reader keeps the later of the two
+/// (measured, docs/toast-plan.md §7).
+fn info_bar_announce(
+    bar: &bindings::Microsoft::UI::Xaml::Controls::InfoBar,
+    spec: &crate::protocol::ToastSpec,
+) -> windows_core::Result<()> {
+    use bindings::Microsoft::UI::Xaml::Automation::Peers::{
+        AutomationNotificationKind, AutomationNotificationProcessing, FrameworkElementAutomationPeer,
+    };
+    let said = if spec.action == crate::protocol::ToastAction::None {
+        spec.text.clone()
+    } else {
+        format!("{}, {}", spec.text, spec.action_label)
+    };
+    FrameworkElementAutomationPeer::CreatePeerForElement(&bar.cast::<UIElement>()?)?.RaiseNotificationEvent(
+        AutomationNotificationKind::Other,
+        AutomationNotificationProcessing::MostRecent,
+        &HSTRING::from(said.as_str()),
+        &HSTRING::from("InfoBarOpenedActivityId"),
+    )?;
+    #[cfg(feature = "harness")]
+    info_bar_ear::raised(&said);
+    Ok(())
+}
+
+fn info_bar_withdraw(window: u64, id: u64) -> windows_core::Result<()> {
+    if INFO_BAR_TOASTS.with_borrow(|bars| bars.get(&window).and_then(|t| t.shown)) == Some(id) {
+        info_bar_take(window);
+    }
+    Ok(())
 }
 
 /// Perform a clipboard role on the focused widget. Answers whether it WAS one,
@@ -15969,6 +16238,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             apply_identity_to_window(core, window.0)?;
         }
         ApplyOp::DestroyWindow { window } => {
+            info_bar_take(window.0);
+            INFO_BAR_TOASTS.with_borrow_mut(|bars| bars.remove(&window.0));
             core.window_veto.remove(&window.0);
             core.fullscreen.remove(&window.0);
             core.tearing_down.insert(window.0);
@@ -16649,7 +16920,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
         ApplyOp::CancelNotification(notification) => {
             on_notify(move || notification_forget(notification.0));
         }
-        ApplyOp::PresentToast(_) | ApplyOp::WithdrawToast { .. } => crate::depth_stub("toast"),
+        ApplyOp::PresentToast(spec) => info_bar_present(core, spec)?,
+        ApplyOp::WithdrawToast { window, toast } => info_bar_withdraw(window.0, toast.0)?,
         ApplyOp::CreatePlayer(player) => media::create_player(core, player.0)?,
         ApplyOp::SetPlayerProp { player, prop, value } => media::set_player_prop(core, player.0, prop, value)?,
         ApplyOp::PlayerCommand { player, command } => media::command(core, player.0, command)?,
@@ -20166,6 +20438,43 @@ fn run_powershell(script: &str) -> String {
 
 #[cfg(feature = "harness")]
 struct WinUiStage;
+
+/// The InfoBar the user sees: its popup open and the bar itself open, the
+/// lowest window first.
+#[cfg(feature = "harness")]
+fn info_bar_on_screen() -> windows_core::Result<Option<bindings::Microsoft::UI::Xaml::Controls::InfoBar>> {
+    let mut bars: Vec<(u64, Popup, bindings::Microsoft::UI::Xaml::Controls::InfoBar)> = INFO_BAR_TOASTS
+        .with_borrow(|bars| bars.iter().map(|(w, t)| (*w, t.popup.clone(), t.bar.clone())).collect());
+    bars.sort_by_key(|(w, _, _)| *w);
+    for (_, popup, bar) in bars {
+        if popup.IsOpen()? && bar.IsOpen()? {
+            return Ok(Some(bar));
+        }
+    }
+    Ok(None)
+}
+
+/// What this arm handed UI Automation (docs/toast-plan.md T12, T13),
+/// recorded once `RaiseNotificationEvent` accepted it. No listener runs: a
+/// UI Automation client touching the guest kills the Java guest
+/// (docs/traps.md, UI Automation cannot read the Shell's file dialog).
+#[cfg(feature = "harness")]
+mod info_bar_ear {
+    static HEARD: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+    /// What the scene's `"<text>|<action>"` is announced as.
+    pub fn said(text: &str, action: &str) -> String {
+        if action.is_empty() { text.to_owned() } else { format!("{text}, {action}") }
+    }
+
+    pub fn heard() -> Vec<String> {
+        HEARD.lock().unwrap().clone()
+    }
+
+    pub fn raised(said: &str) {
+        HEARD.lock().unwrap().push(said.to_owned());
+    }
+}
 
 /// Take the batch's outstanding track re-stamp before this hop touches the
 /// tree (winui/order.rs). Its own borrow, taken and dropped before the
@@ -26308,16 +26617,61 @@ impl crate::harness::Stage for WinUiStage {
         "none".to_owned()
     }
     fn toast(&self) -> Option<(String, String)> {
-        crate::depth_stub("toast")
+        Self::on_ui_bare(|| {
+            let Some(bar) = info_bar_on_screen()? else { return Ok(None) };
+            let element: UIElement = bar.cast()?;
+            let text = match named_descendant(&element, "Message")? {
+                Some(part) => part.cast::<TextBlock>()?.Text()?.to_string(),
+                None => "<the InfoBar template published no Message part>".to_owned(),
+            };
+            let action = match bar.ActionButton() {
+                Ok(button) if button.cast::<FrameworkElement>()?.IsLoaded()? => {
+                    use bindings::Microsoft::UI::Xaml::Automation::Peers::FrameworkElementAutomationPeer;
+                    FrameworkElementAutomationPeer::CreatePeerForElement(&button.cast::<UIElement>()?)?
+                        .GetName()?
+                        .to_string()
+                }
+                _ => String::new(),
+            };
+            Ok(Some((text, action)))
+        })
+        .unwrap_or_else(|e| Some((format!("<the InfoBar did not answer: {e}>"), String::new())))
     }
-    fn toast_announced(&self, _: &str, _: &str) -> Result<(), Vec<String>> {
-        crate::depth_stub("toast")
+    fn toast_announced(&self, text: &str, action: &str) -> Result<(), Vec<String>> {
+        let said = info_bar_ear::said(text, action);
+        let heard = info_bar_ear::heard();
+        if heard.iter().any(|h| *h == said) { Ok(()) } else { Err(heard) }
     }
     fn toast_action(&self) -> bool {
-        crate::depth_stub("toast")
+        Self::on_ui_bare(|| {
+            use bindings::Microsoft::UI::Xaml::Automation::{
+                Peers::FrameworkElementAutomationPeer, Provider::IInvokeProvider,
+            };
+            let Some(bar) = info_bar_on_screen()? else { return Ok(false) };
+            let Ok(button) = bar.ActionButton() else { return Ok(false) };
+            if !button.cast::<FrameworkElement>()?.IsLoaded()? {
+                return Ok(false);
+            }
+            FrameworkElementAutomationPeer::CreatePeerForElement(&button.cast::<UIElement>()?)?
+                .cast::<IInvokeProvider>()?
+                .Invoke()?;
+            Ok(true)
+        })
+        .unwrap_or(false)
     }
     fn toast_close(&self) -> bool {
-        crate::depth_stub("toast")
+        Self::on_ui_bare(|| {
+            use bindings::Microsoft::UI::Xaml::Automation::{
+                Peers::ButtonAutomationPeer, Provider::IInvokeProvider,
+            };
+            let Some(bar) = info_bar_on_screen()? else { return Ok(false) };
+            let Some(close) = find_template_button(&bar.cast::<UIElement>()?, "CloseButton")? else {
+                return Ok(false);
+            };
+            ButtonAutomationPeer::CreateInstanceWithOwner(&close)?.cast::<IInvokeProvider>()?.Invoke()?;
+            Ok(true)
+        })
+        .unwrap_or(false)
     }
     fn dismiss_sheet(&self) {
         // The close button's own route (the ContentDialog Hide precedent):

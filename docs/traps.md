@@ -4,6 +4,36 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## The unannounced AdwToast: GTK announces only from an accessible a client has walked to (measured 2026-10-09)
+
+libadwaita 1.9.2 announces every toast itself, on the AdwToastOverlay
+(AT-SPI `object:announcement`, politeness 1): "A toast appeared: Saved",
+"A toast appeared: First, has a button: Open". A probe app heard it; kaya's
+toast guest, with a listener registered before the first toast, heard
+NOTHING, and neither did a second listener in another process. GTK emits
+an AT-SPI event only from a realized AT context, and a context is realized
+when a client reaches it on the bus; the probe's listener had queried each
+`children-changed` source and so realized the overlay. A listener that
+walked the desktop's tree once, at 3 s, heard every later toast. A screen
+reader walks the tree, so users hear it; a harness listener must walk too.
+gtk.rs's `toast_ear` registers, walks this process's tree until the window
+is in it, and only then starts the script. Also measured: atspi 0.30's
+typed `event_stream` delivered nothing in-process, while a raw zbus
+`MessageStream` on the same connection parses the `(siiva{sv})` body.
+tools/lib/toast_routes.py holds the walk-before-start order, one watched cut.
+
+## A toast queue that drains passes toast.steps (measured 2026-10-09)
+
+libadwaita pushes the shown toast into its queue when a HIGH one is added
+and shows it again when the new one goes. With the GTK arm's dismiss cut,
+the toast leg stayed green: the `expect_no_toast` after Second's action
+waited 5.3 s while First came back and timed out, inside the harness's
+15 s POLL_DEADLINE. So the scene's T7 wall (docs/toast-plan.md T13) sees a
+queue only where the queue never drains; on GTK and Compose a forgotten
+replace shows as a 5 s stall, never a red. toast_routes.py holds the GTK
+replace (the shown toast dismissed before the add, priority HIGH) and the
+WinUI one, each cut watched.
+
 ## The Compose segment order: Material's selected segment comes last in the semantics tree (measured 2026-10-08)
 
 material3 1.3.1's `SegmentedButton` raises the selected segment's z-index,
@@ -4302,6 +4332,15 @@ THE GUARD IS THE ABSENT CARGO FEATURE: `crates/kaya/Cargo.toml` does not
 enable `Win32_UI_Accessibility`, so reaching for `IUIAutomation` fails
 `cargo build` with the reason written beside it, rather than dying as an
 unexplained JVM crash on one lane months later.
+
+MEASURED AGAIN 2026-10-09, the unannounced toast on Windows: a listener in
+ANOTHER process (PowerShell, .NET 4.8's `AutomationElement.NotificationEvent`)
+registered under the guest's window heard the toast in Rust, Python, JS,
+Go and C#, and killed the Java guest 3 s in with the same
+`Internal Error (0x8001010d)`, stack `KayaRing.run` -> uiautomationcore ->
+combase -> RPC. No UI Automation client may touch a guest, wherever it
+runs, so the WinUI toast's `expect_toast_announced` reads the sentence
+`RaiseNotificationEvent` accepted (docs/toast-plan.md §7).
 
 ## A rebooted Windows VM refuses every shortcut-injection leg
 

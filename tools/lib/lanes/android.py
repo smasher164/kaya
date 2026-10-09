@@ -125,6 +125,8 @@ LEGS = {
         "reveal-compose",
         # The segmented control (docs/segmented-plan.md §6).
         "segmented-compose",
+        # The toast (docs/toast-plan.md §6).
+        "toast-compose",
         # The content type (docs/autofill-plan.md §5).
         "autofill-compose",
         "submit-compose",
@@ -195,7 +197,7 @@ LEGS = {
         "align-jvm", "layout-jvm", "stall-jvm",
         "confirm-jvm", "nav-jvm", "scroll-jvm",
         "progress-jvm", "select-jvm", "radio-jvm",
-        "grid-jvm", "textarea-jvm", "search-jvm", "secure-jvm", "reveal-jvm", "segmented-jvm", "autofill-jvm", "submit-jvm", "scrollto-jvm", "fullscreen-jvm", "sections-jvm",
+        "grid-jvm", "textarea-jvm", "search-jvm", "secure-jvm", "reveal-jvm", "segmented-jvm", "toast-jvm", "autofill-jvm", "submit-jvm", "scrollto-jvm", "fullscreen-jvm", "sections-jvm",
         "menus-jvm", "toolbar-jvm", "identity-jvm",
         "listdetail-jvm", "commands-jvm", "clipboard-jvm",
         "background-jvm", "undo-jvm", "filedialog-jvm",
@@ -220,7 +222,7 @@ LEGS = {
         "layout-go", "stall-go", "confirm-go",
         "nav-go", "scroll-go", "progress-go",
         "select-go", "radio-go", "grid-go",
-        "textarea-go", "search-go", "secure-go", "reveal-go", "segmented-go", "autofill-go", "submit-go", "scrollto-go", "fullscreen-go", "sections-go", "menus-go",
+        "textarea-go", "search-go", "secure-go", "reveal-go", "segmented-go", "toast-go", "autofill-go", "submit-go", "scrollto-go", "fullscreen-go", "sections-go", "menus-go",
         "toolbar-go", "identity-go", "listdetail-go",
         "commands-go", "clipboard-go", "background-go",
         "undo-go", "filedialog-go", "save-go",
@@ -413,10 +415,10 @@ MODS = {
 }
 
 # Machine-derived by tools/lib/android-leg-order.py from the shared
-# verbs: the scenes that leave the app for DocumentsUI (the
-# accessibility service), and the one that opens a composing region
-# (the helper IME).
-A11Y_SCENES = ["chat", "filedialog", "save", "editor", "media_picked"]
+# verbs: the scenes that leave the app for DocumentsUI or read what an
+# assistive service is handed (the accessibility service), and the one
+# that opens a composing region (the helper IME).
+A11Y_SCENES = ["chat", "filedialog", "save", "editor", "media_picked", "toast"]
 IME_SCENES = ["ranges", "richtext"]
 
 # A scene is wired on this lane IF AND ONLY IF a suite lists it, or it

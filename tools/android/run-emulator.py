@@ -1530,8 +1530,8 @@ def run_apk_on(serial, name, apk, component, script, extras,
     package = component.split("/", 1)[0]
     a11y = f"{package}/dev.kaya.KayaHarnessAccessibility"
     needs_a11y = script in lane.A11Y_SCENES
-    # Startup hygiene handles an interrupted prior run; only a picker
-    # scene can have armed this run's service.
+    # Startup hygiene handles an interrupted prior run; only an
+    # A11Y_SCENES leg can have armed this run's service.
     if needs_a11y and not a11y_disarm(serial, package, a11y, out=log):
         return False
     adb(serial, "shell", "am", "force-stop", package, stdout=log,

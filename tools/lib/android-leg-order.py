@@ -29,7 +29,7 @@ PROBE = ROOT / "tools" / "android" / "pickerprobe" / "run.sh"
 SCENES = ROOT / "tools" / "scenes"
 PICKER_VERB = re.compile(
     r"^(?:file_dialog_goto|expect_file_dialog|file_choose|"
-    r"expect_save_dialog|file_dialog_name|file_save)\b",
+    r"expect_save_dialog|file_dialog_name|file_save|expect_toast_announced)\b",
     re.MULTILINE,
 )
 COMPOSING_VERB = re.compile(r"^compose\b", re.MULTILINE)
@@ -541,7 +541,7 @@ def main() -> int:
         extra = sorted(declared_scenes - picker_scenes)
         print(
             "android-leg-order: lanes/android.py's A11Y_SCENES disagrees "
-            f"with the shared picker verbs (missing={missing}, "
+            f"with the shared verbs that need the service (missing={missing}, "
             f"extra={extra}); a missing scene launches DocumentsUI "
             "without the service, while an extra one restores the "
             "all-leg setup cost",

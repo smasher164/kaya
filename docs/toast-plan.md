@@ -568,3 +568,45 @@ check-sugar-surface is red by design between the depth and the breadth.
   generated bindings; whether a Compose live-region change is observable to
   the runner; Compose's snackbar placement above kaya's bottom section bar;
   what each platform's timer does while the app is in the background.
+- MEASURED at the breadth (2026-10-09, Compose, the API 35 emulator,
+  material3 1.3.1): kaya's Compose root composes no Scaffold, so the
+  `SnackbarHost` sits at the bottom of the root's Box and is padded by the
+  section bar's measured height. With the duration passed explicitly an
+  action snackbar at `Short` closed after 4032 ms and `Long` after 10026 ms,
+  so Material's Indefinite default never applies. With an accessibility
+  service bound, each appearance sends TYPE_WINDOW_CONTENT_CHANGED (subtree)
+  on the host's polite live region, whose subtree reads "Deleted Milk, Undo":
+  the harness's service hears that, so `expect_toast_announced` runs on
+  Android with no carve-out.
+- MEASURED at the breadth (2026-10-09, GTK, the forky image: libadwaita
+  1.9.2, GTK 4.24): the AdwToastOverlay wraps each window's AdwToolbarView,
+  inside the tight host, so the toast sits over the content and its bars
+  and under an AdwDialog sheet. `dismissed` fires synchronously inside
+  `Toast::dismiss()`, and a press fires `button-clicked` before
+  `dismissed`, so both handlers defer to an idle. A replaced toast stays an
+  overlay child while it hides and the new one comes after it, so the reads
+  take the overlay's last AdwToastWidget. libadwaita announces the toast
+  itself, "A toast appeared: <text>, has a button: <label>", but only once a
+  client has walked to the overlay (docs/traps.md, the unannounced
+  AdwToast); `expect_toast_announced` hears that sentence. With the replace
+  cut the leg stayed green with a 5.3 s stall (docs/traps.md, a toast queue
+  that drains), so tools/lib/toast_routes.py is the wall for T7 here.
+- MEASURED at the breadth (2026-10-09, WinUI, the Windows App SDK's WinUI
+  2.2.1 on the lane's VM): InfoBar's own opening notification is
+  "Informational icon  <text>" (activity InfoBarOpenedActivityId,
+  CurrentThenMostRecent), naming no action, and "InfoBar dismissed" on every
+  close; the arm raises "<text>, <label>" on the bar's peer under that same
+  activity, MostRecent, so a reader keeps the later of the two. Which one
+  Narrator speaks was not run. A UI Automation listener in another process
+  heard the arm's sentence for Rust, Python, JS, Go and C# and killed the
+  Java guest (docs/traps.md, UI Automation and the Shell's file dialog), so
+  the WinUI `expect_toast_announced` reads the sentence
+  `RaiseNotificationEvent` accepted, not a listener: T13's carve-out, one
+  platform over, FOR THE MAINTAINER'S RULING against dropping the step on
+  that lane as iOS does.
+- Built at the breadth, departures: WinUI's InfoBar rides a Popup at the
+  window's bottom edge, not a Grid cell (T10), since the window's ground
+  holds the content alone and four sites clear or count its children; the
+  sheets ride the popup layer already. Its timer ticks every 100 ms, 5 s or
+  10 s with `UISettings.MessageDuration` as the floor, paused while the
+  pointer or the focus is inside.

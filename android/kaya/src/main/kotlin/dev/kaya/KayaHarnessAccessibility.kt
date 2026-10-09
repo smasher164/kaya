@@ -36,6 +36,35 @@ class KayaHarnessAccessibility : AccessibilityService() {
         ) {
             noteRemoved(event.windowId)
         }
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ||
+            event.eventType == AccessibilityEvent.TYPE_ANNOUNCEMENT
+        ) {
+            noteLiveRegion(event)
+        }
+    }
+
+    private fun noteLiveRegion(event: AccessibilityEvent) {
+        val source = event.source
+        if (source == null || source.liveRegion == android.view.View.ACCESSIBILITY_LIVE_REGION_NONE) return
+        val said = spoken(source)
+        android.util.Log.i(
+            "kaya",
+            "KAYA_A11Y_LIVE: type=${event.eventType} changes=${event.contentChangeTypes} " +
+                "pkg=${event.packageName} live=${source.liveRegion} said=$said",
+        )
+        if (said.isNotEmpty()) synchronized(heard) { heard.add(said) }
+    }
+
+    /** What a screen reader speaks for a live region: every text under it, in order. */
+    private fun spoken(node: AccessibilityNodeInfo): String {
+        val parts = ArrayList<String>()
+        fun walk(n: AccessibilityNodeInfo, depth: Int) {
+            if (depth > 32) return
+            (n.text ?: n.contentDescription)?.toString()?.takeIf { it.isNotEmpty() }?.let { parts.add(it) }
+            for (i in 0 until n.childCount) n.getChild(i)?.let { walk(it, depth + 1) }
+        }
+        walk(node, 0)
+        return parts.joinToString(", ")
     }
 
     override fun onInterrupt() = Unit
@@ -84,6 +113,13 @@ class KayaHarnessAccessibility : AccessibilityService() {
          */
         @Volatile
         internal var appResumed: Boolean = false
+
+        private val heard = ArrayList<String>()
+
+        /** Every live region's speech this service was handed, or null with no
+         * service bound (docs/toast-plan.md T13). */
+        fun heardLiveRegions(): List<String>? =
+            if (live == null) null else synchronized(heard) { heard.toList() }
 
         /**
          * Window ids the system announced REMOVED (capped; cleared at

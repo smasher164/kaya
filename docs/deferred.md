@@ -22,27 +22,41 @@ close), `kaya_toast_action` and `kaya_emit_toast_result`; the Rust binding
 capsule at the top, T8 as amended); the five harness verbs off the platform's
 own surface; tools/scenes/toast.steps green on the mac and on iOS for Rust.
 The tasks app's delete (T16) waits for the breadth. What breadth owes:
-  - **DEPTH STUB: toast on gtk** — `AdwToastOverlay` wrapping each
-    window's content once, dismiss the shown `AdwToast` then `add_toast`
-    at HIGH priority, timeout 5 s or 10 s, `button-clicked` to
-    `kaya_toast_action`'s scene body (`Scene::toast_action`) and `dismissed`
-    to `Scene::toast_closed`; drain `Scene::take_toast_out` beside
-    `take_asks` after `note_text_changed`; reads walk the toast widget's label
-    and button; the AT-SPI announcement (to measure on 1.9.2); a row in
+  - ~~**DEPTH STUB: toast on gtk**~~ — BUILT 2026-10-09: an
+    `AdwToastOverlay` around each window's AdwToolbarView (inside the tight
+    host); a new show dismisses the shown `AdwToast` and adds the new one at
+    HIGH, 5 s or 10 s; `button-clicked` and `dismissed` deferred to idles
+    calling `Scene::toast_action` and `Scene::toast_closed`; the asks drained
+    after a core undo, a native undo and a banked edit. The reads take the
+    overlay's last AdwToastWidget and press its own buttons; libadwaita's
+    own announcement is heard once the harness's listener has walked the tree
+    (docs/traps.md, the unannounced AdwToast). toast.steps green in nine
+    languages on x11 and wayland; a GTK row in tools/lib/toast_routes.py.
+  - ~~**DEPTH STUB: toast on winui**~~ — BUILT 2026-10-09: one InfoBar per
+    window in a Popup at the bottom edge (a departure from T10's Grid cell,
+    docs/toast-plan.md §7), closed and re-opened on replace, a
+    `DispatcherQueueTimer` paused under the pointer or the focus with
+    `UISettings.MessageDuration` as the floor, the action's Click, the X's
+    Closed and the timer to the scene's two bodies; InfoBar, its close
+    reason, its peer and the notification enums in tools/winui-bindgen's
+    filter. The reads are the bar's template parts and the button's peer;
+    the arm raises "<text>, <label>" itself, and `expect_toast_announced`
+    reads what `RaiseNotificationEvent` accepted, since a UI Automation
+    listener kills the Java guest (OPEN for the maintainer: that, or the
+    step dropped on the lane as iOS does). toast.steps green in six
+    languages; a WinUI row in tools/lib/toast_routes.py.
+  - ~~**DEPTH STUB: toast on compose**~~ — BUILT 2026-10-09: the root has no
+    Scaffold, so `KayaToastHost` (a `SnackbarHost`) sits at the bottom of the
+    root's Box, above the section bar by its measured height; a new show
+    dismisses the current snackbar and the per-toast effect is cancelled, the
+    duration always passed (MEASURED: an action toast at `Short` closed after
+    4032 ms, `Long` 10026 ms), the result to `KayaPresent.toastAction` or
+    `emitToastClosed` (new JNI doors), `SwipeToDismissBox`; the reads are the
+    merged semantics tree, `toast_close` the host's `dismiss` action; the
+    announcement is the host's polite live region, heard by the harness's
+    accessibility service (`toast` joined A11Y_SCENES) as "text, label".
+    toast-compose, toast-jvm and toast-go green; a Compose row in
     tools/lib/toast_routes.py.
-  - **DEPTH STUB: toast on winui** — one InfoBar per window in an overlay
-    cell at the bottom (T10), close and re-open on replace, a
-    `DispatcherQueueTimer` paused under the pointer or focus, ActionButton
-    Click and Closed to the scene's two bodies; InfoBar, its peer and
-    event-args types into tools/winui-bindgen's filter; reads through UIA,
-    the announcement through the UIA notification event; drain
-    `take_toast_out`; a row in tools/lib/toast_routes.py.
-  - **DEPTH STUB: toast on compose** — `SnackbarHost` in the root Scaffold,
-    the current snackbar dismissed before `showSnackbar(duration = Short or
-    Long)`, the result to `kaya_toast_action` or `kaya_emit_toast_result`,
-    `SwipeToDismissBox`; reads off the merged semantics node, `toast_close`
-    through the `dismiss` action; the live region's observability (to
-    measure); a row in tools/lib/toast_routes.py.
   - ~~**`show_toast` in the other eight bindings and the C floor**~~ — LANDED
     2026-10-08: each spelled as its alert (T15) — Python's keywords with
     `on_result`, Go's builder with `.OnResult`, C#'s keywords and

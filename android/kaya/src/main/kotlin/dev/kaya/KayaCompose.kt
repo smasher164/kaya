@@ -144,6 +144,14 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarData
+import androidx.compose.material3.SnackbarDefaults
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.SnackbarVisuals
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.rememberSwipeToDismissBoxState
@@ -1332,6 +1340,8 @@ object KayaSceneModel {
     var alertMessage: String = ""
     var alertActions: List<String> = emptyList()
     var alertCancel: String = ""
+    var toast by mutableStateOf<KayaToast?>(null)
+    var sectionBarHeight by mutableStateOf(0.dp)
     // The primary surface's navigation stack, bottom to top
     // (DESIGN.md, Navigation). Android has one surface, so this is THE
     // stack.
@@ -2245,9 +2255,10 @@ object KayaCompose {
     private const val APPLY_REQUEST_PERMISSION = 68
     private const val APPLY_WATCH_CAPTURE_DEVICES = 69
     private const val APPLY_SET_VIDEO_CAPTURE = 70
-    // The toast (docs/toast-plan.md §4); the arm is a depth slice.
+    // The toast (docs/toast-plan.md §4).
     private const val APPLY_PRESENT_TOAST = 71
     private const val APPLY_WITHDRAW_TOAST = 72
+    private const val TOAST_DURATION_LONG = 1
     private const val FRAME_ACCURACY_EXACT = 1
     /** The rich-text pair (docs/rich-text-plan.md §4); the arm is a depth slice. */
     private const val APPLY_SET_RICH_TEXT = 43
@@ -2403,6 +2414,9 @@ object KayaCompose {
      * `Text` in the icon slot, ahead of the row's own label slot, and an
      * untagged one would answer every "what is this row titled" read. */
     const val SECTION_BADGE_TAG = "kaya:section-badge"
+    const val TOAST_TAG = "kaya:toast"
+    const val TOAST_TEXT_TAG = "kaya:toast-text"
+    const val TOAST_ACTION_TAG = "kaya:toast-action"
     const val KIND_COLUMN = 1
     const val KIND_BUTTON = 2
     const val KIND_LABEL = 3
@@ -3946,7 +3960,25 @@ object KayaCompose {
                 APPLY_RELEASE_CAPTURE -> kayaCaptureRelease(b.long)
                 APPLY_REQUEST_PERMISSION -> kayaCaptureRequestPermission(b.int)
                 APPLY_WATCH_CAPTURE_DEVICES -> kayaCaptureWatchDevices(b.int != 0)
-                APPLY_PRESENT_TOAST, APPLY_WITHDRAW_TOAST -> depthStub("toast")
+                APPLY_PRESENT_TOAST -> {
+                    // THE ONE DOOR (docs/toast-plan.md T7): the slot is
+                    // REPLACED, never queued. Window 0, the one surface.
+                    b.long
+                    val toastId = b.long
+                    val toastDuration = b.int
+                    b.int
+                    val toastText = readString(b)
+                    val toastLabel = readString(b)
+                    kayaToastTokens += 1
+                    KayaSceneModel.toast = KayaToast(
+                        toastId, toastText, toastLabel,
+                        toastDuration == TOAST_DURATION_LONG, kayaToastTokens)
+                }
+                APPLY_WITHDRAW_TOAST -> {
+                    b.long
+                    val toastId = b.long
+                    if (KayaSceneModel.toast?.id == toastId) KayaSceneModel.toast = null
+                }
                 APPLY_SET_VIDEO_CAPTURE -> {
                     // { u64 widget; u64 capture }, 0 for none.
                     val vid = b.long
@@ -8321,6 +8353,55 @@ object KayaCompose {
         else -> null
     }
 
+    /** The snackbars on screen, carrying the toast's tag, read in the merged tree as an
+     * assistive service reads them. MAIN THREAD ONLY. */
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    private fun kayaToastBars(activity: ComponentActivity): Pair<SemanticsNode, List<SemanticsNode>>? {
+        val view = kayaComposeRoot(activity.window.decorView) ?: return null
+        val root = view as RootForTest
+        root.measureAndLayoutForTest()
+        val bars = ArrayList<SemanticsNode>()
+        fun walk(node: SemanticsNode, depth: Int) {
+            if (depth > 64) return
+            if (node.config.getOrNull(SemanticsProperties.TestTag) == TOAST_TAG) {
+                bars.add(node)
+                return
+            }
+            for (child in node.children) walk(child, depth + 1)
+        }
+        walk(root.semanticsOwner.rootSemanticsNode, 0)
+        return Pair(root.semanticsOwner.rootSemanticsNode, bars)
+    }
+
+    private fun kayaTagText(bar: SemanticsNode, tag: String): String? =
+        kayaSemanticsWith(bar) { it.config.getOrNull(SemanticsProperties.TestTag) == tag }
+            ?.config?.getOrNull(SemanticsProperties.Text)?.joinToString("")
+
+    private fun kayaToastRead(activity: ComponentActivity): List<Pair<String, String>> =
+        kayaToastBars(activity)?.second.orEmpty().map { bar ->
+            Pair(kayaTagText(bar, TOAST_TEXT_TAG) ?: "", kayaTagText(bar, TOAST_ACTION_TAG) ?: "")
+        }
+
+    /** The action's own click, or the host's `dismiss` accessibility action over
+     * the snackbar: the two doors the platform publishes. MAIN THREAD ONLY. */
+    private fun kayaToastPress(activity: ComponentActivity, action: Boolean): Boolean {
+        val (tree, bars) = kayaToastBars(activity) ?: return false
+        val bar = bars.singleOrNull() ?: return false
+        if (action) {
+            val button = kayaSemanticsWith(bar) {
+                it.config.getOrNull(SemanticsProperties.TestTag) == TOAST_ACTION_TAG
+            } ?: return false
+            val click = button.config.getOrNull(SemanticsActions.OnClick)?.action ?: return false
+            return click()
+        }
+        val host = kayaSemanticsWith(tree) { node ->
+            node.config.contains(SemanticsActions.Dismiss) &&
+                kayaSemanticsWith(node) { it.id == bar.id } != null
+        } ?: return false
+        val dismiss = host.config.getOrNull(SemanticsActions.Dismiss)?.action ?: return false
+        return dismiss()
+    }
+
     /** The node in [tree] carrying [id], the layout the choice arm tagged. */
     private fun kayaTaggedNode(tree: SemanticsNode, id: Long): SemanticsNode? =
         kayaSemanticsWith(tree) { it.config.getOrNull(KayaNodeId) == id }
@@ -11053,11 +11134,55 @@ object KayaCompose {
                             failures.add("sheet detent $got, wanted $want")
                         }
                     }
-                    "expect_toast", "expect_no_toast", "expect_toast_announced" -> {
-                        depthStub("toast")
+                    "expect_toast", "expect_no_toast" -> {
+                        // Off the semantics tree, never KayaSceneModel.toast
+                        // (docs/toast-plan.md T13).
+                        val want = if (parts[0] == "expect_toast") quoted(parts.drop(1)) else ""
+                        val shown = onUi(activity) { kayaToastRead(activity) }
+                        if (shown.size > 1) {
+                            failures.add("${shown.size} toasts on screen")
+                        } else if (parts[0] == "expect_no_toast") {
+                            val one = shown.firstOrNull()
+                            if (one != null) {
+                                failures.add("toast \"${one.first}|${one.second}\" shown, wanted none")
+                            } else {
+                                observed.add("no toast")
+                            }
+                        } else {
+                            val one = shown.firstOrNull()
+                            if (one == null) {
+                                failures.add("no toast shown, wanted \"$want\"")
+                            } else if ("${one.first}|${one.second}" == want) {
+                                observed.add("toast \"$want\"")
+                            } else {
+                                failures.add("toast \"${one.first}|${one.second}\", wanted \"$want\"")
+                            }
+                        }
+                    }
+                    "expect_toast_announced" -> {
+                        // What an assistive service is handed: the live region's
+                        // change event, heard by the harness's own service.
+                        val want = quoted(parts.drop(1))
+                        val said = want.replace("|", ", ").removeSuffix(", ")
+                        val heard = KayaHarnessAccessibility.heardLiveRegions()
+                        if (heard == null) {
+                            failures.add("toast \"$want\" not announced; heard [] (no accessibility service bound)")
+                        } else if (said in heard) {
+                            observed.add("toast announced \"$want\"")
+                        } else {
+                            val list = heard.joinToString(", ") { "\"$it\"" }
+                            failures.add("toast \"$want\" not announced; heard [$list]")
+                        }
                     }
                     "toast_action", "toast_close" -> {
-                        depthStub("toast")
+                        kayaAwaitQuiet()
+                        val answered = kayaBatches
+                        val pressed = onUi(activity) { kayaToastPress(activity, parts[0] == "toast_action") }
+                        if (!pressed) {
+                            failures.add("${parts[0]}: no toast button on screen to press")
+                        } else {
+                            kayaAwaitAnswer(answered)
+                        }
                     }
                     "dismiss_sheet" -> {
                         // The platform's own cancel path: the back key,
@@ -17855,6 +17980,7 @@ fun KayaRoot() {
                 Box(modifier = Modifier.weight(1f)) { KayaSurface() }
             }
         }
+        KayaToastHost(Modifier.align(Alignment.BottomCenter))
     }
 
     // The system back gesture, the user-sovereign POP: enabled only
@@ -18687,13 +18813,18 @@ fun KayaSectionsScaffold(active: KayaSection) {
     // hint must be able to disagree with the app's declaration. A
     // second arm, if this host ever grows one, stamps its own name.
     KayaSceneModel.sectionsRendered = "bar"
+    val density = LocalDensity.current
+    DisposableEffect(Unit) { onDispose { KayaSceneModel.sectionBarHeight = 0.dp } }
     Column(modifier = Modifier.fillMaxSize()) {
         Box(modifier = Modifier.weight(1f)) {
             val top = active.entries.lastOrNull()
             val pane = top?.root ?: active.root
             pane?.let { KayaRender(it, isRoot = true) }
         }
-        NavigationBar {
+        // The toast sits above the bar, as Scaffold places a snackbar (docs/toast-plan.md T8).
+        NavigationBar(modifier = Modifier.onGloballyPositioned {
+            KayaSceneModel.sectionBarHeight = with(density) { it.size.height.toDp() }
+        }) {
             KayaSceneModel.sections.forEach { section ->
                 NavigationBarItem(
                     // THE ROW'S OWN TAG, so the harness can address this
@@ -18935,6 +19066,77 @@ private fun KayaSheetView(sheet: KayaSheet, root: KayaNode) {
 fun kayaAnswerAlert(alert: Long, choice: Int) {
     KayaSceneModel.alertId = null
     KayaPresent.emitAlertResult(alert, choice)
+}
+
+// MARK: - The toast (docs/toast-plan.md §3's Compose row)
+
+data class KayaToast(
+    val id: Long,
+    val text: String,
+    val label: String,
+    val long: Boolean,
+    val token: Long,
+)
+
+internal var kayaToastTokens = 0L
+
+/** T6: the duration is always passed, so Material's Indefinite default for
+ * a snackbar with an action never applies. */
+private class KayaToastVisuals(toast: KayaToast) : SnackbarVisuals {
+    override val message = toast.text
+    override val actionLabel = toast.label.ifEmpty { null }
+    override val withDismissAction = false
+    override val duration = if (toast.long) SnackbarDuration.Long else SnackbarDuration.Short
+}
+
+@Composable
+internal fun KayaToastHost(modifier: Modifier) {
+    val host = remember { SnackbarHostState() }
+    val shown = KayaSceneModel.toast
+    LaunchedEffect(shown?.token) {
+        host.currentSnackbarData?.dismiss()
+        if (shown == null) return@LaunchedEffect
+        Log.i("kaya", "KAYA_TOAST: shown id=${shown.id} long=${shown.long} action=${shown.label.isNotEmpty()}")
+        val began = System.nanoTime()
+        val result = host.showSnackbar(KayaToastVisuals(shown))
+        Log.i("kaya", "KAYA_TOAST: ended id=${shown.id} $result after ${(System.nanoTime() - began) / 1_000_000}ms")
+        if (KayaSceneModel.toast?.token != shown.token) return@LaunchedEffect
+        KayaSceneModel.toast = null
+        if (result == SnackbarResult.ActionPerformed) {
+            KayaPresent.toastAction(shown.id)
+        } else {
+            KayaPresent.emitToastClosed(shown.id)
+        }
+    }
+    SnackbarHost(host, modifier.padding(bottom = KayaSceneModel.sectionBarHeight)) { data ->
+        KayaToastBar(data)
+    }
+}
+
+@Composable
+private fun KayaToastBar(data: SnackbarData) {
+    val state = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value != SwipeToDismissBoxValue.Settled) data.dismiss()
+            true
+        },
+    )
+    SwipeToDismissBox(state = state, backgroundContent = {}) {
+        Snackbar(
+            modifier = Modifier.padding(12.dp).testTag(KayaCompose.TOAST_TAG),
+            action = data.visuals.actionLabel?.let { label ->
+                {
+                    TextButton(
+                        onClick = { data.performAction() },
+                        modifier = Modifier.testTag(KayaCompose.TOAST_ACTION_TAG),
+                        colors = ButtonDefaults.textButtonColors(contentColor = SnackbarDefaults.actionColor),
+                    ) { Text(label) }
+                }
+            },
+        ) {
+            Text(data.visuals.message, modifier = Modifier.testTag(KayaCompose.TOAST_TEXT_TAG))
+        }
+    }
 }
 
 // MARK: - Local notifications (docs/tasks-s3-plan.md §3's Compose row)

@@ -436,6 +436,16 @@ fn main() {
         // (docs/traps.md, WinUI's SelectorBar).
         "Microsoft.UI.Xaml.Controls.ItemsView".to_string(),
         "Microsoft.UI.Xaml.BringIntoViewOptions".to_string(),
+        // The toast (docs/toast-plan.md T10): one InfoBar per window, its
+        // close reason telling the user's X from kaya's own close, and the
+        // two enums AutomationPeer.RaiseNotificationEvent takes.
+        "Microsoft.UI.Xaml.Controls.InfoBar".to_string(),
+        "Microsoft.UI.Xaml.Controls.InfoBarSeverity".to_string(),
+        "Microsoft.UI.Xaml.Controls.InfoBarCloseReason".to_string(),
+        "Microsoft.UI.Xaml.Controls.InfoBarClosedEventArgs".to_string(),
+        "Microsoft.UI.Xaml.Automation.Peers.InfoBarAutomationPeer".to_string(),
+        "Microsoft.UI.Xaml.Automation.Peers.AutomationNotificationKind".to_string(),
+        "Microsoft.UI.Xaml.Automation.Peers.AutomationNotificationProcessing".to_string(),
         // The sections switcher: NavigationView is the platform's own
         // idiom (left pane for auto/sidebar, Top for the bar hint) —
         // items are NavigationViewItems with string content, selection

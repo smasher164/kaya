@@ -77,8 +77,8 @@ ENTRIES = (
     # column read 464px and overflowed a 330px window, 16 linux legs red.
     # Each perturbation is the bare slot the first draft shipped.
     ("the window's content hosted tight",
-     "let hosted = tight::host(&view);",
-     "let hosted = view.clone();"),
+     "let hosted = tight::host(&toasts);",
+     "let hosted = toasts.clone();"),
     ("the sheet's content hosted tight",
      "record.dialog.set_child(Some(&tight::host(&view)));",
      "record.dialog.set_child(Some(&view));"),
