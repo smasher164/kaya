@@ -1,7 +1,9 @@
 # The expander: the design pass (2026-10-09)
 
 Status: RULED 2026-10-09 (the maintainer: "im cool with your rulings"), K1-K19 as
-recommended; nothing built yet. He picked the expander next on the 2026-10-09 shortlist. Its
+recommended; AMENDED 2026-10-09 (the maintainer: "i like both rulings"): a column
+of only expanders drawing as a grouped card (K11) is accepted, and the summary line is spoken by
+the screen reader on every platform, as part of the header's accessible description; nothing built yet. He picked the expander next on the 2026-10-09 shortlist. Its
 roadmap card (docs/roadmap/features.toml, `expander`) gives the shape as "prop
 on column (collapsible, titled)"; this pass is the evidence for how that shape
 is spelled, and K1 recommends a kind instead. The segmented control's and the
