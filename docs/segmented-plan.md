@@ -1,8 +1,8 @@
 # The segmented control: the design pass (2026-10-08)
 
-Status: DEPTH BUILT 2026-10-08 (the mac, Rust, segmented.steps; docs/deferred.md's
-segmented BUILD entry holds the breadth). Every ruling (G1-G13) is still
-RECOMMENDED and awaits the maintainer. The maintainer picked the control
+Status: BUILT 2026-10-08 on all five platforms and in all nine bindings and the C
+floor (3bd46182 depth, bfa9456c breadth; full matrix ALL PASS). Every ruling
+(G1-G13) RULED 2026-10-08. The maintainer picked the control
 next on 2026-10-08. Its roadmap card (docs/roadmap/features.toml,
 `segmented`) gives the shape as "presentation on radio group", and this pass
 is the evidence for how that shape is spelled. The search field's and the
@@ -91,7 +91,7 @@ Developers, Segmented button
   `bar` presentation. They are navigation between retained roots, not a
   value in the content.
 
-## §2 — The rulings (RECOMMENDED 2026-10-08, awaiting the maintainer)
+## §2 — The rulings (RULED 2026-10-08)
 
 ### G1 — A third choice kind, `segmented` (RULED 2026-10-08)
 
@@ -229,7 +229,7 @@ group do there: the options are the prototype's children and shared by
 every copy, the index is bound to a row field, and the stamped handler
 receives its row (DESIGN.md, A stamped handler receives its row).
 
-### G10 — The harness reads the platform's selection and drives the platform's segment (RECOMMEND, with the radio and select reads fixed in the same slice)
+### G10 — The harness reads the platform's selection and drives the platform's segment (RULED 2026-10-08, with the radio and select reads fixed in the same slice)
 
 `expect segmented#0 "<name>"` reads the selected segment's name off the
 platform's own control, never `node.value`; `choose` presses the segment
