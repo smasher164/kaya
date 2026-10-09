@@ -432,6 +432,14 @@ fn main() {
         "Microsoft.UI.Xaml.Automation.Peers.SelectorBarItemAutomationPeer".to_string(),
         "Microsoft.UI.Xaml.Automation.Peers.ItemContainerAutomationPeer".to_string(),
         "Microsoft.UI.Xaml.Automation.Provider.ISelectionItemProvider".to_string(),
+        // The expander (docs/expander-plan.md K14): the control, its two
+        // user-change events, and the peer's ExpandCollapse state the
+        // harness reads.
+        "Microsoft.UI.Xaml.Controls.Expander".to_string(),
+        "Microsoft.UI.Xaml.Controls.ExpanderExpandingEventArgs".to_string(),
+        "Microsoft.UI.Xaml.Controls.ExpanderCollapsedEventArgs".to_string(),
+        "Microsoft.UI.Xaml.Automation.Peers.ExpanderAutomationPeer".to_string(),
+        "Microsoft.UI.Xaml.Automation.ExpandCollapseState".to_string(),
         // An unrealized segment is realized by the bar's own ItemsView
         // (docs/traps.md, WinUI's SelectorBar).
         "Microsoft.UI.Xaml.Controls.ItemsView".to_string(),

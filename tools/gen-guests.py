@@ -130,6 +130,7 @@ def generate(tmp):
                        "guests/swift/autofill.swift",
                        "guests/swift/reveal.swift",
                        "guests/swift/segmented.swift",
+                       "guests/swift/expander.swift",
                        "guests/swift/toast.swift",
                        "guests/swift/submit.swift",
                        "guests/swift/scrollto.swift",

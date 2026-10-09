@@ -240,6 +240,10 @@ module KayaApp
     setContentType,
     setRevealed,
     setRevealable,
+    setSummary,
+    bindSummary,
+    setExpanded,
+    bindExpanded,
     setHref,
     setRole,
     setSymbol,
@@ -262,6 +266,8 @@ module KayaApp
     grid,
     labeled,
     labeledBound,
+    expander,
+    expanderBound,
     progress,
     progressIndeterminate,
     bindTextElement,
@@ -446,6 +452,8 @@ module KayaApp
     scrollOf,
     gridOf,
     labeledOf,
+    expanderOf,
+    TplExpandedSource,
     buttonBound,
     entryBound,
     textareaBound,
@@ -2937,6 +2945,23 @@ setRevealable :: Widget -> Build ()
 setRevealable (Widget w) = emitB (W.txSetRevealable w True)
 
 -- | The DESTINATION a 'Link' label opens (docs\/tasks-s2-plan.md T3): the
+-- | An expander's second header line (docs\/expander-plan.md K3); empty
+-- draws none.
+setSummary :: Widget -> Text -> Build ()
+setSummary (Widget w) v = emitB (W.txSetSummary w (T.unpack v))
+
+bindSummary :: Widget -> Signal Text -> Build ()
+bindSummary (Widget w) (Signal s) = emitB (W.txBindSummary w s)
+
+-- | Whether an expander's body shows (docs\/expander-plan.md K4); the write
+-- never echoes, and the user's own activation of the header reaches
+-- 'onToggle'.
+setExpanded :: Widget -> Bool -> Build ()
+setExpanded (Widget w) on = emitB (W.txSetExpanded w on)
+
+bindExpanded :: Widget -> Signal Bool -> Build ()
+bindExpanded (Widget w) (Signal s) = emitB (W.txBindExpanded w s)
+
 -- platform's own opener takes it and nothing is emitted.
 setHref :: Widget -> Text -> Build ()
 setHref (Widget w) v = emitB (W.txSetHref w (T.unpack v))
@@ -3029,6 +3054,12 @@ data Attr (c :: WClass) where
   Revealed :: Bool -> Attr 'LeafW
   -- | This secure field carries its own show\/hide toggle — 'setRevealable'.
   Revealable :: Attr 'LeafW
+  -- | An expander's second header line — 'setSummary' at construction.
+  Summary :: Text -> Attr 'BoxW
+  SummaryBound :: Signal Text -> Attr 'BoxW
+  -- | Whether an expander's body shows — 'setExpanded' at construction.
+  Expanded :: Bool -> Attr 'BoxW
+  ExpandedBound :: Signal Bool -> Attr 'BoxW
   -- | The DESTINATION this 'Link' label opens
   -- (docs\/tasks-s2-plan.md T3): the platform's own opener takes it, and
   -- nothing is emitted.
@@ -3079,8 +3110,9 @@ data Attr (c :: WClass) where
   MaxWidth :: Double -> Attr 'LeafW
   MaxHeight :: Double -> Attr 'LeafW
   -- | This button draws the platform's glyph in place of its title, which
-  -- stays its accessible name (docs\/composer-plan.md §2).
-  Symbol :: Symbol -> Attr 'LeafW
+  -- stays its accessible name (docs\/composer-plan.md §2); an expander
+  -- draws it before its header (docs\/expander-plan.md K2).
+  Symbol :: Symbol -> Attr c
   -- | What this widget takes from a paste — the closed kinds by name
   -- ('acceptText' and friends) plus any custom format ids.
   Accepts :: [Text] -> Attr c
@@ -3119,6 +3151,10 @@ applyAttr (PlaceholderBound sig) w = bindPlaceholder w sig
 applyAttr (ContentType c) w = setContentType w c
 applyAttr (Revealed on) w = setRevealed w on
 applyAttr Revealable w = setRevealable w
+applyAttr (Summary t) w = setSummary w t
+applyAttr (SummaryBound sig) w = bindSummary w sig
+applyAttr (Expanded on) w = setExpanded w on
+applyAttr (ExpandedBound sig) w = bindExpanded w sig
 applyAttr (Href u) w = setHref w u
 applyAttr (HrefBound sig) w = bindHref w sig
 applyAttr (MinDate d) (Widget n) =
@@ -3224,6 +3260,22 @@ labeledBound name children = labeledWith (labelBound name) children
 
 labeledWith :: Build Widget -> [Build Widget] -> Build Widget
 labeledWith name children = containerOf W.kindLabeled (name : children)
+
+-- | An EXPANDER (docs\/expander-plan.md): the first argument is the header
+-- the user activates, the children its body, laid out as a column and kept
+-- alive while collapsed. The user's toggle reaches 'onToggle'.
+expander :: Text -> [Attr 'BoxW] -> [Build Widget] -> Build Widget
+expander txt attrs children = do
+  w <- withAttrs attrs (containerOf W.kindExpander children)
+  setText w txt
+  return w
+
+-- | 'expander' with the header from a signal.
+expanderBound :: Signal Text -> [Attr 'BoxW] -> [Build Widget] -> Build Widget
+expanderBound sig attrs children = do
+  w <- withAttrs attrs (containerOf W.kindExpander children)
+  bindText w sig
+  return w
 
 -- | A spacer: PURE SUGAR for an empty grown column — it consumes the
 -- leftover main-axis space between its siblings. In EITHER zone.
@@ -4404,6 +4456,13 @@ data TplAttr where
   -- | Each stamped copy carries its own show\/hide toggle (the live
   -- 'Revealable'); its flips reach 'onToggle' with the copy's keys.
   TplRevealable :: TplAttr
+  -- | Each stamped expander's second header line (the live 'Summary'): a
+  -- constant, a signal, or the row's own field.
+  TplSummary :: Text -> TplAttr
+  TplSummaryBound :: Signal Text -> TplAttr
+  TplSummaryField :: KField Text -> TplAttr
+  -- | Each stamped button's or expander's glyph (the live 'Symbol').
+  TplSymbol :: Symbol -> TplAttr
   TplNumberFormat :: NumberFormat -> TplAttr
   -- | A stamped slider's granularity (docs\/slider-plan.md S1): constant
   -- across the copies, like the range.
@@ -4485,6 +4544,10 @@ applyTplAttr (TplRevealed on) (Node n) = emitT (W.txSetRevealed n on)
 applyTplAttr (TplRevealedBound (Signal s)) (Node n) = emitT (W.txBindRevealed n s)
 applyTplAttr (TplRevealedField (KField i)) (Node n) = emitT (W.txBindRevealedElement n 0 i)
 applyTplAttr TplRevealable (Node n) = emitT (W.txSetRevealable n True)
+applyTplAttr (TplSummary t) (Node n) = emitT (W.txSetSummary n (T.unpack t))
+applyTplAttr (TplSummaryBound (Signal s)) (Node n) = emitT (W.txBindSummary n s)
+applyTplAttr (TplSummaryField (KField i)) (Node n) = emitT (W.txBindSummaryElement n 0 i)
+applyTplAttr (TplSymbol sym) (Node n) = emitT (W.txSetSymbol n (symbolWire sym))
 applyTplAttr (TplNumberFormat format) n = setNodeNumberFormat n format
 applyTplAttr (TplStep step) (Node n) = emitT (W.txSetStep n step)
 applyTplAttr (TplMinGap gap) (Node n) = emitT (W.txSetMinGap n gap)
@@ -4715,6 +4778,28 @@ gridOf = gridWith
 -- with an optional trailing button after it.
 labeledOf :: TplStrSource s => s -> [Tpl Node] -> Tpl Node
 labeledOf src children = containerOf W.kindLabeled (label src : children)
+
+-- | What a stamped expander's expanded state binds to: the row's own Bool
+-- field, or a signal in a When outside any For. No constant instance: the
+-- root refuses an unbound stamped expander (docs\/expander-plan.md K10).
+class TplExpandedSource s where
+  bindExpandedSource :: Node -> s -> Tpl ()
+
+instance TplExpandedSource (Signal Bool) where
+  bindExpandedSource (Node n) (Signal s) = emitT (W.txBindExpanded n s)
+
+instance TplExpandedSource (KField Bool) where
+  bindExpandedSource (Node n) (KField i) = emitT (W.txBindExpandedElement n 0 i)
+
+-- | An EXPANDER per stamped copy (docs\/expander-plan.md K10): its header
+-- from any Str source, its expanded state the row's own Bool field, which
+-- the 'onToggle' handler writes back, since a re-stamped copy reads its row.
+expanderOf :: (TplStrSource s, TplExpandedSource e) => s -> e -> [Tpl Node] -> Tpl Node
+expanderOf src open children = do
+  n <- containerOf W.kindExpander children
+  bindTextSource n src
+  bindExpandedSource n open
+  return n
 
 -- | A canvas per stamped copy — a sparkline in a table cell, the case
 -- set_drawing grew its keys-first addressing for (docs/canvas-plan.md

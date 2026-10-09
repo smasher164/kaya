@@ -550,6 +550,70 @@ design between the depth and the breadth.
   body's views (and a TextField's editor) survive a collapse; where focus
   goes when the body holding it collapses; DisclosureGroup's look inside a
   `Form` with `.formStyle(.grouped)`.
+- MEASURED 2026-10-09 (the iOS 26.5 simulator): SwiftUI's DisclosureGroup
+  publishes NO expanded state on iOS. The one element over the header is
+  SwiftUI's AccessibilityNode with the text as its label, the button trait
+  only, `accessibilityExpandedStatus` unsupported, no value, hint or custom
+  action, and the same with kaya's own label element removed; SwiftUI has no
+  modifier that sets `UIAccessibility.ExpandedStatus`. But UIKit's own
+  property (iOS 18) set on that node sticks, read back across later reads
+  and toggles, while `accessibilityExpandedStatusBlock` is ignored once a
+  value is set. So the iOS arm sets the status itself from the header's
+  anchor, and VoiceOver speaks "expanded" or "collapsed" in the user's
+  language (tasksrtl, Arabic, green). SwiftUI builds the node only once an
+  assistive client is attached and builds a rebuilt row's node after the
+  anchor reaches its window, so the arm sets it again for two seconds after
+  every change and when VoiceOver, Switch Control or the harness's
+  automation starts. Below iOS 18 UIKit has no expanded status, and the
+  header publishes none. The summary is the header's value, as iOS Settings
+  speaks a row's detail text, never the hint, which Apple reserves for what
+  activating does; the app's hint keeps the hint.
+- MEASURED 2026-10-09 (the API 35 emulator, Compose 1.7): Tab from nothing
+  focused reaches the header and Space toggles it once; Enter toggles it once
+  the header holds focus. The Tab then Enter that twice pressed Show was the
+  platform's own initial focus: with the display out of touch mode (the
+  previous adb key left it so, and the mode is global), the window's first
+  focus went to the header at launch, 55 ms after the composition, on some
+  launches and not others, so the Tab moved on to Show; the header's own
+  focus log showed it focused before any key. The body leaves the semantics
+  tree after AnimatedVisibility's exit, and comes back recomposed from kaya's
+  model (the typed name is kept). With the body's entry focused, a collapse
+  moved focus to the header (its focus log, 0.4 s later). TalkBack's node
+  info for the header carries no content description of its own and two
+  non-focusable text children, "Details" and "One field", so TalkBack reads
+  the summary as part of the header; the click label was the summary
+  ("double-tap to One field") and is now the framework's own word,
+  `expand_button_content_description_collapsed` / `_expanded` ("Expand",
+  "Collapse", in the app's locale), or the app's hint when it sets one; the
+  state description stays Material's "Collapsed" / "Expanded". A column of
+  only expanders draws as the form's grouped container. A column taller than
+  its window gives its last children no height (Compose's Column hands each
+  the space left): with the free and the form's expanders open, the stamped
+  row's body measured 89x0 and its header 32 high, off the bottom of the
+  screen, so the scene folds both before it reads the list, and the body read
+  wants a height, not presence alone.
+- MEASURED 2026-10-09 (GTK 4.24, libadwaita 1.9.2, the lane image, a
+  PyGObject probe over the AT-SPI bus): the GtkExpander itself is a `push
+  button` with expandable/expanded and one action, `activate`; its computed
+  name is every label inside it, the body's too once open ("Details One
+  field Inside"), and its description is empty, so the arm names it with its
+  text and speaks the summary as its description. AdwExpanderRow's header is
+  an inner AdwActionRow published as a `list item` named by the title, with
+  expandable/expanded, NO bus action, and the subtitle NOT in its
+  description, so the arm sets the description there too; collapsed, its body
+  rows leave the bus. A column of only expanders draws as one boxed-list card
+  of expander rows, each open body in libadwaita's shaded nested list.
+- MEASURED 2026-10-09 (the WinUI 2.2.1 VM): the Expander's own peer is
+  control type Button with the ExpandCollapse pattern, NOT keyboard
+  focusable, its name the AutomationProperties name kaya sets; the template's
+  `ExpanderHeader` ToggleButton (AutomationId `ExpanderToggleButton`) is the
+  focusable element, in the content view with the Toggle pattern and an empty
+  name over a header that is not a string, so the arm copies the name and the
+  summary (as HelpText) onto it once the template exists. A column of only
+  expanders draws as separate Expander cards, each at its natural width; the
+  form's shared label track reaches the labelled rows in its expander's body.
+  Narrator's speech itself was not heard (no audio route on the VM); the
+  harness reads the HelpText off the header the template made.
 - To measure at the breadth: where iOS publishes the expanded state;
   GtkExpander's and AdwExpanderRow's keys and the AT-SPI names on the bus;
   AdwExpanderRow nested in another's list; which door WinUI's header click

@@ -786,6 +786,24 @@ export class Handle {
     return this;
   }
 
+  /** An expander's second header line (docs/expander-plan.md K3): a
+   * constant, a Signal, or the row's own field; empty draws none. Chains. */
+  summary(text: Bindable | string): this {
+    records().push(propSource("summary", this, text, wire.tx_set_summary, wire.tx_bind_summary, wire.tx_bind_summary_element));
+    return this;
+  }
+
+  /** Whether an expander's body shows (docs/expander-plan.md K4): a
+   * constant, a Signal, or the row's own field, which a stamped copy
+   * requires (K10). The write never echoes as a toggle. Chains. */
+  expanded(on: boolean | Signal<boolean> | FieldRef = true): this {
+    if (on instanceof Signal) records().push(wire.tx_bind_expanded(this.id, on.id));
+    else if (on instanceof FieldRef) records().push(wire.tx_bind_expanded_element(this.id, on._level(), on._index));
+    else if (typeof on === "boolean") records().push(wire.tx_set_expanded(this.id, on));
+    else throw new Error(`kaya: expanded takes a boolean, a Signal or one of the row's fields, got ${typeof on}`);
+    return this;
+  }
+
   /** Gives this secure field its own show/hide toggle; each flip reaches
    * the field's onToggle (docs/reveal-plan.md V1, V2). Chains. */
   revealable(): this {
@@ -4309,6 +4327,30 @@ export function labeled<T = void>(label: string | Bindable, optsOrBody?: Labeled
     else labelOf({ bind: label });
     return run !== undefined ? run(container) : (undefined as T);
   });
+}
+
+export type ExpanderOptions = Omit<ContainerOptions, "filled"> & {
+  summary?: Bindable | string;
+  expanded?: boolean | Signal<boolean> | FieldRef;
+  symbol?: SymbolValue | SymbolName;
+  onToggle?: Handler;
+};
+
+/** An EXPANDER (docs/expander-plan.md): `text` is the header the user
+ * activates, the body everything it declares, laid out as a column and
+ * kept alive while collapsed. The user's toggle reaches onToggle(on) —
+ * fn(row, on) for a stamped copy, whose `expanded` must be one of the
+ * row's Bool fields, written back by the handler (K10). */
+export function expander<T = void>(text: string | Bindable, optsOrBody?: ExpanderOptions | ((expander: Widget) => T), body?: (expander: Widget) => T): T {
+  const [opts, run] = optsAndOptionalBody<ExpanderOptions, Widget, T>(optsOrBody, body);
+  const handle = widget(wire.KIND_EXPANDER);
+  records().push(propSource("expander text", handle, text, wire.tx_set_text, wire.tx_bind_text, wire.tx_bind_text_element));
+  if (opts.summary !== undefined) handle.summary(opts.summary);
+  if (opts.expanded !== undefined) handle.expanded(opts.expanded);
+  if (opts.symbol !== undefined) handle.symbol(opts.symbol);
+  if (opts.onToggle !== undefined) app()._register(handle, wire.OCC_TOGGLED, opts.onToggle);
+  setLayout(handle, opts);
+  return new Container(handle).run(run);
 }
 
 /** A spacer: PURE SUGAR for an empty grown column. */

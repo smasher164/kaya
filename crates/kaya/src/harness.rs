@@ -5744,14 +5744,16 @@ fn run_with_log(
                 | TargetKind::Progress
                 | TargetKind::Select
                 | TargetKind::Radio
-                | TargetKind::Segmented => poll(|| {
+                | TargetKind::Segmented
+                | TargetKind::Expander => poll(|| {
                     let got = match t.kind {
                         TargetKind::Entry
                         | TargetKind::Textarea
                         | TargetKind::Search
                         | TargetKind::NumberField => stage.read_text(*t),
                         TargetKind::Image => stage.image_size(*t),
-                        TargetKind::Label => stage.read_label(*t),
+                        // An expander's header text (docs/expander-plan.md K15).
+                        TargetKind::Label | TargetKind::Expander => stage.read_label(*t),
                         TargetKind::Progress => stage.progress_state(*t),
                         TargetKind::Select | TargetKind::Radio | TargetKind::Segmented => {
                             stage.selected_label(*t)

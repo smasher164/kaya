@@ -136,6 +136,15 @@ struct ClipRow {
     }
 
     @discardableResult
+    func expander(
+        _ f: KayaField<String>, expanded: KayaField<Bool>,
+        onToggle: ((KayaAppTx, [KayaValue], Bool) -> Void)? = nil,
+        @KayaNodeChildren _ children: () -> Void
+    ) -> KayaNodeHandle {
+        t.expander(f, expanded: expanded, onToggle: onToggle, children)
+    }
+
+    @discardableResult
     func numberField(
         value f: KayaField<Double>, min: Double? = nil, max: Double? = nil,
         step: Double? = nil, format: KayaNumberFormat = .number,

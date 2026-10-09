@@ -194,6 +194,7 @@ const PREF_WEEK_START: &str = "week_start";
 const PREF_HIDE_BADGE: &str = "hide_badge";
 const PREF_KEEP_DONE: &str = "keep_done";
 const PREF_APPEARANCE: &str = "appearance";
+const PREF_ADVANCED: &str = "advanced";
 
 const APPEARANCE_WORDS: [&str; 3] = ["system", "light", "dark"];
 
@@ -242,6 +243,8 @@ struct Settings {
     keep_done: bool,
     appearance: f64,
     line: String,
+    advanced: bool,
+    summary: String,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -293,6 +296,7 @@ enum Msg {
     HideBadge(bool),
     Appearance(f64),
     KeepDone(bool),
+    Advanced(bool),
     Section(WindowId),
     OpenLogbook,
     LogbookPopped,
@@ -439,6 +443,7 @@ struct App {
     appearance: usize,
     hide_badge: bool,
     keep_done: bool,
+    advanced: bool,
     /// The app's own document and the last thing written to it: the loop
     /// saves after a handler's transaction has committed, and only when
     /// the snapshot moved (docs/tasks-s4-plan.md P7).
@@ -635,6 +640,12 @@ impl App {
                 badge = kaya::tr!(if self.hide_badge { "badge-hidden" } else { "badge-shown" }),
                 done = kaya::tr!(if self.keep_done { "done-stay" } else { "done-move" }),
             ),
+            advanced: self.advanced,
+            summary: kaya::tr!(
+                "advanced-summary",
+                badge = kaya::tr!(if self.hide_badge { "badge-hidden" } else { "badge-shown" }),
+                done = kaya::tr!(if self.keep_done { "done-stay" } else { "done-move" }),
+            ),
         }
     }
 
@@ -675,7 +686,9 @@ impl App {
                 .hide_badge(row.hide_badge)
                 .keep_done(row.keep_done)
                 .appearance(row.appearance)
-                .line(row.line);
+                .line(row.line)
+                .advanced(row.advanced)
+                .summary(row.summary);
         });
     }
 }
@@ -702,6 +715,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     let week_start = prefs.get_i64(PREF_WEEK_START, 0).clamp(0, 1) as usize;
     let hide_badge = prefs.get_bool(PREF_HIDE_BADGE, false);
     let keep_done = prefs.get_bool(PREF_KEEP_DONE, false);
+    let advanced = prefs.get_bool(PREF_ADVANCED, false);
     let appearance = appearance_index(&prefs.get_string(PREF_APPEARANCE, "system"));
     // AND THE DOCUMENT, before the seed: a database that already exists
     // is the user's own tasks, and the seed is the empty app's furniture.
@@ -890,6 +904,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         appearance,
         hide_badge,
         keep_done,
+        advanced,
         store,
         saved: store::Snapshot::default(),
     };
@@ -1315,6 +1330,11 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 kaya::prefs().set_i64(PREF_WEEK_START, app.week_start as i64);
                 app.write_settings(&ctx);
             }
+            Msg::Advanced(on) => {
+                app.advanced = on;
+                kaya::prefs().set_bool(PREF_ADVANCED, on);
+                app.write_settings(&ctx);
+            }
             Msg::HideBadge(on) => {
                 app.hide_badge = on;
                 kaya::prefs().set_bool(PREF_HIDE_BADGE, on);
@@ -1407,34 +1427,46 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                         .column(|tx| {
                             for mut row in screen.rows(tx) {
                                 row.column(|t| {
-                                    t.caption(kaya::tr!("week-starts-on").as_str());
-                                    let days = [kaya::tr!("monday"), kaya::tr!("sunday")];
-                                    let week = t.select(&[days[0].as_str(), days[1].as_str()], Settings::week_start());
-                                    t.a11y_id(week, "week");
-                                    msgs.on_value_node(week, |_, index| Msg::WeekStart(index));
-                                    t.caption(kaya::tr!("appearance").as_str());
-                                    let modes = [kaya::tr!("system"), kaya::tr!("light"), kaya::tr!("dark")];
-                                    let appearance = t.select(
-                                        &[modes[0].as_str(), modes[1].as_str(), modes[2].as_str()],
-                                        Settings::appearance(),
-                                    );
-                                    t.a11y_id(appearance, "appearance");
-                                    msgs.on_value_node(appearance, |_, index| Msg::Appearance(index));
-                                    t.row(|t| {
-                                        let hide = t.checkbox(Settings::hide_badge());
-                                        t.role(hide, kaya::Role::Switch);
-                                        t.a11y_label(hide, kaya::tr!("hide-badge").as_str());
-                                        t.a11y_id(hide, "hide_badge");
-                                        msgs.on_toggle_node(hide, |_, on| Msg::HideBadge(on));
-                                        t.label(kaya::tr!("hide-badge").as_str());
-                                    });
-                                    t.row(|t| {
-                                        let keep = t.checkbox(Settings::keep_done());
-                                        t.role(keep, kaya::Role::Switch);
-                                        t.a11y_label(keep, kaya::tr!("keep-done").as_str());
-                                        t.a11y_id(keep, "keep_done");
-                                        msgs.on_toggle_node(keep, |_, on| Msg::KeepDone(on));
-                                        t.label(kaya::tr!("keep-done").as_str());
+                                    // A FORM (docs/expander-plan.md K11, K19): the two
+                                    // everyday choices as labelled rows, the two others
+                                    // in a collapsed Advanced row kept in the row's field.
+                                    t.column(|t| {
+                                        t.labeled(kaya::tr!("week-starts-on").as_str(), |t| {
+                                            let days = [kaya::tr!("monday"), kaya::tr!("sunday")];
+                                            let week =
+                                                t.select(&[days[0].as_str(), days[1].as_str()], Settings::week_start());
+                                            t.a11y_id(week, "week");
+                                            msgs.on_value_node(week, |_, index| Msg::WeekStart(index));
+                                        });
+                                        t.labeled(kaya::tr!("appearance").as_str(), |t| {
+                                            let modes = [kaya::tr!("system"), kaya::tr!("light"), kaya::tr!("dark")];
+                                            let appearance = t.select(
+                                                &[modes[0].as_str(), modes[1].as_str(), modes[2].as_str()],
+                                                Settings::appearance(),
+                                            );
+                                            t.a11y_id(appearance, "appearance");
+                                            msgs.on_value_node(appearance, |_, index| Msg::Appearance(index));
+                                        });
+                                        let (advanced, ()) =
+                                            t.expander(kaya::tr!("advanced").as_str(), Settings::advanced(), |t| {
+                                                t.labeled(kaya::tr!("hide-badge").as_str(), |t| {
+                                                    let hide = t.checkbox(Settings::hide_badge());
+                                                    t.role(hide, kaya::Role::Switch);
+                                                    t.a11y_label(hide, kaya::tr!("hide-badge").as_str());
+                                                    t.a11y_id(hide, "hide_badge");
+                                                    msgs.on_toggle_node(hide, |_, on| Msg::HideBadge(on));
+                                                });
+                                                t.labeled(kaya::tr!("keep-done").as_str(), |t| {
+                                                    let keep = t.checkbox(Settings::keep_done());
+                                                    t.role(keep, kaya::Role::Switch);
+                                                    t.a11y_label(keep, kaya::tr!("keep-done").as_str());
+                                                    t.a11y_id(keep, "keep_done");
+                                                    msgs.on_toggle_node(keep, |_, on| Msg::KeepDone(on));
+                                                });
+                                            });
+                                        t.summary(advanced, Settings::summary());
+                                        t.a11y_id(advanced, "advanced");
+                                        msgs.on_toggle_node(advanced, |_, on| Msg::Advanced(on));
                                     });
                                     let line = t.caption(Settings::line());
                                     t.a11y_id(line, "settings");

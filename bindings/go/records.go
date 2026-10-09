@@ -892,6 +892,31 @@ func (c RecordCollection[K, T]) Checkbox[S interface {
 	return n
 }
 
+// Expander creates an expander per stamped copy whose header comes from
+// any addressable source and whose expanded state is a Bool field of the
+// row (docs/expander-plan.md K10), with its toggle handler (nil for none)
+// receiving the copy's key; the handler writes the state back.
+func (c RecordCollection[K, T]) Expander[S interface {
+	~string | Signal[string] | func(*T) *string | Field[string]
+}, E interface {
+	func(*T) *bool | Field[bool]
+}](t *Tpl, text S, expanded E, onToggle func(*Tx, K, bool), body func()) Node {
+	n := t.containerOf(KindExpander, body)
+	t.applyRecordText[T](n, text)
+	switch v := any(expanded).(type) {
+	case func(*T) *bool:
+		t.applyExpanded(n, FieldBy(v))
+	case Field[bool]:
+		t.applyExpanded(n, v)
+	}
+	if onToggle != nil {
+		n.OnToggle(func(tx *Tx, keys []any, on bool) {
+			onToggle(tx, keys[0].(K), on)
+		})
+	}
+	return n
+}
+
 // Entry creates an EMPTY text field with its change handler (nil for
 // none): Tpl.Entry's uncontrolled contract with the key already cast.
 func (c RecordCollection[K, T]) Entry(t *Tpl, onChange func(*Tx, K, string)) Node {

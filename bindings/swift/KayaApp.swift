@@ -4432,6 +4432,27 @@ public final class KayaAppTx {
         tx.setRevealed(w.id, on)
     }
 
+    /// An expander's second header line (docs/expander-plan.md K3); empty
+    /// draws none.
+    public func setSummary(_ w: KayaWidget, _ text: String) {
+        tx.setSummary(w.id, text)
+    }
+
+    public func setSummary(_ w: KayaWidget, _ s: KayaSignal) {
+        tx.bindSummary(w.id, s.id)
+    }
+
+    /// Whether an expander's body shows (docs/expander-plan.md K4); the
+    /// write never echoes, and the user's own activation of the header
+    /// reaches `onToggle`.
+    public func setExpanded(_ w: KayaWidget, _ on: Bool) {
+        tx.setExpanded(w.id, on)
+    }
+
+    public func setExpanded(_ w: KayaWidget, _ s: KayaSignal) {
+        tx.bindExpanded(w.id, s.id)
+    }
+
     /// Gives a secure field its own show/hide toggle; each flip reaches
     /// `onToggle` (docs/reveal-plan.md V1, V2).
     public func setRevealable(_ w: KayaWidget) {
@@ -5311,6 +5332,54 @@ public final class KayaAppTx {
             for id in ids { tx.addChild(parent.id, id) }
         }
         return try children(parent)
+    }
+
+    /// An EXPANDER (docs/expander-plan.md): the header the user activates,
+    /// the children its body, laid out as a column and kept alive while
+    /// collapsed. The user's toggle reaches `onToggle` with the new state.
+    @discardableResult
+    public func expander<R>(
+        _ text: String, summary: String? = nil, expanded: Bool? = nil,
+        symbol: KayaSymbol? = nil, onToggle: ((KayaAppTx, Bool) throws -> Void)? = nil,
+        grow: Double? = nil, spacing: Double? = nil, inset: Double? = nil,
+        align: KayaAlign? = nil,
+        _ children: (KayaWidget) throws -> R
+    ) rethrows -> R {
+        try expanderOf(
+            { self.setText($0, text) }, summary: summary, expanded: expanded, symbol: symbol,
+            onToggle: onToggle, grow: grow, spacing: spacing, inset: inset, align: align,
+            children)
+    }
+
+    @discardableResult
+    public func expander<R>(
+        _ text: KayaSignal, summary: String? = nil, expanded: Bool? = nil,
+        symbol: KayaSymbol? = nil, onToggle: ((KayaAppTx, Bool) throws -> Void)? = nil,
+        grow: Double? = nil, spacing: Double? = nil, inset: Double? = nil,
+        align: KayaAlign? = nil,
+        _ children: (KayaWidget) throws -> R
+    ) rethrows -> R {
+        try expanderOf(
+            { self.tx.bindText($0.id, text.id) }, summary: summary, expanded: expanded,
+            symbol: symbol, onToggle: onToggle, grow: grow, spacing: spacing, inset: inset,
+            align: align, children)
+    }
+
+    private func expanderOf<R>(
+        _ header: (KayaWidget) -> Void, summary: String?, expanded: Bool?,
+        symbol: KayaSymbol?, onToggle: ((KayaAppTx, Bool) throws -> Void)?,
+        grow: Double?, spacing: Double?, inset: Double?, align: KayaAlign?,
+        _ children: (KayaWidget) throws -> R
+    ) rethrows -> R {
+        try containerOf(
+            UInt32(KAYA_KIND_EXPANDER), { w in
+                header(w)
+                if let summary { setSummary(w, summary) }
+                if let expanded { setExpanded(w, expanded) }
+                if let symbol { setSymbol(w, symbol) }
+                if let onToggle { app.onToggle(w, onToggle) }
+                return try children(w)
+            }, grow: grow, spacing: spacing, inset: inset, align: align)
     }
 
     /// A spacer: PURE SUGAR for an empty grown column — it consumes
@@ -6520,6 +6589,25 @@ public final class KayaTpl {
         tx.tx.bindRevealedElement(n.id, level: level, field: f.index)
     }
 
+    /// Every stamped expander's second header line
+    /// (KayaAppTx.setSummary): a constant, a signal, or the row's own field.
+    public func setSummary(_ n: KayaNodeHandle, _ text: String) {
+        tx.tx.setSummary(n.id, text)
+    }
+
+    public func setSummary(_ n: KayaNodeHandle, _ s: KayaSignal) {
+        tx.tx.bindSummary(n.id, s.id)
+    }
+
+    public func setSummary(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<String>) {
+        tx.tx.bindSummaryElement(n.id, level: level, field: f.index)
+    }
+
+    /// Every stamped button's or expander's glyph (KayaAppTx.setSymbol).
+    public func setSymbol(_ n: KayaNodeHandle, _ symbol: KayaSymbol) {
+        tx.tx.setSymbol(n.id, symbol.rawValue)
+    }
+
     /// Every stamped copy carries its own show/hide toggle; each flip
     /// reaches `onToggle` with the copy's keys (KayaAppTx.setRevealable).
     public func setRevealable(_ n: KayaNodeHandle) {
@@ -7551,6 +7639,88 @@ public final class KayaTpl {
         let ids = tx.app.childFrames.removeLast().ids
         for id in ids { tx.tx.addChild(parent.id, id) }
         return parent
+    }
+
+    /// An EXPANDER per stamped copy (docs/expander-plan.md K10): its
+    /// expanded state is a Bool field of the row (or, in a When outside
+    /// any For, a signal), which `onToggle` writes back, since a re-stamped
+    /// copy reads its row. Toggles carry the copy's keys first.
+    @discardableResult
+    public func expander(
+        _ text: String, expanded: KayaField<Bool>,
+        onToggle: ((KayaAppTx, [KayaValue], Bool) throws -> Void)? = nil,
+        @KayaNodeChildren _ children: () -> Void
+    ) -> KayaNodeHandle {
+        expanderOf(
+            { self.setText($0, text) },
+            { self.tx.tx.bindExpandedElement($0.id, field: expanded.index) }, onToggle, children)
+    }
+
+    @discardableResult
+    public func expander(
+        _ text: KayaSignal, expanded: KayaField<Bool>,
+        onToggle: ((KayaAppTx, [KayaValue], Bool) throws -> Void)? = nil,
+        @KayaNodeChildren _ children: () -> Void
+    ) -> KayaNodeHandle {
+        expanderOf(
+            { self.tx.tx.bindText($0.id, text.id) },
+            { self.tx.tx.bindExpandedElement($0.id, field: expanded.index) }, onToggle, children)
+    }
+
+    @discardableResult
+    public func expander(
+        _ text: KayaField<String>, expanded: KayaField<Bool>,
+        onToggle: ((KayaAppTx, [KayaValue], Bool) throws -> Void)? = nil,
+        @KayaNodeChildren _ children: () -> Void
+    ) -> KayaNodeHandle {
+        expanderOf(
+            { self.bindTextField($0, text) },
+            { self.tx.tx.bindExpandedElement($0.id, field: expanded.index) }, onToggle, children)
+    }
+
+    @discardableResult
+    public func expander(
+        _ text: String, expanded: KayaSignal,
+        onToggle: ((KayaAppTx, [KayaValue], Bool) throws -> Void)? = nil,
+        @KayaNodeChildren _ children: () -> Void
+    ) -> KayaNodeHandle {
+        expanderOf(
+            { self.setText($0, text) },
+            { self.tx.tx.bindExpanded($0.id, expanded.id) }, onToggle, children)
+    }
+
+    @discardableResult
+    public func expander(
+        _ text: KayaSignal, expanded: KayaSignal,
+        onToggle: ((KayaAppTx, [KayaValue], Bool) throws -> Void)? = nil,
+        @KayaNodeChildren _ children: () -> Void
+    ) -> KayaNodeHandle {
+        expanderOf(
+            { self.tx.tx.bindText($0.id, text.id) },
+            { self.tx.tx.bindExpanded($0.id, expanded.id) }, onToggle, children)
+    }
+
+    @discardableResult
+    public func expander(
+        _ text: KayaField<String>, expanded: KayaSignal,
+        onToggle: ((KayaAppTx, [KayaValue], Bool) throws -> Void)? = nil,
+        @KayaNodeChildren _ children: () -> Void
+    ) -> KayaNodeHandle {
+        expanderOf(
+            { self.bindTextField($0, text) },
+            { self.tx.tx.bindExpanded($0.id, expanded.id) }, onToggle, children)
+    }
+
+    private func expanderOf(
+        _ header: (KayaNodeHandle) -> Void, _ expanded: (KayaNodeHandle) -> Void,
+        _ onToggle: ((KayaAppTx, [KayaValue], Bool) throws -> Void)?,
+        _ children: () -> Void
+    ) -> KayaNodeHandle {
+        let n = nodeContainerOf(UInt32(KAYA_KIND_EXPANDER), children)
+        header(n)
+        expanded(n)
+        if let onToggle { tx.app.onToggle(n, onToggle) }
+        return n
     }
 
     /// A spacer: PURE SUGAR for an empty grown column, in every stamped

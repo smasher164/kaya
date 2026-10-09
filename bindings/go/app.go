@@ -1344,6 +1344,66 @@ func (w Widget) Revealable() Widget {
 	return w
 }
 
+// SetSummary sets an expander's second header line
+// (docs/expander-plan.md K3); empty draws none.
+func (tx *Tx) SetSummary(w Widget, text string) {
+	tx.emit(TxSetSummary(w.id, text))
+}
+
+// BindSummary binds an expander's second header line to a signal.
+func (tx *Tx) BindSummary(w Widget, s Signal[string]) {
+	tx.emit(TxBindSummary(w.id, s.id))
+}
+
+// SetExpanded says whether an expander's body shows
+// (docs/expander-plan.md K4). The write never echoes; the user's own
+// activation of the header reaches the expander's OnToggle.
+func (tx *Tx) SetExpanded(w Widget, on bool) {
+	tx.emit(TxSetExpanded(w.id, on))
+}
+
+// BindExpanded binds whether an expander's body shows to a signal.
+func (tx *Tx) BindExpanded(w Widget, s Signal[bool]) {
+	tx.emit(TxBindExpanded(w.id, s.id))
+}
+
+// Summary sets this expander's second header line at construction. Same
+// transaction discipline as Grow.
+func (w Widget) Summary(text string) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: Summary on a widget outside its build transaction — use Tx.SetSummary inside a live transaction")
+	}
+	w.tx.SetSummary(w, text)
+	return w
+}
+
+// BindSummary binds this expander's second header line at construction.
+func (w Widget) BindSummary(s Signal[string]) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: BindSummary on a widget outside its build transaction — use Tx.BindSummary inside a live transaction")
+	}
+	w.tx.BindSummary(w, s)
+	return w
+}
+
+// Expanded says whether this expander's body shows at construction.
+func (w Widget) Expanded(on bool) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: Expanded on a widget outside its build transaction — use Tx.SetExpanded inside a live transaction")
+	}
+	w.tx.SetExpanded(w, on)
+	return w
+}
+
+// BindExpanded binds whether this expander's body shows at construction.
+func (w Widget) BindExpanded(s Signal[bool]) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: BindExpanded on a widget outside its build transaction — use Tx.BindExpanded inside a live transaction")
+	}
+	w.tx.BindExpanded(w, s)
+	return w
+}
+
 // SetHref sets the DESTINATION a RoleLink label opens
 // (docs/tasks-s2-plan.md T3): the platform's own opener takes it and
 // nothing is emitted.
@@ -1990,6 +2050,25 @@ func (tx *Tx) labeledOf(name func(), body func()) Widget {
 	}
 	tx.app.parents = tx.app.parents[:len(tx.app.parents)-1]
 	return parent
+}
+
+// ExpanderText is an EXPANDER (docs/expander-plan.md) whose header is
+// constant: the user activates the header to show and hide the body,
+// laid out as a column and kept alive while collapsed. Chain Summary,
+// Symbol, Expanded and OnToggle. Expander is the signal-bound flavor.
+func (tx *Tx) ExpanderText(text string, body func()) Widget {
+	return tx.expanderOf(func(w Widget) { tx.emit(TxSetText(w.id, text)) }, body)
+}
+
+// Expander is ExpanderText with the header bound to a signal.
+func (tx *Tx) Expander(text Signal[string], body func()) Widget {
+	return tx.expanderOf(func(w Widget) { tx.emit(TxBindText(w.id, text.id)) }, body)
+}
+
+func (tx *Tx) expanderOf(header func(Widget), body func()) Widget {
+	w := tx.containerOf(KindExpander, body)
+	header(w)
+	return w
 }
 
 // Spacer is an empty grown column: it consumes the leftover main-axis
@@ -6067,6 +6146,72 @@ func (t *Tpl) labeledOf(name func(), body func()) Node {
 	return parent
 }
 
+// ExpanderText is an EXPANDER in the blueprint (docs/expander-plan.md
+// K10) whose header is constant. Its expanded state is a Bool field of
+// the row, which the toggle handler writes back, since a re-stamped copy
+// reads its row; ExpanderBound takes a varying header.
+func (t *Tpl) ExpanderText[E interface {
+	Signal[bool] | Field[bool]
+}](text string, expanded E, body func()) Node {
+	n := t.containerOf(KindExpander, body)
+	t.setText(n, text)
+	t.applyExpanded(n, expanded)
+	return n
+}
+
+// ExpanderBound is ExpanderText with the header from a VARYING source.
+func (t *Tpl) ExpanderBound[S interface {
+	Signal[string] | Field[string]
+}, E interface {
+	Signal[bool] | Field[bool]
+}](text S, expanded E, body func()) Node {
+	n := t.containerOf(KindExpander, body)
+	switch v := any(text).(type) {
+	case Signal[string]:
+		t.tx.emit(TxBindText(n.id, v.id))
+	case Field[string]:
+		t.BindTextField(n, 0, v)
+	}
+	t.applyExpanded(n, expanded)
+	return n
+}
+
+func (t *Tpl) applyExpanded[E interface {
+	Signal[bool] | Field[bool]
+}](n Node, src E) {
+	switch v := any(src).(type) {
+	case Signal[bool]:
+		t.tx.emit(TxBindExpanded(n.id, v.id))
+	case Field[bool]:
+		t.tx.emit(TxBindExpandedElement(n.id, 0, v.index))
+	}
+}
+
+// SetSummary sets every stamped copy's second header line (Tx.SetSummary);
+// BindSummary reads it from the row.
+func (t *Tpl) SetSummary(n Node, text string) {
+	t.tx.emit(TxSetSummary(n.id, text))
+}
+
+// BindSummary reads each stamped copy's second header line from a
+// varying source, the row's own field or a signal.
+func (t *Tpl) BindSummary[S interface {
+	Signal[string] | Field[string]
+}](n Node, src S) {
+	switch v := any(src).(type) {
+	case Signal[string]:
+		t.tx.emit(TxBindSummary(n.id, v.id))
+	case Field[string]:
+		t.tx.emit(TxBindSummaryElement(n.id, 0, v.index))
+	}
+}
+
+// SetSymbol gives every stamped button or expander the platform's glyph
+// for symbol (Tx.SetSymbol).
+func (t *Tpl) SetSymbol(n Node, symbol Symbol) {
+	t.tx.emit(TxSetSymbol(n.id, int64(symbol)))
+}
+
 // Spacer is an empty grown column in the blueprint, consuming the
 // leftover main-axis space between its siblings.
 func (t *Tpl) Spacer() Node {
@@ -6813,9 +6958,10 @@ func (n Node) OnTime(fn func(*Tx, []any, Time)) Node {
 	return n
 }
 
-// OnToggle registers a handler for a live checkbox's toggles, or a
-// revealable secure field's (docs/reveal-plan.md V2): the widget owns
-// its bit and reports each flip here.
+// OnToggle registers a handler for a live checkbox's toggles, a
+// revealable secure field's (docs/reveal-plan.md V2) or an expander's
+// (docs/expander-plan.md K4): the widget owns its bit and reports each
+// flip here.
 func (w Widget) OnToggle(fn func(*Tx, bool)) Widget {
 	w.tx.app.widgetToggles[w.id] = fn
 	return w

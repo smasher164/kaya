@@ -56,6 +56,8 @@ badge-hidden = hidden
 done-move = move to Logbook
 done-stay = stay in place
 settings-line = Week starts { $day }; badge { $badge }; completed { $done }
+advanced = Advanced
+advanced-summary = Badge { $badge }; completed { $done }
 # Undo group names
 undo-add = add { $title }
 undo-delete = delete { $title }

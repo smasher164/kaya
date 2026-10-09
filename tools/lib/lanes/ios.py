@@ -22,7 +22,7 @@ body's IOS_*_SCENES assignments.
 # naming a different one where two scenes share an app: a scene selects a
 # SCRIPT, never an app (`listdetail:split` is the only such pair).
 SWIFT_ENTRIES = [
-    "milestone2", "stall", "entry", "search", "secure", "reveal", "segmented", "autofill", "submit", "scrollto", "fullscreen", "gallery",
+    "milestone2", "stall", "entry", "search", "secure", "reveal", "segmented", "expander", "autofill", "submit", "scrollto", "fullscreen", "gallery",
     "todos", "reorder", "feed", "grow", "align", "layout",
     "confirm", "nav", "listdetail:split", "scroll", "progress",
     "select", "radio", "grid", "textarea", "sections",
@@ -52,7 +52,7 @@ SWIFT_ENTRIES = [
 # rust-only canvas scenes, plus `editor` off-list below — a Go app with
 # no swift guest to mirror (docs/editor-plan.md).
 GO_SCENES = [
-    "milestone2", "stall", "entry", "search", "secure", "reveal", "segmented", "autofill", "submit", "scrollto", "fullscreen", "gallery",
+    "milestone2", "stall", "entry", "search", "secure", "reveal", "segmented", "expander", "autofill", "submit", "scrollto", "fullscreen", "gallery",
     "todos", "reorder", "feed", "grow", "align", "layout",
     "confirm", "nav", "listdetail", "scroll", "progress",
     "select", "radio", "grid", "textarea", "sections",
@@ -113,6 +113,8 @@ RUST_SCENES = [
     "reveal",
     # The segmented control (docs/segmented-plan.md §6).
     "segmented",
+    # The expander (docs/expander-plan.md §5).
+    "expander",
     # The toast (docs/toast-plan.md §6).
     "toast",
     # The content type (docs/autofill-plan.md §5).
@@ -188,9 +190,7 @@ PAD_EXTRAS = {
 # drive chrome no phone has; split/panes drive resize_window, which this
 # host rejects by design (DESIGN.md, Windows).
 DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes"]
-# The expander's iOS arm is built; where iOS publishes the header's expanded
-# state is the breadth's to measure (docs/expander-plan.md §7).
-UNWIRED_SCENES = ["expander"]
+UNWIRED_SCENES = []
 
 # The fullscreen scene's app-only way back after the cut, the same steps as
 # tools/lib/lanes/android.py's FULLSCREEN_APP_TAIL: no user change arrives.

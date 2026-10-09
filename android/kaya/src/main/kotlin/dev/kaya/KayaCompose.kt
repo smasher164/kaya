@@ -307,6 +307,13 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.editableText
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.expand
+import androidx.compose.ui.semantics.collapse
+import androidx.compose.ui.draw.rotate
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.buildAnnotatedString
@@ -519,6 +526,10 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     /** docs/reveal-plan.md V1: the secure field shows its text, and carries its eye. */
     var revealed by mutableStateOf(false)
     var revealable by mutableStateOf(false)
+
+    /** docs/expander-plan.md K3, K4: the header's second line, and whether the body shows. */
+    var summary by mutableStateOf("")
+    var expanded by mutableStateOf(false)
 
     /** THE DESTINATION A `role link` LABEL OPENS (docs/tasks-s2-plan.md
      * T3), never spoken and never emitted. Composition state — the link
@@ -1467,6 +1478,7 @@ object KayaSceneModel {
     val videos = ArrayList<KayaNode>()
     val secureFields = ArrayList<KayaNode>()
     val segmenteds = ArrayList<KayaNode>()
+    val expanders = ArrayList<KayaNode>()
 
     // Every kind registry, so a destroyed node leaves all of them at once
     // (docs/traps.md 2026-09-14: a torn-down copy stayed addressable).
@@ -1474,7 +1486,7 @@ object KayaSceneModel {
         buttons, checkboxes, labels, entryWidgets, sliders, images, columns, rows, scrolls,
         progresses, selects, radios, grids, textareas, canvases, datePickers, timePickers,
         labeleds, searches, numberFields, colorPickers, ranges, videos, secureFields,
-        segmenteds,
+        segmenteds, expanders,
     )
 
     fun forget(id: Long) {
@@ -3403,7 +3415,10 @@ object KayaCompose {
                         KIND_VIDEO -> KayaSceneModel.videos.add(node)
                         KIND_SECURE_FIELD -> KayaSceneModel.secureFields.add(node)
                         KIND_SEGMENTED -> KayaSceneModel.segmenteds.add(node)
-                        KIND_EXPANDER -> depthStub("expander")
+                        KIND_EXPANDER -> {
+                            KayaSceneModel.expanders.add(node)
+                            kayaExpandersDeclared = true
+                        }
                         KIND_NUMBER_FIELD -> {
                             // docs/number-field-plan.md §2: unset bounds are
                             // ±2^53, the step 1, and the field shows its
@@ -3504,7 +3519,8 @@ object KayaCompose {
                         PROP_CONTENT_TYPE -> KayaSceneModel.nodes[id]!!.contentType = readI64(b)
                         PROP_REVEALED -> KayaSceneModel.nodes[id]!!.revealed = readBool(b)
                         PROP_REVEALABLE -> KayaSceneModel.nodes[id]!!.revealable = readBool(b)
-                        PROP_SUMMARY, PROP_EXPANDED -> depthStub("expander")
+                        PROP_SUMMARY -> KayaSceneModel.nodes[id]!!.summary = readString(b)
+                        PROP_EXPANDED -> KayaSceneModel.nodes[id]!!.expanded = readBool(b)
                         PROP_ASPECT -> KayaSceneModel.nodes[id]!!.aspect = readI64(b)
                         PROP_PLAYER -> error("kaya: a video view's player arrives as set_video_player; the core never forwards the player prop")
                         PROP_CAPTURE -> error("kaya: a video view's capture arrives as set_video_capture; the core never forwards the capture prop")
@@ -7426,7 +7442,7 @@ object KayaCompose {
             "video" -> KayaSceneModel.videos
             "secure_field" -> KayaSceneModel.secureFields
             "segmented" -> KayaSceneModel.segmenteds
-            "expander" -> depthStub("expander")
+            "expander" -> KayaSceneModel.expanders
             "textarea" -> KayaSceneModel.textareas
             "date_picker" -> KayaSceneModel.datePickers
             "time_picker" -> KayaSceneModel.timePickers
@@ -8351,6 +8367,114 @@ object KayaCompose {
         } ?: Pair(null, "the text could not be counted: the UI thread did not answer")
     }
 
+    /** The header as the platform publishes it: its name, whether it reads
+     * expanded, and its click (docs/expander-plan.md K8, K15). */
+    private class KayaExpanderHeader(
+        val name: String,
+        val open: Boolean,
+        val description: String,
+        val press: () -> Boolean,
+    )
+
+    /**
+     * The merged header node the arm tagged: expanded when it offers collapse
+     * and states Material's own expanded word, collapsed for the mirror. MAIN
+     * THREAD ONLY; a sentence saying what was read when it is neither.
+     */
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    private fun kayaExpanderHeaderRead(activity: ComponentActivity, node: KayaNode): Pair<KayaExpanderHeader?, String> {
+        val view = kayaComposeRoot(activity.window.decorView)
+            ?: return Pair(null, "no Compose root in the window")
+        val root = view as RootForTest
+        root.measureAndLayoutForTest()
+        val header = kayaTaggedNode(root.semanticsOwner.rootSemanticsNode, node.id)
+            ?: return Pair(null, "the expander's header is not in the semantics tree")
+        val cfg = header.config
+        val collapses = cfg.contains(SemanticsActions.Collapse)
+        val expands = cfg.contains(SemanticsActions.Expand)
+        if (collapses == expands) {
+            return Pair(null, "the header offers expand $expands and collapse $collapses, wanted exactly one")
+        }
+        val state = cfg.getOrNull(SemanticsProperties.StateDescription)
+        val word = activity.getString(
+            if (collapses) androidx.compose.material3.R.string.m3c_dropdown_menu_expanded
+            else androidx.compose.material3.R.string.m3c_dropdown_menu_collapsed)
+        if (state != word) {
+            return Pair(null, "the header offers ${if (collapses) "collapse" else "expand"} and states \"$state\", wanted \"$word\"")
+        }
+        val name = kayaAxName(header)
+        val lines = cfg.getOrNull(SemanticsProperties.Text)?.map { it.text }.orEmpty()
+        val clickLabel = cfg.getOrNull(SemanticsActions.OnClick)?.label
+        val hint = clickLabel?.takeIf { it != kayaExpanderActionWord(activity, collapses) }
+        val description = (lines.filter { it != name } + listOfNotNull(hint)).joinToString(". ")
+        val click = cfg.getOrNull(SemanticsActions.OnClick)?.action
+        return Pair(KayaExpanderHeader(name, collapses, description) { click?.invoke() == true }, "")
+    }
+
+    /** Whether the body's first child is in the unmerged tree with a height: AnimatedVisibility
+     * removes it once the collapse has run (docs/expander-plan.md §7). MAIN THREAD ONLY. */
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    private fun kayaExpanderBodyShown(activity: ComponentActivity, node: KayaNode): Boolean {
+        val view = kayaComposeRoot(activity.window.decorView) ?: return false
+        val found = ArrayList<SemanticsNode>()
+        fun walk(at: SemanticsNode, depth: Int) {
+            if (depth > 64) return
+            if (at.config.getOrNull(KayaExpanderBody) == node.id) found.add(at)
+            for (child in at.children) walk(child, depth + 1)
+        }
+        walk((view as RootForTest).semanticsOwner.unmergedRootSemanticsNode, 0)
+        return found.any { it.layoutInfo.isAttached && it.size.height > 0 }
+    }
+
+    /** `expect_expanded`'s two readings, (header, body), never the model. */
+    private fun kayaExpanderReadSpec(activity: ComponentActivity, spec: String): Pair<Pair<Boolean, Boolean>?, String> =
+        onUi(activity) {
+            val node = target(spec, "expander", KayaSceneModel.expanders)
+                ?: return@onUi Pair(null, "no such target $spec")
+            val (header, why) = kayaExpanderHeaderRead(activity, node)
+            if (header == null) Pair(null, why) else Pair(Pair(header.open, kayaExpanderBodyShown(activity, node)), "")
+        }
+
+    /** `expect expander…`: the header's name as a service reads it. */
+    private fun kayaExpanderHeaderText(activity: ComponentActivity, node: KayaNode): String {
+        val (header, why) = kayaExpanderHeaderRead(activity, node)
+        return header?.name ?: "<$why>"
+    }
+
+    /** Press the header when it does not already read [open]; "" when pressed. */
+    private fun kayaExpanderPress(activity: ComponentActivity, spec: String, open: Boolean): String =
+        onUi(activity) {
+            val node = target(spec, "expander", KayaSceneModel.expanders)
+                ?: return@onUi "no such target $spec"
+            val (header, why) = kayaExpanderHeaderRead(activity, node)
+            when {
+                header == null -> why
+                header.open == open ->
+                    "$spec already reads ${if (open) "on" else "off"}; the press would close what the step opens"
+                header.press() -> ""
+                else -> "the platform refused the press on the header"
+            }
+        }
+
+    private fun kayaSubtreeHolds(root: KayaNode, target: KayaNode): Boolean =
+        root.children.any { it === target || kayaSubtreeHolds(it, target) }
+
+    /** docs/expander-plan.md K5: the registry index of the outermost expander
+     * around the target whose header the platform reports collapsed. */
+    private fun kayaCollapsedAncestor(activity: ComponentActivity, spec: String): Int? = onUi(activity) {
+        val target = kayaWidgetTarget(spec) ?: return@onUi null
+        val around = KayaSceneModel.expanders.withIndex()
+            .filter { it.value !== target && kayaSubtreeHolds(it.value, target) }
+            .sortedWith { a, b -> if (kayaSubtreeHolds(a.value, b.value)) -1 else if (kayaSubtreeHolds(b.value, a.value)) 1 else 0 }
+        around.firstOrNull { (_, expander) ->
+            kayaExpanderHeaderRead(activity, expander).first?.open == false
+        }?.index
+    }
+
+    /** The K5 refusal, harness.rs's `out_of_reach` word for word. */
+    private fun kayaOutOfReach(index: Int): String =
+        "the target is out of reach inside collapsed expander#$index; expand it first (docs/expander-plan.md K5)"
+
     /** A choice kind's target, any of the three (docs/segmented-plan.md G10). */
     private fun kayaChoiceTarget(spec: String): KayaNode? = when {
         spec.startsWith("segmented") -> target(spec, "segmented", KayaSceneModel.segmenteds)
@@ -8946,6 +9070,14 @@ object KayaCompose {
                 val stepStart = System.nanoTime()
                 var stepDeadline = stepStart + 15_000_000_000L
                 var retryStep = true
+                if (kayaExpandersDeclared && parts.size > 1 && parts[0] != "expect_out_of_reach") {
+                    val hidden = kayaCollapsedAncestor(activity, parts[1])
+                    if (hidden != null) {
+                        failures.add(kayaOutOfReach(hidden))
+                        Log.i("kaya", "KAYA_HARNESS: step-failed ${failures.last()}")
+                        retryStep = false
+                    }
+                }
                 var attempt = 0
                 while (retryStep) {
                 retryStep = false
@@ -9049,6 +9181,9 @@ object KayaCompose {
                         // inside the field, pressed through its own click action.
                         val why = if (parts[1].startsWith("secure_field")) {
                             kayaRevealPress(activity, parts[1], parts[2] == "on")?.let { "${parts[1]}: $it" }
+                        } else if (parts[1].startsWith("expander")) {
+                            // The header's own click (docs/expander-plan.md K15).
+                            kayaExpanderPress(activity, parts[1], parts[2] == "on").ifEmpty { null }
                         } else {
                             val ok = onUi(activity) {
                                 target(parts[1], "checkbox", KayaSceneModel.checkboxes)?.also { node ->
@@ -9999,7 +10134,31 @@ object KayaCompose {
                             }
                         }
                     }
-                    "expect_expanded", "expect_out_of_reach" -> depthStub("expander")
+                    "expect_expanded" -> {
+                        if (parts.size != 3 || (parts[2] != "on" && parts[2] != "off")) {
+                            failures.add("expect_expanded wants an expander and on|off: $line")
+                        } else {
+                            val (read, why) = kayaExpanderReadSpec(activity, parts[1])
+                            when {
+                                read == null -> failures.add(why)
+                                read.first && !read.second ->
+                                    failures.add("the header reads expanded but the body is not shown")
+                                !read.first && read.second ->
+                                    failures.add("the header reads collapsed but the body is shown")
+                                read.first == (parts[2] == "on") ->
+                                    observed.add("expanded ${if (read.first) "on" else "off"}")
+                                else -> failures.add("expanded ${if (read.first) "on" else "off"}, wanted ${parts[2]}")
+                            }
+                        }
+                    }
+                    "expect_out_of_reach" -> {
+                        val hidden = if (parts.size > 1) kayaCollapsedAncestor(activity, parts[1]) else null
+                        if (hidden != null) {
+                            observed.add("out of reach inside expander#$hidden")
+                        } else {
+                            failures.add("the target is within reach, wanted out of reach inside a collapsed expander")
+                        }
+                    }
                     "expect_segments" -> {
                         val wantSegments = quoted(parts.drop(2))
                         val gotSegments = onUi(activity) {
@@ -10155,6 +10314,9 @@ object KayaCompose {
                                 else if (parts[1].startsWith("select") || parts[1].startsWith("radio") ||
                                     parts[1].startsWith("segmented"))
                                     kayaChoiceTarget(parts[1])?.let { kayaChoiceSelectedText(activity, it) }
+                                else if (parts[1].startsWith("expander"))
+                                    target(parts[1], "expander", KayaSceneModel.expanders)
+                                        ?.let { kayaExpanderHeaderText(activity, it) }
                                 else target(parts[1], "label", KayaSceneModel.labels)?.text
                             }
                             when {
@@ -12334,7 +12496,14 @@ object KayaCompose {
                                     "ax hint ${parts[1]}: no a11y_id to find it by"
                                 )
                             else -> {
-                                val got = onUi(activity) { kayaAxHint(activity, node.a11yId) }
+                                val got = onUi(activity) {
+                                    // An expander's description is its lines past the name (docs/expander-plan.md §7).
+                                    if (node.kind == KayaCompose.KIND_EXPANDER) {
+                                        kayaExpanderHeaderRead(activity, node).first?.description
+                                    } else {
+                                        kayaAxHint(activity, node.a11yId)
+                                    }
+                                }
                                 if (got == null) {
                                     failures.add(
                                         "ax hint ${parts[1]}: nothing carries " +
@@ -15468,11 +15637,13 @@ private fun kayaStampsRows(node: KayaNode): Boolean {
     }
 }
 
-/** A column of nothing but labelled rows, two or more, is a form
- * (docs/forms-plan.md §2). */
+/** A column of nothing but labelled rows and expanders, two or more, is a
+ * form (docs/forms-plan.md §2, docs/expander-plan.md K11). */
 private fun kayaIsForm(node: KayaNode): Boolean {
     val laid = node.laidOut
-    return laid.size >= 2 && laid.all { it.kind == KayaCompose.KIND_LABELED }
+    return laid.size >= 2 && laid.all {
+        it.kind == KayaCompose.KIND_LABELED || it.kind == KayaCompose.KIND_EXPANDER
+    }
 }
 
 /**
@@ -15616,7 +15787,7 @@ private fun KayaRenderCore(
     // on Android carries a hint, which is why the root scopes this prop
     // to activation kinds.
     val a11yHint =
-        if (node.a11yHint.isNotEmpty()) {
+        if (node.a11yHint.isNotEmpty() && node.kind != KayaCompose.KIND_EXPANDER) {
             Modifier.semantics { onClick(label = node.a11yHint, action = null) }
         } else {
             Modifier
@@ -16081,7 +16252,7 @@ private fun KayaRenderCore(
         KayaCompose.KIND_VIDEO -> KayaVideoView(node, a11y, boxFill)
         KayaCompose.KIND_SECURE_FIELD -> KayaSecureField(node, a11y, boxFill)
         KayaCompose.KIND_SEGMENTED -> KayaSegmented(node, a11y, boxFill)
-        KayaCompose.KIND_EXPANDER -> depthStub("expander")
+        KayaCompose.KIND_EXPANDER -> KayaExpander(node, a11y, boxFill)
         KayaCompose.KIND_LABELED -> {
             // THE LABELLED ROW (docs/forms-plan.md §3): Material's own
             // labelled row, the value trailing and a WIDE control folded
@@ -20081,6 +20252,94 @@ internal fun KayaSegmented(node: KayaNode, a11y: Modifier, boxFill: Modifier) {
                     }
                 },
             )
+        }
+    }
+}
+
+/** The body's first child, where `expect_expanded` finds the body shown.
+ * Never published to a service. */
+val KayaExpanderBody = SemanticsPropertyKey<Long>("KayaExpanderBody")
+
+/** Set at an expander's creation, so a scene with none pays no hop per step. */
+@Volatile
+internal var kayaExpandersDeclared = false
+
+/** The header's one door (docs/expander-plan.md K4): the user's flip, never an app write. */
+internal fun kayaExpanderFlip(node: KayaNode, open: Boolean): Boolean {
+    if (node.expanded == open) return false
+    node.expanded = open
+    KayaPresent.emitToggled(node.tag, open)
+    return true
+}
+
+/** The click's label is what the press does: the app's hint, else the
+ * framework's own word (docs/expander-plan.md K13, §7); null leaves
+ * TalkBack's own "activate". */
+@android.annotation.SuppressLint("DiscouragedApi")
+internal fun kayaExpanderActionWord(context: android.content.Context, open: Boolean): String? {
+    val id = context.resources.getIdentifier(
+        if (open) "expand_button_content_description_expanded" else "expand_button_content_description_collapsed",
+        "string", "android")
+    return if (id == 0) null else context.getString(id)
+}
+
+/** docs/expander-plan.md K13: Material's list item over the body, its chevron
+ * turning with it. */
+@Composable
+internal fun KayaExpander(node: KayaNode, a11y: Modifier, boxFill: Modifier) {
+    val open = node.expanded
+    val turn by animateFloatAsState(if (open) 180f else 0f, label = "expander chevron")
+    val state = androidx.compose.ui.res.stringResource(
+        if (open) androidx.compose.material3.R.string.m3c_dropdown_menu_expanded
+        else androidx.compose.material3.R.string.m3c_dropdown_menu_collapsed)
+    val press = node.a11yHint.ifEmpty { null }
+        ?: kayaExpanderActionWord(androidx.compose.ui.platform.LocalContext.current, open)
+    val header = remember { FocusRequester() }
+    var bodyHolds by remember { mutableStateOf(false) }
+    LaunchedEffect(open) {
+        if (!open && bodyHolds) header.requestFocus()
+    }
+    val glyph = if (node.symbol != 0L) KayaCompose.symbolIcon(node.symbol) else null
+    Column(boxFill) {
+        ListItem(
+            headlineContent = { Text(node.text) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .focusRequester(header)
+                .then(a11y)
+                .clickable(role = Role.Button, onClickLabel = press) {
+                    kayaExpanderFlip(node, !node.expanded)
+                }
+                .semantics {
+                    if (node.a11yLabel.isEmpty()) contentDescription = node.text
+                    stateDescription = state
+                    if (open) collapse { kayaExpanderFlip(node, false) } else expand { kayaExpanderFlip(node, true) }
+                    this[KayaNodeId] = node.id
+                },
+            supportingContent = if (node.summary.isEmpty()) null else { { Text(node.summary) } },
+            leadingContent = glyph?.let { { Icon(it, contentDescription = null) } },
+            trailingContent = {
+                Icon(Icons.Filled.ExpandMore, contentDescription = null, modifier = Modifier.rotate(turn))
+            },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        )
+        AnimatedVisibility(visible = open, modifier = Modifier.onFocusChanged { bodyHolds = it.hasFocus }) {
+            Column(
+                Modifier.fillMaxWidth().padding(node.inset.dp),
+                verticalArrangement = Arrangement.spacedBy(node.spacing.dp),
+            ) {
+                node.laidOut.forEachIndexed { i, child ->
+                    var cell = if (i == 0) Modifier.semantics { this[KayaExpanderBody] = node.id } else Modifier
+                    if (child.kind == KayaCompose.KIND_LABELED || child.kind == KayaCompose.KIND_ROW ||
+                        node.align == KayaCompose.ALIGN_STRETCH
+                    ) {
+                        cell = cell.fillMaxWidth()
+                    }
+                    // A labelled row brings the list item's own 16dp; anything else takes it here.
+                    if (child.kind != KayaCompose.KIND_LABELED) cell = cell.padding(horizontal = 16.dp)
+                    Box(cell) { KayaRender(child, flexVertical = true) }
+                }
+            }
         }
     }
 }

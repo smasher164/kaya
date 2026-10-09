@@ -28,6 +28,7 @@ SCENES = [
     "progress", "select", "radio", "grid", "textarea", "search", "submit", "scrollto", "fullscreen",
     "numberfield", "timecode", "colorpicker", "range", "secure", "autofill", "reveal",
     "segmented",
+    "expander",
     "toast",
     "sections",
     "menus", "commands", "a11y", "a11yrows", "filedialog",
@@ -393,6 +394,10 @@ ORDER = [
      # (docs/tints-plan.md).
      "tints_rust",
      "tintsdark_rust",
+     # The expander (docs/expander-plan.md): `toggle` takes the header's
+     # own door, no real mouse.
+     "expander_rust", "expander_python", "expander_js", "expander_go", "expander_csharp",
+     "expander_java",
      "canvas_rust",
      "canvasdark_rust",
      "sizepolicy_rust",

@@ -2660,27 +2660,44 @@ print(f"check-sugar-surface: reveal cuts watched red {_rv_cuts}/{_rv_want}")
 
 # --- THE EXPANDER'S HEADER PROPS, live zone, in all nine (docs/expander-plan.md
 # K3, K4, K18). The kind census holds `expander` in both zones and tpl-surfaces
-# the stamped `summary`; this holds `summary` and `expanded` on the live handle.
-# Rust's rows are the built shape; the other eight are the binding's own name
-# for each and are tightened to the shape each builds at the breadth.
+# the stamped `summary`; this holds `summary` and `expanded` on the live handle
+# and a stamped copy's `expanded` bound to a row field (K10).
 EXPANDER_SURFACES = [
     ("rust", "crates/kaya/src/app.rs",
      [r"pub fn {0}\(self, text: impl Into<LiveSource<StrKind>>\) -> Self",
-      r"pub fn {1}\(self, on: impl Into<LiveSource<BoolKind>>\) -> Self"]),
-    ("python", "bindings/python/kaya/__init__.py", [r"\b{0}\b", r"\b{1}\b"]),
-    ("go", "bindings/go/app.go", [r"func \(w Widget\) {0}\(", r"func \(w Widget\) {1}\("]),
-    ("csharp", "bindings/csharp/KayaApp.cs", [r"\b{0}\b", r"\b{1}\b"]),
+      r"pub fn {1}\(self, on: impl Into<LiveSource<BoolKind>>\) -> Self",
+      r"text: impl Into<TplSource<StrKind>>,\s*{1}: impl Into<TplSource<BoolKind>>,"]),
+    ("python", "bindings/python/kaya/__init__.py",
+     [r"^    def {0}\(self: H, text: TextSource\) -> H:",
+      r"^    def {1}\(self: H, on: FlagSource = True\) -> H:",
+      r"wire\.tx_bind_{1}_element\(self\.id, on\._level\(\), on\._index\)"]),
+    ("go", "bindings/go/app.go",
+     [r"func \(w Widget\) {0}\(text string\) Widget", r"func \(w Widget\) {1}\(on bool\) Widget",
+      r"TxBind{1}Element\(n\.id, 0, v\.index\)"]),
+    ("csharp", "bindings/csharp/KayaApp.cs",
+     [r"string\? {0} = null,", r"bool\? {1} = null,",
+      r"public Node Expander\(string text, Field<bool> {1}, Action body,"]),
     ("java", "bindings/java/dev/kaya/KayaApp.java",
-     [r"public Widget {0}\(", r"public Widget {1}\("]),
-    ("swift", "bindings/swift/KayaApp.swift", [r"\b{0}\b", r"\b{1}\b"]),
-    ("haskell", "bindings/haskell/KayaApp.hs", [r"^  {0} ::", r"^  {1} ::"]),
-    ("ocaml", "bindings/ocaml/kaya_app.ml", [r"\?{0}\b", r"\?{1}\b"]),
-    ("js", "bindings/js/kaya/index.ts", [r"^  {0}\(", r"^  {1}\("]),
+     [r"public Widget {0}\(String text\)", r"public Widget {1}\(boolean on\)",
+      r"public Node expander\(String text, KayaRecords\.Field<Boolean> {1}, Runnable body\)"]),
+    ("swift", "bindings/swift/KayaApp.swift",
+     [r"_ text: String, {0}: String\? = nil,", r"{1}: Bool\? = nil,",
+      r"_ text: String, {1}: KayaField<Bool>,"]),
+    ("haskell", "bindings/haskell/KayaApp.hs",
+     [r"^  {0} :: Text -> Attr 'BoxW", r"^  {1} :: Bool -> Attr 'BoxW",
+      r"^instance Tpl{1}Source \(KField Bool\) where"]),
+    ("ocaml", "bindings/ocaml/kaya_app.ml",
+     [r"^let expander [^=\n]*\?{0}\b", r"^let expander [^=\n]*\?{1}\b",
+      r"let bind_{1}_field \?\(level = 0\) \(Node id\)"]),
+    ("js", "bindings/js/kaya/index.ts",
+     [r"^  {0}\(text: Bindable \| string\): this",
+      r"^  {1}\(on: boolean \| Signal<boolean> \| FieldRef = true\): this",
+      r"wire\.tx_bind_{1}_element\(this\.id, on\._level\(\), on\._index\)"]),
 ]
 EXPANDER_NAMES = {"rust": ("summary", "expanded"), "python": ("summary", "expanded"),
                   "go": ("Summary", "Expanded"), "csharp": ("summary", "expanded"),
                   "java": ("summary", "expanded"), "swift": ("summary", "expanded"),
-                  "haskell": ("summary", "expanded"), "ocaml": ("summary", "expanded"),
+                  "haskell": ("Summary", "Expanded"), "ocaml": ("summary", "expanded"),
                   "js": ("summary", "expanded")}
 
 
@@ -2692,8 +2709,9 @@ def check_expander(fake=None, text_for=None):
         for template in templates:
             pat = template.format(*names)
             if not re.search(pat, text, re.M):
-                out.append(f"check-sugar-surface: {lang}'s LIVE zone cannot spell "
-                           f"`summary`/`expanded` on an expander (wanted /{pat}/ in {rel})")
+                out.append(f"check-sugar-surface: {lang}'s expander cannot spell `summary`/"
+                           f"`expanded` live, or bind a stamped copy's `expanded` to a "
+                           f"row field (K10) (wanted /{pat}/ in {rel})")
     return out
 
 
@@ -2719,7 +2737,7 @@ for _lang, _rel, _templates in _ex_held:
 
         def _mangle_ex(m):
             global _n
-            _inner, _k = sub_count(r"(?i)\b(summary|expanded)\b", r"kayaCut\1", m.group(0))
+            _inner, _k = sub_count(r"(?i)(sum(?=mary)|expan(?=ded))", r"\1KayaCut", m.group(0))
             _n += _k
             return _inner
         _copy = re.sub(_pat, _mangle_ex, _real, flags=re.M)
@@ -6983,7 +7001,7 @@ discardable = tpl_discardable_probe()
 WANT_DISCARDABLE = """swift-row-member=applied:1 rc:1 named:True
 swift-arm-member=applied:1 rc:1 named:True
 swift-eliminator=applied:1 rc:1 named:True
-swift-census-floor=applied:23 rc:1 named:True"""
+swift-census-floor=applied:24 rc:1 named:True"""
 if discardable != WANT_DISCARDABLE:
     print("check-sugar-surface: SELF-TEST FAIL (the Swift generated-surface "
           "discard census did not catch its watched cuts). Wanted:",
@@ -7748,7 +7766,7 @@ def csharp_facade_probe():
     run("csharp-twin-reader",
         src.replace("sealed class TableItemRow\n",
                     "sealed class TableItemRowGone\n")
-        if n == 1 else src, n, "typed-row reader found only 20")
+        if n == 1 else src, n, "typed-row reader found only 21")
     return "\n".join(lines)
 
 

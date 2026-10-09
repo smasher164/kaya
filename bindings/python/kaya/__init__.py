@@ -677,6 +677,32 @@ class _Handle:
                 f"fields, not {type(on).__name__}")
         return self
 
+    def summary(self: H, text: TextSource) -> H:
+        """Set an expander's second header line (docs/expander-plan.md K3):
+        a str, a Signal or one of the row's fields; empty draws none.
+        Returns the handle."""
+        _records().append(_prop_source(
+            "summary", self, text, wire.tx_set_summary,
+            wire.tx_bind_summary, wire.tx_bind_summary_element))
+        return self
+
+    def expanded(self: H, on: FlagSource = True) -> H:
+        """Whether an expander's body shows (docs/expander-plan.md K4): a
+        constant, a Bool Signal, or a row's field, which a stamped copy
+        requires (K10). The write never echoes as a toggle. Returns the
+        handle."""
+        if isinstance(on, Signal):
+            _records().append(wire.tx_bind_expanded(self.id, on.id))
+        elif isinstance(on, FieldRef):
+            _records().append(wire.tx_bind_expanded_element(self.id, on._level(), on._index))
+        elif isinstance(on, bool):
+            _records().append(wire.tx_set_expanded(self.id, on))
+        else:
+            raise KayaTypeError(
+                f"kaya: expanded takes a bool, a Signal or one of the row's "
+                f"fields, not {type(on).__name__}")
+        return self
+
     def revealable(self: H) -> H:
         """Give this secure field its own show/hide toggle
         (docs/reveal-plan.md V1); each flip reaches the field's
@@ -4862,6 +4888,38 @@ def labeled(label: TextSource, *, grow: float | None = None,
     _set_spacing(handle, spacing)
     _set_inset(handle, inset)
     return _Labeled(handle, label)
+
+
+def expander(text: TextSource, *, summary: TextSource | None = None,
+             expanded: FlagSource | None = None,
+             symbol: Symbol | str | None = None,
+             on_toggle: Handler | None = None,
+             grow: float | None = None, spacing: float | None = None,
+             align: Align | str | None = None,
+             inset: float | None = None) -> _Container:
+    """An EXPANDER (docs/expander-plan.md): `text` is the header the user
+    activates, the body everything declared inside, laid out as a column
+    and kept alive while collapsed. The user's toggle reaches `on_toggle`
+    with the new state (template copies get their `Row` first). In a
+    template `expanded` must be one of the row's Bool fields, which the
+    handler writes the toggle back into (K10)."""
+    handle = _widget(wire.KIND_EXPANDER)
+    _records().append(_prop_source(
+        "expander text", handle, text, wire.tx_set_text,
+        wire.tx_bind_text, wire.tx_bind_text_element))
+    if summary is not None:
+        handle.summary(summary)
+    if expanded is not None:
+        handle.expanded(expanded)
+    if symbol is not None:
+        handle.symbol(symbol)
+    if on_toggle is not None:
+        _app._register(handle, wire.OCC_TOGGLED, on_toggle)
+    _set_grow(handle, grow)
+    _set_spacing(handle, spacing)
+    _set_align(handle, align)
+    _set_inset(handle, inset)
+    return _Container(handle)
 
 
 def spacer(grow: float = 1.0) -> Widget:

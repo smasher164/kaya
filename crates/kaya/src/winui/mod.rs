@@ -38,7 +38,8 @@ use bindings::Microsoft::UI::Xaml::Controls::{
     CheckBox, ColorPicker, ColumnDefinition, ColumnDefinitionCollection, ComboBox,
     ComboBoxItem, CommandBar,
     ContentDialog,
-    ContentDialogButton, ContentDialogResult, DisabledFormattingAccelerators, FontIcon, Grid,
+    ContentDialogButton, ContentDialogResult, DisabledFormattingAccelerators, Expander,
+    ExpanderCollapsedEventArgs, ExpanderExpandingEventArgs, FontIcon, Grid,
     Flyout, HyperlinkButton, ICommandBarElement, IconElement, Image, InfoBadge, MenuBar,
     MenuBarItem, MenuFlyout,
     MenuFlyoutItem, MenuFlyoutItemBase, MenuFlyoutSeparator, MenuFlyoutSubItem, NavigationView,
@@ -197,6 +198,9 @@ enum NativeWidget {
     /// The video view (docs/media-plan.md §3): a MediaPlayerElement under a
     /// Grid that also holds kaya's caption overlay (winui/media.rs).
     Video { host: Grid, ax: Image },
+    /// docs/expander-plan.md K14: the header's glyph slot, text and caption
+    /// summary, and the body laid out as a column.
+    Expander { expander: Expander, body: Grid, glyph: Grid, title: TextBlock, summary: TextBlock },
 }
 
 impl NativeWidget {
@@ -246,6 +250,7 @@ impl NativeWidget {
             NativeWidget::ColorPicker(swatch) => swatch.button.cast(),
             NativeWidget::Range(pair) => pair.root.cast(),
             NativeWidget::Video { host, .. } => host.cast(),
+            NativeWidget::Expander { expander, .. } => expander.cast(),
         }
     }
 
@@ -559,6 +564,12 @@ struct CoreState {
     selects: Vec<ComboBox>,
     radios: Vec<RadioButtons>,
     segmenteds: Vec<SelectorBar>,
+    /// docs/expander-plan.md K14, creation-ordered (`expander#N`), the ids
+    /// beside them; the app's hint and whether the app named the header.
+    expanders: Vec<Expander>,
+    expander_ids: Vec<u64>,
+    expander_hints: HashMap<u64, String>,
+    expander_named: std::collections::HashSet<u64>,
     grids: Vec<Grid>,
     textareas: Vec<RichEditBox>,
     textarea_ids: Vec<u64>,
@@ -2585,6 +2596,7 @@ fn stamp_container_padding(core: &CoreState, id: WidgetId) -> windows_core::Resu
             | NativeWidget::Grid2D(grid)
             | NativeWidget::Labeled(grid),
         ) => grid.SetPadding(pad),
+        Some(NativeWidget::Expander { body, .. }) => body.SetPadding(pad),
         Some(NativeWidget::Scroll(_)) => match core.scroll_root_hosts.get(&id) {
             Some(host) => host.SetPadding(pad),
             None => Ok(()),
@@ -2693,6 +2705,7 @@ fn container_panel(core: &CoreState, parent: WidgetId) -> Option<Grid> {
     let own = match core.widgets.get(&parent) {
         Some(NativeWidget::Column(g)) => g.clone(),
         Some(NativeWidget::Row(g)) | Some(NativeWidget::Labeled(g)) => return Some(g.clone()),
+        Some(NativeWidget::Expander { body, .. }) => return Some(body.clone()),
         _ => return None,
     };
     Some(TABLES.with_borrow(|t| t.get(&parent.0).map(|w| w.band.clone())).unwrap_or(own))
@@ -2703,7 +2716,7 @@ fn container_panel(core: &CoreState, parent: WidgetId) -> Option<Grid> {
 /// this fold — a variant-keyed read would call a flipped row a row.
 fn effective_vertical(core: &CoreState, id: WidgetId) -> bool {
     core.axes.get(&id).map_or_else(
-        || matches!(core.widgets.get(&id), Some(NativeWidget::Column(_))),
+        || matches!(core.widgets.get(&id), Some(NativeWidget::Column(_) | NativeWidget::Expander { .. })),
         |a| *a == 1,
     )
 }
@@ -2722,9 +2735,65 @@ fn column_is_form(core: &CoreState, column: WidgetId) -> bool {
         .filter(|c| !core.folded_into.contains_key(&c.0))
         .collect();
     rows.len() >= 2
-        && rows
-            .iter()
-            .all(|c| matches!(core.widgets.get(c), Some(NativeWidget::Labeled(_))))
+        && rows.iter().all(|c| {
+            matches!(core.widgets.get(c), Some(NativeWidget::Labeled(_) | NativeWidget::Expander { .. }))
+        })
+}
+
+/// The maintainer's ruling of 2026-10-09 (docs/expander-plan.md K3): the
+/// summary is spoken, as the header's HelpText, an app's hint after it.
+fn expander_describe(core: &CoreState, id: WidgetId) -> windows_core::Result<()> {
+    let Some(NativeWidget::Expander { expander, summary, .. }) = core.widgets.get(&id) else {
+        return Ok(());
+    };
+    let summary = summary.Text()?.to_string();
+    let hint = core.expander_hints.get(&id.0).cloned().unwrap_or_default();
+    let said = [summary.as_str(), hint.as_str()]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(". ");
+    bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetHelpText(
+        expander,
+        &HSTRING::from(said.as_str()),
+    )
+}
+
+/// docs/expander-plan.md K3, K8: what Narrator focuses is the template's
+/// header ToggleButton, never the Expander's own peer (measured on the VM: the
+/// peer is not keyboard focusable; the header is, in the content view, named
+/// nothing over a header that is not a string), so the header wears the name
+/// and the spoken summary the Expander carries.
+fn expander_header_sync(expander: &Expander) -> windows_core::Result<()> {
+    use bindings::Microsoft::UI::Xaml::Automation::AutomationProperties;
+    let Some(header) = named_descendant(&expander.cast::<UIElement>()?, "ExpanderHeader")? else {
+        return Ok(());
+    };
+    AutomationProperties::SetName(&header, &AutomationProperties::GetName(expander)?)?;
+    AutomationProperties::SetHelpText(&header, &AutomationProperties::GetHelpText(expander)?)
+}
+
+/// The labelled rows sharing a form's label track: its own, and those in the
+/// body of each expander it holds (docs/expander-plan.md K11, K14).
+fn form_rows(core: &CoreState, column: WidgetId) -> Vec<WidgetId> {
+    let mut rows = Vec::new();
+    for child in core.child_order.children(column) {
+        if core.folded_into.contains_key(&child.0) {
+            continue;
+        }
+        match core.widgets.get(child) {
+            Some(NativeWidget::Labeled(_)) => rows.push(*child),
+            Some(NativeWidget::Expander { .. }) => rows.extend(
+                core.child_order
+                    .children(*child)
+                    .iter()
+                    .copied()
+                    .filter(|c| matches!(core.widgets.get(c), Some(NativeWidget::Labeled(_)))),
+            ),
+            _ => {}
+        }
+    }
+    rows
 }
 
 /// THE FORM'S SHARED LABEL TRACK (docs/forms-plan.md §3): WinUI has no
@@ -2735,7 +2804,10 @@ fn column_is_form(core: &CoreState, column: WidgetId) -> bool {
 /// DesiredSize, `table_measure`'s pattern — never read back off the track,
 /// which is the pinned number itself and could only ever agree.
 fn shared_label_width(core: &CoreState, row: WidgetId) -> Option<f64> {
-    let column = core.child_order.parent_of(row)?;
+    let mut column = core.child_order.parent_of(row)?;
+    if matches!(core.widgets.get(&column), Some(NativeWidget::Expander { .. })) {
+        column = core.child_order.parent_of(column)?;
+    }
     if !column_is_form(core, column) {
         return None;
     }
@@ -2744,10 +2816,7 @@ fn shared_label_width(core: &CoreState, row: WidgetId) -> Option<f64> {
         Height: f32::INFINITY,
     };
     let mut widest = 0.0f64;
-    for sibling in core.child_order.children(column) {
-        if core.folded_into.contains_key(&sibling.0) {
-            continue;
-        }
+    for sibling in &form_rows(core, column) {
         let Some(first) = core.child_order.children(*sibling).first() else {
             continue;
         };
@@ -2956,6 +3025,7 @@ fn wrap_retry(rid: u64, probe: Grid) {
 fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
     let grid = match core.widgets.get(&parent) {
         Some(NativeWidget::Column(g)) | Some(NativeWidget::Row(g)) => g.clone(),
+        Some(NativeWidget::Expander { body, .. }) => body.clone(),
         Some(NativeWidget::Labeled(g)) => {
             let g = g.clone();
             return reindex_labeled(core, parent, &g);
@@ -3180,6 +3250,11 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
         // (DESIGN.md Layout; the scene's expect_breadth holds it): a
         // viewport is a region, not content.
         let crossing = crossing || matches!(widget, NativeWidget::Scroll(_));
+        // A form's expander spans the form (docs/expander-plan.md K14).
+        let crossing = crossing
+            || (vertical
+                && matches!(widget, NativeWidget::Expander { .. })
+                && column_is_form(core, parent));
         // A TEXT FIELD FILLS ITS COLUMN'S WIDTH (docs/tasks-plan.md §4, R10).
         let crossing = crossing
             || (vertical
@@ -3261,14 +3336,7 @@ fn flush_tracks(core: &mut CoreState) -> windows_core::Result<()> {
         // grew or went widens or narrows the track its siblings pinned.
         // Terminates — a labelled row's own re-stamp marks nothing.
         if core.forms.contains(&container.0) {
-            let rows: Vec<WidgetId> = core
-                .child_order
-                .children(container)
-                .iter()
-                .copied()
-                .filter(|row| matches!(core.widgets.get(row), Some(NativeWidget::Labeled(_))))
-                .collect();
-            for row in rows {
+            for row in form_rows(core, container) {
                 core.child_order.mark(row);
             }
         }
@@ -6503,6 +6571,34 @@ fn dress_reveal_button(field: &PasswordBox, door: &RevealDoor) -> windows_core::
         button.SetIsChecked(&PropertyValue::CreateBoolean(shown)?.cast::<IReference<bool>>()?)?;
     }
     Ok(())
+}
+
+/// The automation peer of `root` or, for a panel UIA describes through its
+/// content (CreatePeerForElement answers a null peer for a Grid), of its first
+/// descendant that has one; None for a subtree out of the live tree.
+#[cfg(feature = "harness")]
+fn peer_within(
+    root: &UIElement,
+    depth: usize,
+) -> windows_core::Result<Option<bindings::Microsoft::UI::Xaml::Automation::Peers::AutomationPeer>> {
+    use bindings::Microsoft::UI::Xaml::Automation::Peers::FrameworkElementAutomationPeer;
+    use bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper;
+    match FrameworkElementAutomationPeer::CreatePeerForElement(root) {
+        Ok(peer) => return Ok(Some(peer)),
+        Err(e) if !e.code().is_ok() => return Err(e),
+        Err(_) => {}
+    }
+    if depth == 0 {
+        return Ok(None);
+    }
+    for i in 0..VisualTreeHelper::GetChildrenCount(root)? {
+        if let Ok(child) = VisualTreeHelper::GetChild(root, i)?.cast::<UIElement>() {
+            if let Some(peer) = peer_within(&child, depth - 1)? {
+                return Ok(Some(peer));
+            }
+        }
+    }
+    Ok(None)
 }
 
 /// The first descendant of `root` carrying `name` as its template name.
@@ -15140,7 +15236,80 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.rows.push(grid.clone());
                     NativeWidget::Row(grid)
                 }
-                WidgetKind::Expander => crate::depth_stub("expander"),
+                WidgetKind::Expander => {
+                    // docs/expander-plan.md K4, K14: Expanding and Collapsed
+                    // fire on IsExpanded writes too, so the app's write is
+                    // quiet and the user's flip is heard once.
+                    let expander = Expander::new()?;
+                    expander.SetHorizontalContentAlignment(HorizontalAlignment::Stretch)?;
+                    let body = Grid::new()?;
+                    body.SetRowSpacing(8.0)?;
+                    expander.SetContent(&body)?;
+                    let header = Grid::new()?;
+                    for width in [GridLength { Value: 0.0, GridUnitType: GridUnitType::Auto },
+                                  GridLength { Value: 1.0, GridUnitType: GridUnitType::Star }] {
+                        let def = ColumnDefinition::new()?;
+                        def.SetWidth(width)?;
+                        header.ColumnDefinitions()?.Append(&def)?;
+                    }
+                    let glyph = Grid::new()?;
+                    glyph.SetVerticalAlignment(bindings::Microsoft::UI::Xaml::VerticalAlignment::Center)?;
+                    glyph.SetMargin(Thickness { Left: 0.0, Top: 0.0, Right: 12.0, Bottom: 0.0 })?;
+                    glyph.SetVisibility(Visibility::Collapsed)?;
+                    let lines = Grid::new()?;
+                    for _ in 0..2 {
+                        let def = RowDefinition::new()?;
+                        def.SetHeight(GridLength { Value: 0.0, GridUnitType: GridUnitType::Auto })?;
+                        lines.RowDefinitions()?.Append(&def)?;
+                    }
+                    let title = text_block()?;
+                    let summary = text_block()?;
+                    summary.SetStyle(&themed_foreground_style(
+                        "TextBlock",
+                        Some("CaptionTextBlockStyle"),
+                        "TextFillColorSecondaryBrush",
+                    )?)?;
+                    summary.SetVisibility(Visibility::Collapsed)?;
+                    Grid::SetRow(&summary, 1)?;
+                    lines.Children()?.Append(&title)?;
+                    lines.Children()?.Append(&summary)?;
+                    Grid::SetColumn(&lines, 1)?;
+                    lines.SetVerticalAlignment(bindings::Microsoft::UI::Xaml::VerticalAlignment::Center)?;
+                    header.Children()?.Append(&glyph)?;
+                    header.Children()?.Append(&lines)?;
+                    expander.SetHeader(&header)?;
+                    let tag = tag.expect("expanders carry a tag");
+                    for open in [true, false] {
+                        let sink = core.occurrences.clone();
+                        let tag = tag.clone();
+                        let quiet = core.apply_quiet.clone();
+                        let heard = move || {
+                            #[cfg(feature = "harness")]
+                            crate::vtrace::note("expander_event", format_args!(
+                                "<- {}, quiet {}", if open { "Expanding" } else { "Collapsed" },
+                                quiet.load(std::sync::atomic::Ordering::Relaxed)
+                            ));
+                            if !quiet.load(std::sync::atomic::Ordering::Relaxed) {
+                                sink.send_toggle_tag(&tag, open);
+                            }
+                            Ok(())
+                        };
+                        if open {
+                            expander.Expanding(&TypedEventHandler::<Expander, ExpanderExpandingEventArgs>::new(
+                                move |_, _| heard(),
+                            ))?;
+                        } else {
+                            expander.Collapsed(&TypedEventHandler::<Expander, ExpanderCollapsedEventArgs>::new(
+                                move |_, _| heard(),
+                            ))?;
+                        }
+                    }
+                    let loaded = expander.clone();
+                    expander.Loaded(&RoutedEventHandler::new(move |_, _| expander_header_sync(&loaded)))?;
+                    core.expanders.push(expander.clone());
+                    core.expander_ids.push(id.0);
+                    NativeWidget::Expander { expander, body, glyph, title, summary }
+                }
                 WidgetKind::Segmented => {
                     // docs/segmented-plan.md §3.
                     let bar = SelectorBar::new()?;
@@ -16085,6 +16254,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             drop_pair(&mut core.color_picker_ids, &mut core.color_pickers, id.0);
             core.color_swatches.remove(&id.0);
             drop_pair(&mut core.range_ids, &mut core.ranges, id.0);
+            drop_pair(&mut core.expander_ids, &mut core.expanders, id.0);
+            core.expander_hints.remove(&id.0);
+            core.expander_named.remove(&id.0);
             core.range_pairs.remove(&id.0);
             if let Some(tag) = core.widget_tags.get(&id.0) {
                 if let Some(i) = core.buttons.iter().position(|t| t == tag) {
@@ -17117,8 +17289,74 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     return Ok(());
                 }
             }
+            // docs/expander-plan.md K3, K8: an app-named header keeps its name,
+            // and the hint follows the spoken summary.
+            if matches!(core.widgets.get(&id), Some(NativeWidget::Expander { .. })) {
+                match (prop, &value) {
+                    (Prop::A11yLabel, Value::Str(label)) if !label.is_empty() => {
+                        core.expander_named.insert(id.0);
+                    }
+                    (Prop::A11yHint, Value::Str(hint)) => {
+                        core.expander_hints.insert(id.0, hint.clone());
+                        expander_describe(core, id)?;
+                        if let Some(NativeWidget::Expander { expander, .. }) = core.widgets.get(&id) {
+                            expander_header_sync(expander)?;
+                        }
+                        return Ok(());
+                    }
+                    _ => {}
+                }
+            }
             let widget = core.widgets.get(&id).expect("scene validated the id");
             match (widget, prop, value) {
+                (NativeWidget::Expander { expander, title, .. }, Prop::Text, Value::Str(s)) => {
+                    title.SetText(&HSTRING::from(&s))?;
+                    if !core.expander_named.contains(&id.0) {
+                        bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(
+                            expander,
+                            &HSTRING::from(&s),
+                        )?;
+                    }
+                }
+                (NativeWidget::Expander { summary, .. }, Prop::Summary, Value::Str(s)) => {
+                    summary.SetText(&HSTRING::from(&s))?;
+                    summary.SetVisibility(if s.is_empty() { Visibility::Collapsed } else { Visibility::Visible })?;
+                    expander_describe(core, id)?;
+                }
+                (NativeWidget::Expander { glyph, .. }, Prop::Symbol, Value::I64(symbol)) => {
+                    glyph.Children()?.Clear()?;
+                    glyph.SetVisibility(Visibility::Collapsed)?;
+                    if let Some(icon) = symbol_icon(symbol)? {
+                        glyph.SetVisibility(Visibility::Visible)?;
+                        bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetAccessibilityView(
+                            &icon,
+                            bindings::Microsoft::UI::Xaml::Automation::Peers::AccessibilityView::Raw,
+                        )?;
+                        glyph.Children()?.Append(&icon)?;
+                    }
+                }
+                (NativeWidget::Expander { expander, .. }, Prop::Expanded, Value::Bool(open)) => {
+                    core.apply_quiet.store(true, std::sync::atomic::Ordering::Relaxed);
+                    let write = expander.SetIsExpanded(open);
+                    core.apply_quiet.store(false, std::sync::atomic::Ordering::Relaxed);
+                    #[cfg(feature = "harness")]
+                    crate::vtrace::note("expander_write", format_args!(
+                        "-> IsExpanded {open}: reads {:?} after", expander.IsExpanded()
+                    ));
+                    write?;
+                }
+                (NativeWidget::Expander { body, .. }, Prop::Spacing, Value::F64(gap)) => {
+                    body.SetRowSpacing(gap)?;
+                    core.spacings.insert(id, gap);
+                }
+                (NativeWidget::Expander { .. }, Prop::Inset, Value::F64(pad)) => {
+                    core.container_insets.insert(id, pad);
+                    stamp_container_padding(core, id)?;
+                }
+                (NativeWidget::Expander { .. }, Prop::Align, Value::I64(mode)) => {
+                    core.aligns.insert(id, mode);
+                    core.child_order.mark(id);
+                }
                 (NativeWidget::Button { button, caption }, Prop::Text, Value::Str(s)) => {
                     caption.SetText(&HSTRING::from(&s))?;
                     if core.symbol_buttons.contains_key(&id) {
@@ -17996,6 +18234,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     panic!("kaya: winui cannot apply {prop:?} = {value:?} here")
                 }
             }
+            if let Some(NativeWidget::Expander { expander, .. }) = core.widgets.get(&id) {
+                expander_header_sync(expander)?;
+            }
         }
         ApplyOp::AddChild { parent, child } => {
             // BEFORE THE BRANCHES, every one of which returns early for a
@@ -18125,10 +18366,16 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // every flush, so the shared label track follows the widest one.
             if matches!(
                 core.widgets.get(&child).expect("scene validated the id"),
-                NativeWidget::Labeled(_)
+                NativeWidget::Labeled(_) | NativeWidget::Expander { .. }
             ) && matches!(core.widgets.get(&parent), Some(NativeWidget::Column(_)))
             {
                 core.forms.insert(parent.0);
+            }
+            if let Some(form) = matches!(core.widgets.get(&parent), Some(NativeWidget::Expander { .. }))
+                .then(|| core.child_order.parent_of(parent))
+                .flatten()
+            {
+                core.child_order.mark(form);
             }
             // A stamped ROW copy marks its host, whose own cross placement in
             // ITS parent is re-read for it (docs/tasks-plan.md §4, R7); a
@@ -20280,6 +20527,10 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             selects: Vec::new(),
             radios: Vec::new(),
             segmenteds: Vec::new(),
+            expanders: Vec::new(),
+            expander_ids: Vec::new(),
+            expander_hints: HashMap::new(),
+            expander_named: std::collections::HashSet::new(),
             grids: Vec::new(),
             textareas: Vec::new(),
             textarea_ids: Vec::new(),
@@ -21447,7 +21698,7 @@ fn registry_widget_at(core: &CoreState, kind: crate::harness::TargetKind, i: usi
         K::Video => core.media.video_ids.get(i).copied(),
         K::SecureField => core.secure_ids.get(i).copied(),
         K::Segmented => id_of!(core.segmenteds, NativeWidget::Segmented(bar), bar),
-        K::Expander => crate::depth_stub("expander"),
+        K::Expander => core.expander_ids.get(i).copied(),
         K::ColorPicker => core.color_picker_ids.get(i).copied(),
         K::NumberField => core.number_field_ids.get(i).copied(),
         K::Canvas => core.canvas_ids.get(i).copied(),
@@ -21746,7 +21997,7 @@ fn target_element(
         K::Video => nth!(media::elements(core)),
         K::SecureField => nth!(core.secure_fields),
         K::Segmented => nth!(core.segmenteds),
-        K::Expander => crate::depth_stub("expander"),
+        K::Expander => nth!(core.expanders),
         K::ColorPicker => nth!(core.color_pickers),
         K::NumberField => nth!(core.number_fields),
         K::DatePicker => nth!(core.date_pickers),
@@ -21872,7 +22123,7 @@ fn registry_ids(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<u64> 
         K::Video => core.media.video_ids.clone(),
         K::SecureField => core.secure_ids.clone(),
         K::Segmented => ids!(core.segmenteds, NativeWidget::Segmented(bar), bar),
-        K::Expander => crate::depth_stub("expander"),
+        K::Expander => core.expander_ids.clone(),
         K::ColorPicker => core.color_picker_ids.clone(),
         K::NumberField => core.number_field_ids.clone(),
         K::Canvas => core.canvas_ids.clone(),
@@ -23306,6 +23557,15 @@ impl crate::harness::Stage for WinUiStage {
                         _ => return Ok("<no such target>".to_owned()),
                     }
                 }
+                // docs/expander-plan.md K3: where the summary is spoken, the
+                // header Narrator focuses once the template has made it.
+                K::Expander => match target_element(core, target)? {
+                    Some(element) => match named_descendant(&element, "ExpanderHeader")? {
+                        Some(header) => header.cast()?,
+                        None => element,
+                    },
+                    None => return Ok("<no such target>".to_owned()),
+                },
                 // The root admits a11y_hint on activation kinds only.
                 _ => {
                     return Ok("<the hint prop applies to activation kinds only>".to_owned())
@@ -23813,6 +24073,19 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     fn toggle(&self, t: crate::harness::Target, on: bool) {
+        if t.kind == crate::harness::TargetKind::Expander {
+            // docs/expander-plan.md K15: the Expander peer's own
+            // Expand/Collapse, the assistive client's door.
+            Self::on_ui(move |core| {
+                use bindings::Microsoft::UI::Xaml::Automation::Peers::FrameworkElementAutomationPeer;
+                use bindings::Microsoft::UI::Xaml::Automation::Provider::IExpandCollapseProvider;
+                let i = crate::harness::resolve(t.index, core.expanders.len());
+                let peer = FrameworkElementAutomationPeer::CreatePeerForElement(&core.expanders[i].cast::<UIElement>()?)?;
+                let pattern = peer.cast::<IExpandCollapseProvider>()?;
+                if on { pattern.Expand() } else { pattern.Collapse() }
+            });
+            return;
+        }
         Self::on_ui(move |core| {
             let i = crate::harness::resolve(t.index, core.checkboxes.len());
             let check = core.checkboxes[i].clone();
@@ -24433,6 +24706,15 @@ impl crate::harness::Stage for WinUiStage {
 
     fn read_label(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
+            if t.kind == crate::harness::TargetKind::Expander {
+                let Some(i) = crate::harness::try_resolve(t.index, core.expander_ids.len()) else {
+                    return Ok("<no such target>".to_string());
+                };
+                return match core.widgets.get(&WidgetId(core.expander_ids[i])) {
+                    Some(NativeWidget::Expander { title, .. }) => Ok(title.Text()?.to_string()),
+                    _ => Ok("<no such target>".to_string()),
+                };
+            }
             let Some(i) = crate::harness::try_resolve(t.index, core.labels.len()) else {
                 return Ok("<no such target>".to_string());
             };
@@ -25152,7 +25434,7 @@ impl crate::harness::Stage for WinUiStage {
                 K::Video => find(core, K::Video, &media::elements(core), &id),
                 K::SecureField => find(core, K::SecureField, &core.secure_fields, &id),
                 K::Segmented => find(core, K::Segmented, &core.segmenteds, &id),
-                K::Expander => crate::depth_stub("expander"),
+                K::Expander => find(core, K::Expander, &core.expanders, &id),
                 K::ColorPicker => find(core, K::ColorPicker, &core.color_pickers, &id),
                 K::NumberField => find(core, K::NumberField, &core.number_fields, &id),
                 K::Canvas => find(core, K::Canvas, &core.canvases, &id),
@@ -26848,14 +27130,64 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
-    /// No expander exists on this backend before the breadth
-    /// (docs/expander-plan.md §6).
-    fn expanded(&self, _: crate::harness::Target) -> Result<(bool, bool), String> {
-        crate::depth_stub("expander")
+    /// docs/expander-plan.md K8: the Expander peer's ExpandCollapseState
+    /// and whether UIA reports the body on screen.
+    fn expanded(&self, t: crate::harness::Target) -> Result<(bool, bool), String> {
+        Self::on_ui_read(move |core| {
+            use bindings::Microsoft::UI::Xaml::Automation::ExpandCollapseState;
+            use bindings::Microsoft::UI::Xaml::Automation::Peers::FrameworkElementAutomationPeer;
+            use bindings::Microsoft::UI::Xaml::Automation::Provider::IExpandCollapseProvider;
+            let Some(i) = crate::harness::try_resolve(t.index, core.expanders.len()) else {
+                return Ok(Err("<no such target>".to_owned()));
+            };
+            let Some(NativeWidget::Expander { body, .. }) = core.widgets.get(&WidgetId(core.expander_ids[i])) else {
+                return Ok(Err("<no such target>".to_owned()));
+            };
+            let peer = FrameworkElementAutomationPeer::CreatePeerForElement(&core.expanders[i].cast::<UIElement>()?)?;
+            let Ok(pattern) = peer.cast::<IExpandCollapseProvider>() else {
+                return Ok(Err(format!(
+                    "the expander's peer ({}) publishes no ExpandCollapse pattern",
+                    peer.GetClassName()?
+                )));
+            };
+            let open = pattern.ExpandCollapseState()? == ExpandCollapseState::Expanded;
+            let shown = match body.Children()?.Size()? {
+                0 => body.cast::<UIElement>()?,
+                _ => body.Children()?.GetAt(0)?,
+            };
+            let on_screen = match peer_within(&shown, 6)? {
+                Some(shown_peer) => !shown_peer.IsOffscreen()?,
+                None => false,
+            } && shown.cast::<FrameworkElement>()?.ActualHeight()? > 0.0;
+            Ok(Ok((open, on_screen)))
+        })
+        .unwrap_or_else(|e| Err(format!("<accessibility read failed: {e}>")))
     }
 
-    fn collapsed_ancestor(&self, _: crate::harness::Target) -> Option<usize> {
-        crate::depth_stub("expander")
+    /// docs/expander-plan.md K5: WinUI's own IsExpanded on every expander the
+    /// target sits in.
+    fn collapsed_ancestor(&self, t: crate::harness::Target) -> Option<usize> {
+        Self::on_ui_read(move |core| {
+            let Some(index) = crate::harness::try_resolve(t.index, registry_ids(core, t.kind).len()) else {
+                return Ok(None);
+            };
+            let Some(mut node) = registry_widget_at(core, t.kind, index) else {
+                return Ok(None);
+            };
+            let own = (t.kind == crate::harness::TargetKind::Expander).then_some(node);
+            let mut outer = None;
+            while let Some(parent) = core.tree_parent.get(&node).copied() {
+                if let Some(i) = core.expander_ids.iter().position(|e| *e == parent) {
+                    if Some(parent) != own && !core.expanders[i].IsExpanded()? {
+                        outer = Some(i);
+                    }
+                }
+                node = parent;
+            }
+            Ok(outer)
+        })
+        .ok()
+        .flatten()
     }
 
     fn segment_symbol(&self, t: crate::harness::Target, index: usize) -> String {

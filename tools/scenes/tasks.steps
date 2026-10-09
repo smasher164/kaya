@@ -186,6 +186,13 @@ expect_entries 1
 expect label@settings[s] "Week starts Monday; badge shown; completed move to Logbook"
 expect_no_clipping
 choose select@week[s] 1
+# The two settings that are not everyday choices sit in a collapsed Advanced
+# row, out of reach until the user opens it (docs/expander-plan.md K19).
+expect expander@advanced[s] "Advanced"
+expect_expanded expander@advanced[s] off
+expect_out_of_reach checkbox@hide_badge[s]
+toggle expander@advanced[s] on
+expect_expanded expander@advanced[s] on
 # The two settings are switches (S2, R12): the platform's switch trait.
 expect_ax checkbox@hide_badge[s] "switch/Hide the Today badge"
 toggle checkbox@hide_badge[s] on

@@ -7134,11 +7134,23 @@ private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
     // The HINT: what activating this control does. Apple speaks it after the
     // label and forbids naming the gesture, which is why the authored text is
     // a verb phrase.
-    if node.a11yHint.isEmpty {
+    #if os(macOS)
+        let hint = node.kind == kindExpander ? kayaExpanderDescription(node) : node.a11yHint
+    #else
+        // iOS speaks the summary as the header's value (docs/expander-plan.md §7).
+        let hint = node.a11yHint
+    #endif
+    if hint.isEmpty {
         helped
     } else {
-        helped.accessibilityHint(node.a11yHint)
+        helped.accessibilityHint(hint)
     }
+}
+
+/// The maintainer's ruling of 2026-10-09 (docs/expander-plan.md K3): the
+/// summary is spoken, as the header's description, an app's hint after it.
+func kayaExpanderDescription(_ node: KayaNode) -> String {
+    [node.summary, node.a11yHint].filter { !$0.isEmpty }.joined(separator: ". ")
 }
 
 /// Normalize one platform role name into the harness's closed set. The point
@@ -7576,7 +7588,7 @@ private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
 
     /// The HINT as the platform publishes it: AXHelp is where
     /// `.accessibilityHint()` lands on macOS.
-    private func kayaAxHintRead(_ identifier: String) -> String? {
+    private func kayaAxHintRead(_ identifier: String, description: Bool = false) -> String? {
         guard !identifier.isEmpty else { return nil }
         _ = kayaAwaitWindow(0)
         return DispatchQueue.main.sync { () -> String? in
@@ -7761,7 +7773,7 @@ private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
     }
 
     private var kayaAxDumped = false
-    private var kayaAxAutomationOn = false
+    var kayaAxAutomationOn = false
 
     /// Flip the AX runtime's AUTOMATION switch, which is what materializes the
     /// tree at all here (docs/traps.md, "iOS materializes no accessibility tree
@@ -7779,6 +7791,7 @@ private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
         }
         typealias KayaSetAutomation = @convention(c) (Bool) -> Void
         unsafeBitCast(symbol, to: KayaSetAutomation.self)(true)
+        DispatchQueue.main.async { kayaExpanderRepublish() }
     }
 
     private func kayaAxRead(_ identifier: String, declaredSwitch: Bool = false) -> String? {
@@ -7847,7 +7860,7 @@ private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
 
     /// The HINT as UIKit publishes it — `.accessibilityHint()` lands
     /// straight on the element.
-    private func kayaAxHintRead(_ identifier: String) -> String? {
+    private func kayaAxHintRead(_ identifier: String, description: Bool = false) -> String? {
         guard !identifier.isEmpty else { return nil }
         kayaAxEnableAutomation()
         // ON THE MAIN THREAD, like the Mac's reader: walking the window tree
@@ -7860,6 +7873,11 @@ private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
             }) {
                 for window in scene.windows {
                     if let hit = kayaAxFind(window, identifier) {
+                        // An expander's description is its value, then its hint (docs/expander-plan.md §7).
+                        if description {
+                            return [hit.accessibilityValue ?? "", hit.accessibilityHint ?? ""]
+                                .filter { !$0.isEmpty }.joined(separator: ". ")
+                        }
                         return hit.accessibilityHint ?? ""
                     }
                 }
@@ -9138,7 +9156,7 @@ private func kayaRunScript(_ script: String) {
                 let wantHeader = kayaQuoted(Array(parts.dropFirst(2)))
                 let gotHeader = kayaExpanderHeaderText(parts[1])
                 if kayaBytesEqual(gotHeader, wantHeader) {
-                    observed.append("\"\(wantHeader)\"")
+                    observed.append(wantHeader)
                 } else {
                     failures.append("\"\(gotHeader)\", wanted \"\(wantHeader)\"")
                 }
@@ -12893,17 +12911,17 @@ private func kayaRunScript(_ script: String) {
                 // activating this control does, read from the platform,
                 // never from the model.
                 let wantHint = kayaQuoted(Array(parts[2...]))
-                let hintIdentifier = DispatchQueue.main.sync { () -> String? in
+                let hintIdentifier = DispatchQueue.main.sync { () -> (String, Bool)? in
                     guard let node = kayaAnyTarget(parts[1]) else { return nil }
-                    return node.a11yId
+                    return (node.a11yId, node.kind == kindExpander)
                 }
                 let gotHint: String
                 switch hintIdentifier {
                 case .none: gotHint = "<no such target>"
-                case .some(let ident) where ident.isEmpty:
+                case .some(let (ident, _)) where ident.isEmpty:
                     gotHint = "<no a11y_id authored on this widget>"
-                case .some(let ident):
-                    gotHint = kayaAxHintRead(ident) ?? "<not in the accessibility tree>"
+                case .some(let (ident, expander)):
+                    gotHint = kayaAxHintRead(ident, description: expander) ?? "<not in the accessibility tree>"
                 }
                 if gotHint == wantHint {
                     observed.append("ax hint \"\(wantHint)\"")
@@ -23255,7 +23273,7 @@ struct KayaExpander: View {
                 }
             }
         }
-        .background(KayaExpanderAnchor(id: node.id, header: true))
+        .background(KayaExpanderAnchor(id: node.id, header: true, open: open.wrappedValue))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(node.a11yLabel.isEmpty ? node.text : node.a11yLabel)
         #if os(macOS)
@@ -23267,13 +23285,19 @@ struct KayaExpander: View {
                 kayaA11y(header, node, leaf: true)
             }
         #else
-            kayaA11y(header, node, leaf: true)
+            // The state is UIKit's own expanded status, set by the anchor (docs/expander-plan.md §7).
+            if node.summary.isEmpty {
+                kayaA11y(header, node, leaf: true)
+            } else {
+                kayaA11y(header.accessibilityValue(node.summary), node, leaf: true)
+            }
         #endif
     }
 }
 
 final class KayaExpanderBox {
     weak var view: AnyObject?
+    var open = false
 }
 
 /// Each expander's header anchors, and its body anchors: a body anchor is in a
@@ -23295,6 +23319,7 @@ private func kayaExpanderRegister(_ id: UInt64, _ view: AnyObject, header: Bool)
     struct KayaExpanderAnchor: NSViewRepresentable {
         let id: UInt64
         let header: Bool
+        var open = false
         func makeNSView(context: Context) -> NSView {
             let view = NSView()
             kayaExpanderRegister(id, view, header: header)
@@ -23306,13 +23331,86 @@ private func kayaExpanderRegister(_ id: UInt64, _ view: AnyObject, header: Bool)
     struct KayaExpanderAnchor: UIViewRepresentable {
         let id: UInt64
         let header: Bool
+        var open = false
         func makeUIView(context: Context) -> UIView {
             let view = UIView()
             view.isUserInteractionEnabled = false
             kayaExpanderRegister(id, view, header: header)
+            if header { kayaExpanderPublish(view, open) }
             return view
         }
-        func updateUIView(_ view: UIView, context: Context) { kayaExpanderRegister(id, view, header: header) }
+        func updateUIView(_ view: UIView, context: Context) {
+            kayaExpanderRegister(id, view, header: header)
+            if header { kayaExpanderPublish(view, open) }
+        }
+    }
+
+    /// The button SwiftUI publishes over the header's anchor, and how many
+    /// elements cover its centre.
+    func kayaExpanderButton(_ anchor: UIView) -> (NSObject?, Int) {
+        guard let window = anchor.window else { return (nil, 0) }
+        let frame = UIAccessibility.convertToScreenCoordinates(anchor.bounds, in: anchor)
+        var found: [NSObject] = []
+        var seen = Set<ObjectIdentifier>()
+        func walk(_ item: NSObject, _ depth: Int) {
+            if depth > 64 || !seen.insert(ObjectIdentifier(item)).inserted { return }
+            if item.isAccessibilityElement {
+                if item.accessibilityFrame.contains(CGPoint(x: frame.midX, y: frame.midY)) { found.append(item) }
+                return
+            }
+            let count = item.accessibilityElementCount()
+            if count != NSNotFound && count > 0 {
+                for i in 0..<count {
+                    if let child = item.accessibilityElement(at: i) as? NSObject { walk(child, depth + 1) }
+                }
+            }
+            if let view = item as? UIView {
+                for sub in view.subviews { walk(sub, depth + 1) }
+            }
+        }
+        walk(window, 0)
+        return (found.first(where: { $0.accessibilityTraits.contains(.button) }), found.count)
+    }
+
+    /// UIKit's own expanded status on SwiftUI's header element, which
+    /// VoiceOver speaks in the user's language; SwiftUI sets none on iOS and
+    /// UIKit has none below iOS 18 (docs/expander-plan.md §7, MEASURED).
+    func kayaExpanderPublish(_ anchor: UIView, _ open: Bool) {
+        guard #available(iOS 18.0, *) else { return }
+        _ = kayaExpanderWatch
+        for box in kayaExpanderHeaders.values.joined() where box.view === anchor { box.open = open }
+        DispatchQueue.main.async { kayaExpanderSettle(anchor, tries: 8) }
+    }
+
+    /// SwiftUI builds and replaces its elements after a change and after an
+    /// assistive client starts, so the status is set again for two seconds
+    /// (docs/expander-plan.md §7, MEASURED: a rebuilt row's anchor reaches its
+    /// window after it is made).
+    @available(iOS 18.0, *)
+    private func kayaExpanderSettle(_ anchor: UIView, tries: Int) {
+        if anchor.window != nil, let box = kayaExpanderHeaders.values.joined().first(where: { $0.view === anchor }) {
+            kayaExpanderButton(anchor).0?.accessibilityExpandedStatus = box.open ? .expanded : .collapsed
+        }
+        if tries > 0
+            && (UIAccessibility.isVoiceOverRunning || UIAccessibility.isSwitchControlRunning || kayaAxAutomationOn)
+        {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { kayaExpanderSettle(anchor, tries: tries - 1) }
+        }
+    }
+
+    func kayaExpanderRepublish() {
+        guard #available(iOS 18.0, *) else { return }
+        for case let anchor as UIView in kayaExpanderHeaders.values.joined().compactMap({ $0.view }) {
+            kayaExpanderSettle(anchor, tries: 8)
+        }
+    }
+
+    private let kayaExpanderWatch: [NSObjectProtocol] = [
+        UIAccessibility.voiceOverStatusDidChangeNotification, UIAccessibility.switchControlStatusDidChangeNotification,
+    ].map {
+        NotificationCenter.default.addObserver(forName: $0, object: nil, queue: .main) { _ in
+            kayaExpanderRepublish()
+        }
     }
 #endif
 
@@ -23396,49 +23494,30 @@ struct KayaExpanderHeader {
                 + chain.joined(separator: " < ") + ")")
     }
 #else
-    /// The button UIKit publishes inside the header's frame; where it states
-    /// expanded or collapsed is the breadth's to measure (§7), so anything
-    /// else is reported as read.
+    /// The button UIKit publishes over the header and the expanded status it
+    /// carries (docs/expander-plan.md §7); anything else is reported as read.
     func kayaExpanderHeaderRead(_ node: KayaNode) -> KayaExpanderRead<KayaExpanderHeader> {
         kayaAxEnableAutomation()
         let anchors = (kayaExpanderHeaders[node.id] ?? []).compactMap { $0.view as? UIView }
-        guard let anchor = anchors.first(where: { $0.window != nil && !$0.isHidden }), let window = anchor.window
-        else {
+        guard let anchor = anchors.first(where: { $0.window != nil && !$0.isHidden }) else {
             return .unread("none of the expander's \(anchors.count) header rendering(s) is in a window")
         }
-        let frame = UIAccessibility.convertToScreenCoordinates(anchor.bounds, in: anchor)
-        var found: [NSObject] = []
-        var seen = Set<ObjectIdentifier>()
-        func walk(_ item: NSObject, _ depth: Int) {
-            if depth > 64 || !seen.insert(ObjectIdentifier(item)).inserted { return }
-            if item.isAccessibilityElement {
-                let f = item.accessibilityFrame
-                if f.contains(CGPoint(x: frame.midX, y: frame.midY)) { found.append(item) }
-                return
-            }
-            let count = item.accessibilityElementCount()
-            if count != NSNotFound && count > 0 {
-                for i in 0..<count {
-                    if let child = item.accessibilityElement(at: i) as? NSObject { walk(child, depth + 1) }
-                }
-            }
-            if let view = item as? UIView {
-                for sub in view.subviews { walk(sub, depth + 1) }
-            }
+        let (found, covering) = kayaExpanderButton(anchor)
+        guard let button = found else {
+            return .unread("UIKit publishes no button over the header (\(covering) element(s))")
         }
-        walk(window, 0)
-        guard let button = found.first(where: { $0.accessibilityTraits.contains(.button) }) else {
-            return .unread("UIKit publishes no button over the header (\(found.count) element(s))")
+        guard #available(iOS 18.0, *) else {
+            return .unread("UIKit has no expanded status below iOS 18")
         }
-        let value = (button.accessibilityValue ?? "").lowercased()
-        guard value == "expanded" || value == "collapsed" else {
+        let status = button.accessibilityExpandedStatus
+        guard status == .expanded || status == .collapsed else {
             return .unread(
-                "the header's button publishes value \"\(value)\" and traits \(button.accessibilityTraits.rawValue), "
-                    + "neither expanded nor collapsed")
+                "the header's button publishes expanded status \(status.rawValue) and traits "
+                    + "\(button.accessibilityTraits.rawValue), neither expanded nor collapsed")
         }
         return .read(
             KayaExpanderHeader(
-                name: button.accessibilityLabel ?? "", open: value == "expanded",
+                name: button.accessibilityLabel ?? "", open: status == .expanded,
                 press: { button.accessibilityActivate() }))
     }
 #endif

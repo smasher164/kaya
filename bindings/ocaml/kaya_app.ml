@@ -1911,6 +1911,21 @@ let set_content_type (Widget id) c =
    write never echoes as a toggle. *)
 let set_revealed (Widget id) on = emit (the_tx ()) (Kaya_wire.tx_set_revealed id on)
 
+(* An expander's second header line (docs/expander-plan.md K3); empty
+   draws none. *)
+let set_summary (Widget id) text = emit (the_tx ()) (Kaya_wire.tx_set_summary id text)
+
+let bind_summary (Widget id) (s : string signal) =
+  emit (the_tx ()) (Kaya_wire.tx_bind_summary id s.sig_id)
+
+(* Whether an expander's body shows (docs/expander-plan.md K4); the write
+   never echoes, and the user's own activation of the header reaches its
+   [~on_toggle]. *)
+let set_expanded (Widget id) on = emit (the_tx ()) (Kaya_wire.tx_set_expanded id on)
+
+let bind_expanded (Widget id) (s : bool signal) =
+  emit (the_tx ()) (Kaya_wire.tx_bind_expanded id s.sig_id)
+
 (* Gives a secure field its own show/hide toggle; each flip reaches its
    [~on_toggle] (docs/reveal-plan.md V1, V2). *)
 let set_revealable (Widget id) = emit (the_tx ()) (Kaya_wire.tx_set_revealable id true)
@@ -3429,6 +3444,31 @@ let labeled ?label ?label_bind ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a
   add_child parent name;
   List.iter (fun child -> add_child parent (child ())) children;
   parent
+
+(* An EXPANDER (docs/expander-plan.md): [~text] (or [~text_bind]) is the
+   header the user activates, the children its body, laid out as a column
+   and kept alive while collapsed. The user's toggle reaches [~on_toggle]
+   with the new state. *)
+let expander ?text ?text_bind ?summary ?summary_bind ?expanded ?expanded_bind ?symbol ?on_toggle ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?a11y_hint ?spacing ?align ?inset children () =
+  let tx = the_tx () in
+  let w =
+    container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset
+      Kaya_wire.kind_expander children ()
+  in
+  Option.iter (fun t -> set_text w t) text;
+  Option.iter (fun s -> bind_text w s) text_bind;
+  Option.iter (fun t -> set_summary w t) summary;
+  Option.iter (fun s -> bind_summary w s) summary_bind;
+  Option.iter (fun on -> set_expanded w on) expanded;
+  Option.iter (fun s -> bind_expanded w s) expanded_bind;
+  Option.iter (fun s -> set_symbol w s) symbol;
+  Option.iter (fun v -> set_a11y_hint w v) a11y_hint;
+  (match on_toggle with
+  | Some handler ->
+      let (Widget id) = w in
+      Hashtbl.replace tx.app.widget_toggles id handler
+  | None -> ());
+  w
 
 (* A spacer: PURE SUGAR for an empty grown column — it consumes the
    leftover main-axis space between its siblings. *)
@@ -5239,6 +5279,30 @@ module Tpl = struct
     let bind_revealed_field ?(level = 0) (Node id) (fd : (_, bool) field) =
       emit (the_tx ()) (Kaya_wire.tx_bind_revealed_element ~level ~field:fd.fd_index id)
 
+    (* Every stamped expander's second header line (the live
+       [set_summary]); [bind_summary_field] reads it from the row. *)
+    let set_summary (Node id) text = emit (the_tx ()) (Kaya_wire.tx_set_summary id text)
+
+    let bind_summary (Node id) (s : string signal) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_summary id s.sig_id)
+
+    let bind_summary_field ?(level = 0) (Node id) (fd : (_, string) field) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_summary_element ~level ~field:fd.fd_index id)
+
+    (* Whether every stamped expander's body shows (the live
+       [set_expanded]); a stamped copy needs [bind_expanded_field]
+       (docs/expander-plan.md K10). *)
+    let set_expanded (Node id) on = emit (the_tx ()) (Kaya_wire.tx_set_expanded id on)
+
+    let bind_expanded (Node id) (s : bool signal) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_expanded id s.sig_id)
+
+    let bind_expanded_field ?(level = 0) (Node id) (fd : (_, bool) field) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_expanded_element ~level ~field:fd.fd_index id)
+
+    (* Every stamped button's or expander's glyph (the live [set_symbol]). *)
+    let set_symbol (Node id) s = emit (the_tx ()) (Kaya_wire.tx_set_symbol id (symbol_wire s))
+
     (* Every stamped copy carries its own show/hide toggle (the live
        [set_revealable]). *)
     let set_revealable (Node id) = emit (the_tx ()) (Kaya_wire.tx_set_revealable id true)
@@ -6101,6 +6165,40 @@ module Tpl = struct
     Floor.add_child parent name;
     List.iter (fun child -> Floor.add_child parent (child ())) children;
     parent
+
+  (* An EXPANDER per stamped copy (docs/expander-plan.md K10): its
+     expanded state is [~expanded_field], a bool field of the row (or, in a
+     When outside any For, [~expanded_bind]), which [~on_toggle] writes
+     back, since a re-stamped copy reads its row. Toggles carry the copy's
+     keys first. *)
+  let expander ?text ?text_bind ?text_field ?summary ?summary_bind ?summary_field ?expanded
+      ?expanded_bind ?expanded_field ?symbol ?on_toggle ?grow ?fill ?a11y_id ?a11y_id_bind
+      ?a11y_id_field ?a11y_label ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field
+      ?(a11y_level = 0) ?(level = 0) ?inset children () =
+    let n = Floor.widget Kaya_wire.kind_expander in
+    Option.iter (fun g -> Floor.set_grow n g) grow;
+    Option.iter (fun v -> Floor.set_fill n v) fill;
+    Option.iter (fun p -> Floor.set_inset n p) inset;
+    Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~a11y_level n;
+    Option.iter (fun t -> Floor.set_text n t) text;
+    Option.iter (fun s -> Floor.bind_text n s) text_bind;
+    Option.iter (fun fd -> Floor.bind_text_field ~level n fd) text_field;
+    Option.iter (fun t -> Floor.set_summary n t) summary;
+    Option.iter (fun s -> Floor.bind_summary n s) summary_bind;
+    Option.iter (fun fd -> Floor.bind_summary_field ~level n fd) summary_field;
+    Option.iter (fun on -> Floor.set_expanded n on) expanded;
+    Option.iter (fun s -> Floor.bind_expanded n s) expanded_bind;
+    Option.iter (fun fd -> Floor.bind_expanded_field ~level n fd) expanded_field;
+    Option.iter (fun s -> Floor.set_symbol n s) symbol;
+    (match on_toggle with
+    | Some handler ->
+        let (Node id) = n in
+        Hashtbl.replace (the_tx ()).app.node_toggles id (fun keys on ->
+            handler (List.map key_of_wire keys) on)
+    | None -> ());
+    List.iter (fun child -> Floor.add_child n (child ())) children;
+    n
 
   (* A spacer: PURE SUGAR for an empty grown column — it consumes the
      leftover main-axis space between its siblings, in every stamped copy. *)

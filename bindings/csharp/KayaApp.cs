@@ -4312,6 +4312,23 @@ sealed class Tx : IDisposable
     public void SetRevealable(Widget w) =>
         Records.Add(KayaWire.TxSetRevealable(w.Id, true));
 
+    /// An expander's second header line (docs/expander-plan.md K3);
+    /// empty draws none.
+    public void SetSummary(Widget w, string text) =>
+        Records.Add(KayaWire.TxSetSummary(w.Id, text));
+
+    public void SetSummary(Widget w, Signal s) =>
+        Records.Add(KayaWire.TxBindSummary(w.Id, s.Id));
+
+    /// Whether an expander's body shows (docs/expander-plan.md K4). The
+    /// write never echoes; the user's own activation of the header reaches
+    /// KayaApp.OnToggle.
+    public void SetExpanded(Widget w, bool on) =>
+        Records.Add(KayaWire.TxSetExpanded(w.Id, on));
+
+    public void SetExpanded(Widget w, Signal s) =>
+        Records.Add(KayaWire.TxBindExpanded(w.Id, s.Id));
+
     /// The DESTINATION a Role.Link label opens (docs/tasks-s2-plan.md
     /// T3): the platform's own opener takes it and nothing is emitted.
     public void SetHref(Widget w, string url) =>
@@ -5332,6 +5349,47 @@ sealed class Tx : IDisposable
         try { return body(parent); }
         finally { App.Parents.RemoveAt(App.Parents.Count - 1); }
     }
+
+    /// An EXPANDER (docs/expander-plan.md): `text` is the header the user
+    /// activates, the body its children, laid out as a column and kept
+    /// alive while collapsed. The user's toggle reaches onToggle with the
+    /// new state; SetSummary and SetExpanded take a signal too.
+    public void Expander(string text, Action<Widget> body, string? summary = null,
+        bool? expanded = null, Symbol? symbol = null, Action<Tx, bool>? onToggle = null,
+        double? spacing = null, double? grow = null, Align? align = null, double? inset = null) =>
+        ExpanderOf<object?>(w => SetText(w, text), c => { body(c); return null; }, summary,
+            expanded, symbol, onToggle, spacing, grow, align, inset);
+
+    public T Expander<T>(string text, Func<Widget, T> body, string? summary = null,
+        bool? expanded = null, Symbol? symbol = null, Action<Tx, bool>? onToggle = null,
+        double? spacing = null, double? grow = null, Align? align = null, double? inset = null) =>
+        ExpanderOf(w => SetText(w, text), body, summary, expanded, symbol, onToggle, spacing,
+            grow, align, inset);
+
+    public void Expander(Signal text, Action<Widget> body, string? summary = null,
+        bool? expanded = null, Symbol? symbol = null, Action<Tx, bool>? onToggle = null,
+        double? spacing = null, double? grow = null, Align? align = null, double? inset = null) =>
+        ExpanderOf<object?>(w => BindText(w, text), c => { body(c); return null; }, summary,
+            expanded, symbol, onToggle, spacing, grow, align, inset);
+
+    public T Expander<T>(Signal text, Func<Widget, T> body, string? summary = null,
+        bool? expanded = null, Symbol? symbol = null, Action<Tx, bool>? onToggle = null,
+        double? spacing = null, double? grow = null, Align? align = null, double? inset = null) =>
+        ExpanderOf(w => BindText(w, text), body, summary, expanded, symbol, onToggle, spacing,
+            grow, align, inset);
+
+    T ExpanderOf<T>(Action<Widget> header, Func<Widget, T> body, string? summary,
+        bool? expanded, Symbol? symbol, Action<Tx, bool>? onToggle, double? spacing,
+        double? grow, Align? align, double? inset) =>
+        ContainerOf(KayaWire.KindExpander, c =>
+        {
+            header(c);
+            if (summary != null) SetSummary(c, summary);
+            if (expanded is bool on) SetExpanded(c, on);
+            if (symbol is Symbol sym) SetSymbol(c, sym);
+            if (onToggle != null) App.OnToggle(c, onToggle);
+            return body(c);
+        }, grow, spacing, align, inset);
 
     /// A LABELLED ROW (docs/forms-plan.md): `label` names the one control
     /// the body declares, with an optional trailing button after it. A
@@ -6779,6 +6837,21 @@ sealed class Tpl
     public void SetRevealable(Node n) =>
         tx.Records.Add(KayaWire.TxSetRevealable(n.Id, true));
 
+    /// Every stamped expander's second header line (Tx.SetSummary): a
+    /// constant, a signal, or the row's own field.
+    public void SetSummary(Node n, string text) =>
+        tx.Records.Add(KayaWire.TxSetSummary(n.Id, text));
+
+    public void SetSummary(Node n, Signal s) =>
+        tx.Records.Add(KayaWire.TxBindSummary(n.Id, s.Id));
+
+    public void SetSummary(Node n, Field<string> f, uint level = 0) =>
+        tx.Records.Add(KayaWire.TxBindSummaryElement(n.Id, level, f.Index));
+
+    /// Every stamped button's or expander's glyph (Tx.SetSymbol).
+    public void SetSymbol(Node n, Symbol symbol) =>
+        tx.Records.Add(KayaWire.TxSetSymbol(n.Id, (long)symbol));
+
     /// A stamped container's cross-axis child placement (Tx.SetAlign).
     public void SetAlign(Node n, Align align) =>
         tx.Records.Add(KayaWire.TxSetAlign(n.Id, (long)align));
@@ -7625,6 +7698,56 @@ sealed class Tpl
         body?.Invoke();
         tx.App.Parents.RemoveAt(tx.App.Parents.Count - 1);
         return parent;
+    }
+
+    /// An EXPANDER per stamped copy (docs/expander-plan.md K10): its
+    /// expanded state is a Bool field of the row (or, in a When outside
+    /// any For, a signal), which onToggle writes back, since a re-stamped
+    /// copy reads its row. Toggles carry the copy's keys first.
+    public Node Expander(string text, Field<bool> expanded, Action body,
+        Action<Tx, List<object>, bool>? onToggle = null) =>
+        ExpanderOf(n => tx.Records.Add(KayaWire.TxSetText(n.Id, text)),
+            n => tx.Records.Add(KayaWire.TxBindExpandedElement(n.Id, 0, expanded.Index)),
+            body, onToggle);
+
+    public Node Expander(Signal text, Field<bool> expanded, Action body,
+        Action<Tx, List<object>, bool>? onToggle = null) =>
+        ExpanderOf(n => tx.Records.Add(KayaWire.TxBindText(n.Id, text.Id)),
+            n => tx.Records.Add(KayaWire.TxBindExpandedElement(n.Id, 0, expanded.Index)),
+            body, onToggle);
+
+    public Node Expander(Field<string> text, Field<bool> expanded, Action body,
+        Action<Tx, List<object>, bool>? onToggle = null) =>
+        ExpanderOf(n => tx.Records.Add(KayaWire.TxBindTextElement(n.Id, 0, text.Index)),
+            n => tx.Records.Add(KayaWire.TxBindExpandedElement(n.Id, 0, expanded.Index)),
+            body, onToggle);
+
+    public Node Expander(string text, Signal expanded, Action body,
+        Action<Tx, List<object>, bool>? onToggle = null) =>
+        ExpanderOf(n => tx.Records.Add(KayaWire.TxSetText(n.Id, text)),
+            n => tx.Records.Add(KayaWire.TxBindExpanded(n.Id, expanded.Id)),
+            body, onToggle);
+
+    public Node Expander(Signal text, Signal expanded, Action body,
+        Action<Tx, List<object>, bool>? onToggle = null) =>
+        ExpanderOf(n => tx.Records.Add(KayaWire.TxBindText(n.Id, text.Id)),
+            n => tx.Records.Add(KayaWire.TxBindExpanded(n.Id, expanded.Id)),
+            body, onToggle);
+
+    public Node Expander(Field<string> text, Signal expanded, Action body,
+        Action<Tx, List<object>, bool>? onToggle = null) =>
+        ExpanderOf(n => tx.Records.Add(KayaWire.TxBindTextElement(n.Id, 0, text.Index)),
+            n => tx.Records.Add(KayaWire.TxBindExpanded(n.Id, expanded.Id)),
+            body, onToggle);
+
+    Node ExpanderOf(Action<Node> header, Action<Node> expanded, Action body,
+        Action<Tx, List<object>, bool>? onToggle)
+    {
+        var n = ContainerOf(KayaWire.KindExpander, body);
+        header(n);
+        expanded(n);
+        if (onToggle != null) tx.App.OnToggle(n, onToggle);
+        return n;
     }
 
     /// A spacer: PURE SUGAR for an empty grown column, in every stamped

@@ -491,6 +491,18 @@ static class Program
         Fwd("Labeled", ["string label", "System.Action body"], "label, body");
         Fwd("Labeled", ["Signal label", "System.Action body"], "label, body");
         Fwd("Labeled", ["Field<string> label", "System.Action body"], "label, body");
+        Fwd("Expander", ["string text", "Field<bool> expanded", "System.Action body",
+            $"{onToggle} onToggle = null"], "text, expanded, body, onToggle");
+        Fwd("Expander", ["Signal text", "Field<bool> expanded", "System.Action body",
+            $"{onToggle} onToggle = null"], "text, expanded, body, onToggle");
+        Fwd("Expander", ["Field<string> text", "Field<bool> expanded", "System.Action body",
+            $"{onToggle} onToggle = null"], "text, expanded, body, onToggle");
+        Fwd("Expander", ["string text", "Signal expanded", "System.Action body",
+            $"{onToggle} onToggle = null"], "text, expanded, body, onToggle");
+        Fwd("Expander", ["Signal text", "Signal expanded", "System.Action body",
+            $"{onToggle} onToggle = null"], "text, expanded, body, onToggle");
+        Fwd("Expander", ["Field<string> text", "Signal expanded", "System.Action body",
+            $"{onToggle} onToggle = null"], "text, expanded, body, onToggle");
         Fwd("Spacer", [], "");
         // THE NESTED-FOR VOCABULARY, forwarded for the reason the
         // constructors are: a row that cannot open a For cannot name the
@@ -544,6 +556,10 @@ static class Program
         Set("SetRevealed", ["Node n", "Signal s"], "n, s");
         Set("SetRevealed", ["Node n", "Field<bool> f", "uint level = 0"], "n, f, level");
         Set("SetRevealable", ["Node n"], "n");
+        Set("SetSummary", ["Node n", "string text"], "n, text");
+        Set("SetSummary", ["Node n", "Signal s"], "n, s");
+        Set("SetSummary", ["Node n", "Field<string> f", "uint level = 0"], "n, f, level");
+        Set("SetSymbol", ["Node n", "Symbol symbol"], "n, symbol");
         Set("SetAlign", ["Node n", "Align align"], "n, align");
         Set("SetFilled", ["Node n", "Tint tint"], "n, tint");
         Set("SetMaxWidth", ["Node n", "double points"], "n, points");

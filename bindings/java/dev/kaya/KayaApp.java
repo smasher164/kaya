@@ -4749,6 +4749,28 @@ public final class KayaApp {
             return this;
         }
 
+        /** This expander's second header line ({@link Tx#setSummary}). */
+        public Widget summary(String text) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: summary on a widget outside its build transaction"
+                    + " — use Tx.setSummary inside a live transaction");
+            }
+            tx.setSummary(this, text);
+            return this;
+        }
+
+        /** Whether this expander's body shows ({@link Tx#setExpanded}). */
+        public Widget expanded(boolean on) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: expanded on a widget outside its build transaction"
+                    + " — use Tx.setExpanded inside a live transaction");
+            }
+            tx.setExpanded(this, on);
+            return this;
+        }
+
         /** This secure field carries its own show/hide toggle
          * ({@link Tx#setRevealable}). */
         public Widget revealable() {
@@ -5694,6 +5716,33 @@ public final class KayaApp {
             return t.grid(columns, body);
         }
 
+        public Node expander(String text, KayaRecords.Field<Boolean> expanded, Runnable body) {
+            return t.expander(text, expanded, body);
+        }
+
+        public Node expander(Signal<String> text, KayaRecords.Field<Boolean> expanded,
+                Runnable body) {
+            return t.expander(text, expanded, body);
+        }
+
+        public Node expander(KayaRecords.Field<String> text, KayaRecords.Field<Boolean> expanded,
+                Runnable body) {
+            return t.expander(text, expanded, body);
+        }
+
+        public Node expander(String text, Signal<Boolean> expanded, Runnable body) {
+            return t.expander(text, expanded, body);
+        }
+
+        public Node expander(Signal<String> text, Signal<Boolean> expanded, Runnable body) {
+            return t.expander(text, expanded, body);
+        }
+
+        public Node expander(KayaRecords.Field<String> text, Signal<Boolean> expanded,
+                Runnable body) {
+            return t.expander(text, expanded, body);
+        }
+
         public Node labeled(String label, Runnable body) {
             return t.labeled(label, body);
         }
@@ -5932,6 +5981,26 @@ public final class KayaApp {
          * (Tpl.setContentType). */
         public void setContentType(Node n, ContentType content) {
             t.setContentType(n, content);
+        }
+
+        /** This row's copy of that expander's second header line
+         * (Tpl.setSummary). */
+        public void setSummary(Node n, String text) {
+            t.setSummary(n, text);
+        }
+
+        public void setSummary(Node n, Signal<String> s) {
+            t.setSummary(n, s);
+        }
+
+        public void setSummary(Node n, KayaRecords.Field<String> f) {
+            t.setSummary(n, f);
+        }
+
+        /** This row's copy of that button's or expander's glyph
+         * (Tpl.setSymbol). */
+        public void setSymbol(Node n, Symbol symbol) {
+            t.setSymbol(n, symbol);
         }
 
         /** This row's copy of that secure field's reveal (Tpl.setRevealed). */
@@ -6881,6 +6950,27 @@ public final class KayaApp {
             emit(KayaWire.txSetRevealed(w.id, on));
         }
 
+        /** An expander's second header line (docs/expander-plan.md K3);
+         * empty draws none. */
+        public void setSummary(Widget w, String text) {
+            emit(KayaWire.txSetSummary(w.id, text));
+        }
+
+        public void setSummary(Widget w, Signal<String> s) {
+            emit(KayaWire.txBindSummary(w.id, s.id));
+        }
+
+        /** Whether an expander's body shows (docs/expander-plan.md K4); the
+         * write never echoes, and the user's own activation of the header
+         * reaches {@link KayaApp#onToggle(Widget, BiConsumer)}. */
+        public void setExpanded(Widget w, boolean on) {
+            emit(KayaWire.txSetExpanded(w.id, on));
+        }
+
+        public void setExpanded(Widget w, Signal<Boolean> s) {
+            emit(KayaWire.txBindExpanded(w.id, s.id));
+        }
+
         /** Gives a secure field its own show/hide toggle; each flip reaches
          * {@link KayaApp#onToggle(Widget, BiConsumer)} (docs/reveal-plan.md V2). */
         public void setRevealable(Widget w) {
@@ -7023,6 +7113,42 @@ public final class KayaApp {
             } finally {
                 parents.remove(parents.size() - 1);
             }
+        }
+
+        /** An EXPANDER (docs/expander-plan.md): the header the user
+         * activates, the body its children, laid out as a column and kept
+         * alive while collapsed. Chain summary, symbol and expanded; the
+         * user's toggle reaches {@link KayaApp#onToggle(Widget, BiConsumer)}. */
+        public Widget expander(String text, java.util.function.Consumer<Widget> body) {
+            return expanderOf(w -> setText(w, text), body);
+        }
+
+        public <R> Built<R> expander(String text, java.util.function.Function<Widget, R> body) {
+            return expanderOf(w -> setText(w, text), body);
+        }
+
+        public Widget expander(Signal<String> text, java.util.function.Consumer<Widget> body) {
+            return expanderOf(w -> emit(KayaWire.txBindText(w.id, text.id)), body);
+        }
+
+        public <R> Built<R> expander(
+                Signal<String> text, java.util.function.Function<Widget, R> body) {
+            return expanderOf(w -> emit(KayaWire.txBindText(w.id, text.id)), body);
+        }
+
+        private Widget expanderOf(
+                Consumer<Widget> header, java.util.function.Consumer<Widget> body) {
+            return expanderOf(header, w -> {
+                body.accept(w);
+                return null;
+            }).id();
+        }
+
+        private <R> Built<R> expanderOf(
+                Consumer<Widget> header, java.util.function.Function<Widget, R> body) {
+            Built<R> built = containerOf(KayaWire.KIND_EXPANDER, body);
+            header.accept(built.id());
+            return built;
         }
 
         /** A spacer: PURE SUGAR for an empty grown column — it
@@ -9081,6 +9207,26 @@ public final class KayaApp {
             tx.emit(KayaWire.txBindRevealedElement(n.id, 0, f.index));
         }
 
+        /** Every stamped expander's second header line, the blueprint
+         * twin of {@link Tx#setSummary}. */
+        public void setSummary(Node n, String text) {
+            tx.emit(KayaWire.txSetSummary(n.id, text));
+        }
+
+        public void setSummary(Node n, Signal<String> s) {
+            tx.emit(KayaWire.txBindSummary(n.id, s.id));
+        }
+
+        public void setSummary(Node n, KayaRecords.Field<String> f) {
+            tx.emit(KayaWire.txBindSummaryElement(n.id, 0, f.index));
+        }
+
+        /** Every stamped button's or expander's glyph, the blueprint twin
+         * of {@link Tx#setSymbol}. */
+        public void setSymbol(Node n, Symbol symbol) {
+            tx.emit(KayaWire.txSetSymbol(n.id, symbol.wire));
+        }
+
         /** Every stamped copy carries its own show/hide toggle; each flip
          * reaches {@link KayaApp#onToggle(Node, ToggleHandler)} with the
          * copy's keys. */
@@ -9365,6 +9511,51 @@ public final class KayaApp {
             }
             parents.remove(parents.size() - 1);
             return parent;
+        }
+
+        /** An EXPANDER per stamped copy (docs/expander-plan.md K10): its
+         * expanded state is a Bool field of the row (or, in a When outside
+         * any For, a signal), which the toggle handler writes back, since
+         * a re-stamped copy reads its row. Toggles reach
+         * {@link KayaApp#onToggle(Node, ToggleHandler)} with the keys. */
+        public Node expander(String text, KayaRecords.Field<Boolean> expanded, Runnable body) {
+            return expanderOf(n -> setText(n, text),
+                    n -> tx.emit(KayaWire.txBindExpandedElement(n.id, 0, expanded.index)), body);
+        }
+
+        public Node expander(Signal<String> text, KayaRecords.Field<Boolean> expanded,
+                Runnable body) {
+            return expanderOf(n -> tx.emit(KayaWire.txBindText(n.id, text.id)),
+                    n -> tx.emit(KayaWire.txBindExpandedElement(n.id, 0, expanded.index)), body);
+        }
+
+        public Node expander(KayaRecords.Field<String> text, KayaRecords.Field<Boolean> expanded,
+                Runnable body) {
+            return expanderOf(n -> bindTextField(n, 0, text),
+                    n -> tx.emit(KayaWire.txBindExpandedElement(n.id, 0, expanded.index)), body);
+        }
+
+        public Node expander(String text, Signal<Boolean> expanded, Runnable body) {
+            return expanderOf(n -> setText(n, text),
+                    n -> tx.emit(KayaWire.txBindExpanded(n.id, expanded.id)), body);
+        }
+
+        public Node expander(Signal<String> text, Signal<Boolean> expanded, Runnable body) {
+            return expanderOf(n -> tx.emit(KayaWire.txBindText(n.id, text.id)),
+                    n -> tx.emit(KayaWire.txBindExpanded(n.id, expanded.id)), body);
+        }
+
+        public Node expander(KayaRecords.Field<String> text, Signal<Boolean> expanded,
+                Runnable body) {
+            return expanderOf(n -> bindTextField(n, 0, text),
+                    n -> tx.emit(KayaWire.txBindExpanded(n.id, expanded.id)), body);
+        }
+
+        private Node expanderOf(Consumer<Node> header, Consumer<Node> expanded, Runnable body) {
+            Node n = containerOf(KayaWire.KIND_EXPANDER, body);
+            header.accept(n);
+            expanded.accept(n);
+            return n;
         }
 
         /** A spacer: the live zone's PURE SUGAR for an empty grown

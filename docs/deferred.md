@@ -23,23 +23,37 @@ DisclosureGroup; inside a derived form, which now admits expanders as rows,
 K11); the harness's `expect_expanded` and `expect_out_of_reach`, `toggle` and
 `expect` on the kind, and the K5 refusal in harness.rs and the SwiftUI
 runner; tools/scenes/expander.steps green on the mac lane for Rust.
-  - **DEPTH STUB: expander on gtk** — `GtkExpander` outside a form and
-    `AdwExpanderRow` inside one (K12), `notify::expanded` outside the quiet
-    guard, the AT-SPI EXPANDED state and the body's `showing` as the reads
-    (§3); its row in tools/lib/expander_routes.py closes it.
-  - **DEPTH STUB: expander on winui** — `Expander` with its two event-args
-    types and automation peer added to tools/winui-bindgen's filter (K14),
-    `Expanding`/`Collapsed` outside the quiet guard, the peer's
-    ExpandCollapseState and the body's first child as the reads, the measured
-    press door (§7); its expander_routes row closes it.
-  - **DEPTH STUB: expander on compose** — a `ListItem` header with a turning
-    `ExpandMore`, `Role.Button`, the state description and expand/collapse
-    actions over `AnimatedVisibility` (K13), the expanded state composition
-    state (check-compose-state); its expander_routes row closes it.
-  - **The iOS legs** — the arm is built and compiled; where iOS publishes the
-    header's expanded state is unmeasured (§7), so `expander` sits in
-    tools/lib/lanes/ios.py's UNWIRED_SCENES and kayaExpanderHeaderRead's iOS
-    half reports the button's value and traits it read when they say neither.
+  - ~~**DEPTH STUB: expander on gtk**~~ — LANDED 2026-10-09: `GtkExpander`
+    outside a form and `AdwExpanderRow` inside one (K12), the body seated once
+    the expander has a parent; `notify::expanded` on both outside the quiet
+    guard; the header's name is its text and its description the summary (the
+    maintainer's ruling); the reads are the bus's EXPANDED state on the header
+    and GTK's mapped body, the press the bus `activate` (the form row's header
+    publishes none, so it is activated as Enter does). expander-* green in all
+    nine languages and C on x11 and wayland, tasks/tasksrtl with the Advanced
+    section; its expander_routes row in BACKENDS.
+  - ~~**DEPTH STUB: expander on winui**~~ — LANDED 2026-10-09: `Expander`,
+    its two event-args types, its peer and ExpandCollapseState in
+    tools/winui-bindgen's filter (K14); `Expanding`/`Collapsed` outside the
+    quiet guard; the reads are the peer's ExpandCollapseState and UIA's
+    offscreen state on the body, the press the peer's Expand/Collapse; the
+    summary is the HelpText of the Expander and of the template's header
+    ToggleButton, which is what takes focus. expander_rust, _python, _js, _go,
+    _csharp, _java green, tasks_rust and tasksrtl_rust with the Advanced
+    section; its expander_routes row in BACKENDS.
+  - ~~**DEPTH STUB: expander on compose**~~ — LANDED 2026-10-09: `KayaExpander`
+    draws a `ListItem` header with a turning `ExpandMore` over
+    `AnimatedVisibility`, `Role.Button`, Material's own expanded/collapsed word
+    as the state description and the expand/collapse actions; the summary is
+    the header's click label, which is what kaya's Android hint reads; the
+    harness reads the merged header and the body's anchor and presses the
+    header's click. expander-compose, -jvm and -go green, its expander_routes
+    row in BACKENDS.
+  - ~~**The iOS legs**~~ — LANDED 2026-10-09: MEASURED on the iOS 26.5
+    simulator that SwiftUI's DisclosureGroup publishes no expanded state at
+    all (button trait only, ExpandedStatus unsupported, no value, hint or
+    action), so the arm states it as the header's value, in English
+    (docs/expander-plan.md §7); expander-swiftui, -swift and -go green.
   - **The other eight bindings and the C floor** (K18): an `expander` in both
     zones with `summary`, `expanded` and the toggle handler, an `expander`
     guest each; check-sugar-surface is red for them until then.

@@ -85,6 +85,9 @@ menu_activate "عرض>الإعدادات"
 expect_entries 1
 expect label@settings[s] "يبدأ الأسبوع الاثنين؛ الشارة ظاهرة؛ المنجزة تنتقل إلى السجل"
 expect_no_clipping
+expect expander@advanced[s] "خيارات متقدمة"
+toggle expander@advanced[s] on
+expect_expanded expander@advanced[s] on
 expect_ax checkbox@hide_badge[s] "switch/إخفاء شارة اليوم"
 back
 expect_entries 0

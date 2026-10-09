@@ -15295,3 +15295,18 @@ A lane run by hand runs the microphone legs in place: under generated load
 pass KAYA_QUIET=skip, as validate-all does, or they fail as the emulator's
 audio input entry says. GUARD: none new; a pooled drag or shade red is read
 from its bundle's system timeline, which carries both histories.
+
+## The GTK bus walk stopped at depth 24 (measured 2026-10-09)
+
+The harness's AT-SPI reads that name a widget by its ordinal (`atspi_collect`,
+`atspi_text_of`, `atspi_act`, `atspi_states` in crates/kaya/src/gtk.rs) walked
+the bus to depth 24, while `atspi_rank` walks the GTK widget tree with no limit.
+The task manager's Settings switches, inside a labelled row inside the Advanced
+expander's AdwExpanderRow inside a navigation page, sit below that depth: the
+rank found the switch and the bus walk published its row as `ListItem/` over
+one `Panel/` with nothing under it, so `expect_ax` read "<not in the
+accessibility tree>" with the GTK tree mapped and correct (a dump of the
+widget tree beside the bus trace, on both protocols). The same rows in a
+shallow window read fine. Those four walks now go to `ATSPI_DEPTH` (40).
+GUARD: the tasks and tasksrtl legs' `expect_ax checkbox@hide_badge[s]`, which
+reads below the old depth on every linux run.

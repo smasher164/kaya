@@ -334,6 +334,30 @@ sealed class MediaClipRow
         System.Action body) =>
         t.Labeled(label, body);
 
+    public Node Expander(string text, Field<bool> expanded, System.Action body,
+        System.Action<Tx, System.Collections.Generic.List<object>, bool>? onToggle = null) =>
+        t.Expander(text, expanded, body, onToggle);
+
+    public Node Expander(Signal text, Field<bool> expanded, System.Action body,
+        System.Action<Tx, System.Collections.Generic.List<object>, bool>? onToggle = null) =>
+        t.Expander(text, expanded, body, onToggle);
+
+    public Node Expander(Field<string> text, Field<bool> expanded, System.Action body,
+        System.Action<Tx, System.Collections.Generic.List<object>, bool>? onToggle = null) =>
+        t.Expander(text, expanded, body, onToggle);
+
+    public Node Expander(string text, Signal expanded, System.Action body,
+        System.Action<Tx, System.Collections.Generic.List<object>, bool>? onToggle = null) =>
+        t.Expander(text, expanded, body, onToggle);
+
+    public Node Expander(Signal text, Signal expanded, System.Action body,
+        System.Action<Tx, System.Collections.Generic.List<object>, bool>? onToggle = null) =>
+        t.Expander(text, expanded, body, onToggle);
+
+    public Node Expander(Field<string> text, Signal expanded, System.Action body,
+        System.Action<Tx, System.Collections.Generic.List<object>, bool>? onToggle = null) =>
+        t.Expander(text, expanded, body, onToggle);
+
     public Node Spacer() => t.Spacer();
 
     public Collection Collection() => t.Collection();
@@ -432,6 +456,15 @@ sealed class MediaClipRow
         t.SetRevealed(n, f, level);
 
     public void SetRevealable(Node n) => t.SetRevealable(n);
+
+    public void SetSummary(Node n, string text) => t.SetSummary(n, text);
+
+    public void SetSummary(Node n, Signal s) => t.SetSummary(n, s);
+
+    public void SetSummary(Node n, Field<string> f, uint level = 0) =>
+        t.SetSummary(n, f, level);
+
+    public void SetSymbol(Node n, Symbol symbol) => t.SetSymbol(n, symbol);
 
     public void SetAlign(Node n, Align align) => t.SetAlign(n, align);
 

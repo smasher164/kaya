@@ -56,6 +56,10 @@ func (r itemRow) Checkbox(f kaya.Field[bool], onToggle func(*kaya.Tx, string, bo
 	return r.c.Checkbox(r.t, f, onToggle)
 }
 
+func (r itemRow) Expander(text kaya.Field[string], expanded kaya.Field[bool], onToggle func(*kaya.Tx, string, bool), body func()) kaya.Node {
+	return r.c.Expander(r.t, text, expanded, onToggle, body)
+}
+
 func (r itemRow) Button(f kaya.Field[string], onClick func(*kaya.Tx, string)) kaya.Node {
 	return r.c.Button(r.t, f, onClick)
 }
@@ -131,6 +135,12 @@ func (r itemRow) SetLowLabel(n kaya.Node, label string)       { r.t.SetLowLabel(
 func (r itemRow) LowLabel(n kaya.Node, f kaya.Field[string])  { r.c.LowLabel(r.t, n, f) }
 func (r itemRow) SetHighLabel(n kaya.Node, label string)      { r.t.SetHighLabel(n, label) }
 func (r itemRow) HighLabel(n kaya.Node, f kaya.Field[string]) { r.c.HighLabel(r.t, n, f) }
+
+func (r itemRow) SetSummary(n kaya.Node, text string) { r.t.SetSummary(n, text) }
+
+func (r itemRow) Summary(n kaya.Node, f kaya.Field[string]) { r.t.BindSummary(n, f) }
+
+func (r itemRow) SetSymbol(n kaya.Node, symbol kaya.Symbol) { r.t.SetSymbol(n, symbol) }
 
 func (r itemRow) SetA11yID(n kaya.Node, id string)                { r.t.SetA11yID(n, id) }
 func (r itemRow) ContextMenu(n kaya.Node, c *kaya.ContextCatalog) { r.t.ContextMenu(n, c) }

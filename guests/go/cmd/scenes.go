@@ -22,6 +22,7 @@ import (
 	"dev.kaya/guests/go/dnd"
 	"dev.kaya/guests/go/editor"
 	"dev.kaya/guests/go/entry"
+	"dev.kaya/guests/go/expander"
 	"dev.kaya/guests/go/feed"
 	"dev.kaya/guests/go/filedialog"
 	"dev.kaya/guests/go/format"
@@ -100,6 +101,7 @@ var scenes = map[string]func() *kaya.App{
 	"dnd":            dnd.App,
 	"editor":         editor.App,
 	"entry":          entry.App,
+	"expander":       expander.App,
 	"feed":           feed.App,
 	"filedialog":     filedialog.App,
 	"fullscreen":     fullscreen.App,

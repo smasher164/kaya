@@ -1229,6 +1229,17 @@ val set_content_type : widget -> Content_type.t -> unit
    write never echoes as a toggle. *)
 val set_revealed : widget -> bool -> unit
 
+(* An expander's second header line (docs/expander-plan.md K3). *)
+val set_summary : widget -> string -> unit
+
+val bind_summary : widget -> string signal -> unit
+
+(* Whether an expander's body shows (docs/expander-plan.md K4); the write
+   never echoes as a toggle. *)
+val set_expanded : widget -> bool -> unit
+
+val bind_expanded : widget -> bool signal -> unit
+
 (* Gives a secure field its own show/hide toggle; each flip reaches its
    [~on_toggle] (docs/reveal-plan.md V1, V2). *)
 val set_revealable : widget -> unit
@@ -1443,6 +1454,30 @@ val labeled :
   ?help:string ->
   ?help_bind:string signal ->
   ?spacing:float -> ?inset:float -> (unit -> widget) list -> unit -> widget
+
+(* An EXPANDER (docs/expander-plan.md): [~text] is the header the user
+   activates, the children its body, kept alive while collapsed; the
+   user's toggle reaches [~on_toggle]. *)
+val expander :
+  ?text:string ->
+  ?text_bind:string signal ->
+  ?summary:string ->
+  ?summary_bind:string signal ->
+  ?expanded:bool ->
+  ?expanded_bind:bool signal ->
+  ?symbol:symbol ->
+  ?on_toggle:(bool -> unit) ->
+  ?grow:float ->
+  ?fill:bool ->
+  ?a11y_id:string ->
+  ?a11y_id_bind:string signal ->
+  ?a11y_label:string ->
+  ?a11y_label_bind:string signal ->
+  ?help:string ->
+  ?help_bind:string signal ->
+  ?a11y_hint:string ->
+  ?spacing:float ->
+  ?align:align -> ?inset:float -> (unit -> widget) list -> unit -> widget
 
 val spacer : ?grow:float -> unit -> widget
 
@@ -2623,6 +2658,34 @@ module Tpl : sig
     ?help_bind:string signal ->
     ?help_field:('d, string) field ->
     ?a11y_level:int -> ?level:int -> (unit -> node) list -> unit -> node
+
+  (* An EXPANDER per stamped copy (docs/expander-plan.md K10): its
+     expanded state is a bool field of the row, which [~on_toggle] writes
+     back. *)
+  val expander :
+    ?text:string ->
+    ?text_bind:string signal ->
+    ?text_field:('a, string) field ->
+    ?summary:string ->
+    ?summary_bind:string signal ->
+    ?summary_field:('b, string) field ->
+    ?expanded:bool ->
+    ?expanded_bind:bool signal ->
+    ?expanded_field:('c, bool) field ->
+    ?symbol:symbol ->
+    ?on_toggle:(key list -> bool -> unit) ->
+    ?grow:float ->
+    ?fill:bool ->
+    ?a11y_id:string ->
+    ?a11y_id_bind:string signal ->
+    ?a11y_id_field:('d, string) field ->
+    ?a11y_label:string ->
+    ?a11y_label_bind:string signal ->
+    ?a11y_label_field:('e, string) field ->
+    ?help:string ->
+    ?help_bind:string signal ->
+    ?help_field:('f, string) field ->
+    ?a11y_level:int -> ?level:int -> ?inset:float -> (unit -> node) list -> unit -> node
 
   val spacer : ?grow:float -> unit -> node
 

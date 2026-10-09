@@ -3764,6 +3764,8 @@ enum NativeWidget {
     /// docs/media-plan.md §3: a GtkPicture over the player's
     /// gtk4paintablesink paintable, kaya's caption over it.
     Video(gtk_media::GtkVideoView),
+    /// docs/expander-plan.md K12.
+    Expander(Rc<GtkExpanderParts>),
 }
 
 impl NativeWidget {
@@ -3798,6 +3800,7 @@ impl NativeWidget {
             NativeWidget::TimePicker(f) => f.button.clone().upcast(),
             NativeWidget::Labeled(row) => row.clone().upcast(),
             NativeWidget::Video(v) => v.overlay.clone().upcast(),
+            NativeWidget::Expander(x) => x.widget(),
         }
     }
 
@@ -3810,7 +3813,254 @@ impl NativeWidget {
     fn control(&self) -> gtk4::Widget {
         match self {
             NativeWidget::Textarea(_, view) => view.clone().upcast(),
+            NativeWidget::Expander(x) => x.control(),
             other => other.widget(),
+        }
+    }
+}
+
+/// docs/expander-plan.md K12: a GtkExpander outside a derived form and an
+/// AdwExpanderRow inside one, the body seated in whichever is shown.
+struct GtkExpanderParts {
+    id: u64,
+    free: gtk4::Expander,
+    free_body: gtk4::Box,
+    title: gtk4::Label,
+    summary: gtk4::Label,
+    icon: gtk4::Image,
+    row: adw::ExpanderRow,
+    row_header: gtk4::Widget,
+    row_icon: gtk4::Image,
+    in_form: std::cell::Cell<bool>,
+    placed: std::cell::Cell<bool>,
+    children: std::cell::RefCell<Vec<gtk4::Widget>>,
+    hint: std::cell::RefCell<String>,
+}
+
+impl GtkExpanderParts {
+    fn new(id: u64) -> Self {
+        use gtk4::prelude::{BoxExt, Cast, WidgetExt};
+        let icon = || {
+            glib::Object::builder::<gtk4::Image>()
+                .property("accessible-role", gtk4::AccessibleRole::Presentation)
+                .property("visible", false)
+                .build()
+        };
+        let free = gtk4::Expander::new(None);
+        let title = gtk4::Label::new(None);
+        title.set_xalign(0.0);
+        let summary = gtk4::Label::new(None);
+        summary.set_xalign(0.0);
+        summary.add_css_class("dim-label");
+        summary.set_visible(false);
+        let lines = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+        lines.append(&title);
+        lines.append(&summary);
+        let header = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+        let free_icon = icon();
+        header.append(&free_icon);
+        header.append(&lines);
+        free.set_label_widget(Some(&header));
+        let free_body = gtk4::Box::new(gtk4::Orientation::Vertical, CONTAINER_SPACING);
+        set_container_vertical(free_body.upcast_ref(), true);
+        free.set_child(Some(&free_body));
+        let row = adw::ExpanderRow::new();
+        let row_icon = icon();
+        fn first_action_row(w: &gtk4::Widget) -> Option<gtk4::Widget> {
+            let mut child = w.first_child();
+            while let Some(c) = child {
+                if c.is::<adw::ActionRow>() {
+                    return Some(c);
+                }
+                if let Some(found) = first_action_row(&c) {
+                    return Some(found);
+                }
+                child = c.next_sibling();
+            }
+            None
+        }
+        let row_header = first_action_row(row.upcast_ref())
+            .expect("libadwaita's expander row carries its header as an action row");
+        GtkExpanderParts {
+            id,
+            free,
+            free_body,
+            title,
+            summary,
+            icon: free_icon,
+            row,
+            row_header,
+            row_icon,
+            in_form: std::cell::Cell::new(false),
+            placed: std::cell::Cell::new(false),
+            children: std::cell::RefCell::new(Vec::new()),
+            hint: std::cell::RefCell::new(String::new()),
+        }
+    }
+
+    fn widget(&self) -> gtk4::Widget {
+        use gtk4::prelude::Cast;
+        if self.in_form.get() {
+            self.row.clone().upcast()
+        } else {
+            self.free.clone().upcast()
+        }
+    }
+
+    fn control(&self) -> gtk4::Widget {
+        use gtk4::prelude::Cast;
+        if self.in_form.get() {
+            self.row_header.clone()
+        } else {
+            self.free.clone().upcast()
+        }
+    }
+
+    fn is_expanded(&self) -> bool {
+        use adw::prelude::ExpanderRowExt;
+        if self.in_form.get() {
+            self.row.is_expanded()
+        } else {
+            self.free.is_expanded()
+        }
+    }
+
+    /// docs/expander-plan.md K12: in a form a body child that is not a row
+    /// rides a plain row, inset as a row's content is.
+    fn body_add(&self, child: &gtk4::Widget) {
+        use gtk4::prelude::{BoxExt, Cast, ListBoxRowExt};
+        if !self.placed.get() {
+            return;
+        }
+        if !self.in_form.get() {
+            self.free_body.append(child);
+        } else if child.is::<adw::PreferencesRow>() {
+            adw::prelude::ExpanderRowExt::add_row(&self.row, child);
+        } else {
+            let pad = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+            pad.set_margin_start(12);
+            pad.set_margin_end(12);
+            pad.set_margin_top(8);
+            pad.set_margin_bottom(8);
+            pad.append(child);
+            let plain = gtk4::ListBoxRow::new();
+            plain.set_activatable(false);
+            plain.set_child(Some(&pad));
+            adw::prelude::ExpanderRowExt::add_row(&self.row, plain.upcast_ref::<gtk4::Widget>());
+        }
+    }
+
+    fn body_remove(&self, child: &gtk4::Widget) {
+        use gtk4::prelude::{BoxExt, Cast};
+        if !self.placed.get() {
+            return;
+        }
+        if !self.in_form.get() {
+            self.free_body.remove(child);
+        } else if child.is::<adw::PreferencesRow>() {
+            adw::prelude::ExpanderRowExt::remove(&self.row, child);
+        } else if let Some(pad) = child.parent().and_then(|p| p.downcast::<gtk4::Box>().ok()) {
+            let plain = pad.parent();
+            pad.remove(child);
+            if let Some(plain) = plain {
+                adw::prelude::ExpanderRowExt::remove(&self.row, &plain);
+            }
+        }
+    }
+
+    fn reseat_body(&self, core: &CoreState) {
+        self.reseat_into(core, self.in_form.get());
+    }
+
+    fn reseat_into(&self, core: &CoreState, in_form: bool) {
+        let kids = self.children.borrow().clone();
+        for kid in &kids {
+            self.body_remove(kid);
+        }
+        self.in_form.set(in_form);
+        self.placed.set(true);
+        let mut seated = Vec::with_capacity(kids.len());
+        for kid in &kids {
+            let kid = match expander_of(core, kid) {
+                Some(inner) => {
+                    expander_seat(core, &inner, self.in_form.get());
+                    inner.widget()
+                }
+                None => kid.clone(),
+            };
+            self.body_add(&kid);
+            seated.push(kid);
+        }
+        *self.children.borrow_mut() = seated;
+    }
+}
+
+/// The expander whose shown widget (either of its two) is `w`.
+fn expander_of(core: &CoreState, w: &gtk4::Widget) -> Option<Rc<GtkExpanderParts>> {
+    use gtk4::prelude::Cast;
+    core.expanders
+        .iter()
+        .find(|x| x.free.upcast_ref::<gtk4::Widget>() == w || x.row.upcast_ref::<gtk4::Widget>() == w)
+        .cloned()
+}
+
+/// docs/expander-plan.md K11, K12: seat an expander's body once it lands in a
+/// parent, so a template's body is parented once, or move it between its free
+/// widget and its form row, carrying the state the props left on the one that
+/// was shown.
+fn expander_seat(core: &CoreState, x: &GtkExpanderParts, in_form: bool) {
+    use adw::prelude::ExpanderRowExt;
+    use gtk4::prelude::{AccessibleExtManual, WidgetExt};
+    if x.placed.get() && x.in_form.get() == in_form {
+        return;
+    }
+    let switching = x.in_form.get() != in_form;
+    let (old, old_control) = (x.widget(), x.control());
+    let open = x.is_expanded();
+    x.reseat_into(core, in_form);
+    if !switching {
+        return;
+    }
+    let was = core.apply_quiet.get();
+    core.apply_quiet.set(true);
+    x.free.set_expanded(open);
+    x.row.set_expanded(open);
+    core.apply_quiet.set(was);
+    let (new, control) = (x.widget(), x.control());
+    new.set_visible(old.is_visible());
+    new.set_margin_start(old.margin_start());
+    new.set_margin_end(old.margin_end());
+    new.set_margin_top(old.margin_top());
+    new.set_margin_bottom(old.margin_bottom());
+    set_grow_weight(&new, grow_weight(&old));
+    if let Some(on) = fill_of(&old) {
+        set_fill(&new, on);
+    }
+    control.set_widget_name(&old_control.widget_name());
+    control.set_tooltip_text(old_control.tooltip_text().as_deref());
+    if let Some(label) = core.a11y_labels.get(&x.id) {
+        control.update_property(&[gtk4::accessible::Property::Label(label)]);
+    }
+    expander_describe(x);
+}
+
+/// The maintainer's ruling of 2026-10-09 (docs/expander-plan.md K3): the
+/// summary is spoken, as the header's accessible description, an app's
+/// hint after it.
+fn expander_describe(x: &GtkExpanderParts) {
+    use gtk4::prelude::{AccessibleExt, AccessibleExtManual, Cast};
+    let summary = x.summary.label();
+    let hint = x.hint.borrow();
+    let said = [summary.as_str(), hint.as_str()]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(". ");
+    for header in [x.free.upcast_ref::<gtk4::Widget>(), &x.row_header] {
+        if said.is_empty() {
+            header.reset_property(gtk4::AccessibleProperty::Description);
+        } else {
+            header.update_property(&[gtk4::accessible::Property::Description(&said)]);
         }
     }
 }
@@ -4518,7 +4768,7 @@ fn kind_registry(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<gtk4
         K::Video => core.videos.iter().map(|v| v.overlay.clone().upcast()).collect(),
         K::SecureField => core.secure_fields.iter().map(|w| w.clone().upcast()).collect(),
         K::Segmented => core.segmenteds.iter().map(|w| w.clone().upcast()).collect(),
-        K::Expander => crate::depth_stub("expander"),
+        K::Expander => core.expanders.iter().map(|x| x.control()).collect(),
         K::ColorPicker => core.color_pickers.iter().map(|f| f.button.clone().upcast()).collect(),
         K::NumberField => core.number_fields.iter().map(|f| f.spin.clone().upcast()).collect(),
         K::Label => core.labels.clone(),
@@ -5500,6 +5750,8 @@ struct CoreState {
     selects: Vec<gtk4::DropDown>,
     radios: Vec<gtk4::Box>,
     segmenteds: Vec<adw::ToggleGroup>,
+    /// docs/expander-plan.md K12, in creation order (`expander#N`).
+    expanders: Vec<Rc<GtkExpanderParts>>,
     grids: Vec<gtk4::Grid>,
     labeleds: Vec<adw::ActionRow>,
     textareas: Vec<gtk4::TextView>,
@@ -8358,7 +8610,9 @@ fn refresh_form(core: &mut CoreState, column_id: u64) {
         .filter(|w| !list.as_ref().is_some_and(|l| l.clone().upcast::<gtk4::Widget>() == *w))
         .collect();
     let kids: Vec<gtk4::Widget> = seated.iter().chain(loose.iter()).cloned().collect();
-    let qualifies = kids.len() >= 2 && kids.iter().all(|w| w.is::<adw::ActionRow>());
+    // docs/expander-plan.md K11: an expander is a form's row too.
+    let qualifies = kids.len() >= 2
+        && kids.iter().all(|w| w.is::<adw::ActionRow>() || expander_of(core, w).is_some());
     match (qualifies, list) {
         (true, None) => {
             let list = gtk4::ListBox::new();
@@ -8367,7 +8621,14 @@ fn refresh_form(core: &mut CoreState, column_id: u64) {
             list.set_halign(gtk4::Align::Fill);
             for row in &kids {
                 column.remove(row);
-                list.append(row);
+                let row = match expander_of(core, row) {
+                    Some(x) => {
+                        expander_seat(core, &x, true);
+                        x.widget()
+                    }
+                    None => row.clone(),
+                };
+                list.append(&row);
             }
             column.append(&list);
             core.form_lists.insert(column_id, list);
@@ -8376,8 +8637,17 @@ fn refresh_form(core: &mut CoreState, column_id: u64) {
             let mut after: Option<gtk4::Widget> = None;
             for row in &seated {
                 list.remove(row);
-                column.insert_child_after(row, after.as_ref());
-                after = Some(row.clone());
+                let row = match expander_of(core, row) {
+                    Some(x) => {
+                        expander_seat(core, &x, false);
+                        let free = x.widget();
+                        apply_cross_align(&free, true, container_align(column.upcast_ref()));
+                        free
+                    }
+                    None => row.clone(),
+                };
+                column.insert_child_after(&row, after.as_ref());
+                after = Some(row);
             }
             column.remove(&list);
             core.form_lists.remove(&column_id);
@@ -9648,7 +9918,7 @@ fn context_anchor_id(core: &CoreState, t: crate::harness::Target) -> u64 {
             .clone()
             .upcast(),
         K::Segmented => core.segmenteds[resolve(t.index, core.segmenteds.len())].clone().upcast(),
-        K::Expander => crate::depth_stub("expander"),
+        K::Expander => core.expanders[resolve(t.index, core.expanders.len())].widget(),
         K::Entry | K::Textarea | K::Search | K::NumberField | K::SecureField => {
             panic!("kaya: editable text is not a context anchor (v1)")
         }
@@ -12399,7 +12669,31 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.grids.push(grid.clone());
                     NativeWidget::Grid(grid)
                 }
-                WidgetKind::Expander => crate::depth_stub("expander"),
+                WidgetKind::Expander => {
+                    // docs/expander-plan.md K4, K12: the user's flip on either
+                    // widget, outside the quiet guard.
+                    use adw::prelude::ExpanderRowExt;
+                    let x = Rc::new(GtkExpanderParts::new(id.0));
+                    let tag = tag.expect("expanders carry a tag");
+                    {
+                        let (sink, tag, quiet) = (core.occurrences.clone(), tag.clone(), core.apply_quiet.clone());
+                        x.free.connect_expanded_notify(move |e| {
+                            if !quiet.get() {
+                                sink.send_toggle_tag(&tag, e.is_expanded());
+                            }
+                        });
+                    }
+                    {
+                        let (sink, quiet) = (core.occurrences.clone(), core.apply_quiet.clone());
+                        x.row.connect_expanded_notify(move |r| {
+                            if !quiet.get() {
+                                sink.send_toggle_tag(&tag, r.is_expanded());
+                            }
+                        });
+                    }
+                    core.expanders.push(x.clone());
+                    NativeWidget::Expander(x)
+                }
                 WidgetKind::Segmented => {
                     // docs/segmented-plan.md §3.
                     let group = adw::ToggleGroup::new();
@@ -12935,6 +13229,19 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             before,
         } => {
             use gtk4::prelude::WidgetExt;
+            if let NativeWidget::Expander(x) = core.widgets.get(&parent).expect("scene validated the id") {
+                let x = x.clone();
+                let moved = core.widgets.get(&child).expect("scene validated the id").widget();
+                let anchor = before.map(|a| core.widgets.get(&a).expect("scene validated the id").widget());
+                {
+                    let mut kids = x.children.borrow_mut();
+                    kids.retain(|k| k != &moved);
+                    let at = anchor.and_then(|a| kids.iter().position(|k| *k == a)).unwrap_or(kids.len());
+                    kids.insert(at, moved);
+                }
+                x.reseat_body(core);
+                return;
+            }
             let parent_box = match core.widgets.get(&parent).expect("scene validated the id") {
                 // The table's rows are ordered inside its viewport, where
                 // the AddChild above parented them.
@@ -13133,13 +13440,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 core.radios.retain(|b| !gone(b.upcast_ref()));
                 core.grids.retain(|g| !gone(g.upcast_ref()));
                 core.labeleds.retain(|r| !gone(r.upcast_ref()));
+                core.expanders.retain(|x| !gone(&x.widget()));
                 core.textareas.retain(|v| !gone(v.upcast_ref()));
                 if let Some(i) = core.canvas_ids.iter().position(|c| *c == id) {
                     core.canvas_ids.remove(i);
                     core.canvases.remove(i);
                 }
             }
-            if let Some(parent) = widget.parent() {
+            let host = core.expanders.iter().find(|x| x.children.borrow().contains(&widget)).cloned();
+            if let Some(x) = host {
+                x.children.borrow_mut().retain(|c| c != &widget);
+                x.body_remove(&widget);
+            } else if let Some(parent) = widget.parent() {
                 // A FORM'S ROWS ARE ITS BOXED LIST'S CHILDREN, and that
                 // parent is no GtkBox; a labelled row's seats are inside the
                 // ActionRow's own prefix and suffix boxes, which are.
@@ -14484,6 +14796,68 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
         ApplyOp::SetProp { id, prop, value } => {
             let widget = core.widgets.get(&id).expect("scene validated the id");
             match (widget, prop, value) {
+                // docs/expander-plan.md K2-K4: both widgets carry the header,
+                // and the app's write is quiet.
+                (NativeWidget::Expander(x), Prop::Text, Value::Str(s)) => {
+                    use gtk4::prelude::AccessibleExtManual;
+                    x.title.set_label(&s);
+                    adw::prelude::PreferencesRowExt::set_title(&x.row, &s);
+                    if !core.a11y_labels.contains_key(&id.0) {
+                        x.free.update_property(&[gtk4::accessible::Property::Label(&s)]);
+                    }
+                }
+                (NativeWidget::Expander(x), Prop::Summary, Value::Str(s)) => {
+                    x.summary.set_label(&s);
+                    x.summary.set_visible(!s.is_empty());
+                    adw::prelude::ExpanderRowExt::set_subtitle(&x.row, &s);
+                    expander_describe(x);
+                }
+                (NativeWidget::Expander(x), Prop::A11yHint, Value::Str(hint)) => {
+                    x.hint.replace(hint);
+                    expander_describe(x);
+                }
+                (NativeWidget::Expander(x), Prop::Symbol, Value::I64(symbol)) => {
+                    let icon = symbol_icon_name(symbol);
+                    if icon.is_some() && x.row_icon.parent().is_none() {
+                        adw::prelude::ExpanderRowExt::add_prefix(&x.row, &x.row_icon);
+                    }
+                    for image in [&x.icon, &x.row_icon] {
+                        image.set_icon_name(icon);
+                        image.set_visible(icon.is_some());
+                    }
+                }
+                (NativeWidget::Expander(x), Prop::Expanded, Value::Bool(open)) => {
+                    use adw::prelude::ExpanderRowExt;
+                    let was = core.apply_quiet.get();
+                    core.apply_quiet.set(true);
+                    x.free.set_expanded(open);
+                    x.row.set_expanded(open);
+                    core.apply_quiet.set(was);
+                }
+                (NativeWidget::Expander(x), Prop::Spacing, Value::F64(gap)) => {
+                    use gtk4::prelude::{BoxExt, Cast};
+                    let gap = gap.round() as i32;
+                    set_container_spacing(x.free_body.upcast_ref(), gap);
+                    match x
+                        .free_body
+                        .layout_manager()
+                        .and_then(|m| m.downcast::<flex::FlexLayout>().ok())
+                    {
+                        Some(flex) => flex.set_spacing(gap),
+                        None => x.free_body.set_spacing(gap),
+                    }
+                }
+                (NativeWidget::Expander(x), Prop::Inset, Value::F64(pad)) => {
+                    let body = x.free_body.clone().upcast::<gtk4::Widget>();
+                    set_container_inset(core, &body, pad);
+                }
+                (NativeWidget::Expander(x), Prop::Align, Value::I64(mode)) => {
+                    let body = x.free_body.clone().upcast::<gtk4::Widget>();
+                    set_container_align(&body, mode);
+                    for child in x.children.borrow().iter() {
+                        apply_cross_align(child, true, mode);
+                    }
+                }
                 (NativeWidget::Video(view), Prop::Fit, Value::I64(fit)) => gtk_media::set_fit(view, fit),
                 (NativeWidget::Video(view), Prop::Aspect, Value::I64(aspect)) => {
                     gtk_media::video_layout(view).set_aspect(aspect)
@@ -15547,6 +15921,25 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 core.segmented_options.insert(child.0, (parent.0, row));
                 return;
             }
+            if let NativeWidget::Expander(x) = core.widgets.get(&parent).expect("scene validated the id") {
+                // docs/expander-plan.md K1: the body is a column.
+                let x = x.clone();
+                let mut child_widget = core.widgets.get(&child).expect("scene validated the id").widget();
+                child_widget.set_halign(gtk4::Align::Start);
+                child_widget.set_valign(gtk4::Align::Start);
+                apply_cross_align(&child_widget, true, container_align(x.free_body.upcast_ref()));
+                if let Some(inner) = expander_of(core, &child_widget).filter(|_| x.placed.get()) {
+                    expander_seat(core, &inner, x.in_form.get());
+                    child_widget = inner.widget();
+                }
+                x.children.borrow_mut().push(child_widget.clone());
+                x.body_add(&child_widget);
+                if grow_weight(&child_widget) > 0.0 {
+                    ensure_flex(x.free_body.upcast_ref());
+                }
+                reconcile_grow_align(&child_widget);
+                return;
+            }
             if let NativeWidget::Labeled(row) = core.widgets.get(&parent).expect("scene validated the id")
             {
                 // THE SEATS ARE THE CHILD ORDER (docs/forms-plan.md §2): the
@@ -15632,11 +16025,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 core.select_options.insert(child.0, (parent.0, row));
                 return;
             }
-            let child_widget = core
+            let mut child_widget = core
                 .widgets
                 .get(&child)
                 .expect("scene validated the id")
                 .widget();
+            if let Some(x) = expander_of(core, &child_widget) {
+                let into_form = matches!(core.widgets.get(&parent), Some(NativeWidget::Column(_)))
+                    && !core.tables.contains_key(&parent.0)
+                    && core.form_lists.contains_key(&parent.0);
+                expander_seat(core, &x, into_form);
+                child_widget = x.widget();
+            }
             // Normalized layout default: children sit at natural size on the
             // leading edge. GtkWidget's default halign is Fill, which stretches
             // a child to the full cross-axis extent; Start pins it instead.
@@ -15673,6 +16073,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         // column itself and ends the form below.
                         None => match core.form_lists.get(&parent.0) {
                             Some(list) if child_widget.is::<adw::ActionRow>() => {
+                                list.append(&child_widget)
+                            }
+                            Some(list) if child_widget.is::<adw::ExpanderRow>() => {
                                 list.append(&child_widget)
                             }
                             _ => column.append(&child_widget),
@@ -15725,8 +16128,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             // being a form, and the walk inside is per-child: a For's
             // container takes thousands of stamped rows and must not pay
             // for a shape it can never have.
-            if child_widget.is::<adw::ActionRow>() || core.form_lists.contains_key(&parent.0) {
+            if child_widget.is::<adw::ActionRow>()
+                || core.form_lists.contains_key(&parent.0)
+                || expander_of(core, &child_widget).is_some()
+            {
                 refresh_form(core, parent.0);
+            }
+            if let Some(x) = expander_of(core, &child_widget) {
+                child_widget = x.widget();
             }
             // Only now is the parent — and so the main axis — known, so
             // a weight that arrived before the child was attached gets
@@ -15741,6 +16150,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             reconcile_grow_align(&child_widget);
         }
         ApplyOp::Mount { window, root } => {
+            if let Some(NativeWidget::Expander(x)) = core.widgets.get(&root) {
+                expander_seat(core, &x.clone(), false);
+            }
             let root_widget = core
                 .widgets
                 .get(&root)
@@ -17799,6 +18211,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 selects: Vec::new(),
                 radios: Vec::new(),
                 segmenteds: Vec::new(),
+                expanders: Vec::new(),
                 grids: Vec::new(),
                 labeleds: Vec::new(),
                 textareas: Vec::new(),
@@ -19222,12 +19635,30 @@ impl crate::harness::Stage for GtkStage {
         #[cfg(feature = "harness")]
         {
             use crate::harness::TargetKind as K;
+            if target.kind == K::Expander {
+                // docs/expander-plan.md K3: the header's description, where
+                // the summary is spoken.
+                let found = Self::on_main(move |core| {
+                    let i = crate::harness::try_resolve(target.index, core.expanders.len())?;
+                    let x = &core.expanders[i];
+                    let header = x.control();
+                    if x.in_form.get() {
+                        list_item_rank(&core.window, &header).map(|r| (atspi::Role::ListItem, r))
+                    } else {
+                        atspi_rank(&core.window, &header).map(|r| (atspi::Role::Button, r))
+                    }
+                });
+                return match found {
+                    Some((role, rank)) => atspi_collect(role, rank, true)
+                        .unwrap_or_else(|| atspi_miss("<not in the accessibility tree>")),
+                    None => "<not in the accessibility tree>".to_owned(),
+                };
+            }
             let want = match target.kind {
                 K::Button => atspi::Role::Button,
                 K::Checkbox => atspi::Role::CheckBox,
                 K::Select => atspi::Role::ComboBox,
                 K::Radio | K::Segmented => atspi::Role::Grouping,
-                K::Expander => crate::depth_stub("expander"),
                 // The root admits a11y_hint on activation kinds only
                 // (scene.rs), so anything else asking for one is a
                 // scene bug, said out loud rather than answered.
@@ -19827,6 +20258,35 @@ impl crate::harness::Stage for GtkStage {
     }
 
     fn toggle(&self, t: crate::harness::Target, on: bool) {
+        if t.kind == crate::harness::TargetKind::Expander {
+            // docs/expander-plan.md K15: the free header's own `activate`
+            // over the bus, the form row's header row activated as Enter does.
+            let free = Self::on_main(move |core| {
+                use gtk4::prelude::WidgetExt;
+                let i = crate::harness::resolve(t.index, core.expanders.len());
+                let x = &core.expanders[i];
+                if x.is_expanded() == on {
+                    return Ok(None);
+                }
+                if x.in_form.get() {
+                    x.row_header.activate();
+                    return Ok(None);
+                }
+                atspi_rank(&core.window, &x.control())
+                    .map(Some)
+                    .ok_or_else(|| "the expander's header is not in the accessibility tree".to_owned())
+            });
+            match free {
+                Ok(Some(rank)) => {
+                    if let Err(why) = atspi_act(atspi::Role::Button, rank, "activate") {
+                        eprintln!("KAYA_HARNESS: toggle expander#{} refused: {why}", t.index);
+                    }
+                }
+                Ok(None) => {}
+                Err(why) => eprintln!("KAYA_HARNESS: toggle expander#{} refused: {why}", t.index),
+            }
+            return;
+        }
         Self::on_main(move |core| {
             let i = crate::harness::resolve(t.index, core.checkboxes.len());
             set_checked(&core.checkboxes[i], on);
@@ -20491,6 +20951,17 @@ impl crate::harness::Stage for GtkStage {
 
     fn read_label(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
+            if t.kind == crate::harness::TargetKind::Expander {
+                let Some(i) = crate::harness::try_resolve(t.index, core.expanders.len()) else {
+                    return "<no such target>".to_string();
+                };
+                let x = &core.expanders[i];
+                return if x.in_form.get() {
+                    adw::prelude::PreferencesRowExt::title(&x.row).to_string()
+                } else {
+                    x.title.label().to_string()
+                };
+            }
             let Some(i) = crate::harness::try_resolve(t.index, core.labels.len()) else {
                 return "<no such target>".to_string();
             };
@@ -22895,14 +23366,64 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
-    /// No expander exists on this backend before the breadth
-    /// (docs/expander-plan.md §6).
-    fn expanded(&self, _: crate::harness::Target) -> Result<(bool, bool), String> {
-        crate::depth_stub("expander")
+    /// docs/expander-plan.md K8: the header's EXPANDED state off the bus and
+    /// whether GTK mapped the body.
+    fn expanded(&self, t: crate::harness::Target) -> Result<(bool, bool), String> {
+        let found = Self::on_main(move |core| {
+            use gtk4::prelude::WidgetExt;
+            let i = crate::harness::try_resolve(t.index, core.expanders.len())?;
+            let x = &core.expanders[i];
+            let header = x.control();
+            let rank = if x.in_form.get() {
+                list_item_rank(&core.window, &header).map(|r| (atspi::Role::ListItem, r))
+            } else {
+                atspi_rank(&core.window, &header).map(|r| (atspi::Role::Button, r))
+            };
+            let shown = if x.in_form.get() {
+                x.children.borrow().first().is_some_and(|c| c.is_mapped())
+            } else {
+                x.free_body.is_mapped()
+            };
+            Some((rank, shown, x.in_form.get()))
+        });
+        let Some((rank, shown, in_form)) = found else {
+            return Err("<no such target>".to_owned());
+        };
+        let Some((role, rank)) = rank else {
+            return Err(format!(
+                "the {} header is not in the accessibility tree",
+                if in_form { "form row's" } else { "expander's" }
+            ));
+        };
+        let states = atspi_states(role, rank).map_err(|why| atspi_miss(&why))?;
+        Ok((states.contains(atspi::State::Expanded), shown))
     }
 
-    fn collapsed_ancestor(&self, _: crate::harness::Target) -> Option<usize> {
-        crate::depth_stub("expander")
+    /// docs/expander-plan.md K5: GTK's own `expanded` on every expander the
+    /// target sits in, a collapsed GtkExpander's body being parentless.
+    fn collapsed_ancestor(&self, t: crate::harness::Target) -> Option<usize> {
+        Self::on_main(move |core| {
+            use gtk4::prelude::{Cast, WidgetExt};
+            let target = target_widget(core, t)?;
+            let own = (t.kind == crate::harness::TargetKind::Expander)
+                .then(|| crate::harness::try_resolve(t.index, core.expanders.len()))
+                .flatten();
+            let mut outer = None;
+            let mut node = Some(target);
+            while let Some(w) = node {
+                let mut next = w.parent();
+                for (i, x) in core.expanders.iter().enumerate() {
+                    if w == *x.free_body.upcast_ref::<gtk4::Widget>() {
+                        next = Some(x.free.clone().upcast());
+                    }
+                    if w == x.widget() && Some(i) != own && !x.is_expanded() {
+                        outer = Some(i);
+                    }
+                }
+                node = next;
+            }
+            outer
+        })
     }
 
     fn segment_symbol(&self, t: crate::harness::Target, index: usize) -> String {
@@ -24056,7 +24577,7 @@ fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk
         K::Video => try_resolve(target.index, core.videos.len()).map(|i| core.videos[i].overlay.clone().upcast()),
         K::SecureField => nth!(core.secure_fields),
         K::Segmented => nth!(core.segmenteds),
-        K::Expander => crate::depth_stub("expander"),
+        K::Expander => try_resolve(target.index, core.expanders.len()).map(|i| core.expanders[i].control()),
         K::ColorPicker => try_resolve(target.index, core.color_pickers.len())
             .map(|i| core.color_pickers[i].swatch.clone().upcast()),
         K::NumberField => try_resolve(target.index, core.number_fields.len())
@@ -24147,6 +24668,11 @@ fn atspi_role_of(w: &gtk4::Widget) -> Option<atspi::Role> {
     // (both measured 2026-09-07). BEFORE the Button check for that reason.
     if w.is::<gtk4::LinkButton>() {
         return Some(atspi::Role::Link);
+    }
+    // docs/expander-plan.md K8: GtkExpander declares BUTTON (measured
+    // 2026-10-09 in the lane's image, GTK 4.24).
+    if w.is::<gtk4::Expander>() {
+        return Some(atspi::Role::Button);
     }
     // ToggleButton is a Button subclass and must not count as one: the
     // drop-down's internal button is a toggle, and the bus agrees.
@@ -24816,7 +25342,7 @@ fn atspi_text_of(want: atspi::Role, index: usize) -> Option<String> {
         async fn walk(
             node: AccessibleProxy<'_>, out: &mut Vec<(atspi::Role, String, String)>, depth: usize,
         ) {
-            if depth > 24 {
+            if depth > ATSPI_DEPTH {
                 return;
             }
             if let Ok(role) = bus_role(&node).await {
@@ -24916,7 +25442,7 @@ fn atspi_collect(want: atspi::Role, index: usize, want_description: bool) -> Opt
             out: &mut Vec<(atspi::Role, String, String)>,
             depth: usize,
         ) {
-            if depth > 24 {
+            if depth > ATSPI_DEPTH {
                 return;
             }
             if let (Ok(role), Ok(name), Ok(description)) =
@@ -24994,6 +25520,98 @@ fn atspi_collect(want: atspi::Role, index: usize, want_description: bool) -> Opt
     })
 }
 
+/// How deep the reads that name a widget walk the bus (docs/traps.md, the GTK
+/// bus walk's depth).
+#[cfg(all(feature = "harness", target_os = "linux"))]
+const ATSPI_DEPTH: usize = 40;
+
+/// A mapped list box row's rank among the window's, depth-first: every
+/// GtkListBoxRow is a `list item` on the bus, an AdwExpanderRow's header row
+/// among them (docs/expander-plan.md K8).
+#[cfg(all(feature = "harness", target_os = "linux"))]
+fn list_item_rank(window: &gtk4::Window, target: &gtk4::Widget) -> Option<usize> {
+    use gtk4::prelude::{Cast, WidgetExt};
+    fn walk(node: &gtk4::Widget, target: &gtk4::Widget, rank: &mut usize) -> bool {
+        if node == target {
+            return true;
+        }
+        if !node.is_mapped() {
+            return false;
+        }
+        if node.is::<gtk4::ListBoxRow>() {
+            *rank += 1;
+        }
+        let mut child = node.first_child();
+        while let Some(c) = child {
+            if walk(&c, target, rank) {
+                return true;
+            }
+            child = c.next_sibling();
+        }
+        false
+    }
+    let mut rank = 0;
+    walk(window.upcast_ref(), target, &mut rank).then_some(rank)
+}
+
+/// The states our process's `index`th node of role `want` publishes.
+#[cfg(all(feature = "harness", target_os = "linux"))]
+fn atspi_states(want: atspi::Role, index: usize) -> Result<atspi::StateSet, String> {
+    use atspi::proxy::accessible::AccessibleProxy;
+    atspi::zbus::block_on(async move {
+        let conn = atspi::connection::AccessibilityConnection::new()
+            .await
+            .map_err(|e| format!("no accessibility bus ({e})"))?;
+        let root = AccessibleProxy::builder(conn.connection())
+            .destination("org.a11y.atspi.Registry")
+            .and_then(|b| b.path("/org/a11y/atspi/accessible/root"))
+            .map_err(|e| e.to_string())?
+            .build()
+            .await
+            .map_err(|e| e.to_string())?;
+        async fn walk<'a>(node: AccessibleProxy<'a>, want: atspi::Role, out: &mut Vec<AccessibleProxy<'a>>, depth: usize) {
+            if depth > ATSPI_DEPTH {
+                return;
+            }
+            if bus_role(&node).await.ok() == Some(want) {
+                out.push(node.clone());
+            }
+            let Ok(children) = node.get_children().await else { return };
+            for child in children {
+                let Some(dest) = child.name() else { continue };
+                let Ok(proxy) = AccessibleProxy::builder(node.inner().connection())
+                    .destination(dest.to_owned())
+                    .and_then(|b| b.path(child.path().to_owned()))
+                else {
+                    continue;
+                };
+                if let Ok(proxy) = proxy.build().await {
+                    Box::pin(walk(proxy, want, out, depth + 1)).await;
+                }
+            }
+        }
+        let mut found = Vec::new();
+        for app in root.get_children().await.map_err(|e| e.to_string())? {
+            let Some(dest) = app.name() else { continue };
+            let Ok(builder) = AccessibleProxy::builder(conn.connection())
+                .destination(dest.to_owned())
+                .and_then(|b| b.path(app.path().to_owned()))
+            else {
+                continue;
+            };
+            let Ok(proxy) = builder.build().await else { continue };
+            if proxy.get_application().await.is_err() {
+                continue;
+            }
+            Box::pin(walk(proxy, want, &mut found, 0)).await;
+        }
+        let Some(node) = found.get(index) else {
+            return Err(format!("no {want:?}#{index} on the bus ({} of that role)", found.len()));
+        };
+        node.get_state().await.map_err(|e| format!("{want:?}#{index} answered no states ({e})"))
+    })
+}
+
 /// Do the accessible action named `name` on our process's `index`th node of
 /// role `want`, as an assistive client does: the action is matched by its
 /// last dotted part, case-folded (GTK names a widget action `group.name`).
@@ -25014,7 +25632,7 @@ fn atspi_act(want: atspi::Role, index: usize, name: &str) -> Result<(), String> 
             .await
             .map_err(|e| e.to_string())?;
         async fn walk<'a>(node: AccessibleProxy<'a>, want: atspi::Role, out: &mut Vec<AccessibleProxy<'a>>, depth: usize) {
-            if depth > 24 {
+            if depth > ATSPI_DEPTH {
                 return;
             }
             if bus_role(&node).await.ok() == Some(want) {

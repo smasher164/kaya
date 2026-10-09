@@ -251,6 +251,19 @@ func (sc SumCase[K, V]) Checkbox(sel func(*V) *bool, onToggle func(*Tx, K, bool)
 	return n
 }
 
+// Expander with a constant header, its expanded state the field the
+// selector names (docs/expander-plan.md K10), its toggle handler
+// co-located (stamped key first).
+func (sc SumCase[K, V]) Expander(text string, sel func(*V) *bool, onToggle func(*Tx, K, bool), body func()) Node {
+	n := sc.t.ExpanderText(text, FieldBy(sel), body)
+	if onToggle != nil {
+		n.OnToggle(func(tx *Tx, keys []any, on bool) {
+			onToggle(tx, keys[0].(K), on)
+		})
+	}
+	return n
+}
+
 // Button with a constant caption and its click handler co-located.
 func (sc SumCase[K, V]) Button(text string, onClick func(*Tx, K)) Node {
 	n := sc.t.Button(text)
@@ -452,6 +465,18 @@ func (sc SumCase[K, V]) SetHighLabel(n Node, label string) { sc.t.SetHighLabel(n
 func (sc SumCase[K, V]) BindHighLabel(n Node, sel func(*V) *string) {
 	sc.t.BindHighLabel(n, FieldBy(sel))
 }
+
+// SetSummary is the second header line of an expander this arm stamps
+// (Tpl.SetSummary); BindSummary speaks the field the selector names.
+func (sc SumCase[K, V]) SetSummary(n Node, text string) { sc.t.SetSummary(n, text) }
+
+func (sc SumCase[K, V]) BindSummary(n Node, sel func(*V) *string) {
+	sc.t.BindSummary(n, FieldBy(sel))
+}
+
+// SetSymbol is the glyph of a button or expander this arm stamps
+// (Tpl.SetSymbol).
+func (sc SumCase[K, V]) SetSymbol(n Node, symbol Symbol) { sc.t.SetSymbol(n, symbol) }
 
 // SetAlpha lets a colour picker this arm stamps choose translucency
 // (Tpl.SetAlpha).

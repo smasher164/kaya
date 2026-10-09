@@ -118,6 +118,8 @@ LEGS = {
         "reveal-compose",
         # The segmented control (docs/segmented-plan.md §6).
         "segmented-compose",
+        # The expander (docs/expander-plan.md §5).
+        "expander-compose",
         # The toast (docs/toast-plan.md §6).
         "toast-compose",
         # The content type (docs/autofill-plan.md §5).
@@ -190,7 +192,7 @@ LEGS = {
         "align-jvm", "layout-jvm", "stall-jvm",
         "confirm-jvm", "nav-jvm", "scroll-jvm",
         "progress-jvm", "select-jvm", "radio-jvm",
-        "grid-jvm", "textarea-jvm", "search-jvm", "secure-jvm", "reveal-jvm", "segmented-jvm", "toast-jvm", "autofill-jvm", "submit-jvm", "scrollto-jvm", "fullscreen-jvm", "sections-jvm",
+        "grid-jvm", "textarea-jvm", "search-jvm", "secure-jvm", "reveal-jvm", "segmented-jvm", "expander-jvm", "toast-jvm", "autofill-jvm", "submit-jvm", "scrollto-jvm", "fullscreen-jvm", "sections-jvm",
         "menus-jvm", "toolbar-jvm", "identity-jvm",
         "listdetail-jvm", "commands-jvm", "clipboard-jvm",
         "background-jvm", "undo-jvm", "filedialog-jvm",
@@ -215,7 +217,7 @@ LEGS = {
         "layout-go", "stall-go", "confirm-go",
         "nav-go", "scroll-go", "progress-go",
         "select-go", "radio-go", "grid-go",
-        "textarea-go", "search-go", "secure-go", "reveal-go", "segmented-go", "toast-go", "autofill-go", "submit-go", "scrollto-go", "fullscreen-go", "sections-go", "menus-go",
+        "textarea-go", "search-go", "secure-go", "reveal-go", "segmented-go", "expander-go", "toast-go", "autofill-go", "submit-go", "scrollto-go", "fullscreen-go", "sections-go", "menus-go",
         "toolbar-go", "identity-go", "listdetail-go",
         "commands-go", "clipboard-go", "background-go",
         "undo-go", "filedialog-go", "save-go",

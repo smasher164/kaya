@@ -2,6 +2,8 @@
 # the platform and driven through the header's own press. The app's Show and
 # Hide write `expanded`, which the platform must show and which never echoes.
 expect_ax expander@details "button/Details"
+# The summary is spoken, as the header's description (the maintainer, 2026-10-09).
+expect_ax_hint expander@details "One field"
 expect expander@details "Details"
 expect_expanded expander@details off
 expect_out_of_reach entry@name
@@ -30,6 +32,11 @@ expect_out_of_reach checkbox@badge
 toggle expander@advanced on
 expect_expanded expander@advanced on
 expect_ax checkbox@badge "checkbox/Hide badge"
+# Fold both away so the list below fits a phone's window: a column taller
+# than its window gives its last rows no height (docs/expander-plan.md §7).
+toggle expander@advanced off
+click button@hide
+expect_expanded expander@details off
 # The stamped list (K10): each copy starts from its row's field, a toggle
 # names its row, and the app's write-back outlives the row's rebuild.
 expect_expanded expander@sec[s00] off
