@@ -51,6 +51,10 @@ fn enum_go_type(name: &str) -> Option<&'static str> {
         // above (the idiom review's G1/X1).
         "alert_choice" => Some("AlertChoice"),
         "notification_outcome" => Some("NotificationOutcome"),
+        // The toast (docs/toast-plan.md T15).
+        "toast_duration" => Some("ToastDuration"),
+        "toast_action" => Some("ToastAction"),
+        "toast_outcome" => Some("ToastOutcome"),
         "file_mode" => Some("FileMode"),
         "file_content" => Some("FileContent"),
         "swipe" => Some("Swipe"),

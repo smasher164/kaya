@@ -374,6 +374,8 @@ public final class KayaApp {
 
     private final java.util.Map<Long, BiConsumer<Tx, AlertChoice>> alerts =
             new java.util.HashMap<>();
+    private final java.util.Map<Long, BiConsumer<Tx, ToastOutcome>> toasts =
+            new java.util.HashMap<>();
     private long nextAlert;
     // Players get their own id space (docs/media-plan.md §2); the
     // mirror each occurrence moves before any handler runs, and the
@@ -850,6 +852,154 @@ public final class KayaApp {
             }
             return known;
         }
+    }
+
+    /** A toast's one answer (docs/toast-plan.md T5): the user pressed its
+     * action, or it went away any other way. */
+    public enum ToastOutcome {
+        ACTION(KayaWire.TOAST_OUTCOME_ACTION, "action"),
+        CLOSED(KayaWire.TOAST_OUTCOME_CLOSED, "closed");
+
+        final int wire;
+        final String spelling;
+
+        ToastOutcome(int wire, String spelling) {
+            this.wire = wire;
+            this.spelling = spelling;
+        }
+
+        @Override
+        public String toString() {
+            return spelling;
+        }
+
+        static ToastOutcome fromWire(int number) {
+            ToastOutcome known = switch (number) {
+                case KayaWire.TOAST_OUTCOME_ACTION -> ACTION;
+                case KayaWire.TOAST_OUTCOME_CLOSED -> CLOSED;
+                default -> null;
+            };
+            if (known == null) {
+                throw new IllegalStateException("kaya: toast outcome " + number
+                        + ", which this build does not know");
+            }
+            return known;
+        }
+    }
+
+    /** How long a toast stays: the platform's shorter or longer time
+     * (docs/toast-plan.md T6). */
+    public enum ToastDuration {
+        SHORT(KayaWire.TOAST_DURATION_SHORT),
+        LONG(KayaWire.TOAST_DURATION_LONG);
+
+        final int wire;
+
+        ToastDuration(int wire) {
+            this.wire = wire;
+        }
+    }
+
+    enum ToastAction {
+        NONE(KayaWire.TOAST_ACTION_NONE),
+        APP(KayaWire.TOAST_ACTION_APP),
+        UNDO(KayaWire.TOAST_ACTION_UNDO);
+
+        final int wire;
+
+        ToastAction(int wire) {
+            this.wire = wire;
+        }
+    }
+
+    /** The toast chain (docs/toast-plan.md T15): the alert's grammar, one
+     * SHOW_TOAST record sent at show(). A second toast in the same window
+     * replaces this one, which answers {@link ToastOutcome#CLOSED}. */
+    public static class ToastRef {
+        private final Tx tx;
+        private final KayaApp app;
+        private final long id;
+        private final String text;
+        private long window;
+        private ToastAction action = ToastAction.NONE;
+        private String actionLabel = "";
+        private ToastDuration duration = ToastDuration.SHORT;
+        private BiConsumer<Tx, ToastOutcome> onResult;
+        private boolean sent;
+
+        ToastRef(Tx tx, KayaApp app, long id, String text) {
+            this.tx = tx;
+            this.app = app;
+            this.id = id;
+            this.text = text;
+        }
+
+        /** Show it in this window instead of the primary. */
+        public ToastRef inWindow(long window) {
+            this.window = window;
+            return this;
+        }
+
+        /** Offer one button, labelled by the app; its press answers
+         * {@link ToastOutcome#ACTION}. */
+        public ToastRef action(String label) {
+            if (action == ToastAction.NONE) action = ToastAction.APP;
+            actionLabel = label;
+            return this;
+        }
+
+        /** Make the button the window's undo of THIS transaction's step:
+         * the transaction must be undoable, and the press undoes it as
+         * Edit > Undo would ({@code onUndone} hears it), then answers
+         * {@link ToastOutcome#ACTION}. */
+        public ToastRef undo() {
+            action = ToastAction.UNDO;
+            return this;
+        }
+
+        public ToastRef duration(ToastDuration duration) {
+            this.duration = duration;
+            return this;
+        }
+
+        /** Bind the one-shot result handler to THIS request. */
+        public ToastRef onResult(BiConsumer<Tx, ToastOutcome> handler) {
+            this.onResult = handler;
+            return this;
+        }
+
+        public long show() {
+            return send(onResult);
+        }
+
+        private long send(BiConsumer<Tx, ToastOutcome> handler) {
+            tx.alive();
+            if (sent) throw new IllegalStateException("kaya: this toast request was already sent");
+            if (action == ToastAction.UNDO && actionLabel.isEmpty()) {
+                throw new IllegalStateException(
+                        "kaya: an undo toast's button needs a label — "
+                                + "call action(label) before show()");
+            }
+            tx.emit(KayaWire.txShowToast(window, id, duration.wire, action.wire, text, actionLabel));
+            sent = true;
+            if (handler != null) app.toasts.put(id, handler);
+            tx.rollbackActions.add(() -> app.toasts.remove(id));
+            return id;
+        }
+
+        private CompletableFuture<ToastOutcome> future() {
+            if (onResult != null) throw new IllegalStateException("kaya: choose a callback or a future, not both");
+            return app.requestFuture(tx, resolve -> send((t, answer) -> resolve.accept(answer)));
+        }
+    }
+
+    public static final class FutureToastRef extends ToastRef {
+        FutureToastRef(Tx tx, KayaApp app, long id, String text) { super(tx, app, id, text); }
+        @Override public FutureToastRef inWindow(long window) { super.inWindow(window); return this; }
+        @Override public FutureToastRef action(String label) { super.action(label); return this; }
+        @Override public FutureToastRef undo() { super.undo(); return this; }
+        @Override public FutureToastRef duration(ToastDuration duration) { super.duration(duration); return this; }
+        public CompletableFuture<ToastOutcome> showFuture() { return super.future(); }
     }
 
     /** The alert chain: accumulates the one atomic SHOW_ALERT record and
@@ -8303,6 +8453,22 @@ public final class KayaApp {
         }
 
         /**
+         * Show a toast in the primary window (docs/toast-plan.md): a short
+         * message that goes by itself, at most one action. A chain that
+         * ends in show, like showAlert; the result handler retires with
+         * its one answer.
+         */
+        public FutureToastRef showToast(String text) {
+            return new FutureToastRef(this, KayaApp.this, ++nextAlert, text);
+        }
+
+        /** Withdraw a shown toast. It answers nothing: the app caused it. */
+        public void dismissToast(long toast) {
+            emit(KayaWire.txDismissToast(toast));
+            toasts.remove(toast);
+        }
+
+        /**
          * Post a local notification with a GUEST-CHOSEN id
          * (docs/tasks-s3-plan.md N1, N2): the alert's grammar without a
          * window, a chain that ends in show. The result handler rides
@@ -11513,6 +11679,11 @@ public final class KayaApp {
         if (handler != null) dispatch(tx -> handler.accept(tx, choice));
     }
 
+    void toastResult(long id, ToastOutcome outcome) {
+        BiConsumer<Tx, ToastOutcome> handler = toasts.remove(id);
+        if (handler != null) dispatch(tx -> handler.accept(tx, outcome));
+    }
+
     void fileDialogResult(long id, List<PickedFile> files) {
         if (liveFileDialog == id) liveFileDialog = 0;
         BiConsumer<Tx, List<PickedFile>> handler = fileDialogs.remove(id);
@@ -11837,6 +12008,8 @@ public final class KayaApp {
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_ALERT_RESULT) {
                 alertResult(occ.id, AlertChoice.fromWire((Integer) occ.payload));
+            } else if (occ.kind == KayaWire.OCC_KIND_TOAST_RESULT) {
+                toastResult(occ.id, ToastOutcome.fromWire((Integer) occ.payload));
             } else if (occ.kind == KayaWire.OCC_KIND_LINK_OPENED) {
                 // occ.id is the ROUTE the core matched
                 // (docs/app-links-plan.md §4), and NOT one-shot.

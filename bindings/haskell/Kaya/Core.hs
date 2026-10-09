@@ -69,6 +69,8 @@ module Kaya.Core
     alertChoiceOfWire,
     NotificationOutcome (..),
     notificationOutcomeOfWire,
+    ToastOutcome (..),
+    toastOutcomeOfWire,
     Widget (..),
     Node (..),
     Signal (..),
@@ -421,6 +423,15 @@ notificationOutcomeOfWire o
   | o == W.notificationOutcomeActivated = NotificationActivated
   | otherwise = NotificationRefused
 
+-- | WHAT BECAME OF A TOAST (spec enum @toast_outcome@, docs\/toast-plan.md T5).
+data ToastOutcome = ToastAction | ToastClosed
+  deriving (Eq, Show)
+
+toastOutcomeOfWire :: Word32 -> ToastOutcome
+toastOutcomeOfWire o
+  | o == W.toastOutcomeAction = ToastAction
+  | otherwise = ToastClosed
+
 data Counters = Counters
   { cSignal :: !Word64,
     -- Live widgets AND template nodes, ONE sequence (DESIGN.md, Binding
@@ -471,6 +482,7 @@ data Pending
   = PClick !Word64 (IO ())
   | PAlert !Word64 (AlertChoice -> IO ())
   | PNotification !Word64 (NotificationOutcome -> IO ())
+  | PToast !Word64 (ToastOutcome -> IO ())
   | PFileDialog !Word64 ([PickedFile] -> IO ())
   | PClipboardRead !Word64 (Maybe Representation -> IO ())
   | PEntryPopped !Word64 (IO ())
@@ -2274,6 +2286,8 @@ data App = App
     -- One-shot, keyed by the GUEST's notification id (the alert's
     -- request/result grammar; many may be live at once).
     appNotificationHandlers :: IORef (Map.Map Word64 (NotificationOutcome -> IO ())),
+    -- One-shot, keyed by toast id from the alert's counter (docs/toast-plan.md T1).
+    appToastHandlers :: IORef (Map.Map Word64 (ToastOutcome -> IO ())),
     -- NOT one-shot, and not keyed at all: the process-level handler for
     -- a result whose id has none above (docs/tasks-s9-plan.md R1). A
     -- relaunched process never called showNotification.

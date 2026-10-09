@@ -2594,6 +2594,9 @@ ld. aarch64 BFD ld's footprint is dominated by debuginfo, so
 run-suites now builds with `CARGO_PROFILE_DEV_DEBUG=0` (nothing in
 the container asserts on symbols). If it ever recurs despite that,
 bound the link parallelism (`cargo build -j`), not the example count.
+Since 2026-10-08 the lane links with rust-lld at `-j8`, 3.0 GiB at its
+peak against BFD's 5.7 GiB at `-j6` ("The linux lane linked its examples
+with BFD ld", below).
 
 ## WinUI TextBox speaks CR, everything else speaks LF
 
@@ -14481,7 +14484,9 @@ five times. On the full matrix of 2026-10-05 17:13Z the suites' legs summed
 and 118 s if the pool stayed full, while the phases read 443, 266 and 224 s
 with 279 s of the lane's own exclusive holds among them. run_suite_legs now
 queues a suite's exclusive legs after its pooled ones, so they share the one
-drain the suite ends with anyway.
+drain the suite ends with anyway. Since 2026-10-08 there is no drain per suite: every
+suite's exclusive and ALONE legs run after the lane's one drain ("The android
+pool's suite drains", below).
 
 Separately, `cargo ndk build --example rusthost` (compose) and `--lib` (jvm,
 go, python) rebuild kaya each time they alternate: the example graph unifies
@@ -15093,3 +15098,79 @@ free /data and the holders, and the lane's start releases the same way on
 every device, tablet included, and refuses one under 1024 MB naming
 `adb -s <serial> emu kill`. GUARD: tools/lib/android-leg-order.py's
 storage clause, six cuts watched red.
+
+## The linux lane linked its examples with BFD ld (measured 2026-10-08)
+
+After any core edit the linux lane's core-build read 216-267 s on the full
+matrices of 2026-10-07/08 and 3-6 s when the core had not moved. Measured
+in the container on a quiet host after `cargo clean -p kaya` (cargo
+`--timings`): the kaya lib unit 20 s, then 76 examples whose units summed
+657 s at `-j6`, each a compile and a BFD link of the whole kaya rlib with
+GTK, 132 s in all, the container at 5.7 GiB. The same build linked by
+rust-lld (the `gcc-ld` shim rustup ships beside rustc, `cc -B<dir>
+-fuse-ld=lld`): kaya 11 s, the examples' units 132 s, 34 s in all at `-j6`
+and 27 s at `-j8`, the container at 3.0 GiB. In a lane run beside the
+Android lane the core-build read 233 s with BFD and 38-46 s with lld when
+kaya was rebuilt. Nothing in the image changed: rust-lld is part of the
+toolchain the Dockerfile installs.
+
+run-suites.sh links through /tmp/cc-lld now, at `-j8`, and refuses a
+libkaya.so or example whose `.comment` section names no `Linker: LLD` (BFD
+writes no linker line), with a self-test that links one probe each way
+before the build. The first lane run after the switch relinks every
+dependency once (core-build 74 s). target-linux had grown to 119 GB; `cargo
+clean -p kaya` in it removed 110.9 GiB, which tools/prune-objects.py
+(target/ only) never reaches.
+
+## The linux leg loop asked cabal for every Haskell path (measured 2026-10-08)
+
+The leg loop runs in one shell and starts each leg in the background, so
+anything it does between legs is serial. Every Haskell leg's command line
+held `"$(hs_bin <scene>)"`, a `cabal list-bin` taking 0.13-0.36 s in the
+container on a quiet host, 69 sites per protocol. And each of the seven
+EXCLUSIVE legs (the four dndwitness legs, the three wayland clipboard legs)
+waited for the eight-wide pool to empty where it stood. A greedy schedule
+of the 2026-10-08 legs at eight wide put the seven drains at 30 s; the
+legs phase read 1078-1128 s against a schedule of 680-706 s plus 245-305 s
+of token waits.
+
+build_haskell now writes every executable's path to /tmp/hs-bins in the
+build pool (`xargs -P 8`, refused unless every executable in
+kaya-guests.cabal has one), hs_bin reads the file, and a missing path fails
+its leg naming /tmp/hs-bins. run() defers an EXCLUSIVE leg to run_deferred,
+called before the drain that closes each protocol's pooled block, where
+the seven run back to back after one drain. The non-harness `cargo check`
+moved from the core build into the guest-build pool. Beside the Android
+lane the legs phase read 743 s before and 677-728 s after with 31-45 s of
+token waits. GUARD: check-exclusive holds the deferral and its call
+(two watched negatives).
+
+## The android pool's suite drains (measured 2026-10-08)
+
+run_suite_legs ended every suite with a drain, then the next suite built
+and staged with all four phones idle, so the pool emptied four times a lane
+and the builds and installs sat on the lane's clock. A suite now queues its
+pooled legs and returns; the next suite's build overlaps the last legs, and
+its staging claims each phone the way a leg does (`staging_claim`), since
+the disarm writes that device's accessibility settings; the lane drains
+once, then runs every suite's EXCLUSIVE and ALONE legs, each still alone.
+From the end of build-compose to the lane's end, beside the linux lane: 649
+s before (jvm/go/python builds 9/14/8 s cold), 524, 580, 523 and 685 s
+after (the last with dnd-jvm at 87 s and dnd-go at 61 s).
+
+The denser pool met a fault no lane had printed: an emulator's adb
+transport drops for about half a second (`adb devices` sampled every 0.5 s
+read the device gone, then back under a new transport id), once or several
+times a run, and every leg that claimed the device in that half second
+failed in 0 s with `adb: device offline`: three, four and six legs on three
+runs. The before run's transport ids show the same drop on 5554 landing
+between legs. The cause is not measured; host load at the drops was 15-25
+with 40-80% idle, and Android's logcat had been cleared by the time it was
+read. _leg_worker now asks `adb get-state` after the claim and, for any
+answer but `device`, waits up to 30 s with `wait-for-device` and prints both
+answers and the wait (`emulator-5556 answered 'error: device offline' at
+claim; 'device' after 0.7s`, the first sighting, every leg green). GUARD:
+tools/lib/android-leg-order.py's drain clause (per-suite drain, an isolated
+leg pooled, the isolated block above the drain, a stage with no claim, a
+claim that takes no slot or never releases, each watched red) and the
+worker order marker for `device_online`.

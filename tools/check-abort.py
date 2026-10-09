@@ -621,7 +621,7 @@ with scratch_dir("check-abort-") as tmp:
         shadow.mkdir()
         source = java_probe if target == "probe" else java_original
         changed = g.doctor(f"Java async {name}", source, pattern, replacement,
-                           want=4 if name == "mixed-owner" else 1)
+                           want=5 if name == "mixed-owner" else 1)
         binding_copy = shadow / "KayaApp.java"
         probe_copy = shadow / "AsyncCheck.java"
         binding_copy.write_text(changed if target == "binding" else java_original, encoding="utf-8")

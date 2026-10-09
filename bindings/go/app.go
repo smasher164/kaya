@@ -290,6 +290,7 @@ type App struct {
 	dismissRequested map[uint64]func(*Tx)
 	sectionSelected map[uint64]func(*Tx)
 	alerts         map[uint64]func(*Tx, AlertChoice)
+	toasts         map[uint64]func(*Tx, ToastOutcome)
 	// One-shot, keyed by the GUEST's notification id (the alert's
 	// grammar; many may be live at once).
 	notifications  map[uint64]func(*Tx, NotificationResult)
@@ -380,6 +381,7 @@ func NewApp() *App {
 		sortHandlers:   make(map[uint64]func(*Tx, uint32)),
 		nodeSorts:      make(map[uint64]func(*Tx, []any, uint32)),
 		alerts:         make(map[uint64]func(*Tx, AlertChoice)),
+		toasts:         make(map[uint64]func(*Tx, ToastOutcome)),
 		notifications:  make(map[uint64]func(*Tx, NotificationResult)),
 		links:          make(map[uint64]func(*Tx, map[string]string)),
 		fileDialogs:    make(map[uint64]func(*Tx, []PickedFile)),
@@ -3434,6 +3436,84 @@ func (r AlertRef) Show() uint64 {
 	return r.id
 }
 
+// ShowToast requests a toast in the primary window (docs/toast-plan.md):
+// a short message that goes by itself, at most one action. A chain ending
+// in Show, like ShowAlert; a second toast in the same window replaces this
+// one, which answers ToastOutcomeClosed.
+func (tx *Tx) ShowToast(text string) ToastRef {
+	tx.app.c.alert++
+	return ToastRef{tx: tx, id: tx.app.c.alert, text: text,
+		duration: ToastDurationShort, action: ToastActionNone}
+}
+
+// DismissToast withdraws a shown toast. It answers nothing: the app
+// caused it.
+func (tx *Tx) DismissToast(toast uint64) {
+	tx.emit(TxDismissToast(toast))
+}
+
+// ToastRef accumulates the one SHOW_TOAST record; nothing is sent until
+// Show.
+type ToastRef struct {
+	tx       *Tx
+	id       uint64
+	window   uint64
+	text     string
+	label    string
+	duration ToastDuration
+	action   ToastAction
+	onResult func(*Tx, ToastOutcome)
+}
+
+// Action offers one button, labelled by the app; its press answers
+// ToastOutcomeAction.
+func (r ToastRef) Action(label string) ToastRef {
+	if r.action == ToastActionNone {
+		r.action = ToastActionApp
+	}
+	r.label = label
+	return r
+}
+
+// Undo makes the button the window's undo of THIS transaction's step: the
+// transaction must be Undoable, and the press undoes it exactly as
+// Edit > Undo would (OnUndone hears it), then answers ToastOutcomeAction.
+func (r ToastRef) Undo() ToastRef {
+	r.action = ToastActionUndo
+	return r
+}
+
+// Long asks for the platform's longer duration.
+func (r ToastRef) Long() ToastRef {
+	r.duration = ToastDurationLong
+	return r
+}
+
+// InWindow shows it in this window instead of the primary.
+func (r ToastRef) InWindow(window uint64) ToastRef {
+	r.window = window
+	return r
+}
+
+// OnResult binds the one-shot answer to THIS toast; it retires with the
+// answer, and a dismissed toast answers nothing (docs/toast-plan.md T5).
+func (r ToastRef) OnResult(fn func(*Tx, ToastOutcome)) ToastRef {
+	r.onResult = fn
+	return r
+}
+
+// Show sends the request, returning its id for DismissToast.
+func (r ToastRef) Show() uint64 {
+	if r.action == ToastActionUndo && r.label == "" {
+		panic("kaya: an undo toast's button needs a label — call Action(label) before Show()")
+	}
+	if r.onResult != nil {
+		r.tx.app.toasts[r.id] = r.onResult
+	}
+	r.tx.emit(TxShowToast(r.window, r.id, uint32(r.duration), uint32(r.action), r.text, r.label))
+	return r.id
+}
+
 // ShowNotification posts a local notification with a GUEST-CHOSEN id
 // (docs/tasks-s3-plan.md N1, N2): the alert's chain without a window,
 // ending in Show. The result handler rides the REQUEST and retires with
@@ -4309,6 +4389,20 @@ type AlertChoice uint32
 // opened it, NotificationOutcomeRefused when the platform would not post
 // it. Dismissal is not one of them — two platforms never report it.
 type NotificationOutcome uint32
+
+// ToastOutcome is a toast's one answer (docs/toast-plan.md T5):
+// ToastOutcomeAction when the user pressed its action, ToastOutcomeClosed
+// for every other way it went.
+type ToastOutcome uint32
+
+// ToastDuration is how long a toast stays: ToastDurationShort (the
+// default) or ToastDurationLong, in the platform's own seconds.
+type ToastDuration uint32
+
+// ToastAction is what a toast's button does: nothing (ToastActionNone),
+// answer the app (ToastActionApp), or the window's undo of its step
+// (ToastActionUndo).
+type ToastAction uint32
 
 // NotificationResult is a notification's one answer: its Outcome, and for
 // NotificationOutcomeReplied the Text the user sent from its Reply field
@@ -7020,6 +7114,12 @@ func (a *App) Serve() {
 				delete(a.alerts, id)
 				picked := AlertChoice(choice)
 				a.dispatch(func(tx *Tx) { fn(tx, picked) })
+			}
+		case kind == occToastResult:
+			if fn := a.toasts[id]; fn != nil {
+				delete(a.toasts, id)
+				outcome := ToastOutcome(choice)
+				a.dispatch(func(tx *Tx) { fn(tx, outcome) })
 			}
 		case kind == occLinkOpened:
 			a.linkOpened(id, linkURLOf(payload), linkParamsOf(payload))

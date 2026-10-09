@@ -1,7 +1,8 @@
 # The toast: the design pass (2026-10-08)
 
 Status: RULED (T1-T16); the DEPTH is BUILT (2026-10-08): the spec, the core,
-Rust, and the SwiftUI arm on macOS and iOS; the breadth is docs/deferred.md's
+Rust, and the SwiftUI arm on macOS and iOS; the other eight bindings and the C
+floor are BUILT (2026-10-08); the rest of the breadth is docs/deferred.md's
 toast BUILD entry. The maintainer picked the toast next after the segmented
 control (the 2026-10-06 shortlist). Its roadmap card (docs/roadmap/features.toml,
 `toast`) calls it "the undo surface": kaya's core-owned undo has no place to

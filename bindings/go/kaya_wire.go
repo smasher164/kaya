@@ -192,13 +192,13 @@ const (
 	NotificationOutcomeActivated NotificationOutcome = 0
 	NotificationOutcomeRefused NotificationOutcome = 1
 	NotificationOutcomeReplied NotificationOutcome = 2
-	ToastDurationShort = 0
-	ToastDurationLong = 1
-	ToastActionNone = 0
-	ToastActionApp = 1
-	ToastActionUndo = 2
-	ToastOutcomeAction = 0
-	ToastOutcomeClosed = 1
+	ToastDurationShort ToastDuration = 0
+	ToastDurationLong ToastDuration = 1
+	ToastActionNone ToastAction = 0
+	ToastActionApp ToastAction = 1
+	ToastActionUndo ToastAction = 2
+	ToastOutcomeAction ToastOutcome = 0
+	ToastOutcomeClosed ToastOutcome = 1
 	FileModeRead FileMode = 0
 	FileModeWrite FileMode = 1
 	FileModeReadWrite FileMode = 2
@@ -653,6 +653,38 @@ func (n NotificationOutcome) String() string {
 		return "replied"
 	}
 	return "NotificationOutcome(" + strconv.FormatInt(int64(n), 10) + ")"
+}
+
+func (t ToastDuration) String() string {
+	switch t {
+	case ToastDurationShort:
+		return "short"
+	case ToastDurationLong:
+		return "long"
+	}
+	return "ToastDuration(" + strconv.FormatInt(int64(t), 10) + ")"
+}
+
+func (t ToastAction) String() string {
+	switch t {
+	case ToastActionNone:
+		return "none"
+	case ToastActionApp:
+		return "app"
+	case ToastActionUndo:
+		return "undo"
+	}
+	return "ToastAction(" + strconv.FormatInt(int64(t), 10) + ")"
+}
+
+func (t ToastOutcome) String() string {
+	switch t {
+	case ToastOutcomeAction:
+		return "action"
+	case ToastOutcomeClosed:
+		return "closed"
+	}
+	return "ToastOutcome(" + strconv.FormatInt(int64(t), 10) + ")"
 }
 
 func (f FileMode) String() string {

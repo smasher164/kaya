@@ -3312,6 +3312,48 @@ check("zero is a badge value and not an absent one (it CLEARS)",
       kaya.wire.tx_set_section_badge(5150, 0.0)
       != kaya.wire.tx_set_section_badge(5150, 3.0))
 
+# --- TOASTS (docs/toast-plan.md T15) --------------------------------
+app_toast = kaya.App()
+with app_toast.window():
+    before_t = len(kaya._tx)
+    plain_id = kaya.show_toast("Saved")
+    undo_id = kaya.show_toast("Deleted Milk", action="Undo", undo=True,
+                              duration=kaya.ToastDuration.LONG,
+                              on_result=lambda o: None)
+    toast_records = kaya._tx[before_t:]
+    before_t = len(kaya._tx)
+    kaya.dismiss_toast(undo_id)
+    dismiss_records = kaya._tx[before_t:]
+
+check("show_toast packs the generated record, short and no action by default",
+      kaya.wire.tx_show_toast(0, plain_id, kaya.wire.TOAST_DURATION_SHORT,
+                              kaya.wire.TOAST_ACTION_NONE, "Saved", "")
+      in toast_records)
+check("undo=True with a label packs the undo action and the long duration",
+      kaya.wire.tx_show_toast(0, undo_id, kaya.wire.TOAST_DURATION_LONG,
+                              kaya.wire.TOAST_ACTION_UNDO, "Deleted Milk", "Undo")
+      in toast_records)
+check("dismiss_toast packs the generated record and drops the handler",
+      kaya.wire.tx_dismiss_toast(undo_id) in dismiss_records
+      and undo_id not in app_toast._toast_handlers)
+
+no_label = False
+try:
+    with app_toast.window():
+        kaya.show_toast("Deleted", undo=True)
+except ValueError:
+    no_label = True
+check("an undo toast with no action label is refused", no_label)
+
+body = struct.pack("<QII", 7, kaya.wire.TOAST_OUTCOME_CLOSED, 0)
+check("a packed toast_result decodes to its id and outcome",
+      kaya.wire.parse_occurrence(
+          struct.pack("<IHH", 8 + len(body), kaya.wire.OCC_TOAST_RESULT, 0) + body)
+      == (kaya.wire.OCC_TOAST_RESULT, 7, [], kaya.ToastOutcome.CLOSED))
+check("a CLOSED outcome never compares equal to ACTION, as a guest's == reads it",
+      not (kaya.ToastOutcome(kaya.wire.TOAST_OUTCOME_CLOSED)
+           == kaya.ToastOutcome.ACTION))
+
 # --- NOTIFICATIONS (docs/tasks-s3-plan.md N1, N2) -------------------
 # The alert's grammar without a window: the handler binds AT THE SHOW,
 # fires once and retires; the id is the GUEST's, so it may be posted

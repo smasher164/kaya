@@ -62,6 +62,7 @@ module KayaApp
     buildTx,
     Ask,
     askAlert,
+    askToast,
     askPickFiles,
     askPickFile,
     askPickFilesOf,
@@ -127,6 +128,11 @@ module KayaApp
     Platform (..),
     AlertAttr (..),
     showAlert,
+    ToastAttr (..),
+    ToastDuration (..),
+    ToastId (..),
+    showToast,
+    dismissToast,
     NotificationAttr (..),
     showNotification,
     cancelNotification,
@@ -1719,6 +1725,59 @@ showAlert attrs handler = do
                 (W.VStr (T.unpack (mconcat (take 1 (drop 1 actions)))))
                 (W.VStr (T.unpack (mconcat (take 1 cancels))))
             )
+
+-- | Toast construction attributes, 'AlertAttr' one request over
+-- (docs/toast-plan.md T15).
+data ToastAttr
+  = TAction Text
+  | TUndo
+  | TDuration ToastDuration
+  | TWindow Word64
+
+data ToastDuration = ToastShort | ToastLong
+  deriving (Eq, Show)
+
+newtype ToastId = ToastId Word64
+  deriving (Eq, Show)
+
+-- | Show a toast: the handler answers 'ToastAction' or 'ToastClosed' once
+-- and retires. 'TUndo' binds the 'TAction' button to this transaction's
+-- step, so it belongs inside 'undoableTx'.
+showToast :: Text -> [ToastAttr] -> (ToastOutcome -> IO ()) -> Build ToastId
+showToast text attrs handler = do
+  let actions = [a | TAction a <- attrs]
+      undo = not (null [() | TUndo <- attrs])
+      long = ToastLong `elem` [d | TDuration d <- attrs]
+      target = last (0 : [w | TWindow w <- attrs])
+  case () of
+    _
+      | length actions > 1 ->
+          error "kaya: a toast carries at most one action"
+      | undo && null actions ->
+          error "kaya: an undo toast's button needs a label — add TAction"
+      | otherwise -> do
+          n <- state $ \s ->
+            let c = s.bCounters
+                next = c.cAlert + 1
+             in (next, s {bCounters = c {cAlert = next}})
+          pendB (PToast n handler)
+          emitB
+            ( W.txShowToast
+                target
+                n
+                (if long then W.toastDurationLong else W.toastDurationShort)
+                ( if undo
+                    then W.toastActionUndo
+                    else if null actions then W.toastActionNone else W.toastActionApp
+                )
+                (W.VStr (T.unpack text))
+                (W.VStr (T.unpack (mconcat actions)))
+            )
+          return (ToastId n)
+
+-- | Withdraw a shown toast. It answers nothing: the app caused it.
+dismissToast :: ToastId -> Build ()
+dismissToast (ToastId n) = emitB (W.txDismissToast n)
 
 -- | Notification construction attributes — the config-list spelling,
 -- 'AlertAttr' one request over.
@@ -4917,6 +4976,7 @@ register app pending = case pending of
   PAlert n handler -> modifyIORef' (app.appAlertHandlers) (Map.insert n handler)
   PNotification n handler ->
     modifyIORef' (app.appNotificationHandlers) (Map.insert n handler)
+  PToast n handler -> modifyIORef' (app.appToastHandlers) (Map.insert n handler)
   PFileDialog n handler ->
     modifyIORef' (app.appFileDialogHandlers) (Map.insert n handler)
   PClipboardRead n handler ->
@@ -5644,6 +5704,7 @@ newApp =
     <*> newIORef Map.empty -- appDismissRequested
     <*> newIORef Map.empty -- appAlertHandlers
     <*> newIORef Map.empty -- appNotificationHandlers
+    <*> newIORef Map.empty -- appToastHandlers
     <*> newIORef Nothing -- appNotificationActivation
     <*> newIORef Map.empty -- appLinkHandlers
     <*> newIORef 0 -- appNextLinkRoute
@@ -6058,6 +6119,14 @@ dispatchLoop app = do
               linkOpened app ident (T.pack url) (Map.fromList (pairs rest))
             _ -> return ()
           dispatchLoop app
+      | kind == W.occKindToastResult -> do
+          let outcome = case payload of
+                Just (W.VI64 o) -> fromIntegral o :: Word32
+                _ -> W.toastOutcomeClosed
+          handlers <- readIORef (app.appToastHandlers)
+          writeIORef (app.appToastHandlers) (Map.delete ident handlers)
+          dispatch (mapM_ ($ toastOutcomeOfWire outcome) (Map.lookup ident handlers))
+          dispatchLoop app
       | kind == W.occKindNotificationResult -> do
           -- The parser boxes the u32 outcome as VI64, the alert's own slot.
           notificationResult app ident $ case payload of
@@ -6152,6 +6221,9 @@ askWith show = do
 
 askAlert :: [AlertAttr] -> Ask AlertChoice
 askAlert attrs = askWith (showAlert attrs)
+
+askToast :: Text -> [ToastAttr] -> Ask ToastOutcome
+askToast text attrs = askWith (\k -> showToast text attrs k >> pure ())
 
 askPickFiles :: [(Text, Text)] -> Ask [PickedFile]
 askPickFiles filters = askWith (pickFiles filters)

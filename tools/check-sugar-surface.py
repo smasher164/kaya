@@ -3901,36 +3901,81 @@ print(f"check-sugar-surface: number field surface watched: prop fake "
 
 # --- THE TOAST SURFACE, all nine (docs/toast-plan.md T15, §5) -------------
 # A window-level request, not a kind, so neither the kind sweep nor the prop
-# census sees it. Rust is the reference row; the other eight are the
-# breadth's, red by design until each binding spells the show, the dismiss,
-# the answer, the undo binding and the duration in its own idiom.
+# census sees it. Rust is the reference row; each row reads the binding's
+# own spelling, the alert's shape in that binding (T15).
 def toast_rows(stem):
     S = stem[0].upper() + stem[1:]
     F = SLIDER_FILES
-    rust = [
-        ("show", rf"pub fn show_{stem}\(&mut self, text: &str\) -> {S}Ref"),
-        ("dismiss", rf"pub fn dismiss_{stem}\(&mut self, "),
-        ("answer", rf"pub fn on_{stem}\("),
-        ("undo", rf"{S}Action::Undo;"),
-        ("duration", rf"{S}Duration::Long;"),
-    ]
-    rows = [("rust", F["rust"], part, pat) for part, pat in rust]
-    for lang in ("python", "ocaml"):
-        for part, pat in (("show", rf"\bshow_{stem}\b"), ("dismiss", rf"\bdismiss_{stem}\b"),
-                          ("answer", rf"\b{stem}_outcome\b"), ("undo", rf"\b{stem}_action\b"),
-                          ("duration", rf"\b{stem}_duration\b")):
-            rows.append((lang, F[lang], part, pat))
-    for lang in ("go", "csharp"):
-        for part, pat in (("show", rf"\bShow{S}\b"), ("dismiss", rf"\bDismiss{S}\b"),
-                          ("answer", rf"\b{S}Outcome\b"), ("undo", rf"\b{S}Action\b"),
-                          ("duration", rf"\b{S}Duration\b")):
-            rows.append((lang, F[lang], part, pat))
-    for lang in ("java", "swift", "js", "haskell"):
-        for part, pat in (("show", rf"\bshow{S}\b"), ("dismiss", rf"\bdismiss{S}\b"),
-                          ("answer", rf"\b{S}Outcome\b"), ("undo", rf"\b{S}Action\b"),
-                          ("duration", rf"\b{S}Duration\b")):
-            rows.append((lang, F[lang], part, pat))
-    return rows
+    spelled = {
+        "rust": [
+            ("show", rf"pub fn show_{stem}\(&mut self, text: &str\) -> {S}Ref"),
+            ("dismiss", rf"pub fn dismiss_{stem}\(&mut self, "),
+            ("answer", rf"pub fn on_{stem}\("),
+            ("undo", rf"{S}Action::Undo;"),
+            ("duration", rf"{S}Duration::Long;"),
+        ],
+        "python": [
+            ("show", rf"^def show_{stem}\(text: str, \*, action: str \| None = None, undo: bool"),
+            ("dismiss", rf"^def dismiss_{stem}\("),
+            ("answer", rf"^class {S}Outcome\(enum\.IntEnum\)"),
+            ("undo", rf"wire\.{stem.upper()}_ACTION_UNDO if undo"),
+            ("duration", rf"^class {S}Duration\(enum\.IntEnum\)"),
+        ],
+        "go": [
+            ("show", rf"^func \(tx \*Tx\) Show{S}\(text string\) {S}Ref"),
+            ("dismiss", rf"^func \(tx \*Tx\) Dismiss{S}\("),
+            ("answer", rf"^type {S}Outcome uint32"),
+            ("undo", rf"^func \(r {S}Ref\) Undo\(\) {S}Ref"),
+            ("duration", rf"^type {S}Duration uint32"),
+        ],
+        "csharp": [
+            ("show", rf"public ulong Show{S}\($"),
+            ("dismiss", rf"public void Dismiss{S}\(ulong "),
+            ("answer", rf"public Task<{S}Outcome> Show{S}Async\("),
+            ("undo", rf"public ulong Show{S}\(\n\s+string text, string\? action = null, "
+                     rf"bool undo = false,"),
+            ("duration", rf"^enum {S}Duration : uint"),
+        ],
+        "java": [
+            ("show", rf"public Future{S}Ref show{S}\(String text\)"),
+            ("dismiss", rf"public void dismiss{S}\(long "),
+            ("answer", rf"public enum {S}Outcome \{{"),
+            ("undo", rf"public {S}Ref undo\(\)"),
+            ("duration", rf"public enum {S}Duration \{{"),
+        ],
+        "swift": [
+            ("show", rf"public func show{S}\($"),
+            ("dismiss", rf"public func dismiss{S}\(_ "),
+            ("answer", rf"public enum Kaya{S}Outcome: UInt32"),
+            ("undo", rf"public func show{S}\(\n\s+_ text: String, action: String\? = nil, "
+                     rf"undo: Bool = false,"),
+            ("duration", rf"public enum Kaya{S}Duration: UInt32"),
+        ],
+        "js": [
+            ("show", rf"^export function show{S}\(opts: {S}Options\): "
+                     rf"number \| Promise<{S}Outcome>"),
+            ("dismiss", rf"^export function dismiss{S}\("),
+            ("answer", rf"^export type {S}Outcome = "),
+            ("undo", rf"opts\.undo === true \? wire\.{stem.upper()}_ACTION_UNDO"),
+            ("duration", rf"^export type {S}Duration = \"short\" \| \"long\";"),
+        ],
+        "haskell": [
+            ("show", rf"^show{S} :: Text -> \[{S}Attr\]"),
+            ("dismiss", rf"^dismiss{S} :: {S}Id -> Build \(\)"),
+            ("answer", rf"-> \({S}Outcome -> IO \(\)\) -> Build {S}Id$"),
+            ("undo", rf"^data {S}Attr\n\s+= TAction Text\n\s+\| TUndo$"),
+            ("duration", rf"^data {S}Duration = "),
+        ],
+        "ocaml": [
+            ("show", rf"^let show_{stem} \?\(window = 0L\) \?action \?\(undo = false\)"),
+            ("dismiss", rf"^let dismiss_{stem} "),
+            ("answer", rf"^module {S}_outcome = struct"),
+            ("undo", rf"if undo then Kaya_wire\.{stem}_action_undo"),
+            ("duration", rf"^module {S}_duration = struct"),
+        ],
+    }
+    return [(lang, F[lang], part, pat) for lang, rows in spelled.items()
+            for part, pat in rows]
 
 
 def check_toast(stem, findings=None):
@@ -3960,7 +4005,7 @@ if len(fake) != len(toast_rows("toast")):
                   f"{len(toast_rows('toast'))} toast patterns fired for a stem "
                   f"that exists nowhere)")
 print(f"check-sugar-surface: toast surface: {len(toast_rows('toast'))} rows, "
-      f"{len(toast_reference)} red (the breadth's), fake {len(fake)}/{len(toast_rows('toast'))}")
+      f"{len(toast_reference)} red, fake {len(fake)}/{len(toast_rows('toast'))}")
 
 # --- THE COLOUR PICKER SURFACE, all nine (docs/color-picker-plan.md §2, §7)
 # The kind sweep holds the constructor in both zones and nothing else: a
@@ -6860,7 +6905,7 @@ discardable = tpl_discardable_probe()
 WANT_DISCARDABLE = """swift-row-member=applied:1 rc:1 named:True
 swift-arm-member=applied:1 rc:1 named:True
 swift-eliminator=applied:1 rc:1 named:True
-swift-census-floor=applied:22 rc:1 named:True"""
+swift-census-floor=applied:23 rc:1 named:True"""
 if discardable != WANT_DISCARDABLE:
     print("check-sugar-surface: SELF-TEST FAIL (the Swift generated-surface "
           "discard census did not catch its watched cuts). Wanted:",

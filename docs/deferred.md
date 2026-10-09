@@ -9,7 +9,7 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
-## BUILD — the toast (docs/toast-plan.md), depth on the mac and iOS (2026-10-08); the GTK, WinUI and Compose arms and the other eight bindings are the breadth slice
+## BUILD — the toast (docs/toast-plan.md), depth on the mac and iOS (2026-10-08), all nine bindings and the C floor (2026-10-08); the GTK, WinUI and Compose arms are the breadth slice
 KEY: toast, show_toast, dismiss_toast, present_toast, withdraw_toast, toast_result, toast_duration, toast_action, toast_outcome, ToastId, ToastRef, on_toast, kaya_toast_action, kaya_emit_toast_result, KayaToastHost, KayaToastView, kayaToastRead, kayaToastPress, kayaToastEarInstall, expect_toast, expect_no_toast, expect_toast_announced, toast_close, toast.steps, toast_routes, DEPTH STUB toast
 
 The depth slice: tx 82/83, apply 71/72, occurrence 55 and the three enums;
@@ -43,9 +43,18 @@ The tasks app's delete (T16) waits for the breadth. What breadth owes:
     `SwipeToDismissBox`; reads off the merged semantics node, `toast_close`
     through the `dismiss` action; the live region's observability (to
     measure); a row in tools/lib/toast_routes.py.
-  - **`show_toast` in the other eight bindings and the C floor** — spelled
-    as each spells its alert (T15), a `toast` guest per language; the
-    Python, JS, Swift, C#, Java iOS and mac legs with them.
+  - ~~**`show_toast` in the other eight bindings and the C floor**~~ — LANDED
+    2026-10-08: each spelled as its alert (T15) — Python's keywords with
+    `on_result`, Go's builder with `.OnResult`, C#'s keywords and
+    `ShowToastAsync`, Java's builder with `show()`/`showFuture()`, Swift's
+    `tx.showToast(..., onResult:)` and `await app.showToast`, JS's options
+    object (a Promise without `onResult`), OCaml's `'a ask`, Haskell's
+    attribute list and `askToast` — and `guests/c/toast.c` with every field
+    explicit; a `toast` guest per language, toast.steps green on the mac for
+    all nine and C (one verdict line) and on iOS for swift and go;
+    check-sugar-surface's toast rows read each binding's own declaration.
+    Swift's awaited form takes no `undo`: it opens its own transaction, and
+    an undo toast rides the step's (the callback form carries it).
   - **Rust's awaited form** (T15) — `ctx.show_toast(text)` resolving to the
     outcome inside a task scope; the depth ships `Messages::on_toast`.
   - **The tasks app's delete (T16)** and its block in tools/scenes/tasks.steps,

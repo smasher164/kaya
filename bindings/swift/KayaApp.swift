@@ -393,6 +393,27 @@ public enum KayaAlertChoice: UInt32, Sendable {
     }
 }
 
+/// A toast's one answer (docs/toast-plan.md T5): the user pressed its
+/// action, or it went away any other way.
+public enum KayaToastOutcome: UInt32, Sendable {
+    case action = 0
+    case closed = 1
+
+    static func fromWire(_ code: UInt32) -> KayaToastOutcome {
+        guard let known = KayaToastOutcome(rawValue: code) else {
+            fatalError(
+                "kaya: a toast result carries outcome \(code), which this build does not know")
+        }
+        return known
+    }
+}
+
+/// The platform's shorter or longer time on screen (docs/toast-plan.md T6).
+public enum KayaToastDuration: UInt32, Sendable {
+    case short = 0
+    case long = 1
+}
+
 /// A notification's outcomes (docs/tasks-s3-plan.md N1): opened, a reply
 /// from its field with the text sent (docs/notification-reply-plan.md), or
 /// refused by the platform. Dismissal is not one of them: two platforms
@@ -2561,6 +2582,7 @@ public final class KayaApp {
     private var fullscreenChanged: [UInt64: (KayaAppTx, Bool) throws -> Void] = [:]
     var alerts: [UInt64: (KayaAppTx, KayaAlertChoice) throws -> Void] = [:]
     var liveAlert: UInt64 = 0
+    private var toasts: [UInt64: (KayaAppTx, KayaToastOutcome) throws -> Void] = [:]
     var liveFileDialog: UInt64 = 0
     // One-shot, keyed by the GUEST's notification id (the alert's
     // request/result grammar; many may be live at once).
@@ -3270,6 +3292,19 @@ public final class KayaApp {
         }
     }
 
+    /// The awaited toast. An undo toast is shown from the transaction that
+    /// declares its step, so it is the callback form's alone.
+    @KayaAppActor public func showToast(
+        _ text: String, action: String? = nil, duration: KayaToastDuration = .short,
+        window: UInt64 = 0
+    ) async -> KayaToastOutcome {
+        await requestAsync { tx, resolve in
+            tx.showToast(text, action: action, duration: duration, window: window) {
+                _, outcome in resolve(outcome)
+            }
+        }
+    }
+
     @KayaAppActor public func pickFile(
         filters: [(String, String)] = [], content: KayaFileContent = .any, window: UInt64 = 0
     ) async -> [KayaPickedFile] {
@@ -3339,6 +3374,18 @@ public final class KayaApp {
         currentTx!.rollbackActions.append { [self] in
             alerts.removeValue(forKey: alert)
             if liveAlert == alert { liveAlert = 0 }
+        }
+    }
+
+    func onToast(_ toast: UInt64, _ handler: ((KayaAppTx, KayaToastOutcome) throws -> Void)?) {
+        guard let handler else { return }
+        toasts[toast] = handler
+        currentTx!.rollbackActions.append { [self] in toasts.removeValue(forKey: toast) }
+    }
+
+    func toastResult(_ id: UInt64, _ outcome: KayaToastOutcome) {
+        if let handler = toasts.removeValue(forKey: id) {
+            dispatch { try build { tx in try handler(tx, outcome) } }
         }
     }
 
@@ -3424,6 +3471,12 @@ public final class KayaApp {
                 + "handler — none is registered for it "
                 + "(KayaApp.link)\n").utf8))
         }
+    }
+
+    /// No live slot: a second toast replaces the first (docs/toast-plan.md T15).
+    func allocToast() -> UInt64 {
+        nextAlert += 1
+        return nextAlert
     }
 
     func allocAlert() -> UInt64 {
@@ -3840,6 +3893,8 @@ public final class KayaApp {
                 }
             case (UInt16(KAYA_OCCURRENCE_ALERT_RESULT), _):
                 alertResult(id, KayaAlertChoice.fromWire(choice))
+            case (UInt16(KAYA_OCCURRENCE_TOAST_RESULT), _):
+                toastResult(id, KayaToastOutcome.fromWire(choice))
             case (UInt16(KAYA_OCCURRENCE_LINK_OPENED), _):
                 // id is the ROUTE the core matched
                 // (docs/app-links-plan.md §4), and NOT one-shot.
@@ -5535,6 +5590,36 @@ public final class KayaAppTx {
             .str(actions.count == 2 ? actions[1] : ""), .str(cancel))
         app.onAlert(id, onResult)
         return id
+    }
+
+    /// Show a toast (docs/toast-plan.md): a short message that goes by
+    /// itself, at most one `action` button. `undo` makes that button the
+    /// window's undo of THIS transaction's step, which must be `undoable`.
+    /// `onResult` fires once, `.action` or `.closed`; a second toast in the
+    /// window replaces this one, which answers `.closed`.
+    @discardableResult
+    public func showToast(
+        _ text: String, action: String? = nil, undo: Bool = false,
+        duration: KayaToastDuration = .short, window: UInt64 = 0,
+        onResult: ((KayaAppTx, KayaToastOutcome) throws -> Void)? = nil
+    ) -> UInt64 {
+        alive()
+        precondition(
+            !undo || action != nil,
+            "kaya: an undo toast's button needs a label — pass action:")
+        let kind = undo ? KAYA_TOAST_ACTION_UNDO
+            : action == nil ? KAYA_TOAST_ACTION_NONE : KAYA_TOAST_ACTION_APP
+        let id = app.allocToast()
+        tx.showToast(
+            window, id, duration.rawValue, UInt32(kind), .str(text), .str(action ?? ""))
+        app.onToast(id, onResult)
+        return id
+    }
+
+    /// Withdraw a shown toast. It answers nothing: the app caused it.
+    public func dismissToast(_ toast: UInt64) {
+        alive()
+        tx.dismissToast(toast)
     }
 
     /// Post a local notification with a GUEST-CHOSEN id

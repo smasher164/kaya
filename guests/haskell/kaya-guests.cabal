@@ -360,6 +360,11 @@ executable segmented
   main-is: segmented.hs
   build-depends: kaya-guests
 
+executable toast
+  import: shared
+  main-is: toast.hs
+  build-depends: kaya-guests
+
 executable scrollto
   import: shared
   main-is: scrollto.hs

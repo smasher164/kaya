@@ -128,10 +128,11 @@ STAGE_REQUIRED = [
     "if passed != expected:",
     'print(f"stage-{label}: OK ({passed}/{expected} targets)")',
 ]
-# The worker's slot/IME/verdict order: claim, slot-local IME assert,
-# launch, release, verdict.
+# The worker's slot/IME/verdict order: claim, the device's adb state,
+# slot-local IME assert, launch, release, verdict.
 IME_ORDER_MARKERS = [
     "slot = _claim_device()",
+    "ready = device_online(serial, log)",
     "select_helper_ime(serial, log)",
     "ok = ready and run_apk_on(serial, name, *args, log=log)",
     "_release_device(slot)",

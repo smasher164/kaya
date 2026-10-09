@@ -2252,6 +2252,64 @@ export function showAlert(opts: AlertOptions): number | Promise<AlertChoice> {
   });
 }
 
+/** docs/toast-plan.md T5. */
+export type ToastOutcome = "action" | "closed";
+
+const TOAST_OUTCOMES: ReadonlyMap<number, ToastOutcome> = new Map([
+  [wire.TOAST_OUTCOME_ACTION, "action"],
+  [wire.TOAST_OUTCOME_CLOSED, "closed"],
+]);
+
+function toastOutcome(code: number): ToastOutcome {
+  const name = TOAST_OUTCOMES.get(code);
+  if (name === undefined) throw new Error(`kaya: a toast result carries outcome ${code}, which this build does not know`);
+  return name;
+}
+
+/** docs/toast-plan.md T6. */
+export type ToastDuration = "short" | "long";
+
+const TOAST_DURATIONS: Readonly<Record<ToastDuration, number>> = {
+  short: wire.TOAST_DURATION_SHORT,
+  long: wire.TOAST_DURATION_LONG,
+};
+
+export type ToastOptions = {
+  text: string;
+  action?: string;
+  /** docs/toast-plan.md T4: the transaction must be `undoable`. */
+  undo?: boolean;
+  duration?: ToastDuration;
+  onResult?: (outcome: ToastOutcome) => void;
+  window?: number;
+};
+
+/** docs/toast-plan.md; without onResult the call answers a promise, as
+ * showAlert does. */
+export function showToast(opts: ToastOptions & { onResult: (outcome: ToastOutcome) => void }): number;
+export function showToast(opts: ToastOptions): Promise<ToastOutcome>;
+export function showToast(opts: ToastOptions): number | Promise<ToastOutcome> {
+  if (opts.undo === true && !opts.action) throw new Error("kaya: an undo toast's button needs a label — pass action:");
+  const kind = opts.undo === true ? wire.TOAST_ACTION_UNDO : opts.action ? wire.TOAST_ACTION_APP : wire.TOAST_ACTION_NONE;
+  const a = app();
+  const toastId = a._next("alert");
+  const record = wire.tx_show_toast(opts.window ?? 0, toastId, TOAST_DURATIONS[opts.duration ?? "short"], kind, opts.text, opts.action ?? "");
+  if (opts.onResult !== undefined) {
+    registerDialog(a._toastHandlers, toastId, opts.onResult);
+    records().push(record);
+    return toastId;
+  }
+  return new Promise<ToastOutcome>((resolve) => {
+    registerDialog(a._toastHandlers, toastId, resolve);
+    records().push(record);
+  });
+}
+
+/** docs/toast-plan.md T5: no answer follows. */
+export function dismissToast(toast: number): void {
+  records().push(wire.tx_dismiss_toast(toast));
+}
+
 export type NotificationOptions = {
   /** The GUEST's id: many notifications may be live at once, and an id
    * retires on its result or its cancel. */
@@ -6235,6 +6293,8 @@ export class App {
   /** @internal One-shot, keyed by the GUEST's notification id (the
    * alert's grammar; many may be live at once). */
   readonly _notificationHandlers = new Map<number, (outcome: NotificationOutcome) => void>();
+  /** @internal */
+  readonly _toastHandlers = new Map<number, (outcome: ToastOutcome) => void>();
   /** @internal NOT one-shot, and not keyed at all: the process-level
    * handler for a result whose id has none above
    * (docs/tasks-s9-plan.md R1). A relaunched process never called
@@ -6753,6 +6813,13 @@ export class App {
       this._alertHandlers.delete(ident);
       const choice = alertChoice(payload as number);
       if (handler !== undefined) this._dispatch(handler as Handler, choice);
+      return;
+    }
+    if (kind === wire.OCC_TOAST_RESULT) {
+      const handler = this._toastHandlers.get(ident);
+      this._toastHandlers.delete(ident);
+      const outcome = toastOutcome(payload as number);
+      if (handler !== undefined) this._dispatch(handler as Handler, outcome);
       return;
     }
     if (kind === wire.OCC_LINK_OPENED) {

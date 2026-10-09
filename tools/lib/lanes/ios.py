@@ -45,6 +45,7 @@ SWIFT_ENTRIES = [
     "media_reader:media",
     # The capture on kaya's in-process synthetic devices (docs/capture-plan.md §7).
     "capture", "capture_denied:capture",
+    "toast",
 ]
 
 # The go suite: the swift roster entry for entry minus the two
@@ -66,6 +67,7 @@ GO_SCENES = [
     "media_formats", "media_delivery", "media_session", "media_tracks",
     "media_feed", "media_reader",
     "capture", "capture_denied",
+    "toast",
 ]
 
 # CPython embedded in ONE bundle carrying every python scene
@@ -232,6 +234,10 @@ MODS = {
     # can hear it (docs/toast-plan.md T13's carve-out).
     ("rust-swiftui", "toast"): {"drop": ("expect_toast_announced", '"Saved|"'),
                                 "keep": "expect_toast"},
+    ("swift", "toast"): {"drop": ("expect_toast_announced", '"Saved|"'),
+                         "keep": "expect_toast"},
+    ("go", "toast"): {"drop": ("expect_toast_announced", '"Saved|"'),
+                      "keep": "expect_toast"},
     ("rust-swiftui", "submit"): {"drop": ("expect_focused", "entry#0"),
                                  "keep": "expect"},
     ("swift", "submit"): {"drop": ("expect_focused", "entry#0"),

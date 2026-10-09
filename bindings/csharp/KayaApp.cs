@@ -1350,6 +1350,8 @@ sealed record DismissRequested(ulong Id, List<object> Keys) : Occurrence(Id, Key
 
 sealed record AlertAnswered(ulong Id, List<object> Keys, AlertChoice Choice) : Occurrence(Id, Keys);
 
+sealed record ToastAnswered(ulong Id, List<object> Keys, ToastOutcome Outcome) : Occurrence(Id, Keys);
+
 sealed record LinkArrived(ulong Id, List<object> Keys, string Url,
     IReadOnlyDictionary<string, string> Params) : Occurrence(Id, Keys);
 
@@ -1549,6 +1551,32 @@ static class AlertChoices
         KayaWire.AlertChoiceCancel => AlertChoice.Cancel,
         _ => throw new InvalidOperationException(
             $"kaya: alert_result carries choice {choice}, which this build "
+                + "does not know"),
+    };
+}
+
+/// docs/toast-plan.md T5.
+enum ToastOutcome : uint
+{
+    Action = KayaWire.ToastOutcomeAction,
+    Closed = KayaWire.ToastOutcomeClosed,
+}
+
+/// docs/toast-plan.md T6.
+enum ToastDuration : uint
+{
+    Short = KayaWire.ToastDurationShort,
+    Long = KayaWire.ToastDurationLong,
+}
+
+static class ToastOutcomes
+{
+    internal static ToastOutcome FromWire(uint outcome) => outcome switch
+    {
+        KayaWire.ToastOutcomeAction => ToastOutcome.Action,
+        KayaWire.ToastOutcomeClosed => ToastOutcome.Closed,
+        _ => throw new InvalidOperationException(
+            $"kaya: toast_result carries outcome {outcome}, which this build "
                 + "does not know"),
     };
 }
@@ -1957,6 +1985,7 @@ sealed class KayaApp
     internal readonly Dictionary<ulong, Action<Tx, string, UndoDelta>> undone = new();
     internal readonly Dictionary<ulong, Action<Tx, string, UndoDelta>> redone = new();
     internal readonly Dictionary<ulong, Action<Tx, AlertChoice>> alerts = new();
+    internal readonly Dictionary<ulong, Action<Tx, ToastOutcome>> toasts = new();
 
     // One-shot, keyed by the GUEST's notification id (the alert's
     // grammar; many may be live at once).
@@ -2273,6 +2302,12 @@ sealed class KayaApp
         RequestAsync<AlertChoice>((tx, resolve) => tx.ShowAlert(
             title, message, action0, action1, cancel, (_, choice) => resolve(choice), window));
 
+    public Task<ToastOutcome> ShowToastAsync(
+        string text, string? action = null, bool undo = false,
+        ToastDuration duration = ToastDuration.Short, ulong window = 0) =>
+        RequestAsync<ToastOutcome>((tx, resolve) => tx.ShowToast(
+            text, action, undo, duration, (_, outcome) => resolve(outcome), window));
+
     public Task<List<PickedFile>> PickFileAsync(
         (string Label, string Extensions)[]? filters = null, ulong window = 0,
         FileContent content = FileContent.Any) =>
@@ -2399,6 +2434,11 @@ sealed class KayaApp
     {
         if (liveAlert == id) liveAlert = 0;
         if (alerts.Remove(id, out var handler)) Dispatch(tx => handler(tx, choice));
+    }
+
+    internal void ToastResult(ulong id, ToastOutcome outcome)
+    {
+        if (toasts.Remove(id, out var handler)) Dispatch(tx => handler(tx, outcome));
     }
 
     internal void FileDialogResult(ulong id, List<PickedFile> files)
@@ -3405,6 +3445,8 @@ sealed class KayaApp
             case KayaWire.OccKindDismissRequested: return new DismissRequested(id, keys);
             case KayaWire.OccKindAlertResult:
                 return new AlertAnswered(id, keys, AlertChoices.FromWire(code));
+            case KayaWire.OccKindToastResult:
+                return new ToastAnswered(id, keys, ToastOutcomes.FromWire(code));
             case KayaWire.OccKindLinkOpened:
                 return new LinkArrived(id, keys, LinkUrlOf(payload), LinkParamsOf(payload));
             case KayaWire.OccKindNotificationResult:
@@ -3730,6 +3772,9 @@ sealed class KayaApp
                 // One-shot: the registration retires with the result.
                 case AlertAnswered alert:
                     AlertResult(alert.Id, alert.Choice);
+                    break;
+                case ToastAnswered toast:
+                    ToastResult(toast.Id, toast.Outcome);
                     break;
                 // id is the ROUTE the core matched
                 // (docs/app-links-plan.md §4), and NOT one-shot. TWO
@@ -5934,6 +5979,34 @@ sealed class Tx : IDisposable
             if (App.liveAlert == id) App.liveAlert = 0;
         });
         return id;
+    }
+
+    /// docs/toast-plan.md T1-T6, T15.
+    public ulong ShowToast(
+        string text, string? action = null, bool undo = false,
+        ToastDuration duration = ToastDuration.Short,
+        Action<Tx, ToastOutcome>? onResult = null, ulong window = 0)
+    {
+        Alive();
+        if (undo && string.IsNullOrEmpty(action))
+            throw new ArgumentException(
+                "kaya: an undo toast's button needs a label — pass action:");
+        uint kind = undo ? KayaWire.ToastActionUndo
+            : action == null ? KayaWire.ToastActionNone : KayaWire.ToastActionApp;
+        ulong toast = ++App.nextAlert;
+        Records.Add(KayaWire.TxShowToast(
+            window, toast, (uint)duration, kind, text, action ?? ""));
+        if (onResult != null)
+            App.toasts[toast] = onResult;
+        RollbackActions.Add(() => App.toasts.Remove(toast));
+        return toast;
+    }
+
+    /// docs/toast-plan.md T5: no answer follows.
+    public void DismissToast(ulong toast)
+    {
+        Alive();
+        Records.Add(KayaWire.TxDismissToast(toast));
     }
 
     /// Post a local notification with a GUEST-CHOSEN id

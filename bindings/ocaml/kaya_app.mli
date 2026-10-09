@@ -117,6 +117,18 @@ module Notification_outcome : sig
   val name : t -> string
 end
 
+(* A toast's one answer (docs/toast-plan.md T5). *)
+module Toast_outcome : sig
+  type t = Action | Closed
+
+  val of_wire : int -> t
+end
+
+(* The platform's shorter or longer stay (docs/toast-plan.md T6). *)
+module Toast_duration : sig
+  type t = Short | Long
+end
+
 (* The app's OWN light/dark choice, applied process-wide from the
    default window (docs/tasks-s2b-plan.md R1-R3). *)
 module Appearance : sig
@@ -1712,6 +1724,24 @@ val show_alert :
   ?title:string ->
   ?message:string ->
   ?actions:string list -> cancel:string -> unit -> Alert_choice.t ask
+
+(* A toast (docs/toast-plan.md): a short message that goes by itself, at
+   most one [~action]. [~undo] makes that button the window's undo of THIS
+   transaction's step, which must be [undoable]. The show happens now; the
+   second half is its one answer, bound with [let*] in the same handler. A
+   second toast in the window replaces this one, which answers [Closed]. *)
+type toast
+
+val show_toast :
+  ?window:int64 ->
+  ?action:string ->
+  ?undo:bool ->
+  ?duration:Toast_duration.t ->
+  string ->
+  toast * Toast_outcome.t ask
+
+(* Withdraw a shown toast. It answers nothing: the app caused it. *)
+val dismiss_toast : toast -> unit
 
 val show_notification :
   ?title:string ->

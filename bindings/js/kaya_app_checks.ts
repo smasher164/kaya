@@ -493,6 +493,41 @@ if (isMainThread) {
       (app as unknown as { _alertHandlers: Map<number, unknown> })._alertHandlers.size === 0);
   }
 
+  // The toast (docs/toast-plan.md T5, T15): the alert's grammar without
+  // its live slot, since a second toast replaces the first.
+  let toastPromised: Promise<K.ToastOutcome> | null = null;
+  app.build(() => { toastPromised = kaya.showToast({ text: "Saved" }); });
+  const toastId = (app as unknown as { _counters: { alert: number } })._counters.alert;
+  let toastHeard: K.ToastOutcome | null = null;
+  app.build(() => { kaya.showToast({ text: "Second", action: "Open", onResult: (o) => { toastHeard = o; } }); });
+  const secondToastId = (app as unknown as { _counters: { alert: number } })._counters.alert;
+  const toastResult = (id: number, outcome: number): Uint8Array => {
+    const bytes = new Uint8Array(24);
+    const tv = new DataView(bytes.buffer);
+    tv.setUint32(0, 24, true);
+    tv.setUint16(4, wire.OCC_TOAST_RESULT, true);
+    tv.setBigUint64(8, BigInt(id), true);
+    tv.setUint32(16, outcome, true);
+    return bytes;
+  };
+  fire(wire.parse_occurrence(toastResult(toastId, wire.TOAST_OUTCOME_CLOSED)));
+  check("showToast without onResult is a promise of the outcome", (await toastPromised!) === "closed");
+  fire(wire.parse_occurrence(toastResult(secondToastId, wire.TOAST_OUTCOME_ACTION)));
+  check("a second toast needs no free slot, and its callback hears \"action\"", toastHeard === "action");
+  check(
+    "a toast outcome this build does not know is refused naming it",
+    throws(() => { fire(wire.parse_occurrence(toastResult(secondToastId, 5))); }, /toast result carries outcome 5/),
+  );
+  check("an undo toast with no label is refused", throws(() => {
+    app.build(() => { kaya.showToast({ text: "Deleted", undo: true, onResult: () => {} }); });
+  }, /undo toast's button needs a label/));
+  check("aborted toast scope propagates", throws(() => app.build(() => {
+    kaya.showToast({ text: "Saved", onResult: () => {} });
+    throw new Error("abort toast");
+  }), /abort toast/));
+  check("aborted toast registration is released",
+    (app as unknown as { _toastHandlers: Map<number, unknown> })._toastHandlers.size === 0);
+
   // THE CORRECTION SLICE (the idiom review, 2026-09-17). Every closed
   // vocabulary a guest passes is a string-literal union of this binding,
   // there is no alias of a wire constant to reach one through, and a

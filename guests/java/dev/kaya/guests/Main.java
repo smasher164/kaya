@@ -52,6 +52,9 @@ public final class Main {
             case "segmented":
                 app = Segmented::app;
                 break;
+            case "toast":
+                app = Toast::app;
+                break;
             case "table":
                 app = Table::app;
                 break;

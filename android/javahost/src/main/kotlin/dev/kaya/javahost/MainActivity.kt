@@ -66,6 +66,7 @@ object GuestStart : KayaGuestStart {
             "autofill" -> Autofill::app
             "reveal" -> Reveal::app
             "segmented" -> Segmented::app
+            "toast" -> Toast::app
             "sections" -> Sections::app
             "menus" -> Menus::app
             "commands" -> Commands::app

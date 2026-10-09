@@ -2358,6 +2358,30 @@ class NotificationOutcome(enum.IntEnum):
                               "kaya.NotificationOutcome.ACTIVATED")
 
 
+class ToastOutcome(enum.IntEnum):
+    """A toast's two outcomes (docs/toast-plan.md T5): the user pressed
+    its action, or it went away any other way."""
+    ACTION = wire.TOAST_OUTCOME_ACTION
+    CLOSED = wire.TOAST_OUTCOME_CLOSED
+
+    @classmethod
+    def _missing_(cls, value: object) -> "ToastOutcome":
+        return _vocab_missing(cls, value, "a toast outcome",
+                              "kaya.ToastOutcome.CLOSED")
+
+
+class ToastDuration(enum.IntEnum):
+    """How long a toast stays: the platform's shorter or longer time
+    (docs/toast-plan.md T6)."""
+    SHORT = wire.TOAST_DURATION_SHORT
+    LONG = wire.TOAST_DURATION_LONG
+
+    @classmethod
+    def _missing_(cls, value: object) -> "ToastDuration":
+        return _vocab_missing(cls, value, "a toast duration",
+                              "kaya.ToastDuration.SHORT")
+
+
 @dataclasses.dataclass(frozen=True)
 class NotificationReply:
     """A reply from the notification's field: the text the user sent
@@ -2393,6 +2417,40 @@ def show_alert(title: str = "", *, message: str = "",
         int(window), alert_id, len(actions), title, message,
         action0, action1, cancel))
     return alert_id
+
+
+def show_toast(text: str, *, action: str | None = None, undo: bool = False,
+               duration: ToastDuration = ToastDuration.SHORT,
+               on_result: Callable[[ToastOutcome], object] | None = None,
+               window: int = 0) -> int:
+    """Show a toast in `window` (docs/toast-plan.md): a short message that
+    goes by itself, with at most one `action` button. `undo=True` makes
+    that button the window's undo of THIS transaction's step, which must
+    be `undoable`. on_result(outcome) fires exactly once and retires; a
+    second toast in the window replaces this one, which answers CLOSED."""
+    if not text:
+        raise KayaValueError("a toast needs text")
+    if undo and not action:
+        raise KayaValueError(
+            "kaya: an undo toast's button needs a label — pass action=")
+    kind = (wire.TOAST_ACTION_UNDO if undo
+            else wire.TOAST_ACTION_APP if action else wire.TOAST_ACTION_NONE)
+    app = _app
+    toast_id = app._next("alert")
+    if on_result is not None:
+        app._toast_handlers[toast_id] = on_result
+    _records().append(wire.tx_show_toast(
+        int(window), toast_id, int(ToastDuration(duration)), kind, text,
+        action or ""))
+    return toast_id
+
+
+def dismiss_toast(toast: int) -> None:
+    """Withdraw a shown toast. It answers nothing: the app caused it
+    (docs/toast-plan.md T5)."""
+    app = _app
+    app._toast_handlers.pop(int(toast), None)
+    _records().append(wire.tx_dismiss_toast(int(toast)))
 
 
 def show_notification(notification: int, *, title: str = "", body: str = "",
@@ -7271,6 +7329,7 @@ class App:
         # The wire routes by path_len, not by number, so two dicts.
         self._widget_handlers: dict[tuple[int, int], Handler] = {}
         self._alert_handlers: dict[int, Callable[[AlertChoice], object]] = {}
+        self._toast_handlers: dict[int, Callable[[ToastOutcome], object]] = {}
         # One-shot, keyed by the GUEST's notification id (the alert's
         # grammar; many may be live at once).
         self._notification_handlers: dict[
@@ -7903,6 +7962,11 @@ class App:
                 if handler is not None:
                     # payload is the parsed u32 choice.
                     self._dispatch(handler, AlertChoice(payload))
+                continue
+            if kind == wire.OCC_TOAST_RESULT:
+                handler = self._toast_handlers.pop(ident, None)
+                if handler is not None:
+                    self._dispatch(handler, ToastOutcome(payload))
                 continue
             if kind == wire.OCC_LINK_OPENED:
                 # ident is the ROUTE the core matched

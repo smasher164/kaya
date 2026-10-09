@@ -244,6 +244,27 @@ module Notification_outcome = struct
     | Replied _ -> "replied"
 end
 
+(* A toast's one answer (docs/toast-plan.md T5): the user pressed its
+   action, or it went away any other way. *)
+module Toast_outcome = struct
+  type t = Action | Closed
+
+  let of_wire code =
+    if code = Kaya_wire.toast_outcome_action then Action
+    else if code = Kaya_wire.toast_outcome_closed then Closed
+    else
+      invalid_arg
+        (Printf.sprintf
+           "kaya: a toast result carries outcome %d, which this build does \
+            not know"
+           code)
+end
+
+(* The platform's shorter or longer stay (docs/toast-plan.md T6). *)
+module Toast_duration = struct
+  type t = Short | Long
+end
+
 (* The app's OWN light/dark choice, applied process-wide from the
    default window (docs/tasks-s2b-plan.md R1-R3). [System] defers to the
    platform's own setting and to the harness knob. *)
@@ -1119,6 +1140,9 @@ type app = {
   fullscreen_changed : (int64, bool -> unit) Hashtbl.t;
   alert_handlers : (int64, Alert_choice.t -> unit) Hashtbl.t;
   mutable next_alert : int64;
+  (* One-shot, the alert's grammar; ids share [next_alert]
+     (docs/toast-plan.md T1). *)
+  toast_handlers : (int64, Toast_outcome.t -> unit) Hashtbl.t;
   (* One-shot, keyed by the GUEST's notification id (the alert's
      request/result grammar; many may be live at once). *)
   notification_handlers : (int64, Notification_outcome.t -> unit) Hashtbl.t;
@@ -1338,6 +1362,7 @@ let create () =
     section_selected = Hashtbl.create 8;
     fullscreen_changed = Hashtbl.create 8;
     alert_handlers = Hashtbl.create 8;
+    toast_handlers = Hashtbl.create 8;
     next_alert = 0L;
     notification_handlers = Hashtbl.create 8;
     notification_activation = None;
@@ -4102,6 +4127,39 @@ let show_alert ?(window = 0L) ?(title = "") ?(message = "")
        (Kaya_wire.Str (nth 0)) (Kaya_wire.Str (nth 1))
        (Kaya_wire.Str cancel))
 
+
+type toast = Toast of int64
+
+let show_toast ?(window = 0L) ?action ?(undo = false)
+    ?(duration = Toast_duration.Short) text =
+  let tx = the_tx () in
+  if text = "" then invalid_arg "kaya: a toast needs text";
+  let label = Option.value action ~default:"" in
+  if undo && label = "" then
+    invalid_arg
+      "kaya: an undo toast's button needs a label — pass ~action with ~undo";
+  let kind =
+    if undo then Kaya_wire.toast_action_undo
+    else if label = "" then Kaya_wire.toast_action_none
+    else Kaya_wire.toast_action_app
+  in
+  let wire_duration =
+    match duration with
+    | Toast_duration.Short -> Kaya_wire.toast_duration_short
+    | Toast_duration.Long -> Kaya_wire.toast_duration_long
+  in
+  let app = tx.app in
+  app.next_alert <- Int64.add app.next_alert 1L;
+  let id = app.next_alert in
+  emit tx
+    (Kaya_wire.tx_show_toast window id wire_duration kind (Kaya_wire.Str text)
+       (Kaya_wire.Str label));
+  (Toast id, fun k -> Hashtbl.replace app.toast_handlers id k)
+
+let dismiss_toast (Toast id) =
+  let tx = the_tx () in
+  Hashtbl.remove tx.app.toast_handlers id;
+  emit tx (Kaya_wire.tx_dismiss_toast id)
 
 (* Post a local notification with a GUEST-CHOSEN id
    (docs/tasks-s3-plan.md N1, N2): the alert's grammar without a window
@@ -7130,6 +7188,13 @@ let dispatch_loop app =
                Hashtbl.remove app.alert_handlers id;
                let picked = Alert_choice.of_wire (Int64.to_int c) in
                dispatch app (fun () -> handler picked)
+           | _ -> ())
+         else if kind = Kaya_wire.occ_kind_toast_result then
+           (match (Hashtbl.find_opt app.toast_handlers id, payload) with
+           | Some handler, Some (Kaya_wire.I64 o) ->
+               Hashtbl.remove app.toast_handlers id;
+               let outcome = Toast_outcome.of_wire (Int64.to_int o) in
+               dispatch app (fun () -> handler outcome)
            | _ -> ())
          else if kind = Kaya_wire.occ_kind_link_opened then
            (* id is the ROUTE the core matched (docs/app-links-plan.md
