@@ -127,6 +127,12 @@ VERB_FEATURE = {
     # docs/segmented-plan.md §5, the same reasoning.
     "expect_segments": "segmented",
     "expect_segment_symbol": "segmented",
+    # docs/toast-plan.md §5, the same reasoning.
+    "expect_toast": "toast",
+    "expect_no_toast": "toast",
+    "expect_toast_announced": "toast",
+    "toast_action": "toast",
+    "toast_close": "toast",
     # docs/autofill-plan.md §5, the same reasoning.
     "expect_content_type": "autofill",
     # docs/reveal-plan.md §5, the same reasoning.

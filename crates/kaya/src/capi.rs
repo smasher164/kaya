@@ -156,6 +156,8 @@ pub const KAYA_OCCURRENCE_CAPTURE_CHANGED: u16 = 51;
 pub const KAYA_OCCURRENCE_CAPTURE_PERMISSION: u16 = 52;
 pub const KAYA_OCCURRENCE_CAPTURE_DEVICES: u16 = 53;
 pub const KAYA_OCCURRENCE_CAPTURE_OVERRUN: u16 = 54;
+/// TOAST_RESULT { u64 toast; u32 outcome; u32 reserved } (docs/toast-plan.md T5).
+pub const KAYA_OCCURRENCE_TOAST_RESULT: u16 = 55;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -191,6 +193,7 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_CAPTURE_PERMISSION == ring::REC_CAPTURE_PERMISSION
         && KAYA_OCCURRENCE_CAPTURE_DEVICES == ring::REC_CAPTURE_DEVICES
         && KAYA_OCCURRENCE_CAPTURE_OVERRUN == ring::REC_CAPTURE_OVERRUN
+        && KAYA_OCCURRENCE_TOAST_RESULT == ring::REC_TOAST_RESULT
         && KAYA_OCCURRENCE_SECTION_SELECTED == ring::REC_SECTION_SELECTED
         && KAYA_OCCURRENCE_MENU_ACTIVATED == ring::REC_MENU_ACTIVATED
         && KAYA_OCCURRENCE_MENU_TOGGLED == ring::REC_MENU_TOGGLED
@@ -324,6 +327,10 @@ pub const KAYA_TX_CAPTURE_COMMAND: u16 = 78;
 pub const KAYA_TX_RELEASE_CAPTURE: u16 = 79;
 pub const KAYA_TX_REQUEST_PERMISSION: u16 = 80;
 pub const KAYA_TX_WATCH_CAPTURE_DEVICES: u16 = 81;
+/// SHOW_TOAST { u64 window; u64 toast; u32 duration; u32 action; Value text;
+/// Value action_label }; DISMISS_TOAST { u64 toast } (docs/toast-plan.md §4).
+pub const KAYA_TX_SHOW_TOAST: u16 = 82;
+pub const KAYA_TX_DISMISS_TOAST: u16 = 83;
 pub const KAYA_TX_ADD_SECTION: u16 = 25;
 pub const KAYA_TX_SELECT_SECTION: u16 = 26;
 pub const KAYA_TX_SET_SECTION_PROP: u16 = 27;
@@ -648,6 +655,8 @@ const _: () = assert!(
         && KAYA_TX_RELEASE_CAPTURE == wire::TX_RELEASE_CAPTURE
         && KAYA_TX_REQUEST_PERMISSION == wire::TX_REQUEST_PERMISSION
         && KAYA_TX_WATCH_CAPTURE_DEVICES == wire::TX_WATCH_CAPTURE_DEVICES
+        && KAYA_TX_SHOW_TOAST == wire::TX_SHOW_TOAST
+        && KAYA_TX_DISMISS_TOAST == wire::TX_DISMISS_TOAST
         && KAYA_TX_ADD_SECTION == wire::TX_ADD_SECTION
         && KAYA_TX_SELECT_SECTION == wire::TX_SELECT_SECTION
         && KAYA_TX_SET_SECTION_PROP == wire::TX_SET_SECTION_PROP
@@ -744,6 +753,10 @@ pub const KAYA_APPLY_RELEASE_CAPTURE: u16 = 67;
 pub const KAYA_APPLY_REQUEST_PERMISSION: u16 = 68;
 pub const KAYA_APPLY_WATCH_CAPTURE_DEVICES: u16 = 69;
 pub const KAYA_APPLY_SET_VIDEO_CAPTURE: u16 = 70;
+/// PRESENT_TOAST: SHOW_TOAST's layout, replacing the window's shown toast.
+/// WITHDRAW_TOAST { u64 window; u64 toast }: off screen, nothing reported.
+pub const KAYA_APPLY_PRESENT_TOAST: u16 = 71;
+pub const KAYA_APPLY_WITHDRAW_TOAST: u16 = 72;
 pub const KAYA_APPLY_ADD_SECTION: u16 = 15;
 pub const KAYA_APPLY_SELECT_SECTION: u16 = 16;
 pub const KAYA_APPLY_SET_SECTION_PROP: u16 = 17;
@@ -886,6 +899,8 @@ const _: () = assert!(
         && KAYA_APPLY_REQUEST_PERMISSION == wire::APPLY_REQUEST_PERMISSION
         && KAYA_APPLY_WATCH_CAPTURE_DEVICES == wire::APPLY_WATCH_CAPTURE_DEVICES
         && KAYA_APPLY_SET_VIDEO_CAPTURE == wire::APPLY_SET_VIDEO_CAPTURE
+        && KAYA_APPLY_PRESENT_TOAST == wire::APPLY_PRESENT_TOAST
+        && KAYA_APPLY_WITHDRAW_TOAST == wire::APPLY_WITHDRAW_TOAST
         && KAYA_APPLY_ADD_SECTION == wire::APPLY_ADD_SECTION
         && KAYA_APPLY_SELECT_SECTION == wire::APPLY_SELECT_SECTION
         && KAYA_APPLY_SET_SECTION_PROP == wire::APPLY_SET_SECTION_PROP
@@ -1273,7 +1288,7 @@ const _: () = assert!(
 // Completeness for the occurrence exports (docs/traps.md): a new spec
 // occurrence trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 54,
+    crate::spec::SPEC.occurrence.len() == 55,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -1297,6 +1312,24 @@ const _: () = assert!(
     KAYA_NOTIFICATION_OUTCOME_ACTIVATED == wire::NOTIFICATION_OUTCOME_ACTIVATED
         && KAYA_NOTIFICATION_OUTCOME_REFUSED == wire::NOTIFICATION_OUTCOME_REFUSED
         && KAYA_NOTIFICATION_OUTCOME_REPLIED == wire::NOTIFICATION_OUTCOME_REPLIED
+);
+/// The toast vocabularies (spec enums "toast_duration", "toast_action",
+/// "toast_outcome").
+pub const KAYA_TOAST_DURATION_SHORT: u32 = 0;
+pub const KAYA_TOAST_DURATION_LONG: u32 = 1;
+pub const KAYA_TOAST_ACTION_NONE: u32 = 0;
+pub const KAYA_TOAST_ACTION_APP: u32 = 1;
+pub const KAYA_TOAST_ACTION_UNDO: u32 = 2;
+pub const KAYA_TOAST_OUTCOME_ACTION: u32 = 0;
+pub const KAYA_TOAST_OUTCOME_CLOSED: u32 = 1;
+const _: () = assert!(
+    KAYA_TOAST_DURATION_SHORT == wire::TOAST_DURATION_SHORT
+        && KAYA_TOAST_DURATION_LONG == wire::TOAST_DURATION_LONG
+        && KAYA_TOAST_ACTION_NONE == wire::TOAST_ACTION_NONE
+        && KAYA_TOAST_ACTION_APP == wire::TOAST_ACTION_APP
+        && KAYA_TOAST_ACTION_UNDO == wire::TOAST_ACTION_UNDO
+        && KAYA_TOAST_OUTCOME_ACTION == wire::TOAST_OUTCOME_ACTION
+        && KAYA_TOAST_OUTCOME_CLOSED == wire::TOAST_OUTCOME_CLOSED
 );
 const _: () = assert!(
     KAYA_ALERT_CHOICE_ACTION0 == wire::ALERT_CHOICE_ACTION0
@@ -5896,6 +5929,11 @@ fn bank_text_changed(window: u64, tag: &[u8], text: &str, focused: bool) {
         return;
     };
     scene.note_text_changed(crate::protocol::WindowId(window), field, text, focused);
+    let withdrawn = scene.take_toast_out();
+    queue_presentation_ops(&mut PRESENTATION_PENDING.lock().unwrap(), withdrawn);
+    let asks = scene.take_asks();
+    drop(scene_slot);
+    send_occurrences(asks);
 }
 
 /// The noun path bytes an emit_menu_* call carries: the wire path
@@ -6031,8 +6069,52 @@ fn with_undo_scene(
         return;
     };
     queue_presentation_ops(&mut PRESENTATION_PENDING.lock().unwrap(), ops);
+    // An undo toast whose step this undo took answers `closed` after the
+    // `undone` (docs/toast-plan.md T4).
+    let asks = scene.take_asks();
     drop(scene_slot);
     send_undo_occurrence(occurrence);
+    send_occurrences(asks);
+}
+
+/// The toast's two presentation entries share this: mutate the scene, put
+/// the ops in front of the pump, then send what the core answered.
+fn with_toast_scene(f: impl FnOnce(&mut Scene) -> Vec<crate::protocol::ApplyOp>) {
+    let mut scene_slot = PRESENTATION_SCENE.lock().unwrap();
+    let Some(scene) = scene_slot.as_mut() else {
+        return;
+    };
+    let ops = f(scene);
+    queue_presentation_ops(&mut PRESENTATION_PENDING.lock().unwrap(), ops);
+    let asks = scene.take_asks();
+    drop(scene_slot);
+    send_occurrences(asks);
+}
+
+/// THE ONE DOOR FOR A PRESS OF A TOAST'S ACTION (docs/toast-plan.md §3):
+/// the core retires the toast and answers `action`, and for an undo toast
+/// undoes its step first, so the app hears `undone` and then the answer.
+/// A press on a toast already retired does nothing.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_toast_action(toast: u64) {
+    with_toast_scene(|scene| scene.toast_action(crate::protocol::ToastId(toast)));
+}
+
+/// A toast went by any way but its action (timed out, closed by the user):
+/// `outcome` is TOAST_OUTCOME_CLOSED. The core answers once per id, so a
+/// report for a toast it already retired is dropped.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_emit_toast_result(toast: u64, outcome: u32) {
+    if wire::toast_outcome(outcome) == crate::protocol::ToastOutcome::Action {
+        panic!(
+            "kaya: kaya_emit_toast_result was handed `action` for toast {toast} — a press of \
+             the action goes through kaya_toast_action, where the core decides what it does"
+        );
+    }
+    with_toast_scene(|scene| {
+        scene.toast_closed(crate::protocol::ToastId(toast));
+        Vec::new()
+    });
 }
 
 /// Where an undo would go RIGHT NOW: 0 nowhere (the command is inert and
@@ -6468,7 +6550,9 @@ fn send_occurrences(occurrences: Vec<crate::protocol::Occurrence>) {
             | crate::protocol::Occurrence::CaptureChanged { .. }
             | crate::protocol::Occurrence::CapturePermission { .. }
             | crate::protocol::Occurrence::CaptureDevices { .. }
-            | crate::protocol::Occurrence::CaptureOverrun { .. }) => {
+            | crate::protocol::Occurrence::CaptureOverrun { .. }
+            | crate::protocol::Occurrence::ToastResult { .. }
+            | crate::protocol::Occurrence::Undone { .. }) => {
                 crate::protocol::OccSink::Ring(state.ring.clone()).send(other)
             }
             other => unreachable!(
@@ -7109,6 +7193,8 @@ mod tests {
             ("release_capture", KAYA_TX_RELEASE_CAPTURE),
             ("request_permission", KAYA_TX_REQUEST_PERMISSION),
             ("watch_capture_devices", KAYA_TX_WATCH_CAPTURE_DEVICES),
+            ("show_toast", KAYA_TX_SHOW_TOAST),
+            ("dismiss_toast", KAYA_TX_DISMISS_TOAST),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -7179,6 +7265,8 @@ mod tests {
             ("request_permission", KAYA_APPLY_REQUEST_PERMISSION),
             ("watch_capture_devices", KAYA_APPLY_WATCH_CAPTURE_DEVICES),
             ("set_video_capture", KAYA_APPLY_SET_VIDEO_CAPTURE),
+            ("present_toast", KAYA_APPLY_PRESENT_TOAST),
+            ("withdraw_toast", KAYA_APPLY_WITHDRAW_TOAST),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

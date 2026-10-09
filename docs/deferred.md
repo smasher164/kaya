@@ -9,6 +9,61 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
+## BUILD — the toast (docs/toast-plan.md), depth on the mac and iOS (2026-10-08); the GTK, WinUI and Compose arms and the other eight bindings are the breadth slice
+KEY: toast, show_toast, dismiss_toast, present_toast, withdraw_toast, toast_result, toast_duration, toast_action, toast_outcome, ToastId, ToastRef, on_toast, kaya_toast_action, kaya_emit_toast_result, KayaToastHost, KayaToastView, kayaToastRead, kayaToastPress, kayaToastEarInstall, expect_toast, expect_no_toast, expect_toast_announced, toast_close, toast.steps, toast_routes, DEPTH STUB toast
+
+The depth slice: tx 82/83, apply 71/72, occurrence 55 and the three enums;
+the core's one toast per window, its refusals, the undo binding of T4 (the
+ledger's groups carry a step serial, the core undoes through the ledger's own
+body and closes the toast on a newer step, another undo or the window's
+close), `kaya_toast_action` and `kaya_emit_toast_result`; the Rust binding
+(`show_toast(text).action().undo().long().in_window().show()`,
+`dismiss_toast`, `Messages::on_toast`); the SwiftUI arm on macOS and iOS (a
+capsule at the top, T8 as amended); the five harness verbs off the platform's
+own surface; tools/scenes/toast.steps green on the mac and on iOS for Rust.
+The tasks app's delete (T16) waits for the breadth. What breadth owes:
+  - **DEPTH STUB: toast on gtk** — `AdwToastOverlay` wrapping each
+    window's content once, dismiss the shown `AdwToast` then `add_toast`
+    at HIGH priority, timeout 5 s or 10 s, `button-clicked` to
+    `kaya_toast_action`'s scene body (`Scene::toast_action`) and `dismissed`
+    to `Scene::toast_closed`; drain `Scene::take_toast_out` beside
+    `take_asks` after `note_text_changed`; reads walk the toast widget's label
+    and button; the AT-SPI announcement (to measure on 1.9.2); a row in
+    tools/lib/toast_routes.py.
+  - **DEPTH STUB: toast on winui** — one InfoBar per window in an overlay
+    cell at the bottom (T10), close and re-open on replace, a
+    `DispatcherQueueTimer` paused under the pointer or focus, ActionButton
+    Click and Closed to the scene's two bodies; InfoBar, its peer and
+    event-args types into tools/winui-bindgen's filter; reads through UIA,
+    the announcement through the UIA notification event; drain
+    `take_toast_out`; a row in tools/lib/toast_routes.py.
+  - **DEPTH STUB: toast on compose** — `SnackbarHost` in the root Scaffold,
+    the current snackbar dismissed before `showSnackbar(duration = Short or
+    Long)`, the result to `kaya_toast_action` or `kaya_emit_toast_result`,
+    `SwipeToDismissBox`; reads off the merged semantics node, `toast_close`
+    through the `dismiss` action; the live region's observability (to
+    measure); a row in tools/lib/toast_routes.py.
+  - **`show_toast` in the other eight bindings and the C floor** — spelled
+    as each spells its alert (T15), a `toast` guest per language; the
+    Python, JS, Swift, C#, Java iOS and mac legs with them.
+  - **Rust's awaited form** (T15) — `ctx.show_toast(text)` resolving to the
+    outcome inside a task scope; the depth ships `Messages::on_toast`.
+  - **The tasks app's delete (T16)** and its block in tools/scenes/tasks.steps,
+    with the new message in every catalog (check-l10n).
+
+## DEFER — a persistent status banner (docs/toast-plan.md §2 end; 2026-10-08)
+KEY: status banner, InfoBar, indefinite toast, connection lost
+
+A message that stays until its state resolves ("connection lost") is
+InfoBar's own job, not a toast's (T6 refuses `indefinite`). Trigger: an app
+that must show a state until it resolves.
+
+## DEFER — a toast anchored above a control (docs/toast-plan.md §2 end; 2026-10-08)
+KEY: setAnchorView, anchored toast, floating action button
+
+Android's `setAnchorView` lifts a snackbar above a floating action button.
+Trigger: a floating action button in a kaya app.
+
 ## BUILD — the segmented control (docs/segmented-plan.md), depth on the mac (2026-10-08); the GTK, WinUI and Compose arms, the iOS legs and the other eight bindings are the breadth slice
 KEY: segmented, KIND_SEGMENTED, segmented.steps, expect_segments, expect_segment_symbol, segments, segment_symbol, choose_by_keys, segmented_bound, segmented_symbols, KayaSegmented, KayaChoiceAnchor, kayaChoiceRead, segmented_routes, check_segmented_shape, DEPTH STUB segmented
 

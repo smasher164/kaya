@@ -1,7 +1,8 @@
 # The toast: the design pass (2026-10-08)
 
-Status: DESIGN, every ruling (T1-T16) RECOMMENDED, awaiting the maintainer.
-Nothing is built. The maintainer picked the toast next after the segmented
+Status: RULED (T1-T16); the DEPTH is BUILT (2026-10-08): the spec, the core,
+Rust, and the SwiftUI arm on macOS and iOS; the breadth is docs/deferred.md's
+toast BUILD entry. The maintainer picked the toast next after the segmented
 control (the 2026-10-06 shortlist). Its roadmap card (docs/roadmap/features.toml,
 `toast`) calls it "the undo surface": kaya's core-owned undo has no place to
 offer "Deleted. Undo?" today. The segmented control's and the reveal toggle's
@@ -546,6 +547,19 @@ check-sugar-surface is red by design between the depth and the breadth.
   AX observer sees `AXAnnouncementRequested`, whether VoiceOver reads the
   text before the action, and whether a toast's timer should pause while the
   window is not key.
+- MEASURED at the depth (2026-10-08, macOS 26.5): an in-process AXObserver on
+  the application element hears `AXAnnouncementRequested` posted on NSApp or
+  on a window, carrying `AXAnnouncementKey` and `AXPriorityKey` 90; that is
+  the mac's `expect_toast_announced`. What VoiceOver itself speaks was not
+  run (it takes the host's keyboard and audio); the announcement it is handed
+  is the text, then ", " and the action's label. The short toast closed about
+  4.1 s after it showed.
+- Built at the depth, departures from the text above: T8 as amended, so the
+  iOS dismissing swipe is UPWARD, and the macOS toast is the same capsule
+  as iOS's (with the close button) rather than a rounded rectangle; the
+  timer is NOT paused while the window is not key, so it behaves as GTK's
+  and Compose's do while covered; the Apple close button is an `xmark`
+  image whose accessible name is the system's.
 - To measure at the breadth: whether libadwaita 1.9.2 announces a toast
   itself and what the AT-SPI event carries; where the AdwToastOverlay sits
   relative to the split view and AdwDialog hosts; whether InfoBar's open

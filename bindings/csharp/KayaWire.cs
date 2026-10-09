@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x3b06087d3310d8b0;
+    public const ulong SpecHash = 0x5c53f4354ceb6019;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -190,6 +190,13 @@ static class KayaWire
     public const uint NotificationOutcomeActivated = 0;
     public const uint NotificationOutcomeRefused = 1;
     public const uint NotificationOutcomeReplied = 2;
+    public const uint ToastDurationShort = 0;
+    public const uint ToastDurationLong = 1;
+    public const uint ToastActionNone = 0;
+    public const uint ToastActionApp = 1;
+    public const uint ToastActionUndo = 2;
+    public const uint ToastOutcomeAction = 0;
+    public const uint ToastOutcomeClosed = 1;
     public const uint FileModeRead = 0;
     public const uint FileModeWrite = 1;
     public const uint FileModeReadWrite = 2;
@@ -445,6 +452,8 @@ static class KayaWire
     public const ushort TxKindReleaseCapture = 79;
     public const ushort TxKindRequestPermission = 80;
     public const ushort TxKindWatchCaptureDevices = 81;
+    public const ushort TxKindShowToast = 82;
+    public const ushort TxKindDismissToast = 83;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -513,6 +522,8 @@ static class KayaWire
     public const ushort ApplyKindRequestPermission = 68;
     public const ushort ApplyKindWatchCaptureDevices = 69;
     public const ushort ApplyKindSetVideoCapture = 70;
+    public const ushort ApplyKindPresentToast = 71;
+    public const ushort ApplyKindWithdrawToast = 72;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
@@ -567,6 +578,7 @@ static class KayaWire
     public const ushort OccKindCapturePermission = 52;
     public const ushort OccKindCaptureDevices = 53;
     public const ushort OccKindCaptureOverrun = 54;
+    public const ushort OccKindToastResult = 55;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -1455,6 +1467,27 @@ static class KayaWire
         w.Write(on);
         w.Write(0u);
         return Finish(stream, w, TxKindWatchCaptureDevices);
+    }
+
+    /// Show a toast in `window` (0 = the primary; docs/toast-plan.md T1-T7): a short message over the content that goes by itself. `toast` is a guest-chosen id answered once by toast_result. `duration` a TOAST_DURATION, `action` a TOAST_ACTION; `text` and `action_label` are Str, the label empty exactly when the action is `none`. One toast per window: a second replaces the shown one, which answers `closed`. An `undo` action is refused outside an undo group and binds the toast to that group's ledger step (T4).
+    public static byte[] TxShowToast(ulong window, ulong toast, uint duration, uint action, object text, object actionLabel)
+    {
+        var w = Begin(out var stream);
+        w.Write(window);
+        w.Write(toast);
+        w.Write(duration);
+        w.Write(action);
+        EncodeValue(w, text);
+        EncodeValue(w, actionLabel);
+        return Finish(stream, w, TxKindShowToast);
+    }
+
+    /// Withdraw a shown toast. Like cancel_notification it retires the id with NO answer; an unknown or retired id is ignored (docs/toast-plan.md T5).
+    public static byte[] TxDismissToast(ulong toast)
+    {
+        var w = Begin(out var stream);
+        w.Write(toast);
+        return Finish(stream, w, TxKindDismissToast);
     }
 
     /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
@@ -3515,7 +3548,7 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted && kind != OccKindSheetDismissed && kind != OccKindDismissRequested && kind != OccKindSubmitted && kind != OccKindNotificationReplied && kind != OccKindFullscreenChanged && kind != OccKindColorChanged && kind != OccKindRangeChanged && kind != OccKindRangeCommitted && kind != OccKindPlayerChanged && kind != OccKindPlayerPosition && kind != OccKindSeekCompleted && kind != OccKindSessionAction && kind != OccKindPlayerTracks && kind != OccKindCaptionCue && kind != OccKindVideoVisibility && kind != OccKindReaderFrame && kind != OccKindReaderProgress && kind != OccKindReaderPeaks && kind != OccKindReaderDone && kind != OccKindImageLoaded && kind != OccKindCaptureChanged && kind != OccKindCapturePermission && kind != OccKindCaptureDevices && kind != OccKindCaptureOverrun)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted && kind != OccKindSheetDismissed && kind != OccKindDismissRequested && kind != OccKindSubmitted && kind != OccKindNotificationReplied && kind != OccKindFullscreenChanged && kind != OccKindColorChanged && kind != OccKindRangeChanged && kind != OccKindRangeCommitted && kind != OccKindPlayerChanged && kind != OccKindPlayerPosition && kind != OccKindSeekCompleted && kind != OccKindSessionAction && kind != OccKindPlayerTracks && kind != OccKindCaptionCue && kind != OccKindVideoVisibility && kind != OccKindReaderFrame && kind != OccKindReaderProgress && kind != OccKindReaderPeaks && kind != OccKindReaderDone && kind != OccKindImageLoaded && kind != OccKindCaptureChanged && kind != OccKindCapturePermission && kind != OccKindCaptureDevices && kind != OccKindCaptureOverrun && kind != OccKindToastResult)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         if (kind == OccKindAlertResult)
@@ -3525,6 +3558,12 @@ static class KayaWire
             return true;
         }
         if (kind == OccKindNotificationResult)
+        {
+            // A request's one answer: id + the u32 code.
+            payload = BitConverter.ToUInt32(rec, 16);
+            return true;
+        }
+        if (kind == OccKindToastResult)
         {
             // A request's one answer: id + the u32 code.
             payload = BitConverter.ToUInt32(rec, 16);

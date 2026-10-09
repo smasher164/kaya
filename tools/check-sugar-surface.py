@@ -3899,6 +3899,69 @@ if nf_prop_fake != 16 or nf_commit_fake != 13:
 print(f"check-sugar-surface: number field surface watched: prop fake "
       f"{nf_prop_fake}/16, commit fake {nf_commit_fake}/13")
 
+# --- THE TOAST SURFACE, all nine (docs/toast-plan.md T15, §5) -------------
+# A window-level request, not a kind, so neither the kind sweep nor the prop
+# census sees it. Rust is the reference row; the other eight are the
+# breadth's, red by design until each binding spells the show, the dismiss,
+# the answer, the undo binding and the duration in its own idiom.
+def toast_rows(stem):
+    S = stem[0].upper() + stem[1:]
+    F = SLIDER_FILES
+    rust = [
+        ("show", rf"pub fn show_{stem}\(&mut self, text: &str\) -> {S}Ref"),
+        ("dismiss", rf"pub fn dismiss_{stem}\(&mut self, "),
+        ("answer", rf"pub fn on_{stem}\("),
+        ("undo", rf"{S}Action::Undo;"),
+        ("duration", rf"{S}Duration::Long;"),
+    ]
+    rows = [("rust", F["rust"], part, pat) for part, pat in rust]
+    for lang in ("python", "ocaml"):
+        for part, pat in (("show", rf"\bshow_{stem}\b"), ("dismiss", rf"\bdismiss_{stem}\b"),
+                          ("answer", rf"\b{stem}_outcome\b"), ("undo", rf"\b{stem}_action\b"),
+                          ("duration", rf"\b{stem}_duration\b")):
+            rows.append((lang, F[lang], part, pat))
+    for lang in ("go", "csharp"):
+        for part, pat in (("show", rf"\bShow{S}\b"), ("dismiss", rf"\bDismiss{S}\b"),
+                          ("answer", rf"\b{S}Outcome\b"), ("undo", rf"\b{S}Action\b"),
+                          ("duration", rf"\b{S}Duration\b")):
+            rows.append((lang, F[lang], part, pat))
+    for lang in ("java", "swift", "js", "haskell"):
+        for part, pat in (("show", rf"\bshow{S}\b"), ("dismiss", rf"\bdismiss{S}\b"),
+                          ("answer", rf"\b{S}Outcome\b"), ("undo", rf"\b{S}Action\b"),
+                          ("duration", rf"\b{S}Duration\b")):
+            rows.append((lang, F[lang], part, pat))
+    return rows
+
+
+def check_toast(stem, findings=None):
+    global status
+    for lang, rel, part, pat in toast_rows(stem):
+        if not grep_file(pat, rel):
+            msg = (f"check-sugar-surface: {lang} has no sugar for the toast's "
+                   f"{part} (wanted /{pat}/ in {rel})")
+            if findings is None:
+                print(msg)
+                status = 1
+            else:
+                findings.append(msg)
+
+
+toast_reference = []
+check_toast("toast", findings=toast_reference)
+toast_rust = [m for m in toast_reference if m.startswith("check-sugar-surface: rust ")]
+if toast_rust:
+    selftest_exit("check-sugar-surface: the toast census's reference row is red, so its "
+                  "patterns read nothing: " + "; ".join(toast_rust))
+check_toast("toast")
+fake = []
+check_toast("kayafake", findings=fake)
+if len(fake) != len(toast_rows("toast")):
+    selftest_exit(f"check-sugar-surface: self-test failed ({len(fake)}/"
+                  f"{len(toast_rows('toast'))} toast patterns fired for a stem "
+                  f"that exists nowhere)")
+print(f"check-sugar-surface: toast surface: {len(toast_rows('toast'))} rows, "
+      f"{len(toast_reference)} red (the breadth's), fake {len(fake)}/{len(toast_rows('toast'))}")
+
 # --- THE COLOUR PICKER SURFACE, all nine (docs/color-picker-plan.md §2, §7)
 # The kind sweep holds the constructor in both zones and nothing else: a
 # binding could ship a picker whose `alpha` or `on_color` is unspellable,

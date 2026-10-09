@@ -432,6 +432,10 @@ fn main() {
         "Microsoft.UI.Xaml.Automation.Peers.SelectorBarItemAutomationPeer".to_string(),
         "Microsoft.UI.Xaml.Automation.Peers.ItemContainerAutomationPeer".to_string(),
         "Microsoft.UI.Xaml.Automation.Provider.ISelectionItemProvider".to_string(),
+        // An unrealized segment is realized by the bar's own ItemsView
+        // (docs/traps.md, WinUI's SelectorBar).
+        "Microsoft.UI.Xaml.Controls.ItemsView".to_string(),
+        "Microsoft.UI.Xaml.BringIntoViewOptions".to_string(),
         // The sections switcher: NavigationView is the platform's own
         // idiom (left pane for auto/sidebar, Top for the bar hint) —
         // items are NavigationViewItems with string content, selection

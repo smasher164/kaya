@@ -22,7 +22,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x3b06087d3310d8b0
+let kayaSpecHash: UInt64 = 0x5c53f4354ceb6019
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -100,6 +100,15 @@ private let applyReleaseCapture: UInt16 = 67
 private let applyRequestPermission: UInt16 = 68
 private let applyWatchCaptureDevices: UInt16 = 69
 private let applySetVideoCapture: UInt16 = 70
+/// The toast (docs/toast-plan.md §4): present replaces the window's shown
+/// one; withdraw takes off one the core has retired.
+private let applyPresentToast: UInt16 = 71
+private let applyWithdrawToast: UInt16 = 72
+let kayaToastDurationLong: UInt32 = 1
+let kayaToastActionNone: UInt32 = 0
+let kayaToastActionApp: UInt32 = 1
+let kayaToastActionUndo: UInt32 = 2
+let kayaToastOutcomeClosed: UInt32 = 1
 /// What a drop settles on (the wire's drag_op).
 let kayaDragOpNone: UInt32 = 0
 let kayaDragOpCopy: UInt32 = 1
@@ -1116,6 +1125,17 @@ final class KayaSheetModel: Identifiable {
     }
 }
 
+/// One toast on screen. `token` is per present, so a replacement is a new
+/// view with its own timer and its own announcement.
+struct KayaToastShown: Equatable {
+    let id: UInt64
+    let text: String
+    let action: UInt32
+    let label: String
+    let long: Bool
+    let token: UInt64
+}
+
 @Observable
 final class KayaSceneModel {
     /// Live surfaces by id; the primary starts with the process name as its
@@ -1131,6 +1151,8 @@ final class KayaSceneModel {
     var navEntries: [UInt64: KayaEntryModel] = [:]
     /// Live sheets by surface id, and each parent surface's one child.
     var sheets: [UInt64: KayaSheetModel] = [:]
+    /// The toast each window shows (docs/toast-plan.md T7), by window id.
+    var toasts: [UInt64: KayaToastShown] = [:]
     var childSheet: [UInt64: UInt64] = [:]
     /// GROUPED SCREENS (docs/adaptive-layout-plan.md D7.5): the sets the
     /// surface roots consult; `groupedFlows` names each grouped screen's
@@ -4998,6 +5020,17 @@ enum KayaHost {
         api.emit_alert_result(alert, choice)
     }
 
+    /// A toast gone by any way but its action; the core answers once.
+    static func emitToastClosed(_ toast: UInt64) {
+        api.emit_toast_result(toast, kayaToastOutcomeClosed)
+    }
+
+    /// A press of a toast's action: the core decides what it does
+    /// (docs/toast-plan.md T4), and withdraws it.
+    static func toastAction(_ toast: UInt64) {
+        api.toast_action(toast)
+    }
+
     static func emitNotificationResult(_ notification: UInt64, _ outcome: UInt32) {
         api.emit_notification_result(notification, outcome)
     }
@@ -5884,6 +5917,33 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
             case applyCancelNotification:
                 let nid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 kayaCancelNotification(nid)
+            case applyPresentToast:
+                // THE ONE DOOR (docs/toast-plan.md T7): the window's slot is
+                // REPLACED, never queued, so the newest toast is the one shown.
+                let toastWindow = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let toastId = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                let toastDuration = raw.loadUnaligned(fromByteOffset: body + 16, as: UInt32.self)
+                let toastAction = raw.loadUnaligned(fromByteOffset: body + 20, as: UInt32.self)
+                var at = body + 24
+                func nextToastStr() -> String {
+                    let len = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))
+                    let bytes = raw[(at + 8)..<(at + 8 + len)]
+                    at += 8 + len
+                    if at % 8 != 0 { at += 8 - at % 8 }
+                    return String(decoding: bytes, as: UTF8.self)
+                }
+                let toastText = nextToastStr()
+                let toastLabel = nextToastStr()
+                kayaToastTokens += 1
+                kayaScene.toasts[toastWindow] = KayaToastShown(
+                    id: toastId, text: toastText, action: toastAction, label: toastLabel,
+                    long: toastDuration == kayaToastDurationLong, token: kayaToastTokens)
+            case applyWithdrawToast:
+                let toastWindow = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let toastId = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                if kayaScene.toasts[toastWindow]?.id == toastId {
+                    kayaScene.toasts[toastWindow] = nil
+                }
             case applyPresentFileDialog:
                 // The platform's REAL picker (NSOpenPanel), answered exactly
                 // once through kaya_emit_file_dialog_result — the chosen
@@ -6995,6 +7055,9 @@ func kayaStartSelftest() {
                 .data(using: .utf8)!)
         exit(1)
     }
+    #if os(macOS)
+        kayaToastEarInstall()
+    #endif
     Thread {
         kayaRunScript(script)
     }.start()
@@ -11613,6 +11676,55 @@ private func kayaRunScript(_ script: String) {
                     failures.append("sheet \"\(got)\", wanted \"\(want)\"")
                 } else {
                     failures.append("no sheet live, wanted \"\(want)\"")
+                }
+            case "expect_toast", "expect_no_toast":
+                // Off the accessibility tree, never kayaScene.toasts
+                // (docs/toast-plan.md T13).
+                let want = parts[0] == "expect_toast" ? kayaQuoted(Array(parts[1...])) : ""
+                let shown = kayaToastRead()
+                if shown.count > 1 {
+                    failures.append("\(shown.count) toasts on screen")
+                } else if parts[0] == "expect_no_toast" {
+                    if let (text, action) = shown.first {
+                        failures.append("toast \"\(text)|\(action)\" shown, wanted none")
+                    } else {
+                        observed.append("no toast")
+                    }
+                } else if let (text, action) = shown.first {
+                    let got = "\(text)|\(action)"
+                    if kayaBytesEqual(got, want) {
+                        observed.append("toast \"\(want)\"")
+                    } else {
+                        failures.append("toast \"\(got)\", wanted \"\(want)\"")
+                    }
+                } else {
+                    failures.append("no toast shown, wanted \"\(want)\"")
+                }
+            case "expect_toast_announced":
+                let want = kayaQuoted(Array(parts[1...]))
+                let halves = want.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
+                let said = kayaToastAnnouncement(String(halves[0]), halves.count > 1 ? String(halves[1]) : "")
+                #if os(macOS)
+                    let heard = DispatchQueue.main.sync { kayaToastHeard }
+                    if heard.contains(where: { kayaBytesEqual($0, said) }) {
+                        observed.append("toast announced \"\(want)\"")
+                    } else {
+                        let list = heard.map { "\"\($0)\"" }.joined(separator: ", ")
+                        failures.append("toast \"\(want)\" not announced; heard [\(list)]")
+                    }
+                #else
+                    // iOS publishes the post to VoiceOver alone (docs/toast-plan.md
+                    // T13's carve-out); the step is cut there and this says so.
+                    failures.append("toast \"\(want)\" not announced; heard [] (iOS publishes announcements to VoiceOver alone)")
+                #endif
+            case "toast_action", "toast_close":
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
+                let pressed = kayaToastPress(parts[0] == "toast_action" ? "kaya.toast.action" : "kaya.toast.close")
+                if !pressed {
+                    failures.append("\(parts[0]): no toast button on screen to press")
+                } else {
+                    kayaAwaitAnswer(answered)
                 }
             case "expect_text_scale":
                 // The TOOLKIT's factor, never the knob (docs/compliance-plan.md §2.1).
@@ -24382,6 +24494,236 @@ private var kayaSheetTokens: UInt64 = 0
 /// running left the old content alive for a minute, re-registering its
 /// dead window and presenting the chain's child twice (measured on the
 /// lane 2026-09-21, docs/traps.md).
+// MARK: - Toast (docs/toast-plan.md T7-T13)
+
+/// What the platform's accessibility tree says about the toasts on screen:
+/// each one's text and its action's label (docs/toast-plan.md T13). Read
+/// off the tree an assistive client walks, never kayaScene.toasts.
+#if os(macOS)
+    private func kayaToastRead() -> [(String, String)] {
+        _ = kayaAwaitWindow(0)
+        return DispatchQueue.main.sync { () -> [(String, String)] in
+            let app = kayaPanelAxApp()
+            var texts: [AXUIElement] = []
+            kayaAxFindAll(app, "kaya.toast.text", 0, &texts)
+            return texts.map { text in
+                let said = kayaAxCopy(text, kAXValueAttribute) as? String ?? ""
+                var action = ""
+                if let parent = kayaAxCopy(text, kAXParentAttribute),
+                    CFGetTypeID(parent) == AXUIElementGetTypeID(),
+                    let button = kayaAxFind(parent as! AXUIElement, "kaya.toast.action")
+                {
+                    action =
+                        [kAXDescriptionAttribute, kAXTitleAttribute]
+                        .lazy
+                        .compactMap { kayaAxCopy(button, $0 as String) as? String }
+                        .first { !$0.isEmpty } ?? ""
+                }
+                return (said, action)
+            }
+        }
+    }
+
+    /// AXPress on the toast's own button, the activation an assistive client
+    /// sends. False when no such button is on screen.
+    private func kayaToastPress(_ identifier: String) -> Bool {
+        _ = kayaAwaitWindow(0)
+        return DispatchQueue.main.sync { () -> Bool in
+            let app = kayaPanelAxApp()
+            guard let button = kayaAxFind(app, identifier) else { return false }
+            return AXUIElementPerformAction(button, kAXPressAction as CFString) == .success
+        }
+    }
+
+    /// Every announcement the platform published, as an assistive client
+    /// hears it: AXAnnouncementRequested on this application's element
+    /// (MEASURED 2026-10-08: an in-process observer hears a post on NSApp
+    /// and on a window). Main thread only.
+    var kayaToastHeard: [String] = []
+    private var kayaToastEar: AXObserver?
+
+    func kayaToastEarInstall() {
+        guard kayaToastEar == nil else { return }
+        var made: AXObserver?
+        let err = AXObserverCreateWithInfoCallback(getpid(), { _, _, _, info, _ in
+            if let said = (info as NSDictionary)["AXAnnouncementKey"] as? String {
+                kayaToastHeard.append(said)
+            }
+        }, &made)
+        guard err == .success, let made else {
+            FileHandle.standardError.write(Data("kaya: the toast's announcement listener could not be made (AXError \(err.rawValue))\n".utf8))
+            return
+        }
+        let added = AXObserverAddNotification(
+            made, AXUIElementCreateApplication(getpid()), "AXAnnouncementRequested" as CFString, nil)
+        guard added == .success else {
+            FileHandle.standardError.write(Data("kaya: the toast's announcement listener was refused (AXError \(added.rawValue))\n".utf8))
+            return
+        }
+        CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(made), .defaultMode)
+        kayaToastEar = made
+    }
+#else
+    private func kayaToastRead() -> [(String, String)] {
+        kayaAxEnableAutomation()
+        return DispatchQueue.main.sync { () -> [(String, String)] in
+            var out: [(String, String)] = []
+            for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+                for window in scene.windows {
+                    guard let text = kayaAxFind(window, "kaya.toast.text") else { continue }
+                    let said = text.accessibilityLabel ?? text.accessibilityValue ?? ""
+                    let action = kayaAxFind(window, "kaya.toast.action")?.accessibilityLabel ?? ""
+                    out.append((said, action))
+                }
+            }
+            return out
+        }
+    }
+
+    /// The activation VoiceOver sends: accessibilityActivate on the button,
+    /// accessibilityPerformEscape on the toast for its close.
+    private func kayaToastPress(_ identifier: String) -> Bool {
+        kayaAxEnableAutomation()
+        return DispatchQueue.main.sync { () -> Bool in
+            for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+                for window in scene.windows {
+                    if identifier == "kaya.toast.close" {
+                        if let toast = kayaAxFind(window, "kaya.toast") { return toast.accessibilityPerformEscape() }
+                    } else if let button = kayaAxFind(window, identifier) {
+                        return button.accessibilityActivate()
+                    }
+                }
+            }
+            return false
+        }
+    }
+#endif
+
+
+/// Per-present serial for KayaToastShown.token. Main thread only.
+var kayaToastTokens: UInt64 = 0
+
+/// What the toast's announcement says: its text, then its action's label.
+func kayaToastAnnouncement(_ text: String, _ label: String) -> String {
+    label.isEmpty ? text : "\(text), \(label)"
+}
+
+/// Announced, never focused (T12): the screen reader hears the text and the
+/// action, and focus stays where the user left it.
+@MainActor func kayaAnnounceToast(_ shown: KayaToastShown) {
+    let said = kayaToastAnnouncement(shown.text, shown.label)
+    #if os(macOS)
+        NSAccessibility.post(
+            element: NSApp as Any, notification: .announcementRequested,
+            userInfo: [
+                .announcement: said,
+                .priority: NSAccessibilityPriorityLevel.high.rawValue,
+            ])
+    #else
+        UIAccessibility.post(notification: .announcement, argument: said)
+    #endif
+}
+
+/// The window's toast slot, drawn over its content at the top (T8 as
+/// amended: a capsule under the toolbar on macOS, dropping from the top on
+/// iOS). Rides every window root, outside the arm chain, so a push or a
+/// section switch leaves it in place.
+struct KayaToastHost: ViewModifier {
+    let windowId: UInt64
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        let shown = kayaScene.toasts[windowId]
+        content
+            .overlay(alignment: .top) {
+                if let shown {
+                    KayaToastView(windowId: windowId, shown: shown)
+                        .id(shown.token)
+                        .transition(
+                            reduceMotion
+                                ? .opacity : .move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .animation(reduceMotion ? .easeInOut(duration: 0.2) : .snappy, value: shown?.token)
+    }
+}
+
+struct KayaToastView: View {
+    let windowId: UInt64
+    let shown: KayaToastShown
+    @State private var hovering = false
+    @AccessibilityFocusState private var textFocused: Bool
+    @AccessibilityFocusState private var actionFocused: Bool
+
+    /// T6: the platform has no toast, so these are kaya's own seconds.
+    private var seconds: Double { shown.long ? 10 : 4 }
+
+    private func closeToast() {
+        guard kayaScene.toasts[windowId]?.token == shown.token else { return }
+        kayaScene.toasts[windowId] = nil
+        KayaHost.emitToastClosed(shown.id)
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(shown.text)
+                .font(kayaBrandFont(.subheadline) ?? .subheadline)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .accessibilityIdentifier("kaya.toast.text")
+                .accessibilityFocused($textFocused)
+            if shown.action != kayaToastActionNone {
+                Button(shown.label) { KayaHost.toastAction(shown.id) }
+                    .buttonStyle(.borderless)
+                    .font((kayaBrandFont(.subheadline) ?? .subheadline).weight(.semibold))
+                    .accessibilityIdentifier("kaya.toast.action")
+                    .accessibilityFocused($actionFocused)
+            }
+            #if os(macOS)
+                Button(action: closeToast) {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityIdentifier("kaya.toast.close")
+            #endif
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
+        .background(.regularMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(.separator.opacity(0.5), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.18), radius: 14, y: 6)
+        .frame(maxWidth: 560)
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("kaya.toast")
+        .accessibilityAction(.escape) { closeToast() }
+        #if os(macOS)
+            .onHover { hovering = $0 }
+        #else
+            .gesture(
+                DragGesture(minimumDistance: 12).onEnded { drag in
+                    if drag.translation.height < -12 { closeToast() }
+                })
+        #endif
+        .onAppear { kayaAnnounceToast(shown) }
+        // THE TIMER STARTS WHEN THE TOAST IS ON SCREEN, and counts only
+        // while nothing holds it: the pointer over it (macOS) or the screen
+        // reader's cursor inside it (both).
+        .task(id: shown.token) {
+            var left = seconds
+            while left > 0 {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                if Task.isCancelled { return }
+                if !(hovering || textFocused || actionFocused) { left -= 0.1 }
+            }
+            closeToast()
+        }
+    }
+}
+
 struct KayaSheetHost: ViewModifier {
     let surface: UInt64
     @State private var scene = kayaScene
@@ -24781,6 +25123,7 @@ struct KayaAuxRoot: View {
         }
         }
         .modifier(KayaSheetHost(surface: windowId))
+        .modifier(KayaToastHost(windowId: windowId))
         .onAppear { kayaDiag("auxRoot appear wid=\(windowId)") }
         // The brand rides every scene root, not window 0's alone (the
         // Phase A finding — see KayaRoot's tint note).
@@ -28003,6 +28346,7 @@ struct KayaRoot: View {
         // so the reading does not depend on which arm rendered — the arm depends
         // on the reading, never the reverse.
         .modifier(KayaSheetHost(surface: 0))
+        .modifier(KayaToastHost(windowId: 0))
         .modifier(KayaFormFactorRecorder(windowId: 0))
         // The breakpoint channel (docs/adaptive-layout-plan.md D3), the
         // form factor's sibling for the same whole-window reason.

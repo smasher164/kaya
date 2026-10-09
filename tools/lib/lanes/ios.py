@@ -111,6 +111,8 @@ RUST_SCENES = [
     "reveal",
     # The segmented control (docs/segmented-plan.md §6).
     "segmented",
+    # The toast (docs/toast-plan.md §6).
+    "toast",
     # The content type (docs/autofill-plan.md §5).
     "autofill",
     # The notification conformance scene: the activation is a REAL tap on
@@ -226,6 +228,10 @@ MODS = {
                                          ("expect", "entry@message"),
                                          ("expect", "label@echo")),
                                 "keep": "expect_focused"},
+    # iOS publishes an announcement to VoiceOver alone, so no listener here
+    # can hear it (docs/toast-plan.md T13's carve-out).
+    ("rust-swiftui", "toast"): {"drop": ("expect_toast_announced", '"Saved|"'),
+                                "keep": "expect_toast"},
     ("rust-swiftui", "submit"): {"drop": ("expect_focused", "entry#0"),
                                  "keep": "expect"},
     ("swift", "submit"): {"drop": ("expect_focused", "entry#0"),

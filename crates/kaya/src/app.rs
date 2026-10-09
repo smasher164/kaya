@@ -1591,6 +1591,13 @@ impl AppCtx {
         crate::protocol::FileDialogId(id)
     }
 
+    /// Toasts share it too (docs/toast-plan.md T1).
+    fn alloc_toast(&self) -> crate::protocol::ToastId {
+        let id = self.next_alert.get();
+        self.next_alert.set(id + 1);
+        crate::protocol::ToastId(id)
+    }
+
     /// Clipboard reads share the same counter, for the same reason:
     /// a request id that retires with its one answer.
     fn alloc_clip_read(&self) -> u64 {
@@ -2790,6 +2797,31 @@ impl<'a> Tx<'a> {
     /// cleared). An unknown id is ignored by the platform.
     pub fn cancel_notification(&mut self, notification: crate::protocol::NotificationId) {
         self.ops.push(TxOp::CancelNotification(notification));
+    }
+
+    /// Show a toast in the primary window (docs/toast-plan.md): a short
+    /// message that goes by itself, at most one action. Chain `.action()`,
+    /// `.undo()`, `.long()`, `.in_window()` and `.show()`, whose id
+    /// [`Messages::on_toast`] binds the one answer to. A second toast in the
+    /// same window replaces this one, which answers `Closed`.
+    pub fn show_toast(&mut self, text: &str) -> ToastRef<'_, 'a> {
+        let toast = self.ctx.alloc_toast();
+        ToastRef {
+            tx: self,
+            spec: crate::protocol::ToastSpec {
+                window: DEFAULT_WINDOW,
+                toast,
+                duration: crate::protocol::ToastDuration::Short,
+                action: crate::protocol::ToastAction::None,
+                text: text.to_owned(),
+                action_label: String::new(),
+            },
+        }
+    }
+
+    /// Withdraw a shown toast. It answers nothing: the app caused it.
+    pub fn dismiss_toast(&mut self, toast: crate::protocol::ToastId) {
+        self.ops.push(TxOp::DismissToast(toast));
     }
 
     pub fn show_alert(&mut self) -> AlertRef<'_, 'a> {
@@ -5112,6 +5144,7 @@ pub struct Messages<M> {
     fullscreen_changed: RefCell<HashMap<u64, Box<dyn Fn(bool) -> M>>>,
     alerts: RefCell<HashMap<u64, Box<dyn Fn(AlertChoice) -> M>>>,
     notifications: RefCell<HashMap<u64, Box<dyn Fn(crate::protocol::NotificationOutcome) -> M>>>,
+    toasts: RefCell<HashMap<u64, Box<dyn Fn(crate::protocol::ToastOutcome) -> M>>>,
     /// PROCESS-LEVEL and persistent (docs/tasks-s9-plan.md R1): a process
     /// the platform started on a tap never called show, so no one-shot
     /// registration for that id can exist.
@@ -5278,6 +5311,7 @@ impl<M> Messages<M> {
             fullscreen_changed: RefCell::new(HashMap::new()),
             alerts: RefCell::new(HashMap::new()),
             notifications: RefCell::new(HashMap::new()),
+            toasts: RefCell::new(HashMap::new()),
             notification_activation: RefCell::new(None),
             dialogs: RefCell::new(HashMap::new()),
             clip_reads: RefCell::new(HashMap::new()),
@@ -5827,6 +5861,17 @@ impl<M> Messages<M> {
         self.alerts.borrow_mut().insert(alert.0, Box::new(f));
     }
 
+    /// Bind the one-shot answer to a toast (the id [`ToastRef::show`]
+    /// returned): `Action` or `Closed`. Retires with the answer; a
+    /// dismissed toast answers nothing (docs/toast-plan.md T5).
+    pub fn on_toast(
+        &self,
+        toast: crate::protocol::ToastId,
+        f: impl Fn(crate::protocol::ToastOutcome) -> M + 'static,
+    ) {
+        self.toasts.borrow_mut().insert(toast.0, Box::new(f));
+    }
+
     /// Bind the one-shot result handler to a notification (the id
     /// [`NotificationRef::show`] returned): activated, or refused. The
     /// registration retires with the result (docs/tasks-s3-plan.md N1).
@@ -6107,6 +6152,9 @@ impl<M> Messages<M> {
                 Occurrence::AlertResult { alert, choice } => {
                     // One-shot: the registration retires with the result.
                     self.alerts.borrow_mut().remove(&alert.0).map(|f| f(*choice))
+                }
+                Occurrence::ToastResult { toast, outcome } => {
+                    self.toasts.borrow_mut().remove(&toast.0).map(|f| f(*outcome))
                 }
                 Occurrence::NotificationResult { notification, outcome } => {
                     // The one-shot registration first (retiring), the
@@ -6680,6 +6728,55 @@ impl AlertRef<'_, '_> {
         let id = self.spec.alert;
         self.tx.ctx.replies.borrow_mut().claim_alert(id.0);
         self.tx.ops.push(TxOp::ShowAlert(self.spec));
+        id
+    }
+}
+
+/// A toast under construction (docs/toast-plan.md T3-T6).
+#[must_use = "a toast shows nothing until .show()"]
+pub struct ToastRef<'t, 'a> {
+    tx: &'t mut Tx<'a>,
+    spec: crate::protocol::ToastSpec,
+}
+
+impl ToastRef<'_, '_> {
+    /// Offer one button, labelled by the app; its press answers `Action`.
+    pub fn action(mut self, label: &str) -> Self {
+        if self.spec.action == crate::protocol::ToastAction::None {
+            self.spec.action = crate::protocol::ToastAction::App;
+        }
+        self.spec.action_label = label.to_owned();
+        self
+    }
+
+    /// Make the button the window's undo of THIS transaction's step: the
+    /// transaction must be `undoable`, and the press undoes it exactly as
+    /// Edit > Undo would (`on_undone` hears it), then answers `Action`.
+    pub fn undo(mut self) -> Self {
+        self.spec.action = crate::protocol::ToastAction::Undo;
+        self
+    }
+
+    /// The platform's longer duration instead of its shorter one.
+    pub fn long(mut self) -> Self {
+        self.spec.duration = crate::protocol::ToastDuration::Long;
+        self
+    }
+
+    /// Show it in this window instead of the primary.
+    pub fn in_window(mut self, window: WindowId) -> Self {
+        self.spec.window = window;
+        self
+    }
+
+    pub fn show(self) -> crate::protocol::ToastId {
+        assert!(
+            self.spec.action != crate::protocol::ToastAction::Undo
+                || !self.spec.action_label.is_empty(),
+            "kaya: an undo toast's button needs a label — call .action(label) before .show()"
+        );
+        let id = self.spec.toast;
+        self.tx.ops.push(TxOp::ShowToast(self.spec));
         id
     }
 }
@@ -9801,6 +9898,7 @@ mod tests {
                     | Occurrence::WindowClosed { .. }
                     | Occurrence::AlertResult { .. }
                     | Occurrence::NotificationResult { .. }
+                    | Occurrence::ToastResult { .. }
                     | Occurrence::FileDialogResult { .. }
                     | Occurrence::EntryPopped { .. }
                     | Occurrence::BackRequested { .. }

@@ -1,0 +1,86 @@
+# docs/toast-plan.md §5. Every toast read is the platform's own surface,
+# never the model (T13). label#1 counts answers and is written in the same
+# transaction as label#0, so it is read first.
+expect label#0 "no answer yet"
+expect label#1 "answers 0"
+expect label#2 "nothing undone"
+expect label#3 "Milk, Eggs, Bread"
+expect_no_toast
+
+# Shown, announced, and gone by itself (T6, T12).
+click button#0
+expect_toast "Saved|"
+expect_toast_announced "Saved|"
+expect_no_toast
+expect label#1 "answers 1"
+expect label#0 "Saved: closed"
+
+# T7: a second toast replaces the first at once; a backend that queues
+# still shows "First" here.
+click button#1
+expect_toast "First|Open"
+click button#2
+expect_toast "Second|Open"
+expect label#1 "answers 2"
+expect label#0 "First: closed"
+toast_action
+expect_no_toast
+expect label#1 "answers 3"
+expect label#0 "Second: action"
+
+# T4: the undo toast takes back ITS step through the core.
+click button#3
+expect label#3 "Eggs, Bread"
+expect_toast "Deleted Milk|Undo"
+toast_action
+expect label#2 "undone 1: delete Milk"
+expect label#3 "Milk, Eggs, Bread"
+expect label#1 "answers 4"
+expect label#0 "Deleted Milk: action"
+expect_no_toast
+
+# Undone another way, it closes.
+click button#3
+expect_toast "Deleted Milk|Undo"
+menu_activate "Edit>Undo"
+expect label#2 "undone 2: delete Milk"
+expect label#1 "answers 5"
+expect label#0 "Deleted Milk: closed"
+expect_no_toast
+expect label#3 "Milk, Eggs, Bread"
+
+# A newer step closes the older toast, and the newer toast's Undo takes
+# back only its own step.
+click button#3
+expect_toast "Deleted Milk|Undo"
+click button#3
+expect_toast "Deleted Eggs|Undo"
+expect label#1 "answers 6"
+expect label#0 "Deleted Milk: closed"
+toast_action
+expect label#2 "undone 3: delete Eggs"
+expect label#3 "Eggs, Bread"
+expect label#1 "answers 7"
+expect label#0 "Deleted Eggs: action"
+menu_activate "Edit>Undo"
+expect label#2 "undone 4: delete Milk"
+expect label#3 "Milk, Eggs, Bread"
+
+# T11: the user's close answers closed.
+click button#1
+expect_toast "First|Open"
+toast_close
+expect_no_toast
+expect label#1 "answers 8"
+expect label#0 "First: closed"
+
+# T5: the app's dismiss answers nothing.
+click button#4
+expect_toast "Working|"
+click button#5
+expect_no_toast
+click button#0
+expect_toast "Saved|"
+toast_close
+expect label#1 "answers 9"
+expect label#0 "Saved: closed"

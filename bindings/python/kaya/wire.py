@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x3b06087d3310d8b0
+SPEC_HASH = 0x5c53f4354ceb6019
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -192,6 +192,13 @@ ALERT_CHOICE_CANCEL = 4294967295
 NOTIFICATION_OUTCOME_ACTIVATED = 0
 NOTIFICATION_OUTCOME_REFUSED = 1
 NOTIFICATION_OUTCOME_REPLIED = 2
+TOAST_DURATION_SHORT = 0
+TOAST_DURATION_LONG = 1
+TOAST_ACTION_NONE = 0
+TOAST_ACTION_APP = 1
+TOAST_ACTION_UNDO = 2
+TOAST_OUTCOME_ACTION = 0
+TOAST_OUTCOME_CLOSED = 1
 FILE_MODE_READ = 0
 FILE_MODE_WRITE = 1
 FILE_MODE_READ_WRITE = 2
@@ -448,6 +455,8 @@ TX_CAPTURE_COMMAND = 78
 TX_RELEASE_CAPTURE = 79
 TX_REQUEST_PERMISSION = 80
 TX_WATCH_CAPTURE_DEVICES = 81
+TX_SHOW_TOAST = 82
+TX_DISMISS_TOAST = 83
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -516,6 +525,8 @@ APPLY_RELEASE_CAPTURE = 67
 APPLY_REQUEST_PERMISSION = 68
 APPLY_WATCH_CAPTURE_DEVICES = 69
 APPLY_SET_VIDEO_CAPTURE = 70
+APPLY_PRESENT_TOAST = 71
+APPLY_WITHDRAW_TOAST = 72
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
@@ -570,6 +581,7 @@ OCC_CAPTURE_CHANGED = 51
 OCC_CAPTURE_PERMISSION = 52
 OCC_CAPTURE_DEVICES = 53
 OCC_CAPTURE_OVERRUN = 54
+OCC_TOAST_RESULT = 55
 
 
 def _pad(b: bytes) -> bytes:
@@ -976,6 +988,14 @@ def tx_request_permission(kind: int) -> bytes:
 def tx_watch_capture_devices(on: int) -> bytes:
     """1: list the cameras and microphones now (capture_devices), report each kind's permission as it stands (capture_permission), and list again whenever a device comes or goes; 0: stop. Listing asks for no permission."""
     return record(TX_WATCH_CAPTURE_DEVICES, struct.pack("<I", on) + struct.pack("<I", 0))
+
+def tx_show_toast(window: int, toast: int, duration: int, action: int, text: Value, action_label: Value) -> bytes:
+    """Show a toast in `window` (0 = the primary; docs/toast-plan.md T1-T7): a short message over the content that goes by itself. `toast` is a guest-chosen id answered once by toast_result. `duration` a TOAST_DURATION, `action` a TOAST_ACTION; `text` and `action_label` are Str, the label empty exactly when the action is `none`. One toast per window: a second replaces the shown one, which answers `closed`. An `undo` action is refused outside an undo group and binds the toast to that group's ledger step (T4)."""
+    return record(TX_SHOW_TOAST, struct.pack("<Q", window) + struct.pack("<Q", toast) + struct.pack("<I", duration) + struct.pack("<I", action) + _enc.value(text) + _enc.value(action_label))
+
+def tx_dismiss_toast(toast: int) -> bytes:
+    """Withdraw a shown toast. Like cancel_notification it retires the id with NO answer; an unknown or retired id is ignored (docs/toast-plan.md T5)."""
+    return record(TX_DISMISS_TOAST, struct.pack("<Q", toast))
 
 
 def tx_set_text(widget_id: int, text: str) -> bytes:
@@ -2218,13 +2238,17 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
     value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED, OCC_CAPTURE_CHANGED, OCC_CAPTURE_PERMISSION, OCC_CAPTURE_DEVICES, OCC_CAPTURE_OVERRUN):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED, OCC_CAPTURE_CHANGED, OCC_CAPTURE_PERMISSION, OCC_CAPTURE_DEVICES, OCC_CAPTURE_OVERRUN, OCC_TOAST_RESULT):
         return kind, None, [], None
     if kind == OCC_ALERT_RESULT:
         # A request's one answer: id + the u32 code.
         request, code = struct.unpack_from("<QI", buf, 8)
         return kind, request, [], code
     if kind == OCC_NOTIFICATION_RESULT:
+        # A request's one answer: id + the u32 code.
+        request, code = struct.unpack_from("<QI", buf, 8)
+        return kind, request, [], code
+    if kind == OCC_TOAST_RESULT:
         # A request's one answer: id + the u32 code.
         request, code = struct.unpack_from("<QI", buf, 8)
         return kind, request, [], code

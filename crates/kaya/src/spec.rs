@@ -2041,6 +2041,37 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   (capture_permission), and list again whenever a device \
                   comes or goes; 0: stop. Listing asks for no permission.",
         },
+        Record {
+            kind: 82,
+            name: "show_toast",
+            fields: &[
+                f("window", FieldTy::U64),
+                f("toast", FieldTy::U64),
+                f("duration", FieldTy::U32),
+                f("action", FieldTy::U32),
+                f("text", FieldTy::Value),
+                f("action_label", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "Show a toast in `window` (0 = the primary; docs/toast-plan.md \
+                  T1-T7): a short message over the content that goes by itself. \
+                  `toast` is a guest-chosen id answered once by toast_result. \
+                  `duration` a TOAST_DURATION, `action` a TOAST_ACTION; `text` \
+                  and `action_label` are Str, the label empty exactly when the \
+                  action is `none`. One toast per window: a second replaces \
+                  the shown one, which answers `closed`. An `undo` action is \
+                  refused outside an undo group and binds the toast to that \
+                  group's ledger step (T4).",
+        },
+        Record {
+            kind: 83,
+            name: "dismiss_toast",
+            fields: &[f("toast", FieldTy::U64)],
+            payload: None,
+            doc: "Withdraw a shown toast. Like cancel_notification it retires \
+                  the id with NO answer; an unknown or retired id is ignored \
+                  (docs/toast-plan.md T5).",
+        },
     ],
     apply: &[
         Record {
@@ -3028,6 +3059,33 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   mirrored for a front or desktop camera (docs/capture-plan.md \
                   §2 rule 4).",
         },
+        Record {
+            kind: 71,
+            name: "present_toast",
+            fields: &[
+                f("window", FieldTy::U64),
+                f("toast", FieldTy::U64),
+                f("duration", FieldTy::U32),
+                f("action", FieldTy::U32),
+                f("text", FieldTy::Value),
+                f("action_label", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "Show the validated toast in `window`, REPLACING whatever toast \
+                  that window shows (the core has already answered the old one). \
+                  The arm starts the duration's timer once the toast is on \
+                  screen, reports a press of the action through \
+                  kaya_toast_action and every other way it goes through \
+                  kaya_emit_toast_result with `closed`.",
+        },
+        Record {
+            kind: 72,
+            name: "withdraw_toast",
+            fields: &[f("window", FieldTy::U64), f("toast", FieldTy::U64)],
+            payload: None,
+            doc: "Take the toast off screen if it is still the one shown; the \
+                  core has retired it, so the arm reports nothing.",
+        },
     ],
     occurrence: &[
         Record {
@@ -3985,6 +4043,23 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   behind by more than KAYA_CAPTURE_OVERRUN_MS, and again only \
                   after it has caught up.",
         },
+        Record {
+            kind: 55,
+            name: "toast_result",
+            fields: &[
+                f("toast", FieldTy::U64),
+                f("outcome", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "A toast's one answer (docs/toast-plan.md T5): outcome a \
+                  TOAST_OUTCOME, `action` when the user pressed its action and \
+                  `closed` for every other way it went (timed out, closed by \
+                  the user, replaced, its window closed, an undo toast's step \
+                  undone another way or overtaken by a newer one). The id \
+                  retires here; an `undo` toast's press is preceded by the \
+                  `undone` it caused.",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -4266,6 +4341,22 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             // docs/tasks-s3-plan.md N1: activated or refused, nothing else.
             name: "notification_outcome",
             variants: &[("activated", 0), ("refused", 1), ("replied", 2)],
+        },
+        EnumSpec {
+            // docs/toast-plan.md T6: named, the platform's own seconds.
+            name: "toast_duration",
+            variants: &[("short", 0), ("long", 1)],
+        },
+        EnumSpec {
+            // docs/toast-plan.md T4: `undo` is the window's undo, bound to the
+            // step the toast was shown in.
+            name: "toast_action",
+            variants: &[("none", 0), ("app", 1), ("undo", 2)],
+        },
+        EnumSpec {
+            // docs/toast-plan.md T5.
+            name: "toast_outcome",
+            variants: &[("action", 0), ("closed", 1)],
         },
         EnumSpec {
             // What kaya_open_picked opens a handle for (Android's
@@ -4789,6 +4880,8 @@ mod tests {
             ("release_capture", wire::TX_RELEASE_CAPTURE),
             ("request_permission", wire::TX_REQUEST_PERMISSION),
             ("watch_capture_devices", wire::TX_WATCH_CAPTURE_DEVICES),
+            ("show_toast", wire::TX_SHOW_TOAST),
+            ("dismiss_toast", wire::TX_DISMISS_TOAST),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -4870,6 +4963,8 @@ mod tests {
                 ("request_permission", wire::APPLY_REQUEST_PERMISSION),
                 ("watch_capture_devices", wire::APPLY_WATCH_CAPTURE_DEVICES),
                 ("set_video_capture", wire::APPLY_SET_VIDEO_CAPTURE),
+                ("present_toast", wire::APPLY_PRESENT_TOAST),
+                ("withdraw_toast", wire::APPLY_WITHDRAW_TOAST),
             ]
         );
         // The WHOLE list, not indexed asserts: an indexed pin says
@@ -4933,6 +5028,7 @@ mod tests {
                 ("capture_permission", crate::ring::REC_CAPTURE_PERMISSION),
                 ("capture_devices", crate::ring::REC_CAPTURE_DEVICES),
                 ("capture_overrun", crate::ring::REC_CAPTURE_OVERRUN),
+                ("toast_result", crate::ring::REC_TOAST_RESULT),
             ]
         );
     }
@@ -5319,6 +5415,13 @@ mod tests {
                     ("notification_outcome", "activated") => wire::NOTIFICATION_OUTCOME_ACTIVATED,
                     ("notification_outcome", "refused") => wire::NOTIFICATION_OUTCOME_REFUSED,
                     ("notification_outcome", "replied") => wire::NOTIFICATION_OUTCOME_REPLIED,
+                    ("toast_duration", "short") => wire::TOAST_DURATION_SHORT,
+                    ("toast_duration", "long") => wire::TOAST_DURATION_LONG,
+                    ("toast_action", "none") => wire::TOAST_ACTION_NONE,
+                    ("toast_action", "app") => wire::TOAST_ACTION_APP,
+                    ("toast_action", "undo") => wire::TOAST_ACTION_UNDO,
+                    ("toast_outcome", "action") => wire::TOAST_OUTCOME_ACTION,
+                    ("toast_outcome", "closed") => wire::TOAST_OUTCOME_CLOSED,
                     ("axis", "horizontal") => wire::AXIS_HORIZONTAL,
                     ("axis", "vertical") => wire::AXIS_VERTICAL,
                     ("size_class", "none") => wire::SIZE_CLASS_NONE,
@@ -5586,6 +5689,42 @@ mod tests {
 
     /// The capture's records (docs/capture-plan.md §2), the reader's round
     /// trip one feature over.
+    #[test]
+    fn toast_records_round_trip_through_wire() {
+        use crate::protocol::{ToastAction, ToastDuration, ToastId, ToastSpec};
+        let mut w = GenericWriter { buf: Vec::new(), blobs: Vec::new() };
+        w.record(
+            tx_record("show_toast"),
+            &[
+                Arg::U64(0),
+                Arg::U64(4),
+                Arg::U32(wire::TOAST_DURATION_LONG),
+                Arg::U32(wire::TOAST_ACTION_UNDO),
+                Arg::Value(Value::from("Deleted Milk")),
+                Arg::Value(Value::from("Undo")),
+            ],
+        );
+        w.record(tx_record("dismiss_toast"), &[Arg::U64(4)]);
+        let want = vec![
+            TxOp::ShowToast(ToastSpec {
+                window: WindowId(0),
+                toast: ToastId(4),
+                duration: ToastDuration::Long,
+                action: ToastAction::Undo,
+                text: "Deleted Milk".into(),
+                action_label: "Undo".into(),
+            }),
+            TxOp::DismissToast(ToastId(4)),
+        ];
+        let decoded = wire::decode_transaction(&w.buf);
+        assert_eq!(format!("{decoded:?}"), format!("{want:?}"));
+        let mut ours = wire::Writer::new();
+        for op in &want {
+            ours.tx_op(op);
+        }
+        assert_eq!(ours.into_bytes(), w.buf, "the core's encoder and the spec's disagree");
+    }
+
     #[test]
     fn capture_records_round_trip_through_wire() {
         use crate::protocol::{CaptureCommand, CaptureId, CaptureKind, CaptureProp};

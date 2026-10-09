@@ -243,6 +243,11 @@
 #define KAYA_OCCURRENCE_CAPTURE_OVERRUN 54
 
 /**
+ * TOAST_RESULT { u64 toast; u32 outcome; u32 reserved } (docs/toast-plan.md T5).
+ */
+#define KAYA_OCCURRENCE_TOAST_RESULT 55
+
+/**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
  *   CREATE_SIGNAL:     u64 signal_id, value
@@ -417,6 +422,14 @@
 #define KAYA_TX_REQUEST_PERMISSION 80
 
 #define KAYA_TX_WATCH_CAPTURE_DEVICES 81
+
+/**
+ * SHOW_TOAST { u64 window; u64 toast; u32 duration; u32 action; Value text;
+ * Value action_label }; DISMISS_TOAST { u64 toast } (docs/toast-plan.md §4).
+ */
+#define KAYA_TX_SHOW_TOAST 82
+
+#define KAYA_TX_DISMISS_TOAST 83
 
 #define KAYA_TX_ADD_SECTION 25
 
@@ -814,6 +827,14 @@
 #define KAYA_APPLY_WATCH_CAPTURE_DEVICES 69
 
 #define KAYA_APPLY_SET_VIDEO_CAPTURE 70
+
+/**
+ * PRESENT_TOAST: SHOW_TOAST's layout, replacing the window's shown toast.
+ * WITHDRAW_TOAST { u64 window; u64 toast }: off screen, nothing reported.
+ */
+#define KAYA_APPLY_PRESENT_TOAST 71
+
+#define KAYA_APPLY_WITHDRAW_TOAST 72
 
 #define KAYA_APPLY_ADD_SECTION 15
 
@@ -1401,6 +1422,24 @@
 #define KAYA_NOTIFICATION_OUTCOME_REFUSED 1
 
 #define KAYA_NOTIFICATION_OUTCOME_REPLIED 2
+
+/**
+ * The toast vocabularies (spec enums "toast_duration", "toast_action",
+ * "toast_outcome").
+ */
+#define KAYA_TOAST_DURATION_SHORT 0
+
+#define KAYA_TOAST_DURATION_LONG 1
+
+#define KAYA_TOAST_ACTION_NONE 0
+
+#define KAYA_TOAST_ACTION_APP 1
+
+#define KAYA_TOAST_ACTION_UNDO 2
+
+#define KAYA_TOAST_OUTCOME_ACTION 0
+
+#define KAYA_TOAST_OUTCOME_CLOSED 1
 
 /**
  * The align enum's values (spec enum "align"); baseline is rows-only.
@@ -2180,6 +2219,13 @@ typedef struct KayaHostApi {
    * (docs/notification-reply-plan.md): UTF-8 bytes and their length.
    */
   void (*emit_notification_reply)(uint64_t, const uint8_t*, uintptr_t);
+  /**
+   * A toast gone by any way but its action (TOAST_OUTCOME_CLOSED), and
+   * a press of its action, whose answer and undo the core decides
+   * (docs/toast-plan.md §3).
+   */
+  void (*emit_toast_result)(uint64_t, uint32_t);
+  void (*toast_action)(uint64_t);
   /**
    * A URL the platform handed this app (docs/app-links-plan.md §4):
    * the raw kAEGetURL Apple event on macOS, `.onOpenURL` on iOS. The
@@ -3927,6 +3973,21 @@ void kaya_emit_menu_value_changed(uint64_t item,
                                   const uint8_t *noun,
                                   uintptr_t noun_len,
                                   double index);
+
+/**
+ * THE ONE DOOR FOR A PRESS OF A TOAST'S ACTION (docs/toast-plan.md §3):
+ * the core retires the toast and answers `action`, and for an undo toast
+ * undoes its step first, so the app hears `undone` and then the answer.
+ * A press on a toast already retired does nothing.
+ */
+void kaya_toast_action(uint64_t toast);
+
+/**
+ * A toast went by any way but its action (timed out, closed by the user):
+ * `outcome` is TOAST_OUTCOME_CLOSED. The core answers once per id, so a
+ * report for a toast it already retired is dropped.
+ */
+void kaya_emit_toast_result(uint64_t toast, uint32_t outcome);
 
 /**
  * Where an undo would go RIGHT NOW: 0 nowhere (the command is inert and

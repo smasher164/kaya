@@ -762,6 +762,18 @@ pub enum Step {
     /// `Latn`): the check a knob that failed to reach the platform
     /// cannot satisfy.
     ExpectScript(Target, String),
+    /// The toast the platform shows, as `"<text>|<action>"` (`"<text>|"`
+    /// for none), read off the platform's own surface (docs/toast-plan.md
+    /// T13); `ExpectNoToast` is its opposite.
+    ExpectToast(String),
+    ExpectNoToast,
+    /// The platform published the toast's announcement to a listener the
+    /// harness holds.
+    ExpectToastAnnounced(String),
+    /// Press the shown toast's action, or its close, through the platform's
+    /// own activation. Actions, silent like click.
+    ToastAction,
+    ToastClose,
     /// Drive the platform's own cancel path on the topmost sheet (Esc,
     /// the back gesture, a swipe, the close button): an armed
     /// intercept_dismiss sheet emits dismiss_requested and stays; an
@@ -1096,6 +1108,11 @@ impl Step {
             | Step::ExpectLocale(..)
             | Step::ExpectHourCycle(..)
             | Step::DismissSheet
+            | Step::ExpectToast(..)
+            | Step::ExpectNoToast
+            | Step::ExpectToastAnnounced(..)
+            | Step::ToastAction
+            | Step::ToastClose
             | Step::MenuActivate(..)
             | Step::ExpectMenu(..)
             | Step::ExpectMenuSymbol(..)
@@ -1239,6 +1256,11 @@ impl Step {
             Step::ExpectSheet { .. } => true,
             Step::ExpectSheetDetent { .. } => true,
             Step::DismissSheet => false,
+            Step::ExpectToast(..) => true,
+            Step::ExpectNoToast => true,
+            Step::ExpectToastAnnounced(..) => true,
+            Step::ToastAction => false,
+            Step::ToastClose => false,
             Step::ExpectTextScale(..) => true,
             Step::ExpectNoClipping => true,
             Step::ExpectDirection(..) => true,
@@ -1893,6 +1915,18 @@ pub trait Stage: Send + 'static {
     fn sheet_detent(&self) -> String;
     /// Drive the platform's own cancel path on the topmost sheet.
     fn dismiss_sheet(&self);
+    /// The toast the platform shows (docs/toast-plan.md T13): its text and
+    /// its action's label ("" for none) read off the platform's own surface,
+    /// None when none is on screen. Never the scene model.
+    fn toast(&self) -> Option<(String, String)>;
+    /// Ok when the platform published an announcement of a toast with this
+    /// text and action to a listener the harness holds; otherwise every
+    /// announcement it heard.
+    fn toast_announced(&self, text: &str, action: &str) -> Result<(), Vec<String>>;
+    /// Press the shown toast's action, or its close, the platform's way;
+    /// false when no such button is on screen.
+    fn toast_action(&self) -> bool;
+    fn toast_close(&self) -> bool;
     /// The text scale the toolkit reports for the process
     /// (docs/compliance-plan.md §2.1's read-back column); 1.0 where the
     /// platform has no text size.
@@ -3184,6 +3218,29 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 Step::ExpectSheets(n)
             }
             "expect_sheet" => Step::ExpectSheet(parse_string(rest)?),
+            "expect_toast" | "expect_toast_announced" => {
+                let want = parse_string(rest)?;
+                if !want.contains('|') {
+                    return Err(format!(
+                        "{op} wants \"<text>|<action>\" (\"<text>|\" for no action): {line:?}"
+                    ));
+                }
+                if op == "expect_toast" {
+                    Step::ExpectToast(want)
+                } else {
+                    Step::ExpectToastAnnounced(want)
+                }
+            }
+            "expect_no_toast" | "toast_action" | "toast_close" => {
+                if !rest.trim().is_empty() {
+                    return Err(format!("{op} takes no argument: {line:?}"));
+                }
+                match op {
+                    "expect_no_toast" => Step::ExpectNoToast,
+                    "toast_action" => Step::ToastAction,
+                    _ => Step::ToastClose,
+                }
+            }
             "expect_text_scale" => {
                 let factor: f64 = rest.trim().parse().map_err(|_| {
                     format!("expect_text_scale wants a factor such as 2.0: {line:?}")
@@ -5515,6 +5572,20 @@ fn run_with_log(
                 await_answer(answered);
                 None
             }
+            Step::ToastAction | Step::ToastClose => {
+                await_quiet();
+                let answered = crate::scene::answers();
+                let (verb, pressed) = match step {
+                    Step::ToastAction => ("toast_action", stage.toast_action()),
+                    _ => ("toast_close", stage.toast_close()),
+                };
+                if pressed {
+                    await_answer(answered);
+                    None
+                } else {
+                    Some(Err(format!("{verb}: no toast button on screen to press")))
+                }
+            }
             Step::ScrollEnd(t) => {
                 // A SCROLL CONTAINER OR A TABLE (docs/tables-plan.md,
                 // ruled 2026-08-29): on a table these three read the
@@ -6073,6 +6144,28 @@ fn run_with_log(
                     Some(found) if found == script => Ok(format!("{t:?} in {script}")),
                     Some(found) => Err(format!("{t:?} reads {got:?}, whose letters are {found}, wanted {script}")),
                     None => Err(format!("{t:?} reads {got:?}, which has no letters")),
+                }
+            })),
+            Step::ExpectToast(want) => Some(poll(|| match stage.toast() {
+                Some((text, action)) => {
+                    let got = format!("{text}|{action}");
+                    if got == *want {
+                        Ok(format!("toast {want:?}"))
+                    } else {
+                        Err(format!("toast {got:?}, wanted {want:?}"))
+                    }
+                }
+                None => Err(format!("no toast shown, wanted {want:?}")),
+            })),
+            Step::ExpectNoToast => Some(poll(|| match stage.toast() {
+                Some((text, action)) => Err(format!("toast {:?} shown, wanted none", format!("{text}|{action}"))),
+                None => Ok("no toast".to_owned()),
+            })),
+            Step::ExpectToastAnnounced(want) => Some(poll(|| {
+                let (text, action) = want.split_once('|').expect("parse holds the bar");
+                match stage.toast_announced(text, action) {
+                    Ok(()) => Ok(format!("toast announced {want:?}")),
+                    Err(heard) => Err(format!("toast {want:?} not announced; heard {heard:?}")),
                 }
             })),
             Step::ExpectSheet(want) => Some(poll(|| match stage.sheet_title() {
@@ -8563,6 +8656,18 @@ mod tests {
             "none".to_owned()
         }
         fn dismiss_sheet(&self) {}
+        fn toast(&self) -> Option<(String, String)> {
+            None
+        }
+        fn toast_announced(&self, _: &str, _: &str) -> Result<(), Vec<String>> {
+            Err(Vec::new())
+        }
+        fn toast_action(&self) -> bool {
+            true
+        }
+        fn toast_close(&self) -> bool {
+            true
+        }
         fn scroll_overflow(&self, _: Target) -> String {
             String::new()
         }
@@ -9605,6 +9710,18 @@ mod tests {
             "none".to_owned()
         }
         fn dismiss_sheet(&self) {}
+        fn toast(&self) -> Option<(String, String)> {
+            None
+        }
+        fn toast_announced(&self, _: &str, _: &str) -> Result<(), Vec<String>> {
+            Err(Vec::new())
+        }
+        fn toast_action(&self) -> bool {
+            true
+        }
+        fn toast_close(&self) -> bool {
+            true
+        }
         fn scroll_overflow(&self, _: Target) -> String {
             String::new()
         }
@@ -10028,6 +10145,18 @@ mod tests {
             "none".to_owned()
         }
         fn dismiss_sheet(&self) {}
+        fn toast(&self) -> Option<(String, String)> {
+            None
+        }
+        fn toast_announced(&self, _: &str, _: &str) -> Result<(), Vec<String>> {
+            Err(Vec::new())
+        }
+        fn toast_action(&self) -> bool {
+            true
+        }
+        fn toast_close(&self) -> bool {
+            true
+        }
         fn scroll_overflow(&self, _: Target) -> String {
             String::new()
         }

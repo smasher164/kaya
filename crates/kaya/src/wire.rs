@@ -71,6 +71,8 @@ pub(crate) const TX_CAPTURE_COMMAND: u16 = 78;
 pub(crate) const TX_RELEASE_CAPTURE: u16 = 79;
 pub(crate) const TX_REQUEST_PERMISSION: u16 = 80;
 pub(crate) const TX_WATCH_CAPTURE_DEVICES: u16 = 81;
+pub(crate) const TX_SHOW_TOAST: u16 = 82;
+pub(crate) const TX_DISMISS_TOAST: u16 = 83;
 pub(crate) const TX_ADD_SECTION: u16 = 25;
 pub(crate) const TX_SELECT_SECTION: u16 = 26;
 pub(crate) const TX_SET_SECTION_PROP: u16 = 27;
@@ -189,6 +191,8 @@ pub(crate) const APPLY_RELEASE_CAPTURE: u16 = 67;
 pub(crate) const APPLY_REQUEST_PERMISSION: u16 = 68;
 pub(crate) const APPLY_WATCH_CAPTURE_DEVICES: u16 = 69;
 pub(crate) const APPLY_SET_VIDEO_CAPTURE: u16 = 70;
+pub(crate) const APPLY_PRESENT_TOAST: u16 = 71;
+pub(crate) const APPLY_WITHDRAW_TOAST: u16 = 72;
 pub(crate) const APPLY_ADD_SECTION: u16 = 15;
 pub(crate) const APPLY_SELECT_SECTION: u16 = 16;
 pub(crate) const APPLY_SET_SECTION_PROP: u16 = 17;
@@ -1314,6 +1318,81 @@ pub(crate) fn notification_outcome_raw(outcome: &crate::protocol::NotificationOu
         crate::protocol::NotificationOutcome::Activated => (NOTIFICATION_OUTCOME_ACTIVATED, ""),
         crate::protocol::NotificationOutcome::Refused => (NOTIFICATION_OUTCOME_REFUSED, ""),
         crate::protocol::NotificationOutcome::Replied(text) => (NOTIFICATION_OUTCOME_REPLIED, text),
+    }
+}
+
+/// The toast vocabularies (spec enums "toast_duration", "toast_action",
+/// "toast_outcome"; docs/toast-plan.md T4-T6).
+pub(crate) const TOAST_DURATION_SHORT: u32 = 0;
+pub(crate) const TOAST_DURATION_LONG: u32 = 1;
+pub(crate) const TOAST_ACTION_NONE: u32 = 0;
+pub(crate) const TOAST_ACTION_APP: u32 = 1;
+pub(crate) const TOAST_ACTION_UNDO: u32 = 2;
+pub(crate) const TOAST_OUTCOME_ACTION: u32 = 0;
+pub(crate) const TOAST_OUTCOME_CLOSED: u32 = 1;
+
+pub(crate) fn toast_duration(raw: u32) -> crate::protocol::ToastDuration {
+    match raw {
+        TOAST_DURATION_SHORT => crate::protocol::ToastDuration::Short,
+        TOAST_DURATION_LONG => crate::protocol::ToastDuration::Long,
+        other => panic!("kaya: show_toast duration {other} is not a toast duration (short 0, long 1)"),
+    }
+}
+
+pub(crate) fn toast_duration_raw(d: crate::protocol::ToastDuration) -> u32 {
+    match d {
+        crate::protocol::ToastDuration::Short => TOAST_DURATION_SHORT,
+        crate::protocol::ToastDuration::Long => TOAST_DURATION_LONG,
+    }
+}
+
+pub(crate) fn toast_action(raw: u32) -> crate::protocol::ToastAction {
+    match raw {
+        TOAST_ACTION_NONE => crate::protocol::ToastAction::None,
+        TOAST_ACTION_APP => crate::protocol::ToastAction::App,
+        TOAST_ACTION_UNDO => crate::protocol::ToastAction::Undo,
+        other => panic!("kaya: show_toast action {other} is not a toast action (none 0, app 1, undo 2)"),
+    }
+}
+
+pub(crate) fn toast_action_raw(a: crate::protocol::ToastAction) -> u32 {
+    match a {
+        crate::protocol::ToastAction::None => TOAST_ACTION_NONE,
+        crate::protocol::ToastAction::App => TOAST_ACTION_APP,
+        crate::protocol::ToastAction::Undo => TOAST_ACTION_UNDO,
+    }
+}
+
+pub(crate) fn toast_outcome(raw: u32) -> crate::protocol::ToastOutcome {
+    match raw {
+        TOAST_OUTCOME_ACTION => crate::protocol::ToastOutcome::Action,
+        TOAST_OUTCOME_CLOSED => crate::protocol::ToastOutcome::Closed,
+        other => panic!("kaya: {other} is not a toast outcome (action 0, closed 1)"),
+    }
+}
+
+pub(crate) fn toast_outcome_raw(o: crate::protocol::ToastOutcome) -> u32 {
+    match o {
+        crate::protocol::ToastOutcome::Action => TOAST_OUTCOME_ACTION,
+        crate::protocol::ToastOutcome::Closed => TOAST_OUTCOME_CLOSED,
+    }
+}
+
+/// The toast_result occurrence body: { u64 toast; u32 outcome; u32 reserved }.
+pub(crate) fn toast_result_body(
+    toast: crate::protocol::ToastId,
+    outcome: crate::protocol::ToastOutcome,
+) -> [u8; 16] {
+    let mut b = [0u8; 16];
+    b[..8].copy_from_slice(&toast.0.to_le_bytes());
+    b[8..12].copy_from_slice(&toast_outcome_raw(outcome).to_le_bytes());
+    b
+}
+
+fn toast_str(v: Value, field: &str) -> String {
+    match v {
+        Value::Str(s) => s,
+        other => panic!("kaya: show_toast {field} must be a Str value, got {other:?}"),
     }
 }
 
@@ -2588,6 +2667,23 @@ pub fn decode_transaction_with_blobs(
             TX_CANCEL_NOTIFICATION => {
                 TxOp::CancelNotification(crate::protocol::NotificationId(r.u64()))
             }
+            TX_SHOW_TOAST => {
+                let window = WindowId(r.u64());
+                let toast = crate::protocol::ToastId(r.u64());
+                let duration = toast_duration(r.u32());
+                let action = toast_action(r.u32());
+                let text = toast_str(r.value(), "text");
+                let action_label = toast_str(r.value(), "action_label");
+                TxOp::ShowToast(crate::protocol::ToastSpec {
+                    window,
+                    toast,
+                    duration,
+                    action,
+                    text,
+                    action_label,
+                })
+            }
+            TX_DISMISS_TOAST => TxOp::DismissToast(crate::protocol::ToastId(r.u64())),
             TX_DECLARE_LINK_ROUTE => {
                 let route = r.u64();
                 let pattern = alert_str(r.value(), "pattern");
@@ -4104,6 +4200,13 @@ impl Writer {
                 write_value(b, &Value::Str(spec.body.clone()), blobs);
                 write_value(b, &Value::Str(spec.reply.clone()), blobs);
             }),
+            ApplyOp::PresentToast(spec) => self.record(APPLY_PRESENT_TOAST, |b, blobs| {
+                write_toast(b, spec, blobs);
+            }),
+            ApplyOp::WithdrawToast { window, toast } => self.record(APPLY_WITHDRAW_TOAST, |b, _| {
+                b.extend_from_slice(&window.0.to_le_bytes());
+                b.extend_from_slice(&toast.0.to_le_bytes());
+            }),
             ApplyOp::CancelNotification(id) => {
                 self.record(APPLY_CANCEL_NOTIFICATION, |b, _blobs| {
                     b.extend_from_slice(&id.0.to_le_bytes());
@@ -4721,6 +4824,12 @@ impl Writer {
                 write_value(b, &Value::Str(spec.title.clone()), blobs);
                 write_value(b, &Value::Str(spec.body.clone()), blobs);
                 write_value(b, &Value::Str(spec.reply.clone()), blobs);
+            }),
+            TxOp::ShowToast(spec) => self.record(TX_SHOW_TOAST, |b, blobs| {
+                write_toast(b, spec, blobs);
+            }),
+            TxOp::DismissToast(toast) => self.record(TX_DISMISS_TOAST, |b, _| {
+                b.extend_from_slice(&toast.0.to_le_bytes());
             }),
             TxOp::CancelNotification(id) => self.record(TX_CANCEL_NOTIFICATION, |b, _blobs| {
                 b.extend_from_slice(&id.0.to_le_bytes());
@@ -5564,6 +5673,16 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::Revealed => PROP_REVEALED,
         Prop::Revealable => PROP_REVEALABLE,
     }
+}
+
+/// SHOW_TOAST and PRESENT_TOAST carry one layout.
+fn write_toast(b: &mut Vec<u8>, spec: &crate::protocol::ToastSpec, blobs: &mut Vec<Arc<[u8]>>) {
+    b.extend_from_slice(&spec.window.0.to_le_bytes());
+    b.extend_from_slice(&spec.toast.0.to_le_bytes());
+    b.extend_from_slice(&toast_duration_raw(spec.duration).to_le_bytes());
+    b.extend_from_slice(&toast_action_raw(spec.action).to_le_bytes());
+    write_value(b, &Value::Str(spec.text.clone()), blobs);
+    write_value(b, &Value::Str(spec.action_label.clone()), blobs);
 }
 
 fn write_value(b: &mut Vec<u8>, value: &Value, blobs: &mut Vec<Arc<[u8]>>) {

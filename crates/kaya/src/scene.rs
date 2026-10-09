@@ -551,6 +551,8 @@ enum LedgerEntry {
         label: String,
         inverse: UndoDelta,
         forward: UndoDelta,
+        /// The scene-wide serial an undo toast binds to (docs/toast-plan.md T4).
+        step: u64,
     },
     /// The run of text_changed occurrences on one field between clears.
     Episode(Episode),
@@ -573,6 +575,21 @@ struct Episode {
     /// new one. Closed by a group commit, by a programmatic write that
     /// changes the text, or by an event naming another field.
     open: bool,
+}
+
+/// The toast a window shows (docs/toast-plan.md T7), and for an undo toast
+/// the ledger step it offers (T4).
+struct ShownToast {
+    toast: crate::protocol::ToastId,
+    action: crate::protocol::ToastAction,
+    step: Option<u64>,
+}
+
+/// A batch's toast requests, settled at its tail.
+enum ToastStep {
+    Show(crate::protocol::ToastSpec),
+    Dismiss(crate::protocol::ToastId),
+    WindowGone(WindowId),
 }
 
 /// Where an undo request should go (D6, widened to §3's three-way). A4:
@@ -666,6 +683,9 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         TxOp::ShowAlert(_) => UndoVerdict::Refused("show_alert"),
         TxOp::ShowNotification(_) => UndoVerdict::Refused("show_notification"),
         TxOp::CancelNotification(_) => UndoVerdict::Refused("cancel_notification"),
+        // docs/toast-plan.md T4: an undo toast is shown INSIDE the group it
+        // offers to undo, and neither request is state the ledger restores.
+        TxOp::ShowToast(_) | TxOp::DismissToast(_) => UndoVerdict::PureEffect,
         TxOp::SetBadge { .. } => UndoVerdict::Refused("set_badge"),
         // A player and the session are objects the app commands, not
         // state the ledger can invert (docs/media-plan.md §2 rule 3).
@@ -1041,6 +1061,13 @@ pub(crate) struct Scene {
     /// window a group NAMES: the core cannot derive it — a signal write
     /// addresses no surface — so `undo_group` carries it.
     ledgers: HashMap<WindowId, Ledger>,
+    /// The serial the next banked group takes (docs/toast-plan.md T4).
+    next_step: u64,
+    /// The toast each window shows (docs/toast-plan.md T7: one per window).
+    toasts: HashMap<WindowId, ShownToast>,
+    /// Withdrawals a ledger change made outside a transaction and outside
+    /// an undo, drained by the caller of `note_text_changed`.
+    toast_out: Vec<ApplyOp>,
     /// The text the core has SEEN each field hold: seeded by every
     /// programmatic write it resolves, advanced by every text_changed it
     /// is told about. NOT A MIRROR READ — an episode's before-image is
@@ -3269,6 +3296,9 @@ impl Scene {
         // The undo group this batch declared at its head, if any, with
         // the pre-state of everything it has touched so far (D2/D3).
         let mut group: Option<GroupCapture> = None;
+        // docs/toast-plan.md T4, T7: toasts settle at the tail, after the
+        // group has a step and nothing later in the batch can refuse it.
+        let mut toast_steps: Vec<ToastStep> = Vec::new();
         // Every LIVE widget this batch minted, in creation order — the
         // domain of the reachability barrier below. Batch-scoped, not a
         // global sweep over `self.widgets`, because the core never prunes
@@ -3709,6 +3739,7 @@ impl Scene {
                     for root in self.window_menus.remove(&window).unwrap_or_default() {
                         self.menu_items.get_mut(&root).unwrap().anchor = None;
                     }
+                    toast_steps.push(ToastStep::WindowGone(window));
                     out.push(ApplyOp::DestroyWindow { window });
                 }
                 TxOp::ShowAlert(spec) => {
@@ -3766,6 +3797,11 @@ impl Scene {
                 TxOp::CancelNotification(id) => {
                     out.push(ApplyOp::CancelNotification(id));
                 }
+                TxOp::ShowToast(spec) => {
+                    self.check_toast(&spec, group.as_ref().map(|g| g.window), &toast_steps);
+                    toast_steps.push(ToastStep::Show(spec));
+                }
+                TxOp::DismissToast(toast) => toast_steps.push(ToastStep::Dismiss(toast)),
                 TxOp::CreatePlayer { player } => out.push(self.media.create(player)),
                 TxOp::SetPlayerProp { player, prop, value } => {
                     self.media.set_prop(player, prop, value, &mut out, &mut self.asks)
@@ -5355,9 +5391,8 @@ impl Scene {
         self.absorb_number_writes(&out);
         self.absorb_text_writes(&out);
 
-        if let Some(cap) = group {
-            self.bank_group(cap, &dirty, &rollback, &mut out);
-        }
+        let step = group.map(|cap| self.bank_group(cap, &dirty, &rollback, &mut out));
+        self.settle_toasts(toast_steps, step, &mut out);
         #[cfg(debug_assertions)]
         self.assert_bands_hold();
         // THE APP ANSWERED. Last, so the count moves only once the batch
@@ -5570,7 +5605,7 @@ impl Scene {
         dirty: &[SignalId],
         rollback: &HashMap<SignalId, Value>,
         out: &mut Vec<ApplyOp>,
-    ) {
+    ) -> u64 {
         let mut inverse = UndoDelta::default();
         let mut forward = UndoDelta::default();
         for id in dirty {
@@ -5621,16 +5656,20 @@ impl Scene {
         if let Some(LedgerEntry::Episode(ep)) = ledger.done.last_mut() {
             ep.open = false;
         }
+        self.next_step += 1;
+        let step = self.next_step;
         ledger.done.push(LedgerEntry::Group {
             label: cap.label,
             inverse,
             forward,
+            step,
         });
         // A new step invalidates the forward history — the rule every
         // undo system has, and the one the platforms apply to their own
         // text stacks on the next keystroke.
         ledger.redo.clear();
         out.push(ApplyOp::ClearUndo { window: cap.window });
+        step
     }
 
     /// The text a range op is addressed against: the widget's content AS IT
@@ -5824,6 +5863,8 @@ impl Scene {
                 }));
             }
         }
+        let withdrawn = self.reconcile_toasts();
+        self.toast_out.extend(withdrawn);
     }
 
     // --- Rich text: the mirror (docs/rich-text-plan.md R1/R4/R5) --------
@@ -6211,7 +6252,191 @@ impl Scene {
         // Exhausted mid-episode: finish the job the coarse way.
         let mut out = Vec::new();
         let occurrence = self.restore_episode_backwards(window, &mut out);
+        out.extend(self.reconcile_toasts());
         occurrence.map(|occ| (out, occ))
+    }
+
+    // --- The toast (docs/toast-plan.md T3-T7, §4) -------------------------
+
+    /// The core's refusals, made while the scene is still as it was.
+    fn check_toast(
+        &self,
+        spec: &crate::protocol::ToastSpec,
+        group_window: Option<WindowId>,
+        earlier: &[ToastStep],
+    ) {
+        use crate::protocol::ToastAction;
+        let id = spec.toast.0;
+        assert!(
+            spec.window == crate::protocol::DEFAULT_WINDOW || self.windows.contains(&spec.window),
+            "kaya: show_toast {id} names unknown window {:?} — create_window first (0 is the primary)",
+            spec.window
+        );
+        assert!(
+            !spec.text.is_empty(),
+            "kaya: show_toast {id} has an empty text — the text is the whole message"
+        );
+        match spec.action {
+            ToastAction::None => assert!(
+                spec.action_label.is_empty(),
+                "kaya: show_toast {id} carries the action label {:?} with no action — \
+                 call .action(label) to offer one",
+                spec.action_label
+            ),
+            ToastAction::App | ToastAction::Undo => assert!(
+                !spec.action_label.is_empty(),
+                "kaya: show_toast {id} offers an action with an empty label — the app \
+                 names its button (no hidden English)"
+            ),
+        }
+        if spec.action == ToastAction::Undo {
+            match group_window {
+                None => panic!(
+                    "kaya: show_toast {id} offers undo outside an undo group — an undo \
+                     toast is shown IN the undoable transaction it offers to undo, so the \
+                     core knows which step its button takes back (docs/toast-plan.md T4)"
+                ),
+                Some(w) if w != spec.window => panic!(
+                    "kaya: show_toast {id} offers undo in window {:?}, but its undo group \
+                     is window {w:?}'s — the toast must sit in the window whose ledger \
+                     holds the step",
+                    spec.window
+                ),
+                Some(_) => {}
+            }
+        }
+        let shown = self.toasts.values().any(|t| t.toast == spec.toast);
+        let batched = earlier
+            .iter()
+            .any(|step| matches!(step, ToastStep::Show(other) if other.toast == spec.toast));
+        assert!(
+            !shown && !batched,
+            "kaya: show_toast {id} reuses a toast id that is still {} — an id retires \
+             on its toast_result or on dismiss_toast",
+            if shown { "shown" } else { "shown earlier in this transaction" }
+        );
+    }
+
+    fn retire_toast(&mut self, window: WindowId) -> Option<ShownToast> {
+        self.toasts.remove(&window)
+    }
+
+    fn answer_toast(&mut self, toast: crate::protocol::ToastId, outcome: crate::protocol::ToastOutcome) {
+        self.asks.push(Occurrence::ToastResult { toast, outcome });
+    }
+
+    /// The batch's toast requests in order, then the undo toasts held to
+    /// their steps. A replaced toast answers `closed` before its successor
+    /// is presented (T7).
+    fn settle_toasts(&mut self, steps: Vec<ToastStep>, step: Option<u64>, out: &mut Vec<ApplyOp>) {
+        use crate::protocol::{ToastAction, ToastOutcome};
+        for request in steps {
+            match request {
+                ToastStep::Show(spec) => {
+                    if let Some(old) = self.retire_toast(spec.window) {
+                        self.answer_toast(old.toast, ToastOutcome::Closed);
+                    }
+                    let bound = if spec.action == ToastAction::Undo { step } else { None };
+                    self.toasts.insert(
+                        spec.window,
+                        ShownToast { toast: spec.toast, action: spec.action, step: bound },
+                    );
+                    out.push(ApplyOp::PresentToast(spec));
+                }
+                ToastStep::Dismiss(toast) => {
+                    let window = self.toasts.iter().find(|(_, t)| t.toast == toast).map(|(w, _)| *w);
+                    if let Some(window) = window {
+                        self.retire_toast(window);
+                        out.push(ApplyOp::WithdrawToast { window, toast });
+                    }
+                }
+                ToastStep::WindowGone(window) => {
+                    if let Some(old) = self.retire_toast(window) {
+                        self.answer_toast(old.toast, ToastOutcome::Closed);
+                    }
+                }
+            }
+        }
+        out.extend(self.reconcile_toasts());
+    }
+
+    /// An undo toast stays offered only while its step is the newest in its
+    /// window's ledger (T4): undone another way, or overtaken by a newer
+    /// step, it closes.
+    fn reconcile_toasts(&mut self) -> Vec<ApplyOp> {
+        let stale: Vec<WindowId> = self
+            .toasts
+            .iter()
+            .filter(|(window, shown)| {
+                let Some(step) = shown.step else { return false };
+                !matches!(
+                    self.ledgers.get(window).and_then(|l| l.done.last()),
+                    Some(LedgerEntry::Group { step: newest, .. }) if *newest == step
+                )
+            })
+            .map(|(w, _)| *w)
+            .collect();
+        let mut out = Vec::new();
+        for window in stale {
+            let old = self.retire_toast(window).expect("just found");
+            self.answer_toast(old.toast, crate::protocol::ToastOutcome::Closed);
+            out.push(ApplyOp::WithdrawToast { window, toast: old.toast });
+        }
+        out
+    }
+
+    /// The user pressed the toast's action (kaya_toast_action, every arm's
+    /// one door). An `app` action answers `action`; an `undo` one undoes its
+    /// step through the ledger's own body, so `undone` comes first. A press
+    /// on a toast the core has already retired does nothing, which is what
+    /// keeps an undo from running twice. Its occurrences leave through
+    /// `take_asks`, `undone` ahead of the answer.
+    pub(crate) fn toast_action(&mut self, toast: crate::protocol::ToastId) -> Vec<ApplyOp> {
+        use crate::protocol::{ToastAction, ToastOutcome};
+        let Some(window) = self.toasts.iter().find(|(_, t)| t.toast == toast).map(|(w, _)| *w) else {
+            return Vec::new();
+        };
+        let shown = self.retire_toast(window).expect("just found");
+        let mut out = vec![ApplyOp::WithdrawToast { window, toast }];
+        match shown.action {
+            ToastAction::None => {
+                panic!("kaya: toast {} has no action, yet its action was pressed", toast.0)
+            }
+            ToastAction::App => {}
+            ToastAction::Undo => {
+                let newest = matches!(
+                    self.ledgers.get(&window).and_then(|l| l.done.last()),
+                    Some(LedgerEntry::Group { step, .. }) if Some(*step) == shown.step
+                );
+                assert!(newest, "kaya: undo toast {} outlived its step", toast.0);
+                let (ops, undone) = self.undo(window).expect("its step is the newest");
+                out.extend(ops);
+                self.asks.push(undone);
+            }
+        }
+        self.answer_toast(toast, ToastOutcome::Action);
+        out
+    }
+
+    /// The arm reports a toast gone by any way but its action (timed out,
+    /// closed by the user). Once per id: a report for a toast the core has
+    /// already retired is dropped.
+    pub(crate) fn toast_closed(&mut self, toast: crate::protocol::ToastId) {
+        let window = self.toasts.iter().find(|(_, t)| t.toast == toast).map(|(w, _)| *w);
+        if let Some(window) = window {
+            self.retire_toast(window);
+            self.answer_toast(toast, crate::protocol::ToastOutcome::Closed);
+        }
+    }
+
+    /// Withdrawals a typing episode caused (it is a newer step, T4).
+    pub(crate) fn take_toast_out(&mut self) -> Vec<ApplyOp> {
+        std::mem::take(&mut self.toast_out)
+    }
+
+    #[cfg(test)]
+    fn shown_toast(&self, window: WindowId) -> Option<u64> {
+        self.toasts.get(&window).map(|t| t.toast.0)
     }
 
     // --- Undo: routing and the two entry points (D6, §3) ----------------
@@ -6280,6 +6505,7 @@ impl Scene {
     pub(crate) fn undo(&mut self, window: WindowId) -> Option<(Vec<ApplyOp>, Occurrence)> {
         let mut out = Vec::new();
         let occurrence = self.restore_episode_backwards(window, &mut out)?;
+        out.extend(self.reconcile_toasts());
         Some((out, occurrence))
     }
 
@@ -6298,6 +6524,7 @@ impl Scene {
                 label,
                 inverse,
                 forward,
+                step,
             } => {
                 let delta = inverse.clone();
                 (
@@ -6307,6 +6534,7 @@ impl Scene {
                         label,
                         inverse,
                         forward,
+                        step,
                     },
                 )
             }
@@ -6349,6 +6577,7 @@ impl Scene {
                 label,
                 inverse,
                 forward,
+                step,
             } => {
                 let delta = forward.clone();
                 (
@@ -6358,6 +6587,7 @@ impl Scene {
                         label,
                         inverse,
                         forward,
+                        step,
                     },
                 )
             }
@@ -6373,6 +6603,7 @@ impl Scene {
         let mut out = Vec::new();
         self.apply_delta(&delta, &mut out);
         self.ledgers.entry(window).or_default().done.push(back);
+        out.extend(self.reconcile_toasts());
         Some((
             out,
             Occurrence::Redone {
@@ -17487,6 +17718,306 @@ mod tests {
         assert!(scene.undo(DEFAULT_WINDOW).is_none());
     }
 
+    // --- The toast (docs/toast-plan.md T3-T7) ------------------------------
+
+    fn toast(id: u64, action: crate::protocol::ToastAction, label: &str) -> TxOp {
+        TxOp::ShowToast(crate::protocol::ToastSpec {
+            window: DEFAULT_WINDOW,
+            toast: crate::protocol::ToastId(id),
+            duration: crate::protocol::ToastDuration::Short,
+            action,
+            text: format!("toast {id}"),
+            action_label: label.to_owned(),
+        })
+    }
+
+    fn toast_answers(scene: &mut Scene) -> Vec<(u64, crate::protocol::ToastOutcome)> {
+        scene
+            .take_asks()
+            .into_iter()
+            .filter_map(|occ| match occ {
+                Occurrence::ToastResult { toast, outcome } => Some((toast.0, outcome)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn presented(ops: &[ApplyOp]) -> Vec<u64> {
+        ops.iter()
+            .filter_map(|op| match op {
+                ApplyOp::PresentToast(spec) => Some(spec.toast.0),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn withdrawn(ops: &[ApplyOp]) -> Vec<u64> {
+        ops.iter()
+            .filter_map(|op| match op {
+                ApplyOp::WithdrawToast { toast, .. } => Some(toast.0),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A delete of the collection's one row, in an undo group with its toast.
+    fn delete_with_undo_toast(scene: &mut Scene, id: u64, key: &str) -> Vec<ApplyOp> {
+        scene.apply(vec![
+            group("delete"),
+            TxOp::CollectionRemove { id: CollectionId(1), path: vec![], key: v(key) },
+            toast(id, crate::protocol::ToastAction::Undo, "Undo"),
+        ])
+    }
+
+    fn two_rows(scene: &mut Scene) {
+        scene.apply(undo_scene());
+        scene.apply(vec![
+            TxOp::CollectionInsert {
+                id: CollectionId(1),
+                path: vec![],
+                key: v("a"),
+                variant: 0,
+                record: vec![v("A")],
+            },
+            TxOp::CollectionInsert {
+                id: CollectionId(1),
+                path: vec![],
+                key: v("b"),
+                variant: 0,
+                record: vec![v("B")],
+            },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "has an empty text")]
+    fn a_toast_with_no_text_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        let mut op = toast(1, crate::protocol::ToastAction::None, "");
+        if let TxOp::ShowToast(spec) = &mut op {
+            spec.text.clear();
+        }
+        scene.apply(vec![op]);
+    }
+
+    #[test]
+    #[should_panic(expected = "offers an action with an empty label")]
+    fn an_action_with_no_label_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.apply(vec![toast(1, crate::protocol::ToastAction::App, "")]);
+    }
+
+    #[test]
+    #[should_panic(expected = "with no action")]
+    fn a_label_with_no_action_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.apply(vec![toast(1, crate::protocol::ToastAction::None, "Open")]);
+    }
+
+    #[test]
+    #[should_panic(expected = "offers undo outside an undo group")]
+    fn an_undo_toast_outside_a_group_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.apply(vec![toast(1, crate::protocol::ToastAction::Undo, "Undo")]);
+    }
+
+    #[test]
+    #[should_panic(expected = "names unknown window")]
+    fn a_toast_in_an_unknown_window_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        let mut op = toast(1, crate::protocol::ToastAction::None, "");
+        if let TxOp::ShowToast(spec) = &mut op {
+            spec.window = WindowId(9);
+        }
+        scene.apply(vec![op]);
+    }
+
+    #[test]
+    #[should_panic(expected = "reuses a toast id that is still shown")]
+    fn a_live_toast_id_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.apply(vec![toast(1, crate::protocol::ToastAction::None, "")]);
+        scene.apply(vec![toast(1, crate::protocol::ToastAction::None, "")]);
+    }
+
+    /// T7: one per window; the replaced toast answers `closed` and the new
+    /// one is presented, never queued.
+    #[test]
+    fn a_second_toast_replaces_the_first() {
+        use crate::protocol::{ToastAction, ToastOutcome};
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        let ops = scene.apply(vec![toast(1, ToastAction::None, "")]);
+        assert_eq!(presented(&ops), vec![1]);
+        assert!(toast_answers(&mut scene).is_empty());
+        let ops = scene.apply(vec![toast(2, ToastAction::App, "Open")]);
+        assert_eq!(presented(&ops), vec![2]);
+        assert_eq!(toast_answers(&mut scene), vec![(1, ToastOutcome::Closed)]);
+        assert_eq!(scene.shown_toast(DEFAULT_WINDOW), Some(2));
+    }
+
+    /// T5: the app's own dismiss answers nothing; an unknown id is ignored.
+    #[test]
+    fn dismiss_withdraws_with_no_answer() {
+        use crate::protocol::{ToastAction, ToastId};
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.apply(vec![toast(1, ToastAction::None, "")]);
+        let ops = scene.apply(vec![TxOp::DismissToast(ToastId(1))]);
+        assert_eq!(withdrawn(&ops), vec![1]);
+        assert!(toast_answers(&mut scene).is_empty());
+        let ops = scene.apply(vec![TxOp::DismissToast(ToastId(7))]);
+        assert!(withdrawn(&ops).is_empty());
+        assert_eq!(scene.shown_toast(DEFAULT_WINDOW), None);
+    }
+
+    /// The arm's report answers once: a second report, or one for a
+    /// replaced toast, is dropped.
+    #[test]
+    fn a_closed_report_answers_once() {
+        use crate::protocol::{ToastAction, ToastId, ToastOutcome};
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.apply(vec![toast(1, ToastAction::None, "")]);
+        scene.toast_closed(ToastId(1));
+        scene.toast_closed(ToastId(1));
+        assert_eq!(toast_answers(&mut scene), vec![(1, ToastOutcome::Closed)]);
+        scene.apply(vec![toast(2, ToastAction::None, "")]);
+        scene.apply(vec![toast(3, ToastAction::None, "")]);
+        assert_eq!(toast_answers(&mut scene), vec![(2, ToastOutcome::Closed)]);
+        scene.toast_closed(ToastId(2));
+        assert!(toast_answers(&mut scene).is_empty());
+    }
+
+    #[test]
+    fn an_app_action_answers_action() {
+        use crate::protocol::{ToastAction, ToastId, ToastOutcome};
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.apply(vec![toast(1, ToastAction::App, "Open")]);
+        let ops = scene.toast_action(ToastId(1));
+        assert_eq!(withdrawn(&ops), vec![1]);
+        assert_eq!(toast_answers(&mut scene), vec![(1, ToastOutcome::Action)]);
+        assert!(scene.toast_action(ToastId(1)).is_empty());
+        assert!(toast_answers(&mut scene).is_empty());
+    }
+
+    /// T4: the press undoes THAT step through the ledger's own body; the app
+    /// hears `undone` first, then `action`, and a second press does nothing.
+    #[test]
+    fn an_undo_toast_undoes_its_step_once() {
+        use crate::protocol::{ToastId, ToastOutcome};
+        let mut scene = Scene::new();
+        two_rows(&mut scene);
+        delete_with_undo_toast(&mut scene, 5, "a");
+        assert_eq!(keys(&scene), vec![Key::from_value(&v("b"))]);
+        assert!(toast_answers(&mut scene).is_empty());
+        scene.toast_action(ToastId(5));
+        assert_eq!(keys(&scene), vec![Key::from_value(&v("a")), Key::from_value(&v("b"))]);
+        let asks = scene.take_asks();
+        assert!(matches!(&asks[0], Occurrence::Undone { label, .. } if label == "delete"), "{asks:?}");
+        assert!(matches!(asks[1], Occurrence::ToastResult { toast: ToastId(5), outcome: ToastOutcome::Action }));
+        assert_eq!(asks.len(), 2);
+        assert!(scene.toast_action(ToastId(5)).is_empty());
+        assert_eq!(keys(&scene), vec![Key::from_value(&v("a")), Key::from_value(&v("b"))]);
+        assert!(scene.take_asks().is_empty());
+    }
+
+    /// T4: undone another way (Edit > Undo), the toast closes.
+    #[test]
+    fn an_undo_toast_closes_when_its_step_is_undone_elsewhere() {
+        use crate::protocol::{ToastId, ToastOutcome};
+        let mut scene = Scene::new();
+        two_rows(&mut scene);
+        delete_with_undo_toast(&mut scene, 5, "a");
+        let (ops, _) = scene.undo(DEFAULT_WINDOW).expect("the delete");
+        assert_eq!(withdrawn(&ops), vec![5]);
+        assert_eq!(toast_answers(&mut scene), vec![(5, ToastOutcome::Closed)]);
+        assert!(scene.toast_action(ToastId(5)).is_empty());
+        assert_eq!(keys(&scene), vec![Key::from_value(&v("a")), Key::from_value(&v("b"))]);
+    }
+
+    /// T4: a newer undoable step closes it, even when the newer step shows
+    /// no toast of its own.
+    #[test]
+    fn an_undo_toast_closes_on_a_newer_step() {
+        use crate::protocol::{ToastId, ToastOutcome};
+        let mut scene = Scene::new();
+        two_rows(&mut scene);
+        delete_with_undo_toast(&mut scene, 5, "a");
+        let ops = scene.apply(vec![
+            group("rename"),
+            TxOp::WriteSignal { id: SignalId(1), value: v("two") },
+        ]);
+        assert_eq!(withdrawn(&ops), vec![5]);
+        assert_eq!(toast_answers(&mut scene), vec![(5, ToastOutcome::Closed)]);
+        assert!(scene.toast_action(ToastId(5)).is_empty());
+        assert_eq!(scene.signals[&SignalId(1)], v("two"));
+    }
+
+    /// Two deletes: the first toast answers `closed` exactly once though
+    /// both the replacement and the newer step would close it.
+    #[test]
+    fn two_deletes_close_the_first_toast_once() {
+        use crate::protocol::{ToastId, ToastOutcome};
+        let mut scene = Scene::new();
+        two_rows(&mut scene);
+        delete_with_undo_toast(&mut scene, 5, "a");
+        let ops = delete_with_undo_toast(&mut scene, 6, "b");
+        assert_eq!(presented(&ops), vec![6]);
+        assert_eq!(toast_answers(&mut scene), vec![(5, ToastOutcome::Closed)]);
+        scene.toast_action(ToastId(6));
+        assert_eq!(keys(&scene), vec![Key::from_value(&v("b"))]);
+        assert_eq!(toast_answers(&mut scene), vec![(6, ToastOutcome::Action)]);
+    }
+
+    /// Typing is a newer step too.
+    #[test]
+    fn an_undo_toast_closes_when_the_user_types() {
+        use crate::protocol::ToastOutcome;
+        let mut scene = Scene::new();
+        two_rows(&mut scene);
+        delete_with_undo_toast(&mut scene, 5, "a");
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "m", true);
+        assert_eq!(withdrawn(&scene.take_toast_out()), vec![5]);
+        assert_eq!(toast_answers(&mut scene), vec![(5, ToastOutcome::Closed)]);
+    }
+
+    #[test]
+    fn a_closed_window_closes_its_toast() {
+        use crate::protocol::{ToastAction, ToastOutcome};
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.apply(vec![TxOp::CreateWindow { window: WindowId(2) }]);
+        let mut op = toast(1, ToastAction::None, "");
+        if let TxOp::ShowToast(spec) = &mut op {
+            spec.window = WindowId(2);
+        }
+        scene.apply(vec![op]);
+        scene.apply(vec![TxOp::DestroyWindow { window: WindowId(2) }]);
+        assert_eq!(toast_answers(&mut scene), vec![(1, ToastOutcome::Closed)]);
+        assert_eq!(scene.shown_toast(WindowId(2)), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "but its undo group is window")]
+    fn an_undo_toast_in_another_window_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.apply(vec![TxOp::CreateWindow { window: WindowId(2) }]);
+        let mut op = toast(1, crate::protocol::ToastAction::Undo, "Undo");
+        if let TxOp::ShowToast(spec) = &mut op {
+            spec.window = WindowId(2);
+        }
+        scene.apply(vec![group("rename"), TxOp::WriteSignal { id: SignalId(1), value: v("two") }, op]);
+    }
+
     #[test]
     fn a_group_undoes_and_redoes_collection_deltas() {
         let mut scene = Scene::new();
@@ -17515,13 +18046,13 @@ mod tests {
                 before: Some(v("a")),
             },
         ]);
-        assert_eq!(keys(&scene), vec![Key::Str("c".into()), Key::Str("a".into())]);
+        assert_eq!(keys(&scene), vec![Key::Str("c".into()), Key::from_value(&v("a"))]);
 
         let (_, occ) = scene.undo(DEFAULT_WINDOW).expect("one group to undo");
-        assert_eq!(keys(&scene), vec![Key::Str("a".into()), Key::Str("b".into())]);
+        assert_eq!(keys(&scene), vec![Key::from_value(&v("a")), Key::from_value(&v("b"))]);
         let entries = &scene.coll_instances[&(CollectionId(1), vec![])].entries;
-        assert_eq!(entries[&Key::Str("a".into())], (0, vec![v("Alpha")]));
-        assert_eq!(entries[&Key::Str("b".into())], (0, vec![v("Beta")]));
+        assert_eq!(entries[&Key::from_value(&v("a"))], (0, vec![v("Alpha")]));
+        assert_eq!(entries[&Key::from_value(&v("b"))], (0, vec![v("Beta")]));
         assert!(!entries.contains_key(&Key::Str("c".into())));
         let Occurrence::Undone { delta, .. } = &occ else {
             panic!("wanted Undone, got {occ:?}");
@@ -17539,10 +18070,10 @@ mod tests {
         assert_eq!(delta.orders[0].keys, vec![v("a"), v("b")]);
 
         scene.redo(DEFAULT_WINDOW).expect("one group to redo");
-        assert_eq!(keys(&scene), vec![Key::Str("c".into()), Key::Str("a".into())]);
+        assert_eq!(keys(&scene), vec![Key::Str("c".into()), Key::from_value(&v("a"))]);
         let entries = &scene.coll_instances[&(CollectionId(1), vec![])].entries;
-        assert_eq!(entries[&Key::Str("a".into())], (0, vec![v("Alpha!")]));
-        assert!(!entries.contains_key(&Key::Str("b".into())));
+        assert_eq!(entries[&Key::from_value(&v("a"))], (0, vec![v("Alpha!")]));
+        assert!(!entries.contains_key(&Key::from_value(&v("b"))));
     }
 
     #[test]
@@ -17563,7 +18094,7 @@ mod tests {
         ]);
         let (ops, _) = scene.undo(DEFAULT_WINDOW).expect("one group to undo");
         assert_eq!(
-            scene.coll_instances[&(CollectionId(1), vec![])].entries[&Key::Str("a".into())],
+            scene.coll_instances[&(CollectionId(1), vec![])].entries[&Key::from_value(&v("a"))],
             (0, vec![v("Alpha")])
         );
         // The stamped label follows: the element binding re-resolves the
@@ -17677,7 +18208,7 @@ mod tests {
         }));
         assert!(refused.is_err(), "the group must be refused");
         assert_eq!(scene.signals[&SignalId(1)], v("one"), "the signal is back");
-        assert_eq!(keys(&scene), vec![Key::Str("a".into())], "the table is back");
+        assert_eq!(keys(&scene), vec![Key::from_value(&v("a"))], "the table is back");
         assert!(
             scene.ledgers.get(&DEFAULT_WINDOW).is_none_or(|l| l.done.is_empty()),
             "a refused group is not a step"

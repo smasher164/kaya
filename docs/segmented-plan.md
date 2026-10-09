@@ -425,10 +425,18 @@ breadth.
   items both read IsSelected (docs/traps.md, WinUI's SelectorBar), so the
   arm reads the bar's `SelectedItem`. segmented_<lang> green in the six
   languages the lane runs.
-- Built at the breadth and NOT as written above: `choose` on WinUI takes
-  the bar's `SelectedItem` for an unrealized item, the peer otherwise; and
-  `choose_by_keys` is still unbuilt (GTK and WinUI could run it; the verb
-  and its interpreter arms were outside the GTK/WinUI slice).
+- Built at the breadth: `choose_by_keys` is still unbuilt (GTK and WinUI
+  could run it; the verb and its interpreter arms were outside the
+  GTK/WinUI slice).
+- BUILT 2026-10-08 as RULED: WinUI's `choose` on an unrealized segment asks
+  the bar's ItemsView to `StartBringItemIntoView` it, waits up to 2s for it
+  to load and presses it through the peer; it never writes `SelectedItem`
+  (docs/traps.md, WinUI's SelectorBar). MEASURED on the lane: loaded
+  20-34ms after the request, realized in place below the window's edge
+  since the window has no scroll host; with the request cut the leg is red.
+  WinUI's radio and select `choose` still set `SelectedIndex` and do not
+  press. segmented, radio, select and portfolio on windows 19/19, three
+  runs.
 - To measure: AdwToggleGroup's keyboard, whether SelectorBar's selection
   follows Tab focus as the docs say, Compose's key handling between
   segments, and whether UISegmentedControl draws a title and an image

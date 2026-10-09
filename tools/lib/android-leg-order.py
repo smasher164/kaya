@@ -393,13 +393,9 @@ def ime_problem(text: str, lane_ns: dict) -> str | None:
     if len(invocations) != 2:  # the def and the worker call
         return ("select_helper_ime must be invoked once from the "
                 "slot-local worker only")
-    if len(re.findall(r"(?m)^    drain\(\)$", text)) != 1:
-        return ("each suite must end in exactly one drain, inside "
-                "run_suite_legs")
-    legs_fn = py_function(text, "run_suite_legs")
-    if legs_fn is None or legs_fn.find("queue_leg(") < 0 \
-            or legs_fn.find("queue_leg(") > legs_fn.find("    drain()"):
-        return "the one drain must follow the suite's queued legs"
+    problem = drain_problem(text)
+    if problem is not None:
+        return problem
     legs = lane_ns.get("LEGS", {})
     for name in ("compose", "jvm", "go"):
         # The python suite's roster is varied+portfolio; no python scene
@@ -409,6 +405,56 @@ def ime_problem(text: str, lane_ns: dict) -> str | None:
             return f"{name} no longer carries its ranges leg"
     if "editor-go" not in legs.get("go", []):
         return "editor-go left the Go suite's roster"
+    return None
+
+
+# THE POOL DRAINS ONCE (docs/traps.md, the android pool's suite drains): a
+# suite queues its pooled legs and returns, so the next suite's build and
+# staging overlap its last legs; every suite's EXCLUSIVE and ALONE legs run
+# after that one drain, and a device is claimed like a leg's before it is
+# staged.
+ISOLATED_ROUTE = ("        if leg in lane.EXCLUSIVE or leg in lane.ALONE:\n"
+                  "            _isolated.append(leg_args)\n"
+                  "        else:\n"
+                  "            queue_leg(*leg_args)\n")
+LANE_TAIL = ("    run_suite_legs(_suite)\n"
+             "    _staged.append(_suite)\n"
+             "drain()\n"
+             'timing("legs-pooled")\n'
+             "for _leg_args in _isolated:\n"
+             "    queue_leg(*_leg_args)\n"
+             "drain()\n")
+STAGE_CLAIM_ORDER = ["with staging_claim(serial):", "stage_on(serial)",
+                     "def stage_on(serial):", '"install", "-r", str(apk),']
+CLAIM_BRACKET = ["_tablet_lock.acquire()", "_claim_device({slot})", "yield",
+                 "_tablet_lock.release()", "_release_device(slot)"]
+
+
+def drain_problem(text: str) -> str | None:
+    legs_fn = py_function(text, "run_suite_legs")
+    if legs_fn is None:
+        return "run_suite_legs is missing or unreadable"
+    if "drain()" in legs_fn:
+        return ("run_suite_legs drains the pool: a suite queues its pooled "
+                "legs and returns, and the lane drains once")
+    if legs_fn.count(ISOLATED_ROUTE) != 1 or legs_fn.count("queue_leg(") != 1:
+        return ("run_suite_legs must send every EXCLUSIVE and ALONE leg to "
+                "_isolated and queue only the pooled ones")
+    if len(re.findall(r"(?m)^ *drain\(\)$", text)) != 2 \
+            or text.count(LANE_TAIL) != 1:
+        return ("the lane must drain its pooled legs once, then run the "
+                "isolated legs, then drain again")
+    stage = py_function(text, "stage_suite_apk")
+    if stage is None:
+        return "stage_suite_apk is missing or unreadable"
+    claim = py_function(text, "staging_claim")
+    positions = [stage.find(m) for m in STAGE_CLAIM_ORDER]
+    bracket = [claim.find(m) for m in CLAIM_BRACKET] if claim else [-1]
+    if any(pos < 0 for pos in positions + bracket) \
+            or positions != sorted(positions) or bracket != sorted(bracket):
+        return ("stage_suite_apk must claim each phone's slot before it "
+                "stages there and release it after: the previous suite's "
+                "legs may still be running")
     return None
 
 
@@ -725,25 +771,42 @@ def main() -> int:
     doctored, n = doctor(
         "suite IME call",
         text,
-        r"(?m)^(    drain\(\)\n)",
-        "    select_helper_ime(serial, log)\n\\1",
+        r"(?m)^(drain\(\)\ntiming\(\"legs-pooled\"\)\n)",
+        "select_helper_ime(serial, log)\n\\1",
     )
     if n != 1 or ime_problem(doctored, lane_ns) is None:
         print("android-leg-order: SELF-TEST FAIL (suite-wide IME call "
               "read as good)", file=sys.stderr)
         return 1
 
-    # N19: a second drain must red — the one drain is the suite's close.
-    doctored, n = doctor(
-        "extra drain",
-        text,
-        r"(?m)^(    drain\(\)\n)",
-        "    drain()\n\\1",
-    )
-    if n != 1 or ime_problem(doctored, lane_ns) is None:
-        print("android-leg-order: SELF-TEST FAIL (second drain read as "
-              "good)", file=sys.stderr)
-        return 1
+    # N19a..e: the per-suite drain back, an isolated leg queued in the pool,
+    # the isolated block above the pooled drain, a stage with no claim, and
+    # a claim around nothing must each red.
+    drain_cuts = [
+        ("per-suite drain", r'(?m)^(    timing\(f"queued-\{suite\}"\)\n)',
+         "    drain()\n\\1"),
+        ("isolated leg pooled", re.escape("            _isolated.append(leg_args)\n"),
+         "            queue_leg(*leg_args)\n"),
+        ("isolated block before the drain",
+         r'(?m)^drain\(\)\ntiming\("legs-pooled"\)\n(for _leg_args in _isolated:\n'
+         r"    queue_leg\(\*_leg_args\)\n)",
+         '\\1drain()\ntiming("legs-pooled")\n'),
+        ("stage with no claim",
+         re.escape("        with staging_claim(serial):\n            stage_on(serial)\n"),
+         "        stage_on(serial)\n"),
+        ("a claim that takes no slot", re.escape("        _claim_device({slot})\n"),
+         "        pass\n"),
+        ("a claim that never releases", r"(?m)^ {12}_release_device\(slot\)\n",
+         "            pass\n"),
+    ]
+    for label, pattern, repl in drain_cuts:
+        doctored, n = doctor(label, text, pattern, repl)
+        problem = ime_problem(doctored, lane_ns)
+        if n != 1 or problem is None:
+            print(f"android-leg-order: SELF-TEST FAIL ({label} read as "
+                  f"good)", file=sys.stderr)
+            return 1
+        print(f"android-leg-order: {label} -> {problem}")
 
     # N20/N21: a roster missing its ranges or editor leg must red.
     for leg, label in (("ranges-compose", "ranges roster"),

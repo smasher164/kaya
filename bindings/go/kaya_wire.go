@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x3b06087d3310d8b0
+	SpecHash uint64 = 0x5c53f4354ceb6019
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -192,6 +192,13 @@ const (
 	NotificationOutcomeActivated NotificationOutcome = 0
 	NotificationOutcomeRefused NotificationOutcome = 1
 	NotificationOutcomeReplied NotificationOutcome = 2
+	ToastDurationShort = 0
+	ToastDurationLong = 1
+	ToastActionNone = 0
+	ToastActionApp = 1
+	ToastActionUndo = 2
+	ToastOutcomeAction = 0
+	ToastOutcomeClosed = 1
 	FileModeRead FileMode = 0
 	FileModeWrite FileMode = 1
 	FileModeReadWrite FileMode = 2
@@ -447,6 +454,8 @@ const (
 	txReleaseCapture = 79
 	txRequestPermission = 80
 	txWatchCaptureDevices = 81
+	txShowToast = 82
+	txDismissToast = 83
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -515,6 +524,8 @@ const (
 	applyRequestPermission = 68
 	applyWatchCaptureDevices = 69
 	applySetVideoCapture = 70
+	applyPresentToast = 71
+	applyWithdrawToast = 72
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3
@@ -569,6 +580,7 @@ const (
 	occCapturePermission = 52
 	occCaptureDevices = 53
 	occCaptureOverrun = 54
+	occToastResult = 55
 )
 
 func (d Detent) String() string {
@@ -1689,6 +1701,25 @@ func TxWatchCaptureDevices(on uint32) []byte {
 	b := beginRecord(txWatchCaptureDevices)
 	b = binary.LittleEndian.AppendUint32(b, on)
 	b = binary.LittleEndian.AppendUint32(b, 0)
+	return endRecord(b)
+}
+
+// TxShowToast: Show a toast in `window` (0 = the primary; docs/toast-plan.md T1-T7): a short message over the content that goes by itself. `toast` is a guest-chosen id answered once by toast_result. `duration` a TOAST_DURATION, `action` a TOAST_ACTION; `text` and `action_label` are Str, the label empty exactly when the action is `none`. One toast per window: a second replaces the shown one, which answers `closed`. An `undo` action is refused outside an undo group and binds the toast to that group's ledger step (T4).
+func TxShowToast(window uint64, toast uint64, duration uint32, action uint32, text any, actionLabel any) []byte {
+	b := beginRecord(txShowToast)
+	b = binary.LittleEndian.AppendUint64(b, window)
+	b = binary.LittleEndian.AppendUint64(b, toast)
+	b = binary.LittleEndian.AppendUint32(b, duration)
+	b = binary.LittleEndian.AppendUint32(b, action)
+	b = encodeValue(b, text)
+	b = encodeValue(b, actionLabel)
+	return endRecord(b)
+}
+
+// TxDismissToast: Withdraw a shown toast. Like cancel_notification it retires the id with NO answer; an unknown or retired id is ignored (docs/toast-plan.md T5).
+func TxDismissToast(toast uint64) []byte {
+	b := beginRecord(txDismissToast)
+	b = binary.LittleEndian.AppendUint64(b, toast)
 	return endRecord(b)
 }
 
@@ -4264,7 +4295,7 @@ func parseValue(rec []byte, at int) (any, int) {
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted && kind != occSheetDismissed && kind != occDismissRequested && kind != occSubmitted && kind != occNotificationReplied && kind != occFullscreenChanged && kind != occColorChanged && kind != occRangeChanged && kind != occRangeCommitted && kind != occPlayerChanged && kind != occPlayerPosition && kind != occSeekCompleted && kind != occSessionAction && kind != occPlayerTracks && kind != occCaptionCue && kind != occVideoVisibility && kind != occReaderFrame && kind != occReaderProgress && kind != occReaderPeaks && kind != occReaderDone && kind != occImageLoaded && kind != occCaptureChanged && kind != occCapturePermission && kind != occCaptureDevices && kind != occCaptureOverrun {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted && kind != occSheetDismissed && kind != occDismissRequested && kind != occSubmitted && kind != occNotificationReplied && kind != occFullscreenChanged && kind != occColorChanged && kind != occRangeChanged && kind != occRangeCommitted && kind != occPlayerChanged && kind != occPlayerPosition && kind != occSeekCompleted && kind != occSessionAction && kind != occPlayerTracks && kind != occCaptionCue && kind != occVideoVisibility && kind != occReaderFrame && kind != occReaderProgress && kind != occReaderPeaks && kind != occReaderDone && kind != occImageLoaded && kind != occCaptureChanged && kind != occCapturePermission && kind != occCaptureDevices && kind != occCaptureOverrun && kind != occToastResult {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])
@@ -4273,6 +4304,10 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 		return kind, id, nil, binary.LittleEndian.Uint32(rec[16:]), true
 	}
 	if kind == occNotificationResult {
+		// A request's one answer: id + the u32 code.
+		return kind, id, nil, binary.LittleEndian.Uint32(rec[16:]), true
+	}
+	if kind == occToastResult {
 		// A request's one answer: id + the u32 code.
 		return kind, id, nil, binary.LittleEndian.Uint32(rec[16:]), true
 	}

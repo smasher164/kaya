@@ -22,6 +22,10 @@ COMPOSE = "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
 STUBBED = {GTK: 'depth_stub("segmented")', WINUI: 'depth_stub("segmented")', COMPOSE: 'depthStub("segmented")'}
 BACKENDS = {SWIFT: "the SwiftUI arm", COMPOSE: "the Compose arm", GTK: "the GTK arm", WINUI: "the WinUI arm"}
 RUST_MODEL = r"segmented_options|segmented_symbols|core\.scene\b|\.toggle\(|\.active\(\)"
+# docs/traps.md, WinUI's SelectorBar: `choose` brings an unloaded segment into
+# view and presses it, never writing the bar's selection.
+FORBID = {WINUI: ("fn choose_segment(t: crate::harness::Target, index: usize) {",
+                  ["SetSelectedItem(", "SetSelectedIndex(", "send_value_tag("])}
 # The widget backends' rows (docs/segmented-plan.md §3): per backend, (label,
 # opener, which occurrence, what the block must hold, whether it is a read
 # that may not reach kaya's model). The create arm's emit sits behind its
@@ -56,10 +60,17 @@ ROWS = {
          [".store(true, std::sync::atomic::Ordering::Relaxed);", "bar.SetSelectedItem(&item)",
           ".store(false, std::sync::atomic::Ordering::Relaxed);"], False),
         ("choose", "if t.kind == crate::harness::TargetKind::Segmented {", 0,
-         ["let route = if item.cast::<FrameworkElement>()?.IsLoaded()? {",
+         ["Self::choose_segment(t, index);"], True),
+        ("choose's press", "fn choose_segment(t: crate::harness::Target, index: usize) {", 0,
+         ["if !item.cast::<FrameworkElement>()?.IsLoaded()? {\n                return Ok(None);",
           "FrameworkElementAutomationPeer::CreatePeerForElement(&element)?",
           "peer.cast::<ISelectionItemProvider>()?.Select()?;",
-          "core.segmenteds[i].SetSelectedItem(&item)?;"], True),
+          "if let Some(before) = press(core, i)? {",
+          "if ask && let Some(view) = selector_bar_items_view(bar)? {",
+          "view.StartBringItemIntoView(index as i32, &options)?;"], True),
+        ("the bar's ItemsView", "fn selector_bar_items_view(", 0,
+         ["node.cast::<bindings::Microsoft::UI::Xaml::Controls::ItemsView>()",
+          "VisualTreeHelper::GetChild(&element, k)?"], True),
         ("expect", "if t.kind == crate::harness::TargetKind::Segmented {", 1,
          ["let Some(n) = selector_bar_selected(bar)? else {",
           "uia_name(&windows_core::Interface::cast(&item)?, \"the item\")"], True),
@@ -258,6 +269,14 @@ def findings(sources, backends=None):
 
 def row_findings(sources, backends):
     out = []
+    for rel, (opener, calls) in FORBID.items():
+        if rel not in backends or rel not in sources:
+            continue
+        for body in blocks(sources[rel], opener):
+            for call in calls:
+                if call in body:
+                    out.append(f"segmented: {backends[rel]}'s choose calls {call}...), writing the "
+                               f"selection instead of bringing the segment into view and pressing it")
     for rel, rows in ROWS.items():
         if rel not in backends or rel not in sources:
             continue
@@ -377,7 +396,8 @@ def run(g):
         g.negative(f"segmented: {label}", lambda broken=broken: findings({**sources, COMPOSE: broken}),
                    want=want)
     g.counted("segmented GTK and WinUI clauses held",
-              sum(len(needs) + 1 for rows in ROWS.values() for _, _, _, needs, _ in rows), floor=40)
+              sum(len(needs) + 1 for rows in ROWS.values() for _, _, _, needs, _ in rows)
+              + sum(len(calls) for _, calls in FORBID.values()), floor=55)
     row_cuts = [
         ("GTK's read answering from the model", GTK,
          r"(fn segments\(&self, t: crate::harness::Target\) -> String \{\n\s+Self::on_main\(move \|core\| \{\n)",
@@ -408,7 +428,16 @@ def run(g):
          r"if items\.GetAt\(n\)\? == selected \{", "if items.GetAt(n)?.IsSelected()? {",
          "the WinUI arm's the bar's selection lacks if items.GetAt(n)? == selected"),
         ("WinUI's choose a model write", WINUI, r"peer\.cast::<ISelectionItemProvider>\(\)\?\.Select\(\)\?;",
-         "core.segmenteds[i].SetSelectedItem(&element.cast()?)?;", "the WinUI arm's choose lacks"),
+         "core.segmenteds[i].SetSelectedItem(&element.cast()?)?;", "the WinUI arm's choose's press lacks peer.cast"),
+        ("WinUI's unloaded segment selected instead of brought into view", WINUI,
+         r"view\.StartBringItemIntoView\(index as i32, &options\)\?;",
+         "bar.SetSelectedItem(&bar.Items()?.GetAt(index as u32)?)?;", "writing the selection instead"),
+        ("WinUI's choose pressing an unloaded segment", WINUI,
+         r"if !item\.cast::<FrameworkElement>\(\)\?\.IsLoaded\(\)\? \{\n\s+return Ok\(None\);\n\s+\}\n", "",
+         "the WinUI arm's choose's press lacks if !item.cast"),
+        ("WinUI's choose with no ItemsView found", WINUI,
+         r"if let Ok\(view\) = node\.cast::<bindings::Microsoft::UI::Xaml::Controls::ItemsView>\(\) \{",
+         "if let Ok(view) = node.cast::<SelectorBar>() {", "the WinUI arm's the bar's ItemsView lacks"),
         ("WinUI's app write unguarded", WINUI,
          r"(\(NativeWidget::Segmented\(bar\), Prop::Value, Value::F64\(v\)\) => \{\n)\s+core\.apply_quiet\n\s+\.store\(true, std::sync::atomic::Ordering::Relaxed\);\n",
          r"\1", "the WinUI arm's the app's write lacks .store(true"),

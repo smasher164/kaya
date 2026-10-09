@@ -16649,6 +16649,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
         ApplyOp::CancelNotification(notification) => {
             on_notify(move || notification_forget(notification.0));
         }
+        ApplyOp::PresentToast(_) | ApplyOp::WithdrawToast { .. } => crate::depth_stub("toast"),
         ApplyOp::CreatePlayer(player) => media::create_player(core, player.0)?,
         ApplyOp::SetPlayerProp { player, prop, value } => media::set_player_prop(core, player.0, prop, value)?,
         ApplyOp::PlayerCommand { player, command } => media::command(core, player.0, command)?,
@@ -20948,6 +20949,111 @@ impl WinUiStage {
         let _ = dispatcher.0.TryEnqueue(&handler);
         rx.recv().expect("the dispatcher applied the step")
     }
+
+    /// docs/segmented-plan.md G10; an unrealized segment is brought into
+    /// view by the bar's own ItemsView before the press (docs/traps.md,
+    /// WinUI's SelectorBar).
+    fn choose_segment(t: crate::harness::Target, index: usize) {
+        use bindings::Microsoft::UI::Xaml::Automation::Peers::FrameworkElementAutomationPeer;
+        use bindings::Microsoft::UI::Xaml::Automation::Provider::ISelectionItemProvider;
+        use windows_core::Interface as _;
+        const LOAD_WAIT_MS: u64 = 2000;
+        let press = move |core: &CoreState, i: usize| -> windows_core::Result<Option<String>> {
+            let item = core.segmenteds[i].Items()?.GetAt(index as u32)?;
+            if !item.cast::<FrameworkElement>()?.IsLoaded()? {
+                return Ok(None);
+            }
+            let before = selector_bar_states(&core.segmenteds[i]);
+            let element: UIElement = item.cast()?;
+            let peer = FrameworkElementAutomationPeer::CreatePeerForElement(&element)?;
+            peer.cast::<ISelectionItemProvider>()?.Select()?;
+            Ok(Some(before))
+        };
+        let (i, count) = Self::on_ui(move |core| {
+            let i = crate::harness::resolve(t.index, core.segmenteds.len());
+            Ok((i, core.segmenteds[i].Items()?.Size()?))
+        });
+        if index as u32 >= count {
+            panic!("kaya: choose segmented#{i} {index}: the SelectorBar shows {count} item(s)");
+        }
+        enum Hop {
+            Pressed(String),
+            Asked(String),
+            Waiting(String),
+        }
+        let start = std::time::Instant::now();
+        let mut asked: Option<String> = None;
+        let route = loop {
+            let ask = asked.is_none();
+            let hop = Self::on_ui(move |core| {
+                if let Some(before) = press(core, i)? {
+                    return Ok(Hop::Pressed(before));
+                }
+                let bar = &core.segmenteds[i];
+                let states = selector_bar_states(bar);
+                if ask && let Some(view) = selector_bar_items_view(bar)? {
+                    let options = bindings::Microsoft::UI::Xaml::BringIntoViewOptions::new()?;
+                    options.SetAnimationDesired(false)?;
+                    view.StartBringItemIntoView(index as i32, &options)?;
+                    return Ok(Hop::Asked(states));
+                }
+                Ok(Hop::Waiting(states))
+            });
+            let now = match hop {
+                Hop::Pressed(before) => {
+                    break match &asked {
+                        Some(at) => format!(
+                            "not loaded, brought into view by the bar's ItemsView ({at}), loaded \
+                             after {}ms, before {before}, after the peer's Select",
+                            start.elapsed().as_millis()
+                        ),
+                        None => format!("before {before}, after the peer's Select"),
+                    };
+                }
+                Hop::Asked(states) => {
+                    asked = Some(states.clone());
+                    states
+                }
+                Hop::Waiting(states) => states,
+            };
+            if start.elapsed() > std::time::Duration::from_millis(LOAD_WAIT_MS) {
+                match &asked {
+                    Some(at) => panic!(
+                        "kaya: choose segmented#{i} {index}: the item was still not loaded \
+                         {LOAD_WAIT_MS}ms after the step began, the bar's ItemsView having been \
+                         asked to bring it into view (at the request {at}; now {now})"
+                    ),
+                    None => panic!(
+                        "kaya: choose segmented#{i} {index}: the item was still not loaded \
+                         {LOAD_WAIT_MS}ms after the step began and the bar's template held no \
+                         ItemsView to bring it into view ({now})"
+                    ),
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(16));
+        };
+        let after = Self::on_ui(move |core| Ok(selector_bar_states(&core.segmenteds[i])));
+        crate::vtrace::note("choose_segment", format_args!("item {index}: {route} {after}"));
+    }
+}
+
+#[cfg(feature = "harness")]
+fn selector_bar_items_view(
+    bar: &SelectorBar,
+) -> windows_core::Result<Option<bindings::Microsoft::UI::Xaml::Controls::ItemsView>> {
+    use bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper;
+    use windows_core::Interface as _;
+    let mut stack: Vec<windows_core::IInspectable> = vec![bar.cast()?];
+    while let Some(node) = stack.pop() {
+        if let Ok(view) = node.cast::<bindings::Microsoft::UI::Xaml::Controls::ItemsView>() {
+            return Ok(Some(view));
+        }
+        let element: bindings::Microsoft::UI::Xaml::DependencyObject = node.cast()?;
+        for k in 0..VisualTreeHelper::GetChildrenCount(&element)? {
+            stack.push(VisualTreeHelper::GetChild(&element, k)?.cast()?);
+        }
+    }
+    Ok(None)
 }
 
 /// A TARGET IS A LIVE WIDGET (2026-09-08). Every registry `resolve_id` reads is
@@ -26201,6 +26307,18 @@ impl crate::harness::Stage for WinUiStage {
         // A desktop sheet has no detent.
         "none".to_owned()
     }
+    fn toast(&self) -> Option<(String, String)> {
+        crate::depth_stub("toast")
+    }
+    fn toast_announced(&self, _: &str, _: &str) -> Result<(), Vec<String>> {
+        crate::depth_stub("toast")
+    }
+    fn toast_action(&self) -> bool {
+        crate::depth_stub("toast")
+    }
+    fn toast_close(&self) -> bool {
+        crate::depth_stub("toast")
+    }
     fn dismiss_sheet(&self) {
         // The close button's own route (the ContentDialog Hide precedent):
         // an OS-global Escape belongs to legs that run alone, and this pool
@@ -26328,6 +26446,10 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     fn choose(&self, t: crate::harness::Target, index: usize) {
+        if t.kind == crate::harness::TargetKind::Segmented {
+            Self::choose_segment(t, index);
+            return;
+        }
         Self::on_ui(move |core| {
             // The REAL selection route per kind: SetSelectedIndex
             // raises SelectionChanged exactly as a native pick does
@@ -26336,36 +26458,6 @@ impl crate::harness::Stage for WinUiStage {
             if t.kind == crate::harness::TargetKind::Radio {
                 let i = crate::harness::resolve(t.index, core.radios.len());
                 core.radios[i].SetSelectedIndex(index as i32)?;
-                return Ok(());
-            }
-            if t.kind == crate::harness::TargetKind::Segmented {
-                // docs/segmented-plan.md G10.
-                use bindings::Microsoft::UI::Xaml::Automation::Peers::FrameworkElementAutomationPeer;
-                use bindings::Microsoft::UI::Xaml::Automation::Provider::ISelectionItemProvider;
-                use windows_core::Interface as _;
-                let i = crate::harness::resolve(t.index, core.segmenteds.len());
-                let items = core.segmenteds[i].Items()?;
-                let count = items.Size()?;
-                if index as u32 >= count {
-                    panic!("kaya: choose segmented#{i} {index}: the SelectorBar shows {count} item(s)");
-                }
-                let item = items.GetAt(index as u32)?;
-                let element: UIElement = item.cast()?;
-                let before = selector_bar_states(&core.segmenteds[i]);
-                // An unrealized item ignores its peer's Select (docs/traps.md,
-                // WinUI's SelectorBar).
-                let route = if item.cast::<FrameworkElement>()?.IsLoaded()? {
-                    let peer = FrameworkElementAutomationPeer::CreatePeerForElement(&element)?;
-                    peer.cast::<ISelectionItemProvider>()?.Select()?;
-                    "the peer's Select"
-                } else {
-                    core.segmenteds[i].SetSelectedItem(&item)?;
-                    "the bar's SelectedItem, the item not realized"
-                };
-                crate::vtrace::note("choose_segment", format_args!(
-                    "item {index}: before {before}, after {route} {}",
-                    selector_bar_states(&core.segmenteds[i])
-                ));
                 return Ok(());
             }
             let i = crate::harness::resolve(t.index, core.selects.len());

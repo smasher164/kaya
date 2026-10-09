@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x3b06087d3310d8b0L;
+    public static final long SPEC_HASH = 0x5c53f4354ceb6019L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -191,6 +191,13 @@ public final class KayaWire {
     public static final int NOTIFICATION_OUTCOME_ACTIVATED = 0;
     public static final int NOTIFICATION_OUTCOME_REFUSED = 1;
     public static final int NOTIFICATION_OUTCOME_REPLIED = 2;
+    public static final int TOAST_DURATION_SHORT = 0;
+    public static final int TOAST_DURATION_LONG = 1;
+    public static final int TOAST_ACTION_NONE = 0;
+    public static final int TOAST_ACTION_APP = 1;
+    public static final int TOAST_ACTION_UNDO = 2;
+    public static final int TOAST_OUTCOME_ACTION = 0;
+    public static final int TOAST_OUTCOME_CLOSED = 1;
     public static final int FILE_MODE_READ = 0;
     public static final int FILE_MODE_WRITE = 1;
     public static final int FILE_MODE_READ_WRITE = 2;
@@ -446,6 +453,8 @@ public final class KayaWire {
     public static final short TX_KIND_RELEASE_CAPTURE = 79;
     public static final short TX_KIND_REQUEST_PERMISSION = 80;
     public static final short TX_KIND_WATCH_CAPTURE_DEVICES = 81;
+    public static final short TX_KIND_SHOW_TOAST = 82;
+    public static final short TX_KIND_DISMISS_TOAST = 83;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -514,6 +523,8 @@ public final class KayaWire {
     public static final short APPLY_KIND_REQUEST_PERMISSION = 68;
     public static final short APPLY_KIND_WATCH_CAPTURE_DEVICES = 69;
     public static final short APPLY_KIND_SET_VIDEO_CAPTURE = 70;
+    public static final short APPLY_KIND_PRESENT_TOAST = 71;
+    public static final short APPLY_KIND_WITHDRAW_TOAST = 72;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
@@ -568,6 +579,7 @@ public final class KayaWire {
     public static final short OCC_KIND_CAPTURE_PERMISSION = 52;
     public static final short OCC_KIND_CAPTURE_DEVICES = 53;
     public static final short OCC_KIND_CAPTURE_OVERRUN = 54;
+    public static final short OCC_KIND_TOAST_RESULT = 55;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -1401,6 +1413,25 @@ public final class KayaWire {
         Enc b = begin(TX_KIND_WATCH_CAPTURE_DEVICES);
         b.putInt(on);
         b.putInt(0);
+        return finish(b);
+    }
+
+    /** Show a toast in `window` (0 = the primary; docs/toast-plan.md T1-T7): a short message over the content that goes by itself. `toast` is a guest-chosen id answered once by toast_result. `duration` a TOAST_DURATION, `action` a TOAST_ACTION; `text` and `action_label` are Str, the label empty exactly when the action is `none`. One toast per window: a second replaces the shown one, which answers `closed`. An `undo` action is refused outside an undo group and binds the toast to that group's ledger step (T4). */
+    public static byte[] txShowToast(long window, long toast, int duration, int action, Object text, Object actionLabel) {
+        Enc b = begin(TX_KIND_SHOW_TOAST);
+        b.putLong(window);
+        b.putLong(toast);
+        b.putInt(duration);
+        b.putInt(action);
+        encodeValue(b, text);
+        encodeValue(b, actionLabel);
+        return finish(b);
+    }
+
+    /** Withdraw a shown toast. Like cancel_notification it retires the id with NO answer; an unknown or retired id is ignored (docs/toast-plan.md T5). */
+    public static byte[] txDismissToast(long toast) {
+        Enc b = begin(TX_KIND_DISMISS_TOAST);
+        b.putLong(toast);
         return finish(b);
     }
 
@@ -3448,7 +3479,7 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED && kind != OCC_KIND_FULLSCREEN_CHANGED && kind != OCC_KIND_COLOR_CHANGED && kind != OCC_KIND_RANGE_CHANGED && kind != OCC_KIND_RANGE_COMMITTED && kind != OCC_KIND_PLAYER_CHANGED && kind != OCC_KIND_PLAYER_POSITION && kind != OCC_KIND_SEEK_COMPLETED && kind != OCC_KIND_SESSION_ACTION && kind != OCC_KIND_PLAYER_TRACKS && kind != OCC_KIND_CAPTION_CUE && kind != OCC_KIND_VIDEO_VISIBILITY && kind != OCC_KIND_READER_FRAME && kind != OCC_KIND_READER_PROGRESS && kind != OCC_KIND_READER_PEAKS && kind != OCC_KIND_READER_DONE && kind != OCC_KIND_IMAGE_LOADED && kind != OCC_KIND_CAPTURE_CHANGED && kind != OCC_KIND_CAPTURE_PERMISSION && kind != OCC_KIND_CAPTURE_DEVICES && kind != OCC_KIND_CAPTURE_OVERRUN) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED && kind != OCC_KIND_FULLSCREEN_CHANGED && kind != OCC_KIND_COLOR_CHANGED && kind != OCC_KIND_RANGE_CHANGED && kind != OCC_KIND_RANGE_COMMITTED && kind != OCC_KIND_PLAYER_CHANGED && kind != OCC_KIND_PLAYER_POSITION && kind != OCC_KIND_SEEK_COMPLETED && kind != OCC_KIND_SESSION_ACTION && kind != OCC_KIND_PLAYER_TRACKS && kind != OCC_KIND_CAPTION_CUE && kind != OCC_KIND_VIDEO_VISIBILITY && kind != OCC_KIND_READER_FRAME && kind != OCC_KIND_READER_PROGRESS && kind != OCC_KIND_READER_PEAKS && kind != OCC_KIND_READER_DONE && kind != OCC_KIND_IMAGE_LOADED && kind != OCC_KIND_CAPTURE_CHANGED && kind != OCC_KIND_CAPTURE_PERMISSION && kind != OCC_KIND_CAPTURE_DEVICES && kind != OCC_KIND_CAPTURE_OVERRUN && kind != OCC_KIND_TOAST_RESULT) {
             return null;
         }
         long id = b.getLong(8);
@@ -3458,6 +3489,11 @@ public final class KayaWire {
             return new Occ(kind, id, java.util.List.of(), b.getInt(16));
         }
         if (kind == OCC_KIND_NOTIFICATION_RESULT) {
+            // A request's one answer: id + the u32 code.
+            // The alert's cancel sentinel is -1 in java-int terms.
+            return new Occ(kind, id, java.util.List.of(), b.getInt(16));
+        }
+        if (kind == OCC_KIND_TOAST_RESULT) {
             // A request's one answer: id + the u32 code.
             // The alert's cancel sentinel is -1 in java-int terms.
             return new Occ(kind, id, java.util.List.of(), b.getInt(16));

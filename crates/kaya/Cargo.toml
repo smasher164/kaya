@@ -548,6 +548,10 @@ name = "sheet"
 path = "../../guests/rust/sheet.rs"
 
 [[example]]
+name = "toast"
+path = "../../guests/rust/toast.rs"
+
+[[example]]
 name = "format"
 path = "../../guests/rust/format.rs"
 

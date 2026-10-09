@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x3b06087d3310d8b0ULL
+#define KAYA_SPEC_HASH 0x5c53f4354ceb6019ULL
 
 
 /* Create a signal holding `initial`. */
@@ -932,6 +932,25 @@ static inline void kaya_tx_watch_capture_devices(KayaTx *tx, uint32_t on) {
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_WATCH_CAPTURE_DEVICES);
     kaya_wire_u32(tx, on);
     kaya_wire_u32(tx, 0);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Show a toast in `window` (0 = the primary; docs/toast-plan.md T1-T7): a short message over the content that goes by itself. `toast` is a guest-chosen id answered once by toast_result. `duration` a TOAST_DURATION, `action` a TOAST_ACTION; `text` and `action_label` are Str, the label empty exactly when the action is `none`. One toast per window: a second replaces the shown one, which answers `closed`. An `undo` action is refused outside an undo group and binds the toast to that group's ledger step (T4). */
+static inline void kaya_tx_show_toast(KayaTx *tx, uint64_t window, uint64_t toast, uint32_t duration, uint32_t action, KayaVal text, KayaVal action_label) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SHOW_TOAST);
+    kaya_wire_u64(tx, window);
+    kaya_wire_u64(tx, toast);
+    kaya_wire_u32(tx, duration);
+    kaya_wire_u32(tx, action);
+    kaya_wire_value(tx, text);
+    kaya_wire_value(tx, action_label);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Withdraw a shown toast. Like cancel_notification it retires the id with NO answer; an unknown or retired id is ignored (docs/toast-plan.md T5). */
+static inline void kaya_tx_dismiss_toast(KayaTx *tx, uint64_t toast) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_DISMISS_TOAST);
+    kaya_wire_u64(tx, toast);
     kaya_wire_end(tx, kaya_at);
 }
 

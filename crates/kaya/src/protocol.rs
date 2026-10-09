@@ -49,6 +49,46 @@ pub enum NotificationOutcome {
     Replied(String),
 }
 
+/// A toast's id: guest-chosen, retiring on its one toast_result or on the
+/// app's dismiss_toast (docs/toast-plan.md T5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ToastId(pub u64);
+
+/// docs/toast-plan.md T6: two named durations, each backend's own seconds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ToastDuration {
+    Short,
+    Long,
+}
+
+/// docs/toast-plan.md T4: no action, an action the app answers, or the
+/// window's undo bound to the step the toast was shown in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ToastAction {
+    None,
+    App,
+    Undo,
+}
+
+/// docs/toast-plan.md T5: the two facts every platform can report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ToastOutcome {
+    Action,
+    Closed,
+}
+
+/// One toast request, the same shape on SHOW_TOAST and PRESENT_TOAST.
+/// `action_label` is empty exactly when `action` is `None`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToastSpec {
+    pub window: WindowId,
+    pub toast: ToastId,
+    pub duration: ToastDuration,
+    pub action: ToastAction,
+    pub text: String,
+    pub action_label: String,
+}
+
 /// A media player's id: guest-chosen, its own space, live from
 /// create_player to release_player (docs/media-plan.md §2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1069,6 +1109,8 @@ pub enum Occurrence {
     /// A notification's one answer: activated by the user, or refused
     /// by the platform. The id retires with it.
     NotificationResult { notification: NotificationId, outcome: NotificationOutcome },
+    /// A toast's one answer (docs/toast-plan.md T5); the id retires with it.
+    ToastResult { toast: ToastId, outcome: ToastOutcome },
     /// The platform handed this app a URL (docs/app-links-plan.md §4).
     /// `route` is the declared route that matched, 0 for none — the core
     /// announced that miss before this was sent. Params are the pattern's
@@ -2576,6 +2618,10 @@ pub enum TxOp {
     ShowNotification(NotificationSpec),
     /// Withdraw a pending or delivered notification by id.
     CancelNotification(NotificationId),
+    /// docs/toast-plan.md T1: a toast in a window, answered once.
+    ShowToast(ToastSpec),
+    /// Withdraw a toast with no answer (T5).
+    DismissToast(ToastId),
     /// docs/media-plan.md §2: a player's lifetime, its props and commands.
     CreatePlayer { player: PlayerId },
     SetPlayerProp { player: PlayerId, prop: PlayerProp, value: Value },
@@ -2890,6 +2936,10 @@ pub enum ApplyOp {
     PostNotification(NotificationSpec),
     /// Withdraw a notification by id.
     CancelNotification(NotificationId),
+    /// Show the validated toast, replacing the window's shown one.
+    PresentToast(ToastSpec),
+    /// Take a retired toast off screen; the arm reports nothing.
+    WithdrawToast { window: WindowId, toast: ToastId },
     /// docs/media-plan.md §2. `SetPlayerProp`'s source arrives RESOLVED: a
     /// file:// or http(s) URL, a picked file's own platform reference (a
     /// content:// URI, an iOS file URL), or empty.
@@ -3294,6 +3344,12 @@ impl OccSink {
                 Occurrence::NotificationResult { notification, outcome } => {
                     let (kind, body) = crate::wire::notification_answer(notification, &outcome);
                     ring.push_record(kind, &body);
+                }
+                Occurrence::ToastResult { toast, outcome } => {
+                    ring.push_record(
+                        crate::ring::REC_TOAST_RESULT,
+                        &crate::wire::toast_result_body(toast, outcome),
+                    );
                 }
                 Occurrence::LinkOpened { route, url, params } => {
                     ring.push_record(

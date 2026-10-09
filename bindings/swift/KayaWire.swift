@@ -24,7 +24,7 @@ public enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x3b06087d3310d8b0
+let kayaSpecHash: UInt64 = 0x5c53f4354ceb6019
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
 func kayaPackDate(_ year: Int, _ month: Int, _ day: Int) -> Int64 {
@@ -864,6 +864,25 @@ struct KayaTx {
         let kayaAt = self.begin(UInt16(KAYA_TX_WATCH_CAPTURE_DEVICES))
         self.u32(on)
         self.u32(0)
+        self.end(kayaAt)
+    }
+
+    /// Show a toast in `window` (0 = the primary; docs/toast-plan.md T1-T7): a short message over the content that goes by itself. `toast` is a guest-chosen id answered once by toast_result. `duration` a TOAST_DURATION, `action` a TOAST_ACTION; `text` and `action_label` are Str, the label empty exactly when the action is `none`. One toast per window: a second replaces the shown one, which answers `closed`. An `undo` action is refused outside an undo group and binds the toast to that group's ledger step (T4).
+    mutating func showToast(_ window: UInt64, _ toast: UInt64, _ duration: UInt32, _ action: UInt32, _ text: KayaValue, _ actionLabel: KayaValue) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SHOW_TOAST))
+        self.u64(window)
+        self.u64(toast)
+        self.u32(duration)
+        self.u32(action)
+        self.value(text)
+        self.value(actionLabel)
+        self.end(kayaAt)
+    }
+
+    /// Withdraw a shown toast. Like cancel_notification it retires the id with NO answer; an unknown or retired id is ignored (docs/toast-plan.md T5).
+    mutating func dismissToast(_ toast: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_DISMISS_TOAST))
+        self.u64(toast)
         self.end(kayaAt)
     }
 
@@ -3470,6 +3489,7 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             || kind == UInt16(KAYA_OCCURRENCE_CAPTURE_PERMISSION)
             || kind == UInt16(KAYA_OCCURRENCE_CAPTURE_DEVICES)
             || kind == UInt16(KAYA_OCCURRENCE_CAPTURE_OVERRUN)
+            || kind == UInt16(KAYA_OCCURRENCE_TOAST_RESULT)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {
@@ -3478,6 +3498,11 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             return (kind, id, [], .i64(Int64(code)), [], nil, nil, [])
         }
         if kind == UInt16(KAYA_OCCURRENCE_NOTIFICATION_RESULT) {
+            // A request's one answer: id + the u32 code.
+            let code = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)
+            return (kind, id, [], .i64(Int64(code)), [], nil, nil, [])
+        }
+        if kind == UInt16(KAYA_OCCURRENCE_TOAST_RESULT) {
             // A request's one answer: id + the u32 code.
             let code = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)
             return (kind, id, [], .i64(Int64(code)), [], nil, nil, [])

@@ -190,6 +190,11 @@ pub struct KayaHostApi {
     /// The text the user sent from a notification's reply field
     /// (docs/notification-reply-plan.md): UTF-8 bytes and their length.
     pub emit_notification_reply: unsafe extern "C" fn(u64, *const u8, usize),
+    /// A toast gone by any way but its action (TOAST_OUTCOME_CLOSED), and
+    /// a press of its action, whose answer and undo the core decides
+    /// (docs/toast-plan.md §3).
+    pub emit_toast_result: extern "C" fn(u64, u32),
+    pub toast_action: extern "C" fn(u64),
     /// A URL the platform handed this app (docs/app-links-plan.md §4):
     /// the raw kAEGetURL Apple event on macOS, `.onOpenURL` on iOS. The
     /// interpreter parses nothing — the core matches the route.
@@ -616,6 +621,8 @@ pub(crate) fn run() -> i32 {
         emit_alert_result: crate::capi::kaya_emit_alert_result,
         emit_notification_result: crate::capi::kaya_emit_notification_result,
         emit_notification_reply: crate::capi::kaya_emit_notification_reply,
+        emit_toast_result: crate::capi::kaya_emit_toast_result,
+        toast_action: crate::capi::kaya_toast_action,
         link_opened: crate::capi::kaya_link_opened,
         grant_capabilities: crate::capi::kaya_grant_capabilities,
         capabilities: crate::capi::kaya_capabilities,

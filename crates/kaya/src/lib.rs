@@ -165,6 +165,7 @@ pub use protocol::{
     FrameAccuracy, ImageId, Peaks, ReadId, ReadOutcome, ReaderId,
     CameraFacing, CaptureCommand, CaptureDevice, CaptureFailure, CaptureId, CaptureInterruption, CaptureKind,
     CaptureProp, CaptureState, Permission,
+    ToastDuration, ToastId, ToastOutcome,
 };
 
 #[cfg(target_os = "windows")]

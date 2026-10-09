@@ -14304,6 +14304,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
         }
         ApplyOp::PostNotification(spec) => post_notification(core.occurrences.clone(), spec),
         ApplyOp::CancelNotification(id) => cancel_notification(id.0),
+        ApplyOp::PresentToast(_) | ApplyOp::WithdrawToast { .. } => crate::depth_stub("toast"),
         ApplyOp::SetBadge { count } => set_badge(count),
         ApplyOp::CreatePlayer(player) => gtk_media::create_player(core, player.0),
         ApplyOp::SetPlayerProp { player, prop, value } => gtk_media::set_player_prop(player.0, prop, &value),
@@ -22383,6 +22384,18 @@ impl crate::harness::Stage for GtkStage {
     fn sheet_detent(&self) -> String {
         // A desktop sheet has no detent.
         "none".to_owned()
+    }
+    fn toast(&self) -> Option<(String, String)> {
+        crate::depth_stub("toast")
+    }
+    fn toast_announced(&self, _: &str, _: &str) -> Result<(), Vec<String>> {
+        crate::depth_stub("toast")
+    }
+    fn toast_action(&self) -> bool {
+        crate::depth_stub("toast")
+    }
+    fn toast_close(&self) -> bool {
+        crate::depth_stub("toast")
     }
     fn dismiss_sheet(&self) {
         // The platform's own cancel path on the topmost sheet: Esc through

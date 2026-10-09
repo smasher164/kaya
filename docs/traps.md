@@ -28,15 +28,25 @@ which puts segmented.steps' last row below the window: the item peer's
 SelectionChanged ran and the reads showed two items selected
 (`IsSelected [1,1], SelectedItem Some(0), IsLoaded ... items [1,0]`, the
 verb trace's `choose_segment`). A full-size window passed the same step.
-`choose` takes the peer for a realized item and the bar's own
-`SelectedItem` for an unrealized one, and the reads take the bar's
-`SelectedItem`, since an unrealized item never shows its own `IsSelected`.
+The reads take the bar's `SelectedItem`, since an unrealized item never
+shows its own `IsSelected`. `choose` (RULED 2026-10-08) asks the bar's own
+ItemsView (the template's, found by type) to `StartBringItemIntoView` the
+item, waits up to 2s for it to load, and presses it through the peer like
+any loaded item; it never writes `SelectedItem`. Measured on the lane: the
+item loads 20-34ms after the request. The window has no scroll host, so
+nothing scrolls: the item is realized where it stands, at y=388 in a
+339-high root, below the window's edge. With the request cut the item was
+still unloaded 2s later and the leg went red. A bar whose template has not
+loaded yet (seen under the lane's parallel legs, `IsLoaded bar false`) is
+waited for inside the same 2s. Radio and select are not affected: WinUI's
+`choose` for them sets `SelectedIndex` on the control, which works on an
+unrealized item, so neither takes the press route.
 
 Second, inside SelectionChanged the newly selected item and the old one
 both read `IsSelected` true (`IsSelected [1,0,1], SelectedItem Some(2)`),
 so a handler that took the first selected item reported the old index and
 the app wrote it back. The handler reads `SelectedItem`.
-tools/lib/segmented_routes.py holds both reads, one watched cut each.
+tools/lib/segmented_routes.py holds both reads and the press route, one watched cut each.
 
 ## GTK 4.20 publishes a switch as ATSPI_ROLE_SWITCH (measured 2026-10-07)
 

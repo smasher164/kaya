@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x3b06087d3310d8b0L
+let spec_hash = 0x5c53f4354ceb6019L
 
 let value_bool = 1
 let value_i64 = 2
@@ -208,6 +208,13 @@ let alert_choice_cancel = 4294967295
 let notification_outcome_activated = 0
 let notification_outcome_refused = 1
 let notification_outcome_replied = 2
+let toast_duration_short = 0
+let toast_duration_long = 1
+let toast_action_none = 0
+let toast_action_app = 1
+let toast_action_undo = 2
+let toast_outcome_action = 0
+let toast_outcome_closed = 1
 let file_mode_read = 0
 let file_mode_write = 1
 let file_mode_read_write = 2
@@ -463,6 +470,8 @@ let tx_kind_capture_command = 78
 let tx_kind_release_capture = 79
 let tx_kind_request_permission = 80
 let tx_kind_watch_capture_devices = 81
+let tx_kind_show_toast = 82
+let tx_kind_dismiss_toast = 83
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -531,6 +540,8 @@ let apply_kind_release_capture = 67
 let apply_kind_request_permission = 68
 let apply_kind_watch_capture_devices = 69
 let apply_kind_set_video_capture = 70
+let apply_kind_present_toast = 71
+let apply_kind_withdraw_toast = 72
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
@@ -585,6 +596,7 @@ let occ_kind_capture_changed = 51
 let occ_kind_capture_permission = 52
 let occ_kind_capture_devices = 53
 let occ_kind_capture_overrun = 54
+let occ_kind_toast_result = 55
 
 let pad8 b =
   while Buffer.length b mod 8 <> 0 do
@@ -1212,6 +1224,21 @@ let tx_watch_capture_devices on =
   finish tx_kind_watch_capture_devices (fun b ->
       Buffer.add_int32_le b (Int32.of_int on);
       Buffer.add_int32_le b 0l)
+
+(* Show a toast in `window` (0 = the primary; docs/toast-plan.md T1-T7): a short message over the content that goes by itself. `toast` is a guest-chosen id answered once by toast_result. `duration` a TOAST_DURATION, `action` a TOAST_ACTION; `text` and `action_label` are Str, the label empty exactly when the action is `none`. One toast per window: a second replaces the shown one, which answers `closed`. An `undo` action is refused outside an undo group and binds the toast to that group's ledger step (T4). *)
+let tx_show_toast window toast duration action text action_label =
+  finish tx_kind_show_toast (fun b ->
+      Buffer.add_int64_le b window;
+      Buffer.add_int64_le b toast;
+      Buffer.add_int32_le b (Int32.of_int duration);
+      Buffer.add_int32_le b (Int32.of_int action);
+      encode_value b text;
+      encode_value b action_label)
+
+(* Withdraw a shown toast. Like cancel_notification it retires the id with NO answer; an unknown or retired id is ignored (docs/toast-plan.md T5). *)
+let tx_dismiss_toast toast =
+  finish tx_kind_dismiss_toast (fun b ->
+      Buffer.add_int64_le b toast)
 
 (* A civil date as the wire's I64: year * 10000 + month * 100 + day. *)
 let pack_date year month day =
@@ -3302,7 +3329,7 @@ let parse_clip byte at =
    value), None for clicks. None for pad/unknown kinds. *)
 let parse_occurrence byte =
   let kind = u16_at byte 4 in
-  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended && kind <> occ_kind_date_changed && kind <> occ_kind_time_changed && kind <> occ_kind_value_committed && kind <> occ_kind_notification_result && kind <> occ_kind_link_opened && kind <> occ_kind_text_edited && kind <> occ_kind_text_formatted && kind <> occ_kind_sheet_dismissed && kind <> occ_kind_dismiss_requested && kind <> occ_kind_submitted && kind <> occ_kind_notification_replied && kind <> occ_kind_fullscreen_changed && kind <> occ_kind_color_changed && kind <> occ_kind_range_changed && kind <> occ_kind_range_committed && kind <> occ_kind_player_changed && kind <> occ_kind_player_position && kind <> occ_kind_seek_completed && kind <> occ_kind_session_action && kind <> occ_kind_player_tracks && kind <> occ_kind_caption_cue && kind <> occ_kind_video_visibility && kind <> occ_kind_reader_frame && kind <> occ_kind_reader_progress && kind <> occ_kind_reader_peaks && kind <> occ_kind_reader_done && kind <> occ_kind_image_loaded && kind <> occ_kind_capture_changed && kind <> occ_kind_capture_permission && kind <> occ_kind_capture_devices && kind <> occ_kind_capture_overrun then None
+  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended && kind <> occ_kind_date_changed && kind <> occ_kind_time_changed && kind <> occ_kind_value_committed && kind <> occ_kind_notification_result && kind <> occ_kind_link_opened && kind <> occ_kind_text_edited && kind <> occ_kind_text_formatted && kind <> occ_kind_sheet_dismissed && kind <> occ_kind_dismiss_requested && kind <> occ_kind_submitted && kind <> occ_kind_notification_replied && kind <> occ_kind_fullscreen_changed && kind <> occ_kind_color_changed && kind <> occ_kind_range_changed && kind <> occ_kind_range_committed && kind <> occ_kind_player_changed && kind <> occ_kind_player_position && kind <> occ_kind_seek_completed && kind <> occ_kind_session_action && kind <> occ_kind_player_tracks && kind <> occ_kind_caption_cue && kind <> occ_kind_video_visibility && kind <> occ_kind_reader_frame && kind <> occ_kind_reader_progress && kind <> occ_kind_reader_peaks && kind <> occ_kind_reader_done && kind <> occ_kind_image_loaded && kind <> occ_kind_capture_changed && kind <> occ_kind_capture_permission && kind <> occ_kind_capture_devices && kind <> occ_kind_capture_overrun && kind <> occ_kind_toast_result then None
   else begin
     (* ids are guest-allocated and small; the low u32 is the story. *)
     let id = u32_at byte 8 in
@@ -3311,6 +3338,10 @@ let parse_occurrence byte =
       (* A request's one answer: id + the u32 code. *)
       Some (kind, Int64.of_int id, [], Some (I64 (Int64.of_int (u32_at byte 16))), None, None, [])
     else if kind = occ_kind_notification_result
+    then
+      (* A request's one answer: id + the u32 code. *)
+      Some (kind, Int64.of_int id, [], Some (I64 (Int64.of_int (u32_at byte 16))), None, None, [])
+    else if kind = occ_kind_toast_result
     then
       (* A request's one answer: id + the u32 code. *)
       Some (kind, Int64.of_int id, [], Some (I64 (Int64.of_int (u32_at byte 16))), None, None, [])

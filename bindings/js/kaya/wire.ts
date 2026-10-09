@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x3b06087d3310d8b0n;
+export const SPEC_HASH = 0x5c53f4354ceb6019n;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -185,6 +185,13 @@ export const ALERT_CHOICE_CANCEL = 4294967295;
 export const NOTIFICATION_OUTCOME_ACTIVATED = 0;
 export const NOTIFICATION_OUTCOME_REFUSED = 1;
 export const NOTIFICATION_OUTCOME_REPLIED = 2;
+export const TOAST_DURATION_SHORT = 0;
+export const TOAST_DURATION_LONG = 1;
+export const TOAST_ACTION_NONE = 0;
+export const TOAST_ACTION_APP = 1;
+export const TOAST_ACTION_UNDO = 2;
+export const TOAST_OUTCOME_ACTION = 0;
+export const TOAST_OUTCOME_CLOSED = 1;
 export const FILE_MODE_READ = 0;
 export const FILE_MODE_WRITE = 1;
 export const FILE_MODE_READ_WRITE = 2;
@@ -441,6 +448,8 @@ export const TX_CAPTURE_COMMAND = 78;
 export const TX_RELEASE_CAPTURE = 79;
 export const TX_REQUEST_PERMISSION = 80;
 export const TX_WATCH_CAPTURE_DEVICES = 81;
+export const TX_SHOW_TOAST = 82;
+export const TX_DISMISS_TOAST = 83;
 export const APPLY_CREATE = 1;
 export const APPLY_SET_PROP = 2;
 export const APPLY_ADD_CHILD = 3;
@@ -509,6 +518,8 @@ export const APPLY_RELEASE_CAPTURE = 67;
 export const APPLY_REQUEST_PERMISSION = 68;
 export const APPLY_WATCH_CAPTURE_DEVICES = 69;
 export const APPLY_SET_VIDEO_CAPTURE = 70;
+export const APPLY_PRESENT_TOAST = 71;
+export const APPLY_WITHDRAW_TOAST = 72;
 export const OCC_BUTTON_CLICKED = 1;
 export const OCC_TEXT_CHANGED = 2;
 export const OCC_TOGGLED = 3;
@@ -563,6 +574,7 @@ export const OCC_CAPTURE_CHANGED = 51;
 export const OCC_CAPTURE_PERMISSION = 52;
 export const OCC_CAPTURE_DEVICES = 53;
 export const OCC_CAPTURE_OVERRUN = 54;
+export const OCC_TOAST_RESULT = 55;
 
 const text_encoder = new TextEncoder();
 const text_decoder = new TextDecoder("utf-8", { fatal: true });
@@ -1422,6 +1434,25 @@ export function tx_watch_capture_devices(on: number): Uint8Array {
   enc.u32(on);
   enc.u32(0);
   return enc.end(TX_WATCH_CAPTURE_DEVICES);
+}
+
+/** Show a toast in `window` (0 = the primary; docs/toast-plan.md T1-T7): a short message over the content that goes by itself. `toast` is a guest-chosen id answered once by toast_result. `duration` a TOAST_DURATION, `action` a TOAST_ACTION; `text` and `action_label` are Str, the label empty exactly when the action is `none`. One toast per window: a second replaces the shown one, which answers `closed`. An `undo` action is refused outside an undo group and binds the toast to that group's ledger step (T4). */
+export function tx_show_toast(window: number, toast: number, duration: number, action: number, text: WireValue, action_label: WireValue): Uint8Array {
+  enc.begin();
+  enc.u64(window);
+  enc.u64(toast);
+  enc.u32(duration);
+  enc.u32(action);
+  enc.value(text);
+  enc.value(action_label);
+  return enc.end(TX_SHOW_TOAST);
+}
+
+/** Withdraw a shown toast. Like cancel_notification it retires the id with NO answer; an unknown or retired id is ignored (docs/toast-plan.md T5). */
+export function tx_dismiss_toast(toast: number): Uint8Array {
+  enc.begin();
+  enc.u64(toast);
+  return enc.end(TX_DISMISS_TOAST);
 }
 
 /** A civil date as the wire's I64: year * 10000 + month * 100 + day. */
@@ -2944,12 +2975,16 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const size = view.getUint32(0, true);
   const kind = view.getUint16(4, true);
-  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED, OCC_CAPTURE_CHANGED, OCC_CAPTURE_PERMISSION, OCC_CAPTURE_DEVICES, OCC_CAPTURE_OVERRUN].includes(kind)) return { kind, id: null, keys: [], payload: null };
+  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED, OCC_CAPTURE_CHANGED, OCC_CAPTURE_PERMISSION, OCC_CAPTURE_DEVICES, OCC_CAPTURE_OVERRUN, OCC_TOAST_RESULT].includes(kind)) return { kind, id: null, keys: [], payload: null };
   if (kind === OCC_ALERT_RESULT) {
     // A request's one answer: id + the u32 code.
     return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };
   }
   if (kind === OCC_NOTIFICATION_RESULT) {
+    // A request's one answer: id + the u32 code.
+    return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };
+  }
+  if (kind === OCC_TOAST_RESULT) {
     // A request's one answer: id + the u32 code.
     return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };
   }

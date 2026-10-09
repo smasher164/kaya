@@ -2164,7 +2164,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0x3b06087d3310d8b0uL
+    private const val SPEC_HASH: ULong = 0x5c53f4354ceb6019uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -2245,6 +2245,9 @@ object KayaCompose {
     private const val APPLY_REQUEST_PERMISSION = 68
     private const val APPLY_WATCH_CAPTURE_DEVICES = 69
     private const val APPLY_SET_VIDEO_CAPTURE = 70
+    // The toast (docs/toast-plan.md §4); the arm is a depth slice.
+    private const val APPLY_PRESENT_TOAST = 71
+    private const val APPLY_WITHDRAW_TOAST = 72
     private const val FRAME_ACCURACY_EXACT = 1
     /** The rich-text pair (docs/rich-text-plan.md §4); the arm is a depth slice. */
     private const val APPLY_SET_RICH_TEXT = 43
@@ -3943,6 +3946,7 @@ object KayaCompose {
                 APPLY_RELEASE_CAPTURE -> kayaCaptureRelease(b.long)
                 APPLY_REQUEST_PERMISSION -> kayaCaptureRequestPermission(b.int)
                 APPLY_WATCH_CAPTURE_DEVICES -> kayaCaptureWatchDevices(b.int != 0)
+                APPLY_PRESENT_TOAST, APPLY_WITHDRAW_TOAST -> depthStub("toast")
                 APPLY_SET_VIDEO_CAPTURE -> {
                     // { u64 widget; u64 capture }, 0 for none.
                     val vid = b.long
@@ -11048,6 +11052,12 @@ object KayaCompose {
                         } else {
                             failures.add("sheet detent $got, wanted $want")
                         }
+                    }
+                    "expect_toast", "expect_no_toast", "expect_toast_announced" -> {
+                        depthStub("toast")
+                    }
+                    "toast_action", "toast_close" -> {
+                        depthStub("toast")
                     }
                     "dismiss_sheet" -> {
                         // The platform's own cancel path: the back key,

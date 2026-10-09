@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x3b06087d3310d8b0
+specHash = 0x5c53f4354ceb6019
 
 valueBool :: Word32
 valueBool = 1
@@ -378,6 +378,20 @@ notificationOutcomeRefused :: Word32
 notificationOutcomeRefused = 1
 notificationOutcomeReplied :: Word32
 notificationOutcomeReplied = 2
+toastDurationShort :: Word32
+toastDurationShort = 0
+toastDurationLong :: Word32
+toastDurationLong = 1
+toastActionNone :: Word32
+toastActionNone = 0
+toastActionApp :: Word32
+toastActionApp = 1
+toastActionUndo :: Word32
+toastActionUndo = 2
+toastOutcomeAction :: Word32
+toastOutcomeAction = 0
+toastOutcomeClosed :: Word32
+toastOutcomeClosed = 1
 fileModeRead :: Word32
 fileModeRead = 0
 fileModeWrite :: Word32
@@ -888,6 +902,10 @@ txKindRequestPermission :: Word16
 txKindRequestPermission = 80
 txKindWatchCaptureDevices :: Word16
 txKindWatchCaptureDevices = 81
+txKindShowToast :: Word16
+txKindShowToast = 82
+txKindDismissToast :: Word16
+txKindDismissToast = 83
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -1024,6 +1042,10 @@ applyKindWatchCaptureDevices :: Word16
 applyKindWatchCaptureDevices = 69
 applyKindSetVideoCapture :: Word16
 applyKindSetVideoCapture = 70
+applyKindPresentToast :: Word16
+applyKindPresentToast = 71
+applyKindWithdrawToast :: Word16
+applyKindWithdrawToast = 72
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
@@ -1132,6 +1154,8 @@ occKindCaptureDevices :: Word16
 occKindCaptureDevices = 53
 occKindCaptureOverrun :: Word16
 occKindCaptureOverrun = 54
+occKindToastResult :: Word16
+occKindToastResult = 55
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -1487,6 +1511,14 @@ txRequestPermission kind = wireRecord txKindRequestPermission (word32LE kind <> 
 -- 1: list the cameras and microphones now (capture_devices), report each kind's permission as it stands (capture_permission), and list again whenever a device comes or goes; 0: stop. Listing asks for no permission.
 txWatchCaptureDevices :: Word32 -> Builder
 txWatchCaptureDevices on = wireRecord txKindWatchCaptureDevices (word32LE on <> word32LE 0)
+
+-- Show a toast in `window` (0 = the primary; docs/toast-plan.md T1-T7): a short message over the content that goes by itself. `toast` is a guest-chosen id answered once by toast_result. `duration` a TOAST_DURATION, `action` a TOAST_ACTION; `text` and `action_label` are Str, the label empty exactly when the action is `none`. One toast per window: a second replaces the shown one, which answers `closed`. An `undo` action is refused outside an undo group and binds the toast to that group's ledger step (T4).
+txShowToast :: Word64 -> Word64 -> Word32 -> Word32 -> Value -> Value -> Builder
+txShowToast window toast duration action text actionLabel = wireRecord txKindShowToast (word64LE window <> word64LE toast <> word32LE duration <> word32LE action <> encodeValue text <> encodeValue actionLabel)
+
+-- Withdraw a shown toast. Like cancel_notification it retires the id with NO answer; an unknown or retired id is ignored (docs/toast-plan.md T5).
+txDismissToast :: Word64 -> Builder
+txDismissToast toast = wireRecord txKindDismissToast (word64LE toast)
 
 -- A civil date as the wire's I64: year * 10000 + month * 100 + day.
 packDate :: Int -> Int -> Int -> Int64
@@ -3096,7 +3128,7 @@ parseOccurrence ::
   IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues, Maybe DropValues, [Value]))
 parseOccurrence redeem rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted && kind /= occKindSheetDismissed && kind /= occKindDismissRequested && kind /= occKindSubmitted && kind /= occKindNotificationReplied && kind /= occKindFullscreenChanged && kind /= occKindColorChanged && kind /= occKindRangeChanged && kind /= occKindRangeCommitted && kind /= occKindPlayerChanged && kind /= occKindPlayerPosition && kind /= occKindSeekCompleted && kind /= occKindSessionAction && kind /= occKindPlayerTracks && kind /= occKindCaptionCue && kind /= occKindVideoVisibility && kind /= occKindReaderFrame && kind /= occKindReaderProgress && kind /= occKindReaderPeaks && kind /= occKindReaderDone && kind /= occKindImageLoaded && kind /= occKindCaptureChanged && kind /= occKindCapturePermission && kind /= occKindCaptureDevices && kind /= occKindCaptureOverrun
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted && kind /= occKindSheetDismissed && kind /= occKindDismissRequested && kind /= occKindSubmitted && kind /= occKindNotificationReplied && kind /= occKindFullscreenChanged && kind /= occKindColorChanged && kind /= occKindRangeChanged && kind /= occKindRangeCommitted && kind /= occKindPlayerChanged && kind /= occKindPlayerPosition && kind /= occKindSeekCompleted && kind /= occKindSessionAction && kind /= occKindPlayerTracks && kind /= occKindCaptionCue && kind /= occKindVideoVisibility && kind /= occKindReaderFrame && kind /= occKindReaderProgress && kind /= occKindReaderPeaks && kind /= occKindReaderDone && kind /= occKindImageLoaded && kind /= occKindCaptureChanged && kind /= occKindCapturePermission && kind /= occKindCaptureDevices && kind /= occKindCaptureOverrun && kind /= occKindToastResult
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64
@@ -3106,6 +3138,11 @@ parseOccurrence redeem rec = do
           code <- peekByteOff rec 16 :: IO Word32
           return (Just (kind, ident, [], Just (VI64 (fromIntegral code)), Nothing, Nothing, []))
       else if kind == occKindNotificationResult
+        then do
+          -- A request's one answer: id + the u32 code.
+          code <- peekByteOff rec 16 :: IO Word32
+          return (Just (kind, ident, [], Just (VI64 (fromIntegral code)), Nothing, Nothing, []))
+      else if kind == occKindToastResult
         then do
           -- A request's one answer: id + the u32 code.
           code <- peekByteOff rec 16 :: IO Word32
