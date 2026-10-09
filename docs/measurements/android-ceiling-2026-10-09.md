@@ -65,3 +65,20 @@ eight binder threads. Holding a feed's off-screen players unprepared on
 Android would keep fewer decoders open at once, which may or may not keep
 the HAL out of that state; it is a design change to the media surface and is
 left for a ruling.
+
+RULED and built the same day (docs/media-plan.md §7d): a row's player opens
+only once its row shows, on all five platforms. `allocate(c2.goldfish.h264.decoder)`
+lines in the leg's full logcat buffer, the three media_feed legs on the quiet
+pool (KAYA_ONLY=media_feed, each leg forced red after its last step to keep
+its buffer):
+
+| | compose | go | jvm |
+|---|---|---|---|
+| before the scroll, hold cut out (the old behaviour) | 20 | 20 | 20 |
+| before the scroll, with the hold | 8 | 12 | 12 |
+| whole leg, with the hold | 16 | 20 | 20 |
+
+Each player allocates two decoders (the setOutputSurface workaround's
+re-creation), so 4 to 6 rows were shown at mount on the phone. `scroll_end`
+carries every row through the viewport, so by the leg's end every player has
+opened; releasing a decoder when its row scrolls far out is not built.

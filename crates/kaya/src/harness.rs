@@ -629,6 +629,11 @@ pub enum Step {
     /// `expect_display_awake yes`: whether this process holds the
     /// platform's keep-the-display-awake assertion (§2 rule 5).
     ExpectDisplayAwake(bool),
+    /// `expect_player_open 9 no`: whether the platform's own player, the
+    /// n-th the app created (counting from 0, in id order), holds an item —
+    /// the lazy open (docs/media-plan.md §7d) read off the platform, never
+    /// the core.
+    ExpectPlayerOpen(usize, bool),
     /// `expect_image_size image@x WxH`: the box the picture is DRAWN in, in
     /// points, rounded (docs/photo-attach-plan.md §5); `expect image@x` reads
     /// the decoded picture.
@@ -1088,6 +1093,7 @@ impl Step {
             | Step::SessionSend(..)
             | Step::ExpectNowPlaying(..)
             | Step::ExpectDisplayAwake(..)
+            | Step::ExpectPlayerOpen(..)
             | Step::PickEmoji(..)
             | Step::ExpectNoTarget(..)
             | Step::NotificationActivate(..)
@@ -1242,6 +1248,7 @@ impl Step {
             Step::SessionSend(..) => false,
             Step::ExpectNowPlaying(..) => true,
             Step::ExpectDisplayAwake(..) => true,
+            Step::ExpectPlayerOpen(..) => true,
             Step::PickEmoji { .. } => false,
             Step::NotificationActivate { .. } => false,
             Step::NotificationReply(..) => false,
@@ -1826,6 +1833,9 @@ pub trait Stage: Send + 'static {
     fn now_playing(&self) -> String;
     /// Whether this process holds the display-awake assertion.
     fn display_awake(&self) -> bool;
+    /// Whether the platform's player `n`-th by id holds an item, or why
+    /// there is none to read.
+    fn player_open(&self, n: usize) -> Result<bool, String>;
     /// This platform's lane table (docs/media-plan.md §7a): the reason it is
     /// expected to refuse `item`, None where it plays it.
     fn media_refusal(&self, item: &str) -> Option<String>;
@@ -3066,6 +3076,19 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     return Err(format!("expect_display_awake is yes or no, not {word:?}"));
                 }
                 Step::ExpectDisplayAwake(word == "yes")
+            }
+            "expect_player_open" => {
+                let (n, word) = rest.trim().split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_player_open wants a player's number and yes|no: {line:?}")
+                })?;
+                let n: usize = n
+                    .parse()
+                    .map_err(|_| format!("expect_player_open's player is a number counting from 0, not {n:?}"))?;
+                let word = word.trim();
+                if word != "yes" && word != "no" {
+                    return Err(format!("expect_player_open is yes or no, not {word:?}"));
+                }
+                Step::ExpectPlayerOpen(n, word == "yes")
             }
             "expect_image_size" => {
                 let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
@@ -5479,6 +5502,11 @@ fn run_with_log(
                 } else {
                     Err(format!("display awake {got}, wanted {want}"))
                 }
+            })),
+            Step::ExpectPlayerOpen(n, want) => Some(poll(|| match stage.player_open(*n) {
+                Ok(got) if got == *want => Ok(format!("player {n} open {got}")),
+                Ok(got) => Err(format!("player {n} open {got}, wanted {want}")),
+                Err(why) => Err(format!("player {n}: {why}")),
             })),
             Step::ExpectBadge(want) => Some(poll(|| {
                 let got = stage.badge();
@@ -8123,6 +8151,13 @@ mod tests {
             [Step::ExpectDisplayAwake(true)]
         ));
         assert!(parse("expect_display_awake maybe").is_err());
+        assert!(matches!(
+            parse("expect_player_open 9 no").unwrap().as_slice(),
+            [Step::ExpectPlayerOpen(9, false)]
+        ));
+        assert!(parse("expect_player_open video#9 no").is_err());
+        assert!(parse("expect_player_open 9 maybe").is_err());
+        assert!(parse("expect_player_open 9").is_err());
         assert!(video_ink_matches("CA3E1C", "C83C1E"));
         assert!(!video_ink_matches("CB3C1E", "C83C1E"));
         assert!(!video_ink_matches("<no picture>", "C83C1E"));
@@ -8733,6 +8768,9 @@ mod tests {
         }
         fn now_playing(&self) -> String {
             String::new()
+        }
+        fn player_open(&self, _: usize) -> Result<bool, String> {
+            Err("a mock stage holds no player".into())
         }
         fn display_awake(&self) -> bool {
             false
@@ -9852,6 +9890,9 @@ mod tests {
         fn now_playing(&self) -> String {
             String::new()
         }
+        fn player_open(&self, _: usize) -> Result<bool, String> {
+            Err("a mock stage holds no player".into())
+        }
         fn display_awake(&self) -> bool {
             false
         }
@@ -10286,6 +10327,9 @@ mod tests {
         }
         fn now_playing(&self) -> String {
             String::new()
+        }
+        fn player_open(&self, _: usize) -> Result<bool, String> {
+            Err("a mock stage holds no player".into())
         }
         fn display_awake(&self) -> bool {
             false

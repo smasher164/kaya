@@ -26173,6 +26173,10 @@ impl crate::harness::Stage for WinUiStage {
         media::stage::display_awake()
     }
 
+    fn player_open(&self, n: usize) -> Result<bool, String> {
+        Self::on_ui(move |core| Ok(media::stage::player_open(core, n)))
+    }
+
     /// This platform's lane table (docs/media-plan.md §7a): with the HEVC,
     /// AV1, VP9 and Web Media extensions the lane requires, Windows plays
     /// every item.

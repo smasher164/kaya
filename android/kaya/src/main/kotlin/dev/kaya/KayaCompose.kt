@@ -9609,6 +9609,19 @@ object KayaCompose {
                         if (got == want) observed.add("now playing $want")
                         else failures.add("now playing $got, wanted $want")
                     }
+                    "expect_player_open" -> {
+                        // docs/media-plan.md §7d: the n-th player by id holds
+                        // a media item, read off the ExoPlayer.
+                        val n = parts[1].toIntOrNull() ?: -1
+                        val want = parts[2] == "yes"
+                        val (count, got) = onUi(activity) {
+                            val ids = kayaPlayers.keys.sorted()
+                            ids.size to ids.getOrNull(n)?.let { (kayaPlayers[it]?.exo?.mediaItemCount ?: 0) > 0 }
+                        }
+                        if (got == null) failures.add("player $n: this process holds $count player(s)")
+                        else if (got == want) observed.add("player $n open $got")
+                        else failures.add("player $n open $got, wanted $want")
+                    }
                     "expect_display_awake" -> {
                         // The keep-screen-on the WINDOW MANAGER holds: the
                         // runner reads `dumpsys window`'s mHoldScreenWindow and

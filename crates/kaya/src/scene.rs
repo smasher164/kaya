@@ -343,6 +343,56 @@ fn owned_collections(bodies: &[Arc<TplBody>]) -> Vec<Vec<CollectionId>> {
         .collect()
 }
 
+fn player_fields(bodies: &[Arc<TplBody>]) -> Vec<(u32, usize)> {
+    fn walk(body: &TplBody, variant: u32, out: &mut Vec<(u32, usize)>) {
+        for op in &body.ops {
+            match op {
+                TplOp::SetProp { prop: Prop::Player, value: PropValue::Element { level: 0, field }, .. } => {
+                    out.push((variant, *field as usize));
+                }
+                TplOp::When { body, .. } => walk(body, variant, out),
+                _ => {}
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for (variant, body) in bodies.iter().enumerate() {
+        walk(body, variant as u32, &mut out);
+    }
+    out
+}
+
+fn player_of(op: &ApplyOp) -> Option<crate::protocol::PlayerId> {
+    match op {
+        ApplyOp::SetPlayerProp { player, .. }
+        | ApplyOp::PlayerCommand { player, .. }
+        | ApplyOp::SelectTrack { player, .. }
+        | ApplyOp::CaptionTimes { player, .. } => Some(*player),
+        _ => None,
+    }
+}
+
+fn is_source(op: &ApplyOp, player: crate::protocol::PlayerId, open: bool) -> bool {
+    matches!(
+        op,
+        ApplyOp::SetPlayerProp { player: p, prop: crate::protocol::PlayerProp::Source, value: Value::Str(url) }
+            if *p == player && url.is_empty() != open
+    )
+}
+
+/// Whether the last source `ops` hand `player` opens an item, None when
+/// they hand it none.
+fn last_source(ops: &[ApplyOp], player: crate::protocol::PlayerId) -> Option<bool> {
+    ops.iter().rev().find_map(|op| match op {
+        ApplyOp::SetPlayerProp { player: p, prop: crate::protocol::PlayerProp::Source, value: Value::Str(url) }
+            if *p == player =>
+        {
+            Some(!url.is_empty())
+        }
+        _ => None,
+    })
+}
+
 #[derive(Debug)]
 struct TplBody {
     ops: Vec<TplOp>,
@@ -994,6 +1044,14 @@ pub(crate) struct Scene {
     video_shows: HashMap<WidgetId, crate::protocol::PlayerId>,
     visibility: crate::media::Visibility,
     video_addr: HashMap<WidgetId, Option<(u64, PathKey)>>,
+    /// THE LAZY OPEN (docs/media-plan.md §7d): a row's player whose view is
+    /// not shown holds its source and every later op for it here, and the
+    /// players whose platform holds an item.
+    player_holds: HashMap<crate::protocol::PlayerId, Vec<ApplyOp>>,
+    players_handed: HashSet<crate::protocol::PlayerId>,
+    /// Per collection, the (variant, field) a template video view's player
+    /// is bound to.
+    player_fields: HashMap<CollectionId, Vec<(u32, usize)>>,
     when_sites: HashMap<u64, WhenSite>,
     when_by_signal: HashMap<SignalId, Vec<u64>>,
     /// Every live surface that has a mounted root, and WHICH widget
@@ -5366,6 +5424,7 @@ impl Scene {
         self.fan_out_signals(&dirty, &mut out);
         self.settle_range_writes(&mut out);
         self.settle_video_views(&out);
+        self.settle_player_holds(&mut out);
 
         // Barrier: no grow along a scroll's own axis (ruled REFUSE
         // 2026-09-02; docs/deferred.md, "`grow` INSIDE A SCROLL IS
@@ -7196,19 +7255,146 @@ impl Scene {
     }
 
     /// A backend's report of how much of a video view shows (0 to 1),
-    /// coalesced (crate::media::Visibility): what the app hears, if anything.
-    pub(crate) fn video_visible(&mut self, widget: WidgetId, shown: f64) -> Vec<Occurrence> {
+    /// coalesced (crate::media::Visibility): what the app hears, if anything,
+    /// and the held source of the player it shows once any of it shows
+    /// (docs/media-plan.md §7d).
+    pub(crate) fn video_visible(&mut self, widget: WidgetId, shown: f64) -> (Vec<Occurrence>, Vec<ApplyOp>) {
         if !self.videos.contains(&widget) {
-            return Vec::new();
+            return (Vec::new(), Vec::new());
         }
-        let Some(shown) = self.visibility.report(widget, shown) else {
-            return Vec::new();
+        let heard = self.visibility.report(widget, shown);
+        let mut ops = Vec::new();
+        if self.visibility.is_shown(widget) {
+            if let Some(player) = self.video_shows.get(&widget).copied() {
+                if let Some(queue) = self.player_holds.remove(&player) {
+                    self.hand_over(player, queue, &mut ops);
+                }
+            }
+        }
+        let Some(shown) = heard else {
+            return (Vec::new(), ops);
         };
         if !self.video_addr.contains_key(&widget) {
             let addr = self.node_instances.iter().find(|(_, w)| **w == widget).map(|(k, _)| k.clone());
             self.video_addr.insert(widget, addr);
         }
-        vec![visibility_occurrence(widget, self.video_addr[&widget].clone(), shown)]
+        (vec![visibility_occurrence(widget, self.video_addr[&widget].clone(), shown)], ops)
+    }
+
+    fn hand_over(&mut self, player: crate::protocol::PlayerId, queue: Vec<ApplyOp>, out: &mut Vec<ApplyOp>) {
+        if let Some(open) = last_source(&queue, player) {
+            if open {
+                self.players_handed.insert(player);
+            } else {
+                self.players_handed.remove(&player);
+            }
+        }
+        self.media.handed_over(player);
+        out.extend(queue);
+    }
+
+    /// Every player a collection row names in a field a template video view
+    /// shows, realized or not.
+    fn row_players(&self) -> HashSet<crate::protocol::PlayerId> {
+        let mut named = HashSet::new();
+        for ((collection, _), inst) in &self.coll_instances {
+            let Some(fields) = self.player_fields.get(collection) else { continue };
+            for (variant, record) in inst.entries.values() {
+                for (v, field) in fields {
+                    if v == variant {
+                        if let Some(Value::I64(id)) = record.get(*field) {
+                            if *id > 0 {
+                                named.insert(crate::protocol::PlayerId(*id as u64));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        named
+    }
+
+    /// THE LAZY OPEN (docs/media-plan.md §7d), on the batch's end state: a
+    /// player a row names, or a stamped view shows, opens its source only
+    /// once a view showing it is shown, or once it is shown by a live view.
+    fn settle_player_holds(&mut self, out: &mut Vec<ApplyOp>) {
+        use crate::protocol::PlayerId;
+        let mut released: HashSet<PlayerId> = HashSet::new();
+        let mut sourced: Vec<PlayerId> = Vec::new();
+        for op in out.iter() {
+            match op {
+                ApplyOp::ReleasePlayer(p) => {
+                    released.insert(*p);
+                }
+                ApplyOp::SetPlayerProp { player, prop: crate::protocol::PlayerProp::Source, value: Value::Str(url) }
+                    if !url.is_empty() && !sourced.contains(player) =>
+                {
+                    sourced.push(*player)
+                }
+                _ => {}
+            }
+        }
+        for p in &released {
+            self.player_holds.remove(p);
+            self.players_handed.remove(p);
+        }
+        let mut relevant: Vec<PlayerId> = self.player_holds.keys().copied().chain(sourced.iter().copied()).collect();
+        relevant.retain(|p| !released.contains(p));
+        relevant.sort_by_key(|p| p.0);
+        relevant.dedup();
+        if relevant.is_empty() {
+            return;
+        }
+        let stamped: HashSet<WidgetId> = self.node_instances.values().copied().collect();
+        let named = self.row_players();
+        for player in relevant {
+            let views: Vec<WidgetId> =
+                self.video_shows.iter().filter(|(_, p)| **p == player).map(|(w, _)| *w).collect();
+            let waits = !views.iter().any(|w| self.visibility.is_shown(*w) || !stamped.contains(w))
+                && (!views.is_empty() || named.contains(&player));
+            let held = self.player_holds.contains_key(&player);
+            if !held && !waits {
+                if let Some(open) = last_source(out, player) {
+                    if open {
+                        self.players_handed.insert(player);
+                    } else {
+                        self.players_handed.remove(&player);
+                    }
+                }
+                continue;
+            }
+            let mut queue = self.player_holds.remove(&player).unwrap_or_default();
+            let mut rest = Vec::with_capacity(out.len());
+            for op in out.drain(..) {
+                if player_of(&op) == Some(player) {
+                    queue.push(op);
+                } else {
+                    rest.push(op);
+                }
+            }
+            *out = rest;
+            if let Some(cut) = queue.iter().rposition(|op| is_source(op, player, false)) {
+                queue.drain(..cut);
+            }
+            let opens = last_source(&queue, player) != Some(false);
+            if waits && opens {
+                if self.players_handed.remove(&player) {
+                    out.push(ApplyOp::SetPlayerProp {
+                        player,
+                        prop: crate::protocol::PlayerProp::Source,
+                        value: Value::Str(String::new()),
+                    });
+                }
+                self.player_holds.insert(player, queue);
+            } else {
+                self.hand_over(player, queue, out);
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn player_held(&self, player: crate::protocol::PlayerId) -> bool {
+        self.player_holds.contains_key(&player)
     }
 
     /// The sidecar cue at a backend's clock time (crate::media).
@@ -8602,6 +8788,12 @@ impl Scene {
     /// Rows may arrive before their For binds, and they owe their inner lists
     /// just the same.
     fn register_row_owned(&mut self, collection: CollectionId, bodies: &[Arc<TplBody>]) {
+        let fields = player_fields(bodies);
+        if fields.is_empty() {
+            self.player_fields.remove(&collection);
+        } else {
+            self.player_fields.insert(collection, fields);
+        }
         let owned = owned_collections(bodies);
         if owned.iter().all(Vec::is_empty) {
             self.row_owned.insert(collection, owned);
@@ -9750,6 +9942,8 @@ impl Scene {
         self.for_sites.get_mut(&site).unwrap().window.report(first, count);
         let mut out = Vec::new();
         self.reconcile_window(site.0, &site.1, &mut out);
+        self.settle_video_views(&out);
+        self.settle_player_holds(&mut out);
         // The viewport is parked on its first visible row (§2.4).
         let order = &self.coll_instances[&site].order;
         self.for_sites

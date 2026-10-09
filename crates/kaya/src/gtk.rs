@@ -22257,6 +22257,10 @@ impl crate::harness::Stage for GtkStage {
         gtk_media::now_playing()
     }
 
+    fn player_open(&self, n: usize) -> Result<bool, String> {
+        Self::on_main(move |_| gtk_media::player_open(n))
+    }
+
     fn display_awake(&self) -> bool {
         gtk_media::display_awake().unwrap_or_else(|why| {
             eprintln!("kaya: display_awake read nothing: {why}");
@@ -25842,7 +25846,11 @@ mod gtk_media {
                     Pending::Report(id, r) => media_report(core, id, r),
                     Pending::Ask(id) => caption_ask(core, id),
                     Pending::Visible(widget, shown) => {
-                        for occ in core.scene.video_visible(widget, shown) {
+                        let (heard, ops) = core.scene.video_visible(widget, shown);
+                        for op in ops {
+                            super::apply(core, op);
+                        }
+                        for occ in heard {
                             core.occurrences.send(occ);
                         }
                     }
@@ -27212,6 +27220,18 @@ mod gtk_media {
             .and_then(|l| quoted(l))
             .unwrap_or_default();
         format!("{title:?} {status}")
+    }
+
+    #[cfg(feature = "harness")]
+    /// expect_player_open's read (docs/media-plan.md §7d): whether the n-th
+    /// player by id has a playbin out of NULL.
+    pub(super) fn player_open(n: usize) -> Result<bool, String> {
+        let mut ids: Vec<u64> = PLAYERS.with_borrow(|p| p.keys().copied().collect());
+        ids.sort_unstable();
+        let Some(p) = ids.get(n).and_then(|id| player(*id)) else {
+            return Err(format!("this process holds {} player(s)", ids.len()));
+        };
+        Ok(p.pb().current_state() != gst::State::Null)
     }
 
     /// Whether this process holds the idle inhibitor, from the record the

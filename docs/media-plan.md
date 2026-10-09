@@ -758,6 +758,53 @@ and the log says when the client lets the connection go), reads `failed
 timeout`, and plays the floor file on the same player, the app's retry. tools/check-verbs.py holds each arm's wake
 and teardown; the core's unit tests hold the clock.
 
+## §7d. A row's player opens when its row shows (RULED 2026-10-09)
+
+The maintainer, 2026-10-09: "yes, lazy load off-screen players", after
+media_feed's ten players opened fourteen decoders on the Android emulator at
+mount (docs/traps.md, the goldfish codec HAL's binder pool).
+
+THE RULE, the same on all five platforms. A player that a collection row
+names in the field a template video view shows, whether or not the band has
+realized that row (docs/virtualization-plan.md §1), does not open its source
+(no item, no decoder, no download) until a video view showing it is reported
+shown, any part of it (§7b's visibility above 0). A player shown by a live
+view (not a row's), or shown by no view and named by no row (audio alone),
+opens at once, as before. Once open it stays open until the app releases it
+or changes its source: releasing a decoder when its row scrolls far out is
+not built; a feed app keeps players only for the rows on screen (§7b).
+
+THE CORE DECIDES, once, on the batch's end state and on every visibility
+report (crates/kaya/src/scene.rs, `settle_player_holds`, and
+`video_visible`). It holds the player's source and every later op for that
+player (props, commands, track selections, caption timing) in their order and
+hands them to the backend together when a view showing it first shows. No
+backend decides anything: each applies the ops a visibility report returns.
+A new source set on an open player whose row is out of view closes the
+platform's item at once and holds the new one.
+
+WHAT THE APP OBSERVES. Nothing new, so no binding surface moves and none of
+the nine bindings changes (Rust, Python, Go, C#, Java, Swift, OCaml, Haskell
+and JS read the same occurrences; the C floor the same records). Setting a
+source publishes `loading` at once, as it always did, and a held player reads
+`loading` until its row shows; then `ready` (or `failed`) as the platform
+answers. A command or track selection asked while it is held is applied in
+order after the source, so a `play` asked while held plays once it opens.
+The open's bound (§7c) runs from the hand-over, not from the ask, so a row
+held for a minute is not failed `timeout`.
+
+Not counted as a row's: a nested template's video view bound to an OUTER
+row's field (a level above 0). media_feed's `expect_player_open` reads the
+platform's own player (AVPlayer's current item, ExoPlayer's media items,
+playbin out of NULL, MediaPlayer's source), the last row's closed before the
+scroll and open after it.
+Measured before it was built, with the hold cut out of the core: every lane
+read `player 9 open true` before the scroll (the mac's Rust leg, linux's sixteen
+x11 and wayland legs, Windows' six, iOS's three and Android's three),
+so every backend opened all ten at mount. On the Android pool the h264
+decoders allocated before media_feed's scroll fell from 20 to 8-12 a leg
+(docs/measurements/android-ceiling-2026-10-09.md).
+
 ## §8. The follow-on rulings
 
 All six were RULED by the maintainer on 2026-09-29 as recommended below;

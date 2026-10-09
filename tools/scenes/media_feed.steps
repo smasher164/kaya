@@ -2,11 +2,15 @@
 # scroll, each a video view showing its row's own player, paused on its
 # first frame. The first and last rows' visibility is read in label#0 and
 # label#1 as the feed app reads it; the core coalesces the scroll's frames
-# into entering, leaving, tenths and whole.
+# into entering, leaving, tenths and whole. The last row's player opens only
+# once its row shows (§7d), read off the platform's own player.
 expect label#0 "r0 whole"
 expect label#1 "r9 out"
 expect_video_ink video#0 "C83C1E"
+expect_player_open 0 yes
+expect_player_open 9 no
 scroll_end scroll#0
 expect label#1 "r9 whole"
 expect label#0 "r0 out"
 expect_video_ink video#9 "C83C1E"
+expect_player_open 9 yes

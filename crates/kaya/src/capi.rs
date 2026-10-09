@@ -4992,8 +4992,9 @@ pub unsafe extern "C" fn kaya_caption_at(player: u64, t_ms: u64, out: *mut u8, c
 pub extern "C" fn kaya_video_visible(widget: u64, shown: f64) {
     let mut scene_slot = PRESENTATION_SCENE.lock().unwrap_or_else(|e| e.into_inner());
     let Some(scene) = scene_slot.as_mut() else { return };
-    let published = scene.video_visible(crate::protocol::WidgetId(widget), shown);
+    let (published, ops) = scene.video_visible(crate::protocol::WidgetId(widget), shown);
     drop(scene_slot);
+    queue_presentation_ops(&mut PRESENTATION_PENDING.lock().unwrap(), ops);
     send_occurrences(published);
 }
 

@@ -15249,9 +15249,11 @@ whether media3 is loading and the decoder's inits, queued inputs and rendered
 frames, so the next sighting reads `0 input(s) queued` or not without the
 buffers file (forced red, 2026-10-09: `state 3, 2000 ms buffered, not
 loading, 2 decoder init(s), 28 input(s) queued, 1 frame(s) rendered`). Ten
-players preparing at mount is the feed scene's own shape; whether kaya should
-hold a feed's off-screen players unprepared on Android is a design question,
-recorded in docs/measurements/android-ceiling-2026-10-09.md. GUARD:
+players preparing at mount was the feed scene's own shape until the lazy open
+was ruled and built (docs/media-plan.md §7d, 2026-10-09): a row's player opens
+only once its row shows, and the decoders allocated before media_feed's scroll
+fell from 20 to 8-12 a leg (docs/measurements/android-ceiling-2026-10-09.md).
+GUARD:
 check-flightrec's Android timeline clause with a media codec cut, watched red.
 
 ## The iOS submit keyboard: a focus move between text views that resigned first (measured 2026-10-09)

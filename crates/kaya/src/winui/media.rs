@@ -1583,7 +1583,14 @@ fn tick(core: &mut CoreState) {
     let views: Vec<u64> = core.media.video_ids.clone();
     for widget in views {
         let shown = core.media.videos.get(&widget).map_or(0.0, |v| shown_fraction(core, v));
-        for occ in core.scene.video_visible(WidgetId(widget), shown) {
+        let (heard, ops) = core.scene.video_visible(WidgetId(widget), shown);
+        for op in ops {
+            let what = super::op_head(&op);
+            if let Err(e) = super::apply(core, op) {
+                crate::fault::report(format!("kaya: applying {what} failed: {e}"));
+            }
+        }
+        for occ in heard {
             core.occurrences.send(occ);
         }
     }
@@ -2193,6 +2200,17 @@ fn in_mta<T: Send + 'static>(f: impl FnOnce() -> windows_core::Result<T> + Send 
 #[cfg(feature = "harness")]
 pub(super) mod stage {
     use super::*;
+
+    /// expect_player_open's read (docs/media-plan.md §7d): whether the n-th
+    /// player by id has a source set on its MediaPlayer.
+    pub(in super::super) fn player_open(core: &CoreState, n: usize) -> Result<bool, String> {
+        let mut ids: Vec<u64> = core.media.players.keys().copied().collect();
+        ids.sort_unstable();
+        let Some(id) = ids.get(n) else {
+            return Err(format!("this process holds {} player(s)", ids.len()));
+        };
+        Ok(core.media.players[id].player.Source().is_ok())
+    }
 
     /// The video view registry's widget at `index`.
     pub(in super::super) fn video_at(core: &CoreState, index: isize) -> Option<u64> {

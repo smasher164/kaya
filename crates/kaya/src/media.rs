@@ -451,6 +451,20 @@ impl Media {
         })
     }
 
+    /// The core handed a held source to the platform (docs/media-plan.md
+    /// §7d): the open's bound, and a held seek's, run from now.
+    pub(crate) fn handed_over(&mut self, player: PlayerId) {
+        let now = self.now();
+        if let Some(p) = self.players.get_mut(&player) {
+            if p.state == PlayerState::Loading {
+                p.opened_at = Some(now);
+            }
+            if let Some((_, to)) = p.seek_wait {
+                p.seek_wait = Some((now, to));
+            }
+        }
+    }
+
     pub(crate) fn was_released(&self, player: PlayerId) -> bool {
         self.released.contains(&player)
     }
@@ -962,6 +976,10 @@ impl Visibility {
             self.bands.insert(id, band);
         }
         Some(shown)
+    }
+
+    pub(crate) fn is_shown(&self, id: WidgetId) -> bool {
+        self.bands.contains_key(&id)
     }
 
     /// The view went away: true when the app last heard it shown, so it
@@ -1731,7 +1749,7 @@ mod tests {
             .unwrap();
         let mut heard = Vec::new();
         for frame in 0..=60 {
-            heard.extend(scene.video_visible(copy, frame as f64 / 60.0));
+            heard.extend(scene.video_visible(copy, frame as f64 / 60.0).0);
         }
         assert_eq!(heard.len(), 11, "entering, nine tenths and whole: {heard:?}");
         assert!(heard.iter().all(|o| matches!(o,
@@ -1742,7 +1760,139 @@ mod tests {
             scene.take_asks().as_slice(),
             [Occurrence::InstanceVideoVisibility { shown, .. }] if *shown == 0.0
         ));
-        assert!(scene.video_visible(copy, 1.0).is_empty(), "a torn-down copy reports nothing");
+        assert!(scene.video_visible(copy, 1.0).0.is_empty(), "a torn-down copy reports nothing");
+    }
+
+    fn source(player: u64, url: &str) -> TxOp {
+        TxOp::SetPlayerProp {
+            player: PlayerId(player),
+            prop: PlayerProp::Source,
+            value: Value::Str(url.into()),
+        }
+    }
+
+    const CLIP: &str = "media/h264_aac.mp4";
+
+    /// The source ops `ops` hand the platform, per player: "" for a close.
+    fn sources(ops: &[ApplyOp]) -> Vec<(u64, bool)> {
+        ops.iter()
+            .filter_map(|op| match op {
+                ApplyOp::SetPlayerProp { player, prop: PlayerProp::Source, value: Value::Str(url) } => {
+                    Some((player.0, !url.is_empty()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A feed whose players were sourced in the transaction that inserted
+    /// their rows, as media_feed's guests do, and each row's copy.
+    fn sourced_feed(players: &[u64]) -> (crate::scene::Scene, Vec<ApplyOp>, Vec<WidgetId>) {
+        let (mut scene, mut ops) = feed(&[]);
+        let mut tx = Vec::new();
+        for (i, p) in players.iter().enumerate() {
+            tx.push(TxOp::CreatePlayer { player: PlayerId(*p) });
+            tx.push(source(*p, CLIP));
+            tx.push(row(i as i64, *p, false));
+        }
+        ops.extend(scene.apply(tx));
+        let copies = ops
+            .iter()
+            .filter_map(|op| match op {
+                ApplyOp::SetVideoPlayer { widget, .. } => Some(*widget),
+                _ => None,
+            })
+            .collect();
+        (scene, ops, copies)
+    }
+
+    /// THE LAZY OPEN (docs/media-plan.md §7d): a row's player hands its
+    /// source to the platform when its view first shows, and not before.
+    #[test]
+    fn a_rows_player_opens_only_once_its_view_shows() {
+        let (mut scene, ops, copies) = sourced_feed(&[3, 4]);
+        assert_eq!(sources(&ops), [], "no row's view has shown yet");
+        assert!(scene.player_held(PlayerId(3)) && scene.player_held(PlayerId(4)));
+        assert_eq!(sources(&scene.video_visible(copies[1], 0.0).1), []);
+        let (_, opened) = scene.video_visible(copies[0], 0.05);
+        assert_eq!(sources(&opened), [(3, true)]);
+        assert!(!scene.player_held(PlayerId(3)) && scene.player_held(PlayerId(4)));
+        assert_eq!(sources(&scene.video_visible(copies[0], 1.0).1), [], "handed over once");
+        assert_eq!(sources(&scene.video_visible(copies[1], 1.0).1), [(4, true)]);
+    }
+
+    /// A player no row names opens at once: audio alone, or a live view.
+    #[test]
+    fn a_player_no_row_names_opens_at_once() {
+        let (mut scene, _) = scene_with_video(WidgetKind::Video);
+        let ops = scene.apply(vec![source(P.0, CLIP), TxOp::CreatePlayer { player: PlayerId(8) }, source(8, CLIP)]);
+        assert_eq!(sources(&ops), [(P.0, true), (8, true)]);
+    }
+
+    /// Every op for a held player waits behind its source and keeps its order.
+    #[test]
+    fn a_held_players_commands_follow_its_source_at_the_hand_over() {
+        let (mut scene, _, copies) = sourced_feed(&[3]);
+        let ops = scene.apply(vec![
+            TxOp::PlayerCommand { player: PlayerId(3), command: PlayerCommand::Seek(500) },
+            TxOp::PlayerCommand { player: PlayerId(3), command: PlayerCommand::Play },
+        ]);
+        assert!(!ops.iter().any(|op| matches!(op, ApplyOp::PlayerCommand { .. })), "{ops:?}");
+        let (_, opened) = scene.video_visible(copies[0], 1.0);
+        let order: Vec<&str> = opened
+            .iter()
+            .filter_map(|op| match op {
+                ApplyOp::SetPlayerProp { prop: PlayerProp::Source, .. } => Some("source"),
+                ApplyOp::PlayerCommand { command: PlayerCommand::Seek(_), .. } => Some("seek"),
+                ApplyOp::PlayerCommand { command: PlayerCommand::Play, .. } => Some("play"),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(order, ["source", "seek", "play"]);
+    }
+
+    /// A new source on an open player whose row is out of view closes the
+    /// platform's item and holds the new one; a shown row's opens at once.
+    #[test]
+    fn a_new_source_off_screen_closes_the_item_and_waits() {
+        let (mut scene, _, copies) = sourced_feed(&[3]);
+        scene.video_visible(copies[0], 1.0);
+        assert_eq!(sources(&scene.apply(vec![source(3, "media/tone.mp3")])), [(3, true)], "still shown");
+        scene.video_visible(copies[0], 0.0);
+        assert_eq!(sources(&scene.apply(vec![source(3, CLIP)])), [(3, false)]);
+        assert!(scene.player_held(PlayerId(3)));
+        assert_eq!(sources(&scene.video_visible(copies[0], 0.5).1), [(3, true)]);
+    }
+
+    /// The app clearing a held player's source, or releasing it, ends the
+    /// hold with nothing handed over.
+    #[test]
+    fn clearing_or_releasing_a_held_player_ends_the_hold() {
+        let (mut scene, _, copies) = sourced_feed(&[3, 4]);
+        let ops = scene.apply(vec![source(3, ""), TxOp::ReleasePlayer { player: PlayerId(4) }]);
+        assert_eq!(sources(&ops), [(3, false)]);
+        assert!(!scene.player_held(PlayerId(3)) && !scene.player_held(PlayerId(4)));
+        assert_eq!(sources(&scene.video_visible(copies[0], 1.0).1), []);
+    }
+
+    /// A row the band has not realized has no view, and its player still
+    /// waits: the row names it. A player whose row went away is no row's.
+    #[test]
+    fn a_player_in_a_row_with_no_view_waits() {
+        let (mut scene, _, _) = sourced_feed(&[30, 31, 32, 33, 34, 35, 36, 37, 38, 39]);
+        scene.declare_windowing();
+        let band = scene.window_moved(2, 0, 1);
+        assert!(band.iter().any(|op| matches!(op, ApplyOp::Destroy { .. })), "the band tore rows down: {band:?}");
+        let ops = scene.apply(vec![
+            TxOp::CreatePlayer { player: PlayerId(20) },
+            source(20, CLIP),
+            row(9, 20, true),
+        ]);
+        assert!(!ops.iter().any(|op| matches!(op, ApplyOp::SetVideoPlayer { .. })), "row 9 is unrealized: {ops:?}");
+        assert_eq!(sources(&ops), [(39, true)], "39 left every row, so it opens; 20 waits");
+        assert!(scene.player_held(PlayerId(20)));
+        let ops = scene.apply(vec![TxOp::CreatePlayer { player: PlayerId(6) }, source(6, CLIP)]);
+        assert_eq!(sources(&ops), [(6, true)]);
     }
 
     const VTT: &str = "WEBVTT\n\n00:00.000 --> 00:01.000\nfirst cue\n\n00:01.000 --> 00:02.000\nsecond cue\n";

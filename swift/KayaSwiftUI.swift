@@ -11487,6 +11487,23 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("display awake \(got), wanted \(want)")
                 }
+            case "expect_player_open":
+                // docs/media-plan.md §7d: the n-th player by id holds an
+                // AVPlayerItem, read off the AVPlayer.
+                let n = Int(parts[1]) ?? -1
+                let want = parts[2] == "yes"
+                let got: Bool? = DispatchQueue.main.sync {
+                    let ids = kayaPlayers.keys.sorted()
+                    return n >= 0 && n < ids.count ? kayaPlayers[ids[n]]?.player.currentItem != nil : nil
+                }
+                if let got, got == want {
+                    observed.append("player \(n) open \(got)")
+                } else if let got {
+                    failures.append("player \(n) open \(got), wanted \(want)")
+                } else {
+                    let count = DispatchQueue.main.sync { kayaPlayers.count }
+                    failures.append("player \(n): this process holds \(count) player(s)")
+                }
             case "expect_badge":
                 // docs/app-badge-plan.md §4: the platform's own record, retried
                 // like an expect since the Dock publishes the label later.
