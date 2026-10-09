@@ -147,6 +147,18 @@ def swift_findings(source):
     if emit not in shown_ios:
         out.append(f"{SWIFT}: the iOS revealed secure field's Return no longer submits "
                    f"(docs/reveal-plan.md §3)")
+    # docs/traps.md, the iOS submit keyboard (2026-10-09).
+    ios_view = block_after(src, "struct KayaUITextView: UIViewRepresentable {")
+    ios_update = block_after(ios_view, "func updateUIView(_ view: UITextView, context: Context)")
+    two_hops = re.search(
+        r"DispatchQueue\.main\.async \{\s*DispatchQueue\.main\.async \{ \[weak view\] in\s*"
+        r"guard let view, kayaScene\.focusedId != id, view\.isFirstResponder else \{ return \}\s*"
+        r"view\.resignFirstResponder\(\)", ios_update)
+    if ios_update.count("resignFirstResponder()") != 1 or not two_hops:
+        out.append(f"{SWIFT}: the iOS textarea resigns in the turn its focus moved — a move "
+                   f"between two text views must be the new view's becomeFirstResponder, the "
+                   f"old one's resign two turns later and only if it still holds focus, or the "
+                   f"keyboard hides between them and a seen hardware keyboard keeps it hidden")
     doors = blocks_after(src, ".onSubmit {") + [mac, ios_door, shown_mac, shown_ios]
     out.extend(only_through_doors(SWIFT, src, emit, doors))
     return out
@@ -593,6 +605,16 @@ n6 = gate.doctor("the iOS shouldChangeTextIn submits guard cut", REAL[SWIFT],
                  'if let node, replacement == "\\n" {')
 watched("an iOS textarea submitting whether or not it asked to", {**REAL, SWIFT: n6},
         "shouldChangeTextIn emit is not dominated by submits")
+n_ios_focus = gate.doctor(
+    "the iOS textarea's resign put back in the become's turn", REAL[SWIFT],
+    r"DispatchQueue\.main\.async \{\n(\s*)DispatchQueue\.main\.async \{ "
+    r"\[weak view\] in\n(\s*)guard let view, kayaScene\.focusedId != id, "
+    r"view\.isFirstResponder else \{ return \}\n"
+    r"(\s*)view\.resignFirstResponder\(\)\n\s*\}\n",
+    r"DispatchQueue.main.async { [weak view] in\n\2guard let view, "
+    r"kayaScene.focusedId != id else { return }\n\3view.resignFirstResponder()\n")
+watched("an iOS textarea whose focus move hides the keyboard", {**REAL, SWIFT: n_ios_focus},
+        "the iOS textarea resigns in the turn its focus moved")
 
 # GTK
 n7 = gate.doctor("the gtk entry activate emit cut", REAL[GTK],
@@ -891,7 +913,7 @@ n_win_verb = gate.doctor("the harness's nudge committing past the door", REAL[WI
 watched("a WinUI verb that commits without the user's door", {**REAL, WINUI: n_win_verb},
         "winui_number_settle is called")
 
-gate.negatives_ran(55)
+gate.negatives_ran(56)
 
 for line in census(REAL):
     gate.finding(line)

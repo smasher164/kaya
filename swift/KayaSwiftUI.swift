@@ -21694,6 +21694,34 @@ func kayaUndoInertNote(_ item: KayaMenuItemModel, verb: String) {
         return ok ? nil : (lines.first ?? "the host refused the key without saying why")
     }
 
+    /// What held the keyboard when the host could not type (docs/traps.md, the
+    /// iOS submit keyboard of 2026-10-09).
+    func kayaFocusReading() -> String {
+        func describe(_ view: UIView?) -> String {
+            guard let view else { return "nothing" }
+            let node = (view as? KayaTextView)?.nodeId
+            let window = view.window.map {
+                "\(type(of: $0)) key=\($0.isKeyWindow) level=\($0.windowLevel.rawValue)"
+            } ?? "no window"
+            return "\(type(of: view)) node=\(node.map(String.init) ?? "-") "
+                + "id=\"\(view.accessibilityIdentifier ?? "")\" window=[\(window)] "
+                + "hidden=\(view.isHidden) frame=\(view.frame) "
+                + "inputView=\(view.inputView.map { "\(type(of: $0))" } ?? "nil")"
+        }
+        let focus = kayaScene.focusedId
+        let held = focus.flatMap { kayaUITextViews[$0]?.view }
+        let windows = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .map { "\(type(of: $0)) key=\($0.isKeyWindow) level=\($0.windowLevel.rawValue)" }
+        return "kaya's focus is node \(focus.map(String.init) ?? "nowhere") "
+            + "(\(focus.flatMap { kayaScene.nodes[$0]?.a11yId } ?? "")); the first responder is "
+            + describe(kayaFirstResponderView())
+            + "; node's own text view is "
+            + (held.map { "\(describe($0)) firstResponder=\($0.isFirstResponder)" } ?? "unregistered")
+            + "; windows [\(windows.joined(separator: ", "))]"
+    }
+
     func kayaTypeThroughHost(_ text: String, verb: String = "type_b64") -> String? {
         guard let input = kayaAwaitFocusedTextInput() else {
             return "reached no editable first responder — nothing was typed"
@@ -21707,7 +21735,8 @@ func kayaUndoInertNote(_ item: KayaMenuItemModel, verb: String) {
         let payload = Data(text.utf8).base64EncodedString()
         let (ok, lines) = KayaSimdrive.ask("\(verb) \(payload)", timeout: 60)
         if !ok {
-            return lines.first ?? "the host refused to type without saying why"
+            let refused = lines.first ?? "the host refused to type without saying why"
+            return refused + "; " + DispatchQueue.main.sync { kayaFocusReading() }
         }
         kayaSettleTypedText(from: before)
         return nil
@@ -27499,12 +27528,19 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             let wants = focusedId == node.id
             if wants != view.isFirstResponder {
                 let id = node.id
-                DispatchQueue.main.async { [weak view] in
-                    guard let view, (kayaScene.focusedId == id) == wants else { return }
-                    if wants {
+                // docs/traps.md, the iOS submit keyboard: a move between two
+                // text views is one becomeFirstResponder, never a resign first.
+                if wants {
+                    DispatchQueue.main.async { [weak view] in
+                        guard let view, kayaScene.focusedId == id else { return }
                         view.becomeFirstResponder()
-                    } else {
-                        view.resignFirstResponder()
+                    }
+                } else {
+                    DispatchQueue.main.async {
+                        DispatchQueue.main.async { [weak view] in
+                            guard let view, kayaScene.focusedId != id, view.isFirstResponder else { return }
+                            view.resignFirstResponder()
+                        }
                     }
                 }
             }
