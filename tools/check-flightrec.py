@@ -997,11 +997,22 @@ def android_report_checks(src, echo=False):
               "KAYA_DRAG_EVENT: source detached ended=false",
               "KAYA_DRAG_STARTED: draganddrop",
               "KAYA_REQUEST: draganddrop 6 96 64 106 128 1500",
-              "KAYA_ACK: draganddrop 6"]
+              "KAYA_ACK: draganddrop 6",
+              "CCodec  : allocate(c2.goldfish.h264.decoder)",
+              "CCodec  : Created component [c2.goldfish.h264.decoder]",
+              "C2GoldfishAvcDec: calling onInit",
+              "GoldfishComponentStore: created component",
+              "hw-IPCThreadState: All binder threads in pool (8 threads) busy for 15021 ms",
+              "C2BqBuffer: cannot dequeue buffer 0",
+              "CCodec  : [c2.android.aac.decoder] previous call to flush exceeded timeout",
+              "kaya    : media: player 1 failed media3 1003 underlying 0: ERROR_CODE_TIMEOUT: "
+              "Unexpected runtime error: Detaching surface timed out.",
+              "init    : Service 'android-hardware-media-c2-goldfish-hal-1-0' (pid 394) "
+              "received signal 31"]
     timeline = scope["android_system_events"]("\n".join([*events, "unrelated noise"]))
     if any(event not in timeline for event in events) or "unrelated noise" in timeline:
-        found.append("android: system timeline dropped a focus/ANR event or drag event, "
-                     "or kept unrelated noise")
+        found.append("android: system timeline dropped a focus/ANR event, drag event or "
+                     "media codec event, or kept unrelated noise")
     if "Selected 0 line(s)" not in scope["android_system_events"]("unrelated noise"):
         found.append("android: empty system timeline did not report its zero count")
     shade = scope["android_shade_history"]
@@ -1485,6 +1496,7 @@ for label, before, after, want in (
         ("native drag", "WindowManager:", "LostWindowManager:", "drag event"),
         ("view drop", "VRI", "LostView", "drag event"),
         ("Kaya drag", "KAYA_DRAG_", "LOST_DRAG_", "drag event"),
+        ("media codec", "C2Goldfish", "LostGoldfish", "media codec event"),
         ("shade panel", "New panel State:|", "Lost panel State:|", "shade history dropped"),
         ("shade focus", "should be (?:visible and )?focusable|", "should be lost|",
          "shade history dropped"),
@@ -1641,6 +1653,6 @@ stacks_section = doctored(LANE_PY, r'self\.adopt\(bundle, "stacks",',
 gate.negative("NS6 iOS stacks section unwritten", lambda: census_sections(stacks_section),
               want="`stacks` is declared")
 
-gate.negatives_ran(96)
+gate.negatives_ran(97)
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

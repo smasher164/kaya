@@ -14676,6 +14676,10 @@ THE TOKEN WAS NOT THE CAUSE (measured 2026-10-07, below): chat-go failed the
 same way holding it, and SystemUI's own logs name an expand that landed inside
 the reply's unfinished collapse.
 
+POOLED SINCE 2026-10-09: the drags, chat-go, notify-compose and tasks-compose
+run in the pool; only clock24-compose stays ALONE ("The android lane's matrix
+time is the host's", below).
+
 ## The idle waits held the token (measured 2026-10-07)
 
 The mac funnel waited for an idle host INSIDE the matrix-wide token, as
@@ -15219,3 +15223,73 @@ tools/lib/android-leg-order.py's drain clause (per-suite drain, an isolated
 leg pooled, the isolated block above the drain, a stage with no claim, a
 claim that takes no slot or never releases, each watched red) and the
 worker order marker for `device_online`.
+
+## The goldfish codec HAL's binder pool ran dry under media_feed's ten decoders (seen 2026-10-09)
+
+media_feed-jvm went red in the toast matrix (one-minute host load 114 three
+minutes later): the first row 000000 over its whole box with media3 in
+STATE_BUFFERING and no frame rendered, then every player failed `Detaching
+surface timed out` two seconds apart once the rows scrolled away. The leg's
+full buffers (not the bundle, whose logcat tail began after the app had
+gone) show the cause on the emulator's side: fourteen c2.goldfish.h264.decoder
+components created within a second (ten, then four more as the
+setOutputSurface workaround re-created them for their surfaces), each
+`calling onInit`, and then nothing from any decoder for 49 s, until the app's
+death logged `hw-IPCThreadState: All binder threads in pool (8 threads) busy
+for 15021 ms` in the codec HAL with every decoder stuck in `cannot dequeue
+buffer` / `fetchGraphicBlock ... failed`. The HAL serves every decoder on the
+device through those eight threads; that the blocked decoders were what held
+them is the likely reading, not a measured one. Not reproduced: six media_feed legs under 28
+spinning cores (load 60-100) and three quiet ones passed in 4-7 s. The
+bundle's system timeline now carries the codec lines (allocation, the HAL's
+`created component`, onInit, the binder-pool and dequeue lines, flush
+timeouts, `Detaching surface`, the HAL's own restart), the leg log the host's
+load at the verdict, and Compose's frames reading the buffered duration,
+whether media3 is loading and the decoder's inits, queued inputs and rendered
+frames, so the next sighting reads `0 input(s) queued` or not without the
+buffers file (forced red, 2026-10-09: `state 3, 2000 ms buffered, not
+loading, 2 decoder init(s), 28 input(s) queued, 1 frame(s) rendered`). Ten
+players preparing at mount is the feed scene's own shape; whether kaya should
+hold a feed's off-screen players unprepared on Android is a design question,
+recorded in docs/measurements/android-ceiling-2026-10-09.md. GUARD:
+check-flightrec's Android timeline clause with a media codec cut, watched red.
+
+## The iOS submit keyboard: a focus move between text views that resigned first (measured 2026-10-09)
+
+All three iOS submit legs failed at `type "hello"` after `click
+textarea@compose`: the driver waited 45 s for a keyboard and saw none. The
+new reading in the refusal (`kayaFocusReading`) showed the compose text view
+WAS first responder, in the key window, unhidden. The toast's overlay was the
+first suspect and was ruled out: with `KayaToastHost` cut from the root the leg
+failed the same way. ba65d93b, the last tree whose matrix passed, built in a
+scratch worktree, failed the same way on the same simulators, so the tree did
+not change. The simulator state did, and its history is not recorded. The app
+log shows `syncMinimizedStateToHardwareKeyboardAttachedState ... minimized = 1`
+at every focus change. The textarea's focus-following code resigned the old
+view and made the new one first responder in two separate main-queue turns,
+17 ms apart, and UIKit began hiding the keyboard in between (`willHide`). The
+new responder then got an input view set marked `(not visible)`. The earlier
+fields in the same leg recovered because the keyboard had already finished
+hiding before they took focus. The iOS textarea now makes the new view first
+responder alone, which transfers the keyboard. The old view resigns two turns
+later, and only if it still holds focus. submit, toast, secure, reveal,
+autofill, tasks and every textarea scene then passed on iOS. GUARD:
+check-submit's iOS focus-move clause, with the single-turn resign put back in
+place and watched red; the refusal now prints the first responder and the
+windows.
+
+## The android lane's matrix time is the host's (measured 2026-10-09)
+
+Android's net time over four matrices climbed 765, 793, 857, 912 s against an
+870 s ceiling while the lane run alone stayed at 505-509 s after build-compose
+and its shared legs summed 989 and 999 s: the matrix roughly doubles every
+leg's time (2079-2223 s of leg time in the last two matrices), and every other
+lane slowed in the same matrices. Under the matrix the serial ALONE block was
+a third of the lane's net (323 s, with three of four phones idle). Run whole
+beside 30 spinning processes, the lane read 689 s after build-compose with
+that block serial and 483 s with it pooled, every pooled drag and shade leg
+green in both pooled runs (docs/measurements/android-ceiling-2026-10-09.md).
+A lane run by hand runs the microphone legs in place: under generated load
+pass KAYA_QUIET=skip, as validate-all does, or they fail as the emulator's
+audio input entry says. GUARD: none new; a pooled drag or shade red is read
+from its bundle's system timeline, which carries both histories.

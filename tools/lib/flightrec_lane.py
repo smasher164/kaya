@@ -76,9 +76,16 @@ def android_system_events(text):
                r"wm_(?:pause|resume|set_resumed)_activity:|"
                r"WindowManager:.*(?:[Dd]rag|DRAG|[Dd]rop|DROP)|"
                r"VRI\[.*\]: Reporting drop result:|"
-               r"KAYA_DRAG_(?:EVENT|STARTED):|KAYA_(?:REQUEST|ACK): draganddrop")
+               r"KAYA_DRAG_(?:EVENT|STARTED):|KAYA_(?:REQUEST|ACK): draganddrop|"
+               # docs/traps.md: The goldfish codec HAL's binder pool ran dry.
+               r"CCodec\s*: (?:allocate|Created component)|C2Goldfish\w*:|"
+               r"GoldfishComponentStore: created component|binder threads in pool|"
+               r"cannot dequeue buffer|"
+               r"exceeded timeout|Detaching surface|media: player \d+ failed|"
+               r"init\s*: .*media-c2")
     lines = [line for line in text.splitlines() if re.search(pattern, line)]
-    return ("Selected focus, ANR, clipboard and drag events from this device's logcat.\n"
+    return ("Selected focus, ANR, clipboard, drag and media codec events from this "
+            "device's logcat.\n"
             "History can predate this leg; match timestamps against leg-log.txt.\n"
             f"Selected {len(lines)} line(s).\n" + "\n".join(lines) + "\n")
 

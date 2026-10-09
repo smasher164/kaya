@@ -1898,6 +1898,8 @@ def run_apk_on(serial, name, apk, component, script, extras,
         # emulator ran the leg, and the dump below is only chaseable
         # there.
         print(f"leg device: {serial}", file=log)
+        print("host load at the verdict: {:.1f} / {:.1f} / {:.1f} (1, 5, 15 min) "
+              "on {} cores".format(*os.getloadavg(), os.cpu_count()), file=log)
         # THREE TAGS, NOT ONE: AndroidRuntime carries JVM exceptions
         # only, a Go panic goes under `Go` (measured 2026-08-07), and
         # DEBUG:F is the tombstone header. THE SENTENCE THAT NAMES THE

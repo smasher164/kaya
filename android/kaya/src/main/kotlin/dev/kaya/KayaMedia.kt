@@ -794,9 +794,13 @@ internal fun kayaVideoFramesWhyNot(node: KayaNode): String? {
     val surface = kayaVideoSurfaces[node.id]
     if (surface != p.id) return "the view has composed no surface for player ${p.id} (it holds ${surface ?: "none"})"
     if (p.firstFrameGeneration != p.generation) {
-        val rendered = p.exo.videoDecoderCounters?.renderedOutputBufferCount ?: 0
+        val counters = p.exo.videoDecoderCounters
+        val decoder = if (counters == null) "no video decoder enabled" else
+            "${counters.decoderInitCount} decoder init(s), ${counters.queuedInputBufferCount} input(s) queued, " +
+                "${counters.renderedOutputBufferCount} frame(s) rendered"
         return "media3 rendered no first frame of this item to the surface " +
-            "(state ${p.exo.playbackState}, $rendered frame(s) rendered)"
+            "(state ${p.exo.playbackState}, ${p.exo.totalBufferedDuration} ms buffered, " +
+            "${if (p.exo.isLoading) "loading" else "not loading"}, $decoder)"
     }
     return null
 }

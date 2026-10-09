@@ -952,7 +952,7 @@ in docs/deferred.md.
    DESKTOP IS PHOTOGRAPHED ONLY ON AN IDLE HOST since 2026-09-28 (the
    maintainer's screen is his while he is at it): shot_desktop is run
    against a doubled idle clock, two cuts watched.
-   Ninety-six watched negatives, counts printed),
+   Ninety-seven watched negatives, counts printed),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer

@@ -45,18 +45,11 @@ EXCLUSIVE = {
              # §4): no failed read in 8 quiet runs, most runs beside 14 spinning cores.
              "capture-compose", "capture-jvm", "capture-go"}
 
-# ALONE IN THIS LANE, NOT ON THE HOST (the maintainer, 2026-10-06; docs/traps.md,
-# the matrix-wide token's cost): the drags drive the emulator's own input, never
-# the host's, and held the matrix-wide token for 84 s a matrix that every other
-# lane waited out. The pool empties around each; the token is
-# not taken. Their sightings under a matrix are the dnd-compose WATCH's.
-# The notification-shade legs joined them on 2026-10-07 (the maintainer: anything
-# that can be parallelized should be): their reds were the shade's focus, not
-# the token (docs/traps.md, the shade an expand reopens without focus).
-# clock24-compose sets the device's own 24-hour setting, every process's on
-# that emulator (SCENE_SETTINGS), and nothing on the host's.
-ALONE = {"dnd-compose", "dnd-jvm", "dnd-go", "chat-go", "notify-compose",
-         "tasks-compose", "clock24-compose"}
+# ALONE IN THIS LANE, NOT ON THE HOST: the pool empties around each and the token
+# is not taken. clock24-compose sets every phone's 24-hour setting
+# (SCENE_SETTINGS). The drags and the shade legs were pooled on 2026-10-09
+# (docs/measurements/android-ceiling-2026-10-09.md).
+ALONE = {"clock24-compose"}
 
 # THE QUIET TAIL (the maintainer's ruling of 2026-10-05; docs/traps.md, the
 # emulator's audio input entry): the microphone legs run after every other lane
