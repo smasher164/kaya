@@ -15140,6 +15140,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.rows.push(grid.clone());
                     NativeWidget::Row(grid)
                 }
+                WidgetKind::Expander => crate::depth_stub("expander"),
                 WidgetKind::Segmented => {
                     // docs/segmented-plan.md §3.
                     let bar = SelectorBar::new()?;
@@ -21446,6 +21447,7 @@ fn registry_widget_at(core: &CoreState, kind: crate::harness::TargetKind, i: usi
         K::Video => core.media.video_ids.get(i).copied(),
         K::SecureField => core.secure_ids.get(i).copied(),
         K::Segmented => id_of!(core.segmenteds, NativeWidget::Segmented(bar), bar),
+        K::Expander => crate::depth_stub("expander"),
         K::ColorPicker => core.color_picker_ids.get(i).copied(),
         K::NumberField => core.number_field_ids.get(i).copied(),
         K::Canvas => core.canvas_ids.get(i).copied(),
@@ -21744,6 +21746,7 @@ fn target_element(
         K::Video => nth!(media::elements(core)),
         K::SecureField => nth!(core.secure_fields),
         K::Segmented => nth!(core.segmenteds),
+        K::Expander => crate::depth_stub("expander"),
         K::ColorPicker => nth!(core.color_pickers),
         K::NumberField => nth!(core.number_fields),
         K::DatePicker => nth!(core.date_pickers),
@@ -21869,6 +21872,7 @@ fn registry_ids(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<u64> 
         K::Video => core.media.video_ids.clone(),
         K::SecureField => core.secure_ids.clone(),
         K::Segmented => ids!(core.segmenteds, NativeWidget::Segmented(bar), bar),
+        K::Expander => crate::depth_stub("expander"),
         K::ColorPicker => core.color_picker_ids.clone(),
         K::NumberField => core.number_field_ids.clone(),
         K::Canvas => core.canvas_ids.clone(),
@@ -25148,6 +25152,7 @@ impl crate::harness::Stage for WinUiStage {
                 K::Video => find(core, K::Video, &media::elements(core), &id),
                 K::SecureField => find(core, K::SecureField, &core.secure_fields, &id),
                 K::Segmented => find(core, K::Segmented, &core.segmenteds, &id),
+                K::Expander => crate::depth_stub("expander"),
                 K::ColorPicker => find(core, K::ColorPicker, &core.color_pickers, &id),
                 K::NumberField => find(core, K::NumberField, &core.number_fields, &id),
                 K::Canvas => find(core, K::Canvas, &core.canvases, &id),
@@ -26841,6 +26846,16 @@ impl crate::harness::Stage for WinUiStage {
             Ok(out.join("|"))
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
+    /// No expander exists on this backend before the breadth
+    /// (docs/expander-plan.md §6).
+    fn expanded(&self, _: crate::harness::Target) -> Result<(bool, bool), String> {
+        crate::depth_stub("expander")
+    }
+
+    fn collapsed_ancestor(&self, _: crate::harness::Target) -> Option<usize> {
+        crate::depth_stub("expander")
     }
 
     fn segment_symbol(&self, t: crate::harness::Target, index: usize) -> String {

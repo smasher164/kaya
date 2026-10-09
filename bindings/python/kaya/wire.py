@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x5c53f4354ceb6019
+SPEC_HASH = 0x011ac2c5d907da7f
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -54,6 +54,7 @@ KIND_RANGE = 22
 KIND_VIDEO = 23
 KIND_SECURE_FIELD = 24
 KIND_SEGMENTED = 25
+KIND_EXPANDER = 26
 DRAW_OP_MOVE_TO = 1
 DRAW_OP_LINE_TO = 2
 DRAW_OP_CLOSE = 3
@@ -138,6 +139,8 @@ PROP_FORMAT = 55
 PROP_CONTENT_TYPE = 56
 PROP_REVEALED = 57
 PROP_REVEALABLE = 58
+PROP_SUMMARY = 59
+PROP_EXPANDED = 60
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -1866,6 +1869,36 @@ def tx_bind_revealable(widget_id: int, signal_id: int) -> bytes:
 def tx_bind_revealable_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_REVEALABLE, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_summary(widget_id: int, summary: str) -> bytes:
+    """set_property with a constant summary value (str)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_SUMMARY, SOURCE_CONST) + _enc.value(summary))
+
+
+def tx_bind_summary(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound summary value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_SUMMARY, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_summary_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_SUMMARY, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_expanded(widget_id: int, expanded: bool) -> bytes:
+    """set_property with a constant expanded value (bool)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_EXPANDED, SOURCE_CONST) + _enc.value(expanded))
+
+
+def tx_bind_expanded(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound expanded value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_EXPANDED, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_expanded_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_EXPANDED, SOURCE_ELEMENT, level, field))
 
 
 def tx_set_window_title(window: int, title: str) -> bytes:

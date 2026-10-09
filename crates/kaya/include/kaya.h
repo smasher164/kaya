@@ -1039,6 +1039,8 @@
 
 #define KAYA_KIND_SEGMENTED 25
 
+#define KAYA_KIND_EXPANDER 26
+
 /**
  * Property keys.
  */
@@ -1235,6 +1237,16 @@
  * A secure field carries the platform's show/hide toggle (docs/reveal-plan.md V1).
  */
 #define KAYA_PROP_REVEALABLE 58
+
+/**
+ * An expander's second header line (docs/expander-plan.md K3).
+ */
+#define KAYA_PROP_SUMMARY 59
+
+/**
+ * Whether an expander's body shows (docs/expander-plan.md K4).
+ */
+#define KAYA_PROP_EXPANDED 60
 
 /**
  * Window properties (spec::WINDOW_PROPS): their own namespace —

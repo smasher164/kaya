@@ -85,7 +85,7 @@ TARGET_KINDS = (
     "image", "scroll", "progress", "select", "radio", "grid",
     "textarea", "canvas", "date_picker", "time_picker", "labeled",
     "search", "number_field", "color_picker", "range", "video",
-    "secure_field", "segmented",
+    "secure_field", "segmented", "expander",
 )
 TARGET_RE = re.compile(r"\b(" + "|".join(TARGET_KINDS) + r")@([^\s;]*)")
 INDEX_RE = re.compile(r"\b(" + "|".join(TARGET_KINDS) + r")#([^\s;]*)")

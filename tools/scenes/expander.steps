@@ -1,0 +1,43 @@
+# The expander (docs/expander-plan.md §5): the header and the body read off
+# the platform and driven through the header's own press. The app's Show and
+# Hide write `expanded`, which the platform must show and which never echoes.
+expect_ax expander@details "button/Details"
+expect expander@details "Details"
+expect_expanded expander@details off
+expect_out_of_reach entry@name
+toggle expander@details on
+expect label@state "details: open"
+expect label@heard "heard: 1"
+expect_expanded expander@details on
+set_text entry@name "Ada"
+expect label@typed "name: Ada"
+toggle expander@details off
+expect label@state "details: closed"
+expect label@heard "heard: 2"
+expect_expanded expander@details off
+expect_out_of_reach entry@name
+# The body stayed alive while collapsed (K5).
+toggle expander@details on
+expect entry@name "Ada"
+click button@hide
+expect_expanded expander@details off
+click button@show
+expect_expanded expander@details on
+expect label@heard "heard: 3"
+# The form (K11): its expander is one of its rows, its labelled rows inside.
+expect_expanded expander@advanced off
+expect_out_of_reach checkbox@badge
+toggle expander@advanced on
+expect_expanded expander@advanced on
+expect_ax checkbox@badge "checkbox/Hide badge"
+# The stamped list (K10): each copy starts from its row's field, a toggle
+# names its row, and the app's write-back outlives the row's rebuild.
+expect_expanded expander@sec[s00] off
+expect_expanded expander@sec[s01] on
+toggle expander@sec[s00] on
+expect label@rows "sec s00: open"
+expect_expanded expander@sec[s00] on
+click button@rebuild
+expect label@rows "rebuilt s00"
+expect_expanded expander@sec[s00] on
+expect_expanded expander@sec[s01] on

@@ -4518,6 +4518,7 @@ fn kind_registry(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<gtk4
         K::Video => core.videos.iter().map(|v| v.overlay.clone().upcast()).collect(),
         K::SecureField => core.secure_fields.iter().map(|w| w.clone().upcast()).collect(),
         K::Segmented => core.segmenteds.iter().map(|w| w.clone().upcast()).collect(),
+        K::Expander => crate::depth_stub("expander"),
         K::ColorPicker => core.color_pickers.iter().map(|f| f.button.clone().upcast()).collect(),
         K::NumberField => core.number_fields.iter().map(|f| f.spin.clone().upcast()).collect(),
         K::Label => core.labels.clone(),
@@ -9647,6 +9648,7 @@ fn context_anchor_id(core: &CoreState, t: crate::harness::Target) -> u64 {
             .clone()
             .upcast(),
         K::Segmented => core.segmenteds[resolve(t.index, core.segmenteds.len())].clone().upcast(),
+        K::Expander => crate::depth_stub("expander"),
         K::Entry | K::Textarea | K::Search | K::NumberField | K::SecureField => {
             panic!("kaya: editable text is not a context anchor (v1)")
         }
@@ -12397,6 +12399,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.grids.push(grid.clone());
                     NativeWidget::Grid(grid)
                 }
+                WidgetKind::Expander => crate::depth_stub("expander"),
                 WidgetKind::Segmented => {
                     // docs/segmented-plan.md §3.
                     let group = adw::ToggleGroup::new();
@@ -19224,6 +19227,7 @@ impl crate::harness::Stage for GtkStage {
                 K::Checkbox => atspi::Role::CheckBox,
                 K::Select => atspi::Role::ComboBox,
                 K::Radio | K::Segmented => atspi::Role::Grouping,
+                K::Expander => crate::depth_stub("expander"),
                 // The root admits a11y_hint on activation kinds only
                 // (scene.rs), so anything else asking for one is a
                 // scene bug, said out loud rather than answered.
@@ -22891,6 +22895,16 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
+    /// No expander exists on this backend before the breadth
+    /// (docs/expander-plan.md §6).
+    fn expanded(&self, _: crate::harness::Target) -> Result<(bool, bool), String> {
+        crate::depth_stub("expander")
+    }
+
+    fn collapsed_ancestor(&self, _: crate::harness::Target) -> Option<usize> {
+        crate::depth_stub("expander")
+    }
+
     fn segment_symbol(&self, t: crate::harness::Target, index: usize) -> String {
         Self::on_main(move |core| {
             let Some(i) = crate::harness::try_resolve(t.index, core.segmenteds.len()) else {
@@ -24042,6 +24056,7 @@ fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk
         K::Video => try_resolve(target.index, core.videos.len()).map(|i| core.videos[i].overlay.clone().upcast()),
         K::SecureField => nth!(core.secure_fields),
         K::Segmented => nth!(core.segmenteds),
+        K::Expander => crate::depth_stub("expander"),
         K::ColorPicker => try_resolve(target.index, core.color_pickers.len())
             .map(|i| core.color_pickers[i].swatch.clone().upcast()),
         K::NumberField => try_resolve(target.index, core.number_fields.len())

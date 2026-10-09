@@ -41,6 +41,21 @@ pub(crate) fn answers() -> u64 {
     ANSWERS.load(Ordering::Acquire)
 }
 
+/// Whether this process declared an expander, live or in a template: the
+/// harness asks the backend for a collapsed ancestor only then
+/// (docs/expander-plan.md K5).
+static EXPANDERS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[allow(dead_code)]
+pub(crate) fn expanders_declared() -> bool {
+    EXPANDERS.load(std::sync::atomic::Ordering::Acquire)
+}
+
+#[cfg(test)]
+pub(crate) fn note_expander_for_test() {
+    EXPANDERS.store(true, std::sync::atomic::Ordering::Release);
+}
+
 /// Auxiliary windows: the host can materialize a surface beside the
 /// primary one. Clear on the phones, whose systems own surface geometry.
 pub(crate) const CAP_AUX_WINDOWS: u64 = 1;
@@ -1106,6 +1121,11 @@ pub(crate) struct Scene {
     /// Live segmented controls touched this transaction, checked for shape
     /// at its end (docs/segmented-plan.md G3, G4).
     segmented_dirty: Vec<WidgetId>,
+    /// Live expanders created this transaction, held to a header text at
+    /// its end (docs/expander-plan.md §4).
+    expander_dirty: Vec<WidgetId>,
+    /// Live expanders whose header text has been set.
+    expander_named: HashSet<WidgetId>,
     /// Live labels carrying a symbol: each is a segment
     /// (docs/segmented-plan.md G3).
     segment_symbols: HashSet<WidgetId>,
@@ -1205,6 +1225,7 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
                 | WidgetKind::Textarea
                 | WidgetKind::Search
                 | WidgetKind::SecureField
+                | WidgetKind::Expander
         ),
         // The prompt an empty field shows: the text kinds alone
         // (docs/search-plan.md S3).
@@ -1260,6 +1281,8 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         Prop::ContentType => matches!(kind, WidgetKind::Entry | WidgetKind::SecureField),
         // docs/reveal-plan.md V1.
         Prop::Revealed | Prop::Revealable => matches!(kind, WidgetKind::SecureField),
+        // docs/expander-plan.md K3, K4.
+        Prop::Summary | Prop::Expanded => kind == WidgetKind::Expander,
         Prop::Indeterminate => matches!(kind, WidgetKind::Progress),
         Prop::Source => matches!(kind, WidgetKind::Image),
         // Layout weight is kind-agnostic: any child of a row/column may
@@ -1271,12 +1294,16 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         Prop::Spacing => {
             matches!(
                 kind,
-                WidgetKind::Column | WidgetKind::Row | WidgetKind::Grid | WidgetKind::Labeled
+                WidgetKind::Column
+                    | WidgetKind::Row
+                    | WidgetKind::Grid
+                    | WidgetKind::Labeled
+                    | WidgetKind::Expander
             )
         }
         // Alignment likewise: where the container places ITS children
         // on the cross axis.
-        Prop::Align => matches!(kind, WidgetKind::Column | WidgetKind::Row),
+        Prop::Align => matches!(kind, WidgetKind::Column | WidgetKind::Row | WidgetKind::Expander),
         // The arrangement axis: the two constructor kinds are one node
         // this parameterizes (docs/adaptive-layout-plan.md D1).
         // A slider takes it too (docs/range-plan.md §2); a range refuses it
@@ -1294,7 +1321,11 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         Prop::Inset => {
             matches!(
                 kind,
-                WidgetKind::Column | WidgetKind::Row | WidgetKind::Grid | WidgetKind::Labeled
+                WidgetKind::Column
+                    | WidgetKind::Row
+                    | WidgetKind::Grid
+                    | WidgetKind::Labeled
+                    | WidgetKind::Expander
             )
         }
         // The grid's own shape: how many columns children fill
@@ -1333,6 +1364,7 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
                 | WidgetKind::DatePicker
                 | WidgetKind::TimePicker
                 | WidgetKind::ColorPicker
+                | WidgetKind::Expander
         ),
         // Semantic emphasis (docs/styling-plan.md D4). KIND legality here
         // is the union of the variants' homes; WHICH variant fits which
@@ -1344,7 +1376,7 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         ),
         // A button's glyph, and a segment's (a label held to a segmented
         // parent at the end of the transaction, docs/segmented-plan.md G3).
-        Prop::Symbol => matches!(kind, WidgetKind::Button | WidgetKind::Label),
+        Prop::Symbol => matches!(kind, WidgetKind::Button | WidgetKind::Label | WidgetKind::Expander),
         Prop::MaxWidth | Prop::MaxHeight => kind == WidgetKind::Image,
     };
     assert!(ok, "kaya: {kind:?} has no property {prop:?}");
@@ -1887,6 +1919,8 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Fit | Prop::Player | Prop::Capture | Prop::Aspect => ValueType::I64,
         Prop::ContentType => ValueType::I64,
         Prop::Revealed | Prop::Revealable => ValueType::Bool,
+        Prop::Summary => ValueType::Str,
+        Prop::Expanded => ValueType::Bool,
         Prop::Role => ValueType::I64,
         Prop::Symbol => ValueType::I64,
         Prop::Indeterminate | Prop::Fill | Prop::Wrap | Prop::Rich | Prop::Submits => ValueType::Bool,
@@ -2401,6 +2435,10 @@ fn short_of_gap(low: f64, high: f64, gap: f64) -> bool {
 /// one control it names second — any leaf that is not a label — and at
 /// most a trailing button third. Nothing nested: the platform's labelled
 /// control has exactly these seats.
+/// docs/expander-plan.md §4: a header with no text has no name.
+const EXPANDER_NAMELESS: &str = "kaya: an expander's header is its text, and the text is its \
+    accessible name; give it a non-empty text (docs/expander-plan.md K2)";
+
 fn check_labeled_shape(who: &str, kinds: &[WidgetKind]) {
     assert!(
         kinds.len() == 2 || kinds.len() == 3,
@@ -2423,6 +2461,7 @@ fn check_labeled_shape(who: &str, kinds: &[WidgetKind]) {
                 | WidgetKind::Grid
                 | WidgetKind::Scroll
                 | WidgetKind::Labeled
+                | WidgetKind::Expander
         ),
         "kaya: labeled row {who}'s second child is the control it names — a leaf, \
          not a label or a container; got {control:?}"
@@ -2490,6 +2529,9 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
         value.type_of() == prop_value_type(prop),
         "kaya: {prop:?} cannot hold {value:?}"
     );
+    if let (WidgetKind::Expander, Prop::Text, Value::Str(text)) = (kind, prop, value) {
+        assert!(!text.is_empty(), "{EXPANDER_NAMELESS}");
+    }
     // Grow's domain is narrower than its type: a negative weight has
     // no reading under "divide the leftover in proportion to the
     // weights", and every backend would invent its own answer.
@@ -3054,6 +3096,53 @@ impl Scene {
         }
     }
 
+    /// docs/expander-plan.md K10, §4: a stamped expander names its header and
+    /// binds `expanded` to the row, since a re-stamp reads the row's data and
+    /// a toggle the app never wrote back is forgotten.
+    fn check_expander_template(&self, body: &TplBody, in_for: bool) {
+        let mut named: HashSet<u64> = HashSet::new();
+        let mut bound: HashSet<u64> = HashSet::new();
+        for op in &body.ops {
+            match op {
+                TplOp::SetProp { node, prop: Prop::Text, .. } => {
+                    named.insert(*node);
+                }
+                TplOp::SetProp { node, prop: Prop::Expanded, value } => {
+                    let held = match value {
+                        PropValue::Element { .. } => true,
+                        PropValue::Signal(_) => !in_for,
+                        PropValue::Const(_) => false,
+                    };
+                    if held {
+                        bound.insert(*node);
+                    } else {
+                        bound.remove(node);
+                    }
+                }
+                TplOp::For { bodies, .. } => {
+                    for b in bodies {
+                        self.check_expander_template(b, true);
+                    }
+                }
+                TplOp::When { body, .. } => self.check_expander_template(body, in_for),
+                _ => {}
+            }
+        }
+        for op in &body.ops {
+            if let TplOp::Widget { node, kind: WidgetKind::Expander } = op {
+                assert!(named.contains(node), "{EXPANDER_NAMELESS} (template node {node})");
+                assert!(
+                    bound.contains(node),
+                    "kaya: template node {node} is an expander whose `expanded` is not bound to \
+                     {} — a stamped copy is re-stamped from its row and would forget the \
+                     user's toggle; bind expanded to a Bool field of the row, and write the \
+                     toggled value back (docs/expander-plan.md K10)",
+                    if in_for { "a Bool field of the row" } else { "a Bool field or signal" }
+                );
+            }
+        }
+    }
+
     fn check_labeled_template(&self, body: &TplBody) {
         let mut children: HashMap<u64, Vec<u64>> = HashMap::new();
         for op in &body.ops {
@@ -3467,6 +3556,10 @@ impl Scene {
                     if kind == WidgetKind::Segmented {
                         self.segmented_dirty.push(id);
                     }
+                    if kind == WidgetKind::Expander {
+                        EXPANDERS.store(true, std::sync::atomic::Ordering::Release);
+                        self.expander_dirty.push(id);
+                    }
                     if kind == WidgetKind::Row {
                         // A row centres its children on the cross axis unless
                         // the app says otherwise (DESIGN.md Layout, R5).
@@ -3493,6 +3586,9 @@ impl Scene {
                     if kind == WidgetKind::Label && prop == Prop::Symbol {
                         self.segment_symbols.insert(widget);
                         self.segment_symbol_dirty.push(widget);
+                    }
+                    if kind == WidgetKind::Expander && prop == Prop::Text {
+                        self.expander_named.insert(widget);
                     }
                     match value {
                         PropValue::Const(v) => {
@@ -5256,6 +5352,12 @@ impl Scene {
             let segments = self.children_of.get(&id).map_or(&[][..], |c| &c[..]);
             let symbols = segments.iter().filter(|w| self.segment_symbols.contains(w)).count();
             check_segmented_shape(&format!("{id:?}"), segments.len(), symbols);
+        }
+        for id in std::mem::take(&mut self.expander_dirty) {
+            assert!(
+                !self.widgets.contains_key(&id) || self.expander_named.contains(&id),
+                "{EXPANDER_NAMELESS} (expander {id:?})"
+            );
         }
         // NO GROW INSIDE A WRAPPING ROW (docs/layout-knobs-plan.md §2): a
         // weight has no track to take on a line that breaks where it must.
@@ -7931,6 +8033,9 @@ impl Scene {
                 assert!(!clash, "kaya: template node id {} already exists", id.0);
                 top.current.declared.push(id.0);
                 top.current.ops.push(TplOp::Widget { node: id.0, kind });
+                if kind == WidgetKind::Expander {
+                    EXPANDERS.store(true, std::sync::atomic::Ordering::Release);
+                }
                 if kind == WidgetKind::Row {
                     top.current.ops.push(TplOp::SetProp {
                         node: id.0,
@@ -8191,18 +8296,21 @@ impl Scene {
             TxOp::TemplateEnd => {
                 let closed = scopes.pop().unwrap();
                 let bodies = self.close_scope_bodies(closed);
+                let in_for = scopes.iter().any(|s| matches!(s.header, ScopeHeader::For { .. }));
                 match &bodies {
                     ClosedScope::For { bodies, .. } => {
                         for body in bodies {
                             self.check_labeled_template(body);
                             self.check_segmented_template(body);
                             self.check_document_template(body);
+                            self.check_expander_template(body, true);
                         }
                     }
                     ClosedScope::When { body, .. } => {
                         self.check_labeled_template(body);
                         self.check_segmented_template(body);
                         self.check_document_template(body);
+                        self.check_expander_template(body, in_for);
                     }
                 }
                 match (scopes.last_mut(), bodies) {
@@ -11152,6 +11260,21 @@ mod tests {
                         TxOp::AddChild { parent: WidgetId(base), child: WidgetId(base + 2) },
                     ];
                 }
+                if kind == WidgetKind::Expander {
+                    let expanded = if base == 10 {
+                        PropValue::Element { level: 0, field: 1 }
+                    } else {
+                        PropValue::Const(Value::Bool(false))
+                    };
+                    return vec![
+                        TxOp::SetProperty {
+                            widget: WidgetId(base),
+                            prop: Prop::Text,
+                            value: PropValue::Const(Value::Str("Details".into())),
+                        },
+                        TxOp::SetProperty { widget: WidgetId(base), prop: Prop::Expanded, value: expanded },
+                    ];
+                }
                 if kind != WidgetKind::Labeled {
                     return Vec::new();
                 }
@@ -11180,7 +11303,7 @@ mod tests {
                 TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
                 TxOp::CreateCollection {
                     id: CollectionId(1),
-                    variants: vec![vec![ValueType::Str]],
+                    variants: vec![vec![ValueType::Str, ValueType::Bool]],
                 },
                 TxOp::CreateFor { id: 2, collection: CollectionId(1) },
                 TxOp::CreateWidget { id: WidgetId(10), kind },
@@ -11193,7 +11316,13 @@ mod tests {
                 TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
             ])
             .collect());
-            let stamped = scene.apply(vec![insert(1, vec![], "k", "row")]);
+            let stamped = scene.apply(vec![TxOp::CollectionInsert {
+                id: CollectionId(1),
+                path: vec![],
+                key: v("k"),
+                variant: 0,
+                record: vec![v("row"), Value::Bool(false)],
+            }]);
             let stamped_tagged = creates(&stamped)
                 .into_iter()
                 .find(|(k, _)| *k == kind)
@@ -11508,6 +11637,124 @@ mod tests {
                 .cloned()
                 .or_else(|| err.downcast_ref::<&str>().map(|s| (*s).to_owned()))
                 .unwrap_or_default();
+            assert!(msg.contains(want), "{msg}");
+        }
+    }
+
+    fn panic_text(err: Box<dyn std::any::Any + Send>) -> String {
+        err.downcast_ref::<String>()
+            .cloned()
+            .or_else(|| err.downcast_ref::<&str>().map(|s| (*s).to_owned()))
+            .unwrap_or_default()
+    }
+
+    /// A live expander over one entry, its header text `text` when given.
+    fn expander(text: Option<&str>) -> Vec<TxOp> {
+        let mut ops = vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Expander },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Entry },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+        ];
+        if let Some(text) = text {
+            ops.push(TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Text,
+                value: PropValue::Const(Value::Str(text.into())),
+            });
+        }
+        ops.extend([
+            TxOp::SetProperty { widget: WidgetId(1), prop: Prop::Summary, value: PropValue::Const(Value::Str("two on".into())) },
+            TxOp::SetProperty { widget: WidgetId(1), prop: Prop::Expanded, value: PropValue::Const(Value::Bool(false)) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+        ops
+    }
+
+    /// docs/expander-plan.md K1-K4, §4: a named expander is admitted and
+    /// tagged, since its user's toggle reports; a header with no text, or an
+    /// empty one, dies; the two props are the expander's alone; and an
+    /// expander is no labelled row's control.
+    #[test]
+    fn an_expander_is_named_and_its_props_are_its_own() {
+        let ops = Scene::new().apply(expander(Some("Details")));
+        assert!(ops.iter().any(|op| matches!(
+            op,
+            ApplyOp::Create { id: WidgetId(1), kind: WidgetKind::Expander, tag: Some(_) }
+        )));
+        for (ops, want) in [
+            (expander(None), "an expander's header is its text"),
+            (expander(Some("")), "an expander's header is its text"),
+        ] {
+            let msg = panic_text(std::panic::catch_unwind(|| { Scene::new().apply(ops); }).unwrap_err());
+            assert!(msg.contains(want), "{msg}");
+        }
+        for (kind, prop) in [(WidgetKind::Column, Prop::Expanded), (WidgetKind::Checkbox, Prop::Expanded),
+            (WidgetKind::Label, Prop::Summary)]
+        {
+            let msg = panic_text(std::panic::catch_unwind(|| check_prop(kind, prop)).unwrap_err());
+            assert!(msg.contains("has no property"), "{kind:?} {prop:?}: {msg}");
+        }
+        for prop in [Prop::Text, Prop::Symbol, Prop::Summary, Prop::Expanded, Prop::Spacing, Prop::Inset,
+            Prop::Align, Prop::A11yHint, Prop::Help]
+        {
+            check_prop(WidgetKind::Expander, prop);
+        }
+        assert_eq!(prop_value_type(Prop::Summary), ValueType::Str);
+        assert_eq!(prop_value_type(Prop::Expanded), ValueType::Bool);
+        let msg = panic_text(
+            std::panic::catch_unwind(|| check_labeled_shape("x", &[WidgetKind::Label, WidgetKind::Expander]))
+                .unwrap_err(),
+        );
+        assert!(msg.contains("second child is the control it names"), "{msg}");
+    }
+
+    /// A stamped expander over a Bool row field, its `expanded` bound as
+    /// `expanded` says: a row field, a constant, a signal, or nothing.
+    fn template_expander(expanded: Option<PropValue>, named: bool) -> Vec<TxOp> {
+        let mut ops = vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateSignal { id: SignalId(5), initial: Value::Bool(false) },
+            TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::Str, ValueType::Bool]] },
+            TxOp::CreateFor { id: 2, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Expander },
+            TxOp::CreateWidget { id: WidgetId(11), kind: WidgetKind::Label },
+            TxOp::AddChild { parent: WidgetId(10), child: WidgetId(11) },
+        ];
+        if named {
+            ops.push(TxOp::SetProperty {
+                widget: WidgetId(10),
+                prop: Prop::Text,
+                value: PropValue::Element { level: 0, field: 0 },
+            });
+        }
+        if let Some(value) = expanded {
+            ops.push(TxOp::SetProperty { widget: WidgetId(10), prop: Prop::Expanded, value });
+        }
+        ops.extend([
+            TxOp::TemplateEnd,
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+        ops
+    }
+
+    /// docs/expander-plan.md K10: a stamped expander's `expanded` is bound to a
+    /// Bool field of its row, refused at the template's close otherwise — a
+    /// copy re-stamped after its row scrolled away would forget the toggle.
+    #[test]
+    fn a_stamped_expander_binds_expanded_to_its_row() {
+        Scene::new().apply(template_expander(Some(PropValue::Element { level: 0, field: 1 }), true));
+        for (expanded, named, want) in [
+            (None, true, "template node 10 is an expander whose `expanded` is not bound to a Bool field of the row"),
+            (Some(PropValue::Const(Value::Bool(true))), true, "is not bound to a Bool field of the row"),
+            (Some(PropValue::Signal(SignalId(5))), true, "is not bound to a Bool field of the row"),
+            (Some(PropValue::Element { level: 0, field: 1 }), false, "an expander's header is its text"),
+            (Some(PropValue::Element { level: 0, field: 0 }), true, "cannot bind field 0"),
+        ] {
+            let msg = panic_text(
+                std::panic::catch_unwind(|| { Scene::new().apply(template_expander(expanded, named)); })
+                    .expect_err("the stamped expander was admitted"),
+            );
             assert!(msg.contains(want), "{msg}");
         }
     }

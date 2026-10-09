@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x5c53f4354ceb6019
+	SpecHash uint64 = 0x011ac2c5d907da7f
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -54,6 +54,7 @@ const (
 	KindVideo = 23
 	KindSecureField = 24
 	KindSegmented = 25
+	KindExpander = 26
 	DrawOpMoveTo = 1
 	DrawOpLineTo = 2
 	DrawOpClose = 3
@@ -138,6 +139,8 @@ const (
 	PropContentType = 56
 	PropRevealed = 57
 	PropRevealable = 58
+	PropSummary = 59
+	PropExpanded = 60
 	WpropTitle = 1
 	WpropWidth = 2
 	WpropHeight = 3
@@ -3635,6 +3638,70 @@ func TxBindRevealableElement(widgetID uint64, level uint32, field uint32) []byte
 	b := beginRecord(txSetProperty)
 	b = binary.LittleEndian.AppendUint64(b, widgetID)
 	b = binary.LittleEndian.AppendUint32(b, PropRevealable)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetSummary: set_property with a constant summary value.
+func TxSetSummary(widgetID uint64, summary string) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropSummary)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, summary)
+	return endRecord(b)
+}
+
+// TxBindSummary: set_property with a signal-bound summary value.
+func TxBindSummary(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropSummary)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindSummaryElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindSummaryElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropSummary)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetExpanded: set_property with a constant expanded value.
+func TxSetExpanded(widgetID uint64, expanded bool) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropExpanded)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, expanded)
+	return endRecord(b)
+}
+
+// TxBindExpanded: set_property with a signal-bound expanded value.
+func TxBindExpanded(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropExpanded)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindExpandedElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindExpandedElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropExpanded)
 	b = binary.LittleEndian.AppendUint32(b, SourceElement)
 	b = binary.LittleEndian.AppendUint32(b, level)
 	b = binary.LittleEndian.AppendUint32(b, field)

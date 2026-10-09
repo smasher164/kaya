@@ -2658,6 +2658,84 @@ for _lang, _rel, _templates in REVEAL_SURFACES:
         _rv_cuts += 1
 print(f"check-sugar-surface: reveal cuts watched red {_rv_cuts}/{_rv_want}")
 
+# --- THE EXPANDER'S HEADER PROPS, live zone, in all nine (docs/expander-plan.md
+# K3, K4, K18). The kind census holds `expander` in both zones and tpl-surfaces
+# the stamped `summary`; this holds `summary` and `expanded` on the live handle.
+# Rust's rows are the built shape; the other eight are the binding's own name
+# for each and are tightened to the shape each builds at the breadth.
+EXPANDER_SURFACES = [
+    ("rust", "crates/kaya/src/app.rs",
+     [r"pub fn {0}\(self, text: impl Into<LiveSource<StrKind>>\) -> Self",
+      r"pub fn {1}\(self, on: impl Into<LiveSource<BoolKind>>\) -> Self"]),
+    ("python", "bindings/python/kaya/__init__.py", [r"\b{0}\b", r"\b{1}\b"]),
+    ("go", "bindings/go/app.go", [r"func \(w Widget\) {0}\(", r"func \(w Widget\) {1}\("]),
+    ("csharp", "bindings/csharp/KayaApp.cs", [r"\b{0}\b", r"\b{1}\b"]),
+    ("java", "bindings/java/dev/kaya/KayaApp.java",
+     [r"public Widget {0}\(", r"public Widget {1}\("]),
+    ("swift", "bindings/swift/KayaApp.swift", [r"\b{0}\b", r"\b{1}\b"]),
+    ("haskell", "bindings/haskell/KayaApp.hs", [r"^  {0} ::", r"^  {1} ::"]),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", [r"\?{0}\b", r"\?{1}\b"]),
+    ("js", "bindings/js/kaya/index.ts", [r"^  {0}\(", r"^  {1}\("]),
+]
+EXPANDER_NAMES = {"rust": ("summary", "expanded"), "python": ("summary", "expanded"),
+                  "go": ("Summary", "Expanded"), "csharp": ("summary", "expanded"),
+                  "java": ("summary", "expanded"), "swift": ("summary", "expanded"),
+                  "haskell": ("summary", "expanded"), "ocaml": ("summary", "expanded"),
+                  "js": ("summary", "expanded")}
+
+
+def check_expander(fake=None, text_for=None):
+    out = []
+    for lang, rel, templates in EXPANDER_SURFACES:
+        text = text_for(lang, rel) if text_for else read_rel(rel)
+        names = fake or EXPANDER_NAMES[lang]
+        for template in templates:
+            pat = template.format(*names)
+            if not re.search(pat, text, re.M):
+                out.append(f"check-sugar-surface: {lang}'s LIVE zone cannot spell "
+                           f"`summary`/`expanded` on an expander (wanted /{pat}/ in {rel})")
+    return out
+
+
+_ex_found = check_expander()
+for _line in _ex_found:
+    print(_line)
+    status = 1
+_ex_want = sum(len(ts) for _, _, ts in EXPANDER_SURFACES)
+_ex_fake = check_expander(("kayaFakeSummary", "kayaFakeExpanded"))
+print(f"check-sugar-surface: fake expander spellings fired {len(_ex_fake)}/{_ex_want}")
+if len(_ex_fake) != _ex_want:
+    selftest_exit(f"check-sugar-surface: self-test failed ({len(_ex_fake)}/{_ex_want} expander "
+                  f"patterns fired for names that exist nowhere)")
+# Rename-in-a-copy for every binding whose clause holds today; a binding still
+# red takes its cut the moment its arm lands.
+_ex_cuts = 0
+_ex_held = [row for row in EXPANDER_SURFACES if not any(f" {row[0]}'s " in f for f in _ex_found)]
+for _lang, _rel, _templates in _ex_held:
+    _real = read_rel(_rel)
+    for _template in _templates:
+        _pat = _template.format(*EXPANDER_NAMES[_lang])
+        _n = 0
+
+        def _mangle_ex(m):
+            global _n
+            _inner, _k = sub_count(r"(?i)\b(summary|expanded)\b", r"kayaCut\1", m.group(0))
+            _n += _k
+            return _inner
+        _copy = re.sub(_pat, _mangle_ex, _real, flags=re.M)
+        print(f"check-sugar-surface: expander cut {_lang} /{_template[:30]}.../: "
+              f"{_n} substitution(s)")
+        _found = check_expander(
+            text_for=lambda lang, rel, _c=_copy, _r=_rel: _c if rel == _r else read_rel(rel))
+        if _n < 1 or not any(f" {_lang}'s " in _f for _f in _found):
+            selftest_exit(f"check-sugar-surface: self-test failed (the {_lang} expander cut "
+                          f"/{_template[:30]}.../ was not refused)")
+        if (ROOT / _rel).read_text(encoding="utf-8") != _real:
+            selftest_exit(f"check-sugar-surface: {_rel} changed on disk under the expander cut")
+        _ex_cuts += 1
+_ex_rows = sum(len(t) for _, _, t in _ex_held)
+print(f"check-sugar-surface: expander cuts watched red {_ex_cuts}/{_ex_rows}")
+
 # --- THE SEGMENTED CONTROL'S OTHER SPELLINGS (docs/segmented-plan.md G3, G4)
 # The kind census holds `segmented` in both zones; this holds what it cannot
 # see: the symbol segments in both zones and the live zone's bound index, in

@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x5c53f4354ceb6019;
+    public const ulong SpecHash = 0x011ac2c5d907da7f;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -52,6 +52,7 @@ static class KayaWire
     public const uint KindVideo = 23;
     public const uint KindSecureField = 24;
     public const uint KindSegmented = 25;
+    public const uint KindExpander = 26;
     public const uint DrawOpMoveTo = 1;
     public const uint DrawOpLineTo = 2;
     public const uint DrawOpClose = 3;
@@ -136,6 +137,8 @@ static class KayaWire
     public const uint PropContentType = 56;
     public const uint PropRevealed = 57;
     public const uint PropRevealable = 58;
+    public const uint PropSummary = 59;
+    public const uint PropExpanded = 60;
     public const uint WpropTitle = 1;
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
@@ -2973,6 +2976,56 @@ static class KayaWire
     {
         var w = Begin(out var stream);
         w.Write(widgetId); w.Write(PropRevealable); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant summary value.
+    public static byte[] TxSetSummary(ulong widgetId, string summary)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropSummary); w.Write(SourceConst);
+        EncodeValue(w, summary);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound summary value.
+    public static byte[] TxBindSummary(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropSummary); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindSummaryElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropSummary); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant expanded value.
+    public static byte[] TxSetExpanded(ulong widgetId, bool expanded)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropExpanded); w.Write(SourceConst);
+        EncodeValue(w, expanded);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound expanded value.
+    public static byte[] TxBindExpanded(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropExpanded); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindExpandedElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropExpanded); w.Write(SourceElement); w.Write(level); w.Write(field);
         return Finish(stream, w, TxKindSetProperty);
     }
 

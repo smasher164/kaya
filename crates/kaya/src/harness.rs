@@ -115,6 +115,9 @@ pub enum TargetKind {
     /// `choose` and `expect`, plus `expect_segments` and
     /// `expect_segment_symbol` read off the platform's own segments.
     Segmented,
+    /// The expander (docs/expander-plan.md K15): `toggle` presses its header,
+    /// `expect_expanded` reads the header's state and the body's presence.
+    Expander,
 }
 
 /// Text bound for a secure field (docs/secure-entry-plan.md P6). It has no
@@ -817,6 +820,14 @@ pub enum Step {
     /// The SEMANTIC ICON NAME the segment at the 0-based index draws, read
     /// off the platform's own segment (docs/segmented-plan.md G5).
     ExpectSegmentSymbol(Target, usize, String),
+    /// `expect_expanded <expander> on|off`: the header's published expanded
+    /// state AND the body's presence on screen, read off the platform and
+    /// required to agree (docs/expander-plan.md K8).
+    ExpectExpanded(Target, bool),
+    /// `expect_out_of_reach <target>`: the target sits inside a collapsed
+    /// expander, so every other step aimed at it is refused
+    /// (docs/expander-plan.md K5).
+    ExpectOutOfReach(Target),
     /// Expect the grid to lay its children out in exactly N columns with
     /// each column's cells sharing their leading edge — geometry from the
     /// toolkit, never a model copy.
@@ -1008,6 +1019,8 @@ impl Step {
             | Step::Choose(t, _)
             | Step::ExpectSegments(t, _)
             | Step::ExpectSegmentSymbol(t, _, _)
+            | Step::ExpectExpanded(t, _)
+            | Step::ExpectOutOfReach(t)
             | Step::ExpectGridColumns(t, _)
             | Step::ExpectAx(t, _)
             | Step::ExpectAxHint(t, _)
@@ -1283,6 +1296,8 @@ impl Step {
             Step::Choose { .. } => false,
             Step::ExpectSegments { .. } => true,
             Step::ExpectSegmentSymbol { .. } => true,
+            Step::ExpectExpanded { .. } => true,
+            Step::ExpectOutOfReach { .. } => true,
             Step::ExpectGridColumns { .. } => true,
             Step::MenuActivate { .. } => false,
             Step::ContextOpen { .. } => false,
@@ -1980,6 +1995,14 @@ pub trait Stage: Send + 'static {
     /// The SEMANTIC ICON NAME the segment at `index` draws, read off the
     /// platform's own segment, or a sentence saying what was measured.
     fn segment_symbol(&self, target: Target, index: usize) -> String;
+    /// An expander's two platform readings, (the header publishes expanded,
+    /// the body's first child is on screen), or a sentence saying what was
+    /// measured instead; never the scene model (docs/expander-plan.md K8).
+    fn expanded(&self, target: Target) -> Result<(bool, bool), String>;
+    /// The registry index of the outermost expander enclosing `target`
+    /// whose header the platform reports collapsed (docs/expander-plan.md
+    /// K5); None when every enclosing expander is open or there is none.
+    fn collapsed_ancestor(&self, target: Target) -> Option<usize>;
     /// The grid observation: empty when the grid lays out in exactly `want`
     /// columns whose cells share their leading edges (within two device
     /// units); otherwise the toolkit's own description of the mismatch, for
@@ -3375,6 +3398,24 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     .map_err(|_| format!("expect_segment_symbol wants a 0-based index: {line:?}"))?;
                 Step::ExpectSegmentSymbol(target, index, parse_string(want)?)
             }
+            "expect_expanded" => {
+                let (target, state) = rest
+                    .split_once(char::is_whitespace)
+                    .ok_or_else(|| format!("expect_expanded wants an expander and on|off: {line:?}"))?;
+                let target = parse_target(target)?;
+                if target.kind != TargetKind::Expander {
+                    return Err(format!("expect_expanded reads an expander, not {target:?}"));
+                }
+                Step::ExpectExpanded(
+                    target,
+                    match state.trim() {
+                        "on" => true,
+                        "off" => false,
+                        other => return Err(format!("expect_expanded wants on|off, got {other:?}")),
+                    },
+                )
+            }
+            "expect_out_of_reach" => Step::ExpectOutOfReach(parse_target(rest)?),
             "expect_grid_columns" => {
                 let (target, n) = rest
                     .split_once(char::is_whitespace)
@@ -3915,6 +3956,7 @@ fn parse_target_kind(kind: &str, spec: &str) -> Result<TargetKind, String> {
         "video" => TargetKind::Video,
         "secure_field" => TargetKind::SecureField,
         "segmented" => TargetKind::Segmented,
+        "expander" => TargetKind::Expander,
         other => return Err(format!("unknown target kind {other:?} in {spec:?}")),
     })
 }
@@ -4692,6 +4734,20 @@ fn run_with_log(
             }
             failures.push(text);
             continue;
+        }
+        if crate::scene::expanders_declared() && !matches!(step_norm, Step::ExpectOutOfReach(_)) {
+            let refused = step_norm
+                .targets_mut()
+                .into_iter()
+                .find_map(|t| stage.collapsed_ancestor(*t))
+                .map(out_of_reach);
+            if let Some(text) = refused {
+                if let Some((log, _)) = log {
+                    log(&format!("KAYA_HARNESS: step-failed {text}"));
+                }
+                failures.push(text);
+                continue;
+            }
         }
         let step = &step_norm;
         if let Some((log, start)) = log {
@@ -5660,6 +5716,11 @@ fn run_with_log(
                 } else {
                     Err(format!("segments {got:?}, wanted {want:?}"))
                 }
+            })),
+            Step::ExpectExpanded(t, want) => Some(poll(|| expanded_reading(stage.expanded(*t), *want))),
+            Step::ExpectOutOfReach(t) => Some(poll(|| match stage.collapsed_ancestor(*t) {
+                Some(i) => Ok(format!("out of reach inside expander#{i}")),
+                None => Err(WITHIN_REACH.to_owned()),
             })),
             Step::ExpectSegmentSymbol(t, index, want) => Some(poll(|| {
                 let got = stage.segment_symbol(*t, *index);
@@ -6882,6 +6943,31 @@ pub(crate) fn swipe_spec(mut items: Vec<(i64, String)>) -> String {
         .join("/")
 }
 
+/// The K5 refusal (docs/expander-plan.md K5), one sentence in all three
+/// harnesses (tools/lib/expander_routes.py compares them).
+fn out_of_reach(expander: usize) -> String {
+    format!(
+        "the target is out of reach inside collapsed expander#{expander}; expand it first \
+         (docs/expander-plan.md K5)"
+    )
+}
+
+const WITHIN_REACH: &str = "the target is within reach, wanted out of reach inside a collapsed expander";
+
+/// `expect_expanded`'s verdict over the platform's two readings
+/// (docs/expander-plan.md K8): a header and a body that disagree is a
+/// finding naming both.
+fn expanded_reading(read: Result<(bool, bool), String>, want: bool) -> Result<String, String> {
+    let word = |on: bool| if on { "on" } else { "off" };
+    match read {
+        Err(why) => Err(why),
+        Ok((true, false)) => Err("the header reads expanded but the body is not shown".to_owned()),
+        Ok((false, true)) => Err("the header reads collapsed but the body is shown".to_owned()),
+        Ok((got, _)) if got == want => Ok(format!("expanded {}", word(got))),
+        Ok((got, _)) => Err(format!("expanded {}, wanted {}", word(got), word(want))),
+    }
+}
+
 fn target_spec(t: &Target) -> String {
     let kind = match t.kind {
         TargetKind::Button => "button",
@@ -6909,6 +6995,7 @@ fn target_spec(t: &Target) -> String {
         TargetKind::Video => "video",
         TargetKind::SecureField => "secure_field",
         TargetKind::Segmented => "segmented",
+        TargetKind::Expander => "expander",
     };
     if let Some(id) = t.id {
         t.keys.map_or_else(
@@ -8341,6 +8428,51 @@ mod tests {
         static MOCK_TYPED: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
         static MOCK_REVEALED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
         static MOCK_LOG: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+        static MOCK_EXPANDED: std::cell::Cell<(bool, bool)> = const { std::cell::Cell::new((false, false)) };
+        static MOCK_COLLAPSED: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    }
+
+    /// docs/expander-plan.md K5, K8: the two platform readings must agree, and a
+    /// step aimed inside a collapsed expander is refused in the one sentence.
+    #[test]
+    fn expander_reads_both_halves_and_refuses_a_hidden_body() {
+        crate::scene::note_expander_for_test();
+        let run = |script: &str| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let code = run_with_log(parse(script).unwrap(), MockStage { seen: &SEEN, verdict: tx }, None, None);
+            let (_, verdict) = rx.recv().unwrap();
+            (code, verdict)
+        };
+        MOCK_COLLAPSED.with(|c| c.set(None));
+        MOCK_EXPANDED.with(|e| e.set((false, false)));
+        let (code, verdict) = run("expect_expanded expander#0 off\ntoggle expander#0 on\nexpect_expanded expander#0 on");
+        assert_eq!(code, 0, "{verdict}");
+        assert!(verdict.contains("expanded on"), "{verdict}");
+        MOCK_EXPANDED.with(|e| e.set((true, false)));
+        let (code, verdict) = run("expect_expanded expander#0 on");
+        assert_eq!(code, 1, "{verdict}");
+        assert!(verdict.contains("the header reads expanded but the body is not shown"), "{verdict}");
+        MOCK_EXPANDED.with(|e| e.set((false, true)));
+        let (_, verdict) = run("expect_expanded expander#0 off");
+        assert!(verdict.contains("the header reads collapsed but the body is shown"), "{verdict}");
+        MOCK_COLLAPSED.with(|c| c.set(Some(1)));
+        let (code, verdict) = run("click button#7\nexpect_out_of_reach entry#0");
+        assert_eq!(code, 1, "{verdict}");
+        assert!(verdict.contains(&out_of_reach(1)), "{verdict}");
+        let (code, verdict) = run("expect_out_of_reach entry#0");
+        assert_eq!(code, 0, "{verdict}");
+        assert!(verdict.contains("out of reach inside expander#1"), "{verdict}");
+        assert!(
+            !SEEN.lock().unwrap().iter().any(|s| s.contains("kind: Button, index: 7")),
+            "the refused click reached the stage"
+        );
+        MOCK_COLLAPSED.with(|c| c.set(None));
+        let (code, verdict) = run("expect_out_of_reach entry#0");
+        assert_eq!(code, 1, "{verdict}");
+        assert!(verdict.contains(WITHIN_REACH), "{verdict}");
+        assert!(parse("expect_expanded checkbox#0 on").is_err());
+        assert!(parse("expect_expanded expander#0 maybe").is_err());
+        MOCK_EXPANDED.with(|e| e.set((false, false)));
     }
 
     /// THE SECURE FIELD'S TEXT REACHES NO TRANSCRIPT (docs/secure-entry-plan.md
@@ -8531,7 +8663,11 @@ mod tests {
             MOCK_SECURE_FOCUS.with(|f| f.set(t.kind == TargetKind::SecureField));
             self.seen.lock().unwrap().push(format!("click {t:?}"));
         }
-        fn toggle(&self, _: Target, _: bool) {}
+        fn toggle(&self, t: Target, on: bool) {
+            if t.kind == TargetKind::Expander {
+                MOCK_EXPANDED.with(|e| e.set((on, on)));
+            }
+        }
         fn set_value(&self, _: Target, _: f64) {}
         fn set_date(&self, t: Target, d: crate::Date) {
             self.seen.lock().unwrap().push(format!("set_date {t:?} {d}"));
@@ -8975,6 +9111,12 @@ mod tests {
         }
         fn toggle_reveal(&self, _: Target, on: bool) {
             MOCK_REVEALED.with(|r| r.set(on));
+        }
+        fn expanded(&self, _: Target) -> Result<(bool, bool), String> {
+            Ok(MOCK_EXPANDED.with(|e| e.get()))
+        }
+        fn collapsed_ancestor(&self, _: Target) -> Option<usize> {
+            MOCK_COLLAPSED.with(|c| c.get())
         }
         fn content_type(&self, target: Target) -> Result<&'static str, String> {
             match target.kind {
@@ -9621,6 +9763,12 @@ mod tests {
         assert_eq!(verdict, "KAYA_SELFTEST: OK (root fills)");
         struct Hugger(Sender<(i32, String)>);
         impl Stage for Hugger {
+            fn expanded(&self, _: Target) -> Result<(bool, bool), String> {
+                Err("no expander".to_owned())
+            }
+            fn collapsed_ancestor(&self, _: Target) -> Option<usize> {
+                None
+            }
             fn clipboard_seed(&self, _: &str, _: &str) {}
             fn clipboard_read(&self, _: &str) -> String {
                 String::new()
@@ -10059,6 +10207,12 @@ mod tests {
         // ratio-at-minimum cannot pass it.
         struct Pooler(Sender<(i32, String)>);
         impl Stage for Pooler {
+            fn expanded(&self, _: Target) -> Result<(bool, bool), String> {
+                Err("no expander".to_owned())
+            }
+            fn collapsed_ancestor(&self, _: Target) -> Option<usize> {
+                None
+            }
             fn clipboard_seed(&self, _: &str, _: &str) {}
             fn clipboard_read(&self, _: &str) -> String {
                 String::new()

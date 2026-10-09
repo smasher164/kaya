@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x5c53f4354ceb6019L;
+    public static final long SPEC_HASH = 0x011ac2c5d907da7fL;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -53,6 +53,7 @@ public final class KayaWire {
     public static final int KIND_VIDEO = 23;
     public static final int KIND_SECURE_FIELD = 24;
     public static final int KIND_SEGMENTED = 25;
+    public static final int KIND_EXPANDER = 26;
     public static final int DRAW_OP_MOVE_TO = 1;
     public static final int DRAW_OP_LINE_TO = 2;
     public static final int DRAW_OP_CLOSE = 3;
@@ -137,6 +138,8 @@ public final class KayaWire {
     public static final int PROP_CONTENT_TYPE = 56;
     public static final int PROP_REVEALED = 57;
     public static final int PROP_REVEALABLE = 58;
+    public static final int PROP_SUMMARY = 59;
+    public static final int PROP_EXPANDED = 60;
     public static final int WPROP_TITLE = 1;
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
@@ -2806,6 +2809,52 @@ public final class KayaWire {
     public static byte[] txBindRevealableElement(long widgetId, int level, int field) {
         Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_REVEALABLE).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant summary value. */
+    public static byte[] txSetSummary(long widgetId, String summary) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_SUMMARY).putInt(SOURCE_CONST);
+        encodeValue(b, summary);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound summary value. */
+    public static byte[] txBindSummary(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_SUMMARY).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindSummaryElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_SUMMARY).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant expanded value. */
+    public static byte[] txSetExpanded(long widgetId, boolean expanded) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_EXPANDED).putInt(SOURCE_CONST);
+        encodeValue(b, expanded);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound expanded value. */
+    public static byte[] txBindExpanded(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_EXPANDED).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindExpandedElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_EXPANDED).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
     }

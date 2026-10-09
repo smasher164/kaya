@@ -22,7 +22,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x5c53f4354ceb6019
+let kayaSpecHash: UInt64 = 0x011ac2c5d907da7f
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -228,6 +228,7 @@ private let kindRange: UInt32 = 22
 private let kindVideo: UInt32 = 23
 private let kindSecureField: UInt32 = 24
 private let kindSegmented: UInt32 = 25
+private let kindExpander: UInt32 = 26
 private let propText: UInt32 = 1
 private let propChecked: UInt32 = 2
 private let propColumns: UInt32 = 11
@@ -333,6 +334,8 @@ private let propFormat: UInt32 = 55
 private let propContentType: UInt32 = 56
 private let propRevealed: UInt32 = 57
 private let propRevealable: UInt32 = 58
+private let propSummary: UInt32 = 59
+private let propExpanded: UInt32 = 60
 private let fileContentImages: UInt32 = 1
 private let tintAccent: Int64 = 1
 private let tintSuccess: Int64 = 2
@@ -817,6 +820,10 @@ final class KayaNode: Identifiable {
     /// (docs/reveal-plan.md V1).
     var revealed = false
     var revealable = false
+    /// An expander's second header line and whether its body shows
+    /// (docs/expander-plan.md K3, K4).
+    var summary = ""
+    var expanded = false
     /// The packed box ratio the app chose (0 none; docs/media-plan.md §3).
     var aspect: Int64 = 0
     var videoSeq = 0
@@ -1228,13 +1235,14 @@ final class KayaSceneModel {
     var videos: [KayaNode] = []
     var secureFields: [KayaNode] = []
     var segmenteds: [KayaNode] = []
+    var expanders: [KayaNode] = []
 
     /// Every kind registry, so a destroyed node leaves all of them at once.
     static let registries: [ReferenceWritableKeyPath<KayaSceneModel, [KayaNode]>] = [
         \.buttons, \.checkboxes, \.labels, \.entryWidgets, \.sliders, \.datePickers,
         \.timePickers, \.images, \.canvases, \.columns, \.rows, \.scrolls, \.progresses,
         \.selects, \.radios, \.grids, \.textareas, \.labeleds, \.searches, \.numberFields,
-        \.colorPickers, \.ranges, \.videos, \.secureFields, \.segmenteds,
+        \.colorPickers, \.ranges, \.videos, \.secureFields, \.segmenteds, \.expanders,
     ]
 
     func forget(_ id: UInt64) {
@@ -5656,6 +5664,9 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case kindVideo: kayaScene.videos.append(node)
                 case kindSecureField: kayaScene.secureFields.append(node)
                 case kindSegmented: kayaScene.segmenteds.append(node)
+                case kindExpander:
+                    kayaScene.expanders.append(node)
+                    kayaExpandersDeclared = true
                 case kindNumberField:
                     // docs/number-field-plan.md §2: unset bounds are ±2^53, the
                     // step 1, and the field shows its value from the start.
@@ -6277,6 +6288,11 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaRevealSwap(kayaScene.nodes[id]!, raw[body + 24] != 0)
                 case (propRevealable, valueBool):
                     kayaScene.nodes[id]!.revealable = raw[body + 24] != 0
+                case (propExpanded, valueBool):
+                    kayaScene.nodes[id]!.expanded = raw[body + 24] != 0
+                case (propSummary, valueStr):
+                    kayaScene.nodes[id]!.summary = String(
+                        decoding: raw[(body + 24)..<(body + 24 + len)], as: UTF8.self)
                 case (propOwnUndo, valueBool):
                     kayaScene.nodes[id]!.ownUndo = raw[body + 24] != 0
                 case (propCanUndo, valueBool):
@@ -7079,6 +7095,9 @@ func kayaA11y(_ view: some View, _ node: KayaNode, leaf: Bool = false) -> some V
         // The secure field's props go on its field, not on the eye beside it
         // (docs/reveal-plan.md V7), the search row's reason.
         view
+    } else if node.kind == kindExpander && !leaf {
+        // On the header, never the container (docs/expander-plan.md K8).
+        view
     } else if node.kind == kindRange {
         // THE RANGE CARRIES ITS PROPS ON ITS OWN VIEWS (docs/range-plan.md §3
         // rule 7): the container is the group and each thumb its own slider,
@@ -7161,6 +7180,8 @@ private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
         // closed set exists to make a scene read the same everywhere.
         case kAXRadioGroupRole, kAXScrollAreaRole: return "group"
         case kAXGroupRole: return "group"
+        // A DisclosureGroup's header (docs/expander-plan.md K8, §7).
+        case "AXDisclosureTriangle": return "button"
         default: return "unknown"
         }
     }
@@ -8596,6 +8617,7 @@ private func kayaAnyTarget(_ spec: Substring) -> KayaNode? {
     case "video": return kayaTarget(spec, "video", kayaScene.videos)
     case "secure_field": return kayaTarget(spec, "secure_field", kayaScene.secureFields)
     case "segmented": return kayaTarget(spec, "segmented", kayaScene.segmenteds)
+    case "expander": return kayaTarget(spec, "expander", kayaScene.expanders)
     default: return nil
     }
 }
@@ -9032,6 +9054,12 @@ private func kayaRunScript(_ script: String) {
             // missing it under a five-lane host — the android class one
             // platform over (docs/traps.md); a step's deadline is a per-host
             // number, and tools/check-harness-ceiling.py holds the three equal.
+            if kayaExpandersDeclared, parts.count > 1, parts[0] != "expect_out_of_reach",
+                let hidden = kayaCollapsedAncestor(parts[1])
+            {
+                failures.append(kayaOutOfReach(hidden))
+                continue
+            }
             let stepDeadline = Date().addingTimeInterval(kayaStepDeadline)
             var retryStep = true
             var attempt = 0
@@ -9074,6 +9102,45 @@ private func kayaRunScript(_ script: String) {
                     kayaAwaitAnswer(answered)
                 } else {
                     failures.append("no such target \(parts[1])")
+                }
+            case "toggle" where parts.count == 3 && parts[1].hasPrefix("expander"):
+                // The header's own press (docs/expander-plan.md K15).
+                kayaAwaitQuiet()
+                let expanderAnswered = kayaAnswers()
+                let unpressed = kayaExpanderPress(parts[1], parts[2] == "on")
+                if let unpressed {
+                    failures.append(unpressed)
+                } else {
+                    kayaAwaitAnswer(expanderAnswered)
+                }
+            case "expect_expanded":
+                guard parts.count == 3, parts[2] == "on" || parts[2] == "off" else {
+                    failures.append("expect_expanded wants an expander and on|off: \(line)")
+                    break
+                }
+                let wantOpen = parts[2] == "on"
+                switch kayaExpanderReadSpec(parts[1]) {
+                case .unread(let why): failures.append(why)
+                case .read((true, false)): failures.append("the header reads expanded but the body is not shown")
+                case .read((false, true)): failures.append("the header reads collapsed but the body is shown")
+                case .read((let open, _)) where open == wantOpen:
+                    observed.append("expanded \(open ? "on" : "off")")
+                case .read((let open, _)):
+                    failures.append("expanded \(open ? "on" : "off"), wanted \(parts[2])")
+                }
+            case "expect_out_of_reach":
+                if parts.count > 1, let hidden = kayaCollapsedAncestor(parts[1]) {
+                    observed.append("out of reach inside expander#\(hidden)")
+                } else {
+                    failures.append("the target is within reach, wanted out of reach inside a collapsed expander")
+                }
+            case "expect" where parts.count > 2 && parts[1].hasPrefix("expander"):
+                let wantHeader = kayaQuoted(Array(parts.dropFirst(2)))
+                let gotHeader = kayaExpanderHeaderText(parts[1])
+                if kayaBytesEqual(gotHeader, wantHeader) {
+                    observed.append("\"\(wantHeader)\"")
+                } else {
+                    failures.append("\"\(gotHeader)\", wanted \"\(wantHeader)\"")
                 }
             case "toggle":
                 kayaAwaitQuiet()
@@ -17470,7 +17537,7 @@ struct KayaFlow: Layout {
 /// (docs/forms-plan.md §2).
 func kayaIsForm(_ node: KayaNode) -> Bool {
     let laid = node.laidOut
-    return laid.count >= 2 && laid.allSatisfy { $0.kind == kindLabeled }
+    return laid.count >= 2 && laid.allSatisfy { $0.kind == kindLabeled || $0.kind == kindExpander }
 }
 
 /// Whether this container is a grouped screen's registered primary flow —
@@ -20490,6 +20557,7 @@ struct KayaRender: View {
                     #if os(macOS)
                         Form {
                             kayaStackChildren(vertical: true)
+                                .environment(\.kayaInForm, true)
                         }
                         .formStyle(.grouped)
                     #else
@@ -20942,6 +21010,8 @@ struct KayaRender: View {
             .labelsHidden()
             .fixedSize()
             .background(KayaChoiceAnchor(id: node.id))
+        case kindExpander:
+            KayaExpander(node: node)
         case kindSegmented:
             KayaSegmented(node: node, stretch: node.grow > 0 || (flexVertical == true && node.fill == true))
         case kindProgress:
@@ -23122,6 +23192,323 @@ func kayaToolbarChromeFits(_ spelling: String) -> String? {
         return semantic
     }
 #endif
+
+// MARK: - The expander (docs/expander-plan.md)
+
+private struct KayaInFormKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// Whether a view sits in a derived form's Form (docs/expander-plan.md K11).
+    var kayaInForm: Bool {
+        get { self[KayaInFormKey.self] }
+        set { self[KayaInFormKey.self] = newValue }
+    }
+}
+
+/// The platform's DisclosureGroup over the body's children; the header is one
+/// accessibility element named by the text (docs/expander-plan.md K2, K8, §7).
+struct KayaExpander: View {
+    let node: KayaNode
+    @Environment(\.kayaInForm) private var inForm
+
+    var body: some View {
+        let open = Binding(
+            get: { node.expanded },
+            set: { now in
+                kayaUserWrite { node.expanded = now }
+                KayaHost.emitToggled(node.tag, now)
+            })
+        DisclosureGroup(isExpanded: open) {
+            if inForm {
+                kayaExpanderBody
+            } else {
+                VStack(alignment: .leading, spacing: node.spacing) { kayaExpanderBody }
+                    .padding(node.insetSet ? node.inset : 0)
+            }
+        } label: {
+            kayaExpanderLabel(open)
+        }
+    }
+
+    @ViewBuilder private var kayaExpanderBody: some View {
+        ForEach(Array(node.laidOut.enumerated()), id: \.element.id) { index, child in
+            if index == 0 {
+                KayaRender(node: child, flexVertical: true)
+                    .background(KayaExpanderAnchor(id: node.id, header: false))
+            } else {
+                KayaRender(node: child, flexVertical: true)
+            }
+        }
+    }
+
+    @ViewBuilder private func kayaExpanderLabel(_ open: Binding<Bool>) -> some View {
+        let header = HStack(spacing: 6) {
+            if node.symbol != 0 {
+                Image(systemName: kayaSFSymbol(node.symbol) ?? "questionmark")
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(node.text).font(kayaBrandFont())
+                if !node.summary.isEmpty {
+                    Text(node.summary).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .background(KayaExpanderAnchor(id: node.id, header: true))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(node.a11yLabel.isEmpty ? node.text : node.a11yLabel)
+        #if os(macOS)
+            // A grouped Form's disclosure publishes no press (docs/traps.md, the
+            // expander's form row), so the header names its own.
+            if inForm {
+                kayaA11y(header, node, leaf: true).accessibilityAction { open.wrappedValue.toggle() }
+            } else {
+                kayaA11y(header, node, leaf: true)
+            }
+        #else
+            kayaA11y(header, node, leaf: true)
+        #endif
+    }
+}
+
+final class KayaExpanderBox {
+    weak var view: AnyObject?
+}
+
+/// Each expander's header anchors, and its body anchors: a body anchor is in a
+/// window exactly while the platform shows the body, since SwiftUI drops a
+/// collapsed body's views (§7).
+var kayaExpanderHeaders: [UInt64: [KayaExpanderBox]] = [:]
+var kayaExpanderBodies: [UInt64: [KayaExpanderBox]] = [:]
+
+private func kayaExpanderRegister(_ id: UInt64, _ view: AnyObject, header: Bool) {
+    var boxes = ((header ? kayaExpanderHeaders[id] : kayaExpanderBodies[id]) ?? []).filter { $0.view != nil }
+    if boxes.contains(where: { $0.view === view }) { return }
+    let box = KayaExpanderBox()
+    box.view = view
+    boxes.append(box)
+    if header { kayaExpanderHeaders[id] = boxes } else { kayaExpanderBodies[id] = boxes }
+}
+
+#if os(macOS)
+    struct KayaExpanderAnchor: NSViewRepresentable {
+        let id: UInt64
+        let header: Bool
+        func makeNSView(context: Context) -> NSView {
+            let view = NSView()
+            kayaExpanderRegister(id, view, header: header)
+            return view
+        }
+        func updateNSView(_ view: NSView, context: Context) { kayaExpanderRegister(id, view, header: header) }
+    }
+#else
+    struct KayaExpanderAnchor: UIViewRepresentable {
+        let id: UInt64
+        let header: Bool
+        func makeUIView(context: Context) -> UIView {
+            let view = UIView()
+            view.isUserInteractionEnabled = false
+            kayaExpanderRegister(id, view, header: header)
+            return view
+        }
+        func updateUIView(_ view: UIView, context: Context) { kayaExpanderRegister(id, view, header: header) }
+    }
+#endif
+
+/// Whether the body's first child is in a window the platform shows.
+private func kayaExpanderBodyShown(_ node: KayaNode) -> Bool {
+    #if os(macOS)
+        return (kayaExpanderBodies[node.id] ?? []).contains {
+            guard let view = $0.view as? NSView, let window = view.window else { return false }
+            return window.isVisible && !view.isHiddenOrHasHiddenAncestor
+        }
+    #else
+        return (kayaExpanderBodies[node.id] ?? []).contains {
+            guard let view = $0.view as? UIView else { return false }
+            return view.window != nil && !view.isHidden
+        }
+    #endif
+}
+
+/// A platform reading, or a sentence saying what was measured instead.
+enum KayaExpanderRead<T> {
+    case read(T)
+    case unread(String)
+}
+
+/// The header as the platform publishes it: its name, whether it reads
+/// expanded, and its press.
+struct KayaExpanderHeader {
+    let name: String
+    let open: Bool
+    let press: () -> Bool
+}
+
+#if os(macOS)
+    /// The accessibility element at the header's centre, walked up to its
+    /// disclosure triangle (measured, docs/expander-plan.md §7).
+    func kayaExpanderHeaderRead(_ node: KayaNode) -> KayaExpanderRead<KayaExpanderHeader> {
+        let anchors = (kayaExpanderHeaders[node.id] ?? []).compactMap { $0.view as? NSView }
+        guard let anchor = anchors.first(where: { $0.window?.isVisible == true }), let window = anchor.window
+        else {
+            return .unread("none of the expander's \(anchors.count) header rendering(s) is in a visible window")
+        }
+        guard let primary = NSScreen.screens.first else { return .unread("no screen") }
+        let inWindow = anchor.convert(anchor.bounds, to: nil)
+        if let content = window.contentView?.frame, !content.contains(CGPoint(x: inWindow.midX, y: inWindow.midY)) {
+            return .unread("the header's centre \(inWindow) lies outside its window's content \(content)")
+        }
+        let rect = window.convertToScreen(inWindow)
+        let app = AXUIElementCreateApplication(getpid())
+        AXUIElementSetMessagingTimeout(app, 2.0)
+        if !kayaAxAnnounced {
+            kayaAxAnnounced = true
+            AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+            AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        }
+        var hit: AXUIElement?
+        let err = AXUIElementCopyElementAtPosition(
+            app, Float(rect.midX), Float(primary.frame.maxY - rect.midY), &hit)
+        guard err == .success, let hit else {
+            return .unread("no accessibility element at the header's centre (AXError \(err.rawValue))")
+        }
+        var chain: [String] = []
+        var at: AXUIElement? = hit
+        for _ in 0..<6 {
+            guard let element = at else { break }
+            let role = kayaAxCopy(element, kAXRoleAttribute) as? String ?? "?"
+            chain.append(role)
+            if role == "AXDisclosureTriangle" {
+                guard let value = kayaAxCopy(element, kAXValueAttribute) as? NSNumber else {
+                    return .unread("the header's disclosure triangle publishes no value")
+                }
+                return .read(
+                    KayaExpanderHeader(
+                        name: kayaAxCopy(element, kAXDescriptionAttribute) as? String ?? "",
+                        open: value.intValue == 1,
+                        press: { AXUIElementPerformAction(element, kAXPressAction as CFString) == .success }))
+            }
+            at = kayaAxCopy(element, kAXParentAttribute).map { $0 as! AXUIElement }
+        }
+        return .unread(
+            "the element at the header's centre sits in no disclosure triangle ("
+                + chain.joined(separator: " < ") + ")")
+    }
+#else
+    /// The button UIKit publishes inside the header's frame; where it states
+    /// expanded or collapsed is the breadth's to measure (§7), so anything
+    /// else is reported as read.
+    func kayaExpanderHeaderRead(_ node: KayaNode) -> KayaExpanderRead<KayaExpanderHeader> {
+        kayaAxEnableAutomation()
+        let anchors = (kayaExpanderHeaders[node.id] ?? []).compactMap { $0.view as? UIView }
+        guard let anchor = anchors.first(where: { $0.window != nil && !$0.isHidden }), let window = anchor.window
+        else {
+            return .unread("none of the expander's \(anchors.count) header rendering(s) is in a window")
+        }
+        let frame = UIAccessibility.convertToScreenCoordinates(anchor.bounds, in: anchor)
+        var found: [NSObject] = []
+        var seen = Set<ObjectIdentifier>()
+        func walk(_ item: NSObject, _ depth: Int) {
+            if depth > 64 || !seen.insert(ObjectIdentifier(item)).inserted { return }
+            if item.isAccessibilityElement {
+                let f = item.accessibilityFrame
+                if f.contains(CGPoint(x: frame.midX, y: frame.midY)) { found.append(item) }
+                return
+            }
+            let count = item.accessibilityElementCount()
+            if count != NSNotFound && count > 0 {
+                for i in 0..<count {
+                    if let child = item.accessibilityElement(at: i) as? NSObject { walk(child, depth + 1) }
+                }
+            }
+            if let view = item as? UIView {
+                for sub in view.subviews { walk(sub, depth + 1) }
+            }
+        }
+        walk(window, 0)
+        guard let button = found.first(where: { $0.accessibilityTraits.contains(.button) }) else {
+            return .unread("UIKit publishes no button over the header (\(found.count) element(s))")
+        }
+        let value = (button.accessibilityValue ?? "").lowercased()
+        guard value == "expanded" || value == "collapsed" else {
+            return .unread(
+                "the header's button publishes value \"\(value)\" and traits \(button.accessibilityTraits.rawValue), "
+                    + "neither expanded nor collapsed")
+        }
+        return .read(
+            KayaExpanderHeader(
+                name: button.accessibilityLabel ?? "", open: value == "expanded",
+                press: { button.accessibilityActivate() }))
+    }
+#endif
+
+/// `expect_expanded`'s two readings, (header, body), never the model.
+func kayaExpanderReadSpec(_ spec: Substring) -> KayaExpanderRead<(Bool, Bool)> {
+    DispatchQueue.main.sync { () -> KayaExpanderRead<(Bool, Bool)> in
+        guard let node = kayaTarget(spec, "expander", kayaScene.expanders) else {
+            return .unread("no such target \(spec)")
+        }
+        switch kayaExpanderHeaderRead(node) {
+        case .unread(let why): return .unread(why)
+        case .read(let header): return .read((header.open, kayaExpanderBodyShown(node)))
+        }
+    }
+}
+
+func kayaExpanderHeaderText(_ spec: Substring) -> String {
+    DispatchQueue.main.sync { () -> String in
+        guard let node = kayaTarget(spec, "expander", kayaScene.expanders) else { return "<no such target>" }
+        switch kayaExpanderHeaderRead(node) {
+        case .unread(let why): return "<\(why)>"
+        case .read(let header): return header.name
+        }
+    }
+}
+
+/// Press the header when it does not already read `open`; nil when pressed.
+func kayaExpanderPress(_ spec: Substring, _ open: Bool) -> String? {
+    DispatchQueue.main.sync { () -> String? in
+        guard let node = kayaTarget(spec, "expander", kayaScene.expanders) else {
+            return "no such target \(spec)"
+        }
+        switch kayaExpanderHeaderRead(node) {
+        case .unread(let why): return why
+        case .read(let header) where header.open == open:
+            return "\(spec) already reads \(open ? "on" : "off"); the press would close what the step opens"
+        case .read(let header):
+            return header.press() ? nil : "the platform refused the press on the header"
+        }
+    }
+}
+
+private func kayaSubtree(_ root: KayaNode, holds target: KayaNode) -> Bool {
+    root.children.contains { $0 === target || kayaSubtree($0, holds: target) }
+}
+
+/// docs/expander-plan.md K5: the registry index of the outermost expander
+/// around the target whose header the platform reports collapsed.
+func kayaCollapsedAncestor(_ spec: Substring) -> Int? {
+    DispatchQueue.main.sync { () -> Int? in
+        guard !kayaScene.expanders.isEmpty, let target = kayaAnyTarget(spec) else { return nil }
+        let around = kayaScene.expanders.enumerated()
+            .filter { $0.element !== target && kayaSubtree($0.element, holds: target) }
+            .sorted { kayaSubtree($0.element, holds: $1.element) }
+        for (index, expander) in around {
+            if case .read(let header) = kayaExpanderHeaderRead(expander), !header.open { return index }
+        }
+        return nil
+    }
+}
+
+/// Set on the main thread at an expander's creation and read by the harness
+/// thread, so a scene with no expander pays no hop per step.
+var kayaExpandersDeclared = false
+
+/// The K5 refusal, harness.rs's `out_of_reach` word for word.
+func kayaOutOfReach(_ index: Int) -> String {
+    "the target is out of reach inside collapsed expander#\(index); expand it first (docs/expander-plan.md K5)"
+}
 
 // MARK: - The choice controls, read off the platform (docs/segmented-plan.md G10)
 

@@ -9,6 +9,72 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
+## BUILD — the expander (docs/expander-plan.md), depth on the mac (2026-10-09); the GTK, WinUI and Compose arms, the iOS legs and the other eight bindings are the breadth slice
+KEY: expander, KIND_EXPANDER, PROP_SUMMARY, PROP_EXPANDED, summary, expanded, expander.steps, expect_expanded, expect_out_of_reach, collapsed_ancestor, out_of_reach, EXPANDER_NAMELESS, check_expander_template, expanders_declared, KayaExpander, kayaExpanderHeaderRead, kayaCollapsedAncestor, kayaInForm, expander_routes, DEPTH STUB expander
+
+The depth slice: kind 26 `expander` with props 59 `summary` and 60
+`expanded`, `text` and `symbol` legal on it, the user's flip on the
+`toggled` record; the root refuses a header with no text and, at the
+template's close, a stamped expander whose `expanded` is not bound to a Bool
+field of the row (K10); the Rust binding in both zones (`tx.expander(text,
+body)` with `.summary`, `.symbol`, `.expanded`; `row.expander(text,
+expanded, body)`); the SwiftUI arm on macOS and iOS (the platform's
+DisclosureGroup; inside a derived form, which now admits expanders as rows,
+K11); the harness's `expect_expanded` and `expect_out_of_reach`, `toggle` and
+`expect` on the kind, and the K5 refusal in harness.rs and the SwiftUI
+runner; tools/scenes/expander.steps green on the mac lane for Rust.
+  - **DEPTH STUB: expander on gtk** — `GtkExpander` outside a form and
+    `AdwExpanderRow` inside one (K12), `notify::expanded` outside the quiet
+    guard, the AT-SPI EXPANDED state and the body's `showing` as the reads
+    (§3); its row in tools/lib/expander_routes.py closes it.
+  - **DEPTH STUB: expander on winui** — `Expander` with its two event-args
+    types and automation peer added to tools/winui-bindgen's filter (K14),
+    `Expanding`/`Collapsed` outside the quiet guard, the peer's
+    ExpandCollapseState and the body's first child as the reads, the measured
+    press door (§7); its expander_routes row closes it.
+  - **DEPTH STUB: expander on compose** — a `ListItem` header with a turning
+    `ExpandMore`, `Role.Button`, the state description and expand/collapse
+    actions over `AnimatedVisibility` (K13), the expanded state composition
+    state (check-compose-state); its expander_routes row closes it.
+  - **The iOS legs** — the arm is built and compiled; where iOS publishes the
+    header's expanded state is unmeasured (§7), so `expander` sits in
+    tools/lib/lanes/ios.py's UNWIRED_SCENES and kayaExpanderHeaderRead's iOS
+    half reports the button's value and traits it read when they say neither.
+  - **The other eight bindings and the C floor** (K18): an `expander` in both
+    zones with `summary`, `expanded` and the toggle handler, an `expander`
+    guest each; check-sugar-surface is red for them until then.
+  - **The keyboard and focus blocks of expander.steps** (K9, K5): MEASURED on
+    macOS 26.5 that the header is not a key view without the system's
+    Keyboard navigation setting and a collapse with focus in the body leaves
+    the first responder on the window, so both blocks open with the breadth
+    arms and the mac cuts them, the segmented control's G6 shape.
+
+## DEFER — widgets in an expander's header (docs/expander-plan.md K2; 2026-10-09)
+KEY: expander header widgets, label-widget, AdwExpanderRow suffix, header control
+
+The header is text with an optional glyph and summary; a control in it (a
+switch or a checkbox, Microsoft's toppings sample) makes one row with two
+activations, and libadwaita's and Compose's headers have no seat for one.
+Trigger: an app whose collapsed state must show a live control.
+
+## DEFER — an expander that opens upward, disables its body, or closes its siblings (docs/expander-plan.md K6; 2026-10-09)
+KEY: ExpandDirection, show-enable-switch, accordion, one open at a time
+
+WinUI alone expands upward, libadwaita alone puts an enable switch in the
+header (and kaya has no disabled state, the `enabled` entry), and an
+accordion is the app's own `expanded = false` on the others from its
+`toggled` handler. Triggers: an app anchored to the bottom of a window that
+must grow upward; the `enabled` prop landing; a platform shipping an
+accordion control of its own.
+
+## DEFER — a skinned expander (docs/expander-plan.md K17; 2026-10-09)
+KEY: expander tint, branded chevron, filled header
+
+The expander takes each platform's own header and chevron in its own tokens;
+a tint, a filled header or a branded chevron is a styling capability and the
+maintainer's ruling. Trigger: the maintainer asks for an app-skinned
+expander.
+
 ## BUILD — the toast (docs/toast-plan.md), depth on the mac and iOS (2026-10-08), all nine bindings and the C floor (2026-10-08); the GTK, WinUI and Compose arms are the breadth slice
 KEY: toast, show_toast, dismiss_toast, present_toast, withdraw_toast, toast_result, toast_duration, toast_action, toast_outcome, ToastId, ToastRef, on_toast, kaya_toast_action, kaya_emit_toast_result, KayaToastHost, KayaToastView, kayaToastRead, kayaToastPress, kayaToastEarInstall, expect_toast, expect_no_toast, expect_toast_announced, toast_close, toast.steps, toast_routes, DEPTH STUB toast
 

@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x5c53f4354ceb6019
+specHash = 0x011ac2c5d907da7f
 
 valueBool :: Word32
 valueBool = 1
@@ -102,6 +102,8 @@ kindSecureField :: Word32
 kindSecureField = 24
 kindSegmented :: Word32
 kindSegmented = 25
+kindExpander :: Word32
+kindExpander = 26
 drawOpMoveTo :: Word32
 drawOpMoveTo = 1
 drawOpLineTo :: Word32
@@ -270,6 +272,10 @@ propRevealed :: Word32
 propRevealed = 57
 propRevealable :: Word32
 propRevealable = 58
+propSummary :: Word32
+propSummary = 59
+propExpanded :: Word32
+propExpanded = 60
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -2650,6 +2656,44 @@ txBindRevealable widgetId signalId = wireRecord txKindSetProperty
 txBindRevealableElement :: Word64 -> Word32 -> Word32 -> Builder
 txBindRevealableElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propRevealable <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant summary value.
+txSetSummary :: Word64 -> String -> Builder
+txSetSummary widgetId summary = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propSummary <> word32LE sourceConst
+    <> encodeValue (VStr summary))
+
+-- set_property with a signal-bound summary value.
+txBindSummary :: Word64 -> Word64 -> Builder
+txBindSummary widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propSummary <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindSummaryElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindSummaryElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propSummary <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant expanded value.
+txSetExpanded :: Word64 -> Bool -> Builder
+txSetExpanded widgetId expanded = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propExpanded <> word32LE sourceConst
+    <> encodeValue (VBool expanded))
+
+-- set_property with a signal-bound expanded value.
+txBindExpanded :: Word64 -> Word64 -> Builder
+txBindExpanded widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propExpanded <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindExpandedElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindExpandedElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propExpanded <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
 -- set_window_prop with a constant title value (window 0, the primary surface).

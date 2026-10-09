@@ -964,6 +964,7 @@ pub const KAYA_KIND_RANGE: u32 = 22;
 pub const KAYA_KIND_VIDEO: u32 = 23;
 pub const KAYA_KIND_SECURE_FIELD: u32 = 24;
 pub const KAYA_KIND_SEGMENTED: u32 = 25;
+pub const KAYA_KIND_EXPANDER: u32 = 26;
 const _: () = assert!(
     KAYA_KIND_COLUMN == wire::KIND_COLUMN
         && KAYA_KIND_BUTTON == wire::KIND_BUTTON
@@ -990,6 +991,7 @@ const _: () = assert!(
         && KAYA_KIND_VIDEO == wire::KIND_VIDEO
         && KAYA_KIND_SECURE_FIELD == wire::KIND_SECURE_FIELD
         && KAYA_KIND_SEGMENTED == wire::KIND_SEGMENTED
+        && KAYA_KIND_EXPANDER == wire::KIND_EXPANDER
 );
 // Completeness, not just agreement: a value pin cannot see a FORGOTTEN
 // export (docs/traps.md, "A value pin cannot see a FORGOTTEN sibling").
@@ -1007,7 +1009,7 @@ const _: () = {
         n
     };
     assert!(
-        kinds == 25,
+        kinds == 26,
         "the spec kind enum grew: export the new KAYA_KIND_* above, extend the pin, and bump          this count"
     );
 };
@@ -1123,6 +1125,10 @@ pub const KAYA_PROP_CONTENT_TYPE: u32 = 56;
 pub const KAYA_PROP_REVEALED: u32 = 57;
 /// A secure field carries the platform's show/hide toggle (docs/reveal-plan.md V1).
 pub const KAYA_PROP_REVEALABLE: u32 = 58;
+/// An expander's second header line (docs/expander-plan.md K3).
+pub const KAYA_PROP_SUMMARY: u32 = 59;
+/// Whether an expander's body shows (docs/expander-plan.md K4).
+pub const KAYA_PROP_EXPANDED: u32 = 60;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -1395,6 +1401,8 @@ const _: () = assert!(
         && KAYA_PROP_CONTENT_TYPE == wire::PROP_CONTENT_TYPE
         && KAYA_PROP_REVEALED == wire::PROP_REVEALED
         && KAYA_PROP_REVEALABLE == wire::PROP_REVEALABLE
+        && KAYA_PROP_SUMMARY == wire::PROP_SUMMARY
+        && KAYA_PROP_EXPANDED == wire::PROP_EXPANDED
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -1931,7 +1939,7 @@ const _: () = {
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 58,
+    crate::spec::PROPS.len() == 60,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(

@@ -2174,7 +2174,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0x5c53f4354ceb6019uL
+    private const val SPEC_HASH: ULong = 0x011ac2c5d907da7fuL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -2442,6 +2442,7 @@ object KayaCompose {
     const val KIND_VIDEO = 23
     const val KIND_SECURE_FIELD = 24
     const val KIND_SEGMENTED = 25
+    const val KIND_EXPANDER = 26
     private const val PROP_TEXT = 1
     private const val PROP_CHECKED = 2
     private const val PROP_VALUE = 3
@@ -2489,6 +2490,8 @@ object KayaCompose {
     private const val PROP_CONTENT_TYPE = 56
     private const val PROP_REVEALED = 57
     private const val PROP_REVEALABLE = 58
+    private const val PROP_SUMMARY = 59
+    private const val PROP_EXPANDED = 60
     private const val FILE_CONTENT_IMAGES = 1
     private const val PROP_COLUMNS = 11
     // The accessibility identifier (never spoken) and label (spoken).
@@ -3400,6 +3403,7 @@ object KayaCompose {
                         KIND_VIDEO -> KayaSceneModel.videos.add(node)
                         KIND_SECURE_FIELD -> KayaSceneModel.secureFields.add(node)
                         KIND_SEGMENTED -> KayaSceneModel.segmenteds.add(node)
+                        KIND_EXPANDER -> depthStub("expander")
                         KIND_NUMBER_FIELD -> {
                             // docs/number-field-plan.md §2: unset bounds are
                             // ±2^53, the step 1, and the field shows its
@@ -3500,6 +3504,7 @@ object KayaCompose {
                         PROP_CONTENT_TYPE -> KayaSceneModel.nodes[id]!!.contentType = readI64(b)
                         PROP_REVEALED -> KayaSceneModel.nodes[id]!!.revealed = readBool(b)
                         PROP_REVEALABLE -> KayaSceneModel.nodes[id]!!.revealable = readBool(b)
+                        PROP_SUMMARY, PROP_EXPANDED -> depthStub("expander")
                         PROP_ASPECT -> KayaSceneModel.nodes[id]!!.aspect = readI64(b)
                         PROP_PLAYER -> error("kaya: a video view's player arrives as set_video_player; the core never forwards the player prop")
                         PROP_CAPTURE -> error("kaya: a video view's capture arrives as set_video_capture; the core never forwards the capture prop")
@@ -7421,6 +7426,7 @@ object KayaCompose {
             "video" -> KayaSceneModel.videos
             "secure_field" -> KayaSceneModel.secureFields
             "segmented" -> KayaSceneModel.segmenteds
+            "expander" -> depthStub("expander")
             "textarea" -> KayaSceneModel.textareas
             "date_picker" -> KayaSceneModel.datePickers
             "time_picker" -> KayaSceneModel.timePickers
@@ -9993,6 +9999,7 @@ object KayaCompose {
                             }
                         }
                     }
+                    "expect_expanded", "expect_out_of_reach" -> depthStub("expander")
                     "expect_segments" -> {
                         val wantSegments = quoted(parts.drop(2))
                         val gotSegments = onUi(activity) {
@@ -16074,6 +16081,7 @@ private fun KayaRenderCore(
         KayaCompose.KIND_VIDEO -> KayaVideoView(node, a11y, boxFill)
         KayaCompose.KIND_SECURE_FIELD -> KayaSecureField(node, a11y, boxFill)
         KayaCompose.KIND_SEGMENTED -> KayaSegmented(node, a11y, boxFill)
+        KayaCompose.KIND_EXPANDER -> depthStub("expander")
         KayaCompose.KIND_LABELED -> {
             // THE LABELLED ROW (docs/forms-plan.md §3): Material's own
             // labelled row, the value trailing and a WIDE control folded

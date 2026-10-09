@@ -28,7 +28,7 @@ DEFAULT_KINDS = (
     "column button label entry row checkbox slider image "
     "scroll progress select radio grid textarea canvas "
     "date_picker time_picker labeled search number_field color_picker range video "
-    "secure_field segmented"
+    "secure_field segmented expander"
 ).split()
 
 def wire_kinds(root):
@@ -279,7 +279,9 @@ TPL_PROPS = ["format", "grow", "a11y_id", "a11y_label", "a11y_hint", "accepts", 
              # docs/autofill-plan.md A1: a stamped credential field's content type.
              "content_type",
              # docs/reveal-plan.md V1: a stamped secure field's reveal and toggle.
-             "revealed", "revealable"]
+             "revealed", "revealable",
+             # docs/expander-plan.md K3: a stamped expander's second header line.
+             "summary"]
 
 # Rust's `grow` is the generic floor `set(node, prop, value)` and not a
 # named setter, so that one row cannot tell grow from any other generic
@@ -296,6 +298,7 @@ PROP_MEMBERS = {
         "submits": "submits",
         "content_type": "content_type",
         "revealed": "revealed", "revealable": "revealable",
+        "summary": "summary",
     },
     "go": {
         "format": "SetFormat",
@@ -309,6 +312,7 @@ PROP_MEMBERS = {
         "submits": "SetSubmits",
         "content_type": "SetContentType",
         "revealed": "SetRevealed", "revealable": "SetRevealable",
+        "summary": "SetSummary",
     },
     "csharp": {
         "format": "SetFormat",
@@ -322,6 +326,7 @@ PROP_MEMBERS = {
         "submits": "SetSubmits",
         "content_type": "SetContentType",
         "revealed": "SetRevealed", "revealable": "SetRevealable",
+        "summary": "SetSummary",
     },
     "java": {
         "format": "setFormat",
@@ -335,6 +340,7 @@ PROP_MEMBERS = {
         "submits": "setSubmits",
         "content_type": "setContentType",
         "revealed": "setRevealed", "revealable": "setRevealable",
+        "summary": "setSummary",
     },
     "swift": {
         "format": "setFormat",
@@ -348,6 +354,7 @@ PROP_MEMBERS = {
         "submits": "setSubmits",
         "content_type": "setContentType",
         "revealed": "setRevealed", "revealable": "setRevealable",
+        "summary": "setSummary",
     },
     "ocaml": {
         "format": "set_format",
@@ -361,6 +368,7 @@ PROP_MEMBERS = {
         "submits": "set_submits",
         "content_type": "set_content_type",
         "revealed": "set_revealed", "revealable": "set_revealable",
+        "summary": "set_summary",
     },
     # Haskell's template props are not methods but CONSTRUCTORS of the
     # `TplAttr` GADT, applied by `applyTplAttr`.
@@ -376,6 +384,7 @@ PROP_MEMBERS = {
         "submits": "TplSubmits",
         "content_type": "TplContentType",
         "revealed": "TplRevealed", "revealable": "TplRevealable",
+        "summary": "TplSummary",
     },
     # JS spells five of the seven as chainable methods on the base handle
     # and the other two as CONSTRUCTOR OPTIONS; members_js says why the
@@ -391,6 +400,7 @@ PROP_MEMBERS = {
         "submits": "submits",
         "content_type": "contentType",
         "revealed": "revealed", "revealable": "revealable",
+        "summary": "summary",
     },
 }
 

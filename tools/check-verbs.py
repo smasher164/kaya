@@ -5618,6 +5618,8 @@ from reveal_routes import run as check_reveal_routes
 check_reveal_routes(g)
 from segmented_routes import run as check_segmented_routes
 check_segmented_routes(g)
+from expander_routes import run as check_expander_routes
+check_expander_routes(g)
 from toast_routes import run as check_toast_routes
 check_toast_routes(g)
 

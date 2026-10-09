@@ -228,6 +228,12 @@ impl From<f64> for LiveSource<F64Kind> {
     }
 }
 
+impl From<bool> for LiveSource<BoolKind> {
+    fn from(v: bool) -> Self {
+        LiveSource { inner: LiveInner::Const(Value::Bool(v)), _kind: PhantomData }
+    }
+}
+
 impl From<u32> for LiveSource<F64Kind> {
     fn from(v: u32) -> Self {
         LiveSource { inner: LiveInner::Const(Value::F64(f64::from(v))), _kind: PhantomData }
@@ -1988,6 +1994,18 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// An expander's second header line — [`Tx::summary`] chained.
+    pub fn summary(self, text: impl Into<LiveSource<StrKind>>) -> Self {
+        self.tx.summary(self.id, text);
+        self
+    }
+
+    /// Whether an expander's body shows — [`Tx::expanded`] chained.
+    pub fn expanded(self, on: impl Into<LiveSource<BoolKind>>) -> Self {
+        self.tx.expanded(self.id, on);
+        self
+    }
+
     /// Whether this secure field shows its text — [`Tx::revealed`] chained.
     pub fn revealed(self, on: bool) -> Self {
         self.tx.revealed(self.id, on);
@@ -3015,7 +3033,7 @@ impl<'a> Tx<'a> {
     }
 
     /// One live Str source onto one prop: a constant sets, a signal binds.
-    fn set_live(&mut self, widget: WidgetId, prop: Prop, src: LiveSource<StrKind>) {
+    fn set_live<K>(&mut self, widget: WidgetId, prop: Prop, src: LiveSource<K>) {
         match src.inner {
             LiveInner::Const(value) => self.set(widget, prop, value),
             LiveInner::Signal(signal) => self.bind(widget, prop, signal),
@@ -3101,6 +3119,19 @@ impl<'a> Tx<'a> {
     /// (docs/autofill-plan.md A1-A3). `ContentType::None` takes the hint away.
     pub fn content_type(&mut self, widget: WidgetId, content: crate::protocol::ContentType) {
         self.set(widget, Prop::ContentType, content.wire());
+    }
+
+    /// An expander's second header line (docs/expander-plan.md K3); empty
+    /// draws none.
+    pub fn summary(&mut self, widget: WidgetId, text: impl Into<LiveSource<StrKind>>) {
+        self.set_live(widget, Prop::Summary, text.into());
+    }
+
+    /// Whether an expander's body shows (docs/expander-plan.md K4). A write
+    /// never echoes; the user's own activation of the header reaches
+    /// [`Messages::on_toggle`] with the new state.
+    pub fn expanded(&mut self, widget: WidgetId, on: impl Into<LiveSource<BoolKind>>) {
+        self.set_live(widget, Prop::Expanded, on.into());
     }
 
     /// Whether a secure field shows its text (docs/reveal-plan.md V1). A
@@ -3394,6 +3425,22 @@ impl<'a> Tx<'a> {
             tx.set_live(l, Prop::Text, label);
             body(tx)
         })
+    }
+
+    /// An EXPANDER (docs/expander-plan.md): `text` is the header the user
+    /// activates, the body its children, laid out as a column and kept alive
+    /// while collapsed. Chain [`Widget::summary`], [`Widget::symbol`] and
+    /// [`Widget::expanded`]; the user's toggle reaches [`Messages::on_toggle`].
+    pub fn expander<R>(
+        &mut self,
+        text: impl Into<LiveSource<StrKind>>,
+        body: impl FnOnce(&mut Self) -> R,
+    ) -> Widget<'_, 'a, R> {
+        let text = text.into();
+        let w = self.container_of(WidgetKind::Expander, body);
+        let id = w.id;
+        w.tx.set_live(id, Prop::Text, text);
+        Widget { id, out: w.out, tx: w.tx }
     }
 
     /// A grid laying its children out row-major into `columns` columns —
@@ -4861,6 +4908,23 @@ impl<'b> Row<'_, 'b> {
         body: impl FnOnce(&mut Tpl<'_, 'b>) -> R,
     ) -> (TemplateNodeId, R) {
         self.tpl().labeled(label, body)
+    }
+
+    pub fn expander<R>(
+        &mut self,
+        text: impl Into<TplSource<StrKind>>,
+        expanded: impl Into<TplSource<BoolKind>>,
+        body: impl FnOnce(&mut Tpl<'_, 'b>) -> R,
+    ) -> (TemplateNodeId, R) {
+        self.tpl().expander(text, expanded, body)
+    }
+
+    pub fn summary(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
+        self.tpl().summary(node, src)
+    }
+
+    pub fn symbol(&mut self, node: TemplateNodeId, symbol: crate::Symbol) {
+        self.tpl().symbol(node, symbol)
     }
 
     pub fn progress(&mut self, src: impl Into<TplSource<F64Kind>>) -> TemplateNodeId {
@@ -8408,6 +8472,32 @@ impl<'b> Tpl<'_, 'b> {
             t.label(label);
             body(t)
         })
+    }
+
+    /// An EXPANDER in the template zone (docs/expander-plan.md K10): its
+    /// `expanded` binds a Bool field of the row, which the app writes the
+    /// user's toggle back into, since a re-stamped copy reads its row.
+    pub fn expander<R>(
+        &mut self,
+        text: impl Into<TplSource<StrKind>>,
+        expanded: impl Into<TplSource<BoolKind>>,
+        body: impl FnOnce(&mut Self) -> R,
+    ) -> (TemplateNodeId, R) {
+        let (node, out) = self.container_of(WidgetKind::Expander, body);
+        self.apply_source(node, Prop::Text, text.into().inner);
+        self.apply_source(node, Prop::Expanded, expanded.into().inner);
+        (node, out)
+    }
+
+    /// A stamped expander's second header line, the blueprint twin of
+    /// [`Tx::summary`].
+    pub fn summary(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
+        self.apply_source(node, Prop::Summary, src.into().inner);
+    }
+
+    /// A stamped button's or expander's glyph.
+    pub fn symbol(&mut self, node: TemplateNodeId, symbol: crate::Symbol) {
+        self.set(node, Prop::Symbol, symbol as i64);
     }
 
     /// A spacer: an empty grown column, the same pure sugar the live

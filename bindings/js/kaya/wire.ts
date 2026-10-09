@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x5c53f4354ceb6019n;
+export const SPEC_HASH = 0x011ac2c5d907da7fn;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -47,6 +47,7 @@ export const KIND_RANGE = 22;
 export const KIND_VIDEO = 23;
 export const KIND_SECURE_FIELD = 24;
 export const KIND_SEGMENTED = 25;
+export const KIND_EXPANDER = 26;
 export const DRAW_OP_MOVE_TO = 1;
 export const DRAW_OP_LINE_TO = 2;
 export const DRAW_OP_CLOSE = 3;
@@ -131,6 +132,8 @@ export const PROP_FORMAT = 55;
 export const PROP_CONTENT_TYPE = 56;
 export const PROP_REVEALED = 57;
 export const PROP_REVEALABLE = 58;
+export const PROP_SUMMARY = 59;
+export const PROP_EXPANDED = 60;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -2526,6 +2529,42 @@ export function tx_bind_revealable(widget_id: number, signal_id: number): Uint8A
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_revealable_element(widget_id: number, level = 0, field = 0): Uint8Array {
   enc.begin(); enc.u64(widget_id); enc.u32(PROP_REVEALABLE); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant summary value. */
+export function tx_set_summary(widget_id: number, summary: string): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_SUMMARY); enc.u32(SOURCE_CONST); enc.value(summary);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound summary value. */
+export function tx_bind_summary(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_SUMMARY); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_summary_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_SUMMARY); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant expanded value. */
+export function tx_set_expanded(widget_id: number, expanded: boolean): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_EXPANDED); enc.u32(SOURCE_CONST); enc.value(expanded);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound expanded value. */
+export function tx_bind_expanded(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_EXPANDED); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_expanded_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_EXPANDED); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
   return enc.end(TX_SET_PROPERTY);
 }
 

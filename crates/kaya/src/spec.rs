@@ -291,6 +291,10 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // the platform's own show/hide toggle.
     ("revealed", 57, PropKind::Bool),
     ("revealable", 58, PropKind::Bool),
+    // docs/expander-plan.md K3, K4: an expander's second header line, and
+    // whether its body shows.
+    ("summary", 59, PropKind::Str),
+    ("expanded", 60, PropKind::Bool),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -3128,7 +3132,8 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             doc: "path_len key values follow, then the checkbox's new state \
                   as one Bool value, or a secure field's new revealed state \
                   when the user flipped its own toggle (docs/reveal-plan.md \
-                  V2). Same shape, ownership, and user-only-emits stance as \
+                  V2), or an expander's new expanded state when the user \
+                  activated its header (docs/expander-plan.md K4). Same shape, ownership, and user-only-emits stance as \
                   text_changed.",
         },
         Record {
@@ -4119,6 +4124,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("video", 23),
                 ("secure_field", 24),
                 ("segmented", 25),
+                ("expander", 26),
             ],
         },
         EnumSpec {
@@ -4244,6 +4250,8 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("content_type", 56),
                 ("revealed", 57),
                 ("revealable", 58),
+                ("summary", 59),
+                ("expanded", 60),
             ],
         },
         EnumSpec {
@@ -5270,6 +5278,7 @@ mod tests {
                     ("kind", "number_field") => wire::KIND_NUMBER_FIELD,
                     ("kind", "secure_field") => wire::KIND_SECURE_FIELD,
                     ("kind", "segmented") => wire::KIND_SEGMENTED,
+                    ("kind", "expander") => wire::KIND_EXPANDER,
                     ("kind", "color_picker") => wire::KIND_COLOR_PICKER,
                     ("kind", "range") => wire::KIND_RANGE,
                     ("kind", "video") => wire::KIND_VIDEO,
@@ -5359,6 +5368,8 @@ mod tests {
                     ("prop", "content_type") => wire::PROP_CONTENT_TYPE,
                     ("prop", "revealed") => wire::PROP_REVEALED,
                     ("prop", "revealable") => wire::PROP_REVEALABLE,
+                    ("prop", "summary") => wire::PROP_SUMMARY,
+                    ("prop", "expanded") => wire::PROP_EXPANDED,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,

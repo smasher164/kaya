@@ -283,6 +283,7 @@ pub(crate) const KIND_RANGE: u32 = 22;
 pub(crate) const KIND_VIDEO: u32 = 23;
 pub(crate) const KIND_SECURE_FIELD: u32 = 24;
 pub(crate) const KIND_SEGMENTED: u32 = 25;
+pub(crate) const KIND_EXPANDER: u32 = 26;
 
 // Draw opcodes (docs/canvas-plan.md §3.3). The op stream is a flat run
 // of tagged values: one of these as an i64, then its operands.
@@ -1187,6 +1188,8 @@ pub(crate) const PROP_FORMAT: u32 = 55;
 pub(crate) const PROP_CONTENT_TYPE: u32 = 56;
 pub(crate) const PROP_REVEALED: u32 = 57;
 pub(crate) const PROP_REVEALABLE: u32 = 58;
+pub(crate) const PROP_SUMMARY: u32 = 59;
+pub(crate) const PROP_EXPANDED: u32 = 60;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
@@ -1753,6 +1756,7 @@ fn widget_kind(raw: u32) -> WidgetKind {
         KIND_VIDEO => WidgetKind::Video,
         KIND_SECURE_FIELD => WidgetKind::SecureField,
         KIND_SEGMENTED => WidgetKind::Segmented,
+        KIND_EXPANDER => WidgetKind::Expander,
         other => panic!("kaya: unknown widget kind {other}"),
     }
 }
@@ -1817,6 +1821,8 @@ fn prop(raw: u32) -> Prop {
         PROP_CONTENT_TYPE => Prop::ContentType,
         PROP_REVEALED => Prop::Revealed,
         PROP_REVEALABLE => Prop::Revealable,
+        PROP_SUMMARY => Prop::Summary,
+        PROP_EXPANDED => Prop::Expanded,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -5396,6 +5402,7 @@ fn kind_raw(kind: WidgetKind) -> u32 {
         WidgetKind::Video => KIND_VIDEO,
         WidgetKind::SecureField => KIND_SECURE_FIELD,
         WidgetKind::Segmented => KIND_SEGMENTED,
+        WidgetKind::Expander => KIND_EXPANDER,
     }
 }
 
@@ -5672,6 +5679,8 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::ContentType => PROP_CONTENT_TYPE,
         Prop::Revealed => PROP_REVEALED,
         Prop::Revealable => PROP_REVEALABLE,
+        Prop::Summary => PROP_SUMMARY,
+        Prop::Expanded => PROP_EXPANDED,
     }
 }
 

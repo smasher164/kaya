@@ -188,7 +188,9 @@ PAD_EXTRAS = {
 # drive chrome no phone has; split/panes drive resize_window, which this
 # host rejects by design (DESIGN.md, Windows).
 DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes"]
-UNWIRED_SCENES = []
+# The expander's iOS arm is built; where iOS publishes the header's expanded
+# state is the breadth's to measure (docs/expander-plan.md §7).
+UNWIRED_SCENES = ["expander"]
 
 # The fullscreen scene's app-only way back after the cut, the same steps as
 # tools/lib/lanes/android.py's FULLSCREEN_APP_TAIL: no user change arrives.

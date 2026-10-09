@@ -58,7 +58,9 @@ SCENES = [
 DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows",
                 "format", "flexshrink", "listrow", "tints", "badge", "emoji", "media",
                 # The capture (docs/capture-plan.md §8), rust-only at depth.
-                "capture"]
+                "capture",
+                # The expander (docs/expander-plan.md §6).
+                "expander"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -307,6 +309,9 @@ ORDER = [
     ("capture", LANGS),
     ("capture_denied", LANGS),
     ("toast", LANGS + ("c",)),
+    # RUST ALONE while the eight bindings' expander is the breadth slice
+    # (docs/expander-plan.md §6).
+    ("expander", ("rust",)),
     ("richtext", ("rust", "python", "js", "go", "csharp", "java", "swift",
                   "ocaml", "haskell")),
     ("ownundo", ("rust", "python", "js", "go", "csharp", "java", "swift",

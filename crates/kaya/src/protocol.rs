@@ -1644,6 +1644,9 @@ pub enum WidgetKind {
     /// A SEGMENTED CONTROL (docs/segmented-plan.md G1): the choice contract
     /// in a third presentation, its label children the segments.
     Segmented,
+    /// An EXPANDER (docs/expander-plan.md K1): a header the user activates
+    /// over a body, its children, laid out as a column.
+    Expander,
 }
 
 /// A video view's box ratio, width:height (docs/media-plan.md §3, RULED
@@ -1940,7 +1943,7 @@ impl WidgetKind {
     /// export `WidgetKind` into the public header as an opaque handle no C
     /// caller can use. `cfg(test)` because the sweeps that walk it are tests.
     #[cfg(test)]
-    pub(crate) const ALL: [WidgetKind; 25] = [
+    pub(crate) const ALL: [WidgetKind; 26] = [
         WidgetKind::Column,
         WidgetKind::Button,
         WidgetKind::Label,
@@ -1966,6 +1969,7 @@ impl WidgetKind {
         WidgetKind::Video,
         WidgetKind::SecureField,
         WidgetKind::Segmented,
+        WidgetKind::Expander,
     ];
 
     /// Whether a widget of this kind carries an identity tag — the
@@ -1991,7 +1995,8 @@ impl WidgetKind {
             | WidgetKind::ColorPicker
             | WidgetKind::Range
             | WidgetKind::SecureField
-            | WidgetKind::Segmented => true,
+            | WidgetKind::Segmented
+            | WidgetKind::Expander => true,
             // Exhaustive on purpose — no wildcard. A kind added to the
             // spec lands here as a compile error, which is the moment to
             // decide whether it reports.
@@ -2245,6 +2250,11 @@ pub enum Prop {
     /// A secure field carries the platform's show/hide toggle (Bool;
     /// docs/reveal-plan.md V1).
     Revealable,
+    /// An expander's second header line (Str; docs/expander-plan.md K3).
+    Summary,
+    /// Whether an expander's body shows (Bool; docs/expander-plan.md K4).
+    /// The user's activation of the header reports as a Toggled occurrence.
+    Expanded,
     /// The app owns a rich textarea's undo (Bool-valued; docs/rich-text-plan.md
     /// R6, §14): the native stack is off, the ledger never banks it, and
     /// Edit>Undo/Redo reach the app through the role item's own activation.
