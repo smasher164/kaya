@@ -14774,6 +14774,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.rows.push(grid.clone());
                     NativeWidget::Row(grid)
                 }
+                WidgetKind::Segmented => crate::depth_stub("segmented"),
                 WidgetKind::SecureField => {
                     // docs/secure-entry-plan.md §3: the text goes to the app
                     // alone, never to the ledger or a banked copy (P2). A
@@ -20847,6 +20848,7 @@ fn registry_widget_at(core: &CoreState, kind: crate::harness::TargetKind, i: usi
         K::Range => core.range_ids.get(i).copied(),
         K::Video => core.media.video_ids.get(i).copied(),
         K::SecureField => core.secure_ids.get(i).copied(),
+        K::Segmented => crate::depth_stub("segmented"),
         K::ColorPicker => core.color_picker_ids.get(i).copied(),
         K::NumberField => core.number_field_ids.get(i).copied(),
         K::Canvas => core.canvas_ids.get(i).copied(),
@@ -21144,6 +21146,7 @@ fn target_element(
         K::Range => nth!(core.ranges),
         K::Video => nth!(media::elements(core)),
         K::SecureField => nth!(core.secure_fields),
+        K::Segmented => crate::depth_stub("segmented"),
         K::ColorPicker => nth!(core.color_pickers),
         K::NumberField => nth!(core.number_fields),
         K::DatePicker => nth!(core.date_pickers),
@@ -21268,6 +21271,7 @@ fn registry_ids(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<u64> 
         K::Range => core.range_ids.clone(),
         K::Video => core.media.video_ids.clone(),
         K::SecureField => core.secure_ids.clone(),
+        K::Segmented => crate::depth_stub("segmented"),
         K::ColorPicker => core.color_picker_ids.clone(),
         K::NumberField => core.number_field_ids.clone(),
         K::Canvas => core.canvas_ids.clone(),
@@ -24546,6 +24550,7 @@ impl crate::harness::Stage for WinUiStage {
                 K::Range => find(core, K::Range, &core.ranges, &id),
                 K::Video => find(core, K::Video, &media::elements(core), &id),
                 K::SecureField => find(core, K::SecureField, &core.secure_fields, &id),
+                K::Segmented => crate::depth_stub("segmented"),
                 K::ColorPicker => find(core, K::ColorPicker, &core.color_pickers, &id),
                 K::NumberField => find(core, K::NumberField, &core.number_fields, &id),
                 K::Canvas => find(core, K::Canvas, &core.canvases, &id),
@@ -26155,6 +26160,16 @@ impl crate::harness::Stage for WinUiStage {
             core.selects[i].SetSelectedIndex(index as i32)?;
             Ok(())
         });
+    }
+
+    /// No segmented control exists on this backend before the breadth
+    /// (docs/segmented-plan.md §6).
+    fn segments(&self, _: crate::harness::Target) -> String {
+        crate::depth_stub("segmented")
+    }
+
+    fn segment_symbol(&self, _: crate::harness::Target, _: usize) -> String {
+        crate::depth_stub("segmented")
     }
 
     fn selected_label(&self, t: crate::harness::Target) -> String {

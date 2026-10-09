@@ -4476,6 +4476,7 @@ fn kind_registry(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<gtk4
         K::Range => core.ranges.iter().map(|p| p.group.clone().upcast()).collect(),
         K::Video => core.videos.iter().map(|v| v.overlay.clone().upcast()).collect(),
         K::SecureField => core.secure_fields.iter().map(|w| w.clone().upcast()).collect(),
+        K::Segmented => crate::depth_stub("segmented"),
         K::ColorPicker => core.color_pickers.iter().map(|f| f.button.clone().upcast()).collect(),
         K::NumberField => core.number_fields.iter().map(|f| f.spin.clone().upcast()).collect(),
         K::Label => core.labels.clone(),
@@ -9593,6 +9594,7 @@ fn context_anchor_id(core: &CoreState, t: crate::harness::Target) -> u64 {
             .button
             .clone()
             .upcast(),
+        K::Segmented => crate::depth_stub("segmented"),
         K::Entry | K::Textarea | K::Search | K::NumberField | K::SecureField => {
             panic!("kaya: editable text is not a context anchor (v1)")
         }
@@ -12265,6 +12267,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.grids.push(grid.clone());
                     NativeWidget::Grid(grid)
                 }
+                WidgetKind::Segmented => crate::depth_stub("segmented"),
                 WidgetKind::SecureField => {
 // docs/secure-entry-plan.md §3 and docs/reveal-plan.md §3, V10: GTK's own password
 // entry, its peek icon replaced by kaya's eye, the context menu's "Show Text"
@@ -22461,6 +22464,16 @@ impl crate::harness::Stage for GtkStage {
         });
     }
 
+    /// No segmented control exists on this backend before the breadth
+    /// (docs/segmented-plan.md §6).
+    fn segments(&self, _: crate::harness::Target) -> String {
+        crate::depth_stub("segmented")
+    }
+
+    fn segment_symbol(&self, _: crate::harness::Target, _: usize) -> String {
+        crate::depth_stub("segmented")
+    }
+
     fn selected_label(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
             if t.kind == crate::harness::TargetKind::Radio {
@@ -23580,6 +23593,7 @@ fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk
             .map(|i| core.ranges[i].group.clone().upcast()),
         K::Video => try_resolve(target.index, core.videos.len()).map(|i| core.videos[i].overlay.clone().upcast()),
         K::SecureField => nth!(core.secure_fields),
+        K::Segmented => crate::depth_stub("segmented"),
         K::ColorPicker => try_resolve(target.index, core.color_pickers.len())
             .map(|i| core.color_pickers[i].swatch.clone().upcast()),
         K::NumberField => try_resolve(target.index, core.number_fields.len())

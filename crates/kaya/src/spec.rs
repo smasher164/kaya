@@ -3084,8 +3084,9 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             payload: Some(PropKind::F64),
             doc: "path_len key values follow, then the widget's new value as \
                   one F64 value: the slider's position, or the select's new \
-                  selected index (integral, 0-based; the radio group is \
-                  the same contract in its inline presentation). One \
+                  selected index (integral, 0-based; the radio group and \
+                  the segmented control are the same contract in their \
+                  own presentations). One \
                   occurrence per USER change (programmatic writes never \
                   echo — without that, a handler writing back a different \
                   value would ping-pong forever); same ownership stance.",
@@ -4042,6 +4043,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("range", 22),
                 ("video", 23),
                 ("secure_field", 24),
+                ("segmented", 25),
             ],
         },
         EnumSpec {
@@ -5171,6 +5173,7 @@ mod tests {
                     ("kind", "search") => wire::KIND_SEARCH,
                     ("kind", "number_field") => wire::KIND_NUMBER_FIELD,
                     ("kind", "secure_field") => wire::KIND_SECURE_FIELD,
+                    ("kind", "segmented") => wire::KIND_SEGMENTED,
                     ("kind", "color_picker") => wire::KIND_COLOR_PICKER,
                     ("kind", "range") => wire::KIND_RANGE,
                     ("kind", "video") => wire::KIND_VIDEO,

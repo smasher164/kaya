@@ -1,6 +1,7 @@
 # The segmented control: the design pass (2026-10-08)
 
-Status: DESIGN PASS 2026-10-08, nothing built. Every ruling (G1-G13) is
+Status: DEPTH BUILT 2026-10-08 (the mac, Rust, segmented.steps; docs/deferred.md's
+segmented BUILD entry holds the breadth). Every ruling (G1-G13) is still
 RECOMMENDED and awaits the maintainer. The maintainer picked the control
 next on 2026-10-08. Its roadmap card (docs/roadmap/features.toml,
 `segmented`) gives the shape as "presentation on radio group", and this pass
@@ -383,9 +384,23 @@ breadth.
   names none of them yet.
 - MEASURED 2026-10-08 (the tree): the SwiftUI and Compose `expect` and
   `choose` arms for `radio` and `select` read and write `node.value` (G10).
-- To measure at the depth: that SwiftUI's segmented Picker is an
-  NSSegmentedControl on macOS, per-segment tooltips through it, a symbol
-  segment's AX name, and the iOS segment elements' traits.
+- MEASURED 2026-10-08 at the depth (macOS 26.5, a SwiftUI probe built with
+  `kaya_swiftc`): the segmented Picker builds `SwiftUISegmentedControl`, an
+  NSSegmentedControl subclass with segmentDistribution fillEqually; `.help`
+  on a Picker item lands as `toolTip(forSegment:)` (AXHelp), so the arm
+  needs no NSViewRepresentable; an `Image(systemName:)` segment's
+  AXIdentifier is its SF name and its AXDescription the
+  `.accessibilityLabel`; AXPress on a segment runs the selection binding's
+  set; the `.radioGroup` Picker is the same AXRadioGroup of AXRadioButtons
+  (name in AXDescription, AXValue 1 selected) and the `.menu` Picker an
+  AXPopUpButton whose AXValue is the selected title.
+- Built at the depth and NOT as written above: the scene's symbol control
+  uses `info` and `edit`, since the vocabulary has no list or grid glyph;
+  `choose_by_keys` waits for the breadth (no depth lane can run it); and
+  the Rust binding gained `segmented_bound`, because no choice kind had a
+  live-zone way for an app to write the index after the build.
+- To measure at the breadth: the iOS segment elements' traits, the iOS
+  press and symbol read (built, unrun).
 - To measure at the breadth: AdwToggleGroup's keyboard and AT-SPI role
   names, SelectorBar's UIA tree and whether its selection follows Tab
   focus as the docs say, Compose's key handling between segments, and

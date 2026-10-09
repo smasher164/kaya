@@ -319,6 +319,10 @@ name = "secure"
 path = "../../guests/rust/secure.rs"
 
 [[example]]
+name = "segmented"
+path = "../../guests/rust/segmented.rs"
+
+[[example]]
 name = "autofill"
 path = "../../guests/rust/autofill.rs"
 

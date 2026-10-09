@@ -22,7 +22,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xad557b5075ff50eb
+let kayaSpecHash: UInt64 = 0x3b06087d3310d8b0
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -218,6 +218,7 @@ private let kindColorPicker: UInt32 = 21
 private let kindRange: UInt32 = 22
 private let kindVideo: UInt32 = 23
 private let kindSecureField: UInt32 = 24
+private let kindSegmented: UInt32 = 25
 private let propText: UInt32 = 1
 private let propChecked: UInt32 = 2
 private let propColumns: UInt32 = 11
@@ -1204,13 +1205,14 @@ final class KayaSceneModel {
     var ranges: [KayaNode] = []
     var videos: [KayaNode] = []
     var secureFields: [KayaNode] = []
+    var segmenteds: [KayaNode] = []
 
     /// Every kind registry, so a destroyed node leaves all of them at once.
     static let registries: [ReferenceWritableKeyPath<KayaSceneModel, [KayaNode]>] = [
         \.buttons, \.checkboxes, \.labels, \.entryWidgets, \.sliders, \.datePickers,
         \.timePickers, \.images, \.canvases, \.columns, \.rows, \.scrolls, \.progresses,
         \.selects, \.radios, \.grids, \.textareas, \.labeleds, \.searches, \.numberFields,
-        \.colorPickers, \.ranges, \.videos, \.secureFields,
+        \.colorPickers, \.ranges, \.videos, \.secureFields, \.segmenteds,
     ]
 
     func forget(_ id: UInt64) {
@@ -5620,6 +5622,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case kindRange: kayaScene.ranges.append(node)
                 case kindVideo: kayaScene.videos.append(node)
                 case kindSecureField: kayaScene.secureFields.append(node)
+                case kindSegmented: kayaScene.segmenteds.append(node)
                 case kindNumberField:
                     // docs/number-field-plan.md §2: unset bounds are ±2^53, the
                     // step 1, and the field shows its value from the start.
@@ -6389,7 +6392,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 // before this parent was known); otherwise every later label
                 // shifts index.
                 let parentKind = kayaScene.nodes[parent]!.kind
-                if parentKind == kindSelect || parentKind == kindRadio {
+                if parentKind == kindSelect || parentKind == kindRadio || parentKind == kindSegmented {
                     kayaScene.labels.removeAll { $0.id == child }
                 }
             case applySetDragSource:
@@ -8529,6 +8532,7 @@ private func kayaAnyTarget(_ spec: Substring) -> KayaNode? {
     case "range": return kayaTarget(spec, "range", kayaScene.ranges)
     case "video": return kayaTarget(spec, "video", kayaScene.videos)
     case "secure_field": return kayaTarget(spec, "secure_field", kayaScene.secureFields)
+    case "segmented": return kayaTarget(spec, "segmented", kayaScene.segmenteds)
     default: return nil
     }
 }
@@ -9383,6 +9387,60 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("no such target \(parts[1])")
                 }
+            case "choose" where parts.count == 3 && parts[1].hasPrefix("segmented"):
+                // The segment's own accessibility press (docs/segmented-plan.md
+                // G10), so the platform's control drives the binding's set.
+                guard let segmentIndex = Int(parts[2]) else {
+                    failures.append("choose wants a 0-based index: \(line)")
+                    break
+                }
+                kayaAwaitQuiet()
+                let segmentAnswered = kayaAnswers()
+                let unpressed = DispatchQueue.main.sync { () -> String? in
+                    guard let node = kayaTarget(parts[1], "segmented", kayaScene.segmenteds) else {
+                        return "no such target \(parts[1])"
+                    }
+                    return kayaChoicePress(node, segmentIndex)
+                }
+                if let unpressed {
+                    failures.append(unpressed)
+                } else {
+                    kayaAwaitAnswer(segmentAnswered)
+                }
+            case "expect_segments":
+                // docs/segmented-plan.md G5, read off the platform's segments.
+                let wantSegments = kayaQuoted(Array(parts.dropFirst(2)))
+                let gotSegments = DispatchQueue.main.sync { () -> String in
+                    guard parts.count > 1,
+                        let node = kayaTarget(parts[1], "segmented", kayaScene.segmenteds)
+                    else { return "<no such target>" }
+                    return kayaSegmentsText(node)
+                }
+                if kayaBytesEqual(gotSegments, wantSegments) {
+                    observed.append("segments \"\(wantSegments)\"")
+                } else {
+                    failures.append("segments \"\(gotSegments)\", wanted \"\(wantSegments)\"")
+                }
+            case "expect_segment_symbol":
+                guard parts.count >= 4, let glyphIndex = Int(parts[2]) else {
+                    failures.append(
+                        "expect_segment_symbol wants a segmented control, a 0-based index and a "
+                            + "quoted symbol name: \(line)")
+                    break
+                }
+                let wantGlyph = kayaQuoted(Array(parts.dropFirst(3)))
+                let gotGlyph = DispatchQueue.main.sync { () -> String in
+                    guard let node = kayaTarget(parts[1], "segmented", kayaScene.segmenteds) else {
+                        return "<no such target>"
+                    }
+                    return kayaSegmentSymbolText(node, glyphIndex)
+                }
+                if kayaBytesEqual(gotGlyph, wantGlyph) {
+                    observed.append("segment \(glyphIndex) symbol \"\(wantGlyph)\"")
+                } else {
+                    failures.append(
+                        "segment \(glyphIndex) symbol \"\(gotGlyph)\", wanted \"\(wantGlyph)\"")
+                }
             case "choose":
                 // The select's real change route in this interpreter is the
                 // Picker's binding set — mirrored here exactly as set_value
@@ -9702,16 +9760,13 @@ private func kayaRunScript(_ script: String) {
                                         : "\(Int(($0.value * 100).rounded()))%"
                                 }
                                 : parts[1].hasPrefix("select") || parts[1].hasPrefix("radio")
+                                    || parts[1].hasPrefix("segmented")
                                     ? (parts[1].hasPrefix("radio")
                                         ? kayaTarget(parts[1], "radio", kayaScene.radios)
+                                        : parts[1].hasPrefix("segmented")
+                                        ? kayaTarget(parts[1], "segmented", kayaScene.segmenteds)
                                         : kayaTarget(parts[1], "select", kayaScene.selects))
-                                        .map {
-                                            // The selected option's LABEL —
-                                            // child order is option order.
-                                            let index = Int($0.value)
-                                            return $0.children.indices.contains(index)
-                                                ? $0.children[index].text : ""
-                                        }
+                                        .map { kayaChoiceSelectedText($0) }
                                     : kayaTarget(parts[1], "label", kayaScene.labels)?.text
                 }
                 if let got, kayaBytesEqual(got, want) {
@@ -20664,6 +20719,7 @@ struct KayaRender: View {
             .pickerStyle(.menu)
             .labelsHidden()
             .fixedSize()
+            .background(KayaChoiceAnchor(id: node.id))
         case kindGrid where node.columns == 0:
             // THE GRID THAT FITS (docs/layout-knobs-plan.md §3): as many
             // columns as fit the proposed width at the floor, equal shares;
@@ -20756,6 +20812,9 @@ struct KayaRender: View {
             #endif
             .labelsHidden()
             .fixedSize()
+            .background(KayaChoiceAnchor(id: node.id))
+        case kindSegmented:
+            KayaSegmented(node: node, stretch: node.grow > 0 || (flexVertical == true && node.fill == true))
         case kindProgress:
             // The dressed floor: SwiftUI's own ProgressView — linear
             // determinate over the 0..=1 fraction, or the activity
@@ -22905,6 +22964,277 @@ func kayaToolbarChromeFits(_ spelling: String) -> String? {
         return semantic
     }
 #endif
+
+// MARK: - The choice controls, read off the platform (docs/segmented-plan.md G10)
+
+/// docs/segmented-plan.md §3, G3; the platform's control measured in §7.
+struct KayaSegmented: View {
+    let node: KayaNode
+    let stretch: Bool
+
+    var body: some View {
+        let picker = Picker(
+            "",
+            selection: Binding(
+                get: { Int(node.value) },
+                set: { newIndex in
+                    kayaUserWrite { node.value = Double(newIndex) }
+                    KayaHost.emitValue(node.tag, Double(newIndex))
+                })
+        ) {
+            ForEach(Array(node.children.enumerated()), id: \.element.id) { index, segment in
+                if segment.symbol != 0 {
+                    Image(systemName: kayaSFSymbol(segment.symbol) ?? "questionmark")
+                        .accessibilityLabel(segment.text)
+                        .help(segment.text)
+                        .tag(index)
+                } else {
+                    Text(segment.text).font(kayaBrandFont()).tag(index)
+                }
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        if stretch {
+            picker.frame(maxWidth: .infinity).background(KayaChoiceAnchor(id: node.id))
+        } else {
+            picker.fixedSize().background(KayaChoiceAnchor(id: node.id))
+        }
+    }
+}
+
+final class KayaChoiceAnchorBox {
+    weak var view: AnyObject?
+}
+
+/// Each choice control's anchors, empty platform views behind it: the
+/// control's frame, where the reads find the platform's own element. Every
+/// rendering registers its own, since a node can be drawn more than once
+/// (the portfolio's filter is, measured).
+var kayaChoiceAnchors: [UInt64: [KayaChoiceAnchorBox]] = [:]
+
+private func kayaChoiceRegister(_ id: UInt64, _ view: AnyObject) {
+    var boxes = (kayaChoiceAnchors[id] ?? []).filter { $0.view != nil }
+    if boxes.contains(where: { $0.view === view }) { return }
+    let box = KayaChoiceAnchorBox()
+    box.view = view
+    boxes.append(box)
+    kayaChoiceAnchors[id] = boxes
+}
+
+#if os(macOS)
+    struct KayaChoiceAnchor: NSViewRepresentable {
+        let id: UInt64
+        func makeNSView(context: Context) -> NSView {
+            let view = NSView()
+            kayaChoiceRegister(id, view)
+            return view
+        }
+        func updateNSView(_ view: NSView, context: Context) { kayaChoiceRegister(id, view) }
+    }
+#else
+    struct KayaChoiceAnchor: UIViewRepresentable {
+        let id: UInt64
+        func makeUIView(context: Context) -> UIView {
+            let view = UIView()
+            view.isUserInteractionEnabled = false
+            kayaChoiceRegister(id, view)
+            return view
+        }
+        func updateUIView(_ view: UIView, context: Context) { kayaChoiceRegister(id, view) }
+    }
+#endif
+
+struct KayaChoiceSegment {
+    let name: String
+    let selected: Bool
+    /// The glyph's SF name as the platform publishes it, nil for a text segment.
+    let glyph: String?
+    let press: () -> Bool
+}
+
+enum KayaChoiceRead {
+    case segments([KayaChoiceSegment])
+    case popUp(String)
+    case unread(String)
+}
+
+#if os(macOS)
+    /// The platform's element at the control's centre, walked up to its radio
+    /// group (a segmented control's cell and a radio group alike) or its pop-up
+    /// button (measured, docs/segmented-plan.md §7).
+    func kayaChoiceRead(_ node: KayaNode) -> KayaChoiceRead {
+        let anchors = (kayaChoiceAnchors[node.id] ?? []).compactMap { $0.view as? NSView }
+        guard let anchor = anchors.first(where: { $0.window?.isVisible == true }), let window = anchor.window
+        else {
+            return .unread("none of the control's \(anchors.count) rendering(s) is in a visible window")
+        }
+        guard let primary = NSScreen.screens.first else { return .unread("no screen") }
+        let rect = window.convertToScreen(anchor.convert(anchor.bounds, to: nil))
+        let app = AXUIElementCreateApplication(getpid())
+        AXUIElementSetMessagingTimeout(app, 2.0)
+        if !kayaAxAnnounced {
+            kayaAxAnnounced = true
+            AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+            AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        }
+        var hit: AXUIElement?
+        let err = AXUIElementCopyElementAtPosition(
+            app, Float(rect.midX), Float(primary.frame.maxY - rect.midY), &hit)
+        guard err == .success, let hit else {
+            return .unread("no accessibility element at the control's centre (AXError \(err.rawValue))")
+        }
+        var chain: [String] = []
+        var at: AXUIElement? = hit
+        for _ in 0..<6 {
+            guard let element = at else { break }
+            let role = kayaAxCopy(element, kAXRoleAttribute) as? String ?? "?"
+            chain.append(role)
+            if role == "AXRadioGroup" {
+                let kids = (kayaAxCopy(element, kAXChildrenAttribute) as? [AXUIElement] ?? []).filter {
+                    kayaAxCopy($0, kAXRoleAttribute) as? String == "AXRadioButton"
+                }
+                return .segments(
+                    kids.map { kid in
+                        let described = kayaAxCopy(kid, kAXDescriptionAttribute) as? String ?? ""
+                        return KayaChoiceSegment(
+                            name: described.isEmpty
+                                ? kayaAxCopy(kid, kAXTitleAttribute) as? String ?? "" : described,
+                            selected: (kayaAxCopy(kid, kAXValueAttribute) as? NSNumber)?.intValue == 1,
+                            glyph: kayaAxCopy(kid, kAXIdentifierAttribute) as? String,
+                            press: { AXUIElementPerformAction(kid, kAXPressAction as CFString) == .success })
+                    })
+            }
+            if role == "AXPopUpButton" {
+                return .popUp(kayaAxCopy(element, kAXValueAttribute) as? String ?? "")
+            }
+            at = kayaAxCopy(element, kAXParentAttribute).map { $0 as! AXUIElement }
+        }
+        return .unread(
+            "the element at the control's centre sits in no radio group or pop-up button ("
+                + chain.joined(separator: " < ") + ")")
+    }
+#else
+    /// The accessibility elements UIKit publishes inside the control's frame:
+    /// a UISegmentedControl's segments, or a menu picker's button.
+    func kayaChoiceRead(_ node: KayaNode) -> KayaChoiceRead {
+        kayaAxEnableAutomation()
+        let anchors = (kayaChoiceAnchors[node.id] ?? []).compactMap { $0.view as? UIView }
+        guard let anchor = anchors.first(where: { $0.window != nil && !$0.isHidden }), let window = anchor.window
+        else {
+            return .unread("none of the control's \(anchors.count) rendering(s) is in a window")
+        }
+        let frame = UIAccessibility.convertToScreenCoordinates(anchor.bounds, in: anchor)
+        var found: [NSObject] = []
+        var seen = Set<ObjectIdentifier>()
+        func walk(_ item: NSObject, _ depth: Int) {
+            if depth > 64 || !seen.insert(ObjectIdentifier(item)).inserted { return }
+            if item.isAccessibilityElement {
+                let f = item.accessibilityFrame
+                if frame.contains(CGPoint(x: f.midX, y: f.midY)) { found.append(item) }
+                return
+            }
+            let count = item.accessibilityElementCount()
+            if count != NSNotFound && count > 0 {
+                for i in 0..<count {
+                    if let child = item.accessibilityElement(at: i) as? NSObject { walk(child, depth + 1) }
+                }
+            }
+            if let view = item as? UIView {
+                for sub in view.subviews { walk(sub, depth + 1) }
+            }
+        }
+        walk(window, 0)
+        let buttons = found.filter { $0.accessibilityTraits.contains(.button) }
+        if node.kind == kindSelect {
+            guard let button = buttons.first else {
+                return .unread("UIKit publishes no button inside the menu picker's frame (\(found.count) element(s))")
+            }
+            let value = button.accessibilityValue ?? ""
+            return .popUp(value.isEmpty ? button.accessibilityLabel ?? "" : value)
+        }
+        guard !buttons.isEmpty else {
+            return .unread("UIKit publishes no segment inside the control's frame (\(found.count) element(s))")
+        }
+        return .segments(
+            buttons.sorted { $0.accessibilityFrame.minX < $1.accessibilityFrame.minX }.enumerated().map {
+                index, element in
+                func glyphUnder(_ item: NSObject, _ depth: Int) -> String? {
+                    if depth > 16 { return nil }
+                    if item is UIImageView, let ident = kayaAxIdentifier(item) { return ident }
+                    for sub in (item as? UIView)?.subviews ?? [] {
+                        if let found = glyphUnder(sub, depth + 1) { return found }
+                    }
+                    return nil
+                }
+                return KayaChoiceSegment(
+                    name: element.accessibilityLabel ?? "",
+                    selected: element.accessibilityTraits.contains(.selected),
+                    glyph: glyphUnder(element, 0),
+                    press: {
+                        if element.accessibilityActivate() { return true }
+                        var up = (element as? UIView)?.superview
+                        while let view = up, !(view is UISegmentedControl) { up = view.superview }
+                        guard let control = up as? UISegmentedControl else { return false }
+                        control.selectedSegmentIndex = index
+                        control.sendActions(for: .valueChanged)
+                        return true
+                    })
+            })
+    }
+#endif
+
+/// The selected option's name as the platform shows it.
+func kayaChoiceSelectedText(_ node: KayaNode) -> String {
+    switch kayaChoiceRead(node) {
+    case .popUp(let value): return value
+    case .segments(let segments):
+        return segments.first(where: \.selected)?.name ?? "<the platform shows no option selected>"
+    case .unread(let why): return "<\(why)>"
+    }
+}
+
+/// `Day|[Week]|Month`, harness.rs's Stage::segments spelling.
+func kayaSegmentsText(_ node: KayaNode) -> String {
+    switch kayaChoiceRead(node) {
+    case .segments(let segments):
+        return segments.map { $0.selected ? "[\($0.name)]" : $0.name }.joined(separator: "|")
+    case .popUp: return "<the platform shows a pop-up button, not segments>"
+    case .unread(let why): return "<\(why)>"
+    }
+}
+
+/// The SEMANTIC name of the glyph the segment draws, inverted through either
+/// column of kayaSymbolTable; never the label's `symbol`.
+func kayaSegmentSymbolText(_ node: KayaNode, _ index: Int) -> String {
+    switch kayaChoiceRead(node) {
+    case .segments(let segments):
+        guard segments.indices.contains(index) else {
+            return "<the platform shows \(segments.count) segment(s), none at \(index)>"
+        }
+        guard let glyph = segments[index].glyph else {
+            return "<segment \(index) publishes no glyph>"
+        }
+        return kayaSymbolTable.first { $0.sf == glyph || $0.rendered == glyph }?.name
+            ?? "<segment \(index) draws \(glyph), which is not in this interpreter's table>"
+    case .popUp: return "<the platform shows a pop-up button, not segments>"
+    case .unread(let why): return "<\(why)>"
+    }
+}
+
+/// Press the segment at `index` through the platform's own activation; nil
+/// when pressed, else what was measured.
+func kayaChoicePress(_ node: KayaNode, _ index: Int) -> String? {
+    switch kayaChoiceRead(node) {
+    case .segments(let segments):
+        guard segments.indices.contains(index) else {
+            return "the platform shows \(segments.count) segment(s), none at \(index)"
+        }
+        return segments[index].press() ? nil : "the platform refused the press on segment \(index)"
+    case .popUp: return "the platform shows a pop-up button, not segments"
+    case .unread(let why): return why
+    }
+}
 
 /// KAYA_SECTION_TRACE=1 dumps every surface a section-symbol read could have
 /// consulted: how the channel on each host was ANSWERED rather than guessed.

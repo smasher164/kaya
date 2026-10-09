@@ -5616,6 +5616,8 @@ from content_type_routes import run as check_content_type_routes
 check_content_type_routes(g)
 from reveal_routes import run as check_reveal_routes
 check_reveal_routes(g)
+from segmented_routes import run as check_segmented_routes
+check_segmented_routes(g)
 
 if (clip_status or window_status or ink_status or ax_status
         or drop_tol_status

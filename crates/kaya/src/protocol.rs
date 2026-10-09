@@ -1599,6 +1599,9 @@ pub enum WidgetKind {
     /// with the platform masking what is typed; the harness never reads its
     /// text back, only how many characters the platform masks.
     SecureField,
+    /// A SEGMENTED CONTROL (docs/segmented-plan.md G1): the choice contract
+    /// in a third presentation, its label children the segments.
+    Segmented,
 }
 
 /// A video view's box ratio, width:height (docs/media-plan.md §3, RULED
@@ -1895,7 +1898,7 @@ impl WidgetKind {
     /// export `WidgetKind` into the public header as an opaque handle no C
     /// caller can use. `cfg(test)` because the sweeps that walk it are tests.
     #[cfg(test)]
-    pub(crate) const ALL: [WidgetKind; 24] = [
+    pub(crate) const ALL: [WidgetKind; 25] = [
         WidgetKind::Column,
         WidgetKind::Button,
         WidgetKind::Label,
@@ -1920,6 +1923,7 @@ impl WidgetKind {
         WidgetKind::Range,
         WidgetKind::Video,
         WidgetKind::SecureField,
+        WidgetKind::Segmented,
     ];
 
     /// Whether a widget of this kind carries an identity tag — the
@@ -1944,7 +1948,8 @@ impl WidgetKind {
             | WidgetKind::NumberField
             | WidgetKind::ColorPicker
             | WidgetKind::Range
-            | WidgetKind::SecureField => true,
+            | WidgetKind::SecureField
+            | WidgetKind::Segmented => true,
             // Exhaustive on purpose — no wildcard. A kind added to the
             // spec lands here as a compile error, which is the moment to
             // decide whether it reports.

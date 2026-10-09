@@ -1025,6 +1025,15 @@ pub(crate) struct Scene {
     /// Live labelled rows touched this transaction, checked for shape at
     /// its end (docs/forms-plan.md §2) once every child has arrived.
     labeled_dirty: Vec<WidgetId>,
+    /// Live segmented controls touched this transaction, checked for shape
+    /// at its end (docs/segmented-plan.md G3, G4).
+    segmented_dirty: Vec<WidgetId>,
+    /// Live labels carrying a symbol: each is a segment
+    /// (docs/segmented-plan.md G3).
+    segment_symbols: HashSet<WidgetId>,
+    /// The labels given a symbol this transaction, held to a segmented
+    /// parent at its end.
+    segment_symbol_dirty: Vec<WidgetId>,
     next_internal: u64,
     next_when_site: u64,
     next_scope: u64,
@@ -1048,10 +1057,27 @@ pub(crate) struct Scene {
 }
 
 /// The choice kinds: one selection among label-children options. Select
-/// is the dropdown presentation, Radio the inline group — SAME semantics,
-/// different chrome.
+/// is the dropdown presentation, Radio the inline group, Segmented the
+/// strip (docs/segmented-plan.md G1) — SAME semantics, different chrome.
 fn is_choice(kind: WidgetKind) -> bool {
-    matches!(kind, WidgetKind::Select | WidgetKind::Radio)
+    matches!(kind, WidgetKind::Select | WidgetKind::Radio | WidgetKind::Segmented)
+}
+
+/// A segmented control's shape on its complete declaration
+/// (docs/segmented-plan.md G3, G4): two segments at least, and all text or
+/// all symbols.
+fn check_segmented_shape(who: &str, segments: usize, symbols: usize) {
+    assert!(
+        segments >= 2,
+        "kaya: segmented control {who} holds {segments} segment(s); it takes two at least \
+         (docs/segmented-plan.md G4)"
+    );
+    assert!(
+        symbols == 0 || symbols == segments,
+        "kaya: segmented control {who} mixes {symbols} symbol segment(s) with {} text \
+         segment(s); one control shows all text or all symbols (docs/segmented-plan.md G3)",
+        segments - symbols
+    );
 }
 
 /// The window's size class: the platform's own where one was reported,
@@ -1218,6 +1244,7 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
                 | WidgetKind::Checkbox
                 | WidgetKind::Select
                 | WidgetKind::Radio
+                | WidgetKind::Segmented
                 | WidgetKind::DatePicker
                 | WidgetKind::TimePicker
                 | WidgetKind::ColorPicker
@@ -1230,7 +1257,9 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
             kind,
             WidgetKind::Button | WidgetKind::Label | WidgetKind::Checkbox | WidgetKind::Row
         ),
-        Prop::Symbol => kind == WidgetKind::Button,
+        // A button's glyph, and a segment's (a label held to a segmented
+        // parent at the end of the transaction, docs/segmented-plan.md G3).
+        Prop::Symbol => matches!(kind, WidgetKind::Button | WidgetKind::Label),
         Prop::MaxWidth | Prop::MaxHeight => kind == WidgetKind::Image,
     };
     assert!(ok, "kaya: {kind:?} has no property {prop:?}");
@@ -2899,6 +2928,47 @@ impl Scene {
         }
     }
 
+    fn check_segmented_template(&self, body: &TplBody) {
+        let mut children: HashMap<u64, Vec<u64>> = HashMap::new();
+        let mut parent: HashMap<u64, u64> = HashMap::new();
+        let mut symbols: HashSet<u64> = HashSet::new();
+        for op in &body.ops {
+            match op {
+                TplOp::AddChild { parent: p, child } => {
+                    children.entry(*p).or_default().push(*child);
+                    parent.insert(*child, *p);
+                }
+                TplOp::SetProp { node, prop: Prop::Symbol, .. }
+                    if self.template_nodes.get(node) == Some(&WidgetKind::Label) =>
+                {
+                    symbols.insert(*node);
+                }
+                TplOp::For { bodies, .. } => {
+                    for b in bodies {
+                        self.check_segmented_template(b);
+                    }
+                }
+                TplOp::When { body, .. } => self.check_segmented_template(body),
+                _ => {}
+            }
+        }
+        for label in &symbols {
+            assert!(
+                parent.get(label).and_then(|p| self.template_nodes.get(p))
+                    == Some(&WidgetKind::Segmented),
+                "kaya: template node {label} carries a symbol outside a segmented control — a \
+                 label's symbol is a segment's glyph (docs/segmented-plan.md G3)"
+            );
+        }
+        for op in &body.ops {
+            if let TplOp::Widget { node, kind: WidgetKind::Segmented } = op {
+                let segments = children.get(node).map_or(&[][..], |c| &c[..]);
+                let marked = segments.iter().filter(|n| symbols.contains(n)).count();
+                check_segmented_shape(&format!("template node {node}"), segments.len(), marked);
+            }
+        }
+    }
+
     fn check_labeled_template(&self, body: &TplBody) {
         let mut children: HashMap<u64, Vec<u64>> = HashMap::new();
         for op in &body.ops {
@@ -3306,6 +3376,9 @@ impl Scene {
                     if kind == WidgetKind::Labeled {
                         self.labeled_dirty.push(id);
                     }
+                    if kind == WidgetKind::Segmented {
+                        self.segmented_dirty.push(id);
+                    }
                     if kind == WidgetKind::Row {
                         // A row centres its children on the cross axis unless
                         // the app says otherwise (DESIGN.md Layout, R5).
@@ -3328,6 +3401,10 @@ impl Scene {
                     check_prop(kind, prop);
                     if let (Prop::Accepts, PropValue::Const(Value::Str(list))) = (prop, &value) {
                         self.accept_lists.insert(widget, list.clone());
+                    }
+                    if kind == WidgetKind::Label && prop == Prop::Symbol {
+                        self.segment_symbols.insert(widget);
+                        self.segment_symbol_dirty.push(widget);
                     }
                     match value {
                         PropValue::Const(v) => {
@@ -4387,6 +4464,11 @@ impl Scene {
                     {
                         self.labeled_dirty.push(parent);
                     }
+                    if self.widgets[&parent] == WidgetKind::Segmented
+                        && !self.segmented_dirty.contains(&parent)
+                    {
+                        self.segmented_dirty.push(parent);
+                    }
                     self.layout_dirty = true;
                     out.push(ApplyOp::AddChild { parent, child });
                 }
@@ -5063,6 +5145,23 @@ impl Scene {
                 .map(|c| c.iter().map(|w| self.widgets[w]).collect())
                 .unwrap_or_default();
             check_labeled_shape(&format!("{id:?}"), &kinds);
+        }
+        for label in std::mem::take(&mut self.segment_symbol_dirty) {
+            let parent = self.parent_of.get(&label).copied();
+            assert!(
+                parent.is_some_and(|p| self.widgets[&p] == WidgetKind::Segmented),
+                "kaya: label {label:?} carries a symbol outside a segmented control — a \
+                 label's symbol is a segment's glyph (docs/segmented-plan.md G3)"
+            );
+            let parent = parent.expect("checked above");
+            if !self.segmented_dirty.contains(&parent) {
+                self.segmented_dirty.push(parent);
+            }
+        }
+        for id in std::mem::take(&mut self.segmented_dirty) {
+            let segments = self.children_of.get(&id).map_or(&[][..], |c| &c[..]);
+            let symbols = segments.iter().filter(|w| self.segment_symbols.contains(w)).count();
+            check_segmented_shape(&format!("{id:?}"), segments.len(), symbols);
         }
         // NO GROW INSIDE A WRAPPING ROW (docs/layout-knobs-plan.md §2): a
         // weight has no track to take on a line that breaks where it must.
@@ -7679,11 +7778,13 @@ impl Scene {
                     ClosedScope::For { bodies, .. } => {
                         for body in bodies {
                             self.check_labeled_template(body);
+                            self.check_segmented_template(body);
                             self.check_document_template(body);
                         }
                     }
                     ClosedScope::When { body, .. } => {
                         self.check_labeled_template(body);
+                        self.check_segmented_template(body);
                         self.check_document_template(body);
                     }
                 }
@@ -10618,6 +10719,14 @@ mod tests {
             // row is held to its shape at the end of the transaction, so it
             // gets the label and control that shape demands.
             let filling = |base: u64| -> Vec<TxOp> {
+                if kind == WidgetKind::Segmented {
+                    return vec![
+                        TxOp::CreateWidget { id: WidgetId(base + 1), kind: WidgetKind::Label },
+                        TxOp::CreateWidget { id: WidgetId(base + 2), kind: WidgetKind::Label },
+                        TxOp::AddChild { parent: WidgetId(base), child: WidgetId(base + 1) },
+                        TxOp::AddChild { parent: WidgetId(base), child: WidgetId(base + 2) },
+                    ];
+                }
                 if kind != WidgetKind::Labeled {
                     return Vec::new();
                 }
@@ -10869,6 +10978,115 @@ mod tests {
         ]);
     }
 
+    /// A segmented control of `segments` labels, the ones flagged carrying
+    /// a symbol (docs/segmented-plan.md G3, G4).
+    fn segmented(segments: &[bool]) -> Vec<TxOp> {
+        let mut ops = vec![TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Segmented }];
+        for (i, symbol) in segments.iter().enumerate() {
+            let id = WidgetId(10 + i as u64);
+            ops.push(TxOp::CreateWidget { id, kind: WidgetKind::Label });
+            ops.push(TxOp::AddChild { parent: WidgetId(1), child: id });
+            if *symbol {
+                ops.push(TxOp::SetProperty {
+                    widget: id,
+                    prop: Prop::Symbol,
+                    value: PropValue::Const(Value::I64(10)),
+                });
+            }
+        }
+        ops.push(TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) });
+        ops
+    }
+
+    /// The positive control for the three refusals below: two text segments,
+    /// and two symbol segments, both admitted and tagged.
+    #[test]
+    fn a_segmented_control_of_text_or_of_symbols_is_admitted() {
+        for shape in [&[false, false][..], &[true, true, true][..]] {
+            let ops = Scene::new().apply(segmented(shape));
+            assert!(ops.iter().any(|op| matches!(
+                op,
+                ApplyOp::Create { id: WidgetId(1), kind: WidgetKind::Segmented, tag: Some(_) }
+            )));
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "holds 1 segment(s); it takes two at least")]
+    fn a_segmented_control_of_one_segment_dies() {
+        Scene::new().apply(segmented(&[false]));
+    }
+
+    #[test]
+    #[should_panic(expected = "mixes 1 symbol segment(s) with 1 text segment(s)")]
+    fn a_segmented_control_mixing_text_and_symbols_dies() {
+        Scene::new().apply(segmented(&[true, false]));
+    }
+
+    /// A later transaction cannot make the mix either.
+    #[test]
+    #[should_panic(expected = "mixes 1 symbol segment(s) with 2 text segment(s)")]
+    fn a_symbol_written_onto_one_segment_later_dies() {
+        let mut scene = Scene::new();
+        scene.apply(segmented(&[false, false, false]));
+        scene.apply(vec![TxOp::SetProperty {
+            widget: WidgetId(11),
+            prop: Prop::Symbol,
+            value: PropValue::Const(Value::I64(10)),
+        }]);
+    }
+
+    fn template_segmented(segments: &[bool], parent: WidgetKind) -> Vec<TxOp> {
+        let mut ops = vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::F64]] },
+            TxOp::CreateFor { id: 2, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(10), kind: parent },
+        ];
+        for (i, symbol) in segments.iter().enumerate() {
+            let id = WidgetId(20 + i as u64);
+            ops.push(TxOp::CreateWidget { id, kind: WidgetKind::Label });
+            ops.push(TxOp::AddChild { parent: WidgetId(10), child: id });
+            if *symbol {
+                ops.push(TxOp::SetProperty {
+                    widget: id,
+                    prop: Prop::Symbol,
+                    value: PropValue::Const(Value::I64(10)),
+                });
+            }
+        }
+        ops.extend([
+            TxOp::TemplateEnd,
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+        ops
+    }
+
+    /// G9: the template zone is held to the same shape, at the template's
+    /// close, and admits the same two shapes.
+    #[test]
+    fn a_template_segmented_control_is_held_to_the_same_shape() {
+        Scene::new().apply(template_segmented(&[false, false], WidgetKind::Segmented));
+        Scene::new().apply(template_segmented(&[true, true], WidgetKind::Segmented));
+        for (shape, parent, want) in [
+            (&[false][..], WidgetKind::Segmented, "template node 10 holds 1 segment(s)"),
+            (&[true, false][..], WidgetKind::Segmented, "template node 10 mixes 1 symbol"),
+            (&[true, true][..], WidgetKind::Radio, "carries a symbol outside a segmented control"),
+        ] {
+            let err = std::panic::catch_unwind(|| {
+                Scene::new().apply(template_segmented(shape, parent));
+            })
+            .expect_err("the template shape was admitted");
+            let msg = err
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| err.downcast_ref::<&str>().map(|s| (*s).to_owned()))
+                .unwrap_or_default();
+            assert!(msg.contains(want), "{msg}");
+        }
+    }
+
     /// THE ROW'S CENTRE DEFAULT (docs/tasks-plan.md R5): a new Row carries
     /// `align = center` right after its Create, so every backend sees an
     /// explicit prop; a Column carries nothing.
@@ -10985,7 +11203,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Label has no property Symbol")]
+    #[should_panic(expected = "carries a symbol outside a segmented control")]
     fn a_symbol_label_dies_at_declare() {
         let mut scene = Scene::new();
         scene.apply(vec![

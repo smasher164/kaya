@@ -432,7 +432,7 @@ def open_transactions(account=None):
                 kaya.label(bind=net_signal).a11y_id("net")
                 kaya.select([name for name, _ in FILTERS],
                             selected=filter_index,
-                            on_select=on_filter)  # select#0
+                            on_select=on_filter).a11y_id("filter")  # select#0
                 recent = kaya.collection(Txn)
                 # UNGROWN: a summary table hugs its rows.
                 for row in recent.columns("Date", "Ticker", "Side", "Total",

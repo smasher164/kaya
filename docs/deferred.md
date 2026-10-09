@@ -9,6 +9,83 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
+## BUILD — the segmented control (docs/segmented-plan.md), depth on the mac (2026-10-08); the GTK, WinUI and Compose arms, the iOS legs and the other eight bindings are the breadth slice
+KEY: segmented, KIND_SEGMENTED, segmented.steps, expect_segments, expect_segment_symbol, segments, segment_symbol, choose_by_keys, segmented_bound, segmented_symbols, KayaSegmented, KayaChoiceAnchor, kayaChoiceRead, segmented_routes, check_segmented_shape, DEPTH STUB segmented
+
+The depth slice: kind 25 on the choice contract (`is_choice`), a label's
+`symbol` legal as a segment's glyph, the root's two refusals at the end of
+the transaction (two segments at least, all text or all symbols) in both
+zones, the Rust binding (`segmented`, `segmented_bound`,
+`segmented_symbols`, both zones), the SwiftUI arm on macOS and iOS, the
+harness's `expect_segments` and `expect_segment_symbol` with `choose` and
+`expect` on the kind, and tools/scenes/segmented.steps green on the mac
+lane for Rust. The rulings G1-G13 are built as recommended and await the
+maintainer. What breadth owes:
+  - **DEPTH STUB: segmented on gtk** — an `AdwToggleGroup`, homogeneous,
+    one `AdwToggle` per segment (label, or the Adwaita icon with the name
+    as tooltip), `notify::active` outside the quiet guard and `set_active`
+    under it; Stage's `segments`, `segment_symbol` and `selected_label`
+    read the group and its toggles; the adw crate's feature moves to v1_7
+    (plan §3, §7).
+  - **DEPTH STUB: segmented on winui** — a `SelectorBar` of
+    `SelectorBarItem`s, each item's MinWidth the widest, SelectionChanged
+    outside the quiet guard; the reads through UIA and `choose` through the
+    item peer's SelectionItem.Select; SelectorBar and its types join
+    tools/winui-bindgen's filter (plan §3).
+  - **DEPTH STUB: segmented on compose** — `SingleChoiceSegmentedButtonRow`,
+    the harness's `expect_segments` and `expect_segment_symbol` off the
+    merged semantics nodes, `choose` through the segment's click action
+    (plan §3).
+  - **The iOS legs** — the arm is built (the same segmented Picker) and its
+    reads walk the UIKit accessibility elements inside the control's frame;
+    the segment read, the press and the symbol read are unmeasured.
+  - **`segmented` in the other eight bindings and the C floor** — both
+    zones, `segmented_bound`, the symbol segments in each binding's idiom,
+    a segmented guest per language; check-sugar-surface is red for them
+    until then.
+  - **`choose_by_keys`** (G6) — not built at the depth: the mac and iOS
+    lanes cut the keyboard block and every backend that could run it is a
+    stub, so the verb waits for the first backend that can.
+  - **segmented_routes rows** for GTK, WinUI and Compose, read and press
+    through each platform's own API (tools/lib/segmented_routes.py).
+  - **The portfolio's period control** (G13).
+
+## DEFECT — the interpreters' radio and select reads echoed the model (docs/segmented-plan.md G10; 2026-10-08)
+KEY: selected_label, expect radio, expect select, node.value, kayaChoiceSelectedText, kayaChoiceRead, KayaChoiceAnchor, choice reads, KayaCompose expect select
+
+`expect radio#N` and `expect select#N` were answered from `node.value` in
+both interpreters, so a Picker that drew the wrong option or ignored the
+app's write passed radio.steps and select.steps. The SwiftUI half is fixed
+in the segmented depth: the mac reads the platform's own element at the
+control's centre (AXRadioGroup and its AXRadioButtons' AXValue, or the
+AXPopUpButton's value; measured), and iOS the UIKit accessibility elements
+inside the control's frame (built, unmeasured until the iOS legs run). The
+read found one case already: the portfolio's second visit read the first
+visit's filter, a node no longer on screen, which the model answered; the
+scene now addresses the filter by id. STILL OPEN: Compose's `expect` for
+`select` and `radio` reads `node.value` (KayaCompose.kt's expect arm);
+the breadth reads the Material control's semantics, the selected
+RadioButton row and the dropdown's text, and watches a control showing the
+wrong selection go red.
+
+## DEFER — several selections in a segmented control (docs/segmented-plan.md G2; 2026-10-08)
+KEY: selectAny, MultiChoiceSegmentedButtonRow, several selections, format bar
+
+Single selection only: AdwToggleGroup, SelectorBar and UISegmentedControl
+hold one selection, so several are reachable on two platforms of five. The
+use the HIG names (bold, italic, underline) is a set of independent Bools,
+spelled today as checkboxes or toolbar toggle items. Trigger: an app that
+needs a format bar outside the command catalog.
+
+## DEFER — a disabled state for every control, segments and radio options included (docs/segmented-plan.md G7; 2026-10-08)
+KEY: enabled prop, disabled segment, setEnabled forSegment, AdwToggle enabled, disabled widget
+
+No kind has an `enabled` prop (menu items alone do), and all five
+platforms can disable a single segment, a radio option, a button. A
+disabled segment alone would be the first disabled widget. Trigger: the
+first app that must grey out a control instead of removing it; the prop is
+then cross-kind, with segments and radio options as parts.
+
 ## ~~BUILD — the secure field (docs/secure-entry-plan.md), depth on the mac (2026-10-07); the GTK, WinUI and Compose arms, the iOS legs and the other eight bindings are the breadth slice~~ COMPLETE 2026-10-07: breadth built in c1c25d0c on all five platforms and in all nine bindings; the full matrix on c1c25d0c ran every secure and gallery leg green (37 and 39); review page NzHtTqPdSgUPsAZVVm23He. The rulings stay open in the plan.
 KEY: secure field, secure_field, KIND_SECURE_FIELD, secure.steps, type_secret, expect_masked, Secret, MaskRead, masked_len, secure_focused, is_secure_field, KayaSecret, kayaSecretOut, kayaAxMaskedRead, DEPTH STUB secure
 

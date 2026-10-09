@@ -3682,6 +3682,55 @@ impl<'a> Tx<'a> {
         Widget { id: w, out: (), tx: self }
     }
 
+    /// A segmented control over its segments (docs/segmented-plan.md): the
+    /// choice contract ([`Self::select`]) as a strip; same option children,
+    /// same index semantics, same [`Messages::on_select`].
+    pub fn segmented(&mut self, segments: &[&str], selected: usize) -> Widget<'_, 'a> {
+        let w = self.widget(WidgetKind::Segmented);
+        self.parents.push(w.0);
+        for segment in segments {
+            let label = self.widget(WidgetKind::Label);
+            self.set(label, Prop::Text, *segment);
+        }
+        self.parents.pop();
+        self.set(w, Prop::Value, selected as f64);
+        Widget { id: w, out: (), tx: self }
+    }
+
+    /// A segmented control whose selected index binds a float signal; the
+    /// app's write moves the selection and never echoes (G4).
+    pub fn segmented_bound(&mut self, segments: &[&str], selected: SignalId) -> Widget<'_, 'a> {
+        let w = self.widget(WidgetKind::Segmented);
+        self.parents.push(w.0);
+        for segment in segments {
+            let label = self.widget(WidgetKind::Label);
+            self.set(label, Prop::Text, *segment);
+        }
+        self.parents.pop();
+        self.bind(w, Prop::Value, selected);
+        Widget { id: w, out: (), tx: self }
+    }
+
+    /// A segmented control whose segments draw the platform's glyph for
+    /// each symbol, each text kept as its accessible name and tooltip
+    /// (docs/segmented-plan.md G3).
+    pub fn segmented_symbols(
+        &mut self,
+        segments: &[(&str, crate::Symbol)],
+        selected: usize,
+    ) -> Widget<'_, 'a> {
+        let w = self.widget(WidgetKind::Segmented);
+        self.parents.push(w.0);
+        for (name, symbol) in segments {
+            let label = self.widget(WidgetKind::Label);
+            self.set(label, Prop::Text, *name);
+            self.set(label, Prop::Symbol, *symbol as i64);
+        }
+        self.parents.pop();
+        self.set(w, Prop::Value, selected as f64);
+        Widget { id: w, out: (), tx: self }
+    }
+
     /// An image displaying encoded bytes: the toolkit decodes natively. The
     /// bytes ride the blob channel — one Arc'd copy in core memory, an
     /// 8-byte handle everywhere else — so a large image costs one
@@ -4859,6 +4908,22 @@ impl<'b> Row<'_, 'b> {
         src: impl Into<TplSource<F64Kind>>,
     ) -> TemplateNodeId {
         self.tpl().radio(options, src)
+    }
+
+    pub fn segmented(
+        &mut self,
+        segments: &[&str],
+        src: impl Into<TplSource<F64Kind>>,
+    ) -> TemplateNodeId {
+        self.tpl().segmented(segments, src)
+    }
+
+    pub fn segmented_symbols(
+        &mut self,
+        segments: &[(&str, crate::Symbol)],
+        src: impl Into<TplSource<F64Kind>>,
+    ) -> TemplateNodeId {
+        self.tpl().segmented_symbols(segments, src)
     }
 
     pub fn image(&mut self, src: impl Into<TplSource<BlobKind>>) -> TemplateNodeId {
@@ -8413,6 +8478,34 @@ impl<'b> Tpl<'_, 'b> {
         self.choice(WidgetKind::Radio, options, src.into().inner)
     }
 
+    /// A segmented control: [`Self::select`]'s contract as a strip
+    /// (docs/segmented-plan.md G9).
+    pub fn segmented(
+        &mut self,
+        segments: &[&str],
+        src: impl Into<TplSource<F64Kind>>,
+    ) -> TemplateNodeId {
+        self.choice(WidgetKind::Segmented, segments, src.into().inner)
+    }
+
+    /// A segmented control of symbol segments (docs/segmented-plan.md G3).
+    pub fn segmented_symbols(
+        &mut self,
+        segments: &[(&str, crate::Symbol)],
+        src: impl Into<TplSource<F64Kind>>,
+    ) -> TemplateNodeId {
+        let n = self.widget(WidgetKind::Segmented);
+        self.tx.parents.push(n.0);
+        for (name, symbol) in segments {
+            let label = self.widget(WidgetKind::Label);
+            self.set(label, Prop::Text, *name);
+            self.set(label, Prop::Symbol, *symbol as i64);
+        }
+        self.tx.parents.pop();
+        self.apply_source(n, Prop::Value, src.into().inner);
+        n
+    }
+
     fn choice(
         &mut self,
         kind: WidgetKind,
@@ -10053,6 +10146,7 @@ mod tests {
                 ("slider", t.slider(0.0, 1.0, num), Prop::Value),
                 ("select", t.select(&["a", "b"], num), Prop::Value),
                 ("radio", t.radio(&["a", "b"], num), Prop::Value),
+                ("segmented", t.segmented(&["a", "b"], num), Prop::Value),
                 ("a11y_id", e, Prop::A11yId),
                 ("a11y_label", e, Prop::A11yLabel),
                 ("a11y_hint", b, Prop::A11yHint),
@@ -10088,8 +10182,8 @@ mod tests {
         // template body that returned early would leave one.
         assert_eq!(
             nodes.len(),
-            12,
-            "kaya: the source-arm sweep walked {} constructors, not the 9 the \
+            13,
+            "kaya: the source-arm sweep walked {} constructors, not the 13 the \
              zone has — a constructor added without a row here is one this test \
              cannot speak for",
             nodes.len()

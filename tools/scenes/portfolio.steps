@@ -183,7 +183,9 @@ expect_entries 1
 expect_title "Transactions"
 expect label@count "4698 of 15003 transactions"
 expect label@net "net BND 20, VXUS 15 = $2370.00"
-expect select#0 "Retirement"
+# By id: the first visit's filter is still in the index registry, and the
+# read is the platform's, so only the control on screen answers.
+expect select@filter "Retirement"
 back
 expect_entries 0
 settle 600

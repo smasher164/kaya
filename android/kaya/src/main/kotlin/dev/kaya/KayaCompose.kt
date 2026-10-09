@@ -2159,7 +2159,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0xad557b5075ff50ebuL
+    private const val SPEC_HASH: ULong = 0x3b06087d3310d8b0uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -2419,6 +2419,7 @@ object KayaCompose {
     const val KIND_RANGE = 22
     const val KIND_VIDEO = 23
     const val KIND_SECURE_FIELD = 24
+    const val KIND_SEGMENTED = 25
     private const val PROP_TEXT = 1
     private const val PROP_CHECKED = 2
     private const val PROP_VALUE = 3
@@ -3376,6 +3377,7 @@ object KayaCompose {
                         KIND_RANGE -> KayaSceneModel.ranges.add(node)
                         KIND_VIDEO -> KayaSceneModel.videos.add(node)
                         KIND_SECURE_FIELD -> KayaSceneModel.secureFields.add(node)
+                        KIND_SEGMENTED -> depthStub("segmented")
                         KIND_NUMBER_FIELD -> {
                             // docs/number-field-plan.md §2: unset bounds are
                             // ±2^53, the step 1, and the field shows its
@@ -7377,6 +7379,7 @@ object KayaCompose {
             "range" -> KayaSceneModel.ranges
             "video" -> KayaSceneModel.videos
             "secure_field" -> KayaSceneModel.secureFields
+            "segmented" -> depthStub("segmented")
             "textarea" -> KayaSceneModel.textareas
             "date_picker" -> KayaSceneModel.datePickers
             "time_picker" -> KayaSceneModel.timePickers
@@ -9740,6 +9743,9 @@ object KayaCompose {
                                 else -> failures.add("${parts[1]}: $why")
                             }
                         }
+                    }
+                    "expect_segments", "expect_segment_symbol" -> {
+                        depthStub("segmented")
                     }
                     "expect_masked" -> {
                         // How many characters the platform shows masked, read
@@ -15744,6 +15750,7 @@ private fun KayaRenderCore(
         KayaCompose.KIND_RANGE -> KayaRangeSurface(node, boxFill, a11y)
         KayaCompose.KIND_VIDEO -> KayaVideoView(node, a11y, boxFill)
         KayaCompose.KIND_SECURE_FIELD -> KayaSecureField(node, a11y, boxFill)
+        KayaCompose.KIND_SEGMENTED -> depthStub("segmented")
         KayaCompose.KIND_LABELED -> {
             // THE LABELLED ROW (docs/forms-plan.md §3): Material's own
             // labelled row, the value trailing and a WIDE control folded

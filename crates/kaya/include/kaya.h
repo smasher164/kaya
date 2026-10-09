@@ -1016,6 +1016,8 @@
 
 #define KAYA_KIND_SECURE_FIELD 24
 
+#define KAYA_KIND_SEGMENTED 25
+
 /**
  * Property keys.
  */

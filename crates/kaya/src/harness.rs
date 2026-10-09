@@ -111,6 +111,10 @@ pub enum TargetKind {
     /// `type_secret`, read by `expect_masked`, and never by `expect` or
     /// `set_text`.
     SecureField,
+    /// The segmented control (docs/segmented-plan.md): the choice contract's
+    /// `choose` and `expect`, plus `expect_segments` and
+    /// `expect_segment_symbol` read off the platform's own segments.
+    Segmented,
 }
 
 /// Text bound for a secure field (docs/secure-entry-plan.md P6). It has no
@@ -789,6 +793,13 @@ pub enum Step {
     /// emits value_changed. An action, silent like click; `expect
     /// select#N "label"` is the observable.
     Choose(Target, usize),
+    /// Every segment's accessible name in order, the selected one in
+    /// brackets (`"Day|[Week]|Month"`), read off the platform's own segments
+    /// (docs/segmented-plan.md G5).
+    ExpectSegments(Target, String),
+    /// The SEMANTIC ICON NAME the segment at the 0-based index draws, read
+    /// off the platform's own segment (docs/segmented-plan.md G5).
+    ExpectSegmentSymbol(Target, usize, String),
     /// Expect the grid to lay its children out in exactly N columns with
     /// each column's cells sharing their leading edge — geometry from the
     /// toolkit, never a model copy.
@@ -978,6 +989,8 @@ impl Step {
             | Step::ExpectAligned(t, _)
             | Step::ExpectAxis(t, _)
             | Step::Choose(t, _)
+            | Step::ExpectSegments(t, _)
+            | Step::ExpectSegmentSymbol(t, _, _)
             | Step::ExpectGridColumns(t, _)
             | Step::ExpectAx(t, _)
             | Step::ExpectAxHint(t, _)
@@ -1239,6 +1252,8 @@ impl Step {
             Step::ExpectAtStart { .. } => true,
             Step::ExpectScrolledTo { .. } => true,
             Step::Choose { .. } => false,
+            Step::ExpectSegments { .. } => true,
+            Step::ExpectSegmentSymbol { .. } => true,
             Step::ExpectGridColumns { .. } => true,
             Step::MenuActivate { .. } => false,
             Step::ContextOpen { .. } => false,
@@ -1913,6 +1928,14 @@ pub trait Stage: Send + 'static {
     /// state — never a model copy. Labels, not indices: byte-compared
     /// across every language like all expects.
     fn selected_label(&self, target: Target) -> String;
+    /// A segmented control's segments as the platform presents them: each
+    /// segment's accessible name in order, the selected one bracketed
+    /// (`"Day|[Week]|Month"`), or a sentence saying what was measured
+    /// instead (docs/segmented-plan.md G5). Never the scene model.
+    fn segments(&self, target: Target) -> String;
+    /// The SEMANTIC ICON NAME the segment at `index` draws, read off the
+    /// platform's own segment, or a sentence saying what was measured.
+    fn segment_symbol(&self, target: Target, index: usize) -> String;
     /// The grid observation: empty when the grid lays out in exactly `want`
     /// columns whose cells share their leading edges (within two device
     /// units); otherwise the toolkit's own description of the mismatch, for
@@ -3245,6 +3268,33 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                         .map_err(|_| format!("choose wants a 0-based index: {line:?}"))?,
                 )
             }
+            "expect_segments" => {
+                let (target, want) = rest
+                    .split_once(char::is_whitespace)
+                    .ok_or_else(|| format!("expect_segments wants a segmented control and a string: {line:?}"))?;
+                let target = parse_target(target)?;
+                if target.kind != TargetKind::Segmented {
+                    return Err(format!("expect_segments reads a segmented control, not {target:?}"));
+                }
+                Step::ExpectSegments(target, parse_string(want)?)
+            }
+            "expect_segment_symbol" => {
+                let mut words = rest.trim().splitn(3, char::is_whitespace);
+                let (Some(target), Some(index), Some(want)) = (words.next(), words.next(), words.next())
+                else {
+                    return Err(format!(
+                        "expect_segment_symbol wants a segmented control, a 0-based index and a quoted symbol name: {line:?}"
+                    ));
+                };
+                let target = parse_target(target)?;
+                if target.kind != TargetKind::Segmented {
+                    return Err(format!("expect_segment_symbol reads a segmented control, not {target:?}"));
+                }
+                let index = index
+                    .parse::<usize>()
+                    .map_err(|_| format!("expect_segment_symbol wants a 0-based index: {line:?}"))?;
+                Step::ExpectSegmentSymbol(target, index, parse_string(want)?)
+            }
             "expect_grid_columns" => {
                 let (target, n) = rest
                     .split_once(char::is_whitespace)
@@ -3784,6 +3834,7 @@ fn parse_target_kind(kind: &str, spec: &str) -> Result<TargetKind, String> {
         "range" => TargetKind::Range,
         "video" => TargetKind::Video,
         "secure_field" => TargetKind::SecureField,
+        "segmented" => TargetKind::Segmented,
         other => return Err(format!("unknown target kind {other:?} in {spec:?}")),
     })
 }
@@ -5490,8 +5541,8 @@ fn run_with_log(
                 }
             }
             Step::Choose(t, index) => {
-                if !matches!(t.kind, TargetKind::Select | TargetKind::Radio) {
-                    Some(Err(format!("{t:?} is not a choice (select/radio) target")))
+                if !matches!(t.kind, TargetKind::Select | TargetKind::Radio | TargetKind::Segmented) {
+                    Some(Err(format!("{t:?} is not a choice (select/radio/segmented) target")))
                 } else {
                     // An action, silent like click: `expect select#N`
                     // and the guest's value_changed reaction are the
@@ -5503,6 +5554,22 @@ fn run_with_log(
                     None
                 }
             }
+            Step::ExpectSegments(t, want) => Some(poll(|| {
+                let got = stage.segments(*t);
+                if got == *want {
+                    Ok(format!("segments {want:?}"))
+                } else {
+                    Err(format!("segments {got:?}, wanted {want:?}"))
+                }
+            })),
+            Step::ExpectSegmentSymbol(t, index, want) => Some(poll(|| {
+                let got = stage.segment_symbol(*t, *index);
+                if got == *want {
+                    Ok(format!("segment {index} symbol {want:?}"))
+                } else {
+                    Err(format!("segment {index} symbol {got:?}, wanted {want:?}"))
+                }
+            })),
             Step::Expect(t, want) => Some(match t.kind {
                 // The target kind picks the observation, and nothing else
                 // reads at all: routing another kind to read_label would
@@ -5516,7 +5583,8 @@ fn run_with_log(
                 | TargetKind::Label
                 | TargetKind::Progress
                 | TargetKind::Select
-                | TargetKind::Radio => poll(|| {
+                | TargetKind::Radio
+                | TargetKind::Segmented => poll(|| {
                     let got = match t.kind {
                         TargetKind::Entry
                         | TargetKind::Textarea
@@ -5525,7 +5593,9 @@ fn run_with_log(
                         TargetKind::Image => stage.image_size(*t),
                         TargetKind::Label => stage.read_label(*t),
                         TargetKind::Progress => stage.progress_state(*t),
-                        TargetKind::Select | TargetKind::Radio => stage.selected_label(*t),
+                        TargetKind::Select | TargetKind::Radio | TargetKind::Segmented => {
+                            stage.selected_label(*t)
+                        }
                         _ => unreachable!(),
                     };
                     let want = expand_template(&stage, want)?;
@@ -6717,6 +6787,7 @@ fn target_spec(t: &Target) -> String {
         TargetKind::Range => "range",
         TargetKind::Video => "video",
         TargetKind::SecureField => "secure_field",
+        TargetKind::Segmented => "segmented",
     };
     if let Some(id) = t.id {
         t.keys.map_or_else(
@@ -8275,6 +8346,37 @@ mod tests {
         assert!(parse("expect_content_type entry#0").is_err());
     }
 
+    /// docs/segmented-plan.md G5: the segment observations' sentences, the
+    /// SwiftUI harness's bytes, and their parse refusals.
+    #[test]
+    fn segment_reads_answer_in_one_spelling() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(
+            parse(
+                "expect_segments segmented#0 \"Day|[Week]|Month\"\n\
+                 expect_segment_symbol segmented#1 1 \"edit\"",
+            )
+            .unwrap(),
+            MockStage { seen: &SEEN, verdict: tx },
+        );
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 0, "{verdict}");
+        assert!(verdict.contains("segments \"Day|[Week]|Month\""), "{verdict}");
+        assert!(verdict.contains("segment 1 symbol \"edit\""), "{verdict}");
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(
+            parse("expect_segment_symbol segmented#1 0 \"edit\"").unwrap(),
+            MockStage { seen: &SEEN, verdict: tx },
+        );
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 1, "{verdict}");
+        assert!(verdict.contains("segment 0 symbol \"info\", wanted \"edit\""), "{verdict}");
+        assert!(parse("expect_segments radio#0 \"a|[b]\"").is_err());
+        assert!(parse("expect_segment_symbol segmented#0 x \"info\"").is_err());
+        assert!(parse("expect_segment_symbol select#0 0 \"info\"").is_err());
+        assert!(parse("choose segmented#0 1").is_ok());
+    }
+
     #[test]
     fn mask_count_reads_one_glyph_and_refuses_typed_characters() {
         assert_eq!(mask_count(""), Ok(0));
@@ -8477,6 +8579,12 @@ mod tests {
         fn choose(&self, _: Target, _: usize) {}
         fn selected_label(&self, _: Target) -> String {
             String::new()
+        }
+        fn segments(&self, _: Target) -> String {
+            "Day|[Week]|Month".to_owned()
+        }
+        fn segment_symbol(&self, _: Target, index: usize) -> String {
+            ["info", "edit"].get(index).map_or_else(|| format!("no segment {index}"), |s| (*s).to_owned())
         }
         fn grid_columns(&self, _: Target, _: usize) -> String {
             String::new()
@@ -9514,6 +9622,12 @@ mod tests {
         fn selected_label(&self, _: Target) -> String {
             String::new()
         }
+        fn segments(&self, _: Target) -> String {
+            String::new()
+        }
+        fn segment_symbol(&self, _: Target, _: usize) -> String {
+            String::new()
+        }
         fn grid_columns(&self, _: Target, _: usize) -> String {
             String::new()
         }
@@ -9929,6 +10043,12 @@ mod tests {
         }
         fn choose(&self, _: Target, _: usize) {}
         fn selected_label(&self, _: Target) -> String {
+            String::new()
+        }
+        fn segments(&self, _: Target) -> String {
+            String::new()
+        }
+        fn segment_symbol(&self, _: Target, _: usize) -> String {
             String::new()
         }
         fn grid_columns(&self, _: Target, _: usize) -> String {

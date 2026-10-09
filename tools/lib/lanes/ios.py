@@ -182,8 +182,9 @@ PAD_EXTRAS = {
 # drive chrome no phone has; split/panes drive resize_window, which this
 # host rejects by design (DESIGN.md, Windows).
 DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes"]
-# Scenes whose legs are not run here yet.
-UNWIRED_SCENES = []
+# Scenes whose legs are not run here yet. The segmented control's iOS arm is
+# built; its legs are the breadth slice's to measure (docs/segmented-plan.md §6).
+UNWIRED_SCENES = ["segmented"]
 
 # The fullscreen scene's app-only way back after the cut, the same steps as
 # tools/lib/lanes/android.py's FULLSCREEN_APP_TAIL: no user change arrives.

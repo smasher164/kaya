@@ -1,0 +1,29 @@
+# The segmented control (docs/segmented-plan.md §5): the choice contract as a
+# strip, read and driven through the platform's own segments. The app's
+# Reset writes the index, which the platform must show and which never echoes.
+expect segmented@period "Day"
+expect_ax segmented@period "group/Period"
+expect_segments segmented@period "[Day]|Week|Month"
+choose segmented@period 2
+expect label#0 "period: Month"
+expect label#1 "heard: 1"
+expect segmented@period "Month"
+expect_segments segmented@period "Day|Week|[Month]"
+click button@reset
+expect segmented@period "Day"
+expect_segments segmented@period "[Day]|Week|Month"
+expect label#0 "period: Day"
+expect label#1 "heard: 1"
+# The symbol control: each segment draws its glyph and keeps its name.
+expect_segment_symbol segmented@view 0 "info"
+expect_segment_symbol segmented@view 1 "edit"
+expect_segments segmented@view "Info|[Edit]"
+choose segmented@view 0
+expect label#2 "view: Info"
+expect_segments segmented@view "[Info]|Edit"
+# A stamped copy starts from its row's field, and its pick names its row.
+expect segmented@cadence[read] "Weekly"
+expect segmented@cadence[walk] "Daily"
+choose segmented@cadence[walk] 1
+expect label#3 "cadence walk: Weekly"
+expect_segments segmented@cadence[walk] "Daily|[Weekly]"

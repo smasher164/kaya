@@ -124,6 +124,9 @@ VERB_FEATURE = {
     # docs/secure-entry-plan.md §5, the same reasoning.
     "type_secret": "secure",
     "expect_masked": "secure",
+    # docs/segmented-plan.md §5, the same reasoning.
+    "expect_segments": "segmented",
+    "expect_segment_symbol": "segmented",
     # docs/autofill-plan.md §5, the same reasoning.
     "expect_content_type": "autofill",
     # docs/reveal-plan.md §5, the same reasoning.
