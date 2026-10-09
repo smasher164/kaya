@@ -15127,23 +15127,25 @@ clean -p kaya` in it removed 110.9 GiB, which tools/prune-objects.py
 The leg loop runs in one shell and starts each leg in the background, so
 anything it does between legs is serial. Every Haskell leg's command line
 held `"$(hs_bin <scene>)"`, a `cabal list-bin` taking 0.13-0.36 s in the
-container on a quiet host, 69 sites per protocol. And each of the seven
-EXCLUSIVE legs (the four dndwitness legs, the three wayland clipboard legs)
-waited for the eight-wide pool to empty where it stood. A greedy schedule
-of the 2026-10-08 legs at eight wide put the seven drains at 30 s; the
-legs phase read 1078-1128 s against a schedule of 680-706 s plus 245-305 s
-of token waits.
+container on a quiet host, 69 sites per protocol. build_haskell now writes
+every executable's path to /tmp/hs-bins in the build pool (`xargs -P 8`,
+refused unless every executable in kaya-guests.cabal has one: a fake cabal
+answering nothing for one executable was watched refused, `68 of 69`),
+hs_bin reads the file, and a missing path fails its leg naming
+/tmp/hs-bins. The non-harness `cargo check` moved from the core build into
+the guest-build pool. Beside the Android lane the legs phase read 743 s
+before and 677-735 s after, with 31-45 s of token waits.
 
-build_haskell now writes every executable's path to /tmp/hs-bins in the
-build pool (`xargs -P 8`, refused unless every executable in
-kaya-guests.cabal has one), hs_bin reads the file, and a missing path fails
-its leg naming /tmp/hs-bins. run() defers an EXCLUSIVE leg to run_deferred,
-called before the drain that closes each protocol's pooled block, where
-the seven run back to back after one drain. The non-harness `cargo check`
-moved from the core build into the guest-build pool. Beside the Android
-lane the legs phase read 743 s before and 677-728 s after with 31-45 s of
-token waits. GUARD: check-exclusive holds the deferral and its call
-(two watched negatives).
+THE EXCLUSIVE LEGS STAY WHERE THEY ARE. Each of the seven waits for the
+eight-wide pool to empty, and a greedy schedule of the 2026-10-08 legs put
+those drains at 30 s, so they were tried deferred to the end of each
+protocol's pooled block, after chat-go. dndwitness-in-x11 then failed 2 of
+13 runs (one full lane, one of six runs filtered to notes, editor-go,
+chat-go and dndwitness), both times `dragdrive: no drag began within 5000ms
+of the press` on the in-app drag, on a host 80% idle; the same filter with
+the legs in their own place passed 6 of 6, and the kept matrix logs show
+the leg green in every run. What the earlier legs leave on the display is
+not measured. The deferral was reverted.
 
 ## The android pool's suite drains (measured 2026-10-08)
 
@@ -15169,7 +15171,11 @@ with 40-80% idle, and Android's logcat had been cleared by the time it was
 read. _leg_worker now asks `adb get-state` after the claim and, for any
 answer but `device`, waits up to 30 s with `wait-for-device` and prints both
 answers and the wait (`emulator-5556 answered 'error: device offline' at
-claim; 'device' after 0.7s`, the first sighting, every leg green). GUARD:
+claim; 'device' after 0.7s`, the first sighting, every leg green). A drop
+between that answer and the leg's first read still failed confirm-go once,
+so restore_touch_mode reads the touch mode again after the same wait when
+its first `dumpsys input` comes back empty, and its unreadable sentence
+names what `adb get-state` answered then. GUARD:
 tools/lib/android-leg-order.py's drain clause (per-suite drain, an isolated
 leg pooled, the isolated block above the drain, a stage with no claim, a
 claim that takes no slot or never releases, each watched red) and the

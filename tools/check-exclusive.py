@@ -551,17 +551,6 @@ def census(texts, lanes=None, tools=None):
         out.append(f"{LINUX}: run() does not read KAYA_EXCLUSIVE")
     if "kaya_exclusive_summary linux" not in sh:
         out.append(f"{LINUX}: never prints exclusion's summary")
-    # THE EXCLUSIVE LEGS RUN AT THEIR PROTOCOL'S LAST DRAIN, not in place
-    # (docs/traps.md, "The linux leg loop asked cabal for every Haskell path").
-    defer = re.search(r'case "\$KAYA_EXCLUSIVE_LEGS" in \*" \$name-\$proto "\*\)\n'
-                      r'\s*if \[ "\$KAYA_DEFERRING" = 1 \]; then\n'
-                      r'\s*KAYA_DEFERRED\+=', run_body)
-    if defer is None or defer.start() > run_body.find("kaya_exclusive_wait linux"):
-        out.append(f"{LINUX}: run() does not defer an exclusive leg before its token wait — "
-                   f"run in place each one drains the eight-wide pool")
-    if not re.search(r"\n    run_deferred\n    drain\n", sh):
-        out.append(f"{LINUX}: run_deferred is not called before a drain inside the protocol loop — "
-                   f"the deferred exclusive legs would never run")
     m = re.search(r'^KAYA_EXCLUSIVE_LEGS="([^"]*)"', sh, re.M)
     if not m:
         out.append(f"{LINUX}: no KAYA_EXCLUSIVE_LEGS line")
@@ -739,17 +728,6 @@ watched("an android EXCLUSIVE name no leg is called", REAL, "dnd-ghost",
 sh_no_hold = gate.doctor("the linux hold_begin cut out", REAL[LINUX],
                          r'\n\s*kaya_exclusive_hold_begin linux "\$name-\$proto"\n', "\n")
 watched("a linux run() that never holds", {**REAL, LINUX: sh_no_hold}, "kaya_exclusive_hold_begin")
-
-# 4b. THE LINUX EXCLUSIVE LEGS RUN IN PLACE AGAIN, OR NEVER.
-sh_in_place = gate.doctor("the linux deferral cut out", REAL[LINUX],
-                          r'\n\s*if \[ "\$KAYA_DEFERRING" = 1 \]; then\n',
-                          "\n        if false; then\n")
-watched("a linux run() that drains the pool for every exclusive leg",
-        {**REAL, LINUX: sh_in_place}, "does not defer an exclusive leg")
-sh_never = gate.doctor("the linux run_deferred call cut out", REAL[LINUX],
-                       r"\n    run_deferred\n", "\n")
-watched("a linux lane that never runs its deferred legs",
-        {**REAL, LINUX: sh_never}, "run_deferred is not called")
 
 # 5. THE SHELL DRIFTS FROM THE PYTHON SENTENCE.
 sh_drift = gate.doctor("the shell release sentence reworded", REAL[EXCLUSIVE_SH],
@@ -1011,7 +989,7 @@ watched("a reply that opens the shade without the door",
         {**REAL, "tools/android/run-emulator.py": _reply},
         "reply_notification does not open the shade through open_shade")
 
-gate.negatives_ran(37)
+gate.negatives_ran(35)
 
 gate.counted("windows legs whose scene posts a notification",
              sorted(MODS["windows"].notification_legs(str(ROOT / "tools/scenes"))), floor=2)

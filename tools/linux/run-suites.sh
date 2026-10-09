@@ -96,16 +96,50 @@ cp guests/csharp/*.cs guests/csharp/kaya-guests.csproj bindings/csharp/*.cs /tmp
 run_build csharp build_csharp
 run_build java build_java
 
+# LINKED BY rust-lld, through the gcc-ld shim rustup ships beside rustc
+# (docs/traps.md, "The linux lane linked its examples with BFD ld").
+kaya_host_line="$(rustc -vV | grep '^host: ')"
+kaya_host="${kaya_host_line#host: }"
+kaya_gcc_ld="$(rustc --print sysroot)/lib/rustlib/$kaya_host/bin/gcc-ld"
+if [ ! -x "$kaya_gcc_ld/ld.lld" ]; then
+    echo "run-suites: no ld.lld under $kaya_gcc_ld; the toolchain in tools/linux/Dockerfile no longer ships rust-lld" >&2
+    exit 1
+fi
+printf '#!/bin/sh\nexec cc -B%s -fuse-ld=lld "$@"\n' "$kaya_gcc_ld" >/tmp/cc-lld
+chmod +x /tmp/cc-lld
+kaya_linker_var="CARGO_TARGET_$(printf '%s' "$kaya_host" | tr 'a-z-' 'A-Z_')_LINKER"
+export "$kaya_linker_var=/tmp/cc-lld"
+lld_linked() { # <elf>
+    readelf -p .comment "$1" 2>/dev/null | grep -q 'Linker: LLD'
+}
+lld_selftest() {
+    printf 'int main(void) { return 0; }\n' >/tmp/lld-probe.c
+    cc -fuse-ld=bfd -o /tmp/lld-probe-bfd /tmp/lld-probe.c || return 1
+    /tmp/cc-lld -o /tmp/lld-probe-lld /tmp/lld-probe.c || return 1
+    if lld_linked /tmp/lld-probe-bfd; then
+        echo "run-suites: SELF-TEST FAIL — the linker census read a BFD-linked probe as rust-lld's" >&2
+        return 1
+    fi
+    if ! lld_linked /tmp/lld-probe-lld; then
+        echo "run-suites: SELF-TEST FAIL — the linker census refused a probe /tmp/cc-lld linked" >&2
+        return 1
+    fi
+    echo "run-suites: the linker census refuses a BFD-linked probe and takes an lld-linked one"
+}
+lld_selftest || exit 1
 # Debuginfo off, AND the link parallelism bounded (docs/traps.md:
 # "Container linker OOM scales with the example count").
-CARGO_PROFILE_DEV_DEBUG=0 cargo build -j6 --locked --features harness --lib \
+CARGO_PROFILE_DEV_DEBUG=0 cargo build -j8 --locked --features harness --lib \
     "${BUILD_EXAMPLES[@]}" || exit 1
 tools/build-id.py --verify "$CARGO_TARGET_DIR/debug/libkaya.so" || exit 1
-# THE SHIPPED CONFIGURATION TOO: every leg links the harness build, and
-# check-targets cannot compile the GTK backend at all, so a non-harness
-# build that fails on linux is seen by nothing else on the matrix
-# (docs/traps.md, the GTK backend that compiled only with the harness).
-CARGO_PROFILE_DEV_DEBUG=0 cargo check -j6 --locked --lib || exit 1
+for kaya_linked in "$CARGO_TARGET_DIR/debug/libkaya.so" "$CARGO_TARGET_DIR/debug/examples/milestone2"; do
+    if ! lld_linked "$kaya_linked"; then
+        echo "run-suites: $kaya_linked was not linked by rust-lld (its .comment names no 'Linker: LLD');" \
+            "BFD ld takes the core build from about 35 s to about 130 s on a quiet host (docs/traps.md," \
+            "\"The linux lane linked its examples with BFD ld\")" >&2
+        exit 1
+    fi
+done
 timing core-build
 
 # The repo is mounted at /work, not at the compile-time default.
@@ -795,13 +829,27 @@ run_build ocaml build_ocaml
 
 # The rpath travels via ghc-options — Linux resolves libkaya only by
 # rpath or LD_LIBRARY_PATH.
+# EVERY EXECUTABLE'S PATH IS READ HERE, ONCE, in the build pool: `cabal
+# list-bin` costs 0.13-0.36 s and the leg loop named 138 of them one at a
+# time (docs/traps.md, "The linux leg loop asked cabal for every Haskell
+# path"). A path missing here fails its leg naming /tmp/hs-bins.
 build_haskell() {
     cd guests/haskell && cabal build all \
         --extra-lib-dirs="$CARGO_TARGET_DIR/debug" \
-        --ghc-options="-L$CARGO_TARGET_DIR/debug -optl-Wl,-rpath,$CARGO_TARGET_DIR/debug" -v0
+        --ghc-options="-L$CARGO_TARGET_DIR/debug -optl-Wl,-rpath,$CARGO_TARGET_DIR/debug" -v0 || return 1
+    rm -rf /tmp/hs-bins && mkdir -p /tmp/hs-bins || return 1
+    grep '^executable ' kaya-guests.cabal | cut -d' ' -f2 \
+        | xargs -P 8 -I{} sh -c 'cabal list-bin "$1" -v0 >"/tmp/hs-bins/$1"' sh {} || return 1
+    local wanted got
+    wanted=$(grep -c '^executable ' kaya-guests.cabal)
+    got=$(find /tmp/hs-bins -type f -size +0 | wc -l)
+    if [ "$got" -ne "$wanted" ] || [ "$wanted" -lt 60 ]; then
+        echo "build_haskell: $got of $wanted executables have a path in /tmp/hs-bins" >&2
+        return 1
+    fi
 }
 run_build haskell build_haskell
-hs_bin() { (cd guests/haskell && cabal list-bin "$1" -v0); }
+hs_bin() { cat "/tmp/hs-bins/$1" 2>/dev/null || echo "/tmp/hs-bins/$1-has-no-path"; }
 
 CS_GUEST="/tmp/cs/bin/Debug/net10.0/kaya-guests.dll"
 build_go() {
@@ -811,6 +859,14 @@ build_go() {
     go build -o /tmp/go-guests/kaya-go dev.kaya/guests/go/cmd || return 1
 }
 run_build go build_go
+
+# THE SHIPPED CONFIGURATION TOO: every leg links the harness build, and
+# check-targets cannot compile the GTK backend at all, so a non-harness
+# build that fails on linux is seen by nothing else on the matrix
+# (docs/traps.md, the GTK backend that compiled only with the harness).
+# Pooled with the guest builds, since no leg runs it.
+check_shipped() { CARGO_PROFILE_DEV_DEBUG=0 cargo check -j6 --locked --lib; }
+run_build shipped check_shipped
 
 # The pool drains here: csharp/java started before the cargo build (no
 # libkaya link), the rest right after it.

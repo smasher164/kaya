@@ -1270,6 +1270,10 @@ def stage_suite_apk(label, apk, package, targets):
         return False
 
     def stage_one(serial):
+        with staging_claim(serial):
+            stage_on(serial)
+
+    def stage_on(serial):
         with open(stage_dir / f"{serial}.log", "w", encoding="utf-8",
                   errors="replace") as slog:
             target_verdict = "FAIL"
@@ -1457,13 +1461,18 @@ def restore_touch_mode(serial, log):
         return (found.group(1) if found else None), len(dump)
 
     before, size = mode()
+    if before is None and device_online(serial, log):
+        before, size = mode()
     if before == "1":
         print(f"touch mode at leg start: 1 on {serial}", file=log)
         return True
     if before is None:
+        state = out_of(["adb", "-s", serial, "get-state"],
+                       stderr=subprocess.STDOUT).strip()
         print(f"touch mode at leg start: unreadable on {serial} — `dumpsys "
               f"input` ({size} bytes) carried no `Display: 0 TouchMode:` "
-              f"line", file=log)
+              f"line; `adb get-state` then answered {state or 'nothing'!r}",
+              file=log)
         return False
 
     def focus():
@@ -2036,6 +2045,45 @@ def _release_device(slot):
         _slots_lock.notify_all()
 
 
+@contextlib.contextmanager
+def staging_claim(serial):
+    """The device claimed like a leg's for its staging: the previous suite's
+    last legs may still be running, and the disarm writes the device's
+    accessibility settings (docs/traps.md, the android pool's suite drains)."""
+    slot = SERIALS.index(serial) if serial in SERIALS else None
+    if slot is None:
+        _tablet_lock.acquire()
+    else:
+        _claim_device({slot})
+    try:
+        yield
+    finally:
+        if slot is None:
+            _tablet_lock.release()
+        else:
+            _release_device(slot)
+
+
+def device_online(serial, log):
+    """The claimed device's adb state, waited back for when it is not
+    `device`: a transport that drops for half a second otherwise fails
+    every leg that claims it in that half second (docs/traps.md, the
+    android pool's suite drains)."""
+    state = out_of(["adb", "-s", serial, "get-state"],
+                   stderr=subprocess.STDOUT).strip()
+    if state == "device":
+        return True
+    t0 = time.monotonic()
+    run(["timeout", "30", "adb", "-s", serial, "wait-for-device"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    again = out_of(["adb", "-s", serial, "get-state"],
+                   stderr=subprocess.STDOUT).strip()
+    print(f"run-emulator: {serial} answered {state or 'nothing'!r} at "
+          f"claim; {again or 'nothing'!r} after "
+          f"{time.monotonic() - t0:.1f}s of wait-for-device", file=log)
+    return again == "device"
+
+
 def _leg_refused(name):
     """A leg no device could run, written down as the verdict files say."""
     for suffix, text in ((".secs", "0\n"), (".verdict", "FAIL\n")):
@@ -2063,7 +2111,7 @@ def _leg_worker(name, script, args, tablet):
             serial = SERIALS[slot]
         t0 = time.monotonic()
         try:
-            ready = True
+            ready = device_online(serial, log)
             # The ranges leg's slot-local IME re-assert: on the device
             # it just claimed, before the launch, failing through the
             # normal leg verdict path (select_helper_ime carries the
@@ -3840,20 +3888,24 @@ def check_real_prefs(suite, package, targets):
     status = 1
 
 
+# THE LANE'S EXCLUSIVE AND ALONE LEGS, every suite's, run after the one drain
+# of the pooled legs, each still alone (docs/traps.md, the android pool's
+# suite drains).
+_isolated = []
+
+
 def run_suite_legs(suite):
-    """Every leg from the lane module's roster, in its order, one drain
-    at the end. The bare suite legs launch with KAYA_SELFTEST=1 (the
-    unprefixed milestone2 arm); everything else passes its scene name.
-    The tablet leg, the remount legs and the per-leg extras are
-    lanes/android.py's FLAGS."""
+    """Every pooled leg from the lane module's roster, in its order, with no
+    drain: the next suite's build and staging overlap this one's last legs.
+    The suite's EXCLUSIVE and ALONE legs go to `_isolated`. The bare suite
+    legs launch with KAYA_SELFTEST=1 (the unprefixed milestone2 arm);
+    everything else passes its scene name. The tablet leg, the remount legs
+    and the per-leg extras are lanes/android.py's FLAGS."""
     global _selected
     apk_rel, package, activity = lane.SUITE_APPS[suite]
     apk = ROOT / apk_rel
     component = f"{package}/{activity}"
-    # THE SUITE'S EXCLUSIVE LEGS RUN LAST, together (docs/traps.md, the
-    # android pool's per-leg drains): each one empties the pool first.
-    for leg in sorted(selected_legs(suite),
-                      key=lambda leg: leg in lane.EXCLUSIVE or leg in lane.ALONE):
+    for leg in selected_legs(suite):
         _selected += 1
         flags = lane.FLAGS.get(leg, {})
         scene = lane.scene_of(leg)
@@ -3892,15 +3944,15 @@ def run_suite_legs(suite):
         if door and not two_act:
             die(f"run-emulator: lanes/android.py names a relaunch door "
                 f"for {scene}, whose scene script has no `relaunch`")
-        queue_leg(leg, selftest,
-                  (apk, component, selftest, extras, remount_expect,
-                   two_act),
-                  tablet=bool(flags.get("tablet")))
-    drain()
-    check_real_prefs(suite, package,
-                     [*SERIALS, TABLET_SERIAL] if suite == "compose"
-                     else list(SERIALS))
-    timing(f"legs-{suite}")
+        leg_args = (leg, selftest,
+                    (apk, component, selftest, extras, remount_expect,
+                     two_act),
+                    bool(flags.get("tablet")))
+        if leg in lane.EXCLUSIVE or leg in lane.ALONE:
+            _isolated.append(leg_args)
+        else:
+            queue_leg(*leg_args)
+    timing(f"queued-{suite}")
 
 
 def media_queued():
@@ -3942,6 +3994,7 @@ if media_queued():
             MEDIA_UNROUTED.append(f"{_serial}: {_said}")
         print(f"media-server: {_serial} -> {MEDIA_URL}: {_said}", flush=True)
 
+_staged = []
 for _suite in lane.SUITES:
     if SUITE not in (_suite, "all"):
         continue
@@ -3950,6 +4003,17 @@ for _suite in lane.SUITES:
     if not build_suite(_suite):
         sys.exit(1)
     run_suite_legs(_suite)
+    _staged.append(_suite)
+drain()
+timing("legs-pooled")
+for _leg_args in _isolated:
+    queue_leg(*_leg_args)
+drain()
+timing("legs-isolated")
+for _suite in _staged:
+    check_real_prefs(_suite, lane.SUITE_APPS[_suite][1],
+                     [*SERIALS, TABLET_SERIAL] if _suite == "compose"
+                     else list(SERIALS))
 
 try:
     MEDIA.close()
