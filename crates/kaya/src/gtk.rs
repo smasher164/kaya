@@ -3743,6 +3743,7 @@ enum NativeWidget {
     Progress(gtk4::ProgressBar),
     Select(gtk4::DropDown),
     Radio(gtk4::Box),
+    Segmented(adw::ToggleGroup),
     Grid(gtk4::Grid),
     /// THE ONE COMPOSITE KIND WITH A CONTROL INSIDE IT: a `GtkTextView` in a
     /// `GtkScrolledWindow`, in that order (viewport, control). Both halves
@@ -3789,6 +3790,7 @@ impl NativeWidget {
             NativeWidget::Progress(w) => w.clone().upcast(),
             NativeWidget::Select(w) => w.clone().upcast(),
             NativeWidget::Radio(w) => w.clone().upcast(),
+            NativeWidget::Segmented(w) => w.clone().upcast(),
             NativeWidget::Grid(w) => w.clone().upcast(),
             NativeWidget::Textarea(scroller, _) => scroller.clone().upcast(),
             NativeWidget::Canvas(w) => w.clone().upcast(),
@@ -3816,6 +3818,45 @@ impl NativeWidget {
 /// The text a LABEL registry slot draws, whichever control the role left
 /// there (docs/tasks-s2-plan.md T3): a `GtkLinkButton`'s caption is its
 /// `label` property, not a `GtkLabel`'s `text`.
+fn segment_text_apply(toggle: &adw::Toggle, text: &str) {
+    if toggle.icon_name().is_some() {
+        toggle.set_tooltip(text);
+    } else {
+        toggle.set_label(Some(text));
+    }
+}
+
+fn segment_symbol_apply(toggle: &adw::Toggle, symbol: i64) {
+    if let Some(display) = gdk::Display::default() {
+        assert_symbol_icons_resolve(&display);
+    }
+    let icon = symbol_icon_name(symbol)
+        .unwrap_or_else(|| panic!("kaya: symbol {symbol} has no Adwaita name in SYMBOL_ICONS"));
+    let name = toggle.label().map(|l| l.to_string()).unwrap_or_else(|| toggle.tooltip().to_string());
+    toggle.set_label(None);
+    toggle.set_icon_name(Some(icon));
+    toggle.set_tooltip(&name);
+}
+
+fn segment_buttons(group: &adw::ToggleGroup) -> Vec<gtk4::ToggleButton> {
+    let mut out = Vec::new();
+    let mut child = group.first_child();
+    while let Some(c) = child {
+        if let Some(b) = c.downcast_ref::<gtk4::ToggleButton>() {
+            out.push(b.clone());
+        }
+        child = c.next_sibling();
+    }
+    out
+}
+
+fn segment_button_name(button: &gtk4::ToggleButton) -> String {
+    match button.child().and_then(|c| c.downcast::<gtk4::Label>().ok()) {
+        Some(label) => label.text().to_string(),
+        None => button.tooltip_text().map(|t| t.to_string()).unwrap_or_default(),
+    }
+}
+
 fn label_text(widget: &gtk4::Widget) -> String {
     use gtk4::prelude::{ButtonExt, Cast};
     if let Some(label) = widget.downcast_ref::<gtk4::Label>() {
@@ -4476,7 +4517,7 @@ fn kind_registry(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<gtk4
         K::Range => core.ranges.iter().map(|p| p.group.clone().upcast()).collect(),
         K::Video => core.videos.iter().map(|v| v.overlay.clone().upcast()).collect(),
         K::SecureField => core.secure_fields.iter().map(|w| w.clone().upcast()).collect(),
-        K::Segmented => crate::depth_stub("segmented"),
+        K::Segmented => core.segmenteds.iter().map(|w| w.clone().upcast()).collect(),
         K::ColorPicker => core.color_pickers.iter().map(|f| f.button.clone().upcast()).collect(),
         K::NumberField => core.number_fields.iter().map(|f| f.spin.clone().upcast()).collect(),
         K::Label => core.labels.clone(),
@@ -5457,6 +5498,7 @@ struct CoreState {
     progresses: Vec<gtk4::ProgressBar>,
     selects: Vec<gtk4::DropDown>,
     radios: Vec<gtk4::Box>,
+    segmenteds: Vec<adw::ToggleGroup>,
     grids: Vec<gtk4::Grid>,
     labeleds: Vec<adw::ActionRow>,
     textareas: Vec<gtk4::TextView>,
@@ -5486,6 +5528,9 @@ struct CoreState {
     radio_options: HashMap<u64, (u64, u32)>,
     radio_buttons: HashMap<u64, Vec<gtk4::CheckButton>>,
     radio_tags: HashMap<u64, Vec<u8>>,
+    /// docs/segmented-plan.md §3.
+    segmented_options: HashMap<u64, (u64, u32)>,
+    segmented_symbols: HashMap<u64, i64>,
     /// Option-label plumbing: label widget id -> (its select's id, its option
     /// row). A select's label children are OPTIONS — rows of the DropDown's
     /// StringList — so they leave the harness's label registry.
@@ -9594,7 +9639,7 @@ fn context_anchor_id(core: &CoreState, t: crate::harness::Target) -> u64 {
             .button
             .clone()
             .upcast(),
-        K::Segmented => crate::depth_stub("segmented"),
+        K::Segmented => core.segmenteds[resolve(t.index, core.segmenteds.len())].clone().upcast(),
         K::Entry | K::Textarea | K::Search | K::NumberField | K::SecureField => {
             panic!("kaya: editable text is not a context anchor (v1)")
         }
@@ -12267,7 +12312,21 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.grids.push(grid.clone());
                     NativeWidget::Grid(grid)
                 }
-                WidgetKind::Segmented => crate::depth_stub("segmented"),
+                WidgetKind::Segmented => {
+                    // docs/segmented-plan.md §3.
+                    let group = adw::ToggleGroup::new();
+                    group.set_homogeneous(true);
+                    let sink = core.occurrences.clone();
+                    let tag = tag.expect("segmented controls carry a tag");
+                    let quiet = core.apply_quiet.clone();
+                    group.connect_active_notify(move |g| {
+                        if !quiet.get() && g.active() != gtk4::INVALID_LIST_POSITION {
+                            sink.send_value_tag(&tag, f64::from(g.active()));
+                        }
+                    });
+                    core.segmenteds.push(group.clone());
+                    NativeWidget::Segmented(group)
+                }
                 WidgetKind::SecureField => {
 // docs/secure-entry-plan.md §3 and docs/reveal-plan.md §3, V10: GTK's own password
 // entry, its peek icon replaced by kaya's eye, the context menu's "Show Text"
@@ -14374,6 +14433,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     if let Some((radio, row)) = core.radio_options.get(&id.0) {
                         core.radio_buttons[radio][*row as usize].set_label(Some(&s));
                     }
+                    if let Some((control, row)) = core.segmented_options.get(&id.0) {
+                        if let Some(NativeWidget::Segmented(group)) =
+                            core.widgets.get(&WidgetId(*control))
+                        {
+                            if let Some(toggle) = group.toggle(*row) {
+                                segment_text_apply(&toggle, &s);
+                            }
+                        }
+                    }
                 }
                 // A LINK'S CAPTION IS THE LABEL'S TEXT (docs/tasks-s2-plan.md
                 // T3), on the control the role left behind. A link is never a
@@ -14971,6 +15039,27 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     grid.set_row_spacing(gap as u32);
                     grid.set_column_spacing(gap as u32);
                 }
+                (NativeWidget::Segmented(group), Prop::Value, Value::F64(v)) => {
+                    core.apply_quiet.set(true);
+                    group.set_active(v as u32);
+                    core.apply_quiet.set(false);
+                }
+                (NativeWidget::Label(_), Prop::Symbol, Value::I64(symbol)) => {
+                    match core.segmented_options.get(&id.0) {
+                        Some((control, row)) => {
+                            if let Some(NativeWidget::Segmented(group)) =
+                                core.widgets.get(&WidgetId(*control))
+                            {
+                                if let Some(toggle) = group.toggle(*row) {
+                                    segment_symbol_apply(&toggle, symbol);
+                                }
+                            }
+                        }
+                        None => {
+                            core.segmented_symbols.insert(id.0, symbol);
+                        }
+                    }
+                }
                 (NativeWidget::Radio(_), Prop::Value, Value::F64(v)) => {
                     core.apply_quiet.set(true);
                     if let Some(check) = core
@@ -15339,6 +15428,30 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 group.append(&check);
                 buttons.push(check);
                 core.radio_options.insert(child.0, (parent.0, row));
+                return;
+            }
+            if let NativeWidget::Segmented(group) =
+                core.widgets.get(&parent).expect("scene validated the id")
+            {
+                let group = group.clone();
+                let text = match core.widgets.get(&child).expect("scene validated the id") {
+                    NativeWidget::Label(l) => {
+                        let l = l.clone().upcast::<gtk4::Widget>();
+                        core.labels.retain(|x| x != &l);
+                        label_text(&l)
+                    }
+                    _ => String::new(),
+                };
+                let toggle = adw::Toggle::new();
+                segment_text_apply(&toggle, &text);
+                if let Some(symbol) = core.segmented_symbols.remove(&child.0) {
+                    segment_symbol_apply(&toggle, symbol);
+                }
+                let row = group.n_toggles();
+                core.apply_quiet.set(true);
+                group.add(toggle);
+                core.apply_quiet.set(false);
+                core.segmented_options.insert(child.0, (parent.0, row));
                 return;
             }
             if let NativeWidget::Labeled(row) = core.widgets.get(&parent).expect("scene validated the id")
@@ -17586,6 +17699,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 progresses: Vec::new(),
                 selects: Vec::new(),
                 radios: Vec::new(),
+                segmenteds: Vec::new(),
                 grids: Vec::new(),
                 labeleds: Vec::new(),
                 textareas: Vec::new(),
@@ -17600,6 +17714,8 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 radio_options: HashMap::new(),
                 radio_buttons: HashMap::new(),
                 radio_tags: HashMap::new(),
+                segmented_options: HashMap::new(),
+                segmented_symbols: HashMap::new(),
                 select_options: HashMap::new(),
                 a11y_labels: HashMap::new(),
                 hrefs: HashMap::new(),
@@ -18865,7 +18981,7 @@ impl crate::harness::Stage for GtkStage {
                 K::Button => atspi::Role::Button,
                 K::Checkbox => atspi::Role::CheckBox,
                 K::Select => atspi::Role::ComboBox,
-                K::Radio => atspi::Role::Grouping,
+                K::Radio | K::Segmented => atspi::Role::Grouping,
                 // The root admits a11y_hint on activation kinds only
                 // (scene.rs), so anything else asking for one is a
                 // scene bug, said out loud rather than answered.
@@ -22459,23 +22575,79 @@ impl crate::harness::Stage for GtkStage {
                 }
                 return;
             }
+            if t.kind == crate::harness::TargetKind::Segmented {
+                // docs/segmented-plan.md G10.
+                let i = crate::harness::resolve(t.index, core.segmenteds.len());
+                let buttons = segment_buttons(&core.segmenteds[i]);
+                match buttons.get(index) {
+                    Some(button) => {
+                        button.activate();
+                    }
+                    None => panic!(
+                        "kaya: choose segmented#{i} {index}: the toggle group shows {} segment(s)",
+                        buttons.len()
+                    ),
+                }
+                return;
+            }
             let i = crate::harness::resolve(t.index, core.selects.len());
             core.selects[i].set_selected(index as u32);
         });
     }
 
-    /// No segmented control exists on this backend before the breadth
-    /// (docs/segmented-plan.md §6).
-    fn segments(&self, _: crate::harness::Target) -> String {
-        crate::depth_stub("segmented")
+    fn segments(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.segmenteds.len()) else {
+                return "<no such target>".to_string();
+            };
+            segment_buttons(&core.segmenteds[i])
+                .iter()
+                .map(|b| {
+                    let name = segment_button_name(b);
+                    if b.is_active() {
+                        format!("[{name}]")
+                    } else {
+                        name
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("|")
+        })
     }
 
-    fn segment_symbol(&self, _: crate::harness::Target, _: usize) -> String {
-        crate::depth_stub("segmented")
+    fn segment_symbol(&self, t: crate::harness::Target, index: usize) -> String {
+        Self::on_main(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.segmenteds.len()) else {
+                return "<no such target>".to_string();
+            };
+            let buttons = segment_buttons(&core.segmenteds[i]);
+            let Some(button) = buttons.get(index) else {
+                return format!("<the toggle group shows {} segment(s), none at {index}>", buttons.len());
+            };
+            let Some(image) = button.child().and_then(|c| c.downcast::<gtk4::Image>().ok()) else {
+                return format!("<segment {index} draws no image>");
+            };
+            let Some(icon) = image.icon_name() else {
+                return format!("<segment {index}'s image names no icon>");
+            };
+            symbol_name_of_icon(&icon)
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("<segment {index} draws {icon}, which is not in SYMBOL_ICONS>"))
+        })
     }
 
     fn selected_label(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
+            if t.kind == crate::harness::TargetKind::Segmented {
+                let Some(i) = crate::harness::try_resolve(t.index, core.segmenteds.len()) else {
+                    return "<no such target>".to_string();
+                };
+                return segment_buttons(&core.segmenteds[i])
+                    .iter()
+                    .find(|b| b.is_active())
+                    .map(segment_button_name)
+                    .unwrap_or_else(|| "<the toggle group shows no segment active>".to_string());
+            }
             if t.kind == crate::harness::TargetKind::Radio {
                 // The REAL control's state: the ACTIVE grouped
                 // CheckButton's own label.
@@ -23593,7 +23765,7 @@ fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk
             .map(|i| core.ranges[i].group.clone().upcast()),
         K::Video => try_resolve(target.index, core.videos.len()).map(|i| core.videos[i].overlay.clone().upcast()),
         K::SecureField => nth!(core.secure_fields),
-        K::Segmented => crate::depth_stub("segmented"),
+        K::Segmented => nth!(core.segmenteds),
         K::ColorPicker => try_resolve(target.index, core.color_pickers.len())
             .map(|i| core.color_pickers[i].swatch.clone().upcast()),
         K::NumberField => try_resolve(target.index, core.number_fields.len())
@@ -23641,6 +23813,10 @@ fn atspi_role_of(w: &gtk4::Widget) -> Option<atspi::Role> {
     if w.accessible_role() == gtk4::AccessibleRole::Group {
         return Some(atspi::Role::Grouping);
     }
+    // docs/segmented-plan.md §7, the toggle group's AT-SPI roles.
+    if w.accessible_role() == gtk4::AccessibleRole::RadioGroup {
+        return Some(atspi::Role::Grouping);
+    }
     // A label carrying the heading role (docs/styling-plan.md D4) was given
     // HEADING by the lowering, and GTK 4.18 maps that to ATSPI_ROLE_HEADING
     // — so it is not a Label on the bus. BEFORE the Label check for exactly
@@ -23683,6 +23859,9 @@ fn atspi_role_of(w: &gtk4::Widget) -> Option<atspi::Role> {
     }
     // ToggleButton is a Button subclass and must not count as one: the
     // drop-down's internal button is a toggle, and the bus agrees.
+    if w.is::<gtk4::ToggleButton>() && w.accessible_role() == gtk4::AccessibleRole::Radio {
+        return Some(atspi::Role::RadioButton);
+    }
     if w.is::<gtk4::ToggleButton>() {
         return Some(atspi::Role::ToggleButton);
     }

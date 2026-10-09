@@ -465,6 +465,25 @@ static class Program
         Fwd("Radio",
             ["string[] options", "Field<double> selected", $"{onSelect} onSelect = null"],
             "options, selected, onSelect");
+        Fwd("Segmented", ["string[] segments", "int selected", $"{onSelect} onSelect = null"],
+            "segments, selected, onSelect");
+        Fwd("Segmented", ["string[] segments", "Signal selected", $"{onSelect} onSelect = null"],
+            "segments, selected, onSelect");
+        Fwd("Segmented",
+            ["string[] segments", "Field<double> selected", $"{onSelect} onSelect = null"],
+            "segments, selected, onSelect");
+        Fwd("SegmentedSymbols",
+            ["(string Name, Symbol Symbol)[] segments", "int selected",
+             $"{onSelect} onSelect = null"],
+            "segments, selected, onSelect");
+        Fwd("SegmentedSymbols",
+            ["(string Name, Symbol Symbol)[] segments", "Signal selected",
+             $"{onSelect} onSelect = null"],
+            "segments, selected, onSelect");
+        Fwd("SegmentedSymbols",
+            ["(string Name, Symbol Symbol)[] segments", "Field<double> selected",
+             $"{onSelect} onSelect = null"],
+            "segments, selected, onSelect");
         Fwd("Row", ["System.Action body"], "body");
         Fwd("Column", ["System.Action body"], "body");
         Fwd("Scroll", ["System.Action body"], "body");

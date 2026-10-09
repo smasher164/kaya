@@ -49,6 +49,9 @@ public final class Main {
             case "reveal":
                 app = Reveal::app;
                 break;
+            case "segmented":
+                app = Segmented::app;
+                break;
             case "table":
                 app = Table::app;
                 break;

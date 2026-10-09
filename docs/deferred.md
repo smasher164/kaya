@@ -21,24 +21,30 @@ harness's `expect_segments` and `expect_segment_symbol` with `choose` and
 `expect` on the kind, and tools/scenes/segmented.steps green on the mac
 lane for Rust. The rulings G1-G13 are built as recommended and await the
 maintainer. What breadth owes:
-  - **DEPTH STUB: segmented on gtk** — an `AdwToggleGroup`, homogeneous,
-    one `AdwToggle` per segment (label, or the Adwaita icon with the name
-    as tooltip), `notify::active` outside the quiet guard and `set_active`
-    under it; Stage's `segments`, `segment_symbol` and `selected_label`
-    read the group and its toggles; the adw crate's feature moves to v1_7
-    (plan §3, §7).
-  - **DEPTH STUB: segmented on winui** — a `SelectorBar` of
-    `SelectorBarItem`s, each item's MinWidth the widest, SelectionChanged
-    outside the quiet guard; the reads through UIA and `choose` through the
-    item peer's SelectionItem.Select; SelectorBar and its types join
-    tools/winui-bindgen's filter (plan §3).
-  - **DEPTH STUB: segmented on compose** — `SingleChoiceSegmentedButtonRow`,
-    the harness's `expect_segments` and `expect_segment_symbol` off the
-    merged semantics nodes, `choose` through the segment's click action
-    (plan §3).
-  - **The iOS legs** — the arm is built (the same segmented Picker) and its
-    reads walk the UIKit accessibility elements inside the control's frame;
-    the segment read, the press and the symbol read are unmeasured.
+  - ~~**DEPTH STUB: segmented on gtk**~~ — LANDED 2026-10-08: an
+    `AdwToggleGroup`, homogeneous, one `AdwToggle` per segment (label, or
+    the Adwaita icon with the name as tooltip), `notify::active` outside the
+    quiet guard and `set_active` under it; the reads walk the group's own
+    toggle buttons and `choose` activates one; the adw feature is v1_7;
+    tools/lib/segmented_routes.py's GTK row.
+  - ~~**DEPTH STUB: segmented on winui**~~ — LANDED 2026-10-08: a
+    `SelectorBar` of `SelectorBarItem`s, each item's MinWidth the widest,
+    SelectionChanged outside the quiet guard reading the bar's
+    `SelectedItem`; the reads take each item's UIA name and the bar's
+    `SelectedItem`, `choose` the item peer's SelectionItem.Select, or the
+    bar's `SelectedItem` for an item the bar has not realized (docs/traps.md,
+    WinUI's SelectorBar); the types joined tools/winui-bindgen's filter;
+    tools/lib/segmented_routes.py's WinUI row.
+  - ~~**DEPTH STUB: segmented on compose**~~ — LANDED 2026-10-08:
+    `KayaSegmented`, a `SingleChoiceSegmentedButtonRow` of `SegmentedButton`s
+    (a symbol segment's icon slot empty and its label the glyph, named by
+    the option's text); the reads off the semantics tree sorted by position
+    (docs/traps.md, the Compose segment order), `choose` through the
+    option's click action; segmented-compose and segmented-go green, the arm's
+    selection cut watched red; tools/lib/segmented_routes.py's Compose row.
+  - ~~**The iOS legs**~~ — LANDED 2026-10-08: segmented-swiftui green on
+    its first run, the segment read, the press and the symbol read with it;
+    the swift and go iOS legs join when those guests do.
   - **`segmented` in the other eight bindings and the C floor** — both
     zones, `segmented_bound`, the symbol segments in each binding's idiom,
     a segmented guest per language; check-sugar-surface is red for them
@@ -46,11 +52,12 @@ maintainer. What breadth owes:
   - **`choose_by_keys`** (G6) — not built at the depth: the mac and iOS
     lanes cut the keyboard block and every backend that could run it is a
     stub, so the verb waits for the first backend that can.
-  - **segmented_routes rows** for GTK, WinUI and Compose, read and press
-    through each platform's own API (tools/lib/segmented_routes.py).
+  - ~~**segmented_routes rows**~~ — LANDED 2026-10-08: GTK, WinUI and
+    Compose each hold a row in tools/lib/segmented_routes.py, read and press
+    through the platform's own API, with watched cuts.
   - **The portfolio's period control** (G13).
 
-## DEFECT — the interpreters' radio and select reads echoed the model (docs/segmented-plan.md G10; 2026-10-08)
+## ~~DEFECT — the interpreters' radio and select reads echoed the model (docs/segmented-plan.md G10; 2026-10-08)~~ FIXED 2026-10-08: Compose's half too — `expect` reads the radio group's selected row and the select field's text off the semantics tree, `choose` clicks the row or opens the dropdown and clicks its menu row; radio-compose and select-compose watched red with the arm's selection cut, green restored; the iOS UIKit read measured green on radio and select.
 KEY: selected_label, expect radio, expect select, node.value, kayaChoiceSelectedText, kayaChoiceRead, KayaChoiceAnchor, choice reads, KayaCompose expect select
 
 `expect radio#N` and `expect select#N` were answered from `node.value` in
@@ -62,11 +69,8 @@ AXPopUpButton's value; measured), and iOS the UIKit accessibility elements
 inside the control's frame (built, unmeasured until the iOS legs run). The
 read found one case already: the portfolio's second visit read the first
 visit's filter, a node no longer on screen, which the model answered; the
-scene now addresses the filter by id. STILL OPEN: Compose's `expect` for
-`select` and `radio` reads `node.value` (KayaCompose.kt's expect arm);
-the breadth reads the Material control's semantics, the selected
-RadioButton row and the dropdown's text, and watches a control showing the
-wrong selection go red.
+scene now addresses the filter by id. The Compose half was fixed in the
+breadth (the headline's note).
 
 ## DEFER — several selections in a segmented control (docs/segmented-plan.md G2; 2026-10-08)
 KEY: selectAny, MultiChoiceSegmentedButtonRow, several selections, format bar

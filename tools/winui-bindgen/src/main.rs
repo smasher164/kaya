@@ -421,6 +421,17 @@ fn main() {
         // inline control — Items (a plain IVector, no ItemCollection
         // hierarchy), SelectedIndex, SelectionChanged.
         "Microsoft.UI.Xaml.Controls.RadioButtons".to_string(),
+        // The segmented control (docs/segmented-plan.md §3): SelectorBar of
+        // SelectorBarItems (ItemContainer subclasses, IsSelected on the base),
+        // its SelectionChanged args, and the item peer's SelectionItem
+        // pattern that `choose` presses.
+        "Microsoft.UI.Xaml.Controls.SelectorBar".to_string(),
+        "Microsoft.UI.Xaml.Controls.SelectorBarItem".to_string(),
+        "Microsoft.UI.Xaml.Controls.SelectorBarSelectionChangedEventArgs".to_string(),
+        "Microsoft.UI.Xaml.Controls.ItemContainer".to_string(),
+        "Microsoft.UI.Xaml.Automation.Peers.SelectorBarItemAutomationPeer".to_string(),
+        "Microsoft.UI.Xaml.Automation.Peers.ItemContainerAutomationPeer".to_string(),
+        "Microsoft.UI.Xaml.Automation.Provider.ISelectionItemProvider".to_string(),
         // The sections switcher: NavigationView is the platform's own
         // idiom (left pane for auto/sidebar, Top for the bar hint) —
         // items are NavigationViewItems with string content, selection

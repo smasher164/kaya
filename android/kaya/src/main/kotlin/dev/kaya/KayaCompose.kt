@@ -174,6 +174,9 @@ import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SelectableDates
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderColors
@@ -1453,6 +1456,7 @@ object KayaSceneModel {
     val ranges = ArrayList<KayaNode>()
     val videos = ArrayList<KayaNode>()
     val secureFields = ArrayList<KayaNode>()
+    val segmenteds = ArrayList<KayaNode>()
 
     // Every kind registry, so a destroyed node leaves all of them at once
     // (docs/traps.md 2026-09-14: a torn-down copy stayed addressable).
@@ -1460,6 +1464,7 @@ object KayaSceneModel {
         buttons, checkboxes, labels, entryWidgets, sliders, images, columns, rows, scrolls,
         progresses, selects, radios, grids, textareas, canvases, datePickers, timePickers,
         labeleds, searches, numberFields, colorPickers, ranges, videos, secureFields,
+        segmenteds,
     )
 
     fun forget(id: Long) {
@@ -3377,7 +3382,7 @@ object KayaCompose {
                         KIND_RANGE -> KayaSceneModel.ranges.add(node)
                         KIND_VIDEO -> KayaSceneModel.videos.add(node)
                         KIND_SECURE_FIELD -> KayaSceneModel.secureFields.add(node)
-                        KIND_SEGMENTED -> depthStub("segmented")
+                        KIND_SEGMENTED -> KayaSceneModel.segmenteds.add(node)
                         KIND_NUMBER_FIELD -> {
                             // docs/number-field-plan.md §2: unset bounds are
                             // ±2^53, the step 1, and the field shows its
@@ -4204,7 +4209,7 @@ object KayaCompose {
                     // without this every later label shifts index.
                     val parentNode = KayaSceneModel.nodes[parent]!!
                     val parentKind = parentNode.kind
-                    if (parentKind == KIND_SELECT || parentKind == KIND_RADIO) {
+                    if (parentKind == KIND_SELECT || parentKind == KIND_RADIO || parentKind == KIND_SEGMENTED) {
                         KayaSceneModel.labels.removeAll { it.id == child }
                     }
                     // A row stamped into a reorderable For after the
@@ -7379,7 +7384,7 @@ object KayaCompose {
             "range" -> KayaSceneModel.ranges
             "video" -> KayaSceneModel.videos
             "secure_field" -> KayaSceneModel.secureFields
-            "segmented" -> depthStub("segmented")
+            "segmented" -> KayaSceneModel.segmenteds
             "textarea" -> KayaSceneModel.textareas
             "date_picker" -> KayaSceneModel.datePickers
             "time_picker" -> KayaSceneModel.timePickers
@@ -8302,6 +8307,166 @@ object KayaCompose {
                     "the text could not be counted: the accessibility provider served no node info")
             kayaUnmaskedCount(info.text?.toString() ?: "")
         } ?: Pair(null, "the text could not be counted: the UI thread did not answer")
+    }
+
+    /** A choice kind's target, any of the three (docs/segmented-plan.md G10). */
+    private fun kayaChoiceTarget(spec: String): KayaNode? = when {
+        spec.startsWith("segmented") -> target(spec, "segmented", KayaSceneModel.segmenteds)
+        spec.startsWith("radio") -> target(spec, "radio", KayaSceneModel.radios)
+        spec.startsWith("select") -> target(spec, "select", KayaSceneModel.selects)
+        else -> null
+    }
+
+    /** The node in [tree] carrying [id], the layout the choice arm tagged. */
+    private fun kayaTaggedNode(tree: SemanticsNode, id: Long): SemanticsNode? =
+        kayaSemanticsWith(tree) { it.config.getOrNull(KayaNodeId) == id }
+
+    /**
+     * A radio group's or a segmented control's options as the platform
+     * presents them: the merged nodes under the tagged group that carry
+     * Selected, in order. MAIN THREAD ONLY; a sentence when there are none.
+     */
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    private fun kayaChoiceOptions(activity: ComponentActivity, id: Long): Pair<List<SemanticsNode>?, String> {
+        val view = kayaComposeRoot(activity.window.decorView)
+            ?: return Pair(null, "no Compose root in the window")
+        val root = view as RootForTest
+        root.measureAndLayoutForTest()
+        val group = kayaTaggedNode(root.semanticsOwner.rootSemanticsNode, id)
+            ?: return Pair(null, "the control is not in the semantics tree")
+        val options = ArrayList<SemanticsNode>()
+        fun walk(node: SemanticsNode, depth: Int) {
+            if (depth > 64) return
+            for (child in node.children) {
+                if (child.config.contains(SemanticsProperties.Selected)) options.add(child)
+                else walk(child, depth + 1)
+            }
+        }
+        walk(group, 0)
+        // Material raises the selected segment's z-index, which moves it last
+        // in the semantics children (docs/traps.md, the Compose segment order).
+        val rtl = group.layoutInfo.layoutDirection == LayoutDirection.Rtl
+        options.sortWith(compareBy<SemanticsNode> { it.boundsInRoot.top }
+            .thenBy { if (rtl) -it.boundsInRoot.right else it.boundsInRoot.left })
+        if (options.isEmpty()) {
+            return Pair(null, "the control publishes no selectable option (${group.children.size} child nodes)")
+        }
+        return Pair(options, "")
+    }
+
+    /** What the select's field shows, off its editable text. MAIN THREAD ONLY. */
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    private fun kayaSelectShown(activity: ComponentActivity, id: Long): Pair<String?, String> {
+        val view = kayaComposeRoot(activity.window.decorView)
+            ?: return Pair(null, "no Compose root in the window")
+        val root = view as RootForTest
+        root.measureAndLayoutForTest()
+        val field = kayaTaggedNode(root.semanticsOwner.unmergedRootSemanticsNode, id)
+            ?: return Pair(null, "the select is not in the semantics tree")
+        val shown = kayaSemanticsValue(field, SemanticsProperties.EditableText)
+            ?: return Pair(null, "the select's field publishes no text")
+        return Pair(shown.text, "")
+    }
+
+    /** `expect` on a choice kind: the selected option's name as the platform
+     * shows it. MAIN THREAD ONLY. */
+    private fun kayaChoiceSelectedText(activity: ComponentActivity, choice: KayaNode): String {
+        if (choice.kind == KIND_SELECT) {
+            val (shown, why) = kayaSelectShown(activity, choice.id)
+            return shown ?: "<$why>"
+        }
+        val (options, why) = kayaChoiceOptions(activity, choice.id)
+        if (options == null) return "<$why>"
+        val picked = options.filter { it.config.getOrNull(SemanticsProperties.Selected) == true }
+        if (picked.size != 1) return "<${picked.size} options shown selected>"
+        return kayaAxName(picked[0])
+    }
+
+    /** `expect_segments`: each option's name in order, the selected one
+     * bracketed. MAIN THREAD ONLY. */
+    private fun kayaSegmentsText(activity: ComponentActivity, choice: KayaNode): String {
+        val (options, why) = kayaChoiceOptions(activity, choice.id)
+        if (options == null) return "<$why>"
+        return options.joinToString("|") {
+            val name = kayaAxName(it)
+            if (it.config.getOrNull(SemanticsProperties.Selected) == true) "[$name]" else name
+        }
+    }
+
+    /** `expect_segment_symbol`: the glyph segment [index] drew, by its
+     * symbol name. MAIN THREAD ONLY. */
+    private fun kayaSegmentSymbolText(activity: ComponentActivity, choice: KayaNode, index: Int): String {
+        val (options, why) = kayaChoiceOptions(activity, choice.id)
+        if (options == null) return "<$why>"
+        val segment = options.getOrNull(index)
+            ?: return "<the control shows ${options.size} segments, no segment $index>"
+        val view = kayaComposeRoot(activity.window.decorView) ?: return "<no Compose root in the window>"
+        val unmerged = kayaSemanticsWith((view as RootForTest).semanticsOwner.unmergedRootSemanticsNode) {
+            it.id == segment.id
+        } ?: return "<segment $index is not in the unmerged tree>"
+        val glyph = kayaSemanticsValue(unmerged, KayaGlyph) ?: return "<segment $index draws no glyph>"
+        return SYMBOLS.firstOrNull { it.third == glyph }?.second
+            ?: "<segment $index draws a glyph outside the symbol table>"
+    }
+
+    /**
+     * `choose`: the option's own click action, what a service invokes; the
+     * select's through its anchor and then the menu row in its popup.
+     */
+    private fun kayaChoicePress(activity: ComponentActivity, spec: String, index: Int?): String? {
+        if (index == null) return "choose wants a target and an index"
+        val choice = onUi(activity) { kayaChoiceTarget(spec) } ?: return "no such target $spec"
+        if (choice.kind == KIND_SELECT) return kayaSelectPress(activity, choice, index)
+        return onUi(activity) {
+            val (options, why) = kayaChoiceOptions(activity, choice.id)
+            if (options == null) return@onUi "$spec: $why"
+            val option = options.getOrNull(index)
+                ?: return@onUi "$spec shows ${options.size} options, no option $index"
+            val click = option.config.getOrNull(SemanticsActions.OnClick)?.action
+                ?: return@onUi "$spec's option $index publishes no click action"
+            click()
+            KayaDiag.note("choose $spec -> option $index of node=${choice.id} batches=$kayaBatches")
+            null
+        }
+    }
+
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    private fun kayaSelectPress(activity: ComponentActivity, choice: KayaNode, index: Int): String? {
+        val option = choice.children.getOrNull(index)
+            ?: return "the select has ${choice.children.size} options, no option $index"
+        val opened = onUi(activity) {
+            val view = kayaComposeRoot(activity.window.decorView)
+                ?: return@onUi "no Compose root in the window"
+            val root = view as RootForTest
+            root.measureAndLayoutForTest()
+            val field = kayaTaggedNode(root.semanticsOwner.unmergedRootSemanticsNode, choice.id)
+                ?: return@onUi "the select is not in the semantics tree"
+            val open = kayaSemanticsWith(field) { it.config.contains(SemanticsActions.OnClick) }
+                ?.config?.getOrNull(SemanticsActions.OnClick)?.action
+                ?: return@onUi "the select's field publishes no click action"
+            open()
+            null
+        }
+        if (opened != null) return opened
+        val deadline = System.nanoTime() + 3_000_000_000L
+        var seen = 0
+        while (System.nanoTime() < deadline) {
+            val pressed = onUi(activity) {
+                seen = KayaSceneModel.menuPopupViews.size
+                for (popup in KayaSceneModel.menuPopupViews) {
+                    val root = kayaComposeRoot(popup) as? RootForTest ?: continue
+                    val row = kayaTaggedNode(root.semanticsOwner.unmergedRootSemanticsNode, option.id)
+                        ?: continue
+                    val click = row.config.getOrNull(SemanticsActions.OnClick)?.action ?: continue
+                    click()
+                    return@onUi true
+                }
+                false
+            }
+            if (pressed) return null
+            Thread.sleep(20)
+        }
+        return "the select's menu showed no row for option $index within 3s ($seen menu popups open)"
     }
 
     /** Presses the secure field's own eye (docs/reveal-plan.md V4): the one button
@@ -9662,24 +9827,10 @@ object KayaCompose {
                         else kayaAwaitAnswer(answered)
                     }
                     "choose" -> {
-                        // Mirrors the item's own onClick: write the state
-                        // the control reads, emit with the identity tag.
                         kayaAwaitQuiet()
                         val answered = kayaBatches
-                        val ok = onUi(activity) {
-                            val node =
-                                if (parts[1].startsWith("radio"))
-                                    target(parts[1], "radio", KayaSceneModel.radios)
-                                else target(parts[1], "select", KayaSceneModel.selects)
-                            node?.also {
-                                it.value = parts[2].toDouble()
-                                KayaDiag.note(
-                                    "choose ${parts[1]} -> node=${it.id} value=${it.value} " +
-                                        "tag=${kayaTagDigest(it.tag)} batches=$kayaBatches")
-                                KayaPresent.emitValueChanged(it.tag, it.value)
-                            } != null
-                        }
-                        if (!ok) failures.add("no such target ${parts[1]}")
+                        val why = kayaChoicePress(activity, parts[1], parts.getOrNull(2)?.toIntOrNull())
+                        if (why != null) failures.add(why)
                         else kayaAwaitAnswer(answered)
                     }
                     // THE REAL-KEYSTROKE TYPING VERB (docs/undo-plan.md
@@ -9744,8 +9895,32 @@ object KayaCompose {
                             }
                         }
                     }
-                    "expect_segments", "expect_segment_symbol" -> {
-                        depthStub("segmented")
+                    "expect_segments" -> {
+                        val wantSegments = quoted(parts.drop(2))
+                        val gotSegments = onUi(activity) {
+                            target(parts[1], "segmented", KayaSceneModel.segmenteds)
+                                ?.let { kayaSegmentsText(activity, it) }
+                        }
+                        when (gotSegments) {
+                            null -> failures.add("no such target ${parts[1]}")
+                            wantSegments -> observed.add("segments \"$wantSegments\"")
+                            else -> failures.add("segments \"$gotSegments\", wanted \"$wantSegments\"")
+                        }
+                    }
+                    "expect_segment_symbol" -> {
+                        val glyphIndex = parts.getOrNull(2)?.toIntOrNull()
+                        val wantGlyph = quoted(parts.drop(3))
+                        val gotGlyph = if (glyphIndex == null) null else onUi(activity) {
+                            target(parts[1], "segmented", KayaSceneModel.segmenteds)
+                                ?.let { kayaSegmentSymbolText(activity, it, glyphIndex) }
+                        }
+                        when {
+                            glyphIndex == null ->
+                                failures.add("expect_segment_symbol wants a target, an index and a symbol: $line")
+                            gotGlyph == null -> failures.add("no such target ${parts[1]}")
+                            gotGlyph == wantGlyph -> observed.add("segment $glyphIndex symbol \"$wantGlyph\"")
+                            else -> failures.add("segment $glyphIndex symbol \"$gotGlyph\", wanted \"$wantGlyph\"")
+                        }
                     }
                     "expect_masked" -> {
                         // How many characters the platform shows masked, read
@@ -9872,15 +10047,9 @@ object KayaCompose {
                                         if (it.indeterminate) "indeterminate"
                                         else "${Math.round(it.value * 100)}%"
                                     }
-                                else if (parts[1].startsWith("select") || parts[1].startsWith("radio"))
-                                    // The selected option's LABEL — what
-                                    // the control shows (child order is
-                                    // option order).
-                                    (if (parts[1].startsWith("radio"))
-                                        target(parts[1], "radio", KayaSceneModel.radios)
-                                    else target(parts[1], "select", KayaSceneModel.selects))?.let {
-                                        it.children.getOrNull(it.value.toInt())?.text ?: ""
-                                    }
+                                else if (parts[1].startsWith("select") || parts[1].startsWith("radio") ||
+                                    parts[1].startsWith("segmented"))
+                                    kayaChoiceTarget(parts[1])?.let { kayaChoiceSelectedText(activity, it) }
                                 else target(parts[1], "label", KayaSceneModel.labels)?.text
                             }
                             when {
@@ -15349,14 +15518,17 @@ private fun KayaRenderCore(
                     // kayaDrawnExtents exists to catch.
                     modifier = boxFill.then(a11y)
                         .then(if (node.grow > 0 || fieldFills) Modifier else Modifier.width(selectWidth))
+                        .semantics { this[KayaNodeId] = node.id }
                         .menuAnchor(),
                 )
                 ExposedDropdownMenu(
                     expanded = expanded,
                     onDismissRequest = { expanded = false },
                 ) {
+                    KayaMenuPopupRoot()
                     node.children.forEachIndexed { i, option ->
                         androidx.compose.material3.DropdownMenuItem(
+                            modifier = Modifier.semantics { this[KayaNodeId] = option.id },
                             text = { Text(option.text) },
                             onClick = {
                                 expanded = false
@@ -15455,7 +15627,10 @@ private fun KayaRenderCore(
             // selectable group of RadioButton rows. Every USER pick
             // emits with the group's identity tag — the select's
             // uncontrolled contract.
-            Column(modifier = boxFill.then(a11y).selectableGroup()) {
+            Column(
+                modifier = boxFill.then(a11y).selectableGroup()
+                    .semantics { this[KayaNodeId] = node.id },
+            ) {
                 node.children.forEachIndexed { i, option ->
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -15750,7 +15925,7 @@ private fun KayaRenderCore(
         KayaCompose.KIND_RANGE -> KayaRangeSurface(node, boxFill, a11y)
         KayaCompose.KIND_VIDEO -> KayaVideoView(node, a11y, boxFill)
         KayaCompose.KIND_SECURE_FIELD -> KayaSecureField(node, a11y, boxFill)
-        KayaCompose.KIND_SEGMENTED -> depthStub("segmented")
+        KayaCompose.KIND_SEGMENTED -> KayaSegmented(node, a11y, boxFill)
         KayaCompose.KIND_LABELED -> {
             // THE LABELLED ROW (docs/forms-plan.md §3): Material's own
             // labelled row, the value trailing and a WIDE control folded
@@ -19634,6 +19809,48 @@ private fun KayaRangeSurface(node: KayaNode, boxFill: Modifier, a11y: Modifier) 
  * harness finds a stamped copy's thumbs where the shared `a11y_id` cannot
  * tell the rows apart. Never published to a service. */
 val KayaNodeId = SemanticsPropertyKey<Long>("KayaNodeId")
+
+/** The glyph a segment drew, read back by expect_segment_symbol
+ * (docs/segmented-plan.md G5). Never published to a service. */
+val KayaGlyph = SemanticsPropertyKey<ImageVector>("KayaGlyph")
+
+/** docs/segmented-plan.md §3: Material's single-choice segmented row. */
+@Composable
+internal fun KayaSegmented(node: KayaNode, a11y: Modifier, boxFill: Modifier) {
+    val count = node.children.size
+    SingleChoiceSegmentedButtonRow(
+        modifier = boxFill.then(a11y).semantics { this[KayaNodeId] = node.id },
+    ) {
+        node.children.forEachIndexed { i, segment ->
+            val glyph = if (segment.symbol != 0L) KayaCompose.symbolIcon(segment.symbol) else null
+            val selected = node.value.toInt() == i
+            SegmentedButton(
+                selected = selected,
+                onClick = {
+                    node.value = i.toDouble()
+                    KayaDiag.note(
+                        "segmented tap node=${node.id} index=$i tag=${kayaTagDigest(node.tag)}")
+                    KayaPresent.emitValueChanged(node.tag, i.toDouble())
+                },
+                shape = SegmentedButtonDefaults.itemShape(index = i, count = count),
+                icon = {
+                    if (glyph == null) SegmentedButtonDefaults.Icon(selected)
+                },
+                label = {
+                    if (glyph != null) {
+                        Icon(
+                            glyph,
+                            contentDescription = segment.text,
+                            modifier = Modifier.semantics { this[KayaGlyph] = glyph },
+                        )
+                    } else {
+                        Text(segment.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                },
+            )
+        }
+    }
+}
 
 // ---- the number field (docs/number-field-plan.md) ---------------------------
 // The platform's text field over the arm's own text (§6): written and read by

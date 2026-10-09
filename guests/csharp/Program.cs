@@ -53,6 +53,7 @@ static class Program
             case "secure": SecureScene.Run(); break;
             case "autofill": AutofillScene.Run(); break;
             case "reveal": RevealScene.Run(); break;
+            case "segmented": SegmentedScene.Run(); break;
             case "submit": SubmitScene.Run(); break;
             case "progress": ProgressScene.Run(); break;
             case "select": SelectScene.Run(); break;

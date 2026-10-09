@@ -30,7 +30,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) the foreign suites load;
 # --example alone would build only the rlib it depends on.
-SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen numberfield timecode colorpicker range media capture secure autofill reveal"
+SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen numberfield timecode colorpicker range media capture secure autofill reveal segmented"
 # Depth-slice scenes, rust only. `windowed` and `canvas` are rust BY
 # DESIGN rather than by depth — the compiled conformance scenes every
 # lane runs (docs/virtualization-plan.md §6.3, docs/canvas-plan.md
@@ -1507,6 +1507,26 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$(hs_bin reveal)"
     run "$proto" reveal-java env KAYA_SELFTEST=reveal KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    # THE SEGMENTED CONTROL (docs/segmented-plan.md), through a11y-leg.sh for
+    # its expect_ax.
+    run "$proto" segmented-rust env KAYA_SELFTEST=segmented \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/segmented"
+    run "$proto" segmented-python env KAYA_SELFTEST=segmented KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/segmented.py
+    run "$proto" segmented-js env KAYA_SELFTEST=segmented KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/segmented.ts
+    run "$proto" segmented-go env KAYA_SELFTEST=segmented \
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" segmented-csharp env KAYA_SELFTEST=segmented KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" segmented-ocaml env KAYA_SELFTEST=segmented KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/segmented.exe
+    run "$proto" segmented-haskell env KAYA_SELFTEST=segmented \
+        tools/linux/a11y-leg.sh "$(hs_bin segmented)"
+    run "$proto" segmented-java env KAYA_SELFTEST=segmented KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    run "$proto" segmented-c env KAYA_SELFTEST=segmented \
+        tools/linux/a11y-leg.sh /tmp/c-guests/segmented
     # The content type (docs/autofill-plan.md), read off the GtkText.
     run "$proto" autofill-rust env KAYA_SELFTEST=autofill "$CARGO_TARGET_DIR/debug/examples/autofill"
     run "$proto" autofill-python env KAYA_SELFTEST=autofill KAYA_LIB="$LIB" python3 guests/python/autofill.py

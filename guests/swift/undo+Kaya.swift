@@ -116,6 +116,22 @@ struct TodoRow {
     }
 
     @discardableResult
+    func segmented(
+        _ segments: [String], selected f: KayaField<Double>,
+        onSelect: ((KayaAppTx, [KayaValue], Int) -> Void)? = nil
+    ) -> KayaNodeHandle {
+        t.segmented(segments, selected: f, onSelect: onSelect)
+    }
+
+    @discardableResult
+    func segmentedSymbols(
+        _ segments: [(String, KayaSymbol)], selected f: KayaField<Double>,
+        onSelect: ((KayaAppTx, [KayaValue], Int) -> Void)? = nil
+    ) -> KayaNodeHandle {
+        t.segmentedSymbols(segments, selected: f, onSelect: onSelect)
+    }
+
+    @discardableResult
     func numberField(
         value f: KayaField<Double>, min: Double? = nil, max: Double? = nil,
         step: Double? = nil, format: KayaNumberFormat = .number,

@@ -50,7 +50,7 @@ SCENES = [
     "assets", "sizepolicy", "adaptive", "pickers", "sliders",
     "tooltips", "search", "richtext", "ownundo", "richlabel", "sheet",
     "submit", "numberfield", "timecode", "colorpicker", "range",
-    "secure", "autofill", "reveal",
+    "secure", "autofill", "reveal", "segmented",
 ]
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed — built and run rust-only until their guests arrive,
@@ -58,16 +58,16 @@ SCENES = [
 DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows",
                 "format", "flexshrink", "listrow", "tints", "badge", "emoji", "media",
                 # The capture (docs/capture-plan.md §8), rust-only at depth.
-                "capture",
-                # The segmented control (docs/segmented-plan.md §6).
-                "segmented"]
+                "capture"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
 C_SCENES = ["undo", "dirty", "ranges", "save", "a11yrows", "styling",
             "assets",
             # The formatter door at the floor (docs/compliance-plan.md §1.4).
-            "format"]
+            "format",
+            # The segmented control at the floor (docs/segmented-plan.md G12).
+            "segmented"]
 
 # The nine hosted languages in their DEFAULT group order; a group
 # that deviates spells its own order in ORDER below. js is the ninth
@@ -179,9 +179,7 @@ ORDER = [
     ("secure", LANGS),
     ("autofill", LANGS),
     ("reveal", LANGS),
-    # RUST ALONE while the eight bindings' sugar is the breadth slice
-    # (docs/segmented-plan.md §6).
-    ("segmented", ("rust",)),
+    ("segmented", LANGS + ("c",)),
     # The number field in the everyday locale and in German
     # (docs/number-field-plan.md §5).
     ("timecode", LANGS),

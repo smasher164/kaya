@@ -383,6 +383,9 @@ module KayaApp
     numberFieldBound,
     selectOn,
     radioOn,
+    segmentedOn,
+    segmentedBoundOn,
+    segmentedSymbolsOn,
     spacer,
     imageBytes,
     imageAsset,
@@ -449,6 +452,8 @@ module KayaApp
     numberField,
     select,
     radio,
+    segmented,
+    segmentedSymbols,
     MScope (..),
     MItem,
     MOption,
@@ -3473,6 +3478,47 @@ radioOn options selected handler = leafish $ do
   pendB (PValue n (handler . round))
   return w
 
+-- | A segmented control — the choice contract ('selectOn') as a strip
+-- (docs\/segmented-plan.md): same option children, same 0-based index,
+-- same pick handler.
+segmentedOn :: (LeafArgs r) => [Text] -> Int -> (Int -> IO ()) -> r
+segmentedOn segments selected handler = leafish $ do
+  w@(Widget n) <- segmentsOf [(name, Nothing) | name <- segments]
+  emitB (W.txSetValue n (fromIntegral selected))
+  pendB (PValue n (handler . round))
+  return w
+
+-- | 'segmentedOn' whose selected index follows a float signal: the app's
+-- write moves the selection and never echoes (G4).
+segmentedBoundOn :: (LeafArgs r) => [Text] -> Signal Double -> (Int -> IO ()) -> r
+segmentedBoundOn segments sig handler = leafish $ do
+  w@(Widget n) <- segmentsOf [(name, Nothing) | name <- segments]
+  bindValue w sig
+  pendB (PValue n (handler . round))
+  return w
+
+-- | 'segmentedOn' whose segments draw the platform's glyph for each
+-- symbol, each name kept as its accessible name and tooltip (G3).
+segmentedSymbolsOn :: (LeafArgs r) => [(Text, Symbol)] -> Int -> (Int -> IO ()) -> r
+segmentedSymbolsOn segments selected handler = leafish $ do
+  w@(Widget n) <- segmentsOf [(name, Just sym) | (name, sym) <- segments]
+  emitB (W.txSetValue n (fromIntegral selected))
+  pendB (PValue n (handler . round))
+  return w
+
+segmentsOf :: [(Text, Maybe Symbol)] -> Build Widget
+segmentsOf segments = do
+  w <- widget W.kindSegmented
+  mapM_
+    ( \(name, sym) -> do
+        o <- widget W.kindLabel
+        setText o name
+        mapM_ (setSymbol o) sym
+        addChild w o
+    )
+    segments
+  return w
+
 -- | A label with a CONSTANT caption, in either zone — 'button''s shape
 -- one kind over: the argument is the same in both, so a stamped
 -- constant label needs no source and no ascription (the addressable
@@ -4670,6 +4716,27 @@ select = choiceWith W.kindSelect
 -- presentation — same option children, same index, same registrar.
 radio :: TplNumberSource s => [Text] -> s -> Tpl Node
 radio = choiceWith W.kindRadio
+
+-- | A stamped segmented control: 'select''s contract as a strip
+-- (docs\/segmented-plan.md G9) — same option children, same index, same
+-- registrar.
+segmented :: TplNumberSource s => [Text] -> s -> Tpl Node
+segmented = choiceWith W.kindSegmented
+
+-- | A stamped segmented control of symbol segments (G3).
+segmentedSymbols :: TplNumberSource s => [(Text, Symbol)] -> s -> Tpl Node
+segmentedSymbols segments src = do
+  n <- widget W.kindSegmented
+  mapM_
+    ( \(name, sym) -> do
+        o@(Node i) <- widget W.kindLabel
+        setTextProp o name
+        emitT (W.txSetSymbol i (symbolWire sym))
+        addChild n o
+    )
+    segments
+  bindValueSource n src
+  return n
 
 -- The options are built CHILDREN-FIRST — declare the label, set its
 -- text, then addChild. gtk.rs reads an option's text AT the AddChild, so

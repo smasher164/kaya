@@ -4374,15 +4374,19 @@ export function progress(opts: ProgressOptions = {}): Widget {
   return handle;
 }
 
-export type ChoiceOptions = GrowOption & { selected?: number | Signal<number>; onSelect?: Handler };
+export type ChoiceOptions = GrowOption & { selected?: number | Signal<number> | FieldRef; onSelect?: Handler };
 
-function choice(kind: number, options: readonly string[], opts: ChoiceOptions): Widget {
+function choice(kind: number, options: readonly string[], opts: ChoiceOptions, symbols?: readonly (SymbolValue | SymbolName)[]): Widget {
   const handle = widget(kind);
   new Container(handle).run(() => {
-    for (const text of options) label(text);
+    options.forEach((text, i) => {
+      const child = label(text);
+      if (symbols !== undefined) records().push(wire.tx_set_symbol(child.id, symbolValue(symbols[i]!)));
+    });
   });
   const selected = opts.selected ?? 0;
   if (selected instanceof Signal) records().push(wire.tx_bind_value(handle.id, selected.id));
+  else if (selected instanceof FieldRef) records().push(wire.tx_bind_value_element(handle.id, selected._level(), selected._index));
   else records().push(wire.tx_set_value(handle.id, Number(selected)));
   const onSelect = opts.onSelect;
   if (onSelect !== undefined) {
@@ -4401,6 +4405,19 @@ export function select(options: readonly string[], opts: ChoiceOptions = {}): Wi
 /** A radio group over fixed options — the choice contract inline. */
 export function radio(options: readonly string[], opts: ChoiceOptions = {}): Widget {
   return choice(wire.KIND_RADIO, options, opts);
+}
+
+/** A segmented control — the choice contract as a strip
+ * (docs/segmented-plan.md). */
+export function segmented(segments: readonly string[], opts: ChoiceOptions = {}): Widget {
+  return choice(wire.KIND_SEGMENTED, segments, opts);
+}
+
+/** A segmented control whose segments draw the platform's glyph for each
+ * symbol, each name kept as its accessible name and tooltip
+ * (docs/segmented-plan.md G3). */
+export function segmentedSymbols(segments: readonly (readonly [string, SymbolValue | SymbolName])[], opts: ChoiceOptions = {}): Widget {
+  return choice(wire.KIND_SEGMENTED, segments.map(([name]) => name), opts, segments.map(([, symbol]) => symbol));
 }
 
 export type SliderOptions = GrowOption & { value?: number | Signal<number> | FieldRef; min?: number; max?: number; step?: number; tickSpacing?: number; onChange?: Handler; onCommit?: Handler; axis?: AxisValue | AxisName };

@@ -4962,6 +4962,66 @@ public final class KayaAppTx {
         return w
     }
 
+    /// A segmented control: `select`'s contract as a strip
+    /// (docs/segmented-plan.md), same option children, same 0-based index,
+    /// same pick handler.
+    @discardableResult
+    public func segmented(
+        _ segments: [String], selected: Int = 0,
+        onSelect: ((KayaAppTx, Int) throws -> Void)? = nil,
+        grow: Double? = nil
+    ) -> KayaWidget {
+        let w = segmentedOf(segments.map { ($0, nil) }, onSelect, grow)
+        tx.setValue(w.id, Double(selected))
+        return w
+    }
+
+    /// A segmented control whose selected index follows a float signal:
+    /// the app's write moves the selection and never echoes (G4).
+    @discardableResult
+    public func segmented(
+        _ segments: [String], selected s: KayaSignal,
+        onSelect: ((KayaAppTx, Int) throws -> Void)? = nil,
+        grow: Double? = nil
+    ) -> KayaWidget {
+        let w = segmentedOf(segments.map { ($0, nil) }, onSelect, grow)
+        tx.bindValue(w.id, s.id)
+        return w
+    }
+
+    /// A segmented control whose segments draw the platform's glyph for
+    /// each symbol, each name kept as its accessible name and tooltip (G3).
+    @discardableResult
+    public func segmentedSymbols(
+        _ segments: [(String, KayaSymbol)], selected: Int = 0,
+        onSelect: ((KayaAppTx, Int) throws -> Void)? = nil,
+        grow: Double? = nil
+    ) -> KayaWidget {
+        let w = segmentedOf(segments.map { ($0.0, $0.1) }, onSelect, grow)
+        tx.setValue(w.id, Double(selected))
+        return w
+    }
+
+    private func segmentedOf(
+        _ segments: [(String, KayaSymbol?)],
+        _ onSelect: ((KayaAppTx, Int) throws -> Void)?, _ grow: Double?
+    ) -> KayaWidget {
+        let w = widget(UInt32(KAYA_KIND_SEGMENTED))
+        app.childFrames.append(KayaApp.KayaChildFrame(template: false))
+        for (name, symbol) in segments {
+            let o = widget(UInt32(KAYA_KIND_LABEL))
+            setText(o, name)
+            if let symbol { setSymbol(o, symbol) }
+        }
+        let ids = app.childFrames.removeLast().ids
+        for id in ids { tx.addChild(w.id, id) }
+        if let onSelect {
+            app.onValueChanged(w) { tx, v in try onSelect(tx, Int(v)) }
+        }
+        if let grow { setGrow(w, grow) }
+        return w
+    }
+
     @discardableResult
     public func checkbox(
         _ text: String? = nil, checked: Bool? = nil,
@@ -7188,19 +7248,87 @@ public final class KayaTpl {
         return n
     }
 
+    /// A segmented control in the blueprint: `select`'s contract as a
+    /// strip (docs/segmented-plan.md G9).
+    @discardableResult
+    public func segmented(
+        _ segments: [String], selected: Int = 0,
+        onSelect: ((KayaAppTx, [KayaValue], Int) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = choiceOf(UInt32(KAYA_KIND_SEGMENTED), segments, onSelect)
+        tx.tx.setValue(n.id, Double(selected))
+        return n
+    }
+
+    @discardableResult
+    public func segmented(
+        _ segments: [String], selected s: KayaSignal,
+        onSelect: ((KayaAppTx, [KayaValue], Int) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = choiceOf(UInt32(KAYA_KIND_SEGMENTED), segments, onSelect)
+        tx.tx.bindValue(n.id, s.id)
+        return n
+    }
+
+    @discardableResult
+    public func segmented(
+        _ segments: [String], selected f: KayaField<Double>,
+        onSelect: ((KayaAppTx, [KayaValue], Int) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = choiceOf(UInt32(KAYA_KIND_SEGMENTED), segments, onSelect)
+        bindValueField(n, f)
+        return n
+    }
+
+    /// A segmented control of symbol segments in the blueprint (G3).
+    @discardableResult
+    public func segmentedSymbols(
+        _ segments: [(String, KayaSymbol)], selected: Int = 0,
+        onSelect: ((KayaAppTx, [KayaValue], Int) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = choiceOf(UInt32(KAYA_KIND_SEGMENTED), segments.map { $0.0 }, onSelect,
+                         symbols: segments.map { $0.1 })
+        tx.tx.setValue(n.id, Double(selected))
+        return n
+    }
+
+    @discardableResult
+    public func segmentedSymbols(
+        _ segments: [(String, KayaSymbol)], selected s: KayaSignal,
+        onSelect: ((KayaAppTx, [KayaValue], Int) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = choiceOf(UInt32(KAYA_KIND_SEGMENTED), segments.map { $0.0 }, onSelect,
+                         symbols: segments.map { $0.1 })
+        tx.tx.bindValue(n.id, s.id)
+        return n
+    }
+
+    @discardableResult
+    public func segmentedSymbols(
+        _ segments: [(String, KayaSymbol)], selected f: KayaField<Double>,
+        onSelect: ((KayaAppTx, [KayaValue], Int) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = choiceOf(UInt32(KAYA_KIND_SEGMENTED), segments.map { $0.0 }, onSelect,
+                         symbols: segments.map { $0.1 })
+        bindValueField(n, f)
+        return n
+    }
+
     /// Both choice kinds, minus the index. The options are LABEL CHILDREN
     /// of the prototype, so every stamped copy offers the same list and
     /// only the selected index can be the row's
     /// (docs/sugar-pass-plan.md §2).
     private func choiceOf(
         _ kind: UInt32, _ options: [String],
-        _ onSelect: ((KayaAppTx, [KayaValue], Int) throws -> Void)?
+        _ onSelect: ((KayaAppTx, [KayaValue], Int) throws -> Void)?,
+        symbols: [KayaSymbol]? = nil
     ) -> KayaNodeHandle {
         let n = widget(kind)
         tx.app.childFrames.append(KayaApp.KayaChildFrame(template: true))
-        for option in options {
+        for (i, option) in options.enumerated() {
             let o = widget(UInt32(KAYA_KIND_LABEL))
             setText(o, option)
+            if let symbols { tx.tx.setSymbol(o.id, symbols[i].rawValue) }
         }
         let ids = tx.app.childFrames.removeLast().ids
         for id in ids { tx.tx.addChild(n.id, id) }

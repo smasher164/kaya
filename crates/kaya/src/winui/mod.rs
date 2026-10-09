@@ -47,6 +47,7 @@ use bindings::Microsoft::UI::Xaml::Controls::{
     NumberBoxValidationMode, NumberBoxValueChangedEventArgs, ProgressBar, RadioMenuFlyoutItem,
     RichEditBox, RichEditClipboardFormat, RowDefinition,
     RadioButtons, ScrollBarVisibility, ScrollMode, ScrollViewer, SelectionChangedEventHandler,
+    SelectorBar, SelectorBarItem, SelectorBarSelectionChangedEventArgs,
     SymbolIcon,
     Slider, SwipeBehaviorOnInvoked, SwipeControl, SwipeItem, SwipeItemInvokedEventArgs,
     SwipeItems, SwipeMode, TextBlock, TextBox, TextChangedEventHandler, TextCompositionEndedEventArgs,
@@ -153,6 +154,8 @@ enum NativeWidget {
     Progress(ProgressBar),
     Select(ComboBox),
     Radio(RadioButtons),
+    /// docs/segmented-plan.md §3.
+    Segmented(SelectorBar),
     /// The 2D grid widget (KIND_GRID) — a WinUI Grid with Auto
     /// tracks, distinct from Column/Row's star-sized Grids.
     Grid2D(Grid),
@@ -228,6 +231,7 @@ impl NativeWidget {
             NativeWidget::Progress(bar) => bar.cast(),
             NativeWidget::Select(combo) => combo.cast(),
             NativeWidget::Radio(group) => group.cast(),
+            NativeWidget::Segmented(bar) => bar.cast(),
             NativeWidget::Grid2D(grid) => grid.cast(),
             NativeWidget::Textarea(field) => field.cast(),
             NativeWidget::Canvas(image) => image.cast(),
@@ -554,6 +558,7 @@ struct CoreState {
     progresses: Vec<ProgressBar>,
     selects: Vec<ComboBox>,
     radios: Vec<RadioButtons>,
+    segmenteds: Vec<SelectorBar>,
     grids: Vec<Grid>,
     textareas: Vec<RichEditBox>,
     textarea_ids: Vec<u64>,
@@ -600,6 +605,9 @@ struct CoreState {
     /// group, its row in the group's Items vector) — option text
     /// updates land with SetAt.
     radio_options: HashMap<u64, (RadioButtons, u32)>,
+    /// docs/segmented-plan.md §3.
+    segmented_options: HashMap<u64, (SelectorBar, u32)>,
+    segmented_symbols: HashMap<u64, i64>,
     /// Option-label plumbing: label widget id -> (its select's ComboBox, its
     /// option row's own TextBlock). A select's label children are its OPTIONS
     /// — ComboBoxItems in the popup, not standalone widgets — so their SetProp
@@ -1296,6 +1304,95 @@ fn icon_uia_name(icon: &IconElement) -> String {
         return "the icon element is not a FrameworkElement".to_owned();
     };
     uia_name(&fe, "the icon")
+}
+
+fn segment_text_apply(item: &SelectorBarItem, text: &str) -> windows_core::Result<()> {
+    let name = HSTRING::from(text);
+    bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(item, &name)?;
+    if item.Icon().is_ok() {
+        bindings::Microsoft::UI::Xaml::Controls::ToolTipService::SetToolTip(
+            item,
+            &PropertyValue::CreateString(&name)?,
+        )
+    } else {
+        item.SetText(&name)
+    }
+}
+
+fn segment_symbol_apply(item: &SelectorBarItem, symbol: i64) -> windows_core::Result<()> {
+    let Some(icon) = symbol_icon(symbol)? else {
+        return Ok(());
+    };
+    let text = item.Text()?;
+    item.SetIcon(&icon)?;
+    item.SetText(&HSTRING::new())?;
+    if !text.is_empty() {
+        segment_text_apply(item, &text.to_string())?;
+    }
+    Ok(())
+}
+
+/// The bar's SelectedItem as an index, never the items' IsSelected
+/// (docs/traps.md, WinUI's SelectorBar).
+fn selector_bar_selected(bar: &SelectorBar) -> windows_core::Result<Option<u32>> {
+    let Ok(selected) = bar.SelectedItem() else {
+        return Ok(None);
+    };
+    let items = bar.Items()?;
+    for n in 0..items.Size()? {
+        if items.GetAt(n)? == selected {
+            return Ok(Some(n));
+        }
+    }
+    Ok(None)
+}
+
+#[cfg(feature = "harness")]
+fn selector_bar_states(bar: &SelectorBar) -> String {
+    let read = || -> windows_core::Result<String> {
+        let items = bar.Items()?;
+        let selected = bar.SelectedItem().ok();
+        let mut out = Vec::new();
+        let mut loaded = Vec::new();
+        let mut at = None;
+        for n in 0..items.Size()? {
+            let item = items.GetAt(n)?;
+            out.push(if item.IsSelected()? { "1" } else { "0" });
+            let fe: FrameworkElement = windows_core::Interface::cast(&item)?;
+            loaded.push(if fe.IsLoaded()? { "1" } else { "0" });
+            if selected.as_ref() == Some(&item) {
+                at = Some(n);
+            }
+        }
+        let bar_fe: FrameworkElement = windows_core::Interface::cast(bar)?;
+        Ok(format!(
+            "IsSelected [{}], SelectedItem {at:?}, IsLoaded bar {} items [{}]",
+            out.join(","),
+            bar_fe.IsLoaded()?,
+            loaded.join(",")
+        ))
+    };
+    read().unwrap_or_else(|e| format!("<unreadable: {e}>"))
+}
+
+fn selector_bar_equalize(bar: &SelectorBar) -> windows_core::Result<()> {
+    let items = bar.Items()?;
+    let mut widest = 0.0f64;
+    let mut all = Vec::new();
+    for n in 0..items.Size()? {
+        let fe: FrameworkElement = windows_core::Interface::cast(&items.GetAt(n)?)?;
+        widest = widest.max(fe.ActualWidth()?);
+        all.push(fe);
+    }
+    if widest <= 0.0 {
+        return Ok(());
+    }
+    for fe in all {
+        if (fe.MinWidth()? - widest).abs() > 0.5 && fe.ActualWidth()? < widest - 0.5 {
+            fe.SetMinWidth(widest)?;
+        }
+    }
+    Ok(())
 }
 
 /// The name any live element publishes to UIA — what an assistive client
@@ -14774,7 +14871,41 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.rows.push(grid.clone());
                     NativeWidget::Row(grid)
                 }
-                WidgetKind::Segmented => crate::depth_stub("segmented"),
+                WidgetKind::Segmented => {
+                    // docs/segmented-plan.md §3.
+                    let bar = SelectorBar::new()?;
+                    let sink = core.occurrences.clone();
+                    let tag = tag.expect("segmented controls carry a tag");
+                    let quiet = core.apply_quiet.clone();
+                    bar.SelectionChanged(&TypedEventHandler::<
+                        SelectorBar,
+                        SelectorBarSelectionChangedEventArgs,
+                    >::new(move |sender, _| {
+                        if quiet.load(std::sync::atomic::Ordering::Relaxed) {
+                            return Ok(());
+                        }
+                        if let Some(bar) = sender.as_ref() {
+                            #[cfg(feature = "harness")]
+                            crate::vtrace::note("segment_changed", format_args!(
+                                "<- SelectionChanged: {}", selector_bar_states(bar)
+                            ));
+                            if let Some(index) = selector_bar_selected(bar)? {
+                                sink.send_value_tag(&tag, f64::from(index));
+                            }
+                        }
+                        Ok(())
+                    }))?;
+                    // G8.
+                    let weak = windows_core::Interface::cast::<SelectorBar>(&bar)?;
+                    let equalize = weak.clone();
+                    bar.LayoutUpdated(&bindings::Windows::Foundation::EventHandler::<
+                        windows_core::IInspectable,
+                    >::new(move |_, _| {
+                        selector_bar_equalize(&equalize)
+                    }))?;
+                    core.segmenteds.push(bar.clone());
+                    NativeWidget::Segmented(bar)
+                }
                 WidgetKind::SecureField => {
                     // docs/secure-entry-plan.md §3: the text goes to the app
                     // alone, never to the ledger or a banked copy (P2). A
@@ -16750,6 +16881,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                             .Items()?
                             .SetAt(*row, &PropertyValue::CreateString(&HSTRING::from(&s))?)?;
                     }
+                    if let Some((bar, row)) = core.segmented_options.get(&id.0) {
+                        segment_text_apply(&bar.Items()?.GetAt(*row)?, &s)?;
+                    }
                 }
                 (NativeWidget::Secure(field), Prop::Text, Value::Str(s)) => {
                     if field.Password()?.to_string() != s {
@@ -17201,6 +17335,25 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     grid.SetRowSpacing(gap)?;
                     grid.SetColumnSpacing(gap)?;
                 }
+                (NativeWidget::Segmented(bar), Prop::Value, Value::F64(v)) => {
+                    core.apply_quiet
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                    let write = bar.Items().and_then(|items| items.GetAt(v as u32)).and_then(|item| bar.SetSelectedItem(&item));
+                    core.apply_quiet
+                        .store(false, std::sync::atomic::Ordering::Relaxed);
+                    write?;
+                }
+                (NativeWidget::Label { .. }, Prop::Symbol, Value::I64(symbol)) => {
+                    match core.segmented_options.get(&id.0) {
+                        Some((bar, row)) => {
+                            let item = bar.Items()?.GetAt(*row)?;
+                            segment_symbol_apply(&item, symbol)?;
+                        }
+                        None => {
+                            core.segmented_symbols.insert(id.0, symbol);
+                        }
+                    }
+                }
                 (NativeWidget::Radio(group), Prop::Value, Value::F64(v)) => {
                     core.apply_quiet
                         .store(true, std::sync::atomic::Ordering::Relaxed);
@@ -17601,6 +17754,32 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     .expect("grid created")
                     .push(element);
                 core.child_order.mark(parent);
+                return Ok(());
+            }
+            if let NativeWidget::Segmented(bar) =
+                core.widgets.get(&parent).expect("scene validated the id")
+            {
+                let bar = bar.clone();
+                let items = bar.Items()?;
+                let row = items.Size()?;
+                let item = SelectorBarItem::new()?;
+                if let NativeWidget::Label { block, .. } =
+                    core.widgets.get(&child).expect("scene validated the id")
+                {
+                    segment_text_apply(&item, &block.Text()?.to_string())?;
+                    let block = block.clone();
+                    core.labels.retain(|x| x != &block);
+                }
+                if let Some(symbol) = core.segmented_symbols.remove(&child.0) {
+                    segment_symbol_apply(&item, symbol)?;
+                }
+                core.apply_quiet
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+                let append = items.Append(&item);
+                core.apply_quiet
+                    .store(false, std::sync::atomic::Ordering::Relaxed);
+                append?;
+                core.segmented_options.insert(child.0, (bar, row));
                 return Ok(());
             }
             // A radio's label children are its OPTIONS: string rows of
@@ -19826,6 +20005,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             progresses: Vec::new(),
             selects: Vec::new(),
             radios: Vec::new(),
+            segmenteds: Vec::new(),
             grids: Vec::new(),
             textareas: Vec::new(),
             textarea_ids: Vec::new(),
@@ -19854,6 +20034,8 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             wrap_wired: std::collections::HashSet::new(),
             wrap_breaks: HashMap::new(),
             radio_options: HashMap::new(),
+            segmented_options: HashMap::new(),
+            segmented_symbols: HashMap::new(),
             select_options: HashMap::new(),
             apply_quiet: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             columns: Vec::new(),
@@ -20848,7 +21030,7 @@ fn registry_widget_at(core: &CoreState, kind: crate::harness::TargetKind, i: usi
         K::Range => core.range_ids.get(i).copied(),
         K::Video => core.media.video_ids.get(i).copied(),
         K::SecureField => core.secure_ids.get(i).copied(),
-        K::Segmented => crate::depth_stub("segmented"),
+        K::Segmented => id_of!(core.segmenteds, NativeWidget::Segmented(bar), bar),
         K::ColorPicker => core.color_picker_ids.get(i).copied(),
         K::NumberField => core.number_field_ids.get(i).copied(),
         K::Canvas => core.canvas_ids.get(i).copied(),
@@ -21146,7 +21328,7 @@ fn target_element(
         K::Range => nth!(core.ranges),
         K::Video => nth!(media::elements(core)),
         K::SecureField => nth!(core.secure_fields),
-        K::Segmented => crate::depth_stub("segmented"),
+        K::Segmented => nth!(core.segmenteds),
         K::ColorPicker => nth!(core.color_pickers),
         K::NumberField => nth!(core.number_fields),
         K::DatePicker => nth!(core.date_pickers),
@@ -21271,7 +21453,7 @@ fn registry_ids(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<u64> 
         K::Range => core.range_ids.clone(),
         K::Video => core.media.video_ids.clone(),
         K::SecureField => core.secure_ids.clone(),
-        K::Segmented => crate::depth_stub("segmented"),
+        K::Segmented => ids!(core.segmenteds, NativeWidget::Segmented(bar), bar),
         K::ColorPicker => core.color_picker_ids.clone(),
         K::NumberField => core.number_field_ids.clone(),
         K::Canvas => core.canvas_ids.clone(),
@@ -24550,7 +24732,7 @@ impl crate::harness::Stage for WinUiStage {
                 K::Range => find(core, K::Range, &core.ranges, &id),
                 K::Video => find(core, K::Video, &media::elements(core), &id),
                 K::SecureField => find(core, K::SecureField, &core.secure_fields, &id),
-                K::Segmented => crate::depth_stub("segmented"),
+                K::Segmented => find(core, K::Segmented, &core.segmenteds, &id),
                 K::ColorPicker => find(core, K::ColorPicker, &core.color_pickers, &id),
                 K::NumberField => find(core, K::NumberField, &core.number_fields, &id),
                 K::Canvas => find(core, K::Canvas, &core.canvases, &id),
@@ -26156,24 +26338,93 @@ impl crate::harness::Stage for WinUiStage {
                 core.radios[i].SetSelectedIndex(index as i32)?;
                 return Ok(());
             }
+            if t.kind == crate::harness::TargetKind::Segmented {
+                // docs/segmented-plan.md G10.
+                use bindings::Microsoft::UI::Xaml::Automation::Peers::FrameworkElementAutomationPeer;
+                use bindings::Microsoft::UI::Xaml::Automation::Provider::ISelectionItemProvider;
+                use windows_core::Interface as _;
+                let i = crate::harness::resolve(t.index, core.segmenteds.len());
+                let items = core.segmenteds[i].Items()?;
+                let count = items.Size()?;
+                if index as u32 >= count {
+                    panic!("kaya: choose segmented#{i} {index}: the SelectorBar shows {count} item(s)");
+                }
+                let item = items.GetAt(index as u32)?;
+                let element: UIElement = item.cast()?;
+                let before = selector_bar_states(&core.segmenteds[i]);
+                // An unrealized item ignores its peer's Select (docs/traps.md,
+                // WinUI's SelectorBar).
+                let route = if item.cast::<FrameworkElement>()?.IsLoaded()? {
+                    let peer = FrameworkElementAutomationPeer::CreatePeerForElement(&element)?;
+                    peer.cast::<ISelectionItemProvider>()?.Select()?;
+                    "the peer's Select"
+                } else {
+                    core.segmenteds[i].SetSelectedItem(&item)?;
+                    "the bar's SelectedItem, the item not realized"
+                };
+                crate::vtrace::note("choose_segment", format_args!(
+                    "item {index}: before {before}, after {route} {}",
+                    selector_bar_states(&core.segmenteds[i])
+                ));
+                return Ok(());
+            }
             let i = crate::harness::resolve(t.index, core.selects.len());
             core.selects[i].SetSelectedIndex(index as i32)?;
             Ok(())
         });
     }
 
-    /// No segmented control exists on this backend before the breadth
-    /// (docs/segmented-plan.md §6).
-    fn segments(&self, _: crate::harness::Target) -> String {
-        crate::depth_stub("segmented")
+    fn segments(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.segmenteds.len()) else {
+                return Ok("<no such target>".to_string());
+            };
+            let bar = &core.segmenteds[i];
+            let selected = selector_bar_selected(bar)?;
+            let items = bar.Items()?;
+            let mut out = Vec::new();
+            for n in 0..items.Size()? {
+                let item = items.GetAt(n)?;
+                let name = uia_name(&windows_core::Interface::cast(&item)?, "the item");
+                out.push(if selected == Some(n) { format!("[{name}]") } else { name });
+            }
+            Ok(out.join("|"))
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
-    fn segment_symbol(&self, _: crate::harness::Target, _: usize) -> String {
-        crate::depth_stub("segmented")
+    fn segment_symbol(&self, t: crate::harness::Target, index: usize) -> String {
+        Self::on_ui_read(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.segmenteds.len()) else {
+                return Ok("<no such target>".to_string());
+            };
+            let items = core.segmenteds[i].Items()?;
+            let count = items.Size()?;
+            if index as u32 >= count {
+                return Ok(format!("<the SelectorBar shows {count} item(s), none at {index}>"));
+            }
+            Ok(match items.GetAt(index as u32)?.Icon() {
+                Ok(icon) => icon_uia_name(&icon),
+                Err(e) if e.code().is_ok() => format!("<segment {index} draws no icon>"),
+                Err(e) => format!("<segment {index}'s icon could not be read: {e}>"),
+            })
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
     fn selected_label(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
+            if t.kind == crate::harness::TargetKind::Segmented {
+                let Some(i) = crate::harness::try_resolve(t.index, core.segmenteds.len()) else {
+                    return Ok("<no such target>".to_string());
+                };
+                let bar = &core.segmenteds[i];
+                let Some(n) = selector_bar_selected(bar)? else {
+                    return Ok("<the SelectorBar has no item selected>".to_string());
+                };
+                let item = bar.Items()?.GetAt(n)?;
+                return Ok(uia_name(&windows_core::Interface::cast(&item)?, "the item"));
+            }
             if t.kind == crate::harness::TargetKind::Radio {
                 // The REAL control's state: the selected row's string
                 // out of the group's own Items vector.

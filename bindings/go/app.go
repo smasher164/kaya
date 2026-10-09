@@ -2616,6 +2616,60 @@ func (tx *Tx) Radio(options []string, selected int, onSelect func(*Tx, int)) Wid
 	return w
 }
 
+// Segment is one symbol segment of a segmented control: Name is its
+// accessible name and tooltip, Symbol the glyph it draws
+// (docs/segmented-plan.md G3).
+type Segment struct {
+	Name   string
+	Symbol Symbol
+}
+
+// Segmented is Select's contract as a strip (docs/segmented-plan.md):
+// same option children, same 0-based index, same pick handler.
+func (tx *Tx) Segmented(segments []string, selected int, onSelect func(*Tx, int)) Widget {
+	w := tx.segmentedOf(segments, nil, onSelect)
+	tx.emit(TxSetValue(w.id, float64(selected)))
+	return w
+}
+
+// SegmentedBound is Segmented whose selected index follows a float64
+// signal: the app's write moves the selection and never echoes (G4).
+func (tx *Tx) SegmentedBound(segments []string, selected Signal[float64], onSelect func(*Tx, int)) Widget {
+	w := tx.segmentedOf(segments, nil, onSelect)
+	tx.emit(TxBindValue(w.id, selected.id))
+	return w
+}
+
+// SegmentedSymbols is Segmented whose segments draw the platform's glyph
+// for each symbol, each name kept as its accessible name (G3).
+func (tx *Tx) SegmentedSymbols(segments []Segment, selected int, onSelect func(*Tx, int)) Widget {
+	names := make([]string, len(segments))
+	symbols := make([]Symbol, len(segments))
+	for i, s := range segments {
+		names[i], symbols[i] = s.Name, s.Symbol
+	}
+	w := tx.segmentedOf(names, symbols, onSelect)
+	tx.emit(TxSetValue(w.id, float64(selected)))
+	return w
+}
+
+func (tx *Tx) segmentedOf(names []string, symbols []Symbol, onSelect func(*Tx, int)) Widget {
+	w := tx.Widget(KindSegmented)
+	tx.app.parents = append(tx.app.parents, w.id)
+	for i, name := range names {
+		o := tx.Widget(KindLabel)
+		tx.SetText(o, name)
+		if symbols != nil {
+			tx.emit(TxSetSymbol(o.id, int64(symbols[i])))
+		}
+	}
+	tx.app.parents = tx.app.parents[:len(tx.app.parents)-1]
+	if onSelect != nil {
+		w.OnValueChanged(func(tx *Tx, v float64) { onSelect(tx, int(v)) })
+	}
+	return w
+}
+
 // Checkbox creates a labeled box with its toggle handler (nil for
 // none).
 func (tx *Tx) Checkbox(text string, onToggle func(*Tx, bool)) Widget {
@@ -5775,6 +5829,51 @@ func (t *Tpl) RadioBound[S interface {
 }](options []string, src S) Node {
 	n := t.choiceOf(KindRadio, options)
 	t.applyValue(n, src)
+	return n
+}
+
+// Segmented is Tpl.Select's contract as a strip (docs/segmented-plan.md
+// G9): the segments are the prototype's children, shared by every copy.
+func (t *Tpl) Segmented(segments []string, selected int) Node {
+	n := t.choiceOf(KindSegmented, segments)
+	t.tx.emit(TxSetValue(n.id, float64(selected)))
+	return n
+}
+
+// SegmentedBound is Tpl.SelectBound's strip: same F64-sourced index.
+func (t *Tpl) SegmentedBound[S interface {
+	Signal[float64] | Field[float64]
+}](segments []string, src S) Node {
+	n := t.choiceOf(KindSegmented, segments)
+	t.applyValue(n, src)
+	return n
+}
+
+// SegmentedSymbols is Tpl.Segmented of symbol segments (G3).
+func (t *Tpl) SegmentedSymbols(segments []Segment, selected int) Node {
+	n := t.segmentedSymbolsOf(segments)
+	t.tx.emit(TxSetValue(n.id, float64(selected)))
+	return n
+}
+
+// SegmentedSymbolsBound is Tpl.SegmentedBound of symbol segments.
+func (t *Tpl) SegmentedSymbolsBound[S interface {
+	Signal[float64] | Field[float64]
+}](segments []Segment, src S) Node {
+	n := t.segmentedSymbolsOf(segments)
+	t.applyValue(n, src)
+	return n
+}
+
+func (t *Tpl) segmentedSymbolsOf(segments []Segment) Node {
+	n := t.Widget(KindSegmented)
+	t.tx.app.parents = append(t.tx.app.parents, n.id)
+	for _, s := range segments {
+		o := t.Widget(KindLabel)
+		t.setText(o, s.Name)
+		t.tx.emit(TxSetSymbol(o.id, int64(s.Symbol)))
+	}
+	t.tx.app.parents = t.tx.app.parents[:len(t.tx.app.parents)-1]
 	return n
 }
 

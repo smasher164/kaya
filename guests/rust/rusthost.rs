@@ -175,6 +175,8 @@ mod secure;
 mod autofill;
 #[path = "reveal.rs"]
 mod reveal;
+#[path = "segmented.rs"]
+mod segmented;
 
 #[cfg(target_os = "android")]
 #[path = "tasks.rs"]
@@ -264,6 +266,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("secure") => secure::app(ctx),
         Ok("autofill") => autofill::app(ctx),
         Ok("reveal") => reveal::app(ctx),
+        Ok("segmented") => segmented::app(ctx),
         Ok("tasks") => tasks::app(ctx),
         Ok("taskspersist") => tasks::app(ctx),
         // The same app under KAYA_LOCALE=ar-EG (tools/scenes/tasksrtl.steps).

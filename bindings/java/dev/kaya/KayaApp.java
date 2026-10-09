@@ -203,6 +203,11 @@ public final class KayaApp {
      * for app-specific art. THE WIRE VALUES ARE APPEND-ONLY:
      * renumbering silently redraws every shipped app's menus.
      */
+    /** One symbol segment of a segmented control: its name is its
+     * accessible name and tooltip, its symbol the glyph it draws
+     * (docs/segmented-plan.md G3). */
+    public record Segment(String name, Symbol symbol) {}
+
     public enum Symbol {
         ADD(KayaWire.SYMBOL_ADD),
         REMOVE(KayaWire.SYMBOL_REMOVE),
@@ -5619,6 +5624,31 @@ public final class KayaApp {
             return t.radio(options, selected);
         }
 
+        public Node segmented(String[] segments, int selected) {
+            return t.segmented(segments, selected);
+        }
+
+        public Node segmented(String[] segments, Signal<Double> selected) {
+            return t.segmented(segments, selected);
+        }
+
+        public Node segmented(String[] segments, KayaRecords.Field<Double> selected) {
+            return t.segmented(segments, selected);
+        }
+
+        public Node segmentedSymbols(Segment[] segments, int selected) {
+            return t.segmentedSymbols(segments, selected);
+        }
+
+        public Node segmentedSymbols(Segment[] segments, Signal<Double> selected) {
+            return t.segmentedSymbols(segments, selected);
+        }
+
+        public Node segmentedSymbols(Segment[] segments,
+                KayaRecords.Field<Double> selected) {
+            return t.segmentedSymbols(segments, selected);
+        }
+
         // THE LEVEL-TAKING BINDS. The constructors above bind at level
         // 0 — this row's own element — so these are the only way to read
         // an OUTER row's field from a nested template.
@@ -7557,6 +7587,59 @@ public final class KayaApp {
             }
             parents.remove(parents.size() - 1);
             emit(KayaWire.txSetValue(w.id, selected));
+            if (onSelect != null) {
+                KayaApp.this.onValueChanged(w,
+                        (tx, v) -> onSelect.accept(tx, (int) (double) v));
+            }
+            return w;
+        }
+
+        /** A segmented control — select's contract as a strip
+         * (docs/segmented-plan.md): same option children, same 0-based
+         * index, same pick handler. */
+        public Widget segmented(String[] segments, int selected,
+                BiConsumer<Tx, Integer> onSelect) {
+            Widget w = segmentedOf(segments, null, onSelect);
+            emit(KayaWire.txSetValue(w.id, selected));
+            return w;
+        }
+
+        /** A segmented control whose selected index follows a signal: the
+         * app's write moves the selection and never echoes (G4). */
+        public Widget segmented(String[] segments, Signal<Double> selected,
+                BiConsumer<Tx, Integer> onSelect) {
+            Widget w = segmentedOf(segments, null, onSelect);
+            emit(KayaWire.txBindValue(w.id, selected.id));
+            return w;
+        }
+
+        /** A segmented control whose segments draw the platform's glyph
+         * for each symbol, each name kept as its accessible name (G3). */
+        public Widget segmentedSymbols(Segment[] segments, int selected,
+                BiConsumer<Tx, Integer> onSelect) {
+            String[] names = new String[segments.length];
+            Symbol[] symbols = new Symbol[segments.length];
+            for (int i = 0; i < segments.length; i++) {
+                names[i] = segments[i].name();
+                symbols[i] = segments[i].symbol();
+            }
+            Widget w = segmentedOf(names, symbols, onSelect);
+            emit(KayaWire.txSetValue(w.id, selected));
+            return w;
+        }
+
+        private Widget segmentedOf(String[] names, Symbol[] symbols,
+                BiConsumer<Tx, Integer> onSelect) {
+            Widget w = widget(KayaWire.KIND_SEGMENTED);
+            parents.add(w.id);
+            for (int i = 0; i < names.length; i++) {
+                Widget o = widget(KayaWire.KIND_LABEL);
+                setText(o, names[i]);
+                if (symbols != null) {
+                    setSymbol(o, symbols[i]);
+                }
+            }
+            parents.remove(parents.size() - 1);
             if (onSelect != null) {
                 KayaApp.this.onValueChanged(w,
                         (tx, v) -> onSelect.accept(tx, (int) (double) v));
@@ -9734,6 +9817,58 @@ public final class KayaApp {
         public Node radio(String[] options, KayaRecords.Field<Double> selected) {
             Node n = choice(KayaWire.KIND_RADIO, options);
             bindValueField(n, 0, selected);
+            return n;
+        }
+
+        /** A segmented control — {@link #select(String[], int)}'s
+         * contract as a strip (docs/segmented-plan.md G9). */
+        public Node segmented(String[] segments, int selected) {
+            Node n = choice(KayaWire.KIND_SEGMENTED, segments);
+            tx.emit(KayaWire.txSetValue(n.id, selected));
+            return n;
+        }
+
+        public Node segmented(String[] segments, Signal<Double> selected) {
+            Node n = choice(KayaWire.KIND_SEGMENTED, segments);
+            tx.emit(KayaWire.txBindValue(n.id, selected.id));
+            return n;
+        }
+
+        public Node segmented(String[] segments, KayaRecords.Field<Double> selected) {
+            Node n = choice(KayaWire.KIND_SEGMENTED, segments);
+            bindValueField(n, 0, selected);
+            return n;
+        }
+
+        /** A segmented control of symbol segments (G3). */
+        public Node segmentedSymbols(Segment[] segments, int selected) {
+            Node n = symbolSegments(segments);
+            tx.emit(KayaWire.txSetValue(n.id, selected));
+            return n;
+        }
+
+        public Node segmentedSymbols(Segment[] segments, Signal<Double> selected) {
+            Node n = symbolSegments(segments);
+            tx.emit(KayaWire.txBindValue(n.id, selected.id));
+            return n;
+        }
+
+        public Node segmentedSymbols(Segment[] segments,
+                KayaRecords.Field<Double> selected) {
+            Node n = symbolSegments(segments);
+            bindValueField(n, 0, selected);
+            return n;
+        }
+
+        private Node symbolSegments(Segment[] segments) {
+            Node n = widget(KayaWire.KIND_SEGMENTED);
+            parents.add(n.id);
+            for (Segment segment : segments) {
+                Node o = widget(KayaWire.KIND_LABEL);
+                setText(o, segment.name());
+                tx.emit(KayaWire.txSetSymbol(o.id, segment.symbol().wire));
+            }
+            parents.remove(parents.size() - 1);
             return n;
         }
 

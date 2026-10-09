@@ -355,6 +355,11 @@ executable reveal
   main-is: reveal.hs
   build-depends: kaya-guests
 
+executable segmented
+  import: shared
+  main-is: segmented.hs
+  build-depends: kaya-guests
+
 executable scrollto
   import: shared
   main-is: scrollto.hs

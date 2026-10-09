@@ -5067,6 +5067,56 @@ sealed class Tx : IDisposable
         return w;
     }
 
+    /// A segmented control — Select's contract as a strip
+    /// (docs/segmented-plan.md): same option children, same 0-based
+    /// index, same pick handler.
+    public Widget Segmented(string[] segments, int selected = 0,
+        Action<Tx, int>? onSelect = null, double? grow = null)
+    {
+        var w = SegmentedOf(segments, null, onSelect, grow);
+        Records.Add(KayaWire.TxSetValue(w.Id, selected));
+        return w;
+    }
+
+    /// Segmented whose selected index follows a signal: the app's write
+    /// moves the selection and never echoes (G4).
+    public Widget Segmented(string[] segments, Signal selected,
+        Action<Tx, int>? onSelect = null, double? grow = null)
+    {
+        var w = SegmentedOf(segments, null, onSelect, grow);
+        Records.Add(KayaWire.TxBindValue(w.Id, selected.Id));
+        return w;
+    }
+
+    /// Segmented whose segments draw the platform's glyph for each symbol,
+    /// each name kept as its accessible name and tooltip (G3).
+    public Widget SegmentedSymbols((string Name, Symbol Symbol)[] segments, int selected = 0,
+        Action<Tx, int>? onSelect = null, double? grow = null)
+    {
+        var w = SegmentedOf(Array.ConvertAll(segments, s => s.Name),
+            Array.ConvertAll(segments, s => s.Symbol), onSelect, grow);
+        Records.Add(KayaWire.TxSetValue(w.Id, selected));
+        return w;
+    }
+
+    Widget SegmentedOf(string[] names, Symbol[]? symbols, Action<Tx, int>? onSelect,
+        double? grow)
+    {
+        var w = Widget(KayaWire.KindSegmented);
+        App.Parents.Add(w.Id);
+        for (var i = 0; i < names.Length; i++)
+        {
+            var o = Widget(KayaWire.KindLabel);
+            SetText(o, names[i]);
+            if (symbols != null) SetSymbol(o, symbols[i]);
+        }
+        App.Parents.RemoveAt(App.Parents.Count - 1);
+        if (onSelect != null)
+            App.OnValueChanged(w, (tx, v) => onSelect(tx, (int)v));
+        if (grow is double g) SetGrow(w, g);
+        return w;
+    }
+
     public Widget Checkbox(string? text = null, bool? isChecked = null,
         Action<Tx, bool>? onToggle = null, double? grow = null)
     {
@@ -7364,6 +7414,62 @@ sealed class Tpl
     public Node Radio(string[] options, Field<double> selected,
         Action<Tx, List<object>, int>? onSelect = null) =>
         Choice(KayaWire.KindRadio, options, selected, onSelect);
+
+    /// A segmented control in the blueprint — Select's contract as a strip
+    /// (docs/segmented-plan.md G9).
+    public Node Segmented(string[] segments, int selected,
+        Action<Tx, List<object>, int>? onSelect = null) =>
+        Choice(KayaWire.KindSegmented, segments, selected, onSelect);
+
+    public Node Segmented(string[] segments, Signal selected,
+        Action<Tx, List<object>, int>? onSelect = null) =>
+        Choice(KayaWire.KindSegmented, segments, selected, onSelect);
+
+    public Node Segmented(string[] segments, Field<double> selected,
+        Action<Tx, List<object>, int>? onSelect = null) =>
+        Choice(KayaWire.KindSegmented, segments, selected, onSelect);
+
+    /// Segmented of symbol segments (G3).
+    public Node SegmentedSymbols((string Name, Symbol Symbol)[] segments, int selected,
+        Action<Tx, List<object>, int>? onSelect = null)
+    {
+        var n = SymbolSegments(segments, onSelect);
+        tx.Records.Add(KayaWire.TxSetValue(n.Id, selected));
+        return n;
+    }
+
+    public Node SegmentedSymbols((string Name, Symbol Symbol)[] segments, Signal selected,
+        Action<Tx, List<object>, int>? onSelect = null)
+    {
+        var n = SymbolSegments(segments, onSelect);
+        tx.Records.Add(KayaWire.TxBindValue(n.Id, selected.Id));
+        return n;
+    }
+
+    public Node SegmentedSymbols((string Name, Symbol Symbol)[] segments,
+        Field<double> selected, Action<Tx, List<object>, int>? onSelect = null)
+    {
+        var n = SymbolSegments(segments, onSelect);
+        BindValueField(n, 0, selected);
+        return n;
+    }
+
+    Node SymbolSegments((string Name, Symbol Symbol)[] segments,
+        Action<Tx, List<object>, int>? onSelect)
+    {
+        var n = Widget(KayaWire.KindSegmented);
+        tx.App.Parents.Add(n.Id);
+        foreach (var (name, symbol) in segments)
+        {
+            var o = Widget(KayaWire.KindLabel);
+            SetText(o, name);
+            tx.Records.Add(KayaWire.TxSetSymbol(o.Id, (long)symbol));
+        }
+        tx.App.Parents.RemoveAt(tx.App.Parents.Count - 1);
+        if (onSelect != null)
+            tx.App.OnValueChanged(n, (t2, keys, v) => onSelect(t2, keys, (int)v));
+        return n;
+    }
 
     Node Choice(uint kind, string[] options, int selected,
         Action<Tx, List<object>, int>? onSelect)

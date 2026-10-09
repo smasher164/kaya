@@ -222,11 +222,12 @@ pango = { version = "0.22.8", features = ["v1_56"] }
 # libadwaita: AdwNavigationSplitView is GNOME's list-detail component, so
 # the platform's own collapse animation, pane proportions, separator and
 # back behaviour replace geometry kaya computed for itself. v1_4 gates it
-# and BreakpointBin, v1_5 AdwDialog (the sheet, docs/sheet-plan.md U3), and
-# the pin is deliberately not higher — the validation image
-# ships 1.7.6, so anything above 1.7 would compile here and fail there.
+# and BreakpointBin, v1_5 AdwDialog (the sheet, docs/sheet-plan.md U3), v1_7
+# AdwToggleGroup (the segmented control, docs/segmented-plan.md §3). The
+# validation image ships 1.9.2 (measured 2026-10-08); a feature above the
+# image's version compiles here and fails there.
 # Not optional: a semantics that appears only in some builds is not one.
-adw = { package = "libadwaita", version = "0.9.2", features = ["v1_5"] }
+adw = { package = "libadwaita", version = "0.9.2", features = ["v1_7"] }
 # BOTH display backends are named so a declared app identity can move an
 # EXISTING surface's WM_CLASS/app_id (docs/app-identity-plan.md);
 # `g_set_prgname` cannot, since GDK reads the program name when it CREATES a

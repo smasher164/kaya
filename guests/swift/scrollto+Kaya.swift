@@ -116,6 +116,22 @@ struct MessageRow {
     }
 
     @discardableResult
+    func segmented(
+        _ segments: [String], selected f: KayaField<Double>,
+        onSelect: ((KayaAppTx, [KayaValue], Int) -> Void)? = nil
+    ) -> KayaNodeHandle {
+        t.segmented(segments, selected: f, onSelect: onSelect)
+    }
+
+    @discardableResult
+    func segmentedSymbols(
+        _ segments: [(String, KayaSymbol)], selected f: KayaField<Double>,
+        onSelect: ((KayaAppTx, [KayaValue], Int) -> Void)? = nil
+    ) -> KayaNodeHandle {
+        t.segmentedSymbols(segments, selected: f, onSelect: onSelect)
+    }
+
+    @discardableResult
     func numberField(
         value f: KayaField<Double>, min: Double? = nil, max: Double? = nil,
         step: Double? = nil, format: KayaNumberFormat = .number,
@@ -264,6 +280,22 @@ struct FrameRow {
             min: min, max: max, low: low, high: high, step: step,
             tickSpacing: tickSpacing, minGap: minGap, lowLabel: lowLabel,
             highLabel: highLabel, onChange: onChange, onCommit: onCommit)
+    }
+
+    @discardableResult
+    func segmented(
+        _ segments: [String], selected f: KayaField<Double>,
+        onSelect: ((KayaAppTx, [KayaValue], Int) -> Void)? = nil
+    ) -> KayaNodeHandle {
+        t.segmented(segments, selected: f, onSelect: onSelect)
+    }
+
+    @discardableResult
+    func segmentedSymbols(
+        _ segments: [(String, KayaSymbol)], selected f: KayaField<Double>,
+        onSelect: ((KayaAppTx, [KayaValue], Int) -> Void)? = nil
+    ) -> KayaNodeHandle {
+        t.segmentedSymbols(segments, selected: f, onSelect: onSelect)
     }
 
     @discardableResult

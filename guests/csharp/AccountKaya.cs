@@ -292,6 +292,30 @@ sealed class AccountRow
         System.Action<Tx, System.Collections.Generic.List<object>, int>? onSelect = null) =>
         t.Radio(options, selected, onSelect);
 
+    public Node Segmented(string[] segments, int selected,
+        System.Action<Tx, System.Collections.Generic.List<object>, int>? onSelect = null) =>
+        t.Segmented(segments, selected, onSelect);
+
+    public Node Segmented(string[] segments, Signal selected,
+        System.Action<Tx, System.Collections.Generic.List<object>, int>? onSelect = null) =>
+        t.Segmented(segments, selected, onSelect);
+
+    public Node Segmented(string[] segments, Field<double> selected,
+        System.Action<Tx, System.Collections.Generic.List<object>, int>? onSelect = null) =>
+        t.Segmented(segments, selected, onSelect);
+
+    public Node SegmentedSymbols((string Name, Symbol Symbol)[] segments, int selected,
+        System.Action<Tx, System.Collections.Generic.List<object>, int>? onSelect = null) =>
+        t.SegmentedSymbols(segments, selected, onSelect);
+
+    public Node SegmentedSymbols((string Name, Symbol Symbol)[] segments, Signal selected,
+        System.Action<Tx, System.Collections.Generic.List<object>, int>? onSelect = null) =>
+        t.SegmentedSymbols(segments, selected, onSelect);
+
+    public Node SegmentedSymbols((string Name, Symbol Symbol)[] segments, Field<double> selected,
+        System.Action<Tx, System.Collections.Generic.List<object>, int>? onSelect = null) =>
+        t.SegmentedSymbols(segments, selected, onSelect);
+
     public Node Row(System.Action body) => t.Row(body);
 
     public Node Column(System.Action body) => t.Column(body);

@@ -4976,47 +4976,67 @@ def progress(value: NumberSource | None = None, *,
     return handle
 
 
-def select(options: Sequence[str], *, selected: float | Signal[Any] = 0,
+def _choice(kind: int, options: Sequence[str], selected: NumberSource,
+            on_select: Handler | None, grow: float | None,
+            symbols: Sequence[Symbol | str] | None = None) -> Widget:
+    handle = _widget(kind)
+    with _Container(handle):
+        for i, option in enumerate(options):
+            child = label(text=option)
+            if symbols is not None:
+                _records().append(
+                    wire.tx_set_symbol(child.id, _symbol_value(symbols[i])))
+    if isinstance(selected, Signal):
+        _records().append(wire.tx_bind_value(handle.id, selected.id))
+    elif isinstance(selected, FieldRef):
+        _records().append(wire.tx_bind_value_element(
+            handle.id, selected._level(), selected._index))
+    else:
+        _records().append(
+            wire.tx_set_value(handle.id, float(cast("float", selected))))
+    if on_select is not None:
+        _app._register(
+            handle, wire.OCC_VALUE_CHANGED,
+            lambda *args: on_select(*args[:-1], int(args[-1])))
+    _set_grow(handle, grow)
+    return handle
+
+
+def select(options: Sequence[str], *, selected: NumberSource = 0,
            on_select: Handler | None = None,
            grow: float | None = None) -> Widget:
     """A dropdown select over fixed options; each becomes a label child.
     UNCONTROLLED: the widget owns its selection and reports each USER
     pick to `on_select`; programmatic writes never echo."""
-    handle = _widget(wire.KIND_SELECT)
-    with _Container(handle):
-        for option in options:
-            label(text=option)
-    if isinstance(selected, Signal):
-        _records().append(wire.tx_bind_value(handle.id, selected.id))
-    else:
-        _records().append(wire.tx_set_value(handle.id, float(selected)))
-    if on_select is not None:
-        _app._register(
-            handle, wire.OCC_VALUE_CHANGED,
-            lambda *args: on_select(*args[:-1], int(args[-1])))
-    _set_grow(handle, grow)
-    return handle
+    return _choice(wire.KIND_SELECT, options, selected, on_select, grow)
 
 
-def radio(options: Sequence[str], *, selected: float | Signal[Any] = 0,
+def radio(options: Sequence[str], *, selected: NumberSource = 0,
           on_select: Handler | None = None,
           grow: float | None = None) -> Widget:
     """A radio group over fixed options — `select`'s contract in its
     inline presentation."""
-    handle = _widget(wire.KIND_RADIO)
-    with _Container(handle):
-        for option in options:
-            label(text=option)
-    if isinstance(selected, Signal):
-        _records().append(wire.tx_bind_value(handle.id, selected.id))
-    else:
-        _records().append(wire.tx_set_value(handle.id, float(selected)))
-    if on_select is not None:
-        _app._register(
-            handle, wire.OCC_VALUE_CHANGED,
-            lambda *args: on_select(*args[:-1], int(args[-1])))
-    _set_grow(handle, grow)
-    return handle
+    return _choice(wire.KIND_RADIO, options, selected, on_select, grow)
+
+
+def segmented(segments: Sequence[str], *, selected: NumberSource = 0,
+              on_select: Handler | None = None,
+              grow: float | None = None) -> Widget:
+    """A segmented control — `select`'s contract as a strip
+    (docs/segmented-plan.md)."""
+    return _choice(wire.KIND_SEGMENTED, segments, selected, on_select, grow)
+
+
+def segmented_symbols(segments: Sequence[tuple[str, Symbol | str]], *,
+                      selected: NumberSource = 0,
+                      on_select: Handler | None = None,
+                      grow: float | None = None) -> Widget:
+    """A segmented control whose segments draw the platform's glyph for
+    each symbol, each name kept as its accessible name and tooltip
+    (docs/segmented-plan.md G3)."""
+    return _choice(wire.KIND_SEGMENTED, [name for name, _ in segments],
+                   selected, on_select, grow,
+                   symbols=[symbol for _, symbol in segments])
 
 
 def slider(value: NumberSource | None = None, *, min: float | None = None,

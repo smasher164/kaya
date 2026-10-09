@@ -2790,6 +2790,49 @@ let radio ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help 
   | None -> ());
   w
 
+let segmented_of ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?a11y_hint ?selected ?bind ?on_select segments =
+  let tx = the_tx () in
+  let w = widget Kaya_wire.kind_segmented in
+  Option.iter (fun g -> set_grow w g) grow;
+  Option.iter (fun v -> set_fill w v) fill;
+  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
+  Option.iter (fun v -> set_a11y_hint w v) a11y_hint;
+  List.iter
+    (fun (name, symbol) ->
+      let o = widget Kaya_wire.kind_label in
+      set_text o name;
+      Option.iter (fun s -> set_symbol o s) symbol;
+      add_child w o)
+    segments;
+  let (Widget id) = w in
+  (match bind with
+  | Some s -> emit tx (Kaya_wire.tx_bind_value id s.sig_id)
+  | None ->
+      emit tx
+        (Kaya_wire.tx_set_value id
+           (float_of_int (Option.value selected ~default:0))));
+  (match on_select with
+  | Some handler ->
+      Hashtbl.replace tx.app.widget_values id
+        (fun v -> handler (int_of_float v))
+  | None -> ());
+  w
+
+(* A segmented control — the choice contract ([select]) as a strip
+   (docs/segmented-plan.md): same option children, same 0-based
+   [~selected] index or [~bind] float signal, same [~on_select]. *)
+let segmented ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?a11y_hint ?selected ?bind ?on_select segments () =
+  segmented_of ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind
+    ?help ?help_bind ?a11y_hint ?selected ?bind ?on_select
+    (List.map (fun name -> (name, None)) segments)
+
+(* A segmented control whose segments draw the platform's glyph for each
+   symbol, each name kept as its accessible name and tooltip (G3). *)
+let segmented_symbols ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?a11y_hint ?selected ?bind ?on_select segments () =
+  segmented_of ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind
+    ?help ?help_bind ?a11y_hint ?selected ?bind ?on_select
+    (List.map (fun (name, symbol) -> (name, Some symbol)) segments)
+
 let checkbox ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?a11y_hint ?text ?checked ?on_toggle () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_checkbox in
@@ -5710,6 +5753,64 @@ module Tpl = struct
             handler (List.map key_of_wire keys) (int_of_float v))
     | None -> ());
     n
+
+  let segmented_of ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_hint ?a11y_hint_bind
+      ?a11y_hint_field ?selected ?bind ?bind_field ?(level = 0)
+      ?(a11y_level = level) ?on_select segments =
+    let n = Floor.widget Kaya_wire.kind_segmented in
+    Option.iter (fun g -> Floor.set_grow n g) grow;
+    Option.iter (fun v -> Floor.set_fill n v) fill;
+    Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~a11y_level n;
+    Option.iter (fun v -> Floor.set_a11y_hint n v) a11y_hint;
+    Option.iter (fun s -> Floor.bind_a11y_hint n s) a11y_hint_bind;
+    Option.iter (fun fd -> Floor.bind_a11y_hint_field ~level:a11y_level n fd)
+      a11y_hint_field;
+    List.iter
+      (fun (name, symbol) ->
+        let o = Floor.widget Kaya_wire.kind_label in
+        Floor.set_text o name;
+        Option.iter
+          (fun s ->
+            let (Node oid) = o in
+            emit (the_tx ()) (Kaya_wire.tx_set_symbol oid (symbol_wire s)))
+          symbol;
+        Floor.add_child n o)
+      segments;
+    Option.iter (fun i -> Floor.set_value n (float_of_int i)) selected;
+    Option.iter (fun s -> Floor.bind_value n s) bind;
+    Option.iter (fun fd -> Floor.bind_value_field ~level n fd) bind_field;
+    (match on_select with
+    | Some handler ->
+        let (Node id) = n in
+        Hashtbl.replace (the_tx ()).app.node_values id (fun keys v ->
+            handler (List.map key_of_wire keys) (int_of_float v))
+    | None -> ());
+    n
+
+  (* A segmented control per stamped copy — the choice contract
+     ([select]) as a strip (docs/segmented-plan.md G9). *)
+  let segmented ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_hint ?a11y_hint_bind
+      ?a11y_hint_field ?selected ?bind ?bind_field ?level
+      ?a11y_level ?on_select segments () =
+    segmented_of ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_hint
+      ?a11y_hint_bind ?a11y_hint_field ?selected ?bind ?bind_field ?level
+      ?a11y_level ?on_select
+      (List.map (fun name -> (name, None)) segments)
+
+  (* A segmented control of symbol segments per stamped copy (G3). *)
+  let segmented_symbols ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_hint ?a11y_hint_bind
+      ?a11y_hint_field ?selected ?bind ?bind_field ?level
+      ?a11y_level ?on_select segments () =
+    segmented_of ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_hint
+      ?a11y_hint_bind ?a11y_hint_field ?selected ?bind ?bind_field ?level
+      ?a11y_level ?on_select
+      (List.map (fun (name, symbol) -> (name, Some symbol)) segments)
 
   let checkbox ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_hint ?a11y_hint_bind

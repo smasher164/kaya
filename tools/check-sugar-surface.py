@@ -2658,6 +2658,104 @@ for _lang, _rel, _templates in REVEAL_SURFACES:
         _rv_cuts += 1
 print(f"check-sugar-surface: reveal cuts watched red {_rv_cuts}/{_rv_want}")
 
+# --- THE SEGMENTED CONTROL'S OTHER SPELLINGS (docs/segmented-plan.md G3, G4)
+# The kind census holds `segmented` in both zones; this holds what it cannot
+# see: the symbol segments in both zones and the live zone's bound index, in
+# all nine, each row read out of that binding's own file.
+SEGMENTED_SURFACES = [
+    ("rust", "crates/kaya/src/app.rs",
+     [r"pub fn {0}_symbols\(\s*&mut self,\s*segments: &\[\(&str, crate::Symbol\)\],\s*selected: "
+      r"usize,",
+      r"pub fn {0}_symbols\(\s*&mut self,\s*segments: &\[\(&str, crate::Symbol\)\],\s*src: "
+      r"impl Into<TplSource<F64Kind>>,",
+      r"pub fn {0}_bound\(&mut self, segments: &\[&str\], selected: SignalId\)"]),
+    ("python", "bindings/python/kaya/__init__.py",
+     [r"^def {0}_symbols\(segments: Sequence\[tuple\[str, Symbol \| str\]\], \*,\s*selected: "
+      r"NumberSource = 0,",
+      r"^def {0}\(segments: Sequence\[str\], \*, selected: NumberSource = 0,"]),
+    ("go", "bindings/go/app.go",
+     [r"^func \(tx \*Tx\) {0}Symbols\(segments \[\]Segment, selected int,",
+      r"^func \(t \*Tpl\) {0}SymbolsBound\[S interface",
+      r"^func \(tx \*Tx\) {0}Bound\(segments \[\]string, selected Signal\[float64\],"]),
+    ("csharp", "bindings/csharp/KayaApp.cs",
+     [r"public Widget {0}Symbols\(\(string Name, Symbol Symbol\)\[\] segments, int selected = 0,",
+      r"public Node {0}Symbols\(\(string Name, Symbol Symbol\)\[\] segments,\s*"
+      r"Field<double> selected,",
+      r"public Widget {0}\(string\[\] segments, Signal selected,"]),
+    ("java", "bindings/java/dev/kaya/KayaApp.java",
+     [r"public Widget {0}Symbols\(Segment\[\] segments, int selected,",
+      r"public Node {0}Symbols\(Segment\[\] segments,\s*KayaRecords\.Field<Double> selected\)",
+      r"public Widget {0}\(String\[\] segments, Signal<Double> selected,"]),
+    ("swift", "bindings/swift/KayaApp.swift",
+     [r"public func {0}Symbols\(\n\s*_ segments: \[\(String, KayaSymbol\)\], selected: "
+      r"Int = 0,\n\s*onSelect: \(\(KayaAppTx, Int\)",
+      r"public func {0}Symbols\(\n\s*_ segments: \[\(String, KayaSymbol\)\], selected f: "
+      r"KayaField<Double>,",
+      r"public func {0}\(\n\s*_ segments: \[String\], selected s: KayaSignal,\n\s*onSelect: "
+      r"\(\(KayaAppTx, Int\)"]),
+    ("haskell", "bindings/haskell/KayaApp.hs",
+     [r"^{0}SymbolsOn :: \(LeafArgs r\) => \[\(Text, Symbol\)\]",
+      r"^{0}Symbols :: TplNumberSource s => \[\(Text, Symbol\)\]",
+      r"^{0}BoundOn :: \(LeafArgs r\) => \[Text\] -> Signal Double"]),
+    ("ocaml", "bindings/ocaml/kaya_app.ml",
+     [r"^let {0}_symbols \?grow .*\?selected \?bind \?on_select segments \(\) =",
+      r"^  let {0}_symbols \?grow",
+      r"^let {0} \?grow .*\?selected \?bind \?on_select segments \(\) ="]),
+    ("js", "bindings/js/kaya/index.ts",
+     [r"^export function {0}Symbols\(segments: readonly \(readonly \[string, "
+      r"SymbolValue \| SymbolName\]\)\[\], opts: ChoiceOptions",
+      r"^export function {0}\(segments: readonly string\[\], opts: ChoiceOptions"]),
+]
+
+
+def check_segmented(fake=None, text_for=None):
+    out = []
+    for lang, rel, templates in SEGMENTED_SURFACES:
+        text = text_for(lang, rel) if text_for else read_rel(rel)
+        name = fake or ("Segmented" if lang in ("go", "csharp") else "segmented")
+        for template in templates:
+            pat = template.format(name)
+            if not re.search(pat, text, re.M):
+                out.append(f"check-sugar-surface: {lang}'s segmented control lacks a "
+                           f"symbol-segment or bound-index spelling (wanted /{pat}/ in {rel})")
+    return out
+
+
+for _line in check_segmented():
+    print(_line)
+    status = 1
+_sg_want = sum(len(ts) for _, _, ts in SEGMENTED_SURFACES)
+_sg_fake = check_segmented("kayaFakeSegmented")
+print(f"check-sugar-surface: fake segmented spellings fired {len(_sg_fake)}/{_sg_want}")
+if len(_sg_fake) != _sg_want:
+    selftest_exit(f"check-sugar-surface: self-test failed ({len(_sg_fake)}/{_sg_want} segmented "
+                  f"patterns fired for a name that exists nowhere)")
+_sg_cuts = 0
+for _lang, _rel, _templates in SEGMENTED_SURFACES:
+    _real = read_rel(_rel)
+    _name = "Segmented" if _lang in ("go", "csharp") else "segmented"
+    for _template in _templates:
+        _pat = _template.format(_name)
+        _n = 0
+
+        def _mangle_sg(m):
+            global _n
+            _inner, _k = sub_count(r"(?i)segmented", "kayaCut", m.group(0))
+            _n += _k
+            return _inner
+        _copy = re.sub(_pat, _mangle_sg, _real, flags=re.M)
+        print(f"check-sugar-surface: segmented cut {_lang} /{_template[:34]}.../: "
+              f"{_n} substitution(s)")
+        _found = check_segmented(
+            text_for=lambda lang, rel, _c=_copy, _r=_rel: _c if rel == _r else read_rel(rel))
+        if _n < 1 or not any(f" {_lang}'s " in _f for _f in _found):
+            selftest_exit(f"check-sugar-surface: self-test failed (the {_lang} segmented cut "
+                          f"/{_template[:34]}.../ was not refused)")
+        if (ROOT / _rel).read_text(encoding="utf-8") != _real:
+            selftest_exit(f"check-sugar-surface: {_rel} changed on disk under the segmented cut")
+        _sg_cuts += 1
+print(f"check-sugar-surface: segmented cuts watched red {_sg_cuts}/{_sg_want}")
+
 # --- THE MEDIA ROW, TRACKS AND VISIBILITY (docs/media-plan.md §3, §7b) --
 # Neither a KIND nor a WINDOW PROP: a row's PLAYER FIELD (the type a stamped
 # video view binds), the visibility handlers in both zones, the track
@@ -6699,7 +6797,7 @@ discardable = tpl_discardable_probe()
 WANT_DISCARDABLE = """swift-row-member=applied:1 rc:1 named:True
 swift-arm-member=applied:1 rc:1 named:True
 swift-eliminator=applied:1 rc:1 named:True
-swift-census-floor=applied:21 rc:1 named:True"""
+swift-census-floor=applied:22 rc:1 named:True"""
 if discardable != WANT_DISCARDABLE:
     print("check-sugar-surface: SELF-TEST FAIL (the Swift generated-surface "
           "discard census did not catch its watched cuts). Wanted:",
@@ -7464,7 +7562,7 @@ def csharp_facade_probe():
     run("csharp-twin-reader",
         src.replace("sealed class TableItemRow\n",
                     "sealed class TableItemRowGone\n")
-        if n == 1 else src, n, "typed-row reader found only 19")
+        if n == 1 else src, n, "typed-row reader found only 20")
     return "\n".join(lines)
 
 

@@ -1046,6 +1046,26 @@ func (c RecordCollection[K, T]) Radio[S interface {
 	return c.choice(t, KindRadio, options, src, onSelect)
 }
 
+// Segmented is Select's strip (docs/segmented-plan.md G9): same option
+// children, same F64-sourced 0-based index, same pick handler.
+func (c RecordCollection[K, T]) Segmented[S interface {
+	~float64 | Signal[float64] | func(*T) *float64 | Field[float64]
+}](t *Tpl, segments []string, src S, onSelect func(*Tx, K, int)) Node {
+	return c.choice(t, KindSegmented, segments, src, onSelect)
+}
+
+// SegmentedSymbols is Segmented of symbol segments (G3).
+func (c RecordCollection[K, T]) SegmentedSymbols[S interface {
+	~float64 | Signal[float64] | func(*T) *float64 | Field[float64]
+}](t *Tpl, segments []Segment, src S, onSelect func(*Tx, K, int)) Node {
+	n := t.segmentedSymbolsOf(segments)
+	t.applyRecordValue[T](n, src)
+	if onSelect != nil {
+		c.onValueOf(t, n, func(tx *Tx, key K, v float64) { onSelect(tx, key, int(v)) })
+	}
+	return n
+}
+
 // choice is the shared body of the two choice constructors.
 func (c RecordCollection[K, T]) choice[S interface {
 	~float64 | Signal[float64] | func(*T) *float64 | Field[float64]

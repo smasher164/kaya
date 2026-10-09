@@ -1082,6 +1082,39 @@ val radio :
   ?selected:int ->
   ?on_select:(int -> unit) -> string list -> unit -> widget
 
+(* A segmented control — the choice contract as a strip
+   (docs/segmented-plan.md): [~selected] or a [~bind] float signal, the
+   app's write never echoing. *)
+val segmented :
+  ?grow:float ->
+  ?fill:bool ->
+  ?a11y_id:string ->
+  ?a11y_id_bind:string signal ->
+  ?a11y_label:string ->
+  ?a11y_label_bind:string signal ->
+  ?help:string ->
+  ?help_bind:string signal ->
+  ?a11y_hint:string ->
+  ?selected:int ->
+  ?bind:float signal ->
+  ?on_select:(int -> unit) -> string list -> unit -> widget
+
+(* A segmented control whose segments draw the platform's glyph for each
+   symbol, each name kept as its accessible name (G3). *)
+val segmented_symbols :
+  ?grow:float ->
+  ?fill:bool ->
+  ?a11y_id:string ->
+  ?a11y_id_bind:string signal ->
+  ?a11y_label:string ->
+  ?a11y_label_bind:string signal ->
+  ?help:string ->
+  ?help_bind:string signal ->
+  ?a11y_hint:string ->
+  ?selected:int ->
+  ?bind:float signal ->
+  ?on_select:(int -> unit) -> (string * symbol) list -> unit -> widget
+
 val checkbox :
   ?grow:float ->
   ?fill:bool ->
@@ -2316,6 +2349,53 @@ module Tpl : sig
     ?level:int ->
     ?a11y_level:int ->
     ?on_select:(key list -> int -> unit) -> string list -> unit -> node
+
+  (* A segmented control per stamped copy — the choice contract as a
+     strip (docs/segmented-plan.md G9). *)
+  val segmented :
+    ?grow:float ->
+    ?fill:bool ->
+    ?a11y_id:string ->
+    ?a11y_id_bind:string signal ->
+    ?a11y_id_field:('a, string) field ->
+    ?a11y_label:string ->
+    ?a11y_label_bind:string signal ->
+    ?a11y_label_field:('b, string) field ->
+    ?help:string ->
+    ?help_bind:string signal ->
+    ?help_field:('c, string) field ->
+    ?a11y_hint:string ->
+    ?a11y_hint_bind:string signal ->
+    ?a11y_hint_field:('d, string) field ->
+    ?selected:int ->
+    ?bind:float signal ->
+    ?bind_field:('e, float) field ->
+    ?level:int ->
+    ?a11y_level:int ->
+    ?on_select:(key list -> int -> unit) -> string list -> unit -> node
+
+  (* A segmented control of symbol segments per stamped copy (G3). *)
+  val segmented_symbols :
+    ?grow:float ->
+    ?fill:bool ->
+    ?a11y_id:string ->
+    ?a11y_id_bind:string signal ->
+    ?a11y_id_field:('a, string) field ->
+    ?a11y_label:string ->
+    ?a11y_label_bind:string signal ->
+    ?a11y_label_field:('b, string) field ->
+    ?help:string ->
+    ?help_bind:string signal ->
+    ?help_field:('c, string) field ->
+    ?a11y_hint:string ->
+    ?a11y_hint_bind:string signal ->
+    ?a11y_hint_field:('d, string) field ->
+    ?selected:int ->
+    ?bind:float signal ->
+    ?bind_field:('e, float) field ->
+    ?level:int ->
+    ?a11y_level:int ->
+    ?on_select:(key list -> int -> unit) -> (string * symbol) list -> unit -> node
 
   val checkbox :
     ?grow:float ->

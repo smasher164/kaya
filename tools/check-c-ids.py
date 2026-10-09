@@ -365,9 +365,9 @@ after = sum(1 for line in census(s)[0]
             if line.startswith("check-c-ids:   "))
 print(f"check-c-ids: self-test N3 removed one guest from the copy-set: "
       f"roster {before} -> {after}")
-if not (before == 8 and after == 7):
+if not (before == 9 and after == 8):
     g.refuse(f"SELF-TEST BROKEN (N3 roster {before} -> {after}, "
-             f"expected 8 -> 7)")
+             f"expected 9 -> 8)")
 s = shadow("n3b")
 for name in ("undo.c", "todos.c", "menus.c", "milestone2.c"):
     (s / "guests" / "c" / name).unlink()

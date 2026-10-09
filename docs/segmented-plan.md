@@ -399,9 +399,36 @@ breadth.
   `choose_by_keys` waits for the breadth (no depth lane can run it); and
   the Rust binding gained `segmented_bound`, because no choice kind had a
   live-zone way for an app to write the index after the build.
-- To measure at the breadth: the iOS segment elements' traits, the iOS
-  press and symbol read (built, unrun).
-- To measure at the breadth: AdwToggleGroup's keyboard and AT-SPI role
-  names, SelectorBar's UIA tree and whether its selection follows Tab
-  focus as the docs say, Compose's key handling between segments, and
-  whether UISegmentedControl draws a title and an image together.
+- MEASURED 2026-10-08 at the breadth (iOS 26.5 simulator): the segment
+  elements' selected trait, the press and the symbol read, segmented-swiftui
+  green on its first run.
+- MEASURED 2026-10-08 at the breadth (Android emulator, material3 1.3.1):
+  the selected segment is last among the row's semantics children, since
+  Material raises its z-index (docs/traps.md, the Compose segment order).
+  Built for the review: a symbol segment's icon slot is empty and its label
+  the glyph, so Material's check mark never replaces the only glyph; a
+  text segment keeps the check mark.
+- MEASURED 2026-10-08 at the breadth (kaya-linux:latest, libadwaita 1.9.2,
+  GTK 4.24, a python gi probe on the AT-SPI bus): AdwToggleGroup's
+  accessible role is RADIO_GROUP, published as `grouping` and named by the
+  a11y label; each toggle is an internal GtkToggleButton with role RADIO,
+  published as `radio button`, holding a GtkLabel (a text toggle) or a
+  GtkImage of role presentation (an icon toggle, whose bus name is the
+  toggle's `tooltip`), with a GtkSeparator between toggles (the first
+  unmapped). `set_active` fires `notify::active`, so the app's write rides
+  the quiet guard; `activate()` on the internal button selects its toggle.
+  segmented-<lang>-x11 and -wayland green in all nine languages and C.
+- MEASURED 2026-10-08 at the breadth (the windows lane's VM): SelectorBar's
+  bar answers `group` to `expect_ax`; an item the bar has not realized
+  ignores its peer's Select, and inside SelectionChanged the old and new
+  items both read IsSelected (docs/traps.md, WinUI's SelectorBar), so the
+  arm reads the bar's `SelectedItem`. segmented_<lang> green in the six
+  languages the lane runs.
+- Built at the breadth and NOT as written above: `choose` on WinUI takes
+  the bar's `SelectedItem` for an unrealized item, the peer otherwise; and
+  `choose_by_keys` is still unbuilt (GTK and WinUI could run it; the verb
+  and its interpreter arms were outside the GTK/WinUI slice).
+- To measure: AdwToggleGroup's keyboard, whether SelectorBar's selection
+  follows Tab focus as the docs say, Compose's key handling between
+  segments, and whether UISegmentedControl draws a title and an image
+  together.

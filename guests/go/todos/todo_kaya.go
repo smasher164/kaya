@@ -101,6 +101,14 @@ func (r todoRow) Slider(min, max float64, f kaya.Field[float64], onChange func(*
 	return r.c.Slider(r.t, min, max, f, onChange)
 }
 
+func (r todoRow) Segmented(segments []string, f kaya.Field[float64], onSelect func(*kaya.Tx, int64, int)) kaya.Node {
+	return r.c.Segmented(r.t, segments, f, onSelect)
+}
+
+func (r todoRow) SegmentedSymbols(segments []kaya.Segment, f kaya.Field[float64], onSelect func(*kaya.Tx, int64, int)) kaya.Node {
+	return r.c.SegmentedSymbols(r.t, segments, f, onSelect)
+}
+
 func (r todoRow) NumberField(f kaya.Field[float64], onCommit func(*kaya.Tx, int64, float64)) kaya.Node {
 	return r.c.NumberField(r.t, f, onCommit)
 }

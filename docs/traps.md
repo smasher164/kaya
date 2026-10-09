@@ -4,6 +4,40 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## The Compose segment order: Material's selected segment comes last in the semantics tree (measured 2026-10-08)
+
+material3 1.3.1's `SegmentedButton` raises the selected segment's z-index,
+and the semantics tree orders children by z-index, so a row drawn
+`Day|Week|Month` with Day selected publishes its children as
+`Week|Month|[Day]`. A harness that took the children in tree order
+pressed Day for `choose … 2` (the android segmented leg's bundle:
+`choose segmented@period -> option 2` then `segmented tap … index=0`).
+TalkBack's own traversal sorts by position, so the reader is not
+affected. The harness sorts the options by their bounds (reading
+direction aware) in `kayaChoiceOptions`; tools/lib/segmented_routes.py
+holds the sort, one watched cut.
+
+## WinUI's SelectorBar: an unrealized item ignores its peer's Select, and SelectionChanged runs before the old item clears (measured 2026-10-08)
+
+SelectorBar lays its items out in a virtualizing ItemsView, so an item
+outside the window's viewport is not realized (`IsLoaded` false). The
+windows lane tiles every leg at 556x378 (`KAYA_WIN_SLOT`, winui's `setup`),
+which puts segmented.steps' last row below the window: the item peer's
+`ISelectionItemProvider.Select()` on that unrealized item set its
+`IsSelected` and never reached the bar, so `SelectedItem` stayed put, no
+SelectionChanged ran and the reads showed two items selected
+(`IsSelected [1,1], SelectedItem Some(0), IsLoaded ... items [1,0]`, the
+verb trace's `choose_segment`). A full-size window passed the same step.
+`choose` takes the peer for a realized item and the bar's own
+`SelectedItem` for an unrealized one, and the reads take the bar's
+`SelectedItem`, since an unrealized item never shows its own `IsSelected`.
+
+Second, inside SelectionChanged the newly selected item and the old one
+both read `IsSelected` true (`IsSelected [1,0,1], SelectedItem Some(2)`),
+so a handler that took the first selected item reported the old index and
+the app wrote it back. The handler reads `SelectedItem`.
+tools/lib/segmented_routes.py holds both reads, one watched cut each.
+
 ## GTK 4.20 publishes a switch as ATSPI_ROLE_SWITCH (measured 2026-10-07)
 
 GTK 4.18.6's gtkatspiutils.c mapped GTK_ACCESSIBLE_ROLE_SWITCH to

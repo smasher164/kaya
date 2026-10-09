@@ -385,6 +385,21 @@ func (sc SumCase[K, V]) Radio(options []string, sel func(*V) *float64, onSelect 
 	return sc.choice(KindRadio, options, sel, onSelect)
 }
 
+// Segmented is Select's strip: same children, same index.
+func (sc SumCase[K, V]) Segmented(segments []string, sel func(*V) *float64, onSelect func(*Tx, K, int)) Node {
+	return sc.choice(KindSegmented, segments, sel, onSelect)
+}
+
+// SegmentedSymbols is Segmented of symbol segments.
+func (sc SumCase[K, V]) SegmentedSymbols(segments []Segment, sel func(*V) *float64, onSelect func(*Tx, K, int)) Node {
+	n := sc.t.segmentedSymbolsOf(segments)
+	sc.t.BindValueField(n, 0, FieldBy(sel))
+	if onSelect != nil {
+		sc.onValue(n, func(tx *Tx, key K, v float64) { onSelect(tx, key, int(v)) })
+	}
+	return n
+}
+
 func (sc SumCase[K, V]) choice(kind uint32, options []string, sel func(*V) *float64, onSelect func(*Tx, K, int)) Node {
 	n := sc.t.choiceOf(kind, options)
 	sc.t.BindValueField(n, 0, FieldBy(sel))

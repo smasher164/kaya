@@ -27,6 +27,7 @@ SCENES = [
     "confirm", "nav", "split", "panes", "table", "scroll",
     "progress", "select", "radio", "grid", "textarea", "search", "submit", "scrollto", "fullscreen",
     "numberfield", "timecode", "colorpicker", "range", "secure", "autofill", "reveal",
+    "segmented",
     "sections",
     "menus", "commands", "a11y", "a11yrows", "filedialog",
     "clipboard", "undo", "dirty", "ranges", "save", "styling",
@@ -268,6 +269,10 @@ ORDER = [
      "a11y_rust", "a11y_python", "a11y_js", "a11y_go", "a11y_csharp", "a11y_java",
      "select_rust", "select_python", "select_js", "select_go", "select_csharp", "select_java",
      "radio_rust", "radio_python", "radio_js", "radio_go", "radio_csharp", "radio_java",
+     # The segmented control (docs/segmented-plan.md): `choose` runs the
+     # item peer's SelectionItem pattern, no real mouse.
+     "segmented_rust", "segmented_python", "segmented_js", "segmented_go", "segmented_csharp",
+     "segmented_java",
      "grid_rust", "grid_python", "grid_js", "grid_go", "grid_csharp", "grid_java",
      "textarea_rust", "textarea_python", "textarea_js", "textarea_go", "textarea_csharp", "textarea_java",
      "sections_rust", "sections_python", "sections_js", "sections_go", "sections_csharp", "sections_java",
