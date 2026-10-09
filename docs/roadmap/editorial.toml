@@ -5,11 +5,11 @@
 base = '2dadc3b5'
 title = 'What kaya builds next'
 lede = 'Every open item scored three ways: how many apps need it, how many of fifteen GUI frameworks ship it, and what a slice of that shape has cost kaya on its own record. The order below follows from the scores; the cards say why each one landed where it did.'
-state = "Since the 2026-10-04 read the timecode formatter shipped on five platforms, in nine bindings and on the C floor (2026-10-05), a drop's point is read on every lane (2026-10-06), and the day's matrix speed work took the full plain matrix from 2098 s to 1588 s, ALL PASS. With both pieces built, the video editor waits on nothing but the maintainer's choice of what to build before it."
+state = "Since the 2026-10-06 read the password field shipped whole on five platforms and in nine bindings: the secure field (2026-10-07), autofill content hints with logins shared through [links] hosts (10-07, 10-08), and the show-password toggle with an eye the keyboard reaches (10-08). The Linux lane moved to Debian forky and GTK 4.24, with the libsoup, GTK sink and GLib launch defects it surfaced fixed in kaya; the full matrix reads ALL PASS in 1439 s."
 menu_heading = 'The menu: the pieces first, then the apps they unblock'
 menu_lede = "Every framework piece is its own entry, in the order recommended, and each names the demo app it unblocks; the apps follow, each listing what it still waits on, so an app is never picked with its pieces unbuilt. A star marks a piece that needs a ruling before any arm is written. With the task manager and the chat app shipped, the one demo app left is the video editor. Every ruling its plan asked is taken and every piece it names is built, the last two (the timecode formatter and a drop's point) on 2026-10-05 and 10-06, so the editor waits only on the maintainer's choice of what comes before it. The chat app's calls stage follows: capture and audio playback are built, and the one piece between them and a call is the far end, the peer's picture and voice. Read out of the surface promised against the surface built, the ledger's open headlines and the maintainer's own evidence order; the editor's pieces, the media reader and capture shipped between the reads and stay listed with their dates."
-recommended_next = ''
-recommended_note = "<b>Recommended next: open.</b> The maintainer said on 2026-10-06 that he wants more user-facing features before the video editor starts, and is choosing among them. The editor itself waits on nothing. The candidates are the far end of a call (ruled, the larger one), the three starred items (each needs a ruling first) and the Next tier's cards below, of which secure entry shipped 2026-10-07 (review page NzHtTqPdSgUPsAZVVm23He); the maintainer's own order from the 2026-10-06 shortlist was secure entry first."
+recommended_next = 'Segmented control'
+recommended_note = "<b>Recommended next: the segmented control</b>, in design (docs/segmented-plan.md), then the toast, then the media player demo app with its two new pieces, images from the network and a styling pass toward the look the maintainer asked for on 2026-10-08. The video editor waits on nothing and stays held behind these."
 demo_heading = 'The demo apps, and what each still waits on'
 proposed_heading = 'Proposed: more demo apps, as milestones'
 proposed_lede = "Proposed 2026-09-28 at the maintainer's ask, not ruled. Each demo is a milestone that forces a set of pieces no shipped app needs, taken from the archetype table below; the order puts the one that shares the most with the video editor first, so its pieces are built once for both. The webcam and the microphone (the maintainer, 2026-09-28: at least one demo must use them) go into the chat app as calls rather than a demo of their own, the way Signal and Slack carry them: the conversation, the simulated peer and the notifications are already there. The photo gallery and the video editor's voiceover would use the same capture piece more lightly. Nothing here starts until the maintainer picks."
@@ -201,6 +201,31 @@ unblocks = 'no app'
 key = 'first line box'
 text = "S each: the checkbox that reads a touch high beside a title's first line on Android, iOS and Windows (deferred 2026-09-24; cap-height centring is the candidate), the Windows launchers derivation, the iOS typeface observation stub, the Windows dnd_java drag face, WinUI swipe items drawn as text only (SwipeItem takes an IconSource, which kaya does not lower symbols to yet), the colour picker's panel scene (<code>pick_color</code>), capture's C floor parsers, and the iOS media session's remote pause seen once leaving the player playing, whose bundle could not say why. Two need a ruling first: how wide a number field is, and what a C# or Java host does when asked for a scene it does not carry."
 
+[[menu]]
+title = 'Segmented control'
+star = false
+status = 'open'
+size = 'M'
+unblocks = 'the media player (its filter chips); the portfolio chart period'
+plan = 'docs/segmented-plan.md'
+text = "IN DESIGN 2026-10-08 (docs/segmented-plan.md, 13 rulings recommended): a third choice kind beside select and radio, the platform's own segmented control where it has one (SwiftUI, Material 3, libadwaita's toggle group) and a SelectorBar on WinUI; the slice also makes radio's and select's harness reads come from the screen."
+
+[[menu]]
+title = 'Images from the network'
+star = true
+status = 'open'
+size = 'M'
+unblocks = 'the media player (album art); feeds and galleries'
+text = "Album art, avatars and thumbnails come over HTTP, and kaya's images come only from bundled assets or the app's bytes. A remote image source with a cache, a placeholder while loading and a stated failure, in both zones so a table row's art loads per row. Needs a design pass."
+
+[[menu]]
+title = 'A styling pass toward an app-skinned look'
+star = true
+status = 'open'
+size = 'L'
+unblocks = 'the media player'
+text = "The maintainer, 2026-10-08, after an egui Spotify client: push kaya as far as possible towards styling a media client like that. It loosens DESIGN.md's brand-tier ceiling again, as the semantic tints did on 2026-09-25: gradient and image surface backgrounds, image shapes (a round avatar, rounded art), card surfaces with hover and selection, image and two-line cells in a table, a bar docked under the panes; tokens over raw values wherever the platforms share one, native controls kept. Every capability is a ruling of his; the demo app decides the order."
+
 [[demo]]
 name = 'The text editor'
 grp = 'docs/editor-plan.md; written in Go on purpose, the first forcing app'
@@ -240,12 +265,13 @@ shipped = "canvas with an image op, horizontal scroll, fullscreen, the number fi
 waits = "nothing built: every ruling in the plan's §7 is taken, the app's language Rust. It is held while the maintainer picks user-facing features to build first (2026-10-06)"
 then = 'the app one screen at a time (XL), when the maintainer picks it'
 
-[[proposed]]
-name = '1. A media player'
-grp = 'VLC, Music'
-forces = 'audio playback, the <code>video</code> kind, fullscreen, media keys and Now Playing, playback that continues in the background, captions'
-shares = "the video editor's monitors and its audio track; horizontal scroll for a queue"
-size = 'M: its pieces shipped 2026-09-28 to 10-01 (the player with audio, the video view, fullscreen, captions, media keys and Now Playing, background audio on iOS); the app is what is left'
+[[demo]]
+name = 'The media player'
+grp = 'a music client styled toward the egui Spotify screenshot (the maintainer, 2026-10-08), over a public catalogue'
+shipped = 'the media player with audio and Now Playing on every platform, media keys, sliders, tables, the three-pane window, the search field, the secure field and autofill for sign-in'
+waits = 'the segmented control (filter chips), images from the network, and the styling pass'
+then_tier = 'next'
+then = 'the app one screen at a time (M for the app, L for the styling pass), after the segmented control and the toast'
 
 [[proposed]]
 name = '2. A feed reader'
