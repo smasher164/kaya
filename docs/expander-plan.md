@@ -1,7 +1,7 @@
 # The expander: the design pass (2026-10-09)
 
-Status: RECOMMENDED 2026-10-09, nothing built. Rulings K1-K19 wait on the
-maintainer. He picked the expander next on the 2026-10-09 shortlist. Its
+Status: RULED 2026-10-09 (the maintainer: "im cool with your rulings"), K1-K19 as
+recommended; nothing built yet. He picked the expander next on the 2026-10-09 shortlist. Its
 roadmap card (docs/roadmap/features.toml, `expander`) gives the shape as "prop
 on column (collapsible, titled)"; this pass is the evidence for how that shape
 is spelled, and K1 recommends a kind instead. The segmented control's and the
@@ -110,7 +110,7 @@ AccessibilityNodeInfo
   answering `expect` from the model (docs/segmented-plan.md G10). An expander
   read off `node.expanded` would repeat it.
 
-## §2 — The rulings (RECOMMENDED 2026-10-09)
+## §2 — The rulings (RULED 2026-10-09, as recommended)
 
 ### K1 — A container kind, `expander`, not a prop on `column`
 
