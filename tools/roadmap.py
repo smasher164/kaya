@@ -420,7 +420,8 @@ def render(feats, ed, derived):
     for d in ed["demo"]:
         then = d["then"]
         if d.get("then_tier"):
-            then = " ".join(x for x in (chip_tier(d["then_tier"]), then) if x)
+            sep = "" if not then or then[0] in ",.;:" else " "
+            then = chip_tier(d["then_tier"]) + sep + then
         w(f'<tr><td><strong>{d["name"]}</strong><span class="grp">{d["grp"]}</span></td>'
           f'<td>{R(d["shipped"])}</td><td>{R(d["waits"])}</td><td>{then}</td></tr>')
     w("</tbody></table></div>")
