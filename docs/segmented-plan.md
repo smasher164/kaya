@@ -8,6 +8,7 @@ next on 2026-10-08. Its roadmap card (docs/roadmap/features.toml,
 is the evidence for how that shape is spelled. The search field's and the
 reveal toggle's plans (docs/search-plan.md, docs/reveal-plan.md) are the
 precedents for the layout of this one.
+RULED 2026-10-08 (the maintainer: "im cool with your recommendations for the questions. the windows look is fine"): G1-G13 as built; WinUI keeps SelectorBar's look; WinUI's `choose` brings an unloaded segment into view and presses it rather than setting the selection.
 
 ## §0 — What the platforms offer
 
@@ -92,7 +93,7 @@ Developers, Segmented button
 
 ## §2 — The rulings (RECOMMENDED 2026-10-08, awaiting the maintainer)
 
-### G1 — A third choice kind, `segmented` (RECOMMEND: kind)
+### G1 — A third choice kind, `segmented` (RULED 2026-10-08)
 
 The segmented control is the choice contract in a third presentation, and
 kaya already spells a choice's presentation as its KIND: `select` is the
@@ -118,7 +119,7 @@ content and mounts nothing. An app that switches whole screens uses
 sections (the HIG: "For switching between completely separate sections of
 an app, use a tab bar instead").
 
-### G2 — Single selection only (RECOMMEND: single; several selections ledgered)
+### G2 — Single selection only (RULED 2026-10-08)
 
 Exactly one segment is selected, the choice contract's rule. Several
 selections are reachable on two platforms of five (§0 fact 1): AdwToggleGroup
@@ -128,7 +129,7 @@ which kaya spells today as checkboxes and, in a toolbar, as toggle items.
 A DEFERRED entry records several selections with its admission trigger:
 an app that needs a format bar outside the command catalog.
 
-### G3 — A segment shows its text, or a symbol named by its text; one control is all one or all the other (RECOMMEND)
+### G3 — A segment shows its text, or a symbol named by its text; one control is all one or all the other (RULED 2026-10-08)
 
 Each option keeps its text. An option may also carry `symbol` (the
 existing vocabulary, made legal on a segmented control's option labels
@@ -148,7 +149,7 @@ new against the symbol button, which shows none; if the maintainer prefers
 the button's rule, the tooltip comes out and the app sets `help` on the
 control.
 
-### G4 — The value is the index; the app hears `value_changed` (RECOMMEND: the choice contract unchanged)
+### G4 — The value is the index; the app hears `value_changed` (RULED 2026-10-08)
 
 The selected segment is `value`, a 0-based index, written as configuration
 and never echoed; the user's pick reaches the app as `value_changed`
@@ -162,7 +163,7 @@ the end of the transaction), and there is always a selected segment (the
 contract already has no "none"; SelectorBar's null and iOS's `noSegment`
 are never used).
 
-### G5 — The a11y verdict is `group`, the radio group's (RECOMMEND)
+### G5 — The a11y verdict is `group`, the radio group's (RULED 2026-10-08)
 
 `expect_ax segmented#0 "group/<label>"`. Each platform's identity is its
 radio group: macOS AXRadioGroup (MEASURED), iOS the segmented control
@@ -181,7 +182,7 @@ peers on WinUI, the merged semantics nodes on Compose, the segment elements
 on iOS). A symbol segment's glyph is read by `expect_segment_symbol
 segmented#0 1 "grid"`, the sections' symbol read one control over.
 
-### G6 — The keyboard is the platform's own; the harness drives it through the system (RECOMMEND)
+### G6 — The keyboard is the platform's own; the harness drives it through the system (RULED 2026-10-08)
 
 Each backend uses its control's own keys: Tab once then the arrows on
 WinUI (MEASURED from the template) and, under Keyboard navigation, on
@@ -203,7 +204,7 @@ control. The other choice is an AppKit subclass that is always a key view,
 as V10's eye is; that would make the one mac control reachable when its
 neighbours are not.
 
-### G7 — No disabled segments in this slice (RECOMMEND: out, ledgered with a disabled state for every control)
+### G7 — No disabled segments in this slice (RULED 2026-10-08)
 
 All five platforms can disable a single segment, but kaya has no disabled
 state on any widget (§1): no button, checkbox or radio option can be greyed
@@ -211,7 +212,7 @@ out today. A disabled segment alone would be the first and only one. The
 DEFERRED entry for a cross-kind `enabled` prop records segments (and radio
 options) as one of its parts.
 
-### G8 — Equal widths, the control hugging its content, no overflow (RECOMMEND)
+### G8 — Equal widths, the control hugging its content, no overflow (RULED 2026-10-08)
 
 Every segment is as wide as the widest, the platforms' default (iOS, macOS
 `fillEqually`, AdwToggleGroup `homogeneous`, Compose's row); WinUI's items
@@ -221,7 +222,7 @@ any other control. It never scrolls, wraps or folds (§0 fact 4). A text too
 long for its share is the platform's to truncate. The two-to-five guidance
 is the docs', not a refusal.
 
-### G9 — Both construction zones (RECOMMEND)
+### G9 — Both construction zones (RULED 2026-10-08)
 
 A segmented control in a stamped row works as the select and the radio
 group do there: the options are the prototype's children and shared by
@@ -260,7 +261,7 @@ AXRadioGroup reader, the Compose radio group the same selectable group,
 and the select needs only its popup's value; a DEFECT entry is filed at the
 depth so the fix is recorded before it is built.
 
-### G11 — iOS's radio group stays a segmented control (RECOMMEND: unchanged)
+### G11 — iOS's radio group stays a segmented control (RULED 2026-10-08)
 
 With G1, an iOS radio group and an iOS segmented control draw the same
 control. iOS has no radio button, and its other one-of-N idiom, a list of
@@ -268,7 +269,7 @@ rows with a check mark (`.pickerStyle(.inline)`), belongs inside a grouped
 list or form, which a kaya radio group is not required to sit in. The
 radio group's iOS look does not change.
 
-### G12 — All nine bindings and the C floor, both zones (RECOMMEND: do in every language)
+### G12 — All nine bindings and the C floor, both zones (RULED 2026-10-08)
 
 Per invariant 2: Rust, Python, Go, C#, Java, Swift, OCaml, Haskell and JS
 each get the constructor in both zones, spelled as that binding spells
@@ -277,7 +278,7 @@ floor declares the kind and its label children explicitly, a `segmented`
 C guest as the floor's documentation. No language has a reason to defer or
 refuse.
 
-### G13 — Its first demo app home: the portfolio chart's period (RECOMMEND)
+### G13 — Its first demo app home: the portfolio chart's period (RULED 2026-10-08)
 
 The portfolio draws a 90-day value chart (guests/python/portfolio.py,
 `CHART_DAYS`). A segmented control above it choosing "1M", "3M" and "1Y"
