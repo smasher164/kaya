@@ -3999,6 +3999,10 @@ func kayaPresentSaveDialog(
         static var responsePath: String {
             (directory as NSString).appendingPathComponent("kaya-simdrive-response")
         }
+        static var doingPath: String {
+            (directory as NSString).appendingPathComponent("kaya-simdrive-doing")
+        }
+        private static var asked = 0
 
         /// ONE REQUEST FILE AND ONE RESPONSE FILE means the exchange is a
         /// critical section: the clipboard's asks are not single-threaded, and
@@ -4012,8 +4016,10 @@ func kayaPresentSaveDialog(
             turn.lock()
             defer { turn.unlock() }
             let fm = FileManager.default
+            asked += 1
+            let id = "#\(asked)"
             try? fm.removeItem(atPath: responsePath)
-            guard fm.createFile(atPath: requestPath, contents: Data(verb.utf8)) else {
+            guard fm.createFile(atPath: requestPath, contents: Data("\(id) \(verb)".utf8)) else {
                 return (false, ["could not write the simdrive request to \(requestPath)"])
             }
             let deadline = Date().addingTimeInterval(timeout)
@@ -4028,13 +4034,21 @@ func kayaPresentSaveDialog(
                     var lines = text.split(separator: "\n", omittingEmptySubsequences: false)
                         .map(String.init)
                     if lines.last == "" { lines.removeLast() }
-                    let ok = lines.first == "ok"
-                    return (ok, Array(lines.dropFirst()))
+                    let head = lines.first?.split(separator: " ").map(String.init) ?? []
+                    // docs/traps.md, the iOS media_screen entry: an answer to an
+                    // ask that already stopped waiting is not this ask's answer.
+                    guard head.count == 2, head[1] == id else { continue }
+                    return (head[0] == "ok", Array(lines.dropFirst()))
                 }
                 Thread.sleep(forTimeInterval: 0.05)
             }
             try? fm.removeItem(atPath: requestPath)
-            return (false, ["the simdrive watcher did not answer \(verb) within \(Int(timeout))s"])
+            let doing = (fm.contents(atPath: doingPath).map { String(decoding: $0, as: UTF8.self) } ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return (false, [
+                "the simdrive watcher did not answer \(id) \(verb) within \(Int(timeout))s; "
+                    + (doing.isEmpty ? "the watcher wrote no account of any request" : doing)
+            ])
         }
     }
 

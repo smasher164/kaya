@@ -42,12 +42,12 @@ import urllib.parse
 
 from packaging import identity as app_identity
 from packaging import ios as packaging_ios
-from packaging import mark
 from lanes import ios as lane
 import exclusive
 import only  # noqa: E402
 import scene_cut
 import secure_scan
+import simscreen
 import flightrec_lane
 import media_server
 from swift_sdk import require_ios_sdk
@@ -1368,32 +1368,87 @@ def clip_verb(udid, parts):
 MEDIAREMOTE_SIM = ROOT / "target/ios-tools/mediaremote"
 
 
-def screen_pixel(png, x, y):
-    """One pixel of a simulator screenshot as RRGGBB, or an error sentence.
-    The screenshot must say it is sRGB (measured: `simctl io screenshot`
-    tags it), since the verb compares in sRGB."""
-    if b"sRGB" not in png[:4096]:
-        return None, "the screenshot carries no sRGB chunk, so its colours are in no stated space"
-    w, h, ch, rows = mark.decode_png(png)
-    if not (0 <= x < w and 0 <= y < h):
-        return None, f"the screenshot is {w}x{h}, no pixel at {x},{y}"
-    px = rows[y][x * ch:x * ch + 3]
-    return "%02X%02X%02X" % tuple(px), ""
+SCREEN_MISREADS = simscreen.self_test()
+if SCREEN_MISREADS:
+    die("run-sim: tools/lib/simscreen.py misreads a screenshot: " + "; ".join(SCREEN_MISREADS))
+
+SCREEN_CAPTURE_BOUND = 20
 
 
-def media_verb(udid, parts):
+class Account:
+    """One simdrive request's parts as they happen, rewritten into
+    kaya-simdrive-doing so a guest that stops waiting can say where the time
+    went (docs/traps.md, the iOS media_screen entry)."""
+
+    def __init__(self, path, rid, verb, queued_ms):
+        self.path, self.head = path, f"{rid} {verb}".strip()
+        self.parts, self.running, self.since = [("queue", queued_ms)], None, 0
+        self.write()
+
+    def begin(self, part):
+        self.end()
+        self.running, self.since = part, now_ms()
+        self.write()
+
+    def end(self):
+        if self.running:
+            self.parts.append((self.running, now_ms() - self.since))
+            self.running = None
+            self.write()
+
+    def text(self):
+        done = ", ".join(f"{p} {ms} ms" for p, ms in self.parts)
+        live = f", {self.running} still running after {now_ms() - self.since} ms" \
+            if self.running else ""
+        return f"the watcher's account of {self.head}: {done}{live}"
+
+    def log(self):
+        return ",".join(f"{p}:{ms}" for p, ms in self.parts)
+
+    def write(self):
+        part = self.path.with_name(self.path.name + ".part")
+        part.write_text(self.text() + "\n", encoding="utf-8")
+        part.rename(self.path)
+
+    def run(self, part, argv, bound):
+        """(returncode, stderr), or (None, sentence) past `bound` seconds."""
+        self.begin(part)
+        proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **TEXT)
+        deadline = time.time() + bound
+        while True:
+            try:
+                _, err = proc.communicate(timeout=0.5)
+                break
+            except subprocess.TimeoutExpired:
+                if time.time() > deadline:
+                    proc.kill()
+                    proc.communicate()
+                    said = self.text()
+                    self.end()
+                    return None, f"did not finish within {bound} s ({said})"
+                self.write()
+        self.end()
+        return proc.returncode, err.strip()
+
+
+def media_verb(udid, parts, account):
     """The media suite's host verbs (docs/media-plan.md §6): the device's
     own screenshot read at a pixel, and a MediaRemote command sent from a
     process spawned in the simulator. Returns (rc, body)."""
     verb = parts[0]
     if verb == "media_screen" and len(parts) == 3:
         with tempfile.TemporaryDirectory() as tmp:
-            shot = pathlib.Path(tmp) / "screen.png"
-            got = subprocess.run(["xcrun", "simctl", "io", udid, "screenshot", str(shot)],
-                                 capture_output=True, check=False, **TEXT)
-            if got.returncode != 0 or not shot.is_file():
-                return 1, f"simctl io screenshot exited {got.returncode}: {got.stderr.strip()}"
-            hexed, err = screen_pixel(shot.read_bytes(), int(parts[1]), int(parts[2]))
+            shot = pathlib.Path(tmp) / "screen.bmp"
+            rc, err = account.run("capture", ["xcrun", "simctl", "io", udid, "screenshot",
+                                              "--type=bmp", str(shot)], SCREEN_CAPTURE_BOUND)
+            if rc is None:
+                return 1, f"simctl io screenshot {err}"
+            if rc != 0 or not shot.is_file():
+                return 1, f"simctl io screenshot exited {rc}: {err} ({account.text()})"
+            account.begin("read")
+            with open(shot, "rb") as f:
+                hexed, err = simscreen.screen_pixel(f, int(parts[1]), int(parts[2]))
+            account.end()
         return (0, hexed) if hexed else (1, err)
     if verb == "media_send" and len(parts) == 2:
         if not MEDIAREMOTE_SIM.is_file():
@@ -1452,9 +1507,11 @@ def simdrive_watch(udid, bundle_id, docs_dir, log_path, stop):
     docs = pathlib.Path(docs_dir)
     request = docs / "kaya-simdrive-request"
     response = docs / "kaya-simdrive-response"
+    doing = docs / "kaya-simdrive-doing"
     docs.mkdir(parents=True, exist_ok=True)
     request.unlink(missing_ok=True)
     response.unlink(missing_ok=True)
+    doing.unlink(missing_ok=True)
     attached = False
     with open(log_path, "a", encoding="utf-8") as lg:
         lg.write(f"KAYA_SIMDRIVE: at={now_ms()} src=watch ev=watch_start "
@@ -1462,16 +1519,24 @@ def simdrive_watch(udid, bundle_id, docs_dir, log_path, stop):
         lg.flush()
         while not stop.is_set():
             if request.is_file():
+                try:
+                    queued = now_ms() - int(request.stat().st_mtime * 1000)
+                except FileNotFoundError:
+                    continue
                 verb = request.read_text(encoding="utf-8",
                                          errors="replace").strip()
                 request.unlink(missing_ok=True)
+                rid = ""
+                if verb.startswith("#"):
+                    rid, _, verb = verb.partition(" ")
                 parts = verb.split()
                 started = now_ms()
+                account = Account(doing, rid, verb, queued)
                 pid, pid_ms = "", "none"
                 if parts and parts[0].startswith("clip_"):
                     rc, body = clip_verb(udid, parts)
                 elif parts and parts[0].startswith("media_"):
-                    rc, body = media_verb(udid, parts)
+                    rc, body = media_verb(udid, parts, account)
                 else:
                     # THE PICKER VERBS GO TO THE DEVICE'S DRIVER, attached
                     # to this leg's app on the first ask (the app is
@@ -1490,13 +1555,16 @@ def simdrive_watch(udid, bundle_id, docs_dir, log_path, stop):
                             attached = False
                     rc = 0 if ok else 1
                 lg.write(f"KAYA_SIMDRIVE: at={now_ms()} src=watch "
-                         f"ev=request verb={parts[0] if parts else ''} "
+                         f"ev=request id={rid or 'none'} "
+                         f"verb={parts[0] if parts else ''} "
                          f"rc={rc} ms={now_ms() - started} "
+                         f"parts={account.log()} "
                          f"pid_ms={pid_ms} pid={pid or 'none'}\n")
                 lg.flush()
                 part = docs / "kaya-simdrive-response.part"
                 part.write_text(
-                    ("ok\n" if rc == 0 else "err\n") + body + "\n",
+                    ("ok" if rc == 0 else "err") + (f" {rid}" if rid else "")
+                    + "\n" + body + "\n",
                     encoding="utf-8")
                 part.rename(response)
             time.sleep(0.05)

@@ -5622,6 +5622,8 @@ from expander_routes import run as check_expander_routes
 check_expander_routes(g)
 from toast_routes import run as check_toast_routes
 check_toast_routes(g)
+from simscreen_routes import run as check_simscreen_routes
+check_simscreen_routes(g)
 
 if (clip_status or window_status or ink_status or ax_status
         or drop_tol_status
@@ -5668,4 +5670,5 @@ g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"+ the app's aspect through the core's box rule on 5 arms "
           f"+ the content type's one table, its platform read and its answers "
           f"+ the reveal's one door, its platform read and its refusals "
+          f"+ the iOS screen read (one pixel of a BMP, each ask's own answer) "
           f"+ spec hash against 2 interpreters")

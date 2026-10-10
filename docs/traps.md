@@ -15409,3 +15409,45 @@ checked out put the OLDER modification times back, and cargo, which compares
 mtimes against its fingerprints, called the core up to date: the windows build
 took 3 s and `tools/build-id.py --verify` refused the lane with `kaya.dll:
 STALE`. Touch what a restore writes. GUARD: build-id's verify, which caught it.
+
+## The iOS media_screen read decoded the whole screenshot (measured 2026-10-10)
+
+`expect_video_ink` and `expect_video_corner` on iOS ask the host for one pixel
+of `simctl io screenshot`, and the guest waits 30 s for it. capture-go went red
+in a matrix with `the simdrive watcher did not answer media_screen 528 1838
+within 30s`; its asks had taken 2.6-12.7 s and one 35.6 s. The capture was
+never the cost: `simctl io screenshot` takes ~165 ms idle. run-sim read the
+pixel by decoding the WHOLE PNG in pure python (`mark.decode_png`, 1.54 s idle
+for 1125x2436), and the four devices' watchers are threads of one run-sim, so
+their decodes queue on one GIL: four in parallel, decode median 6.0 s and max
+12.4 s idle, max 16.5 s under 28 spinners. The screenshot is now taken as
+`--type=bmp` (a V5 header naming sRGB, 32-bit BGRA, pixel-identical to the PNG
+over all 2,740,500 pixels of a home screen) and tools/lib/simscreen.py reads
+the header and the one pixel at its offset. Four in parallel: max 295 ms idle,
+618 ms under load. On the lane (KAYA_ONLY=capture,media, 65-67 asks a run): max
+308 and 255 ms idle, max 1867, 3106 and 2370 ms beside 20-36 spinners (load
+average 210-340, median 307-350 ms), all ALL PASS. The 30 s bound stays; it
+was never the wrong kind. One run at load 340 never reached a leg: the picker's
+LocalStorage export probe failed admission twice, a separate load sensitivity.
+
+The same red showed a second defect. A guest that stops waiting asks again,
+and the watcher, still on the old ask, then answered it into the one response
+file, where the new ask took it as its own. Each ask now carries `#<n>`, the
+answer's first line echoes it, and an answer to another ask is dropped. The
+watcher keeps `kaya-simdrive-doing` current (queue, capture, read, and the part
+still running), so a guest that gives up prints where the time went, and the
+capture is bounded at 20 s on the host with that account in its sentence.
+A forced red (the capture delayed 40 s) printed `did not answer #1
+media_screen 528 1928 within 30s; the watcher's account of #1 ...: queue 34
+ms, capture still running after 29629 ms`, and asks #2 and #3 timed out on
+their own ids rather than taking #1's late answer. The
+simdrive log carries `parts=queue:N,capture:N,read:N` per ask.
+
+`simctl io <dev> screenshot -` does not write stdout here: it writes a file
+named `-` in the working directory.
+
+GUARD: run-sim runs simscreen.self_test() at import and refuses to start when
+the reader misreads a synthetic BMP (top-down, bottom-up, no sRGB, 24-bit, out
+of range, a PNG) or reads more than the header and one pixel of a phone-sized
+one; check-verbs' simscreen clauses hold that call, the BMP capture, the echoed
+id on both sides and the account read, nine cuts watched red with counts.
