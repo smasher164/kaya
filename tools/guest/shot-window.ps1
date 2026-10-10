@@ -63,6 +63,15 @@ if ($w -le 0 -or $h -le 0) {
     exit 1
 }
 
+# CopyFromScreen has no pixels for a frame past the screen's edge and fills
+# them white (docs/expander-plan.md §7, the Windows review shot).
+Add-Type -AssemblyName System.Windows.Forms
+$screen = [System.Windows.Forms.SystemInformation]::VirtualScreen
+if ($r.Left -lt $screen.Left -or $r.Top -lt $screen.Top -or $r.Right -gt $screen.Right -or $r.Bottom -gt $screen.Bottom) {
+    Write-Error "shot-window: the window's frame ($($r.Left),$($r.Top) to $($r.Right),$($r.Bottom)) runs past the screen ($($screen.Left),$($screen.Top) to $($screen.Right),$($screen.Bottom)); a photograph would carry rows that are not the window's"
+    exit 1
+}
+
 Add-Type -AssemblyName System.Drawing
 $bmp = New-Object System.Drawing.Bitmap $w, $h
 $g = [System.Drawing.Graphics]::FromImage($bmp)

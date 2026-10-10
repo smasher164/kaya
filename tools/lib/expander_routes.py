@@ -33,6 +33,8 @@ ARM = ("struct KayaExpander: View {", [
     ".background(KayaExpanderAnchor(id: node.id, header: false))",
     ".accessibilityElement(children: .ignore)",
     "kayaA11y(header, node, leaf: true).accessibilityAction { open.wrappedValue.toggle() }",
+    "if child.kind == kindLabeled || child.kind == kindExpander {",
+    "kayaExpanderChild(index, child).frame(maxWidth: .infinity, alignment: .leading)",
 ])
 # (label, opener, which definition, what it must hold, whether it may reach the model)
 READS = [
@@ -61,6 +63,10 @@ CALLS = [
     (SWIFT, "the header reads as a button", 'case "AXDisclosureTriangle": return "button"'),
     (SWIFT, "the header's text observed bare, as harness.rs and Compose observe it",
      "if kayaBytesEqual(gotHeader, wantHeader) {\n observed.append(wantHeader)"),
+    (GTK, "a row joining a form's list spans it",
+     "child_widget.set_halign(gtk4::Align::Fill);\n list.append(&child_widget)"),
+    (WINUI, "the app's width fitted to the screen", "resize_request(&target, Some(*v), None)?;\n fit_work_area(&target);"),
+    (WINUI, "the app's height fitted to the screen", "resize_request(&target, None, Some(*v))?;\n fit_work_area(&target);"),
     (HARNESS, "harness.rs refuses a step aimed inside a collapsed expander",
      ".find_map(|t| stage.collapsed_ancestor(*t))\n                .map(out_of_reach);"),
     (HARNESS, "harness.rs reads both halves",
@@ -166,6 +172,18 @@ WIDGET_ROWS = [
     (SWIFT, "the iOS spoken summary's read", "private func kayaAxHintRead(_ identifier: String, description: Bool = false)",
      ['[hit.accessibilityValue ?? "", hit.accessibilityHint ?? ""]'], []),
     # The click's label says what the press does (docs/expander-plan.md K13, §7).
+    # docs/expander-plan.md §7 (2026-10-09, the review's three details): a
+    # For's column inside the declared one spans like the form it is, every
+    # row of a form's list spans it, and an app's size is fitted to the
+    # screen it opens on. A capture is their only other witness.
+    (GTK, "the GTK breadth rule", "fn apply_cross_align(",
+     ["if vertical_container && (is_form(child) || holds_form(child)) {"], []),
+    (GTK, "the GTK form inside a column", "fn holds_form(", ["is_form(w) || holds_form(w)"], []),
+    (GTK, "the GTK form's columns", "fn refresh_form(",
+     ["row.set_halign(gtk4::Align::Fill);", "while let Some(above) = widget.parent() {", "widget = above;"], []),
+    (WINUI, "the WinUI fit", "fn fit_work_area(window: &Window) {",
+     ["work_area_for(at.X, at.Y, size.Width, size.Height)", "clamp_frame(frame, work)",
+      "app_window.MoveAndResize("], []),
     (COMPOSE, "the Compose press's own word", "internal fun kayaExpanderActionWord(",
      ['if (open) "expand_button_content_description_expanded" else "expand_button_content_description_collapsed"',
       'context.resources.getIdentifier('], ["node."]),
@@ -418,6 +436,21 @@ def run(g):
         ("the WinUI header left unnamed and unspoken", WINUI,
          r"\n\s+AutomationProperties::SetHelpText\(&header, &AutomationProperties::GetHelpText\(expander\)\?\)", "\n    Ok(())",
          "the WinUI header Narrator focuses lacks AutomationProperties::SetHelpText(&header"),
+        ("the mac form's body centred", SWIFT,
+         r"kayaExpanderChild\(index, child\)\.frame\(maxWidth: \.infinity, alignment: \.leading\)",
+         "kayaExpanderChild(index, child)", "the SwiftUI arm lacks kayaExpanderChild(index, child).frame"),
+        ("the GTK column around a form hugging", GTK, r"\(is_form\(child\) \|\| holds_form\(child\)\)",
+         "is_form(child)", "the GTK breadth rule lacks if vertical_container && (is_form(child) ||"),
+        ("the GTK form's columns never re-read", GTK, r"\n\s+widget = above;", "",
+         "the GTK form's columns lacks widget = above;"),
+        ("a GTK row joining a form's list hugging", GTK,
+         r"child_widget\.set_halign\(gtk4::Align::Fill\);\n(\s+)list\.append\(&child_widget\)",
+         r"list.append(&child_widget)", "a row joining a form's list spans it"),
+        ("the WinUI height unfitted", WINUI,
+         r"(resize_request\(&target, None, Some\(\*v\)\)\?;)\n\s+fit_work_area\(&target\);", r"\1",
+         "the app's height fitted to the screen"),
+        ("the WinUI fit off the work area", WINUI, r"clamp_frame\(frame, work\)", "frame",
+         "the WinUI fit lacks clamp_frame(frame, work)"),
         ("harness.rs reading through a collapsed expander", HARNESS,
          r"\.find_map\(\|t\| stage\.collapsed_ancestor\(\*t\)\)", ".find_map(|_| None::<usize>)",
          "harness.rs refuses a step aimed inside a collapsed expander"),

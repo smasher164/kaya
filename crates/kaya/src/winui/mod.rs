@@ -16344,6 +16344,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         None,
                     ) {
                         resize_request(&target, Some(*v), None)?;
+                        fit_work_area(&target);
                     }
                 }
                 (WindowProp::Height, Value::F64(v)) => {
@@ -16355,6 +16356,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         Some(*v),
                     ) {
                         resize_request(&target, None, Some(*v))?;
+                        fit_work_area(&target);
                     }
                 }
                 (WindowProp::VetoClose, Value::Bool(on)) => {
@@ -19933,6 +19935,21 @@ fn work_area_for(x: i32, y: i32, width: i32, height: i32) -> Option<(i32, i32, i
         .ok()?;
     let work = area.WorkArea().ok()?;
     Some((work.X, work.Y, work.Width, work.Height))
+}
+
+/// The app's size is a request (DESIGN.md, Presentation contexts), and a
+/// window it asks taller than the screen opened at the cascade origin with
+/// its bottom rows past the screen's edge (docs/expander-plan.md §7): the
+/// frame is fitted the way a remembered one is.
+fn fit_work_area(window: &Window) {
+    let Ok(app_window) = window.AppWindow() else { return };
+    let (Ok(at), Ok(size)) = (app_window.Position(), app_window.Size()) else { return };
+    let frame = (at.X, at.Y, size.Width, size.Height);
+    let Some(work) = work_area_for(at.X, at.Y, size.Width, size.Height) else { return };
+    let (x, y, width, height) = clamp_frame(frame, work);
+    if (x, y, width, height) != frame {
+        let _ = app_window.MoveAndResize(RectInt32 { X: x, Y: y, Width: width, Height: height });
+    }
 }
 
 /// The frame this window opens at when a previous process left one.

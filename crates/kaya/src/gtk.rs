@@ -1725,6 +1725,14 @@ fn set_form(widget: &gtk4::Widget, on: bool) {
     unsafe { widget.set_data(FORM_KEY, on) }
 }
 
+/// A column with a derived form somewhere down its chain of columns: a For's
+/// rows are a column of their own inside the one the app declared
+/// (docs/expander-plan.md §7, the stamped list).
+fn holds_form(widget: &gtk4::Widget) -> bool {
+    container_vertical(widget) == Some(true)
+        && children_of(widget).iter().any(|w| is_form(w) || holds_form(w))
+}
+
 /// A row in a column, or a column in a row — the child's main axis IS the
 /// parent's cross axis, so its own breadth is what the parent's cross box
 /// hands out.
@@ -1794,7 +1802,7 @@ fn apply_cross_align(child: &gtk4::Widget, vertical_container: bool, mode: i64) 
     // A DERIVED FORM SPANS ITS COLUMN (docs/forms-plan.md §2): the boxed
     // list is a surface the platform draws, like a scroll's viewport, and
     // every other backend's form surface takes the width it is offered.
-    if vertical_container && is_form(child) {
+    if vertical_container && (is_form(child) || holds_form(child)) {
         align = gtk4::Align::Fill;
     }
     // An auto grid is width-driven (docs/layout-knobs-plan.md §3).
@@ -8628,6 +8636,7 @@ fn refresh_form(core: &mut CoreState, column_id: u64) {
                     }
                     None => row.clone(),
                 };
+                row.set_halign(gtk4::Align::Fill);
                 list.append(&row);
             }
             column.append(&list);
@@ -8656,12 +8665,15 @@ fn refresh_form(core: &mut CoreState, column_id: u64) {
     }
     // Its own breadth is re-read for it, the stamped-rows shape: a column
     // attached to its parent BEFORE it qualified took the hugging align.
-    let widget = column.upcast::<gtk4::Widget>();
+    let mut widget = column.upcast::<gtk4::Widget>();
     set_form(&widget, qualifies);
-    if let Some(above) = widget.parent() {
-        if let Some(vertical) = container_vertical(&above) {
-            apply_cross_align(&widget, vertical, container_align(&above));
+    while let Some(above) = widget.parent() {
+        let Some(vertical) = container_vertical(&above) else { break };
+        apply_cross_align(&widget, vertical, container_align(&above));
+        if !vertical {
+            break;
         }
+        widget = above;
     }
 }
 
@@ -16072,10 +16084,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         // (docs/forms-plan.md §2); anything else lands in the
                         // column itself and ends the form below.
                         None => match core.form_lists.get(&parent.0) {
-                            Some(list) if child_widget.is::<adw::ActionRow>() => {
-                                list.append(&child_widget)
-                            }
-                            Some(list) if child_widget.is::<adw::ExpanderRow>() => {
+                            Some(list)
+                                if child_widget.is::<adw::ActionRow>()
+                                    || child_widget.is::<adw::ExpanderRow>() =>
+                            {
+                                child_widget.set_halign(gtk4::Align::Fill);
                                 list.append(&child_widget)
                             }
                             _ => column.append(&child_widget),

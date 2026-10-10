@@ -23240,7 +23240,15 @@ struct KayaExpander: View {
             })
         DisclosureGroup(isExpanded: open) {
             if inForm {
-                kayaExpanderBody
+                // A grouped Form centres a row that is not a labelled one
+                // (docs/expander-plan.md §7, the stamped list's body).
+                ForEach(Array(node.laidOut.enumerated()), id: \.element.id) { index, child in
+                    if child.kind == kindLabeled || child.kind == kindExpander {
+                        kayaExpanderChild(index, child)
+                    } else {
+                        kayaExpanderChild(index, child).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
             } else {
                 VStack(alignment: .leading, spacing: node.spacing) { kayaExpanderBody }
                     .padding(node.insetSet ? node.inset : 0)
@@ -23252,12 +23260,16 @@ struct KayaExpander: View {
 
     @ViewBuilder private var kayaExpanderBody: some View {
         ForEach(Array(node.laidOut.enumerated()), id: \.element.id) { index, child in
-            if index == 0 {
-                KayaRender(node: child, flexVertical: true)
-                    .background(KayaExpanderAnchor(id: node.id, header: false))
-            } else {
-                KayaRender(node: child, flexVertical: true)
-            }
+            kayaExpanderChild(index, child)
+        }
+    }
+
+    @ViewBuilder private func kayaExpanderChild(_ index: Int, _ child: KayaNode) -> some View {
+        if index == 0 {
+            KayaRender(node: child, flexVertical: true)
+                .background(KayaExpanderAnchor(id: node.id, header: false))
+        } else {
+            KayaRender(node: child, flexVertical: true)
         }
     }
 

@@ -614,6 +614,26 @@ design between the depth and the breadth.
   form's shared label track reaches the labelled rows in its expander's body.
   Narrator's speech itself was not heard (no audio route on the VM); the
   harness reads the HelpText off the header the template made.
+- MEASURED 2026-10-09 (the review's three details, approved for fixing):
+  (1) WINDOWS: the scene's declared 520x860 window opened at the cascade
+  origin (156,156) on the lane's 1280x800 screen, its height capped by
+  Windows at a 781 client and its frame running 217 px past the 752 work
+  area; shot-window.ps1 copies screen pixels, so the strip past the
+  screen came out white. Not capture timing and not the expander's
+  layout: the window opened where nobody could reach its bottom. The
+  app's width and height now fit the frame into the work area as a
+  remembered frame is (`fit_work_area`; the harness's own resize_window
+  is not fitted), and shot-window.ps1 refuses a frame past the screen.
+  (2) GTK: a For is a column of its own (scene.rs registers CreateFor as
+  a Column), so the stamped list's form sat inside the app's column,
+  which was attached before it held a form and kept the hugging align
+  (`column#2 ... spans 115px of its parent's 478px breadth`); a column
+  with a form down its chain of columns now spans, refresh_form re-reads
+  every column above, and a row joining a form's list fills it (the third
+  stamped row hugged its title). (3) macOS: a grouped Form centres a row
+  that is not a labelled one, so a label in an in-form expander's body
+  sat in the middle; it is placed on the leading edge. Held by
+  tools/lib/expander_routes.py's rows, six cuts watched red.
 - To measure at the breadth: where iOS publishes the expanded state;
   GtkExpander's and AdwExpanderRow's keys and the AT-SPI names on the bus;
   AdwExpanderRow nested in another's list; which door WinUI's header click
