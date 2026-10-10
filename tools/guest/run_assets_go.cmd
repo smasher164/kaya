@@ -3,8 +3,6 @@ cd /d C:\kaya
 rem llvm-mingw directory is versioned; find whichever is present.
 for /d %%d in (C:\kaya\llvm-mingw-*) do set MINGW=%%d\bin
 set PATH=C:\kaya;%MINGW%;C:\kaya\go127\go\bin;C:\Program Files\Go\bin;%PATH%
-set CGO_ENABLED=1
-set CC=aarch64-w64-mingw32-clang
 rem NO ASSET LINE HERE, and on THIS scene that is the whole
 rem point: the guest names two assets and reads no path and no
 rem environment variable, and the census it freezes is of the
@@ -24,8 +22,12 @@ set KAYA_SELFTEST=assets
 set KAYA_VERB_TRACE=C:\kaya\flightrec\assets_go-vtrace.txt
 rem Build INTO C:\kaya: the exe must sit beside resources.pri for
 rem ms-appx (XamlControlsResources) to resolve — the adjacency probe.
-go build -o C:\kaya\assets_go.exe dev.kaya/guests/go/cmd > C:\kaya\out_assets_go.txt 2>&1
-if errorlevel 1 goto done
-assets_go.exe >> C:\kaya\out_assets_go.txt 2>&1
-:done
+rem One Go link a lane, deploy-win's go-warm; the leg runs a copy under its own name
+rem (docs/traps.md, the Windows Go legs linked the guest once each).
+copy /y C:\kaya\goguest.exe C:\kaya\assets_go.exe >nul 2>&1 || goto nocopy
+assets_go.exe > C:\kaya\out_assets_go.txt 2>&1
 echo EXIT=%ERRORLEVEL% >> C:\kaya\out_assets_go.txt
+exit /b
+:nocopy
+echo run_assets_go.cmd: C:\kaya\goguest.exe did not copy to C:\kaya\assets_go.exe; go-warm builds it, and a running assets_go.exe holds the name> C:\kaya\out_assets_go.txt
+echo EXIT=1 >> C:\kaya\out_assets_go.txt

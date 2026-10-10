@@ -117,7 +117,8 @@ def check(root):
             # the .py clause's business, and dotnet/java ship their own
             # guest trees whole.
             if base in ("python", "pythonw", "java", "dotnet", "cmd",
-                        "wscript", "cscript", "schtasks", "taskkill"):
+                        "wscript", "cscript", "schtasks", "taskkill",
+                        "goguest"):
                 continue
             scene = base[:-3] if base.endswith("_go") else base
             if scene not in exes:
@@ -317,6 +318,38 @@ def check(root):
                 fail(f"{suites_rel}'s run_one launch at its line {line} "
                      f"carries no XDG_STATE_HOME=\"$kaya_state\" — that leg "
                      f"shares the app's harness tree with every other")
+
+    # --- ONE GO BUILD A LANE (docs/traps.md, the Windows Go legs linked the
+    # guest once each): go-warm.cmd builds goguest.exe and keeps it, and
+    # every Go launcher runs a copy under its own name.
+    warm_rel = "tools/guest/go-warm.cmd"
+    warm = (root / warm_rel).read_text(encoding="utf-8", errors="replace")
+    if not re.search(r"^go build -o C:\\kaya\\goguest\.exe dev\.kaya/guests/go/cmd ",
+                     warm, re.M):
+        fail(f"{warm_rel} does not build C:\\kaya\\goguest.exe, the one binary "
+             f"every Go launcher copies")
+    if re.search(r"^del C:\\kaya\\goguest\.exe", warm[warm.find("go build"):], re.M):
+        fail(f"{warm_rel} deletes goguest.exe after building it, so every Go "
+             f"leg refuses with nothing to copy")
+    go_launchers = 0
+    for path in sorted(guest.glob("run_*.cmd")):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        runs = re.findall(r"^(\S*\w+_go\.exe) > C:\\kaya\\out_", text, re.M)
+        if "dev.kaya/guests/go/cmd" in text:
+            fail(f"tools/guest/{path.name} builds the Go guest itself — a link "
+                 f"per leg on the VM's cores; it runs a copy of go-warm's "
+                 f"C:\\kaya\\goguest.exe instead")
+        if not runs:
+            continue
+        go_launchers += 1
+        exe = runs[0] if runs[0].startswith("C:\\") else f"C:\\kaya\\{runs[0]}"
+        if f"copy /y C:\\kaya\\goguest.exe {exe} >nul 2>&1 || goto nocopy" not in text:
+            fail(f"tools/guest/{path.name} runs {runs[0]} without first copying "
+                 f"C:\\kaya\\goguest.exe to {exe}, so it runs whatever an earlier "
+                 f"lane left under that name")
+    if go_launchers < 60:
+        fail(f"only {go_launchers} Go launcher(s) read — this census read "
+             f"almost nothing and would agree with anything")
 
     # --- NO VERDICT OVER A LIVE SAMPLER ------------------------------
     # docs/deferred.md's LEAK entry: the windows lane dropped a stop file
@@ -585,6 +618,27 @@ negative(
     r"^rmdir /s /q C:\\kaya\\legs\\todos_go 2>nul\r?\n", "",
     "never clears",
     "N7d (a leg that reads what the last run left)")
+
+negative(
+    "N7h", "put a per-leg Go build back", "tools/guest/run_todos_go.cmd",
+    r"^copy /y C:\\kaya\\goguest\.exe C:\\kaya\\todos_go\.exe >nul 2>&1 \|\| goto nocopy\r?$",
+    "go build -o C:\\\\kaya\\\\todos_go.exe dev.kaya/guests/go/cmd",
+    "builds the Go guest itself",
+    "N7h (a Go leg linking the guest on the VM again)")
+
+negative(
+    "N7i", "ran a Go exe it never copied", "tools/guest/run_todos_go.cmd",
+    r"^copy /y C:\\kaya\\goguest\.exe C:\\kaya\\todos_go\.exe ",
+    "copy /y C:\\\\kaya\\\\goguest.exe C:\\\\kaya\\\\ghost_go.exe ",
+    "without first copying",
+    "N7i (a Go leg running whatever an earlier lane left)")
+
+negative(
+    "N7j", "deleted the Go build after warming it", "tools/guest/go-warm.cmd",
+    r"^(echo EXIT=%ERRORLEVEL% >> C:\\kaya\\out_gowarm\.txt)$",
+    "\\1\ndel C:\\\\kaya\\\\goguest.exe 2>nul",
+    "deletes goguest.exe after building it",
+    "N7j (go-warm leaving nothing for the legs to copy)")
 
 negative(
     "N8", "took the lane's sampler wait out", "tools/deploy-win.py",

@@ -503,6 +503,29 @@ if _missing:
     sys.exit(1)
 timing("build")
 
+# THE UNIT TEST BINARY BUILDS ON THE HOST WHILE THE VM IS STAGED, warmed and
+# probed: it touches no VM, and its 90-110 s when the core moved used to be
+# serial with all of that (docs/measurements/windows-lane-2026-10-09.md).
+# Joined in unit_tests_on_windows(), before any leg runs.
+UNIT_JSON = ROOT / "target/win-unit-tests.json"
+_unit_json = open(UNIT_JSON, "w", encoding="utf-8")
+UNIT_BUILD = subprocess.Popen(
+    ["cargo", "xwin", "test", "--locked", "--features", "harness",
+     "--release", "--target", "aarch64-pc-windows-msvc", "-p", "kaya",
+     "--lib", "--no-run", "--message-format=json"],
+    cwd=ROOT, stdout=_unit_json, start_new_session=True)
+
+
+def stop_unit_build():
+    if UNIT_BUILD.poll() is None:
+        os.killpg(UNIT_BUILD.pid, signal.SIGKILL)
+        UNIT_BUILD.wait()
+        print("deploy-win: the unit test build was still running at exit and "
+              f"was stopped (rc={UNIT_BUILD.returncode})", file=sys.stderr)
+
+
+atexit.register(stop_unit_build)
+
 must_ssh("cmd /c if not exist C:\\kaya mkdir C:\\kaya")
 must_ssh("cmd /c if not exist C:\\kaya\\bindings\\python mkdir "
          "C:\\kaya\\bindings\\python")
@@ -958,7 +981,7 @@ must_ssh('cmd /c "' + NODE_PRESENT + f' || (echo deploy-win: node v{NODE_VERSION
 # test VM — python/go/dotnet processes are always kaya guests — so
 # killing by image name is safe.
 def kill_guests(log=None):
-    # Two name families beyond <scene>.exe: the go legs build
+    # Two name families beyond <scene>.exe: the go legs copy goguest.exe to
     # <scene>_go.exe (the pri-adjacency arrangement), and the C# legs
     # run the kaya-guests.exe apphost — both held kaya.dll through a
     # deploy once (2026-07-22).
@@ -1386,13 +1409,9 @@ def guest_unit_module(file, module, filt, blurb, hint):
 def unit_tests_on_windows():
     print("== unit tests on the guest (aarch64-pc-windows-msvc) ==",
           flush=True)
-    json_path = ROOT / "target/win-unit-tests.json"
-    with open(json_path, "w", encoding="utf-8") as jf:
-        built = subprocess.run(
-            ["cargo", "xwin", "test", "--locked", "--features", "harness",
-             "--release", "--target", "aarch64-pc-windows-msvc", "-p", "kaya",
-             "--lib", "--no-run", "--message-format=json"],
-            cwd=ROOT, stdout=jf, check=False).returncode
+    json_path = UNIT_JSON
+    built = UNIT_BUILD.wait()
+    _unit_json.close()
     if built != 0:
         print("deploy-win: the unit test binary would not build for windows.",
               file=sys.stderr)
@@ -1475,16 +1494,12 @@ def unit_tests_on_windows():
         sys.exit(1)
 
 
-unit_tests_on_windows()
-timing("unit-tests")
-
 
 def go_warm():
-    """ONE cgo COMPILE, ALONE, BEFORE THE POOL OPENS: every Go leg builds
-    the same package (dev.kaya/guests/go/cmd) and shares Go's build cache,
-    so a regenerated binding had the first four legs compile it at once
-    and read 105/96/84/74s (docs/traps.md: The Windows lane's first
-    matrix after a spec change). The verdict is the build's own exit."""
+    """THE LANE'S ONE GO BUILD, ALONE, BEFORE THE POOL OPENS: every Go leg
+    runs a copy of C:\\kaya\\goguest.exe under its own name (docs/traps.md:
+    The Windows lane's first matrix after a spec change, and the Windows Go
+    legs linked the guest once each). The verdict is the build's own exit."""
     run_ssh('cmd /c "del C:\\kaya\\out_gowarm.txt 2>nul & exit /b 0"')
     rc = run_ssh("cmd /c C:\\kaya\\go-warm.cmd")
     out = (run_ssh_out("cmd /c type C:\\kaya\\out_gowarm.txt")
@@ -1903,11 +1918,24 @@ _restarted = False
 status = 0
 
 
-def _claim_slot():
+_group_waiting = [0]
+
+
+def _claim_slot(grouped=False):
+    """A leg holding its SERIAL_GROUPS lock takes the next free slot ahead of
+    the pool: without that its group waited behind every other leg of the
+    block, 81 s for the second capture leg on the first measured run
+    (docs/measurements/windows-lane-2026-10-09.md)."""
     with _slots_lock:
-        while not _slots:
-            _slots_lock.wait()
-        return _slots.pop(0)
+        if grouped:
+            _group_waiting[0] += 1
+        try:
+            while not _slots or (not grouped and _group_waiting[0]):
+                _slots_lock.wait()
+            return _slots.pop(0)
+        finally:
+            if grouped:
+                _group_waiting[0] -= 1
 
 
 def _release_slot(slot):
@@ -1919,7 +1947,7 @@ def _release_slot(slot):
         # a leg that aims REAL INPUT at screen pixels (dnd's `drag`) then
         # presses the taskbar (docs/traps.md: TWO OF THE SIX WINDOW TILES).
         _slots.sort()
-        _slots_lock.notify()
+        _slots_lock.notify_all()
 
 
 # THE SECOND ACT (docs/tasks-s9-plan.md R6). Act one exited at its `relaunch`
@@ -2204,11 +2232,20 @@ def secure_refusals(name, log):
     return secure_scan.refusals(script, transcripts)
 
 
+_group_locks = {g: threading.Lock() for g in lane.SERIAL_GROUPS}
+
+
 def _leg_worker(name):
+    group = lane.serial_group(name)
+    with _group_locks[group] if group else contextlib.nullcontext():
+        _leg_worker_slot(name, group is not None)
+
+
+def _leg_worker_slot(name, grouped):
     # Line-buffered: a lane killed mid-leg keeps the evidence so far.
     with open(LEGS_DIR / f"{name}.log", "w", encoding="utf-8",
               errors="replace", buffering=1) as log:
-        slot = _claim_slot()
+        slot = _claim_slot(grouped)
         (LEGS_DIR / f"{name}.slot").write_text(f"{slot}\n", encoding="utf-8")
         t0 = time.monotonic()
         leg_epoch = int(time.time())
@@ -2402,8 +2439,6 @@ def drain_suites():
         secs = (sfile.read_text(encoding="utf-8").strip()
                 if sfile.is_file() else "?")
         print(f"{name}: {verdict} ({secs}s)", flush=True)
-    if any(lane.capture_leg(n) for n in _leg_names):
-        capture_devices_stop()
     _leg_names.clear()
 
 
@@ -2672,6 +2707,9 @@ if any(lane.media_leg(leg) for leg in queued_legs()):
     FR.media_log = ROOT / "target/windows-media-server.log"
     timing("media-server")
 
+unit_tests_on_windows()
+timing("unit-tests")
+
 rec_suite_start()
 if SUITE == "all":
     # FIRST, AND ALONE: the probe drives a real border drag and a width
@@ -2681,10 +2719,16 @@ if SUITE == "all":
         status = 1
     timing("caption-centre")
     # THE ROSTER IS DATA: tools/lib/lanes/win.py, blocks between drains.
-    for block in lane.ORDER:
+    for at, block in enumerate(lane.ORDER):
         for leg in block:
             run_suite(leg)
         drain_suites()
+        # THE DEVICES STAY UP ACROSS BLOCKS THAT HOLD CAPTURE LEGS and go down
+        # before the first that holds none (a start and a stop around each of
+        # the twelve once cost 2-4 s apiece; docs/measurements/windows-lane-2026-10-09.md).
+        following = lane.ORDER[at + 1] if at + 1 < len(lane.ORDER) else []
+        if not any(lane.capture_leg(leg) for leg in following):
+            capture_devices_stop()
 elif SUITE == "caption-centre":
     if not caption_centre_probe():
         status = 1
@@ -2715,6 +2759,7 @@ else:
         if lane.alone(leg):
             drain_suites()
 drain_suites()
+capture_devices_stop()
 timing("suites")
 # The media server stops HERE, before the verdict, and proves it is gone
 # (tools/lib/media_server.py raises otherwise).

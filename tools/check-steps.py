@@ -3719,6 +3719,57 @@ if out:
     print("\n".join(out), file=sys.stderr)
     status = 1
 
+
+# The win lane's camera rule (docs/capture-plan.md §7): two capture legs
+# never run at once. A pooled capture leg is held by its SERIAL_GROUPS
+# group, and the runner's worker takes that group's lock before its slot.
+def win_camera_serial(order, group_of, runner, path):
+    bad = []
+    seen = 0
+    for block in order:
+        for leg in block:
+            if not re.match(r"capture(_denied)?_", leg):
+                continue
+            seen += 1
+            if list(block) != [leg] and group_of(leg) is None:
+                bad.append(f'{path}: leg "{leg}" shares a block with '
+                           f"{len(block) - 1} other leg(s) and no SERIAL_GROUPS "
+                           f"group holds it to one capture leg at a time")
+    if seen == 0:
+        bad.append(f"{path}: no capture leg found (the scene must stay wired)")
+    worker = re.search(r"^def _leg_worker\(name\):\n(.*?)^def ", runner,
+                       re.M | re.S)
+    if not worker or not re.search(
+            r"group = lane\.serial_group\(name\)\n\s+with _group_locks\[group\] "
+            r"if group else contextlib\.nullcontext\(\):\n\s+"
+            r"_leg_worker_slot\(name, group is not None\)",
+            worker.group(1)):
+        bad.append("tools/deploy-win.py: _leg_worker does not take the leg's "
+                   "SERIAL_GROUPS lock before it claims a slot, so a group's "
+                   "legs run at once")
+    return bad
+
+
+_win_runner = read_rel("tools/deploy-win.py")
+if not win_camera_serial([["layout_java", "capture_rust", "capture_go"]],
+                         lambda leg: None, _win_runner, "-"):
+    selftest_fail("pooled capture legs with no serial group passed")
+_cut, _n = sub_count(r"with _group_locks\[group\] if group else "
+                   r"contextlib\.nullcontext\(\):\n\s+_leg_worker_slot\(name, group is not None\)",
+                   "_leg_worker_slot(name, False)", _win_runner)
+print(f"check-steps: self-test the runner's group lock cut, {_n} substitution(s)")
+if _n != 1 or not win_camera_serial(win_lane.ORDER, win_lane.serial_group,
+                                    _cut, "-"):
+    selftest_fail("a runner that ignores SERIAL_GROUPS passed")
+out = win_camera_serial(win_lane.ORDER, win_lane.serial_group, _win_runner,
+                        "tools/lib/lanes/win.py")
+if out:
+    print("check-steps: the win lane's capture legs must never run two at "
+          "once (docs/capture-plan.md §7 — each opens the virtual camera "
+          "ExclusiveControl):", file=sys.stderr)
+    print("\n".join(out), file=sys.stderr)
+    status = 1
+
 # THE SAVE LEGS ARE MUTUALLY EXCLUSIVE ON THE MAC LANE, and the shared
 # thing is the PANEL rather than the scene (the refusal below carries the
 # measurement). THE OTHER TWO DESKTOP RUNNERS ARE NOT IN THIS LOOP by
@@ -4768,14 +4819,14 @@ def go_desktop_scenes(table_text, table, runners):
         if kind == "cmd-dir":
             selected = set()
             for name, src in payload:
-                if "dev.kaya/guests/go/cmd" not in src:
+                if "copy /y C:\\kaya\\goguest.exe " not in src:
                     bad.append(f"{name}: a go launcher that does not "
-                               f"build dev.kaya/guests/go/cmd")
+                               f"run go-warm's C:\\kaya\\goguest.exe")
                     continue
                 names = re.findall(r"set KAYA_SELFTEST=([A-Za-z0-9_]+)",
                                    src)
                 if not names:
-                    bad.append(f"{name}: builds the Go guest and sets "
+                    bad.append(f"{name}: runs the Go guest and sets "
                                f"no KAYA_SELFTEST, so it runs whatever "
                                f"the default is")
                 selected.update(names)
@@ -4826,8 +4877,8 @@ if not go_desktop_scenes(
 if not go_desktop_scenes(
         SAMPLE_TABLE, "-",
         [("-", "cmd-dir", [("run_ghost_go.cmd",
-          "set KAYA_SELFTEST=ghost\ngo build -o C:\\kaya\\ghost_go.exe "
-          "dev.kaya/guests/go/cmd\n")])]):
+          "set KAYA_SELFTEST=ghost\ncopy /y C:\\kaya\\goguest.exe "
+          "C:\\kaya\\ghost_go.exe >nul 2>&1 || goto nocopy\n")])]):
     selftest_fail("a windows launcher naming a scene the table lacks "
                   "passed — the .cmd pattern is not reading the "
                   "launchers")

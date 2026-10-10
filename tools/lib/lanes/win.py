@@ -252,6 +252,12 @@ ORDER = [
     # chrome in any of these. milestone2's five legs are the bare
     # language names (their launchers are run_rust.cmd and kin).
     [
+     # THE CAPTURE LEGS, FIRST so their one-at-a-time run ends inside the
+     # pool's: SERIAL_GROUPS' camera group, beside everything else here.
+     "capture_rust", "capture_python", "capture_js", "capture_go",
+     "capture_csharp", "capture_java",
+     "capture_denied_rust", "capture_denied_python", "capture_denied_js",
+     "capture_denied_go", "capture_denied_csharp", "capture_denied_java",
      "rust", "python", "js", "go", "csharp", "java",
      "entry_rust", "entry_python", "entry_js", "entry_go", "entry_csharp", "entry_java",
      "gallery_rust", "gallery_python", "gallery_js", "gallery_go", "gallery_csharp", "gallery_java",
@@ -316,6 +322,10 @@ ORDER = [
     # the leg's own window. The local server is the runner's
     # (tools/lib/media_server.py, LANE_PORTS["windows"]).
     [
+     # The bound (docs/media-plan.md §7c): a source the server never answers
+     # fails `timeout`; progressive, so it pools. FIRST: its 37 s ended the
+     # block when it was submitted last.
+     "media_timeout_rust",
      "media_formats_rust", "media_formats_python", "media_formats_js",
      "media_formats_go", "media_formats_csharp", "media_formats_java",
      "media_feed_rust", "media_feed_python", "media_feed_js",
@@ -323,9 +333,6 @@ ORDER = [
      # The reader (docs/media-plan.md §8): nothing played, nothing typed.
      "media_reader_rust", "media_reader_python", "media_reader_js",
      "media_reader_go", "media_reader_csharp", "media_reader_java",
-     # The bound (docs/media-plan.md §7c): a source the server never answers
-     # fails `timeout`; progressive, so it pools.
-     "media_timeout_rust",
     ],
     # media_delivery TWO AT A TIME, media_tracks ALONE (RULED 2026-10-01 and
     # amended 2026-10-06, docs/media-plan.md §7c): Media Foundation's adaptive
@@ -343,14 +350,6 @@ ORDER = [
     ["media_tracks_go"],
     ["media_tracks_csharp"],
     ["media_tracks_java"],
-    # EACH CAPTURE LEG ALONE (docs/capture-plan.md §7): the arm opens its
-    # devices ExclusiveControl, so two guests on one virtual camera would
-    # answer each other in_use; the runner starts the lane's devices
-    # (CAPTURE_DEVICES) around these legs and stops them after.
-    ["capture_rust"], ["capture_python"], ["capture_js"], ["capture_go"],
-    ["capture_csharp"], ["capture_java"],
-    ["capture_denied_rust"], ["capture_denied_python"], ["capture_denied_js"],
-    ["capture_denied_go"], ["capture_denied_csharp"], ["capture_denied_java"],
     # EACH media_session LEG ALONE: the system's media session manager is one
     # per desktop, every unpackaged kaya process wears the same declared app id
     # in it, and the leg sends commands through it to whichever session
@@ -813,6 +812,19 @@ ORDER = [
      "clipboard_java",
     ],
 ]
+
+
+# LEGS THAT RUN ONE AT A TIME AMONG THEMSELVES AND POOL WITH THE REST OF THEIR
+# BLOCK: group -> the scenes in it. The camera group (docs/capture-plan.md §7):
+# the arm opens its devices ExclusiveControl, so two guests on one virtual
+# camera would answer each other in_use, and nothing else in the lane opens
+# them. The runner keeps the lane's devices up around every block holding one.
+SERIAL_GROUPS = {"camera": ("capture", "capture_denied")}
+
+
+def serial_group(leg):
+    scene = scene_lang(leg)[0]
+    return next((g for g, scenes in SERIAL_GROUPS.items() if scene in scenes), None)
 
 
 def legs():

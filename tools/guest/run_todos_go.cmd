@@ -3,8 +3,6 @@ cd /d C:\kaya
 rem llvm-mingw directory is versioned; find whichever is present.
 for /d %%d in (C:\kaya\llvm-mingw-*) do set MINGW=%%d\bin
 set PATH=C:\kaya;%MINGW%;C:\kaya\go127\go\bin;C:\Program Files\Go\bin;%PATH%
-set CGO_ENABLED=1
-set CC=aarch64-w64-mingw32-clang
 rem THE LEG'S OWN STATE HOME (docs/tasks-s4-plan.md P7): the harness's
 rem scratch -- the act-two marker, the preferences domain and the app's
 rem data directory -- is ONE tree per app, and this lane runs many legs
@@ -23,8 +21,12 @@ rem in XamlControlsResources, so `go run` (which launches from a temp
 rem build directory) fail-fasts at the first layout pass. Never `go run`
 rem for a WinUI leg — docs/traps.md, "WinUI resource resolution is
 rem anchored to the PROCESS exe's directory".
-go build -o C:\kaya\todos_go.exe dev.kaya/guests/go/cmd > C:\kaya\out_todos_go.txt 2>&1
-if errorlevel 1 goto done
-todos_go.exe >> C:\kaya\out_todos_go.txt 2>&1
-:done
+rem One Go link a lane, deploy-win's go-warm; the leg runs a copy under its own name
+rem (docs/traps.md, the Windows Go legs linked the guest once each).
+copy /y C:\kaya\goguest.exe C:\kaya\todos_go.exe >nul 2>&1 || goto nocopy
+todos_go.exe > C:\kaya\out_todos_go.txt 2>&1
 echo EXIT=%ERRORLEVEL% >> C:\kaya\out_todos_go.txt
+exit /b
+:nocopy
+echo run_todos_go.cmd: C:\kaya\goguest.exe did not copy to C:\kaya\todos_go.exe; go-warm builds it, and a running todos_go.exe holds the name> C:\kaya\out_todos_go.txt
+echo EXIT=1 >> C:\kaya\out_todos_go.txt

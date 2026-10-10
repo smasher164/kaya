@@ -246,6 +246,18 @@ def winui_findings(source):
                    f"(Some(id.0)) — ungated, a plain textarea submits (S2)")
     if "(NativeWidget::Textarea(_), Prop::Submits, Value::Bool(on)) => {" not in src:
         out.append(f"{WINUI}: no Prop::Submits apply arm — SUBMITS is never written")
+    # The harness's Return: a Return that inserts nothing leaves before the
+    # ledger wait, or every `press return` on an entry waits 2 s and prints a
+    # false sentence (docs/traps.md, the WinUI Return that waited for a newline).
+    typing = block_after(src, "    fn type_text(&self, text: &str)")
+    ledger = typing.find("core.banked_text.get(&id)")
+    skip = re.search(r"core\.textarea_ids\.contains\(&id\) && "
+                     r"!SUBMITS\.with_borrow\(\|set\| set\.contains\(&id\)\)[^;]*;\s*"
+                     r"if text\.contains\('\\n'\) && !inserts_return \{\s*return;", typing)
+    if ledger < 0 or not skip or skip.start() > ledger:
+        out.append(f"{WINUI}: type_text waits for the ledger to bank a Return that inserts "
+                   f"nothing (an entry's, a submitting textarea's) — 2 s a press and a false "
+                   f"'the ledger never saw' sentence")
     out.extend(only_through_doors(WINUI, src, emit, [door]))
     return out
 
@@ -913,7 +925,13 @@ n_win_verb = gate.doctor("the harness's nudge committing past the door", REAL[WI
 watched("a WinUI verb that commits without the user's door", {**REAL, WINUI: n_win_verb},
         "winui_number_settle is called")
 
-gate.negatives_ran(56)
+n_win_return = gate.doctor("the harness's Return skip cut", REAL[WINUI],
+                           r"if text\.contains\('\\n'\) && !inserts_return \{",
+                           "if false {")
+watched("a WinUI harness Return that waits for a newline nobody inserts",
+        {**REAL, WINUI: n_win_return}, "waits for the ledger to bank a Return")
+
+gate.negatives_ran(57)
 
 for line in census(REAL):
     gate.finding(line)

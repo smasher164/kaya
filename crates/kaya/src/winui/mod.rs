@@ -24600,6 +24600,19 @@ impl crate::harness::Stage for WinUiStage {
             return;
         }
         let Some((id, before)) = before else { return };
+        // RETURN THAT INSERTS NOTHING: an entry's Return and a submitting
+        // textarea's are commands, and the app may clear the field in answer,
+        // so the ledger never banks `text`; the answer is the next step's
+        // observable, as the number field's. Waiting here cost every such
+        // press 2 s and printed the sentence below for a key that landed
+        // (docs/traps.md, the WinUI Return that waited for a newline).
+        let inserts_return = Self::on_ui_read(move |core| {
+            Ok(core.textarea_ids.contains(&id) && !SUBMITS.with_borrow(|set| set.contains(&id)))
+        })
+        .unwrap_or(true);
+        if text.contains('\n') && !inserts_return {
+            return;
+        }
         let want = format!("{before}{text}");
         for _ in 0..400 {
             let seen = Self::on_ui_read(move |core| Ok(core.banked_text.get(&id).cloned()))

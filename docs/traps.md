@@ -9185,6 +9185,8 @@ warm cache whatever the spec did. MEASURED on the lane standalone with
 was four copies of it sharing the VM's cores with the other four lanes.
 A duration reading that lands on the first matrix after a spec change
 and not the next is this class.
+Since 2026-10-09 go-warm's build is the lane's only link and every Go
+leg runs a copy of it ("The Windows Go legs linked the guest once each").
 
 ## A BLOB HANDLE DIES WITH ITS BATCH, and a per-record prefetch misses every record nobody added to it — with no error on any side (measured 2026-09-03)
 
@@ -15310,3 +15312,54 @@ widget tree beside the bus trace, on both protocols). The same rows in a
 shallow window read fine. Those four walks now go to `ATSPI_DEPTH` (40).
 GUARD: the tasks and tasksrtl legs' `expect_ax checkbox@hide_badge[s]`, which
 reads below the old depth on every linux run.
+
+## The Windows Go legs linked the guest once each (measured 2026-10-09)
+
+Every Windows Go launcher ran `go build -o C:\kaya\<leg>.exe
+dev.kaya/guests/go/cmd` before its guest. go-warm had already compiled the
+package, so each of the lane's 71 Go legs paid a cgo link on the VM's cores,
+inside the pool. Standalone that was 2.8 s a Go leg over the harness's own
+time against 1.3-2.1 s for the other languages; in the matrices of 2026-10-07
+to 2026-10-09 it was 3.7-9.2 s, since the pools are CPU-bound on the VM's six
+cores (88-100% busy with a run queue of 18-37 during the first pool) and a
+link competes with every neighbour. go-warm now builds `C:\kaya\goguest.exe`
+and keeps it, and each launcher copies it to the leg's own exe name (the
+name kill_guests sweeps and the notification identity derive from) and
+refuses with a sentence when the copy fails. The Go legs' seconds went from
+383 to 290 on a standalone lane. GUARD: check-staging's one-Go-build clause
+(no launcher builds the package, every Go exe run is first copied from
+goguest.exe, go-warm keeps it), watched by N7h, N7i and N7j.
+
+## The WinUI Return that waited for a newline (measured 2026-10-09)
+
+`press return` is `type_text("\n")` on WinUI, and type_text waited up to 2 s
+for the field's ledger to bank the typed text. An entry's Return and a
+submitting textarea's insert nothing, and the app may clear the field in
+answer, so the wait always ran out: 2 s a press, then `kaya: type "\n": the
+ledger never saw "milk\n" ... something else took them`, a sentence about a
+key that had landed. A standalone lane printed it 29 times on green legs (four
+per submit leg, five in chat_go). type_text now leaves after posting when the
+text holds a Return that inserts nothing, as the number field already did;
+the submit block went from 17 to 7 s and chat_go from 34 to 22 s. GUARD:
+check-submit's WinUI clause holds the skip ahead of the ledger wait, watched
+red with the skip cut.
+
+## A grouped Windows leg waited behind its whole pool for a slot (measured 2026-10-09)
+
+The windows lane's capture legs pool with the first block under a
+SERIAL_GROUPS lock (one at a time among themselves). With the slot pool's
+`Condition.notify()`, a freed slot went to whichever of the ~180 waiting
+threads woke first, so the second capture leg took its group lock at 12 s and
+its slot at 93 s, and the capture run stretched the block from 100 to 133 s.
+A leg holding a group lock now claims ahead of the rest (`_claim_slot(grouped)`,
+`notify_all`), and the block read 103-111 s with the twelve capture legs in it.
+GUARD: check-steps' win_camera_serial reads the worker passing the group to
+the claim, watched red with the lock cut.
+
+## A file put back with its old mtime is not rebuilt (measured 2026-10-09)
+
+Restoring a saved change set with `shutil.copy2` over files git had just
+checked out put the OLDER modification times back, and cargo, which compares
+mtimes against its fingerprints, called the core up to date: the windows build
+took 3 s and `tools/build-id.py --verify` refused the lane with `kaya.dll:
+STALE`. Touch what a restore writes. GUARD: build-id's verify, which caught it.
