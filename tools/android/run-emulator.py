@@ -1514,6 +1514,44 @@ def restore_touch_mode(serial, log):
     return after == "1"
 
 
+def hold_upright(serial, log, when):
+    """docs/traps.md: A rotation put back from the home screen comes back"""
+    said = adb_out(serial, "shell", "cmd", "window",
+                   "user-rotation").strip()
+    if said == "lock 0":
+        print(f"rotation at {when}: lock 0 on {serial}", file=log)
+        return True
+    adb(serial, "shell", "cmd", "window", "user-rotation", "lock", "0",
+        stdout=log, stderr=log)
+    after = adb_out(serial, "shell", "cmd", "window",
+                    "user-rotation").strip()
+    turned = ("this leg's app came up turned" if when == "leg start"
+              else "Settings came up turned")
+    print(f"rotation at {when}: {said or 'unreadable'!r} on {serial}, read "
+          f"with an unspecified-orientation activity in front; the lane's "
+          f"scenes assume the natural rotation, and {turned}. Put back "
+          f"with that activity still in front, read back {after!r} "
+          f"(docs/traps.md, a rotation put back from the home screen)",
+          file=log)
+    return False
+
+
+def upright_at_lane_start(serial):
+    adb(serial, "shell", "am", "start", "-W", "-n", SETTINGS_ACTIVITY,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    hold_upright(serial, sys.stdout, "lane start")
+    adb(serial, "shell", "am", "force-stop", SETTINGS_ACTIVITY.split("/")[0],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+_upright = [threading.Thread(target=upright_at_lane_start, args=(_serial,))
+            for _serial in [*SERIALS, TABLET_SERIAL]]
+for _thread in _upright:
+    _thread.start()
+for _thread in _upright:
+    _thread.join()
+
+
 def run_apk_on(serial, name, apk, component, script, extras,
                remount_expect, two_act, log, rebooted=False):
     """One leg on one device, everything it prints going to its own
@@ -1629,6 +1667,9 @@ def run_apk_on(serial, name, apk, component, script, extras,
     adb(serial, "shell", "am", "start", "-W", "-n", component, "--es",
         "KAYA_SELFTEST", script, *rec_extra, *extras,
         stdout=subprocess.DEVNULL, stderr=log)
+    upright = hold_upright(serial, log, "leg start")
+    if not upright:
+        failed = True
     # POLLED DUMPS, NEVER ONE STREAM: a streaming watch wedged for its
     # whole 60s with the verdict already sitting in the buffer it was
     # reading (docs/traps.md 2026-08-28). NO PER-LEG SCREENSHOT: 48 of
@@ -1681,7 +1722,7 @@ def run_apk_on(serial, name, apk, component, script, extras,
     # ordinary verdict below is act TWO's, out of the file.
     verdict_pat = (r"^.*KAYA_SELFTEST: ACT 1 (?:OK|FAILED).*$" if two_act
                    else r"^.*KAYA_SELFTEST: (?:OK|FAILED).*$")
-    for _ in range(240):
+    for _ in range(240 if upright else 0):
         dump = kaya_logcat(serial)
         m = re.search(verdict_pat, dump, re.M)
         if m:
@@ -1898,6 +1939,16 @@ def run_apk_on(serial, name, apk, component, script, extras,
         # emulator ran the leg, and the dump below is only chaseable
         # there.
         print(f"leg device: {serial}", file=log)
+        windows = adb_out(serial, "shell", "dumpsys", "window")
+        turns = [ln.strip() for ln in windows.splitlines()
+                 if re.search(r"ROTATION_\d+ to ROTATION_|mode=USER_ROTATION"
+                              r"|caller=", ln)]
+        print(f"rotation at the verdict: "
+              f"{adb_out(serial, 'shell', 'cmd', 'window', 'user-rotation').strip()!r} "
+              f"(blind to a turned user rotation while a portrait-only window "
+              f"such as the launcher is in front); the window manager's last "
+              f"rotation records:", file=log)
+        print("\n".join(turns[-12:]) or "  none", file=log)
         print("host load at the verdict: {:.1f} / {:.1f} / {:.1f} (1, 5, 15 min) "
               "on {} cores".format(*os.getloadavg(), os.cpu_count()), file=log)
         # THREE TAGS, NOT ONE: AndroidRuntime carries JVM exceptions

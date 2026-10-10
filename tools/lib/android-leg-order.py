@@ -362,6 +362,59 @@ def storage_problem(text: str) -> str | None:
     return None
 
 
+UPRIGHT_LEG = ('    upright = hold_upright(serial, log, "leg start")\n'
+               "    if not upright:\n        failed = True\n")
+UPRIGHT_START = ["def upright_at_lane_start(serial):",
+                 '"am", "start", "-W", "-n", SETTINGS_ACTIVITY,',
+                 'hold_upright(serial, sys.stdout, "lane start")',
+                 '"am", "force-stop", SETTINGS_ACTIVITY.split("/")[0],']
+UPRIGHT_SWEEP = ("_upright = [threading.Thread(target=upright_at_lane_start, "
+                 "args=(_serial,))\n"
+                 "            for _serial in [*SERIALS, TABLET_SERIAL]]\n")
+
+
+def upright_problem(text: str) -> str | None:
+    """docs/traps.md: A rotation put back from the home screen comes back"""
+    hold = py_function(text, "hold_upright")
+    body = py_function(text, "run_apk_on")
+    start = py_function(text, "upright_at_lane_start")
+    if hold is None or body is None or start is None:
+        return ("hold_upright, upright_at_lane_start or run_apk_on is "
+                "missing or unreadable")
+    reads = re.findall(r'"cmd", "window",\s*"user-rotation"\)', hold)
+    if len(reads) != 2 or "user_rotation" in hold:
+        return ("hold_upright must read the window manager's own "
+                "`cmd window user-rotation`, before and after its write, "
+                "and never the settings provider's user_rotation, which "
+                "the launcher's override answers 0 for a turned device")
+    if '"user-rotation", "lock", "0",' not in hold:
+        return "hold_upright no longer puts the rotation back to lock 0"
+    if body.count(UPRIGHT_LEG) != 1:
+        return ("run_apk_on must read the rotation once per leg and fail "
+                "the leg it found turned")
+    if body.count("for _ in range(240 if upright else 0):") != 1:
+        return ("a leg found turned must skip its poll: after the put-back "
+                "rangertl and filedialog never answered and polled 134 s")
+    launch = body.find('adb(serial, "shell", "am", "start", "-W", "-n", '
+                       "component,")
+    poll = body.find("for _ in range(240 if upright else 0):")
+    if not 0 <= launch < body.find(UPRIGHT_LEG) < poll:
+        return ("the per-leg rotation read must follow the leg's `am start "
+                "-W` and precede its poll: before the launch the launcher "
+                "is in front and the reading is lock 0 whatever the device "
+                "holds")
+    positions = [start.find(m) for m in UPRIGHT_START]
+    if any(p < 0 for p in positions) or positions != sorted(positions):
+        return ("upright_at_lane_start must read the rotation with Settings "
+                "(an unspecified-orientation activity) in front, then stop it")
+    sweep = text.find(UPRIGHT_SWEEP)
+    if text.count(UPRIGHT_SWEEP) != 1 or not \
+            text.find(start) < sweep < text.find("def run_apk_on("):
+        return ("every device, tablet included, must be put upright once at "
+                "the lane's start")
+    return None
+
+
 def ime_problem(text: str, lane_ns: dict) -> str | None:
     actual = set(lane_ns.get("IME_SCENES", []))
     expected = {
@@ -525,6 +578,10 @@ def main() -> int:
         print(f"android-leg-order: {problem}", file=sys.stderr)
         return 1
     problem = guarded_disarm_problem(body)
+    if problem is not None:
+        print(f"android-leg-order: {problem}", file=sys.stderr)
+        return 1
+    problem = upright_problem(text)
     if problem is not None:
         print(f"android-leg-order: {problem}", file=sys.stderr)
         return 1
@@ -966,6 +1023,39 @@ def main() -> int:
     for label, cut in storage_cuts:
         doctored, n = cut(label)
         problem = storage_problem(doctored)
+        if n != 1 or problem is None:
+            print(f"android-leg-order: SELF-TEST FAIL ({label} read as "
+                  f"good)", file=sys.stderr)
+            return 1
+        print(f"android-leg-order: {label} -> {problem}")
+
+    # N36..N42: each rotation link cut, swapped or moved must red.
+    upright_cuts = [
+        ("per-leg rotation read removed",
+         lambda l: doctor(l, text, re.escape(UPRIGHT_LEG), "")),
+        ("per-leg rotation read above am start",
+         lambda l: move(l, text, UPRIGHT_LEG,
+                        '    adb(serial, "shell", "am", "start", "-W", '
+                        '"-n", component, "--es",\n')),
+        ("rotation read from the settings provider",
+         lambda l: doctor(l, text, r'"cmd", "window",\n(\s*)"user-rotation"\)',
+                          '"settings", "get",\\n\\1"system", "user_rotation")')),
+        ("rotation never put back",
+         lambda l: doctor(l, text, re.escape('"user-rotation", "lock", "0",'),
+                          '"user-rotation",')),
+        ("lane-start read with the launcher in front",
+         lambda l: doctor(l, text,
+                          r'(?m)^    adb\(serial, "shell", "am", "start", '
+                          r'"-W", "-n", SETTINGS_ACTIVITY,\n.*\n', "")),
+        ("turned leg still polls",
+         lambda l: doctor(l, text, re.escape("range(240 if upright else 0)"),
+                          "range(240)")),
+        ("lane-start sweep removed",
+         lambda l: doctor(l, text, re.escape(UPRIGHT_SWEEP), "_upright = []\n")),
+    ]
+    for label, cut in upright_cuts:
+        doctored, n = cut(label)
+        problem = upright_problem(doctored)
         if n != 1 or problem is None:
             print(f"android-leg-order: SELF-TEST FAIL ({label} read as "
                   f"good)", file=sys.stderr)

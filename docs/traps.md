@@ -4,6 +4,36 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## A rotation put back from the home screen comes back (measured 2026-10-09)
+
+Seven unrelated android legs went red on one matrix, all on emulator-5558:
+labels in `Nx0px` boxes, a missing field node, segments in reverse order, a
+wrong range thumb. The device was turned 90 degrees for kaya's apps only.
+An agent had turned it for screenshots (`settings put system user_rotation
+1` with an app in front), stopped the app, and put `user_rotation 0` back
+from the home screen. Android 15's DisplayRotationReversionController
+saves a turned user rotation while a NOSENSOR window (the launcher) is in
+front and shows that window upright; when the next app comes up,
+`revertOverride` writes the SAVED rotation back. So the restore was undone
+by the next launch, and every leg's activity (SCREEN_ORIENTATION_UNSPECIFIED)
+ran at 800x360. Every reading taken with the launcher in front says
+upright: `settings get system user_rotation`, `cmd window user-rotation`,
+`dumpsys window displays`, `wm size`. The agent's read-back and the
+coordinator's check both read 0. `cmd window user-rotation lock 0` from
+the home screen is undone the same way. Only a write made while an
+unspecified-orientation app is in front holds. Reproduced on
+emulator-5560 several times. `dumpsys window`'s RotationHistory (`user=`)
+and RotationLockHistory (`caller=`) are the records that tell.
+
+run_apk_on reads the rotation right after the leg's own `am start -W`,
+prints `rotation at leg start` into the leg log, puts a turned device back
+to `lock 0` with that app in front, and fails the leg naming it. The lane
+start does the same on every device with Settings in front. A red leg's log
+carries `rotation at the verdict` and the last rotation records.
+tools/lib/android-leg-order.py's upright clause holds the read, the write,
+their placement, the skipped poll (two turned legs polled 134 s for a
+verdict that never came) and the lane-start sweep, seven cuts watched.
+
 ## The unannounced AdwToast: GTK announces only from an accessible a client has walked to (measured 2026-10-09)
 
 libadwaita 1.9.2 announces every toast itself, on the AdwToastOverlay
