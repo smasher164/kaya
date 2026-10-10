@@ -222,8 +222,8 @@ def mac_idle(texts, mod, tools):
         if budget * 2 > ceiling:
             out.append(f"{MAC_LANE}: IDLE_BUDGET_S {budget:.0f}s is over half the mac "
                        f"lane's {ceiling}s ceiling — a lane may not spend that much of "
-                       f"its budget waiting for a human, and a duration anomaly then "
-                       f"names the wait instead of the code")
+                       f"its wall waiting for a human, even with the waits netted out "
+                       f"of the ceiling")
     # THE SENTENCES SAY WHAT THEY MEASURED.
     for key, phrases in IDLE_SAYS.items():
         fn = IDLE_SAYS_IN.get(key, "idle_wait")
@@ -308,6 +308,35 @@ def mac_idle(texts, mod, tools):
     if "_mac.hid_idle_seconds()" not in texts["tools/validate-all.py"]:
         out.append("tools/validate-all.py: the launch line carries no HIDIdleTime — load "
                    "says how busy the machine is, never whether a human is at it")
+    out += idle_netted(texts["tools/validate-all.py"], mod)
+    return out
+
+
+def idle_netted(va, mod):
+    """The idle waits are netted out of the ceiling and printed beside the
+    token's (docs/traps.md, the idle waits counted against the ceiling); the
+    reader is run over its own summary sentence."""
+    out = []
+    if not re.search(r"idle = _mac\.idle_waited_seconds\(log_text\)\n"
+                     r"\s+net = secs - waited - idle\n", va):
+        out.append("tools/validate-all.py: the net read against a lane's ceiling does not "
+                   "subtract _mac.idle_waited_seconds(log_text) — a matrix run while the "
+                   "maintainer is at the host reads his minutes as the lane's work")
+    if "{idle}s waiting for an idle host; {net}s net" not in va:
+        out.append("tools/validate-all.py: never prints the idle-host seconds beside the "
+                   "token's on the net line — a net nobody can recompute is believed anyway")
+    reader = getattr(mod, "idle_waited_seconds", None)
+    if reader is None:
+        return out + [f"{MAC_LANE}: no idle_waited_seconds() — validate-all has nothing to "
+                      f"read the idle waits back with"]
+    line = mod.IDLE_SENTENCES["summary"].format(legs=4, secs=240, budget=240, display=120,
+                                                deferred=9)
+    for text, want in ((f"exclusive: mac held 1 legs for 5s\n{line}\nmac: PASS\n", 360),
+                       ("mac: PASS\n", 0)):
+        got = reader(text)
+        if got != want:
+            out.append(f"{MAC_LANE}: idle_waited_seconds read {got}s off {text!r}, wanted "
+                       f"{want}s (the summary's own seconds plus its display seconds)")
     return out
 
 
@@ -989,7 +1018,25 @@ watched("a reply that opens the shade without the door",
         {**REAL, "tools/android/run-emulator.py": _reply},
         "reply_notification does not open the shade through open_shade")
 
-gate.negatives_ran(35)
+# 31-33. THE IDLE WAITS COUNTED AGAINST THE CEILING AGAIN.
+_unnetted = gate.doctor("the idle seconds cut from validate-all's net",
+                        REAL["tools/validate-all.py"],
+                        r"net = secs - waited - idle\n", "net = secs - waited\n")
+watched("a ceiling that charges the lane for the human's minutes",
+        {**REAL, "tools/validate-all.py": _unnetted}, "does not subtract")
+_unsaid = gate.doctor("the idle seconds cut from the net line", REAL["tools/validate-all.py"],
+                      r"\{idle\}s waiting for an idle host; ", "")
+watched("a net line that hides the idle seconds",
+        {**REAL, "tools/validate-all.py": _unsaid}, "never prints the idle-host seconds")
+_half = gate.doctor("idle_waited_seconds dropping the display seconds", _LANE_TEXT,
+                    r'int\(m\.group\("secs"\)\) \+ int\(m\.group\("display"\)\)',
+                    'int(m.group("secs"))')
+_half_mod = gate.scratch() / "mac-idle-half.py"
+_half_mod.write_text(_half, encoding="utf-8")
+watched("an idle reader that misses the display waits", REAL,
+        "idle_waited_seconds read 240s", lanes={**MODS, "mac": load_lane(_half_mod)})
+
+gate.negatives_ran(38)
 
 gate.counted("windows legs whose scene posts a notification",
              sorted(MODS["windows"].notification_legs(str(ROOT / "tools/scenes"))), floor=2)

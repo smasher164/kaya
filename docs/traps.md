@@ -14734,6 +14734,22 @@ token; and the summary prints the display seconds and the deferred count.
 Guard: tools/check-exclusive.py's clause 7 and idle_under_token, negatives
 10, 11 and 20b-20f.
 
+## The idle waits counted against the ceiling (measured 2026-10-10)
+
+The mac lane's waits for an idle host were charged to its ceiling while the
+exclusive token's waits were netted out. On the matrix of 2026-10-10 the
+maintainer was at the host: four filedialog legs spent the whole 240 s
+idle-wait budget, the deferred fullscreen legs spent their shared 120 s, and
+the lane read 1150 s with 74 s of token waits, 1076 s net against 1100 s,
+when its own work was 716 s. The waits run with the lane's pool joined, so
+every second of them is wall the lane did nothing in.
+
+validate-all now reads both kinds back off the lane's summary line
+(tools/lib/lanes/mac.py's idle_waited_seconds, through the summary's own
+template) and prints `Ns of that waiting for the exclusive token, Ms waiting
+for an idle host; Xs net against the Cs ceiling`. The budgets are unchanged.
+Guard: tools/check-exclusive.py's idle_netted, negatives 31-33.
+
 ## The shade an expand reopens without focus (measured 2026-10-07)
 
 chat-go replies to Alex's notification (step 43) and then activates Sam's

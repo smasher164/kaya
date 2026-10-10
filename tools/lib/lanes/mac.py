@@ -519,9 +519,9 @@ DISPLAY_LEGS = {name for name, scene, _lang in legs() if scene in DISPLAY_SCENES
 # reddens a lane (docs/deferred.md, the swallowed-press entry). IDLE_S: a
 # reader's pauses are seconds, so 20s idle means the host is not in use;
 # IDLE_BOUND_S: what one leg waits before running anyway and saying so;
-# IDLE_BUDGET_S: what the whole lane spends, sized against validate-all's
-# mac ceiling (net band 550-673s + 240 fits 1100 with room) rather than
-# bound x set, which stops fitting the day a leg joins the set.
+# IDLE_BUDGET_S: what the whole lane spends, rather than bound x set, which
+# grows the day a leg joins the set; validate-all nets it out of the mac
+# ceiling (idle_waited_seconds).
 IDLE_S = 20.0
 IDLE_BOUND_S = 60.0
 IDLE_BUDGET_S = 240.0
@@ -804,6 +804,18 @@ def idle_summary(say=None):
         legs=_idle["legs"], secs=int(_idle["spent"]),
         budget=int(IDLE_BUDGET_S), display=int(_idle["display"]),
         deferred=_idle["deferred"]))
+
+
+def idle_waited_seconds(text):
+    """The seconds the lane's summary line in `text` says it waited for an
+    idle host, both kinds; validate-all nets them out of the ceiling
+    (docs/traps.md, the idle waits counted against the ceiling)."""
+    pattern = re.escape(IDLE_SENTENCES["summary"])
+    for key, group in (("legs", r"\d+"), ("secs", r"(?P<secs>\d+)"), ("budget", r"\d+"),
+                       ("display", r"(?P<display>\d+)"), ("deferred", r"\d+")):
+        pattern = pattern.replace(re.escape("{" + key + "}"), group)
+    m = re.search("^" + pattern + "$", text, re.M)
+    return int(m.group("secs")) + int(m.group("display")) if m else 0
 
 
 def hid_idle_seconds():

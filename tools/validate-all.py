@@ -502,15 +502,20 @@ if MODE == "parallel":
         # android 915s against 870 with 294s of waits, its two python
         # legs 37s of a 249s phase). Read through exclusive.py's own
         # template, so the sentence and its reader cannot drift.
+        # AND SO ARE THE MAC LANE'S WAITS FOR AN IDLE HOST, both kinds:
+        # time spent waiting for a human is not the lane's work either
+        # (docs/traps.md, the idle waits counted against the ceiling).
         waited = exclusive.waited_seconds(name, log_text)
-        net = secs - waited
-        if waited:
+        idle = _mac.idle_waited_seconds(log_text)
+        net = secs - waited - idle
+        if waited or idle:
             print(f"{name}: {waited}s of that waiting for the exclusive "
-                  f"token; {net}s net against the {budget}s ceiling")
+                  f"token, {idle}s waiting for an idle host; {net}s net "
+                  f"against the {budget}s ceiling")
         if budget > 0 and net > budget:
             now = os.getloadavg()
             print(f"{name}: DURATION ANOMALY — {secs}s ({net}s net of the "
-                  f"token's waits) exceeds the "
+                  f"token's and the idle host's waits) exceeds the "
                   f"{budget}s ceiling. A lane that slows down by this "
                   f"much changed in kind, not in degree: look for work "
                   f"added to EVERY leg (an env export, a per-leg wait, "
