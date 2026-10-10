@@ -386,6 +386,11 @@ def idle_under_token(mod):
     saved = (mod._hid_idle_ns, mod.time, dict(mod._idle))
     quiet = exclusive._say
     exclusive._say = lambda _s: None
+    # A busy host on a doubled clock: a cut wall must report, never sleep for real.
+    wall = [0.0]
+    mod.time = types.SimpleNamespace(monotonic=lambda: wall[0],
+                                     sleep=lambda secs: wall.__setitem__(0, wall[0] + secs))
+    mod._hid_idle_ns = lambda: (0, None)
     with tempfile.TemporaryDirectory(prefix="check-exclusive-") as td:
         for fn, leg in (("idle_wait", panel[0]), ("display_wait", display[0])):
             try:
