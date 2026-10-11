@@ -348,6 +348,8 @@ need_why = "settings groups, inspectors; Apple's disclosure controls and Adw's e
 parity_why = 'DisclosureGroup, AdwExpanderRow, WinUI Expander, ExpansionTile; Compose composes one from AnimatedVisibility'
 shape = 'prop on column (collapsible, titled)'
 kaya = 'DisclosureGroup, AdwExpanderRow, WinUI Expander; Compose synthesizes with AnimatedVisibility. In nearly every catalogue; small.'
+shipped = true
+shipped_note = '2026-10-09 (376af34d, 44e4dbcf, 65fd9ef7): kind <code>expander</code> with a header, an optional summary the screen readers speak, and <code>expanded</code>/<code>toggled</code>; collapsed content stays alive; a column of expanders draws as one grouped card where the platform has one; first used in the task manager&#39;s Settings · <a href="https://claude.ai/artifact/MQ7PA8e2z4GLJLatA9aeBJ">review page</a>'
 
 [[feature]]
 slug = 'doctabs'
@@ -387,6 +389,8 @@ need_why = 'in three vendor catalogues; the weakest-evidence row at this score: 
 parity_why = 'first-party in 5 of 10 full toolkits, reachable in 9'
 shape = 'presentation on radio group'
 kaya = 'Picker(.segmented), SegmentedButton, AdwToggleGroup (libadwaita 1.7), SelectorBar. A presentation of the radio group kaya already has, the way sections take `bar` or `sidebar`.'
+shipped = true
+shipped_note = '2026-10-08 (3bd46182, bfa9456c): kind <code>segmented</code> sharing the select and radio model, text or symbol segments, in list rows too; WinUI draws its SelectorBar; radio and select harness reads now come from the screen on every platform · <a href="https://claude.ai/artifact/SCGLn3k2KshTDjhNWTUm4y">review page</a>'
 
 [[feature]]
 slug = 'toast'
@@ -400,6 +404,8 @@ need_why = "the 'saved, undo?' surface of the settings archetype; Material Snack
 parity_why = 'first-party in Compose, Flutter, GTK, WinUI and Uno; Apple ships none, which is why the survey found it off-list'
 shape = 'presentation context'
 kaya = "AdwToast carries an undo action, WinUI has InfoBar and TeachingTip, Compose the Snackbar; Apple has no toast, so the two SwiftUI lanes draw kaya's own or map to a one-action alert. kaya's core-owned undo has no surface to offer 'Deleted. Undo?' on today."
+shipped = true
+shipped_note = '2026-10-08 to 10-09 (1440bbc2, fda4e4cd, 08fbf8a9): <code>show_toast</code> with at most one button, placed each platform&#39;s way (a capsule at the top on Apple, libadwaita&#39;s toast, a WinUI InfoBar, Material&#39;s snackbar); a new toast replaces the one showing, and its Undo is performed by the core exactly once · <a href="https://claude.ai/artifact/HLmYT7qQbFyPbJkXWtzjbh">review page</a>'
 
 [[feature]]
 slug = 'animations'

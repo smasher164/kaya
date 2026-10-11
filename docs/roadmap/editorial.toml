@@ -5,11 +5,11 @@
 base = '2dadc3b5'
 title = 'What kaya builds next'
 lede = 'Every open item scored three ways: how many apps need it, how many of fifteen GUI frameworks ship it, and what a slice of that shape has cost kaya on its own record. The order below follows from the scores; the cards say why each one landed where it did.'
-state = "Since the 2026-10-06 read the password field shipped whole on five platforms and in nine bindings: the secure field (2026-10-07), autofill content hints with logins shared through [links] hosts (10-07, 10-08), and the show-password toggle with an eye the keyboard reaches (10-08). The Linux lane moved to Debian forky and GTK 4.24, with the libsoup, GTK sink and GLib launch defects it surfaced fixed in kaya; the full matrix reads ALL PASS in 1439 s."
+state = "Since the 2026-10-06 read the password field shipped whole on five platforms and in nine bindings: the secure field (2026-10-07), autofill content hints with logins shared through [links] hosts (10-07, 10-08), and the show-password toggle with an eye the keyboard reaches (10-08). The Linux lane moved to Debian forky and GTK 4.24, with the libsoup, GTK sink and GLib launch defects it surfaced fixed in kaya; the full matrix reads ALL PASS in 1439 s. Then three controls shipped the same way: the segmented control (10-08), the toast with its one-time Undo (10-08, 10-09) and the expander (10-09), each green on the full matrix. Safe areas and keyboard avoidance on the phones are ruled (2026-10-11) and being built."
 menu_heading = 'The menu: the pieces first, then the apps they unblock'
 menu_lede = "Every framework piece is its own entry, in the order recommended, and each names the demo app it unblocks; the apps follow, each listing what it still waits on, so an app is never picked with its pieces unbuilt. A star marks a piece that needs a ruling before any arm is written. With the task manager and the chat app shipped, the one demo app left is the video editor. Every ruling its plan asked is taken and every piece it names is built, the last two (the timecode formatter and a drop's point) on 2026-10-05 and 10-06, so the editor waits only on the maintainer's choice of what comes before it. The chat app's calls stage follows: capture and audio playback are built, and the one piece between them and a call is the far end, the peer's picture and voice. Read out of the surface promised against the surface built, the ledger's open headlines and the maintainer's own evidence order; the editor's pieces, the media reader and capture shipped between the reads and stay listed with their dates."
-recommended_next = 'Segmented control'
-recommended_note = "It is in design (docs/segmented-plan.md); then the toast, then the media player demo app with its two new pieces, images from the network and a styling pass toward the look the maintainer asked for on 2026-10-08. The video editor waits on nothing and stays held behind these."
+recommended_next = 'Safe-area insets and keyboard avoidance'
+recommended_note = "Ruled 2026-10-11 and being built (docs/safe-area-plan.md); then the media player demo app with its two new pieces, images from the network and a styling pass toward the look the maintainer asked for on 2026-10-08. The video editor waits on nothing and stays held behind these."
 demo_heading = 'The demo apps, and what each still waits on'
 proposed_heading = 'Proposed: more demo apps, as milestones'
 proposed_lede = "Proposed 2026-09-28 at the maintainer's ask, not ruled. Each demo is a milestone that forces a set of pieces no shipped app needs, taken from the archetype table below; the order puts the one that shares the most with the video editor first, so its pieces are built once for both. The webcam and the microphone (the maintainer, 2026-09-28: at least one demo must use them) go into the chat app as calls rather than a demo of their own, the way Signal and Slack carry them: the conversation, the simulated peer and the notifications are already there. The photo gallery and the video editor's voiceover would use the same capture piece more lightly. Nothing here starts until the maintainer picks."
@@ -29,6 +29,7 @@ media = 'https://claude.ai/artifact/WkW8D1Ba44qhMTnK3a7NLM'
 aspect = 'https://claude.ai/artifact/SR71ZiQgSF4QGMXX6WyLUL'
 reader = 'https://claude.ai/artifact/Gwtwpt5BogkAd8aTwswXRX'
 capture = 'https://claude.ai/artifact/5Pb49ub6dhKPfGaP7k8RHB'
+segmented = 'https://claude.ai/artifact/SCGLn3k2KshTDjhNWTUm4y'
 timecode = '~/Projects/kaya-handoffs/2026-10-04-timecode/review/index.html'
 
 [[menu]]
@@ -204,11 +205,11 @@ text = "S each: the checkbox that reads a touch high beside a title's first line
 [[menu]]
 title = 'Segmented control'
 star = false
-status = 'open'
+status = 'shipped'
 size = 'M'
 unblocks = 'the media player (its filter chips); the portfolio chart period'
 plan = 'docs/segmented-plan.md'
-text = "IN DESIGN 2026-10-08 (docs/segmented-plan.md, 13 rulings recommended): a third choice kind beside select and radio, the platform's own segmented control where it has one (SwiftUI, Material 3, libadwaita's toggle group) and a SelectorBar on WinUI; the slice also makes radio's and select's harness reads come from the screen."
+text = "SHIPPED 2026-10-08 (bfa9456c; review {review:segmented}): a third choice kind beside select and radio, the platform's own segmented control where it has one (SwiftUI, Material 3, libadwaita's toggle group) and a SelectorBar on WinUI; the slice also made radio's and select's harness reads come from the screen."
 
 [[menu]]
 title = 'Images from the network'
@@ -268,10 +269,10 @@ then = 'the app one screen at a time (XL), when the maintainer picks it'
 [[demo]]
 name = 'The media player'
 grp = 'a music client styled toward the egui Spotify screenshot (the maintainer, 2026-10-08), over a public catalogue'
-shipped = 'the media player with audio and Now Playing on every platform, media keys, sliders, tables, the three-pane window, the search field, the secure field and autofill for sign-in'
-waits = 'the segmented control (filter chips), images from the network, and the styling pass'
+shipped = 'the media player with audio and Now Playing on every platform, media keys, sliders, tables, the three-pane window, the search field, the secure field and autofill for sign-in, the segmented control for its filter chips, the toast'
+waits = 'images from the network and the styling pass'
 then_tier = 'next'
-then = 'the app one screen at a time (M for the app, L for the styling pass), after the segmented control and the toast'
+then = 'the app one screen at a time (M for the app, L for the styling pass), after safe areas'
 
 [[proposed]]
 name = '2. A feed reader'
