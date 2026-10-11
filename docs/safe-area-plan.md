@@ -183,7 +183,7 @@ Microsoft Learn, Respond to the presence of the touch keyboard
   iOS pool raises nothing (§0, item 2). Neither phone lane rotates a device
   today, and neither has a cutout configured beyond the iPhone's own notch.
 
-## §2 — The rulings (RECOMMENDED 2026-10-09)
+## §2 — The rulings (RULED 2026-10-11, as recommended)
 
 ### A1 — The default: inside the safe area and above the keyboard, with no app code (RULED 2026-10-11)
 
