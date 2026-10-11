@@ -1,6 +1,17 @@
 # Safe areas and the keyboard: the design pass (2026-10-09)
 
-Status: RULED 2026-10-11 (the maintainer: "accept all"), A1-A16 as recommended; nothing built yet.
+Status: RULED 2026-10-11 (the maintainer: "accept all"), A1-A16 as recommended;
+nothing built yet. He picked "safe-area and keyboard avoidance on phones" from the
+2026-10-09 shortlist. Its roadmap card (docs/roadmap/features.toml,
+`safe_area`) gives the shape as "scene proof + a scroll behaviour" and says
+what is owed: a scene with an entry at the bottom proving it stays visible
+with the keyboard up, on both phones. §0 found that the owed proof would
+fail today on Android for any field outside a scroll and for every field in
+landscape, and that the iOS pool raises no software keyboard at all, so this
+pass is more than a scene. The expander's and the toast's plans
+(docs/expander-plan.md, docs/toast-plan.md) are the shape of this one;
+docs/fullscreen-plan.md (immersive mode), docs/chat-plan.md and
+docs/composer-plan.md (the composer above the keyboard) are what it meets.
 
 Two words, used as the platforms use them:
 
