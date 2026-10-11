@@ -1,17 +1,6 @@
 # Safe areas and the keyboard: the design pass (2026-10-09)
 
-Status: RECOMMENDED 2026-10-09, A1-A16 awaiting the maintainer; nothing
-built. He picked "safe-area and keyboard avoidance on phones" from the
-2026-10-09 shortlist. Its roadmap card (docs/roadmap/features.toml,
-`safe_area`) gives the shape as "scene proof + a scroll behaviour" and says
-what is owed: a scene with an entry at the bottom proving it stays visible
-with the keyboard up, on both phones. §0 found that the owed proof would
-fail today on Android for any field outside a scroll and for every field in
-landscape, and that the iOS pool raises no software keyboard at all, so this
-pass is more than a scene. The expander's and the toast's plans
-(docs/expander-plan.md, docs/toast-plan.md) are the shape of this one;
-docs/fullscreen-plan.md (immersive mode), docs/chat-plan.md and
-docs/composer-plan.md (the composer above the keyboard) are what it meets.
+Status: RULED 2026-10-11 (the maintainer: "accept all"), A1-A16 as recommended; nothing built yet.
 
 Two words, used as the platforms use them:
 
@@ -185,7 +174,7 @@ Microsoft Learn, Respond to the presence of the touch keyboard
 
 ## §2 — The rulings (RECOMMENDED 2026-10-09)
 
-### A1 — The default: inside the safe area and above the keyboard, with no app code
+### A1 — The default: inside the safe area and above the keyboard, with no app code (RULED 2026-10-11)
 
 RECOMMEND that every window lay its widgets out inside the platform's safe
 area, and, while the keyboard is up, above the keyboard, on every platform,
@@ -200,7 +189,7 @@ Making it a ruling turns today's two separate fixes into a rule a gate can
 hold on every backend, and gives the desktops the same sentence where they
 have the concept (A13).
 
-### A2 — The bars' own grounds extend under the bars; widgets never do
+### A2 — The bars' own grounds extend under the bars; widgets never do (RULED 2026-10-11)
 
 RECOMMEND that the GROUNDS kaya or the platform draws for chrome run to the
 screen's edge, as the platform's own apps draw them: the window ground, the
@@ -218,7 +207,7 @@ not look like an Android app on a gesture-navigation phone. The rule is
 the same sentence iOS already obeys, so the two phones end in one
 semantics. No app code: a ground has no reason to stop at a bar.
 
-### A3 — An app asks for full bleed per widget, with a `bleed` prop on an image, a video view or a canvas
+### A3 — An app asks for full bleed per widget, with a `bleed` prop on an image, a video view or a canvas (RULED 2026-10-11)
 
 RECOMMEND a new Bool widget prop, `bleed`, false by default, legal on
 `image`, the video view and `canvas` only. A widget with `bleed` set extends
@@ -249,7 +238,7 @@ Not now: a reading of the insets for the app (A14). A bled canvas's draw
 will run under the bars with no way to know where they are; that is the
 named limit, ledgered at the depth.
 
-### A4 — When the keyboard rises, the focused field is moved into view, by its scroll or by panning the content
+### A4 — When the keyboard rises, the focused field is moved into view, by its scroll or by panning the content (RULED 2026-10-11)
 
 RECOMMEND that, when the keyboard rises or grows while a text-taking widget
 (entry, search field, secure field, textarea, number field, a rich
@@ -280,7 +269,7 @@ Refused: making every window root scroll by itself. It would change what
 share), and the derived form, the grouped screen and the table all lean on
 the root not scrolling.
 
-### A5 — The composer pattern: whatever follows the window's grown scroll rides the keyboard; a scroll that follows its end keeps its end
+### A5 — The composer pattern: whatever follows the window's grown scroll rides the keyboard; a scroll that follows its end keeps its end (RULED 2026-10-11)
 
 RECOMMEND no new prop for a bottom bar that rides the keyboard. The rule:
 in a window whose root is a column holding a grown scroll, the children
@@ -299,7 +288,7 @@ reader is at the end", so it carries this half too. An explicit
 `rides_keyboard` prop was weighed and refused: it would be a second way to
 say what the column's order already says.
 
-### A6 — Bottom navigation and a sheet's actions: the section bar stays under the keyboard; a sheet rides
+### A6 — Bottom navigation and a sheet's actions: the section bar stays under the keyboard; a sheet rides (RULED 2026-10-11)
 
 RECOMMEND that the section bar (Sections presented as a bar) and a phone's
 bottom toolbar stay where they are and are covered by the keyboard, on
@@ -314,7 +303,7 @@ do, and the 64 dp it takes are the difference between a visible field and a
 hidden one in landscape (§0, items 5 and 6). The sheet already behaves on
 Android; writing it down holds iOS to it.
 
-### A7 — Landscape and cutouts: the same rules on every side
+### A7 — Landscape and cutouts: the same rules on every side (RULED 2026-10-11)
 
 RECOMMEND that A1-A6 apply on all four sides, in every orientation: content
 stays out of a cutout on whichever side it is (Android's `safeDrawing`
@@ -332,7 +321,7 @@ prove it (§5). Fullscreen extract editing (the platform's old answer for a
 landscape phone) is refused by Compose's fields today, and kaya should not
 re-enable it: it hides the screen the user is typing about.
 
-### A8 — Immersive and fullscreen: the bars' insets go, the cutout and the keyboard stay
+### A8 — Immersive and fullscreen: the bars' insets go, the cutout and the keyboard stay (RULED 2026-10-11)
 
 RECOMMEND that with `fullscreen` on (docs/fullscreen-plan.md), the status
 and navigation bars' insets read as zero while the bars are hidden, content
@@ -346,7 +335,7 @@ Why: this is what each platform's immersive mode does with insets
 `persistentSystemOverlays(.hidden)` shrinks the safe area to the sensor
 housing), so kaya adds nothing and states it so the harness can read it.
 
-### A9 — The harness reads the platform's insets and frames, never kaya's model, and refuses when there is no keyboard
+### A9 — The harness reads the platform's insets and frames, never kaya's model, and refuses when there is no keyboard (RULED 2026-10-11)
 
 RECOMMEND three observations and one wall, every one read off the platform:
 
@@ -381,7 +370,7 @@ size, not a frame. Byte-identical expectations need words, not points, so
 the verdicts are `on`, `off`, `safe`, `bleeds` and edge words, with the
 numbers only in the failure text.
 
-### A10 — The phone lanes run with the software keyboard up
+### A10 — The phone lanes run with the software keyboard up (RULED 2026-10-11)
 
 RECOMMEND that the iOS lane raise the software keyboard for every leg that
 types (the Android pool already does), through a simulator setting found
@@ -395,7 +384,7 @@ Why: §0 item 2. A keyboard rule that one of the two phone lanes cannot see
 is half a rule, and the wall in A9 would otherwise fail every iOS typing
 leg the day it lands.
 
-### A11 — Tablets: only a docked keyboard is avoided
+### A11 — Tablets: only a docked keyboard is avoided (RULED 2026-10-11)
 
 RECOMMEND that A4 and A5 respond to the keyboard's DOCKED part alone: an
 iPad's floating or split keyboard and a hardware keyboard's shortcuts bar
@@ -407,7 +396,7 @@ Why: that is the platforms' own reading of the insets, so the rule costs
 nothing and keeps a floating keyboard from panning a whole screen. To
 measure on kaya-sim-pad and the Android tablet leg.
 
-### A12 — The keyboard is dismissed the platform's way; kaya adds no dismiss
+### A12 — The keyboard is dismissed the platform's way; kaya adds no dismiss (RULED 2026-10-11)
 
 RECOMMEND no kaya-drawn "done" bar and no dismiss-on-tap-outside: the
 keyboard goes when focus leaves a text field (the harness's existing focus
@@ -420,7 +409,7 @@ key on iOS, keeps the Done toolbar it already has (KayaDrive's
 Why: each platform's own gesture is what users expect, and a kaya bar would
 be one more thing between the field and the keyboard's top edge.
 
-### A13 — The desktops: the same sentence where the platform has the concept
+### A13 — The desktops: the same sentence where the platform has the concept (RULED 2026-10-11)
 
 RECOMMEND that the desktops answer A1 through what they already have: a
 macOS fullscreen window on a notched display keeps AppKit's default (below
@@ -434,7 +423,7 @@ Why: invariant 1 asks for one semantics wherever a platform can express it,
 and these are the places the desktops can. None is reachable on the lanes
 (§0, item 9), so it is stated, not proved, and named in the ledger.
 
-### A14 — No inset reading for the app, now
+### A14 — No inset reading for the app, now (RULED 2026-10-11)
 
 RECOMMEND no occurrence or signal giving the app the insets or the
 keyboard's height in this slice. A bled canvas draws under the bars blind
@@ -447,7 +436,7 @@ Why: every case this pass serves is handled with no app code, and a reading
 the app can act on is a new protocol surface with nine bindings' worth of
 spelling; it should arrive with the app that forces it.
 
-### A15 — The first homes: the chat composer, the tasks quick-add sheet and details screen, the autofill form
+### A15 — The first homes: the chat composer, the tasks quick-add sheet and details screen, the autofill form (RULED 2026-10-11)
 
 RECOMMEND the proofs live in apps that already type on phones:
 
@@ -465,7 +454,7 @@ Why: three of the four are the measured failures and the fourth is the only
 new surface; each is an existing guest whose captures the maintainer has
 already reviewed, so a change is visible against them.
 
-### A16 — `bleed` in all nine bindings and the C floor, live zone only
+### A16 — `bleed` in all nine bindings and the C floor, live zone only (RULED 2026-10-11)
 
 RECOMMEND every binding spell `bleed` as it spells the image's other Bool
 props (a chained call, a keyword, a labelled argument), on the three kinds
