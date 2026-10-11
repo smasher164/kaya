@@ -1129,6 +1129,8 @@ pub const KAYA_PROP_REVEALABLE: u32 = 58;
 pub const KAYA_PROP_SUMMARY: u32 = 59;
 /// Whether an expander's body shows (docs/expander-plan.md K4).
 pub const KAYA_PROP_EXPANDED: u32 = 60;
+/// An image, video view or canvas bleeds to the window\'s edge (docs/safe-area-plan.md A3).
+pub const KAYA_PROP_BLEED: u32 = 61;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -1403,6 +1405,7 @@ const _: () = assert!(
         && KAYA_PROP_REVEALABLE == wire::PROP_REVEALABLE
         && KAYA_PROP_SUMMARY == wire::PROP_SUMMARY
         && KAYA_PROP_EXPANDED == wire::PROP_EXPANDED
+        && KAYA_PROP_BLEED == wire::PROP_BLEED
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -1939,7 +1942,7 @@ const _: () = {
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 60,
+    crate::spec::PROPS.len() == 61,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(

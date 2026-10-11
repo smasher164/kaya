@@ -1,7 +1,8 @@
 # Safe areas and the keyboard: the design pass (2026-10-09)
 
 Status: RULED 2026-10-11 (the maintainer: "accept all"), A1-A16 as recommended;
-nothing built yet. He picked "safe-area and keyboard avoidance on phones" from the
+the depth (§6 steps 1 and 2) built 2026-10-11 on iOS and the mac
+(docs/deferred.md, the safe-area BUILD entry); the breadth is open. He picked "safe-area and keyboard avoidance on phones" from the
 2026-10-09 shortlist. Its roadmap card (docs/roadmap/features.toml,
 `safe_area`) gives the shape as "scene proof + a scroll behaviour" and says
 what is owed: a scene with an entry at the bottom proving it stays visible
@@ -527,6 +528,13 @@ Additions to existing scenes, run on the phone lanes (the card's
    a lane flag that rotates the device before launch and restores it, the
    restore read back (`user_rotation` 0 on Android; on iOS the driver's
    orientation, to add to KayaDrive) and refused if it did not take.
+   BUILT on iOS without turning the device (2026-10-11): a landscape leg
+   runs a bundle pinned to landscape, one orientation per key as the
+   portrait bundle is (tools/check-staging.py), so no device state changes
+   and nothing needs restoring; the leg appends `expect_insets "none/bar"`
+   as the proof its interface turned (tools/lib/lanes/ios.py,
+   LANDSCAPE_EXTRAS). The Android leg may take the same shape at the
+   breadth if the activity's orientation can be pinned the same way.
 5. An Android cutout leg: the emulator's tall-cutout overlay on, the same
    scenes in both orientations, overlay off and read back after.
 6. A new `safearea.steps` with its guest: a top image with `bleed`
@@ -603,12 +611,60 @@ is part of the leg).
   KayaSwiftUI.swift's one `ignoresSafeArea` (the grouped ground) and its
   `safeAreaInset` uses (the native table's apron alone); the immersive arms
   (`statusBarHidden`/`persistentSystemOverlays`, `WindowInsetsControllerCompat`).
-- To measure at the depth: a software keyboard on the iOS pool with no
-  reboot (A10); SwiftUI's ScrollView and a focused TextField with the
-  keyboard rising; the keyboard frame under a SwiftUI host; iOS's sheet
-  with the keyboard up; KayaDrive gaining an orientation verb.
-- To measure at the breadth: Compose's bring-into-view when the IME grows
-  after focus (foundation 1.11.4); a bled image under the status bar with
+- MEASURED 2026-10-11 (kaya-sim-1 and kaya-sim-2, iOS 26.5, a plain SwiftUI
+  probe app with no kaya in it: a TextField focused through @FocusState, the
+  keyboardWillChangeFrame notification, the window's keyboardLayoutGuide and
+  safeAreaInsets and the field's global frame logged, `simctl io screenshot`):
+  - A10's route: `simctl spawn <udid> defaults write
+    com.apple.keyboard.preferences AutomaticMinimizationEnabled -bool NO` (the
+    pool reads 1) raises the full software keyboard at the next app launch,
+    end frame (0,476,375,336), with no reboot, erase or Simulator.app;
+    `-bool YES` takes it away again at the next launch, watched both ways.
+    UIKit's isInHardwareKeyboardMode stays true and GameController's
+    GCKeyboard.coalesced stays non-nil whatever the setting. The same key under
+    com.apple.Preferences does nothing. The iOS lane writes NO before its first
+    leg and YES after its last, each read back (tools/ios/run-sim.py).
+  - The keyboard frame under a SwiftUI host comes from
+    keyboardWillChangeFrameNotification; the window's keyboardLayoutGuide reads
+    (0,0,0,0) while nothing constrains to it, and the UIKit safeAreaInsets never
+    include the keyboard (bottom stays 34): SwiftUI's keyboard region is its own.
+  - SwiftUI's ScrollView brings a focused field into view by itself, both one
+    the keyboard rises over (y 577 to 445) and one scrolled off screen (row 25
+    to 445), stopping with the field's bottom 3 pt under the keyboard's top and
+    its caret line visible. A4's first case needs no code on iOS.
+  - A column taller than the space the keyboard leaves keeps its field under
+    the keyboard (y 568 against a keyboard top of 476): A4.2's defect is iOS's
+    too, which the interpreter's pan now answers.
+  - A field after a grown ScrollView rides the keyboard (426..460 over 476).
+  - A view placed by a custom Layout at the safe area's edge and given
+    `.ignoresSafeArea(.container, edges:)` extends to the screen's edge: the
+    frame read (0,0,375,180) for a 120 pt slot at y 60, the sibling below
+    unmoved. A fixed `.frame(height:)` inside the ignore shifts instead of
+    growing. This is the bleed's lowering (§3).
+- MEASURED 2026-10-11 with kaya (the lane's bundles on kaya-sim-1, the
+  keyboard setting written NO for the capture and YES after, read back): the
+  tasks quick-add sheet grows to its large detent with the keyboard up and its
+  field stays above it; the details screen's notes field is above the keyboard
+  and the section bar sits under the keyboard with no code (A6 holds natively);
+  the content-type form's stamped code field was under the number pad until
+  the pan moved the form up, clipped at the top bar. On the mac the bled
+  picture runs under the 32 pt title bar to the content view's top (frame
+  y 0 in a content view whose safe area starts at 32), drawn behind the
+  title bar. The frame is read by a GeometryReader INSIDE the ignore, which
+  grows exactly as the content does; one outside it read the unextended
+  frame (y 150 on the phone, under the large title), and one with an ignore
+  of its own read itself and reported a bleed whose content stopped short.
+- MEASURED 2026-10-11 (emulator-5554, API 35, Gboard; a throwaway rust guest,
+  a grown scroll of 30 labels with an entry last, in a rusthost built by the
+  android lane's own compose suite, `am start` with `click entry@low`,
+  `uiautomator dump` and `dumpsys window` read; the guest removed from the tree
+  after): Compose foundation keeps a focused field in view when the IME grows
+  AFTER the focus. The entry, at [16,760][344,800] with the keyboard down, sat
+  at [16,453][344,509] once the IME took [0,525][360,800]; A4's first case
+  needs no BringIntoViewRequester of kaya's on IME growth inside a scroll. The
+  pool's installed rusthost still carries that guest until the lane's next
+  compose build replaces it.
+- To measure at the breadth: a bled image under the status bar with
   `layout`; the NavigationBar hidden while the IME is visible; kaya-sim-pad's
   floating keyboard and the Android tablet leg (A11); WinUI's touch keyboard
   on the VM, if it can be forced without a touch device (A13).

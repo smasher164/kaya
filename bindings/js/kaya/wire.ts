@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x011ac2c5d907da7fn;
+export const SPEC_HASH = 0x12513a04dcdb4c9an;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -134,6 +134,7 @@ export const PROP_REVEALED = 57;
 export const PROP_REVEALABLE = 58;
 export const PROP_SUMMARY = 59;
 export const PROP_EXPANDED = 60;
+export const PROP_BLEED = 61;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -2565,6 +2566,24 @@ export function tx_bind_expanded(widget_id: number, signal_id: number): Uint8Arr
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_expanded_element(widget_id: number, level = 0, field = 0): Uint8Array {
   enc.begin(); enc.u64(widget_id); enc.u32(PROP_EXPANDED); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant bleed value. */
+export function tx_set_bleed(widget_id: number, bleed: boolean): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_BLEED); enc.u32(SOURCE_CONST); enc.value(bleed);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound bleed value. */
+export function tx_bind_bleed(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_BLEED); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_bleed_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_BLEED); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
   return enc.end(TX_SET_PROPERTY);
 }
 

@@ -24,7 +24,7 @@ public enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x011ac2c5d907da7f
+let kayaSpecHash: UInt64 = 0x12513a04dcdb4c9a
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
 func kayaPackDate(_ year: Int, _ month: Int, _ day: Int) -> Int64 {
@@ -2800,6 +2800,38 @@ struct KayaTx {
         let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_EXPANDED))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
+    /// set_property with a constant bleed value.
+    mutating func setBleed(_ widgetId: UInt64, _ bleed: Bool) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_BLEED))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.bool(bleed))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound bleed value.
+    mutating func bindBleed(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_BLEED))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindBleedElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_BLEED))
         self.u32(UInt32(KAYA_SOURCE_ELEMENT))
         self.u32(level)
         self.u32(field)

@@ -2186,7 +2186,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0x011ac2c5d907da7fuL
+    private const val SPEC_HASH: ULong = 0x12513a04dcdb4c9auL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -2504,6 +2504,7 @@ object KayaCompose {
     private const val PROP_REVEALABLE = 58
     private const val PROP_SUMMARY = 59
     private const val PROP_EXPANDED = 60
+    private const val PROP_BLEED = 61
     private const val FILE_CONTENT_IMAGES = 1
     private const val PROP_COLUMNS = 11
     // The accessibility identifier (never spoken) and label (spoken).
@@ -3521,6 +3522,7 @@ object KayaCompose {
                         PROP_REVEALABLE -> KayaSceneModel.nodes[id]!!.revealable = readBool(b)
                         PROP_SUMMARY -> KayaSceneModel.nodes[id]!!.summary = readString(b)
                         PROP_EXPANDED -> KayaSceneModel.nodes[id]!!.expanded = readBool(b)
+                        PROP_BLEED -> depthStub("safearea")
                         PROP_ASPECT -> KayaSceneModel.nodes[id]!!.aspect = readI64(b)
                         PROP_PLAYER -> error("kaya: a video view's player arrives as set_video_player; the core never forwards the player prop")
                         PROP_CAPTURE -> error("kaya: a video view's capture arrives as set_video_capture; the core never forwards the capture prop")
@@ -10134,6 +10136,8 @@ object KayaCompose {
                             }
                         }
                     }
+                    // docs/safe-area-plan.md §6: the breadth's.
+                    "expect_keyboard", "expect_safe", "expect_insets" -> depthStub("safearea")
                     "expect_expanded" -> {
                         if (parts.size != 3 || (parts[2] != "on" && parts[2] != "off")) {
                             failures.add("expect_expanded wants an expander and on|off: $line")

@@ -4,6 +4,36 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## A SwiftUI modifier behind a branch rebuilt the focused field (measured 2026-10-11)
+
+The keyboard pan's first draft (docs/safe-area-plan.md A4.2) wrote
+`if pan > 0 { root.offset(y: -pan).clipped() } else { root }` in
+KayaRender's body. The two branches are two view identities, so every time
+the pan moved SwiftUI threw the whole mounted root away and built it again,
+the focused UITextField with it: the keyboard went down, the pan went to 0,
+focus came back, the keyboard rose, the pan moved. reveal-swiftui's stamped
+secure field logged the window flapping 734/433 pt eleven times in 0.6 s and
+ended with no focus, and `type_secret` refused. One chain whatever the value
+(`.offset(y: -pan).clipShape(KayaTopEdgeClip(active: pan > 0))`) keeps the
+identity, and the leg went green. tools/lib/safearea_routes.py refuses the
+branch and the cut is watched red. The same holds for any modifier that comes
+and goes with a value over a subtree that can hold focus.
+
+## The bled canvas grew itself every frame (measured 2026-10-11)
+
+KayaBleedLayout first answered `sizeThatFits` with its child's answer to the
+same proposal. A canvas answers at the size it was drawn, and it is drawn at
+the EXTENDED size the layout places it at, so each frame the slot grew by the
+inset on each touching side: 4004x2128 pt after 1.5 s in a 420x640 window, and
+`expect_safe ... bleeds` read it as bleeding, since every edge it touched was
+past the window's. The slot is now the child's answer at the extended proposal
+less the extension, and expect_safe refuses a frame that runs past the window
+(tools/lib/safearea_routes.py holds both, each cut watched red). The scene
+settles 700 ms before reading the canvas a second time: its first reading comes
+58 ms after the mount, before the growth shows, and its inset-0 half removes the
+extension the growth feeds on, so without the settle the safearea leg stayed
+green with the runaway put back (watched, then watched red with it).
+
 ## A rotation put back from the home screen comes back (measured 2026-10-09)
 
 Seven unrelated android legs went red on one matrix, all on emulator-5558:

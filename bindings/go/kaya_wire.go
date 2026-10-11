@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x011ac2c5d907da7f
+	SpecHash uint64 = 0x12513a04dcdb4c9a
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -141,6 +141,7 @@ const (
 	PropRevealable = 58
 	PropSummary = 59
 	PropExpanded = 60
+	PropBleed = 61
 	WpropTitle = 1
 	WpropWidth = 2
 	WpropHeight = 3
@@ -3702,6 +3703,38 @@ func TxBindExpandedElement(widgetID uint64, level uint32, field uint32) []byte {
 	b := beginRecord(txSetProperty)
 	b = binary.LittleEndian.AppendUint64(b, widgetID)
 	b = binary.LittleEndian.AppendUint32(b, PropExpanded)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetBleed: set_property with a constant bleed value.
+func TxSetBleed(widgetID uint64, bleed bool) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropBleed)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, bleed)
+	return endRecord(b)
+}
+
+// TxBindBleed: set_property with a signal-bound bleed value.
+func TxBindBleed(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropBleed)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindBleedElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindBleedElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropBleed)
 	b = binary.LittleEndian.AppendUint32(b, SourceElement)
 	b = binary.LittleEndian.AppendUint32(b, level)
 	b = binary.LittleEndian.AppendUint32(b, field)

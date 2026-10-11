@@ -15847,6 +15847,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     };
                     fit_picture(picture, texture);
                 }
+                // docs/safe-area-plan.md §6: the breadth's.
+                (_, Prop::Bleed, _) => crate::depth_stub("safearea"),
                 (_, prop, value) => {
                     panic!("kaya: gtk cannot apply {prop:?} = {value:?} here")
                 }
@@ -23414,6 +23416,20 @@ impl crate::harness::Stage for GtkStage {
 
     /// docs/expander-plan.md K5: GTK's own `expanded` on every expander the
     /// target sits in, a collapsed GtkExpander's body being parentless.
+    /// The keyboard and safe-area readings are the breadth's on this backend
+    /// (docs/safe-area-plan.md §6).
+    fn keyboard(&self) -> Result<bool, String> {
+        crate::depth_stub("safearea")
+    }
+
+    fn safe(&self, _: crate::harness::Target) -> Result<crate::harness::SafeWord, String> {
+        crate::depth_stub("safearea")
+    }
+
+    fn insets(&self) -> Result<(String, String), String> {
+        crate::depth_stub("safearea")
+    }
+
     fn collapsed_ancestor(&self, t: crate::harness::Target) -> Option<usize> {
         Self::on_main(move |core| {
             use gtk4::prelude::{Cast, WidgetExt};

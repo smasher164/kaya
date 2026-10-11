@@ -22,7 +22,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x011ac2c5d907da7f
+let kayaSpecHash: UInt64 = 0x12513a04dcdb4c9a
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -336,6 +336,7 @@ private let propRevealed: UInt32 = 57
 private let propRevealable: UInt32 = 58
 private let propSummary: UInt32 = 59
 private let propExpanded: UInt32 = 60
+private let propBleed: UInt32 = 61
 private let fileContentImages: UInt32 = 1
 private let tintAccent: Int64 = 1
 private let tintSuccess: Int64 = 2
@@ -824,6 +825,8 @@ final class KayaNode: Identifiable {
     /// (docs/expander-plan.md K3, K4).
     var summary = ""
     var expanded = false
+    /// docs/safe-area-plan.md A3.
+    var bleed = false
     /// The packed box ratio the app chose (0 none; docs/media-plan.md §3).
     var aspect: Int64 = 0
     var videoSeq = 0
@@ -1186,6 +1189,9 @@ final class KayaSceneModel {
     var contextNouns: [UInt64: [UInt8]] = [:]
     // The focus command's landing spot; expect_focused reads it back.
     var focusedId: UInt64?
+    /// A4.2's pan by root id (docs/safe-area-plan.md): how far the focused
+    /// field's root is moved up over the keyboard.
+    var keyboardPan: [UInt64: CGFloat] = [:]
     /// The DERIVED brand accent (apply 32), eleven packed sRGB words — seed +
     /// light five + dark five, in the wire's order. A REQUEST, uniformly
     /// (docs/styling-plan.md D2): the system accent wins unless the user chose
@@ -6304,6 +6310,8 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaScene.nodes[id]!.revealable = raw[body + 24] != 0
                 case (propExpanded, valueBool):
                     kayaScene.nodes[id]!.expanded = raw[body + 24] != 0
+                case (propBleed, valueBool):
+                    kayaScene.nodes[id]!.bleed = raw[body + 24] != 0
                 case (propSummary, valueStr):
                     kayaScene.nodes[id]!.summary = String(
                         decoding: raw[(body + 24)..<(body + 24 + len)], as: UTF8.self)
@@ -9145,6 +9153,54 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     kayaAwaitAnswer(expanderAnswered)
                 }
+            case "expect_keyboard":
+                // The platform's own keyboard over the window (harness.rs
+                // Step::ExpectKeyboard); a desktop has none.
+                guard parts.count == 2, parts[1] == "on" || parts[1] == "off" else {
+                    failures.append("expect_keyboard wants on|off: \(line)")
+                    break
+                }
+                let keyboardUp = DispatchQueue.main.sync { kayaKeyboardInWindow() != nil }
+                let keyboardWord = keyboardUp ? "on" : "off"
+                if keyboardWord == parts[1] {
+                    observed.append("keyboard \(keyboardWord)")
+                } else {
+                    failures.append("keyboard \(keyboardWord), wanted \(parts[1])")
+                }
+            case "expect_safe":
+                // harness.rs Step::ExpectSafe.
+                let wantSafe = parts.count >= 3 ? String(parts[2]) : "safe"
+                guard parts.count <= 3, wantSafe == "safe" || wantSafe == "bleeds" else {
+                    failures.append("expect_safe wants a target and safe|bleeds: \(line)")
+                    break
+                }
+                let safeRead = DispatchQueue.main.sync { kayaSafeReading(parts[1]) }
+                if let gotSafe = safeRead.word, gotSafe == wantSafe {
+                    observed.append("\(parts[1]) \(gotSafe)")
+                } else if let gotSafe = safeRead.word {
+                    failures.append("\(parts[1]) reads \(gotSafe), wanted \(wantSafe): \(safeRead.why)")
+                } else {
+                    failures.append(safeRead.why)
+                }
+            case "expect_insets":
+                // harness.rs Step::ExpectInsets.
+                let wantInsets = kayaQuoted(Array(parts[1...]))
+                let insetWords = ["bar", "cutout", "none"]
+                let halves = wantInsets.split(separator: "/", omittingEmptySubsequences: false)
+                guard halves.count == 2, halves.allSatisfy({ insetWords.contains(String($0)) }) else {
+                    failures.append("expect_insets wants \"<top>/<bottom>\", each one of bar, cutout, none: \(line)")
+                    break
+                }
+                if let gotInsets = DispatchQueue.main.sync(execute: { kayaInsetWords() }) {
+                    let got = "\(gotInsets.0)/\(gotInsets.1)"
+                    if got == wantInsets {
+                        observed.append("insets \"\(got)\"")
+                    } else {
+                        failures.append("insets \"\(got)\", wanted \"\(wantInsets)\"")
+                    }
+                } else {
+                    failures.append("expect_insets: no window to read the insets of")
+                }
             case "expect_expanded":
                 guard parts.count == 3, parts[2] == "on" || parts[2] == "off" else {
                     failures.append("expect_expanded wants an expander and on|off: \(line)")
@@ -9736,6 +9792,7 @@ private func kayaRunScript(_ script: String) {
                         failures.append("type \"\(typed)\": \(why)")
                     } else {
                         kayaAwaitAnswer(answered)
+                        if let walled = kayaKeyboardWall("type") { failures.append(walled) }
                     }
                 #endif
             case "type_secret":
@@ -9772,6 +9829,7 @@ private func kayaRunScript(_ script: String) {
                         failures.append("type_secret: \(why)")
                     } else {
                         kayaAwaitAnswer(secretAnswered)
+                        if let walled = kayaKeyboardWall("type_secret") { failures.append(walled) }
                     }
                 #endif
             case "expect_content_type":
@@ -9873,6 +9931,9 @@ private func kayaRunScript(_ script: String) {
                         failures.append("press \(parts[1]): \(why)")
                     } else {
                         kayaAwaitAnswer(pressAnswered)
+                        #if os(iOS)
+                            if let walled = kayaKeyboardWall("press \(parts[1])") { failures.append(walled) }
+                        #endif
                     }
                     break
                 }
@@ -9887,6 +9948,7 @@ private func kayaRunScript(_ script: String) {
                         failures.append("press return: \(why)")
                     } else {
                         kayaAwaitAnswer(pressAnswered)
+                        if let walled = kayaKeyboardWall("press return") { failures.append(walled) }
                     }
                 #endif
             case "expect":
@@ -20445,6 +20507,396 @@ func kayaDrawingImage(_ data: Data?, _ width: Int, _ height: Int) -> CGImage? {
         intent: .defaultIntent)
 }
 
+// MARK: - Safe area and the keyboard (docs/safe-area-plan.md)
+
+/// A bled widget's drawn frame in window space, recorded inside the bleed
+/// (KayaBleed); `expect_safe ... bleeds` reads it.
+@MainActor var kayaBleedFrames: [UInt64: CGRect] = [:]
+
+/// Whether `id` is a mounted root: a window's, an entry's, a sheet's or a
+/// section's.
+@MainActor func kayaIsMountedRoot(_ id: UInt64) -> Bool {
+    let scene = kayaScene
+    return scene.windows.values.contains { $0.root?.id == id }
+        || scene.navEntries.values.contains { $0.root?.id == id }
+        || scene.sheets.values.contains { $0.root?.id == id }
+        || scene.sectionsById.values.contains { $0.root?.id == id }
+}
+
+/// The root a node is mounted under, through the parent links.
+@MainActor func kayaRootOf(_ id: UInt64) -> UInt64 {
+    var at = id
+    var hops = 0
+    while let up = kayaScene.parents[at], hops < 4096 {
+        at = up
+        hops += 1
+    }
+    return at
+}
+
+/// The sides on which a widget touches its root's content edge, so that nothing
+/// but the window's inset lies between it and the edge (docs/safe-area-plan.md
+/// A3): every side of a mounted root; through a column, the cross sides and the
+/// first child's top and the last child's bottom (a row likewise, along its
+/// axis); no side through any other container or one with an inset or a fill.
+@MainActor func kayaBleedEdges(_ node: KayaNode) -> Edge.Set {
+    var edges: Edge.Set = [.top, .bottom, .leading, .trailing]
+    var child = node.id
+    while let parentId = kayaScene.parents[child], let parent = kayaScene.nodes[parentId] {
+        guard parent.kind == kindColumn || parent.kind == kindRow, parent.filled == 0,
+            kayaFilledInset(parent) == 0
+        else { return [] }
+        let vertical = (parent.axis ?? (parent.kind == kindColumn ? 1 : 0)) == 1
+        let first = parent.children.first?.id == child
+        let last = parent.children.last?.id == child
+        if !first { edges.remove(vertical ? .top : .leading) }
+        if !last { edges.remove(vertical ? .bottom : .trailing) }
+        child = parentId
+    }
+    return kayaIsMountedRoot(child) ? edges : []
+}
+
+/// Places its one child extended by the window's inset on the touching sides,
+/// while reporting the slot's own size to its parent; the child then ignores
+/// the container safe area on those sides (measured: docs/safe-area-plan.md §7).
+struct KayaBleedLayout: Layout {
+    let edges: Edge.Set
+    let inset: CGFloat
+    /// A picture's slot: the offered width at the picture's height. Nil takes
+    /// the child's own size.
+    var slotHeight: CGFloat? = nil
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        if let slotHeight {
+            return CGSize(width: proposal.width ?? 0, height: slotHeight)
+        }
+        // The child is asked at the EXTENDED size and the slot is its answer
+        // less the extension: a canvas drawn at the extended size answers with
+        // it, and passing that up grew the slot by the inset every frame.
+        let dx = (edges.contains(.leading) ? inset : 0) + (edges.contains(.trailing) ? inset : 0)
+        let dy = (edges.contains(.top) ? inset : 0) + (edges.contains(.bottom) ? inset : 0)
+        let grown = ProposedViewSize(width: proposal.width.map { $0 + dx }, height: proposal.height.map { $0 + dy })
+        let answer = subviews.first?.sizeThatFits(grown) ?? .zero
+        return CGSize(width: max(0, answer.width - dx), height: max(0, answer.height - dy))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var r = bounds
+        if edges.contains(.top) {
+            r.origin.y -= inset
+            r.size.height += inset
+        }
+        if edges.contains(.bottom) { r.size.height += inset }
+        if edges.contains(.leading) {
+            r.origin.x -= inset
+            r.size.width += inset
+        }
+        if edges.contains(.trailing) { r.size.width += inset }
+        subviews.first?.place(at: r.origin, anchor: .topLeading, proposal: ProposedViewSize(r.size))
+    }
+}
+
+/// `bleed` on an image, a video view or a canvas (docs/safe-area-plan.md A3):
+/// past the window's inset and the container safe area on its touching sides,
+/// never the keyboard's region.
+struct KayaBleed<Content: View>: View {
+    let node: KayaNode
+    var slotHeight: CGFloat? = nil
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        let edges = kayaBleedEdges(node)
+        let inset = CGFloat(kayaScene.windows[0]?.inset ?? 16)
+        KayaBleedLayout(edges: edges, inset: inset, slotHeight: slotHeight) {
+            // THE READER RIDES INSIDE THE IGNORE, so it grows exactly as the
+            // content does: outside it measured the unextended frame, and with
+            // an ignore of its own it measured itself (docs/traps.md).
+            content
+                .background(
+                    GeometryReader { geo in
+                        Color.clear
+                            .onAppear { kayaBleedFrames[node.id] = geo.frame(in: .global) }
+                            .onChange(of: geo.frame(in: .global)) { _, f in kayaBleedFrames[node.id] = f }
+                    }
+                )
+                .ignoresSafeArea(.container, edges: edges)
+        }
+    }
+}
+
+/// A clip at the top edge alone: the panned root is cut where the top bar
+/// begins and nowhere else.
+struct KayaTopEdgeClip: Shape {
+    let active: Bool
+
+    func path(in rect: CGRect) -> Path {
+        let top = active ? rect.minY : rect.minY - 10_000
+        return Path(CGRect(x: rect.minX - 10_000, y: top, width: rect.width + 20_000, height: rect.maxY + 10_000 - top))
+    }
+}
+
+/// A canvas's or a video view's bleed, when the app asked for one.
+struct KayaBleedIfAsked: ViewModifier {
+    let node: KayaNode
+
+    func body(content: Content) -> some View {
+        if node.bleed {
+            KayaBleed(node: node) { content }
+        } else {
+            content
+        }
+    }
+}
+
+/// The window's bounds and its safe rect, in the space `.global` frames use.
+@MainActor func kayaSafeWindowRects() -> (window: CGRect, safe: CGRect)? {
+    #if os(macOS)
+        guard let window = kayaNSWindows[0] ?? NSApp.keyWindow ?? NSApp.windows.first,
+            let content = window.contentView
+        else { return nil }
+        let b = content.bounds
+        let si = content.safeAreaInsets
+        return (
+            CGRect(origin: .zero, size: b.size),
+            CGRect(x: si.left, y: si.top, width: b.width - si.left - si.right, height: b.height - si.top - si.bottom)
+        )
+    #else
+        guard let window = kayaHarnessWindow() else { return nil }
+        return (window.bounds, window.bounds.inset(by: window.safeAreaInsets))
+    #endif
+}
+
+func kayaRectText(_ r: CGRect) -> String {
+    "(\(Int(r.minX.rounded())),\(Int(r.minY.rounded())),\(Int(r.width.rounded()))x\(Int(r.height.rounded())))"
+}
+
+/// A widget's frame in window space as the platform drew it: a bled widget's
+/// own recorded frame, a text control's UIKit view, else the cell it was laid
+/// out in.
+@MainActor func kayaPlatformFrame(_ node: KayaNode) -> CGRect? {
+    if node.bleed, let f = kayaBleedFrames[node.id] { return f }
+    #if os(iOS)
+        if let window = kayaHarnessWindow() {
+            if let view = kayaUITextViews[node.id]?.view, view.window != nil {
+                return view.convert(view.bounds, to: window)
+            }
+            if kayaScene.focusedId == node.id, let view = kayaFirstResponderView(), view is UITextField {
+                return view.convert(view.bounds, to: window)
+            }
+        }
+    #endif
+    return kayaNodeFrames[node.id]
+}
+
+/// `expect_safe`'s reading (harness.rs Step::ExpectSafe): the word, or the
+/// sentence naming every frame it compared.
+@MainActor func kayaSafeReading(_ spec: Substring) -> (word: String?, why: String) {
+    guard let node = kayaAnyTarget(spec) else { return (nil, "no such target \(spec)") }
+    guard let rects = kayaSafeWindowRects() else { return (nil, "\(spec): no window to read the safe area of") }
+    guard let frame = kayaPlatformFrame(node) else {
+        return (nil, "\(spec): no frame recorded for it — it was never laid out")
+    }
+    let keyboard = kayaKeyboardInWindow()
+    let tol: CGFloat = 1
+    let window = rects.window
+    let facts = "frame \(kayaRectText(frame)), safe area \(kayaRectText(rects.safe)), keyboard "
+        + (keyboard.map(kayaRectText) ?? "none") + ", window \(Int(window.width))x\(Int(window.height))"
+    if let keyboard, frame.maxY > keyboard.minY + tol {
+        return (nil, "\(spec) is covered by the keyboard: \(facts)")
+    }
+    if frame.minX < window.minX - tol || frame.minY < window.minY - tol || frame.maxX > window.maxX + tol
+        || frame.maxY > window.maxY + tol
+    {
+        return (nil, "\(spec) runs past the window's edge: \(facts)")
+    }
+    let edges = node.bleed ? kayaBleedEdges(node) : []
+    if !edges.isEmpty {
+        let ltr = !kayaMirroredLayout()
+        let reaches: [(Edge.Set, Bool)] = [
+            (.top, frame.minY <= window.minY + tol),
+            (.bottom, frame.maxY >= window.maxY - tol || keyboard.map { frame.maxY >= $0.minY - tol } == true),
+            (.leading, ltr ? frame.minX <= window.minX + tol : frame.maxX >= window.maxX - tol),
+            (.trailing, ltr ? frame.maxX >= window.maxX - tol : frame.minX <= window.minX + tol),
+        ]
+        let short = reaches.filter { edges.contains($0.0) && !$0.1 }
+        if short.isEmpty { return ("bleeds", facts) }
+        return (nil, "\(spec) bleeds but stops short of the window's edge on \(short.count) touching side(s): \(facts)")
+    }
+    let s = rects.safe
+    if frame.minX >= s.minX - tol, frame.maxX <= s.maxX + tol, frame.minY >= s.minY - tol, frame.maxY <= s.maxY + tol {
+        return ("safe", facts)
+    }
+    return (nil, "\(spec) lies outside the safe area: \(facts)")
+}
+
+/// Whether this process lays out right to left.
+@MainActor func kayaMirroredLayout() -> Bool {
+    #if os(macOS)
+        return NSApp.userInterfaceLayoutDirection == .rightToLeft
+    #else
+        return UIApplication.shared.userInterfaceLayoutDirection == .rightToLeft
+    #endif
+}
+
+/// `expect_insets`' reading: the top and bottom platform insets as words.
+@MainActor func kayaInsetWords() -> (String, String)? {
+    #if os(macOS)
+        guard let window = kayaNSWindows[0] ?? NSApp.keyWindow ?? NSApp.windows.first else { return nil }
+        let notch = window.screen?.safeAreaInsets.top ?? 0
+        let full = window.styleMask.contains(.fullScreen)
+        return (full && notch > 0 ? "cutout" : "none", "none")
+    #else
+        guard let window = kayaHarnessWindow() else { return nil }
+        let insets = window.safeAreaInsets
+        let barHidden = window.windowScene?.statusBarManager?.isStatusBarHidden ?? false
+        let top = insets.top <= 0 ? "none" : (barHidden ? "cutout" : "bar")
+        let bottom = insets.bottom <= 0 ? "none" : "bar"
+        return (top, bottom)
+    #endif
+}
+
+#if os(macOS)
+    /// No software keyboard on this platform (docs/safe-area-plan.md A13).
+    @MainActor func kayaKeyboardInWindow() -> CGRect? { nil }
+#else
+    /// The software keyboard's end frame in screen space, from UIKit's own
+    /// notification; zero while none is up.
+    @MainActor var kayaKeyboardScreenFrame: CGRect = .zero
+    @MainActor var kayaKeyboardFrames = 0
+    @MainActor private var kayaKeyboardWatching = false
+
+    @MainActor func kayaWatchKeyboard() {
+        guard !kayaKeyboardWatching else { return }
+        kayaKeyboardWatching = true
+        let center = NotificationCenter.default
+        center.addObserver(
+            forName: UIResponder.keyboardWillChangeFrameNotification, object: nil, queue: .main
+        ) { note in
+            let end = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue ?? .zero
+            MainActor.assumeIsolated {
+                kayaKeyboardScreenFrame = end
+                kayaKeyboardFrames += 1
+                kayaKeyboardMoved()
+            }
+        }
+        center.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated {
+                kayaKeyboardScreenFrame = .zero
+                kayaKeyboardMoved()
+            }
+        }
+        for name in [UITextField.textDidBeginEditingNotification, UITextView.textDidBeginEditingNotification] {
+            center.addObserver(forName: name, object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { kayaKeyboardMoved() }
+            }
+        }
+    }
+
+    /// The keyboard's frame in the harness window's space, nil while none
+    /// covers the window.
+    @MainActor func kayaKeyboardInWindow() -> CGRect? {
+        guard let window = kayaHarnessWindow(), kayaKeyboardScreenFrame.height > 0 else { return nil }
+        let r = window.convert(kayaKeyboardScreenFrame, from: window.screen.coordinateSpace)
+        let hit = r.intersection(window.bounds)
+        return hit.isNull || hit.height <= 0 ? nil : hit
+    }
+
+    /// The pan is re-read after the keyboard's animation and SwiftUI's own
+    /// scroll to the focused field have settled.
+    @MainActor func kayaKeyboardMoved() {
+        for delay in [0.35, 0.7] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { kayaPanEvaluate() }
+        }
+    }
+
+    /// The focused text control, its frame and its caret line in window space.
+    @MainActor func kayaFocusedFieldRects() -> (view: UIView, field: CGRect, caret: CGRect, window: UIWindow)? {
+        guard let view = kayaFirstResponderView(), let input = view as? UITextInput,
+            view is UITextField || view is UITextView, let window = view.window
+        else { return nil }
+        let at = input.selectedTextRange?.end ?? input.endOfDocument
+        let caret = view.convert(input.caretRect(for: at), to: window)
+        return (view, view.convert(view.bounds, to: window), caret, window)
+    }
+
+    /// A4.2 (docs/safe-area-plan.md): when no scroll brought the focused field
+    /// above the keyboard, the field's root is panned up by what is still
+    /// covered, and back down when it needs less.
+    @MainActor func kayaPanEvaluate() {
+        guard let keyboard = kayaKeyboardInWindow(), let rects = kayaFocusedFieldRects() else {
+            if !kayaScene.keyboardPan.isEmpty { kayaScene.keyboardPan = [:] }
+            return
+        }
+        let root = kayaScene.focusedId.map(kayaRootOf) ?? kayaScene.root?.id ?? 0
+        let room = keyboard.minY - rects.window.safeAreaInsets.top
+        let target = rects.field.height <= room ? rects.field : rects.caret
+        let margin: CGFloat = 8
+        let covered = target.maxY - keyboard.minY
+        let current = kayaScene.keyboardPan[root] ?? 0
+        var next = current
+        if covered > 0.5 {
+            next = current + covered + margin
+        } else if current > 0, covered < -2 * margin {
+            next = max(0, current + covered + margin)
+        }
+        if abs(next - current) > 0.5 {
+            kayaScene.keyboardPan = [root: next]
+        }
+    }
+
+    /// A9's wall (docs/safe-area-plan.md): after a key reached a focused text
+    /// control, the keyboard is up and the caret line is visible above it. Nil
+    /// when it holds or no text control holds the focus; the sentence names
+    /// what was measured otherwise. Off the main thread; waits for the
+    /// keyboard's animation and the pan.
+    func kayaKeyboardWall(_ verb: String) -> String? {
+        var last: String?
+        for _ in 0..<60 {
+            last = DispatchQueue.main.sync { kayaWallReading(verb) }
+            if last == nil { return nil }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        return last
+    }
+
+    @MainActor func kayaWallReading(_ verb: String) -> String? {
+        guard let rects = kayaFocusedFieldRects() else { return nil }
+        let who = kayaScene.focusedId.flatMap { kayaScene.nodes[$0] }.map {
+            "node \($0.id) (\"\($0.a11yId)\")"
+        } ?? "\(type(of: rects.view))"
+        let window = rects.window.bounds
+        guard let keyboard = kayaKeyboardInWindow() else {
+            let measured = "\(verb): no software keyboard is up over the focused field \(who) "
+                + "(frame \(kayaRectText(rects.field)), window \(Int(window.width))x\(Int(window.height)))"
+            if kayaKeyboardFrames == 0 {
+                let pref = UserDefaults(suiteName: "com.apple.keyboard.preferences")?
+                    .object(forKey: "AutomaticMinimizationEnabled") as? Bool
+                if pref == false {
+                    return measured + "; UIKit sent this process no keyboard frame at all though "
+                        + "com.apple.keyboard.preferences AutomaticMinimizationEnabled reads false, so "
+                        + "the simulator's hardware-keyboard setting is not why, and nothing here "
+                        + "measures what kept it down (docs/safe-area-plan.md A9)"
+                }
+                return measured + "; UIKit sent this process no keyboard frame at all and "
+                    + "com.apple.keyboard.preferences AutomaticMinimizationEnabled reads "
+                    + "\(pref.map { "\($0)" } ?? "unset"): the simulator treats a hardware keyboard as "
+                    + "attached and keeps the software one down (docs/safe-area-plan.md A10)"
+            }
+            return measured + "; UIKit sent \(kayaKeyboardFrames) keyboard frame(s), the last "
+                + "\(kayaRectText(kayaKeyboardScreenFrame)) in screen space, so a keyboard rose and "
+                + "is not over the window now (docs/safe-area-plan.md A9)"
+        }
+        let top = rects.window.safeAreaInsets.top
+        if rects.caret.maxY <= keyboard.minY + 0.5, rects.caret.minY >= top - 0.5 {
+            return nil
+        }
+        return "\(verb): the focused field \(who) is not visible above the keyboard: its caret line "
+            + "\(kayaRectText(rects.caret)) and frame \(kayaRectText(rects.field)), the keyboard "
+            + "\(kayaRectText(keyboard)), the window \(Int(window.width))x\(Int(window.height)) "
+            + "(docs/safe-area-plan.md A4, A9)"
+    }
+#endif
+
 struct KayaRender: View {
     let node: KayaNode
     /// The mounted root fills its window; nested containers do not.
@@ -20468,6 +20920,20 @@ struct KayaRender: View {
     @Environment(\.kayaGroupedButtonRow) private var kayaGroupedButtonRow
 
     var body: some View {
+        #if os(iOS)
+            // A4.2's pan (docs/safe-area-plan.md): the root alone moves, and
+            // what it moves past the top bar is clipped rather than drawn
+            // under the title.
+            // ONE CHAIN whatever the pan: a branch on it rebuilt the root,
+            // and the focused field with it, each time the pan moved.
+            let pan = isRoot ? kayaScene.keyboardPan[node.id] ?? 0 : 0
+            kayaAnchored.offset(y: -pan).clipShape(KayaTopEdgeClip(active: pan > 0))
+        #else
+            kayaAnchored
+        #endif
+    }
+
+    @ViewBuilder private var kayaAnchored: some View {
         // The widget/node anchor: a context catalog rides .contextMenu on the
         // node's view, and editable text never reaches here (the root rejects
         // the attach). The accessibility props ride EVERY kind, applied where
@@ -20888,6 +21354,7 @@ struct KayaRender: View {
                     .background(KayaVideoVisibility(node: node))
                     .accessibilityElement(children: .ignore)
                     .accessibilityAddTraits(.isImage)
+                    .modifier(KayaBleedIfAsked(node: node))
             } else {
                 KayaVideoSurface(node: node)
                     .overlay { KayaCaptionOverlay(node: node) }
@@ -20898,6 +21365,7 @@ struct KayaRender: View {
                     .accessibilityAddTraits(.isImage)
                     .accessibilityAction(named: actions[0].0, actions[0].1)
                     .accessibilityAction(named: actions[1].0, actions[1].1)
+                    .modifier(KayaBleedIfAsked(node: node))
             }
         case kindDatePicker:
             // The platform's own control, hosted (docs/datetime-plan.md D6):
@@ -21137,10 +21605,23 @@ struct KayaRender: View {
                                 kayaScrollProxies[node.id] = proxy
                                 kayaDrainRowScrolls()
                             }
-                            .onChange(of: g.size) { _, size in
+                            .onChange(of: g.size) { old, size in
+                                // A5 (docs/safe-area-plan.md): a following scroll
+                                // that sat at its end keeps it when its viewport
+                                // shrinks, as when the keyboard rises.
+                                let wasAtEnd = node.scrollContentMaxY <= old.height + kayaFollowSlack
                                 node.scrollViewportH = size.height
                                 node.scrollViewportW = size.width
                                 node.scrollViewportGlobal = g.frame(in: .global)
+                                if node.followsEnd, !sideways, size.height < old.height - 0.5, wasAtEnd {
+                                    var t = Transaction()
+                                    t.disablesAnimations = true
+                                    withTransaction(t) {
+                                        proxy.scrollTo(
+                                            "kaya-scroll-content-\(node.id)",
+                                            anchor: kayaScrollEndAnchor(node))
+                                    }
+                                }
                             }
                             .onChange(of: g.frame(in: .global).origin) { _, _ in
                                 node.scrollViewportGlobal = g.frame(in: .global)
@@ -21152,7 +21633,23 @@ struct KayaRender: View {
             // Fixed to the decoded image's intrinsic size (no .resizable()),
             // matching the harness's size observation. A FAILED DECODE IS
             // PRESENT AND EMPTY, NOT ABSENT (tools/check-empty-child.py).
-            if let image = node.image {
+            // A BLED picture spans its slot's width at its own height and fills
+            // the bled frame (docs/safe-area-plan.md §3).
+            if node.bleed, let image = node.image {
+                let fit = kayaImageFit(natural: image.size, node: node) ?? image.size
+                KayaBleed(node: node, slotHeight: fit.height) {
+                    Color.clear
+                        .overlay {
+                            #if os(macOS)
+                                Image(nsImage: image).resizable().scaledToFill()
+                            #else
+                                Image(uiImage: image).resizable().scaledToFill()
+                            #endif
+                        }
+                        .clipped()
+                }
+                .background(KayaLabelFrameReader(id: node.id))
+            } else if let image = node.image {
                 let fit = kayaImageFit(natural: image.size, node: node)
                 Group {
                     #if os(macOS)
@@ -21205,6 +21702,7 @@ struct KayaRender: View {
                 maxHeight: node.grow > 0 ? .infinity : nil)
             .background(KayaCanvasReader(id: node.id))
             .background(kayaHarnessDrivesFrames ? nil : KayaCanvasTicker())
+            .modifier(KayaBleedIfAsked(node: node))
         default:
             EmptyView()
         }
@@ -28918,6 +29416,9 @@ struct KayaRoot: View {
             // appear fires for an empty window; the content branch's
             // does not).
             kayaArmSelftestStartupDeadline()
+            #if os(iOS)
+                kayaWatchKeyboard()
+            #endif
             kayaOpenWindow = { openWindow(value: $0) }
             kayaDismissWindow = { dismissWindow(value: $0) }
             for id in kayaPendingOpens {

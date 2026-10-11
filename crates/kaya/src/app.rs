@@ -2019,6 +2019,13 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// This image, video view or canvas bleeds to the window's edge —
+    /// [`Tx::bleed`] chained.
+    pub fn bleed(self) -> Self {
+        self.tx.bleed(self.id);
+        self
+    }
+
     /// A `role link` label's destination (docs/tasks-s2-plan.md T3).
     pub fn href(self, url: impl Into<LiveSource<StrKind>>) -> Self {
         self.tx.href(self.id, url);
@@ -3145,6 +3152,13 @@ impl<'a> Tx<'a> {
     /// (docs/reveal-plan.md V1); each flip reaches [`Messages::on_toggle`].
     pub fn revealable(&mut self, widget: WidgetId) {
         self.set(widget, Prop::Revealable, true);
+    }
+
+    /// An image, video view or canvas extends past the window's inset and the
+    /// safe area to the window's edge on each side it touches, never under the
+    /// keyboard (docs/safe-area-plan.md A3). Live zone only (A16).
+    pub fn bleed(&mut self, widget: WidgetId) {
+        self.set(widget, Prop::Bleed, true);
     }
 
     /// A `role link` label's destination (docs/tasks-s2-plan.md T3).

@@ -136,6 +136,11 @@ VERB_FEATURE = {
     "expect_toast_announced": "toast",
     "toast_action": "toast",
     "toast_close": "toast",
+    # docs/safe-area-plan.md §5, the same reasoning: the phone scripts of the
+    # chat app, the task manager and the content-type form read the keyboard.
+    "expect_keyboard": "safearea",
+    "expect_safe": "safearea",
+    "expect_insets": "safearea",
     # docs/autofill-plan.md §5, the same reasoning.
     "expect_content_type": "autofill",
     # docs/reveal-plan.md §5, the same reasoning.

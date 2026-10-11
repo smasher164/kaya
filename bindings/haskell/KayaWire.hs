@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x011ac2c5d907da7f
+specHash = 0x12513a04dcdb4c9a
 
 valueBool :: Word32
 valueBool = 1
@@ -276,6 +276,8 @@ propSummary :: Word32
 propSummary = 59
 propExpanded :: Word32
 propExpanded = 60
+propBleed :: Word32
+propBleed = 61
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -2694,6 +2696,25 @@ txBindExpanded widgetId signalId = wireRecord txKindSetProperty
 txBindExpandedElement :: Word64 -> Word32 -> Word32 -> Builder
 txBindExpandedElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propExpanded <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant bleed value.
+txSetBleed :: Word64 -> Bool -> Builder
+txSetBleed widgetId bleed = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propBleed <> word32LE sourceConst
+    <> encodeValue (VBool bleed))
+
+-- set_property with a signal-bound bleed value.
+txBindBleed :: Word64 -> Word64 -> Builder
+txBindBleed widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propBleed <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindBleedElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindBleedElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propBleed <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
 -- set_window_prop with a constant title value (window 0, the primary surface).

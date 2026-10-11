@@ -1190,6 +1190,7 @@ pub(crate) const PROP_REVEALED: u32 = 57;
 pub(crate) const PROP_REVEALABLE: u32 = 58;
 pub(crate) const PROP_SUMMARY: u32 = 59;
 pub(crate) const PROP_EXPANDED: u32 = 60;
+pub(crate) const PROP_BLEED: u32 = 61;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
@@ -1823,6 +1824,7 @@ fn prop(raw: u32) -> Prop {
         PROP_REVEALABLE => Prop::Revealable,
         PROP_SUMMARY => Prop::Summary,
         PROP_EXPANDED => Prop::Expanded,
+        PROP_BLEED => Prop::Bleed,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -5681,6 +5683,7 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::Revealable => PROP_REVEALABLE,
         Prop::Summary => PROP_SUMMARY,
         Prop::Expanded => PROP_EXPANDED,
+        Prop::Bleed => PROP_BLEED,
     }
 }
 

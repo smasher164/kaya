@@ -828,6 +828,17 @@ pub enum Step {
     /// expander, so every other step aimed at it is refused
     /// (docs/expander-plan.md K5).
     ExpectOutOfReach(Target),
+    /// `expect_keyboard on|off`: the platform's own software keyboard, read
+    /// off the window (docs/safe-area-plan.md A9); a desktop answers off.
+    ExpectKeyboard(bool),
+    /// `expect_safe <target> [safe|bleeds]`: the target's frame lies inside the
+    /// platform's safe area and above the keyboard (`safe`), or, for a widget
+    /// with `bleed`, reaches the window's edge on its touching sides (`bleeds`);
+    /// read off the platform's frames (docs/safe-area-plan.md A9).
+    ExpectSafe(Target, SafeWord),
+    /// `expect_insets "<top>/<bottom>"`: each edge's platform inset as a word,
+    /// `bar`, `cutout` or `none` (docs/safe-area-plan.md A9).
+    ExpectInsets(String),
     /// Expect the grid to lay its children out in exactly N columns with
     /// each column's cells sharing their leading edge — geometry from the
     /// toolkit, never a model copy.
@@ -1021,6 +1032,7 @@ impl Step {
             | Step::ExpectSegmentSymbol(t, _, _)
             | Step::ExpectExpanded(t, _)
             | Step::ExpectOutOfReach(t)
+            | Step::ExpectSafe(t, _)
             | Step::ExpectGridColumns(t, _)
             | Step::ExpectAx(t, _)
             | Step::ExpectAxHint(t, _)
@@ -1129,6 +1141,8 @@ impl Step {
             | Step::DismissSheet
             | Step::ExpectToast(..)
             | Step::ExpectNoToast
+            | Step::ExpectKeyboard(_)
+            | Step::ExpectInsets(_)
             | Step::ExpectToastAnnounced(..)
             | Step::ToastAction
             | Step::ToastClose
@@ -1298,6 +1312,9 @@ impl Step {
             Step::ExpectSegmentSymbol { .. } => true,
             Step::ExpectExpanded { .. } => true,
             Step::ExpectOutOfReach { .. } => true,
+            Step::ExpectKeyboard(..) => true,
+            Step::ExpectSafe(..) => true,
+            Step::ExpectInsets(..) => true,
             Step::ExpectGridColumns { .. } => true,
             Step::MenuActivate { .. } => false,
             Step::ContextOpen { .. } => false,
@@ -2003,6 +2020,16 @@ pub trait Stage: Send + 'static {
     /// whose header the platform reports collapsed (docs/expander-plan.md
     /// K5); None when every enclosing expander is open or there is none.
     fn collapsed_ancestor(&self, target: Target) -> Option<usize>;
+    /// Whether the platform's software keyboard is up over this window, or a
+    /// sentence saying what was measured instead (docs/safe-area-plan.md A9).
+    fn keyboard(&self) -> Result<bool, String>;
+    /// The target's verdict against the platform's safe area and keyboard:
+    /// `safe` or `bleeds` as [`SafeWord`] spells them, or a sentence naming the
+    /// frames it read (docs/safe-area-plan.md A9).
+    fn safe(&self, target: Target) -> Result<SafeWord, String>;
+    /// The window's top and bottom platform insets as words (`bar`, `cutout`,
+    /// `none`), or a sentence saying what was measured instead.
+    fn insets(&self) -> Result<(String, String), String>;
     /// The grid observation: empty when the grid lays out in exactly `want`
     /// columns whose cells share their leading edges (within two device
     /// units); otherwise the toolkit's own description of the mismatch, for
@@ -3416,6 +3443,29 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 )
             }
             "expect_out_of_reach" => Step::ExpectOutOfReach(parse_target(rest)?),
+            "expect_keyboard" => Step::ExpectKeyboard(match rest.trim() {
+                "on" => true,
+                "off" => false,
+                other => return Err(format!("expect_keyboard wants on|off, got {other:?}")),
+            }),
+            "expect_safe" => {
+                let (target, word) = match rest.split_once(char::is_whitespace) {
+                    Some((t, w)) => (t, w.trim()),
+                    None => (rest, "safe"),
+                };
+                let word = SafeWord::parse(word)?;
+                Step::ExpectSafe(parse_target(target)?, word)
+            }
+            "expect_insets" => {
+                let want = parse_string(rest)?;
+                let ok = want.split_once('/').is_some_and(|(top, bottom)| {
+                    INSET_WORDS.contains(&top) && INSET_WORDS.contains(&bottom)
+                });
+                if !ok {
+                    return Err(format!("expect_insets wants \"<top>/<bottom>\", each one of {INSET_WORDS:?}: {line:?}"));
+                }
+                Step::ExpectInsets(want)
+            }
             "expect_grid_columns" => {
                 let (target, n) = rest
                     .split_once(char::is_whitespace)
@@ -5718,6 +5768,25 @@ fn run_with_log(
                 }
             })),
             Step::ExpectExpanded(t, want) => Some(poll(|| expanded_reading(stage.expanded(*t), *want))),
+            Step::ExpectKeyboard(want) => Some(poll(|| match stage.keyboard() {
+                Err(why) => Err(why),
+                Ok(got) if got == *want => Ok(format!("keyboard {}", if got { "on" } else { "off" })),
+                Ok(got) => Err(format!(
+                    "keyboard {}, wanted {}",
+                    if got { "on" } else { "off" },
+                    if *want { "on" } else { "off" }
+                )),
+            })),
+            Step::ExpectSafe(t, want) => Some(poll(|| match stage.safe(*t) {
+                Err(why) => Err(why),
+                Ok(got) if got == *want => Ok(format!("{} {}", target_spec(t), got.word())),
+                Ok(got) => Err(format!("{} reads {}, wanted {}", target_spec(t), got.word(), want.word())),
+            })),
+            Step::ExpectInsets(want) => Some(poll(|| match stage.insets() {
+                Err(why) => Err(why),
+                Ok((top, bottom)) if format!("{top}/{bottom}") == *want => Ok(format!("insets \"{want}\"")),
+                Ok((top, bottom)) => Err(format!("insets \"{top}/{bottom}\", wanted \"{want}\"")),
+            })),
             Step::ExpectOutOfReach(t) => Some(poll(|| match stage.collapsed_ancestor(*t) {
                 Some(i) => Ok(format!("out of reach inside expander#{i}")),
                 None => Err(WITHIN_REACH.to_owned()),
@@ -6944,6 +7013,32 @@ pub(crate) fn swipe_spec(mut items: Vec<(i64, String)>) -> String {
         .collect::<Vec<_>>()
         .join("/")
 }
+
+/// `expect_safe`'s two verdicts (docs/safe-area-plan.md A9).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SafeWord {
+    Safe,
+    Bleeds,
+}
+
+impl SafeWord {
+    fn parse(word: &str) -> Result<SafeWord, String> {
+        [SafeWord::Safe, SafeWord::Bleeds]
+            .into_iter()
+            .find(|w| w.word() == word)
+            .ok_or_else(|| format!("expect_safe wants safe|bleeds, got {word:?}"))
+    }
+
+    pub fn word(self) -> &'static str {
+        match self {
+            SafeWord::Safe => "safe",
+            SafeWord::Bleeds => "bleeds",
+        }
+    }
+}
+
+/// The words `expect_insets` reads an edge as (docs/safe-area-plan.md A9).
+pub const INSET_WORDS: [&str; 3] = ["bar", "cutout", "none"];
 
 /// The K5 refusal (docs/expander-plan.md K5), one sentence in all three
 /// harnesses (tools/lib/expander_routes.py compares them).
@@ -8432,6 +8527,7 @@ mod tests {
         static MOCK_LOG: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
         static MOCK_EXPANDED: std::cell::Cell<(bool, bool)> = const { std::cell::Cell::new((false, false)) };
         static MOCK_COLLAPSED: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+        static MOCK_KEYBOARD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     }
 
     /// docs/expander-plan.md K5, K8: the two platform readings must agree, and a
@@ -8475,6 +8571,36 @@ mod tests {
         assert!(parse("expect_expanded checkbox#0 on").is_err());
         assert!(parse("expect_expanded expander#0 maybe").is_err());
         MOCK_EXPANDED.with(|e| e.set((false, false)));
+    }
+
+    /// docs/safe-area-plan.md A9: the three readings answer in words, and a
+    /// reading that disagrees names both sides.
+    #[test]
+    fn safe_area_readings_answer_in_words() {
+        let run = |script: &str| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let code = run_with_log(parse(script).unwrap(), MockStage { seen: &SEEN, verdict: tx }, None, None);
+            let (_, verdict) = rx.recv().unwrap();
+            (code, verdict)
+        };
+        MOCK_KEYBOARD.with(|k| k.set(false));
+        let (code, verdict) =
+            run("expect_keyboard off\nexpect_safe image#0 bleeds\nexpect_safe entry#0\nexpect_insets \"bar/none\"");
+        assert_eq!(code, 0, "{verdict}");
+        assert!(verdict.contains("keyboard off") && verdict.contains("image#0 bleeds"), "{verdict}");
+        let (code, verdict) = run("expect_keyboard on");
+        assert_eq!(code, 1, "{verdict}");
+        assert!(verdict.contains("keyboard off, wanted on"), "{verdict}");
+        let (_, verdict) = run("expect_safe image#0");
+        assert!(verdict.contains("image#0 reads bleeds, wanted safe"), "{verdict}");
+        let (_, verdict) = run("expect_safe label#0");
+        assert!(verdict.contains("under the keyboard"), "{verdict}");
+        let (_, verdict) = run("expect_insets \"none/none\"");
+        assert!(verdict.contains("insets \"bar/none\", wanted \"none/none\""), "{verdict}");
+        assert!(parse("expect_keyboard maybe").is_err());
+        assert!(parse("expect_safe image#0 hidden").is_err());
+        assert!(parse("expect_insets \"bar\"").is_err());
+        assert!(parse("expect_insets \"bar/notch\"").is_err());
     }
 
     /// THE SECURE FIELD'S TEXT REACHES NO TRANSCRIPT (docs/secure-entry-plan.md
@@ -9119,6 +9245,19 @@ mod tests {
         }
         fn collapsed_ancestor(&self, _: Target) -> Option<usize> {
             MOCK_COLLAPSED.with(|c| c.get())
+        }
+        fn keyboard(&self) -> Result<bool, String> {
+            Ok(MOCK_KEYBOARD.with(|k| k.get()))
+        }
+        fn safe(&self, t: Target) -> Result<SafeWord, String> {
+            match t.kind {
+                TargetKind::Image => Ok(SafeWord::Bleeds),
+                TargetKind::Label => Err("label#0 is covered: frame (0,500,100,20) under the keyboard (0,476,375,336)".to_owned()),
+                _ => Ok(SafeWord::Safe),
+            }
+        }
+        fn insets(&self) -> Result<(String, String), String> {
+            Ok(("bar".to_owned(), "none".to_owned()))
         }
         fn content_type(&self, target: Target) -> Result<&'static str, String> {
             match target.kind {
@@ -9771,6 +9910,15 @@ mod tests {
             fn collapsed_ancestor(&self, _: Target) -> Option<usize> {
                 None
             }
+            fn keyboard(&self) -> Result<bool, String> {
+                Ok(false)
+            }
+            fn safe(&self, _: Target) -> Result<SafeWord, String> {
+                Ok(SafeWord::Safe)
+            }
+            fn insets(&self) -> Result<(String, String), String> {
+                Ok(("none".to_owned(), "none".to_owned()))
+            }
             fn clipboard_seed(&self, _: &str, _: &str) {}
             fn clipboard_read(&self, _: &str) -> String {
                 String::new()
@@ -10214,6 +10362,15 @@ mod tests {
             }
             fn collapsed_ancestor(&self, _: Target) -> Option<usize> {
                 None
+            }
+            fn keyboard(&self) -> Result<bool, String> {
+                Ok(false)
+            }
+            fn safe(&self, _: Target) -> Result<SafeWord, String> {
+                Ok(SafeWord::Safe)
+            }
+            fn insets(&self) -> Result<(String, String), String> {
+                Ok(("none".to_owned(), "none".to_owned()))
             }
             fn clipboard_seed(&self, _: &str, _: &str) {}
             fn clipboard_read(&self, _: &str) -> String {

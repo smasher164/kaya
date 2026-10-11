@@ -328,6 +328,10 @@ name = "expander"
 path = "../../guests/rust/expander.rs"
 
 [[example]]
+name = "safearea"
+path = "../../guests/rust/safearea.rs"
+
+[[example]]
 name = "autofill"
 path = "../../guests/rust/autofill.rs"
 

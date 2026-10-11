@@ -1249,6 +1249,11 @@
 #define KAYA_PROP_EXPANDED 60
 
 /**
+ * An image, video view or canvas bleeds to the window\'s edge (docs/safe-area-plan.md A3).
+ */
+#define KAYA_PROP_BLEED 61
+
+/**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
  * windows are not widgets. Window 0 is the primary surface.
  */

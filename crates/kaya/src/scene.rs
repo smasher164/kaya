@@ -1283,6 +1283,8 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         Prop::Revealed | Prop::Revealable => matches!(kind, WidgetKind::SecureField),
         // docs/expander-plan.md K3, K4.
         Prop::Summary | Prop::Expanded => kind == WidgetKind::Expander,
+        // docs/safe-area-plan.md A3: the three kinds whose content is a picture.
+        Prop::Bleed => matches!(kind, WidgetKind::Image | WidgetKind::Video | WidgetKind::Canvas),
         Prop::Indeterminate => matches!(kind, WidgetKind::Progress),
         Prop::Source => matches!(kind, WidgetKind::Image),
         // Layout weight is kind-agnostic: any child of a row/column may
@@ -1921,6 +1923,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Revealed | Prop::Revealable => ValueType::Bool,
         Prop::Summary => ValueType::Str,
         Prop::Expanded => ValueType::Bool,
+        Prop::Bleed => ValueType::Bool,
         Prop::Role => ValueType::I64,
         Prop::Symbol => ValueType::I64,
         Prop::Indeterminate | Prop::Fill | Prop::Wrap | Prop::Rich | Prop::Submits => ValueType::Bool,
@@ -8062,6 +8065,12 @@ impl Scene {
                      view only, never a row's (docs/capture-plan.md §3)",
                     widget.0
                 );
+                assert!(
+                    prop != Prop::Bleed,
+                    "kaya: template node {} asks for `bleed` — a stamped row never touches the \
+                     window's edge, so bleed there could only mean nothing (docs/safe-area-plan.md A16)",
+                    widget.0
+                );
                 match &value {
                     PropValue::Const(v) => {
                         check_prop_value(node_kind, prop, v);
@@ -11756,6 +11765,48 @@ mod tests {
                     .expect_err("the stamped expander was admitted"),
             );
             assert!(msg.contains(want), "{msg}");
+        }
+    }
+
+    /// docs/safe-area-plan.md A3, A16: `bleed` is a Bool on the three picture
+    /// kinds, live zone only; any other kind and every template node are refused.
+    #[test]
+    fn bleed_belongs_to_the_picture_kinds_in_the_live_zone() {
+        for kind in [WidgetKind::Image, WidgetKind::Video, WidgetKind::Canvas] {
+            check_prop(kind, Prop::Bleed);
+        }
+        for kind in [WidgetKind::Column, WidgetKind::Button, WidgetKind::Entry, WidgetKind::Label, WidgetKind::Scroll] {
+            let msg = panic_text(std::panic::catch_unwind(|| check_prop(kind, Prop::Bleed)).unwrap_err());
+            assert!(msg.contains("has no property"), "{kind:?}: {msg}");
+        }
+        assert_eq!(prop_value_type(Prop::Bleed), ValueType::Bool);
+        let live = Scene::new().apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Image },
+            TxOp::SetProperty { widget: WidgetId(2), prop: Prop::Bleed, value: PropValue::Const(Value::Bool(true)) },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+        assert!(live.iter().any(|op| *op
+            == ApplyOp::SetProp { id: WidgetId(2), prop: Prop::Bleed, value: Value::Bool(true) }));
+        let stamped = |prop_on: WidgetKind| {
+            vec![
+                TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+                TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::Str]] },
+                TxOp::CreateFor { id: 2, collection: CollectionId(1) },
+                TxOp::CreateWidget { id: WidgetId(10), kind: prop_on },
+                TxOp::SetProperty { widget: WidgetId(10), prop: Prop::Bleed, value: PropValue::Const(Value::Bool(true)) },
+                TxOp::TemplateEnd,
+                TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+                TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+            ]
+        };
+        for kind in [WidgetKind::Image, WidgetKind::Canvas] {
+            let msg = panic_text(
+                std::panic::catch_unwind(|| { Scene::new().apply(stamped(kind)); })
+                    .expect_err("a stamped bleed was admitted"),
+            );
+            assert!(msg.contains("asks for `bleed`") && msg.contains("A16"), "{kind:?}: {msg}");
         }
     }
 

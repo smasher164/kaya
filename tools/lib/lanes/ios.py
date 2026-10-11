@@ -168,6 +168,9 @@ RUST_SCENES = [
     # devices, the simulator having no camera and its microphone being the
     # host's.
     "capture", "capture_denied",
+    # The safe area (docs/safe-area-plan.md §6): `bleed`, and the task manager
+    # and the content-type form with the keyboard up.
+    "safearea", "taskskeyboard", "autofillkeyboard",
 ]
 
 # The iPad legs, queued right after their phone sibling: the phone pool is
@@ -178,6 +181,12 @@ RUST_SCENES = [
 # Scenes that also run under KAYA_APPEARANCE=dark, as `<scene>dark-swiftui`:
 # the tints resolved in the dark appearance (docs/tints-plan.md §4).
 DARK_EXTRAS = ("tints",)
+# Scenes that also run in a bundle pinned to landscape, as
+# `<scene>land-<suite>` (docs/safe-area-plan.md §5.4): the keyboard leaves
+# least room there. The reading appended proves the interface turned: a
+# notched phone's top inset goes and its home indicator stays.
+LANDSCAPE_EXTRAS = ("taskskeyboard", "autofillkeyboard")
+LANDSCAPE_READING = 'expect_insets "none/bar"'
 
 PAD_EXTRAS = {
     "menus": 'expect_menu_presentation "regular/bar"',
@@ -318,6 +327,13 @@ MODS = {
     ("go", "numberfieldde"): NUMBER_FIELD_CUT,
     ("rust-swiftui", "numberfield"): NUMBER_FIELD_CUT,
     ("rust-swiftui", "numberfieldde"): NUMBER_FIELD_CUT,
+    # THE INSETS ARE THE DEVICE'S (docs/safe-area-plan.md A8, A9): the pool
+    # phone's status bar over its notch and its home indicator, then
+    # immersive mode, where the notch alone is left at the top.
+    ("rust-swiftui", "safearea"): {
+        "extra": 'expect_insets "bar/bar"; click button@full; expect label@caption "fullscreen"; '
+                 'expect_fullscreen on; expect_insets "cutout/bar"; expect_safe image@picture bleeds; '
+                 'expect_safe canvas@ground bleeds; expect_safe label@caption'},
     ("rust-swiftui", "adaptive"): {
         "extra": 'expect_axis row@narrow "vertical"; expect_grid_columns grid@sheet 1; '
                  'expect_grid_columns grid@fit 1',
@@ -326,6 +342,11 @@ MODS = {
 }
 
 SUITES = ("swift", "go", "python", "rust-swiftui")
+
+# A10 (docs/safe-area-plan.md §7): the pool raises the software keyboard while
+# this lane runs, through this preference, written before the first leg and
+# put back after the last, both read back.
+SOFTWARE_KEYBOARD_PREF = ("com.apple.keyboard.preferences", "AutomaticMinimizationEnabled")
 
 # THE SECOND ACT'S DOOR ON THIS LANE (docs/tasks-s9-plan.md R6a). The
 # simulator's shade activates no notification by any route
@@ -373,7 +394,8 @@ RUST_EXAMPLE = {"listdetail": "split", "taskspersist": "tasks",
                 "media_session": "media", "media_tracks": "media",
                 "media_feed": "media", "media_picked": "media",
                 "media_timeout": "media", "media_reader": "media",
-                "capture_denied": "capture"}
+                "capture_denied": "capture",
+                "taskskeyboard": "tasks", "autofillkeyboard": "autofill"}
 
 # The scenes whose guest declares a media session: their bundles carry
 # UIBackgroundModes audio (docs/media-plan.md §5). The media guest is one
@@ -424,6 +446,7 @@ def suite_legs(suite):
             out.append("go" if scene == "milestone2" else f"{scene}-go")
         out.append("editor-go")
         out.append("chat-go")
+        out.append("chatkeyboard-go")
     elif suite == "python":
         out += [f"{scene}-python" for scene in PYTHON_SCENES]
     elif suite == "rust-swiftui":
@@ -434,6 +457,8 @@ def suite_legs(suite):
             out.append(f"{scene}-swiftui")
             if scene in PAD_EXTRAS:
                 out.append(f"{scene}-swiftui-pad")
+            if scene in LANDSCAPE_EXTRAS:
+                out.append(f"{scene}land-swiftui")
     return out
 
 
@@ -450,4 +475,5 @@ def wired_scenes():
     out.update(RUST_SCENES)
     out.add("editor")
     out.add("chat")
+    out.add("chatkeyboard")
     return out

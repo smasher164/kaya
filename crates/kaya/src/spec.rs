@@ -295,6 +295,9 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // whether its body shows.
     ("summary", 59, PropKind::Str),
     ("expanded", 60, PropKind::Bool),
+    // docs/safe-area-plan.md A3: an image, video view or canvas extends past
+    // kaya\'s inset and the safe area to the window\'s edge where it touches.
+    ("bleed", 61, PropKind::Bool),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -4252,6 +4255,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("revealable", 58),
                 ("summary", 59),
                 ("expanded", 60),
+                ("bleed", 61),
             ],
         },
         EnumSpec {
@@ -5370,6 +5374,7 @@ mod tests {
                     ("prop", "revealable") => wire::PROP_REVEALABLE,
                     ("prop", "summary") => wire::PROP_SUMMARY,
                     ("prop", "expanded") => wire::PROP_EXPANDED,
+                    ("prop", "bleed") => wire::PROP_BLEED,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,

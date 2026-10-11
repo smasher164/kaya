@@ -349,7 +349,8 @@ def verify_bundle_assets(src, dst, leg):
         sys.exit(1)
 
 
-def make_bundle(name, bundle_id, executable_path, identity="", session=False):
+def make_bundle(name, bundle_id, executable_path, identity="", session=False,
+                landscape=False):
     """One .app: Info.plist from the template, the asset root, the
     executable. A non-empty `identity` puts the declared identity into
     THIS bundle — OPT-IN AND NOT GLOBAL: `expect_app_icon` reads this
@@ -405,14 +406,19 @@ def make_bundle(name, bundle_id, executable_path, identity="", session=False):
                  "        <key>CFBundleURLSchemes</key>\n"
                  f"        <array><string>{declared.scheme}</string></array>\n"
                  "    </dict></array>")
-    (app / "Info.plist").write_text(
-        tpl.replace("@EXECUTABLE@", name).replace("@BUNDLE_ID@", bundle_id)
-           .replace("@NAME@", name).replace("@IDENTITY@", block)
-           .replace("@URLTYPES@", url_types)
-           .replace("@LAUNCH@", launch)
-           .replace("@MEDIA@", "<key>UIBackgroundModes</key>\n"
-                    "    <array><string>audio</string></array>" if session else ""),
-        encoding="utf-8")
+    plist = (tpl.replace("@EXECUTABLE@", name).replace("@BUNDLE_ID@", bundle_id)
+             .replace("@NAME@", name).replace("@IDENTITY@", block)
+             .replace("@URLTYPES@", url_types)
+             .replace("@LAUNCH@", launch)
+             .replace("@MEDIA@", "<key>UIBackgroundModes</key>\n"
+                      "    <array><string>audio</string></array>" if session else ""))
+    if landscape:
+        # A LANDSCAPE LEG'S BUNDLE IS PINNED THE OTHER WAY, one orientation
+        # still (tools/check-staging.py), so its geometry is no more the
+        # device's than the portrait bundle's (docs/safe-area-plan.md §5.4).
+        plist = plist.replace("<string>UIInterfaceOrientationPortrait</string>",
+                              "<string>UIInterfaceOrientationLandscapeLeft</string>")
+    (app / "Info.plist").write_text(plist, encoding="utf-8")
     # PARSED BACK, because the template is TEXT and a plist iOS cannot
     # read is a bundle that fails at INSTALL with the reason on the
     # simulator's side of the fence. Measured 2026-09-07: an XML comment
@@ -2695,9 +2701,34 @@ def media_queued():
                for suite in suites for name in lane.suite_legs(suite))
 
 
+def software_keyboard(udids, up):
+    """A10 (docs/safe-area-plan.md §7): the setting that raises the software
+    keyboard on the pool, written and READ BACK on every device; the
+    devices whose reading disagrees, each with what it read."""
+    domain, key = lane.SOFTWARE_KEYBOARD_PREF
+    want = "0" if up else "1"
+    wrong = []
+    for udid in udids:
+        run(["timeout", "30", "xcrun", "simctl", "spawn", udid, "defaults",
+             "write", domain, key, "-bool", "NO" if up else "YES"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        got = out_of(["xcrun", "simctl", "spawn", udid, "defaults", "read",
+                      domain, key], timeout_s=30).strip()
+        if got != want:
+            wrong.append(f"{udid} reads {got or 'nothing'!r}, wanted {want}")
+    return wrong
+
+
 def cleanup():
     with contextlib.suppress(RuntimeError):
         MEDIA.close()
+    if UDIDS:
+        restored = [*UDIDS, *([PAD_UDID] if PAD_UDID else [])]
+        wrong = software_keyboard(restored, False)
+        print(f"run-sim: the software keyboard setting put back on "
+              f"{len(restored) - len(wrong)} of {len(restored)} device(s)"
+              + (f"; {'; '.join(wrong)}" if wrong else " (read back 1)"),
+              file=sys.stderr, flush=True)
     xcuidrive_stop_all()
     FR.flush()
     shutil.rmtree(LEGS_DIR, ignore_errors=True)
@@ -3040,6 +3071,13 @@ def timing(phase):
 if os.environ.get("KAYA_RECORD"):
     os.environ["SIMCTL_CHILD_KAYA_RECORD"] = "1"
 boot_pool()
+_keyboard_wrong = software_keyboard([*UDIDS, PAD_UDID], True)
+if _keyboard_wrong:
+    die("run-sim: the software keyboard did not stay up on the pool ("
+        + "; ".join(_keyboard_wrong) + ") — every typing leg would meet A9's "
+        "no-keyboard refusal (docs/safe-area-plan.md A10)")
+print(f"run-sim: the software keyboard is up on {len(UDIDS) + 1} device(s) "
+      f"(read back 0)", file=sys.stderr, flush=True)
 xcuidrive_launch_all()
 # BEFORE ANY LEG: can each phone export and reopen a file through
 # LocalStorage? BACKGROUNDED here and JOINED IN queue_leg (prep_join),
@@ -3182,9 +3220,11 @@ def with_dylib(app):
 
 
 def queue_scene_leg(suite, scene, name, app, bundle_id, selftest,
-                    scene_arg, pad=False, appearance=""):
+                    scene_arg, pad=False, appearance="", landscape=False):
     """One leg from the module's tables: the MODS entry supplies the
-    cut/drop/keep/extra the leg asserts (tools/lib/lanes/ios.py)."""
+    cut/drop/keep/extra the leg asserts (tools/lib/lanes/ios.py). A
+    `landscape` leg runs a bundle pinned to landscape (make_bundle) and
+    appends the lane's reading of it (docs/safe-area-plan.md §5.4)."""
     mods = lane.MODS.get((suite, scene), {})
     # ONE PAIR OR A LIST OF THEM: a relaunch scene drops the resize AND
     # its assertion, which sit on either side of the second act.
@@ -3193,6 +3233,8 @@ def queue_scene_leg(suite, scene, name, app, bundle_id, selftest,
         (tuple(drop),) if drop else ())
     extra = lane.PAD_EXTRAS.get(scene, "") if pad else mods.get("extra",
                                                                 "")
+    if landscape:
+        extra = "; ".join(x for x in (lane.LANDSCAPE_READING, extra) if x)
     queue_leg(name, app, bundle_id, name, selftest, scene_arg,
               extra, mods.get("cut", ""), mods.get("keep", ""),
               drops, appearance, pad=pad)
@@ -3352,6 +3394,9 @@ if SUITE in ("go", "all"):
                                  BUNDLES / "go-bin"))
     queue_scene_leg("go", "chat", "chat-go", app, "dev.kaya.chatgo",
                     "chat", "chat")
+    # The same app with the keyboard up (docs/safe-area-plan.md A15).
+    queue_scene_leg("go", "chatkeyboard", "chatkeyboard-go", app,
+                    "dev.kaya.chatgo", "chatkeyboard", "chatkeyboard")
     suite_end("go")
 
 # THE PYTHON GUEST SUITE (docs/python-mobile-plan.md): CPython embedded
@@ -3447,7 +3492,8 @@ if SUITE in ("rust-swiftui", "all"):
                   if not only.active() or only.matches(
                       ["rust-swiftui" if scene == "milestone2"
                        else f"{scene}-swiftui",
-                       f"{scene}-swiftui-pad", f"{scene}dark-swiftui"])]
+                       f"{scene}-swiftui-pad", f"{scene}dark-swiftui",
+                       f"{scene}land-swiftui"])]
     # ONE CARGO CALL FOR EVERY EXAMPLE (docs/traps.md, the iOS lane's
     # serial example builds).
     if RUST_BUILT:
@@ -3487,6 +3533,13 @@ if SUITE in ("rust-swiftui", "all"):
             queue_scene_leg("rust-swiftui", scene, f"{scene}dark-swiftui", app,
                             f"dev.kaya.{scene}swiftui", scene, scene,
                             appearance="dark")
+        if scene in lane.LANDSCAPE_EXTRAS:
+            turned = with_dylib(make_bundle(
+                f"{scene}rs-swiftui-land", f"dev.kaya.{scene}landswiftui",
+                TARGET_DIR / f"examples/{example}", landscape=True))
+            queue_scene_leg("rust-swiftui", scene, f"{scene}land-swiftui", turned,
+                            f"dev.kaya.{scene}landswiftui", scene, scene,
+                            landscape=True)
     suite_end("swiftui")
 
 # The interleaved pool's one collection point.

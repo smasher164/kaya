@@ -1,0 +1,24 @@
+# The task manager with the keyboard up (docs/safe-area-plan.md A1, A4, A6,
+# A15): the quick-add sheet's field and the details screen's notes stay above
+# the keyboard. A phone's script: the desktops have no software keyboard (A13).
+expect_title "tasks"
+click button@new
+expect_sheets 1
+click entry@quick
+expect_focused entry@quick
+expect_keyboard on
+expect_safe entry@quick
+type "Buy oat milk"
+expect entry@quick "Buy oat milk"
+click button@add
+expect_sheets 0
+expect label@title[t10] "Buy oat milk"
+click button@details[t2]
+expect_entries 1
+click textarea@notes
+expect_focused textarea@notes
+expect_keyboard on
+expect_safe textarea@notes
+type "Call before noon"
+expect textarea@notes "Call before noon"
+expect_safe textarea@notes

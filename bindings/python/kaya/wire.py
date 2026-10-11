@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x011ac2c5d907da7f
+SPEC_HASH = 0x12513a04dcdb4c9a
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -141,6 +141,7 @@ PROP_REVEALED = 57
 PROP_REVEALABLE = 58
 PROP_SUMMARY = 59
 PROP_EXPANDED = 60
+PROP_BLEED = 61
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -1899,6 +1900,21 @@ def tx_bind_expanded(widget_id: int, signal_id: int) -> bytes:
 def tx_bind_expanded_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_EXPANDED, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_bleed(widget_id: int, bleed: bool) -> bytes:
+    """set_property with a constant bleed value (bool)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_BLEED, SOURCE_CONST) + _enc.value(bleed))
+
+
+def tx_bind_bleed(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound bleed value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_BLEED, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_bleed_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_BLEED, SOURCE_ELEMENT, level, field))
 
 
 def tx_set_window_title(window: int, title: str) -> bytes:

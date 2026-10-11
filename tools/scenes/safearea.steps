@@ -1,0 +1,19 @@
+# The safe area (docs/safe-area-plan.md A3, §5): the picture bleeds past the
+# window's inset and the bars at the top, the canvas at the bottom, and the
+# widgets between them stay inside the safe area, at the default inset and at 0.
+expect_title "safearea"
+expect_safe image@picture bleeds
+expect_safe label@caption
+expect_safe button@inset
+expect_safe canvas@ground bleeds
+# A bled canvas keeps its size: it is drawn at the bled size, and a slot that
+# passed that size up grew every frame (docs/traps.md).
+settle 700
+expect_safe canvas@ground bleeds
+expect_inset 16
+click button@inset
+expect label@caption "inset 0"
+expect_inset 0
+expect_safe image@picture bleeds
+expect_safe label@caption
+expect_safe canvas@ground bleeds

@@ -1,0 +1,19 @@
+# The chat app with the keyboard up (docs/safe-area-plan.md A5, A15): the
+# composer rides the keyboard and the thread keeps its newest message above it.
+# A phone's script: the desktops have no software keyboard (A13).
+expect_title "chat"
+click button@open[maya]
+click button@newest
+expect_scrolled_to column@thread m30
+expect_at_end scroll#0
+click textarea@compose
+expect_focused textarea@compose
+expect_keyboard on
+expect_safe textarea@compose
+expect_at_end scroll#0
+type "On my way"
+press return
+expect label@text[u1] "On my way"
+expect_keyboard on
+expect_safe textarea@compose
+expect_at_end scroll#0

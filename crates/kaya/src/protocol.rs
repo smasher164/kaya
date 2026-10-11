@@ -2255,6 +2255,9 @@ pub enum Prop {
     /// Whether an expander's body shows (Bool; docs/expander-plan.md K4).
     /// The user's activation of the header reports as a Toggled occurrence.
     Expanded,
+    /// An image, video view or canvas extends to the window\'s edge where it
+    /// touches the root\'s content edge (Bool; docs/safe-area-plan.md A3).
+    Bleed,
     /// The app owns a rich textarea's undo (Bool-valued; docs/rich-text-plan.md
     /// R6, §14): the native stack is off, the ledger never banks it, and
     /// Edit>Undo/Redo reach the app through the role item's own activation.

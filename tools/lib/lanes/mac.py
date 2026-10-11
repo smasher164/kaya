@@ -58,7 +58,9 @@ SCENES = [
 DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows",
                 "format", "flexshrink", "listrow", "tints", "badge", "emoji", "media",
                 # The capture (docs/capture-plan.md §8), rust-only at depth.
-                "capture"]
+                "capture",
+                # The safe area (docs/safe-area-plan.md §6), rust-only at depth.
+                "safearea"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -112,7 +114,10 @@ CUTS = {"reveal": {"cut": "press tab", "keep": "expect_unmasked expect_masked"}}
 # size, so a knob that scales one is refused there (docs/compliance-plan.md
 # R4) and the two scale scenes run on the other four lanes.
 OFF_SCENES = {"tasksbig": "macOS has no text size (docs/compliance-plan.md R4)",
-              "formatbig": "macOS has no text size (docs/compliance-plan.md R4)"}
+              "formatbig": "macOS has no text size (docs/compliance-plan.md R4)",
+              "chatkeyboard": "macOS has no software keyboard (docs/safe-area-plan.md A13)",
+              "taskskeyboard": "macOS has no software keyboard (docs/safe-area-plan.md A13)",
+              "autofillkeyboard": "macOS has no software keyboard (docs/safe-area-plan.md A13)"}
 
 # The clock a scene runs under (docs/compliance-plan.md §4): the core writes
 # Apple's own `AppleICUForce24HourTime` into this process's volatile argument
@@ -310,6 +315,9 @@ ORDER = [
     ("capture_denied", LANGS),
     ("toast", LANGS + ("c",)),
     ("expander", LANGS + ("c",)),
+    # RUST ALONE while the eight bindings' bleed is the breadth slice
+    # (docs/safe-area-plan.md §6).
+    ("safearea", ("rust",)),
     ("richtext", ("rust", "python", "js", "go", "csharp", "java", "swift",
                   "ocaml", "haskell")),
     ("ownundo", ("rust", "python", "js", "go", "csharp", "java", "swift",

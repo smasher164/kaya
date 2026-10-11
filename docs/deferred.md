@@ -9,6 +9,83 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
+## BUILD — safe areas and the keyboard (docs/safe-area-plan.md), depth on iOS and the mac (2026-10-11); the Compose arm, GTK's and WinUI's answers and the other eight bindings are the breadth slice
+KEY: safe area, bleed, PROP_BLEED, propBleed, expect_keyboard, expect_safe, expect_insets, SafeWord, INSET_WORDS, KayaBleed, KayaBleedLayout, kayaBleedEdges, kayaSafeReading, kayaKeyboardWall, kayaPanEvaluate, keyboardPan, KayaTopEdgeClip, SOFTWARE_KEYBOARD_PREF, AutomaticMinimizationEnabled, LANDSCAPE_EXTRAS, orientation, safearea.steps, chatkeyboard, taskskeyboard, autofillkeyboard, safearea_routes, DEPTH STUB safearea
+
+The depth slice: prop 61 `bleed` (Bool) on image, video view and canvas, the
+template zone refused at the root (A16); the Rust binding's `.bleed()` in the
+live zone; the harness's `expect_keyboard`, `expect_safe <target>
+[safe|bleeds]` and `expect_insets "<top>/<bottom>"`; the SwiftUI arm's bleed
+(a Layout that extends the slot by the window's inset on the structurally
+touching sides, then `.ignoresSafeArea(.container, edges:)`), its three
+readings, A4.2's pan of the focused field's root, A5's follows_end kept at its
+end as the viewport shrinks, and A9's wall after every `type`, `type_secret`
+and `press` on iOS; the iOS lane raising the software keyboard on the pool
+(A10, the setting written and read back before the first leg and put back
+after the last), its driver's `orientation` verb and the landscape legs;
+tools/scenes/safearea.steps green on the mac and iOS, the phone scripts
+chatkeyboard, taskskeyboard and autofillkeyboard green on iOS and declared
+off on the mac.
+  - **DEPTH STUB: safearea on compose**: A2's per-bar insets (the root stops
+    padding by `safeDrawing`, TopAppBar and NavigationBar consume their own),
+    `bleed` by a measured offset, A4's bring-into-view on IME growth and the
+    content pan, A6's NavigationBar hidden while the IME is visible, the three
+    readings off `ViewCompat.getRootWindowInsets`, and A9's wall in the Compose
+    runner; the three keyboard scripts and the landscape and cutout legs on the
+    android lane, each turn and overlay restored and read back.
+  - **DEPTH STUB: safearea on gtk**: `bleed` accepted inertly,
+    `expect_keyboard` answering off, `expect_safe` read off the window (A13).
+    When the stub goes, the linux lane needs a declared-off list for the three
+    keyboard scripts, which the mac already has.
+  - **DEPTH STUB: safearea on winui**: the same three answers (A13); when the
+    stub goes, the windows lane needs the same declared-off list.
+  - **The other eight bindings and the C floor** (A16): `bleed` on the three
+    kinds in the live zone, refused by type in the template zone; and
+    check-sugar-surface's rows for it with fake-name and rename-in-a-copy
+    negatives, which the depth leaves out so the gate stays green.
+  - **The section bar read as covered** (§5.2): no target kind names a tab, so
+    taskskeyboard asserts the notes field and the depth's capture shows the bar
+    under the keyboard; a reading needs a target for the bar.
+  - **The chat thread in landscape has no room** (A5, A7): MEASURED
+    2026-10-11 on the pool phone in a landscape-pinned bundle that the
+    keyboard leaves 211 pt, which the inline title, the thread's search field,
+    the Newest button and the composer fill, so the thread's scroll gets a 0 pt
+    viewport and `expect_at_end` reads "content end 136 vs viewport 0". The
+    composer stays above the keyboard (A4, A7 hold); A5's newest message cannot.
+    No ruling says what gives way first, so the landscape chat leg is not wired
+    (the task manager's and the form's are). For the maintainer: whether the
+    search field and the Newest button pan under the top bar while the composer
+    is focused in landscape.
+  - **iOS immersive mode keeps the home indicator's inset**: MEASURED
+    2026-10-11 that `expect_insets` reads "cutout/bar" with `fullscreen` on, the
+    bottom 34 pt kept under `persistentSystemOverlays(.hidden)`, where A8 says
+    the bars' insets read zero while hidden. The platform's own reading; for
+    the maintainer's review with the breadth's Android reading beside it.
+
+## DEFER — the safe area as a reading for the app (docs/safe-area-plan.md A14; 2026-10-11)
+KEY: inset reading, safe area occurrence, canvas insets
+
+A bled canvas draws under the bars with no way to know where they are (A3's
+named limit). The shape when it comes: the safe area as four numbers in the
+canvas's draw context, read by the backend at draw time. Trigger: the first
+app that places its own drawing against the bars (the video editor's monitor,
+a map).
+
+## DEFER — WinUI's touch keyboard and macOS's notch, stated and not proved (docs/safe-area-plan.md A13; 2026-10-11)
+KEY: touch keyboard, CoreInputView, notch, safeAreaInsets
+
+No lane desktop has a touch keyboard or a notched display in fullscreen, so
+A13's sentences (ScrollViewer's own bring-into-view on WinUI's occlusion,
+AppKit's default below the notch with a bled widget reaching it) are stated
+and unproved. Trigger: a lane host with either.
+
+## DEFER — the iPad's floating keyboard and a hardware keyboard's shortcuts bar (docs/safe-area-plan.md A11; 2026-10-11)
+KEY: shortcuts bar, floating keyboard
+
+A11 avoids the docked keyboard alone; whether SwiftUI's keyboard region and
+kaya's pan stay still for kaya-sim-pad's floating keyboard and the shortcuts
+bar is to measure. Trigger: a pad leg that types.
+
 ## BUILD — the expander (docs/expander-plan.md), depth on the mac (2026-10-09); the GTK, WinUI and Compose arms, the iOS legs and the other eight bindings are the breadth slice
 KEY: expander, KIND_EXPANDER, PROP_SUMMARY, PROP_EXPANDED, summary, expanded, expander.steps, expect_expanded, expect_out_of_reach, collapsed_ancestor, out_of_reach, EXPANDER_NAMELESS, check_expander_template, expanders_declared, KayaExpander, kayaExpanderHeaderRead, kayaCollapsedAncestor, kayaInForm, expander_routes, DEPTH STUB expander
 

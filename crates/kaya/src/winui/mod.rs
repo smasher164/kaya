@@ -18232,6 +18232,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         "TextFillColorSecondaryBrush",
                     )?)?;
                 }
+                // docs/safe-area-plan.md §6: the breadth's.
+                (_, Prop::Bleed, _) => crate::depth_stub("safearea"),
                 (_, prop, value) => {
                     panic!("kaya: winui cannot apply {prop:?} = {value:?} here")
                 }
@@ -27196,6 +27198,20 @@ impl crate::harness::Stage for WinUiStage {
 
     /// docs/expander-plan.md K5: WinUI's own IsExpanded on every expander the
     /// target sits in.
+    /// The keyboard and safe-area readings are the breadth's on this backend
+    /// (docs/safe-area-plan.md §6).
+    fn keyboard(&self) -> Result<bool, String> {
+        crate::depth_stub("safearea")
+    }
+
+    fn safe(&self, _: crate::harness::Target) -> Result<crate::harness::SafeWord, String> {
+        crate::depth_stub("safearea")
+    }
+
+    fn insets(&self) -> Result<(String, String), String> {
+        crate::depth_stub("safearea")
+    }
+
     fn collapsed_ancestor(&self, t: crate::harness::Target) -> Option<usize> {
         Self::on_ui_read(move |core| {
             let Some(index) = crate::harness::try_resolve(t.index, registry_ids(core, t.kind).len()) else {

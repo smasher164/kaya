@@ -148,6 +148,7 @@ var scenes = map[string]func() *kaya.App{
 	"scroll":         scroll.App,
 	"scrollto":       scrollto.App,
 	"chat":           chat.App,
+	"chatkeyboard":   chat.App,
 	"sections":       sections.App,
 	"search":         search.App,
 	"secure":         secure.App,
