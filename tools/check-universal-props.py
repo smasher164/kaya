@@ -666,7 +666,7 @@ def growing_textareas(swiftui_text, compose_text, gtk_text, winui_text):
         (SWIFTUI, swiftui_text, (
             "func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSScrollView",
             "func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView",
-            "minHeight: grows_lines ? nil : 96")),
+            "minHeight: grows_lines ? nil : min(96, cap ?? 96)")),
         (COMPOSE, compose_text, ("minHeightInLines = 1, maxHeightInLines = node.maxLines",)),
         (GTK, gtk_text, ("scroller.set_max_content_height(most);",
                          "scroller.set_propagate_natural_height(true);",
@@ -1377,7 +1377,7 @@ for label, path, pattern, repl in (
      r"    if let Some\(layer\) = core\.split_layers\.remove\(&window\) \{",
      "    if let Some(layer) = core.split_layers.get(&window).cloned() {"),
     ("SwiftUI's growing textarea back on its fixed floor", SWIFTUI,
-     r"minHeight: grows_lines \? nil : 96", "minHeight: 96"),
+     r"minHeight: grows_lines \? nil : min\(96, cap \?\? 96\)", "minHeight: min(96, cap ?? 96)"),
     ("Compose's growing textarea at three lines", COMPOSE,
      r"minHeightInLines = 1, maxHeightInLines = node\.maxLines",
      "minHeightInLines = 3, maxHeightInLines = node.maxLines"),

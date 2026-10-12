@@ -1192,6 +1192,9 @@ final class KayaSceneModel {
     /// A4.2's pan by root id (docs/safe-area-plan.md): how far the focused
     /// field's root is moved up over the keyboard.
     var keyboardPan: [UInt64: CGFloat] = [:]
+    /// The focused textarea's height cap while the keyboard is up, by node id
+    /// (A20, docs/safe-area-plan.md; kayaPanEvaluate).
+    var keyboardFieldCap: [UInt64: CGFloat] = [:]
     /// The DERIVED brand accent (apply 32), eleven packed sRGB words — seed +
     /// light five + dark five, in the wire's order. A REQUEST, uniformly
     /// (docs/styling-plan.md D2): the system accent wins unless the user chose
@@ -21021,13 +21024,32 @@ struct KayaRootFrameReader: View {
     @MainActor func kayaPanEvaluate() {
         guard let keyboard = kayaKeyboardInWindow(), let rects = kayaFocusedFieldRects() else {
             if !kayaScene.keyboardPan.isEmpty { kayaScene.keyboardPan = [:] }
+            if !kayaScene.keyboardFieldCap.isEmpty { kayaScene.keyboardFieldCap = [:] }
             return
         }
         kayaRevealInScroll(rects.view, above: keyboard, in: rects.window)
         let root = kayaScene.focusedId.map(kayaRootOf) ?? kayaScene.root?.id ?? 0
         let room = keyboard.minY - rects.window.safeAreaInsets.top
-        let target = rects.field.height <= room ? rects.field : rects.caret
         let margin: CGFloat = 8
+        // A20: a focused textarea shrinks to the room above the keyboard, down
+        // to one line, and scrolls its own text.
+        let focused = kayaScene.focusedId.flatMap { kayaScene.nodes[$0] }
+        if kayaScene.keyboardFieldCap.keys.contains(where: { $0 != focused?.id }) {
+            kayaScene.keyboardFieldCap = [:]
+        }
+        if let node = focused, node.kind == kindTextarea, let text = rects.view as? UITextView {
+            let top = max(rects.window.safeAreaInsets.top, kayaRootFrames[root]?.minY ?? 0)
+            let line = ceil((text.font ?? UIFont.preferredFont(forTextStyle: .body)).lineHeight)
+            let floor = line + text.textContainerInset.top + text.textContainerInset.bottom
+            let want = max(floor, keyboard.minY - top - margin)
+            let held = kayaScene.keyboardFieldCap[node.id]
+            if held != nil || rects.field.height > want + 0.5, abs((held ?? -1) - want) > 0.5 {
+                kayaScene.keyboardFieldCap = [node.id: want]
+                kayaKeyboardMoved()
+                return
+            }
+        }
+        let target = rects.field.height <= room ? rects.field : rects.caret
         let covered = target.maxY - keyboard.minY
         let current = kayaScene.keyboardPan[root] ?? 0
         var next = current
@@ -27539,7 +27561,8 @@ struct KayaTextareaPlaceholder: ViewModifier {
 /// got a small box while every share assertion passed.
 extension View {
     func kayaTextareaFrame(
-        grow: Double, flexVertical: Bool?, stretch: Bool, fill: Bool?, maxLines: Double = 0
+        grow: Double, flexVertical: Bool?, stretch: Bool, fill: Bool?, maxLines: Double = 0,
+        cap: CGFloat? = nil
     ) -> some View {
         let grows = grow > 0
         // In a column a text area fills the width (docs/tasks-plan.md R10)
@@ -27553,8 +27576,8 @@ extension View {
         let grows_lines = maxLines > 0
         return frame(
             minWidth: 240, maxWidth: fillsWidth ? .infinity : 240,
-            minHeight: grows_lines ? nil : 96,
-            maxHeight: grows_lines ? nil : (fillsHeight ? .infinity : 96)
+            minHeight: grows_lines ? nil : min(96, cap ?? 96),
+            maxHeight: cap ?? (grows_lines ? nil : (fillsHeight ? .infinity : 96))
         )
         .fixedSize(horizontal: false, vertical: grows_lines)
     }
@@ -28458,12 +28481,13 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                 revealSeq: node.revealSeq,
                 rich: node.rich,
                 richRuns: node.richRuns,
-                richSeq: node.richSeq
+                richSeq: node.richSeq,
+                cap: kayaScene.keyboardFieldCap[node.id]
             )
             .modifier(KayaTextareaPlaceholder(node: node))
             .kayaTextareaFrame(
                 grow: node.grow, flexVertical: flexVertical, stretch: flexStretch, fill: node.fill,
-                maxLines: node.maxLines)
+                maxLines: node.maxLines, cap: kayaScene.keyboardFieldCap[node.id])
             .border(Color.gray.opacity(inGroupedCard || inComposer ? 0 : 0.4))
         }
     }
@@ -28484,6 +28508,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         let rich: Bool
         let richRuns: [KayaRichRun]
         let richSeq: Int
+        let cap: CGFloat?
 
         final class Coordinator: NSObject, UITextViewDelegate {
             var node: KayaNode?
@@ -28646,7 +28671,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             let used = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height - insets
             let line = ceil(font.lineHeight)
             let text = min(max(used, line), line * CGFloat(node.maxLines))
-            return CGSize(width: width, height: text + insets)
+            return CGSize(width: width, height: min(text + insets, cap ?? .infinity))
         }
 
         func makeUIView(context: Context) -> UITextView {

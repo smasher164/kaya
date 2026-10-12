@@ -22,3 +22,10 @@ expect_safe textarea@notes
 type "Call before noon"
 expect textarea@notes "Call before noon"
 expect_safe textarea@notes
+# A20 (docs/safe-area-plan.md): the focused notes field shrinks to the room
+# above the keyboard, down to one line, and keeps its caret line in view.
+press return
+type "Bring the invoice"
+press return
+type "Ask about the boiler"
+expect_safe textarea@notes

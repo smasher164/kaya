@@ -1315,6 +1315,9 @@ object KayaSceneModel {
      * keyboard is up: the window's root keeps its natural height and pans
      * until the keyboard goes (kayaPanEvaluate, A4, A17). */
     var keyboardOverflow by mutableStateOf(false)
+    /** The focused textarea's height cap while the keyboard is up, as (node,
+     * px): A20, docs/safe-area-plan.md (kayaPanEvaluate). */
+    var keyboardFieldCap by mutableStateOf<Pair<Long, Float>?>(null)
 
     /**
      * THE APP'S OWN APPEARANCE CHOICE (wprop 9, docs/tasks-s2b-plan.md
@@ -17010,6 +17013,7 @@ fun KayaTextField(
         quote = LocalContentColor.current.copy(alpha = KAYA_RICH_QUOTE_ALPHA),
         code = LocalContentColor.current.copy(alpha = KAYA_RICH_CODE_ALPHA))
     val richSeq = node.richSeq
+    val cap = KayaSceneModel.keyboardFieldCap?.takeIf { !singleLine && it.first == node.id }?.second
     val output = remember(node, node.rich, richSeq, palette) {
         if (node.rich) kayaRichTransformation(node.richRuns, palette) else null
     }
@@ -17097,6 +17101,9 @@ fun KayaTextField(
         // which a verticalScroll wrapper would cost.
         lineLimits =
             if (singleLine) TextFieldLineLimits.SingleLine
+            else if (cap != null) TextFieldLineLimits.MultiLine(
+                minHeightInLines = 1,
+                maxHeightInLines = if (node.maxLines > 0) node.maxLines else KAYA_TEXTAREA_LINES)
             // A GROWING textarea is one line at rest and grows to its own cap
             // (docs/grow-lines-plan.md).
             else if (node.maxLines > 0) TextFieldLineLimits.MultiLine(
@@ -17150,6 +17157,7 @@ fun KayaTextField(
         textStyle = LocalTextStyle.current.copy(color = LocalContentColor.current),
         modifier = a11y
             .then(if (singleLine && !search) kayaContentHint(node.id, node.contentType) else Modifier)
+            .then(if (cap != null) Modifier.sizeIn(maxHeight = with(LocalDensity.current) { cap.toDp() }) else Modifier)
             .then(fill)
             .focusRequester(focusRequester)
             // ESCAPE IS THE CLEAR ACT ON A DESKTOP KEYBOARD (S5), and an
@@ -17333,6 +17341,7 @@ private fun KayaHighlightLayer(
             // both what gets clipped and what a photograph must cover.
             .onGloballyPositioned {
                 val r = it.boundsInWindow()
+                kayaTextViewports[node.id] = it.size.height.toFloat()
                 kayaTextBoxes[node.id] = android.graphics.Rect(
                     r.left.toInt(), r.top.toInt(), r.right.toInt(), r.bottom.toInt())
             }
@@ -18414,6 +18423,17 @@ internal fun kayaKeyboardTop(view: android.view.View): Float {
 /** Each sheet's content top in its own window, as last laid out. */
 internal val kayaSheetTops = HashMap<Long, Float>()
 
+/** Each text field's own viewport height, unclipped. */
+internal val kayaTextViewports = HashMap<Long, Float>()
+
+/** A textarea's height at one line: its frame less its viewport, plus its
+ * first line (A20). */
+internal fun kayaOneLineHeight(node: KayaNode, frame: androidx.compose.ui.geometry.Rect): Float {
+    val layout = kayaTextLayouts[node.id]?.invoke() ?: return frame.height
+    val viewport = kayaTextViewports[node.id] ?: return frame.height
+    return frame.height - viewport + (layout.getLineBottom(0) - layout.getLineTop(0))
+}
+
 /** The content box's top in the window, below the top bar, as last laid out. */
 internal var kayaContentTop = 0f
 
@@ -18624,6 +18644,8 @@ internal fun kayaPanEvaluate() {
     val frame = field?.let { kayaNodeFrames[it.id] }
     val imeShown = insets?.isVisible(WindowInsetsCompat.Type.ime()) == true
     if (insets != null && !imeShown && KayaSceneModel.keyboardOverflow) KayaSceneModel.keyboardOverflow = false
+    val capped = KayaSceneModel.keyboardFieldCap
+    if (capped != null && (!imeShown || capped.first != field?.id)) KayaSceneModel.keyboardFieldCap = null
     if (insets == null || field == null || frame == null || !imeShown || !kayaIsTextField(field)) {
         if (KayaSceneModel.keyboardPan != 0f) KayaSceneModel.keyboardPan = 0f
         return
@@ -18639,10 +18661,21 @@ internal fun kayaPanEvaluate() {
     val top = if (inSheet) maxOf(safeTop.toFloat(), kayaSheetTops[kayaRootIdOf(field.id)] ?: 0f)
         else maxOf(safeTop.toFloat(), kayaContentTop)
     val room = keyboardTop - top
+    val gap = 8f * decor.resources.displayMetrics.density
+    // A20: a focused textarea shrinks to the room above the keyboard, down to
+    // one line, and scrolls its own text.
+    if (field.kind == KayaCompose.KIND_TEXTAREA) {
+        val want = maxOf(kayaOneLineHeight(field, frame), room - gap)
+        val held = KayaSceneModel.keyboardFieldCap?.takeIf { it.first == field.id }?.second
+        if ((held != null || frame.height > want + 0.5f) && (held == null || kotlin.math.abs(held - want) > 0.5f)) {
+            KayaSceneModel.keyboardFieldCap = field.id to want
+            return
+        }
+    }
     val caret = kayaCaretRect(field, frame)
     val need = if (frame.height <= room) frame.height else caret.height
     val target = if (frame.height <= room) frame.bottom else caret.bottom
-    val margin = minOf(8f * decor.resources.displayMetrics.density, maxOf(0f, room - need))
+    val margin = minOf(gap, maxOf(0f, room - need))
     val covered = target - keyboardTop
     val current = KayaSceneModel.keyboardPan
     var next = current

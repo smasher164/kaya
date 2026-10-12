@@ -10,7 +10,7 @@ scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
 ## BUILD — safe areas and the keyboard (docs/safe-area-plan.md), depth on iOS and the mac (2026-10-11); the Compose arm, GTK's and WinUI's answers and the other eight bindings are the breadth slice
-KEY: safe area, bleed, PROP_BLEED, propBleed, expect_keyboard, expect_safe, expect_insets, SafeWord, INSET_WORDS, KayaBleed, KayaBleedLayout, kayaBleedEdges, kayaSafeReading, kayaKeyboardWall, kayaPanEvaluate, keyboardPan, KayaTopEdgeClip, SOFTWARE_KEYBOARD_PREF, AutomaticMinimizationEnabled, LANDSCAPE_EXTRAS, orientation, safearea.steps, chatkeyboard, taskskeyboard, autofillkeyboard, safearea_routes, DEPTH STUB safearea
+KEY: safe area, bleed, PROP_BLEED, propBleed, expect_keyboard, expect_safe, expect_insets, SafeWord, INSET_WORDS, KayaBleed, KayaBleedLayout, kayaBleedEdges, kayaSafeReading, kayaKeyboardWall, kayaPanEvaluate, keyboardPan, KayaTopEdgeClip, SOFTWARE_KEYBOARD_PREF, AutomaticMinimizationEnabled, LANDSCAPE_EXTRAS, orientation, safearea.steps, chatkeyboard, taskskeyboard, autofillkeyboard, safearea_routes, keyboardFieldCap, taskskeyboardland, DEPTH STUB safearea
 
 The depth slice: prop 61 `bleed` (Bool) on image, video view and canvas, the
 template zone refused at the root (A16); the Rust binding's `.bleed()` in the
@@ -89,6 +89,12 @@ off on the mac.
     bottom 34 pt kept under `persistentSystemOverlays(.hidden)`, where A8 says
     the bars' insets read zero while hidden. The platform's own reading; for
     the maintainer's review with the breadth's Android reading beside it.
+  - ~~**The tasks notes field in Android landscape**~~ — RULED and BUILT
+    2026-10-12 (docs/safe-area-plan.md A20): a focused textarea shrinks to the
+    room above the keyboard, down to one line, and scrolls its own text, on
+    Compose and SwiftUI on iOS; taskskeyboardland-compose green (docs/traps.md,
+    the landscape composer entry). It had been red since the honest reader:
+    80 px in a 48 px strip.
 
 ## DEFER — the safe area as a reading for the app (docs/safe-area-plan.md A14; 2026-10-11)
 KEY: inset reading, safe area occurrence, canvas insets

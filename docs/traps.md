@@ -39,7 +39,9 @@ its content's minimum outgrows; a SwiftUI window does not grow, and
 NSHostingView's fittingSize answered 0x0, so there is no content height to
 grow to. Both WindowGroups now take `.defaultSize` from
 `kayaUndeclaredWindowSize`, 540x450: GTK's default width (gtk.rs's two
-`unwrap_or((540, 330))`) and SwiftUI's own default height. `NSSplitView Subview Frames` (a sidebar's column
+`unwrap_or((540, 330))`) and SwiftUI's own default height. RULED 2026-10-12
+(the maintainer, "go with your recommendations"): a mac window that declares
+no size opens at 540x450. `NSSplitView Subview Frames` (a sidebar's column
 widths) still autosave into the host's domain and are shared the same way.
 tools/check-window-memory.py clause F (the forget, the cleared autosave name,
 both default sizes, the width held equal to GTK's and the height to 450) and
@@ -12507,7 +12509,8 @@ the rule is that a hand run launches exactly as the pool does, which
 run-leg.py now does and check-gates N18 holds. Likely the same cause as "The host domain's
 window frame" above (AppKit's autosave in a domain named after the binary;
 `align.plist` and `align.exe.plist` both exist), unmeasured; an undeclared
-window now opens at 540x450 whatever was saved.
+window now opens at 540x450 whatever was saved (RULED 2026-10-12; "The host
+domain's window frame" above).
 
 ## A shadow that links a directory and then writes below it writes the real tree (measured 2026-09-16)
 
@@ -15746,3 +15749,18 @@ keyboard is scrolled the rest of the way with `setContentOffset` (the leg read
 `textarea@notes safe` after). The SwiftUI sentences name each cut that took
 something (`cut by ...`), since the first red's bundle could not say which
 ancestor it was. GUARD: the same file's desktop, SwiftUI and reveal clauses.
+
+THE TASKS NOTES FIELD IN ANDROID LANDSCAPE stayed red after those fixes, honestly:
+80 px (the textarea's three-line floor) in the 48 px between the top bar and the
+keyboard, so the pan could show its caret line and never the whole field. Ruled
+2026-10-12 as docs/safe-area-plan.md A20: a focused textarea shrinks to the room
+above the keyboard less the pan's 8 dp margin, down to one line, and scrolls its
+own text. On Compose kayaPanEvaluate writes `keyboardFieldCap` and KayaTextField
+takes one line as its floor and the cap as its maximum (a `sizeIn` before its
+fill, since the fill fixes the height after it). The leg reads 48 px with three
+typed lines and its caret line shown; with the cap cut it went red at `press
+return` and `expect_safe`. iOS's textarea was a FIXED 96 pt frame, so the iOS
+leg had passed only because 96 pt fit; the SwiftUI arm caps it the same way, and
+a probe forcing the cap to its floor read the field 96 -> 37 pt with every step
+green, but no lane's room reaches it. GUARD: tools/lib/safearea_routes.py's A20
+clauses, eleven cuts watched.

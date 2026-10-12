@@ -4,7 +4,7 @@ Status: RULED 2026-10-11 (the maintainer: "accept all"), A1-A16 as recommended;
 the depth (§6 steps 1 and 2) built 2026-10-11 on iOS and the mac
 (docs/deferred.md, the safe-area BUILD entry); the breadth (§6 step 3) built
 2026-10-11 on Compose, GTK, WinUI and the eight other bindings; A17-A19 RULED
-the same day. He picked "safe-area and keyboard avoidance on phones" from the
+the same day; A20 RULED and built 2026-10-12. He picked "safe-area and keyboard avoidance on phones" from the
 2026-10-09 shortlist. Its roadmap card (docs/roadmap/features.toml,
 `safe_area`) gives the shape as "scene proof + a scroll behaviour" and says
 what is owed: a scene with an entry at the bottom proving it stays visible
@@ -506,6 +506,24 @@ offered width at its fit height, and the picture fills the slot extended by
 the touching sides, cropped to it (aspect fill), as the SwiftUI arm built it.
 A picture narrower than its slot is scaled up to fill rather than letterboxed.
 Every backend draws it this way.
+
+### A20 — A focused text area shrinks to the room above the keyboard, down to one line (RULED 2026-10-12)
+
+The maintainer's ruling ("go with your recommendations") on the breadth's open
+leg, taskskeyboardland-compose: while the keyboard is up, a FOCUSED multi-line
+text area is no taller than the room between the content's top (below the top
+bar, or a sheet's content top) and the keyboard's top, less the pan's 8 pt
+margin, and never shorter than one line of its own text with its chrome; it
+scrolls its own text, so its caret line shows. When the keyboard goes or the
+focus moves it returns to its own size. A4's pan then moves the whole field
+into view, and `expect_safe` still holds the whole field and its caret line.
+On both phones: Compose (KayaTextField's one-line floor and `sizeIn` cap, from
+kayaPanEvaluate) and SwiftUI on iOS (kayaTextareaFrame's cap, the growing
+textarea's sizeThatFits, from kayaPanEvaluate), the same rule in both, held by
+tools/lib/safearea_routes.py. The desktops (A13): macOS answers no keyboard, GTK
+has no on-screen keyboard API, and WinUI's touch keyboard leaves layout to
+ScrollViewer's bring-into-view, so none shrinks a field and none needs to; no
+desktop lane raises a keyboard.
 
 ### Deferred, for the ledger at the depth
 
