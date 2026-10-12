@@ -614,7 +614,7 @@ internal fun KayaVideoView(node: KayaNode, a11y: Modifier, boxFill: Modifier) {
         CustomAccessibilityAction("Pause") { kayaPlayers[node.videoPlayer]?.pause(); true },
     )
     Box(
-        modifier = sized.clipToBounds()
+        modifier = sized.then(kayaBleed(node)).clipToBounds()
             .then(a11y)
             .semantics {
                 role = Role.Image

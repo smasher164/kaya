@@ -4857,9 +4857,22 @@ export function caption(a: string | LabelOptions, b?: LabelOptions): Widget {
 
 export type ImageSource = Uint8Array | Asset | Signal<unknown> | FieldRef;
 
+/** `bleed: true` extends an image, video view or canvas to the window's
+ * edge on each side it touches, in the live zone only
+ * (docs/safe-area-plan.md A3, A16). */
+export type BleedOption = { bleed?: boolean };
+
+function setBleed(handle: Widget, opts: BleedOption): void {
+  if (opts.bleed !== true) return;
+  if (handle.isNode) {
+    throw new Error("kaya: `bleed` is a LIVE-ZONE declaration — a stamped row never touches the window's edge, so bleed there could only mean nothing (docs/safe-area-plan.md A16)");
+  }
+  records().push(wire.tx_set_bleed(handle.id, true));
+}
+
 /** An image displaying encoded bytes: the toolkit decodes natively. The
  * source is bytes, an Asset, a Signal, or an element field. */
-export function image(source?: ImageSource, opts: GrowOption = {}): Widget {
+export function image(source?: ImageSource, opts: GrowOption & BleedOption = {}): Widget {
   const handle = widget(wire.KIND_IMAGE);
   if (source !== undefined) {
     if (source instanceof Signal) records().push(wire.tx_bind_source(handle.id, source.id));
@@ -4872,6 +4885,7 @@ export function image(source?: ImageSource, opts: GrowOption = {}): Widget {
     }
   }
   setGrow(handle, opts);
+  setBleed(handle, opts);
   return handle;
 }
 
@@ -4981,7 +4995,7 @@ export class Draw {
 }
 
 export type Size = [width: number, height: number];
-export type CanvasOptions = GrowOption & { fixed?: boolean; onDraw?: (d: Draw, size: Size) => void; onTick?: (d: Draw, size: Size, time: number) => void };
+export type CanvasOptions = GrowOption & BleedOption & { fixed?: boolean; onDraw?: (d: Draw, size: Size) => void; onTick?: (d: Draw, size: Size, time: number) => void };
 
 /** WHAT THIS CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX
  * (docs/canvas-plan.md §3.2.1). `scale` is spelled by declaring nothing.
@@ -5017,6 +5031,7 @@ export function canvas(viewbox: Size, opts: CanvasOptions = {}): Widget {
   _canvasViewboxes.set(handle.id, [Number(w), Number(h)]);
   setGrow(handle, opts);
   sizePolicy(handle, opts);
+  setBleed(handle, opts);
   return handle;
 }
 
@@ -5566,7 +5581,7 @@ export function player(opts: PlayerOptions = {}): Player {
   return p;
 }
 
-export type VideoOptions = GrowOption & {
+export type VideoOptions = GrowOption & BleedOption & {
   fit?: Fit;
   /** The box's width:height, whatever the picture's shape; `fit` places
    * the picture in it (§3). */
@@ -5605,6 +5620,7 @@ export function video(source: Player | FieldRef | null, opts: VideoOptions = {})
     app()._register(handle, wire.OCC_VIDEO_VISIBILITY, (...args: unknown[]) => onVisibility(...args.slice(0, -1), Number(args[args.length - 1])));
   }
   setGrow(handle, opts);
+  setBleed(handle, opts);
   return handle;
 }
 

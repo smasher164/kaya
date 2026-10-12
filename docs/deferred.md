@@ -26,27 +26,52 @@ after the last), its driver's `orientation` verb and the landscape legs;
 tools/scenes/safearea.steps green on the mac and iOS, the phone scripts
 chatkeyboard, taskskeyboard and autofillkeyboard green on iOS and declared
 off on the mac.
-  - **DEPTH STUB: safearea on compose**: A2's per-bar insets (the root stops
-    padding by `safeDrawing`, TopAppBar and NavigationBar consume their own),
-    `bleed` by a measured offset, A4's bring-into-view on IME growth and the
-    content pan, A6's NavigationBar hidden while the IME is visible, the three
-    readings off `ViewCompat.getRootWindowInsets`, and A9's wall in the Compose
-    runner; the three keyboard scripts and the landscape and cutout legs on the
-    android lane, each turn and overlay restored and read back.
-  - **DEPTH STUB: safearea on gtk**: `bleed` accepted inertly,
-    `expect_keyboard` answering off, `expect_safe` read off the window (A13).
-    When the stub goes, the linux lane needs a declared-off list for the three
-    keyboard scripts, which the mac already has.
-  - **DEPTH STUB: safearea on winui**: the same three answers (A13); when the
-    stub goes, the windows lane needs the same declared-off list.
-  - **The other eight bindings and the C floor** (A16): `bleed` on the three
-    kinds in the live zone, refused by type in the template zone; and
-    check-sugar-surface's rows for it with fake-name and rename-in-a-copy
-    negatives, which the depth leaves out so the gate stays green.
+  - ~~**DEPTH STUB: safearea on compose**~~ — BUILT 2026-10-11: the root
+    pads nothing; TopAppBar consumes the status bar's side and the section
+    bar's NavigationBar the navigation bar's, the bar staying composed at the
+    screen's edge under the keyboard (A6); the content box takes what the bars
+    left, the keyboard included only when its root RIDES (a grown scroll, A5)
+    and otherwise keeps its layout and pans (A4; a Column squeezed into the
+    room above the keyboard dropped its last field from the accessibility
+    tree); a detented sheet goes to its full anchor and pans; `bleed` as a
+    layout modifier through the window inset and the safe-area padding on the
+    touching sides; the three readings off the root's insets and every node's
+    window frame; A9's wall after type, type_secret and press, its keys sent to
+    the field's own window (a sheet's). The android pool's keyboard is the
+    clipboard helper's, which now shows a panel Gboard's height (A10). The
+    landscape legs pin the app (KAYA_ORIENTATION), never the device, and the
+    runner reads the display's rotation back with the app in front and on the
+    next leg there. Legs: safearea on compose, jvm and go; taskskeyboard and
+    autofillkeyboard upright and landscape; chatkeyboard and chatkeyboardland
+    on go; autofillkeyboard under the emulator's tall cutout overlay, upright
+    and landscape, the overlay on before the launch and off when the leg ends,
+    each read back (§5.5).
+  - ~~**DEPTH STUB: safearea on gtk**~~ — BUILT 2026-10-11: a bled widget
+    leaves the root's padding through negative CSS margins on its touching
+    sides (A3's inset half, since the desktop has no safe area), a bled
+    picture spans its slot at its fit height and is drawn cropped (A19);
+    `expect_keyboard` off, `expect_insets` "none/none", `expect_safe` through
+    harness::safe_verdict; the linux lane declares the three keyboard scripts
+    off. safearea-rust green on x11 and wayland.
+  - ~~**DEPTH STUB: safearea on winui**~~ — BUILT 2026-10-11: the same shape
+    with negative Margins, a bled picture UniformToFill with its MaxHeight
+    grown by its touching sides, a bled canvas's track read less its margins;
+    `expect_inset` reads the first child's layout SLOT, since a bled first
+    child's own origin moves; the windows lane declares the keyboard scripts
+    off.
+  - ~~**The other eight bindings and the C floor**~~ — BUILT 2026-10-11 (A16):
+    `bleed` in the live zone of all nine, refused by type in the template zone
+    of Go, C#, Java, Swift and Haskell and by one frozen sentence in Python,
+    OCaml and JS, a safearea guest per language and the C floor's, wired on
+    every lane; check-sugar-surface's 25 bleed rows with fake-name and
+    rename-in-a-copy negatives.
   - **The section bar read as covered** (§5.2): no target kind names a tab, so
     taskskeyboard asserts the notes field and the depth's capture shows the bar
     under the keyboard; a reading needs a target for the bar.
-  - **The chat thread in landscape has no room** (A5, A7): MEASURED
+  - ~~**The chat thread in landscape has no room**~~ — RULED 2026-10-11
+    (docs/safe-area-plan.md A17): the composer and the keyboard cover the
+    thread, which may be 0 pt tall; the landscape chat legs assert the
+    composer and not the thread, and are wired on both phones. (A5, A7): MEASURED
     2026-10-11 on the pool phone in a landscape-pinned bundle that the
     keyboard leaves 211 pt, which the inline title, the thread's search field,
     the Newest button and the composer fill, so the thread's scroll gets a 0 pt
@@ -56,7 +81,10 @@ off on the mac.
     (the task manager's and the form's are). For the maintainer: whether the
     search field and the Newest button pan under the top bar while the composer
     is focused in landscape.
-  - **iOS immersive mode keeps the home indicator's inset**: MEASURED
+  - ~~**iOS immersive mode keeps the home indicator's inset**~~ — RULED
+    2026-10-11 (docs/safe-area-plan.md A18, amending A8): iOS reserves it and
+    the reading stays; each phone's safearea leg reads what its immersive mode
+    leaves. MEASURED
     2026-10-11 that `expect_insets` reads "cutout/bar" with `fullscreen` on, the
     bottom 34 pt kept under `persistentSystemOverlays(.hidden)`, where A8 says
     the bars' insets read zero while hidden. The platform's own reading; for

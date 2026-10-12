@@ -554,6 +554,10 @@ struct CoreState {
     time_picker_ids: Vec<u64>,
     picker_cells: HashMap<u64, std::sync::Arc<PickerCell>>,
     images: Vec<Image>,
+    /// The widgets with `bleed` (docs/safe-area-plan.md A3), and each bled
+    /// picture's own MaxHeight, which the bleed grows by its touching sides.
+    bled: Vec<WidgetId>,
+    image_max_heights: HashMap<WidgetId, f64>,
     /// The canvases, and their CORE ids beside them: `canvas_probe` asks
     /// the core about a widget id and `kind#index` is the only address
     /// the harness has.
@@ -1660,7 +1664,10 @@ fn canvas_track_of(core: &CoreState, id: WidgetId, image: &Image) -> Option<(f64
     let element: FrameworkElement = windows_core::Interface::cast(image).ok()?;
     if core.grow.get(&id).copied().unwrap_or(0.0) > 0.0 {
         let slot = LayoutInformation::GetLayoutSlot(&element).ok()?;
-        return Some((f64::from(slot.Width), f64::from(slot.Height)));
+        // A BLED CANVAS IS DRAWN PAST ITS SLOT by its negative margins
+        // (refresh_bleeds), which the slot still counts.
+        let m = element.Margin().ok()?;
+        return Some((f64::from(slot.Width) - m.Left - m.Right, f64::from(slot.Height) - m.Top - m.Bottom));
     }
     Some((element.ActualWidth().ok()?, element.ActualHeight().ok()?))
 }
@@ -3324,6 +3331,67 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
 /// both op runners' ends AND at every harness hop, so nothing can be shown a
 /// tree a batch behind; a failure leaves the rest marked for the next flush.
 fn flush_tracks(core: &mut CoreState) -> windows_core::Result<()> {
+    flush_container_tracks(core)?;
+    refresh_bleeds(core)
+}
+
+/// The sides a bled widget touches the root's content edge on, as
+/// (top, bottom, leading, trailing): every container between it and its
+/// mounted root is a plain row or column with no fill and no inset of its
+/// own, and the widget is first or last along each one's axis
+/// (swift/KayaSwiftUI.swift's kayaBleedEdges, the same walk).
+fn bleed_edges(core: &CoreState, id: WidgetId) -> [bool; 4] {
+    let mut edges = [true; 4];
+    let mut child = id;
+    loop {
+        if core.mounted_roots.values().any(|r| *r == child) {
+            return edges;
+        }
+        let Some(parent) = core.child_order.parent_of(child) else { return [false; 4] };
+        let plain = matches!(core.widgets.get(&parent), Some(NativeWidget::Column(_) | NativeWidget::Row(_)))
+            && !core.filled.contains_key(&parent)
+            && !core.composers.contains_key(&parent)
+            && core.container_insets.get(&parent).is_none_or(|v| *v == 0.0)
+            && !TABLES.with_borrow(|t| t.contains_key(&parent.0));
+        if !plain {
+            return [false; 4];
+        }
+        let vertical = effective_vertical(core, parent);
+        let kids = core.child_order.children(parent);
+        if kids.first() != Some(&child) {
+            edges[if vertical { 0 } else { 2 }] = false;
+        }
+        if kids.last() != Some(&child) {
+            edges[if vertical { 1 } else { 3 }] = false;
+        }
+        child = parent;
+    }
+}
+
+/// Each bled widget's margins out through the root's padding on the sides it
+/// touches, a bled picture stretched across its slot with its MaxHeight grown
+/// by them, so its slot stays the picture's own height
+/// (docs/safe-area-plan.md A3). Leading and trailing are Left and Right,
+/// which a RightToLeft FlowDirection mirrors.
+fn refresh_bleeds(core: &mut CoreState) -> windows_core::Result<()> {
+    let pad = core.inset;
+    for id in core.bled.clone() {
+        let Some(widget) = core.widgets.get(&id) else { continue };
+        let [top, bottom, leading, trailing] = bleed_edges(core, id);
+        let out = |on: bool| if on { -pad } else { 0.0 };
+        let element: FrameworkElement = widget.element()?.cast()?;
+        element.SetMargin(Thickness { Left: out(leading), Top: out(top), Right: out(trailing), Bottom: out(bottom) })?;
+        if let NativeWidget::Image(image) = widget {
+            image.SetHorizontalAlignment(bindings::Microsoft::UI::Xaml::HorizontalAlignment::Stretch)?;
+            if let Some(max) = core.image_max_heights.get(&id) {
+                image.SetMaxHeight(max - out(top) - out(bottom))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn flush_container_tracks(core: &mut CoreState) -> windows_core::Result<()> {
     while let Some(container) = core.child_order.next_due() {
         // A 2D grid re-flows row-major instead: `reflow_grid` clears the
         // Children collection and re-appends every child.
@@ -17259,6 +17327,31 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 return Ok(());
             }
+            // `bleed` lands at the batch's end, where refresh_bleeds reads the
+            // settled tree (docs/safe-area-plan.md A3).
+            if let (Prop::Bleed, Value::Bool(on)) = (prop, &value) {
+                let on = *on;
+                if let Some(widget) = core.widgets.get(&id) {
+                    if let NativeWidget::Image(image) = widget {
+                        // A BLED PICTURE spans its slot's width at its fit
+                        // height, drawn to fill.
+                        image.SetStretch(if on { Stretch::UniformToFill } else { Stretch::Uniform })?;
+                        if let Some(max) = core.image_max_heights.get(&id) {
+                            image.SetMaxHeight(*max)?;
+                        }
+                    }
+                    let element: FrameworkElement = widget.element()?.cast()?;
+                    element.SetMargin(Thickness { Left: 0.0, Top: 0.0, Right: 0.0, Bottom: 0.0 })?;
+                }
+                core.bled.retain(|b| *b != id);
+                if on {
+                    core.bled.push(id);
+                }
+                if let Some(parent) = core.child_order.parent_of(id) {
+                    core.child_order.mark(parent);
+                }
+                return Ok(());
+            }
             // Fill likewise lands on the parent's next reindex
             // (docs/layout-knobs-plan.md §1).
             if let (Prop::Fill, Value::Bool(on)) = (prop, &value) {
@@ -18072,6 +18165,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (NativeWidget::Video { .. }, Prop::Fit, Value::I64(fit)) => media::set_fit(core, id.0, fit)?,
                 (NativeWidget::Video { .. }, Prop::Aspect, Value::I64(aspect)) => media::set_aspect(core, id.0, aspect)?,
                 (NativeWidget::Image(image), Prop::MaxHeight, Value::F64(bound)) => {
+                    core.image_max_heights.insert(id, bound);
                     image.SetMaxHeight(bound)?;
                 }
                 (NativeWidget::Image(image), Prop::Source, Value::Blob(blob)) => {
@@ -18232,8 +18326,6 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         "TextFillColorSecondaryBrush",
                     )?)?;
                 }
-                // docs/safe-area-plan.md §6: the breadth's.
-                (_, Prop::Bleed, _) => crate::depth_stub("safearea"),
                 (_, prop, value) => {
                     panic!("kaya: winui cannot apply {prop:?} = {value:?} here")
                 }
@@ -20618,6 +20710,8 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             tree_parent: HashMap::new(),
             dead_roots: std::collections::HashSet::new(),
             mounted_roots: HashMap::new(),
+            bled: Vec::new(),
+            image_max_heights: HashMap::new(),
             window_titles: HashMap::new(),
             window_dirty: HashMap::new(),
             window_veto: HashMap::new(),
@@ -27196,22 +27290,51 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|e| Err(format!("<accessibility read failed: {e}>")))
     }
 
+    /// No lane raises the touch keyboard (docs/safe-area-plan.md A13).
+    fn keyboard(&self) -> Result<bool, String> {
+        Ok(false)
+    }
+
+    /// A desktop window has no safe area: the mounted root's own box is the
+    /// whole of it (docs/safe-area-plan.md A9, A13).
+    fn safe(&self, t: crate::harness::Target) -> Result<crate::harness::SafeWord, String> {
+        let spec = crate::harness::target_spec(&t);
+        let failed = spec.clone();
+        Self::on_ui_read(move |core| {
+            let read = |why: String| -> windows_core::Result<Result<crate::harness::SafeWord, String>> { Ok(Err(why)) };
+            let index = crate::harness::try_resolve(t.index, registry_ids(core, t.kind).len());
+            let Some(id) = index.and_then(|i| registry_widget_at(core, t.kind, i)).map(WidgetId) else {
+                return read(format!("no such target {spec}"));
+            };
+            let Some(widget) = core.widgets.get(&id) else { return read(format!("no such target {spec}")) };
+            let Some(root) = core.mounted_roots.get(&0).and_then(|r| core.widgets.get(r)) else {
+                return read(format!("{spec}: nothing is mounted in the window"));
+            };
+            let root: FrameworkElement = root.element()?.cast()?;
+            let element: FrameworkElement = widget.element()?.cast()?;
+            let at = element
+                .TransformToVisual(&root)?
+                .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
+            let frame = [f64::from(at.X), f64::from(at.Y), element.ActualWidth()?, element.ActualHeight()?];
+            let rtl = root.FlowDirection()? == bindings::Microsoft::UI::Xaml::FlowDirection::RightToLeft;
+            Ok(crate::harness::safe_verdict(
+                &spec,
+                frame,
+                (root.ActualWidth()?, root.ActualHeight()?),
+                core.bled.contains(&id).then(|| bleed_edges(core, id)),
+                rtl,
+            ))
+        })
+        .unwrap_or_else(|e| Err(format!("{failed}: the frame read failed: {e}")))
+    }
+
+    /// No platform insets on a desktop window (docs/safe-area-plan.md A13).
+    fn insets(&self) -> Result<(String, String), String> {
+        Ok(("none".to_owned(), "none".to_owned()))
+    }
+
     /// docs/expander-plan.md K5: WinUI's own IsExpanded on every expander the
     /// target sits in.
-    /// The keyboard and safe-area readings are the breadth's on this backend
-    /// (docs/safe-area-plan.md §6).
-    fn keyboard(&self) -> Result<bool, String> {
-        crate::depth_stub("safearea")
-    }
-
-    fn safe(&self, _: crate::harness::Target) -> Result<crate::harness::SafeWord, String> {
-        crate::depth_stub("safearea")
-    }
-
-    fn insets(&self) -> Result<(String, String), String> {
-        crate::depth_stub("safearea")
-    }
-
     fn collapsed_ancestor(&self, t: crate::harness::Target) -> Option<usize> {
         Self::on_ui_read(move |core| {
             let Some(index) = crate::harness::try_resolve(t.index, registry_ids(core, t.kind).len()) else {
@@ -27889,25 +28012,28 @@ impl crate::harness::Stage for WinUiStage {
     fn inset(&self) -> String {
         Self::on_ui_read(move |core| {
             // MEASURED from real layout, never read back from the
-            // model: Grid.Padding shifts the first child's visual
-            // offset inside the root by exactly the inset
-            // (docs/styling-plan.md D3).
+            // model: Grid.Padding shifts the first child's layout SLOT
+            // inside the root by exactly the inset (docs/styling-plan.md D3)
+            // — the slot and not the child's own origin, which a bled
+            // child's negative margins move (docs/safe-area-plan.md A3).
             let root = window_surface(&core.window)?;
             root.UpdateLayout()?;
             // The mounted root is a Grid for the container kinds and a
             // ScrollViewer for a scroll-rooted scene (the portfolio
             // dashboard): the read broke on the cast alone before the scroll
             // arm existed, the same hole as the padding stamp's.
-            let child: UIElement = if let Ok(grid) = root.cast::<Grid>() {
-                grid.Children()?.GetAt(0)?
+            let origin = if let Ok(grid) = root.cast::<Grid>() {
+                let child: FrameworkElement = grid.Children()?.GetAt(0)?.cast()?;
+                let slot = LayoutInformation::GetLayoutSlot(&child)?;
+                bindings::Windows::Foundation::Point { X: slot.X, Y: slot.Y }
             } else if let Ok(viewer) = root.cast::<ScrollViewer>() {
-                viewer.Content()?.cast()?
+                let child: UIElement = viewer.Content()?.cast()?;
+                child
+                    .TransformToVisual(&root)?
+                    .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?
             } else {
                 return Ok("<the window content is neither a Grid nor a ScrollViewer>".into());
             };
-            let transform = child.TransformToVisual(&root)?;
-            let origin = transform
-                .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
             // The root's one Padding carries the root CONTAINER's own inset too
             // when it declares one (container_padding — WinUI has a single
             // Padding where SwiftUI and Compose nest two boxes), and that

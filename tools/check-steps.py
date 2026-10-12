@@ -1804,16 +1804,32 @@ def wired():
               "module's queue — it moved, and this clause is blind",
               file=sys.stderr)
         return 1
-    for decl, why in mac_lane.OFF_SCENES.items():
-        if decl not in roster:
-            print(f'check-steps: the mac lane module declares "{decl}" off '
-                  f"({why}), but no such scene exists", file=sys.stderr)
-            failed = 1
-        if decl in mac_wired:
-            print(f'check-steps: the mac lane module declares "{decl}" off '
-                  f"AND its queue lists it — one of the two is stale",
-                  file=sys.stderr)
-            failed = 1
+    linux_off_line = re.findall(r'^OFF_SCENES="([^"]*)"$',
+                                runner_texts["tools/linux/run-suites.sh"], re.M)
+    if len(linux_off_line) != 1:
+        print("check-steps: tools/linux/run-suites.sh carries "
+              f"{len(linux_off_line)} `OFF_SCENES=\"...\"` lines, wanted "
+              "exactly one", file=sys.stderr)
+        failed = 1
+    linux_off = set(" ".join(linux_off_line).split())
+    linux_text = runner_texts["tools/linux/run-suites.sh"]
+    off_tables = [
+        ("mac", mac_lane.OFF_SCENES, lambda s: s in mac_wired),
+        ("win", win_lane.OFF_SCENES, lambda s: s in win_scenes),
+        ("linux", dict.fromkeys(linux_off, "run-suites.sh's OFF_SCENES"),
+         lambda s: f'run "$proto" {s}-' in linux_text),
+    ]
+    for lane_name, table, is_wired in off_tables:
+        for decl, why in table.items():
+            if decl not in roster:
+                print(f'check-steps: the {lane_name} lane declares "{decl}" off '
+                      f"({why}), but no such scene exists", file=sys.stderr)
+                failed = 1
+            if is_wired(decl):
+                print(f'check-steps: the {lane_name} lane declares "{decl}" off '
+                      f"AND wires a leg for it — one of the two is stale",
+                      file=sys.stderr)
+                failed = 1
     for p in STEPS:
         scene = p.stem
         for runner, text in runner_texts.items():
@@ -1837,7 +1853,7 @@ def wired():
                           f"declared off ({runner})", file=sys.stderr)
                     failed = 1
             elif runner == "tools/lib/lanes/win.py":
-                if scene not in win_scenes:
+                if scene not in win_scenes and scene not in win_lane.OFF_SCENES:
                     print(f'check-steps: scene "{scene}" has no leg in '
                           f"the win lane module ({runner})",
                           file=sys.stderr)
@@ -1852,9 +1868,10 @@ def wired():
                 sig = f'run "$proto" {scene}-'
                 if scene == "milestone2":
                     sig = scene
-                if sig not in text:
+                if sig not in text and scene not in linux_off:
                     print(f'check-steps: scene "{scene}" has no live '
-                          f'legs in {runner} (wanted "{sig}")',
+                          f'legs in {runner} (wanted "{sig}") and is not '
+                          f"declared off in its OFF_SCENES",
                           file=sys.stderr)
                     failed = 1
     return failed

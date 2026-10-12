@@ -55,6 +55,7 @@ static class Program
             case "reveal": RevealScene.Run(); break;
             case "segmented": SegmentedScene.Run(); break;
             case "expander": ExpanderScene.Run(); break;
+            case "safearea": SafeareaScene.Run(); break;
             case "toast": ToastScene.Run(); break;
             case "submit": SubmitScene.Run(); break;
             case "progress": ProgressScene.Run(); break;

@@ -3720,6 +3720,181 @@ if policy_fake != 9:
                   f"({policy_fake}/9 size-policy handler patterns "
                   f"fired for a handler that exists nowhere)")
 
+# --- THE BLEED, in all nine (docs/safe-area-plan.md A3, A16) -----------
+# A Bool on the three picture kinds in the LIVE zone, spelled where each
+# binding spells the canvas's `fixed`; the template zone refuses it, BY TYPE
+# where the zone has its own handle and in ONE frozen sentence where one
+# handle serves both. Neither the kind sweep nor the prop censuses can see a
+# widget prop the generator reached every binding with.
+BLEED_SURFACES = [
+    ("rust", "crates/kaya/src/app.rs",
+     [r"pub fn {0}\(self\) -> Self", r"pub fn {0}\(&mut self, widget: WidgetId\)"]),
+    ("python", "bindings/python/kaya/__init__.py",
+     [r"^def _{0}\(handle: Widget, {0}: bool\) -> None:",
+      r"^def image\(source[^\n]*\n[^\n]*\b{0}: bool = False\) -> Widget:",
+      r"capture: Capture \| None = None,\n\s*{0}: bool = False\) -> Widget:",
+      r"on_tick: Callable\[\[Draw, tuple\[float, float\], float\], object\] \| None = None,\n"
+      r"\s*{0}: bool = False\) -> Widget:"]),
+    ("go", "bindings/go/app.go",
+     [r"^func \(w Widget\) {1}\(\) Widget", r"^func \(tx \*Tx\) Set{1}\(w Widget\)"]),
+    ("csharp", "bindings/csharp/KayaApp.cs",
+     [r"public Widget {1}\(\)", r"public void Set{1}\(Widget w\)"]),
+    ("java", "bindings/java/dev/kaya/KayaApp.java",
+     [r"public Widget {0}\(\)", r"public void set{1}\(Widget w\)"]),
+    ("swift", "bindings/swift/KayaApp.swift",
+     [r"public func {0}\(\) -> KayaWidget", r"public func set{1}\(_ w: KayaWidget\)"]),
+    ("haskell", "bindings/haskell/KayaApp.hs",
+     [r"^{0} :: Widget -> Build \(\)", r"^    {0},$"]),
+    ("ocaml", "bindings/ocaml/kaya_app.ml",
+     [r"^let declare_{0} \(Widget id\) {0} =",
+      r"^let image [^\n]*\?\({0} = false\) \(\) =",
+      r"^let video [^\n]*\?help_bind \?\({0} = false\)\n",
+      r"^let video_capture [^\n]*\?help_bind \?\({0} = false\)\n",
+      r"^let canvas [^\n]*\?\({0} = false\)"]),
+    ("js", "bindings/js/kaya/index.ts",
+     [r"^export type {1}Option = \{{ {0}\?: boolean \}};",
+      r"^export function image\(source\?: ImageSource, "
+      r"opts: GrowOption & {1}Option = \{{\}}\): Widget",
+      r"^export type CanvasOptions = GrowOption & {1}Option &",
+      r"^export type VideoOptions = GrowOption & {1}Option &"]),
+]
+BLEED_NAMES = ("bleed", "Bleed")
+
+
+def check_bleed(fake=None, text_for=None):
+    out = []
+    for lang, rel, templates in BLEED_SURFACES:
+        text = text_for(lang, rel) if text_for else read_rel(rel)
+        for template in templates:
+            pat = template.format(*(fake or BLEED_NAMES))
+            if not re.search(pat, text, re.M):
+                out.append(f"check-sugar-surface: {lang}'s LIVE zone cannot spell `bleed` on "
+                           f"an image, video view or canvas (wanted /{pat}/ in {rel})")
+    return out
+
+
+_bl_found = check_bleed()
+for _line in _bl_found:
+    print(_line)
+    status = 1
+_bl_want = sum(len(ts) for _, _, ts in BLEED_SURFACES)
+_bl_fake = check_bleed(("kayaFakeBleed", "KayaFakeBleed"))
+print(f"check-sugar-surface: fake bleed spellings fired {len(_bl_fake)}/{_bl_want}")
+if len(_bl_fake) != _bl_want:
+    selftest_exit(f"check-sugar-surface: self-test failed ({len(_bl_fake)}/{_bl_want} bleed "
+                  f"patterns fired for a name that exists nowhere)")
+_bl_cuts = 0
+_bl_held = [row for row in BLEED_SURFACES if not any(f" {row[0]}'s " in f for f in _bl_found)]
+for _lang, _rel, _templates in _bl_held:
+    _real = read_rel(_rel)
+    for _template in _templates:
+        _pat = _template.format(*BLEED_NAMES)
+        _n = 0
+
+        def _mangle_bl(m):
+            global _n
+            _inner, _k = sub_count(r"(?i)(blee(?=d))", r"\1KayaCut", m.group(0))
+            _n += _k
+            return _inner
+        _copy = re.sub(_pat, _mangle_bl, _real, flags=re.M)
+        print(f"check-sugar-surface: bleed cut {_lang} /{_template[:30]}.../: "
+              f"{_n} substitution(s)")
+        _found = check_bleed(
+            text_for=lambda lang, rel, _c=_copy, _r=_rel: _c if rel == _r else read_rel(rel))
+        if _n < 1 or not any(f" {_lang}'s " in _f for _f in _found):
+            selftest_exit(f"check-sugar-surface: self-test failed (the {_lang} bleed cut "
+                          f"/{_template[:30]}.../ was not refused)")
+        if (ROOT / _rel).read_text(encoding="utf-8") != _real:
+            selftest_exit(f"check-sugar-surface: {_rel} changed on disk under the bleed cut")
+        _bl_cuts += 1
+_bl_rows = sum(len(t) for _, _, t in _bl_held)
+print(f"check-sugar-surface: bleed cuts watched red {_bl_cuts}/{_bl_rows}")
+
+# THE TEMPLATE ZONE REFUSES IT. Six bindings by TYPE: a template handle that
+# grew a bleed would be a spelling the core then refuses at batch, so the
+# forbidden shapes are named and each is planted in a copy and watched red.
+BLEED_TYPED_REFUSALS = [
+    ("rust", "crates/kaya/src/app.rs", r"pub fn bleed\(&mut self, \w+: TemplateNodeId",
+     "    pub fn bleed(&mut self, node: TemplateNodeId) {}\n"),
+    ("go", "bindings/go/app.go", r"^func \((n Node|t \*Tpl)\) (Set)?Bleed\(",
+     "func (n Node) Bleed() Node { return n }\n"),
+    ("csharp", "bindings/csharp/KayaApp.cs", r"public (Node Bleed\(|void SetBleed\(Node )",
+     "    public Node Bleed() => default;\n"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", r"public (Node bleed\(|void setBleed\(Node )",
+     "        public Node bleed() { return null; }\n"),
+    ("swift", "bindings/swift/KayaApp.swift",
+     r"func (bleed\(\) -> KayaNodeHandle|setBleed\(_ n: KayaNodeHandle)",
+     "    public func bleed() -> KayaNodeHandle { self }\n"),
+    ("haskell", "bindings/haskell/KayaApp.hs", r"^(bleed :: Node|  TplBleed\b)",
+     "bleed :: Node -> Tpl ()\n"),
+]
+
+
+def bleed_typed(text_for=None):
+    out = []
+    for lang, rel, pat, _ in BLEED_TYPED_REFUSALS:
+        text = text_for(rel) if text_for else read_rel(rel)
+        if re.search(pat, text, re.M):
+            out.append(f"check-sugar-surface: {lang}'s template zone spells `bleed` "
+                       f"(/{pat}/ in {rel}) — a stamped row never touches the window's "
+                       f"edge, so the zone refuses it BY TYPE (docs/safe-area-plan.md A16)")
+    return out
+
+
+for _line in bleed_typed():
+    print(_line)
+    status = 1
+_bl_planted = 0
+for _lang, _rel, _pat, _plant in BLEED_TYPED_REFUSALS:
+    _real = read_rel(_rel)
+    _copy = _real + "\n" + _plant
+    _found = bleed_typed(text_for=lambda rel, _c=_copy, _r=_rel: _c if rel == _r else read_rel(rel))
+    if not any(f" {_lang}'s template zone" in f for f in _found):
+        selftest_exit(f"check-sugar-surface: self-test failed (a {_lang} template-zone bleed "
+                      f"planted in a copy was not refused)")
+    _bl_planted += 1
+print(f"check-sugar-surface: template-zone bleed plants watched red "
+      f"{_bl_planted}/{len(BLEED_TYPED_REFUSALS)}")
+
+
+def bleed_sentence():
+    SENTENCE = ("kaya: `bleed` is a LIVE-ZONE declaration — a stamped row never "
+                "touches the window's edge, so bleed there could only mean nothing "
+                "(docs/safe-area-plan.md A16)")
+
+    def flat(text):
+        text = re.sub(r'"\s*\n\s*"', "", text)
+        text = re.sub(r"\\\s*\n\s*", "", text)
+        return re.sub(r"\s+", " ", text)
+
+    AMBIENT = ["bindings/python/kaya/__init__.py",
+               "bindings/ocaml/kaya_app.ml",
+               "bindings/js/kaya/index.ts"]
+    out, fails = [], []
+    want = re.sub(r"\s+", " ", SENTENCE)
+    for name in AMBIENT:
+        if want not in flat(read_rel(name)):
+            fails.append(f"{name} serves both zones with ONE handle but does not refuse "
+                         f"a template-node bleed in the frozen words: \"{want}\"")
+    for name in AMBIENT:
+        doctored, n = sub_count("LIVE-ZONE declaration — a stamped row",
+                                "live-zone declaration — a stamped row", read_rel(name))
+        out.append(f"check-sugar-surface: bleed sentence perturbation applied {n} "
+                   f"substitution(s) in {name}")
+        if n < 1:
+            fails.append(f"the bleed sentence self-test perturbed NOTHING in {name}")
+        elif want in flat(doctored):
+            fails.append(f"the bleed sentence self-test stayed GREEN against a doctored "
+                         f"copy of {name}")
+    out.extend("check-sugar-surface: " + line for line in fails)
+    return out, not fails
+
+
+bleed_lines, bleed_ok = bleed_sentence()
+print("\n".join(bleed_lines))
+if not bleed_ok:
+    status = 1
+
 # --- THE SLIDER SURFACE, all nine (docs/slider-plan.md S1, S2, S5) ---
 # The kind sweep sees the CONSTRUCTOR and the window-prop sweep sees
 # neither of these, so both are blind to what props 24/25 and occurrence

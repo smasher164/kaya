@@ -93,6 +93,23 @@ with app.build():
                       "LIVE-ZONE declaration in this slice" in str(e))
             kaya.label("empty")
 
+# `bleed` is live-zone only (docs/safe-area-plan.md A16), refused the same way.
+with app.build():
+    with kaya.column():
+        with kaya.for_each(c):
+            for name, make in (("image", lambda: kaya.image(bleed=True)),
+                               ("canvas", lambda: kaya.canvas((10.0, 10.0), bleed=True))):
+                try:
+                    make()
+                    check(f"a template-node {name} bleed is refused", False)
+                except RuntimeError as e:
+                    check(f"a template-node {name} bleed is refused",
+                          "`bleed` is a LIVE-ZONE declaration" in str(e))
+            kaya.label("empty")
+        kaya.image(bleed=True)
+        kaya.canvas((10.0, 10.0), bleed=True)
+        check("a live image and canvas take bleed", True)
+
 with app.build():
     with kaya.column():
         try:

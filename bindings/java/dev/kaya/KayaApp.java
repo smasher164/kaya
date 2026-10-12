@@ -4833,6 +4833,20 @@ public final class KayaApp {
             return this;
         }
 
+        /**
+         * This image, video view or canvas extends past the window's inset
+         * and the safe area to the window's edge on each side it touches,
+         * never under the keyboard (docs/safe-area-plan.md A3). Live zone
+         * only: {@link Node} has no bleed (A16).
+         */
+        public Widget bleed() {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException("kaya: bleed on a widget outside its build transaction");
+            }
+            tx.setBleed(this);
+            return this;
+        }
+
         public Widget format(NumberFormat format) {
             if (tx == null || tx.closed) {
                 throw new IllegalStateException("kaya: format on a widget outside its build transaction");
@@ -6975,6 +6989,12 @@ public final class KayaApp {
          * {@link KayaApp#onToggle(Widget, BiConsumer)} (docs/reveal-plan.md V2). */
         public void setRevealable(Widget w) {
             emit(KayaWire.txSetRevealable(w.id, true));
+        }
+
+        /** An image, video view or canvas bleeds to the window's edge
+         * (docs/safe-area-plan.md A3); live zone only (A16). */
+        public void setBleed(Widget w) {
+            emit(KayaWire.txSetBleed(w.id, true));
         }
 
         /**

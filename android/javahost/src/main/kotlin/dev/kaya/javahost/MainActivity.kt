@@ -67,7 +67,7 @@ object GuestStart : KayaGuestStart {
             "reveal" -> Reveal::app
             "segmented" -> Segmented::app
             "expander" -> Expander::app
-            "expander" -> Expander::app
+            "safearea" -> Safearea::app
             "toast" -> Toast::app
             "sections" -> Sections::app
             "menus" -> Menus::app

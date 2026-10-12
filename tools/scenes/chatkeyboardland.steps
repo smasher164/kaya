@@ -1,0 +1,16 @@
+# The chat app in landscape with the keyboard up (docs/safe-area-plan.md A17):
+# the composer and the keyboard cover the thread, which may be 0 pt tall, so
+# nothing is asserted of the thread while the keyboard is up. A phone's script,
+# run by an app pinned to landscape (A13: the desktops have no software keyboard).
+expect_title "chat"
+click button@open[maya]
+click button@newest
+expect_scrolled_to column@thread m30
+click textarea@compose
+expect_focused textarea@compose
+expect_keyboard on
+expect_safe textarea@compose
+type "On my way"
+press return
+expect_keyboard on
+expect_safe textarea@compose

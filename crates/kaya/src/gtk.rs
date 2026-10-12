@@ -5992,6 +5992,9 @@ struct CoreState {
     /// The provider holding the `.kaya-root` padding, kept to rewrite
     /// when the inset moves.
     inset_css: gtk4::CssProvider,
+    /// The widgets with `bleed` (docs/safe-area-plan.md A3), whose touching
+    /// sides refresh_bleeds recomputes after every batch.
+    bled: Vec<gtk4::Widget>,
     /// A CONTAINER's own inset (prop 17): its own provider, one
     /// `kaya-inset-N` rule per distinct value, and the set those rules cover.
     /// Separate from `inset_css`, which the window arm rewrites whole.
@@ -6147,6 +6150,7 @@ fn drain_transactions() {
             // does not depend on which of them ran first. An unchanged
             // report emits no op.
             presentation_report(core);
+            refresh_bleeds(core);
         });
     });
 }
@@ -8162,6 +8166,94 @@ const COMPOSER_CLASS: &str = "kaya-composer";
 
 const MAX_WIDTH_KEY: &str = "kaya-max-width";
 const MAX_HEIGHT_KEY: &str = "kaya-max-height";
+const BLEED_KEY: &str = "kaya-bleed";
+const BLEED_CLASSES: [&str; 4] = ["kaya-bleed-top", "kaya-bleed-bottom", "kaya-bleed-left", "kaya-bleed-right"];
+
+/// The `.kaya-root` padding and the margins that take a bled widget back out
+/// through it (docs/safe-area-plan.md A3): one provider, rewritten whole.
+fn root_inset_css(px: i64) -> String {
+    format!(
+        ".kaya-root {{ padding: {px}px; }} .kaya-bleed-top {{ margin-top: -{px}px; }} \
+         .kaya-bleed-bottom {{ margin-bottom: -{px}px; }} .kaya-bleed-left {{ margin-left: -{px}px; }} \
+         .kaya-bleed-right {{ margin-right: -{px}px; }}"
+    )
+}
+
+/// The sides a bled widget touches the root's content edge on, as
+/// (top, bottom, leading, trailing): every container between it and the
+/// mounted root is a plain row or column with no fill and no inset of its own,
+/// and the widget is first or last along each one's axis
+/// (swift/KayaSwiftUI.swift's kayaBleedEdges, the same walk).
+fn bleed_edges(widget: &gtk4::Widget) -> [bool; 4] {
+    use gtk4::prelude::{Cast, WidgetExt};
+    let mut edges = [true; 4];
+    let mut child = widget.clone();
+    loop {
+        if child.has_css_class("kaya-root") {
+            return edges;
+        }
+        let Some(parent) = child.parent() else { return [false; 4] };
+        // The axis from the flex manager when ensure_flex replaced the box's
+        // own layout, which is what GtkBox::orientation reads.
+        let vertical = parent
+            .layout_manager()
+            .and_then(|l| l.downcast_ref::<flex::FlexLayout>().map(|f| f.orientation() == gtk4::Orientation::Vertical))
+            .or_else(|| {
+                parent
+                    .downcast_ref::<gtk4::Box>()
+                    .map(|b| gtk4::prelude::OrientableExt::orientation(b) == gtk4::Orientation::Vertical)
+            });
+        let Some(vertical) = vertical else { return [false; 4] };
+        let inset = parent.css_classes().iter().any(|c| {
+            c.strip_prefix(INSET_CLASS).is_some_and(|n| n != "0")
+        });
+        if parent.has_css_class(FILLED_CLASS) || inset {
+            return [false; 4];
+        }
+        if parent.first_child().as_ref() != Some(&child) {
+            edges[if vertical { 0 } else { 2 }] = false;
+        }
+        if parent.last_child().as_ref() != Some(&child) {
+            edges[if vertical { 1 } else { 3 }] = false;
+        }
+        child = parent;
+    }
+}
+
+/// Each bled widget's margins out through the root's padding on the sides it
+/// touches, and a bled picture's height grown by them, so its slot stays the
+/// picture's own height (docs/safe-area-plan.md A3).
+fn refresh_bleeds(core: &mut CoreState) {
+    use gtk4::prelude::{Cast, PaintableExt, WidgetExt};
+    let px = core.inset.round() as i32;
+    for widget in &core.bled {
+        let [top, bottom, leading, trailing] = bleed_edges(widget);
+        let rtl = widget.direction() == gtk4::TextDirection::Rtl;
+        let (left, right) = if rtl { (trailing, leading) } else { (leading, trailing) };
+        for (class, on) in BLEED_CLASSES.iter().zip([top, bottom, left, right]) {
+            if on {
+                widget.add_css_class(class);
+            } else {
+                widget.remove_css_class(class);
+            }
+        }
+        // The minimum holds the margins it gives back, so the measured size
+        // is never negative; a picture's height is its fit height grown.
+        let dx = px * (i32::from(leading) + i32::from(trailing));
+        let dy = px * (i32::from(top) + i32::from(bottom));
+        let picture = widget.downcast_ref::<gtk4::Picture>();
+        let fit = picture
+            .and_then(|p| p.paintable())
+            .and_then(|p| p.downcast::<bounded_paintable::BoundedPaintable>().ok())
+            .map_or(0, |p| p.fit_height().max(0));
+        widget.set_size_request(dx, fit + dy);
+        // A bled picture spans its slot (A19), whatever its container's
+        // align stamped on it when it was added.
+        if picture.is_some() {
+            widget.set_halign(gtk4::Align::Fill);
+        }
+    }
+}
 
 /// An image's bound (docs/photo-attach-plan.md §2). GtkPicture is final and
 /// its natural size is its paintable's, so a bounded picture shows the decoded
@@ -8178,6 +8270,20 @@ fn fit_picture(picture: &gtk4::Picture, texture: Option<gtk4::gdk::Texture>) {
     let bound = |key: &str| unsafe { picture.data::<f64>(key).map(|p| *p.as_ref()) };
     let (max_w, max_h) = (bound(MAX_WIDTH_KEY), bound(MAX_HEIGHT_KEY));
     let (w, h) = (f64::from(texture.intrinsic_width()), f64::from(texture.intrinsic_height()));
+    // SAFETY: written only by the Bleed arm, always a bool.
+    let bled = unsafe { picture.data::<bool>(BLEED_KEY).is_some_and(|p| *p.as_ref()) };
+    // A BLED PICTURE spans its slot's width at its fit height, drawn to fill
+    // (docs/safe-area-plan.md A3; the SwiftUI arm's KayaBleed slot).
+    if bled {
+        picture.set_halign(gtk4::Align::Fill);
+    }
+    if bled && w > 0.0 && h > 0.0 {
+        let scale = 1f64.min(max_w.map_or(1.0, |m| m / w)).min(max_h.map_or(1.0, |m| m / h));
+        let cover = bounded_paintable::BoundedPaintable::new(&texture, (w * scale).round() as i32, (h * scale).round() as i32);
+        cover.cover();
+        picture.set_paintable(Some(&cover));
+        return;
+    }
     if (max_w.is_none() && max_h.is_none()) || w <= 0.0 || h <= 0.0 {
         picture.set_paintable(Some(&texture));
         return;
@@ -8212,6 +8318,9 @@ mod bounded_paintable {
     pub struct BoundedPaintableInner {
         texture: RefCell<Option<gdk::Texture>>,
         size: Cell<(i32, i32)>,
+        /// A bled picture's: no size or shape of its own, so it is handed
+        /// its whole allocation, and the texture cropped to fill it.
+        cover: Cell<bool>,
     }
 
     #[glib::object_subclass]
@@ -8225,15 +8334,34 @@ mod bounded_paintable {
 
     impl PaintableImpl for BoundedPaintableInner {
         fn intrinsic_width(&self) -> i32 {
-            self.size.get().0
+            if self.cover.get() { 0 } else { self.size.get().0 }
         }
         fn intrinsic_height(&self) -> i32 {
-            self.size.get().1
+            if self.cover.get() { 0 } else { self.size.get().1 }
+        }
+        fn intrinsic_aspect_ratio(&self) -> f64 {
+            let (w, h) = self.size.get();
+            if self.cover.get() || w <= 0 || h <= 0 { 0.0 } else { f64::from(w) / f64::from(h) }
         }
         fn snapshot(&self, snapshot: &gdk::Snapshot, width: f64, height: f64) {
-            if let Some(texture) = self.texture.borrow().as_ref() {
+            let Some(texture) = self.texture.borrow().clone() else { return };
+            if !self.cover.get() {
                 texture.snapshot(snapshot, width, height);
+                return;
             }
+            let Some(snap) = snapshot.downcast_ref::<gtk4::Snapshot>() else { return };
+            let (tw, th) = (f64::from(texture.intrinsic_width()), f64::from(texture.intrinsic_height()));
+            if tw <= 0.0 || th <= 0.0 {
+                return;
+            }
+            let scale = (width / tw).max(height / th);
+            let (dw, dh) = (tw * scale, th * scale);
+            snap.push_clip(&gtk4::graphene::Rect::new(0.0, 0.0, width as f32, height as f32));
+            snap.save();
+            snap.translate(&gtk4::graphene::Point::new(((width - dw) / 2.0) as f32, ((height - dh) / 2.0) as f32));
+            texture.snapshot(snap.upcast_ref::<gdk::Snapshot>(), dw, dh);
+            snap.restore();
+            snap.pop();
         }
     }
 
@@ -8252,6 +8380,16 @@ mod bounded_paintable {
 
         pub fn texture(&self) -> Option<gdk::Texture> {
             self.imp().texture.borrow().clone()
+        }
+
+        pub fn cover(&self) {
+            self.imp().cover.set(true);
+        }
+
+        /// The fit height, which a cover paintable keeps out of its
+        /// intrinsic size.
+        pub fn fit_height(&self) -> i32 {
+            self.imp().size.get().1
         }
     }
 }
@@ -13563,9 +13701,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     load_kaya_css(
                         &core.inset_css,
                         "root inset",
-                        &format!(".kaya-root {{ padding: {}px; }}", units.round() as i64),
+                        &root_inset_css(units.round() as i64),
                         &core.css_error,
                     );
+                    refresh_bleeds(core);
                 }
                 (WindowProp::SectionsPresentation, Value::I64(hint)) => {
                     // ADVISORY: bar/auto = the header StackSwitcher,
@@ -15847,8 +15986,32 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     };
                     fit_picture(picture, texture);
                 }
-                // docs/safe-area-plan.md §6: the breadth's.
-                (_, Prop::Bleed, _) => crate::depth_stub("safearea"),
+                (w, Prop::Bleed, Value::Bool(on)) => {
+                    let widget = w.widget();
+                    core.bled.retain(|b| b != &widget);
+                    if on {
+                        core.bled.push(widget.clone());
+                    } else {
+                        for class in BLEED_CLASSES {
+                            widget.remove_css_class(class);
+                        }
+                        widget.set_size_request(-1, -1);
+                    }
+                    if let NativeWidget::Image(picture) = w {
+                        use gtk4::prelude::ObjectExt;
+                        // SAFETY: the key is private to this module and only
+                        // ever holds a bool, written here and read by fit_picture.
+                        unsafe { picture.set_data(BLEED_KEY, on) }
+                        let texture = picture.paintable().and_then(|p| {
+                            match p.downcast::<bounded_paintable::BoundedPaintable>() {
+                                Ok(bounded) => bounded.texture(),
+                                Err(p) => p.downcast::<gtk4::gdk::Texture>().ok(),
+                            }
+                        });
+                        fit_picture(picture, texture);
+                    }
+                    refresh_bleeds(core);
+                }
                 (_, prop, value) => {
                     panic!("kaya: gtk cannot apply {prop:?} = {value:?} here")
                 }
@@ -17841,7 +18004,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         let css_error: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
         let css = gtk4::CssProvider::new();
         watch_css_errors(&css, &css_error);
-        load_kaya_css(&css, "root inset", ".kaya-root { padding: 16px; }", &css_error);
+        load_kaya_css(&css, "root inset", &root_inset_css(16), &css_error);
         // The brand's own provider, EMPTY until a SetBrand arrives.
         // APPLICATION priority (600) for both, the whole vocabulary's position
         // on Linux: it outranks libadwaita's own stylesheet (THEME, 200) and
@@ -18158,6 +18321,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 },
                 inset: 16.0,
                 inset_css,
+                bled: Vec::new(),
                 container_inset_css,
                 container_insets: BTreeSet::new(),
                 brand,
@@ -23414,22 +23578,45 @@ impl crate::harness::Stage for GtkStage {
         Ok((states.contains(atspi::State::Expanded), shown))
     }
 
+    /// GTK has no software keyboard API of its own (docs/safe-area-plan.md A13).
+    fn keyboard(&self) -> Result<bool, String> {
+        Ok(false)
+    }
+
+    /// A desktop window has no safe area: the content under the header bar is
+    /// the whole of it (docs/safe-area-plan.md A9, A13).
+    fn safe(&self, t: crate::harness::Target) -> Result<crate::harness::SafeWord, String> {
+        Self::on_main(move |core| {
+            use gtk4::prelude::WidgetExt;
+            let spec = crate::harness::target_spec(&t);
+            let widget = target_widget(core, t).ok_or_else(|| format!("no such target {spec}"))?;
+            let content = window_content(core, 0).ok_or_else(|| format!("{spec}: no window content to read"))?;
+            // Both in the content's own coordinates, whose origin is inside its
+            // padding; its border box is the window's content area.
+            let frame = widget
+                .compute_bounds(&content)
+                .ok_or_else(|| format!("{spec}: not laid out inside the window's content"))?;
+            let area = content
+                .compute_bounds(&content)
+                .ok_or_else(|| format!("{spec}: the window's content is not laid out"))?;
+            let bled = core.bled.contains(&widget);
+            crate::harness::safe_verdict(
+                &spec,
+                [frame.x() - area.x(), frame.y() - area.y(), frame.width(), frame.height()].map(f64::from),
+                (f64::from(area.width()), f64::from(area.height())),
+                bled.then(|| bleed_edges(&widget)),
+                widget.direction() == gtk4::TextDirection::Rtl,
+            )
+        })
+    }
+
+    /// No platform insets on a desktop window (docs/safe-area-plan.md A13).
+    fn insets(&self) -> Result<(String, String), String> {
+        Ok(("none".to_owned(), "none".to_owned()))
+    }
+
     /// docs/expander-plan.md K5: GTK's own `expanded` on every expander the
     /// target sits in, a collapsed GtkExpander's body being parentless.
-    /// The keyboard and safe-area readings are the breadth's on this backend
-    /// (docs/safe-area-plan.md §6).
-    fn keyboard(&self) -> Result<bool, String> {
-        crate::depth_stub("safearea")
-    }
-
-    fn safe(&self, _: crate::harness::Target) -> Result<crate::harness::SafeWord, String> {
-        crate::depth_stub("safearea")
-    }
-
-    fn insets(&self) -> Result<(String, String), String> {
-        crate::depth_stub("safearea")
-    }
-
     fn collapsed_ancestor(&self, t: crate::harness::Target) -> Option<usize> {
         Self::on_main(move |core| {
             use gtk4::prelude::{Cast, WidgetExt};

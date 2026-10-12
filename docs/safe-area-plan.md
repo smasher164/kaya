@@ -2,7 +2,9 @@
 
 Status: RULED 2026-10-11 (the maintainer: "accept all"), A1-A16 as recommended;
 the depth (§6 steps 1 and 2) built 2026-10-11 on iOS and the mac
-(docs/deferred.md, the safe-area BUILD entry); the breadth is open. He picked "safe-area and keyboard avoidance on phones" from the
+(docs/deferred.md, the safe-area BUILD entry); the breadth (§6 step 3) built
+2026-10-11 on Compose, GTK, WinUI and the eight other bindings; A17-A19 RULED
+the same day. He picked "safe-area and keyboard avoidance on phones" from the
 2026-10-09 shortlist. Its roadmap card (docs/roadmap/features.toml,
 `safe_area`) gives the shape as "scene proof + a scroll behaviour" and says
 what is owed: a scene with an entry at the bottom proving it stays visible
@@ -336,8 +338,9 @@ re-enable it: it hides the screen the user is typing about.
 ### A8 — Immersive and fullscreen: the bars' insets go, the cutout and the keyboard stay (RULED 2026-10-11)
 
 RECOMMEND that with `fullscreen` on (docs/fullscreen-plan.md), the status
-and navigation bars' insets read as zero while the bars are hidden, content
-may use that space, and the cutout's and the keyboard's insets still apply.
+and navigation bars' insets read as zero while the bars are hidden, except
+the home indicator's, which iOS reserves (A18), content may use that space,
+and the cutout's and the keyboard's insets still apply.
 A bled widget reaches the true screen edge on every touching side. When the
 user swipes the bars back transiently on Android, content does not move
 (the bars draw over it, the platform's own transient behaviour).
@@ -478,6 +481,32 @@ where the zone has its own handle, as the canvas's size policy does.
 Why: invariant 2's sweep with no carve-out, and the size-policy surface is
 the precedent for a prop legal in one zone (CLAUDE.md, check-sugar-surface).
 
+### A17 — Landscape chat with the keyboard up: the composer and the keyboard cover the thread (RULED 2026-10-11)
+
+The maintainer's ruling on the depth's open question (docs/deferred.md, the
+safe-area BUILD entry): in landscape the keyboard leaves room for the
+composer alone, and the thread may be 0 pt tall while it is up, as Messages
+and WhatsApp behave. No minimum strip of thread is kept. The landscape chat
+legs assert that the composer is safe and above the keyboard and assert
+nothing about the thread while the keyboard is up.
+
+### A18 — Immersive mode keeps what the platform reserves (amends A8; RULED 2026-10-11)
+
+The maintainer's ruling on the depth's measurement: on iOS the home
+indicator's bottom inset stays in fullscreen, since iOS reserves it
+(`expect_insets` reads `cutout/bar` with `fullscreen` on, measured on the
+pool phone). The safearea scene's fullscreen reading on each phone is what
+that phone's immersive mode leaves: on Android, the reading the breadth
+measured (§7).
+
+### A19 — A bled picture spans its slot's width and fills its extended frame, cropping (RULED 2026-10-11)
+
+The maintainer's ruling on the depth's lowering: a bled image's slot is the
+offered width at its fit height, and the picture fills the slot extended by
+the touching sides, cropped to it (aspect fill), as the SwiftUI arm built it.
+A picture narrower than its slot is scaled up to fill rather than letterboxed.
+Every backend draws it this way.
+
 ### Deferred, for the ledger at the depth
 
 - The inset reading for the app (A14). KEY: inset reading, safe area occurrence, canvas insets.
@@ -493,8 +522,17 @@ the precedent for a prop legal in one zone (CLAUDE.md, check-sugar-surface).
 | SwiftUI, iOS | already: SwiftUI's safe area; grounds use the ShapeStyle background that ignores safe-area edges (the grouped ground's shape, applied to the window ground, the sheet and the bars) | `.ignoresSafeArea(.container, edges:)` on the bled view, the edges computed from the touching sides; never `.keyboard` | the nearest kaya scroll's ScrollViewReader scrolls to the focused field's id when the keyboard's frame changes (`keyboardWillChangeFrame`), unanimated; with no scroll, an `.offset` on the content root by the measured overlap (A4.2); to measure whether SwiftUI's own avoidance already covers case 1 | the column's children after the grown scroll need nothing (the keyboard region); follows_end re-asserts its end on the keyboard change; the TabView's bar `.ignoresSafeArea(.keyboard)` | the window's `safeAreaInsets` and keyboard frame through the hosting controller, the target's frame in window space through the existing frame readers |
 | SwiftUI, macOS | already | `.ignoresSafeArea` (a fullscreen notch only) | none | none | `expect_keyboard` answers `off` |
 | Compose | the root stops padding by `safeDrawing`; it pads by `displayCutout` and the IME, KayaMenuTopBar consumes `statusBars` (TopAppBar's `windowInsets`), the section bar's NavigationBar consumes `navigationBars`, the content between consumes what is left (`consumeWindowInsets`); `ADJUST_RESIZE` stays | the bled image, video or canvas skips the consumed padding on its touching sides (a measured offset with `layout`, since Compose has no `ignoresSafeArea`) | a `BringIntoViewRequester` on every text-taking widget, invoked on focus and again whenever `WindowInsets.ime`'s bottom grows while focused; with no scroll ancestor, an `offset` on the content Box by the overlap, read from `boundsInWindow` against the IME inset | children after the grown scroll sit above the IME padding as today; the NavigationBar is not composed while `WindowInsets.isImeVisible`; follows_end re-asserts its end | `ViewCompat.getRootWindowInsets` for `ime`, `systemBars`, `displayCutout`; the target's `boundsInWindow` (in the window's space, docs/traps.md's surface-space lesson applies to any pixel read) |
-| GTK | the window; nothing to do | inert (no safe area), accepted | none | none | `expect_keyboard` answers `off` |
-| WinUI | the client area; nothing to do | inert, accepted | ScrollViewer's own bring-into-view on the touch keyboard (documented) | none | `expect_keyboard` answers `off` |
+| GTK | the window; nothing to do | no safe area, so A3's inset half alone (BUILT): negative CSS margins through the root's padding on the touching sides | none | none | `expect_keyboard` answers `off`, `expect_insets` `none/none` |
+| WinUI | the client area; nothing to do | the same through negative Margins (BUILT) | ScrollViewer's own bring-into-view on the touch keyboard (documented) | none | `expect_keyboard` answers `off`, `expect_insets` `none/none` |
+
+AS BUILT on Compose (2026-10-11): the NavigationBar is not left out of the
+composition while the IME shows (that hid the switcher from every reader) but
+stays at the screen's bottom edge under the IME's window; the content gives up
+its height to the keyboard only when its root rides it (a grown scroll, A5)
+and otherwise keeps its layout and pans (A4), since a squeezed Column dropped
+its last field from the accessibility tree; a detented sheet goes to its full
+anchor and pans; foundation's own bring-into-view is kept inside a scroll and
+the pan covers what it leaves (docs/traps.md, the 2026-10-11 entries).
 
 ## §4 — The wire
 
@@ -664,6 +702,15 @@ is part of the leg).
   needs no BringIntoViewRequester of kaya's on IME growth inside a scroll. The
   pool's installed rusthost still carries that guest until the lane's next
   compose build replaces it.
+- MEASURED 2026-10-11 (the android pool, the lane's helper keyboard at Gboard's
+  height): the safearea scene reads `bar/bar` upright and `none/none` in
+  immersive mode (no cutout on the pool phone), where iOS keeps `cutout/bar`
+  (A18); in landscape the keyboard leaves 136 dp (24 of status bar), and a
+  Material bottom sheet's window is resized to that room, the medium detent
+  placed at half of it; the landscape tasks, form and chat legs pass with the
+  pan and the chat composer above the keyboard (A17); the form passes under
+  the tall cutout overlay upright and in landscape, the overlay read back on
+  before the launch and off after the leg (§5.5).
 - To measure at the breadth: a bled image under the status bar with
   `layout`; the NavigationBar hidden while the IME is visible; kaya-sim-pad's
   floating keyboard and the Android tablet leg (A11); WinUI's touch keyboard

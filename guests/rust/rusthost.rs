@@ -181,6 +181,8 @@ mod reveal;
 mod segmented;
 #[path = "expander.rs"]
 mod expander;
+#[path = "safearea.rs"]
+mod safearea;
 
 #[cfg(target_os = "android")]
 #[path = "tasks.rs"]
@@ -270,15 +272,20 @@ fn app(ctx: kaya::AppCtx) {
         Ok("search") => search::app(ctx),
         Ok("secure") => secure::app(ctx),
         Ok("autofill") => autofill::app(ctx),
+        // With the keyboard up (tools/scenes/autofillkeyboard.steps).
+        Ok("autofillkeyboard") => autofill::app(ctx),
         Ok("reveal") => reveal::app(ctx),
         Ok("segmented") => segmented::app(ctx),
         Ok("expander") => expander::app(ctx),
+        Ok("safearea") => safearea::app(ctx),
         Ok("tasks") => tasks::app(ctx),
         Ok("taskspersist") => tasks::app(ctx),
         // The same app under KAYA_LOCALE=ar-EG (tools/scenes/tasksrtl.steps).
         Ok("tasksrtl") => tasks::app(ctx),
         // And at twice the text size (tools/scenes/tasksbig.steps).
         Ok("tasksbig") => tasks::app(ctx),
+        // With the keyboard up (tools/scenes/taskskeyboard.steps).
+        Ok("taskskeyboard") => tasks::app(ctx),
         // The same app again: an app link opens the screen it names, and
         // the routes are declared on the handlers the tasks app already
         // has (docs/app-links-plan.md L4).

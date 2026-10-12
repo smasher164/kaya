@@ -3033,10 +3033,24 @@ let show_player (Widget id) p =
   emit (the_tx ())
     (Kaya_wire.tx_set_player id (match p with Some (Player pid) -> pid | None -> 0L))
 
+(* [~bleed:true] (docs/safe-area-plan.md A3, A16): the LIVE constructor can
+   be called inside a template body, so the refusal is [tpl_depth], the size
+   policy's shape. *)
+let declare_bleed (Widget id) bleed =
+  if bleed then begin
+    let tx = the_tx () in
+    if tx.app.tpl_depth > 0 then
+      failwith
+        "kaya: `bleed` is a LIVE-ZONE declaration — a stamped row never \
+         touches the window's edge, so bleed there could only mean nothing \
+         (docs/safe-area-plan.md A16)";
+    emit tx (Kaya_wire.tx_set_bleed id true)
+  end
+
 (* A video view showing [~player] (docs/media-plan.md §3): the platform's
    own view with its controls off. [~on_visibility] hears how much of it
    shows, 0 to 1. *)
-let video ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind
+let video ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?(bleed = false)
     ?a11y_hint ?fit ?aspect ?on_visibility ~player () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_video in
@@ -3049,6 +3063,7 @@ let video ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help 
   Option.iter (set_fit w) fit;
   Option.iter (fun (width, height) -> set_aspect w width height) aspect;
   Option.iter (fun f -> Hashtbl.replace tx.app.media.widget_visibility id f) on_visibility;
+  declare_bleed w bleed;
   w
 
 (* Declare the app's one media session, replacing the last
@@ -3136,7 +3151,7 @@ let show_capture (Widget id) c =
 
 (* A video view previewing [capture] (docs/capture-plan.md §3): the
    player's view one source over, mirrored for a front camera. *)
-let video_capture ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind
+let video_capture ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?(bleed = false)
     ?a11y_hint ?fit ?aspect ~capture () =
   let w = widget Kaya_wire.kind_video in
   Option.iter (fun g -> set_grow w g) grow;
@@ -3146,6 +3161,7 @@ let video_capture ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bin
   show_capture w (Some capture);
   Option.iter (set_fit w) fit;
   Option.iter (fun (width, height) -> set_aspect w width height) aspect;
+  declare_bleed w bleed;
   w
 
 
@@ -3248,7 +3264,7 @@ let time_picker ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind
    renders the placeholder, never a crash. [~source] ships the bytes and
    [~source_asset] names the picture instead (the bytes never enter the
    OCaml heap). The two are EXCLUSIVE. *)
-let image ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?source ?source_asset ?bind () =
+let image ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?source ?source_asset ?bind ?(bleed = false) () =
   let w = widget Kaya_wire.kind_image in
   Option.iter (fun g -> set_grow w g) grow;
   Option.iter (fun v -> set_fill w v) fill;
@@ -3262,6 +3278,7 @@ let image ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help 
    | None, Some a -> set_source_asset w a
    | None, None -> ());
   Option.iter (fun s -> bind_source w s) bind;
+  declare_bleed w bleed;
   w
 
 (* --- THE CANVAS VOCABULARIES (docs/canvas-plan.md §3.3, §3.4) --------
@@ -3337,7 +3354,7 @@ let declare_size_policy tx id policy =
    THE THREE SIZE-POLICY DECLARATIONS RIDE HERE (§3.2.1, ruling 1):
    [~fixed:true] refuses coercion, [~on_draw] and [~on_tick] take the
    assigned size, and REGISTERING IS DECLARING. Writing none is `scale`. *)
-let canvas ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ~viewbox ?draw ?(fixed = false)
+let canvas ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ~viewbox ?draw ?(fixed = false) ?(bleed = false)
     ?(on_draw : (draw -> viewbox -> unit) option)
     ?(on_tick : (draw -> viewbox -> float -> unit) option) () =
   let tx = the_tx () in
@@ -3364,6 +3381,7 @@ let canvas ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help
       declare_size_policy tx id Kaya_wire.size_policy_tick;
       Hashtbl.replace tx.app.canvas_draws id f)
     on_tick;
+  declare_bleed w bleed;
   Option.iter (fun body -> emit tx (drawing_record id [] viewbox body)) draw;
   w
 

@@ -774,6 +774,8 @@ def kaya_teardown():
     for serial in CLIPHELPER_IME_ON:
         adb(serial, "shell", "ime", "reset", stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL)
+    for serial, name in list(CUTOUT_ON):
+        cutout_overlay(serial, name, False, sys.stderr)
 
 
 atexit.register(kaya_teardown)
@@ -1536,6 +1538,74 @@ def hold_upright(serial, log, when):
     return False
 
 
+# THE DEVICES A LANDSCAPE LEG LAST RAN ON (docs/safe-area-plan.md §5.4): that
+# leg pins its own activity, never the device, and the next leg there reads the
+# display's rotation back with its own app in front (docs/traps.md, a rotation
+# put back from the home screen).
+LANDSCAPE_RAN = set()
+
+
+# THE CUTOUT OVERLAY A LEG RAN UNDER (docs/safe-area-plan.md §5.5), per
+# device: on before its launch, off when it ends whatever its verdict, each read
+# back, and off again at teardown for a lane that died mid-leg.
+CUTOUT_ON = set()
+
+
+def cutout_overlay(serial, name, on, log):
+    """The emulator's own display-cutout emulation overlay, read back."""
+    pkg = f"com.android.internal.display.cutout.emulation.{name}"
+    adb(serial, "shell", "cmd", "overlay", "enable" if on else "disable", pkg,
+        stdout=log, stderr=log)
+    mark = "[x]" if on else "[ ]"
+    listed = ""
+    for _ in range(50):
+        listed = adb_out(serial, "shell", "cmd", "overlay", "list")
+        if f"{mark} {pkg}" in listed:
+            print(f"cutout {name} {'on' if on else 'off'} on {serial}, read back {mark}",
+                  file=log)
+            if on:
+                CUTOUT_ON.add((serial, name))
+            else:
+                CUTOUT_ON.discard((serial, name))
+            return True
+        time.sleep(0.1)
+    line = next((x for x in listed.splitlines() if pkg in x), "nothing")
+    print(f"cutout {name} on {serial}: asked {'on' if on else 'off'}, the overlay "
+          f"list reads {line.strip()!r} (docs/safe-area-plan.md §5.5)", file=log)
+    return False
+
+
+def leg_cutout(extras):
+    """The cutout a leg's extras name, or None."""
+    return extras[extras.index("KAYA_CUTOUT") + 1] if "KAYA_CUTOUT" in extras else None
+
+
+def display_rotation(serial):
+    """The display's rotation in degrees, as the window manager holds it."""
+    text = adb_out(serial, "shell", "dumpsys", "window", "displays")
+    found = re.search(r"mDisplayRotation=ROTATION_(\d+)", text)
+    return int(found.group(1)) if found else None
+
+
+def leg_rotation(serial, log, pinned):
+    """A landscape leg's app turned the display, and the leg after one on the
+    same device is upright again, each read with the app in front."""
+    want = (90, 270) if pinned else (0,)
+    got = None
+    for _ in range(30):
+        got = display_rotation(serial)
+        if got in want:
+            print(f"rotation after launch: {got} on {serial}", file=log)
+            return True
+        time.sleep(0.1)
+    print(f"rotation after launch: the display reads {got!r} on {serial} with "
+          f"this leg's app in front, wanted {' or '.join(map(str, want))} — "
+          + ("the app's landscape pin did not turn it" if pinned else
+             "a landscape leg ran here before and the display did not come back")
+          + " (docs/safe-area-plan.md §5.4)", file=log)
+    return False
+
+
 def upright_at_lane_start(serial):
     adb(serial, "shell", "am", "start", "-W", "-n", SETTINGS_ACTIVITY,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -1670,6 +1740,14 @@ def run_apk_on(serial, name, apk, component, script, extras,
     upright = hold_upright(serial, log, "leg start")
     if not upright:
         failed = True
+    pinned = "KAYA_ORIENTATION" in extras
+    if pinned or serial in LANDSCAPE_RAN:
+        if not leg_rotation(serial, log, pinned):
+            failed = True
+        if pinned:
+            LANDSCAPE_RAN.add(serial)
+        else:
+            LANDSCAPE_RAN.discard(serial)
     # POLLED DUMPS, NEVER ONE STREAM: a streaming watch wedged for its
     # whole 60s with the verdict already sitting in the buffer it was
     # reading (docs/traps.md 2026-08-28). NO PER-LEG SCREENSHOT: 48 of
@@ -2172,7 +2250,14 @@ def _leg_worker(name, script, args, tablet):
             if (script in lane.IME_SCENES
                     and not select_helper_ime(serial, log)):
                 ready = False
-            ok = ready and run_apk_on(serial, name, *args, log=log)
+            cutout = leg_cutout(args[3])
+            if ready and cutout and not cutout_overlay(serial, cutout, True, log):
+                ready = False
+            try:
+                ok = ready and run_apk_on(serial, name, *args, log=log)
+            finally:
+                if cutout and not cutout_overlay(serial, cutout, False, log):
+                    ok = False
         finally:
             if tablet:
                 _tablet_lock.release()
@@ -3978,6 +4063,10 @@ def run_suite_legs(suite):
             extras += ["--es", "KAYA_LOCALE", lane.SCENE_LOCALE[scene]]
         if scene in lane.SCENE_TEXT_SCALE:
             extras += ["--es", "KAYA_TEXT_SCALE", lane.SCENE_TEXT_SCALE[scene]]
+        if flags.get("orientation"):
+            extras += ["--es", "KAYA_ORIENTATION", flags["orientation"]]
+        if flags.get("cutout"):
+            extras += ["--es", "KAYA_CUTOUT", flags["cutout"]]
         if scene.startswith("media_"):
             extras += ["--es", "KAYA_MEDIA_URL", MEDIA_URL]
         # THE VERB TRACE, a RELATIVE name the interpreter resolves under

@@ -3397,6 +3397,13 @@ if SUITE in ("go", "all"):
     # The same app with the keyboard up (docs/safe-area-plan.md A15).
     queue_scene_leg("go", "chatkeyboard", "chatkeyboard-go", app,
                     "dev.kaya.chatgo", "chatkeyboard", "chatkeyboard")
+    # And pinned to landscape, the keyboard over the thread
+    # (docs/safe-area-plan.md A17).
+    turned = with_dylib(make_bundle("chatgoland", "dev.kaya.chatgoland",
+                                    BUNDLES / "go-bin", landscape=True))
+    queue_scene_leg("go", "chatkeyboardland", "chatkeyboardland-go", turned,
+                    "dev.kaya.chatgoland", "chatkeyboardland", "chatkeyboardland",
+                    landscape=True)
     suite_end("go")
 
 # THE PYTHON GUEST SUITE (docs/python-mobile-plan.md): CPython embedded

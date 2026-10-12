@@ -1263,6 +1263,7 @@ val video :
   ?a11y_label_bind:string signal ->
   ?help:string ->
   ?help_bind:string signal ->
+  ?bleed:bool ->
   ?a11y_hint:string ->
   ?fit:Fit.t -> ?aspect:int * int -> ?on_visibility:(float -> unit) -> player:player -> unit -> widget
 
@@ -1331,6 +1332,7 @@ val video_capture :
   ?a11y_label_bind:string signal ->
   ?help:string ->
   ?help_bind:string signal ->
+  ?bleed:bool ->
   ?a11y_hint:string ->
   ?fit:Fit.t -> ?aspect:int * int -> capture:capture -> unit -> widget
 
@@ -1391,7 +1393,7 @@ val image :
   ?a11y_label_bind:string signal ->
   ?help:string ->
   ?help_bind:string signal ->
-  ?source:bytes -> ?source_asset:asset -> ?bind:bytes signal -> unit -> widget
+  ?source:bytes -> ?source_asset:asset -> ?bind:bytes signal -> ?bleed:bool -> unit -> widget
 
 (* --- THE CANVAS VOCABULARY (docs/canvas-plan.md §3.3, §3.4) --------- *)
 
@@ -1421,6 +1423,7 @@ val canvas :
   viewbox:viewbox ->
   ?draw:(draw -> unit) ->
   ?fixed:bool ->
+  ?bleed:bool ->
   ?on_draw:(draw -> viewbox -> unit) ->
   ?on_tick:(draw -> viewbox -> float -> unit) -> unit -> widget
 

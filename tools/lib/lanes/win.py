@@ -29,6 +29,7 @@ SCENES = [
     "numberfield", "timecode", "colorpicker", "range", "secure", "autofill", "reveal",
     "segmented",
     "expander",
+    "safearea",
     "toast",
     "sections",
     "menus", "commands", "a11y", "a11yrows", "filedialog",
@@ -44,6 +45,14 @@ SCENES = [
     # The capture (docs/capture-plan.md); capture_denied runs its guest.
     "capture",
 ]
+
+# Scenes this lane declares off rather than wires (tools/check-steps.py
+# reads it): the phone keyboard scripts, since a desktop has no software
+# keyboard (docs/safe-area-plan.md A13).
+OFF_SCENES = {"chatkeyboard": "Windows has no software keyboard on this lane (docs/safe-area-plan.md A13)",
+              "taskskeyboard": "Windows has no software keyboard on this lane (docs/safe-area-plan.md A13)",
+              "autofillkeyboard": "Windows has no software keyboard on this lane (docs/safe-area-plan.md A13)",
+              "chatkeyboardland": "Windows has no software keyboard on this lane (docs/safe-area-plan.md A13)"}
 
 # THE LEGS THAT RUN AS THE ONLY INPUT-DRIVING LEG ON THE HOST (tools/lib/
 # exclusive.py): the drag family, already alone inside this lane for the
@@ -397,6 +406,10 @@ ORDER = [
      # own door, no real mouse.
      "expander_rust", "expander_python", "expander_js", "expander_go", "expander_csharp",
      "expander_java",
+     # The safe area (docs/safe-area-plan.md A3, A13): `bleed` past kaya's
+     # inset on a desktop with no safe area.
+     "safearea_rust", "safearea_python", "safearea_js", "safearea_go", "safearea_csharp",
+     "safearea_java",
      "canvas_rust",
      "canvasdark_rust",
      "sizepolicy_rust",

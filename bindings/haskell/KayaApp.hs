@@ -422,6 +422,7 @@ module KayaApp
     -- The size policy, LIVE CANVASES ONLY (docs/canvas-plan.md §3.2.1);
     -- `scale` is spelled by writing none of these three.
     fixed,
+    bleed,
     onDraw,
     onTick,
     TplStrSource,
@@ -4191,6 +4192,13 @@ canvas vb ops = leafish $ do
 -- @scale@.
 fixed :: Widget -> Build ()
 fixed (Widget w) = emitB (W.txSetSizePolicy w W.sizePolicyFixed)
+
+-- | This image, video view or canvas extends past the window's inset and
+-- the safe area to the window's edge on each side it touches, never under
+-- the keyboard (docs\/safe-area-plan.md A3). It takes a 'Widget': a
+-- template 'Node' cannot be passed (A16).
+bleed :: Widget -> Build ()
+bleed (Widget w) = emitB (W.txSetBleed w True)
 
 -- | THIS CANVAS'S DRAWING IS A FUNCTION OF ITS SIZE (docs\/canvas-plan.md
 -- §3.2.1): registering IS the declaration, so this also puts the policy

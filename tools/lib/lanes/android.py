@@ -122,6 +122,13 @@ LEGS = {
         "expander-compose",
         # The toast (docs/toast-plan.md §6).
         "toast-compose",
+        # The safe area and the keyboard (docs/safe-area-plan.md §5): `bleed`,
+        # and the task manager and the content-type form with the keyboard up,
+        # upright and in an app pinned to landscape (FLAGS).
+        "safearea-compose", "taskskeyboard-compose", "autofillkeyboard-compose",
+        "taskskeyboardland-compose", "autofillkeyboardland-compose",
+        # And under the emulator's tall cutout, upright and in landscape (§5.5).
+        "autofillkeyboardcutout-compose", "autofillkeyboardcutoutland-compose",
         # The content type (docs/autofill-plan.md §5).
         "autofill-compose",
         "submit-compose",
@@ -192,7 +199,7 @@ LEGS = {
         "align-jvm", "layout-jvm", "stall-jvm",
         "confirm-jvm", "nav-jvm", "scroll-jvm",
         "progress-jvm", "select-jvm", "radio-jvm",
-        "grid-jvm", "textarea-jvm", "search-jvm", "secure-jvm", "reveal-jvm", "segmented-jvm", "expander-jvm", "toast-jvm", "autofill-jvm", "submit-jvm", "scrollto-jvm", "fullscreen-jvm", "sections-jvm",
+        "grid-jvm", "textarea-jvm", "search-jvm", "secure-jvm", "reveal-jvm", "segmented-jvm", "expander-jvm", "safearea-jvm", "toast-jvm", "autofill-jvm", "submit-jvm", "scrollto-jvm", "fullscreen-jvm", "sections-jvm",
         "menus-jvm", "toolbar-jvm", "identity-jvm",
         "listdetail-jvm", "commands-jvm", "clipboard-jvm",
         "background-jvm", "undo-jvm", "filedialog-jvm",
@@ -217,11 +224,14 @@ LEGS = {
         "layout-go", "stall-go", "confirm-go",
         "nav-go", "scroll-go", "progress-go",
         "select-go", "radio-go", "grid-go",
-        "textarea-go", "search-go", "secure-go", "reveal-go", "segmented-go", "expander-go", "toast-go", "autofill-go", "submit-go", "scrollto-go", "fullscreen-go", "sections-go", "menus-go",
+        "textarea-go", "search-go", "secure-go", "reveal-go", "segmented-go", "expander-go", "safearea-go", "toast-go", "autofill-go", "submit-go", "scrollto-go", "fullscreen-go", "sections-go", "menus-go",
         "toolbar-go", "identity-go", "listdetail-go",
         "commands-go", "clipboard-go", "background-go",
         "undo-go", "filedialog-go", "save-go",
         "dirty-go", "ranges-go", "editor-go", "chat-go",
+        # The chat app with the keyboard up, upright and pinned to landscape
+        # (docs/safe-area-plan.md A5, A17).
+        "chatkeyboard-go", "chatkeyboardland-go",
         "dnd-go", "pickers-go", "sliders-go", "tooltips-go",
         "sheet-go",
         "format-go", "formatde-go", "formatar-go",
@@ -323,6 +333,18 @@ FLAGS = {
     "typeface-jvm": {"asset_dir": True},
     "typeface-go": {"asset_dir": True},
     "assets-jvm": {"asset_dir": True},
+    # A LANDSCAPE LEG PINS ITS APP, NEVER THE DEVICE (docs/safe-area-plan.md
+    # §5.4): KAYA_ORIENTATION, and the runner reads the display's rotation
+    # back with the app in front, and again on the next leg on that device.
+    "taskskeyboardland-compose": {"scene": "taskskeyboard", "orientation": "landscape"},
+    "autofillkeyboardland-compose": {"scene": "autofillkeyboard", "orientation": "landscape"},
+    "chatkeyboardland-go": {"orientation": "landscape"},
+    # THE CUTOUT IS THE EMULATOR'S OWN OVERLAY (docs/safe-area-plan.md §5.5),
+    # on for the leg's device before its launch and off when it ends, each
+    # read back by the runner.
+    "autofillkeyboardcutout-compose": {"scene": "autofillkeyboard", "cutout": "tall"},
+    "autofillkeyboardcutoutland-compose": {"scene": "autofillkeyboard", "cutout": "tall",
+                                           "orientation": "landscape"},
 }
 
 # The fullscreen scene's app-only way back after the cut, the same steps as
@@ -402,6 +424,12 @@ MODS = {
         (("expect_window_size",), "expect_pref expect_no_pref",
          "a phone window has no frame to remember"),
     )},
+    # THE INSETS ARE THE DEVICE'S (docs/safe-area-plan.md A8, A18): the pool
+    # phone's status bar and gesture bar, then what immersive mode leaves.
+    "safearea": {"append": 'expect_insets "bar/bar";click button@full;'
+                           'expect label@caption "fullscreen";expect_fullscreen on;'
+                           'expect_insets "none/none";expect_safe image@picture bleeds;'
+                           'expect_safe canvas@ground bleeds;expect_safe label@caption;'},
     "dnd": {"drop": ((("drag_file",
                        'expect label#4 "files target got dropped.txt '
                        'dropped bytes (copy)"'),

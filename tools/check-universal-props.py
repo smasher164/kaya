@@ -603,6 +603,26 @@ def compose_pushed_screen(compose_text):
                "        if (KayaSceneModel.menubar.isEmpty() && !covered)")
     if covered not in compose_text:
         bad.append(f"{COMPOSE}: a covered stack no longer wears the top bar")
+    # THE BARS CONSUME THEIR OWN SIDES (docs/safe-area-plan.md A2): the root
+    # pads nothing, so the top bar's and the section bar's grounds run under
+    # the system bars, and the content between takes what they left.
+    root_at = compose_text.find("fun KayaRoot() {")
+    root_end = compose_text.find("\n}\n", root_at)
+    root = compose_text[root_at:root_end] if root_at >= 0 else ""
+    if not root or "safeDrawingPadding" in root:
+        bad.append(f"{COMPOSE}: KayaRoot pads the whole surface by safeDrawing again — the "
+                   "bars' grounds stop at the system bars (A2)")
+    for needle, what in (
+        ("windowInsets = WindowInsets.safeDrawing.only("
+         "WindowInsetsSides.Horizontal + WindowInsetsSides.Top),",
+         "the top bar no longer consumes the status bar's side"),
+        ("windowInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout)",
+         "the section bar no longer consumes the navigation bar's side"),
+        ("val pads = kayaContentPads(topConsumed, bottomConsumed, rides)",
+         "the content no longer takes the safe area the bars left"),
+    ):
+        if needle not in compose_text:
+            bad.append(f"{COMPOSE}: {what} (A2)")
     return bad
 
 
@@ -1009,7 +1029,7 @@ def drag_waits(winui_text):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 128
+DECLARED = 131
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -1332,6 +1352,16 @@ for label, path, pattern, repl in (
      r"AnimatedPane \{\n                        KayaPaneFocus \{\n"
      r"                            detailEntry",
      "AnimatedPane {\n                        run {\n                            detailEntry"),
+    ("Compose's root padding the whole surface by safeDrawing again", COMPOSE,
+     r"Box\(modifier = Modifier\.fillMaxSize\(\)\.dragAndDropTarget\(",
+     "Box(modifier = Modifier.fillMaxSize().safeDrawingPadding().dragAndDropTarget("),
+    ("Compose's top bar back on Material's own insets", COMPOSE,
+     r"        windowInsets = WindowInsets\.safeDrawing\.only\("
+     r"WindowInsetsSides\.Horizontal \+ WindowInsetsSides\.Top\),\n",
+     ""),
+    ("Compose's content padded by nothing", COMPOSE,
+     r"val pads = kayaContentPads\(topConsumed, bottomConsumed, rides\)",
+     "val pads = Pair(PaddingValues(0.dp), KayaSafePads(0f, 0f, 0f, 0f))"),
     ("Compose's pushed screen without its bar", COMPOSE,
      r"if \(KayaSceneModel\.menubar\.isEmpty\(\) && !covered\)",
      "if (KayaSceneModel.menubar.isEmpty())"),

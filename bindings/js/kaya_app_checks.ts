@@ -641,6 +641,24 @@ if (isMainThread) {
     });
   }, /LIVE-ZONE declaration/));
 
+  // ------------------------------------------------------------ bleed
+  for (const [name, make] of [["image", () => kaya.image(undefined, { bleed: true })], ["canvas", () => kaya.canvas([10, 10], { bleed: true })]] as const) {
+    check(`a template ${name} refuses bleed by name`, throws(() => {
+      app.window(() => {
+        kaya.column(() => {
+          for (const _t of todos) {
+            make();
+          }
+        });
+      });
+    }, /`bleed` is a LIVE-ZONE declaration/));
+  }
+  app.build(() => {
+    kaya.image(undefined, { bleed: true });
+    kaya.canvas([10, 10], { bleed: true });
+    check("a live image and canvas take bleed", true);
+  });
+
   // ------------------------------------------------------------ undoable
   app.build(() => {
     kaya.label("x");

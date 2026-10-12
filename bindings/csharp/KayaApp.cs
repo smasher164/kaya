@@ -104,6 +104,16 @@ readonly struct Widget
         return this;
     }
 
+    /// <summary>This image, video view or canvas extends past the window's
+    /// inset and the safe area to the window's edge on each side it
+    /// touches, never under the keyboard (docs/safe-area-plan.md A3). Live
+    /// zone only: Node has no Bleed (A16).</summary>
+    public Widget Bleed()
+    {
+        KayaApp.AmbientTx("Bleed()").SetBleed(this);
+        return this;
+    }
+
     /// <summary>THIS CANVAS'S DRAWING IS A FUNCTION OF ITS SIZE: `f` is
     /// handed the size layout assigned, which becomes the viewbox it draws
     /// in, and the core takes back what it drew for that size. Registering
@@ -4311,6 +4321,11 @@ sealed class Tx : IDisposable
     /// KayaApp.OnToggle (docs/reveal-plan.md V1, V2).
     public void SetRevealable(Widget w) =>
         Records.Add(KayaWire.TxSetRevealable(w.Id, true));
+
+    /// An image, video view or canvas bleeds to the window's edge
+    /// (docs/safe-area-plan.md A3); live zone only (A16).
+    public void SetBleed(Widget w) =>
+        Records.Add(KayaWire.TxSetBleed(w.Id, true));
 
     /// An expander's second header line (docs/expander-plan.md K3);
     /// empty draws none.

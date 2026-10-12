@@ -629,6 +629,17 @@ public struct KayaWidget {
         return self
     }
 
+    /// This image, video view or canvas extends past the window's inset and
+    /// the safe area to the window's edge on each side it touches, never
+    /// under the keyboard (docs/safe-area-plan.md A3). Live zone only:
+    /// KayaNodeHandle has no bleed (A16).
+    @discardableResult
+    public func bleed() -> KayaWidget {
+        let (_, tx) = kayaDeclaring()
+        tx.setBleed(self)
+        return self
+    }
+
     /// THIS CANVAS'S DRAWING IS A FUNCTION OF ITS SIZE: the core hands it
     /// the size layout assigned and takes back what this draws for that
     /// size, which becomes its viewbox. PROVIDING THE HANDLER IS THE
@@ -4457,6 +4468,12 @@ public final class KayaAppTx {
     /// `onToggle` (docs/reveal-plan.md V1, V2).
     public func setRevealable(_ w: KayaWidget) {
         tx.setRevealable(w.id, true)
+    }
+
+    /// An image, video view or canvas bleeds to the window's edge
+    /// (docs/safe-area-plan.md A3); live zone only (A16).
+    public func setBleed(_ w: KayaWidget) {
+        tx.setBleed(w.id, true)
     }
 
     /// The DESTINATION a `.link` label opens (docs/tasks-s2-plan.md T3):

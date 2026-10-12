@@ -24,8 +24,83 @@ WINUI = "crates/kaya/src/winui/mod.rs"
 COMPOSE = "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
 RUNSIM = "tools/ios/run-sim.py"
 IOS_LANE = "tools/lib/lanes/ios.py"
+MEDIA = "android/kaya/src/main/kotlin/dev/kaya/KayaMedia.kt"
+HELPER = "tools/android/cliphelper/app/src/main/kotlin/dev/kaya/cliphelper/Helper.kt"
+EMULATOR = "tools/android/run-emulator.py"
 STUBBED = {GTK: 'depth_stub("safearea")', WINUI: 'depth_stub("safearea")', COMPOSE: 'depthStub("safearea")'}
-BACKENDS = {SWIFT: "the SwiftUI arm"}
+BACKENDS = {SWIFT: "the SwiftUI arm", GTK: "the GTK arm", WINUI: "the WinUI arm", COMPOSE: "the Compose arm"}
+# THE BREADTH'S ARMS (docs/safe-area-plan.md §3, the breadth): (file, label,
+# what must stand). A desktop has no safe area, so its bleed is the window
+# inset's half alone; Compose consumes each bar's side per bar (A2), pans a
+# covered field (A4), keeps the section bar under the keyboard (A6) and reads
+# the platform's own insets (A9).
+NATIVE = [
+    (GTK, "GTK's bleed leaves the root's padding by its margins",
+     '.kaya-root {{ padding: {px}px; }} .kaya-bleed-top {{ margin-top: -{px}px; }}'),
+    (GTK, "GTK's touching sides refresh at every drain", "presentation_report(core);\n refresh_bleeds(core);"),
+    (GTK, "GTK's touching sides refresh when the inset moves",
+     "&root_inset_css(units.round() as i64),\n &core.css_error,\n );\n refresh_bleeds(core);"),
+    (GTK, "GTK reads a container's axis off its flex manager first",
+     ".and_then(|l| l.downcast_ref::<flex::FlexLayout>().map(|f| f.orientation() == gtk4::Orientation::Vertical))"),
+    (GTK, "GTK's bled picture keeps no width of its own", "if self.cover.get() { 0 } else { self.size.get().0 }"),
+    (GTK, "GTK's bled picture re-takes its slot's width", "if picture.is_some() {\n widget.set_halign(gtk4::Align::Fill);"),
+    (GTK, "GTK's expect_safe reads the content's border box",
+     "let area = content\n .compute_bounds(&content)"),
+    (GTK, "GTK has no software keyboard", "fn keyboard(&self) -> Result<bool, String> {\n Ok(false)"),
+    (WINUI, "WinUI's touching sides refresh at every batch", "flush_container_tracks(core)?;\n refresh_bleeds(core)"),
+    (WINUI, "WinUI's bleed leaves the root's padding by its margins",
+     "element.SetMargin(Thickness { Left: out(leading), Top: out(top), Right: out(trailing), Bottom: out(bottom) })?;"),
+    (WINUI, "WinUI's bled canvas is drawn past its slot",
+     "f64::from(slot.Width) - m.Left - m.Right, f64::from(slot.Height) - m.Top - m.Bottom"),
+    (WINUI, "WinUI's expect_inset reads the first child's slot",
+     "let slot = LayoutInformation::GetLayoutSlot(&child)?;"),
+    (WINUI, "WinUI has no software keyboard on the lanes", "fn keyboard(&self) -> Result<bool, String> {\n Ok(false)"),
+    (COMPOSE, "Compose's top bar consumes its own side",
+     "windowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top),"),
+    (COMPOSE, "Compose's section bar consumes its own side, never the keyboard's",
+     "NavigationBar(\n windowInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout)\n .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),"),
+    (COMPOSE, "Compose's section bar stays under the keyboard",
+     "Box(modifier = Modifier.fillMaxSize().padding(bottom = if (imeShown) 0.dp else KayaSceneModel.sectionBarHeight)) {"),
+    (COMPOSE, "Compose's pane takes the keyboard's side while the bar is under it",
+     "KayaContentBox(topConsumed, bottomConsumed = !imeShown,"),
+    (COMPOSE, "Compose's content takes what the bars left",
+     ".padding(pads.first)\n .onGloballyPositioned { kayaPanSoon() }\n .then(if (pan > 0f) Modifier.clipToBounds() else Modifier)\n .offset { androidx.compose.ui.unit.IntOffset(0, -pan.toInt()) }"),
+    (COMPOSE, "Compose's bled picture spans its slot",
+     "modifier = boxFill.then(if (node.bleed) kayaBleed(node, fit) else bound)"),
+    (COMPOSE, "Compose's bled canvas", "modifier = boxFill.then(kayaBleed(node)).then(kayaFrame(node.id))"),
+    (MEDIA, "Compose's bled video view", "modifier = sized.then(kayaBleed(node)).clipToBounds()"),
+    (COMPOSE, "Compose's bleed never counts the keyboard", "val bleedBottom = if (keyboard) 0 else bottom"),
+    (COMPOSE, "Compose's pan is written", "KayaSceneModel.keyboardPan = next"),
+    (COMPOSE, "Compose's root gives up its height to the keyboard only where it rides",
+     "keyboard && !rides -> bars.getBottom(density)"),
+    (COMPOSE, "Compose's detented sheet pans", "val pan = kayaPanFor(root.id)"),
+    (COMPOSE, "Compose's keys reach a sheet's window",
+     "if (host != null && host !== activity.window.decorView) host.dispatchKeyEvent(key)"),
+    (COMPOSE, "Compose's expect_keyboard reads the root's insets",
+     "?.isVisible(WindowInsetsCompat.Type.ime()) == true"),
+    (COMPOSE, "Compose's expect_safe reads the platform frame", "val frame = kayaNodeFrames[node.id]"),
+    (COMPOSE, "Compose's wall holds type", 'if (why == null) kayaKeyboardWall(activity, "type")?.let { failures.add(it) }'),
+    (COMPOSE, "Compose's wall holds type_secret",
+     'if (why == null) kayaKeyboardWall(activity, "type_secret")?.let { failures.add(it) }'),
+    (COMPOSE, "Compose's wall holds press",
+     'if (why == null) kayaKeyboardWall(activity, "press ${parts[1]}")?.let { failures.add(it) }'),
+    (COMPOSE, "Compose's landscape leg pins its app",
+     "activity.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE"),
+    (COMPOSE, "a turning first instance admits no harness", "if (selftestPending && !turning) {"),
+    (HELPER, "the pool's keyboard shows when a field asks", "override fun onEvaluateInputViewShown(): Boolean = true"),
+    (EMULATOR, "the cutout overlay goes off when its leg ends, whatever the verdict",
+     "finally:\n if cutout and not cutout_overlay(serial, cutout, False, log):\n ok = False"),
+    (EMULATOR, "the cutout overlay is read back", 'if f"{mark} {pkg}" in listed:'),
+    (EMULATOR, "a dead lane's teardown turns the cutout off", "for serial, name in list(CUTOUT_ON):"),
+    (EMULATOR, "the android lane reads the display's rotation after a landscape leg",
+     "if pinned or serial in LANDSCAPE_RAN:\n if not leg_rotation(serial, log, pinned):"),
+]
+# What a backend's read may never name: its own model of the answer.
+NEVER = [
+    (COMPOSE, "fun kayaSafeReading(", ["keyboardPan", "windowInset"]),
+    (COMPOSE, "fun kayaWallReading(", ["keyboardPan"]),
+    (COMPOSE, "fun KayaRoot()", ["safeDrawingPadding"]),
+]
 PREF = ('"com.apple.keyboard.preferences"', '"AutomaticMinimizationEnabled"')
 # (label, opener, which definition, what it must hold, what it may never name)
 BLOCKS = [
@@ -111,6 +186,12 @@ CALLS = [
 def findings(sources, backends=None):
     backends = BACKENDS if backends is None else backends
     out = []
+    flats = {}
+
+    def flattened(rel):
+        if rel not in flats:
+            flats[rel] = flat(sources[rel])
+        return flats[rel]
     swift = sources[SWIFT]
     for label, opener, at, wants, never in BLOCKS:
         found = blocks(swift, opener)
@@ -133,8 +214,18 @@ def findings(sources, backends=None):
         out.append(f"safearea: the wall is called from {walls - 1} typing verb site(s), wanted 4 "
                    f"(type, type_secret, press return, press tab and space)")
     for rel, label, call in CALLS:
-        if flat(call) not in flat(sources[rel]):
+        if flat(call) not in flattened(rel):
             out.append(f"safearea: {label} no longer holds — {rel} lacks {call.splitlines()[0]}")
+    for rel, label, call in NATIVE:
+        if flat(call) not in flattened(rel):
+            out.append(f"safearea: {label} no longer holds — {rel} lacks {call.splitlines()[0][:70]}")
+    for rel, opener, names in NEVER:
+        found = blocks(sources[rel], opener)
+        if not found:
+            out.append(f"safearea: {rel} lacks {opener}")
+        for name in names:
+            if found and name in found[0]:
+                out.append(f"safearea: {rel}'s {opener} names {name}")
     for rel, stub in STUBBED.items():
         if stub not in sources[rel] and rel not in backends:
             out.append(f"safearea: {rel} no longer stubs the safe area and has no row in "
@@ -144,10 +235,11 @@ def findings(sources, backends=None):
 
 def run(g):
     sources = {rel: (ROOT / rel).read_text(encoding="utf-8")
-               for rel in [HARNESS, SWIFT, RUNSIM, IOS_LANE, *STUBBED]}
+               for rel in [HARNESS, SWIFT, RUNSIM, IOS_LANE, MEDIA, HELPER, EMULATOR, *STUBBED]}
     still = [rel for rel, stub in STUBBED.items() if stub in sources[rel]]
     g.counted("safearea clauses held",
-              sum(len(w) + len(n) + 1 for *_, w, n in BLOCKS) + len(CALLS) + 1, floor=60)
+              sum(len(w) + len(n) + 1 for *_, w, n in BLOCKS) + len(CALLS) + 1 + len(NATIVE)
+              + sum(len(n) for *_, n in NEVER), floor=95)
     g.counted("safearea backends still stubbed", len(still), floor=0)
     for line in findings(sources):
         g.finding(line)
@@ -221,12 +313,67 @@ def run(g):
         ("the lane spelling another setting", IOS_LANE, r'"AutomaticMinimizationEnabled"\)', '"HardwareKeyboardLastSeen")',
          "the lane's one spelling of the setting"),
     ]
+    cuts += [
+        ("GTK's bleed margins gone", GTK, r"\.kaya-bleed-top \{\{ margin-top: -\{px\}px; \}\}", "",
+         "GTK's bleed leaves the root's padding"),
+        ("GTK's drain not refreshing the bleed", GTK, r"presentation_report\(core\);\n(\s+)refresh_bleeds\(core\);",
+         r"presentation_report(core);\n\1let _ = 0;", "GTK's touching sides refresh at every drain"),
+        ("GTK reading GtkBox::orientation under a flex manager", GTK,
+         r"\.and_then\(\|l\| l\.downcast_ref::<flex::FlexLayout>\(\)\.map\(\|f\| f\.orientation\(\) == gtk4::Orientation::Vertical\)\)",
+         ".and_then(|_l| None)", "GTK reads a container's axis"),
+        ("GTK's bled picture left at its align's width", GTK,
+         r"if picture\.is_some\(\) \{\n(\s+)widget\.set_halign\(gtk4::Align::Fill\);", r"if false {\n\1widget.set_halign(gtk4::Align::Fill);",
+         "GTK's bled picture re-takes its slot's width"),
+        ("GTK's safe read in the content box's coordinates", GTK, r"let area = content\n(\s+)\.compute_bounds\(&content\)",
+         r"let area = content\n\1.compute_bounds(&widget)", "GTK's expect_safe reads the content's border box"),
+        ("WinUI's batch not refreshing the bleed", WINUI, r"flush_container_tracks\(core\)\?;\n(\s+)refresh_bleeds\(core\)",
+         r"flush_container_tracks(core)?;\n\1Ok(())", "WinUI's touching sides refresh"),
+        ("WinUI's bled canvas tracked at its slot", WINUI, r"f64::from\(slot\.Width\) - m\.Left - m\.Right",
+         "f64::from(slot.Width)", "WinUI's bled canvas is drawn past its slot"),
+        ("WinUI's inset read off the bled child's own origin", WINUI,
+         r"let slot = LayoutInformation::GetLayoutSlot\(&child\)\?;", "let slot = child.ActualOffset()?;",
+         "WinUI's expect_inset reads the first child's slot"),
+        ("Compose's root padding the whole surface again", COMPOSE,
+         r"Box\(modifier = Modifier\.fillMaxSize\(\)\.dragAndDropTarget\(",
+         "Box(modifier = Modifier.fillMaxSize().safeDrawingPadding().dragAndDropTarget(", "names safeDrawingPadding"),
+        ("Compose's section bar riding the keyboard", COMPOSE, r"bottomConsumed = !imeShown,",
+         "bottomConsumed = true,", "Compose's pane takes the keyboard's side"),
+        ("Compose's top bar at Material's own insets", COMPOSE,
+         r"windowInsets = WindowInsets\.safeDrawing\.only\(WindowInsetsSides\.Horizontal \+ WindowInsetsSides\.Top\),\n",
+         "", "Compose's top bar consumes its own side"),
+        ("Compose squeezing every root into the room above the keyboard", COMPOSE,
+         r"keyboard && !rides -> bars\.getBottom\(density\)", "false -> 0",
+         "Compose's root gives up its height"),
+        ("Compose's pan never written", COMPOSE, r"KayaSceneModel\.keyboardPan = next", "next.toString()",
+         "Compose's pan is written"),
+        ("Compose's bleed under the keyboard", COMPOSE, r"val bleedBottom = if \(keyboard\) 0 else bottom",
+         "val bleedBottom = bottom", "Compose's bleed never counts the keyboard"),
+        ("Compose's expect_safe answering from the pan", COMPOSE, r"val frame = kayaNodeFrames\[node\.id\]\n",
+         "val frame = kayaNodeFrames[node.id]?.translate(0f, KayaSceneModel.keyboardPan)\n", "names keyboardPan"),
+        ("Compose's type without the wall", COMPOSE,
+         r'\n\s+if \(why == null\) kayaKeyboardWall\(activity, "type"\)\?\.let \{ failures\.add\(it\) \}', "",
+         "Compose's wall holds type"),
+        ("Compose's keys to the activity only", COMPOSE,
+         r"if \(host != null && host !== activity\.window\.decorView\) host\.dispatchKeyEvent\(key\)",
+         "if (false) host?.dispatchKeyEvent(key)", "Compose's keys reach a sheet's window"),
+        ("a turning first instance admitted", COMPOSE, r"if \(selftestPending && !turning\) \{",
+         "if (selftestPending) {", "a turning first instance admits no harness"),
+        ("the pool's keyboard shows nothing", HELPER, r"override fun onEvaluateInputViewShown\(\): Boolean = true",
+         "override fun onEvaluateInputViewShown(): Boolean = false", "the pool's keyboard shows"),
+        ("the cutout left on after its leg", EMULATOR,
+         r"finally:\n(\s+)if cutout and not cutout_overlay\(serial, cutout, False, log\):",
+         r"finally:\n\1if False:", "the cutout overlay goes off"),
+        ("the cutout overlay never read back", EMULATOR, r'if f"\{mark\} \{pkg\}" in listed:',
+         "if True:", "the cutout overlay is read back"),
+        ("the android lane trusting a landscape leg's device", EMULATOR, r"if pinned or serial in LANDSCAPE_RAN:",
+         "if pinned:", "the android lane reads the display's rotation"),
+    ]
     for label, rel, pattern, repl, want in cuts:
         broken = g.doctor(f"safearea: {label}", sources[rel], pattern, repl)
         g.negative(f"safearea: {label}", lambda rel=rel, broken=broken: findings({**sources, rel: broken}),
                    want=want)
     for rel in STUBBED:
-        if rel in BACKENDS and STUBBED[rel] not in sources[rel]:
+        if STUBBED[rel] not in sources[rel]:
             continue
         n = sources[rel].count(STUBBED[rel])
         broken = g.doctor(f"safearea: {rel}'s stubs gone without a row", sources[rel],

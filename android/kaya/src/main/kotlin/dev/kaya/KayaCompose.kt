@@ -97,7 +97,18 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 // THE SEMANTIC ICON VOCABULARY's glyphs (docs/styling-plan.md D6), one
@@ -530,6 +541,9 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     /** docs/expander-plan.md K3, K4: the header's second line, and whether the body shows. */
     var summary by mutableStateOf("")
     var expanded by mutableStateOf(false)
+
+    /** docs/safe-area-plan.md A3: an image, video view or canvas extends to the window's edge. */
+    var bleed by mutableStateOf(false)
 
     /** THE DESTINATION A `role link` LABEL OPENS (docs/tasks-s2-plan.md
      * T3), never spoken and never emitted. Composition state — the link
@@ -1292,6 +1306,11 @@ object KayaSceneModel {
     /** The window content inset (wprop 8, docs/styling-plan.md D3), in
      * DP — layout, not appearance; 0 is full bleed. */
     var windowInset by mutableStateOf(16.0)
+    /** How far the content is panned up so the focused field shows above
+     * the keyboard, in px (docs/safe-area-plan.md A4; kayaPanEvaluate). */
+    var keyboardPan by mutableStateOf(0f)
+    /** The root the pan moves: the window's content or a sheet's. */
+    var keyboardPanRoot by mutableStateOf<Long?>(null)
 
     /**
      * THE APP'S OWN APPEARANCE CHOICE (wprop 9, docs/tasks-s2b-plan.md
@@ -2747,6 +2766,9 @@ object KayaCompose {
     /** The activity a rich link is followed from (kayaOpenLink). */
     internal fun activityForLink(): ComponentActivity? = mountedActivity
 
+    /** The window the safe-area reads and the keyboard pan measure. */
+    internal fun activityForSafeArea(): ComponentActivity? = mountedActivity
+
     /**
      * THE BUILD-ONCE LATCH (docs/deferred.md's mount entry). Android
      * relaunches an activity for any configuration change it does not
@@ -2953,6 +2975,11 @@ object KayaCompose {
         val first = !mounted
         mounted = true
         mountedActivity = activity
+        // A LANDSCAPE LEG'S APP IS PINNED, the device is not turned
+        // (docs/safe-area-plan.md §5.4; the iOS lane's landscape bundle).
+        if (System.getenv("KAYA_ORIENTATION") == "landscape") {
+            activity.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        }
         if (kayaAppContext == null) kayaAppContext = activity.applicationContext
         // PER WINDOW, so it runs on every attach: the background half is
         // a window-background write and a new window carries the manifest
@@ -3059,8 +3086,19 @@ object KayaCompose {
         }
         // ONCE PER PROCESS: a second admission starts a second script
         // runner, and two harness threads race one scene to two verdicts.
-        if (first && System.getenv("KAYA_SELFTEST") != null) admitSelftestOnFirstDraw(activity)
+        // AND NOT ON AN ACTIVITY ABOUT TO TURN: a landscape pin relaunches
+        // the first instance before it ever draws, so its admission waited
+        // for a draw that never came and the leg ran no step at all.
+        if (first && System.getenv("KAYA_SELFTEST") != null) selftestPending = true
+        val turning = System.getenv("KAYA_ORIENTATION") == "landscape" &&
+            activity.resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE
+        if (selftestPending && !turning) {
+            selftestPending = false
+            admitSelftestOnFirstDraw(activity)
+        }
     }
+
+    private var selftestPending = false
 
     /**
      * WHAT THIS PROCESS CAN DO, MEASURED BEFORE THE GUEST CAN ASK
@@ -3522,7 +3560,7 @@ object KayaCompose {
                         PROP_REVEALABLE -> KayaSceneModel.nodes[id]!!.revealable = readBool(b)
                         PROP_SUMMARY -> KayaSceneModel.nodes[id]!!.summary = readString(b)
                         PROP_EXPANDED -> KayaSceneModel.nodes[id]!!.expanded = readBool(b)
-                        PROP_BLEED -> depthStub("safearea")
+                        PROP_BLEED -> KayaSceneModel.nodes[id]!!.bleed = readBool(b)
                         PROP_ASPECT -> KayaSceneModel.nodes[id]!!.aspect = readI64(b)
                         PROP_PLAYER -> error("kaya: a video view's player arrives as set_video_player; the core never forwards the player prop")
                         PROP_CAPTURE -> error("kaya: a video view's capture arrives as set_video_capture; the core never forwards the capture prop")
@@ -5104,13 +5142,16 @@ object KayaCompose {
                         // hands back events with zeroed timestamps and
                         // no input source, and a key event with no
                         // source is not what a keyboard delivers.
-                        activity.dispatchKeyEvent(
-                            KeyEvent(
-                                now, now, e.action, e.keyCode, 0, e.metaState,
-                                android.view.KeyCharacterMap.VIRTUAL_KEYBOARD, e.scanCode, 0,
-                                android.view.InputDevice.SOURCE_KEYBOARD,
-                            ),
+                        val key = KeyEvent(
+                            now, now, e.action, e.keyCode, 0, e.metaState,
+                            android.view.KeyCharacterMap.VIRTUAL_KEYBOARD, e.scanCode, 0,
+                            android.view.InputDevice.SOURCE_KEYBOARD,
                         )
+                        // A FIELD IN A SHEET IS IN THE SHEET'S OWN WINDOW, which a
+                        // key sent to the activity never reaches.
+                        val host = kayaFocusedTypingNode()?.let { kayaFieldViews[it.id] }?.rootView
+                        if (host != null && host !== activity.window.decorView) host.dispatchKeyEvent(key)
+                        else activity.dispatchKeyEvent(key)
                     }
                 }
                 // Nothing focused is legitimate under point 2, so there
@@ -7418,6 +7459,123 @@ object KayaCompose {
                     "${Math.round(inner)}px breadth"
             }
         }
+
+    /** Whether the input method's window shows over this one, from the
+     * root's own insets (docs/safe-area-plan.md A9). */
+    private fun kayaImeShown(activity: ComponentActivity): Boolean =
+        ViewCompat.getRootWindowInsets(activity.window.decorView)
+            ?.isVisible(WindowInsetsCompat.Type.ime()) == true
+
+    private fun kayaRectText(r: androidx.compose.ui.geometry.Rect): String =
+        "(${r.left.toInt()},${r.top.toInt()},${r.width.toInt()},${r.height.toInt()})"
+
+    /** `expect_insets`' reading: the top and bottom platform insets as words. */
+    private fun kayaInsetWords(activity: ComponentActivity): String? {
+        val insets = ViewCompat.getRootWindowInsets(activity.window.decorView) ?: return null
+        val bars = insets.getInsets(WindowInsetsCompat.Type.statusBars())
+        val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+        val cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
+        val top = if (bars.top > 0) "bar" else if (cutout.top > 0) "cutout" else "none"
+        val bottom = if (nav.bottom > 0) "bar" else if (cutout.bottom > 0) "cutout" else "none"
+        return "$top/$bottom"
+    }
+
+    /**
+     * `expect_safe`'s reading (docs/safe-area-plan.md A9): the target's frame
+     * against the root's safe-drawing insets and the keyboard's, both off the
+     * window; a bled widget's frame against the window's edges on its touching
+     * sides. swift/KayaSwiftUI.swift's kayaSafeReading, sentence for sentence.
+     */
+    private fun kayaSafeReading(activity: ComponentActivity, spec: String): Pair<String?, String> {
+        val node = kayaWidgetTarget(spec) ?: return Pair(null, "no such target $spec")
+        val decor = activity.window.decorView
+        val insets = ViewCompat.getRootWindowInsets(decor)
+            ?: return Pair(null, "$spec: unreadable (the decor view has no root insets)")
+        val frame = kayaNodeFrames[node.id]
+            ?: return Pair(null, "$spec: no frame recorded for it — it was never laid out")
+        val w = decor.width.toFloat()
+        val h = decor.height.toFloat()
+        val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+        val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
+        val keyboard = if (insets.isVisible(WindowInsetsCompat.Type.ime()))
+            androidx.compose.ui.geometry.Rect(0f, h - ime.bottom, w, h) else null
+        val safe = androidx.compose.ui.geometry.Rect(
+            bars.left.toFloat(), bars.top.toFloat(), w - bars.right, h - maxOf(bars.bottom, ime.bottom))
+        val tol = decor.resources.displayMetrics.density
+        val facts = "frame ${kayaRectText(frame)}, safe area ${kayaRectText(safe)}, keyboard " +
+            (keyboard?.let { kayaRectText(it) } ?: "none") + ", window ${w.toInt()}x${h.toInt()}"
+        if (keyboard != null && frame.bottom > keyboard.top + tol) {
+            return Pair(null, "$spec is covered by the keyboard: $facts")
+        }
+        if (frame.left < -tol || frame.top < -tol || frame.right > w + tol || frame.bottom > h + tol) {
+            return Pair(null, "$spec runs past the window's edge: $facts")
+        }
+        val edges = if (node.bleed) kayaBleedEdges(node) else BooleanArray(4)
+        if (edges.any { it }) {
+            val rtl = decor.layoutDirection == android.view.View.LAYOUT_DIRECTION_RTL
+            val left = frame.left <= tol
+            val right = frame.right >= w - tol
+            val reaches = booleanArrayOf(
+                frame.top <= tol,
+                frame.bottom >= h - tol || (keyboard != null && frame.bottom >= keyboard.top - tol),
+                if (rtl) right else left,
+                if (rtl) left else right,
+            )
+            val short = edges.indices.count { edges[it] && !reaches[it] }
+            if (short == 0) return Pair("bleeds", facts)
+            return Pair(null, "$spec bleeds but stops short of the window's edge on $short touching side(s): $facts")
+        }
+        if (frame.left >= safe.left - tol && frame.right <= safe.right + tol &&
+            frame.top >= safe.top - tol && frame.bottom <= safe.bottom + tol
+        ) {
+            return Pair("safe", facts)
+        }
+        return Pair(null, "$spec lies outside the safe area: $facts")
+    }
+
+    /**
+     * A9's wall (docs/safe-area-plan.md): after a key reached a focused text
+     * field, the keyboard is up and the caret line is visible above it. Null
+     * when it holds or no text field holds the focus; the sentence names what
+     * was measured otherwise. Waits for the keyboard's animation and the pan.
+     */
+    private fun kayaKeyboardWall(activity: ComponentActivity, verb: String): String? {
+        var last: String? = null
+        repeat(60) {
+            last = onUi(activity) { kayaWallReading(activity, verb) }
+            if (last == null) return null
+            Thread.sleep(50)
+        }
+        return last
+    }
+
+    private fun kayaWallReading(activity: ComponentActivity, verb: String): String? {
+        val field = KayaSceneModel.composeFocusedId?.let { KayaSceneModel.nodes[it] }
+            ?.takeIf { kayaIsTextField(it) } ?: return null
+        val decor = activity.window.decorView
+        val who = "node ${field.id} (\"${field.a11yId}\")"
+        val frame = kayaNodeFrames[field.id]
+            ?: return "$verb: the focused field $who has no frame recorded — it was never laid out"
+        val window = "window ${decor.width}x${decor.height}"
+        val insets = ViewCompat.getRootWindowInsets(decor)
+            ?: return "$verb: unreadable (the decor view has no root insets) for the focused field $who"
+        if (!insets.isVisible(WindowInsetsCompat.Type.ime())) {
+            val method = android.provider.Settings.Secure.getString(
+                activity.contentResolver, android.provider.Settings.Secure.DEFAULT_INPUT_METHOD)
+            return "$verb: no software keyboard is up over the focused field $who (frame " +
+                "${kayaRectText(frame)}, $window): the root's insets report the input method's window " +
+                "not visible, and the default input method reads ${method ?: "nothing"} " +
+                "(docs/safe-area-plan.md A9, A10)"
+        }
+        val keyboardTop = decor.height - insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+        val safeTop = insets.getInsets(
+            WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()).top
+        val caret = kayaCaretRect(field, frame)
+        if (caret.bottom <= keyboardTop + 0.5f && caret.top >= safeTop - 0.5f) return null
+        return "$verb: the focused field $who is not visible above the keyboard: its caret line " +
+            "${kayaRectText(caret)} and frame ${kayaRectText(frame)}, the keyboard's top at $keyboardTop, " +
+            "the $window (docs/safe-area-plan.md A4, A9)"
+    }
 
     private fun kayaWidgetTarget(spec: String): KayaNode? {
         val delimiter = spec.indexOfAny(charArrayOf('#', '@'))
@@ -10094,6 +10252,7 @@ object KayaCompose {
                             val why = kayaTypeAtFocus(activity, secret.expose, secure = true)
                             if (why != null) failures.add(why)
                             else kayaAwaitAnswer(answered)
+                            if (why == null) kayaKeyboardWall(activity, "type_secret")?.let { failures.add(it) }
                         }
                     }
                     "expect_content_type" -> {
@@ -10136,8 +10295,40 @@ object KayaCompose {
                             }
                         }
                     }
-                    // docs/safe-area-plan.md §6: the breadth's.
-                    "expect_keyboard", "expect_safe", "expect_insets" -> depthStub("safearea")
+                    // docs/safe-area-plan.md A9: the platform's own insets and frames.
+                    "expect_keyboard" -> {
+                        val wantKeyboard = parts.getOrNull(1)
+                        if (parts.size != 2 || (wantKeyboard != "on" && wantKeyboard != "off")) {
+                            failures.add("expect_keyboard wants on|off: $line")
+                        } else {
+                            val up = onUi(activity) { kayaImeShown(activity) }
+                            val got = if (up) "on" else "off"
+                            if (got == wantKeyboard) observed.add("keyboard $got")
+                            else failures.add("keyboard $got, wanted $wantKeyboard")
+                        }
+                    }
+                    "expect_safe" -> {
+                        val wantSafe = parts.getOrNull(2) ?: "safe"
+                        if (parts.size !in 2..3 || (wantSafe != "safe" && wantSafe != "bleeds")) {
+                            failures.add("expect_safe wants a target and safe|bleeds: $line")
+                        } else {
+                            val (got, why) = onUi(activity) { kayaSafeReading(activity, parts[1]) }
+                            when {
+                                got == null -> failures.add(why)
+                                got == wantSafe -> observed.add("${parts[1]} $got")
+                                else -> failures.add("${parts[1]} reads $got, wanted $wantSafe")
+                            }
+                        }
+                    }
+                    "expect_insets" -> {
+                        val wantInsets = quoted(parts.drop(1))
+                        val got = onUi(activity) { kayaInsetWords(activity) }
+                        when (got) {
+                            null -> failures.add("unreadable (the decor view has no root insets)")
+                            wantInsets -> observed.add("insets \"$got\"")
+                            else -> failures.add("insets \"$got\", wanted \"$wantInsets\"")
+                        }
+                    }
                     "expect_expanded" -> {
                         if (parts.size != 3 || (parts[2] != "on" && parts[2] != "off")) {
                             failures.add("expect_expanded wants an expander and on|off: $line")
@@ -10222,6 +10413,7 @@ object KayaCompose {
                             val why = kayaTypeAtFocus(activity, typed.text)
                             if (why != null) failures.add(why)
                             else kayaAwaitAnswer(answered)
+                            if (why == null) kayaKeyboardWall(activity, "type")?.let { failures.add(it) }
                         }
                     }
                     "unfocus" -> {
@@ -10259,6 +10451,7 @@ object KayaCompose {
                             else "press wants one of the named keys (return, tab, space): $line"
                         if (why != null) failures.add(why)
                         else kayaAwaitAnswer(answered)
+                        if (why == null) kayaKeyboardWall(activity, "press ${parts[1]}")?.let { failures.add(it) }
                     }
                     "set_text" -> {
                         if (parts[1].startsWith("secure_field")) {
@@ -15808,7 +16001,7 @@ private fun KayaRenderCore(
         } else {
             Modifier
         }
-    val a11y = a11yTag.then(a11yName).then(a11yHint).then(a11yHelp)
+    val a11y = a11yTag.then(a11yName).then(a11yHint).then(a11yHelp).then(kayaFrame(node.id))
     when (node.kind) {
         KayaCompose.KIND_SELECT -> {
             // The dressed floor: M3's exposed dropdown menu — the
@@ -16570,12 +16763,26 @@ private fun KayaRenderCore(
                 maxHeight = if (node.maxHeight > 0) node.maxHeight.dp else Dp.Infinity,
             )
             val density = LocalDensity.current.density
+            // A BLED PICTURE spans its slot's width at its fit height, drawn
+            // to fill (docs/safe-area-plan.md A3; the SwiftUI arm's slot).
+            val fit = bitmap?.let {
+                val w = it.width.toFloat()
+                val h = it.height.toFloat()
+                val scale = minOf(
+                    1f,
+                    if (node.maxWidth > 0) node.maxWidth.toFloat() * density / w else 1f,
+                    if (node.maxHeight > 0) node.maxHeight.toFloat() * density / h else 1f,
+                )
+                androidx.compose.ui.geometry.Size(w * scale, h * scale)
+            }
             if (bitmap != null) {
                 Image(
                     bitmap = bitmap,
                     contentDescription = node.a11yLabel.ifEmpty { a11yFallback }.ifEmpty { null },
-                    contentScale = if (bounded) ContentScale.Fit else ContentScale.None,
-                    modifier = boxFill.then(bound).then(a11yTag).onGloballyPositioned {
+                    contentScale = if (node.bleed) ContentScale.Crop
+                        else if (bounded) ContentScale.Fit else ContentScale.None,
+                    modifier = boxFill.then(if (node.bleed) kayaBleed(node, fit) else bound).then(a11yTag)
+                        .then(kayaFrame(node.id)).onGloballyPositioned {
                         kayaImageDrawn[node.id] = Pair(
                             it.size.width / density,
                             it.size.height / density,
@@ -16618,7 +16825,7 @@ private fun KayaRenderCore(
                         Box(modifier = a11yTag)
                     }
                 },
-                modifier = boxFill.onGloballyPositioned {
+                modifier = boxFill.then(kayaBleed(node)).then(kayaFrame(node.id)).onGloballyPositioned {
                     val r = it.boundsInWindow()
                     kayaCanvasBoxes[node.id] = android.graphics.Rect(
                         r.left.toInt(), r.top.toInt(), r.right.toInt(), r.bottom.toInt())
@@ -16714,6 +16921,8 @@ fun KayaTextField(
 ) {
     val focusRequester = remember { FocusRequester() }
     val inComposer = LocalKayaInComposer.current
+    val hostView = LocalView.current
+    SideEffect { kayaFieldViews[node.id] = hostView }
     val interaction = remember { MutableInteractionSource() }
     // THE RICH DISPLAY (docs/rich-text-plan.md R7 as amended): the arm's
     // own run table drawn through the field's OutputTransformation, which
@@ -18065,6 +18274,235 @@ private fun kayaSystemContrast(): Float {
     return contrast
 }
 
+/**
+ * The safe-area padding the content box took on each logical side, in px,
+ * which a bled widget extends back through (docs/safe-area-plan.md A3). The
+ * bottom never counts the keyboard: a bled widget ends above it.
+ */
+class KayaSafePads(val start: Float, val top: Float, val end: Float, val bottom: Float)
+
+val LocalKayaSafePads = compositionLocalOf<KayaSafePads?> { null }
+
+/** What the content box pads by: the safe area the bars left, the keyboard
+ * included (docs/safe-area-plan.md A1, A2). */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun kayaContentPads(
+    topConsumed: Boolean,
+    bottomConsumed: Boolean,
+    rides: Boolean,
+): Pair<PaddingValues, KayaSafePads> {
+    val density = LocalDensity.current
+    val dir = LocalLayoutDirection.current
+    val safe = WindowInsets.safeDrawing
+    val bars = WindowInsets.systemBars.union(WindowInsets.displayCutout)
+    val left = safe.getLeft(density, dir)
+    val right = safe.getRight(density, dir)
+    val top = if (topConsumed) 0 else safe.getTop(density)
+    // ONLY A ROOT THAT RIDES THE KEYBOARD GIVES UP ITS HEIGHT TO IT (A5): any
+    // other keeps the layout it had and the pan moves it (A4), where a Column
+    // squeezed into the room above the keyboard gave its last field what was
+    // left (measured: the clipboard scene's entry at 32 px, its semantics node
+    // then dropped from the accessibility tree).
+    val keyboard = WindowInsets.isImeVisible
+    val bottom = when {
+        bottomConsumed -> 0
+        keyboard && !rides -> bars.getBottom(density)
+        else -> safe.getBottom(density)
+    }
+    val bleedBottom = if (keyboard) 0 else bottom
+    val start = if (dir == LayoutDirection.Ltr) left else right
+    val end = if (dir == LayoutDirection.Ltr) right else left
+    val values = with(density) {
+        PaddingValues(start = start.toDp(), top = top.toDp(), end = end.toDp(), bottom = bottom.toDp())
+    }
+    return Pair(values, KayaSafePads(start.toFloat(), top.toFloat(), end.toFloat(), bleedBottom.toFloat()))
+}
+
+/** Whether [node] rides the keyboard (docs/safe-area-plan.md A5): a grown
+ * scroll reachable through the containers that grow toward it, whose space is
+ * what the keyboard takes. */
+internal fun kayaRides(node: KayaNode): Boolean {
+    if (node.kind == KayaCompose.KIND_SCROLL) return node.grow > 0
+    if (node.kind != KayaCompose.KIND_COLUMN && node.kind != KayaCompose.KIND_ROW) return false
+    return node.children.any { child ->
+        child.grow > 0 && (child.kind == KayaCompose.KIND_SCROLL || kayaRides(child))
+    }
+}
+
+/** Whether [id] is a surface's mounted root: the window's, a pushed entry's
+ * or a section's. */
+internal fun kayaIsMountedRoot(id: Long): Boolean =
+    KayaSceneModel.root?.id == id ||
+        KayaSceneModel.navEntries.any { it.root?.id == id } ||
+        KayaSceneModel.sections.any { section ->
+            section.root?.id == id || section.entries.any { it.root?.id == id }
+        }
+
+/**
+ * The sides a bled widget touches the root's content edge on, as (top,
+ * bottom, start, end): every container between it and the mounted root is a
+ * plain row or column with no fill and no inset of its own, and the widget is
+ * first or last along each one's axis (swift/KayaSwiftUI.swift's
+ * kayaBleedEdges, the same walk).
+ */
+internal fun kayaBleedEdges(node: KayaNode): BooleanArray {
+    val none = BooleanArray(4)
+    val edges = booleanArrayOf(true, true, true, true)
+    var child = node.id
+    while (true) {
+        val parentId = KayaSceneModel.parents[child] ?: break
+        val parent = KayaSceneModel.nodes[parentId] ?: return none
+        val plain = (parent.kind == KayaCompose.KIND_COLUMN || parent.kind == KayaCompose.KIND_ROW) &&
+            parent.filled == 0L && parent.inset == 0.0 && parent.role != KayaCompose.ROLE_COMPOSER
+        if (!plain) return none
+        val vertical = (parent.axis ?: if (parent.kind == KayaCompose.KIND_COLUMN) 1L else 0L) == 1L
+        if (parent.children.firstOrNull()?.id != child) edges[if (vertical) 0 else 2] = false
+        if (parent.children.lastOrNull()?.id != child) edges[if (vertical) 1 else 3] = false
+        child = parentId
+    }
+    return if (kayaIsMountedRoot(child)) edges else none
+}
+
+/**
+ * `bleed` (docs/safe-area-plan.md A3): the widget is measured and placed
+ * extended through the window's inset and the content's safe-area padding on
+ * its touching sides, while its slot keeps the size it would have had; a
+ * picture's slot is the offered width at its fit height. Compose has no
+ * ignoresSafeArea, so this is SwiftUI's KayaBleedLayout as a layout modifier.
+ */
+@Composable
+internal fun kayaBleed(node: KayaNode, slot: androidx.compose.ui.geometry.Size? = null): Modifier {
+    if (!node.bleed) return Modifier
+    val pads = LocalKayaSafePads.current
+    val inset = with(LocalDensity.current) { KayaSceneModel.windowInset.dp.toPx() }
+    val edges = kayaBleedEdges(node)
+    val ext = if (pads == null) IntArray(4) else intArrayOf(
+        if (edges[0]) (inset + pads.top).roundToInt() else 0,
+        if (edges[1]) (inset + pads.bottom).roundToInt() else 0,
+        if (edges[2]) (inset + pads.start).roundToInt() else 0,
+        if (edges[3]) (inset + pads.end).roundToInt() else 0,
+    )
+    return Modifier.layout { measurable, constraints ->
+        val (top, bottom, start, end) = ext
+        val dx = start + end
+        val dy = top + bottom
+        if (slot != null) {
+            val w = if (constraints.hasBoundedWidth) constraints.maxWidth
+                else slot.width.roundToInt().coerceIn(constraints.minWidth, constraints.maxWidth)
+            val h = slot.height.roundToInt().coerceIn(constraints.minHeight, constraints.maxHeight)
+            val placeable = measurable.measure(Constraints.fixed(w + dx, h + dy))
+            layout(w, h) { placeable.placeRelative(-start, -top) }
+        } else {
+            // The child is asked at the EXTENDED size and the slot is its
+            // answer less the extension (docs/traps.md, the bled canvas that
+            // grew itself every frame).
+            val grown = Constraints(
+                minWidth = if (constraints.minWidth > 0) constraints.minWidth + dx else 0,
+                maxWidth = if (constraints.hasBoundedWidth) constraints.maxWidth + dx else Constraints.Infinity,
+                minHeight = if (constraints.minHeight > 0) constraints.minHeight + dy else 0,
+                maxHeight = if (constraints.hasBoundedHeight) constraints.maxHeight + dy else Constraints.Infinity,
+            )
+            val placeable = measurable.measure(grown)
+            val w = (placeable.width - dx).coerceIn(constraints.minWidth, constraints.maxWidth)
+            val h = (placeable.height - dy).coerceIn(constraints.minHeight, constraints.maxHeight)
+            layout(w, h) { placeable.placeRelative(-start, -top) }
+        }
+    }
+}
+
+/** Every node's frame in the window, unclipped, for expect_safe, the pan and
+ * the keyboard wall (docs/safe-area-plan.md A4, A9). */
+internal val kayaNodeFrames = HashMap<Long, androidx.compose.ui.geometry.Rect>()
+
+/** The view each text field is composed in, whose root is its window's. */
+internal val kayaFieldViews = HashMap<Long, android.view.View>()
+
+internal fun kayaFrame(id: Long): Modifier = Modifier.onGloballyPositioned {
+    kayaNodeFrames[id] = androidx.compose.ui.geometry.Rect(
+        it.positionInWindow(),
+        androidx.compose.ui.geometry.Size(it.size.width.toFloat(), it.size.height.toFloat()),
+    )
+    if (id == KayaSceneModel.composeFocusedId) kayaPanSoon()
+}
+
+private val kayaPanHandler by lazy { android.os.Handler(android.os.Looper.getMainLooper()) }
+private var kayaPanPosted = false
+
+/** One pan evaluation after the layout that asked for it has landed. */
+internal fun kayaPanSoon() {
+    if (kayaPanPosted) return
+    kayaPanPosted = true
+    kayaPanHandler.post {
+        kayaPanPosted = false
+        kayaPanEvaluate()
+    }
+}
+
+/** The focused field's caret line in the window, from the field's own text
+ * layout; the field's frame when it has none. */
+internal fun kayaCaretRect(node: KayaNode, frame: androidx.compose.ui.geometry.Rect): androidx.compose.ui.geometry.Rect {
+    val layout = kayaTextLayouts[node.id]?.invoke() ?: return frame
+    val origin = kayaTextBoxes[node.id]?.top?.toFloat() ?: frame.top
+    val at = node.textState.selection.end.coerceIn(0, layout.layoutInput.text.length)
+    val cursor = layout.getCursorRect(at)
+    val scroll = if (node.kind == KayaCompose.KIND_TEXTAREA) node.scrollState.value.toFloat() else 0f
+    val top = (origin + cursor.top - scroll).coerceIn(frame.top, frame.bottom)
+    val bottom = (origin + cursor.bottom - scroll).coerceIn(frame.top, frame.bottom)
+    return androidx.compose.ui.geometry.Rect(frame.left, top, frame.right, bottom)
+}
+
+/**
+ * A4's second case (docs/safe-area-plan.md): a focused field the keyboard
+ * still covers, after any scroll above it has moved it (measured, §7), pans
+ * the content up until the whole field shows, or its caret line when the
+ * field is taller than the room, and back down when it needs less. iOS's
+ * kayaPanEvaluate, the same rule and hysteresis.
+ */
+internal fun kayaPanEvaluate() {
+    val activity = KayaCompose.activityForSafeArea() ?: return
+    val decor = activity.window.decorView
+    val insets = ViewCompat.getRootWindowInsets(decor)
+    val field = KayaSceneModel.composeFocusedId?.let { KayaSceneModel.nodes[it] }
+    val frame = field?.let { kayaNodeFrames[it.id] }
+    val imeShown = insets?.isVisible(WindowInsetsCompat.Type.ime()) == true
+    if (insets == null || field == null || frame == null || !imeShown || !kayaIsTextField(field)) {
+        if (KayaSceneModel.keyboardPan != 0f) KayaSceneModel.keyboardPan = 0f
+        return
+    }
+    val keyboardTop = decor.height - insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+    val safeTop = insets.getInsets(
+        WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()).top
+    val room = keyboardTop - safeTop
+    val target = if (frame.height <= room) frame.bottom else kayaCaretRect(field, frame).bottom
+    val margin = 8f * decor.resources.displayMetrics.density
+    val covered = target - keyboardTop
+    val current = KayaSceneModel.keyboardPan
+    var next = current
+    if (covered > 0.5f) {
+        next = current + covered + margin
+    } else if (current > 0f && covered < -2 * margin) {
+        next = maxOf(0f, current + covered + margin)
+    }
+    if (kotlin.math.abs(next - current) > 0.5f) {
+        KayaSceneModel.keyboardPanRoot = kayaRootIdOf(field.id)
+        KayaSceneModel.keyboardPan = next
+    }
+}
+
+/** The topmost node above [id]: a surface's mounted root or a sheet's. */
+internal fun kayaRootIdOf(id: Long): Long {
+    var top = id
+    while (true) top = KayaSceneModel.parents[top] ?: return top
+}
+
+/** The pan a content box applies: none while it is a sheet's root that pans. */
+internal fun kayaPanFor(sheetRoot: Long?): Float {
+    val root = KayaSceneModel.keyboardPanRoot
+    val inSheet = KayaSceneModel.sheets.any { it.root?.id == root }
+    return if (if (sheetRoot == null) !inSheet else root == sheetRoot) KayaSceneModel.keyboardPan else 0f
+}
+
 @Composable
 fun KayaRoot() {
     // docs/traps.md: Android sent a drag end that Kaya did not record.
@@ -18131,24 +18569,12 @@ fun KayaRoot() {
     LaunchedEffect(metricsWidth, metricsHeight) {
         KayaPresent.windowMetrics(0, metricsWidth, metricsHeight)
     }
-    // THE SYSTEM'S OWN CHROME IS AN INSET THIS SURFACE CONSUMES, all of
-    // it: the status bar, the navigation bar, a display cutout and the
-    // soft keyboard, whose union `safeDrawing` is.
-    // THE KEYBOARD HALF is the older half — without it the system PANS
-    // the whole window up for a focused field low in it (measured
-    // 2026-08-10, `getLocationInWindow()` = (0, -199)), putting the menu
-    // bar and first line ABOVE the window, never drawn, while the model,
-    // the semantics tree and the field's viewport all still read
-    // correctly, so only a PIXEL read notices.
-    // THE SYSTEM BARS joined 2026-09-03 (docs/traps.md: THE TOP 24px OF
-    // AN ANDROID KAYA WINDOW WAS THE STATUS BAR'S): these apps target
-    // SDK 35, where Android 15 forces edge to edge, so kaya's first row
-    // drew under the status bar and its last under the gesture bar — and
-    // that strip is the status bar's TOUCHABLE region, so no real input
-    // could reach it either. No lane could see it: every `click` is
-    // programmatic, and the dnd lane's real injected pointer is the
-    // first injected touch this backend ever had.
-    Box(modifier = Modifier.fillMaxSize().safeDrawingPadding().dragAndDropTarget(
+    // THE BARS CONSUME THEIR OWN SIDES (docs/safe-area-plan.md A2): the top
+    // bar the status bar, the section bar the navigation bar, the content
+    // what is left (kayaContentPads), so each bar's ground runs under its
+    // system bar. Why the content may never go unpadded: docs/traps.md, the
+    // top 24px of an Android kaya window and the soft keyboard's pan.
+    Box(modifier = Modifier.fillMaxSize().dragAndDropTarget(
         shouldStartDragAndDrop = { it.toAndroidDragEvent().localState is KayaDragSession },
         target = dragEndTarget,
     )) {
@@ -18162,7 +18588,7 @@ fun KayaRoot() {
             // No catalog: the surface keeps its exact pre-menus shape (no
             // phantom bar over scenes that declared no commands).
             KayaSceneModel.menuPresentation = "none"
-            KayaSurface()
+            KayaSurface(topConsumed = false)
         } else {
             // The window catalog's phone lowering (DESIGN.md, Menus).
             // STAMPED BY THE ARM THAT RENDERS, not inferred from the
@@ -18173,7 +18599,7 @@ fun KayaRoot() {
                 if (KayaSceneModel.menubar.isEmpty()) "none" else "overflow"
             Column(modifier = Modifier.fillMaxSize()) {
                 KayaMenuTopBar()
-                Box(modifier = Modifier.weight(1f)) { KayaSurface() }
+                Box(modifier = Modifier.weight(1f)) { KayaSurface(topConsumed = true) }
             }
         }
         KayaToastHost(Modifier.align(Alignment.BottomCenter))
@@ -18355,36 +18781,21 @@ internal fun kayaSplitArm(): Boolean = kayaSplitArm(kayaScaffoldValue(kayaPaneDi
  * exactly the pre-menus KayaRoot body: the menus top bar stacks ABOVE
  * this so a catalog never disturbs the measured offer the layout
  * observations read. */
-@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+@OptIn(ExperimentalMaterial3AdaptiveApi::class, ExperimentalLayoutApi::class)
 @Composable
-private fun KayaSurface() {
-    // Normalized default: the root is pinned to the top-leading corner,
-    // not centered, so the scene packs into the top-left like AppKit/SwiftUI.
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            // The OUTER half of the measured-inset observation: this
-            // capture sits before the padding, its twin after, and the
-            // halved difference is the inset the harness asserts.
-            .onGloballyPositioned { kayaOuterSize = it.size }
-            // The normalized root inset — now the window's OWN (wprop
-            // 8, docs/styling-plan.md D3): 16 unless the app says
-            // otherwise, applied before the offer is measured so the
-            // available area is the content box, exactly as the
-            // SwiftUI interpreter reads it.
-            .padding(KayaSceneModel.windowInset.dp)
-            .onGloballyPositioned { kayaAvailableSize = it.size },
-        contentAlignment = Alignment.TopStart,
-    ) {
-        val activeSection =
-            KayaSceneModel.selectedSection?.let { KayaSceneModel.sectionIndex[it] }
-        if (KayaSceneModel.sections.isNotEmpty() && activeSection != null) {
-            // Sections present: the M3 bottom bar is the phones'
-            // idiom regardless of the ADVISORY hint (physics). Each
-            // pane shows ITS stack's top (stacks are per-surface);
-            // covered panes stay in the model, retained.
-            KayaSectionsScaffold(activeSection)
-        } else {
+private fun KayaSurface(topConsumed: Boolean) {
+    val activeSection =
+        KayaSceneModel.selectedSection?.let { KayaSceneModel.sectionIndex[it] }
+    if (KayaSceneModel.sections.isNotEmpty() && activeSection != null) {
+        // Sections present: the M3 bottom bar is the phones' idiom
+        // regardless of the ADVISORY hint (physics), and it consumes the
+        // navigation bar's side itself (A2), so the pane carries the inset.
+        KayaSectionsScaffold(activeSection, topConsumed)
+        return
+    }
+    val shown = KayaSceneModel.navEntries.lastOrNull()?.root ?: KayaSceneModel.root
+    KayaContentBox(topConsumed, bottomConsumed = false, rides = shown?.let { kayaRides(it) } == true) {
+        run {
         val topEntry = KayaSceneModel.navEntries.lastOrNull()
         // ADAPTIVE LIST-DETAIL (DESIGN.md): Android's OWN container,
         // entered on the app's declaration alone, and WHETHER it shows
@@ -18480,6 +18891,50 @@ private fun KayaSurface() {
 }
 
 /**
+ * The content between the bars (docs/safe-area-plan.md A1, A2, A4): padded by
+ * the safe area the bars did not consume, the keyboard included, panned up
+ * while the focused field outside a scroll would be under the keyboard, and
+ * then by the window's own inset. The bled widgets read the same padding.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun KayaContentBox(
+    topConsumed: Boolean,
+    bottomConsumed: Boolean,
+    rides: Boolean,
+    content: @Composable () -> Unit,
+) {
+    val pads = kayaContentPads(topConsumed, bottomConsumed, rides)
+    val pan = kayaPanFor(null)
+    LaunchedEffect(KayaSceneModel.composeFocusedId) { kayaPanSoon() }
+    CompositionLocalProvider(LocalKayaSafePads provides pads.second) {
+        // Normalized default: the root is pinned to the top-leading corner,
+        // not centered, so the scene packs into the top-left like AppKit/SwiftUI.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(pads.first)
+                .onGloballyPositioned { kayaPanSoon() }
+                .then(if (pan > 0f) Modifier.clipToBounds() else Modifier)
+                .offset { androidx.compose.ui.unit.IntOffset(0, -pan.toInt()) }
+                // The OUTER half of the measured-inset observation: this
+                // capture sits before the padding, its twin after, and the
+                // halved difference is the inset the harness asserts.
+                .onGloballyPositioned { kayaOuterSize = it.size }
+                // The normalized root inset — the window's OWN (wprop 8,
+                // docs/styling-plan.md D3): 16 unless the app says otherwise,
+                // applied before the offer is measured so the available area
+                // is the content box, exactly as the SwiftUI interpreter reads it.
+                .padding(KayaSceneModel.windowInset.dp)
+                .onGloballyPositioned { kayaAvailableSize = it.size },
+            contentAlignment = Alignment.TopStart,
+        ) {
+            content()
+        }
+    }
+}
+
+/**
  * THE TEST TAG EVERY MATERIALIZED MENU AFFORDANCE CARRIES, keyed by the
  * item's id — what makes the symbol read an OBSERVATION, the tagged
  * node's content description having come from the [Icon] the lowering
@@ -18538,6 +18993,7 @@ private fun KayaMenuPopupRoot() {
 @Composable
 fun KayaMenuTopBar() {
     TopAppBar(
+        windowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top),
         // The tag IS the chrome's identity for the toolbar reads: they
         // search this subtree and nowhere else, so "the promoted set
         // reached the chrome" is a question about the bar rather than
@@ -18999,8 +19455,9 @@ private fun kayaMenuDescend(
  * ignored here by physics). The bar's item taps are the USER route,
  * moving the selection and emitting section_selected, where a
  * programmatic select_section lands in the model quietly. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun KayaSectionsScaffold(active: KayaSection) {
+fun KayaSectionsScaffold(active: KayaSection, topConsumed: Boolean) {
     // THE STAMP, written by the arm that runs — there is exactly one
     // here, so it is unconditionally "bar" (a phone has no leading
     // sidebar to give the hint; physics decides). Written where the
@@ -19010,17 +19467,30 @@ fun KayaSectionsScaffold(active: KayaSection) {
     // second arm, if this host ever grows one, stamps its own name.
     KayaSceneModel.sectionsRendered = "bar"
     val density = LocalDensity.current
+    // THE BAR STAYS WHERE IT IS, UNDER THE KEYBOARD (docs/safe-area-plan.md
+    // A6): it keeps the screen's bottom edge, which the input method's window
+    // covers, while the content is padded above the keyboard instead of above
+    // the bar. Not composing it while the keyboard showed took the switcher
+    // out of the window for every reader (measured: tasks-compose's
+    // expect_section_symbol, "the window has no section switcher").
+    val imeShown = WindowInsets.isImeVisible
     DisposableEffect(Unit) { onDispose { KayaSceneModel.sectionBarHeight = 0.dp } }
-    Column(modifier = Modifier.fillMaxSize()) {
-        Box(modifier = Modifier.weight(1f)) {
-            val top = active.entries.lastOrNull()
-            val pane = top?.root ?: active.root
-            pane?.let { KayaRender(it, isRoot = true) }
+    Box(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.fillMaxSize().padding(bottom = if (imeShown) 0.dp else KayaSceneModel.sectionBarHeight)) {
+            val shown = active.entries.lastOrNull()?.root ?: active.root
+            KayaContentBox(topConsumed, bottomConsumed = !imeShown, rides = shown?.let { kayaRides(it) } == true) {
+                val pane = shown
+                pane?.let { KayaRender(it, isRoot = true) }
+            }
         }
         // The toast sits above the bar, as Scaffold places a snackbar (docs/toast-plan.md T8).
-        NavigationBar(modifier = Modifier.onGloballyPositioned {
-            KayaSceneModel.sectionBarHeight = with(density) { it.size.height.toDp() }
-        }) {
+        NavigationBar(
+            windowInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout)
+                .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
+            modifier = Modifier.align(Alignment.BottomCenter).onGloballyPositioned {
+                KayaSceneModel.sectionBarHeight = with(density) { it.size.height.toDp() }
+            },
+        ) {
             KayaSceneModel.sections.forEach { section ->
                 NavigationBarItem(
                     // THE ROW'S OWN TAG, so the harness can address this
@@ -19207,7 +19677,7 @@ fun KayaSheetHost(parent: Long?) {
     }
 }
 
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun KayaSheetView(sheet: KayaSheet, root: KayaNode) {
     // The detent is the platform's own anchor (docs/sheet-plan.md §1.4):
@@ -19232,6 +19702,13 @@ private fun KayaSheetView(sheet: KayaSheet, root: KayaNode) {
             }
         },
         sheetState = state,
+        // A DETENTED SHEET KEEPS ITS LAYOUT UNDER THE KEYBOARD and pans its
+        // content instead, where Material's own keyboard padding squeezed the
+        // field to nothing in landscape (docs/safe-area-plan.md A4, A7).
+        contentWindowInsets = {
+            if (detented) WindowInsets.safeDrawing.only(WindowInsetsSides.Top)
+            else androidx.compose.material3.BottomSheetDefaults.windowInsets
+        },
         properties = ModalBottomSheetProperties(shouldDismissOnBackPress = !sheet.interceptDismiss),
     ) {
         // Armed: back asks the app; the sheet's own back handler is off.
@@ -19244,7 +19721,25 @@ private fun KayaSheetView(sheet: KayaSheet, root: KayaNode) {
         androidx.compose.runtime.SideEffect {
             sheet.window = (view.parent as? DialogWindowProvider)?.window
         }
-        Column(modifier = if (detented) Modifier.fillMaxHeight() else Modifier) {
+        val pan = kayaPanFor(root.id)
+        // WITH THE KEYBOARD UP the sheet's window is resized to the room above
+        // it (measured: 136 dp in landscape on the pool phone), so a detented
+        // sheet goes to its full anchor, as iOS's grows to its large detent,
+        // and its content keeps its own height to pan through rather than
+        // being squeezed (docs/safe-area-plan.md A1, A4, A7).
+        val typing = WindowInsets.isImeVisible &&
+            KayaSceneModel.composeFocusedId?.let { kayaRootIdOf(it) } == root.id
+        LaunchedEffect(typing) { if (typing && detented) state.expand() }
+        Column(
+            modifier = (if (detented) Modifier.layout { measurable, constraints ->
+                val placeable = measurable.measure(
+                    constraints.copy(minHeight = constraints.maxHeight, maxHeight = Constraints.Infinity))
+                layout(placeable.width, constraints.maxHeight) { placeable.place(0, 0) }
+            } else Modifier)
+                .onGloballyPositioned { kayaPanSoon() }
+                .then(if (pan > 0f) Modifier.clipToBounds() else Modifier)
+                .offset { androidx.compose.ui.unit.IntOffset(0, -pan.toInt()) },
+        ) {
             // The title row: Material draws no header of its own.
             Text(
                 sheet.title,
@@ -19285,6 +19780,7 @@ private class KayaToastVisuals(toast: KayaToast) : SnackbarVisuals {
     override val duration = if (toast.long) SnackbarDuration.Long else SnackbarDuration.Short
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun KayaToastHost(modifier: Modifier) {
     val host = remember { SnackbarHostState() }
@@ -19304,7 +19800,16 @@ internal fun KayaToastHost(modifier: Modifier) {
             KayaPresent.emitToastClosed(shown.id)
         }
     }
-    SnackbarHost(host, modifier.padding(bottom = KayaSceneModel.sectionBarHeight)) { data ->
+    // Above the section bar when it shows, which already consumed the
+    // navigation bar; above the keyboard or the navigation bar otherwise
+    // (docs/toast-plan.md T8, docs/safe-area-plan.md A6).
+    val bar = if (WindowInsets.isImeVisible) 0.dp else KayaSceneModel.sectionBarHeight
+    val sides = if (bar > 0.dp) WindowInsetsSides.Horizontal + WindowInsetsSides.Top
+        else WindowInsetsSides.Horizontal + WindowInsetsSides.Top + WindowInsetsSides.Bottom
+    SnackbarHost(
+        host,
+        modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(sides)).padding(bottom = bar),
+    ) { data ->
         KayaToastBar(data)
     }
 }
@@ -20406,6 +20911,8 @@ internal val kayaRevealEyeFocused = mutableSetOf<Long>()
 @Composable
 private fun KayaSecureField(node: KayaNode, a11y: Modifier, fill: Modifier) {
     val revealed = node.revealed
+    val hostView = LocalView.current
+    SideEffect { kayaFieldViews[node.id] = hostView }
     val focusRequester = remember { FocusRequester() }
     val interaction = remember { MutableInteractionSource() }
     LaunchedEffect(node) {

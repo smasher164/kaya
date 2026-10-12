@@ -46,6 +46,7 @@ SWIFT_ENTRIES = [
     # The capture on kaya's in-process synthetic devices (docs/capture-plan.md §7).
     "capture", "capture_denied:capture",
     "toast",
+    "safearea",
 ]
 
 # The go suite: the swift roster entry for entry minus the two
@@ -68,6 +69,7 @@ GO_SCENES = [
     "media_feed", "media_reader",
     "capture", "capture_denied",
     "toast",
+    "safearea",
 ]
 
 # CPython embedded in ONE bundle carrying every python scene
@@ -212,6 +214,13 @@ FULLSCREEN_APP_TAIL = ('click button#0; expect label#0 "asked for a window"; '
 # §5): the scene steps last, so the cut takes the steps alone.
 NUMBER_FIELD_CUT = {"cut": "nudge", "keep": "expect_focused expect_ax"}
 
+# THE INSETS ARE THE DEVICE'S (docs/safe-area-plan.md A8, A9): the pool
+# phone's status bar over its notch and its home indicator, then immersive
+# mode, where the notch alone is left at the top.
+SAFEAREA_EXTRA = ('expect_insets "bar/bar"; click button@full; expect label@caption "fullscreen"; '
+                  'expect_fullscreen on; expect_insets "cutout/bar"; expect_safe image@picture bleeds; '
+                  'expect_safe canvas@ground bleeds; expect_safe label@caption')
+
 # Per-leg modifiers, keyed (suite, scene). `cut` names the verb this host
 # cannot express (everything from it on is dropped, printed); `drop` names
 # ONE step by verb and target; `keep` names the assertions neither may
@@ -327,13 +336,9 @@ MODS = {
     ("go", "numberfieldde"): NUMBER_FIELD_CUT,
     ("rust-swiftui", "numberfield"): NUMBER_FIELD_CUT,
     ("rust-swiftui", "numberfieldde"): NUMBER_FIELD_CUT,
-    # THE INSETS ARE THE DEVICE'S (docs/safe-area-plan.md A8, A9): the pool
-    # phone's status bar over its notch and its home indicator, then
-    # immersive mode, where the notch alone is left at the top.
-    ("rust-swiftui", "safearea"): {
-        "extra": 'expect_insets "bar/bar"; click button@full; expect label@caption "fullscreen"; '
-                 'expect_fullscreen on; expect_insets "cutout/bar"; expect_safe image@picture bleeds; '
-                 'expect_safe canvas@ground bleeds; expect_safe label@caption'},
+    ("rust-swiftui", "safearea"): {"extra": SAFEAREA_EXTRA},
+    ("swift", "safearea"): {"extra": SAFEAREA_EXTRA},
+    ("go", "safearea"): {"extra": SAFEAREA_EXTRA},
     ("rust-swiftui", "adaptive"): {
         "extra": 'expect_axis row@narrow "vertical"; expect_grid_columns grid@sheet 1; '
                  'expect_grid_columns grid@fit 1',
@@ -447,6 +452,7 @@ def suite_legs(suite):
         out.append("editor-go")
         out.append("chat-go")
         out.append("chatkeyboard-go")
+        out.append("chatkeyboardland-go")
     elif suite == "python":
         out += [f"{scene}-python" for scene in PYTHON_SCENES]
     elif suite == "rust-swiftui":
@@ -476,4 +482,5 @@ def wired_scenes():
     out.add("editor")
     out.add("chat")
     out.add("chatkeyboard")
+    out.add("chatkeyboardland")
     return out

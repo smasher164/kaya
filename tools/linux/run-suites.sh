@@ -30,7 +30,11 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) the foreign suites load;
 # --example alone would build only the rlib it depends on.
-SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen numberfield timecode colorpicker range media capture secure autofill reveal segmented expander toast"
+SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen numberfield timecode colorpicker range media capture secure autofill reveal segmented expander toast safearea"
+# Scenes this lane declares off rather than wires (tools/check-steps.py
+# reads this line): the phone keyboard scripts, since a desktop has no
+# software keyboard (docs/safe-area-plan.md A13).
+OFF_SCENES="chatkeyboard taskskeyboard autofillkeyboard chatkeyboardland"
 # Depth-slice scenes, rust only. `windowed` and `canvas` are rust BY
 # DESIGN rather than by depth — the compiled conformance scenes every
 # lane runs (docs/virtualization-plan.md §6.3, docs/canvas-plan.md
@@ -970,6 +974,7 @@ media_server_stop() {
     KAYA_MEDIA_PID=""
 }
 media_server_start
+echo "run-suites: declared off on this desktop: $OFF_SCENES"
 
 for proto in x11 wayland; do
     run "$proto" rust "$CARGO_TARGET_DIR/debug/examples/milestone2"
@@ -1623,6 +1628,17 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" expander-c env KAYA_SELFTEST=expander \
         tools/linux/a11y-leg.sh /tmp/c-guests/expander
+    # THE SAFE AREA (docs/safe-area-plan.md A3, A13): `bleed` past kaya's
+    # inset on a desktop with no safe area.
+    run "$proto" safearea-rust env KAYA_SELFTEST=safearea "$CARGO_TARGET_DIR/debug/examples/safearea"
+    run "$proto" safearea-python env KAYA_SELFTEST=safearea KAYA_LIB="$LIB" python3 guests/python/safearea.py
+    run "$proto" safearea-js env KAYA_SELFTEST=safearea KAYA_LIB="$LIB" node guests/js/safearea.ts
+    run "$proto" safearea-go env KAYA_SELFTEST=safearea /tmp/go-guests/kaya-go
+    run "$proto" safearea-csharp env KAYA_SELFTEST=safearea KAYA_LIB="$LIB" dotnet exec "$CS_GUEST"
+    run "$proto" safearea-ocaml env KAYA_SELFTEST=safearea KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/safearea.exe
+    run "$proto" safearea-haskell env KAYA_SELFTEST=safearea "$(hs_bin safearea)"
+    run "$proto" safearea-java env KAYA_SELFTEST=safearea KAYA_LIB="$LIB" java -cp /tmp/java-guests dev.kaya.guests.Main
+    run "$proto" safearea-c env KAYA_SELFTEST=safearea /tmp/c-guests/safearea
     # The content type (docs/autofill-plan.md), read off the GtkText.
     run "$proto" autofill-rust env KAYA_SELFTEST=autofill "$CARGO_TARGET_DIR/debug/examples/autofill"
     run "$proto" autofill-python env KAYA_SELFTEST=autofill KAYA_LIB="$LIB" python3 guests/python/autofill.py

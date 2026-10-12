@@ -5630,11 +5630,26 @@ def caption(text: str | None = None, bind: TextSource | None = None, *,
     return label(text=text, bind=bind, grow=grow).role("caption")
 
 
+def _bleed(handle: Widget, bleed: bool) -> None:
+    """docs/safe-area-plan.md A3, A16."""
+    if not bleed:
+        return
+    if isinstance(handle, Node):
+        raise KayaStateError(
+            "kaya: `bleed` is a LIVE-ZONE declaration — a stamped row never "
+            "touches the window's edge, so bleed there could only mean "
+            "nothing (docs/safe-area-plan.md A16)"
+        )
+    _records().append(wire.tx_set_bleed(handle.id, True))
+
+
 def image(source: bytes | bytearray | memoryview | Asset | Source | None = None,
-          *, grow: float | None = None) -> Widget:
+          *, grow: float | None = None, bleed: bool = False) -> Widget:
     """An image displaying encoded bytes: the toolkit decodes natively,
     and a decode failure renders the placeholder, never a crash. `source`
-    is encoded bytes, an `Asset`, a Signal, or an element field."""
+    is encoded bytes, an `Asset`, a Signal, or an element field.
+    `bleed=True` extends it to the window's edge on each side it touches
+    (docs/safe-area-plan.md A3), in the live zone only."""
     handle = _widget(wire.KIND_IMAGE)
     if source is not None:
         if isinstance(source, Signal):
@@ -5656,6 +5671,7 @@ def image(source: bytes | bytearray | memoryview | Asset | Source | None = None,
                 "belongs on kaya.label"
             )
     _set_grow(handle, grow)
+    _bleed(handle, bleed)
     return handle
 
 
@@ -5847,8 +5863,8 @@ def _size_policy(handle: Widget, fixed: bool | None,
 def canvas(viewbox: tuple[float, float], *, grow: float | None = None,
            fixed: bool | None = None,
            on_draw: Callable[[Draw, tuple[float, float]], object] | None = None,
-           on_tick: Callable[[Draw, tuple[float, float], float], object] | None = None
-           ) -> Widget:
+           on_tick: Callable[[Draw, tuple[float, float], float], object] | None = None,
+           bleed: bool = False) -> Widget:
     """A drawing surface. `viewbox` is the (width, height) coordinate
     system the ops are written in AND the canvas's natural size in
     points (docs/canvas-plan.md §3.2). Declare what it draws with
@@ -5872,6 +5888,7 @@ def canvas(viewbox: tuple[float, float], *, grow: float | None = None,
     _canvas_viewboxes[handle.id] = (float(w), float(h))
     _set_grow(handle, grow)
     _size_policy(handle, fixed, on_draw, on_tick)
+    _bleed(handle, bleed)
     return handle
 
 
@@ -6624,7 +6641,8 @@ def video(player: Player | Source | None = None, *,
           on_visibility: Handler | None = None,
           aspect: tuple[int, int] | None = None,
           grow: float | None = None,
-          capture: Capture | None = None) -> Widget:
+          capture: Capture | None = None,
+          bleed: bool = False) -> Widget:
     """A video view showing `player` (docs/media-plan.md §3): the
     platform's own view with its controls off. In a template the source
     is the row's Player field. A player is shown by one video view at a
@@ -6670,6 +6688,7 @@ def video(player: Player | Source | None = None, *,
         _app._register(handle, wire.OCC_VIDEO_VISIBILITY,
                        lambda *args: on_visibility(*args[:-1], float(args[-1])))
     _set_grow(handle, grow)
+    _bleed(handle, bleed)
     return handle
 
 

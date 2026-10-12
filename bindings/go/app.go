@@ -1344,6 +1344,24 @@ func (w Widget) Revealable() Widget {
 	return w
 }
 
+// SetBleed extends an image, video view or canvas past the window's
+// inset and the safe area to the window's edge on each side it touches,
+// never under the keyboard (docs/safe-area-plan.md A3). Live zone only:
+// Node has no Bleed (A16).
+func (tx *Tx) SetBleed(w Widget) {
+	tx.emit(TxSetBleed(w.id, true))
+}
+
+// Bleed is Tx.SetBleed at construction. Same transaction discipline as
+// Grow.
+func (w Widget) Bleed() Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: Bleed on a widget outside its build transaction — use Tx.SetBleed inside a live transaction")
+	}
+	w.tx.SetBleed(w)
+	return w
+}
+
 // SetSummary sets an expander's second header line
 // (docs/expander-plan.md K3); empty draws none.
 func (tx *Tx) SetSummary(w Widget, text string) {

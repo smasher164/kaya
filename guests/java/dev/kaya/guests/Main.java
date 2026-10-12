@@ -55,6 +55,9 @@ public final class Main {
             case "expander":
                 app = Expander::app;
                 break;
+            case "safearea":
+                app = Safearea::app;
+                break;
             case "toast":
                 app = Toast::app;
                 break;

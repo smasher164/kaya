@@ -192,6 +192,29 @@ class HelperProvider : android.content.ContentProvider() {
     ) = 0
 }
 
-/// Never shown, never bound: being the DEFAULT IME is what exempts
-/// this package's reads from the focus gate.
-class HelperIme : InputMethodService()
+/// Being the DEFAULT IME is what exempts this package's reads from the
+/// focus gate, which also makes it the pool's software keyboard: so it
+/// shows a panel the height Gboard's measured on the pool phone, whenever a
+/// field asks and never fullscreen (docs/safe-area-plan.md A10, §7).
+class HelperIme : InputMethodService() {
+    override fun onCreateInputView(): android.view.View = object : android.view.View(this) {
+        init {
+            setBackgroundColor(0xFF3C4043.toInt())
+        }
+
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+            val metrics = resources.displayMetrics
+            val landscape = resources.configuration.orientation ==
+                android.content.res.Configuration.ORIENTATION_LANDSCAPE
+            val share = if (landscape) 224f / 360f else 275f / 800f
+            setMeasuredDimension(
+                android.view.View.MeasureSpec.getSize(widthMeasureSpec),
+                (metrics.heightPixels * share).toInt(),
+            )
+        }
+    }
+
+    override fun onEvaluateInputViewShown(): Boolean = true
+
+    override fun onEvaluateFullscreenMode(): Boolean = false
+}

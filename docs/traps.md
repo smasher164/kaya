@@ -15481,3 +15481,83 @@ the reader misreads a synthetic BMP (top-down, bottom-up, no sRGB, 24-bit, out
 of range, a PNG) or reads more than the header and one pixel of a phone-sized
 one; check-verbs' simscreen clauses hold that call, the BMP capture, the echoed
 id on both sides and the account read, nine cuts watched red with counts.
+
+## The android pool's software keyboard was the clipboard helper's, which drew nothing (measured 2026-10-11)
+
+run-emulator makes dev.kaya.cliphelper/.HelperIme the DEFAULT input method on
+every pool phone before the first leg, because ClipboardService admits the
+default IME's reads before it checks focus (docs/clipboard-plan.md §0e). It was
+a bare InputMethodService with no input view, so under the lane a focused field
+raised no keyboard at all and every leg typed into a full-height window, while
+the same phone outside the lane (teardown's `ime reset` puts Gboard back) raised
+Gboard. A keyboard measurement taken by hand therefore said nothing about the
+lane. The helper now draws a panel the height Gboard measured on the pool phone
+(275/800 portrait, 224/360 landscape), shown whenever a field asks and never
+fullscreen. Turning it on surfaced three Compose defects, the next three entries.
+
+GUARD: tools/lib/safearea_routes.py holds `onEvaluateInputViewShown() = true`
+(a cut watched red); A9's wall refuses any typing step with no keyboard up and
+names the default input method it read.
+
+## A Compose Column squeezed into the room above the keyboard drops its last field from the accessibility tree (measured 2026-10-11)
+
+Padding the whole content by the IME inset shrinks the mounted root to the room
+above the keyboard, and a Column hands its last children what is left: the
+clipboard scene's entry#1 was laid out 32 px tall, and its semantics node no
+longer reached the accessibility provider (`expect_ax` read `unknown/...` with
+no class). SwiftUI overflows a column instead. Only a root that RIDES the
+keyboard (a grown scroll whose space the keyboard takes, safe-area A5) gives up
+its height; any other keeps its layout and the pan moves the focused field
+(A4). kayaRides decides; tools/lib/safearea_routes.py holds the branch.
+
+## A key sent to the Android activity never reaches a field in a sheet (measured 2026-10-11)
+
+A Material ModalBottomSheet is its own dialog window. `type` dispatched its key
+events to the activity, so typing into the tasks quick-add field left it empty
+with the focus and the keyboard both on it. The typing path now sends each key
+to the root view of the window the focused field is composed in
+(kayaFieldViews). Before the keyboard scripts no leg typed into a sheet: the
+shared tasks scene uses `set_text` there.
+
+## Not composing the section bar while the keyboard shows hides the switcher from every reader (measured 2026-10-11)
+
+The plan's first lowering of safe-area A6 left the NavigationBar out of the
+composition while the IME was visible; once the pool raised a keyboard,
+tasks-compose's `expect_section_symbol` read "the window has no section
+switcher". The bar now stays composed at the screen's bottom edge, under the
+IME's window, and the content alone is padded above the keyboard.
+
+## A landscape-pinned Android activity is relaunched before its first draw (measured 2026-10-11)
+
+`requestedOrientation = LANDSCAPE` in onCreate turns the display, and the host
+activities declare no configChanges, so the first instance is destroyed before
+it ever draws. The harness was admitted on that instance's first pre-draw, so
+the leg ran no step and timed out with a live, landscape app on screen. The
+admission now waits for an instance that is not about to turn
+(selftestPending). Separately, a hand probe that leaves a landscape-pinned app
+in front leaves the pool phone 800 dp wide, and the lane refuses to start on it
+("inside the 400..840 band"): force-stop the app and read the rotation back.
+
+## A top-level Android object in KayaCompose.kt fails the host-JVM tests (measured 2026-10-11)
+
+`private val h = android.os.Handler(Looper.getMainLooper())` at file level runs
+in KayaComposeKt's class initializer, which the host-JVM unit tests load, and
+the stub android.jar throws there: 23 of 28 tests failed with
+NoClassDefFoundError. Make such values `by lazy`.
+
+## GTK: compute_bounds is in the content box's coordinates, and GtkBox::orientation fails under a replaced layout (measured 2026-10-11)
+
+A widget's own coordinate origin is inside its CSS padding, and `width()` is the
+content width: the first expect_safe read put a bled picture at (-16,-16) in a
+"388-wide window" of a 420-wide one. The border box is
+`content.compute_bounds(&content)`. And once ensure_flex has swapped a box's
+layout manager for kaya's FlexLayout, `GtkBox::orientation` reads a manager that
+is not orientable: 5939 Gtk-CRITICALs in one leg. Read the axis off the
+FlexLayout first, as restamp_cross_align does.
+
+## WinUI: a bled first child moves the read expect_inset used (measured 2026-10-11)
+
+WinUI's inset read was the root's first child's own origin, which is the inset
+only while that child has no margin of its own; a bled picture's negative
+margins put it at (0,0) and the leg read "inset 0, wanted 16". It reads the
+child's layout slot now, which the root's padding alone places.
