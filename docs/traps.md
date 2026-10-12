@@ -72,6 +72,43 @@ did not say which reading admitted the shot; `desktop-shot.when` now names it
 (tools/check-flightrec.py NI1). A probe of CGEventSource's session clock hung
 without output and was killed, so that clock is unmeasured here.
 
+## The status bar one overlay behind (measured 2026-10-12)
+
+tasksbig-compose failed 4 runs in 5 at its 200%-text Settings screen, whose
+column has no scroll and no slack: the last caption got 76 px for its 96. The
+app's window inset read `statusBars top=48` with no cutout, where 24 is the
+emulator's own bar, so the content started 24 px lower. Nothing in Compose
+moved (2925c9f3 was suspected and is not involved). The emulator's SystemUI
+lays its status bar out for the cutout the display had BEFORE the latest
+`cmd overlay enable|disable ...cutout.emulation.tall`: after enable the bar
+stayed 24 (watched 15 s), after disable it became 48 and stayed (40 s), so
+every autofillkeyboardcutout leg left its device with a 48 px bar for
+whatever leg claimed it next, and ran itself under a 24 px bar beside a
+48 px cutout. `dumpsys window windows` shows it: the StatusBar window's
+laid-out `mAttrs (fillx24)` beside `paramsForRotation ROTATION_0 (fillx48)`,
+and the display's `statusBars frame [0,0][360,48]`. SystemUI lays every
+rotation out again only when its OWN current height changes, and with the
+cutout it has heard of, which lags the display's by up to ~2 s. So the fix is
+configuration changes until SystemUI's two readings agree and equal the taller
+of its own height and the cutout's top. A cutout turned off while a landscape
+leg holds the display turned leaves the upright bar stale whatever follows,
+since the turned bar's height is the same either way, so the display is
+upright first. A device left stale has no way back except moving SystemUI's
+height both ways: the lane start cycles the tall cutout on and off and
+records each phone's own bar, and refuses a verdict when it cannot.
+
+Two routes that look simpler are wrong. `settings put system font_scale`
+twice back to back can leave the CONFIGURATION at the first value (the
+activity manager writes the scale it applied back to the setting, and a quick
+second put loses to it): one device ran every app 15% larger and two
+landscape keyboard legs went red. Each put is awaited in
+`mGlobalConfiguration` before the next. And `am crash com.android.systemui`
+restarted it once, did nothing the second time, and that SystemUI then
+ignored every later configuration change until the emulator was killed and
+booted from its snapshot. tools/android/run-emulator.py's settle_status_bar,
+upright_for_cutout and upright_bar_at_lane_start;
+tools/lib/safearea_routes.py holds them, six watched cuts.
+
 ## The content box that padded a frame late (measured 2026-10-12)
 
 The safe-area breadth (f9308f01) padded Compose's content box by

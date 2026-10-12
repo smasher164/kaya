@@ -191,6 +191,22 @@ NATIVE = [
      "finally:\n if cutout and not cutout_overlay(serial, cutout, False, log):\n ok = False"),
     (EMULATOR, "the cutout overlay is read back", 'if f"{mark} {pkg}" in listed:'),
     (EMULATOR, "a dead lane's teardown turns the cutout off", "for serial, name in list(CUTOUT_ON):"),
+    # docs/traps.md, the status bar one overlay behind: SystemUI keeps the bar
+    # of the cutout before the latest change, and only the leg AFTER the
+    # cutout leg on that device, on a screen with no slack, can see it.
+    (EMULATOR, "the cutout's change waits for SystemUI's bar",
+     "return settle_status_bar(serial, log, f\"cutout {name} {'on' if on else 'off'}\", on)"),
+    (EMULATOR, "the display is upright before the cutout goes",
+     "if not on and not upright_for_cutout(serial, log):\n return False"),
+    (EMULATOR, "the lane start reads each phone's own bar",
+     "if serial != TABLET_SERIAL and not upright_bar_at_lane_start(serial, sys.stdout):\n BAR_REFUSED.append(serial)"),
+    (EMULATOR, "a phone's bar unread refuses the lane's verdict",
+     'a bar of unknown height (docs/traps.md, the status bar one overlay behind)")\n status = 1'),
+    (EMULATOR, "the nudge awaits its scale in the configuration",
+     "if global_font_scale(serial) == float(other):\n break"),
+    (EMULATOR, "the bar settles laid out and upright alike, under the cutout asked for",
+     "def wanted(now, upright, rotation, cut):\n return rotation == 0 and (cut > 0) == on and now == upright == max(own, cut)\n"
+     " reading, nudged = settle_until(serial, log, wanted)"),
     (EMULATOR, "the android lane reads the display's rotation after a landscape leg",
      "if pinned or serial in LANDSCAPE_RAN:\n if not leg_rotation(serial, log, pinned):"),
 ]
@@ -686,6 +702,23 @@ def run(g):
          "if True:", "the cutout overlay is read back"),
         ("the android lane trusting a landscape leg's device", EMULATOR, r"if pinned or serial in LANDSCAPE_RAN:",
          "if pinned:", "the android lane reads the display's rotation"),
+        ("the cutout's bar left as SystemUI first laid it, as shipped", EMULATOR,
+         r"return settle_status_bar\(serial, log, f\"cutout \{name\} \{'on' if on else 'off'\}\", on\)",
+         "return True", "the cutout's change waits for SystemUI's bar"),
+        ("the cutout turned off on a turned display", EMULATOR,
+         r"if not on and not upright_for_cutout\(serial, log\):", "if False:",
+         "the display is upright before the cutout goes"),
+        ("no phone's bar read at lane start", EMULATOR,
+         r"if serial != TABLET_SERIAL and not upright_bar_at_lane_start\(serial, sys\.stdout\):",
+         "if False:", "the lane start reads each phone's own bar"),
+        ("a phone's bar unread and the lane still green", EMULATOR,
+         r"(overlay behind\)\"\)\n)    status = 1\n", r"\1", "a phone's bar unread refuses the lane's verdict"),
+        ("the nudge's put back racing the scale it undoes", EMULATOR,
+         r"if global_font_scale\(serial\) == float\(other\):\n\s+break", "break",
+         "the nudge awaits its scale in the configuration"),
+        ("a bar SystemUI never laid out again accepted", EMULATOR,
+         r"(def wanted\(now, upright, rotation, cut\):\n\s+return rotation == 0 and \(cut > 0\) == on and )now == upright == ",
+         r"\1upright == ", "the bar settles laid out and upright alike"),
     ]
     for label, rel, pattern, repl, want in cuts:
         broken = g.doctor(f"safearea: {label}", sources[rel], pattern, repl)

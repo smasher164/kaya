@@ -1580,11 +1580,18 @@ LANDSCAPE_RAN = set()
 # device: on before its launch, off when it ends whatever its verdict, each read
 # back, and off again at teardown for a lane that died mid-leg.
 CUTOUT_ON = set()
+# Each phone's upright bar with no cutout, read at lane start (docs/traps.md,
+# the status bar one overlay behind).
+UPRIGHT_BAR = {}
+BAR_REFUSED = []
 
 
 def cutout_overlay(serial, name, on, log):
-    """The emulator's own display-cutout emulation overlay, read back."""
+    """The emulator's own display-cutout emulation overlay, read back, and the
+    status bar SystemUI lays out for it."""
     pkg = f"com.android.internal.display.cutout.emulation.{name}"
+    if not on and not upright_for_cutout(serial, log):
+        return False
     adb(serial, "shell", "cmd", "overlay", "enable" if on else "disable", pkg,
         stdout=log, stderr=log)
     mark = "[x]" if on else "[ ]"
@@ -1598,11 +1605,158 @@ def cutout_overlay(serial, name, on, log):
                 CUTOUT_ON.add((serial, name))
             else:
                 CUTOUT_ON.discard((serial, name))
-            return True
+            return settle_status_bar(serial, log, f"cutout {name} {'on' if on else 'off'}", on)
         time.sleep(0.1)
     line = next((x for x in listed.splitlines() if pkg in x), "nothing")
     print(f"cutout {name} on {serial}: asked {'on' if on else 'off'}, the overlay "
           f"list reads {line.strip()!r} (docs/safe-area-plan.md §5.5)", file=log)
+    return False
+
+
+def upright_for_cutout(serial, log):
+    """The display upright before the cutout goes (docs/traps.md, the status
+    bar one overlay behind)."""
+    got = None
+    for attempt in range(2):
+        for _ in range(30):
+            got = display_rotation(serial)
+            if got == 0:
+                return True
+            time.sleep(0.1)
+        if attempt == 0:
+            adb(serial, "shell", "input", "keyevent", "KEYCODE_HOME", stdout=log, stderr=log)
+    print(f"cutout off on {serial}: the display reads rotation {got!r} with the leg "
+          f"over and the home screen asked for, wanted 0 before the overlay goes "
+          f"(docs/traps.md, the status bar one overlay behind)", file=log)
+    return False
+
+
+def global_font_scale(serial):
+    """The font scale the window manager's configuration carries, or None."""
+    found = re.search(r"mGlobalConfiguration=\{([0-9.]+) ",
+                      adb_out(serial, "shell", "dumpsys", "window", "windows"))
+    return float(found.group(1)) if found else None
+
+
+def font_scale_nudge(serial, log):
+    """A configuration change and back, each put awaited in the configuration
+    (docs/traps.md, the status bar one overlay behind). None, or the sentence
+    of what it read."""
+    scale = adb_out(serial, "shell", "settings", "get", "system", "font_scale").strip()
+    try:
+        want = float(scale)
+    except ValueError:
+        return f"font_scale reads {scale!r}, not a number"
+    other = "1.15" if scale != "1.15" else "1.0"
+    try:
+        adb(serial, "shell", "settings", "put", "system", "font_scale", other,
+            stdout=log, stderr=log)
+        for _ in range(50):
+            if global_font_scale(serial) == float(other):
+                break
+            time.sleep(0.1)
+    finally:
+        back, applied = None, None
+        for _ in range(10):
+            adb(serial, "shell", "settings", "put", "system", "font_scale", scale,
+                stdout=log, stderr=log)
+            time.sleep(0.3)
+            back = adb_out(serial, "shell", "settings", "get", "system", "font_scale").strip()
+            applied = global_font_scale(serial)
+            if back == scale and applied == want:
+                break
+    if back == scale and applied == want:
+        return None
+    return (f"font_scale read {scale!r} before the configuration change and {back!r} "
+            f"after ten puts back, the configuration carrying {applied}")
+
+
+def status_bar_reading(serial):
+    """SystemUI's status bar as laid out now and for the upright display, the
+    display's rotation and its cutout's top, in px."""
+    windows = adb_out(serial, "shell", "dumpsys", "window", "windows")
+    now = re.search(r"StatusBar\}:\n.*?mAttrs=\{\(0,0\)\(fillx(\d+)\)", windows, re.S)
+    upright = re.search(r"ROTATION_0=\{\(0,0\)\(fillx(\d+)\)[^\n]*ty=STATUS_BAR", windows)
+    displays = adb_out(serial, "shell", "dumpsys", "window", "displays")
+    rotation = re.search(r"mDisplayRotation=ROTATION_(\d+)", displays)
+    cut = re.search(r"mDisplayCutout=DisplayCutout\{insets=Rect\(-?\d+, (-?\d+) - ", displays)
+    return tuple(int(m.group(1)) if m else None for m in (now, upright, rotation, cut))
+
+
+def settle_until(serial, log, wanted):
+    """Configuration changes until SystemUI's bar reads as [wanted] says
+    (docs/traps.md, the status bar one overlay behind)."""
+    reading = (None, None, None, None)
+    for _ in range(8):
+        nudged = font_scale_nudge(serial, log)
+        if nudged:
+            return reading, nudged
+        for _ in range(10):
+            reading = status_bar_reading(serial)
+            if None not in reading and wanted(*reading):
+                return reading, None
+            time.sleep(0.1)
+    return reading, None
+
+
+def settle_status_bar(serial, log, when, on):
+    """The bar after the cutout moved: upright, the taller of its own height
+    and the cutout's top."""
+    own = UPRIGHT_BAR.get(serial)
+    if own is None:
+        print(f"status bar at {when} on {serial}: its own height was never read at lane "
+              f"start (docs/traps.md, the status bar one overlay behind)", file=log)
+        return False
+    def wanted(now, upright, rotation, cut):
+        return rotation == 0 and (cut > 0) == on and now == upright == max(own, cut)
+    reading, nudged = settle_until(serial, log, wanted)
+    if nudged:
+        print(f"status bar at {when} on {serial}: {nudged} (docs/traps.md, the status bar "
+              f"one overlay behind)", file=log)
+        return False
+    now, upright, rotation, cut = reading
+    if None not in reading and wanted(*reading):
+        print(f"status bar at {when} on {serial}: {upright} px upright, its own {own} px, "
+              f"the cutout's top {cut} px", file=log)
+        return True
+    print(f"status bar at {when} on {serial}: SystemUI's bar reads {now} px as laid out "
+          f"and {upright} px upright with the display at rotation {rotation}, the cutout's "
+          f"top {cut} px and the bar's own height {own} px; wanted {'a' if on else 'no'} "
+          f"cutout and both bar readings the taller of the last two, after eight "
+          f"configuration changes (docs/traps.md, the status bar one "
+          f"overlay behind)", file=log)
+    return False
+
+
+def upright_bar_at_lane_start(serial, log):
+    """The bar's own height, read with the tall cutout on and then off, which
+    moves SystemUI's height both ways on a device left stale (docs/traps.md,
+    the status bar one overlay behind)."""
+    pkg = "com.android.internal.display.cutout.emulation.tall"
+    adb(serial, "shell", "cmd", "overlay", "enable", pkg, stdout=log, stderr=log)
+    CUTOUT_ON.add((serial, "tall"))
+    on, nudged = settle_until(serial, log, lambda now, upright, rotation, cut:
+                              rotation == 0 and cut > 0 and now == upright >= cut)
+    off = (None, None, None, None)
+    adb(serial, "shell", "cmd", "overlay", "disable", pkg, stdout=log, stderr=log)
+    if not nudged:
+        off, nudged = settle_until(serial, log, lambda now, upright, rotation, cut:
+                                   rotation == 0 and cut == 0 and now == upright < (on[1] or 0))
+    listed = adb_out(serial, "shell", "cmd", "overlay", "list")
+    if f"[ ] {pkg}" in listed:
+        CUTOUT_ON.discard((serial, "tall"))
+    if (not nudged and None not in on and None not in off and on[3] > 0 and off[3] == 0
+            and on[0] == on[1] == max(off[1], on[3]) and off[0] == off[1] < on[1]):
+        UPRIGHT_BAR[serial] = off[1]
+        print(f"status bar at lane start on {serial}: its own {off[1]} px, {on[1]} px "
+              f"under the tall cutout's {on[3]} px", file=log)
+        return True
+    print(f"status bar at lane start on {serial}: read (laid out, upright, rotation, "
+          f"cutout top) {on} with the tall cutout on and {off} with it off"
+          f"{f', {nudged}' if nudged else ''}; wanted the cutout's top on and none off, "
+          f"the bar's two readings equal each time, and the bar the taller of its own "
+          f"height and the cutout's (docs/traps.md, the status bar one overlay behind)",
+          file=log)
     return False
 
 
@@ -1641,6 +1795,8 @@ def upright_at_lane_start(serial):
     adb(serial, "shell", "am", "start", "-W", "-n", SETTINGS_ACTIVITY,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     hold_upright(serial, sys.stdout, "lane start")
+    if serial != TABLET_SERIAL and not upright_bar_at_lane_start(serial, sys.stdout):
+        BAR_REFUSED.append(serial)
     adb(serial, "shell", "am", "force-stop", SETTINGS_ACTIVITY.split("/")[0],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -4204,6 +4360,11 @@ only.summary("run-emulator", _selected)
 # read as a pass (2026-08-29). tools/check-gates.py holds all five
 # runners to this.
 exclusive.summary("android")
+if BAR_REFUSED:
+    print(f"run-emulator: FAIL — the status bar of {', '.join(sorted(BAR_REFUSED))} was not "
+          f"read back at lane start (the sentences above), so every leg there ran under "
+          f"a bar of unknown height (docs/traps.md, the status bar one overlay behind)")
+    status = 1
 print(f"run-emulator: the core's own diagnostics reached logcat on "
       f"{CORE_DIAG['seen']} of {CORE_DIAG['legs']} answered leg(s)")
 if CORE_DIAG["legs"] and not CORE_DIAG["seen"]:
