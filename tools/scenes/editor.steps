@@ -41,6 +41,11 @@ expect_menu "Edit>Undo" disabled
 expect_focused textarea#0
 type "alpha 1 beta 22"
 expect textarea#0 "alpha 1 beta 22"
+# On a phone the keyboard is up now: the buffer owes the room above it and
+# shows whole (docs/safe-area-plan.md A20; docs/traps.md, the grown
+# textarea's one-line floor). Everywhere else, its whole track again.
+expect_fills textarea#0
+expect_safe textarea#0
 expect_dirty true
 expect_menu "Edit>Undo" enabled
 

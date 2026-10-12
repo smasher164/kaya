@@ -129,6 +129,46 @@ IOS_NOTIFICATION_PREDICATE = (
     'eventMessage CONTAINS "effectiveSectionInfo"))')
 
 
+def ios_launch_pid(out, bundle_id):
+    """docs/traps.md, the app log selected by process name."""
+    m = re.search(rf"^{re.escape(bundle_id)}: (\d+)\s*$", out or "", re.M)
+    return int(m.group(1)) if m else None
+
+
+IOS_XCTEST_IDLE = (
+    ("main run loop", "Received request to notify when the main run loop is idle",
+     "Sending main run loop idle reply"),
+    ("animations", "Received request to notify when animations are idle",
+     "Sending animations idle reply"),
+)
+
+
+def ios_xctest_idle(text):
+    """docs/traps.md, the iOS ceiling's stacks and XCTest's 60 s animations-idle wait."""
+    lines = [l for l in (text or "").splitlines() if l[:4].isdigit()]
+    if not lines:
+        return "XCTest's idle waits: the app's log slice holds no lines at all"
+    out = []
+    unanswered = []
+    for kind, ask, answer in IOS_XCTEST_IDLE:
+        pending, asked, answered = [], 0, 0
+        for l in lines:
+            if ask in l:
+                asked += 1
+                pending.append(l[:23])
+            elif answer in l:
+                answered += 1
+                if pending:
+                    pending.pop(0)
+        out.append(f"{kind} asked {asked}, answered {answered}")
+        unanswered += [f"{kind} asked at {at}" for at in pending]
+    head = "XCTest's idle waits in the app: " + "; ".join(out)
+    span = f" (this slice runs {lines[0][:23]} to {lines[-1][:23]})"
+    if unanswered:
+        return head + span + "; NEVER ANSWERED: " + ", ".join(unanswered)
+    return head + span + "; every one answered"
+
+
 def _keyed_root(path):
     import plistlib
     with open(path, "rb") as f:

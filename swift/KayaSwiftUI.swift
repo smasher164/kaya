@@ -12642,6 +12642,11 @@ private func kayaRunScript(_ script: String) {
                             return "no track recorded — not a flex child"
                         }
                         let drawn = kayaDrawnExtents[widget.id] ?? 0
+                        if let room = kayaOwedRoom(widget.id), room < track - 2 {
+                            if abs(drawn - room) <= 2 { return "" }
+                            return "draws \(Int(drawn.rounded()))pt where the keyboard leaves "
+                                + "\(Int(room.rounded()))pt of its \(Int(track.rounded()))pt track (A20)"
+                        }
                         if drawn >= track - 2 { return "" }
                         return "draws \(Int(drawn.rounded()))pt of a \(Int(track.rounded()))pt track"
                     }
@@ -20935,6 +20940,7 @@ struct KayaRootFrameReader: View {
 #if os(macOS)
     /// No software keyboard on this platform (docs/safe-area-plan.md A13).
     @MainActor func kayaKeyboardInWindow() -> CGRect? { nil }
+    @MainActor func kayaOwedRoom(_ id: UInt64) -> CGFloat? { nil }
 #else
     /// The software keyboard's end frame in screen space, from UIKit's own
     /// notification; zero while none is up.
@@ -21018,6 +21024,32 @@ struct KayaRootFrameReader: View {
         }
     }
 
+    /// A20's height for the focused textarea while the keyboard is up: the
+    /// room above the keyboard less the pan's margin, a line at least; nil
+    /// when A20 does not hold it. The pan caps by it and expect_fills owes it.
+    @MainActor func kayaFieldRoom(
+        keyboard: CGRect, rects: (view: UIView, field: CGRect, caret: CGRect, window: UIWindow)
+    ) -> CGFloat? {
+        guard let node = kayaScene.focusedId.flatMap({ kayaScene.nodes[$0] }), node.kind == kindTextarea,
+            let text = rects.view as? UITextView
+        else { return nil }
+        let root = kayaRootOf(node.id)
+        let margin: CGFloat = 8
+        let top = max(rects.window.safeAreaInsets.top, kayaRootFrames[root]?.minY ?? 0)
+        let line = ceil((text.font ?? UIFont.preferredFont(forTextStyle: .body)).lineHeight)
+        let floor = line + text.textContainerInset.top + text.textContainerInset.bottom
+        return max(floor, keyboard.minY - top - margin)
+    }
+
+    /// The room A20 leaves [id] when it is the focused textarea and the
+    /// keyboard is up, read from the window now rather than from the cap.
+    @MainActor func kayaOwedRoom(_ id: UInt64) -> CGFloat? {
+        guard kayaScene.focusedId == id, let keyboard = kayaKeyboardInWindow(),
+            let rects = kayaFocusedFieldRects()
+        else { return nil }
+        return kayaFieldRoom(keyboard: keyboard, rects: rects)
+    }
+
     /// A4.2 (docs/safe-area-plan.md): when no scroll brought the focused field
     /// above the keyboard, the field's root is panned up by what is still
     /// covered, and back down when it needs less.
@@ -21037,11 +21069,7 @@ struct KayaRootFrameReader: View {
         if kayaScene.keyboardFieldCap.keys.contains(where: { $0 != focused?.id }) {
             kayaScene.keyboardFieldCap = [:]
         }
-        if let node = focused, node.kind == kindTextarea, let text = rects.view as? UITextView {
-            let top = max(rects.window.safeAreaInsets.top, kayaRootFrames[root]?.minY ?? 0)
-            let line = ceil((text.font ?? UIFont.preferredFont(forTextStyle: .body)).lineHeight)
-            let floor = line + text.textContainerInset.top + text.textContainerInset.bottom
-            let want = max(floor, keyboard.minY - top - margin)
+        if let node = focused, let want = kayaFieldRoom(keyboard: keyboard, rects: rects) {
             let held = kayaScene.keyboardFieldCap[node.id]
             if held != nil || rects.field.height > want + 0.5, abs((held ?? -1) - want) > 0.5 {
                 kayaScene.keyboardFieldCap = [node.id: want]

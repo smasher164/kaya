@@ -7622,6 +7622,37 @@ object KayaCompose {
         return last
     }
 
+    /** What the keyboard was doing to [id] when a size verb failed: the A20
+     * cap it holds, the root's ime reading and the default input method. */
+    /** The room A20 leaves [widget] when it is the focused textarea and the
+     * keyboard is up, read from the window now rather than from the cap. */
+    private fun kayaOwedRoom(activity: ComponentActivity, widget: KayaNode): Double? {
+        if (KayaSceneModel.composeFocusedId != widget.id) return null
+        val frame = kayaNodeFrames[widget.id] ?: return null
+        val decor = activity.window.decorView
+        val insets = ViewCompat.getRootWindowInsets(decor) ?: return null
+        return kayaFieldRoom(widget, frame, decor, insets)?.toDouble()
+    }
+
+    private fun kayaKeyboardReading(activity: ComponentActivity, id: Long): String {
+        val decor = activity.window.decorView
+        val insets = ViewCompat.getRootWindowInsets(decor)
+        val ime = insets?.let {
+            "ime ${if (it.isVisible(WindowInsetsCompat.Type.ime())) "visible" else "not visible"} " +
+                "${it.getInsets(WindowInsetsCompat.Type.ime()).bottom}px"
+        } ?: "no root insets"
+        val cap = KayaSceneModel.keyboardFieldCap
+        val held = when {
+            cap == null -> "no A20 cap"
+            cap.first == id -> "A20 cap ${Math.round(cap.second)}px"
+            else -> "A20 cap on node ${cap.first}"
+        }
+        val method = android.provider.Settings.Secure.getString(
+            activity.contentResolver, android.provider.Settings.Secure.DEFAULT_INPUT_METHOD)
+        val focused = KayaSceneModel.composeFocusedId
+        return "; $held, $ime, focus node ${focused ?: "none"}, input method ${method ?: "unset"}"
+    }
+
     private fun kayaWallReading(activity: ComponentActivity, verb: String): String? {
         val field = KayaSceneModel.composeFocusedId?.let { KayaSceneModel.nodes[it] }
             ?.takeIf { kayaIsTextField(it) } ?: return null
@@ -12512,11 +12543,19 @@ object KayaCompose {
                                         "no track recorded — not a flex child"
                                     } else {
                                         val drawn = kayaDrawnExtents[widget.id] ?: 0.0
-                                        if (drawn >= track - 2.0) {
+                                        val room = kayaOwedRoom(activity, widget)
+                                        if (room != null && room < track - 2.0) {
+                                            if (kotlin.math.abs(drawn - room) <= 2.0) ""
+                                            else "draws ${Math.round(drawn)}px where the keyboard " +
+                                                "leaves ${Math.round(room)}px of its " +
+                                                "${Math.round(track)}px track (A20)" +
+                                                kayaKeyboardReading(activity, widget.id)
+                                        } else if (drawn >= track - 2.0) {
                                             ""
                                         } else {
                                             "draws ${Math.round(drawn)}px of a " +
-                                                "${Math.round(track)}px track"
+                                                "${Math.round(track)}px track" +
+                                                kayaKeyboardReading(activity, widget.id)
                                         }
                                     }
                                 }
@@ -17341,7 +17380,7 @@ private fun KayaHighlightLayer(
             // both what gets clipped and what a photograph must cover.
             .onGloballyPositioned {
                 val r = it.boundsInWindow()
-                kayaTextViewports[node.id] = it.size.height.toFloat()
+                kayaTextTops[node.id] = it.positionInWindow().y
                 kayaTextBoxes[node.id] = android.graphics.Rect(
                     r.left.toInt(), r.top.toInt(), r.right.toInt(), r.bottom.toInt())
             }
@@ -18423,15 +18462,16 @@ internal fun kayaKeyboardTop(view: android.view.View): Float {
 /** Each sheet's content top in its own window, as last laid out. */
 internal val kayaSheetTops = HashMap<Long, Float>()
 
-/** Each text field's own viewport height, unclipped. */
-internal val kayaTextViewports = HashMap<Long, Float>()
+/** Each text field's own viewport top in the window, unclipped. */
+internal val kayaTextTops = HashMap<Long, Float>()
 
-/** A textarea's height at one line: its frame less its viewport, plus its
- * first line (A20). */
+/** A textarea's height at one line: its first line inside the decoration's
+ * padding above and below it (A20; docs/traps.md, the grown textarea's
+ * one-line floor). */
 internal fun kayaOneLineHeight(node: KayaNode, frame: androidx.compose.ui.geometry.Rect): Float {
     val layout = kayaTextLayouts[node.id]?.invoke() ?: return frame.height
-    val viewport = kayaTextViewports[node.id] ?: return frame.height
-    return frame.height - viewport + (layout.getLineBottom(0) - layout.getLineTop(0))
+    val top = kayaTextTops[node.id] ?: return frame.height
+    return 2f * (top - frame.top) + (layout.getLineBottom(0) - layout.getLineTop(0))
 }
 
 /** The content box's top in the window, below the top bar, as last laid out. */
@@ -18656,16 +18696,10 @@ internal fun kayaPanEvaluate() {
         return
     }
     val keyboardTop = decor.height - insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
-    val safeTop = insets.getInsets(
-        WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()).top
-    val top = if (inSheet) maxOf(safeTop.toFloat(), kayaSheetTops[kayaRootIdOf(field.id)] ?: 0f)
-        else maxOf(safeTop.toFloat(), kayaContentTop)
-    val room = keyboardTop - top
+    val room = keyboardTop - kayaKeyboardRoomTop(field, insets)
     val gap = 8f * decor.resources.displayMetrics.density
-    // A20: a focused textarea shrinks to the room above the keyboard, down to
-    // one line, and scrolls its own text.
-    if (field.kind == KayaCompose.KIND_TEXTAREA) {
-        val want = maxOf(kayaOneLineHeight(field, frame), room - gap)
+    val want = kayaFieldRoom(field, frame, decor, insets)
+    if (want != null) {
         val held = KayaSceneModel.keyboardFieldCap?.takeIf { it.first == field.id }?.second
         if ((held != null || frame.height > want + 0.5f) && (held == null || kotlin.math.abs(held - want) > 0.5f)) {
             KayaSceneModel.keyboardFieldCap = field.id to want
@@ -18688,6 +18722,31 @@ internal fun kayaPanEvaluate() {
         KayaSceneModel.keyboardPanRoot = kayaRootIdOf(field.id)
         KayaSceneModel.keyboardPan = next
     }
+}
+
+/** The top of the room a focused field has above the keyboard: below the
+ * system bars and the content's top, or its sheet's. */
+internal fun kayaKeyboardRoomTop(field: KayaNode, insets: WindowInsetsCompat): Float {
+    val safeTop = insets.getInsets(
+        WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()).top
+    val inSheet = KayaSceneModel.sheets.any { it.root?.id == kayaRootIdOf(field.id) }
+    return if (inSheet) maxOf(safeTop.toFloat(), kayaSheetTops[kayaRootIdOf(field.id)] ?: 0f)
+        else maxOf(safeTop.toFloat(), kayaContentTop)
+}
+
+/** A20's height for a focused textarea while the keyboard is up: the room
+ * above the keyboard less the pan's margin, never below one line; null when
+ * A20 does not hold [field]. The pan caps by it and expect_fills owes it. */
+internal fun kayaFieldRoom(
+    field: KayaNode,
+    frame: androidx.compose.ui.geometry.Rect,
+    decor: android.view.View,
+    insets: WindowInsetsCompat,
+): Float? {
+    if (field.kind != KayaCompose.KIND_TEXTAREA || !insets.isVisible(WindowInsetsCompat.Type.ime())) return null
+    val keyboardTop = decor.height - insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+    val gap = 8f * decor.resources.displayMetrics.density
+    return maxOf(kayaOneLineHeight(field, frame), keyboardTop - kayaKeyboardRoomTop(field, insets) - gap)
 }
 
 /** The topmost node above [id]: a surface's mounted root or a sheet's. */

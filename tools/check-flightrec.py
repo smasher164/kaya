@@ -1218,11 +1218,76 @@ def census_ios_stacks(src):
     census = swift[swift.find("func kayaCeilingAnimations("):]
     if "animations at the ceiling: \\(kayaCeilingAnimations())" not in ask \
             or "layer.animationKeys()" not in census:
-        found.append("swift: the ceiling no longer prints every layer's animations, which "
-                     "is what XCTest's animations-idle wait is waiting on")
+        found.append("swift: the ceiling no longer prints every layer's animations, the "
+                     "reading that rules a CALayer in or out of XCTest's animations-idle "
+                     "wait")
     fail = leg[leg.find("if not ok:"):]
     if "xl.seek(xcode_log_at)" not in fail:
         found.append("ios: a failed leg's log no longer carries XCTest's own idle waits")
+    return found
+
+
+def census_ios_app_log(src):
+    """docs/traps.md, the app log selected by process name."""
+    found = []
+    leg = py_block(src[IOS], "run_swiftui_on")
+    launch = leg.find('"simctl", "launch", "--console-pty"')
+    stamp = leg.find("launched_at = time.time()")
+    if stamp < 0 or launch < 0 or stamp > launch:
+        found.append("ios: the app log's window does not start at the leg's launch")
+    if "flightrec_lane.ios_launch_pid(out, bundle_id), launched_at)" not in leg:
+        found.append("ios: the failure path does not hand device_capture the launch's pid")
+    capture = py_block(src[IOS], "device_capture")
+    if 'f"processID == {pid}"' not in capture or '"--start", since,' not in capture:
+        found.append("ios: the app log is not selected by the launch's pid from its launch")
+    if "flightrec_lane.ios_xctest_idle(body)" not in capture:
+        found.append("ios: the app log does not lead with XCTest's idle waits")
+    if 'log.with_suffix(".applog")' not in py_block(src[LANE_PY], "IosRecorder"):
+        found.append("ios: app-log does not adopt the runner's sidecar")
+    return found
+
+
+def ios_app_log_checks(src, echo=False):
+    scope = {"re": re}
+    for name in ("ios_launch_pid", "ios_xctest_idle"):
+        body = py_block(src[LANE_PY], name)
+        if not body:
+            return [f"ios: missing app-log reader {name}"]
+        exec(compile(body, LANE_PY, "exec"), scope)
+    at = src[LANE_PY].find("IOS_XCTEST_IDLE = (")
+    exec(compile(src[LANE_PY][at:src[LANE_PY].find("\n\n", at)], LANE_PY, "exec"), scope)
+    ask = "[com.apple.dt.xctest:Default] Received request to notify when"
+    rows = [
+        f"2026-10-12 15:22:51.280 Df go[53460:1] {ask} the main run loop is idle",
+        "2026-10-12 15:22:51.280 Df go[53460:2] [com.apple.dt.xctest:Default] "
+        "Sending main run loop idle reply",
+        f"2026-10-12 15:22:51.280 Df go[53460:1] {ask} animations are idle",
+        "2026-10-12 15:22:51.280 Df go[53460:1] [com.apple.dt.xctest:Default] "
+        "Sending animations idle reply with error: (null)",
+        f"2026-10-12 15:22:51.566 Df go[53460:1] {ask} the main run loop is idle",
+        f"2026-10-12 15:22:51.566 Df go[53460:1] {ask} animations are idle",
+        "2026-10-12 15:22:51.566 Df go[53460:2] [com.apple.dt.xctest:Default] "
+        "Sending main run loop idle reply",
+        "2026-10-12 15:23:52.334 Df go[53460:2] [com.apple.UIKit] last line"]
+    stalled = scope["ios_xctest_idle"]("\n".join(rows))
+    clean = scope["ios_xctest_idle"]("\n".join(rows[:4]))
+    empty = scope["ios_xctest_idle"]("Timestamp               Ty Process[PID:TID]\n")
+    pid = scope["ios_launch_pid"]("noise\ndev.kaya.timecodego: 53460\n", "dev.kaya.timecodego")
+    other = scope["ios_launch_pid"]("dev.kaya.milestone2go: 1\n", "dev.kaya.timecodego")
+    if echo:
+        print("check-flightrec: iOS app log, stalled: " + stalled)
+    found = []
+    if "animations asked 2, answered 1" not in stalled or \
+            "NEVER ANSWERED: animations asked at 2026-10-12 15:22:51.566" not in stalled:
+        found.append("ios: the app log's idle reading lost the unanswered animations wait")
+    if "main run loop asked 2, answered 2" not in stalled or "main run loop asked at" in stalled:
+        found.append("ios: the app log's idle reading misreads an answered main run loop wait")
+    if "every one answered" not in clean:
+        found.append("ios: the app log's idle reading calls an answered slice unanswered")
+    if "holds no lines at all" not in empty:
+        found.append("ios: the app log's idle reading does not say its slice was empty")
+    if pid != 53460 or other is not None:
+        found.append("ios: the launch's pid is not read off simctl's own line for the bundle")
     return found
 
 
@@ -1297,7 +1362,8 @@ CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("iOS notification side", census_ios_notifications),
             ("linux ceiling stacks", census_wedge_capture),
             ("linux door record", census_door_record),
-            ("iOS ceiling stacks", census_ios_stacks))
+            ("iOS ceiling stacks", census_ios_stacks),
+            ("iOS app log", census_ios_app_log))
 TABLE = declared(REAL)
 gate.counted("lanes declaring a bundle shape", list(TABLE), floor=5)
 gate.counted("sections declared across the five lanes",
@@ -1318,6 +1384,8 @@ for line in ios_recording_recovery(REAL):
     gate.finding(line, at="iOS recording recovery")
 for line in ios_notification_checks(REAL, echo=True):
     gate.finding(line, at="iOS notification store")
+for line in ios_app_log_checks(REAL, echo=True):
+    gate.finding(line, at="iOS app log")
 
 
 def doctored(rel, pattern, repl, label, *, flags=re.M, want=1):
@@ -1782,6 +1850,35 @@ stacks_section = doctored(LANE_PY, r'self\.adopt\(bundle, "stacks",',
 gate.negative("NS6 iOS stacks section unwritten", lambda: census_sections(stacks_section),
               want="`stacks` is declared")
 
-gate.negatives_ran(106)
+for label, rel, pattern, repl, want, check in (
+        ("NL1 the app log selected by process name again", IOS,
+         r'f"processID == \{pid\}" if pid is not None',
+         "f'process == \"{executable}\"' if pid is not None",
+         "selected by the launch's pid", census_ios_app_log),
+        ("NL2 the app log's window back to the last two minutes", IOS,
+         r'"show", "--start", since,', '"show", "--last", "2m",',
+         "selected by the launch's pid", census_ios_app_log),
+        ("NL3 the launch's pid not handed over", IOS,
+         r"flightrec_lane\.ios_launch_pid\(out, bundle_id\), launched_at\)",
+         "None, launched_at)", "hand device_capture", census_ios_app_log),
+        ("NL4 the launch stamped after the launch", IOS,
+         r"^    launched_at = time\.time\(\)\n", "", "start at the leg's launch",
+         census_ios_app_log),
+        ("NL5 the idle summary dropped from the slice", IOS,
+         r"flightrec_lane\.ios_xctest_idle\(body\)", '""', "lead with",
+         census_ios_app_log),
+        ("NL6 an answer that clears no request", LANE_PY,
+         r"if pending:\n( +)pending\.pop\(0\)", r"if pending:\n\1pass",
+         "misreads an answered", ios_app_log_checks),
+        ("NL7 an unanswered wait never listed", LANE_PY,
+         r'unanswered \+= \[f"\{kind\} asked at \{at\}" for at in pending\]',
+         "unanswered += []", "lost the unanswered", ios_app_log_checks),
+        ("NL8 any launch line's pid taken", LANE_PY,
+         r'rf"\^\{re\.escape\(bundle_id\)\}: ', r'r"^\\S+: ',
+         "simctl's own line", ios_app_log_checks)):
+    changed = doctored(rel, pattern, repl, label)
+    gate.negative(label, lambda: check(changed), want=want)
+
+gate.negatives_ran(114)
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

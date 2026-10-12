@@ -2022,6 +2022,7 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
     if drive_dir.is_dir():
         (drive_dir / "deadline").write_text(f"{time.time() + 100:.3f}\n",
                                             encoding="utf-8")
+    launched_at = time.time()
     got = subprocess.run(
         ["timeout", "120", "xcrun", "simctl", "launch", "--console-pty",
          udid, bundle_id],
@@ -2048,7 +2049,8 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
         # THE PICTURE FIRST: a container lookup and two file copies sit
         # between here and the screen, and what is on it is the one
         # thing that does not keep.
-        device_capture(udid, pathlib.Path(app).stem, name, log)
+        device_capture(udid, pathlib.Path(app).stem, name, log,
+                       flightrec_lane.ios_launch_pid(out, bundle_id), launched_at)
         notification_capture(udid, bundle_id, name, installed_at, log)
         pull_container_files(udid, bundle_id, name, log)
         if drive_log.is_file():
@@ -2126,7 +2128,7 @@ def secure_refusals(script, name, log, out, slices):
     return secure_scan.refusals(script, transcripts)
 
 
-def device_capture(udid, executable, name, log):
+def device_capture(udid, executable, name, log, pid, launched_at):
     """A PICTURE OF THE SIMULATOR AND THE APP'S OWN LOG SLICE, at fail
     time, beside the leg's log for the flight recorder to adopt
     (IosRecorder.ios_leg). HERE AND NOT IN drain(): by then the device is
@@ -2164,16 +2166,34 @@ def device_capture(udid, executable, name, log):
     # The app's own slice of the simulator's log: the crash reporter, the
     # system's view of a launch that never mounted, and anything the
     # runtime said about the process the leg log cannot carry.
+    # docs/traps.md, the app log selected by process name.
     applog = (LEGS_DIR / f"{name}.log").with_suffix(".applog")
-    with open(applog, "w", encoding="utf-8", errors="replace") as af:
-        run(["timeout", "60", "xcrun", "simctl", "spawn", udid, "log",
-             "show", "--last", "2m", "--style", "compact", "--predicate",
-             f'process == "{executable}"'], stdout=af,
-            stderr=subprocess.STDOUT, **TEXT)
-    if not applog.stat().st_size:
-        applog.unlink()
-        print(f"run-sim: {name}: `simctl spawn {udid} log show` for "
-              f"process {executable!r} answered nothing", file=log)
+    since = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(launched_at - 1))
+    predicate = (f"processID == {pid}" if pid is not None
+                 else f'process == "{executable}"')
+    with tempfile.NamedTemporaryFile(prefix="kaya-applog-", delete=False) as tf:
+        raw = pathlib.Path(tf.name)
+    try:
+        with open(raw, "w", encoding="utf-8", errors="replace") as af:
+            got = run(["timeout", "60", "xcrun", "simctl", "spawn", udid, "log",
+                       "show", "--start", since, "--style", "compact",
+                       "--predicate", predicate], stdout=af,
+                      stderr=subprocess.STDOUT, **TEXT)
+        body = raw.read_text(encoding="utf-8", errors="replace")
+    finally:
+        raw.unlink(missing_ok=True)
+    why = ("" if pid is not None else
+           "; simctl printed no pid for the launch, so this is selected by "
+           "process name, which the unified log may give another bundle "
+           "sharing this executable")
+    applog.write_text(
+        f"== the app's own log from {since}, predicate {predicate}{why}; "
+        f"log show exited {got.returncode} ==\n"
+        f"{flightrec_lane.ios_xctest_idle(body)}\n\n{body}",
+        encoding="utf-8")
+    print(f"run-sim: {name} kept the app's log slice ({predicate}, "
+          f"{body.count(chr(10))} line(s), log show exit {got.returncode})",
+          file=log)
 
 
 def notification_capture(udid, bundle_id, name, since, log):

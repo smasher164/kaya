@@ -72,6 +72,38 @@ did not say which reading admitted the shot; `desktop-shot.when` now names it
 (tools/check-flightrec.py NI1). A probe of CGEventSource's session clock hung
 without output and was killed, so that clock is unmeasured here.
 
+## The grown textarea's one-line floor was its whole frame (measured 2026-10-12)
+
+editor-go on the android lane failed `expect_fills textarea#0` at its 7th step,
+"draws 600px of a 632px track", in 4 of 8 filtered runs and in the matrix. The
+reading added to that sentence said: A20 cap 600 px, ime visible 275 px, input
+method the lane's HelperIme. The editor focuses its buffer at mount, so the
+pool's keyboard comes up; when it was up before step 7 the step went red, and
+when step 7 ran first the step passed, which is why the leg had looked green.
+The room above the keyboard was 429 px (800 - 275 - 88 - 8), but A20's floor,
+"one line of its own text with its chrome", was computed as the field's frame
+less its viewport plus one line. Material's decoration measures the inner text
+field with no minimum height, so on a GROWN textarea the viewport is its own
+three lines, not the frame less the padding: 632 - 56 + 24 = 600. The floor
+was the whole buffer less two lines, the cap took the floor, and the buffer ran
+75 px under the keyboard. The non-grown textareas the keyboard scenes use
+(taskskeyboard's notes, chat's composer) have a viewport that fills the frame,
+so both readings agree there and no scene saw it. The floor is now the
+decoration's top padding twice plus the first line, read from the viewport's
+unclipped top. A first guess, that the cap went stale because no layout ran
+when the keyboard finished animating, was wrong: a trigger on the IME inset was
+added, cut, and the leg stayed red with the floor bug in place.
+
+expect_fills on a focused textarea under the keyboard now owes A20's room
+rather than the whole track, read from the window at the step and not from the
+cap, on Compose and on iOS (a desktop never raises a keyboard), so the step no
+longer depends on whether the keyboard has arrived. editor.steps checks
+`expect_fills` and `expect_safe textarea#0` after its first `type`, when the
+phone's keyboard is up on every lane; with the shipped interpreter both went
+red ("covered by the keyboard: frame (0,88,360,600), keyboard (0,525,360,275)")
+in 2 of 2 runs. tools/lib/safearea_routes.py holds the floor, the unclipped
+top and both verbs' room, each cut watched red.
+
 ## The status bar one overlay behind (measured 2026-10-12)
 
 tasksbig-compose failed 4 runs in 5 at its 200%-text Settings screen, whose
@@ -15143,6 +15175,42 @@ bypassing it is Appium WebDriverAgent's swizzle of
 `XCUIApplicationProcess -waitForQuiescenceIncludingAnimationsIdle:isPreEvent:`
 (that signature since Xcode 16 beta 5; present in Xcode 26.6's
 XCUIAutomation).
+
+SECOND SIGHTING, 2026-10-12 (matrix run 20261012T221225Z, `timecode-go`): the
+same step, the Return on `number_field@rowtime[a]`. This time the ceiling's
+census answered `0 animation(s) on 125 layer(s) in 2 window(s)`, so no CALayer
+was animating while XCTest waited. The wait is not a layer animation, and
+"look for the layer present only in the stalled one" found none. The device's
+own log (read by hand, by pid, since the bundle's app log was empty; see the
+next entry) shows this order. UIKit tore down the row field's input session
+and moved the keyboard offscreen at 15:22:51.404, BEFORE it dispatched the
+Return ("Keyboard inserts text" at .422). The keyboard's didHide reached the
+app at .824. XCTest asked for the main run loop idle and got an answer in the
+same millisecond. It asked at .566 for animations idle and got no answer.
+Steps 28 to 30 then ran green. The next `typeText` failed with "Lost
+connection to the application (pid 53460)" / "Unable to monitor animations",
+and the main thread sampled idle. The commit removes the field that holds the
+focus while the keyboard's Return is still being handled. That is the one
+thing this step does that the green Returns on the live fields do not. It is
+also the only part of the mechanism that two sightings share. Since then, an
+iOS app log starts with a line saying which of XCTest's idle requests went
+unanswered (`ios_xctest_idle`). Four filtered `timecode,numberfield` runs
+that followed passed 40 of 40 legs, 12 of them timecode. A forced red on
+`timecode-go` read back a bundle whose app log held 5,666 lines from the
+app's pid, which the unified log named `numberfielddego`.
+
+## The app log selected by process name (measured 2026-10-12)
+
+run-sim.py's `app-log` section was `log show --last 2m --predicate 'process
+== "<executable>"'`. Every Go scene is one executable copied into each bundle
+under that bundle's name, so they all have one Mach-O UUID. The unified log
+names the process after the bundle it registered first: the `timecode-go`
+app, pid 53460, logged as `milestone2go[53460]`. The predicate matched
+nothing, and the bundle of a red Go leg carried an empty app log while the
+device held 1,903 lines from that pid, XCTest's in-app agent included. The
+slice is now chosen by the pid that `simctl launch` prints, from the launch
+time, and starts with XCTest's idle waits (check-flightrec's
+census_ios_app_log and ios_app_log_checks, NL1 to NL8).
 
 ## One SwiftUI focus state across a view swap focuses nothing half the time (measured 2026-10-08)
 
