@@ -4545,6 +4545,32 @@ fn defer_scroll(container: u64, copy: u64, element: UIElement) -> windows_core::
     Ok(())
 }
 
+/// The part of an element's own box its layout slot leaves, as (left, top,
+/// right, bottom) in the element's coordinates; the whole box when the slot
+/// cuts nothing. Horizontally untouched under RTL, whose slots are mirrored.
+#[cfg(feature = "harness")]
+fn slot_cut(element: &FrameworkElement, rtl: bool) -> windows_core::Result<[f64; 4]> {
+    let (w, h) = (element.ActualWidth()?, element.ActualHeight()?);
+    let slot = LayoutInformation::GetLayoutSlot(element)?;
+    let m = element.Margin()?;
+    let offset = element.ActualOffset()?;
+    let clip_y = f64::from(slot.Y) + m.Top - f64::from(offset.Y);
+    let clip_h = f64::from(slot.Height) - (m.Top + m.Bottom);
+    let (mut top, mut bottom) = (0.0, h);
+    if clip_y > 0.0 || clip_y + clip_h < h {
+        (top, bottom) = (clip_y.max(0.0), (clip_y + clip_h).min(h).max(clip_y.max(0.0)));
+    }
+    let (mut left, mut right) = (0.0, w);
+    if !rtl {
+        let clip_x = f64::from(slot.X) + m.Left - f64::from(offset.X);
+        let clip_w = f64::from(slot.Width) - (m.Left + m.Right);
+        if clip_x > 0.0 || clip_x + clip_w < w {
+            (left, right) = (clip_x.max(0.0), (clip_x + clip_w).min(w).max(clip_x.max(0.0)));
+        }
+    }
+    Ok([left, top, right, bottom])
+}
+
 /// The nearest ScrollViewer above an element, by the framework's own
 /// parent chain.
 fn scroll_ancestor(element: &UIElement) -> windows_core::Result<Option<ScrollViewer>> {
@@ -27342,6 +27368,7 @@ impl crate::harness::Stage for WinUiStage {
     /// A desktop window has no safe area: the mounted root's own box is the
     /// whole of it (docs/safe-area-plan.md A9, A13).
     fn safe(&self, t: crate::harness::Target) -> Result<crate::harness::SafeWord, String> {
+        use bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper;
         let spec = crate::harness::target_spec(&t);
         let failed = spec.clone();
         Self::on_ui_read(move |core| {
@@ -27361,33 +27388,43 @@ impl crate::harness::Stage for WinUiStage {
                 .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
             let mut frame = [f64::from(at.X), f64::from(at.Y), element.ActualWidth()?, element.ActualHeight()?];
             let rtl = root.FlowDirection()? == bindings::Microsoft::UI::Xaml::FlowDirection::RightToLeft;
+            let bled = core.bled.contains(&id);
             // docs/traps.md, an element's own maxima crop an overflowing fill.
-            let slot = LayoutInformation::GetLayoutSlot(&element)?;
-            let m = element.Margin()?;
-            let offset = element.ActualOffset()?;
-            let clip_y = f64::from(slot.Y) + m.Top - f64::from(offset.Y);
-            let clip_h = f64::from(slot.Height) - (m.Top + m.Bottom);
-            let top = clip_y.max(0.0);
-            let bottom = (clip_y + clip_h).min(frame[3]);
-            if bottom > top && (top > 0.0 || bottom < frame[3]) {
-                frame[1] += top;
-                frame[3] = bottom - top;
+            let [l, t, r, b] = slot_cut(&element, rtl)?;
+            let mut shown = [frame[0] + l, frame[1] + t, frame[0] + r, frame[1] + b];
+            if bled && b > t {
+                (frame[1], frame[3]) = (shown[1], b - t);
             }
-            if !rtl {
-                let clip_x = f64::from(slot.X) + m.Left - f64::from(offset.X);
-                let clip_w = f64::from(slot.Width) - (m.Left + m.Right);
-                let left = clip_x.max(0.0);
-                let right = (clip_x + clip_w).min(frame[2]);
-                if right > left && (left > 0.0 || right < frame[2]) {
-                    frame[0] += left;
-                    frame[2] = right - left;
+            if bled && r > l {
+                (frame[0], frame[2]) = (shown[0], r - l);
+            }
+            let top: UIElement = root.cast()?;
+            let mut up = VisualTreeHelper::GetParent(&element).ok();
+            while let Some(node) = up {
+                if node.cast::<UIElement>().ok().as_ref() == Some(&top) {
+                    break;
                 }
+                if let Ok(ancestor) = node.cast::<FrameworkElement>() {
+                    let o = ancestor
+                        .TransformToVisual(&root)?
+                        .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
+                    let (ox, oy) = (f64::from(o.X), f64::from(o.Y));
+                    let [l, t, r, b] = if node.cast::<ScrollViewer>().is_ok() {
+                        [0.0, 0.0, ancestor.ActualWidth()?, ancestor.ActualHeight()?]
+                    } else {
+                        slot_cut(&ancestor, rtl)?
+                    };
+                    shown = [shown[0].max(ox + l), shown[1].max(oy + t), shown[2].min(ox + r), shown[3].min(oy + b)];
+                }
+                up = VisualTreeHelper::GetParent(&node).ok();
             }
+            let visible = [shown[0], shown[1], (shown[2] - shown[0]).max(0.0), (shown[3] - shown[1]).max(0.0)];
             Ok(crate::harness::safe_verdict(
                 &spec,
                 frame,
+                visible,
                 (root.ActualWidth()?, root.ActualHeight()?),
-                core.bled.contains(&id).then(|| bleed_edges(core, id)),
+                bled.then(|| bleed_edges(core, id)),
                 rtl,
             ))
         })

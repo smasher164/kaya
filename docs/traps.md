@@ -15724,6 +15724,25 @@ natural height (`Modifier.layout`, unbounded below) and pans; a sheet keeps its
 layout while typing and drops its handle and top inset when the keyboard leaves
 no room for them; the pan measures its room under the top bar and its sheet's
 content top. GUARD: tools/lib/safearea_routes.py (check-verbs), the visible-rect
-and squeeze clauses with their cuts watched. The SwiftUI reader has the same
-shape (a UIKit view frame, unclipped by KayaTopEdgeClip); GTK's reads
-compute_bounds, unclipped by a scrolled window.
+and squeeze clauses with their cuts watched.
+
+THE OTHER THREE READERS HAD THE SAME SHAPE, and were corrected the same day:
+SwiftUI read a UIKit view's frame or the flex track's `.global` frame, GTK
+`compute_bounds`, WinUI its own slot and nothing above it. Each now cuts the
+frame by every ancestor that clips (SwiftUI: a UIKit text control by each
+superview that clips or masks and by the bars over each view controller's
+view, any other frame by each enclosing scroll's viewport and its root's own
+layout frame, recorded outside the pan; GTK: each ancestor whose overflow is
+hidden or which is a GtkScrolledWindow, nothing for an unmapped widget; WinUI:
+each ScrollViewer's box and each ancestor's slot cut, through VisualTreeHelper
+to the root) and refuses a frame with nothing on screen or cut on any side;
+the iOS wall holds the caret line inside what shows. The honest reader turned
+ONE leg red on iOS, taskskeyboardland-swiftui: the details screen's notes
+field (96 pt) inside a scroll whose room above the keyboard was 101 pt showed
+89 of it — `cut by HostingScrollView clipping to (60,94,692x101)`. SwiftUI's
+own scroll to the focused field stops once part of it shows. Fixed by
+kayaRevealInScroll in the pan: a field that fits its scroll's room above the
+keyboard is scrolled the rest of the way with `setContentOffset` (the leg read
+`textarea@notes safe` after). The SwiftUI sentences name each cut that took
+something (`cut by ...`), since the first red's bundle could not say which
+ancestor it was. GUARD: the same file's desktop, SwiftUI and reveal clauses.

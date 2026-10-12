@@ -7041,20 +7041,25 @@ impl SafeWord {
 pub const INSET_WORDS: [&str; 3] = ["bar", "cutout", "none"];
 
 /// `expect_safe` on a desktop window, which has no safe area and no software
-/// keyboard: the frame and the window's content are the backend's own reads,
-/// `bleed` the touching sides as (top, bottom, leading, trailing), and the
-/// sentences are swift/KayaSwiftUI.swift's kayaSafeReading's.
+/// keyboard: the frame, what every ancestor's clip leaves of it (`visible`,
+/// in the frame's coordinates) and the window's content are the backend's own
+/// reads, `bleed` the touching sides as (top, bottom, leading, trailing), and
+/// the sentences are swift/KayaSwiftUI.swift's kayaSafeReading's.
 pub(crate) fn safe_verdict(
     spec: &str,
     frame: [f64; 4],
+    visible: [f64; 4],
     window: (f64, f64),
     bleed: Option<[bool; 4]>,
     rtl: bool,
 ) -> Result<SafeWord, String> {
     let tol = 1.0;
     let [x, y, w, h] = frame;
+    let [vx, vy, vw, vh] = visible;
     let (ww, wh) = window;
-    let facts = format!("frame ({x:.0},{y:.0},{w:.0},{h:.0}), window {ww:.0}x{wh:.0}");
+    let facts = format!(
+        "frame ({x:.0},{y:.0},{w:.0},{h:.0}), visible ({vx:.0},{vy:.0},{vw:.0},{vh:.0}), window {ww:.0}x{wh:.0}"
+    );
     if x < -tol || y < -tol || x + w > ww + tol || y + h > wh + tol {
         return Err(format!("{spec} runs past the window's edge: {facts}"));
     }
@@ -7069,6 +7074,12 @@ pub(crate) fn safe_verdict(
         return Err(format!(
             "{spec} bleeds but stops short of the window's edge on {short} touching side(s): {facts}"
         ));
+    }
+    if vw <= 0.0 || vh <= 0.0 {
+        return Err(format!("{spec} has nothing on screen, its parents clip all of it: {facts}"));
+    }
+    if vx > x + tol || vy > y + tol || vx + vw < x + w - tol || vy + vh < y + h - tol {
+        return Err(format!("{spec} is clipped by its parents: {facts}"));
     }
     Ok(SafeWord::Safe)
 }
@@ -8612,15 +8623,49 @@ mod tests {
     fn desktop_safe_verdict_reads_the_frame_against_the_window() {
         let w = (420.0, 594.0);
         let top_sides = Some([true, false, true, true]);
-        assert_eq!(safe_verdict("image#0", [0.0, 0.0, 420.0, 160.0], w, top_sides, false), Ok(SafeWord::Bleeds));
-        let short = safe_verdict("image#0", [16.0, 16.0, 388.0, 160.0], w, top_sides, false).unwrap_err();
+        let f = [0.0, 0.0, 420.0, 160.0];
+        assert_eq!(safe_verdict("image#0", f, f, w, top_sides, false), Ok(SafeWord::Bleeds));
+        let f = [16.0, 16.0, 388.0, 160.0];
+        let short = safe_verdict("image#0", f, f, w, top_sides, false).unwrap_err();
         assert!(short.contains("stops short of the window's edge on 3 touching side(s)"), "{short}");
-        let past = safe_verdict("canvas#0", [-16.0, 0.0, 10.0, 10.0], w, None, false).unwrap_err();
+        let f = [-16.0, 0.0, 10.0, 10.0];
+        let past = safe_verdict("canvas#0", f, f, w, None, false).unwrap_err();
         assert!(past.contains("runs past the window's edge"), "{past}");
-        assert_eq!(safe_verdict("label#0", [16.0, 200.0, 100.0, 20.0], w, None, false), Ok(SafeWord::Safe));
+        let f = [16.0, 200.0, 100.0, 20.0];
+        assert_eq!(safe_verdict("label#0", f, f, w, None, false), Ok(SafeWord::Safe));
         let leading = Some([false, false, true, false]);
-        assert_eq!(safe_verdict("image#0", [100.0, 0.0, 320.0, 10.0], w, leading, true), Ok(SafeWord::Bleeds));
-        assert!(safe_verdict("image#0", [100.0, 0.0, 320.0, 10.0], w, leading, false).is_err());
+        let f = [100.0, 0.0, 320.0, 10.0];
+        assert_eq!(safe_verdict("image#0", f, f, w, leading, true), Ok(SafeWord::Bleeds));
+        assert!(safe_verdict("image#0", f, f, w, leading, false).is_err());
+    }
+
+    /// docs/safe-area-plan.md A9: a frame inside the window that its parents
+    /// clip (a row scrolled out of its viewport, a field squeezed to nothing)
+    /// is not what the user sees, on all four sides.
+    #[test]
+    fn desktop_safe_verdict_refuses_what_its_parents_clip() {
+        let w = (420.0, 594.0);
+        let f = [16.0, 400.0, 100.0, 20.0];
+        let gone = safe_verdict("button#0", f, [16.0, 400.0, 100.0, 0.0], w, None, false).unwrap_err();
+        assert!(gone.contains("has nothing on screen, its parents clip all of it"), "{gone}");
+        assert!(gone.contains("frame (16,400,100,20), visible (16,400,100,0)"), "{gone}");
+        let squeezed = safe_verdict("entry#0", [16.0, 400.0, 100.0, 0.0], [16.0, 400.0, 100.0, 0.0], w, None, false);
+        assert!(squeezed.unwrap_err().contains("has nothing on screen"));
+        for visible in [
+            [20.0, 400.0, 96.0, 20.0],
+            [16.0, 404.0, 100.0, 16.0],
+            [16.0, 400.0, 90.0, 20.0],
+            [16.0, 400.0, 100.0, 12.0],
+        ] {
+            let cut = safe_verdict("button#0", f, visible, w, None, false).unwrap_err();
+            assert!(cut.contains("is clipped by its parents"), "{cut}");
+        }
+        assert_eq!(safe_verdict("button#0", f, [16.5, 400.5, 99.0, 19.0], w, None, false), Ok(SafeWord::Safe));
+        let bled = [0.0, 0.0, 420.0, 160.0];
+        assert_eq!(
+            safe_verdict("image#0", bled, [16.0, 16.0, 388.0, 144.0], w, Some([true, false, true, true]), false),
+            Ok(SafeWord::Bleeds)
+        );
     }
 
     /// docs/safe-area-plan.md A9: the three readings answer in words, and a

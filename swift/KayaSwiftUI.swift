@@ -20754,16 +20754,94 @@ func kayaRectText(_ r: CGRect) -> String {
 @MainActor func kayaPlatformFrame(_ node: KayaNode) -> CGRect? {
     if node.bleed, let f = kayaBleedFrames[node.id] { return f }
     #if os(iOS)
-        if let window = kayaHarnessWindow() {
-            if let view = kayaUITextViews[node.id]?.view, view.window != nil {
-                return view.convert(view.bounds, to: window)
-            }
-            if kayaScene.focusedId == node.id, let view = kayaFirstResponderView(), view is UITextField {
-                return view.convert(view.bounds, to: window)
-            }
+        if let window = kayaHarnessWindow(), let view = kayaPlatformTextView(node) {
+            return view.convert(view.bounds, to: window)
         }
     #endif
     return kayaNodeFrames[node.id]
+}
+
+#if os(iOS)
+    @MainActor func kayaPlatformTextView(_ node: KayaNode) -> UIView? {
+        if let view = kayaUITextViews[node.id]?.view, view.window != nil { return view }
+        if kayaScene.focusedId == node.id, let view = kayaFirstResponderView(), view is UITextField { return view }
+        return nil
+    }
+
+    /// A9 (docs/safe-area-plan.md): a UIKit view's frame in the harness
+    /// window, cut by every superview that clips or masks and by the bars over
+    /// each view controller's view, with each cut that took something named.
+    @MainActor func kayaUIKitClips(_ view: UIView, in window: UIView) -> (shown: CGRect, cuts: [String]) {
+        var shown = view.convert(view.bounds, to: window)
+        var cuts: [String] = []
+        func cut(_ by: CGRect, _ what: String) {
+            let next = shown.intersection(by)
+            if next != shown { cuts.append("\(what) \(by.isNull ? "(null)" : kayaRectText(by))") }
+            shown = next
+        }
+        var at = view.superview
+        while let v = at, v !== window {
+            if v.clipsToBounds || v.layer.masksToBounds {
+                cut(v.convert(v.bounds, to: window), "\(type(of: v)) clipping to")
+            }
+            if let mask = v.layer.mask {
+                cut(v.convert(mask.frame, to: window), "\(type(of: v))'s mask")
+            }
+            if v.next is UIViewController {
+                cut(v.convert(v.bounds.inset(by: v.safeAreaInsets), to: window),
+                    "the bars over \(type(of: v.next!))'s view, leaving")
+            }
+            at = v.superview
+        }
+        return (shown, cuts)
+    }
+#endif
+
+/// Each mounted root's own layout frame in `.global`, outside its pan: the
+/// root clips what it pans past its top, and what lies outside it is under a
+/// bar (docs/safe-area-plan.md A9).
+@MainActor var kayaRootFrames: [UInt64: CGRect] = [:]
+
+struct KayaRootFrameReader: View {
+    let id: UInt64
+
+    var body: some View {
+        GeometryReader { geo in
+            Color.clear
+                .onAppear { kayaRootFrames[id] = geo.frame(in: .global) }
+                .onChange(of: geo.frame(in: .global)) { _, f in kayaRootFrames[id] = f }
+        }
+    }
+}
+
+/// A9 (docs/safe-area-plan.md): what the platform leaves of `frame` on
+/// screen. A UIKit text control is read through its superviews; any other
+/// frame is cut by every enclosing scroll's viewport and by its root's frame.
+@MainActor func kayaVisibleFrame(_ node: KayaNode, _ frame: CGRect) -> (shown: CGRect, cuts: [String]) {
+    var shown = frame
+    var cuts: [String] = []
+    let empty = CGRect(x: frame.minX, y: frame.minY, width: 0, height: 0)
+    #if os(iOS)
+        if let window = kayaHarnessWindow(), let view = kayaPlatformTextView(node) {
+            let read = kayaUIKitClips(view, in: window)
+            return (read.shown.isNull ? empty : read.shown, read.cuts)
+        }
+    #endif
+    var current = node.id
+    while let parent = kayaScene.parents[current] {
+        if let ancestor = kayaScene.nodes[parent], ancestor.kind == kindScroll {
+            let next = shown.intersection(ancestor.scrollViewportGlobal)
+            if next != shown { cuts.append("scroll \(ancestor.id)'s viewport \(kayaRectText(ancestor.scrollViewportGlobal))") }
+            shown = next
+        }
+        current = parent
+    }
+    if let root = kayaRootFrames[current] {
+        let next = shown.intersection(root)
+        if next != shown { cuts.append("root \(current)'s frame \(kayaRectText(root))") }
+        shown = next
+    }
+    return (shown.isNull ? empty : shown, cuts)
 }
 
 /// `expect_safe`'s reading (harness.rs Step::ExpectSafe): the word, or the
@@ -20777,8 +20855,11 @@ func kayaRectText(_ r: CGRect) -> String {
     let keyboard = kayaKeyboardInWindow()
     let tol: CGFloat = 1
     let window = rects.window
-    let facts = "frame \(kayaRectText(frame)), safe area \(kayaRectText(rects.safe)), keyboard "
-        + (keyboard.map(kayaRectText) ?? "none") + ", window \(Int(window.width))x\(Int(window.height))"
+    let (visible, cuts) = kayaVisibleFrame(node, frame)
+    let cutBy: String = cuts.isEmpty ? "" : " (cut by \(cuts.joined(separator: "; ")))"
+    let keyboardText: String = keyboard.map(kayaRectText) ?? "none"
+    let facts = "frame \(kayaRectText(frame)), visible \(kayaRectText(visible))\(cutBy), safe area "
+        + "\(kayaRectText(rects.safe)), keyboard \(keyboardText), window \(Int(window.width))x\(Int(window.height))"
     if let keyboard, frame.maxY > keyboard.minY + tol {
         return (nil, "\(spec) is covered by the keyboard: \(facts)")
     }
@@ -20800,6 +20881,21 @@ func kayaRectText(_ r: CGRect) -> String {
         if short.isEmpty { return ("bleeds", facts) }
         return (nil, "\(spec) bleeds but stops short of the window's edge on \(short.count) touching side(s): \(facts)")
     }
+    if visible.width <= 0 || visible.height <= 0 {
+        return (nil, "\(spec) has nothing on screen, its parents clip all of it: \(facts)")
+    }
+    if visible.minX > frame.minX + tol || visible.minY > frame.minY + tol || visible.maxX < frame.maxX - tol
+        || visible.maxY < frame.maxY - tol
+    {
+        return (nil, "\(spec) is clipped by its parents: \(facts)")
+    }
+    #if os(iOS)
+        if let caret = kayaFocusedFieldRects(), caret.view === kayaPlatformTextView(node),
+            caret.caret.minY < visible.minY - tol || caret.caret.maxY > visible.maxY + tol
+        {
+            return (nil, "\(spec) shows less than its caret line \(kayaRectText(caret.caret)): \(facts)")
+        }
+    #endif
     let s = rects.safe
     if frame.minX >= s.minX - tol, frame.maxX <= s.maxX + tol, frame.minY >= s.minY - tol, frame.maxY <= s.maxY + tol {
         return ("safe", facts)
@@ -20897,6 +20993,28 @@ func kayaRectText(_ r: CGRect) -> String {
         return (view, view.convert(view.bounds, to: window), caret, window)
     }
 
+    /// A4 (docs/safe-area-plan.md): SwiftUI's own scroll to a focused field
+    /// stops once part of it shows (docs/traps.md, the clipped notes field), so
+    /// a field that fits its scroll's room above the keyboard is scrolled the
+    /// rest of the way.
+    @MainActor func kayaRevealInScroll(_ view: UIView, above keyboard: CGRect, in window: UIWindow) {
+        var at = view.superview
+        while let v = at, !(v is UIScrollView) { at = v.superview }
+        guard let scroll = at as? UIScrollView else { return }
+        let port = scroll.convert(scroll.bounds, to: window)
+        let roomTop = port.minY + scroll.adjustedContentInset.top
+        let roomBottom = min(port.maxY - scroll.adjustedContentInset.bottom, keyboard.minY)
+        let field = view.convert(view.bounds, to: window)
+        guard field.height <= roomBottom - roomTop, field.minY < roomTop - 0.5 || field.maxY > roomBottom + 0.5 else { return }
+        let dy = field.maxY > roomBottom ? field.maxY - roomBottom : field.minY - roomTop
+        let inset = scroll.adjustedContentInset
+        let most = max(-inset.top, scroll.contentSize.height + inset.bottom - scroll.bounds.height)
+        let y = min(max(scroll.contentOffset.y + dy, -inset.top), most)
+        if abs(y - scroll.contentOffset.y) > 0.5 {
+            scroll.setContentOffset(CGPoint(x: scroll.contentOffset.x, y: y), animated: false)
+        }
+    }
+
     /// A4.2 (docs/safe-area-plan.md): when no scroll brought the focused field
     /// above the keyboard, the field's root is panned up by what is still
     /// covered, and back down when it needs less.
@@ -20905,6 +21023,7 @@ func kayaRectText(_ r: CGRect) -> String {
             if !kayaScene.keyboardPan.isEmpty { kayaScene.keyboardPan = [:] }
             return
         }
+        kayaRevealInScroll(rects.view, above: keyboard, in: rects.window)
         let root = kayaScene.focusedId.map(kayaRootOf) ?? kayaScene.root?.id ?? 0
         let room = keyboard.minY - rects.window.safeAreaInsets.top
         let target = rects.field.height <= room ? rects.field : rects.caret
@@ -20965,11 +21084,15 @@ func kayaRectText(_ r: CGRect) -> String {
                 + "is not over the window now (docs/safe-area-plan.md A9)"
         }
         let top = rects.window.safeAreaInsets.top
-        if rects.caret.maxY <= keyboard.minY + 0.5, rects.caret.minY >= top - 0.5 {
+        let (visible, cuts) = kayaUIKitClips(rects.view, in: rects.window)
+        let shown = !visible.isNull && rects.caret.minY >= visible.minY - 0.5 && rects.caret.maxY <= visible.maxY + 0.5
+        if shown, rects.caret.maxY <= keyboard.minY + 0.5, rects.caret.minY >= top - 0.5 {
             return nil
         }
         return "\(verb): the focused field \(who) is not visible above the keyboard: its caret line "
-            + "\(kayaRectText(rects.caret)) and frame \(kayaRectText(rects.field)), the keyboard "
+            + "\(kayaRectText(rects.caret)), frame \(kayaRectText(rects.field)) of which its parents leave "
+            + "\(visible.isNull ? "nothing" : kayaRectText(visible)) on screen"
+            + (cuts.isEmpty ? "" : " (cut by \(cuts.joined(separator: "; ")))") + ", the keyboard "
             + "\(kayaRectText(keyboard)), the window \(Int(window.width))x\(Int(window.height)) "
             + "(docs/safe-area-plan.md A4, A9)"
     }
@@ -21006,8 +21129,9 @@ struct KayaRender: View {
             // and the focused field with it, each time the pan moved.
             let pan = isRoot ? kayaScene.keyboardPan[node.id] ?? 0 : 0
             kayaAnchored.offset(y: -pan).clipShape(KayaTopEdgeClip(active: pan > 0))
+                .background(isRoot ? KayaRootFrameReader(id: node.id) : nil)
         #else
-            kayaAnchored
+            kayaAnchored.background(isRoot ? KayaRootFrameReader(id: node.id) : nil)
         #endif
     }
 

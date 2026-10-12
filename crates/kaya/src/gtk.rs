@@ -9881,6 +9881,32 @@ fn set_shell_content(view: &adw::ToolbarView, child: Option<&gtk4::Widget>) {
     view.set_content(child);
 }
 
+/// `frame` (in `content`'s coordinates) cut by every ancestor that clips,
+/// None when nothing shows (docs/safe-area-plan.md A9).
+#[cfg(feature = "harness")]
+fn clipped_by_ancestors(
+    widget: &gtk4::Widget,
+    content: &gtk4::Widget,
+    frame: gtk4::graphene::Rect,
+) -> Option<gtk4::graphene::Rect> {
+    use gtk4::prelude::{ObjectExt, WidgetExt};
+    if !widget.is_mapped() {
+        return None;
+    }
+    let mut shown = frame;
+    let mut up = widget.parent();
+    while let Some(ancestor) = up {
+        if ancestor == *content {
+            break;
+        }
+        if ancestor.overflow() == gtk4::Overflow::Hidden || ancestor.is::<gtk4::ScrolledWindow>() {
+            shown = shown.intersection(&ancestor.compute_bounds(content)?)?;
+        }
+        up = ancestor.parent();
+    }
+    Some(shown)
+}
+
 /// What the window is showing under its chrome: the menu strip when one
 /// exists, otherwise the mounted root / nav entry / split view. A read that
 /// took the window's child would take the SHELL, which fills the window by
@@ -23600,9 +23626,12 @@ impl crate::harness::Stage for GtkStage {
                 .compute_bounds(&content)
                 .ok_or_else(|| format!("{spec}: the window's content is not laid out"))?;
             let bled = core.bled.contains(&widget);
+            let shown = clipped_by_ancestors(&widget, &content, frame);
+            let [vx, vy, vw, vh] = shown.map_or([frame.x(), frame.y(), 0.0, 0.0], |r| [r.x(), r.y(), r.width(), r.height()]);
             crate::harness::safe_verdict(
                 &spec,
                 [frame.x() - area.x(), frame.y() - area.y(), frame.width(), frame.height()].map(f64::from),
+                [vx - area.x(), vy - area.y(), vw, vh].map(f64::from),
                 (f64::from(area.width()), f64::from(area.height())),
                 bled.then(|| bleed_edges(&widget)),
                 widget.direction() == gtk4::TextDirection::Rtl,
