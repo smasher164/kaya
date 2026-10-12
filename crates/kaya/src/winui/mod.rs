@@ -3382,13 +3382,55 @@ fn refresh_bleeds(core: &mut CoreState) -> windows_core::Result<()> {
         let element: FrameworkElement = widget.element()?.cast()?;
         element.SetMargin(Thickness { Left: out(leading), Top: out(top), Right: out(trailing), Bottom: out(bottom) })?;
         if let NativeWidget::Image(image) = widget {
-            image.SetHorizontalAlignment(bindings::Microsoft::UI::Xaml::HorizontalAlignment::Stretch)?;
-            if let Some(max) = core.image_max_heights.get(&id) {
-                image.SetMaxHeight(max - out(top) - out(bottom))?;
+            // docs/traps.md, an element's own maxima crop an overflowing fill.
+            image.SetHorizontalAlignment(bindings::Microsoft::UI::Xaml::HorizontalAlignment::Center)?;
+            image.SetVerticalAlignment(bindings::Microsoft::UI::Xaml::VerticalAlignment::Center)?;
+            let max = core.image_max_heights.get(&id).copied();
+            match bled_picture_row(core, id, image, max)? {
+                Some((row, fit)) => {
+                    image.SetMaxHeight(f64::INFINITY)?;
+                    row.SetHeight(GridLength { Value: fit, GridUnitType: GridUnitType::Pixel })?;
+                }
+                None => {
+                    if let Some(max) = max {
+                        image.SetMaxHeight(max - out(top) - out(bottom))?;
+                    }
+                }
             }
         }
     }
     Ok(())
+}
+
+/// A bled picture's row in a plain column and its fit height
+/// (docs/safe-area-plan.md A19): the decoded size inside the picture's
+/// maxima, never past its own size. None while the picture is undecoded or
+/// its parent lays it out along a row.
+fn bled_picture_row(
+    core: &CoreState,
+    id: WidgetId,
+    image: &Image,
+    max_height: Option<f64>,
+) -> windows_core::Result<Option<(RowDefinition, f64)>> {
+    let Some(parent) = core.child_order.parent_of(id) else { return Ok(None) };
+    let Some(NativeWidget::Column(grid)) = core.widgets.get(&parent) else { return Ok(None) };
+    if !effective_vertical(core, parent) || TABLES.with_borrow(|t| t.contains_key(&parent.0)) {
+        return Ok(None);
+    }
+    let Some(bitmap) = image.Source().ok().and_then(|s| s.cast::<BitmapImage>().ok()) else { return Ok(None) };
+    let (w, h) = (f64::from(bitmap.PixelWidth()?), f64::from(bitmap.PixelHeight()?));
+    if w <= 0.0 || h <= 0.0 {
+        return Ok(None);
+    }
+    let max_w = image.MaxWidth()?;
+    let scale = 1f64.min(max_w / w).min(max_height.map_or(1.0, |m| m / h));
+    let element: FrameworkElement = image.cast()?;
+    let defs = grid.RowDefinitions()?;
+    let index = Grid::GetRow(&element)?;
+    if index < 0 || index as u32 >= defs.Size()? {
+        return Ok(None);
+    }
+    Ok(Some((defs.GetAt(index as u32)?, (h * scale).round())))
 }
 
 fn flush_container_tracks(core: &mut CoreState) -> windows_core::Result<()> {
@@ -17336,6 +17378,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         // A BLED PICTURE spans its slot's width at its fit
                         // height, drawn to fill.
                         image.SetStretch(if on { Stretch::UniformToFill } else { Stretch::Uniform })?;
+                        image.SetHorizontalAlignment(bindings::Microsoft::UI::Xaml::HorizontalAlignment::Stretch)?;
+                        image.SetVerticalAlignment(bindings::Microsoft::UI::Xaml::VerticalAlignment::Stretch)?;
                         if let Some(max) = core.image_max_heights.get(&id) {
                             image.SetMaxHeight(*max)?;
                         }
@@ -27315,8 +27359,30 @@ impl crate::harness::Stage for WinUiStage {
             let at = element
                 .TransformToVisual(&root)?
                 .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
-            let frame = [f64::from(at.X), f64::from(at.Y), element.ActualWidth()?, element.ActualHeight()?];
+            let mut frame = [f64::from(at.X), f64::from(at.Y), element.ActualWidth()?, element.ActualHeight()?];
             let rtl = root.FlowDirection()? == bindings::Microsoft::UI::Xaml::FlowDirection::RightToLeft;
+            // docs/traps.md, an element's own maxima crop an overflowing fill.
+            let slot = LayoutInformation::GetLayoutSlot(&element)?;
+            let m = element.Margin()?;
+            let offset = element.ActualOffset()?;
+            let clip_y = f64::from(slot.Y) + m.Top - f64::from(offset.Y);
+            let clip_h = f64::from(slot.Height) - (m.Top + m.Bottom);
+            let top = clip_y.max(0.0);
+            let bottom = (clip_y + clip_h).min(frame[3]);
+            if bottom > top && (top > 0.0 || bottom < frame[3]) {
+                frame[1] += top;
+                frame[3] = bottom - top;
+            }
+            if !rtl {
+                let clip_x = f64::from(slot.X) + m.Left - f64::from(offset.X);
+                let clip_w = f64::from(slot.Width) - (m.Left + m.Right);
+                let left = clip_x.max(0.0);
+                let right = (clip_x + clip_w).min(frame[2]);
+                if right > left && (left > 0.0 || right < frame[2]) {
+                    frame[0] += left;
+                    frame[2] = right - left;
+                }
+            }
             Ok(crate::harness::safe_verdict(
                 &spec,
                 frame,

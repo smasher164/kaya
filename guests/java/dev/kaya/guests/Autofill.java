@@ -20,6 +20,7 @@ public final class Autofill {
         boolean[] email = {false};
 
         app.build(tx -> {
+            tx.window(0).title("autofill");
             var accounts = AutofillAccountKaya.collection(tx);
             KayaApp.Signal<String> mode = tx.signal("sign in with a username");
 

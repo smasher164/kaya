@@ -14,6 +14,7 @@ struct Account: KayaGen {
 KayaApp.run { app in
     var email = false
     app.build { tx in
+        tx.window(title: "autofill")
         let accounts = accountCollection(tx)
         let mode = tx.signal(.str("sign in with a username"))
 

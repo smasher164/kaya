@@ -24,6 +24,7 @@ main :: IO ()
 main = kayaMain $ \app -> do
   email <- newIORef False
   buildTx app $ do
+    window primary [WTitle "autofill"]
     accounts <- collectionOf @Account
     mode <- signalText "sign in with a username"
 

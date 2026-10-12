@@ -18,6 +18,7 @@ enum Msg {
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
     let (user, mode) = ctx.apply(|tx| {
+        tx.window(kaya::DEFAULT_WINDOW).title("autofill");
         let mode = tx.signal("sign in with a username");
         let accounts = tx.collection::<Account>();
         let mut user = None;

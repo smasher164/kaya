@@ -1609,6 +1609,57 @@ enum KayaVTrace {
 }
 
 #if os(macOS)
+    /// A red leg's picture of its own windows, taken in process at the first
+    /// final failure into the file `KAYA_FAIL_SHOT` names, with a `.when`
+    /// sentence beside it: the guest leaves within the grace of its verdict,
+    /// so the recorder's collect finds no window (docs/traps.md, the mac red
+    /// leg whose window was gone; KayaCompose's KayaFailShot is the twin).
+    enum KayaFailShot {
+        nonisolated(unsafe) private static var taken = false
+
+        static func take(_ why: String) {
+            let named = ProcessInfo.processInfo.environment["KAYA_FAIL_SHOT"] ?? ""
+            if taken || named.isEmpty { return }
+            taken = true
+            let windows = DispatchQueue.main.sync { () -> [(UInt64, Int)] in
+                kayaNSWindows.filter { $0.value.isVisible && $0.value.windowNumber > 0 }
+                    .map { ($0.key, $0.value.windowNumber) }.sorted { $0.0 < $1.0 }
+            }
+            let said: String
+            if let (wid, num) = windows.first {
+                let shot = Process()
+                shot.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+                shot.arguments = ["-x", "-o", "-l\(num)", named]
+                var ran = "screencapture would not start"
+                do {
+                    try shot.run()
+                    let deadline = Date().addingTimeInterval(5)
+                    while shot.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
+                    if shot.isRunning {
+                        shot.terminate()
+                        ran = "screencapture was still running after 5s"
+                    } else {
+                        ran = "screencapture exited \(shot.terminationStatus)"
+                    }
+                } catch {
+                    ran = "screencapture would not start: \(error)"
+                }
+                let size = (try? FileManager.default.attributesOfItem(atPath: named)[.size] as? Int) ?? 0
+                said =
+                    size > 0
+                    ? "window#\(wid) (window server number \(num), \(windows.count) visible window(s)), "
+                        + "photographed in process by screencapture -l at \(why)"
+                    : "no picture: \(ran) and wrote \(size) bytes for window#\(wid) (number \(num)) at \(why)"
+            } else {
+                said = "no picture: no visible kaya window was registered at \(why)"
+            }
+            try? (said + "\n").write(toFile: named + ".when", atomically: true, encoding: .utf8)
+            FileHandle.standardError.write(Data("KAYA_HARNESS: fail shot: \(said)\n".utf8))
+        }
+    }
+#endif
+
+#if os(macOS)
     /// The app-side state that could explain a dropped scene request.
     func kayaDiagAppState() -> String {
         let app = NSApplication.shared
@@ -4492,6 +4543,7 @@ var kayaTearingDown: Set<UInt64> = []
             if kayaNSWindows[windowId] !== window {
                 kayaDiag("register wid=\(windowId) num=\(window.windowNumber)")
                 kayaNSWindows[windowId] = window
+                window.setFrameAutosaveName("")
                 // THE HAND RUN'S KNOB (tools/mac/dragwitness/run.py --hand): an
                 // accessory app's window opens behind the terminal that launched
                 // it, and a person cannot drag onto what they cannot see. The
@@ -4777,6 +4829,24 @@ var kayaTearingDown: Set<UInt64> = []
         kayaFrameMemory[windowId] = nil
         kayaFrameMemoryDeclared[windowId] = nil
         return false
+    }
+
+    /// A window that declares no size opens at GTK's default width and
+    /// SwiftUI's own default height, never at a frame another app left
+    /// (docs/traps.md, the host domain's frame).
+    let kayaUndeclaredWindowSize = CGSize(width: 540, height: 450)
+
+    /// AppKit's own frame autosave is keyed by the HOST binary's domain, so
+    /// every app one python3 runs shares it (docs/traps.md, the host
+    /// domain's window frame). Kaya's memory is the only one: answers how
+    /// many stale keys it dropped.
+    func kayaForgetAppKitFrames(_ store: UserDefaults) -> Int {
+        let stale = store.dictionaryRepresentation().keys.filter {
+            $0.hasPrefix("NSWindow Frame ")
+                && ($0.contains("KayaRoot") || $0.contains("KayaAuxRoot"))
+        }
+        for key in stale { store.removeObject(forKey: key) }
+        return stale.count
     }
 
     func kayaWindowFrameText(_ rect: NSRect) -> String {
@@ -13613,6 +13683,10 @@ private func kayaRunScript(_ script: String) {
                     for text in failures[failuresBefore...] {
                         print("KAYA_HARNESS: step-failed \(text)")
                     }
+                    #if os(macOS)
+                        watchdog.enter("<the fail shot>")
+                        KayaFailShot.take("the first failed step, \(line)")
+                    #endif
                 }
             }
         }
@@ -13689,6 +13763,10 @@ private func kayaRunScript(_ script: String) {
         actOne
         ? "KAYA_SELFTEST: ACT 1 FAILED (\(reported.joined(separator: "; ")))"
         : "KAYA_SELFTEST: FAILED (\(reported.joined(separator: "; ")))"
+    #if os(macOS)
+        watchdog.enter("<the fail shot>")
+        KayaFailShot.take("the failed verdict")
+    #endif
     KayaVTrace.dump("the verdict failed: \(verdict)")
     FileHandle.standardError.write("\(verdict)\n".data(using: .utf8)!)
     kayaWriteActTwoVerdict(verdict)

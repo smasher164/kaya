@@ -29,6 +29,9 @@ struct KayaApp: App {
                 KayaRoot().onOpenURL { KayaHost.linkOpened($0.absoluteString) }
             #endif
         }
+        #if os(macOS)
+        .defaultSize(width: kayaUndeclaredWindowSize.width, height: kayaUndeclaredWindowSize.height)
+        #endif
         // Auxiliary surfaces: data-driven windows keyed by the kaya window id.
         // Never opened by the system — only the mount arm presents one; phones
         // never get here (the core rejects create_window without the capability).
@@ -37,6 +40,9 @@ struct KayaApp: App {
                 KayaAuxRoot(windowId: windowId)
             }
         }
+        #if os(macOS)
+        .defaultSize(width: kayaUndeclaredWindowSize.width, height: kayaUndeclaredWindowSize.height)
+        #endif
     }
 }
 
@@ -56,6 +62,8 @@ final class KayaAppDelegate: NSObject, NSApplicationDelegate {
         // first frame is drawn in the host's mode (tools/check-appearance.py).
         kayaApplyAppearance()
         kayaApplyTextScale()
+        let forgot = kayaForgetAppKitFrames(.standard)
+        if forgot > 0 { kayaDiag("appkit frames forgotten \(forgot)") }
         // The notification centre's delegate, before launching finishes, so
         // a launch caused by a tap is delivered (docs/tasks-s3-plan.md §3).
         if kayaCanPostNotifications() {

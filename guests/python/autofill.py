@@ -29,7 +29,7 @@ def on_switch():
         mode.set("sign in with a username")
 
 
-with app.window():
+with app.window(title="autofill"):
     mode = kaya.signal("sign in with a username")
     accounts = kaya.collection(Account)
     with kaya.column():

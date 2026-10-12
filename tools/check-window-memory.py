@@ -29,6 +29,9 @@ dev_shell_or_die()
 #      it, cut and compiled with tools/checks/swiftui-fullscreen.swift over a
 #      window double that never reaches the window server — the app's write
 #      wins over a user change it overrode (docs/fullscreen-plan.md §1).
+#   F  STATIC, any host, with its rule driven in clause B: AppKit's own
+#      frame autosave, kept in the HOST binary's domain, is forgotten at
+#      launch and never written (docs/traps.md, the host domain's frame).
 #   E  STATIC, any host: GTK's fullscreen header bar (docs/fullscreen-plan.md
 #      §9), the half the linux lane's appended steps cannot see.
 #   D  STATIC, any host: the fullscreen rule on the two Rust backends
@@ -279,6 +282,88 @@ refuses("a save that remembers a fullscreen frame",
         want="no longer skips a fullscreen window")
 
 negatives = 6
+
+# --- Clause F: kaya's memory is the only one (docs/traps.md, the host
+# domain's window frame). AppKit's autosave lives in the HOST binary's
+# domain, so a window that declares no size opened at whatever another app
+# run by that python3 or java last left — and no scene can see it unless the
+# leg before it happened to leave a size its row does not fit.
+ENTRY = "swift/KayaSwiftUIEntry.swift"
+
+
+def appkit_frames(interp, entry, gtk):
+    bad = []
+    register = braced(interp, r"private func register\(_ view: NSView\)")
+    if register is None or not re.search(
+            r'window\.setFrameAutosaveName\(""\)', register):
+        bad.append("KayaWindowAccessor.register no longer clears the window's "
+                   "frame autosave name: AppKit then writes the frame into "
+                   "the host binary's domain, shared by every app it runs")
+    groups = len(re.findall(
+        r"\n *\.defaultSize\(width: kayaUndeclaredWindowSize\.width, "
+        r"height: kayaUndeclaredWindowSize\.height\)", entry))
+    if groups != 2:
+        bad.append(f"{ENTRY}: {groups} of the two WindowGroups take "
+                   f"kayaUndeclaredWindowSize as their default size, so a window "
+                   f"that declares none opens at whatever SwiftUI picks")
+    size = re.search(r"let kayaUndeclaredWindowSize = CGSize\(width: (\d+), "
+                     r"height: (\d+)\)", interp)
+    gtk_widths = set(re.findall(
+        r"(?:remembered|restored_frame)\.unwrap_or\(\((\d+), \d+\)\)", gtk))
+    if size is None or len(gtk_widths) != 1 or {size.group(1)} != gtk_widths:
+        bad.append(f"the mac's undeclared window width "
+                   f"{size.group(1) if size else None} is not GTK's "
+                   f"{sorted(gtk_widths)} (crates/kaya/src/gtk.rs, both "
+                   f"`unwrap_or` defaults)")
+    # SwiftUI's own default height, measured 900x450 with nothing restored:
+    # GTK's 330 grows to its content's minimum and this window does not, and
+    # the segmented scene's last control sat below a 330 pt window.
+    if size is not None and size.group(2) != "450":
+        bad.append(f"the mac's undeclared window height {size.group(2)} is "
+                   f"not SwiftUI's own default 450 (docs/traps.md, the host "
+                   f"domain's window frame)")
+    launch = braced(strip(entry), r"func applicationWillFinishLaunching\(")
+    if launch is None or "kayaForgetAppKitFrames(.standard)" not in launch:
+        bad.append(f"{ENTRY}: applicationWillFinishLaunching no longer calls "
+                   f"kayaForgetAppKitFrames(.standard) before any window "
+                   f"exists, so a frame another app left in the host's "
+                   f"domain is restored onto this one")
+    return bad
+
+
+real_entry = gate.read(ENTRY)
+real_gtk_rs = gate.read("crates/kaya/src/gtk.rs")
+for line in appkit_frames(real, real_entry, real_gtk_rs):
+    gate.finding(line)
+gate.negative("a window still autosaving into the host's domain",
+              lambda: appkit_frames(gate.doctor(
+                  "the autosave perturbation", real,
+                  r' *window\.setFrameAutosaveName\(""\)\n', ""), real_entry, real_gtk_rs),
+              want="no longer clears the window's frame autosave name")
+gate.negative("a launch that restores another app's frame",
+              lambda: appkit_frames(real, gate.doctor(
+                  "the forget perturbation", real_entry,
+                  r" *let forgot = kayaForgetAppKitFrames\(\.standard\)\n", ""), real_gtk_rs),
+              want="no longer calls kayaForgetAppKitFrames")
+gate.negative("an auxiliary WindowGroup with no default size",
+              lambda: appkit_frames(real, gate.doctor(
+                  "the aux default-size perturbation", real_entry,
+                  r"(KayaAuxRoot\(windowId: windowId\)\n(?:.*\n){2})"
+                  r" *#if os\(macOS\)\n *\.defaultSize\(.*\n *#endif\n", r"\1"), real_gtk_rs),
+              want="1 of the two WindowGroups")
+gate.negative("a mac default that is not GTK's",
+              lambda: appkit_frames(gate.doctor(
+                  "the default-size perturbation", real,
+                  r"CGSize\(width: 540, height: 450\)", "CGSize(width: 900, height: 450)"),
+                  real_entry, real_gtk_rs),
+              want="is not GTK's")
+gate.negative("a mac default height of GTK's 330, which its window never outgrows",
+              lambda: appkit_frames(gate.doctor(
+                  "the default-height perturbation", real,
+                  r"CGSize\(width: 540, height: 450\)", "CGSize(width: 540, height: 330)"),
+                  real_entry, real_gtk_rs),
+              want="not SwiftUI's own default 450")
+negatives += 5
 
 # --- Clause D: the Rust backends' callsites. --------------------------
 GTK = "crates/kaya/src/gtk.rs"
@@ -595,6 +680,16 @@ RUNTIME_NEGATIVES = [
      r"            let window = kayaNSWindows\[windowId\]",
      "guard let window = kayaNSWindows[windowId]",
      "an opted-out window's frame is not saved"),
+    ("aux-frame-kept",
+     "an auxiliary window's AppKit frame left in the host's domain",
+     r' \|\| \$0\.contains\("KayaAuxRoot"\)',
+     "",
+     "both of kaya's AppKit window frames are forgotten"),
+    ("any-frame",
+     "another app's frame forgotten with kaya's",
+     r'\$0\.hasPrefix\("NSWindow Frame "\)\n *&& ',
+     "",
+     "a frame that is not kaya's window's is kept"),
 ]
 
 for name, label, pattern, repl, want in RUNTIME_NEGATIVES:

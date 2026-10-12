@@ -17,6 +17,7 @@ func App() *kaya.App {
 	app := kaya.NewApp()
 
 	app.Build(func(tx *kaya.Tx) {
+		tx.Window(0).Title("autofill")
 		mode := tx.Signal("sign in with a username")
 		accounts := AccountCollection(tx)
 		email := false

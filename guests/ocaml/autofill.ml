@@ -13,6 +13,7 @@ let () =
   let email = ref false in
 
   build app (fun () ->
+      window ~title:"autofill" ();
       let accounts = collection_of account_record in
       let mode = signal Scalar.Str "sign in with a username" in
 

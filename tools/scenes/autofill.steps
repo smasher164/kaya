@@ -1,6 +1,7 @@
 # The content type (docs/autofill-plan.md): each credential field says what it
 # holds, and the harness reads the class off the platform's own property. A
 # new_password field reads as password, the class every platform tells apart.
+expect_title "autofill"
 expect_content_type entry@user username
 expect_content_type secure_field@password password
 expect_content_type entry@email email

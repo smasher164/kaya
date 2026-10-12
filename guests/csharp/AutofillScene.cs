@@ -16,6 +16,7 @@ static class AutofillScene
 
         app.Build(tx =>
         {
+            tx.Window(title: "autofill");
             var mode = tx.Signal("sign in with a username");
             var accounts = AutofillAccountKaya.Collection(tx);
 

@@ -1383,6 +1383,37 @@ def stage_suite_apk(label, apk, package, targets):
     return True
 
 
+def app_shot(serial, package, name, log):
+    """THE APP'S OWN PICTURE of its window at its first failed step
+    (KayaFailShot, KAYA_FAIL_SHOT), pulled through run-as beside the log
+    as the bundle's `shot` with the app's sentence as its note, then
+    deleted on the device. device_capture's screencap is taken after the
+    verdict, when the process has usually left (docs/traps.md, the android
+    red leg that photographed the home screen), so it is the
+    `desktop-shot`."""
+    base = LEGS_DIR / f"{name}.log"
+    for remote, local in ((f"files/fail-shot-{name}.png", base.with_suffix(".shot.png")),
+                          (f"files/fail-shot-{name}.png.when", base.with_suffix(".shotwhen"))):
+        pulled = subprocess.run(
+            ["adb", "-s", serial, "exec-out", "run-as", package, "cat", remote],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False)
+        if pulled.returncode == 0 and (pulled.stdout.startswith(b"\x89PNG")
+                                       or local.suffix == ".shotwhen" and pulled.stdout
+                                       and not pulled.stdout.startswith(b"run-as:")
+                                       and b"No such file" not in pulled.stdout):
+            local.write_bytes(pulled.stdout)
+        else:
+            local.unlink(missing_ok=True)
+    note = base.with_suffix(".shotwhen")
+    said = note.read_text(encoding="utf-8").strip() if note.is_file() else ""
+    print(f"{name}: the app's own picture: "
+          f"{'kept' if base.with_suffix('.shot.png').is_file() else 'none'}"
+          f"{' (' + said + ')' if said else ' (no sentence: the app took none)'}", file=log)
+    subprocess.run(["adb", "-s", serial, "shell", "run-as", package, "rm", "-f",
+                    f"files/fail-shot-{name}.png", f"files/fail-shot-{name}.png.when"],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+
+
 def device_capture(serial, package, name, log):
     """A PICTURE OF THE DEVICE AND ITS LOGCAT TAIL at fail time, beside
     the leg's log for the flight recorder to adopt.
@@ -1396,7 +1427,7 @@ def device_capture(serial, package, name, log):
     the app's process was still alive AT THE SHOT, which is the only
     thing that tells a picture of the scene from a picture of the
     launcher."""
-    shot = (LEGS_DIR / f"{name}.log").with_suffix(".shot.png")
+    shot = (LEGS_DIR / f"{name}.log").with_suffix(".desktop-shot.png")
     alive = out_of(["adb", "-s", serial, "shell", "pidof", package]).strip()
     got = subprocess.run(
         ["adb", "-s", serial, "exec-out", "screencap", "-p"],
@@ -1407,7 +1438,7 @@ def device_capture(serial, package, name, log):
              "left — most often the launcher")
     if got.returncode == 0 and got.stdout.startswith(b"\x89PNG"):
         shot.write_bytes(got.stdout)
-        (LEGS_DIR / f"{name}.log").with_suffix(".shotwhen").write_text(
+        (LEGS_DIR / f"{name}.log").with_suffix(".desktopwhen").write_text(
             f"`adb exec-out screencap -p` on {serial}, taken the moment "
             f"this leg was judged failed. The app's process was {whose}.\n",
             encoding="utf-8")
@@ -2013,6 +2044,7 @@ def run_apk_on(serial, name, apk, component, script, extras,
         # far too late, since the device goes back to the pool when this
         # function returns.
         device_capture(serial, package, name, log)
+        app_shot(serial, package, name, log)
         # The DEVICE, first: nothing else in this log says which
         # emulator ran the leg, and the dump below is only chaseable
         # there.
@@ -4073,6 +4105,7 @@ def run_suite_legs(suite):
         # the app's own files dir — the one place run-as can read back
         # (crates/kaya/src/vtrace.rs).
         extras += ["--es", "KAYA_VERB_TRACE", f"verb-trace-{leg}.txt"]
+        extras += ["--es", "KAYA_FAIL_SHOT", f"fail-shot-{leg}.png"]
         # THE SCENE'S OWN SECOND ACT, and the door this lane opens for it
         # (docs/tasks-s9-plan.md R6): a `relaunch` with no door named is
         # a leg that would wait out its ceiling for a tap nobody makes.

@@ -22,7 +22,7 @@ function onSwitch(): void {
   }
 }
 
-const { mode, user } = app.window(() => {
+const { mode, user } = app.window({ title: "autofill" }, () => {
   const mode = kaya.signal("sign in with a username");
   const accounts = kaya.collection(Account);
   const user = kaya.column(() => {

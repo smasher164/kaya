@@ -837,13 +837,17 @@ run_build ocaml build_ocaml
 # list-bin` costs 0.13-0.36 s and the leg loop named 138 of them one at a
 # time (docs/traps.md, "The linux leg loop asked cabal for every Haskell
 # path"). A path missing here fails its leg naming /tmp/hs-bins.
+# THE LANE'S OWN BUILDDIR: a dist-newstyle shared with the mac lane holds ONE
+# inplace package db per GHC version, so whichever lane registered last breaks
+# the other's next relink (docs/traps.md, the shared Haskell package db).
+HS_BUILDDIR="$CARGO_TARGET_DIR/cabal-guests"
 build_haskell() {
-    cd guests/haskell && cabal build all \
+    cd guests/haskell && cabal build all --builddir="$HS_BUILDDIR" \
         --extra-lib-dirs="$CARGO_TARGET_DIR/debug" \
         --ghc-options="-L$CARGO_TARGET_DIR/debug -optl-Wl,-rpath,$CARGO_TARGET_DIR/debug" -v0 || return 1
     rm -rf /tmp/hs-bins && mkdir -p /tmp/hs-bins || return 1
     grep '^executable ' kaya-guests.cabal | cut -d' ' -f2 \
-        | xargs -P 8 -I{} sh -c 'cabal list-bin "$1" -v0 >"/tmp/hs-bins/$1"' sh {} || return 1
+        | xargs -P 8 -I{} sh -c 'cabal list-bin --builddir="$2" "$1" -v0 >"/tmp/hs-bins/$1"' sh {} "$HS_BUILDDIR" || return 1
     local wanted got
     wanted=$(grep -c '^executable ' kaya-guests.cabal)
     got=$(find /tmp/hs-bins -type f -size +0 | wc -l)

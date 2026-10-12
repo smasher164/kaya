@@ -4,6 +4,108 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## The host domain's window frame (measured 2026-10-12)
+
+`KAYA_ONLY=scrollto tools/validate-mac.py` failed scrollto on python, csharp,
+java and js on every run with `clipped: button 8 "add frame" spans 332...428pt
+across ... past its 420x640pt window`, after the full matrix had passed the
+same legs that morning. The tree was not the cause; the host's preferences
+were. SwiftUI autosaves a WindowGroup window's frame as `NSWindow Frame
+main.KayaRoot-1-AppWindow-1` in the PROCESS's defaults domain, and for a guest
+that is the host binary's: `python3.14`, `com.azul.zulu.java`, `node`,
+`dotnet`, `kaya-go`, each shared by every kaya app that binary runs. The new
+safearea scene declares 420x640, its legs ran in all those hosts, and
+scrollto, which declares no size, opened at 420x640 in each. On the four
+vendor-built hosts (SDK stamps 13.3 and 14.4, the compat design generation)
+NSButton's bezel is 64/86/64/70/96 pt for the five captions, 412 pt with the
+gaps and 428 with the leading pad; on the modern stamp the same row is 378, so
+the rust, go, ocaml, haskell and swift legs fit 420 and passed. Deleting the
+java domain's key made scrollto-java open at 900x450 and pass. The same class
+produced "A hand-run resize_window poisons the NEXT python leg" below.
+
+Kaya's own window memory (docs/tasks-s4-plan.md P4, keyed by the app and
+honouring `remember_frame(false)`) is the only one now: the app delegate's
+`applicationWillFinishLaunching` drops every `NSWindow Frame` key naming
+KayaRoot or KayaAuxRoot before any window exists (`kayaForgetAppKitFrames`),
+and the accessor's register() clears the window's autosave name so AppKit
+never writes one again. With the 420x640 key restored, scrollto-java opened at
+900 and passed; with the forget cut it read 420x612 and failed the same step.
+With nothing restored, a window that declares no size opened at 900x450,
+and `align` (six 100 pt images that must wrap onto two lines) went red in all
+nine languages: every mac lane had been running undeclared windows at whatever
+an earlier run left, usually 540x330. At 540x330 `segmented` went red in all
+ten instead: its last control sat below the window. GTK's 540x330 is a request
+its content's minimum outgrows; a SwiftUI window does not grow, and
+NSHostingView's fittingSize answered 0x0, so there is no content height to
+grow to. Both WindowGroups now take `.defaultSize` from
+`kayaUndeclaredWindowSize`, 540x450: GTK's default width (gtk.rs's two
+`unwrap_or((540, 330))`) and SwiftUI's own default height. `NSSplitView Subview Frames` (a sidebar's column
+widths) still autosave into the host's domain and are shared the same way.
+tools/check-window-memory.py clause F (the forget, the cleared autosave name,
+both default sizes, the width held equal to GTK's and the height to 450) and
+its clause B case, seven watched cuts.
+
+## The mac red leg whose window was gone (measured 2026-10-12)
+
+The mac recorder photographs the guest's window by pid at COLLECT, after the
+leg has exited, and the harness leaves within its grace of the verdict. Every
+fast red therefore had `shot.skip` ("owned no on-screen window") beside a
+windows.txt listing OTHER pooled legs' windows (the java bundle listed the js
+guest's `node` window, which read as a child-process relation and is not one).
+The interpreter now photographs its own window in process at the first final
+failure, or at the failed verdict, with `screencapture -l<window number>` into
+the file `KAYA_FAIL_SHOT` names, before the publish; the recorder adopts it as
+`shot` with its `.when`, ahead of every later attempt. KayaCompose's
+KayaFailShot is the twin. tools/check-flightrec.py's mac app shot census, four
+watched cuts; a forced red scrollto-js bundle's shot.png showed the app.
+
+## A desktop shot of an active maintainer with HIDIdleTime at 99 minutes (measured 2026-10-12)
+
+The same run's desktop-shot.png showed the maintainer's Terminal while he was
+working. shot_desktop's wall held as written: HIDIdleTime read 7228 s at
+11:10 local, so no key or pointer input had reached the HID system since about
+09:10, and the shot at 10:49 saw roughly 99 minutes of idleness. Whatever input
+he was using at the time does not reach IOHIDSystem's idle clock. The bundle
+did not say which reading admitted the shot; `desktop-shot.when` now names it
+(tools/check-flightrec.py NI1). A probe of CGEventSource's session clock hung
+without output and was killed, so that clock is unmeasured here.
+
+## The content box that padded a frame late (measured 2026-10-12)
+
+The safe-area breadth (f9308f01) padded Compose's content box by
+`PaddingValues` built from `WindowInsets.safeDrawing.getTop/getBottom` read in
+COMPOSITION, where the root had used `safeDrawingPadding()`, which reads them
+at LAYOUT. The window's insets reach Compose's holder in the first traversal;
+a composition read reaches the layout only at the next recomposition, a frame
+later. When the guest's first batch (root, rows and the opening
+`scroll_to_row`) was already in the model at the first composition, the
+scroll landed in the inset-less frame and clamped at that frame's max: on the
+160 dpi phones the list's box was 656 px tall at top 104 and became 608 at 128
+one frame later (24 status bar + 24 gesture bar), so `scroll@list short of end
+(776 of 824)` held for all 15 s. It raced on an idle host too (one run 3/3
+green, the next compose and jvm red with go green), depending only on whether
+the root mounted before or after the inset recomposition. The section bar's
+content had the same class: it was padded by the height the bar REPORTED from
+`onGloballyPositioned` on an earlier frame. The content now pads with
+`windowInsetsPadding(pads.content)`, the bleed reads its insets inside its
+layout lambda, and the section scaffold is one Layout that measures the bar
+and then the content in the same pass. tools/lib/safearea_routes.py refuses a
+composition read in kayaContentPads, KayaContentBox and KayaSectionsScaffold,
+with five watched cuts.
+
+## The android red leg that photographed the home screen (measured 2026-10-12)
+
+The android runner reads the verdict from a logcat poll and the scene exits
+about 300 ms after printing it, so the fail-path `screencap` was almost always
+of the launcher: android-scrollto-go's bundle on 2026-10-12 showed the home
+screen for a list that was short of its end. The interpreter now takes its own
+picture (KayaFailShot: PixelCopy of its window, off the UI thread) at the
+first failed step, or at the failed verdict when no step failed, into the file
+`KAYA_FAIL_SHOT` names, and the runner pulls it through run-as as the
+bundle's `shot`; the screencap stays as `desktop-shot`. A PixelCopy is the
+app's surface alone: no system bars' icons, no keyboard, no other window.
+tools/check-flightrec.py holds the order.
+
 ## A SwiftUI modifier behind a branch rebuilt the focused field (measured 2026-10-11)
 
 The keyboard pan's first draft (docs/safe-area-plan.md A4.2) wrote
@@ -2210,7 +2312,9 @@ longer filled its window.
     defaults read kaya-swiftui-mac | grep 'NSWindow Frame'
     defaults delete kaya-swiftui-mac 'NSWindow Frame main.KayaRoot-1-AppWindow-1'
 
-is the check and the cure.
+is the check and the cure. Closed 2026-10-12: the frame now lives in the
+host binary's domain, and kaya forgets and stops writing it ("The host
+domain's window frame" above).
 
 So a hand-run resize is not free: it leaves state the lane inherits, and
 it lands on a DIFFERENT leg from the one you were probing, which is what
@@ -12400,7 +12504,10 @@ the binding (HEAD's fails the same), not KAYA_WIN_SLOT (recording-only;
 it tiles declared sizes too and fails the `window` scene in every
 language). The AppKit reason behind the wrapper's effect is not measured;
 the rule is that a hand run launches exactly as the pool does, which
-run-leg.py now does and check-gates N18 holds.
+run-leg.py now does and check-gates N18 holds. Likely the same cause as "The host domain's
+window frame" above (AppKit's autosave in a domain named after the binary;
+`align.plist` and `align.exe.plist` both exist), unmeasured; an undeclared
+window now opens at 540x450 whatever was saved.
 
 ## A shadow that links a directory and then writes below it writes the real tree (measured 2026-09-16)
 
@@ -15561,3 +15668,62 @@ WinUI's inset read was the root's first child's own origin, which is the inset
 only while that child has no margin of its own; a bled picture's negative
 margins put it at (0,0) and the leg read "inset 0, wanted 16". It reads the
 child's layout slot now, which the root's padding alone places.
+
+## WinUI: an element's own maxima crop an overflowing fill from the top left, whatever its alignment (measured 2026-10-12)
+
+A bled picture is `Stretch::UniformToFill`, and an Image's ArrangeOverride
+returns the WHOLE filled size (CMediaBase::MeasureArrangeHelper), which is
+larger than its slot on one axis. CFrameworkElement::ArrangeCore then aligns
+`min(ink, MaxHeight/Height)` inside the slot, so a bound on the element itself
+leaves nothing to centre: the picture showed its top 176 px, the sun cut and the
+sea gone, beside mac and GTK showing the middle. Setting the alignments to
+Center under the MaxHeight changed nothing (watched on the VM). The bled
+picture now has NO maximum of its own; its column's row is a Pixel track at the
+picture's fit height (refresh_bleeds' bled_picture_row) and the Center
+alignments place the overflow evenly on both sides of that slot. The overflow
+is in ActualWidth/ActualHeight, so a reader taking those reads the uncropped
+picture: expect_safe read `frame (0,-69,420,315)` and refused it as running past
+the window until it intersected the frame with the slot's layout clip. Held by
+tools/lib/safearea_routes.py (the WinUI centre, row and reader clauses).
+
+## The shared Haskell package db: the mac and linux lanes broke each other's relink (measured 2026-10-12)
+
+guests/haskell/dist-newstyle sits in the tree, so the mac lane and the linux
+container built into the same directory, and cabal keeps ONE inplace package db
+for the guests' library per GHC version (`packagedb/ghc-9.10.3`), which both
+lanes' GHC 9.10.3 share. Whichever lane registered the library last owns it: on
+2026-10-12 it held the mac build's unit ids (`base-4.20.2.0-51f4`) and
+`/Users/...` paths, and the first linux build that had to relink an executable
+(an edit to guests/haskell/autofill.hs) died with `cannot satisfy -package-id
+kaya-guests-0-inplace ... unusable due to missing dependencies`, failing EVERY
+Haskell leg on the lane (safearea-haskell as well as autofill-haskell). Nothing
+showed while no Haskell source moved, since an up-to-date executable is never
+relinked. The linux lane now builds into its own `--builddir`
+(`$CARGO_TARGET_DIR/cabal-guests`, tools/linux/run-suites.sh's build_haskell).
+
+## The landscape composer that read safe while hidden: Compose's frame was never what showed (measured 2026-10-12)
+
+On the android pool in landscape (800x360, keyboard top at 136) the chat app's
+composer was hidden under the keyboard while `expect_safe textarea@compose` and
+every typing verb's keyboard wall passed. The composer's frame was ZERO HIGH at
+y 124: a riding root gives its height to the keyboard (A5), the content box
+then had 16 px, and Compose's Column measures its children in order against
+what remains, so the search field got 16, Newest and the composer 0. A 0-high
+frame above the keyboard's top is inside the safe area, and the wall clamped
+the caret into that frame. The reader took `positionInWindow` plus size; it now
+also takes `boundsInWindow()` (the frame clipped by every ancestor) and refuses
+a frame its parents clip or a text field whose unclamped caret line does not fit
+what shows. Corrected, the reader turned three more landscape legs red that had
+passed the same way: the autofill form, taller than the window with no scroll,
+squeezed its last fields to 0 before the keyboard rose; the tasks quick-add
+sheet (Material's own keyboard padding squeezed it, then its drag handle and top
+inset left 20 px for a 56 px field); the tasks notes textarea (3-line floor, 80
+px, in a 48 px strip under the top bar). Fixed: a focused field shorter than its
+caret line stops the root riding until the keyboard goes, and the root keeps its
+natural height (`Modifier.layout`, unbounded below) and pans; a sheet keeps its
+layout while typing and drops its handle and top inset when the keyboard leaves
+no room for them; the pan measures its room under the top bar and its sheet's
+content top. GUARD: tools/lib/safearea_routes.py (check-verbs), the visible-rect
+and squeeze clauses with their cuts watched. The SwiftUI reader has the same
+shape (a UIKit view frame, unclipped by KayaTopEdgeClip); GTK's reads
+compute_bounds, unclipped by a scrolled window.

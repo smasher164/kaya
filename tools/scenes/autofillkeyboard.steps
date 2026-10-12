@@ -1,6 +1,7 @@
 # A form with no scroll and the keyboard up (docs/safe-area-plan.md A4, A15):
 # the focused field is moved above the keyboard. A phone's script: the desktops
 # have no software keyboard (A13).
+expect_title "autofill"
 expect_content_type secure_field@pin[a] one_time_code
 click secure_field@pin[a]
 expect_focused secure_field@pin[a]

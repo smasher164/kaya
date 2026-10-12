@@ -75,10 +75,10 @@ def main(argv):
         print(f"scene-negative: REFUSED — {saved} exists: an earlier run did not restore. "
               f"Compare it with {rel} and put the right one back first", file=sys.stderr)
         return 1
-    shutil.copy2(target, saved)
-    before = sha(saved)
     text = target.read_text(encoding="utf-8")
     doctored = Gate("scene-negative").doctor(rel, text, pattern, repl)
+    shutil.copy2(target, saved)
+    before = sha(saved)
     findings = []
     start = datetime.datetime.now()
     try:

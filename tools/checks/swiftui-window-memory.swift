@@ -401,5 +401,25 @@ enum KayaWindowMemoryProbe {
         kayaRestoreWindowFrame(10, optedOut)
         expect("an opted-out window's frame is not restored",
             optedOut.frame == held && kayaFrameMemory[10] == nil)
+
+        // --- AppKit's host-domain autosave: forgotten, the rest kept. ---
+        let suite = "dev.kaya.check-window-memory"
+        let host = UserDefaults(suiteName: suite)!
+        let mine = [
+            "NSWindow Frame main.KayaRoot-1-AppWindow-1",
+            "NSWindow Frame SwiftUI.PresentedWindowContent<Swift.UInt64, "
+                + "Swift.Optional<main.KayaAuxRoot>>-2-AppWindow-1",
+        ]
+        let theirs = [
+            "NSWindow Frame SomeOtherApp-1",
+            "NSSplitView Subview Frames main.KayaRoot-1-AppWindow-1, SidebarNavigationSplitView",
+        ]
+        for key in mine + theirs { host.set("20 325 420 640 0 0 1728 1084 ", forKey: key) }
+        let forgot = kayaForgetAppKitFrames(host)
+        expect("both of kaya's AppKit window frames are forgotten",
+            forgot == 2 && mine.allSatisfy { host.object(forKey: $0) == nil })
+        expect("a frame that is not kaya's window's is kept",
+            theirs.allSatisfy { host.object(forKey: $0) != nil })
+        host.removePersistentDomain(forName: suite)
     }
 }

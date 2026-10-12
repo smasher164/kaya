@@ -127,6 +127,38 @@ if unlocked:
     print("\n".join(unlocked), file=sys.stderr)
     status = 1
 
+# The container's cabal builds into its own --builddir (docs/traps.md, the
+# shared Haskell package db). Watched on a copy of the real file, the flag cut.
+CABAL = re.compile(r"(?:^|[^-\w])cabal\s+(?:build|list-bin|run|test)(?!\S)")
+
+
+def cabal_shared(text, rel):
+    return [f"{rel}:{n}:{line.strip()[:110]}"
+            for n, line in logical_lines(text)
+            if not line.lstrip().startswith("#") and CABAL.search(line)
+            and "--builddir" not in line]
+
+
+shared = []
+for f in sorted((ROOT / "tools/linux").glob("*.sh")):
+    shared += cabal_shared(f.read_text(encoding="utf-8"), f.relative_to(ROOT))
+suites = (ROOT / "tools/linux/run-suites.sh").read_text(encoding="utf-8")
+n_cut = suites.count(' --builddir="$HS_BUILDDIR"') + suites.count(' --builddir="$2"')
+cut = suites.replace(' --builddir="$HS_BUILDDIR"', "").replace(' --builddir="$2"', "")
+found = len(cabal_shared(cut, "run-suites.sh (cut)"))
+print(f"check-shell: self-test cabal --builddir cut, {n_cut} substitution(s), "
+      f"{found} finding(s)")
+if n_cut != 2 or found != 2:
+    print("check-shell: self-test failed (the cabal --builddir scan did not "
+          "refuse run-suites.sh with the flag cut from both invocations)",
+          file=sys.stderr)
+    status = 1
+if shared:
+    print("check-shell: cabal in the linux container without --builddir (it "
+          "shares the mac lane's inplace package db):", file=sys.stderr)
+    print("\n".join(shared), file=sys.stderr)
+    status = 1
+
 # The `$?` rule and the three shapes it forbids are in CLAUDE.md; none
 # of them is reported at -S warning. Allowed: a bare `name=$?` on the
 # line after a command, or `cmd || name=$?` on one line. Anything else

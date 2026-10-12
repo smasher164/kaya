@@ -1361,7 +1361,7 @@ for label, path, pattern, repl in (
      ""),
     ("Compose's content padded by nothing", COMPOSE,
      r"val pads = kayaContentPads\(topConsumed, bottomConsumed, rides\)",
-     "val pads = Pair(PaddingValues(0.dp), KayaSafePads(0f, 0f, 0f, 0f))"),
+     "val pads = KayaSafePads(WindowInsets(0), WindowInsets(0))"),
     ("Compose's pushed screen without its bar", COMPOSE,
      r"if \(KayaSceneModel\.menubar\.isEmpty\(\) && !covered\)",
      "if (KayaSceneModel.menubar.isEmpty())"),

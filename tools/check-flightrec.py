@@ -68,6 +68,7 @@ SWIFTUI = "swift/KayaSwiftUI.swift"
 DOOR_RECORD = "tools/linux/door_record.py"
 ACT2_EXEC = "tools/linux/act2-exec.sh"
 DOOR_LEGS = ("tools/linux/persist-leg.py", "tools/linux/link-leg.py")
+COMPOSE = "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
 
 # The recorder class whose body IS each python lane's collect path.
 RECORDERS = {"mac": "MacRecorder", "windows": "WinRecorder",
@@ -81,7 +82,84 @@ def sources():
     return {rel: gate.read(rel) for rel in
             (LANE_PY, LANE_SH, LINUX, IOS, ANDROID, WIN,
              STEPS, WINUI, GUEST_PS1, FOCUS_RING, HAND, WINLIST, HARNESS, SWIFTUI,
-             DOOR_RECORD, ACT2_EXEC, *DOOR_LEGS)}
+             DOOR_RECORD, ACT2_EXEC, COMPOSE, *DOOR_LEGS)}
+
+
+def census_android_app_shot(src):
+    """docs/traps.md, the android red leg that photographed the home
+    screen: the app's own picture is taken before its verdict is
+    published, since the process leaves about 300ms after it, and the
+    runner adopts THAT as `shot`, the screencap as `desktop-shot`."""
+    found = []
+    kt = src[COMPOSE]
+    step = kt.find("} else if (failures.size > failuresBefore) {")
+    step_end = kt.find("statements++", step)
+    if step < 0 or "KayaFailShot.take(" not in kt[step:step_end]:
+        found.append("android: the harness takes no picture at a step's final failure "
+                     "(KayaFailShot.take)")
+    verdict = kt.find('val said = reported.joinToString("; ")')
+    publish = kt.find('Log.e("kaya", line)', verdict)
+    take = kt.find("KayaFailShot.take(", verdict)
+    if verdict < 0 or publish < 0 or not 0 <= take < publish:
+        found.append("android: the failed verdict is published before the app's picture is "
+                     "taken — the process leaves under it")
+    if "android.view.PixelCopy.request(" not in kt[kt.find("object KayaFailShot"):]:
+        found.append("android: KayaFailShot no longer copies the window")
+    runner = src[ANDROID]
+    if '["--es", "KAYA_FAIL_SHOT", f"fail-shot-{leg}.png"]' not in runner:
+        found.append("android: the runner no longer names KAYA_FAIL_SHOT for the leg")
+    if 'f"files/fail-shot-{name}.png"' not in py_block(runner, "app_shot"):
+        found.append("android: app_shot does not pull the file KAYA_FAIL_SHOT names")
+    leg = py_block(runner, "run_apk_on")
+    if "app_shot(serial, package, name, log)" not in leg:
+        found.append("android: run_apk_on does not pull the app's own picture on a red leg")
+    if '.with_suffix(".shot.png")' not in py_block(runner, "app_shot") or \
+            '.with_suffix(".desktop-shot.png")' not in py_block(runner, "device_capture"):
+        found.append("android: the screencap after the verdict is filed as the leg's `shot` — "
+                     "it is the launcher's picture once the process has left")
+    rec = py_block(src[LANE_PY], "AndroidRecorder")
+    adopts = ('self.adopt_shot(bundle, "shot", log.with_suffix(".shot.png"),',
+              'self.adopt_shot(bundle, "desktop-shot", '
+              'log.with_suffix(".desktop-shot.png"),')
+    if not all(a in rec for a in adopts):
+        found.append("android: the recorder does not adopt the app's picture as `shot` and the "
+                     "screencap as `desktop-shot`")
+    return found
+
+
+def census_mac_app_shot(src):
+    """docs/traps.md, the mac red leg whose window was gone: the guest
+    leaves within the grace of its verdict, so the collect lists the other
+    pooled legs' windows. The guest photographs its own window at its first
+    final failure and before the verdict's publish, and the recorder adopts
+    that picture as `shot` ahead of every later attempt."""
+    found = []
+    sw = src[SWIFTUI]
+    step = sw.find("} else if failures.count > failuresBefore {")
+    step_end = sw.find("\n    }\n", step)
+    if step < 0 or "KayaFailShot.take(" not in sw[step:step_end]:
+        found.append("mac: the harness takes no picture at a step's final failure "
+                     "(KayaFailShot.take)")
+    verdict = sw.find('? "KAYA_SELFTEST: ACT 1 FAILED (')
+    publish = sw.find("watchdog.published(1)", verdict)
+    take = sw.find("KayaFailShot.take(", verdict)
+    if verdict < 0 or publish < 0 or not 0 <= take < publish:
+        found.append("mac: the failed verdict is published before the guest's picture is "
+                     "taken — the process leaves under it")
+    shot = sw[sw.find("enum KayaFailShot"):]
+    if '"-l\\(num)"' not in shot[:shot.find("\n    }\n")]:
+        found.append("mac: KayaFailShot no longer photographs its window by number")
+    rec = py_block(src[LANE_PY], "MacRecorder")
+    if 'env["KAYA_FAIL_SHOT"] = str(scratch / "fail-shot.png")' not in py_block(
+            rec, "watched_leg"):
+        found.append("mac: watched_leg no longer names KAYA_FAIL_SHOT for the leg")
+    body = py_block(rec, "_shot")
+    adopt, later = body.find('shutil.copy2(fail, bundle / "shot.png")'), \
+        body.find("self.shot_pid(")
+    if not 0 <= adopt < later:
+        found.append("mac: _shot does not adopt the guest's own picture as `shot` before "
+                     "it looks for a window the guest has already closed")
+    return found
 
 
 def py_block(text, name):
@@ -884,6 +962,8 @@ def desktop_shot_checks(src):
             exec(compile(body, LANE_PY, "exec"), scope)
             with tempfile.TemporaryDirectory() as tmp:
                 said = scope["shot_desktop"](None, pathlib.Path(tmp) / "d.png")
+                when = pathlib.Path(tmp) / "d.when"
+                when = when.read_text(encoding="utf-8") if when.is_file() else ""
         except (TypeError, ValueError, AttributeError, KeyError, OSError) as e:
             found.append(f"mac: shot_desktop with HIDIdleTime {idle} raised "
                          f"{type(e).__name__}: {e}")
@@ -900,6 +980,9 @@ def desktop_shot_checks(src):
                          f"the desktop")
         if (said is None) != want_none:
             found.append(f"mac: shot_desktop with HIDIdleTime {idle} answered {said!r}")
+        if said is None and f"HIDIdleTime {idle}s" not in when:
+            found.append(f"mac: shot_desktop photographed the desktop at HIDIdleTime "
+                         f"{idle} and wrote no sentence naming that reading ({when!r})")
     return found
 
 
@@ -1209,6 +1292,8 @@ CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("hand run", census_hand_run), ("iOS SDK stamp", census_ios_stamp),
             ("no frontmost shot", census_frontmost),
             ("Android history", census_android_history),
+            ("Android app shot", census_android_app_shot),
+            ("mac app shot", census_mac_app_shot),
             ("iOS notification side", census_ios_notifications),
             ("linux ceiling stacks", census_wedge_capture),
             ("linux door record", census_door_record),
@@ -1254,6 +1339,45 @@ nf2 = doctored(WINLIST, r'is not a pid"\)', 'is odd")',
 gate.negative("NF2 the window list reading nonsense as no filter",
               lambda: census_frontmost(nf2), want="does not refuse an argument")
 
+# The android app's own picture, each link cut from a copy.
+na1 = doctored(COMPOSE, r"^ *mountedActivity\?\.let \{ KayaFailShot\.take\(it, "
+                        r"\"the first failed step, \$line\"\) \}\n",
+               "", "NA1 cut the step's picture")
+gate.negative("NA1 no picture at a step's final failure",
+              lambda: census_android_app_shot(na1), want="takes no picture at a step")
+na2 = doctored(COMPOSE, r"^( *)(mountedActivity\?\.let \{ "
+                        r"KayaFailShot\.take\(it, \"the failed verdict\"\) \}\n)"
+                        r"((?:.*\n){1,6}?)( *Log\.e\(\"kaya\", line\)\n)",
+               r"\3\4\1\2", "NA2 moved the verdict's picture after the publish")
+gate.negative("NA2 the verdict published before the picture",
+              lambda: census_android_app_shot(na2), want="published before the app's picture")
+na3 = doctored(ANDROID, r"^ *app_shot\(serial, package, name, log\)\n", "",
+               "NA3 cut the pull of the app's picture")
+gate.negative("NA3 a red leg's picture never pulled",
+              lambda: census_android_app_shot(na3), want="does not pull the app's own picture")
+na4 = doctored(ANDROID, r'\.with_suffix\("\.desktop-shot\.png"\)', '.with_suffix(".shot.png")',
+               "NA4 the screencap filed as the leg's shot, as shipped")
+gate.negative("NA4 the launcher's picture as the leg's shot",
+              lambda: census_android_app_shot(na4), want="filed as the leg's `shot`")
+
+# The mac guest's own picture, each link cut from a copy.
+nm1 = doctored(SWIFTUI, r'^ *KayaFailShot\.take\("the first failed step, \\\(line\)"\)\n',
+               "", "NM1 cut the mac step's picture")
+gate.negative("NM1 no mac picture at a step's final failure",
+              lambda: census_mac_app_shot(nm1), want="mac: the harness takes no picture")
+nm2 = doctored(SWIFTUI, r'^ *KayaFailShot\.take\("the failed verdict"\)\n', "",
+               "NM2 cut the mac verdict's picture")
+gate.negative("NM2 the mac verdict published with no picture",
+              lambda: census_mac_app_shot(nm2), want="published before the guest's picture")
+nm3 = doctored(LANE_PY, r'^ *env\["KAYA_FAIL_SHOT"\] = str\(scratch / "fail-shot\.png"\)\n',
+               "", "NM3 cut the leg's KAYA_FAIL_SHOT")
+gate.negative("NM3 a mac leg run with no KAYA_FAIL_SHOT",
+              lambda: census_mac_app_shot(nm3), want="no longer names KAYA_FAIL_SHOT")
+nm4 = doctored(LANE_PY, r'^ *shutil\.copy2\(fail, bundle / "shot\.png"\)\n', "",
+               "NM4 cut the adoption of the guest's picture")
+gate.negative("NM4 the guest's picture never adopted",
+              lambda: census_mac_app_shot(nm4), want="does not adopt the guest's own picture")
+
 # The desktop shot's two idle refusals, each cut from a copy.
 nd1 = doctored(LANE_PY,
                r"^        if idle < mac_lane\.DESKTOP_SHOT_IDLE_S:\n.*?\n(?=        if )",
@@ -1265,6 +1389,11 @@ nd2 = doctored(LANE_PY, r"^        if idle is None:\n.*?\n(?=        if )",
                flags=re.M | re.S)
 gate.negative("ND2 a desktop shot when the idle clock is unreadable",
               lambda: desktop_shot_checks(nd2), want="HIDIdleTime None")
+ni1 = doctored(LANE_PY, r'^            dest\.with_suffix\("\.when"\)\.write_text\(\n'
+                        r'(?:.*\n){3}.*encoding="utf-8"\)\n',
+               "", "NI1 cut the desktop shot's idle sentence")
+gate.negative("NI1 a desktop shot that does not say what idle reading admitted it",
+              lambda: desktop_shot_checks(ni1), want="wrote no sentence naming that reading")
 
 # N1: a section the collect stops writing.
 n1 = doctored(LANE_PY, r'self\.section\(bundle, "unified-log", \[',
@@ -1653,6 +1782,6 @@ stacks_section = doctored(LANE_PY, r'self\.adopt\(bundle, "stacks",',
 gate.negative("NS6 iOS stacks section unwritten", lambda: census_sections(stacks_section),
               want="`stacks` is declared")
 
-gate.negatives_ran(97)
+gate.negatives_ran(106)
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

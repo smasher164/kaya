@@ -415,7 +415,7 @@ def check(gtk, winui, swiftui, compose):
         # observable green, the policy dead (docs/deferred.md's struck
         # winui bullet carries the measured wording).
         # The canvas report's own spelling: expect_inset reads a slot too.
-        if re.search(r"LayoutInformation::GetLayoutSlot\(&element\)",
+        if re.search(r"LayoutInformation::GetLayoutSlot\(&element\)\.ok\(\)\?",
                      strip_comments(winui_text)) is None:
             bad.append(
                 f"{paths['winui']}: the track report no longer reads "
@@ -787,8 +787,8 @@ def negatives():
     # produced, measured as track==raster by construction with the
     # policy dead.
     s = g.perturb("N4i (the WinUI report no longer reads the layout "
-                  "slot)", WINUI, r"LayoutInformation::GetLayoutSlot\(&element\)",
-                  "element_own_box(&element)", flags=re.S)
+                  "slot)", WINUI, r"LayoutInformation::GetLayoutSlot\(&element\)\.ok\(\)\?",
+                  "element_own_box(&element).ok()?", flags=re.S)
     g.negative("a slot report replaced by the element box",
                lambda p=s: check(GTK, str(p), SWIFTUI, COMPOSE),
                want="no longer reads the parent-assigned layout slot")

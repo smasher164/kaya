@@ -50,7 +50,7 @@ SECTIONS = {
                 "toast-moment", "gesture-moment", "media-server", "capture-devices"),
     "ios": ("leg-log", "verb-trace", "shot", "panic", "app-log", "devices", "binary-stamp",
             "notifications", "stacks"),
-    "android": ("leg-log", "verb-trace", "shot", "logcat", "devices",
+    "android": ("leg-log", "verb-trace", "shot", "desktop-shot", "logcat", "devices",
                 "system-events", "anr-history", "shade-history"),
     "linux": ("leg-log", "verb-trace", "shot", "desktop", "xvfb"),
 }
@@ -1247,6 +1247,12 @@ class AndroidRecorder(LaneRecorder):
         "flightrec: `adb exec-out screencap -p` took nothing for this leg — "
         "the device was gone by the fail path, or the call failed; the leg "
         "log's own screencap line says which")
+    APP_SHOT_ABSENT = (
+        "flightrec: the app wrote no picture of its window (KayaFailShot): "
+        "it takes one at the first failed step or the failed verdict, so a "
+        "leg with neither — a launch that never mounted, a step ceiling, a "
+        "process the system killed — has none; the leg log's `the app's own "
+        "picture` line says what came back, and desktop-shot is the device's")
 
     def android_leg(self, leg, verdict, secs, log, out=None):
         """The one per-leg entry point: the journal takes every leg,
@@ -1277,9 +1283,15 @@ class AndroidRecorder(LaneRecorder):
                 self.adopt(bundle, "shade-history", log.with_suffix(".shade-history"),
                            why_absent="flightrec: no SystemUI shade history was kept for "
                                       "this leg")
+                note = log.with_suffix(".shotwhen")
+                said = note.read_text(encoding="utf-8").strip() if note.is_file() else ""
                 self.adopt_shot(bundle, "shot", log.with_suffix(".shot.png"),
+                                why_absent=(f"flightrec: the app answered: {said}" if said
+                                            else self.APP_SHOT_ABSENT),
+                                note_src=note)
+                self.adopt_shot(bundle, "desktop-shot", log.with_suffix(".desktop-shot.png"),
                                 why_absent=self.SHOT_ABSENT,
-                                note_src=log.with_suffix(".shotwhen"))
+                                note_src=log.with_suffix(".desktopwhen"))
                 self.section(bundle, "devices", ["adb", "devices", "-l"])
                 self.finish(bundle, out=out)
         self.leg(leg, verdict, secs, fail, str(bundle) if bundle else "")
@@ -1496,6 +1508,7 @@ class MacRecorder(LaneRecorder):
         scratch = pathlib.Path(scratch)
         scratch.mkdir(parents=True, exist_ok=True)
         env["KAYA_VERB_TRACE"] = str(scratch / "verb-trace.txt")
+        env["KAYA_FAIL_SHOT"] = str(scratch / "fail-shot.png")
         text = ({"text": True, "encoding": "utf-8", "errors": "replace"}
                 if echo else {})
         proc = subprocess.Popen(
@@ -1561,6 +1574,11 @@ class MacRecorder(LaneRecorder):
                        stderr=subprocess.DEVNULL, check=False)
         dest = pathlib.Path(dest)
         if dest.is_file() and dest.stat().st_size > 0:
+            dest.with_suffix(".when").write_text(
+                f"taken with HIDIdleTime {idle}s, at or over "
+                f"{int(mac_lane.DESKTOP_SHOT_IDLE_S)}s: no key or pointer "
+                f"input reached this host's HID system in that time\n",
+                encoding="utf-8")
             return None
         dest.unlink(missing_ok=True)
         return ("flightrec: `screencapture -x -o` took no picture of "
@@ -1586,6 +1604,21 @@ class MacRecorder(LaneRecorder):
         what answers when the guest is already gone (an assertion
         failure exits at once); the DESKTOP answers when neither did,
         which is the case the old skip sentence could only describe."""
+        fail = scratch / "fail-shot.png"
+        said = scratch / "fail-shot.png.when"
+        guest_said = (said.read_text(encoding="utf-8", errors="replace").strip()
+                      if said.is_file() else "")
+        if fail.is_file() and fail.stat().st_size:
+            shutil.copy2(fail, bundle / "shot.png")
+            if said.is_file():
+                shutil.copy2(said, bundle / "shot.when")
+            self.mark(bundle, "shot", "ok",
+                      (bundle / "shot.png").stat().st_size)
+            self.skip(bundle, "desktop-shot",
+                      "flightrec: the `shot` section beside this file is the "
+                      "guest's own window, photographed by the guest itself "
+                      "at its first failure (KAYA_FAIL_SHOT), before it left")
+            return
         pid = self._sampler_pid(scratch)
         if pid and self.shot_pid(pid, bundle / "shot.png"):
             self.mark(bundle, "shot", "ok",
@@ -1621,7 +1654,9 @@ class MacRecorder(LaneRecorder):
             self.skip(bundle, "shot",
                       f"flightrec: guest pid {pid} owned no on-screen "
                       f"window at failure and the sampler took none while "
-                      f"it lived. This does not establish how long the "
+                      f"it lived. The guest's own fail shot said: "
+                      f"{guest_said or 'nothing (no KAYA_FAIL_SHOT sentence was written)'}. "
+                      f"This does not establish how long the "
                       f"host was awake. The window list beside this "
                       f"file is what was there, and the desktop-shot "
                       f"section is its picture.")
