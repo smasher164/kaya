@@ -963,7 +963,12 @@ in docs/deferred.md.
    request, and the runner keeps testmanagerd's, the runner's and
    runningboardd's account plus any crash report by pid (docs/traps.md, the
    animations-idle wait); fourteen cuts watched.
-   A hundred and thirty-two watched negatives, counts printed),
+   AND A RED BUNDLE OUTLIVES ITS RUN since 2026-10-13: the journal keeps the
+   newest 20 runs and a pruned run's red bundles move to flightrec/red/ for
+   90 days under a 2 GB bound, oldest first (the 2026-10-12 XCTest hang's
+   bundle was pruned before anyone needed it). The real pruner runs dry and
+   then for real over a synthetic home; eight cuts watched.
+   A hundred and forty watched negatives, counts printed),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer

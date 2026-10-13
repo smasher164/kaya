@@ -4150,7 +4150,8 @@ unpicked.
   invariant 9's own failure mode, and this entry was one of six the survey
   of that day found. THE ONE THING STILL OPEN under it is small and named
   at its end: whether a hand run should consume one of the journal's
-  newest-20 run slots (`KAYA_FLIGHTREC_KEEP`), which is a ruling. The survey
+  newest-20 run slots (`KAYA_FLIGHTREC_KEEP`), which is a ruling (red
+  bundles outlive the slot since 2026-10-13, in `flightrec/red/`). The survey
   (nine read-only auditors, one per language, the sugar tier plus every
   guest first committed on or after 2026-08-25) answered the maintainer's
   question — "are our bindings a naive port of one language to another?"
@@ -4201,7 +4202,11 @@ frontmost app, both pictures viewed; a green hand run leaves one journal
 record and no bundle; validate-mac ALL PASS twice. Small opens: a hand run
 consumes one of the journal's newest-20 run slots (KAYA_FLIGHTREC_KEEP,
 machine-wide), so twenty hand runs age out a lane run's bundles — raise the
-cap or keep hand runs under their own retention, a ruling.
+cap or keep hand runs under their own retention, a ruling. Since 2026-10-13
+an aged-out run's RED bundles move to `~/.local/state/kaya/flightrec/red/`
+and stay 90 days (2 GB bound), so what twenty hand runs now age out is a
+lane run's journal and green record, not its evidence; the slot question
+stands.
 ~~On a relaunch scene the lane refuses act two unless act one published
 `ACT 1 OK` while run-leg checks the exit code alone.~~ RESOLVED 2026-09-18:
 the hand runner now requires both a zero exit and the lane's act_one_ok
@@ -15819,8 +15824,12 @@ whose commit removes the field that holds the focus.
   ceiling's census read 0 animated layers; UIKit hid the keyboard before it
   delivered the Return; the next `typeText` failed with "Lost connection to
   the application (pid 53460)" / "Unable to monitor animations" while the
-  app's main thread sampled idle. That bundle is gone: the recorder keeps
-  the last 20 runs.
+  app's main thread sampled idle. That bundle is gone: the recorder then
+  kept only the last 20 runs, red bundles included. Since 2026-10-13 a
+  pruned run's red bundles move to
+  `~/.local/state/kaya/flightrec/red/<run>/bundles/<lane>-<leg>/` and stay
+  90 days (2 GB bound, oldest first; tools/lib/flightrec.py's `prune`,
+  held by check-flightrec's retention clause).
 
 63 of 63 timecode legs passed in the reproduction attempts of 2026-10-08
 (idle and under load 20 to 314). Not fixed, and the maintainer does not
@@ -15840,9 +15849,10 @@ suspend mark, the lost-connection lines, and any crash report naming the
 pid. `app-log` (since 36447b86) says which idle request went unanswered;
 `stacks` has both processes' threads at the ceiling.
 
-On the next sighting: copy the whole bundle to
-~/.local/state/kaya/flightrec/sightings/ first, then read `animations`'
-first line. A held count with an open start names the animation: find who
+On the next sighting, read `animations`' first line. The bundle is under
+`runs/<run>/bundles/` while its run is among the newest 20 and under
+`red/<run>/bundles/` after that (`tools/lib/flightrec.py prune --dry-run`
+lists every kept one). A held count with an open start names the animation: find who
 starts it on that Return and why its stop never comes. A held count with
 nothing open, or an idle count with the request unanswered, points away
 from UIView animations: read `system-log` for testmanagerd letting go of a

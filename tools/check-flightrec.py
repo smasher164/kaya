@@ -68,6 +68,7 @@ WINLIST = "tools/mac/flightrec-winlist.swift"
 HARNESS = "crates/kaya/src/harness.rs"
 SWIFTUI = "swift/KayaSwiftUI.swift"
 DOOR_RECORD = "tools/linux/door_record.py"
+JOURNAL = "tools/lib/flightrec.py"
 ACT2_EXEC = "tools/linux/act2-exec.sh"
 DOOR_LEGS = ("tools/linux/persist-leg.py", "tools/linux/link-leg.py")
 COMPOSE = "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
@@ -84,7 +85,7 @@ def sources():
     return {rel: gate.read(rel) for rel in
             (LANE_PY, LANE_SH, LINUX, IOS, ANDROID, WIN,
              STEPS, WINUI, GUEST_PS1, FOCUS_RING, HAND, WINLIST, HARNESS, SWIFTUI,
-             DOOR_RECORD, ACT2_EXEC, COMPOSE, *DOOR_LEGS)}
+             DOOR_RECORD, ACT2_EXEC, COMPOSE, JOURNAL, *DOOR_LEGS)}
 
 
 def census_android_app_shot(src):
@@ -1495,6 +1496,93 @@ def ios_hang_record_checks(src, echo=False):
     return found
 
 
+def retention_checks(src, echo=False):
+    """A red bundle outlives the run it came from (docs/HACKING.md, "read a
+    failed leg"): the real pruner, run over a synthetic home, dry and then
+    for real."""
+    import calendar
+    scope = {"__name__": "flightrec_probe"}
+    exec(compile(src[JOURNAL], JOURNAL, "exec"), scope)
+    now = calendar.timegm((2026, 10, 13, 0, 0, 0))
+
+    def name(days_ago, n):
+        return time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(now - days_ago * 86400)) + f"-{n:06d}"
+
+    found = []
+    with tempfile.TemporaryDirectory() as tmp:
+        base = pathlib.Path(tmp)
+        scope["home"] = lambda: base
+        runs = [name(100 - i * 0.01 if i == 0 else 30 - i * 0.5, i) for i in range(24)]
+        reds = {runs[0]: "linux-gtk-e", runs[1]: "mac-a", runs[3]: "ios-b", runs[23]: "win-new"}
+        for i, run in enumerate(runs):
+            d = base / "runs" / run
+            (d / "bundles").mkdir(parents=True)
+            bundle = f"{d}/bundles/{reds[run]}" if run in reds else None
+            (d / "journal.jsonl").write_text(
+                json.dumps({"rec": "leg", "bundle": bundle}) + "\n", encoding="utf-8")
+            if run in reds:
+                (d / "bundles" / reds[run]).mkdir()
+                (d / "bundles" / reds[run] / "leg-log.txt").write_bytes(b"r" * 3000)
+        for run, leg in ((name(134, 90), "linux-old"), (name(42, 91), "win-c"),
+                         (name(28, 92), "android-d")):
+            (base / "red" / run / "bundles" / leg).mkdir(parents=True)
+            (base / "red" / run / "bundles" / leg / "shot.png").write_bytes(b"p" * 3000)
+
+        def tree():
+            return sorted(str(p.relative_to(base)) for p in base.rglob("*"))
+
+        before = tree()
+        said = []
+        scope["prune"](20, now=now, days=90, limit=10000, dry=True, every=True,
+                       say=said.append)
+        if tree() != before:
+            found.append("retention: the dry run moved or removed something")
+        plan = "\n".join(said)
+        said = []
+        scope["prune"](20, now=now, days=90, limit=10000, say=said.append)
+        did = "\n".join(said)
+        if echo:
+            print("check-flightrec: retention plan (dry):\n  " + plan.replace("\n", "\n  "))
+            print("check-flightrec: retention done:\n  " + did.replace("\n", "\n  "))
+        left = sorted(d.name for d in (base / "runs").iterdir())
+        if left != runs[4:]:
+            found.append(f"retention: {len(left)} runs kept, wanted the newest 20 of 24")
+        if not (base / "runs" / runs[23] / "bundles" / "win-new").is_dir():
+            found.append("retention: a red bundle inside a kept run was moved or removed")
+        red = sorted(str(p.relative_to(base / "red")) for p in (base / "red").glob("*/bundles/*"))
+        want = sorted([f"{runs[1]}/bundles/mac-a", f"{runs[3]}/bundles/ios-b",
+                       f"{name(28, 92)}/bundles/android-d"])
+        for lost in sorted(set(want) - set(red)):
+            found.append(f"retention: lost red bundle {lost}")
+        for extra in sorted(set(red) - set(want)):
+            why = ("older than 90 days" if "-e" in extra or "old" in extra
+                   else "past the disk bound" if "win-c" in extra else "unexpected")
+            found.append(f"retention: kept {extra}, {why}")
+        if (base / "red" / name(134, 90)).exists():
+            found.append("retention: an emptied red run directory was left behind")
+        journal = base / "red" / runs[1] / "journal.jsonl"
+        if not journal.is_file():
+            found.append("retention: a moved red bundle lost its run's journal")
+        elif f"/red/{runs[1]}/bundles/mac-a" not in journal.read_text(encoding="utf-8"):
+            found.append("retention: the kept journal still points into the pruned run")
+        for text, mode in ((plan, "dry run"), (did, "prune")):
+            for leg in ("mac-a", "ios-b", "linux-gtk-e"):
+                if not re.search(rf"move(?:d)? red bundle \S*/{leg} ", text):
+                    found.append(f"retention: the {mode} did not print the move of {leg}")
+            for leg, why in (("linux-old", "older than 90 days"),
+                             ("linux-gtk-e", "older than 90 days"),
+                             ("win-c", "past the 10000 bytes bound")):
+                if not re.search(rf"remove(?:d)? red bundle \S*/{leg} \(.*{why}", text):
+                    found.append(f"retention: the {mode} did not print removing {leg} ({why})")
+            if len(re.findall(r"remove(?:d)? run ", text)) != 4:
+                found.append(f"retention: the {mode} did not print each removed run")
+            if not re.search(r"kept under \S+: 3, ", text):
+                found.append(f"retention: the {mode} did not print what it kept")
+        if plan.count("would keep red bundle") != 3:
+            found.append("retention: the plan did not list each kept red bundle")
+    return found
+
+
 def census_door_record(src):
     """THE LINUX RELAUNCH DOORS' RECORD (docs/traps.md, the plain door's
     lost Activate): a door leg that started its bus with dbus-launch
@@ -1595,6 +1683,8 @@ for line in ios_app_log_checks(REAL, echo=True):
     gate.finding(line, at="iOS app log")
 for line in ios_hang_record_checks(REAL, echo=True):
     gate.finding(line, at="iOS hang record")
+for line in retention_checks(REAL, echo=True):
+    gate.finding(line, at="red bundle retention")
 
 
 def doctored(rel, pattern, repl, label, *, flags=re.M, want=1):
@@ -2149,6 +2239,27 @@ for label, name, want in (("NH13 iOS animations section unwritten", "animations"
                        f'self.adopt(bundle, "lost-{name}",', label)
     gate.negative(label, lambda: census_sections(changed), want=want)
 
-gate.negatives_ran(132)
+for label, pattern, repl, want in (
+        ("NR1 a pruned run's red bundles deleted with it, as shipped",
+         r"^ +os\.rename\(b, dest\)\n", "", "lost red bundle"),
+        ("NR2 the time bound ignored", r"< horizon\]", "< horizon - 1e12]",
+         "older than 90 days"),
+        ("NR3 the disk bound ignored", r"while sized and total > limit:",
+         "while False:", "past the disk bound"),
+        ("NR4 the newest red bundle dropped first", r"over\.append\(sized\.pop\(0\)\)",
+         "over.append(sized.pop())", "lost red bundle"),
+        ("NR5 a dry run that deletes", r'(say\(f"would remove red bundle .*\n) +continue\n',
+         r"\1", "dry run moved or removed"),
+        ("NR6 a removed run not printed", r'^ +say\(f"removed run \{d\} \(\{what\}\)"\)\n',
+         "", "did not print each removed run"),
+        ("NR7 a kept bundle without its journal",
+         r"^( +)_journal_copy\(d / \"journal\.jsonl\", journal, d\.name\)\n", r"\1pass\n",
+         "lost its run's journal"),
+        ("NR8 every run kept whole", r"doomed = dirs\[: max\(0, len\(dirs\) - cap\)\]",
+         "doomed = []", "runs kept")):
+    changed = doctored(JOURNAL, pattern, repl, label)
+    gate.negative(label, lambda: retention_checks(changed), want=want)
+
+gate.negatives_ran(140)
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

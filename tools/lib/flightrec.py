@@ -13,11 +13,14 @@ the category the spec keeps for exactly this (persistent-but-not-precious
 history), it is named by no candidate in that entry, and one home per
 machine is what lets two lanes from two worktrees show up in one journal.
 
-Retention is enforced HERE, at run start, and the cap is printed: bundles
-live inside the run directory, so dropping the oldest run drops its
-bundles with it and a bundle can never outlive its journal record.
+Retention is enforced HERE, at run start, and printed. The newest
+KAYA_FLIGHTREC_KEEP runs stay whole. A pruned run's red bundles move to
+red/<run>/bundles/ with a copy of the run's journal, and stay there for
+KAYA_FLIGHTREC_RED_DAYS, oldest removed first past KAYA_FLIGHTREC_RED_BYTES
+(docs/HACKING.md, "read a failed leg"; check-flightrec runs it).
 """
 
+import calendar
 import json
 import os
 import pathlib
@@ -27,6 +30,8 @@ import sys
 import time
 
 KEEP_DEFAULT = 20
+RED_DAYS_DEFAULT = 90
+RED_BYTES_DEFAULT = 2 * 1024 ** 3
 
 
 def home():
@@ -44,6 +49,22 @@ def keep():
     except ValueError:
         return KEEP_DEFAULT
     return n if n > 0 else KEEP_DEFAULT
+
+
+def _positive(name, default):
+    try:
+        n = int(os.environ.get(name, default))
+    except ValueError:
+        return default
+    return n if n > 0 else default
+
+
+def red_days():
+    return _positive("KAYA_FLIGHTREC_RED_DAYS", RED_DAYS_DEFAULT)
+
+
+def red_bytes():
+    return _positive("KAYA_FLIGHTREC_RED_BYTES", RED_BYTES_DEFAULT)
 
 
 def run_dir(run_id):
@@ -120,20 +141,147 @@ def append(path, record):
         os.close(fd)
 
 
-def prune(cap):
-    """Newest `cap` run directories survive. Returns (pruned, remaining)."""
-    runs = home() / "runs"
-    if not runs.is_dir():
-        return 0, 0
-    dirs = sorted((d for d in runs.iterdir() if d.is_dir()), key=lambda d: d.name)
-    doomed = dirs[: max(0, len(dirs) - cap)]
-    pruned = 0
-    for d in doomed:
+def _run_epoch(name, fallback):
+    try:
+        return calendar.timegm(time.strptime(name[:16], "%Y%m%dT%H%M%SZ"))
+    except ValueError:
+        return fallback
+
+
+def _bytes(path):
+    total = 0
+    for p in path.rglob("*"):
         try:
-            shutil.rmtree(d)
-            pruned += 1
+            if p.is_file() and not p.is_symlink():
+                total += p.stat().st_size
         except OSError:
             pass
+    return total
+
+
+def _mb(n):
+    if n >= 1024 ** 3:
+        return f"{n / 1024 ** 3:.1f} GB"
+    return f"{n / 1024 ** 2:.1f} MB" if n >= 1024 ** 2 else f"{n} bytes"
+
+
+def _journal_copy(src, dest, run_id):
+    """The run's journal beside its kept bundles, each leg's `bundle` field
+    pointed at where the bundle now lives."""
+    out = []
+    for line in src.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            out.append(line)
+            continue
+        if isinstance(rec, dict) and isinstance(rec.get("bundle"), str):
+            rec["bundle"] = rec["bundle"].replace(f"/runs/{run_id}/bundles/",
+                                                  f"/red/{run_id}/bundles/")
+        out.append(json.dumps(rec, sort_keys=True, separators=(",", ":")))
+    dest.write_text("".join(f"{line}\n" for line in out), encoding="utf-8")
+
+
+def prune(cap, *, now=None, days=None, limit=None, dry=False, every=False,
+          say=None):
+    """Newest `cap` run directories survive whole; an older run's red bundles
+    move to red/ before the run goes; red/ is then held to `days` and
+    `limit` bytes, oldest bundle first. Every move and removal is printed,
+    and the kept bundles as a total (each one too with `every`).
+    Returns (pruned, remaining)."""
+    now = time.time() if now is None else now
+    days = red_days() if days is None else days
+    limit = red_bytes() if limit is None else limit
+    if say is None:
+        def say(line):
+            print(f"flightrec: {line}", file=sys.stderr)
+    would = "would " if dry else ""
+    runs, red = home() / "runs", home() / "red"
+    dirs = sorted((d for d in runs.iterdir() if d.is_dir()),
+                  key=lambda d: d.name) if runs.is_dir() else []
+    doomed = dirs[: max(0, len(dirs) - cap)]
+    kept = []
+    if red.is_dir():
+        for run in sorted(d for d in red.iterdir() if d.is_dir()):
+            if (run / "bundles").is_dir():
+                kept += [(run.name, b) for b in sorted((run / "bundles").iterdir())
+                         if b.is_dir()]
+    pruned = 0
+    for d in doomed:
+        bundles = (sorted(b for b in (d / "bundles").iterdir() if b.is_dir())
+                   if (d / "bundles").is_dir() else [])
+        stuck = 0
+        for b in bundles:
+            dest = red / d.name / "bundles" / b.name
+            if dry:
+                say(f"would move red bundle {b} -> {dest}")
+                kept.append((d.name, b))
+                continue
+            try:
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                journal = red / d.name / "journal.jsonl"
+                if (d / "journal.jsonl").is_file() and not journal.exists():
+                    _journal_copy(d / "journal.jsonl", journal, d.name)
+                os.rename(b, dest)
+            except OSError as e:
+                if b.exists():
+                    stuck += 1
+                    say(f"could not move red bundle {b} to {dest} ({e}); "
+                        f"run {d.name} is kept whole")
+                continue
+            say(f"moved red bundle {b} -> {dest}")
+            kept.append((d.name, dest))
+        if stuck:
+            continue
+        what = f"{len(bundles)} red bundle(s) moved out" if bundles else "no red bundle"
+        if dry:
+            say(f"would remove run {d} ({what})")
+            pruned += 1
+            continue
+        try:
+            shutil.rmtree(d)
+        except FileNotFoundError:
+            continue
+        except OSError as e:
+            say(f"could not remove run {d} ({e})")
+            continue
+        say(f"removed run {d} ({what})")
+        pruned += 1
+    sized = sorted(((run, path, _bytes(path)) for run, path in kept),
+                   key=lambda k: (k[0], k[1].name))
+    horizon = now - days * 86400
+    expired = [k for k in sized
+               if _run_epoch(k[0], k[1].stat().st_mtime if k[1].exists() else now)
+               < horizon]
+    sized = [k for k in sized if k not in expired]
+    total = sum(k[2] for k in sized)
+    over = []
+    while sized and total > limit:
+        over.append(sized.pop(0))
+        total -= over[-1][2]
+    for why, gone in ((f"older than {days} days", expired),
+                      (f"oldest past the {_mb(limit)} bound", over)):
+        for run, path, size in gone:
+            target = red / run / "bundles" / path.name
+            if dry:
+                say(f"would remove red bundle {target} ({_mb(size)}, {why})")
+                continue
+            shutil.rmtree(target, ignore_errors=True)
+            say(f"removed red bundle {target} ({_mb(size)}, {why})")
+            left = red / run / "bundles"
+            try:
+                if not any(left.iterdir()):
+                    shutil.rmtree(red / run, ignore_errors=True)
+            except OSError:
+                pass
+    if every:
+        for run, path, size in sized:
+            say(f"{would}keep red bundle {red / run / 'bundles' / path.name} "
+                f"({_mb(size)})")
+    oldest = f", oldest from run {sized[0][0]}" if sized else ""
+    say(f"red bundles {'that would be ' if dry else ''}kept under {red}: "
+        f"{len(sized)}, {_mb(total)} of {_mb(limit)}, {days} days{oldest}; "
+        f"{len(expired)} {'would be ' if dry else ''}removed by age, {len(over)} by size")
     return pruned, len(dirs) - pruned
 
 
@@ -168,6 +316,21 @@ def cmd_start(argv):
         f"(retention: newest {cap} runs, {pruned} pruned, {remaining + 1} kept)",
         file=sys.stderr,
     )
+    return 0
+
+
+def cmd_prune(argv):
+    """By hand: `flightrec.py prune [--dry-run]` prints the whole plan, every
+    kept red bundle included; with --dry-run nothing is moved or removed."""
+    dry = argv == ["--dry-run"]
+    if argv and not dry:
+        print("usage: flightrec.py prune [--dry-run]", file=sys.stderr)
+        return 2
+    pruned, remaining = prune(keep(), dry=dry, every=True,
+                              say=lambda line: print(f"flightrec: {line}"))
+    print(f"flightrec: runs: newest {keep()} kept whole, {pruned} "
+          f"{'would be ' if dry else ''}pruned, {remaining} "
+          f"{'would ' if dry else ''}remain")
     return 0
 
 
@@ -282,6 +445,7 @@ def cmd_home(_argv):
 
 COMMANDS = {
     "start": cmd_start,
+    "prune": cmd_prune,
     "flush": cmd_flush,
     "leg": cmd_leg,
     "bundle": cmd_bundle,

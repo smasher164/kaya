@@ -69,7 +69,8 @@ instead. Read that first (CLAUDE.md's rule); the leg is also teed to
 `target/run-leg-<scene>-<lang>.log`, which is the bundle's `leg-log`. A
 green run builds no bundle and writes one journal record. The journal
 keeps the newest 20 runs, hand runs included, so a loop of them ages out
-older lane runs.
+older lane runs; a pruned run's red bundles move to `red/` and stay
+(the "read a failed leg" row below).
 
 STEPS OTHER THAN THE SCENE'S: `KAYA_SELFTEST_SCRIPT` in the environment
 is kept over the ones lane.leg_env reads from tools/scenes (the capture
@@ -123,7 +124,7 @@ afternoon twice, 2026-09-07). The routes:
 | hand-run a linux capture leg | `KAYA_ONLY=capture-rust tools/validate-linux.py`; inside the container `tools/linux/capture-leg.py portal\|direct <guest>` owns the leg's PipeWire, WirePlumber, the four `tools/linux/pwsynth` synthetic devices, the portal grant (keyed on the empty app id an unsandboxed process has) and their proven stop; wayland legs take the camera portal, x11 legs PipeWire directly (docs/probes/capture-2026-10-01/linux-measured.md) |
 | watch a mac scene negative fail | `tools/mac/scene-negative.py <scene> <lang> <file> <pattern> <repl> "<red sentence>"`: one cut (exactly one substitution, printed), run-leg --build, restore from a saved copy with its sha256 compared, and WATCHED RED only when the leg failed with that sentence in its own output, both artifacts still carried the doctored tree's id after the leg, and the host did not sleep inside the window. The tree is doctored while the leg runs, so nothing else on the host may build then (docs/traps.md, the capture rate cut) |
 | hold a scene still for a capture | give the guest its own steps through `KAYA_SELFTEST_SCRIPT` (the mac lane sets it from tools/scenes in `lanes.mac.leg_env`, so build that env and replace the one key) with `settle 9000` where the photograph goes; the tree stays untouched. On the mac, `KAYA_SELFTEST_SCRIPT="$(cat <yours>)" tools/run-leg.py <scene> <lang>` keeps yours over the scene's and prints that it did |
-| read a failed leg | the flight recorder's bundle first: `~/.local/state/kaya/flightrec/runs/<run>/bundles/<lane>-<leg>/` — the leg log, the verb trace, a PICTURE of what the user would have seen, and each lane's own sections, every one present or carrying a sentence saying what was measured instead; the leg's log prints them all with their sizes. The table is in "The flight recorder's bundle, lane by lane" below |
+| read a failed leg | the flight recorder's bundle first: `~/.local/state/kaya/flightrec/runs/<run>/bundles/<lane>-<leg>/` while its run is among the newest 20, then `~/.local/state/kaya/flightrec/red/<run>/bundles/<lane>-<leg>/` (the run's journal beside it) for 90 days, the oldest removed first past 2 GB; `tools/lib/flightrec.py prune --dry-run` lists every kept red bundle and what the next prune would move or remove — the leg log, the verb trace, a PICTURE of what the user would have seen, and each lane's own sections, every one present or carrying a sentence saying what was measured instead; the leg's log prints them all with their sizes. The table is in "The flight recorder's bundle, lane by lane" below |
 
 Windows `KAYA_RECORD=1` runs legs serially, regardless of KAYA_WIN_JOBS. A
 guest's title replaces the tile suffix record-win uses as identity, so pooled
