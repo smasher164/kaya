@@ -40,6 +40,8 @@ var wireTypes = map[string]bool{
 	// (docs/rich-text-plan.md §19): VALUE_BLOB in the schema, a
 	// kaya.Document everywhere the record is touched.
 	"kaya.Document": true,
+	// An image's phase (docs/network-images-plan.md N2): an I64.
+	"kaya.ImagePhase": true,
 }
 
 // wireTypeName names a field's declared type in the wire vocabulary: a
@@ -358,6 +360,22 @@ func generateRecord(w func(string, ...any), strct *ast.StructType, name, key str
 		w("}")
 	}
 	w("")
+	w("// %sPatchIf is %sPatch made only while the entry exists and the", name, name)
+	w("// guard's field still holds expected; otherwise nothing, and no panic")
+	w("// (docs/network-images-plan.md N7). The chain is one record.")
+	w("func %sPatchIf[V comparable](c kaya.RecordCollection[%s, %s], tx *kaya.Tx, key %s, guard func(*%s) *V, expected V) %sPatchIfBuilder {", name, key, name, key, name, lowerFirst(name))
+	w("\treturn %sPatchIfBuilder{c.PatchIf(tx, key, guard, expected)}", lowerFirst(name))
+	w("}")
+	w("")
+	w("type %sPatchIfBuilder struct{ p kaya.RecordPatchIf[%s, %s] }", lowerFirst(name), key, name)
+	for _, f := range fields {
+		w("")
+		w("func (p %sPatchIfBuilder) %s(v %s) %sPatchIfBuilder {", lowerFirst(name), f.name, f.typ, lowerFirst(name))
+		w("\tp.p.Set(func(t *%s) *%s { return &t.%s }, v)", name, f.typ, f.name)
+		w("\treturn p")
+		w("}")
+	}
+	w("")
 	w("// The row surface: one token per wire field, and the template")
 	w("// constructors that consume them.")
 	w("type %sRow struct {", lowerFirst(name))
@@ -464,6 +482,10 @@ func generateRecord(w func(string, ...any), strct *ast.StructType, name, key str
 	w("func (r %sRow) SetAlpha(n kaya.Node, on bool) { r.t.SetAlpha(n, on) }", lowerFirst(name))
 	w("")
 	w("func (r %sRow) SetFit(n kaya.Node, fit kaya.Fit) { r.t.SetFit(n, fit) }", lowerFirst(name))
+	w("func (r %sRow) SetPhase(n kaya.Node, phase kaya.ImagePhase) { r.t.SetPhase(n, phase) }", lowerFirst(name))
+	// BindPhase, not Phase: a record's phase field is named Phase, and
+	// its token would collide.
+	w("func (r %sRow) BindPhase(n kaya.Node, f kaya.Field[kaya.ImagePhase]) { r.t.BindPhase(n, f) }", lowerFirst(name))
 	w("func (r %sRow) SetAspect(n kaya.Node, width, height int) { r.t.SetAspect(n, width, height) }", lowerFirst(name))
 	w("")
 	w("func (r %sRow) SetMinGap(n kaya.Node, gap float64) { r.t.SetMinGap(n, gap) }", lowerFirst(name))
