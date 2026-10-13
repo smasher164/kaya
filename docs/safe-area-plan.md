@@ -283,6 +283,12 @@ Refused: making every window root scroll by itself. It would change what
 share), and the derived form, the grouped screen and the table all lean on
 the root not scrolling.
 
+Confirmed 2026-10-13 after the review page (the maintainer: "i think the
+first ruling is fine"): when the pan moves a form with no scroll, the rows
+it moves up pass under the top bar and may show cut in half there. An app
+that wants the platform's collapsing title instead puts the form in a
+scroll, which rule 1 then serves.
+
 ### A5 — The composer pattern: whatever follows the window's grown scroll rides the keyboard; a scroll that follows its end keeps its end (RULED 2026-10-11)
 
 RECOMMEND no new prop for a bottom bar that rides the keyboard. The rule:
