@@ -4082,8 +4082,17 @@ func kayaPresentSaveDialog(
             guard fm.createFile(atPath: requestPath, contents: Data("\(id) \(verb)".utf8)) else {
                 return (false, ["could not write the simdrive request to \(requestPath)"])
             }
-            let deadline = Date().addingTimeInterval(timeout)
+            let asked = Date()
+            let deadline = asked.addingTimeInterval(timeout)
+            var told = false
             while Date() < deadline {
+                if !told, Date().timeIntervalSince(asked) >= kayaDriverSlowReading {
+                    told = true
+                    let moment = "\(Int(kayaDriverSlowReading)) s into \(id) "
+                        + verb.prefix { $0 != " " }
+                    FileHandle.standardError.write(
+                        Data("KAYA_HARNESS: \(KayaAnimationLedger.shared.reading(moment))\n".utf8))
+                }
                 if let data = fm.contents(atPath: responsePath),
                     let text = String(data: data, encoding: .utf8), text.hasSuffix("\n")
                 {
@@ -8867,6 +8876,7 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
     /// docs/traps.md, the iOS ceiling's stacks: tools/ios/run-sim.py's stacks_watch
     /// answers, and the wait stays inside the leg's `timeout 120`.
     let kayaCeilingStacksWait: TimeInterval = 25
+    let kayaDriverSlowReading: TimeInterval = 15
 
     /// Every layer still carrying an animation, read on the main thread within
     /// 2 s: XCTest waits for animations to go idle before it acts.
@@ -8910,9 +8920,203 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
         return "the main thread did not answer within 2 s, so no layer was read"
     }
 
+    /// docs/traps.md, XCTest's animations-idle wait: XCTAnimationsIdleNotifier counts
+    /// UIViewAnimationState's two delegate callbacks, so the ledger counts the same two
+    /// the same way (class_replaceMethod, the replaced IMP called first-hand) and keeps
+    /// the starts no stop has matched.
+    final class KayaAnimationLedger: @unchecked Sendable {
+        static let shared = KayaAnimationLedger()
+        private let lock = NSLock()
+        private var installed = "not installed"
+        private var step = "<before the first step>"
+        private var started = 0
+        private var stopped = 0
+        private var unmatched = 0
+        private var open: [(id: ObjectIdentifier, anim: AnyObject, at: String, step: String, what: String)] = []
+        private var events: [String] = []
+
+        static func clock() -> String {
+            var tv = timeval()
+            gettimeofday(&tv, nil)
+            var secs = time_t(tv.tv_sec)
+            var parts = tm()
+            localtime_r(&secs, &parts)
+            return String(
+                format: "%02d:%02d:%02d.%03d", parts.tm_hour, parts.tm_min, parts.tm_sec,
+                Int(tv.tv_usec / 1000))
+        }
+
+        static func describe(_ anim: AnyObject?, _ state: AnyObject) -> String {
+            let owner = "\(type(of: state)) \(Unmanaged.passUnretained(state).toOpaque())"
+            guard let a = anim as? CAAnimation else {
+                return "\(anim.map { "\(type(of: $0))" } ?? "no animation") of \(owner)"
+            }
+            let path = (a as? CAPropertyAnimation)?.keyPath ?? "-"
+            return "\(type(of: a)) \(path) duration \(a.duration) repeat \(a.repeatCount) of \(owner)"
+        }
+
+        func note(_ what: String) {
+            lock.lock()
+            events.append("event \(Self.clock()) (step '\(step)'): \(what)")
+            if events.count > 200 { events.removeFirst(events.count - 200) }
+            lock.unlock()
+        }
+
+        func enter(_ step: String) {
+            lock.lock()
+            self.step = step
+            lock.unlock()
+        }
+
+        func began(_ state: AnyObject, _ anim: AnyObject?) {
+            let what = Self.describe(anim, state)
+            let key = anim ?? state
+            lock.lock()
+            started += 1
+            open.append((ObjectIdentifier(key), key, Self.clock(), step, what))
+            lock.unlock()
+            note("start \(what)")
+        }
+
+        func ended(_ state: AnyObject, _ anim: AnyObject?, _ finished: Bool) {
+            let what = Self.describe(anim, state)
+            let id = ObjectIdentifier(anim ?? state)
+            lock.lock()
+            stopped += 1
+            let at = open.firstIndex { $0.id == id }
+            if let at { open.remove(at: at) } else { unmatched += 1 }
+            lock.unlock()
+            note("stop finished=\(finished)\(at == nil ? " WITH NO START" : "") \(what)")
+        }
+
+        func install() {
+            guard let cls = NSClassFromString("UIViewAnimationState") else {
+                installed = "refused: UIViewAnimationState is not in this process"
+                return
+            }
+            let startSel = NSSelectorFromString("animationDidStart:")
+            let stopSel = NSSelectorFromString("animationDidStop:finished:")
+            guard let start = class_getInstanceMethod(cls, startSel),
+                let stop = class_getInstanceMethod(cls, stopSel)
+            else {
+                installed = "refused: UIViewAnimationState answers no animationDidStart: "
+                    + "or animationDidStop:finished:"
+                return
+            }
+            typealias Start = @convention(c) (AnyObject, Selector, AnyObject?) -> Void
+            typealias Stop = @convention(c) (AnyObject, Selector, AnyObject?, Bool) -> Void
+            let prevStart = unsafeBitCast(method_getImplementation(start), to: Start.self)
+            let prevStop = unsafeBitCast(method_getImplementation(stop), to: Stop.self)
+            let onStart: @convention(block) (AnyObject, AnyObject?) -> Void = { state, anim in
+                KayaAnimationLedger.shared.began(state, anim)
+                prevStart(state, startSel, anim)
+            }
+            let onStop: @convention(block) (AnyObject, AnyObject?, Bool) -> Void = {
+                state, anim, finished in
+                KayaAnimationLedger.shared.ended(state, anim, finished)
+                prevStop(state, stopSel, anim, finished)
+            }
+            class_replaceMethod(
+                cls, startSel, imp_implementationWithBlock(onStart), method_getTypeEncoding(start))
+            class_replaceMethod(
+                cls, stopSel, imp_implementationWithBlock(onStop), method_getTypeEncoding(stop))
+            let center = NotificationCenter.default
+            for name in [
+                UIResponder.keyboardWillShowNotification, UIResponder.keyboardDidShowNotification,
+                UIResponder.keyboardWillHideNotification, UIResponder.keyboardDidHideNotification,
+                UIApplication.willResignActiveNotification, UIApplication.didBecomeActiveNotification,
+                UIApplication.didEnterBackgroundNotification,
+                UIApplication.willEnterForegroundNotification,
+            ] {
+                center.addObserver(forName: name, object: nil, queue: nil) { note in
+                    let end = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?
+                        .cgRectValue
+                    let secs = note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey]
+                    KayaAnimationLedger.shared.note(
+                        note.name.rawValue + (end.map { " end \($0)" } ?? "")
+                            + (secs.map { " duration \($0)" } ?? ""))
+                }
+            }
+            installed = "installed"
+        }
+
+        static func xctest() -> String {
+            guard let cls = NSClassFromString("XCTAnimationsIdleNotifier") else {
+                return "XCTest unread: XCTAnimationsIdleNotifier is not loaded in this process"
+            }
+            let sel = NSSelectorFromString("isAnimationInProgress")
+            guard let m = class_getClassMethod(cls, sel) else {
+                return "XCTest unread: XCTAnimationsIdleNotifier answers no +isAnimationInProgress"
+            }
+            typealias Ask = @convention(c) (AnyClass, Selector) -> Bool
+            return unsafeBitCast(method_getImplementation(m), to: Ask.self)(cls, sel)
+                ? "XCTest IN PROGRESS (+[XCTAnimationsIdleNotifier isAnimationInProgress], its count above 0)"
+                : "XCTest idle (+[XCTAnimationsIdleNotifier isAnimationInProgress], its count 0)"
+        }
+
+        func reading(_ moment: String) -> String {
+            lock.lock()
+            let mine = open
+            let head = "kaya's ledger \(installed); \(started) started, \(stopped) stopped, "
+                + "\(unmatched) stopped with no start, \(open.count) open"
+            let ring = events
+            lock.unlock()
+            let lock2 = NSLock()
+            var placed: [ObjectIdentifier: String]?
+            var mode = ""
+            let asked = Date()
+            var answered = 0.0
+            DispatchQueue.main.async {
+                var found: [ObjectIdentifier: String] = [:]
+                func walk(_ layer: CALayer) {
+                    for key in layer.animationKeys() ?? [] {
+                        if let a = layer.animation(forKey: key) {
+                            let owner = layer.delegate.map { String(describing: type(of: $0)) } ?? "-"
+                            found[ObjectIdentifier(a)] = "\(type(of: layer)) of \(owner) frame \(layer.frame) key \(key)"
+                        }
+                    }
+                    for sub in layer.sublayers ?? [] { walk(sub) }
+                }
+                for window in UIApplication.shared.connectedScenes
+                    .compactMap({ $0 as? UIWindowScene }).flatMap({ $0.windows })
+                {
+                    walk(window.layer)
+                }
+                lock2.lock()
+                placed = found
+                mode = RunLoop.main.currentMode?.rawValue ?? "none"
+                answered = Date().timeIntervalSince(asked)
+                lock2.unlock()
+            }
+            let until = Date().addingTimeInterval(2)
+            var got: [ObjectIdentifier: String]?
+            while Date() < until {
+                lock2.lock()
+                got = placed
+                lock2.unlock()
+                if got != nil { break }
+                Thread.sleep(forTimeInterval: 0.02)
+            }
+            let main = got == nil
+                ? "main thread did not answer within 2 s, so no open animation was placed"
+                : "main thread answered in \(Int(answered * 1000)) ms, run loop mode \(mode)"
+            let lines = mine.prefix(60).map { entry in
+                "  open since \(entry.at) (step '\(entry.step)'): \(entry.what); "
+                    + (got == nil ? "not placed"
+                        : got?[entry.id].map { "on \($0)" } ?? "on no layer in any window")
+            }
+            let more = mine.count > 60 ? ["  open and not listed: \(mine.count - 60) more"] : []
+            return "XCTest's animation tracking \(moment): \(Self.xctest()); \(head); \(main)"
+                + (lines.isEmpty ? "" : "\n" + (lines + more).joined(separator: "\n"))
+                + (ring.isEmpty ? "" : "\n" + ring.map { "  " + $0 }.joined(separator: "\n"))
+        }
+    }
+
     func kayaCeilingStacks(_ step: String) {
         FileHandle.standardError.write(
             Data("KAYA_HARNESS: animations at the ceiling: \(kayaCeilingAnimations())\n".utf8))
+        FileHandle.standardError.write(
+            Data("KAYA_HARNESS: \(KayaAnimationLedger.shared.reading("at the ceiling"))\n".utf8))
         let dir = kayaTempDir() as NSString
         let done = dir.appendingPathComponent("kaya-stacks-done")
         let part = dir.appendingPathComponent("kaya-stacks-request.part")
@@ -9000,6 +9204,9 @@ final class KayaStepWatchdog {
         leaving = nil
         since = Date()
         lock.unlock()
+        #if os(iOS)
+            KayaAnimationLedger.shared.enter(step)
+        #endif
     }
 
     func published(_ code: Int32) {
@@ -9099,6 +9306,9 @@ private func kayaRunScript(_ script: String) {
     // again over the exit, so this run cannot end in silence.
     let watchdog = KayaStepWatchdog(ceiling: kayaStepCeilingSetting())
     watchdog.start()
+    #if os(iOS)
+        DispatchQueue.main.sync { KayaAnimationLedger.shared.install() }
+    #endif
     let start = Date()
     print("KAYA_HARNESS: epoch \(Int(start.timeIntervalSince1970 * 1000))")
     // The verb trace counts from the same zero (crates/kaya/src/vtrace.rs).

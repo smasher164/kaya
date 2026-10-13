@@ -2052,6 +2052,10 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
         device_capture(udid, pathlib.Path(app).stem, name, log,
                        flightrec_lane.ios_launch_pid(out, bundle_id), launched_at)
         notification_capture(udid, bundle_id, name, installed_at, log)
+        system_capture(udid, name, log, launched_at,
+                       flightrec_lane.ios_launch_pid(out, bundle_id))
+        (LEGS_DIR / f"{name}.log").with_suffix(".animations").write_text(
+            flightrec_lane.ios_animation_reading(out), encoding="utf-8")
         pull_container_files(udid, bundle_id, name, log)
         if drive_log.is_file():
             with open(drive_log, "r", encoding="utf-8",
@@ -2117,6 +2121,7 @@ def secure_refusals(script, name, log, out, slices):
     for label, path in (("leg log", leg_log),
                         ("verb trace", leg_log.with_suffix(".vtrace")),
                         ("app log", leg_log.with_suffix(".applog")),
+                        ("system log", leg_log.with_suffix(".syslog")),
                         ("panic log", leg_log.with_suffix(".panic"))):
         if path.is_file():
             transcripts[label] = path.read_text(encoding="utf-8", errors="replace")
@@ -2194,6 +2199,36 @@ def device_capture(udid, executable, name, log, pid, launched_at):
     print(f"run-sim: {name} kept the app's log slice ({predicate}, "
           f"{body.count(chr(10))} line(s), log show exit {got.returncode})",
           file=log)
+
+
+def system_capture(udid, name, log, launched_at, pid):
+    """docs/traps.md, XCTest's animations-idle wait: testmanagerd, the xcui driver's
+    runner and runningboardd over the leg, and any crash report naming the app's pid."""
+    dest = (LEGS_DIR / f"{name}.log").with_suffix(".syslog")
+    since = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(launched_at - 1))
+    predicate = ('process == "testmanagerd" OR process == "KayaDrive-Runner"'
+                 + (f' OR (process == "runningboardd" AND eventMessage CONTAINS "{pid}")'
+                    if pid is not None else ""))
+    with tempfile.NamedTemporaryFile(prefix="kaya-syslog-", delete=False) as tf:
+        raw = pathlib.Path(tf.name)
+    try:
+        with open(raw, "w", encoding="utf-8", errors="replace") as sf:
+            got = run(["timeout", "60", "xcrun", "simctl", "spawn", udid, "log", "show",
+                       "--start", since, "--info", "--style", "compact",
+                       "--predicate", predicate], stdout=sf,
+                      stderr=subprocess.STDOUT, **TEXT)
+        body = raw.read_text(encoding="utf-8", errors="replace")
+    finally:
+        raw.unlink(missing_ok=True)
+    crash = flightrec_lane.ios_crash_reports(
+        pathlib.Path.home() / "Library/Logs/DiagnosticReports", pid, launched_at - 1)
+    dest.write_text(
+        f"== the system's account of pid {pid} from {since}, predicate {predicate}; "
+        f"log show exited {got.returncode} ==\n"
+        f"{flightrec_lane.ios_system_log(body, pid)}\n{crash}\n\n{body}",
+        encoding="utf-8")
+    print(f"run-sim: {name} kept the system's log slice ({body.count(chr(10))} line(s), "
+          f"log show exit {got.returncode}); {crash.splitlines()[0]}", file=log)
 
 
 def notification_capture(udid, bundle_id, name, since, log):

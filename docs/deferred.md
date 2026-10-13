@@ -15803,3 +15803,48 @@ filled the tablet. Nothing in stage_suite_apk restarts the launcher or
 reads free space. The fix belongs on that path: restart the launcher
 after install, or refuse with the free space and the launcher's pinned
 count named, and it is held by android-leg-order's staging clause.
+
+## INVESTIGATE — XCTest waits 60 s for "animations idle" after a Return that commits a list row and removes the focused field (iOS, seen 2026-10-08 and 2026-10-12)
+KEY: animations idle, XCTAnimationsIdleNotifier, isAnimationInProgress, KayaAnimationLedger, kayaDriverSlowReading, system_capture, ios_animation_reading, ios_system_log, ios_crash_reports, Lost connection to the application, timecode rowtime, xcuidrive type_b64
+
+docs/traps.md, "The iOS ceiling's stacks, and XCTest's 60 s animations-idle
+wait", has the mechanism and both sightings. Both were the same step:
+`press return` in `number_field@rowtime[a]` (tools/scenes/timecode.steps),
+whose commit removes the field that holds the focus.
+- 2026-10-08, matrix 20261008T065443Z, `timecode-swift`: the driver's
+  `typeText("\n")` returned after 59.94 s; the app log shows the main run
+  loop idle request answered at once and the animations idle request never
+  answered; the step ceiling ended the leg.
+- 2026-10-12, matrix 20261012T221225Z, `timecode-go`: the same wait; the
+  ceiling's census read 0 animated layers; UIKit hid the keyboard before it
+  delivered the Return; the next `typeText` failed with "Lost connection to
+  the application (pid 53460)" / "Unable to monitor animations" while the
+  app's main thread sampled idle. That bundle is gone: the recorder keeps
+  the last 20 runs.
+
+63 of 63 timecode legs passed in the reproduction attempts of 2026-10-08
+(idle and under load 20 to 314). Not fixed, and the maintainer does not
+want it left alone (2026-10-13): the driver-side bypass (Appium
+WebDriverAgent's swizzle of `-waitForQuiescenceIncludingAnimationsIdle:isPreEvent:`)
+would change every leg's typing and needs his ruling.
+
+What the next red bundle carries (2026-10-13): `animations` gives XCTest's
+own count (`+[XCTAnimationsIdleNotifier isAnimationInProgress]`), kaya's
+ledger of the same UIViewAnimationState callbacks with every unmatched
+start named (step, key path, duration, the layer it sits on), the main
+thread's answer and the last 200 events with the keyboard's and the app's
+notifications, at the ceiling and 15 s into the stuck driver request.
+`system-log` says whether testmanagerd ended its session with the app
+before the app exited, the app's exit context from runningboardd, its last
+suspend mark, the lost-connection lines, and any crash report naming the
+pid. `app-log` (since 36447b86) says which idle request went unanswered;
+`stacks` has both processes' threads at the ceiling.
+
+On the next sighting: copy the whole bundle to
+~/.local/state/kaya/flightrec/sightings/ first, then read `animations`'
+first line. A held count with an open start names the animation: find who
+starts it on that Return and why its stop never comes. A held count with
+nothing open, or an idle count with the request unanswered, points away
+from UIView animations: read `system-log` for testmanagerd letting go of a
+live app. A main thread that did not answer is a hang in the app: read
+`stacks`. Each of those is the next measurement, not a fix to guess at.

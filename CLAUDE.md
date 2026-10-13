@@ -957,7 +957,13 @@ in docs/deferred.md.
    about 300ms after it; KayaFailShot copies the window before the verdict
    is published and the runner adopts it as `shot`, the screencap as
    `desktop-shot` (docs/traps.md); four cuts watched.
-   A hundred and eighteen watched negatives, counts printed),
+   AND AN iOS RED CARRIES WHAT XCTEST COUNTS since 2026-10-13: the harness
+   prints +[XCTAnimationsIdleNotifier isAnimationInProgress] and a ledger of the
+   same UIViewAnimationState callbacks at the ceiling and 15 s into a driver
+   request, and the runner keeps testmanagerd's, the runner's and
+   runningboardd's account plus any crash report by pid (docs/traps.md, the
+   animations-idle wait); fourteen cuts watched.
+   A hundred and thirty-two watched negatives, counts printed),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer

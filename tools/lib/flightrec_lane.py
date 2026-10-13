@@ -17,7 +17,9 @@ measured 27ms and three ssh round trips per leg took the windows lane
 spool, flushed once at lane end.
 """
 
+import datetime
 import hashlib
+import json
 import os
 import pathlib
 import shutil
@@ -49,7 +51,7 @@ SECTIONS = {
                 "foreground", "foreground-text", "desktop-live", "notifications",
                 "toast-moment", "gesture-moment", "media-server", "capture-devices"),
     "ios": ("leg-log", "verb-trace", "shot", "panic", "app-log", "devices", "binary-stamp",
-            "notifications", "stacks"),
+            "notifications", "stacks", "animations", "system-log"),
     "android": ("leg-log", "verb-trace", "shot", "desktop-shot", "logcat", "devices",
                 "system-events", "anr-history", "shade-history"),
     "linux": ("leg-log", "verb-trace", "shot", "desktop", "xvfb"),
@@ -201,6 +203,144 @@ def ios_xctest_idle(text):
     if unanswered:
         return head + span + "; NEVER ANSWERED: " + ", ".join(unanswered)
     return head + span + "; every one answered"
+
+
+IOS_ANIMATION_HEAD = "KAYA_HARNESS: XCTest's animation tracking "
+
+
+def ios_animation_reading(text):
+    """docs/traps.md, XCTest's animations-idle wait: the harness's readings, each judged."""
+    lines = (text or "").splitlines()
+    blocks = []
+    for i, line in enumerate(lines):
+        at = line.find(IOS_ANIMATION_HEAD)
+        if at < 0:
+            continue
+        body = [line[at + len("KAYA_HARNESS: "):]]
+        for more in lines[i + 1:]:
+            if not more.startswith("  "):
+                break
+            body.append(more)
+        blocks.append(body)
+    census = [line for line in lines if "KAYA_HARNESS: animations at the ceiling:" in line]
+    if not blocks:
+        return ("the harness printed no animation reading: it prints one 15 s into a driver "
+                "request the host has not answered and one at the step ceiling, and this leg "
+                "reached neither\n" + "\n".join(census) + "\n")
+    judged = []
+    for body in blocks:
+        head = body[0]
+        moment = head[len("XCTest's animation tracking "):head.find(": XCTest")]
+        opens = [line.strip() for line in body[1:] if line.strip().startswith("open since")]
+        if "XCTest IN PROGRESS" in head:
+            said = (f"XCTest's count is above 0 and kaya's ledger holds {len(opens)} UIView "
+                    f"animation(s) no stop has matched; the oldest: {opens[0]}" if opens else
+                    "XCTest's count is above 0 while kaya's ledger holds no open UIView "
+                    "animation: a start before the ledger was installed, or a stop kaya saw "
+                    "and XCTest did not")
+        elif "XCTest idle" in head:
+            said = ("XCTest's count is 0, so a wait at this moment is not on a UIView animation"
+                    + (f"; kaya's ledger still holds {len(opens)} open" if opens else ""))
+        else:
+            m = re.search(r"XCTest unread: ([^;]+)", head)
+            said = "XCTest's own count was not read: " + (
+                m.group(1) if m else "the reading names no XCTest state at all")
+        refused = re.search(r"kaya's ledger refused: ([^;]+)", head)
+        if refused:
+            said += "; kaya's ledger was never installed: " + refused.group(1)
+        if "main thread did not answer" in head:
+            said += "; the main thread did not answer within 2 s"
+        judged.append(f"{moment}: {said}")
+    return ("\n".join(judged) + "\n\n" + "\n\n".join("\n".join(b) for b in blocks)
+            + "\n\n" + "\n".join(census) + "\n")
+
+
+def _log_time(line):
+    try:
+        return datetime.datetime.strptime(line[:23], "%Y-%m-%d %H:%M:%S.%f")
+    except ValueError:
+        return None
+
+
+def ios_system_log(text, pid):
+    """docs/traps.md, XCTest's animations-idle wait: who let go of the app first."""
+    lines = [line for line in (text or "").splitlines() if line[:4].isdigit()]
+    if not lines:
+        return "the system's log slice holds no lines at all"
+    if pid is None:
+        return ("simctl printed no pid for the launch, so no line here can be tied to the "
+                "app")
+    p = str(pid)
+    exit_line = next((line for line in lines if re.search(
+        rf":{p}\] exited with context <", line)), None)
+    gone = next((line for line in lines if "testmanagerd[" in line and re.search(
+        rf"Invalidating <XCTTargetBootstrapSession: [^>]*>\(pid {p}\)", line)), None)
+    marks = [line for line in lines if re.search(rf"Did (?:suspend|resume) pid: {p}\b", line)]
+    lost = [line for line in lines if re.search(r"(?i)lost connection|unable to monitor", line)]
+    said = []
+    if exit_line:
+        ctx = re.search(r"exited with context (<[^>]*>)", exit_line).group(1)
+        said.append(f"runningboardd saw pid {p} exit at {exit_line[11:23]} with context {ctx}")
+    else:
+        said.append(f"runningboardd recorded no exit of pid {p} in this slice")
+    if gone and exit_line and _log_time(gone) and _log_time(exit_line):
+        lead = (_log_time(exit_line) - _log_time(gone)).total_seconds()
+        said.append(
+            f"testmanagerd ended its session with pid {p} at {gone[11:23]}, "
+            + (f"{lead:.3f} s BEFORE the app exited: XCTest let go of a live app"
+               if lead > 1 else "with the app's exit"))
+    elif gone:
+        said.append(f"testmanagerd ended its session with pid {p} at {gone[11:23]} and no "
+                    f"exit of it is in this slice: XCTest let go of a live app")
+    else:
+        said.append(f"testmanagerd never ended its session with pid {p} in this slice")
+    end = _log_time(exit_line) if exit_line else None
+    live = [line for line in marks if end is None or (
+        _log_time(line) and (end - _log_time(line)).total_seconds() > 0.5)]
+    if live:
+        last = live[-1]
+        state = "SUSPENDED" if "Did suspend" in last else "resumed"
+        said.append(f"testmanagerd's accessibility runtime last marked the running pid {p} "
+                    f"{state} at {last[11:23]} ({len(live)} mark(s) before any exit)")
+    else:
+        said.append(f"testmanagerd's accessibility runtime marked the running pid {p} "
+                    f"neither suspended nor resumed ({len(marks)} mark(s) at its exit)")
+    said.append(f"{len(lost)} line(s) say lost connection or unable to monitor"
+                + (f", the first: {lost[0][:200]}" if lost else ""))
+    return "; ".join(said)
+
+
+def ios_crash_reports(directory, pid, since):
+    """docs/traps.md, XCTest's animations-idle wait: a simulator app's crash report lands
+    in the host's DiagnosticReports, named by process and stamped with its pid."""
+    root = pathlib.Path(directory)
+    if pid is None:
+        return "simctl printed no pid for the launch, so no crash report can be tied to the app"
+    if not root.is_dir():
+        return f"no crash report directory at {root}"
+    fresh = [p for p in sorted(root.glob("*.ips")) if p.stat().st_mtime >= since]
+    mine, unread = [], []
+    for path in fresh:
+        try:
+            body = path.read_text(encoding="utf-8", errors="replace").partition("\n")[2]
+            doc = json.loads(body)
+        except (OSError, ValueError) as exc:
+            unread.append(f"{path.name}: {exc}")
+            continue
+        if isinstance(doc, dict) and doc.get("pid") == pid:
+            mine.append((path, doc))
+    tail = (f"; {len(unread)} could not be read: " + "; ".join(unread)) if unread else ""
+    if not mine:
+        return (f"no crash report written since the launch names pid {pid} "
+                f"({len(fresh)} written in {root} since then){tail}")
+    said = []
+    for path, doc in mine:
+        exc = doc.get("exception") or {}
+        term = doc.get("termination") or {}
+        said.append(f"CRASH REPORT {path} names pid {pid}: exception {exc.get('type')} "
+                    f"{exc.get('signal')}, termination {term.get('namespace')} "
+                    f"{term.get('indicator')}")
+    return "\n".join(said) + tail
 
 
 def _keyed_root(path):
@@ -1287,6 +1427,12 @@ class IosRecorder(LaneRecorder):
                 self.adopt(bundle, "notifications", log.with_suffix(".notifications"),
                            why_absent="flightrec: run-sim.py's notification_capture "
                                       "kept no file for this leg")
+                self.adopt(bundle, "animations", log.with_suffix(".animations"),
+                           why_absent="flightrec: run-sim.py wrote no animation reading "
+                                      "for this leg")
+                self.adopt(bundle, "system-log", log.with_suffix(".syslog"),
+                           why_absent="flightrec: run-sim.py's system_capture kept no "
+                                      "file for this leg")
                 self.adopt(bundle, "stacks", log.with_suffix(".stacks"),
                            why_absent="flightrec: no stacks were taken — run-sim.py's "
                                       "stacks_watch samples the app only when the "

@@ -15253,6 +15253,55 @@ that followed passed 40 of 40 legs, 12 of them timecode. A forced red on
 `timecode-go` read back a bundle whose app log held 5,666 lines from the
 app's pid, which the unified log named `numberfielddego`.
 
+WHAT XCTEST COUNTS (measured 2026-10-13, Xcode 26.6's simulator
+XCTAutomationSupport, by `otool`). The in-app half of "animations idle" is
+`XCTAnimationsIdleNotifier`: it replaces `UIViewAnimationState`'s
+`animationDidStart:` and `animationDidStop:finished:` with
+`class_replaceMethod`, adds one to a private counter on every start and takes
+one off on every stop, and answers the idle request when the counter reaches
+0; `+isAnimationInProgress` is the counter above 0. It counts the delegate
+callbacks of UIView block animations, not layers. So the second sighting's
+census of 0 animated layers does not clear an animation: a start whose stop
+never came holds the counter up after its layer has left every window, and
+CALayer animations SwiftUI drives itself are never counted at all. XCTest's
+notifier is not loaded until the first driver request (a ceiling during the
+first `click` read it absent).
+
+What a red iOS leg carries since then, all checked by check-flightrec
+(census_ios_hang_record, ios_hang_record_checks, NH1 to NH14):
+- `animations`: at the step ceiling and 15 s into any driver request the host
+  has not answered, `KAYA_HARNESS: XCTest's animation tracking …` gives
+  XCTest's own `+isAnimationInProgress`, a ledger kaya keeps of the same two
+  callbacks (it replaces them the way XCTest does and calls the replaced
+  method), every start no stop has matched (time, step, animation class, key
+  path, duration, repeat, and the layer it still sits on, or "on no layer in
+  any window"), the main thread's answer time and run loop mode, and the
+  last 200 events, keyboard will/did show/hide and the app's
+  active/background notifications included, on the device log's clock. The
+  section opens with one judged line per reading.
+- `system-log`: testmanagerd, the KayaDrive-Runner and runningboardd lines
+  naming the app's pid, from the launch, with `--info` (testmanagerd's
+  accessibility suspend and resume marks are Info lines), opening with which
+  side let go first: runningboardd's exit and its context, testmanagerd's end
+  of its session with the pid and how long before the exit, the last
+  suspend or resume mark before the exit, and the lost-connection lines. Then
+  any crash report in the host's ~/Library/Logs/DiagnosticReports written
+  since the launch whose body names the pid.
+
+A deliberate repeating UIView animation started at the Return
+reproduced the wait (XCTest's "App animations complete notification not
+received" after 60 s, the app log's animations request unanswered), and the
+section read `XCTest's count is above 0 and kaya's ledger holds 1 UIView
+animation(s) no stop has matched; the oldest: … (step 'press return'):
+CABasicAnimation opacity duration 0.5 repeat 3.4e38 … on CALayer of
+_UIHostingView…`. The next sighting reads one of four ways: XCTest's count
+held with an open start named (the animation is the cause, and its layer
+says whose); held with nothing open (a start before the ledger or a stop
+XCTest missed); idle while the app log shows the request unanswered (not a
+UIView animation; read `system-log` for testmanagerd letting go of a live
+app); or the main thread not answering. docs/deferred.md holds the open
+item.
+
 ## The app log selected by process name (measured 2026-10-12)
 
 run-sim.py's `app-log` section was `log show --last 2m --predicate 'process

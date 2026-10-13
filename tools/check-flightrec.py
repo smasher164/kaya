@@ -42,7 +42,9 @@ dev_shell_or_die()
 # and deploy-win's pre-leg delete.
 
 import ast
+import datetime
 import io
+import json
 import re
 import subprocess
 import tempfile
@@ -1326,6 +1328,173 @@ def ios_app_log_checks(src, echo=False):
     return found
 
 
+def census_ios_hang_record(src):
+    """docs/traps.md, XCTest's animations-idle wait: what XCTest counts, read from inside
+    the app at the ceiling and 15 s into a driver request, and the system's account of
+    the app beside it."""
+    found = []
+    swift = src[SWIFTUI]
+    ledger = swift[swift.find("final class KayaAnimationLedger"):]
+    ledger = ledger[:ledger.find("\n    func kayaCeilingStacks(")]
+    ask = swift[swift.find("func kayaCeilingStacks("):]
+    ask = ask[:ask.find("\n    }\n")]
+    if 'KayaAnimationLedger.shared.reading("at the ceiling")' not in ask:
+        found.append("swift: the step ceiling no longer prints XCTest's animation count and "
+                     "the ledger")
+    slow = swift[swift.find("enum KayaSimdrive"):]
+    slow = slow[:slow.find("\n    }\n")]
+    if "kayaDriverSlowReading" not in slow or \
+            "KayaAnimationLedger.shared.reading(moment)" not in slow:
+        found.append("swift: a driver request still unanswered after kayaDriverSlowReading "
+                     "no longer prints the animation reading")
+    slow_at = re.search(r"kayaDriverSlowReading: TimeInterval = (\d+)", swift)
+    ceiling = re.search(r"let kayaStepCeiling: TimeInterval = (\d+)", swift)
+    if not slow_at or not ceiling or int(slow_at.group(1)) >= int(ceiling.group(1)):
+        found.append("swift: kayaDriverSlowReading is not inside the step ceiling, so the "
+                     "reading cannot land while XCTest still waits")
+    harness = swift[swift.find("let watchdog = KayaStepWatchdog("):]
+    if "KayaAnimationLedger.shared.install()" not in harness[:400]:
+        found.append("swift: the harness no longer installs the animation ledger when it starts")
+    enter = swift[swift.find("    func enter(_ step: String) {\n        lock.lock()\n"
+                             "        self.step"):]
+    if "KayaAnimationLedger.shared.enter(step)" not in enter[:400]:
+        found.append("swift: the watchdog's enter no longer tells the ledger which step runs")
+    for want, why in (
+            ('NSClassFromString("UIViewAnimationState")', "the class XCTest swizzles"),
+            ("class_replaceMethod(\n                cls, startSel", "the start replaced"),
+            ("class_replaceMethod(\n                cls, stopSel", "the stop replaced"),
+            ("prevStart(state, startSel, anim)", "the replaced start still called"),
+            ("prevStop(state, stopSel, anim, finished)", "the replaced stop still called"),
+            ('NSClassFromString("XCTAnimationsIdleNotifier")', "XCTest's own notifier read"),
+            ('NSSelectorFromString("isAnimationInProgress")', "XCTest's own count read"),
+            ("UIResponder.keyboardWillHideNotification", "the keyboard's timeline")):
+        if want not in ledger:
+            found.append(f"swift: KayaAnimationLedger lost {why} ({want.splitlines()[0]})")
+    for key in ("XCTest's animation tracking ", "XCTest IN PROGRESS", "XCTest idle",
+                "XCTest unread: ", "refused: ", "open since",
+                "main thread did not answer"):
+        if key not in ledger:
+            found.append(f"swift: the reading no longer prints {key!r}, which "
+                         f"flightrec_lane.ios_animation_reading keys on")
+    leg = py_block(src[IOS], "run_swiftui_on")
+    fail = leg[leg.find("if not ok:"):]
+    if "system_capture(udid, name, log, launched_at,\n                       " \
+            "flightrec_lane.ios_launch_pid(out, bundle_id))" not in fail:
+        found.append("ios: a failed leg no longer keeps the system's account of the app")
+    if 'with_suffix(".animations").write_text(\n            ' \
+            "flightrec_lane.ios_animation_reading(out)" not in fail:
+        found.append("ios: a failed leg no longer keeps the judged animation readings")
+    cap = py_block(src[IOS], "system_capture")
+    for want, why in (('process == "testmanagerd"', "testmanagerd"),
+                      ('process == "KayaDrive-Runner"', "the xcui driver's runner"),
+                      ('process == "runningboardd" AND eventMessage CONTAINS "{pid}"',
+                       "runningboardd naming the pid"),
+                      ('"--start", since, "--info"', "the Info lines from the launch"),
+                      ("flightrec_lane.ios_system_log(body, pid)", "the judged summary"),
+                      ('"Library/Logs/DiagnosticReports", pid, launched_at - 1)',
+                       "the crash reports by pid")):
+        if want not in cap:
+            found.append(f"ios: system_capture lost {why}")
+    if "KayaDrive-Runner" not in py_block(src[IOS], "stacks_pids"):
+        found.append("ios: the runner system_capture names is not the one stacks samples")
+    if '("system log", leg_log.with_suffix(".syslog"))' not in py_block(
+            src[IOS], "secure_refusals"):
+        found.append("ios: the system log is adopted without the secure scan reading it")
+    rec = py_block(src[LANE_PY], "IosRecorder")
+    for suffix in (".animations", ".syslog"):
+        if f'log.with_suffix("{suffix}")' not in rec:
+            found.append(f"ios: no section adopts the runner's {suffix} sidecar")
+    return found
+
+
+def ios_hang_record_checks(src, echo=False):
+    scope = {"re": re, "pathlib": pathlib, "json": json, "datetime": datetime}
+    for name in ("ios_animation_reading", "_log_time", "ios_system_log", "ios_crash_reports"):
+        body = py_block(src[LANE_PY], name)
+        if not body:
+            return [f"ios: missing hang reader {name}"]
+        exec(compile(body, LANE_PY, "exec"), scope)
+    at = src[LANE_PY].find("IOS_ANIMATION_HEAD = ")
+    exec(compile(src[LANE_PY][at:src[LANE_PY].find("\n", at)], LANE_PY, "exec"), scope)
+    head = "KAYA_HARNESS: XCTest's animation tracking "
+    ledger = "kaya's ledger installed; 36 started, 35 stopped, 0 stopped with no start, "
+    held = (f"{head}at the ceiling: XCTest IN PROGRESS (+[XCTAnimationsIdleNotifier "
+            f"isAnimationInProgress], its count above 0); {ledger}1 open; main thread "
+            f"answered in 0 ms, run loop mode kCFRunLoopDefaultMode\n"
+            "  open since 11:07:50.974 (step 'press return'): CABasicAnimation opacity "
+            "duration 0.5 repeat 3.4e38 of UIViewAnimationState 0x1; on CALayer of X key "
+            "opacity\n  event 11:07:50.974 (step 'press return'): start\nKAYA_SELFTEST: x")
+    reading = scope["ios_animation_reading"]
+    said = {
+        "held": reading(held),
+        "uncounted": reading(held.replace("1 open;", "0 open;").replace(
+            "  open since", "  event")),
+        "idle": reading(f"{head}15 s into #2 type_b64: XCTest idle (its count 0); {ledger}"
+                        f"0 open; main thread answered in 1 ms, run loop mode m\n"),
+        "unread": reading(f"{head}at the ceiling: XCTest unread: XCTAnimationsIdleNotifier "
+                          f"is not loaded in this process; kaya's ledger refused: "
+                          f"UIViewAnimationState is not in this process; 0 started, 0 "
+                          f"stopped, 0 stopped with no start, 0 open; main thread did not "
+                          f"answer within 2 s, so no open animation was placed\n"),
+        "none": reading("KAYA_HARNESS: animations at the ceiling: 0 animation(s)\n")}
+    t = "2026-10-12 15:2"
+    rows = [f"{t}2:51.566 Df testmanagerd[9:1] [com.apple.dt.xctest:Default] Invalidating "
+            f"<XCTTargetBootstrapSession: 0x1>(pid 53460)",
+            f"{t}2:50.000 I  testmanagerd[9:1] [AXRuntimePID] Did suspend pid: 53460 on Display 0",
+            f"{t}3:00.000 Df KayaDrive-Runner[8:1] Lost connection to the application (pid 53460)",
+            f"{t}3:52.334 Df runningboardd[7:1] [com.apple.runningboard:process] Notifying "
+            f"connection that process [app<dev.kaya.timecodego((null))>:53460] exited with "
+            f"context <RBSProcessExitContext| voluntary>"]
+    system = scope["ios_system_log"]
+    said["let go"] = system("\n".join(rows), 53460)
+    said["no exit"] = system("\n".join(rows[:3]), 53460)
+    said["held on"] = system(rows[3], 53460)
+    said["empty"] = system("Timestamp\n", 53460)
+    said["no pid"] = system("\n".join(rows), None)
+    with tempfile.TemporaryDirectory(prefix="kaya-crash-") as d:
+        root = pathlib.Path(d)
+        doc = {"pid": 53460, "exception": {"type": "EXC_BAD_ACCESS", "signal": "SIGSEGV"},
+               "termination": {"namespace": "SIGNAL", "indicator": "Segmentation fault: 11"}}
+        (root / "timecodego-2026-10-12-152251.ips").write_text(
+            '{"app_name":"timecodego"}\n' + json.dumps(doc), encoding="utf-8")
+        (root / "other.ips").write_text('{}\n' + json.dumps({"pid": 1}), encoding="utf-8")
+        (root / "torn.ips").write_text('{}\n{"pid": ', encoding="utf-8")
+        crash = scope["ios_crash_reports"]
+        said["crash"] = crash(root, 53460, 0)
+        said["no crash"] = crash(root, 53461, 0)
+        said["no dir"] = crash(root / "absent", 53460, 0)
+    if echo:
+        for k, v in said.items():
+            print(f"check-flightrec: iOS hang record, {k}: {v.splitlines()[0]}")
+    found = []
+    for k, want in (
+            ("held", "kaya's ledger holds 1 UIView animation(s) no stop has matched; the "
+                     "oldest: open since 11:07:50.974 (step 'press return')"),
+            ("uncounted", "XCTest's count is above 0 while kaya's ledger holds no open"),
+            ("idle", "15 s into #2 type_b64: XCTest's count is 0"),
+            ("unread", "XCTest's own count was not read: XCTAnimationsIdleNotifier is not "
+                       "loaded in this process; kaya's ledger was never installed: "
+                       "UIViewAnimationState is not in this process; the main thread did "
+                       "not answer"),
+            ("none", "the harness printed no animation reading"),
+            ("let go", "BEFORE the app exited: XCTest let go of a live app"),
+            ("let go", "last marked the running pid 53460 SUSPENDED at 15:22:50.000"),
+            ("let go", "1 line(s) say lost connection or unable to monitor, the first"),
+            ("let go", "exit at 15:23:52.334 with context <RBSProcessExitContext| voluntary>"),
+            ("no exit", "no exit of it is in this slice: XCTest let go of a live app"),
+            ("held on", "testmanagerd never ended its session with pid 53460"),
+            ("empty", "holds no lines at all"),
+            ("no pid", "no line here can be tied to the app"),
+            ("crash", "names pid 53460: exception EXC_BAD_ACCESS SIGSEGV, termination "
+                      "SIGNAL Segmentation fault: 11"),
+            ("crash", "1 could not be read: torn.ips"),
+            ("no crash", "no crash report written since the launch names pid 53461 (3 written"),
+            ("no dir", "no crash report directory at")):
+        if want not in said[k]:
+            found.append(f"ios: the hang record's {k} reading lost {want!r}: {said[k][:300]!r}")
+    return found
+
+
 def census_door_record(src):
     """THE LINUX RELAUNCH DOORS' RECORD (docs/traps.md, the plain door's
     lost Activate): a door leg that started its bus with dbus-launch
@@ -1398,7 +1567,8 @@ CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("linux ceiling stacks", census_wedge_capture),
             ("linux door record", census_door_record),
             ("iOS ceiling stacks", census_ios_stacks),
-            ("iOS app log", census_ios_app_log))
+            ("iOS app log", census_ios_app_log),
+            ("iOS hang record", census_ios_hang_record))
 TABLE = declared(REAL)
 gate.counted("lanes declaring a bundle shape", list(TABLE), floor=5)
 gate.counted("sections declared across the five lanes",
@@ -1423,6 +1593,8 @@ for line in ios_notification_checks(REAL, echo=True):
     gate.finding(line, at="iOS notification store")
 for line in ios_app_log_checks(REAL, echo=True):
     gate.finding(line, at="iOS app log")
+for line in ios_hang_record_checks(REAL, echo=True):
+    gate.finding(line, at="iOS hang record")
 
 
 def doctored(rel, pattern, repl, label, *, flags=re.M, want=1):
@@ -1929,6 +2101,54 @@ for label, rel, pattern, repl, want, check in (
     changed = doctored(rel, pattern, repl, label)
     gate.negative(label, lambda: check(changed), want=want)
 
-gate.negatives_ran(118)
+for label, rel, pattern, repl, want, check in (
+        ("NH1 the ceiling without XCTest's count and the ledger", SWIFTUI,
+         r'^ +Data\("KAYA_HARNESS: \\\(KayaAnimationLedger\.shared\.reading'
+         r'\("at the ceiling"\)\)\\n"\.utf8\)\)\n',
+         "", "no longer prints XCTest's animation count", census_ios_hang_record),
+        ("NH2 a slow driver request read nothing", SWIFTUI,
+         r"KayaAnimationLedger\.shared\.reading\(moment\)", '"nothing"',
+         "kayaDriverSlowReading no longer prints", census_ios_hang_record),
+        ("NH3 the ledger swallowing XCTest's start", SWIFTUI,
+         r"^ +prevStart\(state, startSel, anim\)\n", "", "the replaced start still called",
+         census_ios_hang_record),
+        ("NH4 the ledger never installed", SWIFTUI,
+         r"DispatchQueue\.main\.sync \{ KayaAnimationLedger\.shared\.install\(\) \}",
+         "DispatchQueue.main.sync {}", "no longer installs", census_ios_hang_record),
+        ("NH5 a slow reading past the ceiling", SWIFTUI,
+         r"kayaDriverSlowReading: TimeInterval = 15", "kayaDriverSlowReading: TimeInterval = 60",
+         "not inside the step ceiling", census_ios_hang_record),
+        ("NH6 the Swift reading renamed under the reader", SWIFTUI,
+         r'"XCTest IN PROGRESS \(', '"XCTest BUSY (', "'XCTest IN PROGRESS'",
+         census_ios_hang_record),
+        ("NH7 a failed leg without the system's account", IOS,
+         r"^ +system_capture\(udid, name, log, launched_at,\n.*\n", "",
+         "no longer keeps the system's account", census_ios_hang_record),
+        ("NH8 the system log without its Info lines", IOS,
+         r'"--start", since, "--info",', '"--start", since,', "the Info lines",
+         census_ios_hang_record),
+        ("NH9 the system log beyond the secure scan", IOS,
+         r'^ +\("system log", leg_log\.with_suffix\("\.syslog"\)\),\n', "",
+         "without the secure scan", census_ios_hang_record),
+        ("NH10 a held count judged without its open animation", LANE_PY,
+         r'f"animation\(s\) no stop has matched; the oldest: \{opens\[0\]\}"',
+         'f"animation(s) no stop has matched"', "held reading lost", ios_hang_record_checks),
+        ("NH11 a session ended before the exit read as the exit", LANE_PY,
+         r"if lead > 1 else", "if lead > 1e9 else", "let go reading lost",
+         ios_hang_record_checks),
+        ("NH12 a crash report never matched to its pid", LANE_PY,
+         r'doc\.get\("pid"\) == pid', "False", "crash reading lost",
+         ios_hang_record_checks)):
+    changed = doctored(rel, pattern, repl, label)
+    gate.negative(label, lambda: check(changed), want=want)
+for label, name, want in (("NH13 iOS animations section unwritten", "animations",
+                           "`animations` is declared"),
+                          ("NH14 iOS system-log section unwritten", "system-log",
+                           "`system-log` is declared")):
+    changed = doctored(LANE_PY, rf'self\.adopt\(bundle, "{name}",',
+                       f'self.adopt(bundle, "lost-{name}",', label)
+    gate.negative(label, lambda: census_sections(changed), want=want)
+
+gate.negatives_ran(132)
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")
