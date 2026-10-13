@@ -957,7 +957,7 @@ in docs/deferred.md.
    about 300ms after it; KayaFailShot copies the window before the verdict
    is published and the runner adopts it as `shot`, the screencap as
    `desktop-shot` (docs/traps.md); four cuts watched.
-   A hundred and one watched negatives, counts printed),
+   A hundred and eighteen watched negatives, counts printed),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer
