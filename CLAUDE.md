@@ -972,7 +972,7 @@ in docs/deferred.md.
    90 days under a 2 GB bound, oldest first (the 2026-10-12 XCTest hang's
    bundle was pruned before anyone needed it). The real pruner runs dry and
    then for real over a synthetic home; eight cuts watched.
-   A hundred and forty watched negatives, counts printed),
+   A hundred and forty-nine watched negatives, counts printed),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer

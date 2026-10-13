@@ -17,7 +17,7 @@ param(
     [int]$Seconds = 5400
 )
 
-# ASCII ON THE CODE LINES (tools/flightrec-selftest.py N5): PowerShell
+# ASCII ON THE CODE LINES (check-steps' ANSI payload rule): PowerShell
 # 5.1 reads a .ps1 in the machine's ANSI codepage, so a non-ASCII
 # character inside a string literal kills the parse.
 $ErrorActionPreference = 'Continue'

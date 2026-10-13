@@ -42,9 +42,11 @@ dev_shell_or_die()
 # and deploy-win's pre-leg delete.
 
 import ast
+import atexit
 import datetime
 import io
 import json
+import os
 import re
 import subprocess
 import tempfile
@@ -1070,6 +1072,18 @@ def mac_unified_log_checks(src, echo=False):
     if echo:
         print("check-flightrec: Mac unified log: " + " | ".join(
             line for line in text.splitlines() if line.startswith("== ")))
+
+    def absent(argv, **_):
+        raise FileNotFoundError(2, "No such file or directory", argv[0])
+    try:
+        gone, gone_state = scope["mac_unified_log"](4242, cap=1000, run=absent)
+    except OSError:
+        found.append("mac: an absent `log` tool raised out of the collect, so "
+                     "the bundle loses every section after it")
+    else:
+        if gone_state != "error" or "not run" not in gone or "'log'" not in gone:
+            found.append("mac: an absent `log` tool was not reported, by name, "
+                         "as not run")
     return found
 
 
@@ -1636,9 +1650,220 @@ def census_door_record(src):
     return found
 
 
+def census_pass_path(src):
+    """A PASSING LEG COSTS THE OBSERVER NOTHING (docs/deferred.md, the
+    flight recorder's first matrix: 304ms of ssh and python per leg took
+    the windows lane 110s past its ceiling). Both per-leg record paths are
+    one append, never a spawn."""
+    found = []
+    m = re.search(r"^flightrec_leg\(\) \{.*?^\}", src[LANE_SH], re.S | re.M)
+    if not m:
+        return [f"{LANE_SH}: flightrec_leg could not be read — the anchor moved"]
+    for line in m.group(0).splitlines():
+        if re.match(r"^\s*#", line):
+            continue
+        for banned in ("python3", "run_ssh", "scp", "mkdir"):
+            if re.search(rf"\b{banned}\b", line):
+                found.append(f"{LANE_SH}: flightrec_leg calls '{banned}' — it "
+                             f"runs on every leg and must not spawn")
+    leg = None
+    for node in ast.walk(ast.parse(src[LANE_PY])):
+        if isinstance(node, ast.ClassDef) and node.name == "LaneRecorder":
+            for item in node.body:
+                if isinstance(item, ast.FunctionDef) and item.name == "leg":
+                    leg = ast.get_source_segment(src[LANE_PY], item)
+    if leg is None:
+        return found + [f"{LANE_PY}: LaneRecorder.leg could not be read"]
+    if "subprocess" in leg or "Popen" in leg:
+        found.append(f"{LANE_PY}: LaneRecorder.leg spawns — it runs on every "
+                     f"leg of four lanes and must stay one O_APPEND write")
+    return found
+
+
+# THE MAC RECORDER, DRIVEN. The censuses above read the collect; this runs
+# it: the real MacRecorder (or a doctored copy) through watched_leg and
+# mac_leg, the one wiring validate-mac's pool and run-leg share, against a
+# guest that lives five seconds and fails, one that passes, and one whose
+# journal cannot be opened. The desktop is never photographed: the drive
+# reads the host as busy.
+MAC_DRIVER = '''import importlib.util
+import os
+import pathlib
+import sys
+
+lane_mod, root, leg_name, tmp = sys.argv[1:5]
+leg_argv = sys.argv[5:]
+sys.path.insert(0, str(pathlib.Path(root) / "tools" / "lib"))
+from lanes import mac as mac_lane
+mac_lane.hid_idle_seconds = lambda: (0, None)
+spec = importlib.util.spec_from_file_location("kaya_flightrec_shadow", lane_mod)
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+fr = mod.MacRecorder(pathlib.Path(root))
+tmp = pathlib.Path(tmp)
+scratch = tmp / "scratch"
+log = tmp / "leg.log"
+with open(log, "w", encoding="utf-8") as lf:
+    rc = fr.watched_leg(scratch, leg_argv, dict(os.environ), lf)
+fr.mac_leg(leg_name, "PASS" if rc == 0 else "FAIL", 0, log, scratch)
+fr.flush()
+print(f"driver: status={0 if rc == 0 else 1}")
+'''
+def absent_tool_checks(src):
+    """A capture tool this host does not have leaves a .skip naming it,
+    never a silently absent section and never a raise out of the collect."""
+    import importlib.util
+    shadow = gate.scratch() / f"section-{len(list(gate.scratch().glob('section-*')))}"
+    shadow.mkdir()
+    (shadow / "flightrec_lane.py").write_text(src[LANE_PY], encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("kaya_section_shadow",
+                                                  shadow / "flightrec_lane.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    rec = object.__new__(mod.LaneRecorder)
+    bundle = shadow / "bundle"
+    bundle.mkdir()
+    try:
+        rec.section(bundle, "windows", ["no-such-tool-on-any-host"])
+    except OSError as error:
+        return [f"{LANE_PY}: an absent capture tool raised out of section(): {error}"]
+    marker = bundle / "windows.skip"
+    said = marker.read_text(encoding="utf-8") if marker.is_file() else ""
+    manifest = (bundle / "MANIFEST").read_text(encoding="utf-8") \
+        if (bundle / "MANIFEST").is_file() else ""
+    if "no-such-tool-on-any-host" not in said or "windows skip" not in manifest:
+        return [f"{LANE_PY}: an absent capture tool left no skip naming it "
+                f"({said.strip()!r}, manifest {manifest.strip()!r})"]
+    return []
+
+
+LIVE_FAIL = ("python3", "-c", "import time, sys; time.sleep(5); sys.exit(1)")
+UNREACHED = "never reached section"
+
+
+def mac_drive_start(lane_text, tag, kind):
+    """Start one drive in the background; mac_drive_checks reads it."""
+    tmp = gate.scratch() / f"drive-{tag}"
+    tmp.mkdir(parents=True)
+    (tmp / "flightrec_lane.py").write_text(lane_text, encoding="utf-8")
+    (tmp / "driver.py").write_text(MAC_DRIVER, encoding="utf-8")
+    home = tmp / "journal"
+    if kind == "nojournal":
+        (tmp / "blocker").write_text("", encoding="utf-8")
+        home = tmp / "blocker" / "journal"
+    leg, argv = (("alwayspass", ("/usr/bin/true",)) if kind == "pass"
+                 else ("alwaysfail", LIVE_FAIL))
+    root = pathlib.Path(__file__).resolve().parent.parent
+    proc = subprocess.Popen(
+        [sys.executable, str(tmp / "driver.py"), str(tmp / "flightrec_lane.py"),
+         str(root), leg, str(tmp), *argv],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        encoding="utf-8", errors="replace",
+        env=dict(os.environ, KAYA_FLIGHTREC_DIR=str(home)))
+    atexit.register(proc.kill)
+    return {"proc": proc, "tmp": tmp, "home": home, "kind": kind, "leg": leg}
+
+
+def mac_drive_checks(drive):
+    if "log" not in drive:
+        out, _ = drive["proc"].communicate(timeout=300)
+        drive["log"], drive["rc"] = out, drive["proc"].returncode
+    log, rc, home, kind = drive["log"], drive["rc"], drive["home"], drive["kind"]
+    tail = " | ".join(log.strip().splitlines()[-4:])
+    if kind == "nojournal":
+        found = []
+        if rc != 0 or "driver: status=1" not in log:
+            found.append(f"mac drive: an unwritable journal cost the leg "
+                         f"(driver exit {rc}): {tail}")
+        misses = log.count("flightrec: the journal could not be opened")
+        if misses != 1:
+            found.append(f"mac drive: the journal miss was printed {misses} "
+                         f"time(s), want exactly 1")
+        return found
+    if rc != 0:
+        return [f"mac drive ({kind}): the driver exited {rc}: {tail}"]
+    journals = sorted(home.rglob("journal.jsonl"))
+    journal = journals[0].read_text(encoding="utf-8") if journals else ""
+    verdict = "PASS" if kind == "pass" else "FAIL"
+    found = []
+    if f'"leg":"{drive["leg"]}"' not in journal or f'"verdict":"{verdict}"' not in journal:
+        found.append(f"mac drive ({kind}): the journal has no {verdict} record "
+                     f"for the leg")
+    if kind == "pass":
+        if "driver: status=0" not in log:
+            found.append(f"mac drive: the passing leg did not pass: {tail}")
+        if [p for p in home.rglob("mac-*") if p.is_dir()]:
+            found.append("mac drive: a PASSING leg scaffolded a bundle — the "
+                         "pass path must create nothing")
+        if any(p.stat().st_size for p in home.rglob("spool.tsv")):
+            found.append("mac drive: the spool survived the flush, so a second "
+                         "flush would write every record twice")
+        return found
+    manifests = sorted(home.rglob("MANIFEST"))
+    if "driver: status=1" not in log or not manifests:
+        return found + [f"mac drive: no bundle was written for a failing leg: "
+                        f"{tail}"]
+    bundle = manifests[0].parent
+    sampler = bundle / "sampler.txt"
+    if not sampler.is_file() or not re.search(
+            r"guest_pid=\d+", sampler.read_text(encoding="utf-8")):
+        found.append("mac drive: the sampler never resolved the guest's pid "
+                     "while it lived, so a hang's shot and sample would skip")
+    listed = {line.split()[0] for line in
+              manifests[0].read_text(encoding="utf-8").splitlines() if line.split()}
+    missing = [s for s in declared(REAL)["mac"] if s not in listed]
+    if missing:
+        found.append(f"mac drive: the bundle is missing sections {missing}")
+    for skip in sorted(bundle.glob("*.skip")):
+        said = skip.read_text(encoding="utf-8", errors="replace")
+        if not said.strip() or "named no reason" in said:
+            found.append(f"mac drive: {skip.name} carries no measured reason: "
+                         f"{said.strip()!r}")
+        if UNREACHED in said:
+            found.append(f"mac drive: the collect never reached section "
+                         f"{skip.stem}")
+            if f"{skip.stem} skip" not in log or UNREACHED not in log:
+                found.append(f"mac drive: the report did not print the "
+                             f"unreached {skip.stem} and its sentence")
+    if not re.search(r"flightrec: bundle .* sections", log):
+        found.append("mac drive: the bundle's counts were never printed")
+    return found
+
+
 # ---------------------------------------------------------------- run it
 
 REAL = sources()
+
+# The drives take seconds each, so all of them start here and run beside
+# the censuses; each doctored copy's substitution count is printed now.
+DRIVES = {}
+if sys.platform == "darwin":
+    DRIVES["fail"] = mac_drive_start(REAL[LANE_PY], "fail", "fail")
+    DRIVES["pass"] = mac_drive_start(REAL[LANE_PY], "pass", "pass")
+    DRIVES["nojournal"] = mac_drive_start(REAL[LANE_PY], "nojournal", "nojournal")
+    for tag, kind, label, pattern, repl, flags in (
+            ("MD1", "fail", "MD1 the guest pid walked from descendants only",
+             r'anchors = \[str\(root_pid\)\] if self\._comm\(root_pid\) == "timeout" '
+             r'\\\n +else \[\]', "anchors = []", 0),
+            ("MD2", "fail", "MD2 the windowserver section no longer written",
+             r'self\._text_section\(bundle, "windowserver",\s*'
+             r'"\\n"\.join\(wanted\) \+ "\\n"\)', "pass", 0),
+            ("MD3", "fail", "MD3 the sample section skipped with no sentence",
+             r'self\.adopt\(bundle, "sample", scratch / "sample\.txt",.*?duration\."\)',
+             'self.skip(bundle, "sample", "")', re.S),
+            ("MD4", "pass", "MD4 a passing mac leg collects a bundle",
+             r'if verdict != "PASS":\n(\s+bundle = self\.bundle\(leg\)\n'
+             r'\s+fail = self\.fail_sentence\(log\) if log)', r"if True:\n\1", 0),
+            ("MD5", "nojournal", "MD5 an unopenable journal ends the runner",
+             r'(print\("flightrec: the journal could not be opened.*?'
+             r'file=sys\.stderr\)\n)(\s+)return\n', r"\1\2raise SystemExit(1)\n",
+             re.S)):
+        DRIVES[tag] = (label, mac_drive_start(
+            gate.doctor(label, REAL[LANE_PY], pattern, repl, flags=flags),
+            tag, kind))
+else:
+    print("check-flightrec: the mac recorder drive needs a mac; not run here")
+
 CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("finish", census_finish), ("capture point", census_when),
             ("windows verb trace", census_vtrace),
@@ -1685,6 +1910,15 @@ for line in ios_hang_record_checks(REAL, echo=True):
     gate.finding(line, at="iOS hang record")
 for line in retention_checks(REAL, echo=True):
     gate.finding(line, at="red bundle retention")
+for line in census_pass_path(REAL):
+    gate.finding(line, at="pass path")
+for line in absent_tool_checks(REAL):
+    gate.finding(line, at="absent capture tool")
+for kind in ("fail", "pass", "nojournal"):
+    if kind in DRIVES:
+        for line in mac_drive_checks(DRIVES[kind]):
+            gate.finding(line, at="mac recorder drive")
+        print(f"check-flightrec: mac recorder drive ({kind}) read back")
 
 
 def doctored(rel, pattern, repl, label, *, flags=re.M, want=1):
@@ -2260,6 +2494,33 @@ for label, pattern, repl, want in (
     changed = doctored(JOURNAL, pattern, repl, label)
     gate.negative(label, lambda: retention_checks(changed), want=want)
 
-gate.negatives_ran(140)
+for label, rel, pattern, repl, want, check in (
+        ("MD6 LaneRecorder.leg spawns", LANE_PY,
+         r"(\n +)fd = os\.open\(str\(self\.spool\)",
+         r'\1subprocess.run(["true"])\1fd = os.open(str(self.spool)',
+         "LaneRecorder.leg spawns", census_pass_path),
+        ("MD7 flightrec_leg spawns python3", LANE_SH,
+         r"^(    printf '%s\\t%s\\t%s)", r"    python3 -c pass\n\1",
+         "flightrec_leg calls 'python3'", census_pass_path),
+        ("MD8 an absent log tool raises out of the collect", LANE_PY,
+         r"\n +except OSError as error:\n +data, code = str\(error\)\.encode\(\), "
+         r"f\"not run: \{error\.strerror\}\"", "",
+         "absent `log` tool raised", mac_unified_log_checks),
+        ("MD9 section() without its absent-tool skip", LANE_PY,
+         r"\n +except FileNotFoundError:\n +dest\.unlink\(missing_ok=True\)\n"
+         r" +self\.skip\(bundle, name,\n.*\n.*\n +return", "",
+         "an absent capture tool", absent_tool_checks)):
+    changed = doctored(rel, pattern, repl, label)
+    gate.negative(label, lambda: check(changed), want=want)
+for tag, want in (("MD1", "never resolved the guest's pid"),
+                  ("MD2", "never reached section windowserver"),
+                  ("MD3", "carries no measured reason"),
+                  ("MD4", "PASSING leg scaffolded a bundle"),
+                  ("MD5", "an unwritable journal cost the leg")):
+    if tag in DRIVES:
+        label, drive = DRIVES[tag]
+        gate.negative(label, lambda: mac_drive_checks(drive), want=want)
+
+gate.negatives_ran(144 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

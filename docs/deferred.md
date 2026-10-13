@@ -2151,7 +2151,7 @@ with six watched negatives (a verdict dump cut, a line shape drifted,
 the env var renamed, a dump on the pass path, the Rust watchdog's dump
 moved, the pointer line drifted). COLLECTION: the mac lane names the
 file in each leg's scratch and mac_leg adopts it (`verb-trace` in
-WANT_SECTIONS, so flightrec-selftest's N0 holds it); linux names it
+the mac SECTIONS, so check-flightrec's mac recorder drive holds it); linux names it
 per leg in run_one and adopts it at fail; iOS passes a relative name
 through SIMCTL_CHILD_ and `pull_container_files` copies it out of the
 data container beside the log at fail time only; Android passes it as
@@ -2211,14 +2211,18 @@ WHAT LANDED
   id-normalization search are instrumented; `poll_named` gives a retried
   observation its per-attempt records, which plain `poll` never kept.
 
-WHY A SELF-TEST AND NOT A NUMBERED GATE. `tools/flightrec-selftest.py` is
-deliberately not named `check-*.py`: check-gates' delegation clause forbids
-validate-mac from invoking anything gate-shaped, its census would demand
-registration in four places, and what needs proving is a RUNTIME property
-of a host — that these capture commands answer here — which no static gate
-can see. It cuts the REAL `run()` out of validate-mac by brace depth and
-drives it with an always-failing leg. Six clauses, four watched
-perturbations, and the tree's hashes compared before and after.
+THE RUNTIME HALF. It began as a standalone self-test,
+tools/flightrec-selftest.py (gone), named outside `check-*.py` so the census
+would not see it — and so nothing ran it, and it rotted against the
+MacRecorder wiring (its pin still demanded `FR.sampler_start(` in
+validate-mac) until 2026-10-13. Its clauses now live in
+tools/check-flightrec.py's mac recorder drive, which runs the REAL
+MacRecorder through watched_leg and mac_leg against a guest that lives five
+seconds and fails, one that passes and one whose journal cannot be opened
+(MD1-MD5 cut it, MD9 the absent-tool skip); its retention clause is the
+pruner's (NR1-NR8) and its .ps1 clause is check-steps' ANSI payload rule.
+check-gates' census now reads a tools script whose name ends in -selftest
+as gate-shaped, so a self-test outside the sweep is a finding.
 
 FOUR DEFECTS IT CAUGHT WHILE BEING BUILT, all in the recorder itself, and
 each one a diagnostic that would have lied rather than gone quiet:
@@ -2278,11 +2282,12 @@ sampler start 123ms, flush of 200 records 50ms). One real windows suite,
 five legs concurrent, alternating: hooks-off median 2605ms (spread
 2515-4278), hooks-on median 2622ms (2616-2797) — the hooks-on runs sit
 inside hooks-off's own spread, and they include that once-per-lane setup.
-tools/flightrec-selftest.py clause N6 is the wall: a PASSING leg must
+tools/check-flightrec.py's mac recorder drive (MD4) and pass-path census
+(MD6, MD7) are the wall: a PASSING leg must
 scaffold no bundle, must still be journalled through the spool, must leave
 the spool truncated, and `flightrec_leg`'s body may not name python3,
 run_ssh, scp or mkdir. A lane ceiling noticed this once, after a whole
-matrix; N6 notices in seconds.
+matrix; the gate notices in seconds.
 
 WHAT IS OPEN
 - ~~BREADTH: linux (`tools/validate-linux.py`), iOS (`tools/ios/run-sim.py`)
@@ -2335,10 +2340,8 @@ WHAT IS OPEN
   holds statically what the standalone self-test drives at run time (the
   declared shape, each lane's collect reaching it, the one skip writer, the
   finish() call, and the capture taken while the device is still the leg's).
-  tools/flightrec-selftest.py stays standalone and stays the RUNTIME half —
-  it now reads its section list out of the recorder's own declaration
-  rather than a second copy, and carries a tenth clause watching a
-  reasonless skip write the sentence that names itself a bug.
+  The standalone runtime self-test was folded into check-flightrec on
+  2026-10-13 (above, THE RUNTIME HALF).
 
 ## ~~CHORE — storage cleanup: the host is nearing disk capacity (Akhil, 2026-08-27)~~
 KEY: disk cleanup, target directory size, scratchpad growth, docker prune, nix store gc, validate-failures logs
@@ -6638,7 +6641,7 @@ families — is tools/lib/lanes/mac.py, the body is
 tools/validate-mac.py, and the mac flight-recorder half (the per-leg
 sampler, the window-scoped shot, the at-fail capture) crossed into
 flightrec_lane.py's MacRecorder with 254 lines of mac-only shell
-leaving flightrec.sh. tools/flightrec-selftest.py — the tenth parser,
+leaving flightrec.sh. tools/flightrec-selftest.py (gone) — the tenth parser,
 which used to cut run() out of the shell body and execute it — drives
 the real MacRecorder now, with the driver's one paraphrase pinned
 against the runner's own _leg_worker by ast. The enumeration's

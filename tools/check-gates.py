@@ -45,10 +45,12 @@ def fail(msg):
 # three readers. The naming clause below FORCES every gate into a shape
 # this pattern can see, or the prose scan goes quietly blind.
 # Every gate is python but tools/swift-typecheck.sh, which stays shell
-# (an in-toolchain launcher shape).
+# (an in-toolchain launcher shape). A `*-selftest` script is gate-shaped
+# too, so the census sees it (docs/deferred.md, the flight recorder
+# entry's RUNTIME HALF).
 SHELL_GATE = (r"tools/(?:(?:check-[a-z0-9-]+|gen-(?:header|bindings|guests)"
-              r"|java-typecheck|js-typecheck|go-typecheck|py-typecheck)"
-              r"\.py|swift-typecheck\.sh)")
+              r"|java-typecheck|js-typecheck|go-typecheck|py-typecheck"
+              r"|[a-z0-9-]+-self-?test)\.py|swift-typecheck\.sh)")
 PY_GATE = r"bindings/(?:python/[a-z0-9_]+\.py|js/[a-z0-9_]+\.ts)"
 TOKEN = re.compile(f"{SHELL_GATE}|{PY_GATE}")
 
@@ -802,6 +804,17 @@ if not census(on_disk + ["tools/check-invented-by-selftest.sh"],
               listed_scripts, EXCLUDED):
     fail("self-test N4: a gate script in neither list was not reported — the "
          "census clause is vacuous")
+
+# N4b — a self-test named outside check-* is gate-shaped to the census.
+planted = [name for name in (f"tools/invented-{word}.py"
+                             for word in ("selftest", "self-test"))
+           if re.fullmatch(SHELL_GATE, name)]
+print(f"check-gates: self-test N4b, {len(planted)} of 2 planted self-test "
+      f"names gate-shaped")
+if len(planted) != 2 or len(census(on_disk + planted, listed_scripts,
+                                   EXCLUDED)) < 2:
+    fail("self-test N4b: a `*-selftest` script in neither list was not "
+         "reported — a self-test outside check-* would rot unrun again")
 
 # NQ1 — the quiet tail launched before the lanes are joined.
 doctored, n = re.subn(

@@ -16,7 +16,7 @@ calls, go_desktop_scenes' mac row), check-gates (the delegation
 clause + N3, the lane contract, rung2's CLAUDE.md anchor),
 check-build-id, check-assets (NOTHING_NEEDED), check-appearance (N9),
 check-stubs, scene-features, check-staging (three reads + N1/N3), and
-tools/flightrec-selftest.py — the deepest: it CUT the real run() out
+tools/flightrec-selftest.py (gone) — the deepest: it CUT the real run() out
 of the shell body by brace depth and executed it.
 
 The enumeration's own finds, fixed in this slice:
@@ -60,7 +60,7 @@ The enumeration's own finds, fixed in this slice:
   tool the host does not have (the shell's behavior, which the first
   python port had quietly downgraded to a nameless "error" mark —
   flightrec-selftest N2 is what surfaced it).
-- tools/flightrec-selftest.py rewritten: it drives the REAL
+- tools/flightrec-selftest.py (gone) rewritten: it drives the REAL
   MacRecorder imported from the real module (N0 fails a real leg and
   demands all seven sections accounted; N1/N2 doctor a COPY of the
   module and demand the missing section named and the honest skip);

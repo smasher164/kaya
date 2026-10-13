@@ -666,7 +666,7 @@ class LaneRecorder:
         flightrec_section, argv-only. An error is marked, never raised
         (the recorder may never cost a lane its legs). A capture tool
         this host does not have leaves a .skip NAMING it, never a
-        silently absent section (invariant 3 — flightrec-selftest N2
+        silently absent section (invariant 3 — check-flightrec's MD9
         watches this fire)."""
         if bundle is None or not bundle.is_dir():
             return

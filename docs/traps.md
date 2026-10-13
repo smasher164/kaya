@@ -1948,8 +1948,9 @@ the same patterns return through interpreter drop-downs
   line), which is why tools/guest/desk-warm.ps1 and wait-exit.ps1 have
   carried em-dashes for months and work; the rule is therefore code lines,
   not all lines. Nothing else looks: check-shell walks tools/ for `.sh`
-  and `.cmd` and never `.ps1`. Guard: tools/flightrec-selftest.py clause
-  N5, with a watched negative that puts an em-dash back into a literal.
+  and `.cmd` and never `.ps1`. Guard: tools/check-steps.py's ANSI payload
+  rule over every tools/guest .ps1 and .cmd, with watched negatives in
+  both directions and pkg-run.ps1's own shipped em-dash put back.
   Measured 2026-08-27 building the flight recorder.
 
 - **A `*W` P/Invoke without `CharSet.Unicode` truncates every string to
@@ -1993,9 +1994,11 @@ the same patterns return through interpreter drop-downs
   per-leg one (the foreground is machine-wide, so per-leg was always the
   wrong unit), a spooled journal (a bash `printf` builtin per leg, one
   python3 per lane), and nothing bundle-shaped created on a pass. After:
-  0.130ms per leg, n=200. Guard: tools/flightrec-selftest.py N6, which
-  runs a PASSING leg and refuses a bundle, a surviving spool, or a
-  `flightrec_leg` body naming python3/run_ssh/scp/mkdir. A lane ceiling
+  0.130ms per leg, n=200. Guard: tools/check-flightrec.py's mac recorder
+  drive, which runs a PASSING leg and refuses a bundle (MD4) or a
+  surviving spool, and its pass-path census, which refuses a
+  `flightrec_leg` body naming python3/run_ssh/scp/mkdir (MD7) or a
+  spawning LaneRecorder.leg (MD6). A lane ceiling
   caught this after a whole matrix; the clause catches it in seconds.
 
 - **An expensive capture must not run before a vanishing one.** The mac
