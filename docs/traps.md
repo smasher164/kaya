@@ -292,6 +292,35 @@ replace shows as a 5 s stall, never a red. toast_routes.py holds the GTK
 replace (the shown toast dismissed before the add, priority HIGH) and the
 WinUI one, each cut watched.
 
+## The toast that outlived its seconds (seen 2026-10-13, cause not yet named)
+
+Full matrix of 2026-10-13: five of the ten mac toast legs (haskell, swift,
+java, js, c, launched together in the pool at 07:20:00-03Z, right after
+the media_session EXCLUSIVE series) all read the short "Saved" toast still
+on screen 15, 30 and 45 s after it appeared; the other five, launched five
+seconds earlier, passed. The maintainer's Firefox filled the screen above
+every guest window. The main thread answered the harness every ~39 ms the
+whole time, so it was not wedged. The bundle could not say whether the
+timer was held (pointer, assistive focus), cancelled, or waking late: the
+toast's timer was 40 sleeps of 100 ms each subtracting 0.1 s, and the
+unified-log section held only 1.3 s of replayd from before the leg (one
+query with replayd, capped at 2 MB keeping the head).
+App Nap was tested and NOT seen: an unbundled accessory probe whose window
+sat behind Firefox woke every 100-107 ms for 30 s with its main thread at
+PRI 46, never darwinbg (`ps -M`); ten concurrent toast legs with Firefox
+frontmost passed 10/10. No App Nap opt-out was added on that evidence.
+Measured and fixed: a 100 ms sleep wakes in 104-107 ms here, so counting
+wakes stretched every toast (4.2 s for 4 s) and a late wake stretched it
+without bound. The SwiftUI and WinUI timers now subtract the clock's
+elapsed time. expect_no_toast's failure on SwiftUI prints the timer's own
+reading (on-screen time, counted, held by the pointer and by assistive
+focus, wakes, longest gap, cancelled, app active, window
+visible/occluded/unregistered), every branch forced to print once; the
+mac unified log keeps the guest's lines and replayd's in separate halves,
+each keeping its newest (tools/lib/flightrec_lane.py `mac_unified_log`).
+tools/lib/toast_routes.py and check-flightrec hold both, cuts watched.
+The next sighting names which of hold, cancel or late wake it was.
+
 ## The Compose segment order: Material's selected segment comes last in the semantics tree (measured 2026-10-08)
 
 material3 1.3.1's `SegmentedButton` raises the selected segment's z-index,

@@ -1035,6 +1035,41 @@ def mac_power_checks(src, echo=False):
     return found
 
 
+def mac_unified_log_checks(src, echo=False):
+    """docs/traps.md, the toast that outlived its seconds: replayd's flood
+    filled the one-query section's cap before the leg and kept the head."""
+    scope = {"subprocess": subprocess, "SECTION_CAP": 1000}
+    exec(compile(py_block(src[LANE_PY], "mac_unified_log"), LANE_PY, "exec"), scope)
+    found = []
+    if "mac_unified_log(self._sampler_pid(scratch))" not in py_block(src[LANE_PY], "_capture"):
+        found.append("mac: the unified-log section is no longer mac_unified_log "
+                     "over the leg's guest pid")
+    asked = []
+
+    def fake(argv, **_):
+        predicate = argv[argv.index("--predicate") + 1]
+        asked.append(predicate)
+        guest = predicate.startswith("processID == 4242")
+        body = (b"guest-oldest\n" + b"g" * 300 + b"\nguest-newest\n" if guest
+                else b"flood-oldest\n" + b"r" * 5000 + b"\nflood-newest\n")
+        return subprocess.CompletedProcess(argv, 0 if guest else 1, body)
+    text, state = scope["mac_unified_log"](4242, cap=1000, run=fake)
+    if len(asked) != 2 or any("processID == 4242" in p and "replayd" in p for p in asked):
+        found.append(f"mac: the guest's lines share a query with replayd ({asked})")
+    if "guest-oldest" not in text or "guest-newest" not in text:
+        found.append("mac: the guest's own lines did not survive replayd's flood")
+    if "flood-newest" not in text or "flood-oldest" in text:
+        found.append("mac: an over-cap query kept its oldest lines instead of its newest")
+    if text.find("guest-newest") > text.find("flood-newest"):
+        found.append("mac: the guest's lines no longer come first")
+    if state != "error" or "exit 1" not in text:
+        found.append("mac: a failed log query was not reported with its exit")
+    if echo:
+        print("check-flightrec: Mac unified log: " + " | ".join(
+            line for line in text.splitlines() if line.startswith("== ")))
+    return found
+
+
 def android_report_checks(src, echo=False):
     scope = {"re": re}
     for name in ("android_system_events", "android_anr_history", "android_shade_history"):
@@ -1380,6 +1415,8 @@ for line in desktop_shot_checks(REAL):
     gate.finding(line, at="desktop shot on an idle host")
 for line in mac_power_checks(REAL, echo=True):
     gate.finding(line, at="Mac power history")
+for line in mac_unified_log_checks(REAL, echo=True):
+    gate.finding(line, at="Mac unified log")
 for line in ios_recording_recovery(REAL):
     gate.finding(line, at="iOS recording recovery")
 for line in ios_notification_checks(REAL, echo=True):
@@ -1464,8 +1501,8 @@ gate.negative("NI1 a desktop shot that does not say what idle reading admitted i
               lambda: desktop_shot_checks(ni1), want="wrote no sentence naming that reading")
 
 # N1: a section the collect stops writing.
-n1 = doctored(LANE_PY, r'self\.section\(bundle, "unified-log", \[',
-              'self.section(bundle, "unified-nope", [',
+n1 = doctored(LANE_PY, r'self\.mark\(bundle, "unified-log",',
+              'self.mark(bundle, "unified-nope",',
               "N1 renamed the mac unified-log section away")
 gate.negative("N1 a mac section the collect stopped writing",
               lambda: census_sections(n1), want="`unified-log` is declared")
@@ -1720,6 +1757,19 @@ for label, before, after, want in (
     changed = doctored(LANE_PY, re.escape(before), after, f"Mac power {label} mutation")
     gate.negative(f"Mac power {label} corrupted", lambda: mac_power_checks(changed), want=want)
 
+for label, before, after, want in (
+        ("capture", "mac_unified_log(self._sampler_pid(scratch))", "mac_unified_log(None)",
+         "over the leg's guest pid"),
+        ("one query", '[("this leg\'s guest", f"processID == {pid}"),',
+         '[("this leg\'s guest", f"processID == {pid} OR process == \\"replayd\\""),',
+         "share a query with replayd"),
+        ("head kept", "data = data[-room:]", "data = data[:room]", "kept its oldest lines"),
+        ("status", 'state = "ok" if all(c == 0 for c in codes) else "error"', 'state = "ok"',
+         "not reported with its exit")):
+    changed = doctored(LANE_PY, re.escape(before), after, f"Mac unified log {label} mutation")
+    gate.negative(f"Mac unified log {label} corrupted",
+                  lambda: mac_unified_log_checks(changed), want=want)
+
 with tempfile.TemporaryDirectory(prefix="kaya-record-probe-") as directory:
     record_dir = pathlib.Path(directory)
     film = record_dir / "edge.mp4"
@@ -1879,6 +1929,6 @@ for label, rel, pattern, repl, want, check in (
     changed = doctored(rel, pattern, repl, label)
     gate.negative(label, lambda: check(changed), want=want)
 
-gate.negatives_ran(114)
+gate.negatives_ran(118)
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

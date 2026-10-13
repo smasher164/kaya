@@ -11937,7 +11937,7 @@ private func kayaRunScript(_ script: String) {
                     failures.append("\(shown.count) toasts on screen")
                 } else if parts[0] == "expect_no_toast" {
                     if let (text, action) = shown.first {
-                        failures.append("toast \"\(text)|\(action)\" shown, wanted none")
+                        failures.append("toast \"\(text)|\(action)\" shown, wanted none\(kayaToastClockSaid())")
                     } else {
                         observed.append("no toast")
                     }
@@ -25929,6 +25929,54 @@ private var kayaSheetTokens: UInt64 = 0
 /// Per-present serial for KayaToastShown.token. Main thread only.
 var kayaToastTokens: UInt64 = 0
 
+/// A toast's timer as it ran, per window; read by expect_no_toast's failure.
+/// Main thread only.
+struct KayaToastClock {
+    let token: UInt64
+    let seconds: Double
+    let started: ContinuousClock.Instant
+    var counted = 0.0
+    var heldPointer = 0.0
+    var heldFocus = 0.0
+    var wakes = 0
+    var longestGap = 0.0
+    var cancelled = false
+}
+var kayaToastClocks: [UInt64: KayaToastClock] = [:]
+
+func kayaSeconds(_ d: Duration) -> Double {
+    Double(d.components.seconds) + Double(d.components.attoseconds) / 1e18
+}
+
+/// What the shown toast's timer did, for the failure that found it still on
+/// screen: every number is the timer's own reading.
+func kayaToastClockSaid() -> String {
+    DispatchQueue.main.sync {
+        var said: [String] = []
+        for (windowId, shown) in kayaScene.toasts.sorted(by: { $0.key < $1.key }) {
+            guard let t = kayaToastClocks[windowId], t.token == shown.token else {
+                said.append("window \(windowId)'s timer never started")
+                continue
+            }
+            let f = { (v: Double) in String(format: "%.1fs", v) }
+            var line = "window \(windowId)'s timer: \(f(kayaSeconds(ContinuousClock.now - t.started))) on screen "
+                + "of its \(f(t.seconds)), counted \(f(t.counted)), held \(f(t.heldPointer)) by the pointer "
+                + "and \(f(t.heldFocus)) by assistive focus, \(t.wakes) wakes, longest gap \(f(t.longestGap))"
+            if t.cancelled { line += ", then cancelled with the toast still shown" }
+            #if os(macOS)
+                let visible = kayaNSWindows[windowId]?.occlusionState.contains(.visible)
+                line += "; app \(NSApp.isActive ? "active" : "inactive"), window "
+                    + (visible.map { $0 ? "visible" : "occluded" } ?? "unregistered")
+            #else
+                let state = UIApplication.shared.applicationState
+                line += "; app " + (state == .active ? "active" : state == .inactive ? "inactive" : "in the background")
+            #endif
+            said.append(line)
+        }
+        return said.isEmpty ? "" : " (" + said.joined(separator: "; ") + ")"
+    }
+}
+
 /// What the toast's announcement says: its text, then its action's label.
 func kayaToastAnnouncement(_ text: String, _ label: String) -> String {
     label.isEmpty ? text : "\(text), \(label)"
@@ -26038,12 +26086,33 @@ struct KayaToastView: View {
         // THE TIMER STARTS WHEN THE TOAST IS ON SCREEN, and counts only
         // while nothing holds it: the pointer over it (macOS) or the screen
         // reader's cursor inside it (both).
+        // ON THE CLOCK, NOT BY COUNTED WAKES (docs/traps.md, the toast that
+        // outlived its seconds).
         .task(id: shown.token) {
-            var left = seconds
-            while left > 0 {
-                try? await Task.sleep(nanoseconds: 100_000_000)
-                if Task.isCancelled { return }
-                if !(hovering || textFocused || actionFocused) { left -= 0.1 }
+            let clock = ContinuousClock()
+            var last = clock.now
+            var timer = KayaToastClock(token: shown.token, seconds: seconds, started: last)
+            kayaToastClocks[windowId] = timer
+            while timer.counted < seconds {
+                try? await Task.sleep(for: .seconds(min(0.1, seconds - timer.counted)))
+                let now = clock.now
+                let gap = kayaSeconds(now - last)
+                last = now
+                timer.wakes += 1
+                timer.longestGap = max(timer.longestGap, gap)
+                if Task.isCancelled {
+                    timer.cancelled = true
+                    kayaToastClocks[windowId] = timer
+                    return
+                }
+                if hovering {
+                    timer.heldPointer += gap
+                } else if textFocused || actionFocused {
+                    timer.heldFocus += gap
+                } else {
+                    timer.counted += gap
+                }
+                kayaToastClocks[windowId] = timer
             }
             closeToast()
         }

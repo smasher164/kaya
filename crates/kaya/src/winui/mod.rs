@@ -13686,6 +13686,7 @@ struct InfoBarToast {
     timer: bindings::Microsoft::UI::Dispatching::DispatcherQueueTimer,
     shown: Option<u64>,
     left_ms: i64,
+    last_tick: std::time::Instant,
     hovered: bool,
     focused: bool,
 }
@@ -13836,8 +13837,11 @@ fn info_bar_make(window: u64) -> windows_core::Result<InfoBarToast> {
         let due = INFO_BAR_TOASTS.with_borrow_mut(|bars| {
             let toast = bars.get_mut(&window)?;
             toast.shown?;
+            let now = std::time::Instant::now();
+            let gap = now.duration_since(toast.last_tick).as_millis() as i64;
+            toast.last_tick = now;
             if !(toast.hovered || toast.focused) {
-                toast.left_ms -= INFO_BAR_TICK_MS;
+                toast.left_ms -= gap;
             }
             (toast.left_ms <= 0).then_some(())
         });
@@ -13848,7 +13852,7 @@ fn info_bar_make(window: u64) -> windows_core::Result<InfoBarToast> {
         }
         Ok(())
     }))?;
-    Ok(InfoBarToast { popup, bar, action, timer, shown: None, left_ms: 0, hovered: false, focused: false })
+    Ok(InfoBarToast { popup, bar, action, timer, shown: None, left_ms: 0, last_tick: std::time::Instant::now(), hovered: false, focused: false })
 }
 
 /// T7: the shown toast is closed and the bar re-opened with the new one,
@@ -13880,6 +13884,7 @@ fn info_bar_present(core: &mut CoreState, spec: crate::protocol::ToastSpec) -> w
         let toast = bars.get_mut(&window).expect("just made");
         toast.shown = Some(spec.toast.0);
         toast.left_ms = info_bar_ms(spec.duration);
+        toast.last_tick = std::time::Instant::now();
         (toast.popup.clone(), toast.bar.clone(), toast.action.clone(), toast.timer.clone())
     });
     bar.SetMessage(&HSTRING::from(spec.text.as_str()))?;

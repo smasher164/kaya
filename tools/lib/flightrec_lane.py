@@ -69,6 +69,40 @@ def mac_power_history(text, code):
             + "\n".join(lines[-200:]) + "\n")
 
 
+def mac_unified_log(pid, cap=SECTION_CAP, run=subprocess.run):
+    """The leg's own guest first and its capture service second, each in
+    half the cap and each keeping its NEWEST lines: in one query replayd
+    filled the whole cap in 1.3 s before the leg began and the guest kept
+    no line (docs/traps.md, the toast that outlived its seconds).
+    Returns (text, state)."""
+    parts = ([("this leg's guest", f"processID == {pid}"),
+              ("replayd and ScreenCaptureKit",
+               'process == "replayd" OR subsystem BEGINSWITH "com.apple.ScreenCaptureKit"')]
+             if pid else
+             [("kaya processes", 'process CONTAINS "kaya" OR senderImagePath CONTAINS '
+                                 '"kaya" OR eventMessage CONTAINS "kaya"')])
+    room = cap // len(parts)
+    out, codes = [], []
+    for label, predicate in parts:
+        try:
+            got = run(["log", "show", "--last", "2m", "--style", "compact",
+                       "--predicate", predicate], stdout=subprocess.PIPE,
+                      stderr=subprocess.STDOUT, timeout=90, check=False)
+            data, code = got.stdout, got.returncode
+        except subprocess.TimeoutExpired as late:
+            data, code = late.stdout or b"", "killed at 90 s"
+        except OSError as error:
+            data, code = str(error).encode(), f"not run: {error.strerror}"
+        codes.append(code)
+        head = f"== {label} (log show --predicate '{predicate}'): exit {code}, {len(data)} bytes"
+        if len(data) > room:
+            head += f", the oldest {len(data) - room} cut to keep the newest {room}"
+            data = data[-room:]
+        out.append(head + " ==\n" + data.decode("utf-8", errors="replace"))
+    state = "ok" if all(c == 0 for c in codes) else "error"
+    return "\n".join(out), state
+
+
 def android_system_events(text):
     # docs/traps.md: Android sent a drag end that Kaya did not record.
     pattern = (r"input_focus:|am_anr\s*:|ANR in|Input dispatching timed out|"
@@ -1764,19 +1798,11 @@ class MacRecorder(LaneRecorder):
                 self.skip(bundle, "desktop-shot",
                           "flightrec: the window list would not build, so "
                           "this bundle has no image of any kind — " + why_not)
-        # THIS LEG'S GUEST, not every kaya process: in the pool the other
-        # guests' AVFoundation lines filled the section's cap before the
-        # failing leg's own moment (docs/traps.md, the pooled ink read);
-        # the capture service answers for the guest, so replayd rides along.
-        pid = self._sampler_pid(scratch)
-        predicate = (f'processID == {pid} OR process == "replayd" OR '
-                     f'subsystem BEGINSWITH "com.apple.ScreenCaptureKit"'
-                     if pid else
-                     'process CONTAINS "kaya" OR senderImagePath CONTAINS '
-                     '"kaya" OR eventMessage CONTAINS "kaya"')
-        self.section(bundle, "unified-log", [
-            "log", "show", "--last", "2m", "--style", "compact",
-            "--predicate", predicate])
+        # THIS LEG'S GUEST, not every kaya process (docs/traps.md, the
+        # pooled ink read), its own half of the cap (mac_unified_log).
+        text, state = mac_unified_log(self._sampler_pid(scratch))
+        (bundle / "unified-log.txt").write_text(text, encoding="utf-8")
+        self.mark(bundle, "unified-log", state, (bundle / "unified-log.txt").stat().st_size)
         try:
             power = subprocess.run(["pmset", "-g", "log"], stdout=subprocess.PIPE,
                                    stderr=subprocess.STDOUT, text=True, encoding="utf-8",
