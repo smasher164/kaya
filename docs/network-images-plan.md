@@ -1,6 +1,7 @@
 # Images from the network: the design pass (2026-10-13)
 
-Status: RECOMMENDED 2026-10-13, nothing ruled and nothing built. The roadmap
+Status: RULED 2026-10-13 (the maintainer: "im okay with those rulings"), N1-N17 as
+recommended (§8); nothing built yet. The roadmap
 card (docs/roadmap/editorial.toml, "Images from the network") asks for "a
 remote image source with a cache, a placeholder while loading and a stated
 failure, in both zones so a table row's art loads per row", and names the
@@ -324,9 +325,9 @@ that a slow or failed fetch has a look, that the result has a safe way back
 to its row, and that the bytes, once handed over, are drawn without stalling
 the UI thread or holding a phone's memory hostage.
 
-## §2: The rulings (RECOMMENDED 2026-10-13)
+## §2: The rulings (RULED 2026-10-13, as recommended)
 
-### N1: kaya fetches nothing; the guest hands over bytes
+### N1: kaya fetches nothing; the guest hands over bytes (RULED 2026-10-13)
 
 RECOMMEND that the image keeps taking BYTES (and assets), never a URL, and
 that no binding's core surface fetches. The guest downloads with its own
@@ -349,7 +350,7 @@ stream is fetched by the platform's player because playback is a transport
 (Range requests, adaptive bitrate, DRM) only the player can drive, which
 docs/media-plan.md §7a already argues; an image is one finite response.
 
-### N2: Three phases on the image itself, as one enum prop `phase`
+### N2: Three phases on the image itself, as one enum prop `phase` (RULED 2026-10-13)
 
 RECOMMEND a new image prop, `phase`, an enum of `shown` (the default),
 `loading` and `failed`, legal on the image alone, settable, bindable to a
@@ -387,7 +388,7 @@ is often unknown, and a progress ring inside a 48 pt tile is no platform's
 idiom; an app that wants a progress bar for a large download puts a
 `progress` beside the image and writes its value from the same route.
 
-### N3: A loading or failed image has a box before it has a picture
+### N3: A loading or failed image has a box before it has a picture (RULED 2026-10-13)
 
 RECOMMEND that an image may declare its BOX with `max_width` and `max_height`
 together and `fit` (prop 51, the video view's enum, `contain`, `cover` or
@@ -420,7 +421,7 @@ Image shapes (a round avatar, rounded art) are the styling pass's (the
 roadmap's "A styling pass toward an app-skinned look"), and the loading and
 failed looks take whatever shape that pass gives the image.
 
-### N4: The looks are a still fill in the platform's own placeholder colour; failed adds the platform's missing-image glyph
+### N4: The looks are a still fill in the platform's own placeholder colour; failed adds the platform's missing-image glyph (RULED 2026-10-13)
 
 RECOMMEND:
 
@@ -461,7 +462,7 @@ show a preview: a guest that has a hash or a thumbnail decodes it to bytes
 and sets them as the source while `phase` is `loading`. KEY for the ledger:
 blurhash, thumbhash, image placeholder.
 
-### N5: Accessibility: the label in every phase; busy where the platform has it; a label-less image stays silent
+### N5: Accessibility: the label in every phase; busy where the platform has it; a label-less image stays silent (RULED 2026-10-13)
 
 RECOMMEND:
 
@@ -488,7 +489,7 @@ image say something? The options are (a) nothing, as recommended; (b) the
 app's `a11y_hint` while loading, which the app sets per phase; (c) a word
 kaya ships, which this pass recommends against for the reason above.
 
-### N6: The result comes back through the background route the binding already has; nothing new crosses the C ABI
+### N6: The result comes back through the background route the binding already has; nothing new crosses the C ABI (RULED 2026-10-13)
 
 RECOMMEND no new primitive. The fetch runs where each language runs slow work
 today, and the result is one transaction that writes the bytes and `phase:
@@ -523,7 +524,7 @@ Refused: an image-specific callback channel in the core (a "deliver bytes to
 widget N" record carried outside a transaction): it would be a second
 transaction mechanism with weaker semantics than `post`.
 
-### N7: A keyed write that does nothing when its row is gone or has moved on
+### N7: A keyed write that does nothing when its row is gone or has moved on (RULED 2026-10-13)
 
 RECOMMEND a CONDITIONAL row write, available to every binding: patch row K
 only if it still exists and its field F still equals V; otherwise the write
@@ -555,7 +556,7 @@ QUESTION for the maintainer: this is the one ruling that adds a general
 transaction record rather than an image prop. The alternative is to leave
 the check to N12's helper, in each binding's own code.
 
-### N8: kaya tells the guest when a row's loading image is needed and when it no longer is
+### N8: kaya tells the guest when a row's loading image is needed and when it no longer is (RULED 2026-10-13)
 
 RECOMMEND two row handlers on a template image, `on_needed` and
 `on_released`, each receiving its row (DESIGN.md, "A stamped handler receives
@@ -597,7 +598,7 @@ that touches the windowing ruling of 2026-08-24. Without it, the media player
 demo works (its lists are short) and a guest with a long list fetches
 eagerly.
 
-### N9: Backends decode off the UI thread, at the size they draw
+### N9: Backends decode off the UI thread, at the size they draw (RULED 2026-10-13)
 
 RECOMMEND that every backend decodes a source on a background thread and
 installs the picture on the UI thread when it is ready, and decodes no larger
@@ -638,7 +639,7 @@ platforms also read WebP, GIF, HEIF and AVIF, and it ignores colour profiles
 differently from the same file in Photos. The canvas needs one decoder for
 one hash; an image widget needs the platform's own picture.
 
-### N10: The cache: decoded pictures in each backend, keyed by the bytes' content, bounded by memory; no disk cache in kaya
+### N10: The cache: decoded pictures in each backend, keyed by the bytes' content, bounded by memory; no disk cache in kaya (RULED 2026-10-13)
 
 RECOMMEND:
 
@@ -693,7 +694,7 @@ Options weighed, as the maintainer asked:
 QUESTION for the maintainer: the cache is the one part of this pass he said
 he was unsure about. The recommendation is (b′) plus (d) for bytes.
 
-### N11: Who owns which bytes
+### N11: Who owns which bytes (RULED 2026-10-13)
 
 RECOMMEND, stated once so every backend and binding agrees:
 
@@ -718,7 +719,7 @@ ten times the encoded size and are the part worth bounding; the encoded
 bytes of a few hundred rows are tolerable, and a guest with thousands has
 N8 to keep its set small.
 
-### N12: A small fetch helper in every binding, outside the core, that takes the app's fetch function
+### N12: A small fetch helper in every binding, outside the core, that takes the app's fetch function (RULED 2026-10-13)
 
 RECOMMEND one helper per binding, in the binding's own language and file, not
 in the core and not on the wire. It wires N8 to N7:
@@ -758,7 +759,7 @@ would). For the media player's real catalogue, which is https, they would
 need `ureq` (Rust), `cohttp` with TLS (OCaml) and `http-client-tls`
 (Haskell), each a new pinned dependency in the flake. Which does he want?
 
-### N13: Bytes that will not decode draw the failed look; the app is not told
+### N13: Bytes that will not decode draw the failed look; the app is not told (RULED 2026-10-13)
 
 RECOMMEND that a source that does not decode draws the failed look (N4) on
 an image whose box is declared, and stays 0x0 on one without a box, as
@@ -776,7 +777,7 @@ image_failed, undecodable, decode failure report. It is the item to admit if
 an app shows a need, and it has a clear shape (the content id makes it one
 report per bytes, not per stamp).
 
-### N14: WinUI clears the picture on a failed decode, like the other three
+### N14: WinUI clears the picture on a failed decode, like the other three (RULED 2026-10-13)
 
 RECOMMEND, as part of N9's rewrite of the WinUI arm: `ImageFailed` installs
 the failed look (or nothing, without a box) instead of leaving the previous
@@ -786,7 +787,7 @@ Why: §0 found WinUI the one backend where a bad second picture leaves the
 first one showing, which is invariant 1's divergence; the gallery scene
 cannot see it because it sets one bad source on a fresh image.
 
-### N15: The harness reads the phase off the platform, never the model
+### N15: The harness reads the phase off the platform, never the model (RULED 2026-10-13)
 
 RECOMMEND one new observation and no new action:
 
@@ -802,7 +803,7 @@ RECOMMEND one new observation and no new action:
   keep their meaning; on a `fit` image the drawn box is the box in every
   phase.
 
-### N16: All nine bindings and the C floor, both zones
+### N16: All nine bindings and the C floor, both zones (RULED 2026-10-13)
 
 Per invariant 2, every language does, and none has a reason to defer:
 
@@ -824,7 +825,7 @@ Android: the three hosts already declare INTERNET and allow cleartext to
 is the media server's address there. Windows guests run unpackaged and need
 no capability.
 
-### N17: Its first home: the media player demo's album art
+### N17: Its first home: the media player demo's album art (RULED 2026-10-13)
 
 RECOMMEND that the media player demo is where this is used first: a table of
 tracks with art per row from a public catalogue over https, `fit: cover`,
@@ -999,6 +1000,14 @@ legs (tools/lib/media_server.py's condition, and the linux runner's).
   decoded object WinUI can share between two `Image` elements without a URI.
 
 ## §8: What the maintainer is asked
+
+RULED 2026-10-13 (the maintainer: "im okay with those rulings"): N1-N17 as
+recommended, including N7's conditional write in the core, N8's two
+handlers, N10's content-keyed decoded cache with no disk cache, and N5's
+silence beyond the label on iOS and Android. N12, which carried no
+recommendation, is taken as the pinned clients (`ureq` for Rust, `cohttp`
+with TLS for OCaml, `http-client-tls` for Haskell), since the media
+player's catalogue is https and a plain-socket client cannot reach it.
 
 Every ruling above is his. Four need something only he can supply:
 
