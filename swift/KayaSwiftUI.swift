@@ -13801,6 +13801,7 @@ private struct KayaTrackReader: View {
     let id: UInt64
     let vertical: Bool
     let tableGeneration: Int?
+    @State private var token = UUID()
 
     var body: some View {
         GeometryReader { geo in
@@ -13809,10 +13810,16 @@ private struct KayaTrackReader: View {
                 .onChange(of: geo.size) { _, size in record(size, geo.frame(in: .global)) }
                 .onChange(of: geo.frame(in: .global).origin) { _, _ in record(geo.size, geo.frame(in: .global)) }
                 .task(id: tableGeneration) { record(geo.size, geo.frame(in: .global)) }
+                .onDisappear { kayaTrackRecords.retire(id, token) }
         }
     }
 
     private func record(_ size: CGSize, _ frame: CGRect) {
+        kayaTrackRecords.hold(id, token) { apply(size, frame) }
+        apply(size, frame)
+    }
+
+    private func apply(_ size: CGSize, _ frame: CGRect) {
         kayaTrackSizes[id] = size
         kayaNodeFrames[id] = frame
         kayaMainExtents[id] = Double(vertical ? size.height : size.width)
@@ -13826,6 +13833,30 @@ private struct KayaTrackReader: View {
 /// Every flex child's frame in the window's space, by node id — what
 /// `expect_mirrored` reads (docs/compliance-plan.md §4).
 var kayaNodeFrames: [UInt64: CGRect] = [:]
+
+/// Each live reader's last record of a node, newest last: when SwiftUI drops a
+/// copy of a subtree it laid out, the newest survivor's record is applied again
+/// (docs/traps.md, the dropped copy's frames).
+struct KayaReaderRecords {
+    private var held: [UInt64: [(token: UUID, apply: () -> Void)]] = [:]
+
+    mutating func hold(_ id: UInt64, _ token: UUID, _ apply: @escaping () -> Void) {
+        var list = held[id, default: []]
+        list.removeAll { $0.token == token }
+        list.append((token, apply))
+        held[id] = list
+    }
+
+    mutating func retire(_ id: UInt64, _ token: UUID) {
+        guard var list = held[id] else { return }
+        let newest = list.last?.token == token
+        list.removeAll { $0.token == token }
+        held[id] = list.isEmpty ? nil : list
+        if newest, let survivor = list.last { survivor.apply() }
+    }
+}
+var kayaTrackRecords = KayaReaderRecords()
+var kayaCellRecords = KayaReaderRecords()
 
 /// Each label's own drawn size, by node id — what `expect_no_clipping`
 /// measures the text's need against (docs/compliance-plan.md §4, U7).
@@ -13897,6 +13928,7 @@ private struct KayaCellReader: View {
     let id: UInt64
     let parent: UInt64
     let vertical: Bool
+    @State private var token = UUID()
 
     var body: some View {
         GeometryReader { geo in
@@ -13910,10 +13942,16 @@ private struct KayaCellReader: View {
                 .onAppear { record(frame, global) }
                 .onChange(of: frame) { _, f in record(f, geo.frame(in: .global)) }
                 .onChange(of: global.origin) { _, _ in record(frame, geo.frame(in: .global)) }
+                .onDisappear { kayaCellRecords.retire(id, token) }
         }
     }
 
     private func record(_ frame: CGRect, _ global: CGRect) {
+        kayaCellRecords.hold(id, token) { apply(frame, global) }
+        apply(frame, global)
+    }
+
+    private func apply(_ frame: CGRect, _ global: CGRect) {
         kayaCrossRects[id] =
             vertical
             ? (Double(frame.minX), Double(frame.width))

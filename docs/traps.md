@@ -104,6 +104,31 @@ red ("covered by the keyboard: frame (0,88,360,600), keyboard (0,525,360,275)")
 in 2 of 2 runs. tools/lib/safearea_routes.py holds the floor, the unclipped
 top and both verbs' room, each cut watched red.
 
+The same leg's status line sat under the Android keyboard while iOS kept it
+above (the safe-area review's captures): Compose gave the root's height to the
+keyboard only for a grown SCROLL (kayaRides), so a grown textarea's root kept
+its full height, A20 capped the buffer at the whole room and the pan lifted
+only the buffer, leaving `label@status` at y 752 under a keyboard topped at
+525. A grown textarea rides now, as SwiftUI's keyboard region already did;
+editor.steps checks `expect_safe label@status` after the first `type`, red on
+the old interpreter, and safearea_routes holds the rule with a cut watched red.
+
+## The dropped copy's frames (measured 2026-10-12)
+
+The same step went red on the mac: `label@status runs past the window's edge:
+frame (8,426,616x16)` in a 640x420 window, with the fail shot showing the line
+at y 396. A probe in KayaTrackReader and KayaCellReader showed SwiftUI laying
+the root out TWICE at launch: the copy that stays, and a second copy laid out
+in the window's opening 640x450 frame (label at 426) which appears, records
+LAST, and disappears in the same millisecond. The surviving label never moves
+or resizes again, so nothing re-records it and kayaNodeFrames keeps the dropped
+copy's frame. `onGeometryChange(for:)` in place of `onChange(of: origin)`
+changed nothing (tried and reverted): the survivor's geometry did not change.
+Each reader now holds its last record per node with a token and, on
+disappearing, hands the node back to the newest surviving reader's record
+(KayaReaderRecords). Cutting the two retire calls turned editor-go-swiftui red
+with the same sentence; safearea_routes holds the retire and the hand-back.
+
 ## The status bar one overlay behind (measured 2026-10-12)
 
 tasksbig-compose failed 4 runs in 5 at its 200%-text Settings screen, whose

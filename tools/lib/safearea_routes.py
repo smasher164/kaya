@@ -113,6 +113,22 @@ NATIVE = [
     # keeps its natural height and pans, until the keyboard goes.
     (COMPOSE, "Compose's root stops riding once a focused field is squeezed",
      "root != null && kayaRides(root) && !KayaSceneModel.keyboardOverflow"),
+    # A5: a grown text area gives up its room like a grown scroll, so what
+    # follows it stays above the keyboard (editor.steps' status line; iOS
+    # has it from SwiftUI's keyboard region).
+    # SwiftUI lays a copy of the root out in the window's opening frame and
+    # drops it; its records outlived it and expect_safe read a label 30 pt
+    # past the window (docs/traps.md, the dropped copy's frames).
+    (SWIFT, "SwiftUI's track reader retires a dropped copy's record",
+     ".task(id: tableGeneration) { record(geo.size, geo.frame(in: .global)) }\n"
+     " .onDisappear { kayaTrackRecords.retire(id, token) }"),
+    (SWIFT, "SwiftUI's cell reader retires a dropped copy's record",
+     ".onChange(of: global.origin) { _, _ in record(frame, geo.frame(in: .global)) }\n"
+     " .onDisappear { kayaCellRecords.retire(id, token) }"),
+    (SWIFT, "SwiftUI's retired record hands the node back to its newest survivor",
+     "if newest, let survivor = list.last { survivor.apply() }"),
+    (COMPOSE, "Compose's grown text area rides the keyboard",
+     "if (node.kind == KayaCompose.KIND_SCROLL || node.kind == KayaCompose.KIND_TEXTAREA) return node.grow > 0"),
     (COMPOSE, "Compose's squeeze is detected on the focused field",
      "if (!inSheet && !KayaSceneModel.keyboardOverflow && kayaSqueezed(field, frame)) {\n"
      " KayaSceneModel.keyboardOverflow = true"),
@@ -652,6 +668,18 @@ def run(g):
         ("Compose's every root riding, the squeezed composer as shipped", COMPOSE,
          r"kayaRides\(root\) && !KayaSceneModel\.keyboardOverflow", "kayaRides(root)",
          "Compose's root stops riding once a focused field is squeezed"),
+        ("SwiftUI's track reader leaving a dropped copy's record, as shipped", SWIFT,
+         r"\n\s+\.onDisappear \{ kayaTrackRecords\.retire\(id, token\) \}", "",
+         "SwiftUI's track reader retires a dropped copy's record"),
+        ("SwiftUI's cell reader leaving a dropped copy's record, as shipped", SWIFT,
+         r"\n\s+\.onDisappear \{ kayaCellRecords\.retire\(id, token\) \}", "",
+         "SwiftUI's cell reader retires a dropped copy's record"),
+        ("SwiftUI's retired record handing back nothing", SWIFT,
+         r"if newest, let survivor = list\.last \{ survivor\.apply\(\) \}", "_ = newest",
+         "SwiftUI's retired record hands the node back to its newest survivor"),
+        ("Compose's grown text area holding its column under the keyboard, as shipped", COMPOSE,
+         r"node\.kind == KayaCompose\.KIND_SCROLL \|\| node\.kind == KayaCompose\.KIND_TEXTAREA\) return",
+         "node.kind == KayaCompose.KIND_SCROLL) return", "Compose's grown text area rides the keyboard"),
         ("Compose's squeeze never noticed", COMPOSE, r"KayaSceneModel\.keyboardOverflow = true\n", "Unit\n",
          "Compose's squeeze is detected on the focused field"),
         ("Compose's overflow outliving the keyboard", COMPOSE,

@@ -46,6 +46,8 @@ expect textarea#0 "alpha 1 beta 22"
 # textarea's one-line floor). Everywhere else, its whole track again.
 expect_fills textarea#0
 expect_safe textarea#0
+# The status line follows the grown buffer, so it rides the keyboard (A5).
+expect_safe label@status
 expect_dirty true
 expect_menu "Edit>Undo" enabled
 

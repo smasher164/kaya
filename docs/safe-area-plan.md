@@ -292,6 +292,9 @@ and the scroll gives up the space. A scroll with `follows_end` set that was
 at its end when the keyboard rose stays at its end (the newest message
 stays visible above the composer). A scroll not at its end keeps its first
 visible row where it was.
+A grown text area counts as the grown scroll here, since it scrolls its own
+text: the editor's status line after its grown buffer stays above the
+keyboard (2026-10-12, docs/traps.md, the grown textarea's one-line floor).
 
 Why: that is already the measured Android behaviour (§0, item 3) and
 SwiftUI's default through the keyboard safe-area region, so the rule writes

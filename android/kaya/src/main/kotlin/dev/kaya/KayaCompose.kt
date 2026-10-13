@@ -18442,14 +18442,12 @@ private fun kayaContentPads(
 }
 
 /** Whether [node] rides the keyboard (docs/safe-area-plan.md A5): a grown
- * scroll reachable through the containers that grow toward it, whose space is
- * what the keyboard takes. */
+ * scroll or text area reachable through the containers that grow toward it,
+ * whose space is what the keyboard takes. */
 internal fun kayaRides(node: KayaNode): Boolean {
-    if (node.kind == KayaCompose.KIND_SCROLL) return node.grow > 0
+    if (node.kind == KayaCompose.KIND_SCROLL || node.kind == KayaCompose.KIND_TEXTAREA) return node.grow > 0
     if (node.kind != KayaCompose.KIND_COLUMN && node.kind != KayaCompose.KIND_ROW) return false
-    return node.children.any { child ->
-        child.grow > 0 && (child.kind == KayaCompose.KIND_SCROLL || kayaRides(child))
-    }
+    return node.children.any { child -> child.grow > 0 && kayaRides(child) }
 }
 
 /** The keyboard's top in [view]'s window, its bottom while none is up. */
