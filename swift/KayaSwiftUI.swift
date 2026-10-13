@@ -22,7 +22,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x12513a04dcdb4c9a
+let kayaSpecHash: UInt64 = 0xd695309e4a57ce9e
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -337,6 +337,10 @@ private let propRevealable: UInt32 = 58
 private let propSummary: UInt32 = 59
 private let propExpanded: UInt32 = 60
 private let propBleed: UInt32 = 61
+private let propPhase: UInt32 = 62
+private let imagePhaseShown: Int64 = 0
+private let imagePhaseLoading: Int64 = 1
+private let imagePhaseFailed: Int64 = 2
 private let fileContentImages: UInt32 = 1
 private let tintAccent: Int64 = 1
 private let tintSuccess: Int64 = 2
@@ -837,6 +841,20 @@ final class KayaNode: Identifiable {
     // after a failed decode).
     var image: KayaPlatformImage?
     var imageSize = "0x0"
+    /// docs/network-images-plan.md N2, N3, N9, N13: the phase the app wrote,
+    /// whether it declared a box, the bytes and their content id, the decode
+    /// generation a late result is checked against, and what the arm drew.
+    var phase: Int64 = 0
+    var fitDeclared = false
+    @ObservationIgnored var imageData: Data?
+    @ObservationIgnored var imageContentId: UInt64 = 0
+    @ObservationIgnored var imageGen: UInt64 = 0
+    @ObservationIgnored var imageRequested = false
+    var imagePending = false
+    var imageFailed = false
+    @ObservationIgnored var imageDrawn = ""
+    @ObservationIgnored var imageMounts: [String: Int] = [:]
+    @ObservationIgnored var imageGlyphs = 0
     // THE CANVAS BUFFER the core rasterized (docs/canvas-plan.md §1.1):
     // premultiplied RGBA8 with the scale it was drawn at. nil is
     // declared-and-empty, which stays PRESENT (tools/check-empty-child.py).
@@ -5585,6 +5603,7 @@ enum KayaHost {
     /// of core memory. Handles are batch-local, so callers fetch on the pump
     /// thread, within the batch. Nil for a dead handle.
     static func blobCount() -> UInt64 { api.blob_count() }
+    static func blobContentId(_ handle: UInt64) -> UInt64 { api.blob_content_id(handle) }
 
     static func blobData(_ handle: UInt64) -> Data? {
         var length: UInt = 0
@@ -5634,8 +5653,9 @@ func kayaStartCommandPump() {
             // Blob handles are batch-local: the next nextCommands call
             // replaces the core's table and the main-queue apply may run after
             // that, so every referenced blob is fetched here.
-            let blobs = kayaCollectBlobs()
+            let (blobs, ids) = kayaCollectBlobs()
             DispatchQueue.main.async {
+                kayaBlobIds = ids
                 kayaApply(batch, blobs)
                 // THE APP ANSWERED. An action verb waits for this before it
                 // returns (see kayaAwaitAnswer) — bumped where the apply has
@@ -5653,15 +5673,25 @@ func kayaStartCommandPump() {
 /// next nextCommands call invalidates the handles: the table is the whole
 /// truth, so no record layout decides what arrives (docs/traps.md: A BLOB
 /// HANDLE DIES WITH ITS BATCH).
-private func kayaCollectBlobs() -> [UInt64: Data] {
+private func kayaCollectBlobs() -> ([UInt64: Data], [UInt64: UInt64]) {
     var blobs: [UInt64: Data] = [:]
+    var ids: [UInt64: UInt64] = [:]
     let count = KayaHost.blobCount()
     if count > 0 {
         for handle in 1...count {
-            blobs[handle] = KayaHost.blobData(handle)
+            // N10's skip: bytes this process already holds under the same
+            // content id are not copied out of the core again.
+            let id = KayaHost.blobContentId(handle)
+            ids[handle] = id
+            if id != 0, let held = kayaEncodedBytes.object(forKey: NSNumber(value: id)) {
+                blobs[handle] = held as Data
+            } else if let data = KayaHost.blobData(handle) {
+                blobs[handle] = data
+                if id != 0 { kayaEncodedBytes.setObject(data as NSData, forKey: NSNumber(value: id), cost: data.count) }
+            }
         }
     }
-    return blobs
+    return (blobs, ids)
 }
 
 /// The size request's macOS materialization: resize the primary window's
@@ -6394,6 +6424,8 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaScene.nodes[id]!.expanded = raw[body + 24] != 0
                 case (propBleed, valueBool):
                     kayaScene.nodes[id]!.bleed = raw[body + 24] != 0
+                case (propPhase, valueI64):
+                    kayaScene.nodes[id]!.phase = raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
                 case (propSummary, valueStr):
                     kayaScene.nodes[id]!.summary = String(
                         decoding: raw[(body + 24)..<(body + 24 + len)], as: UTF8.self)
@@ -6471,6 +6503,10 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaScene.nodes[id]!.highLabel = String(decoding: bytes, as: UTF8.self)
                 case (propFit, valueI64):
                     kayaScene.nodes[id]!.fit = raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
+                    if kayaScene.nodes[id]!.kind == kindImage {
+                        kayaScene.nodes[id]!.fitDeclared = true
+                        kayaRequestPicture(kayaScene.nodes[id]!)
+                    }
                 case (propContentType, valueI64):
                     kayaScene.nodes[id]!.contentType =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
@@ -6543,9 +6579,11 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case (propMaxWidth, valueF64):
                     kayaScene.nodes[id]!.maxWidth =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
+                    if kayaScene.nodes[id]!.kind == kindImage { kayaRequestPicture(kayaScene.nodes[id]!) }
                 case (propMaxHeight, valueF64):
                     kayaScene.nodes[id]!.maxHeight =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
+                    if kayaScene.nodes[id]!.kind == kindImage { kayaRequestPicture(kayaScene.nodes[id]!) }
                 case (propMaxLines, valueF64):
                     kayaScene.nodes[id]!.maxLines =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
@@ -6556,9 +6594,13 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
                 case (propSource, valueBlob):
                     // The value's payload is a u64 batch-local handle;
-                    // the pump prefetched the bytes into `blobs`.
+                    // the pump prefetched the bytes into `blobs`. The decode
+                    // is the door's, off the main thread (docs/network-images-plan.md N9).
                     let handle = raw.loadUnaligned(fromByteOffset: body + 24, as: UInt64.self)
-                    kayaDecodeImage(blobs[handle], into: kayaScene.nodes[id]!)
+                    let node = kayaScene.nodes[id]!
+                    node.imageData = blobs[handle]
+                    node.imageContentId = kayaBlobIds[handle] ?? 0
+                    kayaRequestPicture(node)
                 default:
                     fatalError("kaya: cannot apply prop \(prop) with value type \(valueType)")
                 }
@@ -11684,6 +11726,27 @@ private func kayaRunScript(_ script: String) {
                 #else
                 failures.append("pick_emoji \"\(emoji)\": iOS has no emoji picker to open (docs/emoji-picker-plan.md R2)")
                 #endif
+            case "expect_image_phase":
+                // What the arm DREW, never the phase prop (docs/network-images-plan.md N15).
+                let want = parts.count > 2 ? String(parts[2]) : ""
+                func drew() -> String? {
+                    DispatchQueue.main.sync {
+                        kayaTarget(parts[1], "image", kayaScene.images).map { kayaImagePhaseRead($0) }
+                    }
+                }
+                var got = drew()
+                let deadline = Date().addingTimeInterval(5)
+                while got != want && Date() < deadline {
+                    Thread.sleep(forTimeInterval: 0.05)
+                    got = drew()
+                }
+                if let got, got == want {
+                    observed.append("phase \(got)")
+                } else if let got {
+                    failures.append("\(parts[1]) drew \(got), wanted \(want)")
+                } else {
+                    failures.append("no such target \(parts[1])")
+                }
             case "expect_image_size":
                 // The DRAWN box in points (docs/photo-attach-plan.md §5), read
                 // off the layout, never the bound the app declared.
@@ -16241,6 +16304,17 @@ struct KayaTableSurface: View {
     }
 }
 
+#if os(macOS)
+    /// A row's top as far as the clip can actually scroll: a row near the end
+    /// cannot reach the top, and a scroll past the document's end shows one row
+    /// over blank space, which the band reported as the whole viewport until
+    /// AppKit happened to re-constrain the clip (docs/traps.md, the last row's
+    /// one-row band).
+    func kayaClipTop(_ clip: NSClipView, _ y: CGFloat) -> CGFloat {
+        clip.constrainBoundsRect(NSRect(origin: NSPoint(x: clip.bounds.origin.x, y: y), size: clip.bounds.size)).origin.y
+    }
+#endif
+
 /// The mac native tier's fixed metrics, MEASURED 2026-08-24 on the inset-style
 /// NSTableView: rowHeight 24, intercell 0, header 28, 5pt above the first row
 /// and below the last (docs/virtualization-plan.md §4). The leading 5 is THE
@@ -16842,8 +16916,8 @@ private struct KayaNativeTable: View {
 
         private func reparkAnchor() {
             guard let anchor = anchorRow, anchor < numberOfRows(in: tableView) else { return }
-            let want = tableView.rect(ofRow: anchor).minY
             let clip = scrollView.contentView
+            let want = kayaClipTop(clip, tableView.rect(ofRow: anchor).minY)
             if abs(clip.bounds.origin.y - want) > 0.5 {
                 inProgrammaticScroll = true
                 clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: want))
@@ -17064,7 +17138,7 @@ private struct KayaNativeTable: View {
             // read 7498 for a scroll to 7500) — the row's own minY IS
             // the top.
             inProgrammaticScroll = true
-            clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: rect.minY))
+            clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: kayaClipTop(clip, rect.minY)))
             scrollView.reflectScrolledClipView(clip)
             inProgrammaticScroll = false
             report()
@@ -20800,18 +20874,327 @@ private struct KayaButtonStyle: PrimitiveButtonStyle {
     }
 }
 
-/// THE IMAGE DECODE, in one function so the layout negative
-/// (tools/check-empty-child.py) drives the real decoder. A failed decode is the
-/// placeholder class, never a crash; ImageIO is LENIENT where gdk-pixbuf
-/// refuses, so no scene can freeze a HALF-valid image (docs/deferred.md).
-func kayaDecodeImage(_ data: Data?, into node: KayaNode) {
-    if let data, let image = KayaPlatformImage(data: data) {
-        node.image = image
-        node.imageSize = "\(Int(image.size.width))x\(Int(image.size.height))"
+// MARK: - Network images (docs/network-images-plan.md N4, N9, N10, N13)
+
+/// The display's scale, which a decode's size multiplies (KayaPresentationReporter).
+var kayaDisplayScale: CGFloat = 2
+
+/// The content id of each blob in the batch the main queue is applying.
+var kayaBlobIds: [UInt64: UInt64] = [:]
+
+/// Encoded bytes by content id, so the pump does not copy what it holds.
+let kayaEncodedBytes: NSCache<NSNumber, NSData> = {
+    let cache = NSCache<NSNumber, NSData>()
+    cache.totalCostLimit = 64 << 20
+    return cache
+}()
+
+let kayaDecodeQueue = DispatchQueue(label: "dev.kaya.image-decode", qos: .userInitiated)
+
+/// The natural size and longer side in pixels of each content id decoded so
+/// far, so a cache hit is found without reading the bytes again.
+var kayaNaturalSizes: [UInt64: (CGSize, Int)] = [:]
+
+struct KayaPicture: @unchecked Sendable {
+    let image: KayaPlatformImage
+    let natural: CGSize
+    let long: Int
+    let pixels: Int
+    let cost: Int
+}
+
+/// THE IMAGE DECODE, pure and safe on any thread: the platform's own natural
+/// size, and pixels no larger than `target(natural)` on the longer side, decoded
+/// now rather than at the first draw. nil for bytes that do not decode, which
+/// is the placeholder class, never a crash; ImageIO is LENIENT where gdk-pixbuf
+/// refuses (docs/deferred.md). tools/check-empty-child.py drives it.
+func kayaDecodePicture(_ data: Data, target: (CGSize) -> Int?) -> KayaPicture? {
+    guard let natural = KayaPlatformImage(data: data)?.size, natural.width > 0, natural.height > 0,
+        let source = CGImageSourceCreateWithData(data as CFData, nil),
+        let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+        let wide = props[kCGImagePropertyPixelWidth] as? Int,
+        let tall = props[kCGImagePropertyPixelHeight] as? Int
+    else { return nil }
+    let long = max(wide, tall)
+    let pixels = min(long, max(1, target(natural) ?? long))
+    let options: [CFString: Any] = [
+        kCGImageSourceCreateThumbnailFromImageAlways: true,
+        kCGImageSourceCreateThumbnailWithTransform: true,
+        kCGImageSourceShouldCacheImmediately: true,
+        kCGImageSourceThumbnailMaxPixelSize: pixels,
+    ]
+    guard let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+    #if os(macOS)
+        let image = NSImage(cgImage: cg, size: natural)
+    #else
+        let image = UIImage(cgImage: cg, scale: CGFloat(cg.width) / natural.width, orientation: .up)
+    #endif
+    return KayaPicture(image: image, natural: natural, long: long, pixels: pixels, cost: cg.bytesPerRow * cg.height)
+}
+
+/// The longer side in pixels an image is drawn at: its declared box placed by
+/// `fit`, else its bounds, else its natural size, times the display's scale.
+func kayaPictureTarget(_ natural: CGSize, _ maxWidth: Double, _ maxHeight: Double, _ fit: Int64?, _ scale: CGFloat) -> Int {
+    let s: CGFloat
+    if let fit, maxWidth > 0, maxHeight > 0 {
+        let sx = maxWidth / natural.width
+        let sy = maxHeight / natural.height
+        s = fit == 0 ? min(sx, sy) : max(sx, sy)
+    } else {
+        let sx = maxWidth > 0 ? maxWidth / natural.width : 1
+        let sy = maxHeight > 0 ? maxHeight / natural.height : 1
+        s = min(1, sx, sy)
+    }
+    return Int((max(natural.width, natural.height) * s * scale).rounded(.up))
+}
+
+/// The decoded pictures, keyed by the bytes' content id and the decode size,
+/// least recently used out past two screens of pixels, emptied when the system
+/// asks for memory. Main thread only.
+final class KayaPictureCache {
+    struct Key: Hashable {
+        let id: UInt64
+        let pixels: Int
+    }
+
+    nonisolated(unsafe) static let shared = KayaPictureCache()
+    private var entries: [Key: (KayaPicture, UInt64)] = [:]
+    private var cost = 0
+    private var tick: UInt64 = 0
+
+    lazy var budget: Int = {
+        #if os(macOS)
+            let screen = NSScreen.screens.map { $0.frame.width * $0.frame.height * $0.backingScaleFactor * $0.backingScaleFactor }.max()
+        #else
+            let screen = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.screen.nativeBounds }
+                .map { $0.width * $0.height }.max()
+        #endif
+        return Int(2 * (screen ?? 2560 * 1600) * 4)
+    }()
+
+    func get(_ key: Key) -> KayaPicture? {
+        guard let (picture, _) = entries[key] else { return nil }
+        tick &+= 1
+        entries[key] = (picture, tick)
+        return picture
+    }
+
+    func put(_ key: Key, _ picture: KayaPicture) {
+        tick &+= 1
+        if let (old, _) = entries.updateValue((picture, tick), forKey: key) { cost -= old.cost }
+        cost += picture.cost
+        while cost > budget, entries.count > 1,
+            let oldest = entries.min(by: { $0.value.1 < $1.value.1 })?.key
+        {
+            cost -= entries.removeValue(forKey: oldest)?.0.cost ?? 0
+        }
+    }
+
+    func empty() {
+        entries.removeAll()
+        cost = 0
+        kayaEncodedBytes.removeAllObjects()
+    }
+}
+
+#if os(macOS)
+    nonisolated(unsafe) var kayaMemoryPressure: DispatchSourceMemoryPressure?
+#else
+    nonisolated(unsafe) var kayaMemoryPressure: NSObjectProtocol?
+#endif
+
+func kayaWatchMemoryPressure() {
+    guard kayaMemoryPressure == nil else { return }
+    #if os(macOS)
+        let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
+        source.setEventHandler { KayaPictureCache.shared.empty() }
+        source.resume()
+        kayaMemoryPressure = source
+    #else
+        kayaMemoryPressure = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main
+        ) { _ in KayaPictureCache.shared.empty() }
+    #endif
+}
+
+func kayaInstallPicture(_ node: KayaNode, _ picture: KayaPicture?, undecodable: Bool) {
+    node.imagePending = false
+    if let picture {
+        node.image = picture.image
+        node.imageSize = "\(Int(picture.natural.width))x\(Int(picture.natural.height))"
+        node.imageFailed = false
     } else {
         node.image = nil
         node.imageSize = "0x0"
+        node.imageFailed = undecodable
     }
+}
+
+/// The synchronous decode, whole, for tools/check-empty-child.py's probe.
+func kayaDecodeImage(_ data: Data?, into node: KayaNode) {
+    let picture = data.flatMap { kayaDecodePicture($0, target: { _ in nil }) }
+    kayaInstallPicture(node, picture, undecodable: data.map { !$0.isEmpty } ?? false)
+}
+
+/// THE ONE DOOR an image's picture comes through (N9). It runs once the batch
+/// that asked has applied, so every prop the batch carried is in; a picture the
+/// cache holds at this size is installed in the same frame, and anything else
+/// is decoded on kayaDecodeQueue. The generation is what makes a late decode
+/// harmless: an image given other bytes or another box since, or torn down,
+/// drops it.
+func kayaRequestPicture(_ node: KayaNode) {
+    guard !node.imageRequested else { return }
+    node.imageRequested = true
+    let nodeId = node.id
+    DispatchQueue.main.async {
+        if let node = kayaScene.nodes[nodeId] { kayaServePicture(node) }
+    }
+}
+
+func kayaServePicture(_ node: KayaNode) {
+    node.imageRequested = false
+    node.imageGen &+= 1
+    let gen = node.imageGen
+    guard let data = node.imageData, !data.isEmpty else {
+        kayaInstallPicture(node, nil, undecodable: false)
+        return
+    }
+    kayaWatchMemoryPressure()
+    let id = node.imageContentId
+    let (wide, tall, scale) = (node.maxWidth, node.maxHeight, kayaDisplayScale)
+    let fit: Int64? = node.fitDeclared ? node.fit : nil
+    if id != 0, let (natural, long) = kayaNaturalSizes[id],
+        let hit = KayaPictureCache.shared.get(
+            .init(id: id, pixels: min(long, max(1, kayaPictureTarget(natural, wide, tall, fit, scale)))))
+    {
+        kayaInstallPicture(node, hit, undecodable: false)
+        return
+    }
+    node.imagePending = true
+    let nodeId = node.id
+    kayaDecodeQueue.async {
+        let picture = kayaDecodePicture(data) { kayaPictureTarget($0, wide, tall, fit, scale) }
+        DispatchQueue.main.async {
+            guard let node = kayaScene.nodes[nodeId], node.imageGen == gen else { return }
+            if let picture, id != 0 {
+                kayaNaturalSizes[id] = (picture.natural, picture.long)
+                KayaPictureCache.shared.put(.init(id: id, pixels: picture.pixels), picture)
+            }
+            kayaInstallPicture(node, picture, undecodable: picture == nil)
+        }
+    }
+}
+
+/// An image that declared its box (N3) takes it in every phase.
+func kayaImageBoxed(_ node: KayaNode) -> Bool {
+    node.fitDeclared && node.maxWidth > 0 && node.maxHeight > 0
+}
+
+/// N4's glyph is drawn only in a box at least twice its size.
+let kayaFailedGlyph: CGFloat = 20
+
+/// docs/network-images-plan.md N4, N13: a boxed image's look. Each look
+/// records itself as it appears, so the harness reads what was drawn.
+private struct KayaImageBox: View {
+    let node: KayaNode
+
+    var body: some View {
+        let box = CGSize(width: node.maxWidth, height: node.maxHeight)
+        Group {
+            if node.phase == imagePhaseFailed || (node.image == nil && node.imageFailed) {
+                KayaImageLook(node: node, word: "failed") {
+                    if min(box.width, box.height) >= 2 * kayaFailedGlyph {
+                        Image(systemName: "photo")
+                            .font(.system(size: kayaFailedGlyph))
+                            .foregroundStyle(.secondary)
+                            .onAppear { node.imageGlyphs += 1 }
+                            .onDisappear { node.imageGlyphs = max(0, node.imageGlyphs - 1) }
+                    }
+                }
+            } else if let image = node.image {
+                kayaBoxedPicture(image, node.fit)
+                    .frame(width: box.width, height: box.height)
+                    .clipped()
+                    .onAppear { kayaImageAppeared(node, "shown") }
+                    .onDisappear { kayaImageGone(node, "shown") }
+            } else if node.phase == imagePhaseLoading || node.imagePending {
+                KayaImageLook(node: node, word: "loading") { EmptyView() }
+            } else {
+                Color.clear
+                    .frame(width: box.width, height: box.height)
+                    .onAppear { kayaImageAppeared(node, "empty") }
+                    .onDisappear { kayaImageGone(node, "empty") }
+            }
+        }
+    }
+}
+
+@ViewBuilder
+private func kayaBoxedPicture(_ image: KayaPlatformImage, _ fit: Int64) -> some View {
+    #if os(macOS)
+        let picture = Image(nsImage: image).resizable()
+    #else
+        let picture = Image(uiImage: image).resizable()
+    #endif
+    switch fit {
+    case 0: picture.aspectRatio(contentMode: .fit)
+    case 1: picture.aspectRatio(contentMode: .fill)
+    default: picture
+    }
+}
+
+/// The loading and failed looks: the box in the platform's quiet placeholder
+/// fill, the glyph centred over it for failed. A label-less image is
+/// decorative in every phase (N5).
+private struct KayaImageLook<Glyph: View>: View {
+    let node: KayaNode
+    let word: String
+    @ViewBuilder let glyph: () -> Glyph
+
+    var body: some View {
+        let fill = Rectangle()
+            #if os(macOS)
+                .fill(.quaternary)
+            #else
+                .fill(Color(uiColor: .quaternarySystemFill))
+            #endif
+        let look = fill
+            .frame(width: node.maxWidth, height: node.maxHeight)
+            .overlay { glyph() }
+            .onAppear { kayaImageAppeared(node, word) }
+            .onDisappear { kayaImageGone(node, word) }
+        if node.a11yLabel.isEmpty {
+            look.accessibilityHidden(true)
+        } else {
+            look.accessibilityElement(children: .ignore).accessibilityAddTraits(.isImage)
+        }
+    }
+}
+
+/// Each look counts its mounts: SwiftUI can mount a transient copy beside the
+/// one that stays and then drop it (KayaReaderRecords' launch copy), so a
+/// look reads as drawn while any copy of it is mounted, the newest first.
+func kayaImageAppeared(_ node: KayaNode, _ word: String) {
+    node.imageMounts[word, default: 0] += 1
+    node.imageDrawn = word
+}
+
+func kayaImageGone(_ node: KayaNode, _ word: String) {
+    node.imageMounts[word] = max(0, (node.imageMounts[word] ?? 0) - 1)
+}
+
+/// What a boxed or bare image drew, for expect_image_phase (N15): `shown`,
+/// `loading`, `failed`, or `empty`; a failed look in a box with room for the
+/// glyph and no glyph mounted reads as the defect it is.
+@MainActor func kayaImagePhaseRead(_ node: KayaNode) -> String {
+    let mounted = node.imageMounts.filter { $0.value > 0 }.keys
+    guard let drawn = mounted.contains(node.imageDrawn) ? node.imageDrawn : mounted.sorted().first else {
+        return "nothing"
+    }
+    if drawn == "failed", node.imageGlyphs == 0, min(node.maxWidth, node.maxHeight) >= 2 * kayaFailedGlyph {
+        return "failed without its glyph"
+    }
+    return drawn
 }
 
 /// The core's raster as a CGImage: premultiplied RGBA8, no decode and no colour
@@ -22149,6 +22532,9 @@ struct KayaRender: View {
                         .clipped()
                 }
                 .background(KayaLabelFrameReader(id: node.id))
+            } else if kayaImageBoxed(node) {
+                KayaImageBox(node: node)
+                    .background(KayaLabelFrameReader(id: node.id))
             } else if let image = node.image {
                 let fit = kayaImageFit(natural: image.size, node: node)
                 Group {
@@ -22167,8 +22553,12 @@ struct KayaRender: View {
                     #endif
                 }
                 .background(KayaLabelFrameReader(id: node.id))
+                .onAppear { kayaImageAppeared(node, "shown") }
+                .onDisappear { kayaImageGone(node, "shown") }
             } else {
                 Color.clear.frame(width: 0, height: 0)
+                    .onAppear { kayaImageAppeared(node, "empty") }
+                    .onDisappear { kayaImageGone(node, "empty") }
             }
         case kindCanvas:
             // THE BLIT (docs/canvas-plan.md §8): the bytes go on screen at the
@@ -29851,6 +30241,7 @@ private struct KayaPresentationReporter: ViewModifier {
     }
 
     private func report() {
+        kayaDisplayScale = displayScale
         KayaHost.presentation(displayScale, colorScheme == .dark)
     }
 }

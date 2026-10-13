@@ -1334,6 +1334,41 @@ print(f"check-pins: iOS SDK staging wall cut: {sdk_count} substitution(s)")
 if sdk_count != 1 or code_only(ios_source.replace(sdk_route, "pass", 1)).count(sdk_route) != 0:
     out.append("iOS SDK staging wall must run once in the Swift executable verification loop")
 
+# THE NETWORK IMAGES GUESTS' CLIENT (docs/network-images-plan.md N12, ruled
+# 2026-10-13): `ureq` at one exact release, and an EXAMPLE's dependency only,
+# since the binding carries no client and the app passes its fetch.
+def ureq_findings(manifest):
+    found = []
+    sections = re.split(r"(?m)^\[", manifest)
+    library = "".join(s for s in sections if s.startswith("dependencies]"))
+    examples = "".join(s for s in sections if s.startswith("dev-dependencies]"))
+    if re.search(r"(?m)^ureq\b", library):
+        found.append("crates/kaya/Cargo.toml: `ureq` is a dependency of the library; "
+                     "the binding carries no HTTP client (docs/network-images-plan.md N1, N12) "
+                     "— it belongs under [dev-dependencies], the guests'")
+    pin = re.search(r'(?m)^ureq\s*=\s*(?:\{[^}]*version\s*=\s*)?"([^"]*)"', examples)
+    if pin is None:
+        found.append("crates/kaya/Cargo.toml: the network images guests' `ureq` is gone from "
+                     "[dev-dependencies]")
+    elif not re.fullmatch(r"=\d+\.\d+\.\d+", pin.group(1)):
+        found.append(f"crates/kaya/Cargo.toml: `ureq = \"{pin.group(1)}\"` is not one exact "
+                     f"release (`=X.Y.Z`); a range is the resolver's choice")
+    return found
+
+
+_manifest = (root / "crates/kaya/Cargo.toml").read_text(encoding="utf-8")
+out += ureq_findings(_manifest)
+for _label, _old, _new, _expect in [
+    ("a ranged ureq", 'ureq = "=', 'ureq = "', "is not one exact release"),
+    ("ureq in the library", "[dependencies]\n", "[dependencies]\nureq = \"=3.4.2\"\n",
+     "is a dependency of the library"),
+]:
+    _n = _manifest.count(_old)
+    _got = ureq_findings(_manifest.replace(_old, _new, 1))
+    print(f"check-pins: self-test {_label}, {min(_n, 1)} substitution(s)")
+    if _n != 1 or not any(_expect in g for g in _got):
+        out.append(f"check-pins: self-test {_label} was not refused ({_n} match(es), got {_got})")
+
 status = 0
 if out:
     print("check-pins: dependencies that a server, not this repo, would "

@@ -141,6 +141,8 @@ VERB_FEATURE = {
     "expect_keyboard": "safearea",
     "expect_safe": "safearea",
     "expect_insets": "safearea",
+    # docs/network-images-plan.md §5, the same reasoning.
+    "expect_image_phase": "netimage",
     # docs/autofill-plan.md §5, the same reasoning.
     "expect_content_type": "autofill",
     # docs/reveal-plan.md §5, the same reasoning.

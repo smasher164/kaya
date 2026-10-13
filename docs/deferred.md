@@ -9,6 +9,72 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
+## BUILD — images from the network (docs/network-images-plan.md), depth on the mac and iOS (2026-10-13); the GTK, WinUI and Compose arms, `image_missing`, the other eight bindings and the C floor are the breadth slice
+KEY: network images, netimage, netimage_http, phase, PROP_PHASE, image_phase, IMAGE_PHASE_SHOWN, IMAGE_PHASE_LOADING, IMAGE_PHASE_FAILED, ImagePhase, collection_patch_if, CollectionPatchIf, patch_if, image_needed, image_released, ImageNeeded, ImageReleased, on_needed_node, on_released_node, RowImages, kaya_blob_content_id, blob_content_id, content_id, KayaPictureCache, kayaRequestPicture, kayaServePicture, kayaDecodePicture, KayaImageBox, kayaImagePhaseRead, expect_image_phase, image_box, check_image_template, settle_image_needs, need_images_on, netimage_routes, netimage_server_routes, covers, gen-covers, image_missing, DEPTH STUB netimage
+
+The depth slice: prop 62 `phase` (spec enum `image_phase`: shown, loading,
+failed) on the image in both zones, `fit` legal on the image, and the root's
+N3 refusal of a phase that can be busy on an image with no `fit` and both
+bounds (the live zone at the transaction's end, the template zone at its
+close); tx record 84 `collection_patch_if`, lowered by the core at the
+transaction's position against the model it has built so far (a row gone or
+moved on drops the write, a wrong field is refused either way);
+occurrences 56 `image_needed` and 57 `image_released`, published by the core
+from its own stamps and teardowns, once per row, a windowed site's rows
+waiting for the backend's first report rather than the 128-row seed; a
+content id per blob (`kaya_blob_content_id`, SipHash of the bytes memoized
+per allocation) and `update_entry`/`update_field` no longer re-sending an
+unchanged blob; a band move's asks sent at once (`with_window_scene`). The
+harness's `expect_image_phase` reads what the arm DREW. The SwiftUI arm on
+macOS and iOS: the box in every phase, the loading look (the quaternary
+fill) and the failed look (the fill and SF `photo` at the secondary
+foreground in a box of 40pt or more), undecodable bytes drawing failed, the
+decode off the main thread at the box times the display scale through ImageIO
+with the late result dropped by generation, a decoded cache keyed by (content
+id, pixels) bounded at two screens and emptied under memory pressure, and the
+pump skipping the copy of bytes it holds. The Rust binding: a bytes row field
+(`Vec<u8>`), `ImagePhase` as a field and a prop in both zones, `tx.image`
+taking a signal of bytes, `Collection::patch_if`, `on_needed_node` and
+`on_released_node`, and N12's `RowImages` helper over the app's own fetch
+(the guests pass a pinned `ureq`). netimage.steps and netimage_http.steps
+green on the mac lane and iOS for Rust.
+  - **DEPTH STUB: netimage on gtk** — §3's row: a `GtkPicture` with no
+    paintable in a box from libadwaita's colours, `image-missing` at the
+    symbolic size, `gdk::Texture::from_bytes` in `gio::spawn_blocking`
+    returning by generation, an LRU in pixels, `GTK_ACCESSIBLE_STATE_BUSY`;
+    its netimage_routes row in BACKENDS.
+  - **DEPTH STUB: netimage on winui** — §3's row with N14: `SetSourceAsync`
+    with decode pixel sizes, `ImageFailed` installing the failed look instead
+    of keeping the previous picture, the fill brush and a Fluent glyph,
+    what Narrator reads for a busy image measured; its netimage_routes row.
+  - **DEPTH STUB: netimage on compose** — §3's row: `ImageDecoder` with
+    `setTargetSize` (BitmapFactory with `inSampleSize` on 26 and 27) on
+    `Dispatchers.Default`, an `LruCache` in bytes trimmed on `onTrimMemory`,
+    the phase and the picture as composition state; its netimage_routes row.
+  - **`image_missing` in the symbol vocabulary** (N4): the SwiftUI failed look
+    draws SF `photo` directly; joining the vocabulary needs every backend's
+    glyph (check-symbol-parity) and every binding's name (check-sugar-surface)
+    in one change, so it waits for the breadth. MEASURED for the depth: SF
+    `photo.badge.exclamationmark` is SF 2024 (macOS 15, iOS 18), above the
+    floor; `photo` is 2019.
+  - **The busy state** (N5): MEASURED on the macOS 26.5 SDK that AppKit's
+    headers export no AXElementBusy and SwiftUI has no busy modifier or trait,
+    so the mac sets nothing, as iOS; GTK's `GTK_ACCESSIBLE_STATE_BUSY` and
+    WinUI's are the breadth's, with a read the shared scene can hold.
+  - **The other eight bindings and the C floor** (N16): `phase`, `fit` on the
+    image, the conditional write, the two handlers and the helper in both
+    zones, a netimage guest each; neither check-sugar-surface nor
+    tools/tpl-surfaces.py's prop census holds them yet (their rows would be
+    red for eight bindings at once), so the breadth adds the rows with the
+    guests. Rust's helper drops a released row's result but
+    cannot stop a blocking fetch; the languages with cancellation (Swift, C#,
+    JS, Go) cancel, which the server's "closed by the client" line shows.
+  - **The media player's art** (N17) and the review page (§6 step 7).
+  - **The decode cost on the phones** (§7): the iOS simulator and the API 35
+    emulator run on the host's cores, so the depth did not measure them; the
+    breadth's Compose arm and a device on the review page if the maintainer
+    wants one.
+
 ## BUILD — safe areas and the keyboard (docs/safe-area-plan.md), depth on iOS and the mac (2026-10-11); the Compose arm, GTK's and WinUI's answers and the other eight bindings are the breadth slice
 KEY: safe area, bleed, PROP_BLEED, propBleed, expect_keyboard, expect_safe, expect_insets, SafeWord, INSET_WORDS, KayaBleed, KayaBleedLayout, kayaBleedEdges, kayaSafeReading, kayaKeyboardWall, kayaPanEvaluate, keyboardPan, KayaTopEdgeClip, SOFTWARE_KEYBOARD_PREF, AutomaticMinimizationEnabled, LANDSCAPE_EXTRAS, orientation, safearea.steps, chatkeyboard, taskskeyboard, autofillkeyboard, safearea_routes, keyboardFieldCap, taskskeyboardland, DEPTH STUB safearea
 
@@ -173,6 +239,35 @@ runner; tools/scenes/expander.steps green on the mac lane for Rust.
     Keyboard navigation setting and a collapse with focus in the body leaves
     the first responder on the window, so both blocks open with the breadth
     arms and the mac cuts them, the segmented control's G6 shape.
+
+## DEFER — a BlurHash or ThumbHash placeholder (docs/network-images-plan.md N4; 2026-10-13)
+KEY: blurhash, thumbhash, image placeholder
+
+A hash needs a server that sends one, and N2 already lets an app show a
+preview: a guest that has a hash or a thumbnail decodes it to bytes and sets
+them as the source while `phase` is `loading`. Trigger: an app whose
+catalogue sends hashes and wants kaya to draw them.
+
+## DEFER — an image_failed occurrence (docs/network-images-plan.md N13; 2026-10-13)
+KEY: image_failed, undecodable, decode failure report
+
+Bytes that do not decode draw the failed look and the app is not told: the
+report would come from every backend's asynchronous decode, per stamped copy,
+for an answer the app can do nothing with. Its shape is clear (one report per
+content id, not per stamp). Trigger: an app that shows a need.
+
+## OPEN — the mac native table's rows taller than its 24pt floor run past the window (2026-10-13)
+KEY: kayaNativeRowHeight, native table tall rows, grown table overflow, scroll_to_row last row, netimage 20pt art
+
+MEASURED while building network images: a grown one-column-plus table whose
+rows hold a 48pt image (rows measured 48pt against the tier's 24pt floor) laid
+out with its rows running below the window's bottom edge, in a column root and
+in a row root alike, and `scroll_to_row` to the last row left that row below
+the window (NSTableView counted about 20 rows visible in a 640pt window). With
+20pt art the rows stay on the floor and the scene is green, which is what
+netimage.steps uses. Not diagnosed: whether the grown table's frame takes the
+presumed extent of every row or the corrected path leaves the clip short.
+Trigger: the media player's 48pt art in a mac table.
 
 ## DEFER — widgets in an expander's header (docs/expander-plan.md K2; 2026-10-09)
 KEY: expander header widgets, label-widget, AdwExpanderRow suffix, header control

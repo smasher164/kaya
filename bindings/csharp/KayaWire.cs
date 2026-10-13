@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x12513a04dcdb4c9a;
+    public const ulong SpecHash = 0xd695309e4a57ce9e;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -140,6 +140,7 @@ static class KayaWire
     public const uint PropSummary = 59;
     public const uint PropExpanded = 60;
     public const uint PropBleed = 61;
+    public const uint PropPhase = 62;
     public const uint WpropTitle = 1;
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
@@ -356,6 +357,9 @@ static class KayaWire
     public const uint FitContain = 0;
     public const uint FitCover = 1;
     public const uint FitFill = 2;
+    public const uint ImagePhaseShown = 0;
+    public const uint ImagePhaseLoading = 1;
+    public const uint ImagePhaseFailed = 2;
     public const uint ContentTypeNone = 0;
     public const uint ContentTypeUsername = 1;
     public const uint ContentTypePassword = 2;
@@ -458,6 +462,7 @@ static class KayaWire
     public const ushort TxKindWatchCaptureDevices = 81;
     public const ushort TxKindShowToast = 82;
     public const ushort TxKindDismissToast = 83;
+    public const ushort TxKindCollectionPatchIf = 84;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -583,6 +588,8 @@ static class KayaWire
     public const ushort OccKindCaptureDevices = 53;
     public const ushort OccKindCaptureOverrun = 54;
     public const ushort OccKindToastResult = 55;
+    public const ushort OccKindImageNeeded = 56;
+    public const ushort OccKindImageReleased = 57;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -1492,6 +1499,21 @@ static class KayaWire
         var w = Begin(out var stream);
         w.Write(toast);
         return Finish(stream, w, TxKindDismissToast);
+    }
+
+    /// A conditional row write (docs/network-images-plan.md N7): when the entry at `key` exists, holds `variant`, and its field `guard_field` equals `guard_value`, each I64 in `fields` names a field set to the value at the same place in `values`, as collection_update_field would; otherwise the record does NOTHING and the transaction goes on. The guard is read from the model this transaction commits to.
+    public static byte[] TxCollectionPatchIf(ulong collectionId, object[] path, object key, uint guardField, uint variant, object guardValue, object[] fields, object[] values)
+    {
+        var w = Begin(out var stream);
+        w.Write(collectionId);
+        EncodeValues(w, path);
+        EncodeValue(w, key);
+        w.Write(guardField);
+        w.Write(variant);
+        EncodeValue(w, guardValue);
+        EncodeValues(w, fields);
+        EncodeValues(w, values);
+        return Finish(stream, w, TxKindCollectionPatchIf);
     }
 
     /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
@@ -3055,6 +3077,31 @@ static class KayaWire
         return Finish(stream, w, TxKindSetProperty);
     }
 
+    /// set_property with a constant phase value.
+    public static byte[] TxSetPhase(ulong widgetId, long phase)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropPhase); w.Write(SourceConst);
+        EncodeValue(w, phase);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound phase value.
+    public static byte[] TxBindPhase(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropPhase); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindPhaseElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropPhase); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
     /// set_window_prop with a constant title value (window 0, the primary surface).
     public static byte[] TxSetWindowTitle(ulong window, string title)
     {
@@ -3627,7 +3674,7 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted && kind != OccKindSheetDismissed && kind != OccKindDismissRequested && kind != OccKindSubmitted && kind != OccKindNotificationReplied && kind != OccKindFullscreenChanged && kind != OccKindColorChanged && kind != OccKindRangeChanged && kind != OccKindRangeCommitted && kind != OccKindPlayerChanged && kind != OccKindPlayerPosition && kind != OccKindSeekCompleted && kind != OccKindSessionAction && kind != OccKindPlayerTracks && kind != OccKindCaptionCue && kind != OccKindVideoVisibility && kind != OccKindReaderFrame && kind != OccKindReaderProgress && kind != OccKindReaderPeaks && kind != OccKindReaderDone && kind != OccKindImageLoaded && kind != OccKindCaptureChanged && kind != OccKindCapturePermission && kind != OccKindCaptureDevices && kind != OccKindCaptureOverrun && kind != OccKindToastResult)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted && kind != OccKindSheetDismissed && kind != OccKindDismissRequested && kind != OccKindSubmitted && kind != OccKindNotificationReplied && kind != OccKindFullscreenChanged && kind != OccKindColorChanged && kind != OccKindRangeChanged && kind != OccKindRangeCommitted && kind != OccKindPlayerChanged && kind != OccKindPlayerPosition && kind != OccKindSeekCompleted && kind != OccKindSessionAction && kind != OccKindPlayerTracks && kind != OccKindCaptionCue && kind != OccKindVideoVisibility && kind != OccKindReaderFrame && kind != OccKindReaderProgress && kind != OccKindReaderPeaks && kind != OccKindReaderDone && kind != OccKindImageLoaded && kind != OccKindCaptureChanged && kind != OccKindCapturePermission && kind != OccKindCaptureDevices && kind != OccKindCaptureOverrun && kind != OccKindToastResult && kind != OccKindImageNeeded && kind != OccKindImageReleased)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         if (kind == OccKindAlertResult)

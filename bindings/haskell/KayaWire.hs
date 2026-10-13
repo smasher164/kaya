@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x12513a04dcdb4c9a
+specHash = 0xd695309e4a57ce9e
 
 valueBool :: Word32
 valueBool = 1
@@ -278,6 +278,8 @@ propExpanded :: Word32
 propExpanded = 60
 propBleed :: Word32
 propBleed = 61
+propPhase :: Word32
+propPhase = 62
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -710,6 +712,12 @@ fitCover :: Word32
 fitCover = 1
 fitFill :: Word32
 fitFill = 2
+imagePhaseShown :: Word32
+imagePhaseShown = 0
+imagePhaseLoading :: Word32
+imagePhaseLoading = 1
+imagePhaseFailed :: Word32
+imagePhaseFailed = 2
 contentTypeNone :: Word32
 contentTypeNone = 0
 contentTypeUsername :: Word32
@@ -914,6 +922,8 @@ txKindShowToast :: Word16
 txKindShowToast = 82
 txKindDismissToast :: Word16
 txKindDismissToast = 83
+txKindCollectionPatchIf :: Word16
+txKindCollectionPatchIf = 84
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -1164,6 +1174,10 @@ occKindCaptureOverrun :: Word16
 occKindCaptureOverrun = 54
 occKindToastResult :: Word16
 occKindToastResult = 55
+occKindImageNeeded :: Word16
+occKindImageNeeded = 56
+occKindImageReleased :: Word16
+occKindImageReleased = 57
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -1527,6 +1541,10 @@ txShowToast window toast duration action text actionLabel = wireRecord txKindSho
 -- Withdraw a shown toast. Like cancel_notification it retires the id with NO answer; an unknown or retired id is ignored (docs/toast-plan.md T5).
 txDismissToast :: Word64 -> Builder
 txDismissToast toast = wireRecord txKindDismissToast (word64LE toast)
+
+-- A conditional row write (docs/network-images-plan.md N7): when the entry at `key` exists, holds `variant`, and its field `guard_field` equals `guard_value`, each I64 in `fields` names a field set to the value at the same place in `values`, as collection_update_field would; otherwise the record does NOTHING and the transaction goes on. The guard is read from the model this transaction commits to.
+txCollectionPatchIf :: Word64 -> [Value] -> Value -> Word32 -> Word32 -> Value -> [Value] -> [Value] -> Builder
+txCollectionPatchIf collectionId path key guardField variant guardValue fields values = wireRecord txKindCollectionPatchIf (word64LE collectionId <> encodeValues path <> encodeValue key <> word32LE guardField <> word32LE variant <> encodeValue guardValue <> encodeValues fields <> encodeValues values)
 
 -- A civil date as the wire's I64: year * 10000 + month * 100 + day.
 packDate :: Int -> Int -> Int -> Int64
@@ -2717,6 +2735,25 @@ txBindBleedElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propBleed <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
+-- set_property with a constant phase value.
+txSetPhase :: Word64 -> Int64 -> Builder
+txSetPhase widgetId phase = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propPhase <> word32LE sourceConst
+    <> encodeValue (VI64 phase))
+
+-- set_property with a signal-bound phase value.
+txBindPhase :: Word64 -> Word64 -> Builder
+txBindPhase widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propPhase <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindPhaseElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindPhaseElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propPhase <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
 -- set_window_prop with a constant title value (window 0, the primary surface).
 txSetWindowTitle :: Word64 -> String -> Builder
 txSetWindowTitle window title = wireRecord txKindSetWindowProp
@@ -3193,7 +3230,7 @@ parseOccurrence ::
   IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues, Maybe DropValues, [Value]))
 parseOccurrence redeem rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted && kind /= occKindSheetDismissed && kind /= occKindDismissRequested && kind /= occKindSubmitted && kind /= occKindNotificationReplied && kind /= occKindFullscreenChanged && kind /= occKindColorChanged && kind /= occKindRangeChanged && kind /= occKindRangeCommitted && kind /= occKindPlayerChanged && kind /= occKindPlayerPosition && kind /= occKindSeekCompleted && kind /= occKindSessionAction && kind /= occKindPlayerTracks && kind /= occKindCaptionCue && kind /= occKindVideoVisibility && kind /= occKindReaderFrame && kind /= occKindReaderProgress && kind /= occKindReaderPeaks && kind /= occKindReaderDone && kind /= occKindImageLoaded && kind /= occKindCaptureChanged && kind /= occKindCapturePermission && kind /= occKindCaptureDevices && kind /= occKindCaptureOverrun && kind /= occKindToastResult
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted && kind /= occKindSheetDismissed && kind /= occKindDismissRequested && kind /= occKindSubmitted && kind /= occKindNotificationReplied && kind /= occKindFullscreenChanged && kind /= occKindColorChanged && kind /= occKindRangeChanged && kind /= occKindRangeCommitted && kind /= occKindPlayerChanged && kind /= occKindPlayerPosition && kind /= occKindSeekCompleted && kind /= occKindSessionAction && kind /= occKindPlayerTracks && kind /= occKindCaptionCue && kind /= occKindVideoVisibility && kind /= occKindReaderFrame && kind /= occKindReaderProgress && kind /= occKindReaderPeaks && kind /= occKindReaderDone && kind /= occKindImageLoaded && kind /= occKindCaptureChanged && kind /= occKindCapturePermission && kind /= occKindCaptureDevices && kind /= occKindCaptureOverrun && kind /= occKindToastResult && kind /= occKindImageNeeded && kind /= occKindImageReleased
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64

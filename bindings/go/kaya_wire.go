@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x12513a04dcdb4c9a
+	SpecHash uint64 = 0xd695309e4a57ce9e
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -142,6 +142,7 @@ const (
 	PropSummary = 59
 	PropExpanded = 60
 	PropBleed = 61
+	PropPhase = 62
 	WpropTitle = 1
 	WpropWidth = 2
 	WpropHeight = 3
@@ -358,6 +359,9 @@ const (
 	FitContain Fit = 0
 	FitCover Fit = 1
 	FitFill Fit = 2
+	ImagePhaseShown = 0
+	ImagePhaseLoading = 1
+	ImagePhaseFailed = 2
 	ContentTypeNone ContentType = 0
 	ContentTypeUsername ContentType = 1
 	ContentTypePassword ContentType = 2
@@ -460,6 +464,7 @@ const (
 	txWatchCaptureDevices = 81
 	txShowToast = 82
 	txDismissToast = 83
+	txCollectionPatchIf = 84
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -585,6 +590,8 @@ const (
 	occCaptureDevices = 53
 	occCaptureOverrun = 54
 	occToastResult = 55
+	occImageNeeded = 56
+	occImageReleased = 57
 )
 
 func (d Detent) String() string {
@@ -1756,6 +1763,20 @@ func TxShowToast(window uint64, toast uint64, duration uint32, action uint32, te
 func TxDismissToast(toast uint64) []byte {
 	b := beginRecord(txDismissToast)
 	b = binary.LittleEndian.AppendUint64(b, toast)
+	return endRecord(b)
+}
+
+// TxCollectionPatchIf: A conditional row write (docs/network-images-plan.md N7): when the entry at `key` exists, holds `variant`, and its field `guard_field` equals `guard_value`, each I64 in `fields` names a field set to the value at the same place in `values`, as collection_update_field would; otherwise the record does NOTHING and the transaction goes on. The guard is read from the model this transaction commits to.
+func TxCollectionPatchIf(collectionId uint64, path []any, key any, guardField uint32, variant uint32, guardValue any, fields []any, values []any) []byte {
+	b := beginRecord(txCollectionPatchIf)
+	b = binary.LittleEndian.AppendUint64(b, collectionId)
+	b = encodeValues(b, path)
+	b = encodeValue(b, key)
+	b = binary.LittleEndian.AppendUint32(b, guardField)
+	b = binary.LittleEndian.AppendUint32(b, variant)
+	b = encodeValue(b, guardValue)
+	b = encodeValues(b, fields)
+	b = encodeValues(b, values)
 	return endRecord(b)
 }
 
@@ -3741,6 +3762,38 @@ func TxBindBleedElement(widgetID uint64, level uint32, field uint32) []byte {
 	return endRecord(b)
 }
 
+// TxSetPhase: set_property with a constant phase value.
+func TxSetPhase(widgetID uint64, phase int64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropPhase)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, phase)
+	return endRecord(b)
+}
+
+// TxBindPhase: set_property with a signal-bound phase value.
+func TxBindPhase(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropPhase)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindPhaseElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindPhaseElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropPhase)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
 // TxSetWindowTitle: set_window_prop with a constant title value (window 0, the primary surface).
 func TxSetWindowTitle(window uint64, title string) []byte {
 	b := beginRecord(txSetWindowProp)
@@ -4427,7 +4480,7 @@ func parseValue(rec []byte, at int) (any, int) {
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted && kind != occSheetDismissed && kind != occDismissRequested && kind != occSubmitted && kind != occNotificationReplied && kind != occFullscreenChanged && kind != occColorChanged && kind != occRangeChanged && kind != occRangeCommitted && kind != occPlayerChanged && kind != occPlayerPosition && kind != occSeekCompleted && kind != occSessionAction && kind != occPlayerTracks && kind != occCaptionCue && kind != occVideoVisibility && kind != occReaderFrame && kind != occReaderProgress && kind != occReaderPeaks && kind != occReaderDone && kind != occImageLoaded && kind != occCaptureChanged && kind != occCapturePermission && kind != occCaptureDevices && kind != occCaptureOverrun && kind != occToastResult {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted && kind != occSheetDismissed && kind != occDismissRequested && kind != occSubmitted && kind != occNotificationReplied && kind != occFullscreenChanged && kind != occColorChanged && kind != occRangeChanged && kind != occRangeCommitted && kind != occPlayerChanged && kind != occPlayerPosition && kind != occSeekCompleted && kind != occSessionAction && kind != occPlayerTracks && kind != occCaptionCue && kind != occVideoVisibility && kind != occReaderFrame && kind != occReaderProgress && kind != occReaderPeaks && kind != occReaderDone && kind != occImageLoaded && kind != occCaptureChanged && kind != occCapturePermission && kind != occCaptureDevices && kind != occCaptureOverrun && kind != occToastResult && kind != occImageNeeded && kind != occImageReleased {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])

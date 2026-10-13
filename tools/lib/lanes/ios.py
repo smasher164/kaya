@@ -173,6 +173,8 @@ RUST_SCENES = [
     # The safe area (docs/safe-area-plan.md §6): `bleed`, and the task manager
     # and the content-type form with the keyboard up.
     "safearea", "taskskeyboard", "autofillkeyboard",
+    # Network images (docs/network-images-plan.md §6).
+    "netimage", "netimage_http",
 ]
 
 # The iPad legs, queued right after their phone sibling: the phone pool is

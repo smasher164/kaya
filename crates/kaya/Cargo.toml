@@ -67,6 +67,10 @@ rusqlite = { version = "0.40.2", features = ["bundled"] }
 # protocol against this exact release, docs/measurements/richtext-automerge-2026-09-11.txt).
 # Pure Rust, so both phones build it; libkaya's own graph never sees it.
 automerge = "=0.11.0"
+# The network-images guests' fetch (docs/network-images-plan.md N12, ruled
+# 2026-10-13): the binding carries no client, so the app passes one; https
+# because a real catalogue is (rustls with ring and the webpki roots).
+ureq = "=3.4.2"
 
 [build-dependencies]
 syn = { version = "2", features = ["extra-traits", "visit-mut"] }
@@ -330,6 +334,14 @@ path = "../../guests/rust/expander.rs"
 [[example]]
 name = "safearea"
 path = "../../guests/rust/safearea.rs"
+
+[[example]]
+name = "netimage"
+path = "../../guests/rust/netimage.rs"
+
+[[example]]
+name = "netimage_http"
+path = "../../guests/rust/netimage_http.rs"
 
 [[example]]
 name = "autofill"

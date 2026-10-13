@@ -8,6 +8,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#define RowImages_DEFAULT_LIMIT 6
+
 #define MAX_TIMECODE_FRAMES 9007199254740991
 
 /**
@@ -248,6 +250,14 @@
 #define KAYA_OCCURRENCE_TOAST_RESULT 55
 
 /**
+ * IMAGE_NEEDED and IMAGE_RELEASED { the copy's tag }
+ * (docs/network-images-plan.md N8).
+ */
+#define KAYA_OCCURRENCE_IMAGE_NEEDED 56
+
+#define KAYA_OCCURRENCE_IMAGE_RELEASED 57
+
+/**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
  *   CREATE_SIGNAL:     u64 signal_id, value
@@ -430,6 +440,13 @@
 #define KAYA_TX_SHOW_TOAST 82
 
 #define KAYA_TX_DISMISS_TOAST 83
+
+/**
+ * COLLECTION_PATCH_IF { u64 collection; Values path; Value key; u32
+ * guard_field; u32 variant; Value guard; Values fields; Values values }
+ * (docs/network-images-plan.md N7).
+ */
+#define KAYA_TX_COLLECTION_PATCH_IF 84
 
 #define KAYA_TX_ADD_SECTION 25
 
@@ -1254,6 +1271,11 @@
 #define KAYA_PROP_BLEED 61
 
 /**
+ * What an image is waiting for, a KAYA_IMAGE_PHASE_* (docs/network-images-plan.md N2).
+ */
+#define KAYA_PROP_PHASE 62
+
+/**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
  * windows are not widgets. Window 0 is the primary surface.
  */
@@ -1756,6 +1778,12 @@
 
 #define KAYA_FIT_FILL 2
 
+#define KAYA_IMAGE_PHASE_SHOWN 0
+
+#define KAYA_IMAGE_PHASE_LOADING 1
+
+#define KAYA_IMAGE_PHASE_FAILED 2
+
 #define KAYA_CONTENT_TYPE_NONE 0
 
 #define KAYA_CONTENT_TYPE_USERNAME 1
@@ -2208,6 +2236,10 @@ typedef struct KayaHostApi {
   uint32_t (*session_state)(void);
   const uint8_t *(*blob_data)(uint64_t, uintptr_t*);
   uint64_t (*blob_count)(void);
+  /**
+   * The content id a decoded-picture cache keys on (docs/network-images-plan.md N10).
+   */
+  uint64_t (*blob_content_id)(uint64_t);
   /**
    * The protocol fingerprint (capi::kaya_spec_hash), asserted by the
    * dylib against its own baked copy before pumping: a stale compiled
@@ -2957,6 +2989,14 @@ void kaya_pref_remove(const uint8_t *key, uintptr_t key_len);
  * BATCH).
  */
 uint64_t kaya_blob_count(void);
+
+/**
+ * The content id of the blob an apply record carried: equal bytes, equal
+ * id, whichever row or signal holds them; 0 for a dead handle
+ * (docs/network-images-plan.md N10). A backend keys its decoded pictures
+ * on it and may skip the copy of bytes it already holds.
+ */
+uint64_t kaya_blob_content_id(uint64_t handle);
 
 const uint8_t *kaya_blob_data(uint64_t handle, uintptr_t *len);
 

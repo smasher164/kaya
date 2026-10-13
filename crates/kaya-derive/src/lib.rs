@@ -54,6 +54,7 @@ fn derive_struct(input: &DeriveInput, fields: &Fields) -> TokenStream {
     let ftypes: Vec<_> = fields.iter().map(|(_, t)| *t).collect();
     let indexes: Vec<u32> = (0..fields.len() as u32).collect();
     let patch = format_ident!("{name}Patch");
+    let guarded = format_ident!("{name}PatchIf");
 
     quote! {
         impl ::kaya::KayaSum for #name {
@@ -99,14 +100,60 @@ fn derive_struct(input: &DeriveInput, fields: &Fields) -> TokenStream {
             )*
         }
 
+        /// The guarded twin of the patch builder (docs/network-images-plan.md
+        /// N7): its setters gather, and the one record goes when it drops.
+        #[allow(dead_code)]
+        #vis struct #guarded<'t, 'c> {
+            tx: &'t mut ::kaya::Tx<'c>,
+            instance: ::kaya::Collection<#name>,
+            key: ::kaya::Value,
+            guard_field: u32,
+            guard: ::kaya::Value,
+            changes: Vec<(u32, ::kaya::Value)>,
+        }
+
+        #[allow(dead_code)]
+        impl<'t, 'c> #guarded<'t, 'c> {
+            #(
+                pub fn #fnames(mut self, value: impl Into<#ftypes>) -> Self {
+                    self.changes.push((#indexes, ::kaya::KayaField::to_value(&value.into())));
+                    self
+                }
+            )*
+        }
+
+        impl<'t, 'c> Drop for #guarded<'t, 'c> {
+            fn drop(&mut self) {
+                let changes = std::mem::take(&mut self.changes);
+                self.tx.patch_if_raw(
+                    &self.instance,
+                    self.key.clone(),
+                    0,
+                    self.guard_field,
+                    self.guard.clone(),
+                    changes,
+                );
+            }
+        }
+
         impl ::kaya::KayaPatch for #name {
             type Builder<'t, 'c> = #patch<'t, 'c> where 'c: 't;
+            type GuardedBuilder<'t, 'c> = #guarded<'t, 'c> where 'c: 't;
             fn patch_builder<'t, 'c>(
                 tx: &'t mut ::kaya::Tx<'c>,
                 instance: &::kaya::Collection<#name>,
                 key: ::kaya::Value,
             ) -> Self::Builder<'t, 'c> {
                 #patch { tx, instance: instance.clone(), key }
+            }
+            fn patch_if_builder<'t, 'c>(
+                tx: &'t mut ::kaya::Tx<'c>,
+                instance: &::kaya::Collection<#name>,
+                key: ::kaya::Value,
+                guard_field: u32,
+                guard: ::kaya::Value,
+            ) -> Self::GuardedBuilder<'t, 'c> {
+                #guarded { tx, instance: instance.clone(), key, guard_field, guard, changes: Vec::new() }
             }
         }
     }

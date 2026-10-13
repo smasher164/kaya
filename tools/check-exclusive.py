@@ -1041,7 +1041,12 @@ _half_mod.write_text(_half, encoding="utf-8")
 watched("an idle reader that misses the display waits", REAL,
         "idle_waited_seconds read 240s", lanes={**MODS, "mac": load_lane(_half_mod)})
 
-gate.negatives_ran(38)
+# THE MEDIA SERVER STARTS FOR EVERY SCENE THAT FETCHES FROM IT
+# (tools/lib/netimage_server_routes.py; docs/network-images-plan.md §5).
+from netimage_server_routes import run as check_netimage_server_routes  # noqa: E402
+check_netimage_server_routes(gate)
+
+gate.negatives_ran(50)
 
 gate.counted("windows legs whose scene posts a notification",
              sorted(MODS["windows"].notification_legs(str(ROOT / "tools/scenes"))), floor=2)

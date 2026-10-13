@@ -10,6 +10,7 @@ mod brand;
 // The canvas raster (docs/canvas-plan.md); ungated — the core draws once
 // and every platform blits.
 mod canvas;
+mod content_id;
 // The nounwind boundaries' one report path (docs/deferred.md, "A GUARD
 // THAT ABORTS THE PROCESS IS THE WRONG SHAPE"); ungated — every target
 // has frames that cannot unwind.
@@ -142,6 +143,8 @@ pub use app::{
     Frame, ReadError,
     // docs/capture-plan.md: the capture's readings and handle.
     CaptureReading, CaptureRef,
+    // docs/network-images-plan.md N2, N12.
+    ImagePhaseKind, RowImages,
 };
 
 /// A captured frame as the app's callback is handed it (docs/capture-plan.md §4).
@@ -160,7 +163,7 @@ pub use protocol::{
     SectionProp, SectionsPresentation, SignalId, TemplateNodeId, WindowProp,
     FileContent, FileDialogId, FileMode, PickedFile, PickedId, Representation, Time, UndoDelta, UndoText, Value,
     ValueType, WidgetId, WidgetKind, WindowId,
-    Fit, MediaFailure, PlaybackState, PlayerId, PlayerState, PlayerTracks, SessionAction, SessionActionKind,
+    Fit, ImagePhase, MediaFailure, PlaybackState, PlayerId, PlayerState, PlayerTracks, SessionAction, SessionActionKind,
     TrackKind,
     FrameAccuracy, ImageId, Peaks, ReadId, ReadOutcome, ReaderId,
     CameraFacing, CaptureCommand, CaptureDevice, CaptureFailure, CaptureId, CaptureInterruption, CaptureKind,

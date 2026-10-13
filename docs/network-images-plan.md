@@ -1,7 +1,9 @@
 # Images from the network: the design pass (2026-10-13)
 
 Status: RULED 2026-10-13 (the maintainer: "im okay with those rulings"), N1-N17 as
-recommended (§8); nothing built yet. The roadmap
+recommended (§8). DEPTH BUILT 2026-10-13 on the mac and iOS with the Rust
+binding (docs/deferred.md's BUILD entry; §7 records what it measured); the
+breadth is open. The roadmap
 card (docs/roadmap/editorial.toml, "Images from the network") asks for "a
 remote image source with a cache, a placeholder while loading and a stated
 failure, in both zones so a table row's art loads per row", and names the
@@ -998,6 +1000,36 @@ legs (tools/lib/media_server.py's condition, and the linux runner's).
   SwiftUI exposes `AXElementBusy`; what Narrator reads for a busy image;
   whether ATS allows `http://127.0.0.1` on the simulator without a key; which
   decoded object WinUI can share between two `Image` elements without a URI.
+- MEASURED 2026-10-13 at the depth (mac, M5 Pro, a release build, medians of 15,
+  load average 6.5): the content id, SipHash-1-3 over the bytes and their
+  length (std's DefaultHasher, no new dependency), 52.5 µs for 140 KB and
+  389 µs for 1.16 MB, once per allocation since the id is memoized per Arc.
+- MEASURED 2026-10-13: AppKit's 26.5 headers export no AXElementBusy (only
+  the busy indicator role) and SwiftUI has no busy modifier or trait, so the
+  SwiftUI arm sets no busy state on the mac either; N5's busy is GTK's and
+  WinUI's, at the breadth. `expect_ax` reads `image/<label>` on the loading,
+  shown and failed looks alike.
+- MEASURED 2026-10-13: SF `photo.badge.exclamationmark` is SF Symbols 2024
+  (macOS 15, iOS 18), above kaya's floors; the failed glyph is `photo` (2019)
+  at the secondary foreground.
+- MEASURED 2026-10-13: the Rust guests' fetch (`ureq`, its own sockets)
+  reaches the lane's server at `http://127.0.0.1` from the iOS simulator with
+  no ATS key, since ATS governs URLSession; the Swift helper's URLSession
+  measures it at the breadth.
+- Not measured at the depth: the decode cost on the iOS simulator and the API
+  35 emulator. The SwiftUI arm decodes off the main thread on both Apple
+  platforms whatever the number, so it decides nothing there; Compose's arm
+  measures it at the breadth.
+- Taken at the depth, a recommendation where the rulings are silent: a row
+  that a windowed site's SEED realizes (128 rows, before the backend has laid
+  anything out) is not `needed` until the backend's first report, which then
+  needs the band's rows; without it a 300-row table started 128 fetches and
+  released most of them at once.
+- Found at the depth: a signal of bytes could not be written (docs/traps.md),
+  the mac table's scroll to its last rows reported a one-row band
+  (docs/traps.md), and the mac native table's rows taller than its 24pt floor
+  run past the window (docs/deferred.md's OPEN entry), which is why
+  netimage.steps' table art is 20pt.
 
 ## §8: What the maintainer is asked
 

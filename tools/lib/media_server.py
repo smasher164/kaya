@@ -27,6 +27,15 @@ PORT = 8765
 LANE_PORTS = {"mac": 8765, "ios": 8766, "android": 8767, "windows": 8768,
               "linux": 8765}
 PROBE = "h264_aac.mp4"
+# The scenes that fetch from this server (docs/media-plan.md §7a,
+# docs/network-images-plan.md §5). Every lane asks `serves`, never a prefix of
+# its own; tools/lib/netimage_server_routes.py holds that.
+SERVED = ("media_", "netimage_http")
+
+
+def serves(scene):
+    """True for a scene, or a `<scene>-<lang>` leg, that needs the server."""
+    return scene.startswith(SERVED)
 READY_S = 15.0
 
 

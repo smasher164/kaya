@@ -73,6 +73,7 @@ pub(crate) const TX_REQUEST_PERMISSION: u16 = 80;
 pub(crate) const TX_WATCH_CAPTURE_DEVICES: u16 = 81;
 pub(crate) const TX_SHOW_TOAST: u16 = 82;
 pub(crate) const TX_DISMISS_TOAST: u16 = 83;
+pub(crate) const TX_COLLECTION_PATCH_IF: u16 = 84;
 pub(crate) const TX_ADD_SECTION: u16 = 25;
 pub(crate) const TX_SELECT_SECTION: u16 = 26;
 pub(crate) const TX_SET_SECTION_PROP: u16 = 27;
@@ -400,6 +401,13 @@ pub(crate) const SESSION_ACTIONS: &[(i64, &str)] = &[
 pub(crate) const PLAYBACK_STATES: &[(i64, &str)] = &[(0, "none"), (1, "playing"), (2, "paused")];
 
 pub(crate) const FITS: &[(i64, &str)] = &[(0, "contain"), (1, "cover"), (2, "fill")];
+
+/// docs/network-images-plan.md N2 (spec enum "image_phase").
+pub(crate) const IMAGE_PHASE_SHOWN: i64 = 0;
+pub(crate) const IMAGE_PHASE_LOADING: i64 = 1;
+pub(crate) const IMAGE_PHASE_FAILED: i64 = 2;
+pub(crate) const IMAGE_PHASES: &[(i64, &str)] =
+    &[(IMAGE_PHASE_SHOWN, "shown"), (IMAGE_PHASE_LOADING, "loading"), (IMAGE_PHASE_FAILED, "failed")];
 
 pub(crate) const CONTENT_TYPES: &[(i64, &str)] = &[
     (0, "none"),
@@ -1191,6 +1199,7 @@ pub(crate) const PROP_REVEALABLE: u32 = 58;
 pub(crate) const PROP_SUMMARY: u32 = 59;
 pub(crate) const PROP_EXPANDED: u32 = 60;
 pub(crate) const PROP_BLEED: u32 = 61;
+pub(crate) const PROP_PHASE: u32 = 62;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
@@ -1825,6 +1834,7 @@ fn prop(raw: u32) -> Prop {
         PROP_SUMMARY => Prop::Summary,
         PROP_EXPANDED => Prop::Expanded,
         PROP_BLEED => Prop::Bleed,
+        PROP_PHASE => Prop::Phase,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -2692,6 +2702,31 @@ pub fn decode_transaction_with_blobs(
                 })
             }
             TX_DISMISS_TOAST => TxOp::DismissToast(crate::protocol::ToastId(r.u64())),
+            TX_COLLECTION_PATCH_IF => {
+                let id = CollectionId(r.u64());
+                let path = r.path();
+                let key = r.value();
+                let guard_field = r.u32();
+                let variant = r.u32();
+                let guard = r.value();
+                let fields = r.path();
+                let values = r.path();
+                assert!(
+                    fields.len() == values.len(),
+                    "kaya: collection_patch_if names {} field(s) and carries {} value(s)",
+                    fields.len(),
+                    values.len()
+                );
+                let changes = fields
+                    .into_iter()
+                    .zip(values)
+                    .map(|(f, v)| match f {
+                        Value::I64(i) if (0..=i64::from(u32::MAX)).contains(&i) => (i as u32, v),
+                        other => panic!("kaya: collection_patch_if names field {other:?}; a field is an I64 index"),
+                    })
+                    .collect();
+                TxOp::CollectionPatchIf { id, path, key, variant, guard_field, guard, changes }
+            }
             TX_DECLARE_LINK_ROUTE => {
                 let route = r.u64();
                 let pattern = alert_str(r.value(), "pattern");
@@ -4836,6 +4871,20 @@ impl Writer {
             TxOp::ShowToast(spec) => self.record(TX_SHOW_TOAST, |b, blobs| {
                 write_toast(b, spec, blobs);
             }),
+            TxOp::CollectionPatchIf { id, path, key, variant, guard_field, guard, changes } => {
+                self.record(TX_COLLECTION_PATCH_IF, |b, blobs| {
+                    b.extend_from_slice(&id.0.to_le_bytes());
+                    write_path(b, path, blobs);
+                    write_value(b, key, blobs);
+                    b.extend_from_slice(&guard_field.to_le_bytes());
+                    b.extend_from_slice(&variant.to_le_bytes());
+                    write_value(b, guard, blobs);
+                    let fields: Path = changes.iter().map(|(f, _)| Value::I64(i64::from(*f))).collect();
+                    let values: Path = changes.iter().map(|(_, v)| v.clone()).collect();
+                    write_path(b, &fields, blobs);
+                    write_path(b, &values, blobs);
+                })
+            }
             TxOp::DismissToast(toast) => self.record(TX_DISMISS_TOAST, |b, _| {
                 b.extend_from_slice(&toast.0.to_le_bytes());
             }),
@@ -5684,6 +5733,7 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::Summary => PROP_SUMMARY,
         Prop::Expanded => PROP_EXPANDED,
         Prop::Bleed => PROP_BLEED,
+        Prop::Phase => PROP_PHASE,
     }
 }
 

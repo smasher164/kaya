@@ -930,7 +930,7 @@ def leg_env(scene, lang, appearance=""):
 
 def media_queued():
     mode = os.environ.get("KAYA_EXCLUSIVE", "")
-    return any(scene.startswith("media_") and only.wanted(name)
+    return any(media_server.serves(scene) and only.wanted(name)
                and not (mode in ("only", "skip")
                         and (mode == "only") != (name in lane.EXCLUSIVE))
                for name, scene, _lang in lane.legs())

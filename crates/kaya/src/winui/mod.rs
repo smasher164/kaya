@@ -18238,6 +18238,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     image.SetMaxWidth(bound)?;
                 }
                 (NativeWidget::Video { .. }, Prop::Fit, Value::I64(fit)) => media::set_fit(core, id.0, fit)?,
+                // docs/network-images-plan.md §6: the breadth's.
+                (NativeWidget::Image(_), Prop::Phase | Prop::Fit, _) => crate::depth_stub("netimage"),
                 (NativeWidget::Video { .. }, Prop::Aspect, Value::I64(aspect)) => media::set_aspect(core, id.0, aspect)?,
                 (NativeWidget::Image(image), Prop::MaxHeight, Value::F64(bound)) => {
                     core.image_max_heights.insert(id, bound);
@@ -24978,6 +24980,11 @@ impl crate::harness::Stage for WinUiStage {
             })
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
+    /// The phase this backend drew is the breadth's (docs/network-images-plan.md §6).
+    fn image_phase(&self, _: crate::harness::Target) -> String {
+        crate::depth_stub("netimage")
     }
 
     fn image_drawn(&self, t: crate::harness::Target) -> String {

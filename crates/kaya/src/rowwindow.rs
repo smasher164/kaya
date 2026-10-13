@@ -54,9 +54,8 @@ pub(crate) struct RowWindow {
 }
 
 impl RowWindow {
-    /// Reported, as against merely seeded — the distinction the tests
-    /// hold and nothing else needs.
-    #[cfg(test)]
+    /// Reported, as against merely seeded: the tests hold it, and a seeded
+    /// row's loading image waits on it (docs/network-images-plan.md N8).
     pub(crate) fn is_reported(&self) -> bool {
         self.reported.is_some()
     }

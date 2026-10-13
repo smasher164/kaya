@@ -2415,7 +2415,7 @@ def _leg_worker(name, script, args, tablet):
         if tablet:
             _tablet_lock.acquire()
             serial, slot = TABLET_SERIAL, None
-        elif script.startswith("media_"):
+        elif media_server.serves(script):
             # A MEDIA LEG RUNS ONLY WHERE THE LANE'S SERVER ANSWERS
             # (MEDIA_ROUTES, measured once when it started).
             if not MEDIA_ROUTES:
@@ -4255,7 +4255,7 @@ def run_suite_legs(suite):
             extras += ["--es", "KAYA_ORIENTATION", flags["orientation"]]
         if flags.get("cutout"):
             extras += ["--es", "KAYA_CUTOUT", flags["cutout"]]
-        if scene.startswith("media_"):
+        if media_server.serves(scene):
             extras += ["--es", "KAYA_MEDIA_URL", MEDIA_URL]
         # THE VERB TRACE, a RELATIVE name the interpreter resolves under
         # the app's own files dir — the one place run-as can read back
@@ -4288,7 +4288,7 @@ def run_suite_legs(suite):
 
 def media_queued():
     mode = os.environ.get("KAYA_EXCLUSIVE", "")
-    return any(lane.scene_of(leg).startswith("media_")
+    return any(media_server.serves(lane.scene_of(leg))
                and not (mode in ("only", "skip")
                         and (mode == "only") != (leg in lane.EXCLUSIVE))
                for suite in lane.SUITES if SUITE in (suite, "all")

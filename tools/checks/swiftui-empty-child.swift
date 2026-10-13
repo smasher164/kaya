@@ -144,6 +144,31 @@ private func probe() -> Int32 {
         }
     }
 
+    // THE LOOKS ARE ONE NODE EACH (docs/network-images-plan.md N3, N4, N13):
+    // a boxed image loading with no bytes, failed, and undecodable.
+    for (name, phase, bytes) in [
+        ("boxed-loading", Int64(1), [UInt8]()), ("boxed-failed", Int64(2), [UInt8]()),
+        ("boxed-undecodable", Int64(0), Array("not an image".utf8)),
+    ] {
+        let image = KayaNode(id: 2, kind: UInt32(KAYA_KIND_IMAGE), tag: Array("probe".utf8))
+        image.fitDeclared = true
+        image.maxWidth = 48
+        image.maxHeight = 48
+        image.phase = phase
+        kayaDecodeImage(bytes.isEmpty ? nil : Data(bytes), into: image)
+        let counter = NSHostingView(rootView: CountingCell(name: name) { KayaRender(node: image) })
+        counter.frame = CGRect(x: 0, y: 0, width: 400, height: 300)
+        let fitting = counter.fittingSize
+        counter.layoutSubtreeIfNeeded()
+        let count = contributed[name] ?? -1
+        print("  \(name): fitting=\(Int(fitting.width))x\(Int(fitting.height)) subviews=\(count)")
+        if count != 1 || Int(fitting.width) != 48 || Int(fitting.height) != 48 {
+            print("  \(name): FAIL — a look must be one view in its 48x48 box")
+            failures += 1
+        }
+    }
+    failures += pictureRace()
+
     // AND THE CELL'S OWN CLAUSE, which no image case can reach now: an
     // unknown kind number falls to KayaRender's `default:` arm and
     // produces no view at all — the state a guest reaches by running an
@@ -159,4 +184,52 @@ private func probe() -> Int32 {
     print("  unknown-kind-250: fitting=\(Int(measured.width))x\(Int(measured.height))")
 
     return failures == 0 ? 0 : 1
+}
+
+/// A JPEG of `side` pixels square, drawn here so the probe needs no fixture.
+@MainActor private func probeJPEG(_ side: Int) -> Data {
+    let context = CGContext(
+        data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+        space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+    for y in stride(from: 0, to: side, by: 8) {
+        context.setFillColor(red: CGFloat(y % 255) / 255, green: 0.4, blue: 0.6, alpha: 1)
+        context.fill(CGRect(x: 0, y: y, width: side, height: 8))
+    }
+    let data = NSMutableData()
+    let destination = CGImageDestinationCreateWithData(data, "public.jpeg" as CFString, 1, nil)!
+    CGImageDestinationAddImage(destination, context.makeImage()!, nil)
+    CGImageDestinationFinalize(destination)
+    return data as Data
+}
+
+/// THE LATE PICTURE (docs/network-images-plan.md N9): a source whose decode is
+/// still running when the image is given bytes the cache already holds. The
+/// cached bytes install at once; the earlier decode must then be dropped, or
+/// the image shows the picture the app replaced.
+@MainActor private func pictureRace() -> Int {
+    let small = probeJPEG(16)
+    let large = probeJPEG(3000)
+    let warm = KayaNode(id: 90, kind: UInt32(KAYA_KIND_IMAGE), tag: Array("warm".utf8))
+    kayaScene.nodes[90] = warm
+    warm.imageData = small
+    warm.imageContentId = 7
+    kayaServePicture(warm)
+    let warmed = Date().addingTimeInterval(5)
+    while warm.imagePending && Date() < warmed { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+    let image = KayaNode(id: 91, kind: UInt32(KAYA_KIND_IMAGE), tag: Array("race".utf8))
+    kayaScene.nodes[91] = image
+    image.imageData = large
+    image.imageContentId = 8
+    kayaServePicture(image)
+    image.imageData = small
+    image.imageContentId = 7
+    kayaServePicture(image)
+    let settled = Date().addingTimeInterval(1.5)
+    while Date() < settled { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+    print("  picture-race: the replaced 3000x3000 decode finished; the image reads \(image.imageSize)")
+    if image.imageSize != "16x16" {
+        print("  picture-race: FAIL — a decode that finished after its image was given other bytes was installed")
+        return 1
+    }
+    return 0
 }

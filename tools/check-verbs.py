@@ -5624,6 +5624,8 @@ from safearea_routes import run as check_safearea_routes
 check_safearea_routes(g)
 from toast_routes import run as check_toast_routes
 check_toast_routes(g)
+from netimage_routes import run as check_netimage_routes
+check_netimage_routes(g)
 from simscreen_routes import run as check_simscreen_routes
 check_simscreen_routes(g)
 

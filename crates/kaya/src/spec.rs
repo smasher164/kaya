@@ -298,6 +298,9 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // docs/safe-area-plan.md A3: an image, video view or canvas extends past
     // kaya\'s inset and the safe area to the window\'s edge where it touches.
     ("bleed", 61, PropKind::Bool),
+    // docs/network-images-plan.md N2: what an image is waiting for, the app's
+    // own knowledge of its fetch; a busy phase needs a declared box (N3).
+    ("phase", 62, PropKind::Enum("image_phase")),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -2078,6 +2081,28 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             doc: "Withdraw a shown toast. Like cancel_notification it retires \
                   the id with NO answer; an unknown or retired id is ignored \
                   (docs/toast-plan.md T5).",
+        },
+        Record {
+            kind: 84,
+            name: "collection_patch_if",
+            fields: &[
+                f("collection_id", FieldTy::U64),
+                f("path", FieldTy::Values),
+                f("key", FieldTy::Value),
+                f("guard_field", FieldTy::U32),
+                f("variant", FieldTy::U32),
+                f("guard_value", FieldTy::Value),
+                f("fields", FieldTy::Values),
+                f("values", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "A conditional row write (docs/network-images-plan.md N7): \
+                  when the entry at `key` exists, holds `variant`, and its \
+                  field `guard_field` equals `guard_value`, each I64 in `fields` \
+                  names a field set to the value at the same place in \
+                  `values`, as collection_update_field would; otherwise the \
+                  record does NOTHING and the transaction goes on. The guard \
+                  is read from the model this transaction commits to.",
         },
     ],
     apply: &[
@@ -4068,6 +4093,33 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   retires here; an `undo` toast's press is preceded by the \
                   `undone` it caused.",
         },
+        Record {
+            kind: 56,
+            name: "image_needed",
+            fields: &[
+                f("node", FieldTy::U64),
+                f("path_len", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "path_len key values follow: a stamped copy of the template \
+                  image `node` was realized while its phase is `loading` and \
+                  it has no source (docs/network-images-plan.md N8). Sent by \
+                  the core once per row until image_released for that row.",
+        },
+        Record {
+            kind: 57,
+            name: "image_released",
+            fields: &[
+                f("node", FieldTy::U64),
+                f("path_len", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "path_len key values follow: the copy of a row's template \
+                  image that image_needed was sent for was torn down while its \
+                  phase is still `loading` (docs/network-images-plan.md N8).",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -4256,6 +4308,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("summary", 59),
                 ("expanded", 60),
                 ("bleed", 61),
+                ("phase", 62),
             ],
         },
         EnumSpec {
@@ -4666,6 +4719,11 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             variants: &[("contain", 0), ("cover", 1), ("fill", 2)],
         },
         EnumSpec {
+            // docs/network-images-plan.md N2.
+            name: "image_phase",
+            variants: &[("shown", 0), ("loading", 1), ("failed", 2)],
+        },
+        EnumSpec {
             // docs/autofill-plan.md A2.
             name: "content_type",
             variants: &[
@@ -4894,6 +4952,7 @@ mod tests {
             ("watch_capture_devices", wire::TX_WATCH_CAPTURE_DEVICES),
             ("show_toast", wire::TX_SHOW_TOAST),
             ("dismiss_toast", wire::TX_DISMISS_TOAST),
+            ("collection_patch_if", wire::TX_COLLECTION_PATCH_IF),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -5041,6 +5100,8 @@ mod tests {
                 ("capture_devices", crate::ring::REC_CAPTURE_DEVICES),
                 ("capture_overrun", crate::ring::REC_CAPTURE_OVERRUN),
                 ("toast_result", crate::ring::REC_TOAST_RESULT),
+                ("image_needed", crate::ring::REC_IMAGE_NEEDED),
+                ("image_released", crate::ring::REC_IMAGE_RELEASED),
             ]
         );
     }
@@ -5292,6 +5353,7 @@ mod tests {
                     ("session_action", _) => canvas_pin(wire::SESSION_ACTIONS, name),
                     ("playback_state", _) => canvas_pin(wire::PLAYBACK_STATES, name),
                     ("fit", _) => canvas_pin(wire::FITS, name),
+                    ("image_phase", _) => canvas_pin(wire::IMAGE_PHASES, name),
                     ("content_type", _) => canvas_pin(wire::CONTENT_TYPES, name),
                     ("pprop", _) => canvas_pin(wire::PPROPS, name),
                     ("track_kind", _) => canvas_pin(wire::TRACK_KINDS, name),
@@ -5375,6 +5437,7 @@ mod tests {
                     ("prop", "summary") => wire::PROP_SUMMARY,
                     ("prop", "expanded") => wire::PROP_EXPANDED,
                     ("prop", "bleed") => wire::PROP_BLEED,
+                    ("prop", "phase") => wire::PROP_PHASE,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,
@@ -5555,6 +5618,7 @@ mod tests {
             ("session_action", wire::SESSION_ACTIONS),
             ("playback_state", wire::PLAYBACK_STATES),
             ("fit", wire::FITS),
+            ("image_phase", wire::IMAGE_PHASES),
             ("content_type", wire::CONTENT_TYPES),
             ("pprop", wire::PPROPS),
             ("track_kind", wire::TRACK_KINDS),
@@ -5705,6 +5769,41 @@ mod tests {
 
     /// The capture's records (docs/capture-plan.md §2), the reader's round
     /// trip one feature over.
+    /// docs/network-images-plan.md N7: the conditional row write.
+    #[test]
+    fn patch_if_round_trips_through_wire() {
+        let mut w = GenericWriter { buf: Vec::new(), blobs: Vec::new() };
+        w.record(
+            tx_record("collection_patch_if"),
+            &[
+                Arg::U64(3),
+                Arg::Values(vec![Value::from("album")]),
+                Arg::Value(Value::from("t1")),
+                Arg::U32(0),
+                Arg::U32(0),
+                Arg::Value(Value::from("http://h/a.jpg")),
+                Arg::Values(vec![Value::I64(2), Value::I64(1)]),
+                Arg::Values(vec![Value::I64(0), Value::from("ok")]),
+            ],
+        );
+        let want = vec![TxOp::CollectionPatchIf {
+            id: CollectionId(3),
+            path: vec![Value::from("album")],
+            key: Value::from("t1"),
+            variant: 0,
+            guard_field: 0,
+            guard: Value::from("http://h/a.jpg"),
+            changes: vec![(2, Value::I64(0)), (1, Value::from("ok"))],
+        }];
+        let decoded = wire::decode_transaction(&w.buf);
+        assert_eq!(format!("{decoded:?}"), format!("{want:?}"));
+        let mut ours = wire::Writer::new();
+        for op in &want {
+            ours.tx_op(op);
+        }
+        assert_eq!(ours.into_bytes(), w.buf, "the core's encoder and the spec's disagree");
+    }
+
     #[test]
     fn toast_records_round_trip_through_wire() {
         use crate::protocol::{ToastAction, ToastDuration, ToastId, ToastSpec};

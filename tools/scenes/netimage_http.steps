@@ -1,0 +1,16 @@
+# Network images over HTTP (docs/network-images-plan.md §5, N12): the row
+# image helper against the lane's media server, the app's own client doing
+# the fetch. Each row's picture lands on its own row: three sizes, twelve rows.
+expect_image_phase image@art[a00] shown
+expect image@art[a00] "600x600"
+expect image@art[a01] "320x320"
+expect image@art[a02] "1000x1000"
+expect image@art[a11] "1000x1000"
+# A 404 and a 500 are the app's failures, told to its error handler.
+expect_image_phase image@art[missing] failed
+expect_image_phase image@art[broken] failed
+expect label@errors "errors: 2"
+# Bytes that are not a picture draw the same failed look (N13).
+expect_image_phase image@art[junk] failed
+# A response that never finishes stays loading.
+expect_image_phase image@art[slow] loading

@@ -641,6 +641,10 @@ pub enum Step {
     /// points, rounded (docs/photo-attach-plan.md §5); `expect image@x` reads
     /// the decoded picture.
     ExpectImageSize(Target, String),
+    /// `expect_image_phase image@x loading|failed|shown`: the look the arm
+    /// DREW — the loading or failed view mounted, or a decoded picture
+    /// installed — never the `phase` prop (docs/network-images-plan.md N15).
+    ExpectImagePhase(Target, String),
     /// `copy_asset <name> <path>`: a scene's fixture file, the named asset
     /// written through the core's one resolver to a path ($TMP/$PID
     /// expanded), its directory created (docs/photo-attach-plan.md §5).
@@ -1011,6 +1015,7 @@ impl Step {
             | Step::SetText(t, _)
             | Step::Expect(t, _)
             | Step::ExpectImageSize(t, _)
+            | Step::ExpectImagePhase(t, _)
             | Step::ExpectVideoInk(t, _)
             | Step::ExpectVideoBox(t, ..)
             | Step::ExpectVideoCorner(t, _)
@@ -1257,6 +1262,7 @@ impl Step {
             Step::SwipeAction(..) => false,
             Step::ExpectSwipeActions(..) => true,
             Step::ExpectImageSize(..) => true,
+            Step::ExpectImagePhase(..) => true,
             Step::ExpectSaveDialog(..) => true,
             Step::FileDialogName(..) => false,
             Step::FileSave(..) => false,
@@ -1582,6 +1588,9 @@ pub trait Stage: Send + 'static {
     /// The box an image's picture is DRAWN in, in points, as "WxH" rounded
     /// — the layout's own reading, never the bound the app declared.
     fn image_drawn(&self, target: Target) -> String;
+    /// What an image DREW, as `loading`, `failed` or `shown`; `empty` for an
+    /// unboxed image with nothing to show (docs/network-images-plan.md N15).
+    fn image_phase(&self, target: Target) -> String;
     /// The texts of the container's label children, in child order, joined
     /// with `|` — the observation expect_order verifies.
     fn child_texts(&self, target: Target) -> String;
@@ -3139,6 +3148,16 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     return Err(format!("expect_player_open is yes or no, not {word:?}"));
                 }
                 Step::ExpectPlayerOpen(n, word == "yes")
+            }
+            "expect_image_phase" => {
+                let (target, word) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_image_phase wants an image and loading, failed or shown: {line:?}")
+                })?;
+                let word = word.trim();
+                if !["loading", "failed", "shown"].contains(&word) {
+                    return Err(format!("expect_image_phase is loading, failed or shown, not {word:?}"));
+                }
+                Step::ExpectImagePhase(parse_target(target)?, word.to_owned())
             }
             "expect_image_size" => {
                 let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
@@ -5496,6 +5515,17 @@ fn run_with_log(
                     Ok(format!("drawn {got}"))
                 } else {
                     Err(format!("{t:?} is drawn {got}, wanted {want}"))
+                }
+            })),
+            Step::ExpectImagePhase(t, want) => Some(poll(|| {
+                if t.kind != TargetKind::Image {
+                    return Err(format!("expect_image_phase reads images, not {t:?}"));
+                }
+                let got = stage.image_phase(*t);
+                if got == *want {
+                    Ok(format!("phase {got}"))
+                } else {
+                    Err(format!("{t:?} drew {got}, wanted {want}"))
                 }
             })),
             Step::CopyAsset(name, path) => Some(crate::assets::copy_asset(name, &expand_path(path))),
@@ -8946,6 +8976,9 @@ mod tests {
         fn image_size(&self, _: Target) -> String {
             "2x2".into()
         }
+        fn image_phase(&self, _: Target) -> String {
+            "shown".into()
+        }
         fn image_drawn(&self, _: Target) -> String {
             "2x2".into()
         }
@@ -10060,6 +10093,9 @@ mod tests {
             fn image_size(&self, _: Target) -> String {
                 String::new()
             }
+            fn image_phase(&self, _: Target) -> String {
+                String::new()
+            }
             fn image_drawn(&self, _: Target) -> String {
                 String::new()
             }
@@ -10511,6 +10547,9 @@ mod tests {
                 false
             }
             fn image_size(&self, _: Target) -> String {
+                String::new()
+            }
+            fn image_phase(&self, _: Target) -> String {
                 String::new()
             }
             fn image_drawn(&self, _: Target) -> String {

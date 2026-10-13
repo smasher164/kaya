@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x12513a04dcdb4c9aULL
+#define KAYA_SPEC_HASH 0xd695309e4a57ce9eULL
 
 
 /* Create a signal holding `initial`. */
@@ -951,6 +951,20 @@ static inline void kaya_tx_show_toast(KayaTx *tx, uint64_t window, uint64_t toas
 static inline void kaya_tx_dismiss_toast(KayaTx *tx, uint64_t toast) {
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_DISMISS_TOAST);
     kaya_wire_u64(tx, toast);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* A conditional row write (docs/network-images-plan.md N7): when the entry at `key` exists, holds `variant`, and its field `guard_field` equals `guard_value`, each I64 in `fields` names a field set to the value at the same place in `values`, as collection_update_field would; otherwise the record does NOTHING and the transaction goes on. The guard is read from the model this transaction commits to. */
+static inline void kaya_tx_collection_patch_if(KayaTx *tx, uint64_t collection_id, const KayaVal *path, uint32_t path_len, KayaVal key, uint32_t guard_field, uint32_t variant, KayaVal guard_value, const KayaVal *fields, uint32_t fields_len, const KayaVal *values, uint32_t values_len) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_COLLECTION_PATCH_IF);
+    kaya_wire_u64(tx, collection_id);
+    kaya_wire_values(tx, path, path_len);
+    kaya_wire_value(tx, key);
+    kaya_wire_u32(tx, guard_field);
+    kaya_wire_u32(tx, variant);
+    kaya_wire_value(tx, guard_value);
+    kaya_wire_values(tx, fields, fields_len);
+    kaya_wire_values(tx, values, values_len);
     kaya_wire_end(tx, kaya_at);
 }
 
@@ -2944,6 +2958,38 @@ static inline void kaya_tx_bind_bleed_element(KayaTx *tx, uint64_t widget_id, ui
     kaya_wire_end(tx, kaya_at);
 }
 
+/* set_property with a constant phase value. */
+static inline void kaya_tx_set_phase(KayaTx *tx, uint64_t widget_id, int64_t phase) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_PHASE);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_i64(phase));
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a signal-bound phase value. */
+static inline void kaya_tx_bind_phase(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_PHASE);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_phase_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_PHASE);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, kaya_at);
+}
+
 /* set_menu_prop with a constant label value. */
 static inline void kaya_tx_set_menu_label(KayaTx *tx, uint64_t item, const char *label) {
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
@@ -3143,6 +3189,44 @@ static inline int kaya_parse_menu_activated(const uint8_t *rec, uint64_t *id,
                                              uint32_t *n_keys) {
     const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
     if (r->header.kind != KAYA_OCCURRENCE_MENU_ACTIVATED)
+        return 0;
+    *id = r->id;
+    *n_keys = r->path_len;
+    size_t at = sizeof(KayaRecordButtonClicked);
+    for (uint32_t k = 0; k < r->path_len && k < max_keys; k++)
+        at = kaya_parse_value(rec, at, &keys[k]);
+    return 1;
+}
+
+/* Decode a image_needed occurrence: the click identity shape — id plus
+ * path_len key-path values (a node-anchored context activation
+ * carries the stamped copy's keys; path_len is 0 for a bar or
+ * live-widget item). Returns 1 and fills the outputs, or 0 for
+ * other kinds. */
+static inline int kaya_parse_image_needed(const uint8_t *rec, uint64_t *id,
+                                           KayaVal *keys, uint32_t max_keys,
+                                           uint32_t *n_keys) {
+    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
+    if (r->header.kind != KAYA_OCCURRENCE_IMAGE_NEEDED)
+        return 0;
+    *id = r->id;
+    *n_keys = r->path_len;
+    size_t at = sizeof(KayaRecordButtonClicked);
+    for (uint32_t k = 0; k < r->path_len && k < max_keys; k++)
+        at = kaya_parse_value(rec, at, &keys[k]);
+    return 1;
+}
+
+/* Decode a image_released occurrence: the click identity shape — id plus
+ * path_len key-path values (a node-anchored context activation
+ * carries the stamped copy's keys; path_len is 0 for a bar or
+ * live-widget item). Returns 1 and fills the outputs, or 0 for
+ * other kinds. */
+static inline int kaya_parse_image_released(const uint8_t *rec, uint64_t *id,
+                                             KayaVal *keys, uint32_t max_keys,
+                                             uint32_t *n_keys) {
+    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
+    if (r->header.kind != KAYA_OCCURRENCE_IMAGE_RELEASED)
         return 0;
     *id = r->id;
     *n_keys = r->path_len;

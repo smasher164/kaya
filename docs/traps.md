@@ -4,6 +4,26 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## The last row's one-row band: a mac table scroll past the document's end (measured 2026-10-13)
+
+The mac native table's `scroll(toRow:)` and its anchor's re-park put the row's
+top at the clip's top with `clip.scroll(to:)`, which does not constrain. For
+one of the last rows that point is past the document's end, so the clip
+showed that row over blank space, `rows(in: visibleRect)` answered one row,
+and the core's band shrank to it; nothing re-reported until AppKit happened to
+re-constrain the clip. netimage.steps' `scroll_to_row column@tracks t299`
+went red 2 of 5 runs with `no such target image@art[t299]` and a table of
+empty rows on screen. Both scrolls now ask the clip itself
+(`constrainBoundsRect`, `kayaClipTop`): 5 of 5 green.
+
+## A blob signal could not be written (measured 2026-10-13)
+
+scene.rs's `check_type` matched the four scalar types and no Blob, so the
+first write to a signal of bytes panicked "write changes the type of signal"
+and a live image bound to one could never change its picture. A Blob arm;
+netimage.steps' live image is bound to a signal of bytes and writes it three
+times.
+
 ## The host domain's window frame (measured 2026-10-12)
 
 `KAYA_ONLY=scrollto tools/validate-mac.py` failed scrollto on python, csharp,

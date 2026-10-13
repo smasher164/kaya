@@ -96,6 +96,8 @@ pub(crate) const REC_CAPTURE_PERMISSION: u16 = 52;
 pub(crate) const REC_CAPTURE_DEVICES: u16 = 53;
 pub(crate) const REC_CAPTURE_OVERRUN: u16 = 54;
 pub(crate) const REC_TOAST_RESULT: u16 = 55;
+pub(crate) const REC_IMAGE_NEEDED: u16 = 56;
+pub(crate) const REC_IMAGE_RELEASED: u16 = 57;
 
 /// Wire framing of every record, exported through the C header so direct
 /// consumers cast a pointer instead of bit-twiddling. Little-endian;

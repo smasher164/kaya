@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x12513a04dcdb4c9a
+SPEC_HASH = 0xd695309e4a57ce9e
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -142,6 +142,7 @@ PROP_REVEALABLE = 58
 PROP_SUMMARY = 59
 PROP_EXPANDED = 60
 PROP_BLEED = 61
+PROP_PHASE = 62
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -358,6 +359,9 @@ PLAYBACK_STATE_PAUSED = 2
 FIT_CONTAIN = 0
 FIT_COVER = 1
 FIT_FILL = 2
+IMAGE_PHASE_SHOWN = 0
+IMAGE_PHASE_LOADING = 1
+IMAGE_PHASE_FAILED = 2
 CONTENT_TYPE_NONE = 0
 CONTENT_TYPE_USERNAME = 1
 CONTENT_TYPE_PASSWORD = 2
@@ -461,6 +465,7 @@ TX_REQUEST_PERMISSION = 80
 TX_WATCH_CAPTURE_DEVICES = 81
 TX_SHOW_TOAST = 82
 TX_DISMISS_TOAST = 83
+TX_COLLECTION_PATCH_IF = 84
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -586,6 +591,8 @@ OCC_CAPTURE_PERMISSION = 52
 OCC_CAPTURE_DEVICES = 53
 OCC_CAPTURE_OVERRUN = 54
 OCC_TOAST_RESULT = 55
+OCC_IMAGE_NEEDED = 56
+OCC_IMAGE_RELEASED = 57
 
 
 def _pad(b: bytes) -> bytes:
@@ -1000,6 +1007,10 @@ def tx_show_toast(window: int, toast: int, duration: int, action: int, text: Val
 def tx_dismiss_toast(toast: int) -> bytes:
     """Withdraw a shown toast. Like cancel_notification it retires the id with NO answer; an unknown or retired id is ignored (docs/toast-plan.md T5)."""
     return record(TX_DISMISS_TOAST, struct.pack("<Q", toast))
+
+def tx_collection_patch_if(collection_id: int, path: Sequence[Value], key: Value, guard_field: int, variant: int, guard_value: Value, fields: Sequence[Value], values: Sequence[Value]) -> bytes:
+    """A conditional row write (docs/network-images-plan.md N7): when the entry at `key` exists, holds `variant`, and its field `guard_field` equals `guard_value`, each I64 in `fields` names a field set to the value at the same place in `values`, as collection_update_field would; otherwise the record does NOTHING and the transaction goes on. The guard is read from the model this transaction commits to."""
+    return record(TX_COLLECTION_PATCH_IF, struct.pack("<Q", collection_id) + _enc.values(path) + _enc.value(key) + struct.pack("<I", guard_field) + struct.pack("<I", variant) + _enc.value(guard_value) + _enc.values(fields) + _enc.values(values))
 
 
 def tx_set_text(widget_id: int, text: str) -> bytes:
@@ -1917,6 +1928,21 @@ def tx_bind_bleed_element(widget_id: int, level: int = 0, field: int = 0) -> byt
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_BLEED, SOURCE_ELEMENT, level, field))
 
 
+def tx_set_phase(widget_id: int, phase: int) -> bytes:
+    """set_property with a constant phase value (int)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_PHASE, SOURCE_CONST) + _enc.value(int(phase)))
+
+
+def tx_bind_phase(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound phase value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_PHASE, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_phase_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_PHASE, SOURCE_ELEMENT, level, field))
+
+
 def tx_set_window_title(window: int, title: str) -> bytes:
     """set_window_prop with a constant title value (str); window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_TITLE, SOURCE_CONST) + _enc.value(title))
@@ -2287,7 +2313,7 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
     value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED, OCC_CAPTURE_CHANGED, OCC_CAPTURE_PERMISSION, OCC_CAPTURE_DEVICES, OCC_CAPTURE_OVERRUN, OCC_TOAST_RESULT):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED, OCC_CAPTURE_CHANGED, OCC_CAPTURE_PERMISSION, OCC_CAPTURE_DEVICES, OCC_CAPTURE_OVERRUN, OCC_TOAST_RESULT, OCC_IMAGE_NEEDED, OCC_IMAGE_RELEASED):
         return kind, None, [], None
     if kind == OCC_ALERT_RESULT:
         # A request's one answer: id + the u32 code.

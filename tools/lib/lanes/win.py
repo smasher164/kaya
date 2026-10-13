@@ -17,6 +17,8 @@ import os
 import pathlib
 import re
 
+import media_server
+
 # THE scene list: every mechanical per-scene surface derives from it
 # (cross-build examples, exe/python shipping, taskkill). Adding a
 # scene here is the ONE registration; ORDER stays explicit because
@@ -881,7 +883,7 @@ MEDIA_HOST = "192.168.64.1"
 
 
 def media_leg(leg):
-    return scene_lang(leg)[0].startswith("media_")
+    return media_server.serves(scene_lang(leg)[0])
 
 
 # The Store packages that carry the decoders and the Ogg source the lane

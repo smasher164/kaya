@@ -59,7 +59,9 @@ SCENES = [
 DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows",
                 "format", "flexshrink", "listrow", "tints", "badge", "emoji", "media",
                 # The capture (docs/capture-plan.md §8), rust-only at depth.
-                "capture"]
+                "capture",
+                # Network images (docs/network-images-plan.md §6), rust-only at depth.
+                "netimage", "netimage_http"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -318,6 +320,10 @@ ORDER = [
     ("toast", LANGS + ("c",)),
     ("expander", LANGS + ("c",)),
     ("safearea", LANGS + ("c",)),
+    # RUST ALONE while the eight bindings' network images are the breadth's
+    # (docs/network-images-plan.md §6).
+    ("netimage", ("rust",)),
+    ("netimage_http", ("rust",)),
     ("richtext", ("rust", "python", "js", "go", "csharp", "java", "swift",
                   "ocaml", "haskell")),
     ("ownundo", ("rust", "python", "js", "go", "csharp", "java", "swift",
@@ -1203,7 +1209,7 @@ def leg_env(root, scene, lang, appearance=""):
         env["KAYA_LOCALE"] = SCENE_LOCALE[scene]
     if scene in SCENE_CLOCK:
         env["KAYA_CLOCK"] = SCENE_CLOCK[scene]
-    if scene.startswith("media_"):
+    if media_server.serves(scene):
         env["KAYA_MEDIA_URL"] = MEDIA_URL
         helper = media_server.mediaremote_lib(root)
         if helper:

@@ -16012,6 +16012,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     };
                     fit_picture(picture, texture);
                 }
+                // docs/network-images-plan.md §6: the breadth's.
+                (NativeWidget::Image(_), Prop::Phase | Prop::Fit, _) => crate::depth_stub("netimage"),
                 (w, Prop::Bleed, Value::Bool(on)) => {
                     let widget = w.widget();
                     core.bled.retain(|b| b != &widget);
@@ -21214,6 +21216,11 @@ impl crate::harness::Stage for GtkStage {
                 None => "0x0".into(),
             }
         })
+    }
+
+    /// The phase this backend drew is the breadth's (docs/network-images-plan.md §6).
+    fn image_phase(&self, _: crate::harness::Target) -> String {
+        crate::depth_stub("netimage")
     }
 
     fn image_drawn(&self, t: crate::harness::Target) -> String {

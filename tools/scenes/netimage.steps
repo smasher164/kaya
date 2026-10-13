@@ -1,0 +1,62 @@
+# Network images without a network (docs/network-images-plan.md §5): every
+# "download" is a job a worker holds until a click releases it.
+#
+# A live image waiting for its bytes takes its declared box and draws the
+# loading look (N2-N4).
+expect_image_phase image@cover loading
+expect_image_size image@cover "96x96"
+# The label in every phase (N5).
+expect_ax image@cover "image/Cover"
+click button@release
+expect_image_phase image@cover shown
+# The natural size, though the arm decoded at the box (N9).
+expect image@cover "600x600"
+expect_image_size image@cover "96x96"
+expect_ax image@cover "image/Cover"
+# A refresh keeps the old picture while it loads, and the new one lands.
+click button@refresh
+expect image@cover "600x600"
+click button@release
+expect image@cover "320x320"
+expect_image_phase image@cover shown
+# Bytes that do not decode draw the failed look, never the old picture (N13).
+click button@junk
+expect_image_phase image@cover failed
+expect image@cover "0x0"
+expect_image_size image@cover "96x96"
+# A failed fetch, the app's own word.
+click button@fail
+expect_image_phase image@cover loading
+click button@release
+expect_image_phase image@cover failed
+expect_ax image@cover "image/Cover"
+#
+# A table's art is needed for the rows the band realizes, never all of them
+# (N8), and each result lands on its own row: the rows carry three sizes.
+expect label@band "band: partial"
+expect_image_phase image@art[t000] loading
+expect_image_size image@art[t000] "20x20"
+click button@rows
+expect_image_phase image@art[t000] shown
+expect image@art[t000] "600x600"
+expect image@art[t001] "320x320"
+expect image@art[t002] "1000x1000"
+scroll_to_row column@tracks t299
+expect_image_phase image@art[t299] loading
+# Rows torn down while still loading are released.
+scroll_to_row column@tracks t150
+expect label@released "released: some"
+scroll_to_row column@tracks t299
+# A row deleted while its job waits, and a row whose URL moved on: the new
+# job is released before the old one, and the old result drops (N7).
+click button@delete
+scroll_to_row column@tracks t290
+expect_image_phase image@art[t298] loading
+click button@retarget
+click button@rows
+expect image@art[t298] "1000x1000"
+expect_image_phase image@art[t297] shown
+# Back to the top: a row whose bytes arrived is not needed again.
+scroll_to_row column@tracks t000
+expect_image_phase image@art[t000] shown
+expect label@again "again: none"

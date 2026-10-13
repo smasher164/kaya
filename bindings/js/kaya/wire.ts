@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x12513a04dcdb4c9an;
+export const SPEC_HASH = 0xd695309e4a57ce9en;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -135,6 +135,7 @@ export const PROP_REVEALABLE = 58;
 export const PROP_SUMMARY = 59;
 export const PROP_EXPANDED = 60;
 export const PROP_BLEED = 61;
+export const PROP_PHASE = 62;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -351,6 +352,9 @@ export const PLAYBACK_STATE_PAUSED = 2;
 export const FIT_CONTAIN = 0;
 export const FIT_COVER = 1;
 export const FIT_FILL = 2;
+export const IMAGE_PHASE_SHOWN = 0;
+export const IMAGE_PHASE_LOADING = 1;
+export const IMAGE_PHASE_FAILED = 2;
 export const CONTENT_TYPE_NONE = 0;
 export const CONTENT_TYPE_USERNAME = 1;
 export const CONTENT_TYPE_PASSWORD = 2;
@@ -454,6 +458,7 @@ export const TX_REQUEST_PERMISSION = 80;
 export const TX_WATCH_CAPTURE_DEVICES = 81;
 export const TX_SHOW_TOAST = 82;
 export const TX_DISMISS_TOAST = 83;
+export const TX_COLLECTION_PATCH_IF = 84;
 export const APPLY_CREATE = 1;
 export const APPLY_SET_PROP = 2;
 export const APPLY_ADD_CHILD = 3;
@@ -579,6 +584,8 @@ export const OCC_CAPTURE_PERMISSION = 52;
 export const OCC_CAPTURE_DEVICES = 53;
 export const OCC_CAPTURE_OVERRUN = 54;
 export const OCC_TOAST_RESULT = 55;
+export const OCC_IMAGE_NEEDED = 56;
+export const OCC_IMAGE_RELEASED = 57;
 
 const text_encoder = new TextEncoder();
 const text_decoder = new TextDecoder("utf-8", { fatal: true });
@@ -1457,6 +1464,20 @@ export function tx_dismiss_toast(toast: number): Uint8Array {
   enc.begin();
   enc.u64(toast);
   return enc.end(TX_DISMISS_TOAST);
+}
+
+/** A conditional row write (docs/network-images-plan.md N7): when the entry at `key` exists, holds `variant`, and its field `guard_field` equals `guard_value`, each I64 in `fields` names a field set to the value at the same place in `values`, as collection_update_field would; otherwise the record does NOTHING and the transaction goes on. The guard is read from the model this transaction commits to. */
+export function tx_collection_patch_if(collection_id: number, path: readonly WireValue[], key: WireValue, guard_field: number, variant: number, guard_value: WireValue, fields: readonly WireValue[], values: readonly WireValue[]): Uint8Array {
+  enc.begin();
+  enc.u64(collection_id);
+  enc.values(path);
+  enc.value(key);
+  enc.u32(guard_field);
+  enc.u32(variant);
+  enc.value(guard_value);
+  enc.values(fields);
+  enc.values(values);
+  return enc.end(TX_COLLECTION_PATCH_IF);
 }
 
 /** A civil date as the wire's I64: year * 10000 + month * 100 + day. */
@@ -2587,6 +2608,24 @@ export function tx_bind_bleed_element(widget_id: number, level = 0, field = 0): 
   return enc.end(TX_SET_PROPERTY);
 }
 
+/** set_property with a constant phase value. */
+export function tx_set_phase(widget_id: number, phase: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_PHASE); enc.u32(SOURCE_CONST); enc.value(new I64(phase));
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound phase value. */
+export function tx_bind_phase(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_PHASE); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_phase_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_PHASE); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
 /** set_window_prop with a constant title value; window 0, the primary surface. */
 export function tx_set_window_title(window: number, title: string): Uint8Array {
   enc.begin(); enc.u64(window); enc.u32(WPROP_TITLE); enc.u32(SOURCE_CONST); enc.value(title);
@@ -3033,7 +3072,7 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const size = view.getUint32(0, true);
   const kind = view.getUint16(4, true);
-  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED, OCC_CAPTURE_CHANGED, OCC_CAPTURE_PERMISSION, OCC_CAPTURE_DEVICES, OCC_CAPTURE_OVERRUN, OCC_TOAST_RESULT].includes(kind)) return { kind, id: null, keys: [], payload: null };
+  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED, OCC_CAPTURE_CHANGED, OCC_CAPTURE_PERMISSION, OCC_CAPTURE_DEVICES, OCC_CAPTURE_OVERRUN, OCC_TOAST_RESULT, OCC_IMAGE_NEEDED, OCC_IMAGE_RELEASED].includes(kind)) return { kind, id: null, keys: [], payload: null };
   if (kind === OCC_ALERT_RESULT) {
     // A request's one answer: id + the u32 code.
     return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };

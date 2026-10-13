@@ -172,6 +172,8 @@ pub struct KayaHostApi {
     pub session_state: extern "C" fn() -> u32,
     pub blob_data: unsafe extern "C" fn(u64, *mut usize) -> *const u8,
     pub blob_count: unsafe extern "C" fn() -> u64,
+    /// The content id a decoded-picture cache keys on (docs/network-images-plan.md N10).
+    pub blob_content_id: extern "C" fn(u64) -> u64,
     /// The protocol fingerprint (capi::kaya_spec_hash), asserted by the
     /// dylib against its own baked copy before pumping: a stale compiled
     /// dylib bypasses every source gate and would decode wire records with
@@ -615,6 +617,7 @@ pub(crate) fn run() -> i32 {
         session_state: crate::capi::kaya_session_state,
         blob_data: kaya_blob_data,
         blob_count: kaya_blob_count,
+        blob_content_id: crate::capi::kaya_blob_content_id,
         spec_hash: crate::capi::kaya_spec_hash,
         emit_close_requested: crate::capi::kaya_emit_close_requested,
         emit_window_closed: crate::capi::kaya_emit_window_closed,

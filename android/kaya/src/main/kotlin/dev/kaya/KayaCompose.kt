@@ -2278,7 +2278,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0x12513a04dcdb4c9auL
+    private const val SPEC_HASH: ULong = 0xd695309e4a57ce9euL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -2597,6 +2597,7 @@ object KayaCompose {
     private const val PROP_SUMMARY = 59
     private const val PROP_EXPANDED = 60
     private const val PROP_BLEED = 61
+    private const val PROP_PHASE = 62
     private const val FILE_CONTENT_IMAGES = 1
     private const val PROP_COLUMNS = 11
     // The accessibility identifier (never spoken) and label (spoken).
@@ -3627,7 +3628,11 @@ object KayaCompose {
                         PROP_MIN_GAP -> KayaSceneModel.nodes[id]!!.minGap = readF64(b)
                         PROP_LOW_LABEL -> KayaSceneModel.nodes[id]!!.lowLabel = readString(b)
                         PROP_HIGH_LABEL -> KayaSceneModel.nodes[id]!!.highLabel = readString(b)
-                        PROP_FIT -> KayaSceneModel.nodes[id]!!.fit = readI64(b)
+                        PROP_FIT -> {
+                            if (KayaSceneModel.nodes[id]!!.kind == KIND_IMAGE) depthStub("netimage")
+                            KayaSceneModel.nodes[id]!!.fit = readI64(b)
+                        }
+                        PROP_PHASE -> depthStub("netimage")
                         PROP_CONTENT_TYPE -> KayaSceneModel.nodes[id]!!.contentType = readI64(b)
                         PROP_REVEALED -> KayaSceneModel.nodes[id]!!.revealed = readBool(b)
                         PROP_REVEALABLE -> KayaSceneModel.nodes[id]!!.revealable = readBool(b)
@@ -9784,6 +9789,7 @@ object KayaCompose {
                         if (picked == true) kayaAwaitAnswer(answered)
                         else failures.add("pick_emoji \"$emoji\": no emoji picker is open")
                     }
+                    "expect_image_phase" -> depthStub("netimage")
                     "expect_image_size" -> {
                         // The DRAWN box in dp, never the bound the app declared.
                         val want = quoted(parts.drop(2))

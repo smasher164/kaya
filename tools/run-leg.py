@@ -173,7 +173,7 @@ log.parent.mkdir(parents=True, exist_ok=True)
 t0 = time.monotonic()
 # The media suite's server, the lane's way (tools/lib/media_server.py).
 served = (media_server.serving(log=ROOT / "target/run-leg-media-server.log")
-          if scene.startswith("media_") else contextlib.nullcontext())
+          if media_server.serves(scene) else contextlib.nullcontext())
 with served, open(log, "w", encoding="utf-8", errors="replace") as lf:
     rc = FR.watched_leg(SCRATCH / name, argv, env, lf, cwd=ROOT,
                         echo=sys.stdout)

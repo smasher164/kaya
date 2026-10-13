@@ -11,6 +11,8 @@ dev_shell_or_die()
 # over HTTP with Range, never the internet. Started and stopped by a lane
 # through tools/lib/media_server.py. Range is load-bearing: AVPlayer refuses a
 # server that ignores it (-11850, docs/probes/media-suite-2026-09-29.md).
+# The covers family and /status/ are the network-images scenes'
+# (docs/network-images-plan.md §5).
 
 import argparse
 import http.server
@@ -22,6 +24,7 @@ import threading
 import time
 
 FAMILY = ROOT / "guests" / "assets" / "media"
+FAMILIES = {"covers": ROOT / "guests" / "assets" / "covers"}
 
 TYPES = {
     ".m3u8": "application/vnd.apple.mpegurl",
@@ -37,6 +40,9 @@ TYPES = {
     ".mp3": "audio/mpeg",
     ".flac": "audio/flac",
     ".wav": "audio/wav",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
 }
 
 RANGE = re.compile(r"^bytes=(\d*)-(\d*)$")
@@ -48,6 +54,8 @@ RANGE = re.compile(r"^bytes=(\d*)-(\d*)$")
 # `network` on GStreamer before the bound.
 TRICKLE = "/trickle/"
 TRICKLE_S = 2.0
+
+STATUS = re.compile(r"^/status/(\d{3})(?:/|$)")
 
 
 OPEN = 0
@@ -104,9 +112,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _file(self):
         name = self.path.split("?", 1)[0].lstrip("/")
+        family = FAMILY
+        if "/" in name:
+            prefix, name = name.split("/", 1)
+            family = FAMILIES.get(prefix)
+            if family is None:
+                return None
         if not name or "/" in name or name.startswith("."):
             return None
-        f = FAMILY / name
+        f = family / name
         return f if f.is_file() else None
 
     def _head(self, send_body):
@@ -199,17 +213,31 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.served += 1
         self.say(f"trickled {self.path} whole, {sent} byte(s) in {time.time() - began:.1f} s")
 
-    def do_GET(self):
-        if self.path.startswith(TRICKLE):
-            self._trickle(True)
+    def _status(self, code):
+        if not 200 <= code <= 599:
+            code = 400
+        self.say(f"request {self.command} {self.path}: answered {code}, no body")
+        self.send_response(code)
+        self.send_header("Content-Length", "0")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.close_connection = True
+        self.served += 1
+
+    def _route(self, send_body):
+        status = STATUS.match(self.path)
+        if status:
+            self._status(int(status.group(1)))
+        elif self.path.startswith(TRICKLE):
+            self._trickle(send_body)
         else:
-            self._head(True)
+            self._head(send_body)
+
+    def do_GET(self):
+        self._route(True)
 
     def do_HEAD(self):
-        if self.path.startswith(TRICKLE):
-            self._trickle(False)
-        else:
-            self._head(False)
+        self._route(False)
 
 
 def main():
@@ -218,7 +246,8 @@ def main():
     ap.add_argument("--port", type=int, default=8765)
     args = ap.parse_args()
     server = http.server.ThreadingHTTPServer((args.bind, args.port), Handler)
-    print(f"media-server: {stamp()} serving {FAMILY} on http://{args.bind}:{args.port} "
+    also = ", ".join(f"/{k}/ from {v}" for k, v in FAMILIES.items())
+    print(f"media-server: {stamp()} serving {FAMILY} and {also} on http://{args.bind}:{args.port} "
           f"pid {os.getpid()}", flush=True)
     server.serve_forever()
 

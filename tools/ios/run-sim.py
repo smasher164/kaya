@@ -1995,7 +1995,7 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
     if selftest in lane.SCENE_CLOCK:
         env["SIMCTL_CHILD_KAYA_CLOCK"] = lane.SCENE_CLOCK[selftest]
     # The simulator shares the host's loopback (docs/media-plan.md §7a).
-    if scene.startswith("media_"):
+    if media_server.serves(scene):
         env["SIMCTL_CHILD_KAYA_MEDIA_URL"] = MEDIA_URL
     # THE VERB TRACE AND THE PANIC LOG, both RELATIVE names: the
     # interpreter resolves one under its Documents and the core the
@@ -2750,7 +2750,7 @@ MEDIA = contextlib.ExitStack()
 def media_queued():
     mode = os.environ.get("KAYA_EXCLUSIVE", "")
     suites = lane.SUITES if SUITE == "all" else (SUITE,)
-    return any(name.startswith("media_") and only.wanted(name)
+    return any(media_server.serves(name) and only.wanted(name)
                and not (mode in ("only", "skip")
                         and (mode == "only") != (name in lane.EXCLUSIVE))
                for suite in suites for name in lane.suite_legs(suite))

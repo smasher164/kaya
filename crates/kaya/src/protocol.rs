@@ -524,12 +524,48 @@ impl ContentType {
     }
 }
 
-/// A video view's fit (spec enum "fit").
+/// A video view's fit (spec enum "fit"), and an image's box
+/// (docs/network-images-plan.md N3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Fit {
     Contain,
     Cover,
     Fill,
+}
+
+/// What an image is waiting for (spec enum "image_phase";
+/// docs/network-images-plan.md N2): the app's own knowledge of its fetch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum ImagePhase {
+    #[default]
+    Shown,
+    Loading,
+    Failed,
+}
+
+impl ImagePhase {
+    pub(crate) fn wire(self) -> i64 {
+        match self {
+            ImagePhase::Shown => crate::wire::IMAGE_PHASE_SHOWN,
+            ImagePhase::Loading => crate::wire::IMAGE_PHASE_LOADING,
+            ImagePhase::Failed => crate::wire::IMAGE_PHASE_FAILED,
+        }
+    }
+
+    pub(crate) fn from_wire(raw: i64) -> Option<ImagePhase> {
+        match raw {
+            crate::wire::IMAGE_PHASE_SHOWN => Some(ImagePhase::Shown),
+            crate::wire::IMAGE_PHASE_LOADING => Some(ImagePhase::Loading),
+            crate::wire::IMAGE_PHASE_FAILED => Some(ImagePhase::Failed),
+            _ => None,
+        }
+    }
+}
+
+impl From<ImagePhase> for Value {
+    fn from(p: ImagePhase) -> Self {
+        Value::I64(p.wire())
+    }
 }
 
 /// The app's one media session, as declared (docs/media-plan.md §5).
@@ -1221,6 +1257,10 @@ pub enum Occurrence {
     /// (docs/media-plan.md §7b).
     VideoVisibility { id: WidgetId, shown: f64 },
     InstanceVideoVisibility { node: TemplateNodeId, path: Path, shown: f64 },
+    /// A row's loading image was realized with no source, and its row no
+    /// longer needs it (docs/network-images-plan.md N8). Stamped copies only.
+    ImageNeeded { node: TemplateNodeId, path: Path },
+    ImageReleased { node: TemplateNodeId, path: Path },
     /// One requested time answered (docs/media-plan.md §8 ruling 4): the
     /// time asked, the time of the picture the platform returned, and the
     /// core-held image it now lives in.
@@ -1516,6 +1556,13 @@ impl From<f64> for Value {
 impl From<PlayerId> for Value {
     fn from(p: PlayerId) -> Self {
         Value::I64(p.0 as i64)
+    }
+}
+
+/// Encoded bytes, a live image's signal (docs/network-images-plan.md N6).
+impl From<Vec<u8>> for Value {
+    fn from(bytes: Vec<u8>) -> Self {
+        Value::Blob(Blob::from(bytes))
     }
 }
 
@@ -2258,6 +2305,9 @@ pub enum Prop {
     /// An image, video view or canvas extends to the window\'s edge where it
     /// touches the root\'s content edge (Bool; docs/safe-area-plan.md A3).
     Bleed,
+    /// What an image is waiting for (I64, spec enum "image_phase";
+    /// docs/network-images-plan.md N2).
+    Phase,
     /// The app owns a rich textarea's undo (Bool-valued; docs/rich-text-plan.md
     /// R6, §14): the native stack is off, the ledger never banks it, and
     /// Edit>Undo/Redo reach the app through the role item's own activation.
@@ -2792,6 +2842,18 @@ pub enum TxOp {
         value: Value,
     },
     CollectionRemove { id: CollectionId, path: Path, key: Value },
+    /// docs/network-images-plan.md N7: `changes` written as
+    /// CollectionUpdateField would write them, only when the entry exists,
+    /// holds `variant` and its `guard_field` equals `guard`; otherwise nothing.
+    CollectionPatchIf {
+        id: CollectionId,
+        path: Path,
+        key: Value,
+        variant: u32,
+        guard_field: u32,
+        guard: Value,
+        changes: Vec<(u32, Value)>,
+    },
     /// Reposition an entry in the ordered table: before the entry at
     /// `before`, or to the end when None. Keys, never indices.
     CollectionMove { id: CollectionId, path: Path, key: Value, before: Option<Value> },
@@ -3439,6 +3501,12 @@ impl OccSink {
                         crate::ring::REC_VIDEO_VISIBILITY,
                         &crate::wire::video_visibility_body(node.0, &path, shown),
                     );
+                }
+                Occurrence::ImageNeeded { node, path } => {
+                    ring.push_record(crate::ring::REC_IMAGE_NEEDED, &crate::wire::click_tag(node.0, &path));
+                }
+                Occurrence::ImageReleased { node, path } => {
+                    ring.push_record(crate::ring::REC_IMAGE_RELEASED, &crate::wire::click_tag(node.0, &path));
                 }
                 Occurrence::ReaderFrame { reader, read, index, image, width, height, requested_ms, actual_ms } => {
                     ring.push_record(

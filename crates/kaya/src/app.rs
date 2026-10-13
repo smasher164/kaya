@@ -16,6 +16,8 @@ use std::sync::{Arc, Mutex};
 mod tasks;
 mod media;
 mod capture;
+mod images;
+pub use images::RowImages;
 pub use capture::{CaptureReading, CaptureRef};
 pub use media::{can_play, Frame, MediaSource, PlayerReading, PlayerRef, ReadError, SessionRef};
 pub use tasks::{AlertFutureRef, ClipboardFutureRef, DialogFuture, FileFutureRef, SaveFutureRef, TaskOutcome, TaskScope};
@@ -73,6 +75,11 @@ impl ValueKind for TimeKind {
 /// docs/color-picker-plan.md §2: an sRGB colour, a packed I64 on the wire.
 pub struct ColorKind;
 impl ValueKind for ColorKind {
+    const TYPE: ValueType = ValueType::I64;
+}
+/// docs/network-images-plan.md N2: an image's phase, an I64 on the wire.
+pub struct ImagePhaseKind;
+impl ValueKind for ImagePhaseKind {
     const TYPE: ValueType = ValueType::I64;
 }
 /// docs/media-plan.md §7b: a player, its id as an I64 on the wire, 0 none.
@@ -179,6 +186,12 @@ impl From<crate::protocol::PlayerId> for TplSource<PlayerKind> {
     }
 }
 
+impl From<crate::protocol::ImagePhase> for TplSource<ImagePhaseKind> {
+    fn from(p: crate::protocol::ImagePhase) -> Self {
+        TplSource { inner: SourceInner::Const(Value::from(p)), _kind: PhantomData }
+    }
+}
+
 impl<K> From<SignalId> for TplSource<K> {
     fn from(s: SignalId) -> Self {
         TplSource { inner: SourceInner::Signal(s), _kind: PhantomData }
@@ -213,6 +226,18 @@ impl From<&str> for LiveSource<StrKind> {
 impl From<String> for LiveSource<StrKind> {
     fn from(s: String) -> Self {
         LiveSource { inner: LiveInner::Const(Value::Str(s)), _kind: PhantomData }
+    }
+}
+
+impl From<crate::protocol::ImagePhase> for LiveSource<ImagePhaseKind> {
+    fn from(p: crate::protocol::ImagePhase) -> Self {
+        LiveSource { inner: LiveInner::Const(Value::from(p)), _kind: PhantomData }
+    }
+}
+
+impl<T: Into<crate::protocol::Blob>> From<T> for LiveSource<BlobKind> {
+    fn from(bytes: T) -> Self {
+        LiveSource { inner: LiveInner::Const(Value::Blob(bytes.into())), _kind: PhantomData }
     }
 }
 
@@ -328,6 +353,34 @@ impl Document {
     pub(crate) fn from_blob(b: &crate::protocol::Blob) -> Document {
         let (text, runs) = crate::wire::read_document_blob(&b.0);
         Document { text, runs }
+    }
+}
+
+/// A row's encoded bytes, an image's source (docs/network-images-plan.md N16).
+impl KayaField for Vec<u8> {
+    type Kind = BlobKind;
+    fn to_value(&self) -> Value {
+        Value::Blob(crate::protocol::Blob::from(self.as_slice()))
+    }
+    fn from_value(v: &Value) -> Self {
+        match v {
+            Value::Blob(b) => b.0.to_vec(),
+            other => panic!("kaya: expected a bytes (Blob) field, model holds {other:?}"),
+        }
+    }
+}
+
+impl KayaField for crate::protocol::ImagePhase {
+    type Kind = ImagePhaseKind;
+    fn to_value(&self) -> Value {
+        Value::from(*self)
+    }
+    fn from_value(v: &Value) -> Self {
+        match v {
+            Value::I64(raw) => crate::protocol::ImagePhase::from_wire(*raw)
+                .unwrap_or_else(|| panic!("kaya: {raw} is no image phase (shown 0, loading 1, failed 2)")),
+            other => panic!("kaya: expected an image phase (an I64 on the wire), model holds {other:?}"),
+        }
     }
 }
 
@@ -515,12 +568,24 @@ impl KayaRecord for String {
 }
 
 /// A record type with a generated patch builder — one typed setter per
-/// field, each lowering to update_field.
+/// field, each lowering to update_field — and its guarded twin, whose
+/// setters gather one collection_patch_if.
 pub trait KayaPatch: KayaRecord {
     /// The generated builder, holding the transaction borrow.
     type Builder<'t, 'c>
     where
         'c: 't;
+    type GuardedBuilder<'t, 'c>
+    where
+        'c: 't;
+    #[doc(hidden)]
+    fn patch_if_builder<'t, 'c>(
+        tx: &'t mut Tx<'c>,
+        instance: &Collection<Self>,
+        key: Value,
+        guard_field: u32,
+        guard: Value,
+    ) -> Self::GuardedBuilder<'t, 'c>;
     #[doc(hidden)]
     fn patch_builder<'t, 'c>(
         tx: &'t mut Tx<'c>,
@@ -534,6 +599,21 @@ impl<T: KayaPatch> Collection<T> {
     /// `todos.patch(tx, key).done(true).title("x")`.
     pub fn patch<'t, 'c>(&self, tx: &'t mut Tx<'c>, key: impl Into<Value>) -> T::Builder<'t, 'c> {
         T::patch_builder(tx, self, key.into())
+    }
+
+    /// The same writes, made only while row `key` exists and its `field`
+    /// still holds `expected`; otherwise nothing, and no panic
+    /// (docs/network-images-plan.md N7). The chain is one record, sent
+    /// when the statement ends: `tracks.patch_if(tx, key, Track::art_url(),
+    /// url).art(bytes).phase(ImagePhase::Shown);`.
+    pub fn patch_if<'t, 'c, K: ValueKind, V: KayaField<Kind = K>>(
+        &self,
+        tx: &'t mut Tx<'c>,
+        key: impl Into<Value>,
+        field: Field<K>,
+        expected: V,
+    ) -> T::GuardedBuilder<'t, 'c> {
+        T::patch_if_builder(tx, self, key.into(), field.index, expected.to_value())
     }
 }
 
@@ -1908,6 +1988,12 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// What this image is waiting for — [`Tx::phase`] chained.
+    pub fn phase(self, phase: impl Into<LiveSource<ImagePhaseKind>>) -> Self {
+        self.tx.phase(self.id, phase);
+        self
+    }
+
     /// This container's cross-axis child placement — [`Tx::align`] chained.
     pub fn align(self, align: Align) -> Self {
         self.tx.align(self.id, align);
@@ -2480,6 +2566,18 @@ impl<'a> Tx<'a> {
             .unwrap_or_default()
     }
 
+    /// One row of this instance as the transaction sees it, None for a
+    /// missing key.
+    pub fn get<T: KayaSum>(&self, instance: &Collection<T>, key: &Value) -> Option<T> {
+        self.ctx
+            .model
+            .borrow()
+            .get(&instance.id)
+            .and_then(|instances| instances.iter().find(|i| i.path == instance.path))
+            .and_then(|i| i.entries.iter().find(|(k, _, _)| k == key))
+            .map(|(_, variant, record)| T::from_parts(*variant, record))
+    }
+
     pub fn len<T: KayaSum>(&self, instance: &Collection<T>) -> usize {
         self.ctx
             .model
@@ -3001,6 +3099,19 @@ impl<'a> Tx<'a> {
     /// An image's tallest in points, [`Tx::max_width`]'s twin.
     pub fn max_height(&mut self, widget: WidgetId, points: f64) {
         self.set(widget, Prop::MaxHeight, points);
+    }
+
+    /// What an image is waiting for: `Loading` draws the loading look until
+    /// bytes arrive and keeps an earlier picture while it waits, `Failed`
+    /// the failed look. A busy image declares its box with `fit` and both
+    /// bounds (docs/network-images-plan.md N2, N3).
+    pub fn phase(&mut self, widget: WidgetId, phase: impl Into<LiveSource<ImagePhaseKind>>) {
+        self.set_live(widget, Prop::Phase, phase.into());
+    }
+
+    /// A live image's bytes, replaced or bound to a signal of bytes.
+    pub fn image_source(&mut self, widget: WidgetId, bytes: impl Into<LiveSource<BlobKind>>) {
+        self.set_live(widget, Prop::Source, bytes.into());
     }
 
     /// A container's arrangement axis (the creation kind's own is the
@@ -3828,9 +3939,9 @@ impl<'a> Tx<'a> {
     /// bytes ride the blob channel — one Arc'd copy in core memory, an
     /// 8-byte handle everywhere else — so a large image costs one
     /// registration copy and a decode, never a per-update re-copy.
-    pub fn image(&mut self, bytes: impl Into<crate::protocol::Blob>) -> Widget<'_, 'a> {
+    pub fn image(&mut self, bytes: impl Into<LiveSource<BlobKind>>) -> Widget<'_, 'a> {
         let w = self.widget(WidgetKind::Image);
-        self.set(w, Prop::Source, Value::Blob(bytes.into()));
+        self.set_live(w, Prop::Source, bytes.into());
         Widget { id: w, out: (), tx: self }
     }
 
@@ -3934,6 +4045,47 @@ impl<'a> Tx<'a> {
             value,
         });
         if instance.path.is_empty() {
+            self.recompute_derived(instance.id);
+        }
+    }
+
+    /// N7's conditional write (docs/network-images-plan.md): one record the
+    /// core checks against the model it commits to. The binding's own model
+    /// takes the same writes under the same guard, read from the same
+    /// transaction's view. Reached through [`Collection::patch_if`].
+    #[doc(hidden)]
+    pub fn patch_if_raw<T: KayaSum>(
+        &mut self,
+        instance: &Collection<T>,
+        key: Value,
+        variant: u32,
+        guard_field: u32,
+        guard: Value,
+        changes: Vec<(u32, Value)>,
+    ) {
+        let holds = self
+            .ctx
+            .model
+            .borrow()
+            .get(&instance.id)
+            .and_then(|instances| instances.iter().find(|i| i.path == instance.path))
+            .and_then(|i| i.entries.iter().find(|(k, _, _)| *k == key))
+            .is_some_and(|(_, held, record)| *held == variant && record.get(guard_field as usize) == Some(&guard));
+        if holds {
+            for (field, value) in &changes {
+                self.model_set_field(instance.id, &instance.path, &key, *field, value);
+            }
+        }
+        self.ops.push(TxOp::CollectionPatchIf {
+            id: instance.id,
+            path: instance.path.clone(),
+            key,
+            variant,
+            guard_field,
+            guard,
+            changes,
+        });
+        if holds && instance.path.is_empty() {
             self.recompute_derived(instance.id);
         }
     }
@@ -5084,6 +5236,10 @@ impl<'b> Row<'_, 'b> {
         self.tpl().fit(node, fit)
     }
 
+    pub fn phase(&mut self, node: TemplateNodeId, src: impl Into<TplSource<ImagePhaseKind>>) {
+        self.tpl().phase(node, src)
+    }
+
     pub fn content_type(&mut self, node: TemplateNodeId, content: crate::protocol::ContentType) {
         self.tpl().content_type(node, content)
     }
@@ -5207,6 +5363,11 @@ pub struct Messages<M> {
     /// asked first.
     widgets: RefCell<HashMap<u64, Vec<Mapper<M>>>>,
     nodes: RefCell<HashMap<u64, Vec<Mapper<M>>>>,
+    /// N12's helpers on a template image: EVERY one runs for each of its
+    /// image_needed and image_released, before and whatever the mapping
+    /// (docs/network-images-plan.md).
+    #[allow(clippy::type_complexity)]
+    image_feeds: RefCell<HashMap<u64, Vec<Box<dyn Fn(&AppCtx, &Occurrence)>>>>,
     // Menu items are their own id space — their own table ("two
     // tables, always" is N tables by now, still always).
     menu_items: RefCell<HashMap<u64, Mapper<M>>>,
@@ -5378,6 +5539,7 @@ impl<M> Messages<M> {
         Messages {
             widgets: RefCell::new(HashMap::new()),
             nodes: RefCell::new(HashMap::new()),
+            image_feeds: RefCell::new(HashMap::new()),
             menu_items: RefCell::new(HashMap::new()),
             close_requested: RefCell::new(HashMap::new()),
             window_closed: RefCell::new(HashMap::new()),
@@ -5650,6 +5812,26 @@ impl<M> Messages<M> {
                         value: value.clone(),
                     }))
                 }
+                _ => None,
+            }),
+        );
+    }
+
+    /// A row's loading image was realized with no source: fetch it
+    /// (docs/network-images-plan.md N8).
+    pub fn on_needed_node(&self, n: TemplateNodeId, f: impl Fn(Path) -> M + 'static) {
+        self.nodes.borrow_mut().entry(n.0).or_default().push(Box::new(move |occ| match occ {
+                Occurrence::ImageNeeded { path, .. } => Some(f(path.clone())),
+                _ => None,
+            }),
+        );
+    }
+
+    /// The copy image_needed was sent for went while still loading: a fetch
+    /// for it may stop (docs/network-images-plan.md N8).
+    pub fn on_released_node(&self, n: TemplateNodeId, f: impl Fn(Path) -> M + 'static) {
+        self.nodes.borrow_mut().entry(n.0).or_default().push(Box::new(move |occ| match occ {
+                Occurrence::ImageReleased { path, .. } => Some(f(path.clone())),
                 _ => None,
             }),
         );
@@ -6218,6 +6400,14 @@ impl<M> Messages<M> {
                     .borrow()
                     .get(&node.0)
                     .and_then(|fs| fs.iter().rev().find_map(|f| f(&occ))),
+                Occurrence::ImageNeeded { node, .. } | Occurrence::ImageReleased { node, .. } => {
+                    if let Some(feeds) = self.image_feeds.borrow().get(&node.0) {
+                        for feed in feeds {
+                            feed(ctx, &occ);
+                        }
+                    }
+                    self.nodes.borrow().get(&node.0).and_then(|fs| fs.iter().rev().find_map(|f| f(&occ)))
+                }
                 Occurrence::CloseRequested { window } => {
                     self.close_requested.borrow().get(&window.0).map(|f| f())
                 }
@@ -8562,9 +8752,17 @@ impl<'b> Tpl<'_, 'b> {
         self.set(node, Prop::MaxWidth, points);
     }
 
-    /// A stamped video view's fit, the blueprint twin of [`Tx::video_fit`].
+    /// A stamped video view's fit or image's box, the blueprint twin of
+    /// [`Tx::video_fit`].
     pub fn fit(&mut self, node: TemplateNodeId, fit: crate::protocol::Fit) {
         self.set(node, Prop::Fit, media::fit_wire(fit));
+    }
+
+    /// A stamped image's phase, the blueprint twin of [`Tx::phase`]; a row
+    /// field gives each copy its own, and a copy realized `Loading` with no
+    /// bytes reaches [`Messages::on_needed_node`] (docs/network-images-plan.md N8).
+    pub fn phase(&mut self, node: TemplateNodeId, src: impl Into<TplSource<ImagePhaseKind>>) {
+        self.apply_source(node, Prop::Phase, src.into().inner);
     }
 
     /// A stamped field's content type, the blueprint twin of [`Tx::content_type`].
@@ -9401,6 +9599,44 @@ mod tests {
         );
     }
 
+    #[derive(crate::KayaGen, Clone, Debug, PartialEq)]
+    struct Track {
+        art_url: String,
+        art: Vec<u8>,
+        phase: crate::protocol::ImagePhase,
+    }
+
+    /// N7 (docs/network-images-plan.md): the guarded chain is ONE record,
+    /// and the binding's own model takes it only while the guard holds.
+    #[test]
+    fn patch_if_records_one_guarded_write() {
+        use crate::protocol::{ImagePhase, TxOp};
+
+        let (occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, _tx_rx) = mpsc::channel();
+        drop(occ_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
+        let mut tx = ctx.begin();
+        let tracks = tx.collection::<Track>();
+        tx.insert(&tracks, "t1", Track { art_url: "u/1".into(), art: Vec::new(), phase: ImagePhase::Loading });
+        let before = tx.ops.len();
+        tracks.patch_if(&mut tx, "t1", Track::art_url(), "u/old".to_owned()).art(vec![1u8, 2]).phase(ImagePhase::Shown);
+        tracks.patch_if(&mut tx, "t1", Track::art_url(), "u/1".to_owned()).art(vec![9u8]).phase(ImagePhase::Shown);
+        let records: Vec<_> = tx.ops[before..]
+            .iter()
+            .map(|op| match op {
+                TxOp::CollectionPatchIf { guard, changes, .. } => (guard.clone(), changes.len()),
+                other => panic!("patch_if lowered to {other:?}"),
+            })
+            .collect();
+        assert_eq!(records, vec![(Value::from("u/old"), 2), (Value::from("u/1"), 2)]);
+        assert_eq!(
+            tx.get(&tracks, &Value::from("t1")),
+            Some(Track { art_url: "u/1".into(), art: vec![9], phase: ImagePhase::Shown }),
+            "the model took the moved-on write or missed the holding one"
+        );
+    }
+
     #[test]
     fn path_key_extracts_the_typed_field() {
         let path: Path = vec![Value::Str("a".into())];
@@ -10052,6 +10288,8 @@ mod tests {
                     | Occurrence::CaptionCue { .. }
                     | Occurrence::VideoVisibility { .. }
                     | Occurrence::InstanceVideoVisibility { .. }
+                    | Occurrence::ImageNeeded { .. }
+                    | Occurrence::ImageReleased { .. }
                     | Occurrence::SessionAction { .. }
                     | Occurrence::ReaderFrame { .. }
                     | Occurrence::ReaderProgress { .. }

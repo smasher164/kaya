@@ -158,6 +158,10 @@ pub const KAYA_OCCURRENCE_CAPTURE_DEVICES: u16 = 53;
 pub const KAYA_OCCURRENCE_CAPTURE_OVERRUN: u16 = 54;
 /// TOAST_RESULT { u64 toast; u32 outcome; u32 reserved } (docs/toast-plan.md T5).
 pub const KAYA_OCCURRENCE_TOAST_RESULT: u16 = 55;
+/// IMAGE_NEEDED and IMAGE_RELEASED { the copy's tag }
+/// (docs/network-images-plan.md N8).
+pub const KAYA_OCCURRENCE_IMAGE_NEEDED: u16 = 56;
+pub const KAYA_OCCURRENCE_IMAGE_RELEASED: u16 = 57;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -194,6 +198,8 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_CAPTURE_DEVICES == ring::REC_CAPTURE_DEVICES
         && KAYA_OCCURRENCE_CAPTURE_OVERRUN == ring::REC_CAPTURE_OVERRUN
         && KAYA_OCCURRENCE_TOAST_RESULT == ring::REC_TOAST_RESULT
+        && KAYA_OCCURRENCE_IMAGE_NEEDED == ring::REC_IMAGE_NEEDED
+        && KAYA_OCCURRENCE_IMAGE_RELEASED == ring::REC_IMAGE_RELEASED
         && KAYA_OCCURRENCE_SECTION_SELECTED == ring::REC_SECTION_SELECTED
         && KAYA_OCCURRENCE_MENU_ACTIVATED == ring::REC_MENU_ACTIVATED
         && KAYA_OCCURRENCE_MENU_TOGGLED == ring::REC_MENU_TOGGLED
@@ -331,6 +337,10 @@ pub const KAYA_TX_WATCH_CAPTURE_DEVICES: u16 = 81;
 /// Value action_label }; DISMISS_TOAST { u64 toast } (docs/toast-plan.md §4).
 pub const KAYA_TX_SHOW_TOAST: u16 = 82;
 pub const KAYA_TX_DISMISS_TOAST: u16 = 83;
+/// COLLECTION_PATCH_IF { u64 collection; Values path; Value key; u32
+/// guard_field; u32 variant; Value guard; Values fields; Values values }
+/// (docs/network-images-plan.md N7).
+pub const KAYA_TX_COLLECTION_PATCH_IF: u16 = 84;
 pub const KAYA_TX_ADD_SECTION: u16 = 25;
 pub const KAYA_TX_SELECT_SECTION: u16 = 26;
 pub const KAYA_TX_SET_SECTION_PROP: u16 = 27;
@@ -657,6 +667,7 @@ const _: () = assert!(
         && KAYA_TX_WATCH_CAPTURE_DEVICES == wire::TX_WATCH_CAPTURE_DEVICES
         && KAYA_TX_SHOW_TOAST == wire::TX_SHOW_TOAST
         && KAYA_TX_DISMISS_TOAST == wire::TX_DISMISS_TOAST
+        && KAYA_TX_COLLECTION_PATCH_IF == wire::TX_COLLECTION_PATCH_IF
         && KAYA_TX_ADD_SECTION == wire::TX_ADD_SECTION
         && KAYA_TX_SELECT_SECTION == wire::TX_SELECT_SECTION
         && KAYA_TX_SET_SECTION_PROP == wire::TX_SET_SECTION_PROP
@@ -1131,6 +1142,8 @@ pub const KAYA_PROP_SUMMARY: u32 = 59;
 pub const KAYA_PROP_EXPANDED: u32 = 60;
 /// An image, video view or canvas bleeds to the window\'s edge (docs/safe-area-plan.md A3).
 pub const KAYA_PROP_BLEED: u32 = 61;
+/// What an image is waiting for, a KAYA_IMAGE_PHASE_* (docs/network-images-plan.md N2).
+pub const KAYA_PROP_PHASE: u32 = 62;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -1296,7 +1309,7 @@ const _: () = assert!(
 // Completeness for the occurrence exports (docs/traps.md): a new spec
 // occurrence trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 55,
+    crate::spec::SPEC.occurrence.len() == 57,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -1406,6 +1419,7 @@ const _: () = assert!(
         && KAYA_PROP_SUMMARY == wire::PROP_SUMMARY
         && KAYA_PROP_EXPANDED == wire::PROP_EXPANDED
         && KAYA_PROP_BLEED == wire::PROP_BLEED
+        && KAYA_PROP_PHASE == wire::PROP_PHASE
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -1730,6 +1744,9 @@ pub const KAYA_PLAYBACK_STATE_PAUSED: u32 = 2;
 pub const KAYA_FIT_CONTAIN: u32 = 0;
 pub const KAYA_FIT_COVER: u32 = 1;
 pub const KAYA_FIT_FILL: u32 = 2;
+pub const KAYA_IMAGE_PHASE_SHOWN: u32 = 0;
+pub const KAYA_IMAGE_PHASE_LOADING: u32 = 1;
+pub const KAYA_IMAGE_PHASE_FAILED: u32 = 2;
 pub const KAYA_CONTENT_TYPE_NONE: u32 = 0;
 pub const KAYA_CONTENT_TYPE_USERNAME: u32 = 1;
 pub const KAYA_CONTENT_TYPE_PASSWORD: u32 = 2;
@@ -1850,6 +1867,9 @@ const _: () = assert!(
         && vocab_is(wire::FITS, "contain", KAYA_FIT_CONTAIN)
         && vocab_is(wire::FITS, "cover", KAYA_FIT_COVER)
         && vocab_is(wire::FITS, "fill", KAYA_FIT_FILL)
+        && vocab_is(wire::IMAGE_PHASES, "shown", KAYA_IMAGE_PHASE_SHOWN)
+        && vocab_is(wire::IMAGE_PHASES, "loading", KAYA_IMAGE_PHASE_LOADING)
+        && vocab_is(wire::IMAGE_PHASES, "failed", KAYA_IMAGE_PHASE_FAILED)
         && vocab_is(wire::CONTENT_TYPES, "none", KAYA_CONTENT_TYPE_NONE)
         && vocab_is(wire::CONTENT_TYPES, "username", KAYA_CONTENT_TYPE_USERNAME)
         && vocab_is(wire::CONTENT_TYPES, "password", KAYA_CONTENT_TYPE_PASSWORD)
@@ -1929,6 +1949,7 @@ const _: () = {
         "the spec playback_state enum grew: export KAYA_PLAYBACK_STATE_*"
     );
     assert!(spec_enum_variants("fit") == 3, "the spec fit enum grew: export KAYA_FIT_*");
+    assert!(spec_enum_variants("image_phase") == 3, "the spec image_phase enum grew: export KAYA_IMAGE_PHASE_*");
     assert!(spec_enum_variants("content_type") == 7, "the spec content_type enum grew: export KAYA_CONTENT_TYPE_*");
     assert!(spec_enum_variants("capture_state") == 5, "the spec capture_state enum grew: export KAYA_CAPTURE_STATE_*");
     assert!(spec_enum_variants("capture_failure") == 8, "the spec capture_failure enum grew: export KAYA_CAPTURE_FAILURE_*");
@@ -1942,7 +1963,7 @@ const _: () = {
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 61,
+    crate::spec::PROPS.len() == 62,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(
@@ -2076,12 +2097,19 @@ struct Blobs {
     next: u64,
     pending: std::collections::HashMap<u64, std::sync::Arc<[u8]>>,
     out: Vec<std::sync::Arc<[u8]>>,
+    /// The content id of each `out` blob, by index (docs/network-images-plan.md N10).
+    out_ids: Vec<u64>,
 }
 
 fn blobs() -> &'static std::sync::Mutex<Blobs> {
     static BLOBS: std::sync::OnceLock<std::sync::Mutex<Blobs>> = std::sync::OnceLock::new();
     BLOBS.get_or_init(|| {
-        std::sync::Mutex::new(Blobs { next: 1, pending: std::collections::HashMap::new(), out: Vec::new() })
+        std::sync::Mutex::new(Blobs {
+            next: 1,
+            pending: std::collections::HashMap::new(),
+            out: Vec::new(),
+            out_ids: Vec::new(),
+        })
     })
 }
 
@@ -2812,6 +2840,20 @@ pub unsafe extern "C" fn kaya_pref_remove(key: *const u8, key_len: usize) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kaya_blob_count() -> u64 {
     blobs().lock().unwrap().out.len() as u64
+}
+
+/// The content id of the blob an apply record carried: equal bytes, equal
+/// id, whichever row or signal holds them; 0 for a dead handle
+/// (docs/network-images-plan.md N10). A backend keys its decoded pictures
+/// on it and may skip the copy of bytes it already holds.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_blob_content_id(handle: u64) -> u64 {
+    let table = blobs().lock().unwrap();
+    usize::try_from(handle)
+        .ok()
+        .and_then(|h| h.checked_sub(1))
+        .and_then(|i| table.out_ids.get(i).copied())
+        .unwrap_or(0)
 }
 
 #[unsafe(no_mangle)]
@@ -6246,6 +6288,11 @@ fn with_window_scene<R: Default>(
         return R::default();
     };
     queue_presentation_ops(&mut PRESENTATION_PENDING.lock().unwrap(), ops);
+    // A band move realizes and tears down copies, so it is where N8's
+    // image_needed/image_released are born (docs/network-images-plan.md).
+    let asks = scene.take_asks();
+    drop(scene_slot);
+    send_occurrences(asks);
     answer
 }
 
@@ -6564,6 +6611,8 @@ fn send_occurrences(occurrences: Vec<crate::protocol::Occurrence>) {
             | crate::protocol::Occurrence::CaptureDevices { .. }
             | crate::protocol::Occurrence::CaptureOverrun { .. }
             | crate::protocol::Occurrence::ToastResult { .. }
+            | crate::protocol::Occurrence::ImageNeeded { .. }
+            | crate::protocol::Occurrence::ImageReleased { .. }
             | crate::protocol::Occurrence::Undone { .. }) => {
                 crate::protocol::OccSink::Ring(state.ring.clone()).send(other)
             }
@@ -6714,7 +6763,12 @@ pub unsafe extern "C" fn kaya_next_commands(batch: *mut *const u8) -> usize {
     // the records reference these bytes by 1-based index through
     // kaya_blob_data, valid until the next call here. Blob payloads never
     // enter the record stream.
-    blobs().lock().unwrap().out = std::mem::take(&mut writer.blobs);
+    let out = std::mem::take(&mut writer.blobs);
+    let ids = out.iter().map(crate::content_id::of).collect();
+    let mut table = blobs().lock().unwrap();
+    table.out = out;
+    table.out_ids = ids;
+    drop(table);
     HELD_BATCH.with(|held| {
         let mut held = held.borrow_mut();
         *held = writer.into_bytes();
@@ -7207,6 +7261,7 @@ mod tests {
             ("watch_capture_devices", KAYA_TX_WATCH_CAPTURE_DEVICES),
             ("show_toast", KAYA_TX_SHOW_TOAST),
             ("dismiss_toast", KAYA_TX_DISMISS_TOAST),
+            ("collection_patch_if", KAYA_TX_COLLECTION_PATCH_IF),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),

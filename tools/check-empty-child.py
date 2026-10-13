@@ -295,10 +295,9 @@ if platform.system() == "Darwin":
               "— the probe links against it. Run tools/gates.py, which "
               "builds what its gates read.", file=sys.stderr)
         sys.exit(1)
-    with scratch_dir("check-empty-child-") as tmp:
-        # The probe compiles the interpreter's OWN source, so no
-        # interpreter artifact in this path can go stale. Toolchain
-        # resolution stays in tools/lib/swift-toolchain.sh, one copy.
+    def probe(tmp, interpreter, name):
+        """The probe compiled with `interpreter` and run: (status, output),
+        or None when it does not compile."""
         build = subprocess.run(
             ["bash", "-c",
              'source "$1/tools/lib/swift-toolchain.sh" && cd "$1" && '
@@ -306,19 +305,29 @@ if platform.system() == "Darwin":
              "-import-objc-header crates/kaya/include/kaya.h "
              '"$2" "$3" -L target/debug -lkaya '
              "-framework AppKit -framework Foundation -o \"$4\"",
-             "swift-toolchain", str(ROOT), SWIFTUI, PROBE,
-             str(tmp / "swiftui-empty-child")],
+             "swift-toolchain", str(ROOT), str(interpreter), PROBE,
+             str(tmp / name)],
             check=False)
         if build.returncode != 0:
+            return None
+        run = subprocess.run(
+            [str(tmp / name)],
+            env=dict(os.environ,
+                     DYLD_LIBRARY_PATH=str(ROOT / "target/debug")),
+            check=False, capture_output=True, text=True, encoding="utf-8")
+        return run.returncode, run.stdout + run.stderr
+
+    with scratch_dir("check-empty-child-") as tmp:
+        # The probe compiles the interpreter's OWN source, so no
+        # interpreter artifact in this path can go stale. Toolchain
+        # resolution stays in tools/lib/swift-toolchain.sh, one copy.
+        got = probe(tmp, ROOT / SWIFTUI, "swiftui-empty-child")
+        if got is None:
             print("check-empty-child: the layout probe did not compile",
                   file=sys.stderr)
             sys.exit(1)
-        run = subprocess.run(
-            [str(tmp / "swiftui-empty-child")],
-            env=dict(os.environ,
-                     DYLD_LIBRARY_PATH=str(ROOT / "target/debug")),
-            check=False)
-        rc = run.returncode
+        rc, said = got
+        print(said, end="")
         if rc != 0:
             print(f"check-empty-child: FAIL — the SwiftUI layout probe "
                   f"exited {rc}.", file=sys.stderr)
@@ -328,6 +337,23 @@ if platform.system() == "Darwin":
                       f"The last line above names the case that reached "
                       f"it.", file=sys.stderr)
             sys.exit(1)
+        # THE LATE PICTURE WATCHED INSTALLED (docs/network-images-plan.md
+        # N9): the interpreter with its generation check cut must fail the
+        # probe's race in the probe's own words.
+        doctored = gate.doctor(
+            "the late picture's generation check", RAW[SWIFTUI],
+            r"guard let node = kayaScene\.nodes\[nodeId\], node\.imageGen == gen else \{ return \}",
+            "guard let node = kayaScene.nodes[nodeId] else { return }")
+        cut = tmp / "KayaSwiftUI.swift"
+        cut.write_text(doctored, encoding="utf-8")
+        got = probe(tmp, cut, "swiftui-empty-child-cut")
+        if got is None or got[0] == 0 or "picture-race: FAIL" not in got[1]:
+            print("check-empty-child: FAIL — with the generation check cut, the probe "
+                  "did not report the late picture installed"
+                  + ("" if got is None else f" (exit {got[0]})"), file=sys.stderr)
+            sys.exit(1)
+        print("check-empty-child: the late picture's generation check cut -> "
+              "picture-race: FAIL, WATCHED RED")
 else:
     print("check-empty-child: clause A (the SwiftUI layout probe) SKIPPED "
           "— it needs macOS and AppKit. Clauses B and C ran.")

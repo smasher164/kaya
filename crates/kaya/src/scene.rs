@@ -288,6 +288,16 @@ pub(crate) fn declared_id() -> Option<String> {
 /// A copy's key path, in hashable form (wire paths are Vec<Value>).
 type PathKey = Vec<Key>;
 
+/// N10's no-resend (docs/network-images-plan.md): a bound blob whose bytes
+/// did not change is not pushed again, so a row update leaves its picture
+/// undecoded. The pointer answers the common case without reading bytes.
+fn same_blob(before: &Value, after: &Value) -> bool {
+    match (before, after) {
+        (Value::Blob(a), Value::Blob(b)) => Arc::ptr_eq(&a.0, &b.0) || a.0 == b.0,
+        _ => false,
+    }
+}
+
 fn visibility_occurrence(id: WidgetId, addr: Option<(u64, PathKey)>, shown: f64) -> Occurrence {
     match addr {
         Some((node, path)) => Occurrence::InstanceVideoVisibility {
@@ -707,6 +717,7 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         | TxOp::CollectionInsert { .. }
         | TxOp::CollectionUpdate { .. }
         | TxOp::CollectionUpdateField { .. }
+        | TxOp::CollectionPatchIf { .. }
         | TxOp::CollectionRemove { .. }
         | TxOp::CollectionMove { .. } => UndoVerdict::Invertible,
         // Focus was the first pure effect; the three text-range ops
@@ -1126,6 +1137,15 @@ pub(crate) struct Scene {
     expander_dirty: Vec<WidgetId>,
     /// Live expanders whose header text has been set.
     expander_named: HashSet<WidgetId>,
+    /// docs/network-images-plan.md N3: what each live image has declared of
+    /// its box and phase, held at the end of each transaction that touched it.
+    image_boxes: HashMap<WidgetId, ImageBox>,
+    image_box_dirty: Vec<WidgetId>,
+    /// docs/network-images-plan.md N8: each stamped image's row, phase and
+    /// whether it has bytes, and the rows told image_needed and not yet
+    /// image_released.
+    image_rows: HashMap<WidgetId, ImageRow>,
+    images_needed: HashSet<(u64, PathKey)>,
     /// Live labels carrying a symbol: each is a segment
     /// (docs/segmented-plan.md G3).
     segment_symbols: HashSet<WidgetId>,
@@ -1197,6 +1217,52 @@ fn window_size_class(width: f64, platform_class: i64) -> i64 {
     } else {
         i64::from(crate::wire::SIZE_CLASS_REGULAR)
     }
+}
+
+/// What an image has declared toward N3's box (docs/network-images-plan.md).
+#[derive(Default, Clone, Copy)]
+struct ImageBox {
+    fit: bool,
+    max_width: bool,
+    max_height: bool,
+    busy: bool,
+}
+
+impl ImageBox {
+    fn note(&mut self, prop: Prop, value: &PropValue) {
+        match prop {
+            Prop::Fit => self.fit = true,
+            Prop::MaxWidth => self.max_width = true,
+            Prop::MaxHeight => self.max_height = true,
+            Prop::Phase => {
+                self.busy = !matches!(
+                    value,
+                    PropValue::Const(Value::I64(crate::wire::IMAGE_PHASE_SHOWN))
+                )
+            }
+            _ => {}
+        }
+    }
+
+    fn refusal(&self, who: &str) -> Option<String> {
+        (self.busy && !(self.fit && self.max_width && self.max_height)).then(|| {
+            format!(
+                "kaya: {who} can be loading or failed and declares no box — its look would draw \
+                 nothing at no size; declare `fit` with both `max_width` and `max_height` \
+                 (docs/network-images-plan.md N3)"
+            )
+        })
+    }
+}
+
+/// A stamped image as N8 reads it (docs/network-images-plan.md).
+struct ImageRow {
+    addr: (u64, PathKey),
+    /// The For site the row is stamped by: a windowed site's rows wait for
+    /// its first report, since the seed realizes rows no screen shows.
+    site: Option<(CollectionId, PathKey)>,
+    phase: i64,
+    has_source: bool,
 }
 
 /// One declared breakpoint (docs/adaptive-layout-plan.md D3).
@@ -1275,8 +1341,11 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         Prop::Time | Prop::MinuteStep => matches!(kind, WidgetKind::TimePicker),
         // docs/color-picker-plan.md §2.
         Prop::Color | Prop::Alpha => matches!(kind, WidgetKind::ColorPicker),
-        // docs/media-plan.md §3.
-        Prop::Fit | Prop::Player | Prop::Capture | Prop::Aspect => matches!(kind, WidgetKind::Video),
+        // docs/media-plan.md §3; an image's box (docs/network-images-plan.md N3).
+        Prop::Fit => matches!(kind, WidgetKind::Video | WidgetKind::Image),
+        Prop::Player | Prop::Capture | Prop::Aspect => matches!(kind, WidgetKind::Video),
+        // docs/network-images-plan.md N2.
+        Prop::Phase => kind == WidgetKind::Image,
         // docs/autofill-plan.md A1: the two single-line credential kinds.
         Prop::ContentType => matches!(kind, WidgetKind::Entry | WidgetKind::SecureField),
         // docs/reveal-plan.md V1.
@@ -1924,6 +1993,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Summary => ValueType::Str,
         Prop::Expanded => ValueType::Bool,
         Prop::Bleed => ValueType::Bool,
+        Prop::Phase => ValueType::I64,
         Prop::Role => ValueType::I64,
         Prop::Symbol => ValueType::I64,
         Prop::Indeterminate | Prop::Fill | Prop::Wrap | Prop::Rich | Prop::Submits => ValueType::Bool,
@@ -2736,6 +2806,12 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
             "kaya: fit is contain (0), cover (1) or fill (2), got {fit}"
         );
     }
+    if let (Prop::Phase, Value::I64(phase)) = (prop, value) {
+        assert!(
+            crate::wire::vocab_name(crate::wire::IMAGE_PHASES, *phase).is_some(),
+            "kaya: an image's phase is shown (0), loading (1) or failed (2), got {phase}"
+        );
+    }
     // The axis enum's two values, nothing else: horizontal 0,
     // vertical 1 (docs/adaptive-layout-plan.md D1).
     if let (Prop::Axis, Value::I64(mode)) = (prop, value) {
@@ -2809,6 +2885,7 @@ fn check_type(current: &Value, incoming: &Value, what: &str) {
             | (Value::I64(_), Value::I64(_))
             | (Value::F64(_), Value::F64(_))
             | (Value::Str(_), Value::Str(_))
+            | (Value::Blob(_), Value::Blob(_))
     );
     assert!(same, "kaya: write changes the type of {what}");
 }
@@ -3146,6 +3223,23 @@ impl Scene {
         }
     }
 
+    /// N3 in the template zone (docs/network-images-plan.md).
+    fn check_image_template(body: &TplBody) {
+        let mut boxes: HashMap<u64, ImageBox> = HashMap::new();
+        for op in &body.ops {
+            if let TplOp::SetProp { node, prop, value } = op {
+                boxes.entry(*node).or_default().note(*prop, value);
+            }
+        }
+        for op in &body.ops {
+            if let TplOp::Widget { node, kind: WidgetKind::Image } = op {
+                if let Some(why) = boxes.get(node).and_then(|b| b.refusal(&format!("template node {node}"))) {
+                    panic!("{why}");
+                }
+            }
+        }
+    }
+
     fn check_labeled_template(&self, body: &TplBody) {
         let mut children: HashMap<u64, Vec<u64>> = HashMap::new();
         for op in &body.ops {
@@ -3458,12 +3552,20 @@ impl Scene {
         // when the row's children exist (the fold rule's requirement).
         let mut declared_breakpoints: Vec<usize> = Vec::new();
 
-        for (at, op) in tx.into_iter().enumerate() {
+        let mut queue: std::collections::VecDeque<(usize, TxOp)> = tx.into_iter().enumerate().collect();
+        while let Some((at, op)) = queue.pop_front() {
             if matches!(&op, TxOp::SetProperty { prop: Prop::Format, value: PropValue::Signal(_) | PropValue::Element { .. }, .. }) {
                 self.number_dynamic_formats = true;
             }
             if !scopes.is_empty() {
                 self.declare(op, &mut scopes, &mut out);
+                continue;
+            }
+            if let TxOp::CollectionPatchIf { id, path, key, variant, guard_field, guard, changes } = op {
+                let lowered = self.lower_patch_if(id, path, key, variant, guard_field, guard, changes);
+                for write in lowered.into_iter().rev() {
+                    queue.push_front((at, write));
+                }
                 continue;
             }
             // A marked batch is checked op by op BEFORE anything runs:
@@ -3494,6 +3596,7 @@ impl Scene {
                 }
             }
             match op {
+                TxOp::CollectionPatchIf { .. } => unreachable!("patch_if is lowered at the loop's head"),
                 TxOp::UndoGroup { window, label } => {
                     // HEAD OF BATCH, ONCE: a transaction is a bare list
                     // with no header, so this position is the whole
@@ -3583,6 +3686,12 @@ impl Scene {
                         .get(&widget)
                         .unwrap_or_else(|| panic!("kaya: property on unknown widget {widget:?}"));
                     check_prop(kind, prop);
+                    if kind == WidgetKind::Image {
+                        self.image_boxes.entry(widget).or_default().note(prop, &value);
+                        if !self.image_box_dirty.contains(&widget) {
+                            self.image_box_dirty.push(widget);
+                        }
+                    }
                     if let (Prop::Accepts, PropValue::Const(Value::Str(list))) = (prop, &value) {
                         self.accept_lists.insert(widget, list.clone());
                     }
@@ -5362,6 +5471,11 @@ impl Scene {
                 "{EXPANDER_NAMELESS} (expander {id:?})"
             );
         }
+        for id in std::mem::take(&mut self.image_box_dirty) {
+            if let Some(why) = self.image_boxes.get(&id).and_then(|b| b.refusal(&format!("image {id:?}"))) {
+                panic!("{why}");
+            }
+        }
         // NO GROW INSIDE A WRAPPING ROW (docs/layout-knobs-plan.md §2): a
         // weight has no track to take on a line that breaks where it must.
         for id in std::mem::take(&mut self.wrap_dirty) {
@@ -5529,6 +5643,7 @@ impl Scene {
         self.fan_out_signals(&dirty, &mut out);
         self.settle_range_writes(&mut out);
         self.settle_video_views(&out);
+        self.settle_image_needs(&out);
         self.settle_player_holds(&mut out);
 
         // Barrier: no grow along a scroll's own axis (ruled REFUSE
@@ -7359,6 +7474,70 @@ impl Scene {
         }
     }
 
+    /// N8 (docs/network-images-plan.md): the core stamps and tears down the
+    /// copies, so it alone can say when a row's loading image is realized
+    /// with nothing to show and when that copy goes while still loading.
+    fn settle_image_needs(&mut self, out: &[ApplyOp]) {
+        let mut touched: Vec<WidgetId> = Vec::new();
+        for op in out {
+            match op {
+                ApplyOp::Create { id, kind: WidgetKind::Image, .. } if self.image_rows.contains_key(id) => {
+                    touched.push(*id);
+                }
+                ApplyOp::SetProp { id, prop: Prop::Phase, value: Value::I64(phase) } => {
+                    if let Some(row) = self.image_rows.get_mut(id) {
+                        row.phase = *phase;
+                        touched.push(*id);
+                    }
+                }
+                ApplyOp::SetProp { id, prop: Prop::Source, value } => {
+                    if let Some(row) = self.image_rows.get_mut(id) {
+                        row.has_source = matches!(value, Value::Blob(b) if !b.0.is_empty());
+                        touched.push(*id);
+                    }
+                }
+                ApplyOp::Destroy { id } => {
+                    if let Some(row) = self.image_rows.remove(id) {
+                        if self.images_needed.remove(&row.addr) && row.phase == crate::wire::IMAGE_PHASE_LOADING {
+                            self.asks.push(Occurrence::ImageReleased {
+                                node: crate::protocol::TemplateNodeId(row.addr.0),
+                                path: path_values(&row.addr.1),
+                            });
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        self.need_images(touched);
+    }
+
+    /// The rows of a windowed site stamped by its seed are decided at its
+    /// first report, so `touched` there is every image the site holds.
+    fn need_images_on(&mut self, site: &(CollectionId, PathKey)) {
+        let held = self.image_rows.iter().filter(|(_, r)| r.site.as_ref() == Some(site)).map(|(id, _)| *id).collect();
+        self.need_images(held);
+    }
+
+    fn need_images(&mut self, touched: Vec<WidgetId>) {
+        for id in touched {
+            let Some(row) = self.image_rows.get(&id) else { continue };
+            let seeded = row
+                .site
+                .as_ref()
+                .and_then(|site| self.for_sites.get(site))
+                .is_some_and(|s| s.window.is_bounded() && !s.window.is_reported());
+            if row.phase != crate::wire::IMAGE_PHASE_LOADING {
+                self.images_needed.remove(&row.addr);
+            } else if !row.has_source && !seeded && self.images_needed.insert(row.addr.clone()) {
+                self.asks.push(Occurrence::ImageNeeded {
+                    node: crate::protocol::TemplateNodeId(row.addr.0),
+                    path: path_values(&row.addr.1),
+                });
+            }
+        }
+    }
+
     /// A backend's report of how much of a video view shows (0 to 1),
     /// coalesced (crate::media::Visibility): what the app hears, if anything,
     /// and the held source of the player it shows once any of it shows
@@ -8313,6 +8492,7 @@ impl Scene {
                             self.check_segmented_template(body);
                             self.check_document_template(body);
                             self.check_expander_template(body, true);
+                            Self::check_image_template(body);
                         }
                     }
                     ClosedScope::When { body, .. } => {
@@ -8320,6 +8500,7 @@ impl Scene {
                         self.check_segmented_template(body);
                         self.check_document_template(body);
                         self.check_expander_template(body, in_for);
+                        Self::check_image_template(body);
                     }
                 }
                 match (scopes.last_mut(), bodies) {
@@ -8984,6 +9165,62 @@ impl Scene {
         }
     }
 
+    /// N7 (docs/network-images-plan.md): the guard read from the model this
+    /// transaction has built so far; a write whose row is gone or has moved
+    /// on lowers to nothing. The shape is checked either way, so a wrong
+    /// field is found even when the guard drops the write.
+    #[allow(clippy::too_many_arguments)]
+    fn lower_patch_if(
+        &self,
+        id: CollectionId,
+        path: Vec<Value>,
+        key: Value,
+        variant: u32,
+        guard_field: u32,
+        guard: Value,
+        changes: Vec<(u32, Value)>,
+    ) -> Vec<TxOp> {
+        let schema = self.variant_schema(id, variant, "patch_if");
+        let typed = |field: u32, value: &Value, what: &str| {
+            let want = schema.get(field as usize).unwrap_or_else(|| {
+                panic!(
+                    "kaya: patch_if's {what} names field {field} of variant {variant} of {id:?}, \
+                     which has {} field(s)",
+                    schema.len()
+                )
+            });
+            assert!(
+                value.type_of() == *want,
+                "kaya: patch_if's {what} gives field {field} of variant {variant} of {id:?} \
+                 {value:?}; the field is {want:?}"
+            );
+        };
+        typed(guard_field, &guard, "guard");
+        for (field, value) in &changes {
+            typed(*field, value, "change");
+        }
+        let path_key: PathKey = path.iter().map(Key::from_value).collect();
+        let holds = self
+            .coll_instances
+            .get(&(id, path_key))
+            .and_then(|inst| inst.entries.get(&Key::from_value(&key)))
+            .is_some_and(|(held, record)| *held == variant && record[guard_field as usize] == guard);
+        if !holds {
+            return Vec::new();
+        }
+        changes
+            .into_iter()
+            .map(|(field, value)| TxOp::CollectionUpdateField {
+                id,
+                path: path.clone(),
+                key: key.clone(),
+                variant,
+                field,
+                value,
+            })
+            .collect()
+    }
+
     fn update_entry(
         &mut self,
         id: CollectionId,
@@ -9003,7 +9240,7 @@ impl Scene {
             .get_mut(&key)
             .unwrap_or_else(|| panic!("kaya: update of missing key {key:?} in {id:?}"));
         let was = current.0;
-        *current = (variant, record.clone());
+        let before = std::mem::replace(current, (variant, record.clone())).1;
         if was != variant {
             // The entry changed constructor: its copy is a different
             // blueprint now. Tear down, restamp from the new case, and put the
@@ -9031,6 +9268,9 @@ impl Scene {
         if let Some(bound) = self.element_bindings.get(&(id, path.clone(), key.clone())).cloned() {
             for (widget, prop, field) in bound {
                 let value = record[field as usize].clone();
+                if same_blob(&before[field as usize], &value) {
+                    continue;
+                }
                 self.push_bound_prop(widget, prop, value, out);
             }
         }
@@ -9115,10 +9355,11 @@ impl Scene {
             "kaya: update_field witnessed variant {variant} but {key:?} in {id:?} holds \
              variant {stored} (update, not update_field, changes a constructor)"
         );
+        let unchanged = same_blob(&current[field as usize], &value);
         current[field as usize] = value.clone();
         if let Some(bound) = self.element_bindings.get(&(id, path.clone(), key.clone())).cloned() {
             for (widget, prop, bound_field) in bound {
-                if bound_field == field {
+                if bound_field == field && !unchanged {
                     self.push_bound_prop(widget, prop, value.clone(), out);
                 }
             }
@@ -9292,6 +9533,17 @@ impl Scene {
                         tag,
                     });
                     self.node_instances.insert((*node, copy_path.clone()), id);
+                    if *kind == WidgetKind::Image {
+                        self.image_rows.insert(
+                            id,
+                            ImageRow {
+                                addr: (*node, copy_path.clone()),
+                                site: chain.last().map(|(cid, path, _)| (*cid, path.clone())),
+                                phase: crate::wire::IMAGE_PHASE_SHOWN,
+                                has_source: false,
+                            },
+                        );
+                    }
                     // A per-copy drag override outlives its copy's widgets
                     // (reap_nested's rule) and is re-applied on re-stamp;
                     // the template's own declaration comes in body order
@@ -10060,6 +10312,8 @@ impl Scene {
         let mut out = Vec::new();
         self.reconcile_window(site.0, &site.1, &mut out);
         self.settle_video_views(&out);
+        self.settle_image_needs(&out);
+        self.need_images_on(&site);
         self.settle_player_holds(&mut out);
         // The viewport is parked on its first visible row (§2.4).
         let order = &self.coll_instances[&site].order;
@@ -20680,5 +20934,272 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
         assert_eq!(posted_at(scene.apply(vec![notification(1)])), 0);
         let future = unix_now() + 3_600;
         assert_eq!(posted_at(scene.apply(vec![notification(future)])), future);
+    }
+
+    // --- docs/network-images-plan.md N3, N7, N8, N10 -----------------------
+
+    fn art_blob(bytes: &[u8]) -> Value {
+        Value::Blob(crate::protocol::Blob::from(bytes))
+    }
+
+    /// A table of rows {url, art, phase}, its template image boxed and fed by
+    /// the row's art and phase fields.
+    fn art_table() -> Transaction {
+        vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateCollection {
+                id: CollectionId(1),
+                variants: vec![vec![ValueType::Str, ValueType::Blob, ValueType::I64]],
+            },
+            TxOp::CreateFor { id: 2, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Image },
+            TxOp::SetProperty { widget: WidgetId(10), prop: Prop::Fit, value: PropValue::Const(Value::I64(1)) },
+            TxOp::SetProperty { widget: WidgetId(10), prop: Prop::MaxWidth, value: PropValue::Const(Value::F64(48.0)) },
+            TxOp::SetProperty { widget: WidgetId(10), prop: Prop::MaxHeight, value: PropValue::Const(Value::F64(48.0)) },
+            TxOp::SetProperty { widget: WidgetId(10), prop: Prop::Source, value: PropValue::Element { level: 0, field: 1 } },
+            TxOp::SetProperty { widget: WidgetId(10), prop: Prop::Phase, value: PropValue::Element { level: 0, field: 2 } },
+            TxOp::TemplateEnd,
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]
+    }
+
+    fn art_row(key: &str, url: &str, art: &[u8], phase: i64) -> TxOp {
+        TxOp::CollectionInsert {
+            id: CollectionId(1),
+            path: vec![],
+            key: v(key),
+            variant: 0,
+            record: vec![v(url), art_blob(art), Value::I64(phase)],
+        }
+    }
+
+    fn art_patch_if(key: &str, guard: &str, changes: Vec<(u32, Value)>) -> TxOp {
+        TxOp::CollectionPatchIf {
+            id: CollectionId(1),
+            path: vec![],
+            key: v(key),
+            variant: 0,
+            guard_field: 0,
+            guard: v(guard),
+            changes,
+        }
+    }
+
+    fn needs(asks: Vec<Occurrence>) -> Vec<String> {
+        asks.into_iter()
+            .map(|occ| match occ {
+                Occurrence::ImageNeeded { node, path } => format!("needed {} {path:?}", node.0),
+                Occurrence::ImageReleased { node, path } => format!("released {} {path:?}", node.0),
+                other => format!("{other:?}"),
+            })
+            .collect()
+    }
+
+    /// N8: a row's loading image with no bytes is needed once when realized,
+    /// released when its copy goes still loading, and silent once its bytes
+    /// and `shown` have arrived.
+    #[test]
+    fn a_loading_row_image_is_needed_once_and_released_with_its_copy() {
+        let loading = crate::wire::IMAGE_PHASE_LOADING;
+        let mut scene = Scene::new();
+        scene.apply(art_table());
+        scene.apply(vec![art_row("a", "u/a", b"", loading), art_row("b", "u/b", b"", crate::wire::IMAGE_PHASE_SHOWN)]);
+        assert_eq!(needs(scene.take_asks()), vec![r#"needed 10 [Str("a")]"#]);
+        scene.apply(vec![TxOp::CollectionUpdateField {
+            id: CollectionId(1),
+            path: vec![],
+            key: v("a"),
+            variant: 0,
+            field: 0,
+            value: v("u/a2"),
+        }]);
+        assert_eq!(needs(scene.take_asks()), Vec::<String>::new(), "needed twice for one row");
+        scene.apply(vec![TxOp::CollectionRemove { id: CollectionId(1), path: vec![], key: v("a") }]);
+        assert_eq!(needs(scene.take_asks()), vec![r#"released 10 [Str("a")]"#]);
+
+        scene.apply(vec![art_row("c", "u/c", b"", loading)]);
+        assert_eq!(needs(scene.take_asks()), vec![r#"needed 10 [Str("c")]"#]);
+        scene.apply(vec![art_patch_if(
+            "c",
+            "u/c",
+            vec![(1, art_blob(b"\x89PNG")), (2, Value::I64(crate::wire::IMAGE_PHASE_SHOWN))],
+        )]);
+        assert_eq!(needs(scene.take_asks()), Vec::<String>::new(), "a shown row was needed");
+        scene.apply(vec![art_patch_if(
+            "c",
+            "u/c",
+            vec![(1, art_blob(b"")), (2, Value::I64(loading))],
+        )]);
+        assert_eq!(needs(scene.take_asks()), vec![r#"needed 10 [Str("c")]"#], "a dropped picture is not needed again");
+        scene.apply(vec![art_patch_if("c", "u/c", vec![(2, Value::I64(crate::wire::IMAGE_PHASE_FAILED))])]);
+        scene.apply(vec![TxOp::CollectionRemove { id: CollectionId(1), path: vec![], key: v("c") }]);
+        assert_eq!(needs(scene.take_asks()), Vec::<String>::new(), "a failed row was released");
+    }
+
+    /// N8 on a windowed table: the seed's rows wait for the first report,
+    /// which needs only the band's rows; a band move releases the rows it
+    /// tears down and needs the ones it stamps, each once.
+    #[test]
+    fn a_windowed_tables_band_decides_what_is_needed() {
+        let loading = crate::wire::IMAGE_PHASE_LOADING;
+        let mut scene = Scene::new();
+        scene.declare_windowing();
+        let mut table = art_table();
+        let at = table.iter().position(|op| matches!(op, TxOp::CreateWidget { id: WidgetId(10), .. })).unwrap();
+        table.insert(at, TxOp::CreateWidget { id: WidgetId(9), kind: WidgetKind::Row });
+        let end = table.iter().position(|op| matches!(op, TxOp::TemplateEnd)).unwrap();
+        table.insert(end, TxOp::AddChild { parent: WidgetId(9), child: WidgetId(10) });
+        scene.apply(table);
+        scene.apply(vec![TxOp::SetColumnHeaders {
+            widget: WidgetId(2),
+            sorted: crate::wire::SORT_NONE,
+            direction: 0,
+            path: Vec::new(),
+            titles: vec!["Art".into()],
+        }]);
+        scene.apply((0..300).map(|i| art_row(&format!("r{i:03}"), &format!("u/{i}"), b"", loading)).collect());
+        assert_eq!(needs(scene.take_asks()), Vec::<String>::new(), "the seed's rows were needed before any report");
+        scene.window_moved(2, 0, 10);
+        let first = needs(scene.take_asks());
+        assert!(
+            !first.is_empty() && first.len() < 300 && first.iter().all(|n| n.starts_with("needed")),
+            "the first report needed {first:?}"
+        );
+        scene.window_moved(2, 200, 10);
+        let moved = needs(scene.take_asks());
+        let released: Vec<_> = moved.iter().filter(|n| n.starts_with("released")).collect();
+        let needed: Vec<_> = moved.iter().filter(|n| n.starts_with("needed")).collect();
+        assert_eq!(released.len(), first.len(), "the band left {first:?} and released {released:?}");
+        assert!(!needed.is_empty() && needed.iter().all(|n| !first.contains(n)), "{needed:?}");
+    }
+
+    /// N7: the write lands only while the row exists and its guard holds; a
+    /// gone row and a moved-on row drop it without a panic; a wrong field is
+    /// refused even when the guard would have dropped the write.
+    #[test]
+    fn patch_if_writes_only_while_its_row_and_guard_hold() {
+        let mut scene = Scene::new();
+        scene.apply(art_table());
+        scene.apply(vec![art_row("a", "u/a", b"", crate::wire::IMAGE_PHASE_LOADING)]);
+        let art = |scene: &Scene| scene.coll_instances[&(CollectionId(1), vec![])].entries[&Key::from_value(&v("a"))].1[1].clone();
+        let ops = scene.apply(vec![art_patch_if("a", "u/old", vec![(1, art_blob(b"stale"))])]);
+        assert!(ops.is_empty(), "a moved-on row took the write: {ops:?}");
+        assert_eq!(art(&scene), art_blob(b""));
+        let ops = scene.apply(vec![art_patch_if("gone", "u/a", vec![(1, art_blob(b"late"))])]);
+        assert!(ops.is_empty(), "a gone row took the write: {ops:?}");
+        let ops = scene.apply(vec![art_patch_if("a", "u/a", vec![(1, art_blob(b"fresh"))])]);
+        assert!(
+            ops.iter().any(|op| matches!(op, ApplyOp::SetProp { prop: Prop::Source, .. })),
+            "the holding guard's write never reached the image: {ops:?}"
+        );
+        assert_eq!(art(&scene), art_blob(b"fresh"));
+        let msg = panic_text(
+            std::panic::catch_unwind(|| {
+                let mut scene = Scene::new();
+                scene.apply(art_table());
+                scene.apply(vec![art_patch_if("missing", "u/a", vec![(2, v("not a phase"))])]);
+            })
+            .expect_err("a mistyped change was admitted"),
+        );
+        assert!(msg.contains("patch_if's change") && msg.contains("field 2"), "{msg}");
+    }
+
+    /// docs/traps.md, "A blob signal could not be written": a live image
+    /// bound to a signal of bytes takes the signal's next bytes.
+    #[test]
+    fn a_signal_of_bytes_takes_a_write() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateSignal { id: SignalId(1), initial: art_blob(b"") },
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Image },
+            TxOp::SetProperty { widget: WidgetId(2), prop: Prop::Source, value: PropValue::Signal(SignalId(1)) },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+        let ops = scene.apply(vec![TxOp::WriteSignal { id: SignalId(1), value: art_blob(b"\x89PNG") }]);
+        assert!(
+            ops.iter().any(|op| *op == ApplyOp::SetProp { id: WidgetId(2), prop: Prop::Source, value: art_blob(b"\x89PNG") }),
+            "{ops:?}"
+        );
+    }
+
+    /// N10: a row update whose bytes did not change does not send the
+    /// picture again; one whose bytes changed does.
+    #[test]
+    fn a_row_update_sends_its_picture_only_when_the_bytes_change() {
+        let mut scene = Scene::new();
+        scene.apply(art_table());
+        scene.apply(vec![art_row("a", "u/a", b"\xff\xd8 art", crate::wire::IMAGE_PHASE_SHOWN)]);
+        let source = |ops: &[ApplyOp]| ops.iter().any(|op| matches!(op, ApplyOp::SetProp { prop: Prop::Source, .. }));
+        let update = |url: &str, art: &[u8]| TxOp::CollectionUpdate {
+            id: CollectionId(1),
+            path: vec![],
+            key: v("a"),
+            variant: 0,
+            record: vec![v(url), art_blob(art), Value::I64(crate::wire::IMAGE_PHASE_SHOWN)],
+        };
+        let ops = scene.apply(vec![update("u/a2", b"\xff\xd8 art")]);
+        assert!(!source(&ops), "equal bytes were sent again: {ops:?}");
+        let ops = scene.apply(vec![TxOp::CollectionUpdateField {
+            id: CollectionId(1),
+            path: vec![],
+            key: v("a"),
+            variant: 0,
+            field: 1,
+            value: art_blob(b"\xff\xd8 art"),
+        }]);
+        assert!(!source(&ops), "an equal field write was sent again: {ops:?}");
+        let ops = scene.apply(vec![update("u/a2", b"\xff\xd8 new art")]);
+        assert!(source(&ops), "new bytes never reached the image: {ops:?}");
+    }
+
+    /// N3: an image that can be loading or failed declares its box, in both
+    /// zones; a `shown` constant needs none.
+    #[test]
+    fn a_busy_image_declares_its_box_in_both_zones() {
+        let live = |phase: PropValue, boxed: bool| {
+            let mut tx = vec![
+                TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+                TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Image },
+                TxOp::SetProperty { widget: WidgetId(2), prop: Prop::Phase, value: phase },
+            ];
+            if boxed {
+                tx.push(TxOp::SetProperty { widget: WidgetId(2), prop: Prop::Fit, value: PropValue::Const(Value::I64(0)) });
+                tx.push(TxOp::SetProperty { widget: WidgetId(2), prop: Prop::MaxWidth, value: PropValue::Const(Value::F64(96.0)) });
+                tx.push(TxOp::SetProperty { widget: WidgetId(2), prop: Prop::MaxHeight, value: PropValue::Const(Value::F64(96.0)) });
+            }
+            tx.push(TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) });
+            tx.push(TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) });
+            tx
+        };
+        Scene::new().apply(live(PropValue::Const(Value::I64(crate::wire::IMAGE_PHASE_LOADING)), true));
+        Scene::new().apply(live(PropValue::Const(Value::I64(crate::wire::IMAGE_PHASE_SHOWN)), false));
+        for phase in [
+            PropValue::Const(Value::I64(crate::wire::IMAGE_PHASE_LOADING)),
+            PropValue::Const(Value::I64(crate::wire::IMAGE_PHASE_FAILED)),
+        ] {
+            let msg = panic_text(
+                std::panic::catch_unwind(|| {
+                    Scene::new().apply(live(phase, false));
+                })
+                .expect_err("a busy image with no box was admitted"),
+            );
+            assert!(msg.contains("`fit`") && msg.contains("`max_width`") && msg.contains("N3"), "{msg}");
+        }
+        let mut tpl = art_table();
+        tpl.retain(|op| !matches!(op, TxOp::SetProperty { prop: Prop::MaxHeight, .. }));
+        let msg = panic_text(
+            std::panic::catch_unwind(|| {
+                Scene::new().apply(tpl);
+            })
+            .expect_err("a template image bound to a phase field with half a box was admitted"),
+        );
+        assert!(msg.contains("template node 10") && msg.contains("N3"), "{msg}");
+        let msg = panic_text(
+            std::panic::catch_unwind(|| check_prop(WidgetKind::Label, Prop::Phase)).unwrap_err(),
+        );
+        assert!(msg.contains("has no property"), "{msg}");
     }
 }

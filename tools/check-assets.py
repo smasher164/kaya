@@ -1034,27 +1034,35 @@ def check(root):
 
 
 # ---------------------------------------------------------- self-tests
-def media_derivation(root):
-    """C13 (docs/media-plan.md §7a): the media family is GENERATED and
-    committed, so it must be what tools/gen-media.py writes today. Run on
-    the real tree and on one negative only — FFmpeg per shadow would
-    multiply this gate's cost by its negatives."""
-    fam = pathlib.Path(root) / ASSET_ROOT / "media"
-    gen = ROOT / "tools" / "gen-media.py"
+def derivation(root, family, script):
+    """C13 (docs/media-plan.md §7a; docs/network-images-plan.md §5): a
+    GENERATED family is committed, so it must be what its script writes
+    today. Run on the real tree and on one negative each, since FFmpeg per
+    shadow would multiply this gate's cost by its negatives."""
+    fam = pathlib.Path(root) / ASSET_ROOT / family
+    gen = ROOT / "tools" / script
     if not fam.is_dir():
         return []
     if not gen.is_file():
-        return ["tools/gen-media.py is gone while the media family exists "
+        return [f"tools/{script} is gone while the {family} family exists "
                 "— the committed files would have no regeneration story"]
     r = subprocess.run([sys.executable, str(gen), "--check", "--against",
                         str(fam)], capture_output=True, text=True,
-                       check=False)
+                       encoding="utf-8", check=False)
     if r.returncode == 0:
         return []
-    return ["guests/assets/media does not match what tools/gen-media.py "
+    return [f"guests/assets/{family} does not match what tools/{script} "
             "generates — the files are generated, never hand-edited: run "
-            "`tools/gen-media.py` and commit the result:\n"
+            f"`tools/{script}` and commit the result:\n"
             + r.stderr.strip()[:600]]
+
+
+def media_derivation(root):
+    return derivation(root, "media", "gen-media.py")
+
+
+def covers_derivation(root):
+    return derivation(root, "covers", "gen-covers.py")
 
 
 def fresh(name):
@@ -1484,7 +1492,19 @@ g.negative("N37 (a committed media file its generator no longer writes)",
            lambda: media_derivation(s),
            want="differs from what tools/gen-media.py generates")
 
-g.negatives_ran(39)
+# N38 — C13: one committed cover drifts from its generator.
+s = fresh("n38")
+jpg = s / "guests/assets/covers/cover-320.jpg"
+raw = bytearray(jpg.read_bytes())
+raw[len(raw) // 2] ^= 1
+jpg.write_bytes(bytes(raw))
+print("check-assets: N38 flipped 1 byte of guests/assets/covers/cover-320.jpg "
+      "in the shadow")
+g.negative("N38 (a committed cover its generator no longer writes)",
+           lambda: covers_derivation(s),
+           want="differs from what tools/gen-covers.py generates")
+
+g.negatives_ran(40)
 
 # The vacuity floor rule 5 asks for, over the census the checker walks.
 g.counted("files under the asset root",
@@ -1495,6 +1515,7 @@ g.counted("files under the asset root",
 # The tree as it stands.
 out, bad = check(ROOT)
 bad += media_derivation(ROOT)
+bad += covers_derivation(ROOT)
 print("\n".join(out))
 if bad:
     for b in bad:

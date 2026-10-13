@@ -24,7 +24,7 @@ public enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x12513a04dcdb4c9a
+let kayaSpecHash: UInt64 = 0xd695309e4a57ce9e
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
 func kayaPackDate(_ year: Int, _ month: Int, _ day: Int) -> Int64 {
@@ -883,6 +883,20 @@ struct KayaTx {
     mutating func dismissToast(_ toast: UInt64) {
         let kayaAt = self.begin(UInt16(KAYA_TX_DISMISS_TOAST))
         self.u64(toast)
+        self.end(kayaAt)
+    }
+
+    /// A conditional row write (docs/network-images-plan.md N7): when the entry at `key` exists, holds `variant`, and its field `guard_field` equals `guard_value`, each I64 in `fields` names a field set to the value at the same place in `values`, as collection_update_field would; otherwise the record does NOTHING and the transaction goes on. The guard is read from the model this transaction commits to.
+    mutating func collectionPatchIf(_ collectionId: UInt64, _ path: [KayaValue], _ key: KayaValue, _ guardField: UInt32, _ variant: UInt32, _ guardValue: KayaValue, _ fields: [KayaValue], _ values: [KayaValue]) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_COLLECTION_PATCH_IF))
+        self.u64(collectionId)
+        self.values(path)
+        self.value(key)
+        self.u32(guardField)
+        self.u32(variant)
+        self.value(guardValue)
+        self.values(fields)
+        self.values(values)
         self.end(kayaAt)
     }
 
@@ -2838,6 +2852,38 @@ struct KayaTx {
         self.end(kayaAt)
     }
 
+    /// set_property with a constant phase value.
+    mutating func setPhase(_ widgetId: UInt64, _ phase: Int64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_PHASE))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.i64(phase))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound phase value.
+    mutating func bindPhase(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_PHASE))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindPhaseElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_PHASE))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
     /// set_window_prop with a constant title value (window 0, the primary surface).
     mutating func setWindowTitle(_ window: UInt64, _ title: String) {
         let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
@@ -3586,6 +3632,8 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             || kind == UInt16(KAYA_OCCURRENCE_CAPTURE_DEVICES)
             || kind == UInt16(KAYA_OCCURRENCE_CAPTURE_OVERRUN)
             || kind == UInt16(KAYA_OCCURRENCE_TOAST_RESULT)
+            || kind == UInt16(KAYA_OCCURRENCE_IMAGE_NEEDED)
+            || kind == UInt16(KAYA_OCCURRENCE_IMAGE_RELEASED)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {
