@@ -183,6 +183,10 @@ mod segmented;
 mod expander;
 #[path = "safearea.rs"]
 mod safearea;
+#[path = "netimage.rs"]
+mod netimage;
+#[path = "netimage_http.rs"]
+mod netimage_http;
 
 #[cfg(target_os = "android")]
 #[path = "tasks.rs"]
@@ -278,6 +282,8 @@ fn app(ctx: kaya::AppCtx) {
         Ok("segmented") => segmented::app(ctx),
         Ok("expander") => expander::app(ctx),
         Ok("safearea") => safearea::app(ctx),
+        Ok("netimage") => netimage::app(ctx),
+        Ok("netimage_http") => netimage_http::app(ctx),
         Ok("tasks") => tasks::app(ctx),
         Ok("taskspersist") => tasks::app(ctx),
         // The same app under KAYA_LOCALE=ar-EG (tools/scenes/tasksrtl.steps).

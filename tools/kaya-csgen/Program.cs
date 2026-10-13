@@ -98,7 +98,7 @@ static class Program
     // runtime schema.
     static readonly System.Collections.Generic.HashSet<string> Wire =
         new() { "string", "bool", "long", "double", "byte[]", "Document",
-            "System.DateOnly", "System.TimeOnly", "Color", "Player", "Player?" };
+            "System.DateOnly", "System.TimeOnly", "Color", "Player", "Player?", "ImagePhase" };
 
     // The generated files carry no usings of their own — every type
     // Program.cs emits is spelled fully, the two picker types included,
@@ -218,6 +218,14 @@ static class Program
         b.AppendLine();
         b.AppendLine($"    public static {rec}KayaPatch Patch(Tx tx, RecordCollection<{rec}> c, object key) =>");
         b.AppendLine($"        new {rec}KayaPatch(c.Patch(tx, key));");
+        b.AppendLine();
+        b.AppendLine("    /// <summary>The guarded twin of Patch (docs/network-images-plan.md");
+        b.AppendLine("    /// N7): the named setters inside `changes` gather ONE record, made");
+        b.AppendLine("    /// only while the entry exists and its `guard` field still holds");
+        b.AppendLine("    /// `expected`. Answers whether the guard held.</summary>");
+        b.AppendLine($"    public static bool PatchIf<G>(Tx tx, RecordCollection<{rec}> c, object key,");
+        b.AppendLine($"        Field<G> guard, G expected, System.Action<{rec}KayaPatchIf> changes) =>");
+        b.AppendLine($"        c.PatchIf(tx, key, guard, expected, p => changes(new {rec}KayaPatchIf(p)));");
         b.AppendLine();
         b.AppendLine("    /// <summary>The record template, expression form: the body runs");
         b.AppendLine("    /// once, authoring the blueprint with the typed row surface");
@@ -567,6 +575,9 @@ static class Program
         Set("SetColumnsAuto", ["Node n", "double minWidth"], "n, minWidth");
         Set("SetWrap", ["Node n", "bool on"], "n, on");
         Set("SetFit", ["Node n", "Fit fit"], "n, fit");
+        Set("SetPhase", ["Node n", "ImagePhase phase"], "n, phase");
+        Set("SetPhase", ["Node n", "Signal s"], "n, s");
+        Set("SetPhase", ["Node n", "Field<ImagePhase> f", "uint level = 0"], "n, f, level");
         Set("SetAspect", ["Node n", "int width", "int height"], "n, width, height");
         // Fwd leaves a trailing blank line; the class brace closes on it.
         b.Length -= System.Environment.NewLine.Length;
@@ -623,6 +634,22 @@ static class Program
         {
             b.AppendLine();
             b.AppendLine($"    public {rec}KayaPatch {f.name}({f.type} v)");
+            b.AppendLine("    {");
+            b.AppendLine($"        p.Set({rec}Kaya.{f.name}, v);");
+            b.AppendLine("        return this;");
+            b.AppendLine("    }");
+        }
+        b.AppendLine("}");
+        b.AppendLine();
+        b.AppendLine($"sealed class {rec}KayaPatchIf");
+        b.AppendLine("{");
+        b.AppendLine($"    readonly RecordPatchIf<{rec}> p;");
+        b.AppendLine();
+        b.AppendLine($"    internal {rec}KayaPatchIf(RecordPatchIf<{rec}> p) => this.p = p;");
+        foreach (var f in fields)
+        {
+            b.AppendLine();
+            b.AppendLine($"    public {rec}KayaPatchIf {f.name}({f.type} v)");
             b.AppendLine("    {");
             b.AppendLine($"        p.Set({rec}Kaya.{f.name}, v);");
             b.AppendLine("        return this;");

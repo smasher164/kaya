@@ -31,6 +31,22 @@ func (p threadPatchBuilder) Title(v string) threadPatchBuilder {
 	return p
 }
 
+// ThreadPatchIf is ThreadPatch made only while the entry exists and the
+// guard's field still holds expected; otherwise nothing, and no panic
+// (docs/network-images-plan.md N7). The chain is one record.
+func ThreadPatchIf[V comparable](c kaya.RecordCollection[string, Thread], tx *kaya.Tx, key string, guard func(*Thread) *V, expected V) threadPatchIfBuilder {
+	return threadPatchIfBuilder{c.PatchIf(tx, key, guard, expected)}
+}
+
+type threadPatchIfBuilder struct {
+	p kaya.RecordPatchIf[string, Thread]
+}
+
+func (p threadPatchIfBuilder) Title(v string) threadPatchIfBuilder {
+	p.p.Set(func(t *Thread) *string { return &t.Title }, v)
+	return p
+}
+
 // The row surface: one token per wire field, and the template
 // constructors that consume them.
 type threadRow struct {
@@ -127,8 +143,10 @@ func (r threadRow) SetMax(n kaya.Node, max float64) { r.t.SetMax(n, max) }
 
 func (r threadRow) SetAlpha(n kaya.Node, on bool) { r.t.SetAlpha(n, on) }
 
-func (r threadRow) SetFit(n kaya.Node, fit kaya.Fit)         { r.t.SetFit(n, fit) }
-func (r threadRow) SetAspect(n kaya.Node, width, height int) { r.t.SetAspect(n, width, height) }
+func (r threadRow) SetFit(n kaya.Node, fit kaya.Fit)                     { r.t.SetFit(n, fit) }
+func (r threadRow) SetPhase(n kaya.Node, phase kaya.ImagePhase)          { r.t.SetPhase(n, phase) }
+func (r threadRow) BindPhase(n kaya.Node, f kaya.Field[kaya.ImagePhase]) { r.t.BindPhase(n, f) }
+func (r threadRow) SetAspect(n kaya.Node, width, height int)             { r.t.SetAspect(n, width, height) }
 
 func (r threadRow) SetMinGap(n kaya.Node, gap float64)          { r.t.SetMinGap(n, gap) }
 func (r threadRow) SetLowLabel(n kaya.Node, label string)       { r.t.SetLowLabel(n, label) }

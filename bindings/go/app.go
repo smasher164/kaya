@@ -277,6 +277,8 @@ type App struct {
 	media mediaState
 	// The captures' mirrors and handlers (capture.go).
 	capture captureState
+	// The network images' handlers and helpers (images.go).
+	images imageState
 	widgetTimes    map[uint64]func(*Tx, Time)
 	nodeTimes      map[uint64]func(*Tx, []any, Time)
 	// Window lifecycle: one handler each, receiving the window id.
@@ -661,6 +663,8 @@ type Tx struct {
 	// Captures released this transaction, whose callbacks the binding
 	// drops on commit (capture.go).
 	releasedCaptures []uint64
+	// A PatchIf chain still gathering its setters (images.go).
+	pendingIf *pendingPatchIf
 }
 
 type pendingDerived struct {
@@ -674,6 +678,7 @@ type pendingDerived struct {
 // through a Tx that outlived its Build vanishes silently otherwise.
 func (tx *Tx) emit(rec []byte) {
 	tx.alive()
+	tx.flushPatchIf()
 	tx.records = append(tx.records, rec)
 }
 
@@ -742,6 +747,7 @@ func (a *App) Build(fn func(*Tx)) {
 		tx.closed = true
 	}()
 	fn(tx)
+	tx.flushPatchIf()
 	committed = true
 	for _, p := range tx.pendingDerived {
 		a.derived[p.coll] = append(a.derived[p.coll], p.recompute)
@@ -4758,7 +4764,7 @@ func (r SectionRef) Title(title string) SectionRef {
 	return r
 }
 
-// Symbol is the semantic-icon vocabulary (SymbolAdd..SymbolMic),
+// Symbol is the semantic-icon vocabulary (SymbolAdd..SymbolImageMissing),
 // shared by SectionRef.Symbol, MenuItem.Symbol and Widget.Symbol.
 type Symbol int64
 
@@ -7093,6 +7099,8 @@ func (a *App) Serve() {
 			a.mediaOccurred(kind, id, keys, payload)
 		case captureOccurrence(kind):
 			a.captureOccurred(kind, id, payload)
+		case imageOccurrence(kind):
+			a.imageOccurred(kind, id, keys)
 		case kind == occDrawRequested || kind == occTick:
 			a.answerCanvasAsk(kind, id, keys, tail)
 		case kind == occButtonClicked && len(keys) == 0:

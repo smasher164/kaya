@@ -31,6 +31,22 @@ func (p framePatchBuilder) Name(v string) framePatchBuilder {
 	return p
 }
 
+// FramePatchIf is FramePatch made only while the entry exists and the
+// guard's field still holds expected; otherwise nothing, and no panic
+// (docs/network-images-plan.md N7). The chain is one record.
+func FramePatchIf[V comparable](c kaya.RecordCollection[string, Frame], tx *kaya.Tx, key string, guard func(*Frame) *V, expected V) framePatchIfBuilder {
+	return framePatchIfBuilder{c.PatchIf(tx, key, guard, expected)}
+}
+
+type framePatchIfBuilder struct {
+	p kaya.RecordPatchIf[string, Frame]
+}
+
+func (p framePatchIfBuilder) Name(v string) framePatchIfBuilder {
+	p.p.Set(func(t *Frame) *string { return &t.Name }, v)
+	return p
+}
+
 // The row surface: one token per wire field, and the template
 // constructors that consume them.
 type frameRow struct {
@@ -127,8 +143,10 @@ func (r frameRow) SetMax(n kaya.Node, max float64) { r.t.SetMax(n, max) }
 
 func (r frameRow) SetAlpha(n kaya.Node, on bool) { r.t.SetAlpha(n, on) }
 
-func (r frameRow) SetFit(n kaya.Node, fit kaya.Fit)         { r.t.SetFit(n, fit) }
-func (r frameRow) SetAspect(n kaya.Node, width, height int) { r.t.SetAspect(n, width, height) }
+func (r frameRow) SetFit(n kaya.Node, fit kaya.Fit)                     { r.t.SetFit(n, fit) }
+func (r frameRow) SetPhase(n kaya.Node, phase kaya.ImagePhase)          { r.t.SetPhase(n, phase) }
+func (r frameRow) BindPhase(n kaya.Node, f kaya.Field[kaya.ImagePhase]) { r.t.BindPhase(n, f) }
+func (r frameRow) SetAspect(n kaya.Node, width, height int)             { r.t.SetAspect(n, width, height) }
 
 func (r frameRow) SetMinGap(n kaya.Node, gap float64)          { r.t.SetMinGap(n, gap) }
 func (r frameRow) SetLowLabel(n kaya.Node, label string)       { r.t.SetLowLabel(n, label) }

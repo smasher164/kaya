@@ -16,6 +16,26 @@ went red 2 of 5 runs with `no such target image@art[t299]` and a table of
 empty rows on screen. Both scrolls now ask the clip itself
 (`constrainBoundsRect`, `kayaClipTop`): 5 of 5 green.
 
+## A cancelled HttpURLConnection keeps its socket (measured 2026-10-13)
+
+The Java row-image helper's default fetch (KayaRecords.RowImages.http; it is
+not java.net.http because android-36's android.jar has none) cancels by
+stopping its own read. Calling `disconnect()` from the cancelling thread
+BLOCKED that thread 3 s against the lane's /trickle/ route, and neither it,
+`InputStream.close()` nor a disconnect from the reading thread closed the
+socket: on a keep-alive response the JDK hands a half-read stream to its
+KeepAliveStreamCleaner, which drains it in the background, so the media
+server logged "closed by the client" only at JVM exit. Against a server that
+answers the request's `Connection: close` the same cancel closed the socket
+within 0.5 s. Two more measured limits shape the fetch: a read timeout set
+after `getResponseCode` never reaches the socket (0 timeouts over 0.6 s gaps),
+and a timeout during the header read poisons the connection, `getResponseCode`
+looping on the one request it sent. So the cancel completes the future at once,
+the reading thread stops at its next byte or after 10 s with none (OkHttp's
+default read timeout), and the request says `Connection: close`; whether the
+socket closes then is the server's answer. Go's context cancel closed it at
+once (3.0 s, the cancel's own moment).
+
 ## A blob signal could not be written (measured 2026-10-13)
 
 scene.rs's `check_type` matched the four scalar types and no Blob, so the
@@ -15995,3 +16015,82 @@ leg had passed only because 96 pt fit; the SwiftUI arm caps it the same way, and
 a probe forcing the cap to its floor read the field 96 -> 37 pt with every step
 green, but no lane's room reaches it. GUARD: tools/lib/safearea_routes.py's A20
 clauses, eleven cuts watched.
+
+## A Compose effect keyed on a node's fields, not the node, misses a restamped row (measured 2026-10-13)
+
+KayaRender composes a container's children BY POSITION, with no `key()`, so
+when a table restamps a row its new node can take a slot whose previous node
+had the same values for every key a `LaunchedEffect` named. The network image
+arm's decode door was first keyed on (content id, generation, box, density):
+on the netimage leg a retargeted row's restamped image kept the slot of a node
+with equal keys, the effect never relaunched, and `expect image@art[t298]`
+read 0x0 for fifteen seconds while the row's bytes sat in the model (bundle
+runs/20261013T204610Z-003603, step 40). Key every per-node effect on
+`node.id` as well. GUARD: tools/lib/netimage_compose.py, the cut "the door's
+effect not keyed on its node", watched red.
+
+## The OCaml guests' https is OpenSSL, and Lwt runs on one thread (measured 2026-10-13)
+
+nixpkgs builds conduit-lwt-unix 8.0.0 against lwt_ssl and WITHOUT tls-lwt: its
+conduit_lwt_tls.ml is the dummy, so `CONDUIT_TLS=native` fails every https
+fetch with `Failure "Tls not available"` while the default picks OpenSSL. That
+path verifies peer and host (expired.badssl.com and wrong.host.badssl.com
+refused, "certificate verify failed"), so the pins are cohttp-lwt-unix over
+lwt_ssl in both the flake and the linux image's opam, never tls-lwt. Lwt's
+scheduler is one per process and not thread-safe, while the row image helper
+calls the fetch from up to six of its own threads: guests/ocaml/netimage_http.ml
+runs ONE thread in `Lwt_main.run` and its blocking fetch enters it with
+`Lwt_preemptive.run_in_main`. GUARD: tools/check-pins.py's network client clause
+(the three versions, in both places).
+
+## GTK: a guest's transaction arriving inside a nested main-loop turn found CORE borrowed (measured 2026-10-13)
+
+`park_table_row` (scroll_to_row's park on GTK) iterates the main context with
+`MainContext::iteration` while it holds the CORE borrow, and the doorbell's idle
+borrowed CORE unconditionally. Harmless while N8's asks waited for the guest's
+next transaction; once the band report sent them at once (GTK's scroll reports
+had never sent the core's asks, so netimage_http, which writes nothing after
+setup, never fetched), the guest answered inside that nested turn and the
+process aborted with "RefCell already borrowed" in a C callback at netimage's
+`scroll_to_row t299`. The doorbell now drains through `drain_when_free`, which
+re-arms on a 10 ms timeout while CORE is borrowed. GUARD:
+tools/lib/netimage_gtk.py, the cuts "a band report's asks left queued" and "the
+doorbell borrowing CORE inside a nested turn", both watched red; the leg is the
+runtime negative.
+
+## ring on aarch64-pc-windows-msvc: the windows lane stopped building at the first ureq dev-dependency (measured 2026-10-13)
+
+deploy-win builds every scene with `--example`, which compiles every
+dev-dependency, so the Rust netimage guests' `ureq` brought ring 0.17 into the
+windows build. ring's build.rs swaps any compiler that is not clang for a bare
+`clang` on that target, while cargo-xwin's CFLAGS_aarch64_pc_windows_msvc are
+clang-cl's (`/imsvc DIR`) and the dev shell's `clang` is nix's wrapper, which
+adds `-fPIC`: `clang: error: no such file or directory: '/imsvc'`, `unsupported
+option '-fPIC'`. CC_aarch64_pc_windows_msvc does not help (cargo-xwin sets its
+own), the unwrapped clang still reads `/imsvc`, and XWIN_CROSS_COMPILER=clang
+keeps the wrapper and moves libsqlite3-sys to another sysroot. FIX:
+tools/winbuild/clang, first on PATH for deploy-win's two cargo builds only
+(`xwin_env`): a compile for that target runs the unwrapped clang with `/imsvc
+DIR` as `-isystem DIR` and no `-fPIC`; every other call is the shell's own
+clang. GUARD: the build itself, and deploy-win refuses naming both compilers
+when the shell lacks either.
+
+## Windows: a python guest in C:\kaya imports C:\kaya\select.py for the stdlib's select (measured 2026-10-13)
+
+The lane ships python guests flat into C:\kaya and python puts the script's
+directory first on sys.path, so the select scene's guest shadows the stdlib
+`select` that sockets need: urllib from a guest there failed every fetch
+(netimage_http_python, `errors: 16`) and passed from any other directory. On
+the mac and linux lanes `select` is built into the interpreter and cannot be
+shadowed. run_netimage_http_python.cmd runs `python -P`; a python guest that
+touches the network on Windows needs the same. GUARD: the leg (red twice
+without -P).
+
+## WinUI: a BitmapImage held only by its own SetSourceAsync never raises ImageOpened (measured 2026-10-13)
+
+The network images arm decodes into a fresh BitmapImage detached from any
+Image and swaps it in on ImageOpened (detached decoding works: measured). Held
+by nothing else, it never opened, while its failure still arrived through the
+IAsyncAction, so every picture read `loading` and every junk byte read
+`failed`. The arm keeps it as `decoding` until it installs. GUARD:
+tools/lib/netimage_winui.py, the cut "the decoding picture dropped".

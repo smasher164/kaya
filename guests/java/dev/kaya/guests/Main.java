@@ -64,6 +64,12 @@ public final class Main {
             case "table":
                 app = Table::app;
                 break;
+            case "netimage":
+                app = Netimage::app;
+                break;
+            case "netimage_http":
+                app = NetimageHttp::app;
+                break;
             case "feed":
                 app = Feed::app;
                 break;

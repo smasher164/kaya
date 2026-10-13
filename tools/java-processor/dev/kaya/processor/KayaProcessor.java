@@ -234,6 +234,8 @@ public final class KayaProcessor extends AbstractProcessor {
             case "dev.kaya.KayaApp.Color" -> "dev.kaya.KayaApp.Color";
             // docs/media-plan.md §7b.
             case "dev.kaya.KayaApp.Player" -> "dev.kaya.KayaApp.Player";
+            // docs/network-images-plan.md N2.
+            case "dev.kaya.KayaApp.ImagePhase" -> "dev.kaya.KayaApp.ImagePhase";
             default -> null;
         };
     }
@@ -302,6 +304,30 @@ public final class KayaProcessor extends AbstractProcessor {
         for (WireField f : fields) {
             w(b, "");
             w(b, "        Patch %s(%s v) {", f.name(), f.param());
+            w(b, "            p.set(%s, v);", upperSnake(f.name()));
+            w(b, "            return this;");
+            w(b, "        }");
+        }
+        w(b, "    }");
+        w(b, "");
+        w(b, "    /** patch made only while the entry exists and the guard's field");
+        w(b, "     * still holds expected; otherwise nothing, and no exception");
+        w(b, "     * (docs/network-images-plan.md N7). The chain is one record. */");
+        w(b, "    static <V> PatchIf patchIf(KayaApp.Tx tx, KayaRecords.Collection<%s, %s> c, %s key,",
+                key, recRef, key);
+        w(b, "            KayaRecords.Field<V> guard, V expected) {");
+        w(b, "        return new PatchIf(c.patchIf(tx, key, guard, expected));");
+        w(b, "    }");
+        w(b, "");
+        w(b, "    static final class PatchIf {");
+        w(b, "        private final KayaRecords.PatchIf<%s, %s> p;", key, recRef);
+        w(b, "");
+        w(b, "        PatchIf(KayaRecords.PatchIf<%s, %s> p) {", key, recRef);
+        w(b, "            this.p = p;");
+        w(b, "        }");
+        for (WireField f : fields) {
+            w(b, "");
+            w(b, "        PatchIf %s(%s v) {", f.name(), f.param());
             w(b, "            p.set(%s, v);", upperSnake(f.name()));
             w(b, "            return this;");
             w(b, "        }");

@@ -10,6 +10,7 @@ the decode size passes until two albums collide, and a phase read off the prop
 agrees with every write. A backend whose `depth_stub("netimage")` goes must
 take a row in BACKENDS."""
 
+import importlib
 import re
 
 from content_type_routes import flat
@@ -25,6 +26,14 @@ WINUI = "crates/kaya/src/winui/mod.rs"
 COMPOSE = "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
 STUBBED = {GTK: 'depth_stub("netimage")', WINUI: 'depth_stub("netimage")', COMPOSE: 'depthStub("netimage")'}
 BACKENDS = {SWIFT: "the SwiftUI arm"}
+# One module per widget backend's arm, each exporting REL, LABEL,
+# findings(text) -> [str] and CUTS [(label, pattern, replacement, want)].
+ARM_MODULES = {GTK: "netimage_gtk", WINUI: "netimage_winui", COMPOSE: "netimage_compose"}
+
+
+def arm_modules():
+    return {rel: importlib.import_module(name) for rel, name in ARM_MODULES.items()
+            if (ROOT / "tools/lib" / f"{name}.py").exists()}
 MODEL = r"node\.phase\b|node\.image\b|node\.imageFailed|node\.imagePending|node\.imageData"
 # (label, opener, what the block must hold, what it may never name)
 DOORS = [
@@ -53,7 +62,7 @@ DOORS = [
       "if id != 0, let held = kayaEncodedBytes.object(forKey: NSNumber(value: id)) {"], []),
     ("the boxed image", "private struct KayaImageBox: View {",
      ['if node.phase == imagePhaseFailed || (node.image == nil && node.imageFailed) {',
-      'Image(systemName: "photo")', '.onAppear { node.imageGlyphs += 1 }',
+      'Image(systemName: kayaSFSymbol(symbolImageMissing)!)', '.onAppear { node.imageGlyphs += 1 }',
       '.onAppear { kayaImageAppeared(node, "shown") }', 'KayaImageLook(node: node, word: "loading")'], []),
     ("the looks", "private struct KayaImageLook<Glyph: View>: View {",
      [".onAppear { kayaImageAppeared(node, word) }", ".onDisappear { kayaImageGone(node, word) }",
@@ -102,8 +111,12 @@ def arms(text, opener):
 
 
 def findings(sources, backends=None):
-    backends = BACKENDS if backends is None else backends
+    arms_held = arm_modules()
+    backends = {**BACKENDS, **{rel: m.LABEL for rel, m in arms_held.items()}} if backends is None else backends
     out = []
+    for rel, mod in arms_held.items():
+        if rel in backends:
+            out.extend(mod.findings(sources[rel]))
     swift = sources[SWIFT]
     for label, opener, needs, never in DOORS:
         found = (arms if opener.startswith("case ") else blocks)(swift, opener)
@@ -178,8 +191,8 @@ def run(g):
         ("undecodable bytes drawn empty", SWIFT,
          r"if node\.phase == imagePhaseFailed \|\| \(node\.image == nil && node\.imageFailed\) \{",
          "if node.phase == imagePhaseFailed {", "the boxed image lacks if node.phase == imagePhaseFailed ||"),
-        ("the failed look without its glyph", SWIFT, r'Image\(systemName: "photo"\)', 'Image(systemName: "")',
-         'the boxed image lacks Image(systemName: "photo")'),
+        ("the failed look without its glyph", SWIFT, r'Image\(systemName: kayaSFSymbol\(symbolImageMissing\)!\)',
+         'Image(systemName: "")', 'the boxed image lacks Image(systemName: kayaSFSymbol(symbolImageMissing)!)'),
         ("a label-less look announced", SWIFT, r"look\.accessibilityHidden\(true\)", "look",
          "the looks lacks look.accessibilityHidden(true)"),
         ("the phase read off the prop", SWIFT,
@@ -199,11 +212,16 @@ def run(g):
         ("the seed's rows needed before any report", SCENE, r"!row\.has_source && !seeded &&", "!row.has_source &&",
          "a seeded row waits for the first report"),
     ]
+    for rel, mod in arm_modules().items():
+        cuts.extend((label, rel, pattern, repl, want) for label, pattern, repl, want in mod.CUTS)
     for label, rel, pattern, repl, want in cuts:
         broken = g.doctor(f"netimage: {label}", sources[rel], pattern, repl)
         g.negative(f"netimage: {label}", lambda rel=rel, broken=broken: findings({**sources, rel: broken}),
                    want=want)
-    for rel in STUBBED:
+    for rel in [rel for rel in STUBBED if rel not in still]:
+        g.negative(f"netimage: {rel}'s row withheld", lambda: findings(sources, backends=BACKENDS),
+                   want=f"{rel} no longer stubs")
+    for rel in still:
         n = sources[rel].count(STUBBED[rel])
         broken = g.doctor(f"netimage: {rel}'s stubs gone without a row", sources[rel],
                           re.escape(STUBBED[rel]), "todo!()", want=n)

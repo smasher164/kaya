@@ -145,7 +145,9 @@ def generate(tmp):
                        "guests/swift/range.swift",
                        "guests/swift/tooltips.swift",
                        "guests/swift/richrows.swift",
-                       "guests/swift/media.swift"],
+                       "guests/swift/media.swift",
+                       "guests/swift/netimage.swift",
+                       "guests/swift/netimage_http.swift"],
                       env=env, check=False).returncode != 0:
         return 1
     return 0

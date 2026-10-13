@@ -16,6 +16,14 @@ static class ChoreTaskKaya
     public static ChoreTaskKayaPatch Patch(Tx tx, RecordCollection<ChoreTask> c, object key) =>
         new ChoreTaskKayaPatch(c.Patch(tx, key));
 
+    /// <summary>The guarded twin of Patch (docs/network-images-plan.md
+    /// N7): the named setters inside `changes` gather ONE record, made
+    /// only while the entry exists and its `guard` field still holds
+    /// `expected`. Answers whether the guard held.</summary>
+    public static bool PatchIf<G>(Tx tx, RecordCollection<ChoreTask> c, object key,
+        Field<G> guard, G expected, System.Action<ChoreTaskKayaPatchIf> changes) =>
+        c.PatchIf(tx, key, guard, expected, p => changes(new ChoreTaskKayaPatchIf(p)));
+
     /// <summary>The record template, expression form: the body runs
     /// once, authoring the blueprint with the typed row surface
     /// (exact-index tokens, no probes); stamping is the core's
@@ -479,6 +487,13 @@ sealed class ChoreTaskRow
 
     public void SetFit(Node n, Fit fit) => t.SetFit(n, fit);
 
+    public void SetPhase(Node n, ImagePhase phase) => t.SetPhase(n, phase);
+
+    public void SetPhase(Node n, Signal s) => t.SetPhase(n, s);
+
+    public void SetPhase(Node n, Field<ImagePhase> f, uint level = 0) =>
+        t.SetPhase(n, f, level);
+
     public void SetAspect(Node n, int width, int height) =>
         t.SetAspect(n, width, height);
 }
@@ -538,6 +553,25 @@ sealed class ChoreTaskKayaPatch
     }
 
     public ChoreTaskKayaPatch Due(System.DateOnly v)
+    {
+        p.Set(ChoreTaskKaya.Due, v);
+        return this;
+    }
+}
+
+sealed class ChoreTaskKayaPatchIf
+{
+    readonly RecordPatchIf<ChoreTask> p;
+
+    internal ChoreTaskKayaPatchIf(RecordPatchIf<ChoreTask> p) => this.p = p;
+
+    public ChoreTaskKayaPatchIf Name(string v)
+    {
+        p.Set(ChoreTaskKaya.Name, v);
+        return this;
+    }
+
+    public ChoreTaskKayaPatchIf Due(System.DateOnly v)
     {
         p.Set(ChoreTaskKaya.Due, v);
         return this;

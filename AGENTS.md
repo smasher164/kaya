@@ -477,6 +477,13 @@ in docs/deferred.md.
    (tools/lib/timecode_surface.py). check-verbs holds the native routes
    through the core and the drop-frame arithmetic's three watched cuts
    (tools/lib/timecode_routes.py; docs/number-field-plan.md §10).
+   AND THE NETWORK IMAGE SURFACE SINCE 2026-10-13
+   (tools/lib/netimage_surface.py; docs/network-images-plan.md N2, N7, N8,
+   N12): the phase type, `phase` in both zones, the conditional write, the
+   two realization handlers, the helper and the six default fetches, 75 rows
+   read out of each binding's own file, every fake name fired and every row
+   renamed in a copy and watched red, a withheld helper row and an empty
+   reader refused; tpl-surfaces holds `phase` in the template prop census.
    AND THE RICH TEXT SURFACE SINCE 2026-09-11, which neither half of
    this gate could see: `rich` is a WIDGET prop and the prop census
    reads WINDOW props and TEMPLATE props only, so nothing would have
@@ -1321,7 +1328,12 @@ in docs/deferred.md.
    may name Lwt, Eio, an effect handler, forkIO or an MVar, since a runtime
    under the sugar's name is what the carve-out forbids; five watched cuts.
    app.rs unit tests hold occurrence-loop reentry before posts or events,
-   including a manually polled nested future, and depth cleanup on every exit),
+   including a manually polled nested future, and depth cleanup on every exit.
+   THE ROW IMAGE HELPERS SINCE 2026-10-13 (docs/network-images-plan.md N7,
+   N12): C#'s and Swift's checks drive the conditional write's two drops
+   through the mirror, a foreign thread's write refused, and the helper's
+   coalescing, cap, release and cancellation, five watched cuts each; the Go,
+   Java, Python, JS, OCaml and Haskell twins run in their own test files),
    `tools/check-tx-liveness.py` (a transaction is usable only inside
    the build or handler that made it, on the app thread — the HANDLE
    bindings refuse a closed one at a single write chokepoint, the
@@ -1351,6 +1363,15 @@ in docs/deferred.md.
    held by tools/lib/caption_routes.py (27 routes, 33 watched negatives;
    docs/traps.md, GTK caption reads need the player clock and publication
    timeline).
+   The network image arms are held by tools/lib/netimage_routes.py and one
+   module per widget backend (netimage_gtk, netimage_winui,
+   netimage_compose): each decode inside its one off-main door, its late
+   result dropped by generation, the cache keyed on the content id and the
+   decode size and emptied under memory pressure, the failed glyph from the
+   symbol table, `expect_image_phase` reading what was drawn, and every band
+   report sending the core's asks (docs/network-images-plan.md N8-N15); 72
+   SwiftUI clauses and 73 cuts across the four arms, each watched red, and a
+   backend's row withheld refused.
    THE CANVAS VOCABULARIES JOINED 2026-08-26, and they are the reason
    the constant sweep now reads a TYPE as well as a prefix: draw_op,
    paint, fill_rule, text_align and text_baseline ride the op stream as
@@ -1778,6 +1799,11 @@ in docs/deferred.md.
    AND THE NETWORK IMAGES GUESTS' CLIENT SINCE 2026-10-13: `ureq` at one
    exact release and under [dev-dependencies] alone, since the binding
    carries no HTTP client (docs/network-images-plan.md N1, N12); two watched
+   negatives. The OCaml and Haskell guests' clients the same way:
+   cohttp-lwt-unix, conduit-lwt-unix and lwt_ssl, http-client-tls,
+   http-client and http-types, each at one version in flake.nix's pins, the
+   linux image's opam and apt lines and guests/haskell/cabal.project (which
+   reaches no Hackage), and no binding naming a client; twelve watched
    negatives.
    AND THE WINDOWS DOOR SINCE 2026-08-26, which is a curl and therefore
    invisible to the other four: tools/fetch-winappsdk.sh pulls five

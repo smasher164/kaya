@@ -466,6 +466,60 @@ with scratch_dir("check-abort-") as tmp:
     print("check-abort: self-test swift link-route negative refused, by its "
           "own sentence")
 
+    # The network images surface (tools/checks/swift-netimage/main.swift):
+    # the conditional write through the mirror, the wrong thread, the helper.
+    netimage_probe = str(ROOT / "tools/checks/swift-netimage/main.swift")
+
+    def netimage_build(sources, binary, log):
+        step(f"{binary.name}-build",
+             executor_compile + sources + [netimage_probe, "-o", str(binary)], log)
+
+    netimage_binary = tmp / "swift-netimage"
+    netimage_build(executor_sources, netimage_binary, tmp / "netimage-build.log")
+    got = probe_run([str(netimage_binary)], timeout=20)
+    print(got.stdout, end="")
+    if got.returncode != 0 or "swift-netimage: OK" not in got.stdout:
+        g.refuse(f"Swift netimage probe failed: {got.stdout}{got.stderr}")
+    got = probe_run([str(netimage_binary), "foreign"], timeout=20)
+    if got.returncode == 0 or "a transaction belongs to the app thread" not in got.stderr:
+        g.refuse(f"Swift netimage foreign-thread write was not refused: {got.stdout}{got.stderr}")
+    print("check-abort: Swift netimage foreign-thread write refused by name")
+    build_wall = ("    public func build<R>(_ build: (KayaAppTx) throws -> R) rethrows -> R {\n"
+                  "        KayaApp.requireAppThread()\n")
+    alive_wall = ("that created it; to mutate from a background thread use app.post\")\n"
+                  "        KayaApp.requireAppThread()\n")
+    for name, file, cuts, run_mode, expected in (
+        ("mirror-guard", "KayaImages.swift",
+         [("kayaSameWire(current[keyPath: `guard`], expected)", "true")], "all", "guard answers"),
+        # Both app-thread walls, the build's and the write chokepoint's.
+        ("foreign-thread", "KayaApp.swift",
+         [(build_wall, build_wall.replace("        KayaApp.requireAppThread()\n", "")),
+          (alive_wall, alive_wall.replace("        KayaApp.requireAppThread()\n", ""))],
+         "foreign", "conditional write from a foreign thread was not refused"),
+        ("coalesce", "KayaImages.swift", [("if waiting[wanted]!.count > 1 { return }", "")], "all",
+         "three rows sharing a URL"),
+        ("cap", "KayaImages.swift", [("running < Self.limit", "running < 64")], "all",
+         "six fetches start"),
+        ("cancel", "KayaImages.swift", [("inFlight.removeValue(forKey: u)?.task.cancel()",
+                                         "_ = inFlight.removeValue(forKey: u)")], "all",
+         "running fetch is cancelled"),
+    ):
+        shadow = tmp / f"netimage-{name}"
+        shutil.copytree(ROOT / "bindings/swift", shadow)
+        target = shadow / file
+        text = target.read_text(encoding="utf-8")
+        for before, after in cuts:
+            text = g.doctor(f"Swift netimage {name}", text, re.escape(before), after)
+        target.write_text(text, encoding="utf-8")
+        binary = tmp / f"netimage-{name}-bin"
+        netimage_build(sorted(map(str, shadow.glob("*.swift"))), binary,
+                       tmp / f"netimage-{name}-build.log")
+        got = probe_run([str(binary), run_mode], timeout=20)
+        if got.returncode == 0 or expected not in got.stdout + got.stderr:
+            g.refuse(f"Swift netimage {name} negative: rc={got.returncode}: "
+                     f"{got.stdout}{got.stderr}")
+        print(f"check-abort: Swift netimage {name} negative refused: {expected}")
+
     # Built UNCONDITIONALLY, like every arm here: an `[ -f ]` guard ran a
     # dll older than the edited binding and called it green (2026-08-22,
     # invariant 4). dotnet's incremental build makes it cheap.
@@ -488,6 +542,63 @@ with scratch_dir("check-abort-") as tmp:
     if "media-check: OK" not in (tmp / "cs-media.log").read_text(encoding="utf-8",
                                                                  errors="replace"):
         fail("csharp-media (exited 0 without its verdict)", tmp / "cs-media.log")
+    # The network images surface (guests/csharp/NetimageCheck.cs): the
+    # conditional write through the mirror, the wrong thread, the helper.
+    step("csharp-netimage",
+         ["dotnet", "exec", "guests/csharp/bin/Debug/net10.0/kaya-guests.dll"],
+         tmp / "cs-netimage.log", env=dict(ENV, KAYA_CHECK="netimage"),
+         echo="netimage-check:")
+    if "netimage-check: OK" not in (tmp / "cs-netimage.log").read_text(
+            encoding="utf-8", errors="replace"):
+        fail("csharp-netimage (exited 0 without its verdict)", tmp / "cs-netimage.log")
+    for name, rel, cuts, expected in (
+        ("mirror-guard", "KayaRecords.cs",
+         [("&& KayaRecords.SameWire(Info.FieldOfWire(current!, guard.Index), expected)", "")],
+         "guard answers"),
+        # Both app-thread walls, the Build's and the write chokepoint's.
+        ("foreign-thread", "KayaApp.cs",
+         [("RequireAppThread();\n        RequireSynchronousBuild(build);\n        using var tx",
+           "RequireSynchronousBuild(build);\n        using var tx"),
+          ("ObjectDisposedException.ThrowIf(disposed, this);\n        KayaApp.RequireAppThread();",
+           "ObjectDisposedException.ThrowIf(disposed, this);")],
+         "conditional write from a foreign thread was not refused"),
+        ("coalesce", "KayaImages.cs", [("if (rowsWaiting.Count > 1) return;", "")],
+         "three rows sharing a URL"),
+        ("cap", "KayaImages.cs", [("running < DefaultLimit", "running < 64")],
+         "three rows sharing a URL make one fetch and at most six run"),
+        ("cancel", "KayaImages.cs", [("if (inFlight.Remove(u, out var cts)) cts.Cancel();",
+                                      "inFlight.Remove(u, out _);")],
+         "running fetch is cancelled"),
+    ):
+        shadow = tmp / f"cs-netimage-{name}"
+        shadow.mkdir()
+        for src in sorted((ROOT / "bindings/csharp").glob("*.cs")):
+            text = src.read_text(encoding="utf-8")
+            if src.name == rel:
+                for before, after in cuts:
+                    text = g.doctor(f"C# netimage {name}", text, re.escape(before), after)
+            (shadow / src.name).write_text(text, encoding="utf-8")
+        for guest in ("NetimageCheck.cs", "NetimageScene.cs", "SongKaya.cs"):
+            shutil.copyfile(ROOT / "guests/csharp" / guest, shadow / guest)
+        (shadow / "Main.cs").write_text(
+            "static class MainCheck { static void Main() { NetimageCheck.Run(); } }",
+            encoding="utf-8")
+        (shadow / "netimage.csproj").write_text(
+            '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+            '<OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework>'
+            '<AllowUnsafeBlocks>true</AllowUnsafeBlocks><Nullable>enable</Nullable>'
+            '<ImplicitUsings>enable</ImplicitUsings></PropertyGroup></Project>',
+            encoding="utf-8")
+        step(f"csharp-netimage-{name}-build", ["dotnet", "build", "--nologo", "-v", "q",
+                                              str(shadow / "netimage.csproj")],
+             tmp / f"cs-netimage-{name}-build.log")
+        got = subprocess.run(["dotnet", "exec", str(shadow / "bin/Debug/net10.0/netimage.dll")],
+                             env=ENV, capture_output=True, text=True, encoding="utf-8",
+                             timeout=60, check=False)
+        said = got.stdout + got.stderr
+        if got.returncode != 1 or expected not in said:
+            g.refuse(f"C# netimage {name}: expected exit 1 naming {expected}: {said}")
+        print(f"check-abort: C# netimage {name} refused: {expected}")
 
     for name, before, after, expected in (
         ("ambient", "try { job(); }", "try { Build(_ => job()); }",

@@ -688,6 +688,25 @@ module Fit = struct
     | Fill -> Kaya_wire.fit_fill
 end
 
+(* docs/network-images-plan.md N2. *)
+module Image_phase = struct
+  type t = Shown | Loading | Failed
+
+  let wire = function
+    | Shown -> Kaya_wire.image_phase_shown
+    | Loading -> Kaya_wire.image_phase_loading
+    | Failed -> Kaya_wire.image_phase_failed
+
+  let of_wire n =
+    if n = Kaya_wire.image_phase_shown then Shown
+    else if n = Kaya_wire.image_phase_loading then Loading
+    else if n = Kaya_wire.image_phase_failed then Failed
+    else failwith (Printf.sprintf "kaya: image phase %d is not one this build knows" n)
+end
+
+let pack_image_phase p = Int64.of_int (Image_phase.wire p)
+let image_phase_of_packed n = Image_phase.of_wire (Int64.to_int n)
+
 (* What a credential field holds (docs/autofill-plan.md A2): the passwords
    on a secure field only, username, email and phone on an entry only, a
    one-time code on either (A3), refused at the root otherwise. [None]
@@ -1177,6 +1196,10 @@ type app = {
   undone_handlers : (int64, string -> undo_delta -> unit) Hashtbl.t;
   redone_handlers : (int64, string -> undo_delta -> unit) Hashtbl.t;
   node_toggles : (int64, Kaya_wire.value list -> bool -> unit) Hashtbl.t;
+  (* A loading template image's two realization reports
+     (docs/network-images-plan.md N8). *)
+  node_needed : (int64, Kaya_wire.value list -> unit) Hashtbl.t;
+  node_released : (int64, Kaya_wire.value list -> unit) Hashtbl.t;
   (* A stamped slider's move and a stamped choice's pick, the node flavor of
      [widget_values]. *)
   node_values : (int64, Kaya_wire.value list -> float -> unit) Hashtbl.t;
@@ -1383,6 +1406,8 @@ let create () =
     undone_handlers = Hashtbl.create 4;
     redone_handlers = Hashtbl.create 4;
     node_toggles = Hashtbl.create 8;
+    node_needed = Hashtbl.create 8;
+    node_released = Hashtbl.create 8;
     node_values = Hashtbl.create 8;
     widget_commits = Hashtbl.create 8;
     node_commits = Hashtbl.create 8;
@@ -1811,6 +1836,8 @@ module Scalar = struct
     | Date : date t
     | Time : time t
     | Color : color t
+    | Bytes : bytes t
+    | Image_phase : Image_phase.t t
 end
 
 let signal : type a. a Scalar.t -> a -> a signal =
@@ -1823,6 +1850,8 @@ let signal : type a. a Scalar.t -> a -> a signal =
   | Scalar.Date -> signal_of (fun d -> Kaya_wire.I64 (pack_date d)) initial
   | Scalar.Time -> signal_of (fun t -> Kaya_wire.I64 (pack_time t)) initial
   | Scalar.Color -> signal_of (fun c -> Kaya_wire.I64 (pack_color c)) initial
+  | Scalar.Bytes -> signal_of (fun d -> Kaya_wire.Blob (Kaya_runtime.register_blob d)) initial
+  | Scalar.Image_phase -> signal_of (fun p -> Kaya_wire.I64 (pack_image_phase p)) initial
 
 let write (s : 'a signal) (v : 'a) : unit =
   emit (the_tx ()) (Kaya_wire.tx_write_signal s.sig_id (s.sig_enc v))
@@ -2070,6 +2099,7 @@ type symbol =
   | Send
   | Attach
   | Mic
+  | ImageMissing
 
 let symbol_wire = function
   | Add -> Int64.of_int Kaya_wire.symbol_add
@@ -2096,6 +2126,7 @@ let symbol_wire = function
   | Send -> Int64.of_int Kaya_wire.symbol_send
   | Attach -> Int64.of_int Kaya_wire.symbol_attach
   | Mic -> Int64.of_int Kaya_wire.symbol_mic
+  | ImageMissing -> Int64.of_int Kaya_wire.symbol_image_missing
 
 (* An icon-only button (docs/composer-plan.md §2): the glyph in place of
    the title, which stays its accessible name. *)
@@ -2134,6 +2165,12 @@ let set_source_asset (Widget id) a =
 let bind_source (Widget id) (s : bytes signal) =
   let tx = the_tx () in
   emit tx (Kaya_wire.tx_bind_source id s.sig_id)
+
+let set_phase (Widget id) phase =
+  emit (the_tx ()) (Kaya_wire.tx_set_phase id (pack_image_phase phase))
+
+let bind_phase (Widget id) (s : Image_phase.t signal) =
+  emit (the_tx ()) (Kaya_wire.tx_bind_phase id s.sig_id)
 
 (* Drop an entry's content now (the field stays authoritative). *)
 let clear (Widget id) = emit (the_tx ()) (Kaya_wire.tx_widget_command id Kaya_wire.command_clear)
@@ -3264,7 +3301,7 @@ let time_picker ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind
    renders the placeholder, never a crash. [~source] ships the bytes and
    [~source_asset] names the picture instead (the bytes never enter the
    OCaml heap). The two are EXCLUSIVE. *)
-let image ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?source ?source_asset ?bind ?(bleed = false) () =
+let image ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?source ?source_asset ?bind ?fit ?phase ?phase_bind ?max_width ?max_height ?(bleed = false) () =
   let w = widget Kaya_wire.kind_image in
   Option.iter (fun g -> set_grow w g) grow;
   Option.iter (fun v -> set_fill w v) fill;
@@ -3278,6 +3315,11 @@ let image ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help 
    | None, Some a -> set_source_asset w a
    | None, None -> ());
   Option.iter (fun s -> bind_source w s) bind;
+  Option.iter (fun f -> set_fit w f) fit;
+  Option.iter (fun p -> set_phase w p) phase;
+  Option.iter (fun s -> bind_phase w s) phase_bind;
+  Option.iter (fun v -> set_max_width w v) max_width;
+  Option.iter (fun v -> set_max_height w v) max_height;
   declare_bleed w bleed;
   w
 
@@ -3730,6 +3772,9 @@ let time_field index : ('a, time) field =
 let blob_field index : ('a, bytes) field =
   { fd_index = index; fd_to_value = (fun d -> Kaya_wire.Str (Bytes.to_string d)) }
 
+let image_phase_field index : ('a, Image_phase.t) field =
+  { fd_index = index; fd_to_value = (fun p -> Kaya_wire.I64 (pack_image_phase p)) }
+
 (* A [document] field: a Blob slot whose bytes are the document's own
    wire list, so a stamped copy's document binds through the template
    zone as a string field does (docs/rich-text-plan.md §19). *)
@@ -3832,6 +3877,43 @@ let update_field rc (k : key) fd value =
        fd.fd_index 0
        (encode_field (List.nth rc.rc_type.rt_schema fd.fd_index) mv));
   recompute_derived tx rc.rc_handle.cid rc.rc_handle.cpath
+
+type change = Change of int * Kaya_wire.value
+
+let change (fd : (_, 'v) field) (v : 'v) = Change (fd.fd_index, fd.fd_to_value v)
+
+(* N7's conditional write (docs/network-images-plan.md): ONE record the
+   core checks against the model it commits to; the mirror takes the same
+   writes under the same guard, read from this transaction's view. *)
+let patch_if rc (k : key) ~(guard : (_, 'v) field) ~(equals : 'v) changes =
+  let tx = the_tx () in
+  let key = key_to_wire k in
+  let cid = rc.rc_handle.cid and path = rc.rc_handle.cpath in
+  let want = guard.fd_to_value equals in
+  let held =
+    match List.find_opt (fun i -> i.path = path) (instances_of tx.app cid) with
+    | Some i -> (
+        match List.assoc_opt key i.entries with
+        | Some (0, vs) when List.nth_opt vs guard.fd_index = Some want -> Some vs
+        | _ -> None)
+    | None -> None
+  in
+  (match held with
+  | Some vs ->
+      let updated =
+        List.fold_left
+          (fun vs (Change (at, v)) -> List.mapi (fun j x -> if j = at then v else x) vs)
+          vs changes
+      in
+      model_set tx cid path key 0 updated
+  | None -> ());
+  let tag at = List.nth rc.rc_type.rt_schema at in
+  emit tx
+    (Kaya_wire.tx_collection_patch_if cid path key guard.fd_index 0
+       (encode_field (tag guard.fd_index) want)
+       (List.map (fun (Change (at, _)) -> Kaya_wire.I64 (Int64.of_int at)) changes)
+       (List.map (fun (Change (at, v)) -> encode_field (tag at) v) changes));
+  if held <> None then recompute_derived tx cid path
 
 (* The typed model: what this guest wrote, in insertion order. *)
 let record_items rc : (key * 'a) list =
@@ -6073,9 +6155,18 @@ module Tpl = struct
   (* An image per stamped copy: [~source] gives every copy the same bytes,
      [~bind] a Blob signal, [~bind_field] each row's own (_, bytes)
      field — the per-row thumbnail. *)
+  let set_phase (Node id) p = emit (the_tx ()) (Kaya_wire.tx_set_phase id (pack_image_phase p))
+
+  let bind_phase (Node id) (s : Image_phase.t signal) =
+    emit (the_tx ()) (Kaya_wire.tx_bind_phase id s.sig_id)
+
+  let bind_phase_field ?(level = 0) (Node id) (fd : (_, Image_phase.t) field) =
+    emit (the_tx ()) (Kaya_wire.tx_bind_phase_element ~level ~field:fd.fd_index id)
+
   let image ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?source ?bind ?bind_field ?(level = 0)
-      ?(a11y_level = level) () =
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?source ?bind ?bind_field
+      ?fit ?phase ?phase_bind ?phase_field ?max_width ?max_height ?on_needed ?on_released
+      ?(level = 0) ?(a11y_level = level) () =
     let n = Floor.widget Kaya_wire.kind_image in
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Option.iter (fun v -> Floor.set_fill n v) fill;
@@ -6084,6 +6175,22 @@ module Tpl = struct
     Option.iter (fun data -> Floor.set_source n data) source;
     Option.iter (fun s -> Floor.bind_source n s) bind;
     Option.iter (fun fd -> Floor.bind_source_field ~level n fd) bind_field;
+    let (Node id) = n in
+    let tx = the_tx () in
+    Option.iter (fun f -> emit tx (Kaya_wire.tx_set_fit id (Int64.of_int (Fit.wire f)))) fit;
+    Option.iter (set_phase n) phase;
+    Option.iter (bind_phase n) phase_bind;
+    Option.iter (bind_phase_field ~level n) phase_field;
+    Option.iter (fun v -> Floor.set_max_width n v) max_width;
+    Option.iter (fun v -> Floor.set_max_height n v) max_height;
+    Option.iter
+      (fun handler ->
+        Hashtbl.replace tx.app.node_needed id (fun keys -> handler (List.map key_of_wire keys)))
+      on_needed;
+    Option.iter
+      (fun handler ->
+        Hashtbl.replace tx.app.node_released id (fun keys -> handler (List.map key_of_wire keys)))
+      on_released;
     n
 
   (* A video view per stamped copy (docs/media-plan.md §7b): [~bind_field]
@@ -7180,6 +7287,19 @@ let dispatch_loop app =
                | Some handler -> dispatch app (fun () -> handler keys text)
                | None -> ())
            | _ -> ()
+         else if
+           kind = Kaya_wire.occ_kind_image_needed
+           || kind = Kaya_wire.occ_kind_image_released
+         then
+           (match
+              ( Hashtbl.find_opt
+                  (if kind = Kaya_wire.occ_kind_image_needed then app.node_needed
+                   else app.node_released)
+                  id,
+                keys )
+            with
+           | Some handler, _ :: _ -> dispatch app (fun () -> handler keys)
+           | _ -> ())
          else if kind = Kaya_wire.occ_kind_toggled then
            match (payload, keys) with
            | Some (Kaya_wire.Bool checked), [] ->
@@ -7496,3 +7616,210 @@ let run app =
   let code = Kaya_runtime.run () in
   Thread.join app_thread;
   code
+
+(* N12's helper (docs/network-images-plan.md), crates/kaya/src/app/images.rs
+   in OCaml: a row's picture fetched when the core says the row needs it,
+   on the binding's own workers, written back through [post] with one
+   conditional write guarded on the row's url. The app hands over the
+   fetch; this binding carries no client. *)
+module Row_images = struct
+  type 'a t = {
+    app : app;
+    rows : 'a record_collection;
+    url : (unit, string) field;
+    art : (unit, bytes) field;
+    phase : (unit, Image_phase.t) field;
+    fetch : string -> (bytes, string) result;
+    lock : Mutex.t;
+    mutable queue : string list;
+    (* The rows waiting on each URL queued or in flight. *)
+    waiting : (string, Kaya_wire.value list list) Hashtbl.t;
+    mutable workers : int;
+    cache : (string, bytes * int) Hashtbl.t;
+    mutable cached : int;
+    mutable tick : int;
+    mutable on_error : (key list -> string -> unit) option;
+  }
+
+  let limit = 6
+  let budget = 32 lsl 20
+
+  let retype (fd : (_, 'v) field) : (unit, 'v) field =
+    { fd_index = fd.fd_index; fd_to_value = fd.fd_to_value }
+
+  let create app rows ~url ~art ~phase ~fetch =
+    {
+      app;
+      rows;
+      url = retype url;
+      art = retype art;
+      phase = retype phase;
+      fetch;
+      lock = Mutex.create ();
+      queue = [];
+      waiting = Hashtbl.create 16;
+      workers = 0;
+      cache = Hashtbl.create 16;
+      cached = 0;
+      tick = 0;
+      on_error = None;
+    }
+
+  (* Run on the app thread inside the transaction that writes [failed]. *)
+  let on_error t f = t.on_error <- Some f
+
+  let locked t f =
+    Mutex.lock t.lock;
+    Fun.protect ~finally:(fun () -> Mutex.unlock t.lock) f
+
+  let cache_get t url =
+    match Hashtbl.find_opt t.cache url with
+    | Some (bytes, _) ->
+        t.tick <- t.tick + 1;
+        Hashtbl.replace t.cache url (bytes, t.tick);
+        Some bytes
+    | None -> None
+
+  let cache_put t url bytes =
+    t.tick <- t.tick + 1;
+    (match Hashtbl.find_opt t.cache url with
+    | Some (old, _) -> t.cached <- t.cached - Bytes.length old
+    | None -> ());
+    Hashtbl.replace t.cache url (bytes, t.tick);
+    t.cached <- t.cached + Bytes.length bytes;
+    while t.cached > budget && Hashtbl.length t.cache > 1 do
+      let oldest, _ =
+        Hashtbl.fold
+          (fun k (_, used) (best, at) -> if used < at then (Some k, used) else (best, at))
+          t.cache (None, max_int)
+      in
+      match oldest with
+      | Some k ->
+          let gone, _ = Hashtbl.find t.cache k in
+          Hashtbl.remove t.cache k;
+          t.cached <- t.cached - Bytes.length gone
+      | None -> ()
+    done
+
+  (* The row's instance and its own key, out of a stamped copy's path. *)
+  let instance t path =
+    match List.rev path with
+    | key :: outer ->
+        Some
+          ( List.fold_left (fun rc k -> record_at rc (key_of_wire k)) t.rows (List.rev outer),
+            key_of_wire key )
+    | [] -> None
+
+  let write t rows url got =
+    let instances = List.filter_map (fun path -> Option.map (fun i -> (i, path)) (instance t path)) rows in
+    let on_error = t.on_error in
+    post t.app (fun () ->
+        List.iter
+          (fun ((rc, key), path) ->
+            let changes =
+              match got with
+              | Ok bytes -> [ change t.art bytes; change t.phase Image_phase.Shown ]
+              | Error _ -> [ change t.phase Image_phase.Failed ]
+            in
+            patch_if rc key ~guard:t.url ~equals:url changes;
+            match (got, on_error) with
+            | Error why, Some f -> f (List.map key_of_wire path) why
+            | _ -> ())
+          instances)
+
+  let rec work t =
+    let next =
+      locked t (fun () ->
+          match t.queue with
+          | url :: rest ->
+              t.queue <- rest;
+              Some url
+          | [] ->
+              t.workers <- t.workers - 1;
+              None)
+    in
+    match next with
+    | None -> ()
+    | Some url ->
+        let got = try t.fetch url with e -> Error (Printexc.to_string e) in
+        let rows =
+          locked t (fun () ->
+              (match got with Ok bytes -> cache_put t url bytes | Error _ -> ());
+              let rows = Option.value ~default:[] (Hashtbl.find_opt t.waiting url) in
+              Hashtbl.remove t.waiting url;
+              rows)
+        in
+        if rows <> [] then write t rows url got;
+        work t
+
+  (* [Tpl.image ~on_needed]: fetch this row's picture. *)
+  let needed t keys =
+    let path = List.map key_to_wire keys in
+    match instance t path with
+    | None -> ()
+    | Some (rc, key) -> (
+        let tx = the_tx () in
+        let url =
+          match
+            List.find_opt (fun i -> i.path = rc.rc_handle.cpath) (instances_of tx.app rc.rc_handle.cid)
+          with
+          | Some i -> (
+              match List.assoc_opt (key_to_wire key) i.entries with
+              | Some (_, vs) -> (
+                  match List.nth_opt vs t.url.fd_index with
+                  | Some (Kaya_wire.Str url) when url <> "" -> Some url
+                  | _ -> None)
+              | None -> None)
+          | None -> None
+        in
+        match url with
+        | None -> ()
+        | Some url ->
+            let hit, start =
+              locked t (fun () ->
+                  match cache_get t url with
+                  | Some bytes -> (Some bytes, false)
+                  | None ->
+                      let rows = Option.value ~default:[] (Hashtbl.find_opt t.waiting url) in
+                      Hashtbl.replace t.waiting url (rows @ [ path ]);
+                      if rows <> [] then (None, false)
+                      else begin
+                        t.queue <- t.queue @ [ url ];
+                        if t.workers < limit then begin
+                          t.workers <- t.workers + 1;
+                          (None, true)
+                        end
+                        else (None, false)
+                      end)
+            in
+            (match hit with Some bytes -> write t [ path ] url (Ok bytes) | None -> ());
+            if start then ignore (Thread.create work t))
+
+  (* [Tpl.image ~on_released]: a released row stops waiting, and a URL
+     nobody waits on any longer is not fetched. A fetch already running
+     finishes, and its write is guarded like every other. *)
+  let released t keys =
+    let path = List.map key_to_wire keys in
+    locked t (fun () ->
+        let emptied =
+          Hashtbl.fold
+            (fun url rows acc ->
+              let rows' = List.filter (fun p -> p <> path) rows in
+              Hashtbl.replace t.waiting url rows';
+              if rows' = [] then url :: acc else acc)
+            (Hashtbl.copy t.waiting) []
+        in
+        List.iter
+          (fun url ->
+            if List.mem url t.queue then begin
+              t.queue <- List.filter (fun u -> u <> url) t.queue;
+              Hashtbl.remove t.waiting url
+            end)
+          emptied)
+end
+
+(* What the dispatch loop does with posted work, for bindings/ocaml/checks
+   alone: a helper's completion arrives through [post]. *)
+module For_image_checks = struct
+  let drain_posted = drain_posted
+end

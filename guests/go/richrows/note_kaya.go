@@ -36,6 +36,27 @@ func (p notePatchBuilder) Body(v kaya.Document) notePatchBuilder {
 	return p
 }
 
+// NotePatchIf is NotePatch made only while the entry exists and the
+// guard's field still holds expected; otherwise nothing, and no panic
+// (docs/network-images-plan.md N7). The chain is one record.
+func NotePatchIf[V comparable](c kaya.RecordCollection[string, Note], tx *kaya.Tx, key string, guard func(*Note) *V, expected V) notePatchIfBuilder {
+	return notePatchIfBuilder{c.PatchIf(tx, key, guard, expected)}
+}
+
+type notePatchIfBuilder struct {
+	p kaya.RecordPatchIf[string, Note]
+}
+
+func (p notePatchIfBuilder) Title(v string) notePatchIfBuilder {
+	p.p.Set(func(t *Note) *string { return &t.Title }, v)
+	return p
+}
+
+func (p notePatchIfBuilder) Body(v kaya.Document) notePatchIfBuilder {
+	p.p.Set(func(t *Note) *kaya.Document { return &t.Body }, v)
+	return p
+}
+
 // The row surface: one token per wire field, and the template
 // constructors that consume them.
 type noteRow struct {
@@ -134,8 +155,10 @@ func (r noteRow) SetMax(n kaya.Node, max float64) { r.t.SetMax(n, max) }
 
 func (r noteRow) SetAlpha(n kaya.Node, on bool) { r.t.SetAlpha(n, on) }
 
-func (r noteRow) SetFit(n kaya.Node, fit kaya.Fit)         { r.t.SetFit(n, fit) }
-func (r noteRow) SetAspect(n kaya.Node, width, height int) { r.t.SetAspect(n, width, height) }
+func (r noteRow) SetFit(n kaya.Node, fit kaya.Fit)                     { r.t.SetFit(n, fit) }
+func (r noteRow) SetPhase(n kaya.Node, phase kaya.ImagePhase)          { r.t.SetPhase(n, phase) }
+func (r noteRow) BindPhase(n kaya.Node, f kaya.Field[kaya.ImagePhase]) { r.t.BindPhase(n, f) }
+func (r noteRow) SetAspect(n kaya.Node, width, height int)             { r.t.SetAspect(n, width, height) }
 
 func (r noteRow) SetMinGap(n kaya.Node, gap float64)          { r.t.SetMinGap(n, gap) }
 func (r noteRow) SetLowLabel(n kaya.Node, label string)       { r.t.SetLowLabel(n, label) }

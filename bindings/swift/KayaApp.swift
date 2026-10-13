@@ -586,6 +586,7 @@ public enum KayaSymbol: Int64 {
     case send = 22
     case attach = 23
     case mic = 24
+    case image_missing = 25
 }
 
 public struct KayaWidget {
@@ -2616,6 +2617,8 @@ public final class KayaApp {
     let media = KayaMediaState()
     let readers = KayaReaderState()
     let captures = KayaCaptureMirror()
+    /// The network images' two row handlers and the helpers' feeds (KayaImages.swift).
+    let images = KayaImageState()
     var fileDialogs: [UInt64: (KayaAppTx, [KayaPickedFile]) throws -> Void] = [:]
     // Clipboard reads: one-shot, keyed by request id, on the alert's
     // request/result grammar.
@@ -3687,6 +3690,9 @@ public final class KayaApp {
                 continue
             }
             if captureOccurrence(kind, id, payload, tail, { h in self.dispatch { try self.build(h) } }) {
+                continue
+            }
+            if imageOccurrence(kind, id, keys, { h in self.dispatch { try self.build(h) } }) {
                 continue
             }
             var text: String?
@@ -5202,13 +5208,23 @@ public final class KayaAppTx {
     /// An image displaying encoded bytes (PNG, JPEG, ...). Decode failure
     /// renders the placeholder, never a crash.
     @discardableResult
+    ///
+    /// An image the app fetches declares its box, `fit` with both bounds,
+    /// and its `phase` (docs/network-images-plan.md N2, N3); a phase that
+    /// follows a signal is `setPhase(image, signal)`.
     public func image(
-        _ source: Data? = nil, bind: KayaSignal? = nil, grow: Double? = nil
+        _ source: Data? = nil, bind: KayaSignal? = nil, grow: Double? = nil,
+        fit: KayaFit? = nil, maxWidth: Double? = nil, maxHeight: Double? = nil,
+        phase: KayaImagePhase? = nil
     ) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_IMAGE))
         if let source { setSource(w, source) }
         if let bind { bindSource(w, bind) }
         if let grow { setGrow(w, grow) }
+        if let fit { tx.setFit(w.id, fit.rawValue) }
+        if let maxWidth { setMaxWidth(w, maxWidth) }
+        if let maxHeight { setMaxHeight(w, maxHeight) }
+        if let phase { setPhase(w, phase) }
         return w
     }
 
@@ -5639,6 +5655,20 @@ public final class KayaAppTx {
         app.modelSet(c.id, c.path, key, model)
         tx.collectionUpdateField(c.id, c.path, key, field, variant, value)
         recomputeDerived(c)
+    }
+
+    /// N7's record. `model` is the entry with the changes applied when the
+    /// mirror's guard held, nil when it did not, so the mirror takes the same
+    /// writes under the same guard.
+    func patchIfRaw(
+        _ c: KayaCollection, _ key: KayaValue, _ model: Any?, _ variant: UInt32,
+        _ guardField: UInt32, _ guardValue: KayaValue, _ fields: [UInt32], _ values: [KayaValue]
+    ) {
+        if let model { app.modelSet(c.id, c.path, key, model) }
+        tx.collectionPatchIf(
+            c.id, c.path, key, guardField, variant, guardValue,
+            fields.map { .i64(Int64($0)) }, values)
+        if model != nil { recomputeDerived(c) }
     }
 
     // The raw read every typed surface funnels through — guarded once.
@@ -6564,6 +6594,25 @@ public final class KayaTpl {
     /// A stamped image's bound (KayaTx.setMaxWidth, KayaTx.setMaxHeight).
     public func setMaxWidth(_ n: KayaNodeHandle, _ points: Double) {
         tx.tx.setMaxWidth(n.id, points)
+    }
+
+    /// How every stamped copy's boxed image or video view places its picture.
+    public func setFit(_ n: KayaNodeHandle, _ fit: KayaFit) {
+        tx.tx.setFit(n.id, fit.rawValue)
+    }
+
+    /// Every stamped copy's image phase: one for all, a signal, or the row's
+    /// own KayaImagePhase field (docs/network-images-plan.md N2).
+    public func setPhase(_ n: KayaNodeHandle, _ phase: KayaImagePhase) {
+        tx.tx.setPhase(n.id, phase.rawValue)
+    }
+
+    public func setPhase(_ n: KayaNodeHandle, _ s: KayaSignal) {
+        tx.tx.bindPhase(n.id, s.id)
+    }
+
+    public func setPhase(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<KayaImagePhase>) {
+        tx.tx.bindPhaseElement(n.id, level: level, field: f.index)
     }
 
     public func setMaxHeight(_ n: KayaNodeHandle, _ points: Double) {
@@ -7544,10 +7593,16 @@ public final class KayaTpl {
         return n
     }
 
+    /// `fit` and `phase` are the network image's box and the row's own
+    /// ImagePhase field (docs/network-images-plan.md N2, N3).
     @discardableResult
-    public func image(_ f: KayaField<Data>) -> KayaNodeHandle {
+    public func image(
+        _ f: KayaField<Data>, fit: KayaFit? = nil, phase: KayaField<KayaImagePhase>? = nil
+    ) -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_IMAGE))
         bindSourceField(n, f)
+        if let fit { setFit(n, fit) }
+        if let phase { setPhase(n, phase) }
         return n
     }
 

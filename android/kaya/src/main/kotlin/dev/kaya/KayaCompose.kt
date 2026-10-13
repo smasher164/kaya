@@ -27,6 +27,16 @@ import android.content.res.Configuration
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
+import android.util.LruCache
+import android.content.ComponentCallbacks2
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.unit.IntSize
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.compose.ui.semantics.role
 import android.graphics.Canvas
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
@@ -123,6 +133,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
@@ -663,11 +674,24 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     /** What the colour picker's swatch DREW, RRGGBBAA, stamped by its
      * composable: `expect_color`'s reading, [pickerPresented]'s rule. */
     @Volatile var colorPresented = ""
-    // The image slot: the decoded bitmap (null is the placeholder
-    // class) and its size as the harness's "WxH" observation string
-    // ("0x0" before a source lands or after a failed decode).
-    var imageBitmap by mutableStateOf<ImageBitmap?>(null)
+    // The image slot: the decoded picture (null is the placeholder
+    // class) and its natural size as the harness's "WxH" observation
+    // string ("0x0" before a source lands or after a failed decode).
+    // The bytes, their content id and the generation feed the one decode
+    // door, kayaServePicture (docs/network-images-plan.md N9, N10).
+    var picture by mutableStateOf<KayaPicture?>(null)
     var imageSize by mutableStateOf("0x0")
+    var phase by mutableLongStateOf(0L)
+    var fitDeclared by mutableStateOf(false)
+    var imageFailed by mutableStateOf(false)
+    var imagePending by mutableStateOf(false)
+    var imageGen by mutableIntStateOf(0)
+    var imageData: ByteArray? = null
+    var imageContentId = 0L
+    // What the arm composed, for expect_image_phase (kayaImagePhaseRead).
+    val imageMounts = HashMap<String, Int>()
+    var imageDrawn = ""
+    var imageGlyphs = 0
     // The canvas slot (docs/canvas-plan.md §8): the core's raster as an
     // ImageBitmap, and the scale it was drawn at — device pixels over
     // this number is the drawing's size in dp.
@@ -2028,6 +2052,282 @@ internal val kayaTextRects = HashMap<Long, androidx.compose.ui.geometry.Rect>()
  * `expect_image_size` (docs/photo-attach-plan.md §5). */
 internal val kayaImageDrawn = HashMap<Long, Pair<Float, Float>>()
 
+/** A decoded picture: the bitmap at its decode size, the source's natural
+ * size from its header, the decode's longer side and its bytes in memory. */
+class KayaPicture(
+    val bitmap: ImageBitmap,
+    val naturalWidth: Int,
+    val naturalHeight: Int,
+    val pixels: Int,
+    val cost: Int,
+)
+
+/** A picture drawn at its NATURAL size whatever size it was decoded at, so
+ * no layout reads the decode size (docs/network-images-plan.md N9). */
+internal class KayaPicturePainter(private val picture: KayaPicture) : Painter() {
+    override val intrinsicSize = Size(picture.naturalWidth.toFloat(), picture.naturalHeight.toFloat())
+
+    private val bitmap = BitmapPainter(picture.bitmap)
+
+    override fun DrawScope.onDraw() {
+        with(bitmap) { draw(size) }
+    }
+}
+
+/** THE IMAGE DECODE, pure and safe on any thread: the natural size from the
+ * header, and pixels no larger than `target(width, height)` on the longer
+ * side. Null for bytes that do not decode, never a crash. */
+internal fun kayaDecodePicture(data: ByteArray, target: (Int, Int) -> Int): KayaPicture? = try {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        var wide = 0
+        var tall = 0
+        var pixels = 0
+        val bitmap = ImageDecoder.decodeBitmap(ImageDecoder.createSource(java.nio.ByteBuffer.wrap(data))) { decoder, info, _ ->
+            wide = info.size.width
+            tall = info.size.height
+            val long = maxOf(wide, tall)
+            pixels = minOf(long, maxOf(1, target(wide, tall)))
+            if (pixels < long) {
+                decoder.setTargetSize(
+                    maxOf(1, Math.round(wide.toDouble() * pixels / long).toInt()),
+                    maxOf(1, Math.round(tall.toDouble() * pixels / long).toInt()),
+                )
+            }
+            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+        }
+        KayaPicture(bitmap.asImageBitmap(), wide, tall, pixels, bitmap.allocationByteCount)
+    } else {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(data, 0, data.size, bounds)
+        val wide = bounds.outWidth
+        val tall = bounds.outHeight
+        if (wide <= 0 || tall <= 0) {
+            null
+        } else {
+            val long = maxOf(wide, tall)
+            val pixels = minOf(long, maxOf(1, target(wide, tall)))
+            var sample = 1
+            while (long / (sample * 2) >= pixels) sample *= 2
+            BitmapFactory.decodeByteArray(data, 0, data.size, BitmapFactory.Options().apply { inSampleSize = sample })
+                ?.let { KayaPicture(it.asImageBitmap(), wide, tall, pixels, it.allocationByteCount) }
+        }
+    }
+} catch (e: java.io.IOException) {
+    null
+} catch (e: IllegalArgumentException) {
+    null
+}
+
+/** The longer side in pixels an image is drawn at: its declared box placed
+ * by `fit`, else the bounds it is shrunk into (an unboxed picture draws one
+ * pixel per natural pixel), times the density for a box. */
+internal fun kayaPictureTarget(wide: Int, tall: Int, maxWidth: Double, maxHeight: Double, fit: Long?, density: Float): Int {
+    val sx = maxWidth * density / wide
+    val sy = maxHeight * density / tall
+    val s = if (fit != null && maxWidth > 0 && maxHeight > 0) {
+        if (fit == 0L) minOf(sx, sy) else maxOf(sx, sy)
+    } else {
+        minOf(1.0, if (maxWidth > 0) sx else 1.0, if (maxHeight > 0) sy else 1.0)
+    }
+    return kotlin.math.ceil(maxOf(wide, tall) * s).toInt()
+}
+
+/** The decoded pictures, keyed by the bytes' content id and the decode size,
+ * least recently used out past two screens of pixels, emptied when the system
+ * asks for memory (kayaWatchMemory). UI thread only. */
+internal object KayaPictureCache {
+    data class Key(val id: Long, val pixels: Int)
+
+    private val entries: LruCache<Key, KayaPicture> by lazy {
+        val screen = android.content.res.Resources.getSystem().displayMetrics
+        object : LruCache<Key, KayaPicture>(2 * screen.widthPixels * screen.heightPixels * 4) {
+            override fun sizeOf(key: Key, value: KayaPicture) = value.cost
+        }
+    }
+
+    fun get(key: Key): KayaPicture? = entries.get(key)
+
+    fun put(key: Key, picture: KayaPicture) {
+        entries.put(key, picture)
+    }
+
+    fun empty() {
+        entries.evictAll()
+        kayaEncodedBytes.evictAll()
+    }
+}
+
+/** Encoded bytes by content id, so the pump does not copy what it holds. */
+internal val kayaEncodedBytes = object : LruCache<Long, ByteArray>(64 shl 20) {
+    override fun sizeOf(key: Long, value: ByteArray) = value.size
+}
+
+/** The natural size of each content id decoded so far, so a cache hit is
+ * found without reading the bytes again. UI thread only. */
+internal val kayaNaturalSizes = HashMap<Long, IntArray>()
+
+private var kayaMemoryWatched = false
+
+internal fun kayaWatchMemory(context: Context) {
+    if (kayaMemoryWatched) return
+    kayaMemoryWatched = true
+    context.registerComponentCallbacks(object : ComponentCallbacks2 {
+        override fun onTrimMemory(level: Int) {
+            @Suppress("DEPRECATION")
+            val running = level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW &&
+                level < ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN
+            if (running || level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) KayaPictureCache.empty()
+        }
+
+        override fun onConfigurationChanged(newConfig: Configuration) = Unit
+
+        @Deprecated("ComponentCallbacks2.onTrimMemory is the call", ReplaceWith(""))
+        override fun onLowMemory() = KayaPictureCache.empty()
+    })
+}
+
+internal fun kayaInstallPicture(node: KayaNode, picture: KayaPicture?, undecodable: Boolean) {
+    node.imagePending = false
+    node.picture = picture
+    node.imageSize = if (picture != null) "${picture.naturalWidth}x${picture.naturalHeight}" else "0x0"
+    node.imageFailed = picture == null && undecodable
+}
+
+/** THE ONE DOOR an image's picture comes through (docs/network-images-plan.md
+ * N9): a picture the cache holds at this size is installed at once, anything
+ * else is decoded on Dispatchers.Default. Leaving composition cancels it, and
+ * the generation drops a decode whose image was given other bytes or another
+ * box since. */
+@Composable
+internal fun KayaPictureDoor(node: KayaNode) {
+    val density = LocalDensity.current.density
+    val gen = node.imageGen
+    LaunchedEffect(node.id, node.imageContentId, gen, node.maxWidth, node.maxHeight, node.fit, density) {
+        kayaServePicture(node, gen, density)
+    }
+}
+
+internal suspend fun kayaServePicture(node: KayaNode, gen: Int, density: Float) {
+    val data = node.imageData
+    if (data == null || data.isEmpty()) {
+        kayaInstallPicture(node, null, undecodable = false)
+        return
+    }
+    val id = node.imageContentId
+    val wide = node.maxWidth
+    val tall = node.maxHeight
+    val fit: Long? = if (node.fitDeclared) node.fit else null
+    val natural = if (id != 0L) kayaNaturalSizes[id] else null
+    if (natural != null) {
+        val long = maxOf(natural[0], natural[1])
+        val pixels = minOf(long, maxOf(1, kayaPictureTarget(natural[0], natural[1], wide, tall, fit, density)))
+        val hit = KayaPictureCache.get(KayaPictureCache.Key(id, pixels))
+        if (hit != null) {
+            kayaInstallPicture(node, hit, undecodable = false)
+            return
+        }
+    }
+    node.imagePending = true
+    val picture = withContext(Dispatchers.Default) {
+        kayaDecodePicture(data) { w, h -> kayaPictureTarget(w, h, wide, tall, fit, density) }
+    }
+    if (node.imageGen != gen) return
+    if (picture != null && id != 0L) {
+        kayaNaturalSizes[id] = intArrayOf(picture.naturalWidth, picture.naturalHeight)
+        KayaPictureCache.put(KayaPictureCache.Key(id, picture.pixels), picture)
+    }
+    kayaInstallPicture(node, picture, undecodable = picture == null)
+}
+
+/** An image that declared its box (N3) takes it in every phase. */
+internal fun kayaImageBoxed(node: KayaNode): Boolean =
+    node.fitDeclared && node.maxWidth > 0 && node.maxHeight > 0
+
+/** N4's glyph, Material's icon size, drawn only in a box at least twice it. */
+internal const val KAYA_FAILED_GLYPH = 24.0
+
+/** docs/network-images-plan.md N4, N13: a boxed image's look. Each look
+ * records itself as it is composed, so the harness reads what was drawn. */
+@Composable
+internal fun KayaImageBox(node: KayaNode, a11yTag: Modifier, label: String) {
+    val density = LocalDensity.current.density
+    val box = a11yTag.then(kayaFrame(node.id)).size(node.maxWidth.dp, node.maxHeight.dp)
+        .onGloballyPositioned { kayaImageDrawn[node.id] = Pair(it.size.width / density, it.size.height / density) }
+    val picture = node.picture
+    if (node.phase == KayaCompose.IMAGE_PHASE_FAILED || (picture == null && node.imageFailed)) {
+        KayaImageLook(node, "failed", box, label) {
+            if (minOf(node.maxWidth, node.maxHeight) >= 2 * KAYA_FAILED_GLYPH) {
+                Icon(
+                    KayaCompose.symbolIcon(KayaCompose.SYMBOL_IMAGE_MISSING)!!,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(KAYA_FAILED_GLYPH.dp),
+                )
+                DisposableEffect(node) {
+                    node.imageGlyphs += 1
+                    onDispose { node.imageGlyphs = maxOf(0, node.imageGlyphs - 1) }
+                }
+            }
+        }
+    } else if (picture != null) {
+        val painter = remember(picture) { KayaPicturePainter(picture) }
+        Image(
+            painter = painter,
+            contentDescription = label.ifEmpty { null },
+            contentScale = when (node.fit) {
+                FIT_COVER.toLong() -> ContentScale.Crop
+                FIT_FILL.toLong() -> ContentScale.FillBounds
+                else -> ContentScale.Fit
+            },
+            modifier = box.clipToBounds(),
+        )
+        KayaImageMounted(node, "shown")
+    } else if (node.phase == KayaCompose.IMAGE_PHASE_LOADING || node.imagePending) {
+        KayaImageLook(node, "loading", box, label) {}
+    } else {
+        Box(box)
+        KayaImageMounted(node, "empty")
+    }
+}
+
+/** The loading and failed looks: the box in Material 3's surfaceVariant, the
+ * glyph centred over it for failed. A label-less image is decorative in every
+ * phase; a labelled one keeps its name and its image role (N5). */
+@Composable
+private fun KayaImageLook(node: KayaNode, word: String, box: Modifier, label: String, glyph: @Composable () -> Unit) {
+    val named = if (label.isEmpty()) Modifier else Modifier.semantics {
+        contentDescription = label
+        role = Role.Image
+    }
+    Box(box.then(named).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
+        glyph()
+    }
+    KayaImageMounted(node, word)
+}
+
+/** Each look counts its mounts, so a look reads as drawn while any copy of
+ * it is composed, the newest first. */
+@Composable
+internal fun KayaImageMounted(node: KayaNode, word: String) {
+    DisposableEffect(node, word) {
+        node.imageMounts[word] = (node.imageMounts[word] ?: 0) + 1
+        node.imageDrawn = word
+        onDispose { node.imageMounts[word] = maxOf(0, (node.imageMounts[word] ?: 0) - 1) }
+    }
+}
+
+/** What a boxed or bare image composed, for expect_image_phase (N15):
+ * `shown`, `loading`, `failed` or `empty`; a failed look in a box with room
+ * for the glyph and no glyph composed reads as the defect it is. */
+internal fun kayaImagePhaseRead(node: KayaNode): String {
+    val mounted = node.imageMounts.filter { it.value > 0 }.keys
+    val drawn = if (node.imageDrawn in mounted) node.imageDrawn else mounted.sorted().firstOrNull() ?: return "nothing"
+    if (drawn == "failed" && node.imageGlyphs == 0 && minOf(node.maxWidth, node.maxHeight) >= 2 * KAYA_FAILED_GLYPH) {
+        return "failed without its glyph"
+    }
+    return drawn
+}
+
 /**
  * THE SECOND CLAUSE of `expect_no_clipping`: a widget whose bounds leave the
  * root across or down, except along the axis of a scroll that carries it
@@ -2278,7 +2578,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0xd695309e4a57ce9euL
+    private const val SPEC_HASH: ULong = 0x303cc490b4cb14fbuL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -2598,6 +2898,10 @@ object KayaCompose {
     private const val PROP_EXPANDED = 60
     private const val PROP_BLEED = 61
     private const val PROP_PHASE = 62
+    // The image_phase enum's wire values (docs/network-images-plan.md N2).
+    const val IMAGE_PHASE_SHOWN = 0L
+    const val IMAGE_PHASE_LOADING = 1L
+    const val IMAGE_PHASE_FAILED = 2L
     private const val FILE_CONTENT_IMAGES = 1
     private const val PROP_COLUMNS = 11
     // The accessibility identifier (never spoken) and label (spoken).
@@ -2668,6 +2972,7 @@ object KayaCompose {
     const val SYMBOL_SEND = 22L
     const val SYMBOL_ATTACH = 23L
     const val SYMBOL_MIC = 24L
+    const val SYMBOL_IMAGE_MISSING = 25L
 
     /**
      * THE MATERIAL COLUMN: (wire value, semantic name, glyph);
@@ -2701,6 +3006,7 @@ object KayaCompose {
         Triple(SYMBOL_SEND, "send", Icons.AutoMirrored.Filled.Send),
         Triple(SYMBOL_ATTACH, "attach", Icons.Default.AttachFile),
         Triple(SYMBOL_MIC, "mic", Icons.Default.Mic),
+        Triple(SYMBOL_IMAGE_MISSING, "image_missing", Icons.Default.BrokenImage),
     )
 
     /** The SEMANTIC NAME of a wire symbol value, or null for a value
@@ -3055,6 +3361,7 @@ object KayaCompose {
             activity.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
         }
         if (kayaAppContext == null) kayaAppContext = activity.applicationContext
+        kayaWatchMemory(activity.applicationContext)
         // PER WINDOW, so it runs on every attach: the background half is
         // a window-background write and a new window carries the manifest
         // theme's again (tools/check-appearance.py).
@@ -3449,8 +3756,8 @@ object KayaCompose {
                 // apply may run after that. Fetch every referenced blob
                 // here, on the pump thread, within the batch; the bytes
                 // travel with it.
-                val blobs = collectBlobs()
-                mainThread.post { apply(batch, blobs) }
+                val (blobs, ids) = collectBlobs()
+                mainThread.post { apply(batch, blobs, ids) }
             }
         }
     }
@@ -3461,18 +3768,31 @@ object KayaCompose {
      * whole truth, so no record layout decides what arrives (docs/traps.md:
      * A BLOB HANDLE DIES WITH ITS BATCH).
      */
-    private fun collectBlobs(): Map<Long, ByteArray> {
+    private fun collectBlobs(): Pair<Map<Long, ByteArray>, Map<Long, Long>> {
         val blobs = HashMap<Long, ByteArray>()
+        val ids = HashMap<Long, Long>()
         val count = KayaPresent.blobCount()
         var handle = 1L
         while (handle <= count) {
-            KayaPresent.blobData(handle)?.let { blobs[handle] = it }
+            // N10's skip: bytes this process already holds under the same
+            // content id are not copied out of the core again.
+            val id = KayaPresent.blobContentId(handle)
+            ids[handle] = id
+            val held = if (id != 0L) kayaEncodedBytes.get(id) else null
+            if (held != null) {
+                blobs[handle] = held
+            } else {
+                KayaPresent.blobData(handle)?.let {
+                    blobs[handle] = it
+                    if (id != 0L) kayaEncodedBytes.put(id, it)
+                }
+            }
             handle += 1
         }
-        return blobs
+        return Pair(blobs, ids)
     }
 
-    private fun apply(batch: ByteArray, blobs: Map<Long, ByteArray>) {
+    private fun apply(batch: ByteArray, blobs: Map<Long, ByteArray>, ids: Map<Long, Long>) {
         val b = ByteBuffer.wrap(batch).order(ByteOrder.LITTLE_ENDIAN)
         // THE BATCH'S DESTROYED IDS, AND THE PARENTS THAT HELD THEM —
         // detached once at the end rather than one by one. MEASURED
@@ -3609,10 +3929,14 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.maxLines = readF64(b).toInt()
                         PROP_SYMBOL ->
                             KayaSceneModel.nodes[id]!!.symbol = readI64(b)
-                        PROP_MAX_WIDTH ->
-                            KayaSceneModel.nodes[id]!!.maxWidth = readF64(b)
-                        PROP_MAX_HEIGHT ->
-                            KayaSceneModel.nodes[id]!!.maxHeight = readF64(b)
+                        PROP_MAX_WIDTH -> KayaSceneModel.nodes[id]!!.let { node ->
+                            node.maxWidth = readF64(b)
+                            if (node.kind == KIND_IMAGE) node.imageGen += 1
+                        }
+                        PROP_MAX_HEIGHT -> KayaSceneModel.nodes[id]!!.let { node ->
+                            node.maxHeight = readF64(b)
+                            if (node.kind == KIND_IMAGE) node.imageGen += 1
+                        }
                         PROP_COLOR -> KayaSceneModel.nodes[id]!!.color = readI64(b)
                         PROP_ALPHA -> KayaSceneModel.nodes[id]!!.alpha = readBool(b)
                         // An app write is also the settled pair and fires
@@ -3628,11 +3952,14 @@ object KayaCompose {
                         PROP_MIN_GAP -> KayaSceneModel.nodes[id]!!.minGap = readF64(b)
                         PROP_LOW_LABEL -> KayaSceneModel.nodes[id]!!.lowLabel = readString(b)
                         PROP_HIGH_LABEL -> KayaSceneModel.nodes[id]!!.highLabel = readString(b)
-                        PROP_FIT -> {
-                            if (KayaSceneModel.nodes[id]!!.kind == KIND_IMAGE) depthStub("netimage")
-                            KayaSceneModel.nodes[id]!!.fit = readI64(b)
+                        PROP_FIT -> KayaSceneModel.nodes[id]!!.let { node ->
+                            node.fit = readI64(b)
+                            if (node.kind == KIND_IMAGE) {
+                                node.fitDeclared = true
+                                node.imageGen += 1
+                            }
                         }
-                        PROP_PHASE -> depthStub("netimage")
+                        PROP_PHASE -> KayaSceneModel.nodes[id]!!.phase = readI64(b)
                         PROP_CONTENT_TYPE -> KayaSceneModel.nodes[id]!!.contentType = readI64(b)
                         PROP_REVEALED -> KayaSceneModel.nodes[id]!!.revealed = readBool(b)
                         PROP_REVEALABLE -> KayaSceneModel.nodes[id]!!.revealable = readBool(b)
@@ -3704,21 +4031,13 @@ object KayaCompose {
                         PROP_TICK_SPACING ->
                             KayaSceneModel.nodes[id]!!.tickSpacing = readF64(b)
                         PROP_SOURCE -> {
-                            // A null bitmap is the PLACEHOLDER class,
-                            // never a crash — imageSize stays "0x0".
+                            // The decode is the door's, off the UI thread
+                            // (kayaServePicture; docs/network-images-plan.md N9).
                             val handle = readBlobHandle(b)
                             val node = KayaSceneModel.nodes[id]!!
-                            val bytes = blobs[handle]
-                            val bitmap = bytes?.let {
-                                BitmapFactory.decodeByteArray(it, 0, it.size)
-                            }
-                            if (bitmap != null) {
-                                node.imageBitmap = bitmap.asImageBitmap()
-                                node.imageSize = "${bitmap.width}x${bitmap.height}"
-                            } else {
-                                node.imageBitmap = null
-                                node.imageSize = "0x0"
-                            }
+                            node.imageData = blobs[handle]
+                            node.imageContentId = ids[handle] ?: 0L
+                            node.imageGen += 1
                         }
                         else -> error("kaya: unknown prop $prop")
                     }
@@ -9789,7 +10108,19 @@ object KayaCompose {
                         if (picked == true) kayaAwaitAnswer(answered)
                         else failures.add("pick_emoji \"$emoji\": no emoji picker is open")
                     }
-                    "expect_image_phase" -> depthStub("netimage")
+                    "expect_image_phase" -> {
+                        // What the arm COMPOSED, never the phase prop
+                        // (docs/network-images-plan.md N15).
+                        val want = parts.getOrElse(2) { "" }
+                        val got = onUi(activity) {
+                            target(parts[1], "image", KayaSceneModel.images)?.let { kayaImagePhaseRead(it) }
+                        }
+                        when {
+                            got == null -> failures.add("no such target ${parts[1]}")
+                            got == want -> observed.add("phase $got")
+                            else -> failures.add("${parts[1]} drew $got, wanted $want")
+                        }
+                    }
                     "expect_image_size" -> {
                         // The DRAWN box in dp, never the bound the app declared.
                         val want = quoted(parts.drop(2))
@@ -16876,8 +17207,11 @@ private fun KayaRenderCore(
             // "decoration". A FAILED DECODE IS PRESENT AND EMPTY, NOT
             // ABSENT — emit nothing and everything counting children
             // POSITIONALLY reads the wrong one (tools/check-empty-child.py
-            // perturbs these two lines verbatim).
-            val bitmap = node.imageBitmap
+            // perturbs these two lines verbatim). The picture comes through
+            // its one door (KayaPictureDoor), and a boxed image takes its
+            // box in every phase (docs/network-images-plan.md N3, N4).
+            KayaPictureDoor(node)
+            val picture = node.picture
             val bounded = node.maxWidth > 0 || node.maxHeight > 0
             // docs/photo-attach-plan.md §2: a bound caps the box in dp, and
             // the painter keeps the picture's shape inside it; a picture
@@ -16889,9 +17223,9 @@ private fun KayaRenderCore(
             val density = LocalDensity.current.density
             // A BLED PICTURE spans its slot's width at its fit height, drawn
             // to fill (docs/safe-area-plan.md A3; the SwiftUI arm's slot).
-            val fit = bitmap?.let {
-                val w = it.width.toFloat()
-                val h = it.height.toFloat()
+            val fit = picture?.let {
+                val w = it.naturalWidth.toFloat()
+                val h = it.naturalHeight.toFloat()
                 val scale = minOf(
                     1f,
                     if (node.maxWidth > 0) node.maxWidth.toFloat() * density / w else 1f,
@@ -16899,9 +17233,12 @@ private fun KayaRenderCore(
                 )
                 androidx.compose.ui.geometry.Size(w * scale, h * scale)
             }
-            if (bitmap != null) {
+            if (!kayaImageBoxed(node) || node.bleed) KayaImageMounted(node, if (picture != null) "shown" else "empty")
+            if (kayaImageBoxed(node) && !node.bleed) {
+                KayaImageBox(node, a11yTag, node.a11yLabel.ifEmpty { a11yFallback })
+            } else if (picture != null) {
                 Image(
-                    bitmap = bitmap,
+                    painter = remember(picture) { KayaPicturePainter(picture) },
                     contentDescription = node.a11yLabel.ifEmpty { a11yFallback }.ifEmpty { null },
                     contentScale = if (node.bleed) ContentScale.Crop
                         else if (bounded) ContentScale.Fit else ContentScale.None,

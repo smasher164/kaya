@@ -47,6 +47,8 @@ SWIFT_ENTRIES = [
     "capture", "capture_denied:capture",
     "toast",
     "safearea",
+    # Network images (docs/network-images-plan.md §6).
+    "netimage", "netimage_http",
 ]
 
 # The go suite: the swift roster entry for entry minus the two
@@ -70,6 +72,7 @@ GO_SCENES = [
     "capture", "capture_denied",
     "toast",
     "safearea",
+    "netimage", "netimage_http",
 ]
 
 # CPython embedded in ONE bundle carrying every python scene

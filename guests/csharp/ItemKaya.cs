@@ -15,6 +15,14 @@ static class ItemKaya
     public static ItemKayaPatch Patch(Tx tx, RecordCollection<Item> c, object key) =>
         new ItemKayaPatch(c.Patch(tx, key));
 
+    /// <summary>The guarded twin of Patch (docs/network-images-plan.md
+    /// N7): the named setters inside `changes` gather ONE record, made
+    /// only while the entry exists and its `guard` field still holds
+    /// `expected`. Answers whether the guard held.</summary>
+    public static bool PatchIf<G>(Tx tx, RecordCollection<Item> c, object key,
+        Field<G> guard, G expected, System.Action<ItemKayaPatchIf> changes) =>
+        c.PatchIf(tx, key, guard, expected, p => changes(new ItemKayaPatchIf(p)));
+
     /// <summary>The record template, expression form: the body runs
     /// once, authoring the blueprint with the typed row surface
     /// (exact-index tokens, no probes); stamping is the core's
@@ -477,6 +485,13 @@ sealed class ItemRow
 
     public void SetFit(Node n, Fit fit) => t.SetFit(n, fit);
 
+    public void SetPhase(Node n, ImagePhase phase) => t.SetPhase(n, phase);
+
+    public void SetPhase(Node n, Signal s) => t.SetPhase(n, s);
+
+    public void SetPhase(Node n, Field<ImagePhase> f, uint level = 0) =>
+        t.SetPhase(n, f, level);
+
     public void SetAspect(Node n, int width, int height) =>
         t.SetAspect(n, width, height);
 }
@@ -530,6 +545,19 @@ sealed class ItemKayaPatch
     internal ItemKayaPatch(RecordPatch<Item> p) => this.p = p;
 
     public ItemKayaPatch Title(string v)
+    {
+        p.Set(ItemKaya.Title, v);
+        return this;
+    }
+}
+
+sealed class ItemKayaPatchIf
+{
+    readonly RecordPatchIf<Item> p;
+
+    internal ItemKayaPatchIf(RecordPatchIf<Item> p) => this.p = p;
+
+    public ItemKayaPatchIf Title(string v)
     {
         p.Set(ItemKaya.Title, v);
         return this;

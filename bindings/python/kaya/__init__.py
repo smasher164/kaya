@@ -224,6 +224,10 @@ def _wire_scalar(value: Any) -> Any:
         return wire.pack_time(value.hour, value.minute)
     if isinstance(value, Color):
         return value.hex()
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        # A signal of bytes is a live image's source; handles are
+        # single-submit, so every write registers its own.
+        return wire.BlobHandle(runtime.register_blob(value))
     return value
 
 
@@ -1003,9 +1007,14 @@ class Widget(_Handle):
             self.id, 0 if capture is None else capture.id))
 
     def fit(self, fit: Fit | str | int) -> None:
-        """Place this video view's picture in its box another way
-        (docs/media-plan.md §3)."""
+        """Place this video view's or image's picture in its box another
+        way (docs/media-plan.md §3)."""
         _records().append(wire.tx_set_fit(self.id, int(Fit(fit))))
+
+    def phase(self, phase: ImagePhase | str | Source) -> None:
+        """Say what this live image is waiting for now, or bind it to a
+        Signal (docs/network-images-plan.md N2)."""
+        _records().append(_phase_source(self, phase))
 
     def aspect(self, width: int, height: int) -> None:
         """Give this video view's box another width:height, whatever the
@@ -1561,11 +1570,21 @@ class _BoundCollection(Generic[T]):
         self._mirror()[key] = value
         self._recompute_derived()
 
-    def patch(self, key: Key, **fields: Any) -> None:
+    def patch(self, key: Key, /, *, when: Mapping[str, Any] | None = None,
+              **fields: Any) -> None:
         """Field-level deltas: `todos.patch(k, done=True)` sends one
         update_field per kwarg and mutates the model instance in place.
         On a sum the entry's CURRENT CONSTRUCTOR is the witness — a kwarg
-        it lacks raises here."""
+        it lacks raises here.
+
+        `when={"art_url": url}` makes it the CONDITIONAL write
+        (docs/network-images-plan.md N7): one record, applied only while
+        row `key` exists and that field still holds that value, and
+        otherwise nothing, with no error — a late result for a row that
+        was removed or has moved on drops."""
+        if when is not None:
+            self._patch_if(key, when, fields)
+            return
         entry = self._mirror()[key]
         variant, spec = self._owner._variant_for(entry)
         if spec.fields is None:
@@ -1584,6 +1603,40 @@ class _BoundCollection(Generic[T]):
             )
             setattr(entry, name, value)
         self._recompute_derived()
+
+    def _patch_if(self, key: Key, when: Mapping[str, Any],
+                  fields: Mapping[str, Any]) -> None:
+        if not isinstance(when, Mapping) or len(when) != 1:
+            raise KayaTypeError(
+                "kaya: when= names ONE field and the value it must still "
+                "hold — when={'art_url': url} (docs/network-images-plan.md N7)")
+        ((guard_name, guard_value),) = when.items()
+        owner = self._owner
+        names = [guard_name, *fields]
+        entry = self._mirror().get(key)
+        held = None if entry is None else owner._variant_for(entry)
+        shapes = ([held] if held is not None else []) + list(enumerate(owner._variants))
+        shape = next(((v, s) for v, s in shapes
+                      if s.fields is not None and all(n in s.fields for n in names)), None)
+        if shape is None:
+            raise KayaKeyError(
+                f"kaya: no record of this collection has every field "
+                f"{', '.join(repr(n) for n in names)} — a conditional patch "
+                "guards on one of the row's fields and writes others")
+        variant, spec = shape
+        assert spec.fields is not None
+        at = spec.fields[guard_name]
+        indices = [spec.fields[name] for name in fields]
+        _records().append(wire.tx_collection_patch_if(
+            owner._id, self._path, key, at, variant,
+            spec.encoders[at](guard_value), indices,
+            [spec.encoders[i](v) for i, v in zip(indices, fields.values())]))
+        holds = (entry is not None and held is not None and held[0] == variant
+                 and getattr(entry, guard_name) == guard_value)
+        if holds:
+            for name, value in fields.items():
+                setattr(entry, name, value)
+            self._recompute_derived()
 
     def move_before(self, key: Key, anchor: Key) -> None:
         """Reposition an entry before another's key. Keys, never indices;
@@ -4744,6 +4797,7 @@ class Symbol(enum.IntEnum):
     SEND = wire.SYMBOL_SEND
     ATTACH = wire.SYMBOL_ATTACH
     MIC = wire.SYMBOL_MIC
+    IMAGE_MISSING = wire.SYMBOL_IMAGE_MISSING
 
     @classmethod
     def _missing_(cls, value: object) -> Any:
@@ -5644,13 +5698,31 @@ def _bleed(handle: Widget, bleed: bool) -> None:
 
 
 def image(source: bytes | bytearray | memoryview | Asset | Source | None = None,
-          *, grow: float | None = None, bleed: bool = False) -> Widget:
+          *, phase: ImagePhase | str | Source | None = None,
+          fit: Fit | str | int | None = None,
+          on_needed: Handler | None = None,
+          on_released: Handler | None = None,
+          grow: float | None = None, bleed: bool = False) -> Widget:
     """An image displaying encoded bytes: the toolkit decodes natively,
     and a decode failure renders the placeholder, never a crash. `source`
     is encoded bytes, an `Asset`, a Signal, or an element field.
     `bleed=True` extends it to the window's edge on each side it touches
-    (docs/safe-area-plan.md A3), in the live zone only."""
+    (docs/safe-area-plan.md A3), in the live zone only.
+
+    `phase` says what it is waiting for (a constant, a Signal or the
+    row's ImagePhase field), and an image that can be LOADING or FAILED
+    declares its box: `fit` with `max_width` and `max_height`
+    (docs/network-images-plan.md N2, N3). In a template, `on_needed(row)`
+    hears that a copy was realized loading with no bytes and
+    `on_released(row)` that it went while still loading (N8);
+    `kaya.RowImages` answers both."""
     handle = _widget(wire.KIND_IMAGE)
+    if (on_needed is not None or on_released is not None) and not isinstance(handle, Node):
+        raise KayaStateError(
+            "kaya: on_needed and on_released belong to a stamped image — "
+            "the core says when a ROW's copy needs its bytes, and a live "
+            "image is written through its own signal "
+            "(docs/network-images-plan.md N8)")
     if source is not None:
         if isinstance(source, Signal):
             _records().append(wire.tx_bind_source(handle.id, source.id))
@@ -5670,6 +5742,14 @@ def image(source: bytes | bytearray | memoryview | Asset | Source | None = None,
                 f"or an element field, not {type(source).__name__} — text "
                 "belongs on kaya.label"
             )
+    if fit is not None:
+        _records().append(wire.tx_set_fit(handle.id, int(Fit(fit))))
+    if phase is not None:
+        _records().append(_phase_source(handle, phase))
+    if on_needed is not None:
+        _app._register(handle, wire.OCC_IMAGE_NEEDED, on_needed)
+    if on_released is not None:
+        _app._register(handle, wire.OCC_IMAGE_RELEASED, on_released)
     _set_grow(handle, grow)
     _bleed(handle, bleed)
     return handle
@@ -6304,7 +6384,8 @@ class PlaybackState(enum.IntEnum):
 
 
 class Fit(enum.IntEnum):
-    """How a video view fits its picture (docs/media-plan.md §3)."""
+    """How a video view or a boxed image places its picture in its box
+    (docs/media-plan.md §3, docs/network-images-plan.md N3)."""
 
     CONTAIN = wire.FIT_CONTAIN
     COVER = wire.FIT_COVER
@@ -6313,6 +6394,174 @@ class Fit(enum.IntEnum):
     @classmethod
     def _missing_(cls, value: object) -> Any:
         return _vocab_missing(cls, value, "a fit", "kaya.Fit.COVER")
+
+
+class ImagePhase(enum.IntEnum):
+    """What an image is waiting for (docs/network-images-plan.md N2):
+    LOADING draws the loading look until bytes arrive and keeps an earlier
+    picture while it waits, FAILED the failed look. A row field of this
+    type gives each stamped copy its own."""
+
+    SHOWN = wire.IMAGE_PHASE_SHOWN
+    LOADING = wire.IMAGE_PHASE_LOADING
+    FAILED = wire.IMAGE_PHASE_FAILED
+
+    @classmethod
+    def _missing_(cls, value: object) -> Any:
+        return _vocab_missing(cls, value, "an image phase",
+                              "kaya.ImagePhase.LOADING")
+
+
+_WIRE_TYPES.append((ImagePhase, wire.VALUE_I64))
+_FIELD_ENCODERS[ImagePhase] = int
+_FIELD_DECODERS[ImagePhase] = ImagePhase
+
+
+def _phase_source(handle: _Handle, phase: ImagePhase | str | Source) -> bytes:
+    if isinstance(phase, Signal):
+        return wire.tx_bind_phase(handle.id, phase.id)
+    if isinstance(phase, FieldRef):
+        _picker_field("an image's phase", phase, ImagePhase)
+        return wire.tx_bind_phase_element(handle.id, phase._level(), phase._index)
+    if isinstance(phase, (str, int)) and not isinstance(phase, bool):
+        return wire.tx_set_phase(handle.id, int(ImagePhase(phase)))
+    raise KayaTypeError(
+        f"kaya: an image's phase takes a kaya.ImagePhase, a Signal of one "
+        f"or a row's ImagePhase field, not {type(phase).__name__}")
+
+
+class RowImages(Generic[T]):
+    """Rows whose image loads on demand (docs/network-images-plan.md
+    N12): each row holds the URL it wants (`url`), its bytes (`art`) and
+    its phase (`phase`), named as the record's fields. Give the template
+    image `on_needed=images.needed, on_released=images.released`.
+
+    A row realized LOADING is fetched on a worker thread, at most `limit`
+    at a time; rows sharing a URL share one fetch and one copy of the
+    bytes, kept in an LRU of 32 MB by URL. The result comes back through
+    `app.post` as ONE conditional write guarded on the row's URL, so a
+    row removed or moved on meanwhile drops it. A released row stops
+    waiting and a URL nobody waits on is not fetched; Python cannot stop
+    a fetch already running, so its result is dropped instead.
+    `on_error(row, reason)` runs inside the transaction that writes
+    FAILED."""
+
+    LIMIT = 6
+    BUDGET = 32 << 20
+
+    @staticmethod
+    def default_fetch(url: str) -> bytes:
+        """The fetch when the app gives none: the body at `url` through
+        the standard library's urllib.request, raising for an HTTP error
+        status."""
+        import urllib.request
+        with urllib.request.urlopen(url, timeout=30) as response:
+            return response.read()
+
+    def __init__(self, app: App, rows: Collection[T], *, url: str, art: str,
+                 phase: str, fetch: Callable[[str], bytes] | None = None,
+                 limit: int = LIMIT,
+                 on_error: Callable[[Row[T], str], object] | None = None) -> None:
+        names = [url, art, phase]
+        if not any(s.fields is not None and all(n in s.fields for n in names)
+                   for s in rows._variants):
+            raise KayaKeyError(
+                f"kaya: RowImages names the row's url, art and phase fields, "
+                f"and no record of this collection has all of {names}")
+        self._app = app
+        self._rows = rows
+        self._url, self._art, self._phase = url, art, phase
+        self._fetch = fetch if fetch is not None else RowImages.default_fetch
+        self._limit = limit
+        self._on_error = on_error
+        self._lock = threading.Lock()
+        self._queue: list[str] = []
+        self._waiting: dict[str, list[tuple[Key, ...]]] = {}
+        self._workers = 0
+        self._cache: dict[str, bytes] = {}
+        self._cached = 0
+
+    def on_error(self, fn: Callable[[Row[T], str], object]) -> None:
+        self._on_error = fn
+
+    def _cache_get(self, url: str) -> bytes | None:
+        data = self._cache.pop(url, None)
+        if data is not None:
+            self._cache[url] = data
+        return data
+
+    def _cache_put(self, url: str, data: bytes) -> None:
+        old = self._cache.pop(url, None)
+        if old is not None:
+            self._cached -= len(old)
+        self._cache[url] = data
+        self._cached += len(data)
+        while self._cached > self.BUDGET and len(self._cache) > 1:
+            oldest = next(iter(self._cache))
+            self._cached -= len(self._cache.pop(oldest))
+
+    def needed(self, row: Row[T]) -> None:
+        url = getattr(row, self._url)
+        if not url:
+            return
+        keys = (*row.path, row.key)
+        with self._lock:
+            data = self._cache_get(url)
+            if data is None:
+                waiting = self._waiting.setdefault(url, [])
+                waiting.append(keys)
+                if len(waiting) > 1:
+                    return
+                self._queue.append(url)
+                if self._workers >= self._limit:
+                    return
+                self._workers += 1
+        if data is not None:
+            self._land([keys], url, data, None)
+            return
+        threading.Thread(target=self._work, name="kaya-row-images",
+                         daemon=True).start()
+
+    def released(self, row: Row[T]) -> None:
+        keys = (*row.path, row.key)
+        with self._lock:
+            for url, rows in list(self._waiting.items()):
+                if keys in rows:
+                    rows.remove(keys)
+                if not rows and url in self._queue:
+                    self._queue.remove(url)
+                    del self._waiting[url]
+
+    def _work(self) -> None:
+        while True:
+            with self._lock:
+                if not self._queue:
+                    self._workers -= 1
+                    return
+                url = self._queue.pop(0)
+            data: bytes | None = None
+            why: str | None = None
+            try:
+                data = bytes(self._fetch(url))
+            except Exception as error:
+                why = str(error) or type(error).__name__
+            with self._lock:
+                if data is not None:
+                    self._cache_put(url, data)
+                rows = self._waiting.pop(url, [])
+            if rows:
+                self._app.post(self._land, rows, url, data, why)
+
+    def _land(self, rows: list[tuple[Key, ...]], url: str, data: bytes | None,
+              why: str | None) -> None:
+        for keys in rows:
+            changes: dict[str, Any] = (
+                {self._art: data, self._phase: ImagePhase.SHOWN}
+                if data is not None else {self._phase: ImagePhase.FAILED})
+            self._rows.at(*keys[:-1]).patch(keys[-1], when={self._url: url},
+                                            **changes)
+            if why is not None and self._on_error is not None:
+                self._on_error(Row(self._rows, keys), why)
 
 
 class MediaSource:

@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xd695309e4a57ce9e
+	SpecHash uint64 = 0x303cc490b4cb14fb
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -261,6 +261,7 @@ const (
 	SymbolSend Symbol = 22
 	SymbolAttach Symbol = 23
 	SymbolMic Symbol = 24
+	SymbolImageMissing Symbol = 25
 	SourceConst = 0
 	SourceSignal = 1
 	SourceElement = 2
@@ -359,9 +360,9 @@ const (
 	FitContain Fit = 0
 	FitCover Fit = 1
 	FitFill Fit = 2
-	ImagePhaseShown = 0
-	ImagePhaseLoading = 1
-	ImagePhaseFailed = 2
+	ImagePhaseShown ImagePhase = 0
+	ImagePhaseLoading ImagePhase = 1
+	ImagePhaseFailed ImagePhase = 2
 	ContentTypeNone ContentType = 0
 	ContentTypeUsername ContentType = 1
 	ContentTypePassword ContentType = 2
@@ -818,6 +819,8 @@ func (s Symbol) String() string {
 		return "attach"
 	case SymbolMic:
 		return "mic"
+	case SymbolImageMissing:
+		return "image_missing"
 	}
 	return "Symbol(" + strconv.FormatInt(int64(s), 10) + ")"
 }
@@ -910,6 +913,18 @@ func (f Fit) String() string {
 		return "fill"
 	}
 	return "Fit(" + strconv.FormatInt(int64(f), 10) + ")"
+}
+
+func (i ImagePhase) String() string {
+	switch i {
+	case ImagePhaseShown:
+		return "shown"
+	case ImagePhaseLoading:
+		return "loading"
+	case ImagePhaseFailed:
+		return "failed"
+	}
+	return "ImagePhase(" + strconv.FormatInt(int64(i), 10) + ")"
 }
 
 func (c ContentType) String() string {

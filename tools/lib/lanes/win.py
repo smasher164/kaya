@@ -46,6 +46,8 @@ SCENES = [
     "media",
     # The capture (docs/capture-plan.md); capture_denied runs its guest.
     "capture",
+    # Network images (docs/network-images-plan.md §5).
+    "netimage", "netimage_http",
 ]
 
 # Scenes this lane declares off rather than wires (tools/check-steps.py
@@ -327,6 +329,10 @@ ORDER = [
      # peers and Edit>Undo through menu_activate's invoke pipeline, no real
      # mouse and no OS-global key (docs/toast-plan.md T10).
      "toast_rust", "toast_python", "toast_js", "toast_go", "toast_csharp", "toast_java",
+     # Network images without a network (docs/network-images-plan.md §5): the
+     # workers park until a click, and scroll_to_row drives the table.
+     "netimage_rust", "netimage_python", "netimage_js", "netimage_go", "netimage_csharp",
+     "netimage_java",
     ],
     # THE MEDIA SUITE (docs/media-plan.md §7a), pooled: every player is
     # muted, nothing is typed or pointed at, and the picture is read out of
@@ -344,6 +350,10 @@ ORDER = [
      # The reader (docs/media-plan.md §8): nothing played, nothing typed.
      "media_reader_rust", "media_reader_python", "media_reader_js",
      "media_reader_go", "media_reader_csharp", "media_reader_java",
+     # The row-image helper against the lane's media server
+     # (docs/network-images-plan.md §5, N12).
+     "netimage_http_rust", "netimage_http_python", "netimage_http_js", "netimage_http_go",
+     "netimage_http_csharp", "netimage_http_java",
     ],
     # media_delivery TWO AT A TIME, media_tracks ALONE (RULED 2026-10-01 and
     # amended 2026-10-06, docs/media-plan.md §7c): Media Foundation's adaptive

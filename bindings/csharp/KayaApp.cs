@@ -798,6 +798,7 @@ enum Symbol : long
     Send = KayaWire.SymbolSend,
     Attach = KayaWire.SymbolAttach,
     Mic = KayaWire.SymbolMic,
+    ImageMissing = KayaWire.SymbolImageMissing,
 }
 
 /// WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (the spec's
@@ -906,6 +907,16 @@ enum Fit : uint
     Contain = KayaWire.FitContain,
     Cover = KayaWire.FitCover,
     Fill = KayaWire.FitFill,
+}
+
+/// What an image shows while its bytes are the app's to fetch
+/// (docs/network-images-plan.md N2): its picture, the loading look, or the
+/// failed look. Settable, bindable to a signal, and a row field.
+enum ImagePhase : long
+{
+    Shown = KayaWire.ImagePhaseShown,
+    Loading = KayaWire.ImagePhaseLoading,
+    Failed = KayaWire.ImagePhaseFailed,
 }
 
 /// A player's readings, as the core last published them.
@@ -1405,6 +1416,12 @@ sealed record TracksListed(ulong Id, List<object> Keys, PlayerTracks Tracks)
 sealed record CueChanged(ulong Id, List<object> Keys, string Text) : Occurrence(Id, Keys);
 
 sealed record VideoShown(ulong Id, List<object> Keys, double Shown) : Occurrence(Id, Keys);
+
+// A stamped image realized loading with no source, and its last loading
+// copy torn down (docs/network-images-plan.md N8): Id is the template node.
+sealed record ImageNeeded(ulong Id, List<object> Keys) : Occurrence(Id, Keys);
+
+sealed record ImageReleased(ulong Id, List<object> Keys) : Occurrence(Id, Keys);
 
 sealed record SessionActed(ulong Id, List<object> Keys, SessionAction Action)
     : Occurrence(Id, Keys);
@@ -2943,6 +2960,44 @@ sealed class KayaApp
     /// controls (docs/media-plan.md §5).
     public void OnSession(Action<Tx, SessionAction> handler) => sessionHandler = handler;
 
+    /// A stamped image realized `ImagePhase.Loading` with no source: the
+    /// row's bytes are wanted now, about a screen before it is seen. Once
+    /// per row until OnReleased fires for it (docs/network-images-plan.md
+    /// N8). The keys are the copy's, outermost first.
+    public void OnNeeded(Node image, Action<Tx, List<object>> handler) =>
+        imageNeeded[image.Id] = handler;
+
+    /// The last realized copy of a row's image was torn down while still
+    /// loading: its fetch may stop.
+    public void OnReleased(Node image, Action<Tx, List<object>> handler) =>
+        imageReleased[image.Id] = handler;
+
+    readonly Dictionary<ulong, Action<Tx, List<object>>> imageNeeded = new();
+    readonly Dictionary<ulong, Action<Tx, List<object>>> imageReleased = new();
+
+    // A RowImages helper's own pair, run before the app's handler so a later
+    // OnNeeded never shadows a helper (crates/kaya/src/app/images.rs's rule).
+    internal readonly Dictionary<ulong, List<(Action<Tx, List<object>> Needed,
+        Action<Tx, List<object>> Released)>> ImageFeeds = new();
+
+    /// The two N8 occurrences: the helpers' feeds, then the app's handler,
+    /// in one transaction.
+    internal void DispatchImage(Occurrence? occurrence)
+    {
+        bool needed = occurrence is ImageNeeded;
+        if (occurrence is not (ImageNeeded or ImageReleased)) return;
+        var keys = occurrence.Keys;
+        ImageFeeds.TryGetValue(occurrence.Id, out var feeds);
+        (needed ? imageNeeded : imageReleased).TryGetValue(occurrence.Id, out var handler);
+        if (feeds == null && handler == null) return;
+        Dispatch(tx =>
+        {
+            foreach (var feed in feeds ?? new())
+                (needed ? feed.Needed : feed.Released)(tx, keys);
+            handler?.Invoke(tx, keys);
+        });
+    }
+
     internal Capture NextCapture() => new(++captures);
 
     ulong captures;
@@ -3503,6 +3558,8 @@ sealed class KayaApp
             case KayaWire.OccKindCaptionCue:
                 return new CueChanged(id, keys, payload as string ?? "");
             case KayaWire.OccKindVideoVisibility: return new VideoShown(id, keys, number);
+            case KayaWire.OccKindImageNeeded: return new ImageNeeded(id, keys);
+            case KayaWire.OccKindImageReleased: return new ImageReleased(id, keys);
             case KayaWire.OccKindCaptureChanged:
             {
                 var tail = FlatTail("capture_changed", payload as List<object>, 7);
@@ -3827,6 +3884,9 @@ sealed class KayaApp
                     or SessionActed or ReaderFramed or ReaderProgressed or ReaderPeaked
                     or ReaderEnded or ImageLoaded:
                     DispatchMedia(occurrence);
+                    break;
+                case ImageNeeded or ImageReleased:
+                    DispatchImage(occurrence);
                     break;
                 case CaptureMoved or CaptureOverran or PermissionHeard or DevicesListed:
                     DispatchCapture(occurrence);
@@ -5050,8 +5110,9 @@ sealed class Tx : IDisposable
     public void ShowCapture(Widget video, Capture? capture) =>
         Records.Add(KayaWire.TxSetCapture(video.Id, (long)(capture?.Id ?? 0)));
 
-    public void SetFit(Widget video, Fit fit) =>
-        Records.Add(KayaWire.TxSetFit(video.Id, (long)fit));
+    /// How a video view or a boxed image places its picture in its box.
+    public void SetFit(Widget w, Fit fit) =>
+        Records.Add(KayaWire.TxSetFit(w.Id, (long)fit));
 
     /// The width:height ratio of a video view's box, whatever its picture's
     /// shape; SetFit places the picture in it (docs/media-plan.md §3).
@@ -5260,14 +5321,33 @@ sealed class Tx : IDisposable
     /// decodes natively, and decode failure renders the placeholder,
     /// never a crash. The caller's array is free to drop the moment this
     /// returns.
-    public Widget Image(byte[]? source = null, Signal? bind = null, double? grow = null)
+    ///
+    /// An image the app fetches declares its box, `fit` with both bounds,
+    /// and its `phase` (docs/network-images-plan.md N2, N3); a phase that
+    /// follows a signal is SetPhase(image, signal).
+    public Widget Image(byte[]? source = null, Signal? bind = null, double? grow = null,
+        Fit? fit = null, double? maxWidth = null, double? maxHeight = null,
+        ImagePhase? phase = null)
     {
         var w = Widget(KayaWire.KindImage);
         if (source != null) SetSource(w, source);
         if (bind is Signal s) BindSource(w, s);
         if (grow is double g) SetGrow(w, g);
+        if (fit is Fit f) SetFit(w, f);
+        if (maxWidth is double mw) SetMaxWidth(w, mw);
+        if (maxHeight is double mh) SetMaxHeight(w, mh);
+        if (phase is ImagePhase p) SetPhase(w, p);
         return w;
     }
+
+    /// An image's phase (docs/network-images-plan.md N2): Loading keeps
+    /// any source it has on screen, Failed draws the failed look whatever
+    /// the source.
+    public void SetPhase(Widget image, ImagePhase phase) =>
+        Records.Add(KayaWire.TxSetPhase(image.Id, (long)phase));
+
+    public void SetPhase(Widget image, Signal s) =>
+        Records.Add(KayaWire.TxBindPhase(image.Id, s.Id));
 
     /// The PICTURE-FILE overload: the same image, showing what THE APP'S
     /// OWN BUILD PUT BESIDE IT. The picture never enters .NET, and the
@@ -5768,6 +5848,21 @@ sealed class Tx : IDisposable
         ModelSet(c.Id, c.Path, key, model);
         Records.Add(KayaWire.TxCollectionUpdateField(c.Id, c.Path, key, field, variant, value));
         RecomputeDerived(c);
+    }
+
+    /// N7's conditional write (docs/network-images-plan.md): ONE record the
+    /// core checks against the model it commits to. `model` is the entry
+    /// with the changes applied when the mirror's guard held, null when it
+    /// did not, so the mirror takes the same writes under the same guard.
+    internal void PatchIfRaw(Collection c, object key, object? model, uint variant,
+        uint guardField, object guard, uint[] fields, object[] values)
+    {
+        if (model != null) ModelSet(c.Id, c.Path, key, model);
+        var indexes = new object[fields.Length];
+        for (int i = 0; i < fields.Length; i++) indexes[i] = (long)fields[i];
+        Records.Add(KayaWire.TxCollectionPatchIf(c.Id, c.Path, key, guardField, variant, guard,
+            indexes, values));
+        if (model != null) RecomputeDerived(c);
     }
 
     // The record-time mirror-read guard: a read inside a template body
@@ -7155,8 +7250,18 @@ sealed class Tpl
         return n;
     }
 
-    /// How every stamped copy's video view fits its picture.
+    /// How every stamped copy's video view or boxed image fits its picture.
     public void SetFit(Node n, Fit fit) => tx.Records.Add(KayaWire.TxSetFit(n.Id, (long)fit));
+
+    /// Every stamped copy's image phase: one for all, a signal, or the
+    /// row's own ImagePhase field (docs/network-images-plan.md N2).
+    public void SetPhase(Node n, ImagePhase phase) =>
+        tx.Records.Add(KayaWire.TxSetPhase(n.Id, (long)phase));
+
+    public void SetPhase(Node n, Signal s) => tx.Records.Add(KayaWire.TxBindPhase(n.Id, s.Id));
+
+    public void SetPhase(Node n, Field<ImagePhase> f, uint level = 0) =>
+        tx.Records.Add(KayaWire.TxBindPhaseElement(n.Id, level, f.Index));
 
     /// Every stamped copy's video view box ratio.
     public void SetAspect(Node n, int width, int height) =>

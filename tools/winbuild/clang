@@ -1,0 +1,27 @@
+#!/usr/bin/env python3
+"""`clang` on PATH for tools/deploy-win.py's builds only (docs/traps.md, ring
+on aarch64-pc-windows-msvc). ring 0.17's build.rs replaces any compiler that
+is not clang with a bare `clang` for this target, while cargo-xwin's
+CFLAGS_aarch64_pc_windows_msvc are clang-cl's (`/imsvc DIR`) and the dev
+shell's `clang` is nix's wrapper, which adds `-fPIC`; both refuse. A compile
+for that target becomes the unwrapped clang with `-isystem DIR` and no
+`-fPIC`; every other call is the shell's own clang, untouched."""
+
+import os
+import sys
+
+TARGET = "--target=aarch64-pc-windows-msvc"
+
+args = sys.argv[1:]
+if TARGET not in args:
+    host = os.environ["KAYA_XWIN_HOST_CLANG"]
+    os.execv(host, [host, *args])
+out = []
+it = iter(args)
+for arg in it:
+    if arg == "/imsvc":
+        out += ["-isystem", next(it)]
+    elif arg != "-fPIC":
+        out.append(arg)
+real = os.environ["KAYA_XWIN_CLANG"]
+os.execv(real, [real, *out])

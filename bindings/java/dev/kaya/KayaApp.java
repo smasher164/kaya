@@ -242,7 +242,8 @@ public final class KayaApp {
         EMOJI(KayaWire.SYMBOL_EMOJI),
         SEND(KayaWire.SYMBOL_SEND),
         ATTACH(KayaWire.SYMBOL_ATTACH),
-        MIC(KayaWire.SYMBOL_MIC);
+        MIC(KayaWire.SYMBOL_MIC),
+        IMAGE_MISSING(KayaWire.SYMBOL_IMAGE_MISSING);
 
         final long wire;
 
@@ -393,6 +394,9 @@ public final class KayaApp {
     private final Map<Long, BiConsumer<Tx, String>> playerCueHandlers = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, Double>> widgetVisibility = new HashMap<>();
     private final Map<Long, VisibilityHandler> nodeVisibility = new HashMap<>();
+    private final Map<Long, BiConsumer<Tx, List<Object>>> imageNeeded = new HashMap<>();
+    private final Map<Long, BiConsumer<Tx, List<Object>>> imageReleased = new HashMap<>();
+    private final Map<Long, List<KayaRecords.ImageFeed>> imageFeeds = new HashMap<>();
     private BiConsumer<Tx, SessionAction> sessionHandler;
     // Captures get their own id space (docs/capture-plan.md §2); the
     // mirror each occurrence moves before any handler runs, the handlers.
@@ -755,6 +759,25 @@ public final class KayaApp {
     }
 
     /** One key/value pair of a collection instance, in insertion order. */
+    /** One collection_patch_if gathering its setters (Tx#openPatchIf). */
+    static final class PatchIfRecord {
+        final Collection c;
+        final Object key;
+        final int guardField;
+        final Object guard;
+        final boolean holds;
+        final List<Object> fields = new ArrayList<>();
+        final List<Object> values = new ArrayList<>();
+
+        PatchIfRecord(Collection c, Object key, int guardField, Object guard, boolean holds) {
+            this.c = c;
+            this.key = key;
+            this.guardField = guardField;
+            this.guard = guard;
+            this.holds = holds;
+        }
+    }
+
     public static final class Entry {
         public final Object key;
         public final Object value;
@@ -1819,6 +1842,37 @@ public final class KayaApp {
         ContentType(int wire, String word) {
             this.wire = wire;
             this.word = word;
+        }
+
+        @Override
+        public String toString() {
+            return word;
+        }
+    }
+
+    /** What an image shows while its bytes are not its picture yet
+     * (docs/network-images-plan.md N2). A loading or failed image declares
+     * its box: maxWidth, maxHeight and fit (N3). */
+    public enum ImagePhase {
+        SHOWN(KayaWire.IMAGE_PHASE_SHOWN, "shown"),
+        LOADING(KayaWire.IMAGE_PHASE_LOADING, "loading"),
+        FAILED(KayaWire.IMAGE_PHASE_FAILED, "failed");
+
+        final int wire;
+        final String word;
+
+        ImagePhase(int wire, String word) {
+            this.wire = wire;
+            this.word = word;
+        }
+
+        static ImagePhase ofWire(long wire) {
+            for (ImagePhase p : values()) {
+                if (p.wire == wire) {
+                    return p;
+                }
+            }
+            throw new IllegalArgumentException("kaya: " + wire + " is not an image phase");
         }
 
         @Override
@@ -4884,6 +4938,28 @@ public final class KayaApp {
             return this;
         }
 
+        /** An image's phase (docs/network-images-plan.md N2). */
+        public Widget phase(ImagePhase phase) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: phase on a widget outside its build transaction"
+                    + " — write a signal bound with phase(signal) instead");
+            }
+            tx.setPhase(this, phase);
+            return this;
+        }
+
+        /** An image's phase, read from a signal. */
+        public Widget phase(Signal<ImagePhase> s) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: phase on a widget outside its build transaction"
+                    + " — an image's phase signal is bound where the image is built");
+            }
+            tx.setPhase(this, s);
+            return this;
+        }
+
         /** How a video view fits its picture (docs/media-plan.md §3). */
         public Widget fit(Fit fit) {
             if (tx == null || tx.closed) {
@@ -5991,6 +6067,19 @@ public final class KayaApp {
             t.setFit(n, fit);
         }
 
+        /** This row's copy of that image's phase (Tpl.setPhase). */
+        public void setPhase(Node n, ImagePhase phase) {
+            t.setPhase(n, phase);
+        }
+
+        public void setPhase(Node n, Signal<ImagePhase> s) {
+            t.setPhase(n, s);
+        }
+
+        public void setPhase(Node n, KayaRecords.Field<ImagePhase> f) {
+            t.setPhase(n, f);
+        }
+
         /** This row's copy of that field's content type
          * (Tpl.setContentType). */
         public void setContentType(Node n, ContentType content) {
@@ -6416,7 +6505,49 @@ public final class KayaApp {
          */
         private void emit(byte[] record) {
             alive();
+            flushPatchIf();
             records.add(record);
+        }
+
+        /** A patchIf chain still gathering its setters
+         * (docs/network-images-plan.md N7): sent as ONE record before the
+         * transaction's next record, or when its build ends. */
+        private PatchIfRecord pendingIf;
+
+        PatchIfRecord openPatchIf(Collection c, Object key, int guardField, Object guard,
+                boolean holds) {
+            alive();
+            flushPatchIf();
+            pendingIf = new PatchIfRecord(c, key, guardField, guard, holds);
+            return pendingIf;
+        }
+
+        void patchIfSet(PatchIfRecord p, int field, Object wire, Object model) {
+            if (pendingIf != p) {
+                throw new IllegalStateException(
+                        "kaya: a patchIf chain is one statement — its record was already sent "
+                                + "when the transaction's next record was; chain every set on "
+                                + "the patchIf call");
+            }
+            alive();
+            p.fields.add((long) field);
+            p.values.add(wire);
+            if (p.holds) {
+                modelSet(p.c.id, p.c.path, p.key, model);
+            }
+        }
+
+        void flushPatchIf() {
+            PatchIfRecord p = pendingIf;
+            if (p == null) {
+                return;
+            }
+            pendingIf = null;
+            emit(KayaWire.txCollectionPatchIf(p.c.id, p.c.path.toArray(), p.key, p.guardField,
+                    0, p.guard, p.fields.toArray(), p.values.toArray()));
+            if (p.holds) {
+                recomputeDerived(p.c);
+            }
         }
 
         /**
@@ -6732,6 +6863,15 @@ public final class KayaApp {
         /** How a video view fits its picture (docs/media-plan.md §3). */
         public void setFit(Widget video, Fit fit) {
             emit(KayaWire.txSetFit(video.id, fit.wire));
+        }
+
+        /** An image's phase (docs/network-images-plan.md N2). */
+        public void setPhase(Widget image, ImagePhase phase) {
+            emit(KayaWire.txSetPhase(image.id, phase.wire));
+        }
+
+        public void setPhase(Widget image, Signal<ImagePhase> s) {
+            emit(KayaWire.txBindPhase(image.id, s.id));
         }
 
         /** The width:height ratio of a video view's box, whatever its
@@ -9205,6 +9345,21 @@ public final class KayaApp {
             tx.emit(KayaWire.txSetFit(n.id, fit.wire));
         }
 
+        /** Every stamped copy's image phase, the blueprint twin of
+         * {@link Tx#setPhase}. */
+        public void setPhase(Node n, ImagePhase phase) {
+            tx.emit(KayaWire.txSetPhase(n.id, phase.wire));
+        }
+
+        public void setPhase(Node n, Signal<ImagePhase> s) {
+            tx.emit(KayaWire.txBindPhase(n.id, s.id));
+        }
+
+        /** The row's own field: each copy's phase by its row. */
+        public void setPhase(Node n, KayaRecords.Field<ImagePhase> f) {
+            tx.emit(KayaWire.txBindPhaseElement(n.id, 0, f.index));
+        }
+
         /** What every stamped copy of this field holds, the blueprint
          * twin of {@link Tx#setContentType}. */
         public void setContentType(Node n, ContentType content) {
@@ -10353,6 +10508,7 @@ public final class KayaApp {
         R out;
         try {
             out = build.apply(tx);
+            tx.flushPatchIf();
         } catch (RuntimeException | Error e) {
             tx.rollback();
             throw e;
@@ -11154,6 +11310,49 @@ public final class KayaApp {
     /** A stamped video view's visibility, the copy's keys first. */
     public void onVisibility(Node video, VisibilityHandler handler) {
         nodeVisibility.put(video.id, handler);
+    }
+
+    /** A stamped copy of this image was realized loading with no source:
+     * once per row until {@link #onReleased} runs for it
+     * (docs/network-images-plan.md N8). The copy's keys, outermost first. */
+    public void onNeeded(Node image, BiConsumer<Tx, List<Object>> handler) {
+        imageNeeded.put(image.id, handler);
+    }
+
+    /** The last realized copy of a row this image was needed for was torn
+     * down while still loading. */
+    public void onReleased(Node image, BiConsumer<Tx, List<Object>> handler) {
+        imageReleased.put(image.id, handler);
+    }
+
+    void imageFeed(Node image, KayaRecords.ImageFeed feed) {
+        imageFeeds.computeIfAbsent(image.id, k -> new ArrayList<>()).add(feed);
+    }
+
+    private boolean imageOccurrence(KayaWire.Occ occ) {
+        boolean needed = occ.kind == KayaWire.OCC_KIND_IMAGE_NEEDED;
+        if (!needed && occ.kind != KayaWire.OCC_KIND_IMAGE_RELEASED) {
+            return false;
+        }
+        List<KayaRecords.ImageFeed> feeds = imageFeeds.getOrDefault(occ.id, List.of());
+        BiConsumer<Tx, List<Object>> handler =
+                (needed ? imageNeeded : imageReleased).get(occ.id);
+        if (feeds.isEmpty() && handler == null) {
+            return true;
+        }
+        dispatch(tx -> {
+            for (KayaRecords.ImageFeed feed : feeds) {
+                if (needed) {
+                    feed.needed(tx, occ.keys);
+                } else {
+                    feed.released(occ.keys);
+                }
+            }
+            if (handler != null) {
+                handler.accept(tx, occ.keys);
+            }
+        });
+        return true;
     }
 
     /** The actions the declared session handles, from the system's media
@@ -11959,6 +12158,9 @@ public final class KayaApp {
                 continue;
             }
             if (captureOccurrence(occ)) {
+                continue;
+            }
+            if (imageOccurrence(occ)) {
                 continue;
             }
             if (mediaOccurrence(occ.kind)) {

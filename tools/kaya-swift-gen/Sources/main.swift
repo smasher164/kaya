@@ -54,6 +54,8 @@ let wire: [String: (valueCase: String, zero: String)] = [
     "KayaColor": ("i64", "KayaColor(hex: 0x000000FF)"),
     // A row's player (docs/media-plan.md §7b): the id, `.none` for none.
     "KayaPlayer": ("i64", "KayaPlayer.none"),
+    // docs/network-images-plan.md N2.
+    "KayaImagePhase": ("i64", ".shown"),
 ]
 
 /// The READ direction — `init(values:)`, the shape an undo's restored
@@ -71,6 +73,7 @@ let readWire: [String: (valueCase: String, lift: (String) -> String)] = [
     "KayaTime": ("i64", { "kayaTime(packed: \($0))" }),
     "KayaColor": ("i64", { "kayaColor(packed: \($0))" }),
     "KayaPlayer": ("i64", { "kayaPlayer(packed: \($0))" }),
+    "KayaImagePhase": ("i64", { "kayaImagePhase(packed: \($0))" }),
 ]
 
 func conformsToKayaGen(_ clause: InheritanceClauseSyntax?) -> Bool {
@@ -369,8 +372,10 @@ func generateRecord(_ name: String, _ fields: [Field]) -> String {
     line("    }")
     line("")
     line("    @discardableResult")
-    line("    func image(_ f: KayaField<Data>) -> KayaNodeHandle {")
-    line("        t.image(f)")
+    line("    func image(")
+    line("        _ f: KayaField<Data>, fit: KayaFit? = nil, phase: KayaField<KayaImagePhase>? = nil")
+    line("    ) -> KayaNodeHandle {")
+    line("        t.image(f, fit: fit, phase: phase)")
     line("    }")
     line("")
     line("    @discardableResult")

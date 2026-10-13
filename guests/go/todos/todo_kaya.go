@@ -34,6 +34,27 @@ func (p todoPatchBuilder) Done(v bool) todoPatchBuilder {
 	return p
 }
 
+// TodoPatchIf is TodoPatch made only while the entry exists and the
+// guard's field still holds expected; otherwise nothing, and no panic
+// (docs/network-images-plan.md N7). The chain is one record.
+func TodoPatchIf[V comparable](c kaya.RecordCollection[int64, Todo], tx *kaya.Tx, key int64, guard func(*Todo) *V, expected V) todoPatchIfBuilder {
+	return todoPatchIfBuilder{c.PatchIf(tx, key, guard, expected)}
+}
+
+type todoPatchIfBuilder struct {
+	p kaya.RecordPatchIf[int64, Todo]
+}
+
+func (p todoPatchIfBuilder) Title(v string) todoPatchIfBuilder {
+	p.p.Set(func(t *Todo) *string { return &t.Title }, v)
+	return p
+}
+
+func (p todoPatchIfBuilder) Done(v bool) todoPatchIfBuilder {
+	p.p.Set(func(t *Todo) *bool { return &t.Done }, v)
+	return p
+}
+
 // The row surface: one token per wire field, and the template
 // constructors that consume them.
 type todoRow struct {
@@ -132,8 +153,10 @@ func (r todoRow) SetMax(n kaya.Node, max float64) { r.t.SetMax(n, max) }
 
 func (r todoRow) SetAlpha(n kaya.Node, on bool) { r.t.SetAlpha(n, on) }
 
-func (r todoRow) SetFit(n kaya.Node, fit kaya.Fit)         { r.t.SetFit(n, fit) }
-func (r todoRow) SetAspect(n kaya.Node, width, height int) { r.t.SetAspect(n, width, height) }
+func (r todoRow) SetFit(n kaya.Node, fit kaya.Fit)                     { r.t.SetFit(n, fit) }
+func (r todoRow) SetPhase(n kaya.Node, phase kaya.ImagePhase)          { r.t.SetPhase(n, phase) }
+func (r todoRow) BindPhase(n kaya.Node, f kaya.Field[kaya.ImagePhase]) { r.t.BindPhase(n, f) }
+func (r todoRow) SetAspect(n kaya.Node, width, height int)             { r.t.SetAspect(n, width, height) }
 
 func (r todoRow) SetMinGap(n kaya.Node, gap float64)          { r.t.SetMinGap(n, gap) }
 func (r todoRow) SetLowLabel(n kaya.Node, label string)       { r.t.SetLowLabel(n, label) }

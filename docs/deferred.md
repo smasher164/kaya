@@ -9,8 +9,8 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
-## BUILD — images from the network (docs/network-images-plan.md), depth on the mac and iOS (2026-10-13); the GTK, WinUI and Compose arms, `image_missing`, the other eight bindings and the C floor are the breadth slice
-KEY: network images, netimage, netimage_http, phase, PROP_PHASE, image_phase, IMAGE_PHASE_SHOWN, IMAGE_PHASE_LOADING, IMAGE_PHASE_FAILED, ImagePhase, collection_patch_if, CollectionPatchIf, patch_if, image_needed, image_released, ImageNeeded, ImageReleased, on_needed_node, on_released_node, RowImages, kaya_blob_content_id, blob_content_id, content_id, KayaPictureCache, kayaRequestPicture, kayaServePicture, kayaDecodePicture, KayaImageBox, kayaImagePhaseRead, expect_image_phase, image_box, check_image_template, settle_image_needs, need_images_on, netimage_routes, netimage_server_routes, covers, gen-covers, image_missing, DEPTH STUB netimage
+## BUILD — images from the network (docs/network-images-plan.md), depth on the mac and iOS (2026-10-13) and breadth on GTK, WinUI, Compose and all nine bindings with the C floor (2026-10-13); the media player's art (N17) and the review page are open
+KEY: network images, netimage, netimage_http, phase, PROP_PHASE, image_phase, IMAGE_PHASE_SHOWN, IMAGE_PHASE_LOADING, IMAGE_PHASE_FAILED, ImagePhase, collection_patch_if, CollectionPatchIf, patch_if, image_needed, image_released, ImageNeeded, ImageReleased, on_needed_node, on_released_node, RowImages, kaya_blob_content_id, blob_content_id, content_id, KayaPictureCache, kayaRequestPicture, kayaServePicture, kayaDecodePicture, KayaImageBox, kayaImagePhaseRead, expect_image_phase, image_box, check_image_template, settle_image_needs, need_images_on, netimage_routes, netimage_server_routes, covers, gen-covers, image_missing, DEPTH STUB netimage, netimage_gtk, netimage_winui, netimage_compose, netimage_surface, KayaRowImages, RowImages, PatchIf, patchIf, OnNeeded, onNeeded, FetchHTTP, HttpFetch, kayaURLSessionFetch, Row_images, rowImages, blobContentId, drain_when_free, winbuild/clang, SYMBOL_IMAGE_MISSING
 
 The depth slice: prop 62 `phase` (spec enum `image_phase`: shown, loading,
 failed) on the image in both zones, `fit` legal on the image, and the root's
@@ -38,42 +38,77 @@ taking a signal of bytes, `Collection::patch_if`, `on_needed_node` and
 `on_released_node`, and N12's `RowImages` helper over the app's own fetch
 (the guests pass a pinned `ureq`). netimage.steps and netimage_http.steps
 green on the mac lane and iOS for Rust.
-  - **DEPTH STUB: netimage on gtk** — §3's row: a `GtkPicture` with no
-    paintable in a box from libadwaita's colours, `image-missing` at the
-    symbolic size, `gdk::Texture::from_bytes` in `gio::spawn_blocking`
-    returning by generation, an LRU in pixels, `GTK_ACCESSIBLE_STATE_BUSY`;
-    its netimage_routes row in BACKENDS.
-  - **DEPTH STUB: netimage on winui** — §3's row with N14: `SetSourceAsync`
-    with decode pixel sizes, `ImageFailed` installing the failed look instead
-    of keeping the previous picture, the fill brush and a Fluent glyph,
-    what Narrator reads for a busy image measured; its netimage_routes row.
-  - **DEPTH STUB: netimage on compose** — §3's row: `ImageDecoder` with
-    `setTargetSize` (BitmapFactory with `inSampleSize` on 26 and 27) on
-    `Dispatchers.Default`, an `LruCache` in bytes trimmed on `onTrimMemory`,
-    the phase and the picture as composition state; its netimage_routes row.
-  - **`image_missing` in the symbol vocabulary** (N4): the SwiftUI failed look
-    draws SF `photo` directly; joining the vocabulary needs every backend's
-    glyph (check-symbol-parity) and every binding's name (check-sugar-surface)
-    in one change, so it waits for the breadth. MEASURED for the depth: SF
-    `photo.badge.exclamationmark` is SF 2024 (macOS 15, iOS 18), above the
-    floor; `photo` is 2019.
-  - **The busy state** (N5): MEASURED on the macOS 26.5 SDK that AppKit's
-    headers export no AXElementBusy and SwiftUI has no busy modifier or trait,
-    so the mac sets nothing, as iOS; GTK's `GTK_ACCESSIBLE_STATE_BUSY` and
-    WinUI's are the breadth's, with a read the shared scene can hold.
-  - **The other eight bindings and the C floor** (N16): `phase`, `fit` on the
-    image, the conditional write, the two handlers and the helper in both
-    zones, a netimage guest each; neither check-sugar-surface nor
-    tools/tpl-surfaces.py's prop census holds them yet (their rows would be
-    red for eight bindings at once), so the breadth adds the rows with the
-    guests. Rust's helper drops a released row's result but
-    cannot stop a blocking fetch; the languages with cancellation (Swift, C#,
-    JS, Go) cancel, which the server's "closed by the client" line shows.
+  - ~~**DEPTH STUB: netimage on gtk**~~ — BUILT 2026-10-13: the looks from
+    libadwaita's style with `image-missing-symbolic` (verified to draw a
+    dashed picture frame), `gdk::Texture::from_bytes` in
+    `gio::spawn_blocking` installed by generation, a cache of (content id,
+    decode size) at two screens emptied on GMemoryMonitor's low-memory
+    warning, GTK_ACCESSIBLE_STATE_BUSY on a labelled loading image (read true
+    off AT-SPI; no shared scene can hold it, so two route cuts do), a boxed
+    image drawn at its box at the cell's leading edge (a table cell stretched
+    20pt art to 192pt). Fixed on the way: GTK's band reports never sent the
+    core's asks, and the guest's answer then arrived inside park_table_row's
+    nested turn with CORE borrowed (docs/traps.md). tools/lib/netimage_gtk.py,
+    17 cuts. Linux: 34 legs green on x11 and wayland, nine languages and C.
+  - ~~**DEPTH STUB: netimage on winui**~~ — BUILT 2026-10-13 with N14: a
+    one-cell Grid holding the picture and the looks
+    (ControlFillColorSecondaryBrush, Segoe Fluent U+E91B `Photo`, the catalog
+    having no broken-image glyph), `SetSourceAsync` with decode pixel sizes on
+    a detached BitmapImage swapped in on ImageOpened by generation, ImageFailed
+    clearing the picture (the leg read the old 320x320 with that cut), a cache
+    of shared BitmapImages by (content id, decode size) emptied on Win32's
+    low-memory resource notification (Windows.System.MemoryManager fails in an
+    unpackaged process). WinUI 3 has no busy property, so it sets none, as the
+    mac. Fixed on the way: the table band report never sent the core's asks;
+    the windows lane did not build since the depth (ring under cargo-xwin,
+    tools/winbuild/clang); python guests on the VM shadowed by C:\kaya\select.py
+    (`python -P`); all in docs/traps.md. tools/lib/netimage_winui.py, 16 cuts.
+    Windows: 12 legs green, six languages.
+  - ~~**DEPTH STUB: netimage on compose**~~ — BUILT 2026-10-13: ImageDecoder
+    with setTargetSize (BitmapFactory with inSampleSize on 26 and 27) on
+    Dispatchers.Default in an effect keyed on the node, its late result
+    dropped by generation; an LruCache of (content id, pixels) at two screens
+    emptied by ComponentCallbacks2; the pump skipping held bytes through
+    `KayaPresent.blobContentId`; surfaceVariant looks with `image_missing`.
+    tools/lib/netimage_compose.py, 22 cuts. Android: compose, jvm and go legs
+    green.
+  - ~~**`image_missing` in the symbol vocabulary**~~ — BUILT 2026-10-13: wire
+    value 25 in every table (spec hash 0x303cc490b4cb14fb); SF `photo` (no
+    broken-image SF symbol exists at the floor: photo.badge.exclamationmark is
+    2024, photo.trianglebadge.exclamationmark 2024.3), Material BrokenImage,
+    `image-missing-symbolic`, Fluent U+E91B. The SwiftUI failed look draws it
+    through `kayaSFSymbol(symbolImageMissing)`.
+  - ~~**The busy state**~~ — CLOSED 2026-10-13: GTK sets it; WinUI 3 has none
+    (MEASURED in its metadata), so busy is GTK's alone.
+  - ~~**The other eight bindings and the C floor**~~ — BUILT 2026-10-13:
+    `phase` in both zones, ImagePhase as a row field, the conditional write in
+    each binding's idiom (Python `patch(key, when=...)`, JS `{ when }`, Go and
+    Java a chain flushed as one record at the transaction's next record, C# and
+    Swift a closure since neither has Rust's Drop, OCaml `<t>_patch_if`,
+    Haskell `patchIf`), `on_needed`/`on_released` on the template image (rows
+    in Python and JS, keys elsewhere, chained on the node in Go), the helper
+    with a default fetch in the six with a standard client (Java's is
+    HttpURLConnection since android.jar has no java.net.http, docs/traps.md)
+    and the app's fetch in Rust, OCaml (guest: cohttp-lwt-unix over lwt_ssl)
+    and Haskell (guest: http-client-tls), the pins held by check-pins. A
+    netimage guest per language and C, a netimage_http guest per language (C
+    has no standard client). Census: tools/lib/netimage_surface.py inside
+    check-sugar-surface (75 rows) and `phase` in tpl-surfaces' prop census.
+    Found on the way: a signal of bytes could not be made or written in C#,
+    Java, OCaml, Python and JS.
   - **The media player's art** (N17) and the review page (§6 step 7).
-  - **The decode cost on the phones** (§7): the iOS simulator and the API 35
-    emulator run on the host's cores, so the depth did not measure them; the
-    breadth's Compose arm and a device on the review page if the maintainer
-    wants one.
+  - **The decode cost on a phone** (§7): the API 35 emulator measured at the
+    breadth (a 600x600 tile about 1 ms, a 3000x3000 JPEG 15 ms full and 9 ms
+    at a 96px box); a real device's number is the review page's if the
+    maintainer wants one.
+  - **WinUI's loading fill is nearly invisible** (MEASURED 3 grey levels off
+    the window ground, 1 off the table card, ControlFillColorSecondaryBrush);
+    SubtleFillColorSecondaryBrush would show on both. A styling call for the
+    maintainer, with the review page.
+  - **Java's cancel leaves the socket to the server** (docs/traps.md, a
+    cancelled HttpURLConnection keeps its socket): the lane's media server
+    does not answer `Connection: close` on /trickle/, so a Java cancel reads
+    "closed by the client" only at exit; nothing reads that line today.
 
 ## BUILD — safe areas and the keyboard (docs/safe-area-plan.md), depth on iOS and the mac (2026-10-11); the Compose arm, GTK's and WinUI's answers and the other eight bindings are the breadth slice
 KEY: safe area, bleed, PROP_BLEED, propBleed, expect_keyboard, expect_safe, expect_insets, SafeWord, INSET_WORDS, KayaBleed, KayaBleedLayout, kayaBleedEdges, kayaSafeReading, kayaKeyboardWall, kayaPanEvaluate, keyboardPan, KayaTopEdgeClip, SOFTWARE_KEYBOARD_PREF, AutomaticMinimizationEnabled, LANDSCAPE_EXTRAS, orientation, safearea.steps, chatkeyboard, taskskeyboard, autofillkeyboard, safearea_routes, keyboardFieldCap, taskskeyboardland, DEPTH STUB safearea

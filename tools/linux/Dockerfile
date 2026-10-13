@@ -78,6 +78,17 @@ RUN set -eu; arch="$(dpkg --print-architecture)"; \
     tar -xzf "/tmp/$tarball" -C /usr/local --strip-components=1; \
     rm "/tmp/$tarball"; node --version; npm --version
 
+# THE NETWORK IMAGES GUESTS' CLIENTS (docs/network-images-plan.md N12), the
+# flake's versions BY VERSION (tools/check-pins.py holds both sides): the
+# Haskell one as Debian's build for this ghc, which cabal takes from the
+# global package db (guests/haskell/cabal.project resolves nothing else),
+# and libssl-dev for the OCaml one's OpenSSL TLS (lwt_ssl, below).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libssl-dev \
+    libghc-http-client-tls-dev=0.3.6.4-1+b1 libghc-http-client-dev=0.7.19-1+b2 \
+    libghc-http-types-dev=0.12.4-4+b1 \
+    && rm -rf /var/lib/apt/lists/*
+
 # ctypes-foreign via opam on the system compiler: Debian's ctypes deb
 # omits the foreign (libffi) half entirely — its META even dangles.
 #
@@ -100,14 +111,15 @@ RUN set -eu; arch="$(dpkg --print-architecture)"; \
 # promised to be byte-stable and a hash that changes without the content
 # changing is an alarm nobody can act on.
 RUN curl -fsSL -o /tmp/opam-repo.tgz \
-        https://github.com/ocaml/opam-repository/archive/ae6f88cbf223d078928da4d89e303253ea5df2f0.tar.gz \
+        https://github.com/ocaml/opam-repository/archive/c96fd67ce00488b6b1b11ae716942f0b564cff91.tar.gz \
     && mkdir -p /opt/opam-repository \
     && tar -C /opt/opam-repository --strip-components=1 -xzf /tmp/opam-repo.tgz \
     && rm /tmp/opam-repo.tgz
 RUN opam init -a --bare --disable-sandboxing default /opt/opam-repository \
     && opam switch create default ocaml-system \
     && opam install -y ocamlfind.1.9.8 ctypes.0.24.0 ctypes-foreign.0.24.0 \
-        dune.3.24.0 ppxlib.0.38.0
+        dune.3.24.0 ppxlib.0.38.0 \
+        cohttp-lwt-unix.6.2.2 conduit-lwt-unix.8.0.0 lwt_ssl.1.2.0
 ENV PATH=/root/.opam/default/bin:$PATH
 
 # cabal needs a package index even for local-only builds; fetch it once

@@ -137,7 +137,9 @@ GATES = {
     # Package.swift and bindings/swift: the swift language-mode clause
     # reads the manifest and every nonisolated(unsafe) waiver.
     "check-pins": ["android", "tools", "guests/csharp", "docs", "crates/kaya/Cargo.toml",
-                   "Package.swift", "bindings/swift", "guests/swift"],
+                   "Package.swift", "bindings/swift", "guests/swift",
+                   "guests/haskell/cabal.project", "guests/haskell/kaya-guests.cabal",
+                   "bindings/ocaml/dune"],
     # The INTERFACE, not the implementation: kaya.h's own freshness is
     # gated by gen-header, which is keyed on all of crates/.
     "swift-typecheck": ["crates/kaya/include", "bindings/swift",

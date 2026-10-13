@@ -67,6 +67,8 @@ fn enum_go_type(name: &str) -> Option<&'static str> {
         "session_action" => Some("SessionActionKind"),
         "playback_state" => Some("PlaybackState"),
         "fit" => Some("Fit"),
+        // docs/network-images-plan.md N2.
+        "image_phase" => Some("ImagePhase"),
         "content_type" => Some("ContentType"),
         _ => None,
     }

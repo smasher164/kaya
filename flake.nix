@@ -131,6 +131,23 @@
             tar -xzf "$typesNode" -C "$out/node_modules/@types/node" --strip-components=1
             tar -xzf "$undiciTypes" -C "$out/node_modules/undici-types" --strip-components=1
           '';
+          # THE NETWORK IMAGES GUESTS' CLIENTS (docs/network-images-plan.md
+          # N12), at the version this lock resolves and no other: a lock
+          # bump that moves one fails the shell here, naming the pin
+          # (tools/check-pins.py holds the list and the Dockerfile's twins).
+          pinned = pkg: version:
+            if pkg.version == version then pkg
+            else throw "kaya: ${pkg.pname} resolved to ${pkg.version}, pinned at ${version} (flake.nix, tools/check-pins.py)";
+          ocamlHttp = with pkgs.ocamlPackages; [
+            (pinned cohttp-lwt-unix "6.2.2")
+            (pinned conduit-lwt-unix "8.0.0")
+            (pinned lwt_ssl "1.2.0")
+          ];
+          ghcHttp = pkgs.haskellPackages.ghcWithPackages (p: [
+            (pinned p.http-client-tls "0.3.6.4")
+            (pinned p.http-client "0.7.19")
+            (pinned p.http-types "0.12.4")
+          ]);
         in
         {
         default = pkgs.mkShell {
@@ -187,8 +204,10 @@
             ocamlPackages.ctypes
             ocamlPackages.ctypes-foreign
             ocamlPackages.ppxlib
-            # Haskell guest (direct ring; base-only, so bare ghc suffices).
-            ghc
+          ] ++ ocamlHttp ++ [
+            # Haskell guest (direct ring), plus the network images guests'
+            # client in the compiler's own package db.
+            ghcHttp
             cabal-install
             # node 24 runs the .ts guests directly (type stripping is on
             # by default) and libkaya itself is the N-API addon, so no

@@ -336,6 +336,14 @@ fn main() {
         "Microsoft.UI.Xaml.Media.ImageSource".to_string(),
         "Microsoft.UI.Xaml.Media.Imaging.BitmapSource".to_string(),
         "Microsoft.UI.Xaml.Media.Imaging.BitmapImage".to_string(),
+        // NETWORK IMAGES (docs/network-images-plan.md §3's WinUI row):
+        // BitmapImage.ImageFailed is a pad until its handler and args are
+        // named (N14), the loading and failed looks are Borders, and the
+        // decoded cache is shared BitmapImages. Not MemoryManager: it answers
+        // "The object was not found" to an unpackaged process (measured).
+        "Microsoft.UI.Xaml.ExceptionRoutedEventHandler".to_string(),
+        "Microsoft.UI.Xaml.ExceptionRoutedEventArgs".to_string(),
+        "Microsoft.UI.Xaml.Controls.Border".to_string(),
         // THE CANVAS BLIT (docs/canvas-plan.md §8). The raw-pixel
         // sibling of the encoded path above: the core hands over device
         // pixels, so nothing here decodes. `IBuffer` is what

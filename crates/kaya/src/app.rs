@@ -7878,6 +7878,8 @@ pub enum Symbol {
     Attach = 23,
     /// Record audio.
     Mic = 24,
+    /// A picture that is not there: a failed image (docs/network-images-plan.md N4).
+    ImageMissing = 25,
 }
 
 /// One entry of an accept list: a closed kind, or a custom format id.

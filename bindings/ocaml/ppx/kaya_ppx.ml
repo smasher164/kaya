@@ -7,7 +7,7 @@
 
 open Ppxlib
 
-type wire = Str | Bool | I64 | F64 | Blob | Doc | Date | Time | Color | Player
+type wire = Str | Bool | I64 | F64 | Blob | Doc | Date | Time | Color | Player | Phase
 
 let wire_of_core_type (ct : core_type) =
   match ct with
@@ -34,12 +34,14 @@ let wire_of_core_type (ct : core_type) =
   | [%type: Kaya_app.Color.t] -> Some Color
   | [%type: player] -> Some Player
   | [%type: Kaya_app.player] -> Some Player
+  | [%type: Image_phase.t] -> Some Phase
+  | [%type: Kaya_app.Image_phase.t] -> Some Phase
   | _ -> None
 
 let tag_expr ~loc = function
   | Str -> [%expr Kaya_wire.value_str]
   | Bool -> [%expr Kaya_wire.value_bool]
-  | I64 | Date | Time | Color | Player -> [%expr Kaya_wire.value_i64]
+  | I64 | Date | Time | Color | Player | Phase -> [%expr Kaya_wire.value_i64]
   | F64 -> [%expr Kaya_wire.value_f64]
   | Blob | Doc -> [%expr Kaya_wire.value_blob]
 
@@ -49,7 +51,7 @@ let tag_expr ~loc = function
 let value_ctor = function
   | Str -> "Str"
   | Bool -> "Bool"
-  | I64 | Date | Time | Color | Player -> "I64"
+  | I64 | Date | Time | Color | Player | Phase -> "I64"
   | F64 -> "F64"
   | Blob | Doc -> "Str"
 
@@ -62,6 +64,7 @@ let to_model_expr ~loc w e =
   | Time -> [%expr Kaya_app.pack_time [%e e]]
   | Color -> [%expr Kaya_app.pack_color [%e e]]
   | Player -> [%expr Kaya_app.pack_player [%e e]]
+  | Phase -> [%expr Kaya_app.pack_image_phase [%e e]]
   | _ -> e
 
 (* Wrap a model value's bound variable back to the record field. *)
@@ -73,6 +76,7 @@ let of_model_expr ~loc w e =
   | Time -> [%expr Kaya_app.time_of_packed [%e e]]
   | Color -> [%expr Kaya_app.color_of_packed [%e e]]
   | Player -> [%expr Kaya_app.player_of_packed [%e e]]
+  | Phase -> [%expr Kaya_app.image_phase_of_packed [%e e]]
   | _ -> e
 
 let field_ctor = function
@@ -86,6 +90,7 @@ let field_ctor = function
   | Time -> "time_field"
   | Color -> "color_field"
   | Player -> "player_field"
+  | Phase -> "image_phase_field"
 
 let generate ~ctxt (_rec_flag, type_decls) =
   let loc = Expansion_context.Deriver.derived_item_loc ctxt in
@@ -100,7 +105,8 @@ let generate ~ctxt (_rec_flag, type_decls) =
             | None ->
                 Location.raise_errorf ~loc:ld.pld_loc
                   "kaya: field %s is not wire-typed (string, bool, int64, \
-                   float, bytes, document, date, time, color, or player)"
+                   float, bytes, document, date, time, color, player, or \
+                   Image_phase.t)"
                   ld.pld_name.txt)
           labels
       in
@@ -205,7 +211,35 @@ let generate ~ctxt (_rec_flag, type_decls) =
         in
         [%stri let [%p pvar (tname ^ "_patch")] = [%e with_optionals]]
       in
-      (descriptor :: tokens) @ [ patch ]
+      (* <t>_patch_if ?f1 ?f2 ~guard ~equals rc key: the same writes as
+         ONE conditional record (docs/network-images-plan.md N7). *)
+      let patch_if =
+        let change_one (name, _) =
+          [%expr
+            match [%e evar name] with
+            | Some __kaya_v ->
+                [ Kaya_app.change [%e evar (tname ^ "_" ^ name)] __kaya_v ]
+            | None -> []]
+        in
+        let changes =
+          List.fold_right
+            (fun f acc -> [%expr [%e change_one f] @ [%e acc]])
+            fields [%expr []]
+        in
+        let inner =
+          [%expr
+            fun ~guard ~equals __kaya_rc __kaya_key ->
+              Kaya_app.patch_if __kaya_rc __kaya_key ~guard ~equals [%e changes]]
+        in
+        let with_optionals =
+          List.fold_right
+            (fun (name, _) acc ->
+              Ast_builder.Default.pexp_fun ~loc (Optional name) None (pvar name) acc)
+            fields inner
+        in
+        [%stri let [%p pvar (tname ^ "_patch_if")] = [%e with_optionals]]
+      in
+      (descriptor :: tokens) @ [ patch; patch_if ]
   | [ { ptype_name; ptype_kind = Ptype_variant ctors; _ } ] ->
       let tname = ptype_name.txt in
       let evar name = Ast_builder.Default.evar ~loc name in

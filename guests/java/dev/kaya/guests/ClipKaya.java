@@ -46,6 +46,37 @@ final class ClipKaya {
         }
     }
 
+    /** patch made only while the entry exists and the guard's field
+     * still holds expected; otherwise nothing, and no exception
+     * (docs/network-images-plan.md N7). The chain is one record. */
+    static <V> PatchIf patchIf(KayaApp.Tx tx, KayaRecords.Collection<String, Range.Clip> c, String key,
+            KayaRecords.Field<V> guard, V expected) {
+        return new PatchIf(c.patchIf(tx, key, guard, expected));
+    }
+
+    static final class PatchIf {
+        private final KayaRecords.PatchIf<String, Range.Clip> p;
+
+        PatchIf(KayaRecords.PatchIf<String, Range.Clip> p) {
+            this.p = p;
+        }
+
+        PatchIf name(String v) {
+            p.set(NAME, v);
+            return this;
+        }
+
+        PatchIf trimIn(double v) {
+            p.set(TRIM_IN, v);
+            return this;
+        }
+
+        PatchIf trimOut(double v) {
+            p.set(TRIM_OUT, v);
+            return this;
+        }
+    }
+
     /** The record template: `for (var row : ClipKaya.rows(tx, c))`
      * traces it with the typed row surface (exact-index tokens, no
      * probes) — the body runs once, stamping is the core's replay,

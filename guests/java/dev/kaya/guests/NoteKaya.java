@@ -40,6 +40,32 @@ final class NoteKaya {
         }
     }
 
+    /** patch made only while the entry exists and the guard's field
+     * still holds expected; otherwise nothing, and no exception
+     * (docs/network-images-plan.md N7). The chain is one record. */
+    static <V> PatchIf patchIf(KayaApp.Tx tx, KayaRecords.Collection<String, Richrows.Note> c, String key,
+            KayaRecords.Field<V> guard, V expected) {
+        return new PatchIf(c.patchIf(tx, key, guard, expected));
+    }
+
+    static final class PatchIf {
+        private final KayaRecords.PatchIf<String, Richrows.Note> p;
+
+        PatchIf(KayaRecords.PatchIf<String, Richrows.Note> p) {
+            this.p = p;
+        }
+
+        PatchIf title(String v) {
+            p.set(TITLE, v);
+            return this;
+        }
+
+        PatchIf body(dev.kaya.KayaApp.Document v) {
+            p.set(BODY, v);
+            return this;
+        }
+    }
+
     /** The record template: `for (var row : NoteKaya.rows(tx, c))`
      * traces it with the typed row surface (exact-index tokens, no
      * probes) — the body runs once, stamping is the core's replay,

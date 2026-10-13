@@ -559,6 +559,10 @@ object KayaPresent {
     /** How many blobs this batch's table holds: handles are 1..count. */
     @JvmStatic external fun blobCount(): Long
 
+    /** The blob's content id, equal for equal bytes; 0 for a dead handle
+     * (docs/network-images-plan.md N10). */
+    @JvmStatic external fun blobContentId(handle: Long): Long
+
     // ---- The undo tier (docs/undo-plan.md D6/§3) -------------------
     //
     // THE WINDOW IS ALWAYS 0 HERE: Android is one Activity and one

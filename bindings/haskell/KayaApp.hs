@@ -213,6 +213,14 @@ module KayaApp
     -- (docs\/rich-text-plan.md §19).
     onEditNode,
     onFormatNode,
+    onNeeded,
+    onReleased,
+    RowImages,
+    rowImages,
+    onRowImageError,
+    attachRowImages,
+    rowImageNeeded,
+    rowImageReleased,
     setText,
     bindText,
     bindA11yId,
@@ -366,6 +374,7 @@ module KayaApp
     forChecksDriveFrame,
     forChecksDriveSamples,
     forChecksCaptureRaised,
+    forChecksDrainPosted,
     openReader,
     readFrames,
     readPeaks,
@@ -532,7 +541,7 @@ where
 
 
 import Control.Concurrent (ThreadId, forkIO, myThreadId, newEmptyMVar, putMVar, takeMVar)
-import Control.Concurrent.MVar (modifyMVar, modifyMVar_, newMVar)
+import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar)
 import Data.Bits ((.&.))
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BC
@@ -1401,6 +1410,7 @@ data Symbol
   | SymbolSend
   | SymbolAttach
   | SymbolMic
+  | SymbolImageMissing
   deriving (Eq, Show)
 
 -- From the generated table, never literals: the discriminants are spec
@@ -1431,6 +1441,7 @@ symbolWire s = fromIntegral $ case s of
   SymbolSend -> W.symbolSend
   SymbolAttach -> W.symbolAttach
   SymbolMic -> W.symbolMic
+  SymbolImageMissing -> W.symbolImageMissing
 
 -- --- Menus: the command vocabulary (DESIGN.md, Menus) ---------------
 
@@ -2670,6 +2681,17 @@ onFormat app (Widget n) f = modifyIORef' (app.appWidgetFormats) (Map.insert n f)
 onEditNode :: App -> Node -> ([Key] -> Edit -> IO ()) -> IO ()
 onEditNode app (Node n) f = modifyIORef' (app.appNodeEdits) (Map.insert n f)
 
+-- | A stamped image realized 'PhaseLoading' with no source: its row needs
+-- its bytes (docs\/network-images-plan.md N8). Once per row until
+-- 'onReleased' fires for it; the handler receives the copy's keys.
+onNeeded :: App -> Node -> ([Key] -> IO ()) -> IO ()
+onNeeded app (Node n) f = modifyIORef' (app.appNodeNeeded) (Map.insert n f)
+
+-- | The last realized copy of a row's image went while still loading: a
+-- fetch for it may stop.
+onReleased :: App -> Node -> ([Key] -> IO ()) -> IO ()
+onReleased app (Node n) f = modifyIORef' (app.appNodeReleased) (Map.insert n f)
+
 onFormatNode :: App -> Node -> ([Key] -> Format -> IO ()) -> IO ()
 onFormatNode app (Node n) f = modifyIORef' (app.appNodeFormats) (Map.insert n f)
 
@@ -3076,8 +3098,15 @@ data Attr (c :: WClass) where
   -- | Whether a colour picker's user may choose translucency
   -- (docs\/color-picker-plan.md §3 rule 3); off by default.
   Alpha :: Bool -> Attr 'LeafW
-  -- | How a video view fits its picture (docs\/media-plan.md §3).
+  -- | How a video view fits its picture (docs\/media-plan.md §3), and an
+  -- image its picture in the box 'MaxWidth' and 'MaxHeight' declare
+  -- (docs\/network-images-plan.md N3).
   FitAs :: Fit -> Attr 'LeafW
+  -- | What the app knows about an image's bytes
+  -- (docs\/network-images-plan.md N2). A loading or failed image declares
+  -- its box: 'FitAs' and both bounds (N3).
+  Phase :: ImagePhase -> Attr 'LeafW
+  PhaseBound :: Signal ImagePhase -> Attr 'LeafW
   -- | The width:height ratio of a video view's box, whatever its picture's
   -- own shape; 'FitAs' places the picture in it.
   AspectAs :: Int -> Int -> Attr 'LeafW
@@ -3166,6 +3195,8 @@ applyAttr (MaxDate d) (Widget n) =
    in emitB (W.txSetMaxDate n (fromIntegral y) m dd)
 applyAttr (Alpha on) (Widget n) = emitB (W.txSetAlpha n on)
 applyAttr (FitAs f) w = setFit w f
+applyAttr (Phase p) (Widget n) = emitB (W.txSetPhase n (imagePhaseWire p))
+applyAttr (PhaseBound (Signal s)) (Widget n) = emitB (W.txBindPhase n s)
 applyAttr (AspectAs width height) w = setAspect w width height
 applyAttr (MinuteStep minutes) (Widget n) =
   emitB (W.txSetMinuteStep n (fromIntegral minutes))
@@ -4494,8 +4525,13 @@ data TplAttr where
   TplMax :: Double -> TplAttr
   -- | A stamped colour picker's translucency switch, constant across the copies.
   TplAlpha :: Bool -> TplAttr
-  -- | A stamped video view's fit, constant across the copies.
+  -- | A stamped video view's or image's fit, constant across the copies.
   TplFitAs :: Fit -> TplAttr
+  -- | Each stamped image's phase (the live 'Phase'): a constant, a
+  -- signal, or the row's own field — the per-row loading look.
+  TplPhase :: ImagePhase -> TplAttr
+  TplPhaseBound :: Signal ImagePhase -> TplAttr
+  TplPhaseField :: KField ImagePhase -> TplAttr
   -- | A stamped video view's box ratio, constant across the copies.
   TplAspectAs :: Int -> Int -> TplAttr
   -- | What this stamped copy takes from a paste — the closed kinds by
@@ -4572,6 +4608,9 @@ applyTplAttr (TplMin v) (Node n) = emitT (W.txSetMin n v)
 applyTplAttr (TplMax v) (Node n) = emitT (W.txSetMax n v)
 applyTplAttr (TplAlpha on) (Node n) = emitT (W.txSetAlpha n on)
 applyTplAttr (TplFitAs f) (Node n) = emitT (W.txSetFit n (fitWire f))
+applyTplAttr (TplPhase p) (Node n) = emitT (W.txSetPhase n (imagePhaseWire p))
+applyTplAttr (TplPhaseBound (Signal s)) (Node n) = emitT (W.txBindPhase n s)
+applyTplAttr (TplPhaseField (KField i)) (Node n) = emitT (W.txBindPhaseElement n 0 i)
 applyTplAttr (TplAspectAs width height) (Node n) = emitT (W.txSetAspect n (aspectWire width height))
 applyTplAttr (TplAccepts kinds) n = setNodeAccepts n kinds
 applyTplAttr (TplDraggable clip ops) n = setNodeDragSource n clip ops
@@ -5502,6 +5541,11 @@ captureSamplesIn ctx p count at = do
 forChecksClaimAppThread :: IO ()
 forChecksClaimAppThread = myThreadId >>= \here -> writeIORef appThreadRef (Just here)
 
+-- | guests/haskell/AbortCheck alone: run what has been posted, as the
+-- dispatch loop does; a row image helper's write arrives through 'post'.
+forChecksDrainPosted :: App -> IO ()
+forChecksDrainPosted = drainPosted
+
 forChecksDriveFrame :: Capture -> Int -> Int -> IO Bool
 forChecksDriveFrame (Capture c) = R.captureDriveFrame c
 
@@ -5773,6 +5817,8 @@ newApp =
     <*> newIORef Map.empty -- appWidgetFormats
     <*> newIORef Map.empty -- appWidgetToggles
     <*> newIORef Map.empty -- appNodeToggles
+    <*> newIORef Map.empty -- appNodeNeeded
+    <*> newIORef Map.empty -- appNodeReleased
     <*> newIORef Map.empty -- appWidgetValues
     <*> newIORef Map.empty -- appNodeValues
     <*> newIORef Map.empty -- appWidgetCommits
@@ -6012,6 +6058,12 @@ dispatchLoop app = do
             _ -> do
               handlers <- readIORef (app.appNodeSubmits)
               dispatch (mapM_ (\h -> h (keyPath keys) content) (Map.lookup ident handlers))
+          dispatchLoop app
+      | kind == W.occKindImageNeeded || kind == W.occKindImageReleased -> do
+          handlers <- readIORef (if kind == W.occKindImageNeeded then app.appNodeNeeded else app.appNodeReleased)
+          case keys of
+            [] -> return ()
+            _ -> dispatch (mapM_ ($ keyPath keys) (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindToggled -> do
           let checked = case payload of Just (W.VBool b) -> b; _ -> False
@@ -6299,6 +6351,169 @@ askSize other =
         ++ show other
         ++ ", wanted the assigned width and height as f64"
     )
+
+-- | N12's helper (docs\/network-images-plan.md), crates\/kaya\/src\/app\/images.rs
+-- in Haskell: a row realized 'PhaseLoading' with no bytes is fetched with
+-- the app's fetch on the binding's own threads, at most six at a time, rows
+-- sharing a URL sharing one fetch and one copy of the bytes (an encoded LRU
+-- by URL, 32 MB), and written back through 'post' with one 'patchIf'
+-- guarded on the url field: 'PhaseShown' with the bytes, or 'PhaseFailed'.
+-- The app hands over the fetch; this binding carries no client.
+data RowImages a = RowImages
+  { riApp :: App,
+    riRows :: RecordCollection a,
+    riUrl :: KField Text,
+    riArt :: KField BS.ByteString,
+    riPhase :: KField ImagePhase,
+    riFetch :: Text -> IO (Either Text BS.ByteString),
+    riState :: MVar RowImagesState,
+    riOnError :: IORef (Maybe ([Key] -> Text -> IO (Build ())))
+  }
+
+data RowImagesState = RowImagesState
+  { rqQueue :: [Text],
+    -- The rows waiting on each URL queued or in flight.
+    rqWaiting :: Map.Map Text [[Key]],
+    rqWorkers :: Int,
+    rqCache :: Map.Map Text (BS.ByteString, Int),
+    rqCached :: Int,
+    rqTick :: Int
+  }
+
+rowImages ::
+  App ->
+  RecordCollection a ->
+  KField Text ->
+  KField BS.ByteString ->
+  KField ImagePhase ->
+  (Text -> IO (Either Text BS.ByteString)) ->
+  IO (RowImages a)
+rowImages app rows url art phase fetch =
+  RowImages app rows url art phase fetch
+    <$> newMVar (RowImagesState [] Map.empty 0 Map.empty 0 0)
+    <*> newIORef Nothing
+
+-- | Run when a fetch fails: its IO runs on the app thread and the 'Build'
+-- it answers runs inside the transaction that writes 'PhaseFailed', with
+-- the row's keys and why.
+onRowImageError :: RowImages a -> ([Key] -> Text -> IO (Build ())) -> IO ()
+onRowImageError ri f = writeIORef ri.riOnError (Just f)
+
+-- | Fetch for the stamped copies of template image @node@: 'onNeeded' and
+-- 'onReleased' on it.
+attachRowImages :: App -> Node -> RowImages a -> IO ()
+attachRowImages app node ri = do
+  onNeeded app node (rowImageNeeded ri)
+  onReleased app node (rowImageReleased ri)
+
+rowImagesLimit, rowImagesBudget :: Int
+rowImagesLimit = 6
+rowImagesBudget = 32 * 1024 * 1024
+
+rowImageInstance :: RowImages a -> [Key] -> Maybe (RecordCollection a, Key)
+rowImageInstance ri path = case reverse path of
+  key : outer -> Just (foldl at ri.riRows (reverse outer), key)
+  [] -> Nothing
+
+rowImagesCacheGet :: Text -> RowImagesState -> (Maybe BS.ByteString, RowImagesState)
+rowImagesCacheGet url st = case Map.lookup url st.rqCache of
+  Just (bytes, _) ->
+    let tick = st.rqTick + 1
+     in (Just bytes, st {rqCache = Map.insert url (bytes, tick) st.rqCache, rqTick = tick})
+  Nothing -> (Nothing, st)
+
+rowImagesCachePut :: Text -> BS.ByteString -> RowImagesState -> RowImagesState
+rowImagesCachePut url bytes st0 =
+  let tick = st0.rqTick + 1
+      before = maybe 0 (BS.length . fst) (Map.lookup url st0.rqCache)
+      st1 =
+        st0
+          { rqCache = Map.insert url (bytes, tick) st0.rqCache,
+            rqCached = st0.rqCached - before + BS.length bytes,
+            rqTick = tick
+          }
+      evict st
+        | st.rqCached > rowImagesBudget && Map.size st.rqCache > 1 =
+            let (oldest, (gone, _)) = List.minimumBy (\(_, (_, a)) (_, (_, b)) -> compare a b) (Map.toList st.rqCache)
+             in evict st {rqCache = Map.delete oldest st.rqCache, rqCached = st.rqCached - BS.length gone}
+        | otherwise = st
+   in evict st1
+
+-- | 'onNeeded' for a helper: fetch this row's picture.
+rowImageNeeded :: RowImages a -> [Key] -> IO ()
+rowImageNeeded ri path = case rowImageInstance ri path of
+  Nothing -> pure ()
+  Just (RecordCollection (Collection n prefix), key) -> do
+    (model, _) <- readIORef (ri.riApp.appModel)
+    let KField ui = ri.riUrl
+        url = case lookup (keyValue key) (lookupEntries n prefix model) of
+          Just (_, vs) -> case drop (fromIntegral ui) vs of
+            W.VStr s : _ | not (null s) -> Just (T.pack s)
+            _ -> Nothing
+          Nothing -> Nothing
+    case url of
+      Nothing -> pure ()
+      Just u -> do
+        (hit, start) <- modifyMVar (ri.riState) $ \st0 -> case rowImagesCacheGet u st0 of
+          (Just bytes, st) -> pure (st, (Just bytes, False))
+          (Nothing, st) ->
+            let rows = Map.findWithDefault [] u st.rqWaiting
+                waiting = st {rqWaiting = Map.insert u (rows ++ [path]) st.rqWaiting}
+                queued = waiting {rqQueue = waiting.rqQueue ++ [u]}
+             in pure $
+                  if not (null rows)
+                    then (waiting, (Nothing, False))
+                    else
+                      if queued.rqWorkers < rowImagesLimit
+                        then (queued {rqWorkers = queued.rqWorkers + 1}, (Nothing, True))
+                        else (queued, (Nothing, False))
+        mapM_ (\bytes -> rowImagesWrite ri [path] u (Right bytes)) hit
+        if start then () <$ forkIO (rowImagesWork ri) else pure ()
+
+-- | 'onReleased' for a helper: a released row stops waiting, and a URL
+-- nobody waits on any longer is not fetched. A fetch already running
+-- finishes, and its write is guarded like every other.
+rowImageReleased :: RowImages a -> [Key] -> IO ()
+rowImageReleased ri path = modifyMVar_ (ri.riState) $ \st ->
+  let waiting = Map.map (filter (/= path)) st.rqWaiting
+      dropped = filter (`elem` st.rqQueue) (Map.keys (Map.filter null waiting))
+   in pure
+        st
+          { rqWaiting = foldr Map.delete waiting dropped,
+            rqQueue = filter (`notElem` dropped) st.rqQueue
+          }
+
+rowImagesWork :: RowImages a -> IO ()
+rowImagesWork ri = do
+  next <- modifyMVar (ri.riState) $ \st -> case st.rqQueue of
+    u : rest -> pure (st {rqQueue = rest}, Just u)
+    [] -> pure (st {rqWorkers = st.rqWorkers - 1}, Nothing)
+  case next of
+    Nothing -> pure ()
+    Just u -> do
+      got <- ri.riFetch u `catch` \e -> pure (Left (T.pack (show (e :: SomeException))))
+      rows <- modifyMVar (ri.riState) $ \st0 ->
+        let st = either (const st0) (\bytes -> rowImagesCachePut u bytes st0) got
+         in pure (st {rqWaiting = Map.delete u st.rqWaiting}, Map.findWithDefault [] u st.rqWaiting)
+      if null rows then pure () else rowImagesWrite ri rows u got
+      rowImagesWork ri
+
+rowImagesWrite :: RowImages a -> [[Key]] -> Text -> Either Text BS.ByteString -> IO ()
+rowImagesWrite ri rows u got = post (ri.riApp) $ do
+  onError <- readIORef (ri.riOnError)
+  told <- case (got, onError) of
+    (Left why, Just f) -> mapM (\path -> f path why) rows
+    _ -> pure []
+  submitTx (ri.riApp) $ do
+    mapM_
+      ( \path -> case rowImageInstance ri path of
+          Nothing -> pure ()
+          Just (rc, key) -> patchIf rc key (ri.riUrl) u $ case got of
+            Right bytes -> [set (ri.riArt) bytes, set (ri.riPhase) PhaseShown]
+            Left _ -> [set (ri.riPhase) PhaseFailed]
+      )
+      rows
+    sequence_ told
 
 -- A dialog is a question: the continuation monad over the callbacks the
 -- binding already registers, with the App carried, so a chain reads top to

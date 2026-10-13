@@ -30,7 +30,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) the foreign suites load;
 # --example alone would build only the rlib it depends on.
-SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen numberfield timecode colorpicker range media capture secure autofill reveal segmented expander toast safearea"
+SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen numberfield timecode colorpicker range media capture secure autofill reveal segmented expander toast safearea netimage netimage_http"
 # Scenes this lane declares off rather than wires (tools/check-steps.py
 # reads this line): the phone keyboard scripts, since a desktop has no
 # software keyboard (docs/safe-area-plan.md A13).
@@ -1643,6 +1643,37 @@ for proto in x11 wayland; do
     run "$proto" safearea-haskell env KAYA_SELFTEST=safearea "$(hs_bin safearea)"
     run "$proto" safearea-java env KAYA_SELFTEST=safearea KAYA_LIB="$LIB" java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" safearea-c env KAYA_SELFTEST=safearea /tmp/c-guests/safearea
+    # NETWORK IMAGES (docs/network-images-plan.md §5): the affordance scene
+    # through a11y-leg.sh for its expect_ax, and the helper against the media
+    # server this runner starts (KAYA_MEDIA_URL).
+    run "$proto" netimage-rust env KAYA_SELFTEST=netimage \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/netimage"
+    run "$proto" netimage_http-rust env KAYA_SELFTEST=netimage_http "$CARGO_TARGET_DIR/debug/examples/netimage_http"
+    run "$proto" netimage-python env KAYA_SELFTEST=netimage KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/netimage.py
+    run "$proto" netimage-js env KAYA_SELFTEST=netimage KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/netimage.ts
+    run "$proto" netimage-go env KAYA_SELFTEST=netimage \
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" netimage-csharp env KAYA_SELFTEST=netimage KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" netimage-ocaml env KAYA_SELFTEST=netimage KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/netimage.exe
+    run "$proto" netimage-haskell env KAYA_SELFTEST=netimage \
+        tools/linux/a11y-leg.sh "$(hs_bin netimage)"
+    run "$proto" netimage-java env KAYA_SELFTEST=netimage KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    run "$proto" netimage-c env KAYA_SELFTEST=netimage \
+        tools/linux/a11y-leg.sh /tmp/c-guests/netimage
+    run "$proto" netimage_http-python env KAYA_SELFTEST=netimage_http KAYA_LIB="$LIB" python3 guests/python/netimage_http.py
+    run "$proto" netimage_http-js env KAYA_SELFTEST=netimage_http KAYA_LIB="$LIB" node guests/js/netimage_http.ts
+    run "$proto" netimage_http-go env KAYA_SELFTEST=netimage_http /tmp/go-guests/kaya-go
+    run "$proto" netimage_http-csharp env KAYA_SELFTEST=netimage_http KAYA_LIB="$LIB" dotnet exec "$CS_GUEST"
+    run "$proto" netimage_http-ocaml env KAYA_SELFTEST=netimage_http KAYA_LIB="$LIB" \
+        _build-linux/default/guests/ocaml/netimage_http.exe
+    run "$proto" netimage_http-haskell env KAYA_SELFTEST=netimage_http "$(hs_bin netimage_http)"
+    run "$proto" netimage_http-java env KAYA_SELFTEST=netimage_http KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.guests.Main
     # The content type (docs/autofill-plan.md), read off the GtkText.
     run "$proto" autofill-rust env KAYA_SELFTEST=autofill "$CARGO_TARGET_DIR/debug/examples/autofill"
     run "$proto" autofill-python env KAYA_SELFTEST=autofill KAYA_LIB="$LIB" python3 guests/python/autofill.py

@@ -281,7 +281,10 @@ TPL_PROPS = ["format", "grow", "a11y_id", "a11y_label", "a11y_hint", "accepts", 
              # docs/reveal-plan.md V1: a stamped secure field's reveal and toggle.
              "revealed", "revealable",
              # docs/expander-plan.md K3: a stamped expander's second header line.
-             "summary"]
+             "summary",
+             # docs/network-images-plan.md N2: a stamped image's phase, bound
+             # to the row's ImagePhase field.
+             "phase"]
 
 # Rust's `grow` is the generic floor `set(node, prop, value)` and not a
 # named setter, so that one row cannot tell grow from any other generic
@@ -299,6 +302,7 @@ PROP_MEMBERS = {
         "content_type": "content_type",
         "revealed": "revealed", "revealable": "revealable",
         "summary": "summary",
+        "phase": "phase",
     },
     "go": {
         "format": "SetFormat",
@@ -313,6 +317,7 @@ PROP_MEMBERS = {
         "content_type": "SetContentType",
         "revealed": "SetRevealed", "revealable": "SetRevealable",
         "summary": "SetSummary",
+        "phase": "SetPhase",
     },
     "csharp": {
         "format": "SetFormat",
@@ -327,6 +332,7 @@ PROP_MEMBERS = {
         "content_type": "SetContentType",
         "revealed": "SetRevealed", "revealable": "SetRevealable",
         "summary": "SetSummary",
+        "phase": "SetPhase",
     },
     "java": {
         "format": "setFormat",
@@ -341,6 +347,7 @@ PROP_MEMBERS = {
         "content_type": "setContentType",
         "revealed": "setRevealed", "revealable": "setRevealable",
         "summary": "setSummary",
+        "phase": "setPhase",
     },
     "swift": {
         "format": "setFormat",
@@ -355,6 +362,7 @@ PROP_MEMBERS = {
         "content_type": "setContentType",
         "revealed": "setRevealed", "revealable": "setRevealable",
         "summary": "setSummary",
+        "phase": "setPhase",
     },
     "ocaml": {
         "format": "set_format",
@@ -369,6 +377,7 @@ PROP_MEMBERS = {
         "content_type": "set_content_type",
         "revealed": "set_revealed", "revealable": "set_revealable",
         "summary": "set_summary",
+        "phase": "set_phase",
     },
     # Haskell's template props are not methods but CONSTRUCTORS of the
     # `TplAttr` GADT, applied by `applyTplAttr`.
@@ -385,6 +394,7 @@ PROP_MEMBERS = {
         "content_type": "TplContentType",
         "revealed": "TplRevealed", "revealable": "TplRevealable",
         "summary": "TplSummary",
+        "phase": "TplPhaseField",
     },
     # JS spells five of the seven as chainable methods on the base handle
     # and the other two as CONSTRUCTOR OPTIONS; members_js says why the
@@ -401,6 +411,7 @@ PROP_MEMBERS = {
         "content_type": "contentType",
         "revealed": "revealed", "revealable": "revealable",
         "summary": "summary",
+        "phase": "phase",
     },
 }
 
@@ -411,7 +422,7 @@ def members_rust(_):
 
 
 def members_go(_):
-    src = read("bindings/go/app.go")
+    src = read("bindings/go/app.go") + read("bindings/go/images.go")
     return set(re.findall(r"^func \(t \*Tpl\) ([A-Za-z][A-Za-z0-9]*)\s*[\(\[]", src, re.M))
 
 
@@ -484,18 +495,22 @@ def members_js(_):
         src, r"^function setGrow\(handle: Handle, opts: GrowOption\): void \{")
     textarea = brace_block(
         src, r"^export function textarea\(opts: TextAreaOptions = \{\}\): Widget \{")
-    if None in (base, layout, grow, textarea):
+    phase = brace_block(
+        src, r"^function phaseRecord\(handle: Widget, phase: ImagePhase \| Signal<ImagePhase> \| FieldRef\): Uint8Array \{")
+    if None in (base, layout, grow, textarea, phase):
         return None
     names = set(re.findall(r"^  ([a-zA-Z][A-Za-z0-9]*)\(", base, re.M))
     # `document` is a constructor OPTION (docs/rich-text-plan.md §19) and
     # `Handle.document()` is the live READ of the same name, so the option
     # is counted from its writer alone, never from the class block.
     names.discard("document")
+    names.discard("phase")
     for prop, writer, emitter in (("grow", grow, "wire.tx_set_grow("),
                                   ("inset", layout, "wire.tx_set_inset("),
                                   ("align", layout, "wire.tx_set_align("),
                                   ("filled", layout, "wire.tx_set_filled("),
-                                  ("document", textarea, "bindDocument(")):
+                                  ("document", textarea, "bindDocument("),
+                                  ("phase", phase, "wire.tx_bind_phase_element(")):
         if emitter in writer and "isNode" not in writer and "_tplDepth" not in writer:
             names.add(prop)
     return names
@@ -2008,7 +2023,7 @@ def facade_csharp():
 # first leaves a nested typed For's body holding the raw Tpl
 # (docs/deferred.md, closed 2026-08-24). The floor is the census
 # discipline; sum surfaces have no `<Rec>Row`.
-CSHARP_TWIN_FLOOR = 22
+CSHARP_TWIN_FLOOR = 23
 
 
 JAVA_TWIN_FLOOR = 21

@@ -39,8 +39,10 @@ struct MessageRow {
     }
 
     @discardableResult
-    func image(_ f: KayaField<Data>) -> KayaNodeHandle {
-        t.image(f)
+    func image(
+        _ f: KayaField<Data>, fit: KayaFit? = nil, phase: KayaField<KayaImagePhase>? = nil
+    ) -> KayaNodeHandle {
+        t.image(f, fit: fit, phase: phase)
     }
 
     @discardableResult
@@ -215,8 +217,10 @@ struct FrameRow {
     }
 
     @discardableResult
-    func image(_ f: KayaField<Data>) -> KayaNodeHandle {
-        t.image(f)
+    func image(
+        _ f: KayaField<Data>, fit: KayaFit? = nil, phase: KayaField<KayaImagePhase>? = nil
+    ) -> KayaNodeHandle {
+        t.image(f, fit: fit, phase: phase)
     }
 
     @discardableResult

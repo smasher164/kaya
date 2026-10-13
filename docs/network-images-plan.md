@@ -2,8 +2,10 @@
 
 Status: RULED 2026-10-13 (the maintainer: "im okay with those rulings"), N1-N17 as
 recommended (§8). DEPTH BUILT 2026-10-13 on the mac and iOS with the Rust
-binding (docs/deferred.md's BUILD entry; §7 records what it measured); the
-breadth is open. The roadmap
+binding (docs/deferred.md's BUILD entry; §7 records what it measured);
+BREADTH BUILT 2026-10-13 on GTK, WinUI and Compose and in all nine bindings
+with the C floor (§7's breadth block); the media player's art (N17) and the
+review page are open. The roadmap
 card (docs/roadmap/editorial.toml, "Images from the network") asks for "a
 remote image source with a cache, a placeholder while loading and a stated
 failure, in both zones so a table row's art loads per row", and names the
@@ -842,8 +844,8 @@ subject (§6).
 |---|---|---|---|---|---|
 | SwiftUI, macOS | a `Rectangle` filled with `.quaternary` in the box | the same with the chosen SF Symbol, `.secondary` | ImageIO thumbnail on a serial queue, generation-checked on the main queue | `NSCache` with a cost of bytes and a `totalCostLimit` from the window, keyed by (content id, pixel size) | `AXElementBusy` on the image's element (to measure where SwiftUI lets it be set) |
 | SwiftUI, iOS | `Color(.quaternarySystemFill)` | as macOS | as macOS | as macOS, emptied on `didReceiveMemoryWarning` | none (N5) |
-| GTK | a `GtkPicture` with no paintable inside a box styled from libadwaita's colours | the `image-missing` icon at the symbolic size | `gio::spawn_blocking` returning the texture to the main context, generation-checked | an LRU in the backend, sized in pixels | `GTK_ACCESSIBLE_STATE_BUSY` |
-| WinUI | a `Border` with the fill brush in the image's place | the Fluent glyph in a `FontIcon` | `SetSourceAsync` with decode pixel sizes; `ImageOpened` and `ImageFailed` install, generation-checked | an LRU of decoded `SoftwareBitmap`s, or of `BitmapImage`s, to measure which WinUI reuses without a URI | `AutomationProperties` (to measure) |
+| GTK | a `GtkPicture` with no paintable inside a box styled from libadwaita's colours | the `image-missing` icon at the symbolic size | `gio::spawn_blocking` returning the texture to the main context, generation-checked | an LRU in the backend, sized in pixels, emptied on GMemoryMonitor's low-memory warning | `GTK_ACCESSIBLE_STATE_BUSY` |
+| WinUI | a `Border` with the fill brush in the image's place | the Fluent glyph in a `FontIcon` (U+E91B `Photo`: the catalog has no broken-image glyph) | `SetSourceAsync` with decode pixel sizes; `ImageOpened` and `ImageFailed` install, generation-checked | an LRU of shared `BitmapImage`s (MEASURED: one serves two Images), emptied on Win32's low-memory resource notification | none (MEASURED: WinUI 3 has no busy or ARIA property) |
 | Compose | a `Box` with the fill colour | `Icon(Icons.Filled.BrokenImage)` | `ImageDecoder` or `BitmapFactory` in a `LaunchedEffect` keyed on (content id, size) on `Dispatchers.Default`; leaving composition cancels it | an `LruCache<Key, ImageBitmap>` sized in bytes, trimmed on `onTrimMemory` | none (N5); the loading Box carries no image role, as the empty Box does today |
 
 ## §4: The wire
@@ -1058,3 +1060,62 @@ Every ruling above is his. Four need something only he can supply:
 
 And one smaller one, N5: whether a labelled loading image on iOS and Android
 says anything at all.
+
+## §7, breadth: measured 2026-10-13
+
+- The failed glyph, `image_missing` (symbol 25): SF `photo` (Apple's catalog
+  has no broken-image symbol at kaya's floor: photo.badge.exclamationmark is
+  SF 2024, photo.trianglebadge.exclamationmark 2024.3), Material
+  `BrokenImage`, GTK `image-missing-symbolic` (draws a dashed picture frame in
+  adwaita-icon-theme 51.0), Segoe Fluent U+E91B `Photo` (none of the 1074
+  catalog glyphs is a broken or missing picture; U+E8B9 is two stacked
+  frames).
+- Busy (N5): GTK's GTK_ACCESSIBLE_STATE_BUSY reads true off AT-SPI on a
+  labelled loading image and false otherwise. WinUI 3's metadata carries no
+  busy and no ARIA identifier (AutomationProperties has ItemStatus and
+  LiveSetting, neither a busy state), so WinUI sets none, as the mac. Busy is
+  GTK's alone; no shared scene can hold it, so tools/lib/netimage_gtk.py does.
+- WinUI, the windows VM (UTM arm64 Windows 11, release kaya.dll, medians of
+  15): the UI thread's time in the call, and the call to ImageOpened.
+
+  | picture | sync SetSource, UI / opened | SetSourceAsync, UI / opened | SetSourceAsync at 96 px, UI / opened |
+  |---|---|---|---|
+  | cover 600 (10 KB) | 2.86 / 4.5 ms | 0.24 / 1.8 ms | 0.26 / 2.0 ms |
+  | 600x600 noise JPEG (121 KB) | 3.51 / 4.8 ms | 0.34 / 2.8 ms | 0.37 / 3.1 ms |
+  | 3000x3000 noise JPEG (1.19 MB) | 65.6 / 86.7 ms | 1.10 / 19.4 ms | 0.92 / 18.8 ms |
+
+  PixelWidth and PixelHeight report the natural size with a smaller decode
+  size set; a detached BitmapImage decodes and raises ImageOpened, but one
+  held by nothing but its own SetSourceAsync never does; one BitmapImage can
+  be the Source of two Image elements at once; undecodable bytes raise
+  ImageFailed and fail the action; Windows.System.MemoryManager fails in
+  kaya's unpackaged process ("The object was not found").
+- Compose, the API 35 emulator (density 1.0, medians of 15, host load 34-41):
+
+  | picture | box | ImageDecoder full | setTargetSize | BitmapFactory full | inSampleSize |
+  |---|---|---|---|---|---|
+  | cover-600.jpg | 96 px | 0.33 ms | 0.18 ms | 0.36 ms | 0.11 ms |
+  | 600x600 noise JPEG, 138 KB | 96 px | 1.17 ms | 1.08 ms | 1.23 ms | 0.92 ms |
+  | 3000x3000 JPEG, 1.16 MB | 96 px | 14.92 ms | 8.97 ms | 14.55 ms | 7.36 ms |
+  | 3000x3000 JPEG | 20 px | 14.39 ms | 6.85 ms | 14.19 ms | 6.40 ms |
+
+  The emulator runs on the host's cores; a phone's number is still a guess.
+- GTK: §0's lane-image numbers stand (the arm makes exactly that call on a
+  worker). The cache counts 4 bytes a pixel against GTK's 3-byte JPEG
+  textures, so it evicts early rather than late.
+- Each widget backend's table band report reached `window_moved` without
+  sending the core's asks (GTK's and WinUI's own band paths; capi's C door
+  already sent them), so a guest quiet after setup never fetched; both send
+  them now, each held by its route module.
+- iOS: URLSession reaches the lane's server at http://127.0.0.1 from the
+  simulator with no ATS key, so the Swift guests carry no exception.
+- Java: android.jar (API 36) has no java.net.http, and bindings/java compiles
+  into the Android hosts, so the Java helper's default fetch is
+  HttpURLConnection; a cancel stops the read and frees the slot, and the
+  socket closes only if the server honours `Connection: close`
+  (docs/traps.md). Go's context cancel closes it at once.
+- OCaml's https is cohttp-lwt-unix over lwt_ssl (nixpkgs builds conduit
+  without tls-lwt), certificates verified (docs/traps.md).
+- WinUI's loading fill, ControlFillColorSecondaryBrush, is 3 grey levels off
+  the window ground and 1 off the table card: nearly invisible. A styling
+  call for the review page (docs/deferred.md).

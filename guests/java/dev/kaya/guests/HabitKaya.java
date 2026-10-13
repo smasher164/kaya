@@ -40,6 +40,32 @@ final class HabitKaya {
         }
     }
 
+    /** patch made only while the entry exists and the guard's field
+     * still holds expected; otherwise nothing, and no exception
+     * (docs/network-images-plan.md N7). The chain is one record. */
+    static <V> PatchIf patchIf(KayaApp.Tx tx, KayaRecords.Collection<String, Segmented.Habit> c, String key,
+            KayaRecords.Field<V> guard, V expected) {
+        return new PatchIf(c.patchIf(tx, key, guard, expected));
+    }
+
+    static final class PatchIf {
+        private final KayaRecords.PatchIf<String, Segmented.Habit> p;
+
+        PatchIf(KayaRecords.PatchIf<String, Segmented.Habit> p) {
+            this.p = p;
+        }
+
+        PatchIf name(String v) {
+            p.set(NAME, v);
+            return this;
+        }
+
+        PatchIf cadence(double v) {
+            p.set(CADENCE, v);
+            return this;
+        }
+    }
+
     /** The record template: `for (var row : HabitKaya.rows(tx, c))`
      * traces it with the typed row surface (exact-index tokens, no
      * probes) — the body runs once, stamping is the core's replay,

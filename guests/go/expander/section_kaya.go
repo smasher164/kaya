@@ -36,6 +36,27 @@ func (p sectionPatchBuilder) Open(v bool) sectionPatchBuilder {
 	return p
 }
 
+// SectionPatchIf is SectionPatch made only while the entry exists and the
+// guard's field still holds expected; otherwise nothing, and no panic
+// (docs/network-images-plan.md N7). The chain is one record.
+func SectionPatchIf[V comparable](c kaya.RecordCollection[string, Section], tx *kaya.Tx, key string, guard func(*Section) *V, expected V) sectionPatchIfBuilder {
+	return sectionPatchIfBuilder{c.PatchIf(tx, key, guard, expected)}
+}
+
+type sectionPatchIfBuilder struct {
+	p kaya.RecordPatchIf[string, Section]
+}
+
+func (p sectionPatchIfBuilder) Name(v string) sectionPatchIfBuilder {
+	p.p.Set(func(t *Section) *string { return &t.Name }, v)
+	return p
+}
+
+func (p sectionPatchIfBuilder) Open(v bool) sectionPatchIfBuilder {
+	p.p.Set(func(t *Section) *bool { return &t.Open }, v)
+	return p
+}
+
 // The row surface: one token per wire field, and the template
 // constructors that consume them.
 type sectionRow struct {
@@ -134,8 +155,10 @@ func (r sectionRow) SetMax(n kaya.Node, max float64) { r.t.SetMax(n, max) }
 
 func (r sectionRow) SetAlpha(n kaya.Node, on bool) { r.t.SetAlpha(n, on) }
 
-func (r sectionRow) SetFit(n kaya.Node, fit kaya.Fit)         { r.t.SetFit(n, fit) }
-func (r sectionRow) SetAspect(n kaya.Node, width, height int) { r.t.SetAspect(n, width, height) }
+func (r sectionRow) SetFit(n kaya.Node, fit kaya.Fit)                     { r.t.SetFit(n, fit) }
+func (r sectionRow) SetPhase(n kaya.Node, phase kaya.ImagePhase)          { r.t.SetPhase(n, phase) }
+func (r sectionRow) BindPhase(n kaya.Node, f kaya.Field[kaya.ImagePhase]) { r.t.BindPhase(n, f) }
+func (r sectionRow) SetAspect(n kaya.Node, width, height int)             { r.t.SetAspect(n, width, height) }
 
 func (r sectionRow) SetMinGap(n kaya.Node, gap float64)          { r.t.SetMinGap(n, gap) }
 func (r sectionRow) SetLowLabel(n kaya.Node, label string)       { r.t.SetLowLabel(n, label) }

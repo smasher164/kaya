@@ -36,6 +36,8 @@ import (
 	"dev.kaya/guests/go/menus"
 	"dev.kaya/guests/go/milestone2"
 	"dev.kaya/guests/go/nav"
+	"dev.kaya/guests/go/netimage"
+	netimagehttp "dev.kaya/guests/go/netimage_http"
 	"dev.kaya/guests/go/numberfield"
 	"dev.kaya/guests/go/ownundo"
 	"dev.kaya/guests/go/panels"
@@ -122,6 +124,8 @@ var scenes = map[string]func() *kaya.App{
 	"listdetail":       split.App,
 	"menus":            menus.App,
 	"nav":              nav.App,
+	"netimage":         netimage.App,
+	"netimage_http":    netimagehttp.App,
 	"timecode":         timecode.App,
 	"numberfield":      numberfield.App,
 	"colorpicker":      colorpicker.App,

@@ -16,6 +16,14 @@ static class TodoKaya
     public static TodoKayaPatch Patch(Tx tx, RecordCollection<Todo> c, object key) =>
         new TodoKayaPatch(c.Patch(tx, key));
 
+    /// <summary>The guarded twin of Patch (docs/network-images-plan.md
+    /// N7): the named setters inside `changes` gather ONE record, made
+    /// only while the entry exists and its `guard` field still holds
+    /// `expected`. Answers whether the guard held.</summary>
+    public static bool PatchIf<G>(Tx tx, RecordCollection<Todo> c, object key,
+        Field<G> guard, G expected, System.Action<TodoKayaPatchIf> changes) =>
+        c.PatchIf(tx, key, guard, expected, p => changes(new TodoKayaPatchIf(p)));
+
     /// <summary>The record template, expression form: the body runs
     /// once, authoring the blueprint with the typed row surface
     /// (exact-index tokens, no probes); stamping is the core's
@@ -479,6 +487,13 @@ sealed class TodoRow
 
     public void SetFit(Node n, Fit fit) => t.SetFit(n, fit);
 
+    public void SetPhase(Node n, ImagePhase phase) => t.SetPhase(n, phase);
+
+    public void SetPhase(Node n, Signal s) => t.SetPhase(n, s);
+
+    public void SetPhase(Node n, Field<ImagePhase> f, uint level = 0) =>
+        t.SetPhase(n, f, level);
+
     public void SetAspect(Node n, int width, int height) =>
         t.SetAspect(n, width, height);
 }
@@ -538,6 +553,25 @@ sealed class TodoKayaPatch
     }
 
     public TodoKayaPatch Done(bool v)
+    {
+        p.Set(TodoKaya.Done, v);
+        return this;
+    }
+}
+
+sealed class TodoKayaPatchIf
+{
+    readonly RecordPatchIf<Todo> p;
+
+    internal TodoKayaPatchIf(RecordPatchIf<Todo> p) => this.p = p;
+
+    public TodoKayaPatchIf Title(string v)
+    {
+        p.Set(TodoKaya.Title, v);
+        return this;
+    }
+
+    public TodoKayaPatchIf Done(bool v)
     {
         p.Set(TodoKaya.Done, v);
         return this;

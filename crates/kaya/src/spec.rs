@@ -4544,6 +4544,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("send", 22),
                 ("attach", 23),
                 ("mic", 24),
+                ("image_missing", 25),
             ],
         },
         EnumSpec {
@@ -5567,6 +5568,7 @@ mod tests {
                     ("symbol", "send") => wire::SYMBOL_SEND,
                     ("symbol", "attach") => wire::SYMBOL_ATTACH,
                     ("symbol", "mic") => wire::SYMBOL_MIC,
+                    ("symbol", "image_missing") => wire::SYMBOL_IMAGE_MISSING,
                     ("file_mode", "read") => wire::FILE_MODE_READ,
                     ("file_mode", "write") => wire::FILE_MODE_WRITE,
                     ("file_mode", "read_write") => wire::FILE_MODE_READ_WRITE,
@@ -5900,7 +5902,7 @@ mod tests {
         // Nothing outside the table resolves, including the off-by-one
         // neighbours and the negative a signed wire slot can carry.
         assert_eq!(wire::symbol_name(0), None);
-        assert_eq!(wire::symbol_name(25), None);
+        assert_eq!(wire::symbol_name(26), None);
         assert_eq!(wire::symbol_name(-1), None);
     }
 

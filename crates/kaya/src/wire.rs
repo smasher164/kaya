@@ -1541,6 +1541,7 @@ pub(crate) const SYMBOL_EMOJI: u32 = 21;
 pub(crate) const SYMBOL_SEND: u32 = 22;
 pub(crate) const SYMBOL_ATTACH: u32 = 23;
 pub(crate) const SYMBOL_MIC: u32 = 24;
+pub(crate) const SYMBOL_IMAGE_MISSING: u32 = 25;
 
 /// The vocabulary as one table, in wire order: `(id, semantic name)`.
 /// The NAME is what a diagnostic prints and what the harness compares —
@@ -1570,6 +1571,7 @@ pub(crate) const SYMBOLS: &[(u32, &str)] = &[
     (SYMBOL_SEND, "send"),
     (SYMBOL_ATTACH, "attach"),
     (SYMBOL_MIC, "mic"),
+    (SYMBOL_IMAGE_MISSING, "image_missing"),
 ];
 
 /// The semantic name of a wire symbol value, or None if it is outside

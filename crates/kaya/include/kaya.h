@@ -1643,6 +1643,8 @@
 
 #define KAYA_SYMBOL_MIC 24
 
+#define KAYA_SYMBOL_IMAGE_MISSING 25
+
 /**
  * The rich text vocabularies (spec enums "rich_attr", "block_kind",
  * "edit_source"; docs/rich-text-plan.md R3/R4). A name rides as a string.

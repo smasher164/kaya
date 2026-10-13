@@ -118,13 +118,45 @@ export class Color {
   }
 }
 export type ColorToken = typeof Color;
+
+/** What an image is waiting for (docs/network-images-plan.md N2):
+ * LOADING draws the loading look until bytes arrive and keeps an earlier
+ * picture while it waits, FAILED the failed look. The class is also the
+ * schema token, so a row field of it gives each stamped copy its own. */
+export class ImagePhase {
+  static readonly SHOWN = new ImagePhase(wire.IMAGE_PHASE_SHOWN, "shown");
+  static readonly LOADING = new ImagePhase(wire.IMAGE_PHASE_LOADING, "loading");
+  static readonly FAILED = new ImagePhase(wire.IMAGE_PHASE_FAILED, "failed");
+  /** @internal */ readonly _wire: number;
+  readonly name: string;
+
+  private constructor(wireValue: number, name: string) {
+    this._wire = wireValue;
+    this.name = name;
+    Object.freeze(this);
+  }
+
+  /** @internal */
+  static _of(wireValue: number): ImagePhase {
+    const phase = [ImagePhase.SHOWN, ImagePhase.LOADING, ImagePhase.FAILED].find((p) => p._wire === wireValue);
+    if (phase === undefined) throw new RangeError(`kaya: ${wireValue} is no image phase (shown, loading, failed)`);
+    return phase;
+  }
+
+  toString(): string {
+    return this.name;
+  }
+}
+export type ImagePhaseToken = typeof ImagePhase;
 /** A stamped copy's document is a FIELD of its row: a Blob carrying the
  * document's own value list (docs/rich-text-plan.md §19). */
 export type DocumentToken = typeof Document;
-export type Token = StringConstructor | BooleanConstructor | NumberConstructor | Uint8ArrayConstructor | IntToken | CivilDateToken | CivilTimeToken | DocumentToken | ColorToken | PlayerToken;
+export type Token = StringConstructor | BooleanConstructor | NumberConstructor | Uint8ArrayConstructor | IntToken | CivilDateToken | CivilTimeToken | DocumentToken | ColorToken | PlayerToken | ImagePhaseToken;
 export type Schema = { readonly [name: string]: Token };
 type FieldOf<T> = T extends PlayerToken
   ? Player | null
+  : T extends ImagePhaseToken
+  ? ImagePhase
   : T extends DocumentToken
   ? Document
   : T extends ColorToken
@@ -167,10 +199,10 @@ function wireTag(token: Token, name: string): number {
   if (token === Number) return wire.VALUE_F64;
   if (token === Uint8Array) return wire.VALUE_BLOB;
   if (token === Int) return wire.VALUE_I64;
-  if (token === CivilDate || token === CivilTime || token === Color || token === Player) return wire.VALUE_I64;
+  if (token === CivilDate || token === CivilTime || token === ImagePhase || token === Color || token === Player) return wire.VALUE_I64;
   if (token === Document) return wire.VALUE_BLOB;
   throw new TypeError(
-    `kaya: field ${JSON.stringify(name)} has no wire type — a schema names String, Boolean, Number, kaya.Int, kaya.CivilDate, kaya.CivilTime, kaya.Color, kaya.Player, kaya.Document or Uint8Array per field`,
+    `kaya: field ${JSON.stringify(name)} has no wire type — a schema names String, Boolean, Number, kaya.Int, kaya.CivilDate, kaya.CivilTime, kaya.Color, kaya.Player, kaya.ImagePhase, kaya.Document or Uint8Array per field`,
   );
 }
 
@@ -495,9 +527,13 @@ function keyPath(path: readonly unknown[]): wire.WireValue[] {
 function signalValue(what: string, v: unknown): wire.WireValue {
   if (typeof v === "number" || typeof v === "string" || typeof v === "boolean") return v;
   if (v instanceof Color) return new wire.I64(v.hex());
+  if (v instanceof ImagePhase) return new wire.I64(v._wire);
+  // A live image's source; handles are single-submit, so every write
+  // registers its own (docs/network-images-plan.md N6).
+  if (v instanceof Uint8Array) return new BlobHandle(runtime.registerBlob(v));
   if (typeof v === "object" && v !== null && "year" in v) return new wire.I64(wire.pack_date(...dateParts(what, v)));
   if (typeof v === "object" && v !== null && "hour" in v) return new wire.I64(wire.pack_time(...timeParts(what, v)));
-  throw new TypeError(`kaya: ${what} takes a string, a number, a boolean, a civil date, a civil time or a kaya.Color, not ${runtime.describe(v)}`);
+  throw new TypeError(`kaya: ${what} takes a string, a number, a boolean, a civil date, a civil time, a kaya.Color, a kaya.ImagePhase or bytes, not ${runtime.describe(v)}`);
 }
 
 /** A co-located handler. The parameters are open because the arity
@@ -1060,11 +1096,19 @@ export class Widget extends Handle {
     records().push(wire.tx_widget_command(this.id, wire.COMMAND_FOCUS));
   }
 
-  /** Place this video view's picture in its box another way
+  /** Place this video view's or image's picture in its box another way
    * (docs/media-plan.md §3). */
   fit(fit: Fit): this {
     this._live("fit()");
     records().push(wire.tx_set_fit(this.id, fitValue(fit)));
+    return this;
+  }
+
+  /** Say what this live image is waiting for now, or bind it to a Signal
+   * (docs/network-images-plan.md N2). */
+  phase(phase: ImagePhase | Signal<ImagePhase>): this {
+    this._live("phase()");
+    records().push(phaseRecord(this, phase));
     return this;
   }
 
@@ -1526,6 +1570,7 @@ function fieldDecoder(token: Token): (v: wire.Decoded | Uint8Array) => unknown {
   if (token === CivilDate) return (v) => civilDate(v as number);
   if (token === CivilTime) return (v) => civilTime(v as number);
   if (token === Color) return (v) => Color.fromHex(v as number);
+  if (token === ImagePhase) return (v) => ImagePhase._of(Number(v));
   // A row's player (docs/media-plan.md §7b): its id, 0 for none.
   if (token === Player) return (v) => (Number(v) === 0 ? null : (app()._players.get(Number(v)) ?? new Player(Number(v))));
   if (token === Document) return (v) => documentOfBytes(v as Uint8Array);
@@ -1539,6 +1584,7 @@ function fieldEncoder(token: Token, tag: number, type: string): (v: unknown, nam
   if (token === CivilDate) return (v, name) => new wire.I64(wire.pack_date(...dateParts(`${type}.${name}`, v)));
   if (token === CivilTime) return (v, name) => new wire.I64(wire.pack_time(...timeParts(`${type}.${name}`, v)));
   if (token === Color) return (v, name) => (v instanceof Color ? new wire.I64(v.hex()) : refuse(v, name, "kaya.Color"));
+  if (token === ImagePhase) return (v, name) => (v instanceof ImagePhase ? new wire.I64(v._wire) : refuse(v, name, "kaya.ImagePhase"));
   if (token === Player) return (v, name) => (v === null ? new wire.I64(0) : v instanceof Player ? new wire.I64(v.id) : refuse(v, name, "kaya.Player or null"));
   // A Document field IS a Blob field carrying `documentBytes`' list (§19).
   if (token === Document) return (v, name) => (v instanceof Document ? new BlobHandle(runtime.registerBlob(documentBytes(v))) : refuse(v, name, "kaya.Document"));
@@ -1620,6 +1666,20 @@ export class Draft<E> {
 
 /** One instance of a collection: the table inside the copy selected by
  * `path` (the empty path for a live-zone collection). */
+/** `patch`'s options: `when` is N7's guard (docs/network-images-plan.md). */
+export type PatchOptions<E> = { when?: Partial<E> };
+
+/** A guard's equality on the mirror, as the core compares: bytes by
+ * content, every other field by its wire value. */
+function sameField(spec: Variant, at: number, name: string, held: unknown, want: unknown): boolean {
+  if (spec.schema[at] === wire.VALUE_BLOB) {
+    return held instanceof Uint8Array && want instanceof Uint8Array ? Buffer.from(held).equals(Buffer.from(want)) : held === want;
+  }
+  const a = spec.encoders[at]!(held, name);
+  const b = spec.encoders[at]!(want, name);
+  return a instanceof I64 ? b instanceof I64 && a.value === b.value : a === b;
+}
+
 export class BoundCollection<E, R> {
   /** @internal */ readonly _owner: Collection<E, R>;
   /** @internal */ readonly _path: Key[];
@@ -1726,8 +1786,18 @@ export class BoundCollection<E, R> {
   /** Field-level deltas: `todos.patch(k, {done: true})` sends one
    * update_field per field and mutates the model entry in place. On a sum
    * the entry's CURRENT CONSTRUCTOR is the witness — a field it lacks
-   * throws here. */
-  patch(key: Key, fields: Partial<E>): void {
+   * throws here.
+   *
+   * `{ when: { artUrl: url } }` makes it the CONDITIONAL write
+   * (docs/network-images-plan.md N7): one record, applied only while row
+   * `key` exists and that field still holds that value, and otherwise
+   * nothing, with no error — a late result for a row that was removed or
+   * has moved on drops. */
+  patch(key: Key, fields: Partial<E>, opts: PatchOptions<E> = {}): void {
+    if (opts.when !== undefined) {
+      this._patchIf(key, fields, opts.when);
+      return;
+    }
     const entry = this._mirror().get(key);
     if (entry === undefined) throw new Error(`kaya: patch of missing key ${JSON.stringify(key)}`);
     const [variant, spec] = this._owner._variantFor(entry);
@@ -1741,6 +1811,47 @@ export class BoundCollection<E, R> {
       (entry as Record<string, unknown>)[name] = value;
     }
     this._recomputeDerived();
+  }
+
+  /** @internal */
+  _patchIf(key: Key, fields: Partial<E>, when: Partial<E>): void {
+    const guards = when === null || typeof when !== "object" ? [] : Object.entries(when);
+    if (guards.length !== 1) {
+      throw new TypeError("kaya: when names ONE field and the value it must still hold — { when: { artUrl: url } } (docs/network-images-plan.md N7)");
+    }
+    const [guardName, guardValue] = guards[0]!;
+    const changes = Object.entries(fields);
+    const names = [guardName, ...changes.map(([name]) => name)];
+    const owner = this._owner;
+    const entry = this._mirror().get(key);
+    const held = entry === undefined ? null : owner._variantFor(entry);
+    const shapes: [number, Variant][] = [...(held === null ? [] : [held]), ...owner._variants.map((v, i): [number, Variant] => [i, v])];
+    const shape = shapes.find(([, spec]) => spec.fields !== null && names.every((n) => spec.fields!.has(n)));
+    if (shape === undefined) {
+      throw new Error(
+        `kaya: no record of this collection has every field ${names.map((n) => JSON.stringify(n)).join(", ")} — a conditional patch guards on one of the row's fields and writes others`,
+      );
+    }
+    const [variant, spec] = shape;
+    const at = spec.fields!.get(guardName)!;
+    const indices = changes.map(([name]) => spec.fields!.get(name)!);
+    records().push(
+      wire.tx_collection_patch_if(
+        owner._id,
+        keyPath(this._path),
+        keyValue(key),
+        at,
+        variant,
+        spec.encoders[at]!(guardValue, guardName),
+        indices.map((i) => new I64(i)),
+        changes.map(([name, value], i) => spec.encoders[indices[i]!]!(value, name)),
+      ),
+    );
+    const holds = entry !== undefined && held !== null && held[0] === variant && sameField(spec, at, guardName, (entry as Record<string, unknown>)[guardName], guardValue);
+    if (holds) {
+      for (const [name, value] of changes) (entry as Record<string, unknown>)[name] = value;
+      this._recomputeDerived();
+    }
   }
 
   /** Reposition an entry before another's key. Keys, never indices; a
@@ -3968,13 +4079,13 @@ export function tr(key: string, args: Record<string, TrArg> = {}): string {
 
 /** Declare a signal: a render pipe with no read. A number is an F64 on
  * the wire (docs/js-plan.md §4). */
-export function signal<T extends string | number | boolean | CivilDate | CivilTime | Color>(initial: T): Signal<Widen<T>> {
+export function signal<T extends string | number | boolean | CivilDate | CivilTime | Color | ImagePhase | Uint8Array>(initial: T): Signal<Widen<T>> {
   const handle = new Signal<Widen<T>>(app()._next("signal"), initial as Widen<T>);
   app()._signals.set(handle.id, handle as Signal<unknown>);
   records().push(wire.tx_create_signal(handle.id, signalValue("a signal", initial)));
   return handle;
 }
-type Widen<T> = T extends string ? string : T extends number ? number : T extends boolean ? boolean : T;
+type Widen<T> = T extends string ? string : T extends number ? number : T extends boolean ? boolean : T extends Uint8Array ? Uint8Array : T;
 
 /** Declare a collection: no argument for a scalar (string) table, a
  * record type for a record one, a list of record types for a sum — one
@@ -4007,7 +4118,7 @@ export type RowHandle<E> = (E extends object ? E : { value: E }) & {
   readonly exists: boolean;
   remove(): void;
   update(value: E): void;
-  patch(fields: Partial<E>): void;
+  patch(fields: Partial<E>, opts?: PatchOptions<E>): void;
   moveBefore(anchor: Key): void;
   moveAfter(anchor: Key): void;
   moveToEnd(): void;
@@ -4032,7 +4143,7 @@ function rowHandle(owner: Collection<unknown, unknown>, keys: readonly Key[]): u
     },
     remove: () => bound.remove(key),
     update: (v: unknown) => bound.update(key, v),
-    patch: (f: Record<string, unknown>) => bound.patch(key, f),
+    patch: (f: Record<string, unknown>, opts?: PatchOptions<unknown>) => bound.patch(key, f, opts),
     moveBefore: (anchor: Key) => bound.moveBefore(key, anchor),
     moveAfter: (anchor: Key) => bound.moveAfter(key, anchor),
     moveToEnd: () => bound.moveToEnd(key),
@@ -4181,6 +4292,7 @@ export const Symbol_ = Object.freeze({
   SEND: wire.SYMBOL_SEND,
   ATTACH: wire.SYMBOL_ATTACH,
   MIC: wire.SYMBOL_MIC,
+  IMAGE_MISSING: wire.SYMBOL_IMAGE_MISSING,
 });
 // `Symbol` is JS's own; the vocabulary exports under kaya's usual name
 // through this alias, so `kaya.Symbol.COPY` reads like every other binding.
@@ -4870,10 +4982,40 @@ function setBleed(handle: Widget, opts: BleedOption): void {
   records().push(wire.tx_set_bleed(handle.id, true));
 }
 
+export type ImageOptions = GrowOption &
+  BleedOption & {
+    /** What it is waiting for: a constant, a Signal or the row's
+     * ImagePhase field. An image that can be LOADING or FAILED declares
+     * its box, `fit` with maxWidth and maxHeight (N2, N3). */
+    phase?: ImagePhase | Signal<ImagePhase> | FieldRef;
+    fit?: Fit;
+    /** A stamped copy was realized loading with no bytes: its row (N8). */
+    onNeeded?: Handler;
+    /** That copy went while still loading: its row (N8). */
+    onReleased?: Handler;
+  };
+
+function phaseRecord(handle: Widget, phase: ImagePhase | Signal<ImagePhase> | FieldRef): Uint8Array {
+  if (phase instanceof Signal) return wire.tx_bind_phase(handle.id, phase.id);
+  if (phase instanceof FieldRef) {
+    pickerField("an image's phase", phase, ImagePhase, "kaya.ImagePhase");
+    return wire.tx_bind_phase_element(handle.id, phase._level(), phase._index);
+  }
+  if (phase instanceof ImagePhase) return wire.tx_set_phase(handle.id, phase._wire);
+  throw new TypeError(`kaya: an image's phase takes a kaya.ImagePhase, a Signal of one or a row's ImagePhase field, not ${runtime.describe(phase)}`);
+}
+
 /** An image displaying encoded bytes: the toolkit decodes natively. The
- * source is bytes, an Asset, a Signal, or an element field. */
-export function image(source?: ImageSource, opts: GrowOption & BleedOption = {}): Widget {
+ * source is bytes, an Asset, a Signal, or an element field; `phase`,
+ * `fit`, `onNeeded` and `onReleased` are docs/network-images-plan.md's,
+ * and `kaya.RowImages` answers the two handlers. */
+export function image(source?: ImageSource, opts: ImageOptions = {}): Widget {
   const handle = widget(wire.KIND_IMAGE);
+  if ((opts.onNeeded !== undefined || opts.onReleased !== undefined) && !handle.isNode) {
+    throw new Error(
+      "kaya: onNeeded and onReleased belong to a stamped image — the core says when a ROW's copy needs its bytes, and a live image is written through its own signal (docs/network-images-plan.md N8)",
+    );
+  }
   if (source !== undefined) {
     if (source instanceof Signal) records().push(wire.tx_bind_source(handle.id, source.id));
     else if (source instanceof FieldRef) records().push(wire.tx_bind_source_element(handle.id, source._level(), source._index));
@@ -4884,9 +5026,161 @@ export function image(source?: ImageSource, opts: GrowOption & BleedOption = {})
       );
     }
   }
+  if (opts.fit !== undefined) records().push(wire.tx_set_fit(handle.id, fitValue(opts.fit)));
+  if (opts.phase !== undefined) records().push(phaseRecord(handle, opts.phase));
+  if (opts.onNeeded !== undefined) app()._register(handle, wire.OCC_IMAGE_NEEDED, opts.onNeeded);
+  if (opts.onReleased !== undefined) app()._register(handle, wire.OCC_IMAGE_RELEASED, opts.onReleased);
   setGrow(handle, opts);
   setBleed(handle, opts);
   return handle;
+}
+
+/** The app's fetch for RowImages: the bytes at a URL, rejecting when it
+ * cannot have them; `signal` aborts it once no row waits on it. */
+export type ImageFetch = (url: string, signal: AbortSignal) => Promise<Uint8Array>;
+
+export type RowImagesOptions<E> = {
+  /** The row's fields: the URL it wants, its bytes and its phase. */
+  url: keyof E & string;
+  art: keyof E & string;
+  phase: keyof E & string;
+  /** RowImages.defaultFetch, the platform's `fetch`, unless given. */
+  fetch?: ImageFetch;
+  limit?: number;
+  /** Run inside the write that marks a row FAILED. */
+  onError?: (row: RowHandle<E>, reason: string) => void;
+};
+
+/** Rows whose image loads on demand (docs/network-images-plan.md N12):
+ * give the template image `{ onNeeded: images.needed, onReleased:
+ * images.released }`. A row realized LOADING is fetched, at most `limit`
+ * at a time; rows sharing a URL share one fetch and one copy of the bytes,
+ * kept in an LRU of 32 MB by URL. The result is written after the fetch's
+ * await, on the app thread, as ONE conditional write guarded on the row's
+ * URL, so a row removed or moved on meanwhile drops it. A released row
+ * stops waiting, a URL nobody waits on is not fetched, and a running
+ * fetch nobody waits on any more is aborted. */
+export class RowImages<E> {
+  static readonly LIMIT = 6;
+  static readonly BUDGET = 32 << 20;
+  private readonly _rows: Collection<E, unknown>;
+  private readonly _opts: RowImagesOptions<E>;
+  private readonly _fetch: ImageFetch;
+  private readonly _queue: string[] = [];
+  private readonly _waiting = new Map<string, { rows: Key[][]; abort: AbortController | null }>();
+  private readonly _cache = new Map<string, Uint8Array>();
+  private _cached = 0;
+  private _running = 0;
+
+  constructor(rows: Collection<E, unknown>, opts: RowImagesOptions<E>) {
+    const names = [opts.url, opts.art, opts.phase];
+    if (!rows._variants.some((v) => v.fields !== null && names.every((n) => v.fields!.has(n)))) {
+      throw new Error(`kaya: RowImages names the row's url, art and phase fields, and no record of this collection has all of ${JSON.stringify(names)}`);
+    }
+    this._rows = rows;
+    this._opts = opts;
+    this._fetch = opts.fetch ?? RowImages.defaultFetch;
+  }
+
+  /** The fetch when the app gives none: the platform's own `fetch`,
+   * rejecting for an HTTP error status. */
+  static async defaultFetch(url: string, signal: AbortSignal): Promise<Uint8Array> {
+    const response = await fetch(url, { signal });
+    if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
+    return new Uint8Array(await response.arrayBuffer());
+  }
+
+  readonly needed = (row: RowHandle<E>): void => {
+    const url = (row as Record<string, unknown>)[this._opts.url];
+    if (typeof url !== "string" || url === "") return;
+    const keys = [...row.path, row.key];
+    const hit = this._cache.get(url);
+    if (hit !== undefined) {
+      this._cache.delete(url);
+      this._cache.set(url, hit);
+      this._land([keys], url, hit, null);
+      return;
+    }
+    const waiting = this._waiting.get(url);
+    if (waiting !== undefined) {
+      waiting.rows.push(keys);
+      return;
+    }
+    this._waiting.set(url, { rows: [keys], abort: null });
+    this._queue.push(url);
+    this._pump();
+  };
+
+  readonly released = (row: RowHandle<E>): void => {
+    const keys = [...row.path, row.key];
+    for (const [url, waiting] of [...this._waiting]) {
+      waiting.rows = waiting.rows.filter((k) => !sameKeys(k, keys));
+      if (waiting.rows.length > 0 || waiting.abort === null) continue;
+      this._waiting.delete(url);
+      waiting.abort.abort();
+    }
+  };
+
+  private _pump(): void {
+    while (this._running < (this._opts.limit ?? RowImages.LIMIT) && this._queue.length > 0) {
+      const url = this._queue.shift()!;
+      const waiting = this._waiting.get(url)!;
+      if (waiting.rows.length === 0) {
+        this._waiting.delete(url);
+        continue;
+      }
+      waiting.abort = new AbortController();
+      this._running += 1;
+      void this._run(url, waiting);
+    }
+  }
+
+  private async _run(url: string, waiting: { rows: Key[][]; abort: AbortController | null }): Promise<void> {
+    const signal = waiting.abort!.signal;
+    let data: Uint8Array | null = null;
+    let why: string | null = null;
+    try {
+      data = await this._fetch(url, signal);
+    } catch (err) {
+      why = err instanceof Error ? err.message : String(err);
+    }
+    this._running -= 1;
+    if (!signal.aborted) {
+      if (data !== null) this._put(url, data);
+      if (this._waiting.get(url) === waiting) this._waiting.delete(url);
+      this._land(waiting.rows, url, data, why);
+      await app().commit();
+    }
+    this._pump();
+  }
+
+  private _put(url: string, data: Uint8Array): void {
+    const old = this._cache.get(url);
+    if (old !== undefined) this._cached -= old.length;
+    this._cache.delete(url);
+    this._cache.set(url, data);
+    this._cached += data.length;
+    for (const [oldest, bytes] of this._cache) {
+      if (this._cached <= RowImages.BUDGET || this._cache.size <= 1) break;
+      this._cache.delete(oldest);
+      this._cached -= bytes.length;
+    }
+  }
+
+  private _land(rows: Key[][], url: string, data: Uint8Array | null, why: string | null): void {
+    const { url: urlField, art, phase, onError } = this._opts;
+    for (const keys of rows) {
+      const path = keys.slice(0, -1);
+      const bound = path.length === 0 ? this._rows : this._rows.at(...path);
+      const changes = (data !== null ? { [art]: data, [phase]: ImagePhase.SHOWN } : { [phase]: ImagePhase.FAILED }) as Partial<E>;
+      bound.patch(keys[keys.length - 1]!, changes, { when: { [urlField]: url } as Partial<E> });
+      if (why !== null && onError !== undefined) onError(rowHandle(this._rows as Collection<unknown, unknown>, keys) as RowHandle<E>, why);
+    }
+  }
+}
+
+function sameKeys(a: readonly Key[], b: readonly Key[]): boolean {
+  return a.length === b.length && a.every((k, i) => k === b[i]);
 }
 
 // --------------------------------------------------------------- canvas

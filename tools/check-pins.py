@@ -1369,6 +1369,105 @@ for _label, _old, _new, _expect in [
     if _n != 1 or not any(_expect in g for g in _got):
         out.append(f"check-pins: self-test {_label} was not refused ({_n} match(es), got {_got})")
 
+
+# THE OCAML AND HASKELL GUESTS' CLIENTS (docs/network-images-plan.md N12,
+# ruled 2026-10-13): cohttp over OpenSSL and http-client-tls, each at ONE
+# exact version in every place it is resolved — flake.nix's `pinned` (the
+# dev shell refuses a lock that moves one), the linux image's opam install
+# and apt line, and guests/haskell/cabal.project, which takes nothing from
+# Hackage — the same version in all of them, and none a dependency of a
+# binding, since the app passes its fetch.
+NET_OCAML = {"cohttp-lwt-unix": "6.2.2", "conduit-lwt-unix": "8.0.0", "lwt_ssl": "1.2.0"}
+NET_HASKELL = {"http-client-tls": "0.3.6.4", "http-client": "0.7.19", "http-types": "0.12.4"}
+
+
+def netclient_findings(flake, dockerfile, project, binding_dune, guests_cabal):
+    found = []
+    if "if pkg.version == version then pkg" not in flake:
+        found.append("flake.nix: `pinned` no longer refuses a version the lock moved")
+    for name, want in [*NET_OCAML.items(), *NET_HASKELL.items()]:
+        prefix = "p." if name in NET_HASKELL else ""
+        got = re.findall(rf'\(pinned {re.escape(prefix + name)} "([^"]*)"\)', flake)
+        if got != [want]:
+            found.append(f"flake.nix: {name} is not `(pinned {prefix}{name} \"{want}\")` "
+                         f"(found {got})")
+    opam = " ".join(line for _, line in logical_lines(dockerfile) if "opam install" in line)
+    for name, want in NET_OCAML.items():
+        got = re.findall(rf"(?<![\w.-]){re.escape(name)}(\.[^\s]+)?(?![\w-])", opam)
+        if got != ["." + want]:
+            found.append(f"tools/linux/Dockerfile: opam installs {name} as {got}, "
+                         f"not {name}.{want}, the flake's version")
+    apt = " ".join(line for _, line in logical_lines(dockerfile) if "apt-get install" in line)
+    for name, want in NET_HASKELL.items():
+        got = re.findall(rf"libghc-{re.escape(name)}-dev(=[^\s]+)?", apt)
+        if len(got) != 1 or not got[0].startswith(f"={want}-"):
+            found.append(f"tools/linux/Dockerfile: apt installs libghc-{name}-dev as {got}, not "
+                         f"={want}-<debian revision>, the flake's version")
+    if not re.search(r"(?m)^active-repositories:\s*:none\s*$", project):
+        found.append("guests/haskell/cabal.project: Hackage is reachable "
+                     "(`active-repositories: :none` is gone), so a client version is the "
+                     "solver's choice")
+    for name, want in NET_HASKELL.items():
+        got = re.findall(rf"(?<![\w-]){re.escape(name)}\s*([=<>^][^,\n]*)", project)
+        if [g.strip() for g in got] != [f"=={want}"]:
+            found.append(f"guests/haskell/cabal.project: constraint for {name} is {got}, "
+                         f"not =={want}")
+    if re.search(r"cohttp|conduit|lwt", binding_dune):
+        found.append("bindings/ocaml/dune: the binding names an HTTP client; the app passes "
+                     "its fetch (docs/network-images-plan.md N12)")
+    library = re.search(r"(?ms)^library\n.*?(?=^\S)", guests_cabal + "\nend\n")
+    if library is None or re.search(r"http-client|http-types", library.group()):
+        found.append("guests/haskell/kaya-guests.cabal: the binding's library depends on an "
+                     "HTTP client (or could not be read); the app passes its fetch "
+                     "(docs/network-images-plan.md N12)")
+    return found
+
+
+_net = {
+    "flake": (root / "flake.nix").read_text(encoding="utf-8"),
+    "dockerfile": (root / "tools/linux/Dockerfile").read_text(encoding="utf-8"),
+    "project": (root / "guests/haskell/cabal.project").read_text(encoding="utf-8"),
+    "binding_dune": (root / "bindings/ocaml/dune").read_text(encoding="utf-8"),
+    "guests_cabal": (root / "guests/haskell/kaya-guests.cabal").read_text(encoding="utf-8"),
+}
+out += netclient_findings(**_net)
+for _label, _which, _old, _new, _expect in [
+    ("a loosened flake pin", "flake", '(pinned cohttp-lwt-unix "6.2.2")', "cohttp-lwt-unix",
+     "cohttp-lwt-unix is not"),
+    ("a missing flake pin", "flake", '            (pinned p.http-client-tls "0.3.6.4")\n', "",
+     "http-client-tls is not"),
+    ("pinned no longer refusing", "flake", "if pkg.version == version then pkg", "if true then pkg",
+     "no longer refuses"),
+    ("a loosened opam install", "dockerfile", "cohttp-lwt-unix.6.2.2", "cohttp-lwt-unix",
+     "opam installs cohttp-lwt-unix"),
+    ("an opam version unlike the flake's", "dockerfile", "lwt_ssl.1.2.0", "lwt_ssl.1.1.3",
+     "opam installs lwt_ssl"),
+    ("a missing opam install", "dockerfile", " conduit-lwt-unix.8.0.0", "",
+     "opam installs conduit-lwt-unix"),
+    ("a loosened apt install", "dockerfile", "libghc-http-client-tls-dev=0.3.6.4-1+b1",
+     "libghc-http-client-tls-dev", "apt installs libghc-http-client-tls-dev"),
+    ("Hackage reachable", "project", "active-repositories: :none", "active-repositories: :rest",
+     "Hackage is reachable"),
+    ("a loosened cabal constraint", "project", "http-client-tls ==0.3.6.4", "http-client-tls >=0.3",
+     "constraint for http-client-tls"),
+    ("a missing cabal constraint", "project", ", http-types ==0.12.4", "",
+     "constraint for http-types"),
+    ("the OCaml binding naming the client", "binding_dune", "(libraries ctypes",
+     "(libraries cohttp-lwt-unix ctypes", "bindings/ocaml/dune"),
+    ("the Haskell binding naming the client", "guests_cabal",
+     "  build-depends: time, mtl, transformers",
+     "  build-depends: time, mtl, transformers, http-client", "library depends on an HTTP client"),
+]:
+    _texts = dict(_net)
+    _n = _texts[_which].count(_old)
+    _texts[_which] = _texts[_which].replace(_old, _new, 1)
+    _got = netclient_findings(**_texts)
+    print(f"check-pins: self-test {_label}, {min(_n, 1)} substitution(s), {len(_got)} finding(s)")
+    if _n != 1 or not any(_expect in g for g in _got):
+        out.append(f"check-pins: self-test {_label} was not refused ({_n} match(es), got {_got})")
+if len(netclient_findings("", "", "", "", "")) < 13:
+    out.append("check-pins: the network client reader read nothing and agreed")
+
 status = 0
 if out:
     print("check-pins: dependencies that a server, not this repo, would "

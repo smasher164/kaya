@@ -1070,6 +1070,11 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 fn_ptr: present_blob_count as *mut _,
             },
             NativeMethod {
+                name: "blobContentId".into(),
+                sig: "(J)J".into(),
+                fn_ptr: present_blob_content_id as *mut _,
+            },
+            NativeMethod {
                 name: "specHash".into(),
                 sig: "()J".into(),
                 fn_ptr: crate::jvm::ring_spec_hash as *mut _,
@@ -2989,6 +2994,11 @@ extern "system" fn present_emit_sort_requested(
 /// (handles 1..=count), so the pump prefetches the whole table.
 extern "system" fn present_blob_count(_env: JNIEnv, _class: JClass) -> jlong {
     unsafe { crate::capi::kaya_blob_count() as jlong }
+}
+
+/// KayaPresent.blobContentId: kaya_blob_content_id (docs/network-images-plan.md N10).
+extern "system" fn present_blob_content_id(_env: JNIEnv, _class: JClass, handle: jlong) -> jlong {
+    crate::capi::kaya_blob_content_id(handle as u64) as jlong
 }
 
 /// KayaPresent.blobData: a blob's bytes by the handle an apply record

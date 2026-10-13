@@ -89,6 +89,7 @@ const SYMBOL_ICONS: &[(u32, &str)] = &[
     (crate::wire::SYMBOL_SEND, "mail-send-symbolic"),
     (crate::wire::SYMBOL_ATTACH, "mail-attachment-symbolic"),
     (crate::wire::SYMBOL_MIC, "audio-input-microphone-symbolic"),
+    (crate::wire::SYMBOL_IMAGE_MISSING, "image-missing-symbolic"),
 ];
 
 const _: () = assert!(
@@ -4945,6 +4946,9 @@ fn park_table_row(core: &mut CoreState, id: u64, index: usize) {
     for op in ops.unwrap_or_default() {
         apply(core, op);
     }
+    // A band move's asks (N8's needed and released) leave now, not with the
+    // next transaction (capi.rs's band report does the same).
+    send_asks(core);
     // The entering rows have to exist before the scroll can land
     // on one, and the spacers above them have to be the core's
     // before the adjustment's upper covers the row at all.
@@ -5618,6 +5622,7 @@ fn window_report(core: &mut CoreState, id: u64) -> (usize, usize) {
         for op in ops.unwrap_or_default() {
             apply(core, op);
         }
+        send_asks(core);
     }
 
     // THE SPACERS, sized by the core and by nothing here. The content
@@ -6097,9 +6102,20 @@ static EXIT_CODE: AtomicI32 = AtomicI32::new(0);
 /// from any thread; the idle source carries no data.
 pub(crate) fn ring_doorbell() {
     glib::idle_add(|| {
-        drain_transactions();
+        drain_when_free();
         glib::ControlFlow::Break
     });
+}
+
+/// A doorbell can ring inside a nested main-loop turn taken under a borrowed
+/// CORE (park_table_row's layout pass); the transaction then waits for the
+/// borrow to end instead of panicking in a C callback.
+fn drain_when_free() {
+    if CORE.with(|slot| slot.try_borrow_mut().is_err()) {
+        glib::timeout_add_local_once(std::time::Duration::from_millis(10), drain_when_free);
+        return;
+    }
+    drain_transactions();
 }
 
 fn drain_transactions() {
@@ -8297,14 +8313,14 @@ fn fit_picture(picture: &gtk4::Picture, texture: Option<gtk4::gdk::Texture>) {
     picture.set_paintable(Some(&bounded));
 }
 
-/// The decoded picture behind an image, bounded or not.
+/// The decoded picture an image draws, bounded or not; a look draws none.
 fn picture_texture_size(picture: &gtk4::Picture) -> Option<(i32, i32)> {
     use gtk4::prelude::{Cast, PaintableExt};
-    let paintable = picture.paintable()?;
-    match paintable.downcast::<bounded_paintable::BoundedPaintable>() {
-        Ok(bounded) => bounded.texture().map(|t| (t.intrinsic_width(), t.intrinsic_height())),
-        Err(p) => Some((p.intrinsic_width(), p.intrinsic_height())),
-    }
+    let texture = match picture.paintable()?.downcast::<bounded_paintable::BoundedPaintable>() {
+        Ok(bounded) => bounded.texture()?,
+        Err(p) => p.downcast::<gtk4::gdk::Texture>().ok()?,
+    };
+    Some((texture.intrinsic_width(), texture.intrinsic_height()))
 }
 
 mod bounded_paintable {
@@ -8321,6 +8337,10 @@ mod bounded_paintable {
         /// A bled picture's: no size or shape of its own, so it is handed
         /// its whole allocation, and the texture cropped to fill it.
         cover: Cell<bool>,
+        /// A boxed image's `fit` (docs/network-images-plan.md N3): the size is
+        /// the box, and the texture placed in it as the video view places one.
+        fit: Cell<Option<i64>>,
+        rtl: Cell<bool>,
     }
 
     #[glib::object_subclass]
@@ -8341,20 +8361,46 @@ mod bounded_paintable {
         }
         fn intrinsic_aspect_ratio(&self) -> f64 {
             let (w, h) = self.size.get();
-            if self.cover.get() || w <= 0 || h <= 0 { 0.0 } else { f64::from(w) / f64::from(h) }
+            if self.cover.get() || self.fit.get().is_some() || w <= 0 || h <= 0 {
+                0.0
+            } else {
+                f64::from(w) / f64::from(h)
+            }
         }
         fn snapshot(&self, snapshot: &gdk::Snapshot, width: f64, height: f64) {
             let Some(texture) = self.texture.borrow().clone() else { return };
+            let fit = self.fit.get();
+            if fit.is_some() {
+                let Some(snap) = snapshot.downcast_ref::<gtk4::Snapshot>() else { return };
+                let (x, y, w, h) = super::image_box_rect(width, height, self.size.get(), self.rtl.get());
+                snap.save();
+                snap.translate(&gtk4::graphene::Point::new(x as f32, y as f32));
+                self.place(snap, &texture, w, h, fit);
+                snap.restore();
+                return;
+            }
             if !self.cover.get() {
                 texture.snapshot(snapshot, width, height);
                 return;
             }
             let Some(snap) = snapshot.downcast_ref::<gtk4::Snapshot>() else { return };
+            self.place(snap, &texture, width, height, None);
+        }
+    }
+
+    impl BoundedPaintableInner {
+        /// The texture in a `width` x `height` rect: `contain` letterboxed,
+        /// `fill` stretched, `cover` (and a bled picture) cropped to fill.
+        fn place(&self, snap: &gtk4::Snapshot, texture: &gdk::Texture, width: f64, height: f64, fit: Option<i64>) {
+            if fit == Some(2) {
+                texture.snapshot(snap.upcast_ref::<gdk::Snapshot>(), width, height);
+                return;
+            }
             let (tw, th) = (f64::from(texture.intrinsic_width()), f64::from(texture.intrinsic_height()));
             if tw <= 0.0 || th <= 0.0 {
                 return;
             }
-            let scale = (width / tw).max(height / th);
+            let scale = if fit == Some(0) { (width / tw).min(height / th) } else { (width / tw).max(height / th) };
             let (dw, dh) = (tw * scale, th * scale);
             snap.push_clip(&gtk4::graphene::Rect::new(0.0, 0.0, width as f32, height as f32));
             snap.save();
@@ -8386,11 +8432,399 @@ mod bounded_paintable {
             self.imp().cover.set(true);
         }
 
+        pub fn boxed(texture: &gdk::Texture, width: i32, height: i32, fit: i64, rtl: bool) -> Self {
+            let paintable = Self::new(texture, width, height);
+            paintable.imp().fit.set(Some(fit));
+            paintable.imp().rtl.set(rtl);
+            paintable
+        }
+
+        pub fn boxed_size(&self) -> Option<(i32, i32)> {
+            self.imp().fit.get().map(|_| self.imp().size.get())
+        }
+
         /// The fit height, which a cover paintable keeps out of its
         /// intrinsic size.
         pub fn fit_height(&self) -> i32 {
             self.imp().size.get().1
         }
+    }
+}
+
+// --- Network images (docs/network-images-plan.md §3's GTK row) ---
+
+const IMAGE_STATE_KEY: &str = "kaya-netimage";
+
+/// N4's glyph is drawn at the symbolic size, and only in a box at least twice it.
+const IMAGE_GLYPH: i32 = 16;
+
+/// libadwaita's own neutral fill is the foreground at this alpha (its
+/// `alpha(currentColor, .1)`), and its dim label is the foreground at 0.55.
+const IMAGE_FILL_ALPHA: f32 = 0.1;
+const IMAGE_DIM_ALPHA: f32 = 0.55;
+
+/// The one decode size this arm keys: GTK decodes at full size (N9's GTK row,
+/// §0: the scaled loader measured slower than the full decode).
+const FULL_DECODE: u32 = 0;
+
+#[derive(Default)]
+struct ImageState {
+    phase: i64,
+    fit: Option<i64>,
+    labelled: bool,
+    texture: Option<gtk4::gdk::Texture>,
+    undecodable: bool,
+    pending: bool,
+    generation: u64,
+}
+
+fn with_image<R>(picture: &gtk4::Picture, f: impl FnOnce(&mut ImageState) -> R) -> R {
+    use gtk4::prelude::ObjectExt;
+    // SAFETY: the key is private to this module and only ever holds a
+    // RefCell<ImageState>, set when the image is created.
+    unsafe {
+        if picture.data::<std::cell::RefCell<ImageState>>(IMAGE_STATE_KEY).is_none() {
+            picture.set_data(IMAGE_STATE_KEY, std::cell::RefCell::new(ImageState::default()));
+        }
+        let cell = picture.data::<std::cell::RefCell<ImageState>>(IMAGE_STATE_KEY).unwrap();
+        f(&mut cell.as_ref().borrow_mut())
+    }
+}
+
+fn image_box(picture: &gtk4::Picture) -> Option<(f64, f64, i64)> {
+    use gtk4::prelude::ObjectExt;
+    // SAFETY: written only by the MaxWidth/MaxHeight arm, always an f64.
+    let bound = |key: &str| unsafe { picture.data::<f64>(key).map(|p| *p.as_ref()) };
+    let fit = with_image(picture, |s| s.fit)?;
+    match (bound(MAX_WIDTH_KEY), bound(MAX_HEIGHT_KEY)) {
+        (Some(w), Some(h)) if w > 0.0 && h > 0.0 => Some((w, h, fit)),
+        _ => None,
+    }
+}
+
+/// What an image draws, decided from its state alone: a boxed image takes its
+/// box in every phase (N3) and draws the failed look for `failed` or bytes
+/// that did not decode (N13), its picture placed by `fit`, the loading look
+/// while it waits with nothing to show, and an empty box otherwise. A labelled
+/// image is busy while `loading` (N5).
+fn render_image(picture: &gtk4::Picture) {
+    use gtk4::prelude::AccessibleExtManual;
+    let (phase, texture, undecodable, pending, labelled) =
+        with_image(picture, |s| (s.phase, s.texture.clone(), s.undecodable, s.pending, s.labelled));
+    picture.update_state(&[gtk4::accessible::State::Busy(
+        labelled && phase == crate::wire::IMAGE_PHASE_LOADING,
+    )]);
+    let Some((w, h, fit)) = image_box(picture) else {
+        fit_picture(picture, texture);
+        return;
+    };
+    let (bw, bh) = (w.round() as i32, h.round() as i32);
+    let rtl = gtk4::prelude::WidgetExt::direction(picture) == gtk4::TextDirection::Rtl;
+    let look = if phase == crate::wire::IMAGE_PHASE_FAILED || (texture.is_none() && undecodable) {
+        image_look::Look::Failed
+    } else if let Some(texture) = texture {
+        picture.set_paintable(Some(&bounded_paintable::BoundedPaintable::boxed(&texture, bw, bh, fit, rtl)));
+        return;
+    } else if phase == crate::wire::IMAGE_PHASE_LOADING || pending {
+        image_look::Look::Loading
+    } else {
+        image_look::Look::Empty
+    };
+    let glyph = (look == image_look::Look::Failed && bw.min(bh) >= 2 * IMAGE_GLYPH)
+        .then(|| image_missing_icon(picture))
+        .flatten();
+    picture.set_paintable(Some(&image_look::ImageLook::new(picture, look, bw, bh, glyph, rtl)));
+}
+
+/// Where a boxed image's box sits in what the picture was given: a table cell
+/// spans its column, so the box keeps its own size at the leading edge,
+/// centred across.
+fn image_box_rect(width: f64, height: f64, (bw, bh): (i32, i32), rtl: bool) -> (f64, f64, f64, f64) {
+    let (w, h) = (f64::from(bw).min(width), f64::from(bh).min(height));
+    (if rtl { width - w } else { 0.0 }, (height - h) / 2.0, w, h)
+}
+
+/// N4's failed glyph: the `image_missing` row of SYMBOL_ICONS, never a second
+/// spelling, at the symbolic size.
+fn image_missing_icon(picture: &gtk4::Picture) -> Option<gtk4::IconPaintable> {
+    use gtk4::prelude::WidgetExt;
+    let name = symbol_icon_name(i64::from(crate::wire::SYMBOL_IMAGE_MISSING))?;
+    Some(gtk4::IconTheme::for_display(&picture.display()).lookup_icon(
+        name,
+        &[],
+        IMAGE_GLYPH,
+        picture.native().and_then(|n| n.surface()).map_or(1, |s| s.scale().ceil() as i32),
+        picture.direction(),
+        gtk4::IconLookupFlags::empty(),
+    ))
+}
+
+/// THE ONE DOOR an image's picture comes through (N9). A picture the cache
+/// holds is installed in this same turn; anything else is decoded by
+/// `gdk::Texture::from_bytes` on a gio worker while the image keeps what it
+/// showed, and the result is installed on the main context only while the
+/// image's generation still matches, so bytes replaced or an image torn down
+/// in the meantime drop it.
+fn image_source(picture: &gtk4::Picture, bytes: &std::sync::Arc<[u8]>) {
+    let generation = with_image(picture, |s| {
+        s.generation += 1;
+        s.generation
+    });
+    if bytes.is_empty() {
+        with_image(picture, |s| (s.texture, s.undecodable, s.pending) = (None, false, false));
+        render_image(picture);
+        return;
+    }
+    let id = crate::content_id::of(bytes);
+    if let Some(hit) = picture_cache::get(picture_cache::Key { id, pixels: FULL_DECODE }) {
+        with_image(picture, |s| (s.texture, s.undecodable, s.pending) = (Some(hit), false, false));
+        render_image(picture);
+        return;
+    }
+    with_image(picture, |s| s.pending = true);
+    render_image(picture);
+    let encoded = glib::Bytes::from_owned(bytes.clone());
+    let weak = glib::object::ObjectExt::downgrade(picture);
+    glib::MainContext::default().spawn_local(async move {
+        let decoded = gio::spawn_blocking(move || gtk4::gdk::Texture::from_bytes(&encoded).ok())
+            .await
+            .ok()
+            .flatten();
+        let Some(picture) = weak.upgrade() else { return };
+        if with_image(&picture, |s| s.generation) != generation {
+            return;
+        }
+        if let Some(texture) = &decoded {
+            picture_cache::put(picture_cache::Key { id, pixels: FULL_DECODE }, texture.clone());
+        }
+        with_image(&picture, |s| {
+            s.pending = false;
+            s.undecodable = decoded.is_none();
+            s.texture = decoded;
+        });
+        render_image(&picture);
+    });
+}
+
+/// The decoded pictures (N10), keyed by the bytes' content id and the decode
+/// size, least recently used out past two screens of pixels at the display's
+/// scale, emptied on GMemoryMonitor's low-memory warning. Main thread only.
+mod picture_cache {
+    use gtk4::gio;
+    use gtk4::prelude::*;
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+
+    #[derive(Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct Key {
+        pub id: u64,
+        pub pixels: u32,
+    }
+
+    #[derive(Default)]
+    struct Cache {
+        entries: HashMap<Key, (gtk4::gdk::Texture, usize, u64)>,
+        cost: usize,
+        tick: u64,
+        monitor: Option<gio::MemoryMonitor>,
+    }
+
+    thread_local! {
+        static CACHE: RefCell<Cache> = RefCell::new(Cache::default());
+    }
+
+    fn budget() -> usize {
+        let screen = gtk4::gdk::Display::default()
+            .map(|d| {
+                d.monitors()
+                    .iter::<gtk4::gdk::Monitor>()
+                    .filter_map(Result::ok)
+                    .map(|m| {
+                        let g = m.geometry();
+                        let s = m.scale();
+                        (f64::from(g.width()) * f64::from(g.height()) * s * s) as usize
+                    })
+                    .max()
+                    .unwrap_or(0)
+            })
+            .unwrap_or(0);
+        2 * (if screen > 0 { screen } else { 2560 * 1600 }) * 4
+    }
+
+    pub fn get(key: Key) -> Option<gtk4::gdk::Texture> {
+        CACHE.with_borrow_mut(|c| {
+            c.tick += 1;
+            let tick = c.tick;
+            let entry = c.entries.get_mut(&key)?;
+            entry.2 = tick;
+            Some(entry.0.clone())
+        })
+    }
+
+    pub fn put(key: Key, texture: gtk4::gdk::Texture) {
+        let cost = texture.width().max(0) as usize * texture.height().max(0) as usize * 4;
+        let budget = budget();
+        CACHE.with_borrow_mut(|c| {
+            if c.monitor.is_none() {
+                let monitor = gio::MemoryMonitor::dup_default();
+                monitor.connect_low_memory_warning(|_, _| empty());
+                c.monitor = Some(monitor);
+            }
+            c.tick += 1;
+            if let Some((_, old, _)) = c.entries.insert(key, (texture, cost, c.tick)) {
+                c.cost -= old;
+            }
+            c.cost += cost;
+            while c.cost > budget && c.entries.len() > 1 {
+                let Some(oldest) = c.entries.iter().min_by_key(|(_, e)| e.2).map(|(k, _)| *k) else { break };
+                let (_, gone, _) = c.entries.remove(&oldest).unwrap();
+                c.cost -= gone;
+            }
+        });
+    }
+
+    pub fn empty() {
+        CACHE.with_borrow_mut(|c| {
+            c.entries.clear();
+            c.cost = 0;
+        });
+    }
+}
+
+/// The loading and failed looks (N4), and an empty box: the box's size, the
+/// fill the foreground at libadwaita's neutral alpha, the failed glyph at the
+/// dim alpha, both read from the image's own style when drawn.
+mod image_look {
+    use gtk4::gdk;
+    use gtk4::glib;
+    use gtk4::prelude::*;
+    use gtk4::subclass::prelude::*;
+    use std::cell::{Cell, RefCell};
+
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub enum Look {
+        #[default]
+        Empty,
+        Loading,
+        Failed,
+    }
+
+    #[derive(Default)]
+    pub struct ImageLookInner {
+        look: Cell<Look>,
+        size: Cell<(i32, i32)>,
+        glyph: RefCell<Option<gtk4::IconPaintable>>,
+        widget: glib::WeakRef<gtk4::Picture>,
+        rtl: Cell<bool>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for ImageLookInner {
+        const NAME: &'static str = "KayaImageLook";
+        type Type = ImageLook;
+        type Interfaces = (gdk::Paintable,);
+    }
+
+    impl ObjectImpl for ImageLookInner {}
+
+    impl PaintableImpl for ImageLookInner {
+        fn intrinsic_width(&self) -> i32 {
+            self.size.get().0
+        }
+        fn intrinsic_height(&self) -> i32 {
+            self.size.get().1
+        }
+        fn intrinsic_aspect_ratio(&self) -> f64 {
+            0.0
+        }
+        fn snapshot(&self, snapshot: &gdk::Snapshot, width: f64, height: f64) {
+            if self.look.get() == Look::Empty {
+                return;
+            }
+            let Some(snap) = snapshot.downcast_ref::<gtk4::Snapshot>() else { return };
+            let Some(widget) = self.widget.upgrade() else { return };
+            let (x, y, width, height) = super::image_box_rect(width, height, self.size.get(), self.rtl.get());
+            snap.save();
+            snap.translate(&gtk4::graphene::Point::new(x as f32, y as f32));
+            self.draw(snap, &widget, width, height);
+            snap.restore();
+        }
+    }
+
+    impl ImageLookInner {
+        fn draw(&self, snap: &gtk4::Snapshot, widget: &gtk4::Picture, width: f64, height: f64) {
+            let ink = widget.color();
+            let fill = gdk::RGBA::new(ink.red(), ink.green(), ink.blue(), ink.alpha() * super::IMAGE_FILL_ALPHA);
+            snap.append_color(&fill, &gtk4::graphene::Rect::new(0.0, 0.0, width as f32, height as f32));
+            if let Some(glyph) = self.glyph.borrow().as_ref() {
+                let g = f64::from(super::IMAGE_GLYPH);
+                let dim = gdk::RGBA::new(ink.red(), ink.green(), ink.blue(), ink.alpha() * super::IMAGE_DIM_ALPHA);
+                snap.save();
+                snap.translate(&gtk4::graphene::Point::new(((width - g) / 2.0) as f32, ((height - g) / 2.0) as f32));
+                glyph.snapshot_symbolic(snap.upcast_ref::<gdk::Snapshot>(), g, g, &[dim]);
+                snap.restore();
+            }
+        }
+    }
+
+    glib::wrapper! {
+        pub struct ImageLook(ObjectSubclass<ImageLookInner>)
+            @implements gdk::Paintable;
+    }
+
+    impl ImageLook {
+        pub fn new(
+            widget: &gtk4::Picture, look: Look, width: i32, height: i32, glyph: Option<gtk4::IconPaintable>,
+            rtl: bool,
+        ) -> Self {
+            let paintable: Self = glib::Object::new();
+            let imp = paintable.imp();
+            imp.look.set(look);
+            imp.size.set((width, height));
+            *imp.glyph.borrow_mut() = glyph;
+            imp.widget.set(Some(widget));
+            imp.rtl.set(rtl);
+            paintable
+        }
+
+        pub fn look(&self) -> Look {
+            self.imp().look.get()
+        }
+
+        pub fn size(&self) -> (i32, i32) {
+            self.imp().size.get()
+        }
+
+        pub fn has_glyph(&self) -> bool {
+            self.imp().glyph.borrow().is_some()
+        }
+    }
+}
+
+/// A boxed image's box (N3), off the paintable it draws: the picture spans
+/// whatever its slot gives it (a table cell, its column), the box does not.
+fn image_drawn_box(picture: &gtk4::Picture) -> Option<(i32, i32)> {
+    use gtk4::prelude::Cast;
+    let paintable = picture.paintable()?;
+    match paintable.downcast::<image_look::ImageLook>() {
+        Ok(look) => Some(look.size()),
+        Err(p) => p.downcast::<bounded_paintable::BoundedPaintable>().ok()?.boxed_size(),
+    }
+}
+
+/// What an image DREW, for expect_image_phase (N15): the paintable installed
+/// on the picture, never the phase prop. `failed` in a box with room for the
+/// glyph and no glyph reads as the defect it is.
+fn image_drawn_phase(picture: &gtk4::Picture) -> String {
+    use gtk4::prelude::Cast;
+    let Some(paintable) = picture.paintable() else { return "empty".into() };
+    let Ok(look) = paintable.downcast::<image_look::ImageLook>() else { return "shown".into() };
+    let (w, h) = look.size();
+    match look.look() {
+        image_look::Look::Failed if !look.has_glyph() && w.min(h) >= 2 * IMAGE_GLYPH => "failed without its glyph".into(),
+        image_look::Look::Failed => "failed".into(),
+        image_look::Look::Loading => "loading".into(),
+        image_look::Look::Empty => "empty".into(),
     }
 }
 
@@ -15455,6 +15889,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                             pair.labels.borrow_mut()[2] = label.clone();
                             range_labels(pair);
                         }
+                        if let NativeWidget::Image(picture) = w {
+                            with_image(picture, |s| s.labelled = true);
+                            render_image(picture);
+                        }
                     }
                 }
                 // (The IDENTIFIER has no GTK setter and no reader below
@@ -15986,34 +16424,23 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         child = widget.next_sibling();
                     }
                 }
-                (NativeWidget::Image(picture), Prop::Source, Value::Blob(blob)) => {
-                    // Encoded bytes in, native decode:
-                    // gdk::Texture::from_bytes reads encoded PNG/JPEG. A
-                    // failed decode yields the placeholder class (no
-                    // paintable, image_size reads 0x0).
-                    let bytes = gtk4::glib::Bytes::from(&blob.0[..]);
-                    match gtk4::gdk::Texture::from_bytes(&bytes) {
-                        Ok(texture) => fit_picture(picture, Some(texture)),
-                        Err(_) => picture.set_paintable(gtk4::gdk::Paintable::NONE),
-                    }
-                }
+                (NativeWidget::Image(picture), Prop::Source, Value::Blob(blob)) => image_source(picture, &blob.0),
                 (NativeWidget::Image(picture), Prop::MaxWidth | Prop::MaxHeight, Value::F64(bound)) => {
                     use gtk4::prelude::ObjectExt;
                     let key = if prop == Prop::MaxWidth { MAX_WIDTH_KEY } else { MAX_HEIGHT_KEY };
                     // SAFETY: the two keys are private to this module and only
                     // ever hold an f64, written here and read by fit_picture.
                     unsafe { picture.set_data(key, bound) }
-                    let texture = match picture.paintable() {
-                        Some(p) => match p.downcast::<bounded_paintable::BoundedPaintable>() {
-                            Ok(bounded) => bounded.texture(),
-                            Err(p) => p.downcast::<gtk4::gdk::Texture>().ok(),
-                        },
-                        None => None,
-                    };
-                    fit_picture(picture, texture);
+                    render_image(picture);
                 }
-                // docs/network-images-plan.md §6: the breadth's.
-                (NativeWidget::Image(_), Prop::Phase | Prop::Fit, _) => crate::depth_stub("netimage"),
+                (NativeWidget::Image(picture), Prop::Phase, Value::I64(phase)) => {
+                    with_image(picture, |s| s.phase = phase);
+                    render_image(picture);
+                }
+                (NativeWidget::Image(picture), Prop::Fit, Value::I64(fit)) => {
+                    with_image(picture, |s| s.fit = Some(fit));
+                    render_image(picture);
+                }
                 (w, Prop::Bleed, Value::Bool(on)) => {
                     let widget = w.widget();
                     core.bled.retain(|b| b != &widget);
@@ -16030,13 +16457,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         // SAFETY: the key is private to this module and only
                         // ever holds a bool, written here and read by fit_picture.
                         unsafe { picture.set_data(BLEED_KEY, on) }
-                        let texture = picture.paintable().and_then(|p| {
-                            match p.downcast::<bounded_paintable::BoundedPaintable>() {
-                                Ok(bounded) => bounded.texture(),
-                                Err(p) => p.downcast::<gtk4::gdk::Texture>().ok(),
-                            }
-                        });
-                        fit_picture(picture, texture);
+                        render_image(picture);
                     }
                     refresh_bleeds(core);
                 }
@@ -21218,9 +21639,13 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
-    /// The phase this backend drew is the breadth's (docs/network-images-plan.md §6).
-    fn image_phase(&self, _: crate::harness::Target) -> String {
-        crate::depth_stub("netimage")
+    fn image_phase(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.images.len()) else {
+                return "<no such target>".to_string();
+            };
+            image_drawn_phase(&core.images[i])
+        })
     }
 
     fn image_drawn(&self, t: crate::harness::Target) -> String {
@@ -21230,7 +21655,11 @@ impl crate::harness::Stage for GtkStage {
                 return "<no such target>".to_string();
             };
             let picture = &core.images[i];
-            format!("{}x{}", picture.width(), picture.height())
+            let (w, h) = (picture.width(), picture.height());
+            match image_drawn_box(picture) {
+                Some((bw, bh)) => format!("{}x{}", bw.min(w), bh.min(h)),
+                None => format!("{w}x{h}"),
+            }
         })
     }
 

@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0xd695309e4a57ce9eULL
+#define KAYA_SPEC_HASH 0x303cc490b4cb14fbULL
 
 
 /* Create a signal holding `initial`. */

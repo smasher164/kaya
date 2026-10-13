@@ -187,6 +187,9 @@ LEGS = {
         "media_picked-compose",
         # The bound (docs/media-plan.md §7c): rust-only.
         "media_timeout-compose",
+        # Network images (docs/network-images-plan.md §5): the affordance
+        # scene, and the row helper against the lane's server.
+        "netimage-compose", "netimage_http-compose",
         # The capture (docs/capture-plan.md §7): the emulator's own cameras
         # and microphone carrying the synthetic devices
         # (tools/lib/emulator_capture.py).
@@ -213,6 +216,7 @@ LEGS = {
         "range-jvm", "rangertl-jvm",
         "media_formats-jvm", "media_delivery-jvm", "media_session-jvm",
         "media_tracks-jvm", "media_feed-jvm", "media_reader-jvm",
+        "netimage-jvm", "netimage_http-jvm",
         "capture-jvm", "capture_denied-jvm",
     ],
     "go": [
@@ -239,6 +243,7 @@ LEGS = {
         "range-go", "rangertl-go",
         "media_formats-go", "media_delivery-go", "media_session-go",
         "media_tracks-go", "media_feed-go", "media_reader-go",
+        "netimage-go", "netimage_http-go",
         "capture-go", "capture_denied-go",
     ],
     "python": [

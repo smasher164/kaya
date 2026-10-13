@@ -150,7 +150,9 @@ enum NativeWidget {
     /// `Button`'s caption.
     Label { block: TextBlock, link: Option<HyperlinkButton> },
     Entry(TextBox),
-    Image(Image),
+    /// The image under a one-cell Grid that also mounts its loading and
+    /// failed looks (docs/network-images-plan.md N4, winui/images.rs).
+    Image { host: Grid, image: Image },
     Scroll(ScrollViewer),
     Progress(ProgressBar),
     Select(ComboBox),
@@ -230,7 +232,7 @@ impl NativeWidget {
                 None => block.cast(),
             },
             NativeWidget::Entry(field) => field.cast(),
-            NativeWidget::Image(image) => image.cast(),
+            NativeWidget::Image { host, .. } => host.cast(),
             NativeWidget::Scroll(viewer) => viewer.cast(),
             NativeWidget::Progress(bar) => bar.cast(),
             NativeWidget::Select(combo) => combo.cast(),
@@ -265,6 +267,7 @@ impl NativeWidget {
         match self {
             NativeWidget::Search { field, .. } => field.cast(),
             NativeWidget::Video { ax, .. } => ax.cast(),
+            NativeWidget::Image { image, .. } => image.cast(),
             other => other.inner_element(),
         }
     }
@@ -558,6 +561,9 @@ struct CoreState {
     /// picture's own MaxHeight, which the bleed grows by its touching sides.
     bled: Vec<WidgetId>,
     image_max_heights: HashMap<WidgetId, f64>,
+    /// docs/network-images-plan.md §3's WinUI row (winui/images.rs).
+    image_arms: HashMap<WidgetId, images::ImageArm>,
+    image_requests: Vec<WidgetId>,
     /// The canvases, and their CORE ids beside them: `canvas_probe` asks
     /// the core about a widget id and `kind#index` is the only address
     /// the harness has.
@@ -1089,6 +1095,7 @@ const fn fluent_icon(symbol: crate::app::Symbol) -> FluentIcon {
         S::Send => FluentIcon::Member(Fluent::Send),
         S::Attach => FluentIcon::Member(Fluent::Attach),
         S::Mic => FluentIcon::Member(Fluent::Microphone),
+        S::ImageMissing => FluentIcon::Glyph("\u{E91B}"),
     }
 }
 
@@ -1121,16 +1128,18 @@ const fn symbol_wire(symbol: crate::app::Symbol) -> u32 {
         S::Send => crate::wire::SYMBOL_SEND,
         S::Attach => crate::wire::SYMBOL_ATTACH,
         S::Mic => crate::wire::SYMBOL_MIC,
+        S::ImageMissing => crate::wire::SYMBOL_IMAGE_MISSING,
     }
 }
 
 /// The vocabulary in wire order — the decode side's only list.
-const SYMBOL_ORDER: [crate::app::Symbol; 24] = {
+const SYMBOL_ORDER: [crate::app::Symbol; 25] = {
     use crate::app::Symbol as S;
     [
         S::Add, S::Remove, S::Delete, S::Edit, S::Done, S::Close, S::Search, S::Settings,
         S::Refresh, S::Info, S::Warning, S::Back, S::Forward, S::More, S::Copy, S::Paste, S::Star,
         S::Lock, S::Person, S::Home, S::Emoji, S::Send, S::Attach, S::Mic,
+        S::ImageMissing,
     ]
 };
 
@@ -3332,7 +3341,8 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
 /// tree a batch behind; a failure leaves the rest marked for the next flush.
 fn flush_tracks(core: &mut CoreState) -> windows_core::Result<()> {
     flush_container_tracks(core)?;
-    refresh_bleeds(core)
+    refresh_bleeds(core)?;
+    images::serve_requested(core)
 }
 
 /// The sides a bled widget touches the root's content edge on, as
@@ -3381,7 +3391,7 @@ fn refresh_bleeds(core: &mut CoreState) -> windows_core::Result<()> {
         let out = |on: bool| if on { -pad } else { 0.0 };
         let element: FrameworkElement = widget.element()?.cast()?;
         element.SetMargin(Thickness { Left: out(leading), Top: out(top), Right: out(trailing), Bottom: out(bottom) })?;
-        if let NativeWidget::Image(image) = widget {
+        if let NativeWidget::Image { image, .. } = widget {
             // docs/traps.md, an element's own maxima crop an overflowing fill.
             image.SetHorizontalAlignment(bindings::Microsoft::UI::Xaml::HorizontalAlignment::Center)?;
             image.SetVerticalAlignment(bindings::Microsoft::UI::Xaml::VerticalAlignment::Center)?;
@@ -3424,7 +3434,8 @@ fn bled_picture_row(
     }
     let max_w = image.MaxWidth()?;
     let scale = 1f64.min(max_w / w).min(max_height.map_or(1.0, |m| m / h));
-    let element: FrameworkElement = image.cast()?;
+    let Some(widget) = core.widgets.get(&id) else { return Ok(None) };
+    let element: FrameworkElement = widget.element()?.cast()?;
     let defs = grid.RowDefinitions()?;
     let index = Grid::GetRow(&element)?;
     if index < 0 || index as u32 >= defs.Size()? {
@@ -5016,6 +5027,11 @@ fn table_band_to(
             crate::fault::report(format!("kaya: applying {what} failed: {e}"));
             return Ok(());
         }
+    }
+    // A band move's image_needed and image_released (docs/network-images-plan.md
+    // N8) leave now, not with the next transaction.
+    for occ in core.scene.take_asks() {
+        core.occurrences.send(occ);
     }
     // THE SPACERS MOVE BEFORE THE RE-STAMP: `reindex` rebuilds the band
     // panel's two spacer tracks from these stored numbers, and a re-stamp
@@ -16221,8 +16237,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 WidgetKind::Image => {
                     let image = Image::new()?;
+                    let host = images::host_of(&image)?;
                     core.images.push(image.clone());
-                    NativeWidget::Image(image)
+                    NativeWidget::Image { host, image }
                 }
                 WidgetKind::DatePicker => {
                     // DateChanged fires for a programmatic write too, so the
@@ -16368,6 +16385,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
             }
             let widget = core.widgets.remove(&id).expect("scene validated the id");
+            images::forget(core, id);
             if matches!(widget, NativeWidget::Video { .. }) {
                 media::destroy_video(core, id.0);
             }
@@ -16405,7 +16423,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.button_controls.remove(i);
                 }
             }
-            if let Ok(element) = widget.inner_element() {
+            if let Ok(element) = widget.identity_element() {
                 core.checkboxes.retain(|c| c.cast::<UIElement>().ok().as_ref() != Some(&element));
                 core.labels.retain(|c| c.cast::<UIElement>().ok().as_ref() != Some(&element));
                 core.images.retain(|c| c.cast::<UIElement>().ok().as_ref() != Some(&element));
@@ -17405,7 +17423,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             if let (Prop::Bleed, Value::Bool(on)) = (prop, &value) {
                 let on = *on;
                 if let Some(widget) = core.widgets.get(&id) {
-                    if let NativeWidget::Image(image) = widget {
+                    if let NativeWidget::Image { image, .. } = widget {
                         // A BLED PICTURE spans its slot's width at its fit
                         // height, drawn to fill.
                         image.SetStretch(if on { Stretch::UniformToFill } else { Stretch::Uniform })?;
@@ -17476,6 +17494,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     }
                     _ => {}
                 }
+            }
+            if images::set_prop(core, id, prop, &value)? {
+                return Ok(());
             }
             let widget = core.widgets.get(&id).expect("scene validated the id");
             match (widget, prop, value) {
@@ -18231,45 +18252,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     }
                     picker.SetMinuteIncrement(step as i32)?;
                 }
-                // docs/photo-attach-plan.md §2: the Image's own Uniform stretch
-                // keeps the shape inside its maxima, and a picture already
-                // smaller keeps its size.
-                (NativeWidget::Image(image), Prop::MaxWidth, Value::F64(bound)) => {
-                    image.SetMaxWidth(bound)?;
-                }
                 (NativeWidget::Video { .. }, Prop::Fit, Value::I64(fit)) => media::set_fit(core, id.0, fit)?,
-                // docs/network-images-plan.md §6: the breadth's.
-                (NativeWidget::Image(_), Prop::Phase | Prop::Fit, _) => crate::depth_stub("netimage"),
                 (NativeWidget::Video { .. }, Prop::Aspect, Value::I64(aspect)) => media::set_aspect(core, id.0, aspect)?,
-                (NativeWidget::Image(image), Prop::MaxHeight, Value::F64(bound)) => {
-                    core.image_max_heights.insert(id, bound);
-                    image.SetMaxHeight(bound)?;
-                }
-                (NativeWidget::Image(image), Prop::Source, Value::Blob(blob)) => {
-                    // Encoded bytes in, native decode. SetSource is the
-                    // synchronously-callable path on the UI thread; the
-                    // one async hop is DataWriter.StoreAsync, blocked on
-                    // .join(). Any failure (decode included) leaves the
-                    // placeholder — never a panic.
-                    let result: windows_core::Result<()> = (|| {
-                        let stream = InMemoryRandomAccessStream::new()?;
-                        let writer = DataWriter::CreateDataWriter(&stream)?;
-                        writer.WriteBytes(&blob.0)?;
-                        writer.StoreAsync()?.join()?;
-                        writer.DetachStream()?;
-                        stream.Seek(0)?;
-                        let source = BitmapImage::new()?;
-                        source.SetSource(&stream)?;
-                        image.SetSource(&source)?;
-                        Ok(())
-                    })();
-                    if let Err(e) = result {
-                        eprintln!(
-                            "kaya: winui image source rejected (placeholder): {}",
-                            e.message()
-                        );
-                    }
-                }
                 // THE ROLE TIER (docs/styling-plan.md D4): three semantic
                 // roles, each lowered to the platform's OWN emphasis. The
                 // legal (kind, role) pairs sit in the PATTERNS, so a role
@@ -19416,8 +19400,7 @@ fn hicon_from_bytes(bytes: &[u8]) -> Result<isize, String> {
     Ok(icon)
 }
 
-/// The XAML caption sink's picture: the `Image` widget's blob arm,
-/// unchanged. Nothing is decoded by kaya here either — the bytes go to
+/// The XAML caption sink's picture, decoded once at launch by
 /// `BitmapImage.SetSource`, the platform's second decoder on the same blob.
 fn caption_mark_bitmap(bytes: &[u8]) -> windows_core::Result<BitmapImage> {
     let stream = InMemoryRandomAccessStream::new()?;
@@ -20789,6 +20772,8 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             mounted_roots: HashMap::new(),
             bled: Vec::new(),
             image_max_heights: HashMap::new(),
+            image_arms: HashMap::new(),
+            image_requests: Vec::new(),
             window_titles: HashMap::new(),
             window_dirty: HashMap::new(),
             window_veto: HashMap::new(),
@@ -21876,7 +21861,7 @@ fn registry_widget_at(core: &CoreState, kind: crate::harness::TargetKind, i: usi
         K::Column => core.column_ids.get(i).map(|id| id.0),
         K::Row => id_of!(core.rows, NativeWidget::Row(panel), panel),
         K::Labeled => id_of!(core.labeleds, NativeWidget::Labeled(panel), panel),
-        K::Image => id_of!(core.images, NativeWidget::Image(image), image),
+        K::Image => id_of!(core.images, NativeWidget::Image { image, .. }, image),
         K::Scroll => id_of!(core.scrolls, NativeWidget::Scroll(viewer), viewer),
         K::Progress => id_of!(core.progresses, NativeWidget::Progress(bar), bar),
         K::Select => id_of!(core.selects, NativeWidget::Select(combo), combo),
@@ -22301,7 +22286,7 @@ fn registry_ids(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<u64> 
         K::Column => core.column_ids.iter().map(|id| id.0).collect(),
         K::Row => ids!(core.rows, NativeWidget::Row(panel), panel),
         K::Labeled => ids!(core.labeleds, NativeWidget::Labeled(panel), panel),
-        K::Image => ids!(core.images, NativeWidget::Image(image), image),
+        K::Image => ids!(core.images, NativeWidget::Image { image, .. }, image),
         K::Scroll => ids!(core.scrolls, NativeWidget::Scroll(viewer), viewer),
         K::Progress => ids!(core.progresses, NativeWidget::Progress(bar), bar),
         K::Select => ids!(core.selects, NativeWidget::Select(combo), combo),
@@ -24982,9 +24967,14 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
-    /// The phase this backend drew is the breadth's (docs/network-images-plan.md §6).
-    fn image_phase(&self, _: crate::harness::Target) -> String {
-        crate::depth_stub("netimage")
+    fn image_phase(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.images.len()) else {
+                return Ok("<no such target>".to_string());
+            };
+            images::phase_drawn(core, &core.images[i])
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
     fn image_drawn(&self, t: crate::harness::Target) -> String {
@@ -31297,9 +31287,582 @@ fn shell_open(url: &str) -> Result<(), String> {
     ))
 }
 
+mod images {
+    //! The image's network-images arm (docs/network-images-plan.md §3's WinUI
+    //! row, N2-N5, N9, N10, N13-N15): the box, the loading and failed looks, the
+    //! decode off the UI thread and the decoded cache. tools/lib/netimage_winui.py
+    //! holds its doors.
+
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use super::bindings;
+    use super::{theme_resource, CoreState, NativeWidget, CORE, DISPATCHER};
+    use crate::protocol::{Prop, Value, WidgetId};
+
+    use bindings::Microsoft::UI::Dispatching::DispatcherQueueHandler;
+    use bindings::Microsoft::UI::Xaml::Automation::AutomationProperties;
+    use bindings::Microsoft::UI::Xaml::Automation::Peers::AccessibilityView;
+    use bindings::Microsoft::UI::Xaml::Controls::{Border, FontIcon, Grid, Image};
+    use bindings::Microsoft::UI::Xaml::Media::Imaging::BitmapImage;
+    use bindings::Microsoft::UI::Xaml::Media::{Brush, ImageSource, Stretch};
+    use bindings::Microsoft::UI::Xaml::{
+        ExceptionRoutedEventHandler, HorizontalAlignment, RoutedEventHandler, VerticalAlignment,
+        Visibility,
+    };
+    use bindings::Windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
+    use windows_core::Interface as _;
+
+    /// N4's glyph, drawn only in a box at least twice its size.
+    const GLYPH: f64 = 20.0;
+
+    #[derive(Default)]
+    pub(super) struct ImageArm {
+        phase: i64,
+        fit: Option<i64>,
+        width: f64,
+        height: f64,
+        bytes: Option<Arc<[u8]>>,
+        content: u64,
+        generation: u64,
+        pending: bool,
+        undecodable: bool,
+        picture: Option<BitmapImage>,
+        decoding: Option<BitmapImage>,
+        loading: Option<Border>,
+        failed: Option<(Border, FontIcon)>,
+    }
+
+    impl ImageArm {
+        fn boxed(&self) -> bool {
+            self.fit.is_some() && self.width > 0.0 && self.height > 0.0
+        }
+    }
+
+    pub(super) fn host_of(image: &Image) -> windows_core::Result<Grid> {
+        let host = Grid::new()?;
+        host.Children()?.Append(image)?;
+        Ok(host)
+    }
+
+    fn parts(core: &CoreState, id: WidgetId) -> Option<(Grid, Image)> {
+        match core.widgets.get(&id) {
+            Some(NativeWidget::Image { host, image }) => Some((host.clone(), image.clone())),
+            _ => None,
+        }
+    }
+
+    /// The image's own props. Answers whether this arm took the prop.
+    pub(super) fn set_prop(core: &mut CoreState, id: WidgetId, prop: Prop, value: &Value) -> windows_core::Result<bool> {
+        let Some((_, image)) = parts(core, id) else { return Ok(false) };
+        match (prop, value) {
+            (Prop::Source, Value::Blob(blob)) => {
+                let arm = core.image_arms.entry(id).or_default();
+                arm.content = crate::content_id::of(&blob.0);
+                arm.bytes = Some(blob.0.clone());
+                request(core, id);
+            }
+            (Prop::Phase, Value::I64(phase)) => {
+                core.image_arms.entry(id).or_default().phase = *phase;
+                refresh_look(core, id)?;
+            }
+            (Prop::Fit, Value::I64(fit)) => {
+                let stretch = match crate::wire::vocab_name(crate::wire::FITS, *fit) {
+                    Some("cover") => Stretch::UniformToFill,
+                    Some("fill") => Stretch::Fill,
+                    _ => Stretch::Uniform,
+                };
+                image.SetStretch(stretch)?;
+                core.image_arms.entry(id).or_default().fit = Some(*fit);
+                apply_box(core, id)?;
+                request(core, id);
+            }
+            // docs/photo-attach-plan.md §2: the Image's own Uniform stretch keeps
+            // the shape inside its maxima, and a picture already smaller keeps its
+            // size.
+            (Prop::MaxWidth, Value::F64(bound)) => {
+                image.SetMaxWidth(*bound)?;
+                core.image_arms.entry(id).or_default().width = *bound;
+                apply_box(core, id)?;
+                request(core, id);
+            }
+            (Prop::MaxHeight, Value::F64(bound)) => {
+                core.image_max_heights.insert(id, *bound);
+                image.SetMaxHeight(*bound)?;
+                core.image_arms.entry(id).or_default().height = *bound;
+                apply_box(core, id)?;
+                request(core, id);
+            }
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
+
+    pub(super) fn forget(core: &mut CoreState, id: WidgetId) {
+        core.image_arms.remove(&id);
+        core.image_requests.retain(|r| *r != id);
+    }
+
+    /// N3: an image that declared `fit` and both bounds takes exactly that box in
+    /// every phase.
+    fn apply_box(core: &mut CoreState, id: WidgetId) -> windows_core::Result<()> {
+        let Some((_, image)) = parts(core, id) else { return Ok(()) };
+        let Some(arm) = core.image_arms.get(&id) else { return Ok(()) };
+        if !arm.boxed() {
+            return Ok(());
+        }
+        image.SetWidth(arm.width)?;
+        image.SetHeight(arm.height)?;
+        if let Some(look) = &arm.loading {
+            look.SetWidth(arm.width)?;
+            look.SetHeight(arm.height)?;
+        }
+        if let Some((look, _)) = &arm.failed {
+            look.SetWidth(arm.width)?;
+            look.SetHeight(arm.height)?;
+        }
+        refresh_look(core, id)
+    }
+
+    /// A picture is served once per batch, after every prop the batch carried is
+    /// in (`serve_requested`, from `flush_tracks`).
+    fn request(core: &mut CoreState, id: WidgetId) {
+        if !core.image_requests.contains(&id) {
+            core.image_requests.push(id);
+        }
+    }
+
+    pub(super) fn serve_requested(core: &mut CoreState) -> windows_core::Result<()> {
+        for id in std::mem::take(&mut core.image_requests) {
+            serve(core, id)?;
+        }
+        Ok(())
+    }
+
+    /// THE ONE DOOR an image's picture comes through (N9). A picture the cache
+    /// holds at this size is installed now; anything else is written to its
+    /// stream on a worker thread and decoded by `SetSourceAsync`, which XAML runs
+    /// off the UI thread. The generation is what makes a late decode harmless: an
+    /// image given other bytes or another box since, or torn down, drops it.
+    fn serve(core: &mut CoreState, id: WidgetId) -> windows_core::Result<()> {
+        let Some((_, image)) = parts(core, id) else { return Ok(()) };
+        let scale = image.XamlRoot().and_then(|root| root.RasterizationScale()).unwrap_or(1.0);
+        let arm = core.image_arms.entry(id).or_default();
+        arm.generation += 1;
+        let generation = arm.generation;
+        let Some(bytes) = arm.bytes.clone().filter(|b| !b.is_empty()) else {
+            return install(core, id, None, false);
+        };
+        let natural = header_size(&bytes);
+        let target = natural.map(|n| decode_target(n, arm.width, arm.height, arm.fit, scale));
+        let key = (arm.content, target.map_or(0, |(_, long)| long));
+        if let Some(hit) = PICTURES.with_borrow_mut(|cache| cache.get(key)) {
+            return install(core, id, Some(hit), false);
+        }
+        arm.pending = true;
+        refresh_look(core, id)?;
+        written(bytes, move |stream| {
+            on_ui(move |core| match &stream {
+                Ok(stream) => decode(core, id, generation, stream, target, key),
+                Err(_) => failed(core, id, generation),
+            })
+        });
+        Ok(())
+    }
+
+    type Job = Box<dyn FnOnce() + Send>;
+
+    /// The bytes written into a stream on the one writer thread, so the UI
+    /// thread never joins StoreAsync.
+    fn written(
+        bytes: Arc<[u8]>,
+        then: impl FnOnce(windows_core::Result<InMemoryRandomAccessStream>) + Send + 'static,
+    ) {
+        static WRITER: std::sync::OnceLock<std::sync::Mutex<std::sync::mpsc::Sender<Job>>> =
+            std::sync::OnceLock::new();
+        let writer = WRITER.get_or_init(|| {
+            let (tx, rx) = std::sync::mpsc::channel::<Job>();
+            std::thread::spawn(move || {
+                for job in rx {
+                    job();
+                }
+            });
+            std::sync::Mutex::new(tx)
+        });
+        let job: Job = Box::new(move || {
+            then((|| {
+                let stream = InMemoryRandomAccessStream::new()?;
+                let writer = DataWriter::CreateDataWriter(&stream)?;
+                writer.WriteBytes(&bytes)?;
+                writer.StoreAsync()?.join()?;
+                writer.DetachStream()?;
+                stream.Seek(0)?;
+                Ok(stream)
+            })())
+        });
+        if let Ok(writer) = writer.lock() {
+            let _ = writer.send(job);
+        }
+    }
+
+    fn decode(
+        core: &mut CoreState,
+        id: WidgetId,
+        generation: u64,
+        stream: &InMemoryRandomAccessStream,
+        target: Option<(bool, u32)>,
+        key: (u64, u32),
+    ) -> windows_core::Result<()> {
+        if core.image_arms.get(&id).is_none_or(|arm| arm.generation != generation) {
+            return Ok(());
+        }
+        let bitmap = BitmapImage::new()?;
+        match target {
+            Some((true, long)) => bitmap.SetDecodePixelWidth(long as i32)?,
+            Some((false, long)) => bitmap.SetDecodePixelHeight(long as i32)?,
+            None => {}
+        }
+        bitmap.ImageOpened(&RoutedEventHandler::new(move |sender, _| {
+            let Some(bitmap) = sender.as_ref().and_then(|s| s.cast::<BitmapImage>().ok()) else { return Ok(()) };
+            on_ui(move |core| opened(core, id, generation, &bitmap, key));
+            Ok(())
+        }))?;
+        bitmap.ImageFailed(&ExceptionRoutedEventHandler::new(move |_, _| {
+            on_ui(move |core| failed(core, id, generation));
+            Ok(())
+        }))?;
+        bitmap.SetSourceAsync(stream)?.when(move |done| {
+            if done.is_err() {
+                on_ui(move |core| failed(core, id, generation));
+            }
+        })?;
+        if let Some(arm) = core.image_arms.get_mut(&id) {
+            arm.decoding = Some(bitmap);
+        }
+        Ok(())
+    }
+
+    fn opened(core: &mut CoreState, id: WidgetId, generation: u64, bitmap: &BitmapImage, key: (u64, u32)) -> windows_core::Result<()> {
+        if core.image_arms.get(&id).is_none_or(|arm| arm.generation != generation) {
+            return Ok(());
+        }
+        if key.0 != 0 {
+            let (w, h) = (bitmap.PixelWidth()?.max(1) as u64, bitmap.PixelHeight()?.max(1) as u64);
+            let (long, short) = (w.max(h), w.min(h));
+            let decoded = if key.1 == 0 { long } else { u64::from(key.1) };
+            let cost = decoded * (decoded * short / long).max(1) * 4;
+            PICTURES.with_borrow_mut(|cache| cache.put(key, bitmap.clone(), cost));
+        }
+        watch_memory();
+        install(core, id, Some(bitmap.clone()), false)
+    }
+
+    /// N13, N14: bytes that will not decode draw the failed look, and NEVER leave
+    /// the previous picture up.
+    fn failed(core: &mut CoreState, id: WidgetId, generation: u64) -> windows_core::Result<()> {
+        if core.image_arms.get(&id).is_none_or(|arm| arm.generation != generation) {
+            return Ok(());
+        }
+        install(core, id, None, true)
+    }
+
+    fn install(core: &mut CoreState, id: WidgetId, picture: Option<BitmapImage>, undecodable: bool) -> windows_core::Result<()> {
+        let Some((_, image)) = parts(core, id) else { return Ok(()) };
+        match &picture {
+            Some(bitmap) => image.SetSource(bitmap)?,
+            None => image.SetSource(None::<&ImageSource>)?,
+        }
+        let arm = core.image_arms.entry(id).or_default();
+        arm.pending = false;
+        arm.decoding = None;
+        arm.undecodable = undecodable;
+        arm.picture = picture;
+        refresh_look(core, id)
+    }
+
+    /// N4: which look a boxed image draws, mounted in the image's own host over
+    /// the Image, sized to the box; an unboxed image draws none (N13: it stays
+    /// 0x0). The looks are never the accessible element: the Image keeps the
+    /// label in every phase, and a label-less Image stays decorative (N5).
+    fn refresh_look(core: &mut CoreState, id: WidgetId) -> windows_core::Result<()> {
+        let Some((host, image)) = parts(core, id) else { return Ok(()) };
+        let Some(arm) = core.image_arms.get_mut(&id) else { return Ok(()) };
+        let failed = arm.boxed()
+            && (arm.phase == crate::wire::IMAGE_PHASE_FAILED || (arm.picture.is_none() && arm.undecodable));
+        let loading = arm.boxed()
+            && !failed
+            && arm.picture.is_none()
+            && (arm.phase == crate::wire::IMAGE_PHASE_LOADING || arm.pending);
+        if loading && arm.loading.is_none() {
+            let look = look(arm.width, arm.height)?;
+            host.Children()?.Append(&look)?;
+            arm.loading = Some(look);
+        }
+        if failed && arm.failed.is_none() {
+            let look = look(arm.width, arm.height)?;
+            let glyph = FontIcon::new()?;
+            glyph.SetGlyph(&windows_core::HSTRING::from(missing_glyph()))?;
+            glyph.SetFontSize(GLYPH)?;
+            glyph.SetForeground(&theme_resource::<Brush>("TextFillColorSecondaryBrush")?)?;
+            glyph.SetHorizontalAlignment(HorizontalAlignment::Center)?;
+            glyph.SetVerticalAlignment(VerticalAlignment::Center)?;
+            AutomationProperties::SetAccessibilityView(&glyph, AccessibilityView::Raw)?;
+            look.SetChild(&glyph)?;
+            host.Children()?.Append(&look)?;
+            arm.failed = Some((look, glyph));
+        }
+        let shown = |on: bool| if on { Visibility::Visible } else { Visibility::Collapsed };
+        if let Some(look) = &arm.loading {
+            look.SetVisibility(shown(loading))?;
+        }
+        if let Some((look, glyph)) = &arm.failed {
+            look.SetVisibility(shown(failed))?;
+            glyph.SetVisibility(shown(arm.width.min(arm.height) >= 2.0 * GLYPH))?;
+        }
+        image.SetOpacity(if failed { 0.0 } else { 1.0 })
+    }
+
+    fn missing_glyph() -> String {
+        match super::fluent_icon(crate::app::Symbol::ImageMissing) {
+            super::FluentIcon::Member(member) => char::from_u32(member.0 as u32).map(String::from).unwrap_or_default(),
+            super::FluentIcon::Glyph(glyph) => glyph.to_owned(),
+        }
+    }
+
+    fn look(width: f64, height: f64) -> windows_core::Result<Border> {
+        let look = Border::new()?;
+        look.SetBackground(&theme_resource::<Brush>("ControlFillColorSecondaryBrush")?)?;
+        look.SetWidth(width)?;
+        look.SetHeight(height)?;
+        look.SetHorizontalAlignment(HorizontalAlignment::Center)?;
+        look.SetVerticalAlignment(VerticalAlignment::Center)?;
+        AutomationProperties::SetAccessibilityView(&look, AccessibilityView::Raw)?;
+        Ok(look)
+    }
+
+    /// What a boxed or bare image drew, for expect_image_phase (N15), read off
+    /// the host's mounted children: `loading` or `failed` for a look laid out in
+    /// the box, `shown` for a decoded picture the Image is drawing, `empty`
+    /// otherwise; a failed look with room for its glyph and no glyph laid out
+    /// reads as the defect it is.
+    #[cfg(feature = "harness")]
+    pub(super) fn phase_drawn(core: &CoreState, image: &Image) -> windows_core::Result<String> {
+        use bindings::Microsoft::UI::Xaml::FrameworkElement;
+        let laid_out = |e: &FrameworkElement| -> windows_core::Result<bool> {
+            Ok(e.Visibility()? == Visibility::Visible && e.ActualWidth()? > 0.0 && e.ActualHeight()? > 0.0)
+        };
+        let Some((host, _)) = core.widgets.values().find_map(|w| match w {
+            NativeWidget::Image { host, image: i } if i == image => Some((host.clone(), i.clone())),
+            _ => None,
+        }) else {
+            return Ok("nothing".into());
+        };
+        let children = host.Children()?;
+        for i in 1..children.Size()? {
+            let Ok(look) = children.GetAt(i)?.cast::<Border>() else { continue };
+            if !laid_out(&look.cast()?)? {
+                continue;
+            }
+            let Some(child) = look.Child().ok() else { return Ok("loading".into()) };
+            let glyph: FrameworkElement = child.cast()?;
+            if !laid_out(&glyph)? && look.ActualWidth()?.min(look.ActualHeight()?) >= 2.0 * GLYPH {
+                return Ok("failed without its glyph".into());
+            }
+            return Ok("failed".into());
+        }
+        let opened = image
+            .Source()
+            .ok()
+            .and_then(|source| source.cast::<BitmapImage>().ok())
+            .is_some_and(|bitmap| bitmap.PixelWidth().unwrap_or(0) > 0);
+        Ok(if opened && image.Opacity()? > 0.0 { "shown" } else { "empty" }.into())
+    }
+
+    /// The natural size from the file's own header, for the decode size: JPEG's
+    /// frame header, PNG's IHDR and GIF's screen descriptor. None for anything
+    /// else, which then decodes at XAML's own size.
+    pub(super) fn header_size(bytes: &[u8]) -> Option<(u32, u32)> {
+        if bytes.starts_with(b"\x89PNG\r\n\x1a\n") && bytes.len() >= 24 {
+            let w = u32::from_be_bytes(bytes[16..20].try_into().ok()?);
+            let h = u32::from_be_bytes(bytes[20..24].try_into().ok()?);
+            return (w > 0 && h > 0).then_some((w, h));
+        }
+        if bytes.starts_with(b"GIF8") && bytes.len() >= 10 {
+            let w = u32::from(u16::from_le_bytes([bytes[6], bytes[7]]));
+            let h = u32::from(u16::from_le_bytes([bytes[8], bytes[9]]));
+            return (w > 0 && h > 0).then_some((w, h));
+        }
+        if !bytes.starts_with(&[0xFF, 0xD8]) {
+            return None;
+        }
+        let mut at = 2;
+        while at + 9 < bytes.len() {
+            if bytes[at] != 0xFF {
+                return None;
+            }
+            let marker = bytes[at + 1];
+            if marker == 0xFF {
+                at += 1;
+                continue;
+            }
+            let len = usize::from(u16::from_be_bytes([bytes[at + 2], bytes[at + 3]]));
+            if matches!(marker, 0xC0..=0xCF) && !matches!(marker, 0xC4 | 0xC8 | 0xCC) {
+                let h = u32::from(u16::from_be_bytes([bytes[at + 5], bytes[at + 6]]));
+                let w = u32::from(u16::from_be_bytes([bytes[at + 7], bytes[at + 8]]));
+                return (w > 0 && h > 0).then_some((w, h));
+            }
+            at += 2 + len;
+        }
+        None
+    }
+
+    /// The decode size: whether the longer side is the width, and that side in
+    /// physical pixels, the box placed by `fit` (else the bounds, else the
+    /// natural size) times the scale, never past the natural size. The SwiftUI
+    /// arm's `kayaPictureTarget`.
+    pub(super) fn decode_target(natural: (u32, u32), width: f64, height: f64, fit: Option<i64>, scale: f64) -> (bool, u32) {
+        let (w, h) = (f64::from(natural.0), f64::from(natural.1));
+        let s = match fit {
+            Some(fit) if width > 0.0 && height > 0.0 => {
+                let (sx, sy) = (width / w, height / h);
+                if crate::wire::vocab_name(crate::wire::FITS, fit) == Some("contain") { sx.min(sy) } else { sx.max(sy) }
+            }
+            _ => {
+                let sx = if width > 0.0 { width / w } else { 1.0 };
+                let sy = if height > 0.0 { height / h } else { 1.0 };
+                1f64.min(sx).min(sy)
+            }
+        };
+        let long = natural.0.max(natural.1);
+        let px = ((w.max(h) * s * scale).ceil() as u32).clamp(1, long);
+        (natural.0 >= natural.1, px)
+    }
+
+    /// N10: decoded pictures keyed by the bytes' content id and the decode size,
+    /// least recently used out past two screens of pixels, emptied when the
+    /// system says the app's memory use is high. One BitmapImage serves every
+    /// Image showing those bytes at that size (MEASURED, the arm's notes). UI
+    /// thread only.
+    #[derive(Default)]
+    struct Pictures {
+        entries: HashMap<(u64, u32), (BitmapImage, u64, u64)>,
+        cost: u64,
+        tick: u64,
+    }
+
+    thread_local! {
+        static PICTURES: RefCell<Pictures> = RefCell::new(Pictures::default());
+        static MEMORY_WATCHED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    impl Pictures {
+        fn budget() -> u64 {
+            use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
+            let (w, h) = unsafe { (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)) };
+            let screen = if w > 0 && h > 0 { w as u64 * h as u64 } else { 2560 * 1600 };
+            2 * screen * 4
+        }
+
+        fn get(&mut self, key: (u64, u32)) -> Option<BitmapImage> {
+            if key.0 == 0 {
+                return None;
+            }
+            self.tick += 1;
+            let tick = self.tick;
+            let entry = self.entries.get_mut(&key)?;
+            entry.2 = tick;
+            Some(entry.0.clone())
+        }
+
+        fn put(&mut self, key: (u64, u32), bitmap: BitmapImage, cost: u64) {
+            self.tick += 1;
+            if let Some((_, old, _)) = self.entries.insert(key, (bitmap, cost, self.tick)) {
+                self.cost -= old;
+            }
+            self.cost += cost;
+            let budget = Self::budget();
+            while self.cost > budget && self.entries.len() > 1 {
+                let Some(oldest) = self.entries.iter().min_by_key(|(_, e)| e.2).map(|(k, _)| *k) else { break };
+                if let Some((_, cost, _)) = self.entries.remove(&oldest) {
+                    self.cost -= cost;
+                }
+            }
+        }
+
+        fn empty(&mut self) {
+            self.entries.clear();
+            self.cost = 0;
+        }
+    }
+
+    /// The cache empties while Windows reports memory low: MemoryManager is
+    /// unavailable to an unpackaged process (MEASURED), and this notification
+    /// needs no package identity.
+    fn watch_memory() {
+        use windows::Win32::System::Memory::{CreateMemoryResourceNotification, LowMemoryResourceNotification};
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn WaitForSingleObject(handle: isize, millis: u32) -> u32;
+        }
+        if MEMORY_WATCHED.replace(true) {
+            return;
+        }
+        let Ok(low) = (unsafe { CreateMemoryResourceNotification(LowMemoryResourceNotification) }) else { return };
+        let low = low.0 as isize;
+        std::thread::spawn(move || loop {
+            if unsafe { WaitForSingleObject(low, u32::MAX) } != 0 {
+                return;
+            }
+            on_ui(|_| {
+                PICTURES.with_borrow_mut(Pictures::empty);
+                Ok(())
+            });
+            std::thread::sleep(std::time::Duration::from_secs(10));
+        });
+    }
+
+    /// Run `f` on the UI thread with the core, from any thread.
+    fn on_ui(f: impl FnOnce(&mut CoreState) -> windows_core::Result<()> + Send + 'static) {
+        let Some(dispatcher) = DISPATCHER.get() else { return };
+        let cell = std::sync::Mutex::new(Some(f));
+        let handler = DispatcherQueueHandler::new(move || {
+            let Some(f) = cell.lock().ok().and_then(|mut f| f.take()) else { return Ok(()) };
+            CORE.with_borrow_mut(|core| {
+                if let Some(core) = core.as_mut() {
+                    if let Err(e) = f(core) {
+                        eprintln!("kaya: winui image: {}", e.message());
+                    }
+                }
+            });
+            Ok(())
+        });
+        let _ = dispatcher.0.TryEnqueue(&handler);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// docs/network-images-plan.md N9: the decode size comes from the file's
+    /// own header and the box, never past the natural size (winui/images.rs).
+    #[test]
+    fn an_image_header_names_its_natural_size_and_the_decode_follows_the_box() {
+        let cover = include_bytes!("../../../../guests/assets/covers/cover-600.jpg");
+        assert_eq!(images::header_size(cover), Some((600, 600)));
+        assert_eq!(images::header_size(b"not a picture"), None);
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        png.extend(320u32.to_be_bytes());
+        png.extend(200u32.to_be_bytes());
+        assert_eq!(images::header_size(&png), Some((320, 200)));
+        let fit = |name| crate::wire::FITS.iter().find(|(_, n)| *n == name).unwrap().0;
+        assert_eq!(images::decode_target((600, 600), 96.0, 96.0, Some(fit("cover")), 1.0), (true, 96));
+        assert_eq!(images::decode_target((600, 300), 96.0, 96.0, Some(fit("cover")), 2.0), (true, 384));
+        assert_eq!(images::decode_target((600, 300), 96.0, 96.0, Some(fit("contain")), 2.0), (true, 192));
+        assert_eq!(images::decode_target((300, 600), 0.0, 0.0, None, 1.0), (false, 600));
+        assert_eq!(images::decode_target((20, 20), 96.0, 96.0, Some(fit("cover")), 2.0), (true, 20));
+    }
 
     /// docs/range-plan.md §3 rule 4: the clip boundary between the thumbs.
     #[test]

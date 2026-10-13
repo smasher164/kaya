@@ -31,6 +31,22 @@ func (p messagePatchBuilder) Text(v string) messagePatchBuilder {
 	return p
 }
 
+// MessagePatchIf is MessagePatch made only while the entry exists and the
+// guard's field still holds expected; otherwise nothing, and no panic
+// (docs/network-images-plan.md N7). The chain is one record.
+func MessagePatchIf[V comparable](c kaya.RecordCollection[string, Message], tx *kaya.Tx, key string, guard func(*Message) *V, expected V) messagePatchIfBuilder {
+	return messagePatchIfBuilder{c.PatchIf(tx, key, guard, expected)}
+}
+
+type messagePatchIfBuilder struct {
+	p kaya.RecordPatchIf[string, Message]
+}
+
+func (p messagePatchIfBuilder) Text(v string) messagePatchIfBuilder {
+	p.p.Set(func(t *Message) *string { return &t.Text }, v)
+	return p
+}
+
 // The row surface: one token per wire field, and the template
 // constructors that consume them.
 type messageRow struct {
@@ -127,8 +143,10 @@ func (r messageRow) SetMax(n kaya.Node, max float64) { r.t.SetMax(n, max) }
 
 func (r messageRow) SetAlpha(n kaya.Node, on bool) { r.t.SetAlpha(n, on) }
 
-func (r messageRow) SetFit(n kaya.Node, fit kaya.Fit)         { r.t.SetFit(n, fit) }
-func (r messageRow) SetAspect(n kaya.Node, width, height int) { r.t.SetAspect(n, width, height) }
+func (r messageRow) SetFit(n kaya.Node, fit kaya.Fit)                     { r.t.SetFit(n, fit) }
+func (r messageRow) SetPhase(n kaya.Node, phase kaya.ImagePhase)          { r.t.SetPhase(n, phase) }
+func (r messageRow) BindPhase(n kaya.Node, f kaya.Field[kaya.ImagePhase]) { r.t.BindPhase(n, f) }
+func (r messageRow) SetAspect(n kaya.Node, width, height int)             { r.t.SetAspect(n, width, height) }
 
 func (r messageRow) SetMinGap(n kaya.Node, gap float64)          { r.t.SetMinGap(n, gap) }
 func (r messageRow) SetLowLabel(n kaya.Node, label string)       { r.t.SetLowLabel(n, label) }

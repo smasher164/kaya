@@ -41,6 +41,32 @@ func (p conversationPatchBuilder) Unread(v string) conversationPatchBuilder {
 	return p
 }
 
+// ConversationPatchIf is ConversationPatch made only while the entry exists and the
+// guard's field still holds expected; otherwise nothing, and no panic
+// (docs/network-images-plan.md N7). The chain is one record.
+func ConversationPatchIf[V comparable](c kaya.RecordCollection[string, Conversation], tx *kaya.Tx, key string, guard func(*Conversation) *V, expected V) conversationPatchIfBuilder {
+	return conversationPatchIfBuilder{c.PatchIf(tx, key, guard, expected)}
+}
+
+type conversationPatchIfBuilder struct {
+	p kaya.RecordPatchIf[string, Conversation]
+}
+
+func (p conversationPatchIfBuilder) Name(v string) conversationPatchIfBuilder {
+	p.p.Set(func(t *Conversation) *string { return &t.Name }, v)
+	return p
+}
+
+func (p conversationPatchIfBuilder) Preview(v string) conversationPatchIfBuilder {
+	p.p.Set(func(t *Conversation) *string { return &t.Preview }, v)
+	return p
+}
+
+func (p conversationPatchIfBuilder) Unread(v string) conversationPatchIfBuilder {
+	p.p.Set(func(t *Conversation) *string { return &t.Unread }, v)
+	return p
+}
+
 // The row surface: one token per wire field, and the template
 // constructors that consume them.
 type conversationRow struct {
@@ -141,8 +167,10 @@ func (r conversationRow) SetMax(n kaya.Node, max float64) { r.t.SetMax(n, max) }
 
 func (r conversationRow) SetAlpha(n kaya.Node, on bool) { r.t.SetAlpha(n, on) }
 
-func (r conversationRow) SetFit(n kaya.Node, fit kaya.Fit)         { r.t.SetFit(n, fit) }
-func (r conversationRow) SetAspect(n kaya.Node, width, height int) { r.t.SetAspect(n, width, height) }
+func (r conversationRow) SetFit(n kaya.Node, fit kaya.Fit)                     { r.t.SetFit(n, fit) }
+func (r conversationRow) SetPhase(n kaya.Node, phase kaya.ImagePhase)          { r.t.SetPhase(n, phase) }
+func (r conversationRow) BindPhase(n kaya.Node, f kaya.Field[kaya.ImagePhase]) { r.t.BindPhase(n, f) }
+func (r conversationRow) SetAspect(n kaya.Node, width, height int)             { r.t.SetAspect(n, width, height) }
 
 func (r conversationRow) SetMinGap(n kaya.Node, gap float64)          { r.t.SetMinGap(n, gap) }
 func (r conversationRow) SetLowLabel(n kaya.Node, label string)       { r.t.SetLowLabel(n, label) }

@@ -44,6 +44,7 @@ sealed class RecordInfo
         : t == typeof(Color) ? KayaWire.ValueI64
         // A row's player is its id, 0 for none (docs/media-plan.md §7b).
         : t == typeof(Player) || t == typeof(Player?) ? KayaWire.ValueI64
+        : t == typeof(ImagePhase) ? KayaWire.ValueI64
         : (uint?)null;
 
     // One reflection walk per record type, ever: FieldOf runs per event
@@ -102,7 +103,8 @@ sealed class RecordInfo
     internal object EncodeField(uint wireIndex, object value)
     {
         string name = Ctor.GetParameters()[WireToCtor[wireIndex]].Name!;
-        if (value is DateOnly or TimeOnly or Color or Player) return KayaRecords.ScalarWire(value);
+        if (value is DateOnly or TimeOnly or Color or Player or ImagePhase)
+            return KayaRecords.ScalarWire(value);
         if (NoPlayer(wireIndex, value)) return 0L;
         if (Schema[wireIndex] == KayaWire.ValueBlob)
         {
@@ -158,6 +160,8 @@ sealed class RecordInfo
                         ? KayaRecords.PlayerOf(fields[wire])
                     : want == typeof(Player?)
                         ? KayaRecords.OptionalPlayerOf(fields[wire])
+                    : want == typeof(ImagePhase)
+                        ? (ImagePhase)(fields[wire] is long phase ? phase : 0L)
                     : want == typeof(Document)
                         ? KayaApp.DocumentOfBlob(fields[wire])
                         : fields[wire];
@@ -257,6 +261,33 @@ sealed class RecordCollection<T>
     /// update_field; a patch is recorded writes, never a diff.
     public RecordPatch<T> Patch(Tx tx, object key) => new RecordPatch<T>(this, tx, key);
 
+    /// The same writes, made only while the entry at `key` exists and its
+    /// `guard` field still holds `expected`; otherwise nothing, and no
+    /// throw (docs/network-images-plan.md N7). ONE record, so the core
+    /// checks the guard against the model it commits to; the mirror takes
+    /// the writes under the same guard. Answers whether the guard held here.
+    public bool PatchIf<G>(Tx tx, object key, Field<G> guard, G expected,
+        Action<RecordPatchIf<T>> changes)
+    {
+        var p = new RecordPatchIf<T>(Info);
+        changes(p);
+        object guardWire = Info.EncodeField(guard.Index, expected!);
+        object? model = null;
+        if (TryGet(tx, key, out var current)
+            && KayaRecords.SameWire(Info.FieldOfWire(current!, guard.Index), expected))
+        {
+            model = current!;
+            foreach (var (field, value, _) in p.Changes)
+                model = Info.WithField(model, field, value);
+        }
+        var fields = new uint[p.Changes.Count];
+        var values = new object[p.Changes.Count];
+        for (int i = 0; i < fields.Length; i++)
+            (fields[i], _, values[i]) = p.Changes[i];
+        tx.PatchIfRaw(Collection, key, model, 0, guard.Index, guardWire, fields, values);
+        return model != null;
+    }
+
     /// A label bound to the field the selector names.
     public Node Label(Tpl t, Expression<Func<T, string>> selector) =>
         t.Label(KayaRecords.FieldOf(selector));
@@ -355,8 +386,35 @@ sealed class RecordPatch<T>
     }
 }
 
+/// The gathered changes of one conditional write; Set chains.
+sealed class RecordPatchIf<T>
+{
+    readonly RecordInfo info;
+    internal readonly List<(uint Field, object Value, object Wire)> Changes = new();
+
+    internal RecordPatchIf(RecordInfo info) => this.info = info;
+
+    /// The field a pre-resolved token names takes `value` if the guard holds.
+    public RecordPatchIf<T> Set<V>(Field<V> f, V value)
+    {
+        Changes.Add((f.Index, value!, info.EncodeField(f.Index, value!)));
+        return this;
+    }
+
+    /// The field the selector names; chainable.
+    public RecordPatchIf<T> Set<V>(Expression<Func<T, V>> selector, V value) =>
+        Set(KayaRecords.FieldOf(selector), value);
+}
+
 static class KayaRecords
 {
+    /// Two field values equal as the wire would carry them: a guard compares
+    /// what the core compares, so bytes compare by content.
+    internal static bool SameWire(object? held, object? want) =>
+        held is byte[] || want is byte[]
+            ? held is byte[] a && want is byte[] b && a.AsSpan().SequenceEqual(b)
+            : Equals(held is null ? null : ScalarWire(held), want is null ? null : ScalarWire(want));
+
     /// Declare a collection of T records; the record type is the
     /// schema. Returns the typed root handle.
     public static RecordCollection<T> CollectionOf<T>(this Tx tx) => Declare<T>(tx);
@@ -386,6 +444,9 @@ static class KayaRecords
         TimeOnly t => (long)KayaWire.PackTime(t.Hour, t.Minute),
         Color c => c.Packed,
         Player p => (long)p.Id,
+        ImagePhase phase => (long)phase,
+        // A signal of bytes registers them at the write, as a blob field does.
+        byte[] bytes => new KayaWire.BlobHandle(Kaya.RegisterBlob(bytes)),
         _ => v,
     };
 

@@ -406,3 +406,16 @@ executable timecode
   import: shared
   main-is: timecode.hs
   build-depends: kaya-guests
+
+executable netimage
+  import: shared
+  main-is: netimage.hs
+  build-depends: kaya-guests
+
+-- The network images scene over HTTP (docs/network-images-plan.md N12):
+-- the pinned client (flake.nix, tools/linux/Dockerfile, cabal.project)
+-- links into this guest alone.
+executable netimage_http
+  import: shared
+  main-is: netimage_http.hs
+  build-depends: kaya-guests, http-client, http-client-tls, http-types

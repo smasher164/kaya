@@ -120,45 +120,60 @@ def check(raw):
     """raw: {site: unstripped text}. Offender sentences (clauses B+C)."""
     bad = []
 
-    # --- B, GTK: the Err arm keeps the picture and cannot panic. -----
+    # --- B, GTK: a failed decode keeps the picture and cannot panic. -
+    # The source arm hands the bytes to image_source, the one door
+    # (docs/network-images-plan.md N9, N13); a decode that fails marks the
+    # image undecodable and render_image draws the failed look or nothing
+    # on the same GtkPicture.
     text = strip(raw[GTK])
-    arm = braced(text, r"\(NativeWidget::Image\(picture\), Prop::Source, "
-                       r"Value::Blob\(blob\)\)\s*=>")
-    if arm is None:
-        bad.append(f"{GTK}: the image Prop::Source arm is not where this "
-                   "gate looks — it moved or was renamed, and an unread "
-                   "arm is not a checked one")
+    arm_call = ("(NativeWidget::Image(picture), Prop::Source, "
+                "Value::Blob(blob)) => image_source(picture, &blob.0)")
+    door = braced(text, r"\nfn image_source\(picture: &gtk4::Picture, "
+                        r"bytes: &std::sync::Arc<\[u8\]>\)")
+    if arm_call not in text or door is None:
+        bad.append(f"{GTK}: the image Prop::Source arm no longer hands its "
+                   "bytes to image_source, or image_source is not where "
+                   "this gate looks — an unread door is not a checked one")
     else:
-        if "Err(_) => picture.set_paintable" not in arm:
-            bad.append(f"{GTK}: the image decode's Err arm must leave the "
-                       "GtkPicture in place with its paintable cleared "
-                       "(`Err(_) => picture.set_paintable"
-                       "(gtk4::gdk::Paintable::NONE)`). A widget backend "
-                       "keeps its widget: that is what the declarative "
-                       "backends are held to.")
+        if "s.undecodable = decoded.is_none();" not in door:
+            bad.append(f"{GTK}: the image decode must leave the GtkPicture "
+                       "in place and mark it undecodable "
+                       "(`s.undecodable = decoded.is_none();`), so "
+                       "render_image draws the failed look on the same "
+                       "widget. A widget backend keeps its widget: that is "
+                       "what the declarative backends are held to.")
         for hazard in (".unwrap()", ".expect(", "panic!"):
-            if hazard in arm:
-                bad.append(f"{GTK}: the image Prop::Source arm contains "
-                           f"`{hazard}` — a failed decode is the "
-                           f"placeholder class, never a panic.")
+            if hazard in door:
+                bad.append(f"{GTK}: image_source contains `{hazard}` — a "
+                           f"failed decode is the placeholder class, never "
+                           f"a panic.")
 
-    # --- B, WinUI: the error path logs and leaves the Image alone. ---
+    # --- B, WinUI: a failed decode clears the Source on the same Image.
+    # The decode is SetSourceAsync off the apply arm; both its failures
+    # (ImageFailed and the failed action) reach `failed`, which installs no
+    # picture on the Image it keeps (docs/network-images-plan.md N9, N14).
     text = strip(raw[WINUI])
-    arm = braced(text, r"\(NativeWidget::Image\(image\), Prop::Source, "
-                       r"Value::Blob\(blob\)\)\s*=>")
-    if arm is None:
-        bad.append(f"{WINUI}: the image Prop::Source arm is not where this "
-                   "gate looks — it moved or was renamed, and an unread "
-                   "arm is not a checked one")
+    failed = braced(text, r"fn failed\(core: &mut CoreState, id: WidgetId, "
+                          r"generation: u64\) -> windows_core::Result<\(\)>")
+    install = braced(text, r"fn install\(core: &mut CoreState, id: WidgetId, "
+                           r"picture: Option<BitmapImage>, undecodable: bool\)")
+    if failed is None or install is None:
+        bad.append(f"{WINUI}: the image's failed/install pair is not where "
+                   "this gate looks — it moved or was renamed, and an "
+                   "unread door is not a checked one")
     else:
-        if "if let Err(e) = result" not in arm:
-            bad.append(f"{WINUI}: the image Prop::Source arm must funnel "
-                       "every failure (decode included) into one Err "
-                       "branch that leaves the Image element in place with "
-                       "no Source — image_size then reads 0x0.")
+        if "install(core, id, None, true)" not in failed:
+            bad.append(f"{WINUI}: a failed decode must install NO picture "
+                       "on the Image it keeps (`install(core, id, None, "
+                       "true)`) — image_size then reads 0x0 and the failed "
+                       "look draws (N14).")
+        if "None => image.SetSource(None::<&ImageSource>)?" not in install:
+            bad.append(f"{WINUI}: install must clear the Image's Source "
+                       "when there is no picture, never leave the previous "
+                       "one up (N14).")
         for hazard in (".unwrap()", ".expect(", "panic!"):
-            if hazard in arm:
-                bad.append(f"{WINUI}: the image Prop::Source arm contains "
+            if hazard in failed + install:
+                bad.append(f"{WINUI}: the image's failed path contains "
                            f"`{hazard}` — a failed decode is the "
                            f"placeholder class, never a panic.")
 
@@ -279,14 +294,14 @@ negative("the Compose else-drop perturbation", COMPOSE,
          "has no `else` for a null bitmap",
          "a Compose image arm that composes nothing", want=2)
 
-negative("the GTK paintable-drop perturbation", GTK,
-         r"Err\(_\) => picture\.set_paintable", "Err(_) => drop_paintable",
-         "must leave the GtkPicture in place",
-         "a GTK arm that loses its picture")
+negative("the GTK undecodable-drop perturbation", GTK,
+         r"s\.undecodable = decoded\.is_none\(\);", "s.undecodable = false;",
+         "must leave the GtkPicture",
+         "a GTK arm that loses its failed picture")
 
-negative("the WinUI unwrap perturbation", WINUI,
-         r"if let Err\(e\) = result", "let _ = result.unwrap(); if false",
-         "never a panic", "a WinUI arm that panics on a failed decode")
+negative("the WinUI keep-the-old-picture perturbation", WINUI,
+         r"install\(core, id, None, true\)", "Ok(())",
+         "must install NO picture", "a WinUI arm that keeps the previous picture")
 
 # --- Clause A: the runtime negative, where a GUI toolkit exists. -----
 if platform.system() == "Darwin":

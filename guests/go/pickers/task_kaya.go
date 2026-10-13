@@ -36,6 +36,27 @@ func (p taskPatchBuilder) Due(v kaya.Date) taskPatchBuilder {
 	return p
 }
 
+// TaskPatchIf is TaskPatch made only while the entry exists and the
+// guard's field still holds expected; otherwise nothing, and no panic
+// (docs/network-images-plan.md N7). The chain is one record.
+func TaskPatchIf[V comparable](c kaya.RecordCollection[string, Task], tx *kaya.Tx, key string, guard func(*Task) *V, expected V) taskPatchIfBuilder {
+	return taskPatchIfBuilder{c.PatchIf(tx, key, guard, expected)}
+}
+
+type taskPatchIfBuilder struct {
+	p kaya.RecordPatchIf[string, Task]
+}
+
+func (p taskPatchIfBuilder) Name(v string) taskPatchIfBuilder {
+	p.p.Set(func(t *Task) *string { return &t.Name }, v)
+	return p
+}
+
+func (p taskPatchIfBuilder) Due(v kaya.Date) taskPatchIfBuilder {
+	p.p.Set(func(t *Task) *kaya.Date { return &t.Due }, v)
+	return p
+}
+
 // The row surface: one token per wire field, and the template
 // constructors that consume them.
 type taskRow struct {
@@ -134,8 +155,10 @@ func (r taskRow) SetMax(n kaya.Node, max float64) { r.t.SetMax(n, max) }
 
 func (r taskRow) SetAlpha(n kaya.Node, on bool) { r.t.SetAlpha(n, on) }
 
-func (r taskRow) SetFit(n kaya.Node, fit kaya.Fit)         { r.t.SetFit(n, fit) }
-func (r taskRow) SetAspect(n kaya.Node, width, height int) { r.t.SetAspect(n, width, height) }
+func (r taskRow) SetFit(n kaya.Node, fit kaya.Fit)                     { r.t.SetFit(n, fit) }
+func (r taskRow) SetPhase(n kaya.Node, phase kaya.ImagePhase)          { r.t.SetPhase(n, phase) }
+func (r taskRow) BindPhase(n kaya.Node, f kaya.Field[kaya.ImagePhase]) { r.t.BindPhase(n, f) }
+func (r taskRow) SetAspect(n kaya.Node, width, height int)             { r.t.SetAspect(n, width, height) }
 
 func (r taskRow) SetMinGap(n kaya.Node, gap float64)          { r.t.SetMinGap(n, gap) }
 func (r taskRow) SetLowLabel(n kaya.Node, label string)       { r.t.SetLowLabel(n, label) }

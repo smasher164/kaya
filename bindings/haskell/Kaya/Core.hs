@@ -208,6 +208,10 @@ module Kaya.Core
     playbackStateWire,
     Fit (..),
     fitWire,
+    ImagePhase (..),
+    imagePhaseWire,
+    signalPhase,
+    patchIf,
     aspectWire,
     MediaSource (..),
     mediaAsset,
@@ -935,6 +939,10 @@ signalColor = newSignal
 -- transaction boundary, as a record's Blob field does.
 signalImage :: BS.ByteString -> Build (Signal BS.ByteString)
 signalImage = newSignal
+
+-- | An image phase signal, for a bound image's 'Phase'.
+signalPhase :: ImagePhase -> Build (Signal ImagePhase)
+signalPhase = newSignal
 
 writeSignal :: KayaValue v => Signal v -> v -> Build ()
 writeSignal (Signal n) v = emitBIO (W.txWriteSignal n <$> toWireIO v)
@@ -1711,6 +1719,33 @@ fitWire f = fromIntegral $ case f of
   FitCover -> W.fitCover
   FitFill -> W.fitFill
 
+-- | What the app knows about an image's bytes
+-- (docs\/network-images-plan.md N2): drawn, waiting for them, or failed.
+data ImagePhase = PhaseShown | PhaseLoading | PhaseFailed
+  deriving (Eq, Show)
+
+imagePhaseWire :: ImagePhase -> Int64
+imagePhaseWire p = fromIntegral $ case p of
+  PhaseShown -> W.imagePhaseShown
+  PhaseLoading -> W.imagePhaseLoading
+  PhaseFailed -> W.imagePhaseFailed
+
+imagePhaseOfWire :: Int64 -> ImagePhase
+imagePhaseOfWire n
+  | n == fromIntegral W.imagePhaseShown = PhaseShown
+  | n == fromIntegral W.imagePhaseLoading = PhaseLoading
+  | n == fromIntegral W.imagePhaseFailed = PhaseFailed
+  | otherwise = error ("kaya: image phase " ++ show n ++ " is not one this build knows")
+
+instance KayaValue ImagePhase where
+  toWire = W.VI64 . imagePhaseWire
+  fromWire v = case v of W.VI64 n -> imagePhaseOfWire n; _ -> error "kaya: value is not an image phase"
+
+instance KayaFieldType ImagePhase where
+  fieldTag _ = W.valueI64
+  toFieldValue = W.VI64 . imagePhaseWire
+  fromFieldValue v = case v of W.VI64 n -> imagePhaseOfWire n; _ -> error "kaya: field is not an image phase"
+
 -- | A video view's box ratio as the wire packs it (@kaya::Aspect::pack@):
 -- each part saturated to 32 signed bits, width high, height low.
 aspectWire :: Int -> Int -> Int64
@@ -2180,6 +2215,30 @@ set (KField i) v = FieldSet i (fieldTag (Proxy :: Proxy v)) (toFieldValue v)
 patch :: RecordCollection a -> Key -> [FieldSet a] -> Build ()
 patch c key0 = mapM_ (\(FieldSet i tag v) -> updateFieldWire c (keyValue key0) i tag v)
 
+-- | N7's conditional write (docs\/network-images-plan.md): @patchIf rows
+-- key (field \@"url" \@Row) url [set ...]@ is ONE record the core checks
+-- against the model it commits to; the mirror takes the same writes under
+-- the same guard, so a row gone or moved on drops the write in both.
+patchIf ::
+  forall v a. KayaFieldType v =>
+  RecordCollection a -> Key -> KField v -> v -> [FieldSet a] -> Build ()
+patchIf (RecordCollection (Collection n path)) key0 (KField g) expected sets = state $ \s ->
+  let key = keyValue key0
+      want = toFieldValue expected
+      held = case lookup key (lookupEntries n path (s.bModel)) of
+        Just (0, vs) | take 1 (drop (fromIntegral g) vs) == [want] -> Just vs
+        _ -> Nothing
+      written vs = foldl (\acc (FieldSet i _ v) -> take (fromIntegral i) acc ++ [v] ++ drop (fromIntegral i + 1) acc) vs sets
+      record =
+        W.txCollectionPatchIf n path key g 0
+          <$> encodeFieldWire (fieldTag (Proxy :: Proxy v)) want
+          <*> pure [W.VI64 (fromIntegral i) | FieldSet i _ _ <- sets]
+          <*> mapM (\(FieldSet _ tag v) -> encodeFieldWire tag v) sets
+      s' = s {bRecords = s.bRecords <> record}
+   in case held of
+        Just vs -> ((), recomputeDerived n path s' {bModel = modelSet n path key 0 (written vs) (s.bModel)})
+        Nothing -> ((), s')
+
 -- | The typed model: what this guest wrote, in insertion order.
 recordItems :: KayaRecord a => RecordCollection a -> Build [(Key, a)]
 recordItems (RecordCollection (Collection n path)) =
@@ -2250,6 +2309,10 @@ data App = App
     appWidgetFormats :: IORef (Map.Map Word64 (Format -> IO ())),
     appWidgetToggles :: IORef (Map.Map Word64 (Bool -> IO ())),
     appNodeToggles :: IORef (Map.Map Word64 ([Key] -> Bool -> IO ())),
+    -- A loading template image's two realization reports
+    -- (docs/network-images-plan.md N8).
+    appNodeNeeded :: IORef (Map.Map Word64 ([Key] -> IO ())),
+    appNodeReleased :: IORef (Map.Map Word64 ([Key] -> IO ())),
     appWidgetValues :: IORef (Map.Map Word64 (Double -> IO ())),
     -- The node twin of the line above: without it a stamped control's
     -- Occurrence::InstanceValueChanged matches nothing and is dropped

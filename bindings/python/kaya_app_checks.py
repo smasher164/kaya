@@ -2166,7 +2166,7 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
         if name.isupper()
     }
     check("kaya.Symbol is exactly the generated vocabulary, name for name",
-          authored == generated and len(authored) == 24)
+          authored == generated and len(authored) == 25)
     check("and the name spelling is derived from it, not typed twice",
           kaya._SYMBOL_NAMES == generated)
 
@@ -2262,7 +2262,7 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
         bad_item = kaya.item("Save")
         for what, value, kind, fragment in (
             ("an unknown name", "save", ValueError, "must be one of"),
-            ("a number past the vocabulary", 25, ValueError,
+            ("a number past the vocabulary", 26, ValueError,
              "is not a symbol"),
             ("zero", 0, ValueError, "is not a symbol"),
             ("a bool", True, TypeError, "not bool"),
@@ -5440,5 +5440,123 @@ try:
           and len(cap_frames) == 1 and len(cap_chunks) == 1)
 finally:
     kaya.runtime.submit = _cap_real_submit
+
+
+# NETWORK IMAGES (docs/network-images-plan.md N7, N12): the conditional
+# write's two drops through the binding's own mirror, its refusal off the
+# app thread, and RowImages coalescing a shared URL and skipping a URL
+# nobody waits on.
+@dataclass
+class NiTrack:
+    art_url: str
+    art: bytes
+    phase: kaya.ImagePhase
+
+
+def _ni_kinds(records):
+    return [struct.unpack_from("<IH", r)[1] for r in records]
+
+
+ni_app = kaya.App()
+kaya._app_thread = threading.get_ident()
+ni_shipped = []
+_ni_real_submit = kaya.runtime.submit
+kaya.runtime.submit = lambda *records: ni_shipped.append(list(records))
+try:
+    with ni_app.build():
+        ni_rows = kaya.collection(NiTrack)
+        ni_rows.insert("t1", NiTrack("u/1", b"", kaya.ImagePhase.LOADING))
+    ni_shipped.clear()
+    with ni_app.build():
+        ni_rows.patch("t1", when={"art_url": "u/old"}, art=b"x",
+                      phase=kaya.ImagePhase.SHOWN)
+        ni_rows.patch("gone", when={"art_url": "u/1"}, art=b"x",
+                      phase=kaya.ImagePhase.SHOWN)
+    ni_moved = ni_rows.get("t1")
+    check("a conditional patch whose row moved on leaves the mirror as it was",
+          ni_moved is not None and ni_moved.art == b""
+          and ni_moved.phase is kaya.ImagePhase.LOADING)
+    check("a conditional patch of a missing key raises nothing and adds no row",
+          ni_rows.get("gone") is None and len(ni_rows) == 1)
+    check("each conditional patch is ONE collection_patch_if record",
+          len(ni_shipped) == 1
+          and _ni_kinds(ni_shipped[0]) == [kaya.wire.TX_COLLECTION_PATCH_IF] * 2)
+    with ni_app.build():
+        ni_rows.patch("t1", when={"art_url": "u/1"}, art=b"y",
+                      phase=kaya.ImagePhase.SHOWN)
+    ni_held = ni_rows.get("t1")
+    check("a conditional patch whose guard holds writes the mirror",
+          ni_held is not None and ni_held.art == b"y"
+          and ni_held.phase is kaya.ImagePhase.SHOWN)
+
+    ni_refusal = []
+
+    def _ni_off_thread():
+        try:
+            ni_rows.patch("t1", when={"art_url": "u/1"}, phase=kaya.ImagePhase.FAILED)
+        except kaya.KayaError as e:
+            ni_refusal.append(str(e))
+
+    _ni_th = threading.Thread(target=_ni_off_thread)
+    _ni_th.start()
+    _ni_th.join()
+    check("a conditional patch off the app thread is refused as the wrong thread",
+          len(ni_refusal) == 1 and "belongs to the app thread" in ni_refusal[0])
+
+    with ni_app.build():
+        for key, url in (("a", "u/same"), ("b", "u/same"), ("c", "u/other"),
+                         ("bad", "u/bad")):
+            ni_rows.insert(key, NiTrack(url, b"", kaya.ImagePhase.LOADING))
+    ni_fetched = []
+    ni_gate = threading.Event()
+    ni_errors = []
+
+    def _ni_fetch(url):
+        ni_fetched.append(url)
+        ni_gate.wait(5)
+        if url == "u/bad":
+            raise OSError("HTTP Error 404: Not Found")
+        return b"bytes of " + url.encode()
+
+    def _ni_settle(images):
+        deadline = time.monotonic() + 5
+        while images._workers and time.monotonic() < deadline:
+            time.sleep(0.01)
+        ni_app._drain_posted()
+
+    ni_images = kaya.RowImages(ni_app, ni_rows, url="art_url", art="art",
+                               phase="phase", fetch=_ni_fetch, limit=1,
+                               on_error=lambda row, why: ni_errors.append((row.key, why)))
+    with ni_app.build():
+        for key in ("a", "b", "c"):
+            ni_images.needed(kaya.Row(ni_rows, [key]))
+        ni_images.released(kaya.Row(ni_rows, ["c"]))
+    ni_gate.set()
+    _ni_settle(ni_images)
+    ni_a, ni_b, ni_c = (ni_rows.get(k) for k in ("a", "b", "c"))
+    check("RowImages fetches a URL two rows share once, and a released row's "
+          "queued URL never",
+          ni_fetched == ["u/same"])
+    check("RowImages writes the one result to every row that waited on it",
+          ni_a is not None and ni_b is not None
+          and ni_a.art == ni_b.art == b"bytes of u/same"
+          and ni_a.phase is ni_b.phase is kaya.ImagePhase.SHOWN)
+    check("a released row stays loading",
+          ni_c is not None and ni_c.phase is kaya.ImagePhase.LOADING)
+    with ni_app.build():
+        ni_rows.insert("d", NiTrack("u/same", b"", kaya.ImagePhase.LOADING))
+        ni_images.needed(kaya.Row(ni_rows, ["d"]))
+    ni_d = ni_rows.get("d")
+    check("a cached URL is written in the needing transaction with no fetch",
+          ni_fetched == ["u/same"] and ni_d is not None and ni_d.art == b"bytes of u/same")
+    with ni_app.build():
+        ni_images.needed(kaya.Row(ni_rows, ["bad"]))
+    _ni_settle(ni_images)
+    ni_bad = ni_rows.get("bad")
+    check("a failed fetch writes FAILED and hands the reason to on_error",
+          ni_bad is not None and ni_bad.phase is kaya.ImagePhase.FAILED
+          and ni_errors == [("bad", "HTTP Error 404: Not Found")])
+finally:
+    kaya.runtime.submit = _ni_real_submit
 
 sys.exit(1 if failures else 0)

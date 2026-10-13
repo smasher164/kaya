@@ -22,7 +22,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xd695309e4a57ce9e
+let kayaSpecHash: UInt64 = 0x303cc490b4cb14fb
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -288,6 +288,7 @@ private let symbolEmoji: Int64 = 21
 private let symbolSend: Int64 = 22
 private let symbolAttach: Int64 = 23
 private let symbolMic: Int64 = 24
+private let symbolImageMissing: Int64 = 25
 private let propValue: UInt32 = 3
 private let propMin: UInt32 = 4
 private let propMax: UInt32 = 5
@@ -449,6 +450,7 @@ let kayaSymbolTable: [(value: Int64, name: String, sf: String, rendered: String?
     (symbolSend, "send", "arrow.up", nil),
     (symbolAttach, "attach", "paperclip", nil),
     (symbolMic, "mic", "mic", nil),
+    (symbolImageMissing, "image_missing", "photo", nil),
 ]
 
 /// The SEMANTIC NAME of a wire symbol value; nil means this interpreter and
@@ -21104,7 +21106,7 @@ private struct KayaImageBox: View {
             if node.phase == imagePhaseFailed || (node.image == nil && node.imageFailed) {
                 KayaImageLook(node: node, word: "failed") {
                     if min(box.width, box.height) >= 2 * kayaFailedGlyph {
-                        Image(systemName: "photo")
+                        Image(systemName: kayaSFSymbol(symbolImageMissing)!)
                             .font(.system(size: kayaFailedGlyph))
                             .foregroundStyle(.secondary)
                             .onAppear { node.imageGlyphs += 1 }

@@ -20,6 +20,11 @@ static class Program
             NotifyOrderCheck.Run();
             System.Environment.Exit(0);
         }
+        if (System.Environment.GetEnvironmentVariable("KAYA_CHECK") == "netimage")
+        {
+            NetimageCheck.Run();
+            System.Environment.Exit(0);
+        }
         if (System.Environment.GetEnvironmentVariable("KAYA_CHECK") == "media")
         {
             MediaCheck.Run();
@@ -97,6 +102,8 @@ static class Program
             case "media_tracks": case "media_feed": case "media_reader": Media.MediaScene.Run(); break;
             case "capture": case "capture_denied": CaptureScene.Run(); break;
             case "adaptive": AdaptiveScene.Run(); break;
+            case "netimage": NetimageScene.Run(); break;
+            case "netimage_http": NetimageHttpScene.Run(); break;
             case "encodebench": EncodeBench.Run(); break;
             default: Milestone2Scene.Run(); break;
         }

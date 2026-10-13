@@ -441,6 +441,20 @@ def caption_census():
 
 caption_census()
 
+def xwin_env(base):
+    """The build's environment with tools/winbuild first on PATH: ring, which
+    the Rust netimage guests' ureq pulls in, compiles C with a bare `clang`
+    that cargo-xwin's clang-cl flags and nix's wrapper both break
+    (docs/traps.md, ring on aarch64-pc-windows-msvc)."""
+    host = shutil.which("clang", path=base.get("PATH"))
+    cl = shutil.which("clang-cl", path=base.get("PATH"))
+    if not host or not cl:
+        die(f"deploy-win: the dev shell names clang={host} and clang-cl={cl}; the windows build "
+            f"needs both (tools/winbuild/clang)")
+    return dict(base, PATH=f"{ROOT / 'tools/winbuild'}{os.pathsep}{base.get('PATH', '')}",
+                KAYA_XWIN_HOST_CLANG=host, KAYA_XWIN_CLANG=str(pathlib.Path(cl).parent / "clang"))
+
+
 print("== building (aarch64-pc-windows-msvc, release) ==", flush=True)
 for build_args in (
         ["cargo", "xwin", "build", "--locked", "--features", "harness",
@@ -453,7 +467,7 @@ for build_args in (
     # (`kaya_window_moved`) and a re-entrant borrow could not be placed
     # (docs/traps.md, the chat app's textarea in a pushed pane). kaya.pdb
     # ships beside the dll, where the guest's dbghelp looks for it.
-    build_env = dict(os.environ, CARGO_PROFILE_RELEASE_DEBUG="line-tables-only")
+    build_env = xwin_env(dict(os.environ, CARGO_PROFILE_RELEASE_DEBUG="line-tables-only"))
     if subprocess.run(build_args, cwd=ROOT, check=False, env=build_env).returncode != 0:
         sys.exit(1)
 # THE CAPTURE LEGS' SYNTHETIC DEVICES (tools/winvcam): the virtual cameras'
@@ -513,7 +527,7 @@ UNIT_BUILD = subprocess.Popen(
     ["cargo", "xwin", "test", "--locked", "--features", "harness",
      "--release", "--target", "aarch64-pc-windows-msvc", "-p", "kaya",
      "--lib", "--no-run", "--message-format=json"],
-    cwd=ROOT, stdout=_unit_json, start_new_session=True)
+    cwd=ROOT, stdout=_unit_json, start_new_session=True, env=xwin_env(dict(os.environ)))
 
 
 def stop_unit_build():

@@ -67,6 +67,8 @@ public final class KayaRecords {
             if (t == KayaApp.Color.class) return KayaWire.VALUE_I64;
             // A row's player: its id, 0 for none (docs/media-plan.md §7b).
             if (t == KayaApp.Player.class) return KayaWire.VALUE_I64;
+            // An image's phase (docs/network-images-plan.md N2).
+            if (t == KayaApp.ImagePhase.class) return KayaWire.VALUE_I64;
             return null;
         }
 
@@ -173,7 +175,8 @@ public final class KayaRecords {
                 return 0L;
             }
             if (value instanceof LocalDate || value instanceof LocalTime
-                    || value instanceof KayaApp.Color || value instanceof KayaApp.Player) {
+                    || value instanceof KayaApp.Color || value instanceof KayaApp.Player
+                    || value instanceof KayaApp.ImagePhase) {
                 return scalarWire(value);
             }
             if (schema[wireIndex] == KayaWire.VALUE_BLOB) {
@@ -222,6 +225,8 @@ public final class KayaRecords {
                     args[at] = colorOf(fields.get(wire));
                 } else if (want == KayaApp.Player.class) {
                     args[at] = playerOf(fields.get(wire));
+                } else if (want == KayaApp.ImagePhase.class) {
+                    args[at] = KayaApp.ImagePhase.ofWire((Long) fields.get(wire));
                 } else if (want == KayaApp.Document.class) {
                     // A restored Document field is the blob's BYTES,
                     // redeemed by KayaWire.parseValue
@@ -541,6 +546,60 @@ public final class KayaRecords {
         public Patch<K, T> patch(KayaApp.Tx tx, K key) {
             return new Patch<>(this, tx, key);
         }
+
+        /**
+         * The same writes, made only while row {@code key} exists and its
+         * {@code guard} field still holds {@code expected}; otherwise
+         * nothing, and no exception (docs/network-images-plan.md N7). The
+         * chain is ONE record, sent with the transaction's next record or
+         * when its build ends:
+         * {@code tracks.patchIf(tx, key, Track::artUrl, url).set(Track::art, bytes)}.
+         */
+        public <V> PatchIf<K, T> patchIf(KayaApp.Tx tx, K key,
+                java.util.function.Function<T, V> guard, V expected) {
+            return patchIf(tx, key, resolve(guard), expected);
+        }
+
+        /** patchIf over a pre-resolved token. */
+        public <V> PatchIf<K, T> patchIf(KayaApp.Tx tx, K key, Field<V> guard, V expected) {
+            tx.alive();
+            Object current = find(tx, key).orElse(null);
+            boolean holds = current != null && java.util.Objects.equals(
+                    info.fieldOfWire(current, guard.index), expected);
+            return new PatchIf<>(this, tx, key, tx.openPatchIf(handle, key, guard.index,
+                    info.encodeField(guard.index, expected), holds));
+        }
+    }
+
+    /** An open guarded patch on one entry; set chains within the one
+     * statement. */
+    public static final class PatchIf<K, T> {
+        final Collection<K, T> c;
+        final KayaApp.Tx tx;
+        final K key;
+        final KayaApp.PatchIfRecord record;
+
+        PatchIf(Collection<K, T> c, KayaApp.Tx tx, K key, KayaApp.PatchIfRecord record) {
+            this.c = c;
+            this.tx = tx;
+            this.key = key;
+            this.record = record;
+        }
+
+        /** Writes the field the selector reads when the guard holds. */
+        public <V> PatchIf<K, T> set(java.util.function.Function<T, V> selector, V value) {
+            return set(c.resolve(selector), value);
+        }
+
+        /** Writes the field a pre-resolved token names when the guard
+         * holds. */
+        public <V> PatchIf<K, T> set(Field<V> f, V value) {
+            Object model = record.holds
+                    ? c.info.withField(c.find(tx, key).orElseThrow(), f.index, value)
+                    : null;
+            tx.patchIfSet(record, f.index, c.info.encodeField(f.index, value), model);
+            return this;
+        }
     }
 
     /** An open patch on one entry; set chains. */
@@ -721,6 +780,14 @@ public final class KayaRecords {
         if (v instanceof KayaApp.Player p) {
             return p.id;
         }
+        if (v instanceof KayaApp.ImagePhase p) {
+            return (long) p.wire;
+        }
+        // A signal of bytes: handles are single-submit, so every write
+        // registers its own copy (docs/traps.md, a blob signal).
+        if (v instanceof byte[] bytes) {
+            return new KayaWire.BlobHandle(KayaRing.blobRegister(bytes));
+        }
         return v;
     }
 
@@ -755,6 +822,7 @@ public final class KayaRecords {
         if (t == LocalDate.class) return DEFAULT_DATE;
         if (t == LocalTime.class) return DEFAULT_TIME;
         if (t == KayaApp.Color.class) return DEFAULT_COLOR;
+        if (t == KayaApp.ImagePhase.class) return KayaApp.ImagePhase.SHOWN;
         if (t == int.class) return 0;
         return null; // guest-only reference fields
     }
@@ -769,7 +837,267 @@ public final class KayaRecords {
         if (t == LocalTime.class) return SENTINEL_TIME;
         if (t == KayaApp.Color.class) return SENTINEL_COLOR;
         if (t == KayaApp.Player.class) return SENTINEL_PLAYER;
+        if (t == KayaApp.ImagePhase.class) return KayaApp.ImagePhase.FAILED;
         throw new IllegalStateException("kaya: no sentinel for " + t.getName());
+    }
+
+    /** What KayaApp hands a template image's needed and released rows
+     * to: a {@link RowImages}. */
+    interface ImageFeed {
+        void needed(KayaApp.Tx tx, List<Object> keys);
+
+        void released(List<Object> keys);
+    }
+
+    /**
+     * A row's image loaded on demand (docs/network-images-plan.md N12):
+     * each row holds the URL it wants, its bytes and its phase; a row
+     * realized LOADING with no bytes is fetched, at most {@link #LIMIT} at
+     * a time, rows sharing a URL share one fetch, a released row's URL
+     * nobody else waits on is dropped from the queue or its fetch
+     * cancelled, and every result is one {@link Collection#patchIf}
+     * guarded on the URL, written through {@link KayaApp#post}.
+     */
+    public static final class RowImages<K, T> implements ImageFeed {
+        /** The app's fetch: a future of the bytes at a URL. It must
+         * return at once; cancelling the future should stop the fetch. */
+        @FunctionalInterface
+        public interface Fetch {
+            java.util.concurrent.CompletableFuture<byte[]> fetch(String url);
+        }
+
+        /** Runs on the app thread inside the transaction that writes
+         * FAILED, with the row's keys and why. */
+        @FunctionalInterface
+        public interface ErrorHandler {
+            void accept(KayaApp.Tx tx, List<Object> keys, Throwable error);
+        }
+
+        public static final int LIMIT = 6;
+
+        private final KayaApp app;
+        private final Collection<K, T> rows;
+        private final Field<String> url;
+        private final Field<byte[]> art;
+        private final Field<KayaApp.ImagePhase> phase;
+        private final Fetch fetch;
+        private volatile ErrorHandler onError;
+
+        private final java.util.Map<String, Job> jobs = new java.util.HashMap<>();
+        private final java.util.ArrayDeque<Job> queue = new java.util.ArrayDeque<>();
+        private int running;
+        private final java.util.LinkedHashMap<String, byte[]> cache =
+                new java.util.LinkedHashMap<>(16, 0.75f, true);
+        private long cached;
+        private static final long CACHE_BUDGET = 32L << 20;
+
+        private static final class Job {
+            final String url;
+            final List<List<Object>> waiting = new ArrayList<>();
+            java.util.concurrent.CompletableFuture<byte[]> future;
+
+            Job(String url) {
+                this.url = url;
+            }
+        }
+
+        /** Rows' images through {@link #http}. */
+        public RowImages(KayaApp app, Collection<K, T> rows,
+                java.util.function.Function<T, String> url,
+                java.util.function.Function<T, byte[]> art,
+                java.util.function.Function<T, KayaApp.ImagePhase> phase) {
+            this(app, rows, url, art, phase, http());
+        }
+
+        public RowImages(KayaApp app, Collection<K, T> rows,
+                java.util.function.Function<T, String> url,
+                java.util.function.Function<T, byte[]> art,
+                java.util.function.Function<T, KayaApp.ImagePhase> phase, Fetch fetch) {
+            this.app = app;
+            this.rows = rows;
+            this.url = rows.resolve(url);
+            this.art = rows.resolve(art);
+            this.phase = rows.resolve(phase);
+            this.fetch = java.util.Objects.requireNonNull(fetch, "kaya: RowImages needs a fetch");
+        }
+
+        public RowImages<K, T> onError(ErrorHandler handler) {
+            onError = handler;
+            return this;
+        }
+
+        /** Fetch for the stamped copies of template image {@code image},
+         * before and whatever {@link KayaApp#onNeeded} does. */
+        public void attach(KayaApp.Node image) {
+            app.imageFeed(image, this);
+        }
+
+        /**
+         * The default fetch, java.net's HttpURLConnection on a daemon pool:
+         * a status outside 2xx fails, and so does {@link #IDLE_MS} with no
+         * byte (OkHttp's default read timeout). Not java.net.http:
+         * android.jar has none, and this binding is compiled into the
+         * Android hosts. A cancel completes the future at once; the
+         * reading thread stops at its next byte or timeout (docs/traps.md,
+         * a cancelled HttpURLConnection keeps its socket).
+         */
+        public static Fetch http() {
+            return target -> {
+                java.util.concurrent.CompletableFuture<byte[]> out =
+                        new java.util.concurrent.CompletableFuture<>();
+                HTTP.execute(() -> {
+                    java.net.HttpURLConnection c = null;
+                    try {
+                        c = (java.net.HttpURLConnection)
+                                java.net.URI.create(target).toURL().openConnection();
+                        c.setRequestProperty("Connection", "close");
+                        c.setReadTimeout(IDLE_MS);
+                        int status = c.getResponseCode();
+                        if (status < 200 || status > 299) {
+                            throw new java.io.IOException(target + " answered " + status);
+                        }
+                        java.io.ByteArrayOutputStream body = new java.io.ByteArrayOutputStream();
+                        byte[] chunk = new byte[16384];
+                        try (java.io.InputStream in = c.getInputStream()) {
+                            int n;
+                            while (!out.isCancelled() && (n = in.read(chunk)) >= 0) {
+                                body.write(chunk, 0, n);
+                            }
+                        }
+                        out.complete(body.toByteArray());
+                    } catch (java.io.IOException | RuntimeException e) {
+                        out.completeExceptionally(e);
+                    } finally {
+                        if (c != null) {
+                            c.disconnect();
+                        }
+                    }
+                });
+                return out;
+            };
+        }
+
+        /** How long the default fetch waits for a byte. */
+        static final int IDLE_MS = 10_000;
+
+        private static final java.util.concurrent.ExecutorService HTTP =
+                java.util.concurrent.Executors.newCachedThreadPool(r -> {
+                    Thread t = new Thread(r, "kaya-row-images");
+                    t.setDaemon(true);
+                    return t;
+                });
+
+        @SuppressWarnings("unchecked")
+        private Collection<K, T> instance(List<Object> keys) {
+            Collection<K, T> c = rows;
+            for (Object k : keys.subList(0, keys.size() - 1)) {
+                c = c.at(k);
+            }
+            return c;
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public void needed(KayaApp.Tx tx, List<Object> keys) {
+            if (keys.isEmpty()) {
+                return;
+            }
+            K key = (K) keys.get(keys.size() - 1);
+            T record = instance(keys).find(tx, key).orElse(null);
+            String want = record == null ? "" : (String) rows.info.fieldOfWire(record, url.index);
+            if (want.isEmpty()) {
+                return;
+            }
+            byte[] hit;
+            synchronized (this) {
+                hit = cache.get(want);
+                if (hit == null) {
+                    Job job = jobs.get(want);
+                    if (job != null) {
+                        job.waiting.add(keys);
+                        return;
+                    }
+                    job = new Job(want);
+                    job.waiting.add(keys);
+                    jobs.put(want, job);
+                    queue.add(job);
+                    pump();
+                    return;
+                }
+            }
+            write(tx, List.of(keys), want, hit, null);
+        }
+
+        @Override
+        public synchronized void released(List<Object> keys) {
+            for (var it = jobs.values().iterator(); it.hasNext();) {
+                Job job = it.next();
+                job.waiting.removeIf(keys::equals);
+                if (!job.waiting.isEmpty()) {
+                    continue;
+                }
+                it.remove();
+                if (job.future != null) {
+                    job.future.cancel(true);
+                } else {
+                    queue.remove(job);
+                }
+            }
+        }
+
+        private synchronized void pump() {
+            while (running < LIMIT && !queue.isEmpty()) {
+                Job job = queue.poll();
+                running++;
+                job.future = fetch.fetch(job.url);
+                job.future.whenComplete((bytes, error) -> done(job, bytes, error));
+            }
+        }
+
+        private void done(Job job, byte[] bytes, Throwable error) {
+            List<List<Object>> waiting;
+            synchronized (this) {
+                running--;
+                if (error == null) {
+                    byte[] old = cache.put(job.url, bytes);
+                    cached += bytes.length - (old == null ? 0 : old.length);
+                    for (var it = cache.entrySet().iterator();
+                            cached > CACHE_BUDGET && cache.size() > 1 && it.hasNext();) {
+                        cached -= it.next().getValue().length;
+                        it.remove();
+                    }
+                }
+                if (jobs.get(job.url) == job) {
+                    jobs.remove(job.url);
+                }
+                waiting = new ArrayList<>(job.waiting);
+                job.waiting.clear();
+                pump();
+            }
+            if (!waiting.isEmpty()) {
+                Throwable why = error instanceof java.util.concurrent.CompletionException
+                        && error.getCause() != null ? error.getCause() : error;
+                app.post(tx -> write(tx, waiting, job.url, bytes, why));
+            }
+        }
+
+        @SuppressWarnings("unchecked")
+        private void write(KayaApp.Tx tx, List<List<Object>> keysList, String fetched,
+                byte[] bytes, Throwable error) {
+            for (List<Object> keys : keysList) {
+                K key = (K) keys.get(keys.size() - 1);
+                PatchIf<K, T> p = instance(keys).patchIf(tx, key, url, fetched);
+                if (error == null) {
+                    p.set(art, bytes).set(phase, KayaApp.ImagePhase.SHOWN);
+                    continue;
+                }
+                p.set(phase, KayaApp.ImagePhase.FAILED);
+                ErrorHandler handler = onError;
+                if (handler != null) {
+                    handler.accept(tx, keys, error);
+                }
+            }
+        }
     }
 
     private KayaRecords() {}

@@ -459,6 +459,16 @@ module Fit : sig
   type t = Contain | Cover | Fill
 end
 
+(* What the app knows about an image's bytes (docs/network-images-plan.md
+   N2): drawn, waiting for them, or failed. *)
+module Image_phase : sig
+  type t = Shown | Loading | Failed
+end
+
+(* An [Image_phase.t] row field's wire form, for the ppx's generated code. *)
+val pack_image_phase : Image_phase.t -> int64
+val image_phase_of_packed : int64 -> Image_phase.t
+
 (* What a credential field holds (docs/autofill-plan.md A2): the passwords
    on a secure field only, username, email and phone on an entry only, a
    one-time code on either (A3), refused at the root otherwise. *)
@@ -720,6 +730,8 @@ module Scalar : sig
     | Date : date t
     | Time : time t
     | Color : color t
+    | Bytes : bytes t
+    | Image_phase : Image_phase.t t
 end
 
 (* A signal of the witnessed type — the phantom carries the wire
@@ -792,6 +804,7 @@ type symbol =
   | Send
   | Attach
   | Mic
+  | ImageMissing
 
 (* An icon-only button (docs/composer-plan.md §2). *)
 val set_symbol : widget -> symbol -> unit
@@ -1393,7 +1406,22 @@ val image :
   ?a11y_label_bind:string signal ->
   ?help:string ->
   ?help_bind:string signal ->
-  ?source:bytes -> ?source_asset:asset -> ?bind:bytes signal -> ?bleed:bool -> unit -> widget
+  ?source:bytes ->
+  ?source_asset:asset ->
+  ?bind:bytes signal ->
+  ?fit:Fit.t ->
+  ?phase:Image_phase.t ->
+  ?phase_bind:Image_phase.t signal ->
+  ?max_width:float ->
+  ?max_height:float ->
+  ?bleed:bool ->
+  unit ->
+  widget
+
+(* An image's phase, set or bound (docs/network-images-plan.md N2). A
+   loading or failed image declares its box: [fit] and both bounds (N3). *)
+val set_phase : widget -> Image_phase.t -> unit
+val bind_phase : widget -> Image_phase.t signal -> unit
 
 (* --- THE CANVAS VOCABULARY (docs/canvas-plan.md §3.3, §3.4) --------- *)
 
@@ -1593,6 +1621,7 @@ val player_field : int -> ('a, player) field
 
 (* A blob field's MODEL value carries the guest's own bytes. *)
 val blob_field : int -> ('a, bytes) field
+val image_phase_field : int -> ('a, Image_phase.t) field
 
 (* A [document] field: a Blob slot whose bytes are the document's own
    wire list, so a stamped copy's document binds through the template
@@ -1617,6 +1646,17 @@ val update_record : 'a record_collection -> key -> 'a -> unit
 
 (* One field's delta: the rest of the record never travels. *)
 val update_field : 'a record_collection -> key -> ('b, 'c) field -> 'c -> unit
+
+(* One field write of [patch_if]: [change track_art bytes]. *)
+type change
+
+val change : ('a, 'v) field -> 'v -> change
+
+(* Patch row [key] only while it exists and its [guard] field still
+   equals [equals]; otherwise nothing (docs/network-images-plan.md N7).
+   [<t>_patch_if] is the generated, labelled spelling. *)
+val patch_if :
+  'a record_collection -> key -> guard:('b, 'v) field -> equals:'v -> change list -> unit
 
 (* The typed model: what this guest wrote, in insertion order. *)
 val record_items : 'a record_collection -> (key * 'a) list
@@ -2575,6 +2615,10 @@ module Tpl : sig
     ?level:int ->
     ?a11y_level:int -> ?on_change:(key list -> time -> unit) -> unit -> node
 
+  val set_phase : node -> Image_phase.t -> unit
+  val bind_phase : node -> Image_phase.t signal -> unit
+  val bind_phase_field : ?level:int -> node -> ('e, Image_phase.t) field -> unit
+
   (* An image per stamped copy: [~source] gives every copy the same
      bytes, [~bind] a Blob signal, [~bind_field] each row's own (_,
      bytes) field. *)
@@ -2593,6 +2637,14 @@ module Tpl : sig
     ?source:bytes ->
     ?bind:bytes signal ->
     ?bind_field:('d, bytes) field ->
+    ?fit:Fit.t ->
+    ?phase:Image_phase.t ->
+    ?phase_bind:Image_phase.t signal ->
+    ?phase_field:('e, Image_phase.t) field ->
+    ?max_width:float ->
+    ?max_height:float ->
+    ?on_needed:(key list -> unit) ->
+    ?on_released:(key list -> unit) ->
     ?level:int -> ?a11y_level:int -> unit -> node
 
   (* A canvas per stamped copy -- a sparkline in a table cell. The drawing
@@ -2908,3 +2960,36 @@ val on_value_committed : app -> widget -> (float -> unit) -> unit
 
 (* A stamped slider's settled value, the copy's keys first. *)
 val on_value_committed_node : app -> node -> (key list -> float -> unit) -> unit
+
+(* N12's helper (docs/network-images-plan.md): a row realized [Loading]
+   with no bytes is fetched with the app's [fetch] on the binding's own
+   workers, at most six at a time, rows sharing a URL sharing one fetch
+   and one copy of the bytes (an encoded LRU by URL, 32 MB), and written
+   back through [post] with one [patch_if] guarded on [url]: [Shown] with
+   the bytes, or [Failed]. Hand [needed] and [released] to the template
+   image's [~on_needed] and [~on_released]. *)
+module Row_images : sig
+  type 'a t
+
+  val create :
+    app ->
+    'a record_collection ->
+    url:('b, string) field ->
+    art:('c, bytes) field ->
+    phase:('d, Image_phase.t) field ->
+    fetch:(string -> (bytes, string) result) ->
+    'a t
+
+  (* Run on the app thread inside the transaction that writes [Failed],
+     with the row's key path and why. *)
+  val on_error : 'a t -> (key list -> string -> unit) -> unit
+
+  val needed : 'a t -> key list -> unit
+  val released : 'a t -> key list -> unit
+end
+
+(* Run what has been posted, as the dispatch loop does, for
+   bindings/ocaml/checks alone; a guest calls none of it. *)
+module For_image_checks : sig
+  val drain_posted : app -> unit
+end

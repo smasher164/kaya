@@ -852,4 +852,84 @@ for label, name, pattern, repl, sentence in MEDIA_NEGATIVES:
              f"doctor the copy in the scratch directory.")
     print(f"java-typecheck: {label}: red with its own sentence")
 
+# THE NETWORK IMAGES SURFACE, RUN (docs/network-images-plan.md N7, N12):
+# patchIf's drops through the mirror, its one record and its two rules, and
+# RowImages' coalescing, cancellation, error callback and cache. No scene can
+# see a mirror that disagrees with the core or a fetch made twice.
+IMAGES_CHECK = "tools/checks/java-images/dev/kaya/ImagesCheck.java"
+(TMP / "imagesclasses").mkdir()
+if run_javac("-encoding", "UTF-8", "-cp", TMP / "classes", "-d",
+             TMP / "imagesclasses", IMAGES_CHECK) != 0:
+    fail("FAIL — the images exerciser did not compile.")
+if run_java("-cp", f"{TMP / 'classes'}:{TMP / 'imagesclasses'}",
+            "dev.kaya.ImagesCheck", env=MEDIA_ENV) != 0:
+    fail("FAIL — the Java network images surface is wrong "
+         "(tools/checks/java-images).")
+
+IMAGES_NEGATIVES = [
+    ("images negative: the guard never compared", [("KayaRecords.java",
+     r"boolean holds = current != null && java\.util\.Objects\.equals\(\n"
+     r"\s*info\.fieldOfWire\(current, guard\.index\), expected\);",
+     "boolean holds = current != null;")],
+     "a patchIf whose guard moved on wrote the mirror"),
+    ("images negative: the next record does not send the chain", [("KayaApp.java",
+     r"alive\(\);\n {12}flushPatchIf\(\);\n {12}records\.add\(record\);",
+     "alive();\n            records.add(record);")],
+     "a set after the chain's record was sent"),
+    ("images negative: the build's end does not send the chain", [("KayaApp.java",
+     r"out = build\.apply\(tx\);\n {12}tx\.flushPatchIf\(\);",
+     "out = build.apply(tx);")],
+     "a patchIf that ends its build sent 0 records"),
+    ("images negative: patchIf off the app thread", [
+     ("KayaRecords.java", r"tx\.alive\(\);\n( {12}Object current = find)", r"\1"),
+     ("KayaApp.java", r"(boolean holds\) \{\n) {12}alive\(\);\n", r"\1"),
+     ("KayaApp.java", r"\n {12}alive\(\);\n( {12}p\.fields\.add)", r"\n\1")],
+     "a patchIf from another thread was answered with"),
+    ("images negative: rows sharing a URL fetch twice", [("KayaRecords.java",
+     r"if \(job != null\) \{\n {24}job\.waiting\.add",
+     "if (job != null && false) {\n                        job.waiting.add")],
+     "two rows sharing a URL"),
+    ("images negative: a released row's fetch runs on", [("KayaRecords.java",
+     r"job\.future\.cancel\(true\);", "job.future.isDone();")],
+     "did not cancel it"),
+    ("images negative: the cache is never read", [("KayaRecords.java",
+     r"hit = cache\.get\(want\);", "hit = null;")],
+     "a URL already in the cache was not written"),
+    ("images negative: a failure told to nobody", [("KayaRecords.java",
+     r"\n {20}handler\.accept\(tx, keys, error\);", "")],
+     "the error callback heard"),
+]
+for label, cuts, sentence in IMAGES_NEGATIVES:
+    sources = ROOT / "bindings" / "java" / "dev" / "kaya"
+    before = {n: hashlib.sha256((sources / n).read_bytes()).hexdigest()
+              for n in {name for name, _, _ in cuts}}
+    stem = "i" + hashlib.sha256(label.encode("utf-8")).hexdigest()[:8]
+    (TMP / stem).mkdir()
+    for p in sorted(sources.glob("*.java")):
+        (TMP / stem / p.name).write_bytes(p.read_bytes())
+    for name, pattern, repl in cuts:
+        copy = TMP / stem / name
+        copy.write_text(g.doctor(label, copy.read_text(encoding="utf-8"), pattern, repl),
+                        encoding="utf-8")
+    if run_javac("-encoding", "UTF-8", "-d", TMP / (stem + "classes"),
+                 "bindings/java-desktop/dev/kaya/KayaRing.java",
+                 *sorted((TMP / stem).glob("*.java")), IMAGES_CHECK) != 0:
+        fail(f"FAIL — the doctored copy for '{label}' did not compile.")
+    log = TMP / (stem + ".log")
+    if run_java("-cp", str(TMP / (stem + "classes")), "dev.kaya.ImagesCheck",
+                log=log, env=MEDIA_ENV) == 0:
+        fail(f"FAIL — the images exerciser PASSED under '{label}', so it does "
+             f"not exercise that clause.")
+    said = log.read_text(encoding="utf-8", errors="replace")
+    if sentence not in said:
+        print(f"java-typecheck: FAIL — '{label}' failed, but not with "
+              f"'{sentence}'. What it printed:")
+        print(said)
+        raise SystemExit(1)
+    for n, sha in before.items():
+        if hashlib.sha256((sources / n).read_bytes()).hexdigest() != sha:
+            fail(f"FAIL — {sources / n} changed during '{label}'. It must only "
+                 f"ever doctor the copy in the scratch directory.")
+    print(f"java-typecheck: {label}: red with its own sentence")
+
 g.verdict()

@@ -36,6 +36,27 @@ func (p trackPatchBuilder) Level(v float64) trackPatchBuilder {
 	return p
 }
 
+// TrackPatchIf is TrackPatch made only while the entry exists and the
+// guard's field still holds expected; otherwise nothing, and no panic
+// (docs/network-images-plan.md N7). The chain is one record.
+func TrackPatchIf[V comparable](c kaya.RecordCollection[string, Track], tx *kaya.Tx, key string, guard func(*Track) *V, expected V) trackPatchIfBuilder {
+	return trackPatchIfBuilder{c.PatchIf(tx, key, guard, expected)}
+}
+
+type trackPatchIfBuilder struct {
+	p kaya.RecordPatchIf[string, Track]
+}
+
+func (p trackPatchIfBuilder) Name(v string) trackPatchIfBuilder {
+	p.p.Set(func(t *Track) *string { return &t.Name }, v)
+	return p
+}
+
+func (p trackPatchIfBuilder) Level(v float64) trackPatchIfBuilder {
+	p.p.Set(func(t *Track) *float64 { return &t.Level }, v)
+	return p
+}
+
 // The row surface: one token per wire field, and the template
 // constructors that consume them.
 type trackRow struct {
@@ -134,8 +155,10 @@ func (r trackRow) SetMax(n kaya.Node, max float64) { r.t.SetMax(n, max) }
 
 func (r trackRow) SetAlpha(n kaya.Node, on bool) { r.t.SetAlpha(n, on) }
 
-func (r trackRow) SetFit(n kaya.Node, fit kaya.Fit)         { r.t.SetFit(n, fit) }
-func (r trackRow) SetAspect(n kaya.Node, width, height int) { r.t.SetAspect(n, width, height) }
+func (r trackRow) SetFit(n kaya.Node, fit kaya.Fit)                     { r.t.SetFit(n, fit) }
+func (r trackRow) SetPhase(n kaya.Node, phase kaya.ImagePhase)          { r.t.SetPhase(n, phase) }
+func (r trackRow) BindPhase(n kaya.Node, f kaya.Field[kaya.ImagePhase]) { r.t.BindPhase(n, f) }
+func (r trackRow) SetAspect(n kaya.Node, width, height int)             { r.t.SetAspect(n, width, height) }
 
 func (r trackRow) SetMinGap(n kaya.Node, gap float64)          { r.t.SetMinGap(n, gap) }
 func (r trackRow) SetLowLabel(n kaya.Node, label string)       { r.t.SetLowLabel(n, label) }

@@ -68,6 +68,8 @@ object GuestStart : KayaGuestStart {
             "segmented" -> Segmented::app
             "expander" -> Expander::app
             "safearea" -> Safearea::app
+            "netimage" -> Netimage::app
+            "netimage_http" -> NetimageHttp::app
             "toast" -> Toast::app
             "sections" -> Sections::app
             "menus" -> Menus::app

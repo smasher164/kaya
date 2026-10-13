@@ -1229,6 +1229,88 @@ let () =
   if !answer <> "cancelled released" then
     fail "an awaited read closed under it answered %S, wanted \"cancelled released\"" !answer;
 
+  (* THE NETWORK IMAGES WRITE (docs/network-images-plan.md N7, N12): the
+     conditional write drops for a row gone and for a row whose guard moved
+     on, in the mirror as in the core, and still ships its ONE record; a
+     write from another thread is refused; the helper fetches a URL two
+     rows share once, and writes both rows through post. *)
+  let images_app = Kaya_app.create () in
+  For_capture_checks.claim_app_thread ();
+  let image_rt =
+    {
+      rt_schema = [ Kaya_wire.value_str; Kaya_wire.value_blob; Kaya_wire.value_i64 ];
+      rt_to_values = (fun (u, a, p) -> [ Str u; Str (Bytes.to_string a); I64 (pack_image_phase p) ]);
+      rt_of_values =
+        (function
+          | [ Str u; Str a; I64 p ] -> (u, Bytes.of_string a, image_phase_of_packed p)
+          | _ -> invalid_arg "image row");
+    }
+  in
+  let url_f : (string * bytes * Image_phase.t, string) field = str_field 0 in
+  let art_f = blob_field 1 and phase_f = image_phase_field 2 in
+  let rows = build images_app (fun () -> collection_of image_rt) in
+  build images_app (fun () ->
+      insert_record rows (Key.str "r") ("u/1", Bytes.empty, Image_phase.Loading));
+  let guarded what key equals =
+    let shipped =
+      build images_app (fun () ->
+          let tx = the_tx () in
+          let before = List.length (For_checks.records tx) in
+          patch_if rows (Key.str key) ~guard:url_f ~equals
+            [ change art_f (Bytes.of_string "new"); change phase_f Image_phase.Shown ];
+          List.length (For_checks.records tx) - before)
+    in
+    if shipped <> 1 then fail "patch_if (%s) shipped %d records, wanted 1" what shipped
+  in
+  guarded "a row gone" "gone" "u/1";
+  guarded "a guard moved on" "r" "u/old";
+  (match build images_app (fun () -> record_get rows (Key.str "r")) with
+  | Some ("u/1", a, Image_phase.Loading) when Bytes.length a = 0 -> ()
+  | _ -> fail "a dropped patch_if reached the mirror");
+  guarded "a guard that holds" "r" "u/1";
+  (match build images_app (fun () -> record_get rows (Key.str "r")) with
+  | Some ("u/1", a, Image_phase.Shown) when Bytes.to_string a = "new" -> ()
+  | _ -> fail "a holding patch_if did not reach the mirror");
+  let off_thread = ref "" in
+  Thread.join
+    (Thread.create
+       (fun () ->
+         try
+           build images_app (fun () ->
+               patch_if rows (Key.str "r") ~guard:url_f ~equals:"u/1" [ change phase_f Image_phase.Failed ]);
+           off_thread := "went through"
+         with Failure m -> off_thread := m)
+       ());
+  if not (String.length !off_thread > 40 && String.sub !off_thread 0 40 = "kaya: a transaction belongs to the app t")
+  then fail "a patch_if from another thread was not refused: %s" !off_thread;
+  build images_app (fun () ->
+      insert_record rows (Key.str "a") ("u/shared", Bytes.empty, Image_phase.Loading);
+      insert_record rows (Key.str "b") ("u/shared", Bytes.empty, Image_phase.Loading));
+  let calls = ref 0 and gate = Mutex.create () in
+  Mutex.lock gate;
+  let helper =
+    Row_images.create images_app rows ~url:url_f ~art:art_f ~phase:phase_f ~fetch:(fun url ->
+        incr calls;
+        Mutex.lock gate;
+        Mutex.unlock gate;
+        Ok (Bytes.of_string ("bytes of " ^ url)))
+  in
+  build images_app (fun () ->
+      Row_images.needed helper [ Key.str "a" ];
+      Row_images.needed helper [ Key.str "b" ]);
+  Mutex.unlock gate;
+  let rec settle n =
+    For_image_checks.drain_posted images_app;
+    match build images_app (fun () -> (record_get rows (Key.str "a"), record_get rows (Key.str "b"))) with
+    | Some (_, _, Image_phase.Shown), Some (_, _, Image_phase.Shown) -> ()
+    | _ when n > 0 ->
+        Thread.delay 0.01;
+        settle (n - 1)
+    | _ -> fail "the helper's write never reached both rows"
+  in
+  settle 500;
+  if !calls <> 1 then fail "two rows sharing a URL fetched it %d times, wanted 1" !calls;
+
   (* THE CAPTURE'S CALLBACKS (docs/capture-plan.md §4), driven from a fresh
      foreign thread as kaya's capture thread drives them: no transaction
      from there, even while the app thread holds one open; the frame and
@@ -1299,5 +1381,6 @@ let () =
   if !heard <> [ "kept" ] then
     fail "a committed release and a rolled-back one nested in it: the callbacks heard [%s], wanted [kept]"
       (String.concat "; " !heard);
+
 
   print_endline "ocaml abort check: OK"

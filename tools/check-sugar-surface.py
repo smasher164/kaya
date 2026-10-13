@@ -2165,7 +2165,7 @@ def check_symbol_name(snake, pascal, upper, findings=None):
     want("js", "bindings/js/kaya/index.ts", f"^  {upper}: wire.SYMBOL_{upper},$")
 
 
-for sym in wire_vocabulary("SYMBOL", 24):
+for sym in wire_vocabulary("SYMBOL", 25):
     check_symbol_name(*sym)
 
 fake = []
@@ -3731,7 +3731,7 @@ BLEED_SURFACES = [
      [r"pub fn {0}\(self\) -> Self", r"pub fn {0}\(&mut self, widget: WidgetId\)"]),
     ("python", "bindings/python/kaya/__init__.py",
      [r"^def _{0}\(handle: Widget, {0}: bool\) -> None:",
-      r"^def image\(source[^\n]*\n[^\n]*\b{0}: bool = False\) -> Widget:",
+      r"^def image\(source[^)]*\b{0}: bool = False\) -> Widget:",
       r"capture: Capture \| None = None,\n\s*{0}: bool = False\) -> Widget:",
       r"on_tick: Callable\[\[Draw, tuple\[float, float\], float\], object\] \| None = None,\n"
       r"\s*{0}: bool = False\) -> Widget:"]),
@@ -3753,8 +3753,7 @@ BLEED_SURFACES = [
       r"^let canvas [^\n]*\?\({0} = false\)"]),
     ("js", "bindings/js/kaya/index.ts",
      [r"^export type {1}Option = \{{ {0}\?: boolean \}};",
-      r"^export function image\(source\?: ImageSource, "
-      r"opts: GrowOption & {1}Option = \{{\}}\): Widget",
+      r"^export type ImageOptions = GrowOption &\s*{1}Option & \{{",
       r"^export type CanvasOptions = GrowOption & {1}Option &",
       r"^export type VideoOptions = GrowOption & {1}Option &"]),
 ]
@@ -7176,7 +7175,7 @@ discardable = tpl_discardable_probe()
 WANT_DISCARDABLE = """swift-row-member=applied:1 rc:1 named:True
 swift-arm-member=applied:1 rc:1 named:True
 swift-eliminator=applied:1 rc:1 named:True
-swift-census-floor=applied:24 rc:1 named:True"""
+swift-census-floor=applied:26 rc:1 named:True"""
 if discardable != WANT_DISCARDABLE:
     print("check-sugar-surface: SELF-TEST FAIL (the Swift generated-surface "
           "discard census did not catch its watched cuts). Wanted:",
@@ -7941,7 +7940,7 @@ def csharp_facade_probe():
     run("csharp-twin-reader",
         src.replace("sealed class TableItemRow\n",
                     "sealed class TableItemRowGone\n")
-        if n == 1 else src, n, "typed-row reader found only 21")
+        if n == 1 else src, n, "typed-row reader found only 22")
     return "\n".join(lines)
 
 
@@ -11652,6 +11651,11 @@ if _rust_capture:
 from timecode_surface import run as check_timecode_surface
 
 if check_timecode_surface():
+    status = 1
+
+from netimage_surface import run as check_netimage_surface
+
+if check_netimage_surface():
     status = 1
 
 check_scene_sugar()

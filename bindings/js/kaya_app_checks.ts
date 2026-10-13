@@ -2821,6 +2821,84 @@ if (isMainThread) {
         && cpInbox.length === 0 && (cp as unknown as { _worker: unknown })._worker === null);
   }
 
+  // ---------------------------------------------------- network images
+  // docs/network-images-plan.md N7, N12: the conditional write's two drops
+  // through the binding's own mirror, and RowImages coalescing a shared
+  // URL, skipping a URL nobody waits on, aborting a running fetch nobody
+  // waits on, and writing its result after the await as its own batch.
+  {
+    const NiTrack = kaya.record({ artUrl: String, art: Uint8Array, phase: kaya.ImagePhase }, "NiTrack");
+    let niRows!: K.Collection<K.Fields<typeof NiTrack.schema>, K.Row<typeof NiTrack.schema>>;
+    const kindOf = (r: Uint8Array): number => new DataView(r.buffer, r.byteOffset).getUint16(4, true);
+    app.build(() => {
+      niRows = kaya.collection(NiTrack);
+      niRows.insert("t1", NiTrack({ artUrl: "u/1", art: new Uint8Array(), phase: kaya.ImagePhase.LOADING }));
+    });
+    shipped.length = 0;
+    app.build(() => {
+      niRows.patch("t1", { art: Uint8Array.of(1), phase: kaya.ImagePhase.SHOWN }, { when: { artUrl: "u/old" } });
+      niRows.patch("gone", { art: Uint8Array.of(1), phase: kaya.ImagePhase.SHOWN }, { when: { artUrl: "u/1" } });
+    });
+    const moved = niRows.get("t1");
+    check("a conditional patch whose row moved on leaves the mirror as it was",
+      moved !== undefined && moved.art.length === 0 && moved.phase === kaya.ImagePhase.LOADING);
+    check("a conditional patch of a missing key throws nothing and adds no row", niRows.get("gone") === undefined);
+    check("each conditional patch is ONE collection_patch_if record",
+      shipped.length === 1 && shipped[0]!.map(kindOf).join() === [wire.TX_COLLECTION_PATCH_IF, wire.TX_COLLECTION_PATCH_IF].join());
+    app.build(() => niRows.patch("t1", { art: Uint8Array.of(9), phase: kaya.ImagePhase.SHOWN }, { when: { artUrl: "u/1" } }));
+    const held = niRows.get("t1");
+    check("a conditional patch whose guard holds writes the mirror",
+      held !== undefined && held.art[0] === 9 && held.phase === kaya.ImagePhase.SHOWN);
+
+    app.build(() => {
+      for (const [key, url] of [["a", "u/same"], ["b", "u/same"], ["c", "u/other"], ["s", "u/slow"]] as const) {
+        niRows.insert(key, NiTrack({ artUrl: url, art: new Uint8Array(), phase: kaya.ImagePhase.LOADING }));
+      }
+    });
+    const fetched: string[] = [];
+    const signals = new Map<string, AbortSignal>();
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => (finish = resolve));
+    const images = new kaya.RowImages(niRows, {
+      url: "artUrl",
+      art: "art",
+      phase: "phase",
+      limit: 1,
+      fetch: async (url, signal) => {
+        fetched.push(url);
+        signals.set(url, signal);
+        if (url === "u/slow") await new Promise((_, reject) => signal.addEventListener("abort", () => reject(new Error("aborted"))));
+        await gate;
+        return new TextEncoder().encode(`bytes of ${url}`);
+      },
+    });
+    const row = (key: string): K.RowHandle<K.Fields<typeof NiTrack.schema>> =>
+      ({ key, path: [], artUrl: niRows.get(key)!.artUrl }) as unknown as K.RowHandle<K.Fields<typeof NiTrack.schema>>;
+    app.build(() => {
+      images.needed(row("a"));
+      images.needed(row("b"));
+      images.needed(row("c"));
+      images.released(row("c"));
+    });
+    shipped.length = 0;
+    finish();
+    for (let i = 0; i < 3; i++) await new Promise((resolve) => setImmediate(resolve));
+    const a = niRows.get("a")!;
+    const b = niRows.get("b")!;
+    const c = niRows.get("c")!;
+    check("RowImages fetches a URL two rows share once, and a released row's queued URL never", fetched.join() === "u/same");
+    check("RowImages writes the one result to every row that waited on it",
+      new TextDecoder().decode(a.art) === "bytes of u/same" && new TextDecoder().decode(b.art) === "bytes of u/same"
+        && a.phase === kaya.ImagePhase.SHOWN && b.phase === kaya.ImagePhase.SHOWN && c.phase === kaya.ImagePhase.LOADING);
+    check("the result is written after the fetch's await as its own batch, one guarded record a row",
+      shipped.length === 1 && shipped[0]!.map(kindOf).join() === [wire.TX_COLLECTION_PATCH_IF, wire.TX_COLLECTION_PATCH_IF].join());
+    app.build(() => images.needed(row("s")));
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    const slow = signals.get("u/slow");
+    app.build(() => images.released(row("s")));
+    check("a running fetch nobody waits on any more is aborted", slow !== undefined && slow.aborted);
+  }
+
   if (failures.length > 0) {
     console.log(`kaya_app_checks: ${failures.length} FAILED`);
     process.exit(1);

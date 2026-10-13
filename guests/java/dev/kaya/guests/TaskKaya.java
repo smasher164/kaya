@@ -40,6 +40,32 @@ final class TaskKaya {
         }
     }
 
+    /** patch made only while the entry exists and the guard's field
+     * still holds expected; otherwise nothing, and no exception
+     * (docs/network-images-plan.md N7). The chain is one record. */
+    static <V> PatchIf patchIf(KayaApp.Tx tx, KayaRecords.Collection<String, Pickers.Task> c, String key,
+            KayaRecords.Field<V> guard, V expected) {
+        return new PatchIf(c.patchIf(tx, key, guard, expected));
+    }
+
+    static final class PatchIf {
+        private final KayaRecords.PatchIf<String, Pickers.Task> p;
+
+        PatchIf(KayaRecords.PatchIf<String, Pickers.Task> p) {
+            this.p = p;
+        }
+
+        PatchIf name(String v) {
+            p.set(NAME, v);
+            return this;
+        }
+
+        PatchIf due(java.time.LocalDate v) {
+            p.set(DUE, v);
+            return this;
+        }
+    }
+
     /** The record template: `for (var row : TaskKaya.rows(tx, c))`
      * traces it with the typed row surface (exact-index tokens, no
      * probes) — the body runs once, stamping is the core's replay,

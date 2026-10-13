@@ -7,6 +7,7 @@
 
 -- The Haskell uniform-abort guard. Run headless by tools/check-abort.py.
 
+import Control.Concurrent (forkIO, newEmptyMVar, putMVar, readMVar, takeMVar, threadDelay)
 import Control.Exception (SomeException, evaluate, try)
 import Control.Monad (unless)
 import Data.Bits (shiftR, (.&.))
@@ -32,6 +33,20 @@ import qualified KayaWire as W
 data CheckNote = CheckNote {cnTitle :: Text, cnBody :: Document}
   deriving stock (Generic)
   deriving anyclass (KayaRecord)
+
+-- A row whose picture loads on demand (docs/network-images-plan.md N7, N12).
+data CheckArt = CheckArt {caUrl :: Text, caArt :: BS.ByteString, caPhase :: ImagePhase}
+  deriving stock (Generic)
+  deriving anyclass (KayaRecord)
+
+-- The kinds of the records in a staged batch, in order.
+recordKinds :: BS.ByteString -> [Int]
+recordKinds bytes
+  | BS.length bytes < 8 = []
+  | otherwise =
+      let size = fromIntegral (le 0 4)
+          le at n = sum [fromIntegral (BS.index bytes (at + i)) * (256 ^ i) | i <- [0 .. n - 1]] :: Integer
+       in fromIntegral (le 4 2) : recordKinds (BS.drop size bytes)
 
 -- A record with a PLAYER field (docs/media-plan.md §7b).
 data CheckClip = CheckClip {ccName :: Text, ccPlayer :: Player}
@@ -422,6 +437,63 @@ main = do
   doneRec 4 4 W.readOutcomeCancelled >>= feedR
   readIORef answer >>= \a ->
     check (a == "cancelled released") ("an awaited read closed under it answered " ++ show a ++ ", wanted \"cancelled released\"")
+
+  -- THE NETWORK IMAGES WRITE (docs/network-images-plan.md N7, N12): the
+  -- conditional write drops for a row gone and for a row whose guard moved
+  -- on, in the mirror as in the core, and still ships its ONE record; a
+  -- write from another thread is refused; the helper fetches a URL two
+  -- rows share once, and writes both rows through post.
+  imagesApp <- newApp
+  forChecksClaimAppThread
+  let urlF = field @"caUrl" @CheckArt
+      artF = field @"caArt" @CheckArt
+      phaseF = field @"caPhase" @CheckArt
+  arts <- buildTx imagesApp $ do
+    c <- collectionOf @CheckArt
+    insertRecord c "r" (CheckArt "u/1" BS.empty PhaseLoading)
+    return c
+  let guarded what key expected = do
+        bytes <- BL.toStrict . toLazyByteString . snd <$> stageTx imagesApp (patchIf arts key urlF expected [set artF (BC.pack "new"), set phaseF PhaseShown])
+        let kinds = recordKinds bytes
+        check (kinds == [fromIntegral W.txKindCollectionPatchIf])
+          ("patchIf (" ++ what ++ ") shipped records " ++ show kinds ++ ", wanted one collection_patch_if")
+  guarded "a row gone" "gone" "u/1"
+  guarded "a guard moved on" "r" "u/old"
+  buildTx imagesApp (getRecord arts "r") >>= \r ->
+    check (fmap (\a -> (a.caPhase, BS.null a.caArt)) r == Just (PhaseLoading, True)) "a dropped patchIf reached the mirror"
+  guarded "a guard that holds" "r" "u/1"
+  buildTx imagesApp (getRecord arts "r") >>= \r ->
+    check (fmap (\a -> (a.caPhase, a.caArt)) r == Just (PhaseShown, BC.pack "new")) "a holding patchIf did not reach the mirror"
+  offThread <- newEmptyMVar
+  _ <- forkIO $ do
+    r <- try (submitTx imagesApp (patchIf arts "r" urlF "u/1" [set phaseF PhaseFailed]))
+    putMVar offThread $ case r of
+      Right () -> "went through"
+      Left e -> show (e :: SomeException)
+  takeMVar offThread >>= \m ->
+    check ("kaya: a transaction belongs to the app thread" `isInfixOf` m) ("a patchIf from another thread was not refused: " ++ m)
+  submitTx imagesApp $ do
+    insertRecord arts "a" (CheckArt "u/shared" BS.empty PhaseLoading)
+    insertRecord arts "b" (CheckArt "u/shared" BS.empty PhaseLoading)
+  calls <- newIORef (0 :: Int)
+  gate <- newEmptyMVar
+  helper <- rowImages imagesApp arts urlF artF phaseF $ \url -> do
+    atomicModifyIORef' calls (\n -> (n + 1, ()))
+    readMVar gate
+    pure (Right (BC.pack ("bytes of " ++ show url)))
+  rowImageNeeded helper ["a"]
+  rowImageNeeded helper ["b"]
+  putMVar gate ()
+  let settle :: Int -> IO ()
+      settle n = do
+        forChecksDrainPosted imagesApp
+        rows <- buildTx imagesApp ((,) <$> getRecord arts "a" <*> getRecord arts "b")
+        case rows of
+          (Just a, Just b) | a.caPhase == PhaseShown && b.caPhase == PhaseShown -> return ()
+          _ | n > 0 -> threadDelay 10000 >> settle (n - 1)
+          _ -> failWith "the helper's write never reached both rows"
+  settle 500
+  readIORef calls >>= \n -> check (n == 1) ("two rows sharing a URL fetched it " ++ show n ++ " times, wanted 1")
 
   -- THE CAPTURE'S CALLBACKS (docs/capture-plan.md §4), driven from a fresh
   -- foreign thread as kaya's capture thread drives them: a transaction

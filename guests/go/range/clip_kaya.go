@@ -41,6 +41,32 @@ func (p clipPatchBuilder) TrimOut(v float64) clipPatchBuilder {
 	return p
 }
 
+// ClipPatchIf is ClipPatch made only while the entry exists and the
+// guard's field still holds expected; otherwise nothing, and no panic
+// (docs/network-images-plan.md N7). The chain is one record.
+func ClipPatchIf[V comparable](c kaya.RecordCollection[string, Clip], tx *kaya.Tx, key string, guard func(*Clip) *V, expected V) clipPatchIfBuilder {
+	return clipPatchIfBuilder{c.PatchIf(tx, key, guard, expected)}
+}
+
+type clipPatchIfBuilder struct {
+	p kaya.RecordPatchIf[string, Clip]
+}
+
+func (p clipPatchIfBuilder) Name(v string) clipPatchIfBuilder {
+	p.p.Set(func(t *Clip) *string { return &t.Name }, v)
+	return p
+}
+
+func (p clipPatchIfBuilder) TrimIn(v float64) clipPatchIfBuilder {
+	p.p.Set(func(t *Clip) *float64 { return &t.TrimIn }, v)
+	return p
+}
+
+func (p clipPatchIfBuilder) TrimOut(v float64) clipPatchIfBuilder {
+	p.p.Set(func(t *Clip) *float64 { return &t.TrimOut }, v)
+	return p
+}
+
 // The row surface: one token per wire field, and the template
 // constructors that consume them.
 type clipRow struct {
@@ -141,8 +167,10 @@ func (r clipRow) SetMax(n kaya.Node, max float64) { r.t.SetMax(n, max) }
 
 func (r clipRow) SetAlpha(n kaya.Node, on bool) { r.t.SetAlpha(n, on) }
 
-func (r clipRow) SetFit(n kaya.Node, fit kaya.Fit)         { r.t.SetFit(n, fit) }
-func (r clipRow) SetAspect(n kaya.Node, width, height int) { r.t.SetAspect(n, width, height) }
+func (r clipRow) SetFit(n kaya.Node, fit kaya.Fit)                     { r.t.SetFit(n, fit) }
+func (r clipRow) SetPhase(n kaya.Node, phase kaya.ImagePhase)          { r.t.SetPhase(n, phase) }
+func (r clipRow) BindPhase(n kaya.Node, f kaya.Field[kaya.ImagePhase]) { r.t.BindPhase(n, f) }
+func (r clipRow) SetAspect(n kaya.Node, width, height int)             { r.t.SetAspect(n, width, height) }
 
 func (r clipRow) SetMinGap(n kaya.Node, gap float64)          { r.t.SetMinGap(n, gap) }
 func (r clipRow) SetLowLabel(n kaya.Node, label string)       { r.t.SetLowLabel(n, label) }

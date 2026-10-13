@@ -1,1 +1,7 @@
 packages: .
+-- The network images guests' client (docs/network-images-plan.md N12) is
+-- the compiler's own: the flake's ghcWithPackages on the mac, Debian's
+-- libghc packages in the linux image. Nothing is taken from Hackage, so
+-- the versions are the ones tools/check-pins.py holds in both places.
+active-repositories: :none
+constraints: http-client-tls ==0.3.6.4, http-client ==0.7.19, http-types ==0.12.4
