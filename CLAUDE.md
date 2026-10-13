@@ -855,8 +855,12 @@ in docs/deferred.md.
    desktop warm-up reads `Screen.AllScreens` in the interactive session and
    deploy-win's desk_warm refuses unless lane.screens_refusal finds exactly
    one 1280x800 screen, naming what it read and `DisplaySwitch.exe
-   /internal`; run here against four readings. Thirty-five watched
-   negatives, counts printed),
+   /internal`; run here against four readings. AND THE MEDIA SERVER'S ONE
+   PREDICATE SINCE 2026-10-13 (tools/lib/netimage_server_routes.py): every
+   lane starts the server through `media_server.serves(scene)`, never its own
+   `startswith("media_")`, so the netimage_http legs get the server the media
+   legs do, and the server's covers, `/status/<code>/` and image types are
+   held. Fifty watched negatives, counts printed),
    `tools/check-flightrec.py` (A RED LEG'S BUNDLE NAMES ITS CAUSE ON
    EVERY LANE, or says what it measured instead (the maintainer's
    2026-09-16 ruling): the bundle shape is ONE declaration —
@@ -1055,7 +1059,13 @@ in docs/deferred.md.
    tools/checks/swiftui-empty-child.swift and run, four byte shapes plus
    an unknown kind through the real KayaFlex/KayaCell; the static
    clauses hold all four backends' image arms present-and-empty and
-   panic-free),
+   panic-free. AND THE NETWORK IMAGE'S LOOKS AND ITS LATE PICTURE SINCE
+   2026-10-13 (docs/network-images-plan.md N4, N9): a boxed image loading,
+   failed and undecodable is one view in its box, and a decode overtaken by
+   a cache hit for other bytes is dropped by its generation, the gate
+   recompiling the interpreter with that check cut and demanding the probe's
+   own failure on every run — the probe's first run found the cache's lookup
+   keyed on a size its store never wrote),
    `tools/check-pane-ladder.py` (the macOS pane ladder, live: macOS has
    no compact mode to defer to, so kaya's own arithmetic decides how
    many of a three-pane window's columns fit — and the MIDDLE rung is
@@ -1765,6 +1775,10 @@ in docs/deferred.md.
    opam index, none of which has a lockfile the way cargo and nix do;
    the SwiftPM clause is the one whose false green cost a debugging
    round, see docs/traps.md.
+   AND THE NETWORK IMAGES GUESTS' CLIENT SINCE 2026-10-13: `ureq` at one
+   exact release and under [dev-dependencies] alone, since the binding
+   carries no HTTP client (docs/network-images-plan.md N1, N12); two watched
+   negatives.
    AND THE WINDOWS DOOR SINCE 2026-08-26, which is a curl and therefore
    invisible to the other four: tools/fetch-winappsdk.sh pulls five
    Windows App SDK packages out of nuget's flat container, and the
