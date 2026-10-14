@@ -16084,8 +16084,15 @@ leaves a field above its room cannot be reached by any iOS scene today (the pan
 engages only on the autofill form, whose panned field sits 75 pt and more below
 its room's top), so that half is held by the route alone. A SwiftUI expect_safe
 failure also ends with `the pan:`, and each pan move is in the verb trace.
+Compose's pan has no separate top aim because its margin is
+`minOf(gap, room - need)`, so a field that fits lands with its top inside the
+room in one pass. With a fixed 8 px margin (measured 2026-10-14),
+taskskeyboardland-compose and chatkeyboardland-go both went red: each has a
+48 px textarea at A20's one-line floor in a 48 px room (88..136), and each
+was held at top 80, 8 px above the content's clip.
 GUARD: tools/lib/safearea_routes.py, "Compose's pan brings a field that fits
-back below its room's top", "Compose's expect_safe failure names the pan's
+back below its room's top", "Compose's pan aims a field that fits with its top
+inside its room", "Compose's expect_safe failure names the pan's
 inputs", the pan block's `above` clause, "the pan's room", "the pan's queue",
 the three readers re-reading the pan and "SwiftUI's expect_safe failure names
 the pan's inputs"; tools/check-flightrec.py NA5, NA6.

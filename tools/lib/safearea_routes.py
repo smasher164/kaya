@@ -175,6 +175,11 @@ NATIVE = [
      "val above = frame.height <= room && frame.top < roomTop - 0.5f\n"
      " if (covered > 0.5f) {\n next = current + covered + margin\n"
      " } else if (current > 0f && (covered < -2 * margin || above)) {"),
+    # docs/traps.md, the quick-add field panned above its sheet's top.
+    (COMPOSE, "Compose's pan aims a field that fits with its top inside its room",
+     "val need = if (frame.height <= room) frame.height else caret.height\n"
+     " val target = if (frame.height <= room) frame.bottom else caret.bottom\n"
+     " val margin = minOf(gap, maxOf(0f, room - need))"),
     (COMPOSE, "Compose's expect_safe failure names the pan's inputs",
      'got == null -> failures.add(why + (onUi(activity) { kayaPanReading(activity) } ?: ""))'),
     (COMPOSE, "Compose's sheet keeps its layout while typing", "val keeps = detented || typing"),
@@ -791,6 +796,12 @@ def run(g):
         ("Compose's pan leaving a field above its room inside the dead zone, as shipped", COMPOSE,
          r"\(covered < -2 \* margin \|\| above\)", "covered < -2 * margin",
          "Compose's pan brings a field that fits back below its room's top"),
+        ("Compose's pan aiming the bottom alone, a field near its room's height left above it", COMPOSE,
+         r"val margin = minOf\(gap, maxOf\(0f, room - need\)\)", "val margin = gap",
+         "Compose's pan aims a field that fits with its top inside its room"),
+        ("Compose's pan aiming a field that fits by its caret", COMPOSE,
+         r"val need = if \(frame\.height <= room\) frame\.height else caret\.height", "val need = caret.height",
+         "Compose's pan aims a field that fits with its top inside its room"),
         ("Compose's expect_safe failure without the pan, as shipped", COMPOSE,
          r'failures\.add\(why \+ \(onUi\(activity\) \{ kayaPanReading\(activity\) \} \?: ""\)\)',
          "failures.add(why)", "Compose's expect_safe failure names the pan's inputs"),
