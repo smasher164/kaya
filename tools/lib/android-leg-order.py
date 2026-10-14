@@ -532,6 +532,39 @@ def steps_problems(body: str) -> list[str]:
     return problems
 
 
+def teardown_problem(text: str) -> str | None:
+    """Every module global kaya_teardown reads is assigned before the
+    atexit registration, so a run stopped early tears down instead of
+    raising NameError (CUTOUT_ON, 2026-10-14)."""
+    import ast
+    tree = ast.parse(text)
+    reg = None
+    assigned: dict[str, int] = {}
+    teardown = None
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == "kaya_teardown":
+            teardown = node
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for t in targets:
+                if isinstance(t, ast.Name):
+                    assigned.setdefault(t.id, node.lineno)
+        elif (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+              and ast.unparse(node.value) == "atexit.register(kaya_teardown)"):
+            reg = node.lineno
+    if teardown is None or reg is None:
+        return ("kaya_teardown or its atexit.register not found in the "
+                "runner; the teardown clause read nothing")
+    late = sorted({n.id for n in ast.walk(teardown)
+                   if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
+                   and n.id in assigned and assigned[n.id] > reg})
+    if late:
+        return (f"kaya_teardown reads {', '.join(late)}, assigned after "
+                f"atexit.register(kaya_teardown) at line {reg}: a run "
+                "stopped before that line dies of NameError in its teardown")
+    return None
+
+
 def main() -> int:
     for path, label in ((RUNNER, "runner"), (LANE, "lane module")):
         if not path.exists():
@@ -582,6 +615,10 @@ def main() -> int:
         print(f"android-leg-order: {problem}", file=sys.stderr)
         return 1
     problem = upright_problem(text)
+    if problem is not None:
+        print(f"android-leg-order: {problem}", file=sys.stderr)
+        return 1
+    problem = teardown_problem(text)
     if problem is not None:
         print(f"android-leg-order: {problem}", file=sys.stderr)
         return 1
@@ -651,6 +688,17 @@ def main() -> int:
     if positions[0].start() < positions[1].start():
         print("android-leg-order: SELF-TEST FAIL (bad order read as "
               "good)", file=sys.stderr)
+        return 1
+
+    # The teardown's globals assigned before its registration.
+    doctored, n = doctor("teardown global moved late", text,
+                         r"\nCUTOUT_ON = set\(\)\n",
+                         "\n", 1)
+    doctored += "\nCUTOUT_ON = set()\n"
+    if n != 1 or teardown_problem(doctored) is None:
+        print("android-leg-order: SELF-TEST FAIL (a teardown global "
+              "assigned after the registration read as good)",
+              file=sys.stderr)
         return 1
 
     # N2/N3: the restart flag, both spellings, both directions.

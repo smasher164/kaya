@@ -92,6 +92,14 @@ CALLS = [
     ("a decode in flight is composition state", "var imagePending by mutableStateOf(false)"),
     ("the generation is composition state", "var imageGen by mutableIntStateOf(0)"),
     ("the failed glyph's one spelling", 'Triple(SYMBOL_IMAGE_MISSING, "image_missing", Icons.Default.BrokenImage),'),
+    ("a band is read only from a layout of the core's band (docs/traps.md, the Compose band read from a stale "
+     "layout)",
+     "val laid = rowTops.size\n if (laidOutFirst != bandStart || laid != bandCount) {\n KayaVTrace.note(\n"
+     " \"window\",\n \"stale layout table=${node.id} laid=$laidOutFirst+$laid band=$bandStart+$bandCount: no report\",\n"
+     " )\n return\n }\n val (first, count) = visibleRange(scroll)"),
+    ("the table window's moves reach the verb trace",
+     "KayaVTrace.note(\"window\", \"-> park table=${node.id} row=$row count=$count\")\n"
+     " KayaPresent.windowMoved(node.id, row.toLong(), count.toLong())"),
 ]
 
 
@@ -142,6 +150,11 @@ def findings(text):
 
 
 CUTS = [
+    ("Compose: a band read off a layout of another band",
+     r"if \(laidOutFirst != bandStart \|\| laid != bandCount\) \{", "if (false) {",
+     "a band is read only from a layout of the core's band"),
+    ("Compose: the stale read reported anyway", r"(: no report\",\n\s+\)\n)(\s+)return\n", r"\1\2Unit\n",
+     "a band is read only from a layout of the core's band"),
     ("Compose: no header read before the decode",
      r"node\.pendingNatural = node\.imageData\?\.let \{ kayaHeaderNatural\(it\) \}", "node.pendingNatural = null",
      "the source arm reads the header's size"),

@@ -313,6 +313,21 @@ report would come from every backend's asynchronous decode, per stamped copy,
 for an answer the app can do nothing with. Its shape is clear (one report per
 content id, not per stamp). Trigger: an app that shows a need.
 
+## WATCH — a mac caption cue never delivered after a seek (media_tracks-java-swiftui, 2026-10-13)
+KEY: media_tracks, caption cue, second cue, AVPlayerItemLegibleOutput, seek, caption delivery
+
+Seen once, in the full matrix at a16094b4: step 62 read label#4 "first cue"
+where "second cue" was wanted. AVFoundation's own log shows both seeks
+completed; the platform's caption output never delivered the cue for the
+1.5 s seek. Nothing in 69773421..a16094b4 or f9393a8d touches the player, and
+14 more media_tracks legs and three 28/28 filtered mac runs passed. The
+recorder carries what the next sighting needs since 2026-10-14: each seek as
+issued and where it landed, and every caption delivery with its time, logged
+before repeats are dropped (check-verbs holds them; docs/traps.md). On the
+next sighting, read those lines in the leg's bundle (kept under
+~/.local/state/kaya/flightrec/red/ once its run is pruned) before any
+hypothesis.
+
 ## OPEN — the mac native table's rows taller than its 24pt floor run past the window (2026-10-13)
 KEY: kayaNativeRowHeight, native table tall rows, grown table overflow, scroll_to_row last row, netimage 20pt art
 

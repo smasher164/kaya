@@ -30851,10 +30851,19 @@ final class KayaPlayer {
         }
         wakeAtTheBound(generation)
         let to = CMTime(value: CMTimeValue(ms), timescale: 1000)
+        let id = self.id
+        kayaDiag("seek player=\(id) to=\(ms) ms waited=\(waited * 5) ms rate=\(player.rate) cue=\(kayaB64(platformCue))")
         player.seek(to: to, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
-            guard finished else { return }
+            guard finished else {
+                kayaDiag("seek player=\(id) to=\(ms) ms finished=false")
+                return
+            }
             DispatchQueue.main.async {
                 guard let self else { return }
+                let landed = self.player.currentTime()
+                kayaDiag(
+                    "seek player=\(id) to=\(ms) ms finished=true clock=\(landed.isNumeric ? landed.seconds * 1000 : -1) ms "
+                        + "cue=\(kayaB64(self.platformCue))")
                 self.askCaption()
                 guard report else { return }
                 let now = UInt64(max(0, (self.player.currentTime().seconds * 1000).rounded()))
@@ -30880,8 +30889,12 @@ final class KayaLegibleDelegate: NSObject, AVPlayerItemLegibleOutputPushDelegate
         _ output: AVPlayerItemLegibleOutput, didOutputAttributedStrings strings: [NSAttributedString],
         nativeSampleBuffers nativeSamples: [Any], forItemTime itemTime: CMTime
     ) {
+        let text = strings.map(\.string).joined(separator: "\n")
+        kayaDiag(
+            "legible player=\(id) gen=\(generation) item=\(itemTime.isNumeric ? itemTime.seconds * 1000 : -1) ms "
+                + "text=\(kayaB64(text))")
         guard let p = kayaPlayers[id], p.generation == generation else { return }
-        p.platformCueArrived(strings.map(\.string).joined(separator: "\n"))
+        p.platformCueArrived(text)
     }
 }
 
@@ -30899,6 +30912,8 @@ func kayaLanguageTag(_ raw: String?) -> String {
     guard let raw, !raw.isEmpty else { return "und" }
     return Locale.canonicalLanguageIdentifier(from: raw)
 }
+
+func kayaB64(_ text: String) -> String { Data(text.utf8).base64EncodedString() }
 
 func kayaFourCC(_ code: FourCharCode) -> String {
     let bytes = [24, 16, 8, 0].map { UInt8((code >> $0) & 0xFF) }

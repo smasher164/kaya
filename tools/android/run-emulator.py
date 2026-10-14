@@ -750,6 +750,7 @@ CLIPHELPER_IME_ON = []
 # The held presses, {serial: (x, y)} — a drag gesture is such a switch
 # now that the runner holds the press itself (DRAG_HOLD_MS above).
 DRAG_POINTER_DOWN = {}
+CUTOUT_ON = set()
 _torn = threading.Lock()
 # The media suite's server (tools/lib/media_server.py) on this lane's own
 # host port, which the emulator reaches as 10.0.2.2: up only while a media_
@@ -1579,7 +1580,6 @@ LANDSCAPE_RAN = set()
 # THE CUTOUT OVERLAY A LEG RAN UNDER (docs/safe-area-plan.md §5.5), per
 # device: on before its launch, off when it ends whatever its verdict, each read
 # back, and off again at teardown for a lane that died mid-leg.
-CUTOUT_ON = set()
 # Each phone's upright bar with no cutout, read at lane start (docs/traps.md,
 # the status bar one overlay behind).
 UPRIGHT_BAR = {}

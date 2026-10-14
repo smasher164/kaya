@@ -16163,3 +16163,48 @@ host of stamped rows across a column and skipped a DECLARED table's host, so
 the table took its content's width wherever its column did not stretch. A
 table's host now spans its column on both. GUARD: netimage.steps'
 `expect_column_edges column@tracks 2`, which reads the span on every lane.
+
+## Compose: the band read from a layout of another band (measured 2026-10-14)
+
+The full matrix at a16094b4 failed `netimage-compose` on emulator-5558 under a
+host load of 215: `image@art[t298] reads "0x0", wanted "1000x1000"` for 18 s,
+with row t298 on screen in the loading look. The bundle's leg log showed the
+core stamping 12 rows and releasing 21 between the `retarget` and `rows`
+clicks, after `scroll_to_row t297` had returned. The window's moves were not
+in the bundle, so KayaTableWindow now writes each park, park scroll, visible
+range and core band to the verb trace. A forced-red copy of the scene read on
+an unloaded run: right after `click button@delete` the window reported
+`visible first=285 count=2 laid=272+15` while the core's band was 272+27. The
+layout had laid out 15 of the band's 27 rows, so the viewport showed two laid
+rows and empty space, the count collapsed to 2, the band shrank to 283+6, and
+t298 (row 298) was released while on screen, then needed again. The guest drops
+a released row's pending fetches, the retarget's included, so when that
+collapse lands between the two clicks no fetch for t298's new address is ever
+sent. The window now reports only from a layout of the core's own band
+(laidOutFirst and the laid row count equal the band's start and count) and
+otherwise waits for the next layout. The forced-red run then showed two
+`stale layout ... no report` records and the count holding at 14. GUARD:
+tools/lib/netimage_compose.py, the clause "a band is read only from a layout of
+the core's band" and two cuts watched red.
+
+## The mac tx3g caption: a paused seek to 1.5 s got no cue (seen 2026-10-14)
+
+The full matrix at a16094b4 failed `media_tracks-java-swiftui` once:
+`label#4 reads "first cue", wanted "second cue"` on h264_tx3g.mp4 after the
+paused seek to 1.5 s, with the host loaded. The guest's unified log shows both
+seeks completing (`figPlaybackBossPostSeekDidComplete` for seekID 1 and 2,
+seekErr 0), and the item's two tx3g samples were sent to the caption pipeline at
+the selection, not at either seek. A passing run's log has the same pattern, and
+there AVPlayerItemLegibleOutput pushed `second cue` (item time 1000 ms) 1 ms
+after the 1.5 s seek started. In the red run no push arrived for 15 s. No code
+in 69773421..a16094b4 or f9393a8d touches the player. The bundle could not say
+whether any push came, because platformCueArrived drops a repeat and the Java
+guest logs only changes, and it did not record where the seek landed. The
+SwiftUI arm now prints `seek player= to= waited= rate= cue=` when a seek is
+issued, `finished=false` or `finished=true clock= cue=` when it completes, and
+`legible player= gen= item= text=` for every push, the text base64 encoded. A
+forced-red copy of the scene (run 20261014T051320Z-098639) carried all three in
+the bundle's leg log. Fourteen more media_tracks legs (java and go) passed,
+some of them beside load, so the cause stays open until the next sighting.
+GUARD: tools/check-verbs.py's media arms, "a seek landing unprinted" and "a
+legible push unprinted", both watched red.

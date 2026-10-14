@@ -1828,6 +1828,8 @@ object KayaVTrace {
         }
     }
 
+    fun note(verb: String, what: String) = attempt(verb, 0, what)
+
     /** One attempt of a step, numbered from 1 (the retry wrapper is the attempt point). */
     fun attempt(verb: String, n: Int, what: String) {
         synchronized(lock) {
@@ -15181,6 +15183,7 @@ internal class KayaTableWindow(private val node: KayaNode) {
         val count = if (lastCount > 0) lastCount else 1
         lastFirst = row
         lastCount = count
+        KayaVTrace.note("window", "-> park table=${node.id} row=$row count=$count")
         KayaPresent.windowMoved(node.id, row.toLong(), count.toLong())
         schedule()
     }
@@ -15270,6 +15273,7 @@ internal class KayaTableWindow(private val node: KayaNode) {
             if (anchorScroll >= 0 && scroll != anchorScroll) {
                 // A scroll this tier did not issue: the reader owns free
                 // scrolling, and the park yields to it.
+                KayaVTrace.note("window", "park yields table=${node.id} row=$anchorRow: scroll $scroll, parked at $anchorScroll")
                 anchorRow = -1
             } else {
                 val want = contentTopOf(anchorRow)
@@ -15286,6 +15290,7 @@ internal class KayaTableWindow(private val node: KayaNode) {
                     scope.launch {
                         state.scrollTo(want)
                         anchorScroll = state.value
+                        KayaVTrace.note("window", "park scrolled table=${node.id} row=$anchorRow to ${state.value} of $want")
                         // A scroll clamped at the collection's end
                         // cannot honour the park, and re-trying it is a
                         // live loop; the park yields (§5's unasserted
@@ -15297,10 +15302,24 @@ internal class KayaTableWindow(private val node: KayaNode) {
                 }
             }
         }
+        // A LAYOUT OF ANOTHER BAND IS NOT READ (docs/traps.md, the Compose
+        // band read from a stale layout): its rows stop short of the viewport.
+        val laid = rowTops.size
+        if (laidOutFirst != bandStart || laid != bandCount) {
+            KayaVTrace.note(
+                "window",
+                "stale layout table=${node.id} laid=$laidOutFirst+$laid band=$bandStart+$bandCount: no report",
+            )
+            return
+        }
         val (first, count) = visibleRange(scroll)
         if (first != lastFirst || count != lastCount) {
             lastFirst = first
             lastCount = count
+            KayaVTrace.note(
+                "window",
+                "-> visible table=${node.id} first=$first count=$count scroll=$scroll laid=$laidOutFirst+${rowTops.size}",
+            )
             KayaPresent.windowMoved(node.id, first.toLong(), count.toLong())
         }
         val extents = rowExtents
@@ -15322,8 +15341,13 @@ internal class KayaTableWindow(private val node: KayaNode) {
      *  cuts its spacers from. */
     private fun publish() {
         KayaPresent.windowGeometry(node.id, slots)
-        bandStart = slots[KayaPresent.GEOMETRY_FIRST].toInt()
-        bandCount = slots[KayaPresent.GEOMETRY_COUNT].toInt()
+        val start = slots[KayaPresent.GEOMETRY_FIRST].toInt()
+        val count = slots[KayaPresent.GEOMETRY_COUNT].toInt()
+        if (start != bandStart || count != bandCount) {
+            KayaVTrace.note("window", "<- band table=${node.id} $start+$count")
+        }
+        bandStart = start
+        bandCount = count
         offsetPx = slots[KayaPresent.GEOMETRY_OFFSET]
         extentPx = slots[KayaPresent.GEOMETRY_EXTENT]
     }

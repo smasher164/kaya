@@ -3336,6 +3336,20 @@ def ios_media_rows(code):
         bad.append("KayaPlayer.seek does not first wait for a newly selected caption "
                    "track to be enabled (legibleSwitching over item.tracks) — a paused "
                    "seek before the switch never gets its cue (docs/traps.md)")
+    seek_body = re.search(r"\n    func seek\(_ ms: UInt64, report: Bool, waited: Int = 0\) \{"
+                          r"(.*?)\n    \}\n", code, re.S)
+    if seek_body is None or 'kayaDiag("seek player=' not in seek_body.group(1) \
+            or "finished=true clock=" not in seek_body.group(1):
+        bad.append("KayaPlayer.seek does not print its issue and its landing clock — a "
+                   "paused seek that got no cue is unreadable from the bundle (docs/traps.md, "
+                   "the tx3g seek with no cue)")
+    push = re.search(r"didOutputAttributedStrings strings: \[NSAttributedString\],.*?\n    \}",
+                     code, re.S)
+    if push is None or not re.search(r'kayaDiag\(\s*"legible player=.*?guard let p = kayaPlayers',
+                                     push.group(0), re.S):
+        bad.append("the legible delegate does not print every push before the dedup — a "
+                   "missing cue cannot be told from a repeated one (docs/traps.md, the tx3g "
+                   "seek with no cue)")
     ink = [m.group(0) for m in re.finditer(
         r"\n    func kayaVideoInk\(.*?\n    \}\n", code, re.S)]
     ios_ink = [b for b in ink if "KayaSimdrive" in b or "UIView" in b
@@ -3463,6 +3477,12 @@ for pattern, repl, label, rel, want in (
      "the iOS ink read not through the screenshot", SWIFT, 1),
     (r"(\n        if )legibleSwitching && waited < ", "false && waited < ",
      "a seek not waiting for the caption switch", SWIFT, 1),
+    (r'(\n)                kayaDiag\(\n                    "seek player=\\\(id\) '
+     r'to=\\\(ms\) ms finished=true clock=',
+     "                _ = (\n                    \"",
+     "a seek landing unprinted", SWIFT, 1),
+    (r'(\n)        kayaDiag\(\n            "legible player=', "        _ = (\n            \"",
+     "a legible push unprinted", SWIFT, 1),
     (r"(guard let picked = )kayaPickedURLs\[locator\]", "Optional<URL>.none",
      "the iOS picked URL not handed over", SWIFT, 1),
     (r"(let url = )platformURL\(locator\)", "URL(string: locator)",
