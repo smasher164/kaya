@@ -272,6 +272,28 @@ settles 700 ms before reading the canvas a second time: its first reading comes
 extension the growth feeds on, so without the settle the safearea leg stayed
 green with the runaway put back (watched, then watched red with it).
 
+## The grown canvas that could not shrink (measured 2026-10-13)
+
+The matrix of 2026-10-13 read `canvas@ground runs past the window's edge:
+frame (0,288,420x496)` for 15 s in the mac safearea legs of python, go and
+java. The frame was real, not a stale record: the canvas was 496 tall from
+y 288, running 144 pt below a 640 pt window, which shot.png cannot show because
+the ground is one flat fill cut by the window. 496 is the canvas with no
+picture above it (y 144 to 640 at inset 16). Since 69773421 the picture
+decodes off the main thread, and until it lands an unboxed picture takes no
+height, so under the matrix's load the canvas is first laid out and drawn
+160 pt taller. The canvas arm was `.frame(maxWidth: .infinity, maxHeight:
+.infinity)` with no minimum, and a SwiftUI frame with only a maximum takes the
+offer when it is larger than its child and the CHILD's size when it is
+smaller. The child is the 1:1 blit, so once drawn at 496 the frame stayed 496
+in a 336 pt offer, the reader reported 496 and the core drew at 496 again: a
+grown canvas could grow but never shrink, after a late sibling or a window
+made smaller alike. A 400 ms sleep put in the decode reproduced both of the
+matrix's sentences every run; with `minWidth: 0, minHeight: 0` on a grower
+(and `.clipped()`, GTK's centred-and-clipped blit for a frame smaller than its
+blit) the same run is green. tools/lib/safearea_routes.py holds the minimums,
+the cut watched red.
+
 ## A rotation put back from the home screen comes back (measured 2026-10-09)
 
 Seven unrelated android legs went red on one matrix, all on emulator-5558:
@@ -16094,3 +16116,50 @@ by nothing else, it never opened, while its failure still arrived through the
 IAsyncAction, so every picture read `loading` and every junk byte read
 `failed`. The arm keeps it as `decoding` until it installs. GUARD:
 tools/lib/netimage_winui.py, the cut "the decoding picture dropped".
+
+## GTK: the band read from rows that had no allocation yet (measured 2026-10-13)
+
+At startup the GTK netimage table reported bands 36.. and 54.. with the
+scrollbar at 0, so the guest heard `released` for rows on screen before any
+scroll and answered 180 needed and 144 released occurrences, one transaction
+each; every drain re-ran the report, which is the ~330 `window_report` lines
+an idle leg logged. A row the core has just realized has no allocation until
+the next frame lays it out, and its (0, 0) box made the band's bottom edge 0,
+so window_report's "the scrollbar jumped past the band" branch moved the band
+by the realized row count. The band is now read only when every realized row
+has its box; otherwise the report keeps the last band and runs again after the
+frame that allocates them paints. GUARD: tools/lib/netimage_gtk.py (two
+clauses, two cuts) and netimage.steps' `expect label@released "released:
+none"` before any scroll.
+
+## An unboxed image laid out at 0x0 until its off-thread decode landed (measured 2026-10-13)
+
+Since 69773421 every arm decodes off the UI thread, and an image with no
+declared box took no size until the pixels arrived, so whatever came after it
+moved when they did: the mac safearea scene's canvas was laid out 160 pt
+taller and ran under the window under matrix load (the grown canvas entry
+above). Each arm now reads the natural size from the header when the bytes
+arrive and lays the image out at it, bounded as the picture will be
+(docs/network-images-plan.md N9's amendment). Measured on the mac: the core's
+header reader 0.01 µs, `NSImage(data:).size` 64 to 73 µs. GUARD:
+tools/lib/netimage_routes.py and the three arm modules, a clause and a cut
+per arm. No scene sees it: the jump lasts one decode, and every expect polls.
+
+## WinUI: a brush looked up once does not follow the window's theme (measured 2026-10-13)
+
+`theme_resource::<Brush>` answers the application dictionary's brush as an
+object, and that object is the light theme's: the network image's loading
+fill read 141 on a dark window's 32 ground (ControlFillColorSecondaryBrush's
+light #80F9F9F9 over dark). A `{ThemeResource}` setter in a Style resolves
+against the element's own theme (`filled_style`, `themed_foreground_style`).
+GUARD: tools/lib/netimage_winui.py, the cut "the fill looked up once".
+
+## GTK and WinUI: a declared table in a column hugged its content (measured 2026-10-13)
+
+The netimage scene stacked into one column showed a 103 px table in a 754 px
+track on GTK (100 dip of 764 on WinUI); `expect_column_edges` read it as
+"viewport draws 103px of its assigned 754px track". Both arms filled a For's
+host of stamped rows across a column and skipped a DECLARED table's host, so
+the table took its content's width wherever its column did not stretch. A
+table's host now spans its column on both. GUARD: netimage.steps'
+`expect_column_edges column@tracks 2`, which reads the span on every lane.

@@ -48,7 +48,7 @@ static class NetimageScene
             var again = tx.Signal("again: none");
             var songs = SongKaya.Collection(tx);
             Node artNode = default;
-            tx.Mount(tx.Row(root =>
+            tx.Mount(tx.Column(root =>
             {
                 tx.Column(column =>
                 {
@@ -71,6 +71,9 @@ static class NetimageScene
                             live = new LiveJob(covers[1]);
                             t.Write(phase, ImagePhase.Loading);
                         }), "refresh");
+                    });
+                    tx.Row(buttons =>
+                    {
                         tx.SetA11yId(tx.Button("junk", t =>
                         {
                             t.Write(art, "not an image"u8.ToArray());

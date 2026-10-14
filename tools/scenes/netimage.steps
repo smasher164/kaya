@@ -31,9 +31,18 @@ click button@release
 expect_image_phase image@cover failed
 expect_ax image@cover "image/Cover"
 #
+# The table is on screen at its own width and no control runs off the
+# window, a phone's included.
+expect_safe column@tracks
+expect_column_edges column@tracks 2
+expect_safe button@fail
+expect_safe button@retarget
+#
 # A table's art is needed for the rows the band realizes, never all of them
 # (N8), and each result lands on its own row: the rows carry three sizes.
+# Nothing has scrolled, so nothing on screen has been released.
 expect label@band "band: partial"
+expect label@released "released: none"
 expect_image_phase image@art[t000] loading
 expect_image_size image@art[t000] "20x20"
 click button@rows
@@ -50,7 +59,7 @@ scroll_to_row column@tracks t299
 # A row deleted while its job waits, and a row whose URL moved on: the new
 # job is released before the old one, and the old result drops (N7).
 click button@delete
-scroll_to_row column@tracks t290
+scroll_to_row column@tracks t297
 expect_image_phase image@art[t298] loading
 click button@retarget
 click button@rows

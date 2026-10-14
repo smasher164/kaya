@@ -52,7 +52,8 @@ green on the mac lane and iOS for Rust.
     17 cuts. Linux: 34 legs green on x11 and wayland, nine languages and C.
   - ~~**DEPTH STUB: netimage on winui**~~ — BUILT 2026-10-13 with N14: a
     one-cell Grid holding the picture and the looks
-    (ControlFillColorSecondaryBrush, Segoe Fluent U+E91B `Photo`, the catalog
+    (ControlFillColorSecondaryBrush, ControlAltFillColorQuarternaryBrush since
+    the 2026-10-13 ruling below, Segoe Fluent U+E91B `Photo`, the catalog
     having no broken-image glyph), `SetSourceAsync` with decode pixel sizes on
     a detached BitmapImage swapped in on ImageOpened by generation, ImageFailed
     clearing the picture (the leg read the old 320x320 with that cut), a cache
@@ -101,10 +102,31 @@ green on the mac lane and iOS for Rust.
     breadth (a 600x600 tile about 1 ms, a 3000x3000 JPEG 15 ms full and 9 ms
     at a 96px box); a real device's number is the review page's if the
     maintainer wants one.
-  - **WinUI's loading fill is nearly invisible** (MEASURED 3 grey levels off
-    the window ground, 1 off the table card, ControlFillColorSecondaryBrush);
-    SubtleFillColorSecondaryBrush would show on both. A styling call for the
-    maintainer, with the review page.
+  - ~~**WinUI's loading fill is nearly invisible**~~ — RULED AND FIXED
+    2026-10-13 (docs/network-images-plan.md N4's amendment): the maintainer
+    asked for a darker placeholder; five tokens were measured on the VM and
+    ControlAltFillColorQuarternaryBrush taken (23 grey levels off the window
+    ground, 24 off the table card, §7), worn through a `{ThemeResource}` style
+    since the brush looked up once stayed the light theme's on a dark window.
+    tools/lib/netimage_winui.py holds the token, the style and the glyph's
+    themed grey, each cut watched red.
+  - **WinUI: a wrapping row inside a hugging column flows one child per
+    line.** KEY: wrap_width, reflow_wrap, wrapping row, hugging column.
+    `wrap_width` fits the row to its PARENT's ActualWidth, and a column that
+    hugs its content is as wide as the widest line it already holds, so the
+    flow narrows itself to one button a line (measured 2026-10-13 on the
+    netimage scene's controls, seven buttons in seven lines at 820 px; GTK
+    drew two lines). The rule wants the width the column was OFFERED, not
+    the one it took. The netimage guests stopped wrapping (the next entry).
+  - **GTK: a wrapping row makes the window's minimum height its fully wrapped
+    height.** KEY: wrap, minimum height, height-for-width, AdwApplicationWindow.
+    The same controls on GTK made the 820x640 window need 681 px ("Trying to
+    measure AdwApplicationWindow for height of 471, but it needs at least
+    681"), so a grown table below them ran past the window's bottom; with the
+    rows unwrapped the warning is gone (measured 2026-10-13). GTK asks a
+    window's minimum height at its minimum width, where every child of a
+    flowing row is on its own line. The netimage guests lay their seven
+    buttons in three rows that fit a 360 dp phone instead of wrapping.
   - **Java's cancel leaves the socket to the server** (docs/traps.md, a
     cancelled HttpURLConnection keeps its socket): the lane's media server
     does not answer `Connection: close` on /trickle/, so a Java cancel reads

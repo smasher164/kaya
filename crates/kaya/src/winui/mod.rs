@@ -3261,7 +3261,7 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
         let crossing = crossing
             || (vertical
                 && matches!(widget, NativeWidget::Column(_))
-                && core.stamps_rows.contains(&child.0));
+                && (core.stamps_rows.contains(&child.0) || TABLES.with_borrow(|t| t.contains_key(&child.0))));
         // A SCROLL SPANS ITS PARENT'S CROSS AXIS in every align mode
         // (DESIGN.md Layout; the scene's expect_breadth holds it): a
         // viewport is a region, not content.
@@ -4316,6 +4316,12 @@ fn declare_table(
     stamp_container_padding(core, id)?;
     // The two head tracks the rows now shift down past.
     core.child_order.mark(id);
+    // A table spans its column, so its own placement there is re-read.
+    if fresh {
+        if let Some(above) = core.child_order.parent_of(id) {
+            core.child_order.mark(above);
+        }
+    }
     Ok(())
 }
 
@@ -31298,7 +31304,7 @@ mod images {
     use std::sync::Arc;
 
     use super::bindings;
-    use super::{theme_resource, CoreState, NativeWidget, CORE, DISPATCHER};
+    use super::{CoreState, NativeWidget, CORE, DISPATCHER};
     use crate::protocol::{Prop, Value, WidgetId};
 
     use bindings::Microsoft::UI::Dispatching::DispatcherQueueHandler;
@@ -31306,9 +31312,10 @@ mod images {
     use bindings::Microsoft::UI::Xaml::Automation::Peers::AccessibilityView;
     use bindings::Microsoft::UI::Xaml::Controls::{Border, FontIcon, Grid, Image};
     use bindings::Microsoft::UI::Xaml::Media::Imaging::BitmapImage;
-    use bindings::Microsoft::UI::Xaml::Media::{Brush, ImageSource, Stretch};
+    use bindings::Microsoft::UI::Xaml::Media::{ImageSource, Stretch};
+    use bindings::Microsoft::UI::Xaml::Markup::XamlReader;
     use bindings::Microsoft::UI::Xaml::{
-        ExceptionRoutedEventHandler, HorizontalAlignment, RoutedEventHandler, VerticalAlignment,
+        ExceptionRoutedEventHandler, HorizontalAlignment, RoutedEventHandler, Style, VerticalAlignment,
         Visibility,
     };
     use bindings::Windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
@@ -31316,6 +31323,10 @@ mod images {
 
     /// N4's glyph, drawn only in a box at least twice its size.
     const GLYPH: f64 = 20.0;
+
+    /// N4's fill (docs/network-images-plan.md, the 2026-10-13 amendment): the
+    /// token measured visible on both the window ground and the table card.
+    const IMAGE_FILL: &str = "ControlAltFillColorQuarternaryBrush";
 
     #[derive(Default)]
     pub(super) struct ImageArm {
@@ -31330,6 +31341,9 @@ mod images {
         undecodable: bool,
         picture: Option<BitmapImage>,
         decoding: Option<BitmapImage>,
+        /// An unboxed image holding its header's natural size while the
+        /// pixels decode (N9's 2026-10-13 amendment).
+        reserved: bool,
         loading: Option<Border>,
         failed: Option<(Border, FontIcon)>,
     }
@@ -31342,6 +31356,7 @@ mod images {
 
     pub(super) fn host_of(image: &Image) -> windows_core::Result<Grid> {
         let host = Grid::new()?;
+        image.SetHorizontalAlignment(HorizontalAlignment::Left)?;
         host.Children()?.Append(image)?;
         Ok(host)
     }
@@ -31454,13 +31469,23 @@ mod images {
         let Some(bytes) = arm.bytes.clone().filter(|b| !b.is_empty()) else {
             return install(core, id, None, false);
         };
-        let natural = header_size(&bytes);
+        let natural = crate::image_header::natural(&bytes);
         let target = natural.map(|n| decode_target(n, arm.width, arm.height, arm.fit, scale));
         let key = (arm.content, target.map_or(0, |(_, long)| long));
         if let Some(hit) = PICTURES.with_borrow_mut(|cache| cache.get(key)) {
             return install(core, id, Some(hit), false);
         }
         arm.pending = true;
+        if !arm.boxed() && arm.picture.is_none() {
+            if let Some((w, h)) = natural {
+                let (w, h) = (f64::from(w), f64::from(h));
+                let bound = |max: f64, side: f64| if max > 0.0 { max / side } else { 1.0 };
+                let scale = 1f64.min(bound(arm.width, w)).min(bound(arm.height, h));
+                image.SetWidth(w * scale)?;
+                image.SetHeight(h * scale)?;
+                arm.reserved = true;
+            }
+        }
         refresh_look(core, id)?;
         written(bytes, move |stream| {
             on_ui(move |core| match &stream {
@@ -31574,6 +31599,10 @@ mod images {
             None => image.SetSource(None::<&ImageSource>)?,
         }
         let arm = core.image_arms.entry(id).or_default();
+        if std::mem::take(&mut arm.reserved) && !arm.boxed() {
+            image.SetWidth(f64::NAN)?;
+            image.SetHeight(f64::NAN)?;
+        }
         arm.pending = false;
         arm.decoding = None;
         arm.undecodable = undecodable;
@@ -31604,7 +31633,7 @@ mod images {
             let glyph = FontIcon::new()?;
             glyph.SetGlyph(&windows_core::HSTRING::from(missing_glyph()))?;
             glyph.SetFontSize(GLYPH)?;
-            glyph.SetForeground(&theme_resource::<Brush>("TextFillColorSecondaryBrush")?)?;
+            glyph.SetStyle(&super::themed_foreground_style("FontIcon", None, "TextFillColorSecondaryBrush")?)?;
             glyph.SetHorizontalAlignment(HorizontalAlignment::Center)?;
             glyph.SetVerticalAlignment(VerticalAlignment::Center)?;
             AutomationProperties::SetAccessibilityView(&glyph, AccessibilityView::Raw)?;
@@ -31630,12 +31659,22 @@ mod images {
         }
     }
 
+    /// The fill as a {ThemeResource} setter, so it follows the element's own
+    /// theme: a brush looked up once stays the light theme's on a dark window.
+    fn fill_style() -> windows_core::Result<Style> {
+        XamlReader::Load(&windows_core::HSTRING::from(format!(
+            "<Style xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" TargetType=\"Border\">\
+             <Setter Property=\"Background\" Value=\"{{ThemeResource {IMAGE_FILL}}}\"/></Style>"
+        )))?
+        .cast()
+    }
+
     fn look(width: f64, height: f64) -> windows_core::Result<Border> {
         let look = Border::new()?;
-        look.SetBackground(&theme_resource::<Brush>("ControlFillColorSecondaryBrush")?)?;
+        look.SetStyle(&fill_style()?)?;
         look.SetWidth(width)?;
         look.SetHeight(height)?;
-        look.SetHorizontalAlignment(HorizontalAlignment::Center)?;
+        look.SetHorizontalAlignment(HorizontalAlignment::Left)?;
         look.SetVerticalAlignment(VerticalAlignment::Center)?;
         AutomationProperties::SetAccessibilityView(&look, AccessibilityView::Raw)?;
         Ok(look)
@@ -31677,44 +31716,6 @@ mod images {
             .and_then(|source| source.cast::<BitmapImage>().ok())
             .is_some_and(|bitmap| bitmap.PixelWidth().unwrap_or(0) > 0);
         Ok(if opened && image.Opacity()? > 0.0 { "shown" } else { "empty" }.into())
-    }
-
-    /// The natural size from the file's own header, for the decode size: JPEG's
-    /// frame header, PNG's IHDR and GIF's screen descriptor. None for anything
-    /// else, which then decodes at XAML's own size.
-    pub(super) fn header_size(bytes: &[u8]) -> Option<(u32, u32)> {
-        if bytes.starts_with(b"\x89PNG\r\n\x1a\n") && bytes.len() >= 24 {
-            let w = u32::from_be_bytes(bytes[16..20].try_into().ok()?);
-            let h = u32::from_be_bytes(bytes[20..24].try_into().ok()?);
-            return (w > 0 && h > 0).then_some((w, h));
-        }
-        if bytes.starts_with(b"GIF8") && bytes.len() >= 10 {
-            let w = u32::from(u16::from_le_bytes([bytes[6], bytes[7]]));
-            let h = u32::from(u16::from_le_bytes([bytes[8], bytes[9]]));
-            return (w > 0 && h > 0).then_some((w, h));
-        }
-        if !bytes.starts_with(&[0xFF, 0xD8]) {
-            return None;
-        }
-        let mut at = 2;
-        while at + 9 < bytes.len() {
-            if bytes[at] != 0xFF {
-                return None;
-            }
-            let marker = bytes[at + 1];
-            if marker == 0xFF {
-                at += 1;
-                continue;
-            }
-            let len = usize::from(u16::from_be_bytes([bytes[at + 2], bytes[at + 3]]));
-            if matches!(marker, 0xC0..=0xCF) && !matches!(marker, 0xC4 | 0xC8 | 0xCC) {
-                let h = u32::from(u16::from_be_bytes([bytes[at + 5], bytes[at + 6]]));
-                let w = u32::from(u16::from_be_bytes([bytes[at + 7], bytes[at + 8]]));
-                return (w > 0 && h > 0).then_some((w, h));
-            }
-            at += 2 + len;
-        }
-        None
     }
 
     /// The decode size: whether the longer side is the width, and that side in
@@ -31845,17 +31846,10 @@ mod images {
 mod tests {
     use super::*;
 
-    /// docs/network-images-plan.md N9: the decode size comes from the file's
-    /// own header and the box, never past the natural size (winui/images.rs).
+    /// docs/network-images-plan.md N9: the decode size follows the box, never
+    /// past the natural size (crate::image_header reads that size).
     #[test]
-    fn an_image_header_names_its_natural_size_and_the_decode_follows_the_box() {
-        let cover = include_bytes!("../../../../guests/assets/covers/cover-600.jpg");
-        assert_eq!(images::header_size(cover), Some((600, 600)));
-        assert_eq!(images::header_size(b"not a picture"), None);
-        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
-        png.extend(320u32.to_be_bytes());
-        png.extend(200u32.to_be_bytes());
-        assert_eq!(images::header_size(&png), Some((320, 200)));
+    fn the_decode_follows_the_box() {
         let fit = |name| crate::wire::FITS.iter().find(|(_, n)| *n == name).unwrap().0;
         assert_eq!(images::decode_target((600, 600), 96.0, 96.0, Some(fit("cover")), 1.0), (true, 96));
         assert_eq!(images::decode_target((600, 300), 96.0, 96.0, Some(fit("cover")), 2.0), (true, 384));

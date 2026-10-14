@@ -853,6 +853,10 @@ final class KayaNode: Identifiable {
     @ObservationIgnored var imageGen: UInt64 = 0
     @ObservationIgnored var imageRequested = false
     var imagePending = false
+    /// The natural size read from the bytes' header while their pixels decode
+    /// off the main thread, so an unboxed image takes its room in the first
+    /// layout pass (docs/network-images-plan.md N9's 2026-10-13 amendment).
+    var imagePendingNatural: CGSize?
     var imageFailed = false
     @ObservationIgnored var imageDrawn = ""
     @ObservationIgnored var imageMounts: [String: Int] = [:]
@@ -20911,7 +20915,7 @@ struct KayaPicture: @unchecked Sendable {
 /// is the placeholder class, never a crash; ImageIO is LENIENT where gdk-pixbuf
 /// refuses (docs/deferred.md). tools/check-empty-child.py drives it.
 func kayaDecodePicture(_ data: Data, target: (CGSize) -> Int?) -> KayaPicture? {
-    guard let natural = KayaPlatformImage(data: data)?.size, natural.width > 0, natural.height > 0,
+    guard let natural = kayaHeaderNatural(data),
         let source = CGImageSourceCreateWithData(data as CFData, nil),
         let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
         let wide = props[kCGImagePropertyPixelWidth] as? Int,
@@ -20933,6 +20937,24 @@ func kayaDecodePicture(_ data: Data, target: (CGSize) -> Int?) -> KayaPicture? {
     #endif
     return KayaPicture(image: image, natural: natural, long: long, pixels: pixels, cost: cg.bytesPerRow * cg.height)
 }
+
+/// The natural size the decode will report, read from the header alone:
+/// `NSImage(data:)` and `UIImage(data:)` defer their pixels to the first draw.
+func kayaHeaderNatural(_ data: Data) -> CGSize? {
+    guard let natural = KayaPlatformImage(data: data)?.size, natural.width > 0, natural.height > 0 else {
+        return nil
+    }
+    return natural
+}
+
+/// What a bled image draws in its reserved slot before its pixels land.
+let kayaBlankPicture: KayaPlatformImage = {
+    #if os(macOS)
+        NSImage(size: NSSize(width: 1, height: 1))
+    #else
+        UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1)).image { _ in }
+    #endif
+}()
 
 /// The longer side in pixels an image is drawn at: its declared box placed by
 /// `fit`, else its bounds, else its natural size, times the display's scale.
@@ -21021,6 +21043,7 @@ func kayaWatchMemoryPressure() {
 
 func kayaInstallPicture(_ node: KayaNode, _ picture: KayaPicture?, undecodable: Bool) {
     node.imagePending = false
+    node.imagePendingNatural = nil
     if let picture {
         node.image = picture.image
         node.imageSize = "\(Int(picture.natural.width))x\(Int(picture.natural.height))"
@@ -21073,6 +21096,7 @@ func kayaServePicture(_ node: KayaNode) {
         return
     }
     node.imagePending = true
+    node.imagePendingNatural = kayaImageBoxed(node) ? nil : kayaHeaderNatural(data)
     let nodeId = node.id
     kayaDecodeQueue.async {
         let picture = kayaDecodePicture(data) { kayaPictureTarget($0, wide, tall, fit, scale) }
@@ -22520,8 +22544,9 @@ struct KayaRender: View {
             // PRESENT AND EMPTY, NOT ABSENT (tools/check-empty-child.py).
             // A BLED picture spans its slot's width at its own height and fills
             // the bled frame (docs/safe-area-plan.md §3).
-            if node.bleed, let image = node.image {
-                let fit = kayaImageFit(natural: image.size, node: node) ?? image.size
+            if node.bleed, let natural = node.image?.size ?? node.imagePendingNatural {
+                let fit = kayaImageFit(natural: natural, node: node) ?? natural
+                let image = node.image ?? kayaBlankPicture
                 KayaBleed(node: node, slotHeight: fit.height) {
                     Color.clear
                         .overlay {
@@ -22557,6 +22582,12 @@ struct KayaRender: View {
                 .background(KayaLabelFrameReader(id: node.id))
                 .onAppear { kayaImageAppeared(node, "shown") }
                 .onDisappear { kayaImageGone(node, "shown") }
+            } else if let natural = node.imagePendingNatural {
+                let room = kayaImageFit(natural: natural, node: node) ?? natural
+                Color.clear.frame(width: room.width, height: room.height)
+                    .background(KayaLabelFrameReader(id: node.id))
+                    .onAppear { kayaImageAppeared(node, "empty") }
+                    .onDisappear { kayaImageGone(node, "empty") }
             } else {
                 Color.clear.frame(width: 0, height: 0)
                     .onAppear { kayaImageAppeared(node, "empty") }
@@ -22589,9 +22620,13 @@ struct KayaRender: View {
             // OUTSIDE the box that claims it: `.background` measures the view it
             // decorates, so on the bare image it would report the BUFFER's size
             // and the size policy could never do anything.
+            // docs/traps.md, the grown canvas that could not shrink.
             .frame(
+                minWidth: node.grow > 0 ? 0 : nil,
                 maxWidth: node.grow > 0 ? .infinity : nil,
+                minHeight: node.grow > 0 ? 0 : nil,
                 maxHeight: node.grow > 0 ? .infinity : nil)
+            .clipped()
             .background(KayaCanvasReader(id: node.id))
             .background(kayaHarnessDrivesFrames ? nil : KayaCanvasTicker())
             .modifier(KayaBleedIfAsked(node: node))

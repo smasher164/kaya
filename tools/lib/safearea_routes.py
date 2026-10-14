@@ -339,9 +339,15 @@ CALLS = [
     (SWIFT, "the app's bleed reaches the arm",
      "case (propBleed, valueBool):\n kayaScene.nodes[id]!.bleed = raw[body + 24] != 0"),
     (SWIFT, "a bled picture is drawn through the bleed",
-     "if node.bleed, let image = node.image {\n let fit = kayaImageFit(natural: image.size, node: node) ?? image.size\n KayaBleed(node: node, slotHeight: fit.height)"),
+     "if node.bleed, let natural = node.image?.size ?? node.imagePendingNatural {\n let fit = kayaImageFit(natural: natural, node: node) ?? natural\n let image = node.image ?? kayaBlankPicture\n KayaBleed(node: node, slotHeight: fit.height)"),
     (SWIFT, "a bled canvas is drawn through the bleed",
      ".background(kayaHarnessDrivesFrames ? nil : KayaCanvasTicker())\n .modifier(KayaBleedIfAsked(node: node))"),
+    # docs/traps.md, the grown canvas that could not shrink: with no minimum
+    # the frame keeps its last blit's size in a smaller offer.
+    (SWIFT, "a grown canvas takes its offer below its last blit",
+     ".frame(\n minWidth: node.grow > 0 ? 0 : nil,\n maxWidth: node.grow > 0 ? .infinity : nil,\n"
+     " minHeight: node.grow > 0 ? 0 : nil,\n maxHeight: node.grow > 0 ? .infinity : nil)\n .clipped()\n"
+     " .background(KayaCanvasReader(id: node.id))"),
     (SWIFT, "a bled video view is drawn through the bleed",
      ".accessibilityAction(named: actions[1].0, actions[1].1)\n .modifier(KayaBleedIfAsked(node: node))"),
     (SWIFT, "a bled self-view is drawn through the bleed",
@@ -464,6 +470,10 @@ def run(g):
         ("the slot passed through, the runaway", SWIFT,
          r"let answer = subviews\.first\?\.sizeThatFits\(grown\) \?\? \.zero\n\s+return CGSize\(width: max\(0, answer\.width - dx\), height: max\(0, answer\.height - dy\)\)",
          "return subviews.first?.sizeThatFits(proposal) ?? .zero", "the bleed's slot names sizeThatFits(proposal)"),
+        ("a grown canvas that keeps its last blit's size", SWIFT,
+         r"\n\s+minWidth: node\.grow > 0 \? 0 : nil,(\n\s+maxWidth: node\.grow > 0 \? \.infinity : nil,)"
+         r"\n\s+minHeight: node\.grow > 0 \? 0 : nil,",
+         r"\1", "a grown canvas takes its offer below its last blit"),
         ("touching through a padded container", SWIFT, r"kayaFilledInset\(parent\) == 0", "true",
          "the touching sides lacks kayaFilledInset(parent) == 0"),
         ("expect_safe blind to a runaway", SWIFT, r'return \(nil, "\\\(spec\) runs past the window\'s edge: \\\(facts\)"\)',

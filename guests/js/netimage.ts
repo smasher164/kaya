@@ -108,14 +108,16 @@ const { art, phase, band, released, again, tracks } = app.window({ title: "netim
   const released = kaya.signal("released: none");
   const again = kaya.signal("again: none");
   const tracks = kaya.collection(Track);
-  kaya.row(() => {
+  kaya.column(() => {
     kaya.column(() => {
       kaya.image(art, { fit: "cover", phase }).maxWidth(96).maxHeight(96).a11yId("cover").a11yLabel("Cover");
-      kaya.row(() => {
-        for (const [name, fn] of [["release", onRelease], ["refresh", onRefresh], ["junk", onJunk], ["fail", onFail]] as const) {
-          kaya.button(name, { onClick: fn }).a11yId(name);
-        }
-      });
+      for (const pair of [[["release", onRelease], ["refresh", onRefresh]], [["junk", onJunk], ["fail", onFail]]] as const) {
+        kaya.row(() => {
+          for (const [name, fn] of pair) {
+            kaya.button(name, { onClick: fn }).a11yId(name);
+          }
+        });
+      }
       kaya.row(() => {
         for (const [name, fn] of [["rows", onRows], ["delete", onDelete], ["retarget", onRetarget]] as const) {
           kaya.button(name, { onClick: fn }).a11yId(name);

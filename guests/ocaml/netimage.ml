@@ -82,7 +82,7 @@ let () =
         set_grow table 1.0;
 
         let root =
-          row
+          column
             [
               column
                 [
@@ -99,6 +99,9 @@ let () =
                       button ~text:"refresh" ~a11y_id:"refresh" ~on_click:(fun () ->
                           live := Some (Live (Some covers.(1)));
                           write phase Image_phase.Loading);
+                    ];
+                  row
+                    [
                       button ~text:"junk" ~a11y_id:"junk" ~on_click:(fun () ->
                           write art (Bytes.of_string "not an image");
                           write phase Image_phase.Shown);

@@ -69,6 +69,17 @@ CALLS = [
     ("the doorbell's wait re-arms instead of borrowing",
      "if CORE.with(|slot| slot.try_borrow_mut().is_err()) {\n glib::timeout_add_local_once("
      "std::time::Duration::from_millis(10), drain_when_free);\n return;"),
+    ("the failed glyph at GTK's large icon size (N4, 2026-10-13: the 16px glyph read faint beside the other "
+     "platforms')", "const IMAGE_GLYPH: i32 = 32;"),
+    ("the failed glyph dimmed as AdwStatusPage dims its icon", "const IMAGE_DIM_ALPHA: f32 = 0.55;"),
+    ("a band is read only from rows that have their allocation (docs/traps.md, the GTK band read from "
+     "unallocated rows)", "let laid_out = !rows.is_empty() && rows.iter().all(|(_, height)| *height > 0.0);"),
+    ("a band read that found unallocated rows reads again after the frame that allocates them",
+     "if !rows.is_empty() && !laid_out {\n report_after_layout(&body, &pending, &awaiting_layout, id);"),
+    ("an unboxed image takes its header's size while it decodes (N9's 2026-10-13 amendment: an unboxed image laid out at 0x0 until its pixels land moves everything after it)",
+     "s.pending = true;\n s.pending_natural = crate::image_header::natural(bytes);"),
+    ("the reserved size is laid out", "(None, Some(natural)) => reserve_natural(picture, natural),"),
+    ("a decoded picture ends the reserved size", "s.pending = false;\n s.pending_natural = None;"),
     ("a parked row's asks are sent",
      "table.reported = Some((index, count));\n }\n for op in ops.unwrap_or_default() {\n apply(core, op);\n }\n send_asks(core);"),
 ]
@@ -173,6 +184,20 @@ CUTS = [
     ("GTK: the doorbell borrowing CORE inside a nested turn",
      r"glib::idle_add\(\|\| \{\n(\s+)drain_when_free\(\);", r"glib::idle_add(|| {\n\1drain_transactions();",
      "a doorbell rung under a borrowed CORE waits"),
+    ("GTK: the failed glyph back at the symbolic size", r"const IMAGE_GLYPH: i32 = 32;",
+     "const IMAGE_GLYPH: i32 = 16;", "the failed glyph at GTK's large icon size"),
+    ("GTK: a band read off the first allocated row",
+     r"let laid_out = !rows\.is_empty\(\) && rows\.iter\(\)\.all\(\|\(_, height\)\| \*height > 0\.0\);",
+     "let laid_out = rows.iter().any(|(_, height)| *height > 0.0);",
+     "a band is read only from rows that have their allocation"),
+    ("GTK: no read after the allocating frame",
+     r"\n\s+report_after_layout\(&body, &pending, &awaiting_layout, id\);", "",
+     "reads again after the frame that allocates them"),
+    ("GTK: no header read before the decode",
+     r"s\.pending_natural = crate::image_header::natural\(bytes\);", "s.pending_natural = None;",
+     "an unboxed image takes its header's size"),
+    ("GTK: the reserved size never laid out", r"\(None, Some\(natural\)\) => reserve_natural\(picture, natural\),",
+     "(None, Some(_)) => fit_picture(picture, None),", "the reserved size is laid out"),
     ("GTK: the harness reading something else", r"\n(\s+)image_drawn_phase\(&core\.images\[i\]\)\n",
      r'\n\1"shown".to_string()\n', "expect_image_phase on GTK lacks image_drawn_phase"),
 ]

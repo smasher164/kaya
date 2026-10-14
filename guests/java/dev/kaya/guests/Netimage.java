@@ -55,7 +55,7 @@ public final class Netimage {
             KayaApp.Signal<String> again = tx.signal("again: none");
             var tracks = NetTrackKaya.collection(tx);
 
-            tx.mount(tx.row(root -> {
+            tx.mount(tx.column(root -> {
                 tx.column(col -> {
                     tx.image(art).maxWidth(96).maxHeight(96).fit(KayaApp.Fit.COVER)
                             .phase(phase).a11yId("cover").a11yLabel("Cover");
@@ -70,6 +70,8 @@ public final class Netimage {
                             live = new Job(true, covers[1], null, null);
                             t.write(phase, ImagePhase.LOADING);
                         }).a11yId("refresh");
+                    });
+                    tx.row(buttons -> {
                         tx.button("junk", t -> {
                             t.write(art, "not an image".getBytes(java.nio.charset.StandardCharsets.UTF_8));
                             t.write(phase, ImagePhase.SHOWN);

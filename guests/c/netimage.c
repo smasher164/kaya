@@ -18,7 +18,7 @@
 
 /* Guest-allocated ids; tools/check-c-ids.py holds the one id space. */
 #define W_ROOT 1
-#define W_LEFT 2
+#define W_CONTROLS 2
 #define W_COVER 3
 #define W_LIVE_ROW 4
 #define W_RELEASE 5
@@ -36,6 +36,7 @@
 #define N_ROW 17
 #define N_ART 18
 #define N_TITLE 19
+#define W_FAIL_ROW 20
 
 #define SIG_ART 1
 #define SIG_PHASE 2
@@ -207,7 +208,7 @@ static void button(KayaTx *tx, uint64_t row, uint64_t id, const char *name) {
 static void label(KayaTx *tx, uint64_t id, uint64_t signal, const char *a11y_id) {
     kaya_tx_bind_text(tx, id, signal);
     kaya_tx_set_a11y_id(tx, id, a11y_id);
-    kaya_tx_add_child(tx, W_LEFT, id);
+    kaya_tx_add_child(tx, W_CONTROLS, id);
 }
 
 static void build_scene(void) {
@@ -224,9 +225,9 @@ static void build_scene(void) {
     kaya_tx_create_signal(&tx, SIG_RELEASED, kaya_str("released: none"));
     kaya_tx_create_signal(&tx, SIG_AGAIN, kaya_str("again: none"));
 
-    kaya_tx_create_widget(&tx, W_ROOT, KAYA_KIND_ROW);
-    kaya_tx_create_widget(&tx, W_LEFT, KAYA_KIND_COLUMN);
-    kaya_tx_add_child(&tx, W_ROOT, W_LEFT);
+    kaya_tx_create_widget(&tx, W_ROOT, KAYA_KIND_COLUMN);
+    kaya_tx_create_widget(&tx, W_CONTROLS, KAYA_KIND_COLUMN);
+    kaya_tx_add_child(&tx, W_ROOT, W_CONTROLS);
 
     /* A busy image declares its box: fit and both bounds (N3). */
     kaya_tx_create_widget(&tx, W_COVER, KAYA_KIND_IMAGE);
@@ -237,18 +238,20 @@ static void build_scene(void) {
     kaya_tx_bind_phase(&tx, W_COVER, SIG_PHASE);
     kaya_tx_set_a11y_id(&tx, W_COVER, "cover");
     kaya_tx_set_a11y_label(&tx, W_COVER, "Cover");
-    kaya_tx_add_child(&tx, W_LEFT, W_COVER);
+    kaya_tx_add_child(&tx, W_CONTROLS, W_COVER);
 
     kaya_tx_create_widget(&tx, W_LIVE_ROW, KAYA_KIND_ROW);
     kaya_tx_create_widget(&tx, W_RELEASE, KAYA_KIND_BUTTON);
     button(&tx, W_LIVE_ROW, W_RELEASE, "release");
     kaya_tx_create_widget(&tx, W_REFRESH, KAYA_KIND_BUTTON);
     button(&tx, W_LIVE_ROW, W_REFRESH, "refresh");
+    kaya_tx_add_child(&tx, W_CONTROLS, W_LIVE_ROW);
+    kaya_tx_create_widget(&tx, W_FAIL_ROW, KAYA_KIND_ROW);
     kaya_tx_create_widget(&tx, W_JUNK, KAYA_KIND_BUTTON);
-    button(&tx, W_LIVE_ROW, W_JUNK, "junk");
+    button(&tx, W_FAIL_ROW, W_JUNK, "junk");
     kaya_tx_create_widget(&tx, W_FAIL, KAYA_KIND_BUTTON);
-    button(&tx, W_LIVE_ROW, W_FAIL, "fail");
-    kaya_tx_add_child(&tx, W_LEFT, W_LIVE_ROW);
+    button(&tx, W_FAIL_ROW, W_FAIL, "fail");
+    kaya_tx_add_child(&tx, W_CONTROLS, W_FAIL_ROW);
     kaya_tx_create_widget(&tx, W_ROWS_ROW, KAYA_KIND_ROW);
     kaya_tx_create_widget(&tx, W_ROWS, KAYA_KIND_BUTTON);
     button(&tx, W_ROWS_ROW, W_ROWS, "rows");
@@ -256,7 +259,7 @@ static void build_scene(void) {
     button(&tx, W_ROWS_ROW, W_DELETE, "delete");
     kaya_tx_create_widget(&tx, W_RETARGET, KAYA_KIND_BUTTON);
     button(&tx, W_ROWS_ROW, W_RETARGET, "retarget");
-    kaya_tx_add_child(&tx, W_LEFT, W_ROWS_ROW);
+    kaya_tx_add_child(&tx, W_CONTROLS, W_ROWS_ROW);
     kaya_tx_create_widget(&tx, W_BAND, KAYA_KIND_LABEL);
     label(&tx, W_BAND, SIG_BAND, "band");
     kaya_tx_create_widget(&tx, W_RELEASED, KAYA_KIND_LABEL);

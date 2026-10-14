@@ -56,7 +56,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let tracks = tx.collection::<Track>();
         let mut node = None;
         let root = tx
-            .row(|tx| {
+            .column(|tx| {
                 tx.column(|tx| {
                     tx.image(art)
                         .max_width(96.0)
@@ -65,14 +65,14 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                         .phase(phase)
                         .a11y_id("cover")
                         .a11y_label("Cover");
-                    tx.row(|tx| {
-                        for (name, msg) in
-                            [("release", Msg::Release), ("refresh", Msg::Refresh), ("junk", Msg::Junk), ("fail", Msg::Fail)]
-                        {
-                            let b = tx.button(name).a11y_id(name).id();
-                            msgs.on_click(b, msg);
-                        }
-                    });
+                    for pair in [[("release", Msg::Release), ("refresh", Msg::Refresh)], [("junk", Msg::Junk), ("fail", Msg::Fail)]] {
+                        tx.row(|tx| {
+                            for (name, msg) in pair {
+                                let b = tx.button(name).a11y_id(name).id();
+                                msgs.on_click(b, msg);
+                            }
+                        });
+                    }
                     tx.row(|tx| {
                         for (name, msg) in [("rows", Msg::Rows), ("delete", Msg::Delete), ("retarget", Msg::Retarget)] {
                             let b = tx.button(name).a11y_id(name).id();

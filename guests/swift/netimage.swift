@@ -61,7 +61,7 @@ KayaApp.run { app in
                 for job in batch { post { tx in receive(tx, job) } }
             }
         }
-        let root = tx.row { root in
+        let root = tx.column { root in
             tx.column { _ in
                 let cover = tx.image(bind: art, fit: .cover, maxWidth: 96, maxHeight: 96)
                 tx.setPhase(cover, phase)
@@ -80,6 +80,8 @@ KayaApp.run { app in
                             live = .live(covers[1])
                             t.write(phase, .phase(.loading))
                         }), "refresh")
+                }
+                tx.row { _ in
                     tx.setA11yId(
                         tx.button("junk", onClick: { t in
                             t.write(art, .data(Data("not an image".utf8)))

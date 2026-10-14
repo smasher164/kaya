@@ -440,7 +440,7 @@ RECOMMEND:
 | macOS, iOS | the quaternary system fill (`Color(.quaternarySystemFill)` on iOS, the `.quaternary` shape style on the mac), which is what AsyncImage's default grey placeholder resembles | an SF Symbol available at kaya's floors (SF Symbols 4), to choose in the depth: `photo` with a slash is newer than the floor, so the candidate is `exclamationmark.triangle` or `photo` dimmed |
 | Android | Material 3's `surfaceVariant` (or `surfaceContainerHighest`) | Material Symbols `broken_image` |
 | GTK | libadwaita's card colour or the foreground at the HIG's dim alpha, read from the style, never a literal | the freedesktop icon `image-missing`, which every icon theme carries by name |
-| WinUI | `ControlFillColorSecondaryBrush` or `CardBackgroundFillColorSecondaryBrush` | a Segoe Fluent Icons glyph for a broken or missing picture, to choose in the depth |
+| WinUI | `ControlFillColorSecondaryBrush` or `CardBackgroundFillColorSecondaryBrush` (`ControlAltFillColorQuarternaryBrush` since the amendment below) | a Segoe Fluent Icons glyph for a broken or missing picture, to choose in the depth |
 
 The glyph joins the symbol vocabulary as `image_missing`, so check-symbols and
 check-symbol-parity hold it like the other twenty-four.
@@ -465,6 +465,24 @@ placeholder. It needs a server that sends one, and N2 already lets an app
 show a preview: a guest that has a hash or a thumbnail decodes it to bytes
 and sets them as the source while `phase` is `loading`. KEY for the ledger:
 blurhash, thumbhash, image placeholder.
+
+AMENDED 2026-10-13 after the review captures (RULED by the maintainer: "Windows
+uses a darker placeholder colour, and the smaller items as recommended"):
+
+- **WinUI's fill is `ControlAltFillColorQuarternaryBrush`**, worn through a
+  `{ThemeResource}` style so it follows the window's theme. The first fill,
+  `ControlFillColorSecondaryBrush`, was 3 grey levels off the window ground
+  and 1 off the table card, and a brush looked up once out of the
+  application's dictionary stayed the light theme's on a dark window (it read
+  141 on a 32 ground). §7 has the five tokens measured.
+- **GTK's glyph is drawn at 32 px**, GTK_ICON_SIZE_LARGE, where 16 px (the
+  normal size) read small and faint beside the other platforms' 20 to 24. It
+  keeps the dim-label alpha (0.55): libadwaita's own placeholder, AdwStatusPage,
+  draws its icon at `color-mix(in srgb, currentColor var(--dim-opacity),
+  transparent)`, and the other three draw theirs at the secondary foreground.
+- **A table cell's art sits at the cell's leading edge on WinUI too**, as on
+  the other four; the Image and the looks are aligned leading inside the
+  host that stretches to the column.
 
 ### N5: Accessibility: the label in every phase; busy where the platform has it; a label-less image stays silent (RULED 2026-10-13)
 
@@ -642,6 +660,21 @@ platforms also read WebP, GIF, HEIF and AVIF, and it ignores colour profiles
 (reader.rs takes every image as sRGB), so a wide-gamut photo would draw
 differently from the same file in Photos. The canvas needs one decoder for
 one hash; an image widget needs the platform's own picture.
+
+AMENDED 2026-10-13: **the size is read synchronously, the pixels off the
+thread.** An unboxed image whose decode had not landed laid out at 0x0 and
+pushed everything after it when the picture arrived (the safearea scene's
+canvas ran 160 pt under the window under matrix load, docs/traps.md). Each arm
+now reads the natural size from the header when the bytes arrive and lays the
+image out at that size, bounded as the picture will be, until the pixels land:
+SwiftUI through `NSImage(data:)`/`UIImage(data:)`, which defer their pixels to
+the first draw (the decode reports the same function's size); GTK and WinUI
+through the core's one header reader (`crate::image_header::natural`, JPEG's
+frame header, PNG's IHDR, GIF's screen descriptor); Compose through
+`BitmapFactory`'s `inJustDecodeBounds`. A boxed image needs none of it, since
+its box is its size in every phase (N3). Not covered: a JPEG whose EXIF
+orientation swaps its sides is reserved unrotated on GTK, WinUI and Compose,
+and moves once when its pixels land.
 
 ### N10: The cache: decoded pictures in each backend, keyed by the bytes' content, bounded by memory; no disk cache in kaya (RULED 2026-10-13)
 
@@ -1118,4 +1151,22 @@ says anything at all.
   without tls-lwt), certificates verified (docs/traps.md).
 - WinUI's loading fill, ControlFillColorSecondaryBrush, is 3 grey levels off
   the window ground and 1 off the table card: nearly invisible. A styling
-  call for the review page (docs/deferred.md).
+  call for the review page (docs/deferred.md), RULED 2026-10-13 (N4's
+  amendment) on these readings, the windows VM in the light theme, the
+  netimage scene held at its loading look, the cover box against the window
+  ground and a row's art against the table card, in grey levels:
+
+  | token | box / ground | apart | art / card | apart |
+  |---|---|---|---|---|
+  | ControlFillColorSecondaryBrush (the first) | 246 / 243 | 3 | 250 / 251 | 1 |
+  | SubtleFillColorSecondaryBrush | 234 / 243 | 9 | 242 / 251 | 9 |
+  | ControlAltFillColorTertiaryBrush | 229 / 243 | 14 | 236 / 251 | 15 |
+  | ControlAltFillColorQuarternaryBrush (taken) | 220 / 243 | 23 | 227 / 251 | 24 |
+  | ControlStrongFillColorDisabledBrush | 166 / 243 | 77 | 171 / 251 | 80 |
+
+  The taken token is the nearest to GTK's fill (20 apart on both) that shows
+  on both grounds. Dark, through the `{ThemeResource}` style: 48 / 32 (16
+  apart) and 58 / 43 (15 apart).
+- MEASURED 2026-10-13 (mac, M5 Pro, release builds): the core's header reader
+  takes 0.01 µs on the 600 and 1000 covers; `NSImage(data:).size` a median of
+  73 µs and 64 µs (15 runs), so SwiftUI reads it for unboxed images only.

@@ -685,6 +685,10 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     var fitDeclared by mutableStateOf(false)
     var imageFailed by mutableStateOf(false)
     var imagePending by mutableStateOf(false)
+    /** The natural size read from the bytes' header while their pixels
+     * decode, so an unboxed image takes its room in the first layout pass
+     * (docs/network-images-plan.md N9's 2026-10-13 amendment). */
+    var pendingNatural by mutableStateOf<IntArray?>(null)
     var imageGen by mutableIntStateOf(0)
     var imageData: ByteArray? = null
     var imageContentId = 0L
@@ -2186,8 +2190,17 @@ internal fun kayaWatchMemory(context: Context) {
     })
 }
 
+/** The natural size from the header alone: BitmapFactory's bounds pass reads
+ * no pixels. Null for bytes that name none. */
+internal fun kayaHeaderNatural(data: ByteArray): IntArray? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(data, 0, data.size, bounds)
+    return if (bounds.outWidth > 0 && bounds.outHeight > 0) intArrayOf(bounds.outWidth, bounds.outHeight) else null
+}
+
 internal fun kayaInstallPicture(node: KayaNode, picture: KayaPicture?, undecodable: Boolean) {
     node.imagePending = false
+    node.pendingNatural = null
     node.picture = picture
     node.imageSize = if (picture != null) "${picture.naturalWidth}x${picture.naturalHeight}" else "0x0"
     node.imageFailed = picture == null && undecodable
@@ -4038,6 +4051,7 @@ object KayaCompose {
                             node.imageData = blobs[handle]
                             node.imageContentId = ids[handle] ?: 0L
                             node.imageGen += 1
+                            node.pendingNatural = node.imageData?.let { kayaHeaderNatural(it) }
                         }
                         else -> error("kaya: unknown prop $prop")
                     }
@@ -17223,9 +17237,10 @@ private fun KayaRenderCore(
             val density = LocalDensity.current.density
             // A BLED PICTURE spans its slot's width at its fit height, drawn
             // to fill (docs/safe-area-plan.md A3; the SwiftUI arm's slot).
-            val fit = picture?.let {
-                val w = it.naturalWidth.toFloat()
-                val h = it.naturalHeight.toFloat()
+            val natural = picture?.let { intArrayOf(it.naturalWidth, it.naturalHeight) } ?: node.pendingNatural
+            val fit = natural?.let {
+                val w = it[0].toFloat()
+                val h = it[1].toFloat()
                 val scale = minOf(
                     1f,
                     if (node.maxWidth > 0) node.maxWidth.toFloat() * density / w else 1f,
@@ -17250,6 +17265,10 @@ private fun KayaRenderCore(
                         )
                     },
                 )
+            } else if (fit != null) {
+                val room = with(LocalDensity.current) { Modifier.size(fit.width.toDp(), fit.height.toDp()) }
+                Box(modifier = boxFill.then(if (node.bleed) kayaBleed(node, fit) else room).then(a11yTag)
+                    .then(kayaFrame(node.id)))
             } else {
                 Box(modifier = a11yTag)
             }

@@ -11,6 +11,8 @@ mod brand;
 // and every platform blits.
 mod canvas;
 mod content_id;
+#[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(dead_code))]
+mod image_header;
 // The nounwind boundaries' one report path (docs/deferred.md, "A GUARD
 // THAT ABORTS THE PROCESS IS THE WRONG SHAPE"); ungated — every target
 // has frames that cannot unwind.

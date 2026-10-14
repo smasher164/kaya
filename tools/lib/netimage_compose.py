@@ -31,6 +31,8 @@ DOORS = [
       "if (node.imageGen != gen) return",
       "KayaPictureCache.put(KayaPictureCache.Key(id, picture.pixels), picture)",
       "kayaInstallPicture(node, picture, undecodable = picture == null)"], []),
+    ("header read", "internal fun kayaHeaderNatural(data: ByteArray): IntArray? {",
+     ["inJustDecodeBounds = true"], ["ImageDecoder", "inSampleSize", "asImageBitmap"]),
     ("decode", "internal fun kayaDecodePicture(",
      ["ImageDecoder.decodeBitmap(", "wide = info.size.width", "decoder.setTargetSize(",
       "inJustDecodeBounds = true", "inSampleSize = sample"], ["node."]),
@@ -68,6 +70,12 @@ READS = [
 ]
 MODEL = r"node\.phase\b|node\.picture\b|node\.imageFailed|node\.imagePending|node\.imageData|node\.imageSize|IMAGE_PHASE_"
 CALLS = [
+    ("the source arm reads the header's size (N9's 2026-10-13 amendment: an unboxed image laid out at 0x0 until its pixels land moves everything after it)",
+     "node.pendingNatural = node.imageData?.let { kayaHeaderNatural(it) }"),
+    ("an installed picture ends the reserved size", "node.imagePending = false\n node.pendingNatural = null"),
+    ("an unboxed image takes the header's size while it decodes",
+     "val natural = picture?.let { intArrayOf(it.naturalWidth, it.naturalHeight) } ?: node.pendingNatural"),
+    ("the reserved size is laid out", "} else if (fit != null) {\n val room = with(LocalDensity.current) { Modifier.size(fit.width.toDp(), fit.height.toDp()) }"),
     ("the render arm goes through the door", "KayaPictureDoor(node)\n val picture = node.picture"),
     ("a boxed image takes its box in every phase",
      "if (kayaImageBoxed(node) && !node.bleed) {\n KayaImageBox(node, a11yTag, node.a11yLabel.ifEmpty { a11yFallback })"),
@@ -134,6 +142,11 @@ def findings(text):
 
 
 CUTS = [
+    ("Compose: no header read before the decode",
+     r"node\.pendingNatural = node\.imageData\?\.let \{ kayaHeaderNatural\(it\) \}", "node.pendingNatural = null",
+     "the source arm reads the header's size"),
+    ("Compose: the reserved size never laid out", r"\} else if \(fit != null\) \{", "} else if (false) {",
+     "the reserved size is laid out"),
     ("Compose: the decode back in the apply arm",
      r"node\.imageContentId = ids\[handle\] \?: 0L\n",
      "node.imageContentId = ids[handle] ?: 0L\n"

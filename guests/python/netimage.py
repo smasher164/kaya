@@ -128,14 +128,15 @@ with app.window(title="netimage", width=820, height=640):
     released = kaya.signal("released: none")
     again = kaya.signal("again: none")
     tracks = kaya.collection(Track)
-    with kaya.row():
+    with kaya.column():
         with kaya.column():
             kaya.image(art, fit=kaya.Fit.COVER, phase=phase) \
                 .max_width(96).max_height(96).a11y_id("cover").a11y_label("Cover")
-            with kaya.row():
-                for name, fn in (("release", on_release), ("refresh", on_refresh),
-                                 ("junk", on_junk), ("fail", on_fail)):
-                    kaya.button(name, on_click=fn).a11y_id(name)
+            for pair in ((("release", on_release), ("refresh", on_refresh)),
+                         (("junk", on_junk), ("fail", on_fail))):
+                with kaya.row():
+                    for name, fn in pair:
+                        kaya.button(name, on_click=fn).a11y_id(name)
             with kaya.row():
                 for name, fn in (("rows", on_rows), ("delete", on_delete),
                                  ("retarget", on_retarget)):

@@ -61,7 +61,7 @@ func App() *kaya.App {
 		again := tx.Signal("again: none")
 		tracks = TrackCollection(tx)
 
-		tx.Mount(tx.Row(func() {
+		tx.Mount(tx.Column(func() {
 			tx.Column(func() {
 				tx.ImageSignal(art).MaxWidth(96).MaxHeight(96).Fit(kaya.FitCover).
 					BindPhase(phase).A11yID("cover").A11yLabel("Cover")
@@ -76,6 +76,8 @@ func App() *kaya.App {
 						live = &job{live: true, bytes: covers[1]}
 						tx.Write(phase, kaya.ImagePhaseLoading)
 					}).A11yID("refresh")
+				})
+				tx.Row(func() {
 					tx.Button("junk", func(tx *kaya.Tx) {
 						tx.Write(art, []byte("not an image"))
 						tx.Write(phase, kaya.ImagePhaseShown)

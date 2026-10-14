@@ -92,13 +92,15 @@ main = kayaMain $ \app -> do
           modifyIORef' pending (RowJob "t298" "u/298b" (cover 2) :)
           submitTx app (patch tracks "t298" [set (field @"artUrl" @Track) "u/298b"])
     root <-
-      row
+      column
         [ column
             [ imageBound artSig [MaxWidth 96, MaxHeight 96, FitAs FitCover, PhaseBound phaseSig, A11yId "cover", A11yLabel "Cover"],
               row
                 [ buttonOn "release" onRelease [A11yId "release"],
-                  buttonOn "refresh" onRefresh [A11yId "refresh"],
-                  buttonOn "junk" onJunk [A11yId "junk"],
+                  buttonOn "refresh" onRefresh [A11yId "refresh"]
+                ],
+              row
+                [ buttonOn "junk" onJunk [A11yId "junk"],
                   buttonOn "fail" onFail [A11yId "fail"]
                 ],
               row

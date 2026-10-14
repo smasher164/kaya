@@ -1785,8 +1785,10 @@ fn apply_cross_align(child: &gtk4::Widget, vertical_container: bool, mode: i64) 
     if align != gtk4::Align::Baseline && crosses_container(child, vertical_container) {
         align = gtk4::Align::Fill;
     }
-    // A For's stamped rows span it (docs/tasks-plan.md §4, R7).
-    if vertical_container && stamps_rows(child) {
+    // A For's stamped rows span it (docs/tasks-plan.md §4, R7), and a
+    // declared table spans its assigned track (docs/tables-plan.md, the span
+    // half of expect_column_edges).
+    if vertical_container && (stamps_rows(child) || child.has_css_class(TABLE_CARD_CLASS)) {
         align = gtk4::Align::Fill;
     }
     // A SCROLL SPANS ITS PARENT'S CROSS AXIS in every align mode
@@ -4411,6 +4413,9 @@ struct GtkTable {
     /// One report per main-loop turn, however many adjustment signals
     /// asked for it.
     pending: Rc<std::cell::Cell<bool>>,
+    /// Set while a report waits for the frame that allocates rows the core
+    /// has just realized (`report_after_layout`).
+    awaiting_layout: Rc<std::cell::Cell<bool>>,
     /// §2.4's anchor, this tier's half: the ROW the viewport is parked
     /// on. Every correction cycle re-parks it at its corrected position,
     /// so a taller row realized ABOVE moves the scrollbar and not the
@@ -4752,6 +4757,7 @@ fn build_table(sink: &OccSink, cols: usize, tag: Rc<RefCell<Vec<u8>>>, id: u64) 
         bottom,
         reported: None,
         pending,
+        awaiting_layout: Rc::new(std::cell::Cell::new(false)),
         anchor,
         programmatic,
     }
@@ -5082,6 +5088,35 @@ fn scroll_note(what: std::fmt::Arguments<'_>) {
     crate::vtrace::note("scroll_row", what);
     #[cfg(not(feature = "harness"))]
     let _ = what;
+}
+
+/// The report again once the next frame has painted, which is the frame
+/// that allocates the rows the last report found without a box.
+fn report_after_layout(
+    body: &gtk4::ScrolledWindow,
+    pending: &Rc<std::cell::Cell<bool>>,
+    awaiting: &Rc<std::cell::Cell<bool>>,
+    id: u64,
+) {
+    use gtk4::prelude::WidgetExt;
+    if awaiting.get() {
+        return;
+    }
+    let Some(clock) = body.frame_clock() else { return };
+    awaiting.set(true);
+    let handler: Rc<std::cell::Cell<Option<glib::SignalHandlerId>>> = Rc::new(std::cell::Cell::new(None));
+    let pending = pending.clone();
+    let awaiting = awaiting.clone();
+    let slot = handler.clone();
+    let id_handler = clock.connect_after_paint(move |clock| {
+        awaiting.set(false);
+        if let Some(handler) = slot.take() {
+            clock.disconnect(handler);
+        }
+        schedule_window_report(&pending, id);
+    });
+    handler.set(Some(id_handler));
+    clock.request_phase(gtk4::gdk::FrameClockPhase::LAYOUT);
 }
 
 /// One report per main-loop turn, and never from inside the signal
@@ -5469,6 +5504,8 @@ fn window_report(core: &mut CoreState, id: u64) -> (usize, usize) {
     let top = table.top.clone();
     let bottom = table.bottom.clone();
     let last = table.reported;
+    let pending = table.pending.clone();
+    let awaiting_layout = table.awaiting_layout.clone();
     let anchor = table.anchor.clone();
     let programmatic = table.programmatic.clone();
     let adjustment = body.vadjustment();
@@ -5543,7 +5580,13 @@ fn window_report(core: &mut CoreState, id: u64) -> (usize, usize) {
         }
     }
 
-    let laid_out = rows.iter().any(|(_, height)| *height > 0.0);
+    // A ROW THE CORE HAS JUST REALIZED HAS NO ALLOCATION YET, and its (0, 0)
+    // read as the band's bottom edge sent every startup band past the rows
+    // on screen (docs/traps.md, the GTK band read from unallocated rows).
+    let laid_out = !rows.is_empty() && rows.iter().all(|(_, height)| *height > 0.0);
+    if !rows.is_empty() && !laid_out {
+        report_after_layout(&body, &pending, &awaiting_layout, id);
+    }
     // THE PASS THAT MEASURES DERIVES FROM WHAT IT MEASURED (2026-09-01,
     // docs/traps.md's wayland resize entry, the table sibling):
     // `band` was read before the rows were, so the first laid-out pass
@@ -8275,6 +8318,25 @@ fn refresh_bleeds(core: &mut CoreState) {
 /// its natural size is its paintable's, so a bounded picture shows the decoded
 /// texture through a paintable whose intrinsic size is the one that fits
 /// inside both bounds with its shape kept, never larger than the texture.
+/// An unboxed image whose pixels are still decoding takes the room its header
+/// names, bounded as the picture will be, and draws nothing in it.
+fn reserve_natural(picture: &gtk4::Picture, (w, h): (u32, u32)) {
+    use gtk4::prelude::ObjectExt;
+    // SAFETY: as fit_picture's: f64s written by the MaxWidth/MaxHeight arm.
+    let bound = |key: &str| unsafe { picture.data::<f64>(key).map(|p| *p.as_ref()) };
+    let (w, h) = (f64::from(w), f64::from(h));
+    let scale = 1f64.min(bound(MAX_WIDTH_KEY).map_or(1.0, |m| m / w)).min(bound(MAX_HEIGHT_KEY).map_or(1.0, |m| m / h));
+    let rtl = gtk4::prelude::WidgetExt::direction(picture) == gtk4::TextDirection::Rtl;
+    picture.set_paintable(Some(&image_look::ImageLook::new(
+        picture,
+        image_look::Look::Empty,
+        (w * scale).round() as i32,
+        (h * scale).round() as i32,
+        None,
+        rtl,
+    )));
+}
+
 fn fit_picture(picture: &gtk4::Picture, texture: Option<gtk4::gdk::Texture>) {
     use gtk4::prelude::{ObjectExt, PaintableExt};
     let Some(texture) = texture else {
@@ -8455,8 +8517,10 @@ mod bounded_paintable {
 
 const IMAGE_STATE_KEY: &str = "kaya-netimage";
 
-/// N4's glyph is drawn at the symbolic size, and only in a box at least twice it.
-const IMAGE_GLYPH: i32 = 16;
+/// N4's glyph at GTK_ICON_SIZE_LARGE, dimmed as AdwStatusPage dims its
+/// placeholder icon, and only in a box at least twice it (docs/network-images-plan.md
+/// N4's 2026-10-13 amendment).
+const IMAGE_GLYPH: i32 = 32;
 
 /// libadwaita's own neutral fill is the foreground at this alpha (its
 /// `alpha(currentColor, .1)`), and its dim label is the foreground at 0.55.
@@ -8475,6 +8539,9 @@ struct ImageState {
     texture: Option<gtk4::gdk::Texture>,
     undecodable: bool,
     pending: bool,
+    /// The header's natural size while the pixels decode (N9's 2026-10-13
+    /// amendment).
+    pending_natural: Option<(u32, u32)>,
     generation: u64,
 }
 
@@ -8515,7 +8582,10 @@ fn render_image(picture: &gtk4::Picture) {
         labelled && phase == crate::wire::IMAGE_PHASE_LOADING,
     )]);
     let Some((w, h, fit)) = image_box(picture) else {
-        fit_picture(picture, texture);
+        match (texture, with_image(picture, |s| s.pending_natural)) {
+            (None, Some(natural)) => reserve_natural(picture, natural),
+            (texture, _) => fit_picture(picture, texture),
+        }
         return;
     };
     let (bw, bh) = (w.round() as i32, h.round() as i32);
@@ -8571,17 +8641,20 @@ fn image_source(picture: &gtk4::Picture, bytes: &std::sync::Arc<[u8]>) {
         s.generation
     });
     if bytes.is_empty() {
-        with_image(picture, |s| (s.texture, s.undecodable, s.pending) = (None, false, false));
+        with_image(picture, |s| (s.texture, s.undecodable, s.pending, s.pending_natural) = (None, false, false, None));
         render_image(picture);
         return;
     }
     let id = crate::content_id::of(bytes);
     if let Some(hit) = picture_cache::get(picture_cache::Key { id, pixels: FULL_DECODE }) {
-        with_image(picture, |s| (s.texture, s.undecodable, s.pending) = (Some(hit), false, false));
+        with_image(picture, |s| (s.texture, s.undecodable, s.pending, s.pending_natural) = (Some(hit), false, false, None));
         render_image(picture);
         return;
     }
-    with_image(picture, |s| s.pending = true);
+    with_image(picture, |s| {
+        s.pending = true;
+        s.pending_natural = crate::image_header::natural(bytes);
+    });
     render_image(picture);
     let encoded = glib::Bytes::from_owned(bytes.clone());
     let weak = glib::object::ObjectExt::downgrade(picture);
@@ -8599,6 +8672,7 @@ fn image_source(picture: &gtk4::Picture, bytes: &std::sync::Arc<[u8]>) {
         }
         with_image(&picture, |s| {
             s.pending = false;
+            s.pending_natural = None;
             s.undecodable = decoded.is_none();
             s.texture = decoded;
         });
@@ -14924,6 +14998,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             // The card: this container IS the table's extent, and the
             // class is the whole lowering (TABLE_CSS).
             column.add_css_class(TABLE_CARD_CLASS);
+            if let Some(above) = column.parent() {
+                if let Some(vertical) = container_vertical(&above) {
+                    apply_cross_align(column.upcast_ref::<gtk4::Widget>(), vertical, container_align(&above));
+                }
+            }
             let rebuild = !core
                 .tables
                 .get(&id.0)
