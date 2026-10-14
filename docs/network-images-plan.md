@@ -484,6 +484,13 @@ uses a darker placeholder colour, and the smaller items as recommended"):
   the other four; the Image and the looks are aligned leading inside the
   host that stretches to the column.
 
+
+Confirmed 2026-10-14 after the review page (the maintainer: "regarding the
+20-point list rows thing, I think it's fine the way it is"): a box smaller
+than twice the glyph draws the fill alone in both loading and failed, so the
+two look the same at 20 pt rows; the label and the app's own count tell them
+apart.
+
 ### N5: Accessibility: the label in every phase; busy where the platform has it; a label-less image stays silent (RULED 2026-10-13)
 
 RECOMMEND:
