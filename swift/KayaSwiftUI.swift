@@ -21936,7 +21936,27 @@ struct KayaRootFrameReader: View {
             + "\(visible.isNull ? "nothing" : kayaRectText(visible)) on screen"
             + (cuts.isEmpty ? "" : " (cut by \(cuts.joined(separator: "; ")))") + ", the keyboard "
             + "\(kayaRectText(keyboard)), the window \(Int(window.width))x\(Int(window.height)) "
-            + "(docs/safe-area-plan.md A4, A9)"
+            + "(docs/safe-area-plan.md A4, A9)" + kayaFieldScrollReading(rects)
+    }
+
+    /// The focused control's own scroll, for the wall's refusal: a caret line
+    /// outside its frame is a scroll the control did not make.
+    @MainActor func kayaFieldScrollReading(
+        _ rects: (view: UIView, field: CGRect, caret: CGRect, window: UIWindow)
+    ) -> String {
+        let root = kayaScene.focusedId.map(kayaRootOf) ?? kayaScene.root?.id ?? 0
+        var out = "; its own space: bounds \(kayaRectText(rects.view.bounds))"
+        if let scroll = rects.view as? UIScrollView {
+            let inset = scroll.adjustedContentInset
+            let caret = rects.view.convert(rects.caret, from: rects.window)
+            out += ", content \(Int(scroll.contentSize.width))x\(Int(scroll.contentSize.height)) inset "
+                + "\(Int(inset.top))/\(Int(inset.bottom)), caret \(kayaRectText(caret)), scroll "
+                + (scroll.isScrollEnabled ? "enabled" : "disabled")
+        }
+        let cap = kayaScene.focusedId.flatMap { kayaScene.keyboardFieldCap[$0] }
+        return out + "; A20's cap \(cap.map { "\(Int($0))" } ?? "none"), pan "
+            + "\(Int(kayaScene.keyboardPan[root] ?? 0)) on root \(root), root frame "
+            + "\(kayaRootFrames[root].map(kayaRectText) ?? "unrecorded")"
     }
 #endif
 
@@ -29487,6 +29507,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             /// tag. THE EQUALITY GUARD IS WHAT KEEPS THE ECHO OUT, making "no
             /// change, no emission" true by construction.
             func textViewDidChange(_ textView: UITextView) {
+                kayaKeepCaretShown(textView)
                 guard let node else { return }
                 let strip = returnStrip
                 returnStrip = nil
@@ -29849,6 +29870,18 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             KayaHost.textEditSource(nodeId, editSourcePaste)
             insertText(string)
         }
+    }
+
+    /// docs/traps.md, the iOS caret below its text view's estimated content.
+    @MainActor func kayaKeepCaretShown(_ view: UITextView) {
+        guard view.isFirstResponder, let layout = view.textLayoutManager,
+            let content = layout.textContentManager,
+            let caret = content.location(content.documentRange.location, offsetBy: NSMaxRange(view.selectedRange)),
+            let laid = NSTextRange(location: content.documentRange.location, end: caret)
+        else { return }
+        layout.ensureLayout(for: laid)
+        view.layoutIfNeeded()
+        UIView.performWithoutAnimation { view.scrollRangeToVisible(view.selectedRange) }
     }
 
     /// The widget-id -> text-view map, for the apply arms, which reach a

@@ -16393,3 +16393,28 @@ GUARD: the iOS `scroll_to_row` arm fails when a root that does not scroll as
 a page moves within 300 ms of the scroll (watched red with the pin cut:
 `moved root 1 from y 166 to y 114`), and tools/lib/netimage_routes.py holds
 the pin's two sites, its claim and that check, three cuts watched red.
+
+## The iOS caret below its text view's estimated content (measured 2026-10-14)
+
+editor-go refused `type` on a filtered matrix with the caret line at y 459
+and its field ending at 444, 39 pt under it, for the wall's whole 3 s; the
+next `type` read the same. Neither A20's cap (none in force), the pan (0) nor
+the large-title pin (root top 150 in red and green runs alike) moved
+anything. The grown refusal named it: in the text view's own space the caret
+line was 1283..1307 and `contentSize` 1268 (1314 on a green run), so UIKit's
+scroll to the caret stopped at contentSize - bounds (974 for 1013). The
+content height was TextKit 2's estimate of the opened document, and UIKit
+scrolled to the caret against it while typing; nothing scrolled again once
+the layout caught up. It depends on timing: 0 of 2 runs alone, 1 of 1 in the
+iOS keyboard filter set. Invalidating the buffer's layout before each `type`
+reproduces it every time, byte for byte (content 1268, bounds at 974). The
+same estimate is why `revealRequest` lays out before it scrolls. Every user
+edit of a focused iOS textarea now lays the text out up to the caret and
+scrolls the caret line in without animation (`kayaKeepCaretShown`, from
+textViewDidChange): with the layout invalidated it is green, and in one of
+three unprovoked filter runs it found UIKit's offset at 967 with the caret
+line ending at 1306 and moved it to 1012. The wall's refusal carries the
+view's bounds, content size, caret in its own space, A20's cap, the pan and
+the root frame.
+GUARD: tools/lib/safearea_routes.py, the keeper's block, its call and the
+refusal's reading, four cuts watched red.
