@@ -349,6 +349,66 @@ refusal covers both spellings; the sentence says what a table does
 instead. Three watched negatives in scene.rs, plus one that holds a plain
 container still flipping.
 
+## Pinned header: what a table's header does when its rows scroll (ruled 2026-10-14)
+
+THE RULE: a table's column header stays visible at the top of the table
+while its rows scroll vertically, on every platform. It is the vertical
+counterpart of the 2026-08-29 overflow rule, which still holds unchanged:
+when the columns overflow, the header scrolls HORIZONTALLY with the body,
+locked to it at every offset. The maintainer's words: "Yeah pin it".
+
+WHY. Column labels exist to label columns, and a reader 200 rows down
+needs them as much as one at the top. Every multi-column data table
+pins them: Finder's and Explorer's list views, GTK's ColumnView, WinUI's
+data grids, the spreadsheets on phones. Apple's grouped lists scroll
+their section titles away, and that idiom is what the phone tiers
+borrowed for the card; but a section title names a group of rows, and a
+column label names a field of every row, so the borrowing stops at the
+header. macOS (NSTableView), GTK and WinUI already pinned before this
+ruling; the iOS synthesized tier and Compose scrolled the header away
+inside the table's own vertical scroll.
+
+THE COST: the header's height stays on screen, about 28pt in phone
+landscape, where the viewport is shortest.
+
+THE LOOK IS THE CARD'S. On the iOS synthesized tier the header and its
+rule sit on a ground in the card's own fill that is pinned to the top of
+the scroll clip, and the rows scroll beneath it inside the card's clip.
+On Compose the header SEGMENT is what pins, and while pinned it stands on
+the screen's ground (`surface`) down through the 2dp segment gap: the
+first capture showed the row passing beneath it cut in half inside the
+gap and behind the segment's rounded corners.
+Before the table's top reaches the top of its viewport (a folded summary
+above it, docs/adaptive-layout-plan.md D7), the header sits where it
+always did; it pins only from there on.
+
+THE MECHANISM, PER PHONE ARM. SwiftUI: the header titles, the rule and
+the ground are offset by `.visualEffect`, which runs with the scroll
+position itself rather than one report behind it, and whose offset a
+GeometryReader inside it reads back (measured on the mac, 2026-10-14:
+an inner reader saw half the scroll when the effect offset by half), so
+the edge reporters on the titles measure the pinned frame. Compose: the
+table's own placement block reads the scroll state, so a scroll
+re-places without re-measuring, and the header segment and titles are
+placed at the larger of their resting top and the scroll offset with a
+zIndex above the rows. Both keep ONE horizontal offset for the header
+and the body, so the 2026-08-29 lock is untouched.
+
+THE OBSERVABLE: `expect_header_shown <table>` — every header title's
+frame lies inside the table's own viewport along the rows' axis, within
+two device units, read from real layout on all five backends. The
+columns' axis is not read, because a title scrolled sideways out of view
+is the overflow ruling's normal state. tools/scenes/windowed.steps and
+tools/scenes/netimage.steps assert it after a deep `scroll_to_row` and an
+`expect_window` that waits for the scroll to land (read straight after
+the `scroll_to_row`, Compose's netimage legs passed on the old code,
+since the band moves before the scroll does). Both were red on both
+phones before this ruling, and green on macOS and GTK (X11 and wayland).
+tools/check-table-card.py holds each phone arm's pin, its paint order
+and the reporters' place inside the pin, cuts watched red. The iOS NATIVE tier (an iPad's regular width) answers that its
+header is the platform's own and is not measured: no phone in the pool
+reaches it.
+
 ## The wire (append-only ids)
 
 - TX 45 `set_column_headers` (renamed from set_columns mid-slice: the
@@ -379,6 +439,9 @@ container still flipping.
   2026-08-21): headers render at every width, so the spelling is
   byte-identical on every platform and the phone legs run the shared
   scene verbatim.
+- `expect_header_shown <target>` — every header title's frame inside the
+  table's own viewport along the rows' axis (the pinned-header ruling,
+  2026-10-14).
 - `header_click <target> <index>` — an action driving the platform's
   real header path (select_section's shape), so the native handler
   emits sort_requested.

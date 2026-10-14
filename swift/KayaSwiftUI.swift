@@ -10563,6 +10563,18 @@ private func kayaRunScript(_ script: String) {
                         }
                     }
                 }
+            case "expect_header_shown":
+                let off = DispatchQueue.main.sync { () -> String in
+                    guard let node = kayaTarget(parts[1], "column", kayaScene.columns) else {
+                        return "no such target \(parts[1])"
+                    }
+                    return kayaTableHeaderShown(node)
+                }
+                if off.isEmpty {
+                    observed.append("\(parts[1]) header shown")
+                } else {
+                    failures.append("\(parts[1]) header hidden (\(off))")
+                }
             case "header_click":
                 // The user's route: what the sortOrder binding's setter does
                 // for a real header click — the sort tag verbatim plus the
@@ -16188,6 +16200,40 @@ func kayaCurrentTableSynthesized(_ table: KayaNode) -> Bool {
     return observation.synthesized
 }
 
+func kayaTableHeaderInside(_ frames: [CGRect], viewport: CGRect) -> String {
+    let outside = frames.enumerated().filter { _, f in
+        f.minY < viewport.minY - 2 || f.maxY > viewport.maxY + 2
+    }
+    guard !outside.isEmpty else { return "" }
+    let at = outside.map { i, f in "\(i) at \(Int(f.minY.rounded()))..\(Int(f.maxY.rounded()))pt" }
+    return "titles \(at.joined(separator: ", ")) outside viewport "
+        + "\(Int(viewport.minY.rounded()))..\(Int(viewport.maxY.rounded()))pt"
+}
+
+/// expect_header_shown (docs/tables-plan.md, ruled 2026-10-14): the header
+/// titles' frames as drawn, against the table's own viewport on the rows' axis.
+func kayaTableHeaderShown(_ node: KayaNode) -> String {
+    #if os(macOS)
+        if let driver = kayaTableDrivers[node.id] { return driver.headerShown() }
+    #endif
+    let generation = kayaTableGeometryGeneration(node)
+    guard let viewport = node.tableViewport, generation == viewport.generation,
+        viewport.frame.height > 0
+    else { return "no current table viewport" }
+    guard viewport.synthesized else {
+        return "the native table's header is the platform's own and is not measured here"
+    }
+    var frames: [CGRect] = []
+    for column in node.tableColumns.indices {
+        guard let observation = node.tableCellFrames["h/\(column)"],
+            observation.generation == generation
+        else { return "header title \(column) has no current frame" }
+        frames.append(observation.frame)
+    }
+    guard !frames.isEmpty else { return "no columns declared on this container" }
+    return kayaTableHeaderInside(frames, viewport: viewport.frame)
+}
+
 func kayaTableFramesFitVertically(
     _ frames: [CGRect], inside viewport: CGRect, tolerance: CGFloat = 2
 ) -> Bool {
@@ -16763,6 +16809,18 @@ private struct KayaNativeTable: View {
             return scrollView
         }
 
+        func headerShown() -> String {
+            guard let header = tableView.headerView, header.window != nil else {
+                return "the native table has no header view in a window"
+            }
+            let box = scrollView.convert(scrollView.bounds, to: nil)
+            let frame = header.convert(header.visibleRect, to: nil)
+            guard frame.height > 0 else {
+                return "the native header shows 0pt inside its scroll view"
+            }
+            return kayaTableHeaderInside([frame], viewport: box)
+        }
+
         /// A TABLE THAT WAS JUST LAID OUT SHOWS ITS FIRST COLUMN: AppKit keeps
         /// the visible area across a geometry change, so a table whose width
         /// moved arrived parked at its TRAILING edge (2026-08-29). Reset on a
@@ -17327,6 +17385,11 @@ private struct KayaTableLayout: Layout {
     var placement: KayaTablePlacement?
     var placed: KayaTablePlaced?
 
+    /// Headers, the rule, the cells row-major, then the header's ground.
+    private func cellViews(_ subviews: Subviews) -> Subviews.SubSequence {
+        subviews[(cols + 1)..<(subviews.count - 1)]
+    }
+
     private func columnWidths(
         _ subviews: Subviews, _ proposal: ProposedViewSize
     ) -> ([CGFloat], CGFloat) {
@@ -17334,7 +17397,7 @@ private struct KayaTableLayout: Layout {
         for (i, v) in subviews.prefix(cols).enumerated() {
             widths[i] = max(widths[i], v.sizeThatFits(.unspecified).width)
         }
-        for (i, v) in subviews.dropFirst(cols + 1).enumerated() {
+        for (i, v) in cellViews(subviews).enumerated() {
             widths[i % cols] = max(widths[i % cols], v.sizeThatFits(.unspecified).width)
         }
         var total = widths.reduce(0, +) + colGap * CGFloat(cols - 1)
@@ -17351,7 +17414,7 @@ private struct KayaTableLayout: Layout {
             .map { $0.sizeThatFits(.unspecified).height }.max() ?? 0
         let dividerH = subviews[cols].sizeThatFits(.unspecified).height
         var rows: [CGFloat] = []
-        let cells = Array(subviews.dropFirst(cols + 1))
+        let cells = Array(cellViews(subviews))
         for start in stride(from: 0, to: cells.count, by: cols) {
             rows.append(
                 cells[start..<min(start + cols, cells.count)]
@@ -17409,6 +17472,11 @@ private struct KayaTableLayout: Layout {
         subviews[cols].place(
             at: CGPoint(x: bounds.minX, y: dividerY), anchor: .topLeading,
             proposal: ProposedViewSize(width: bounds.width, height: dividerH))
+        subviews[subviews.count - 1].place(
+            at: CGPoint(x: bounds.minX, y: bounds.minY - kayaTableCardInsetY),
+            anchor: .topLeading,
+            proposal: ProposedViewSize(
+                width: bounds.width, height: kayaTableCardInsetY + dividerY - bounds.minY + dividerH))
         var y = dividerY + dividerH + rowGap + top
         // What the report reads back: where the band starts inside this
         // content, and the pitch this pass gave each realized row.
@@ -17425,7 +17493,7 @@ private struct KayaTableLayout: Layout {
             placement.columnsViewport = max(0, bounds.width - 2 * kayaTableCardInsetX)
             placed?()
         }
-        let cells = Array(subviews.dropFirst(cols + 1))
+        let cells = Array(cellViews(subviews))
         for (r, rowH) in rows.enumerated() {
             for c in 0..<cols where r * cols + c < cells.count {
                 cells[r * cols + c].place(
@@ -17436,6 +17504,55 @@ private struct KayaTableLayout: Layout {
         }
     }
 }
+
+/// THE PINNED HEADER (docs/tables-plan.md, ruled 2026-10-14). `lead` is how far
+/// below the card's top edge the element rests: the ground's 0, a title's inset.
+/// The ground covers the layout's own rule, so the rule needs no pin.
+private struct KayaHeaderPin: ViewModifier {
+    let node: KayaNode
+    let lead: CGFloat
+    let on: Bool
+
+    func body(content: Content) -> some View {
+        Group {
+            if on {
+                content
+                    .visualEffect { [space = kayaTableScrollSpace(node), lead] effect, proxy in
+                        effect.offset(
+                            y: kayaHeaderPinOffset(
+                                top: proxy.frame(in: .named(space)).minY, lead: lead))
+                    }
+            } else {
+                content
+            }
+        }
+        .zIndex(lead == 0 ? 1 : 2)
+    }
+}
+
+/// How far an element of the header block moves to keep the block at the top
+/// of the scroll clip, whose top is 0 in the space the offset is read in.
+func kayaHeaderPinOffset(top: CGFloat, lead: CGFloat) -> CGFloat {
+    max(0, lead - top)
+}
+
+/// What the pinned header sits on: the card's own fill, and the header's rule
+/// along its foot so the rule travels with the titles.
+private struct KayaTableHeaderGround: View {
+    var body: some View {
+        Rectangle()
+            .fill(kayaTableHeaderGroundFill)
+            .overlay(alignment: .bottom) { Divider() }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
+
+#if os(macOS)
+    let kayaTableHeaderGroundFill = Color(nsColor: .windowBackgroundColor)
+#else
+    let kayaTableHeaderGroundFill = Color(uiColor: .secondarySystemGroupedBackground)
+#endif
 
 /// THE FINGER IS THIS TIER'S COLUMN SCROLL (docs/tables-plan.md, ruled
 /// 2026-08-29). A drag rather than a ScrollView, which proposes an unbounded
@@ -18567,7 +18684,7 @@ private struct KayaSynthesizedTable: View {
         return title + (node.tableDirection == 0 ? " ▲" : " ▼")
     }
 
-    private func rows(_ generation: Int) -> some View {
+    private func rows(_ generation: Int, pinned: Bool) -> some View {
         KayaTableLayout(
             cols: node.tableColumns.count, colGap: 24, rowGap: node.spacing,
             windowed: window.windowed, top: window.top, bottom: window.bottom,
@@ -18584,6 +18701,7 @@ private struct KayaSynthesizedTable: View {
                     .onTapGesture {
                         KayaHost.emitSortRequested(node.sortTag, UInt32(col))
                     }
+                    .modifier(KayaHeaderPin(node: node, lead: kayaTableCardInsetY, on: pinned))
             }
             Divider()
             ForEach(node.children) { row in
@@ -18599,6 +18717,8 @@ private struct KayaSynthesizedTable: View {
                         .id(KayaRowAnchor(row: row.id, col: col))
                 }
             }
+            KayaTableHeaderGround()
+                .modifier(KayaHeaderPin(node: node, lead: 0, on: pinned))
         }
         .modifier(
             KayaColumnsDrag(
@@ -18636,7 +18756,7 @@ private struct KayaSynthesizedTable: View {
                                     }
                                     .padding(.bottom, kayaFoldSeamGap)
                                 }
-                                rows(generation)
+                                rows(generation, pinned: true)
                                     .background(
                                         KayaTableContentReporter(
                                             node: node, window: window, generation: generation))
@@ -18669,7 +18789,7 @@ private struct KayaSynthesizedTable: View {
             } else {
                 // No clip here: the rows ARE the content, so the face hugs
                 // them exactly as it hugs a short scrolled table's.
-                rows(generation)
+                rows(generation, pinned: false)
                     .background(
                         KayaTableViewportReporter(
                             node: node, generation: generation, synthesized: true))

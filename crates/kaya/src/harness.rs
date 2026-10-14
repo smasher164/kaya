@@ -375,6 +375,11 @@ pub enum Step {
     /// misaligned column splits its cluster and the count moves; a
     /// content-hugging layout comes up short of its track.
     ExpectColumnEdges(Target, usize),
+    /// Expect every header title to lie inside the table's own viewport
+    /// along the rows' axis: the header is pinned while the rows scroll
+    /// (docs/tables-plan.md, ruled 2026-10-14). The columns' axis is the
+    /// overflow ruling's and is not read here.
+    ExpectHeaderShown(Target),
     /// Expect the For's REALIZED BAND and its collection's declared
     /// total — `<first> <count> <total>` — read from the tier's own
     /// geometry (docs/virtualization-plan.md §5).
@@ -1027,6 +1032,7 @@ impl Step {
             | Step::ExpectColumns(t, _)
             | Step::ExpectRows(t, _)
             | Step::ExpectColumnEdges(t, _)
+            | Step::ExpectHeaderShown(t)
             | Step::ScrollToRow(t, _)
             | Step::HeaderClick(t, _)
             | Step::ExpectShares(t, _)
@@ -1206,6 +1212,7 @@ impl Step {
             Step::ExpectColumns { .. } => true,
             Step::ExpectRows { .. } => true,
             Step::ExpectColumnEdges { .. } => true,
+            Step::ExpectHeaderShown(..) => true,
             Step::ExpectWindow { .. } => true,
             Step::ScrollToRow { .. } => false,
             Step::Drag { .. } => false,
@@ -1609,6 +1616,11 @@ pub trait Stage: Send + 'static {
     /// model copy — a content-hugging table keeps every cluster right while
     /// drawing in a corner of its viewport.
     fn column_edges(&self, target: Target, want: usize) -> String;
+    /// Empty when every header title's frame lies inside the table's own
+    /// viewport along the rows' axis, within two device units; otherwise
+    /// the frames it read, for the failure text (docs/tables-plan.md,
+    /// ruled 2026-10-14).
+    fn header_shown(&self, target: Target) -> String;
     /// The For's FIRST VISIBLE row and its collection's declared total, as
     /// this tier lays them out: `"<first> <total>"` (ruled 2026-08-25;
     /// docs/virtualization-plan.md §5). The band's WIDTH is a viewport
@@ -2650,6 +2662,7 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     })?,
                 )
             }
+            "expect_header_shown" => Step::ExpectHeaderShown(parse_target(rest.trim())?),
             "header_click" => {
                 let (target, index) = rest.split_once(char::is_whitespace).ok_or_else(|| {
                     format!("header_click wants a target and a column index: {line:?}")
@@ -5930,6 +5943,20 @@ fn run_with_log(
                     }))
                 }
             }
+            Step::ExpectHeaderShown(t) => {
+                if !matches!(t.kind, TargetKind::Column) {
+                    Some(Err(format!("{t:?} is not a table container target")))
+                } else {
+                    Some(poll(|| {
+                        let off = stage.header_shown(*t);
+                        if off.is_empty() {
+                            Ok(format!("{} header shown", target_spec(t)))
+                        } else {
+                            Err(format!("{} header hidden ({off})", target_spec(t)))
+                        }
+                    }))
+                }
+            }
             Step::ExpectWindow(t, first, total) => {
                 if !matches!(t.kind, TargetKind::Column | TargetKind::Row) {
                     Some(Err(format!("{t:?} is not a collection container target")))
@@ -8698,6 +8725,24 @@ mod tests {
         );
     }
 
+    /// docs/tables-plan.md, the pinned-header ruling (2026-10-14).
+    #[test]
+    fn header_shown_reads_a_table_target_only() {
+        let run = |script: &str| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let code = run_with_log(parse(script).unwrap(), MockStage { seen: &SEEN, verdict: tx }, None, None);
+            let (_, verdict) = rx.recv().unwrap();
+            (code, verdict)
+        };
+        let (code, verdict) = run("expect_header_shown column#0");
+        assert_eq!(code, 0, "{verdict}");
+        assert!(verdict.contains("column#0 header shown"), "{verdict}");
+        let (code, verdict) = run("expect_header_shown label#0");
+        assert_eq!(code, 1, "{verdict}");
+        assert!(verdict.contains("is not a table container target"), "{verdict}");
+        assert!(parse("expect_header_shown").is_err());
+    }
+
     /// docs/safe-area-plan.md A9: the three readings answer in words, and a
     /// reading that disagrees names both sides.
     #[test]
@@ -8995,6 +9040,9 @@ mod tests {
             String::new()
         }
         fn column_edges(&self, _: Target, _: usize) -> String {
+            String::new()
+        }
+        fn header_shown(&self, _: Target) -> String {
             String::new()
         }
         /// A windowed tier: three of twelve rows realized from index 4.
@@ -10111,6 +10159,9 @@ mod tests {
             fn column_edges(&self, _: Target, _: usize) -> String {
                 String::new()
             }
+            fn header_shown(&self, _: Target) -> String {
+                String::new()
+            }
             fn window_band(&self, _: Target) -> String {
                 String::new()
             }
@@ -10565,6 +10616,9 @@ mod tests {
                 String::new()
             }
             fn column_edges(&self, _: Target, _: usize) -> String {
+                String::new()
+            }
+            fn header_shown(&self, _: Target) -> String {
                 String::new()
             }
             fn window_band(&self, _: Target) -> String {

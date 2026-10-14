@@ -409,6 +409,8 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
      */
     val cellEdgeX = java.util.concurrent.ConcurrentHashMap<String, Float>()
     val cellEdgeRightX = java.util.concurrent.ConcurrentHashMap<String, Float>()
+    val cellEdgeTopY = java.util.concurrent.ConcurrentHashMap<String, Float>()
+    val cellEdgeBottomY = java.util.concurrent.ConcurrentHashMap<String, Float>()
     /**
      * COMPOSE STATE, not a plain field: the table's own measure READS
      * it, so a bump forces the re-measure that republishes the geometry
@@ -432,6 +434,7 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     @Volatile var tableViewportLeftX = -1f
     @Volatile var tableViewportRightX = -1f
     @Volatile var tableViewportH = -1f
+    @Volatile var tableViewportTopY = -1f
     @Volatile var tableContentH = -1f
 
     /**
@@ -4983,12 +4986,15 @@ object KayaCompose {
                     node.tableGeometryGeneration += 1
                     node.cellEdgeX.clear()
                     node.cellEdgeRightX.clear()
+                    node.cellEdgeTopY.clear()
+                    node.cellEdgeBottomY.clear()
                     node.tableTrackW = -1f
                     node.tableDrawnW = -1f
                     node.tableContentW = -1f
                     node.tableViewportLeftX = -1f
                     node.tableViewportRightX = -1f
                     node.tableViewportH = -1f
+                    node.tableViewportTopY = -1f
                     node.tableContentH = -1f
                     node.tableColumns = titles
                     node.tableSorted = sorted
@@ -11265,6 +11271,15 @@ object KayaCompose {
                             }
                         }
                     }
+                    "expect_header_shown" -> {
+                        val off = onUi(activity) {
+                            target(parts[1], "column", KayaSceneModel.columns)
+                                ?.let { kayaTableHeaderShown(it) }
+                                ?: "no such target ${parts[1]}"
+                        }
+                        if (off.isEmpty()) observed.add("${parts[1]} header shown")
+                        else failures.add("${parts[1]} header hidden ($off)")
+                    }
                     "header_click" -> {
                         // The user's route: what the header tap's own
                         // handler does — the sort tag verbatim plus the
@@ -15199,6 +15214,9 @@ internal class KayaTableWindow(private val node: KayaNode) {
      *  resolved columns and the interior track they were laid out in. */
     @Volatile var hContentPx = 0
     @Volatile var hTrackPx = 0
+    /** Where the header segment rests in the scrolled content: past it, the
+     *  header is pinned (docs/tables-plan.md, ruled 2026-10-14). */
+    @Volatile var headerRestPx = 0
 
     private var lastHContent = -1
     private var lastHTrack = -1
@@ -15462,8 +15480,18 @@ private val KAYA_FORM_GROUP_SHAPE = RoundedCornerShape(KAYA_TABLE_SEGMENT_OUTER)
  * draws no stroke anywhere — tools/check-table-card.py refuses one here.
  */
 @Composable
-private fun KayaTableSegment(shape: RoundedCornerShape) {
-    Box(Modifier.background(MaterialTheme.colorScheme.surfaceContainer, shape))
+private fun KayaTableSegment(shape: RoundedCornerShape, pinned: () -> Boolean = { false }) {
+    val ground = MaterialTheme.colorScheme.surface
+    if (shape === KAYA_TABLE_HEADER_SEGMENT_SHAPE) {
+        // PINNED, the header segment stands on the screen's ground down
+        // through the segment gap, so the rows passing beneath it stay
+        // under it rather than showing in the gap and the corners.
+        Box(Modifier.drawBehind { if (pinned()) drawRect(ground) }.padding(bottom = KAYA_TABLE_SEGMENT_GAP)) {
+            Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainer, shape))
+        }
+    } else {
+        Box(Modifier.background(MaterialTheme.colorScheme.surfaceContainer, shape))
+    }
 }
 
 /**
@@ -15473,6 +15501,29 @@ private fun KayaTableSegment(shape: RoundedCornerShape) {
  * the box the cells lay out in. Reported raw, every table starts
  * [interior] inside its own viewport at expect_column_edges.
  */
+/** expect_header_shown (docs/tables-plan.md, ruled 2026-10-14): the header
+ *  titles' laid-out frames against the table's own viewport, rows' axis. */
+internal fun kayaTableHeaderShown(node: KayaNode): String {
+    if (node.tableColumns.isEmpty()) return "no columns declared on this container"
+    val top = node.tableViewportTopY
+    val bottom = top + node.tableViewportH
+    if (node.tableViewportH <= 0f) return "no current table viewport"
+    val generation = "${node.tableGeometryGeneration}:"
+    val outside = ArrayList<String>()
+    for (column in node.tableColumns.indices) {
+        val y0 = node.cellEdgeTopY["${generation}h/$column"]
+            ?: return "header title $column has no current frame"
+        val y1 = node.cellEdgeBottomY["${generation}h/$column"]
+            ?: return "header title $column has no current frame"
+        if (y0 < top - 2f || y1 > bottom + 2f) {
+            outside.add("$column at ${Math.round(y0)}..${Math.round(y1)}dp")
+        }
+    }
+    if (outside.isEmpty()) return ""
+    return "titles ${outside.joinToString(", ")} outside viewport " +
+        "${Math.round(top)}..${Math.round(bottom)}dp"
+}
+
 internal fun kayaTableCellsBox(clipLeft: Float, clipWidth: Float, interior: Float):
     Pair<Float, Float> = Pair(clipLeft + interior, clipLeft + clipWidth - interior)
 
@@ -15530,6 +15581,9 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
         val left = it.positionInWindow().x / density
         node.cellEdgeX[key] = left
         node.cellEdgeRightX[key] = left + it.size.width / density
+        val top = it.positionInWindow().y / density
+        node.cellEdgeTopY[key] = top
+        node.cellEdgeBottomY[key] = top + it.size.height / density
     }
     Layout(
         content = {
@@ -15569,7 +15623,7 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
             // LAST IN THE CONTENT AND FIRST IN THE PLACEMENT: placement
             // order is draw order, so these paint BEHIND every row, and
             // every index in the measure block below counts from the end.
-            KayaTableSegment(KAYA_TABLE_HEADER_SEGMENT_SHAPE)
+            KayaTableSegment(KAYA_TABLE_HEADER_SEGMENT_SHAPE) { node.scrollState.value > window.headerRestPx }
             KayaTableSegment(KAYA_TABLE_BODY_SEGMENT_SHAPE)
         },
         modifier = modifier
@@ -15587,6 +15641,7 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
                 node.tableViewportLeftX = left
                 node.tableViewportRightX = right
                 node.tableViewportH = it.size.height / density
+                node.tableViewportTopY = it.positionInWindow().y / density
                 kayaContainerExtents[node.id] = it.size.height.toDouble()
                 kayaContainerCross[node.id] = it.size.width.toDouble()
                 window.viewportPx = it.size.height
@@ -15743,7 +15798,8 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
         // container ends at its last row and a tall one's scrolls with the
         // rows, ONE rounded rectangle each rather than one per band.
         val headerSeg = measurables[measurables.size - 2]
-            .measure(kayaFixedRepresentable(totalW, headerSegH))
+            .measure(kayaFixedRepresentable(totalW, headerSegH + gap))
+        window.headerRestPx = foldedBlock
         val bodySeg = measurables[measurables.size - 1]
             .measure(kayaFixedRepresentable(totalW, contentH - bodyTop))
         val tops = IntArray(rowExtents.size)
@@ -15764,7 +15820,11 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
             // would run the rows over bare ground while the boundary sat
             // somewhere the reader cannot see.
             val colX = IntArray(cols) { colLeft[it] - Math.round(node.tableScrollX) }
-            headerSeg.place(0, foldedBlock)
+            // THE PINNED HEADER (docs/tables-plan.md, ruled 2026-10-14): read
+            // here, a scroll re-places without re-measuring, and the zIndex
+            // lifts the header over the rows that pass beneath it.
+            val headerY = maxOf(foldedBlock, node.scrollState.value)
+            headerSeg.place(0, headerY, zIndex = 1f)
             bodySeg.place(0, bodyTop)
             // The folded children, above everything, at the content's
             // top — they scroll away exactly as a row does.
@@ -15773,7 +15833,7 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
                 p.place(0, foldedY)
                 foldedY += p.height
             }
-            headers.forEachIndexed { c, p -> p.place(padX + colX[c], foldedBlock + padY) }
+            headers.forEachIndexed { c, p -> p.place(padX + colX[c], headerY + padY, zIndex = 1f) }
             top.place(0, rowsTop)
             cells.chunked(cols).forEachIndexed { r, row ->
                 row.forEachIndexed { c, p -> p.place(padX + colX[c], rowsTop + tops[r]) }

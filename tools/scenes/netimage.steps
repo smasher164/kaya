@@ -55,6 +55,9 @@ expect_image_phase image@art[t299] loading
 # Rows torn down while still loading are released.
 scroll_to_row column@tracks t150
 expect label@released "released: some"
+# The header stays while the rows scroll (docs/tables-plan.md, ruled 2026-10-14).
+expect_window column@tracks 150 300
+expect_header_shown column@tracks
 scroll_to_row column@tracks t299
 # A row deleted while its job waits, and a row whose URL moved on: the new
 # job is released before the old one, and the old result drops (N7).

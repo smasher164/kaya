@@ -10,6 +10,8 @@ expect_window column#0 0 400
 # Deep by identity: a row no tier should have realized yet.
 scroll_to_row column#0 r200
 expect_window column#0 200 400
+# The header stays while the rows scroll (docs/tables-plan.md, ruled 2026-10-14).
+expect_header_shown column#0
 # Back: membership is arithmetic, not history — byte-identical to the
 # opening line on every platform.
 scroll_to_row column#0 r000

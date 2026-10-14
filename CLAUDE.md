@@ -1963,7 +1963,11 @@ in docs/deferred.md.
    away and of a different width. Read out of the table's own content
    lambda, so the file's menu separators and the other three backends'
    native hairlines are untouched.
-   59 watched negatives, counts printed, red demanded on every run),
+   AND THE HEADER STAYS PINNED WHILE THE ROWS SCROLL since 2026-10-14
+   (docs/tables-plan.md, the vertical ruling): eleven clauses hold each phone
+   arm's pin, its drawing order, the ground under the pinned segment and the
+   position recorders inside the pin, and `expect_header_shown` is its scene
+   step. 67 watched negatives, counts printed, red demanded on every run),
    `tools/check-keyed.py` (the gate cache is honest: a change inside a
    gate's input set re-runs it, a change outside does NOT, a FAILED gate
    is never cached, KAYA_FAST unset consults nothing but RECORDS its

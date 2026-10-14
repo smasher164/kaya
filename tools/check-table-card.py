@@ -31,6 +31,8 @@ WINUI = "crates/kaya/src/winui/mod.rs"
 COMPOSE = "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
 SWIFTUI = "swift/KayaSwiftUI.swift"
 
+HEADER_SEG_CALL = ("KayaTableSegment(KAYA_TABLE_HEADER_SEGMENT_SHAPE) "
+                   "{ node.scrollState.value > window.headerRestPx }")
 FACE_CALL = ".modifier(KayaTableCardFace())"
 TIER_HEAD = "private struct KayaSynthesizedTable: View {"
 FACE_HEAD = "private struct KayaTableCardFace: ViewModifier {"
@@ -290,7 +292,8 @@ BLOCKS = (
      "const TABLE_CARD_XAML: &str = ", ");",
      ("Shadow", "Elevation", "Translation", "#"), FLAT),
     ("compose segment fill", COMPOSE,
-     "private fun KayaTableSegment(shape: RoundedCornerShape) {", "\n}\n",
+     "private fun KayaTableSegment(shape: RoundedCornerShape, "
+     "pinned: () -> Boolean = { false }) {", "\n}\n",
      (".border(", ".shadow(", "elevation", "tonalElevation", "shadowElevation",
       "Color(", "outlineVariant"), SEGMENTED),
     ("compose table modifier chain", COMPOSE,
@@ -346,11 +349,11 @@ ZONE = (
      "vertical = KAYA_TABLE_CARD_PAD_Y)\n            // NOTHING ON THIS CHAIN",
      "the compose table modifier chain names `.padding(`"),
     ("the compose segments painted over the rows", COMPOSE,
-     "            headerSeg.place(0, foldedBlock)\n"
+     "            headerSeg.place(0, headerY, zIndex = 1f)\n"
      "            bodySeg.place(0, bodyTop)",
      "            headers.forEachIndexed { c, p -> "
-     "p.place(padX + colX[c], foldedBlock + padY) }\n"
-     "            headerSeg.place(0, foldedBlock)\n"
+     "p.place(padX + colX[c], headerY + padY) }\n"
+     "            headerSeg.place(0, headerY, zIndex = 1f)\n"
      "            bodySeg.place(0, bodyTop)",
      "paints OVER them"),
     # A MOVE, not a deletion: both segments still emitted, still exactly
@@ -361,12 +364,12 @@ ZONE = (
      "            // LAST IN THE CONTENT AND FIRST IN THE PLACEMENT: placement\n"
      "            // order is draw order, so these paint BEHIND every row, and\n"
      "            // every index in the measure block below counts from the end.\n"
-     "            KayaTableSegment(KAYA_TABLE_HEADER_SEGMENT_SHAPE)\n"
+     "            " + HEADER_SEG_CALL + "\n"
      "            KayaTableSegment(KAYA_TABLE_BODY_SEGMENT_SHAPE)",
      "            // LAST IN THE CONTENT AND FIRST IN THE PLACEMENT: placement\n"
      "            // order is draw order, so these paint BEHIND every row, and\n"
      "            // every index in the measure block below counts from the end.\n"
-     "            KayaTableSegment(KAYA_TABLE_HEADER_SEGMENT_SHAPE)\n"
+     "            " + HEADER_SEG_CALL + "\n"
      "            KayaTableSegment(KAYA_TABLE_BODY_SEGMENT_SHAPE)\n"
      "            Spacer(Modifier)",
      "are not the last two children"),
@@ -383,7 +386,7 @@ ZONE = (
     ("a third compose segment, at the head of the content", COMPOSE,
      "            folded.forEach { KayaRender(it) }\n            node.tableColumns.forEachIndexed",
      "            folded.forEach { KayaRender(it) }\n"
-     "            KayaTableSegment(KAYA_TABLE_HEADER_SEGMENT_SHAPE)\n"
+     "            " + HEADER_SEG_CALL + "\n"
      "            node.tableColumns.forEachIndexed",
      "wanted exactly 2"),
 )
@@ -504,7 +507,7 @@ def zones(text):
 CONTENT_HEAD = "        content = {"
 CONTENT_END = "\n        modifier = modifier"
 CONTENT_TAIL = (
-    "            KayaTableSegment(KAYA_TABLE_HEADER_SEGMENT_SHAPE)\n"
+    "            " + HEADER_SEG_CALL + "\n"
     "            KayaTableSegment(KAYA_TABLE_BODY_SEGMENT_SHAPE)\n"
     "        },\n        modifier = modifier\n"
 )
@@ -584,6 +587,62 @@ def layers(text):
     return out
 
 
+# --- THE PINNED HEADER (docs/tables-plan.md, ruled 2026-10-14) --------
+# expect_header_shown reads the titles' frames, so a pin that stopped is red
+# on the phones; what no scene can see is the header painting UNDER the rows
+# that pass beneath it, or the reporters measuring the resting frame while
+# the pinned one is drawn. Both arms are read out of their own blocks.
+PIN_SWIFT = (
+    ("the grown arm pins", "rows(generation, pinned: true)"),
+    ("the ungrown arm does not", "rows(generation, pinned: false)"),
+    ("the ground pins with the titles",
+     "KayaTableHeaderGround()\n"
+     "                .modifier(KayaHeaderPin(node: node, lead: 0, on: pinned))"),
+    ("the pin is the scroll's own effect",
+     ".visualEffect { [space = kayaTableScrollSpace(node), lead]"),
+    ("the header block paints over the rows", ".zIndex(lead == 0 ? 1 : 2)"),
+    ("the pin keeps the card's top edge at the clip's top", "max(0, lead - top)"),
+)
+PIN_COMPOSE = (
+    ("the header's top follows the scroll",
+     "val headerY = maxOf(foldedBlock, node.scrollState.value)"),
+    ("the header segment paints over the rows", "headerSeg.place(0, headerY, zIndex = 1f)"),
+    ("the titles paint over the rows",
+     "p.place(padX + colX[c], headerY + padY, zIndex = 1f)"),
+)
+PIN_GROUND = ("Box(Modifier.drawBehind { if (pinned()) drawRect(ground) }"
+              ".padding(bottom = KAYA_TABLE_SEGMENT_GAP))")
+PIN_REPORTER = 'key: "h/\\(col)", generation: generation))'
+PIN_TITLE = ".modifier(KayaHeaderPin(node: node, lead: kayaTableCardInsetY, on: pinned))"
+
+
+def pins(files):
+    out = []
+    text = files[SWIFTUI]
+    for what, needle in PIN_SWIFT:
+        if text.count(needle) != 1:
+            out.append(f"check-table-card: {SWIFTUI}: pinned header — {what}: "
+                       f"`{needle}` appears {text.count(needle)} time(s), wanted 1")
+    r, t = text.find(PIN_REPORTER), text.find(PIN_TITLE)
+    if r < 0 or t < 0 or t < r or text.count(PIN_TITLE) != 1:
+        out.append(f"check-table-card: {SWIFTUI}: pinned header — the titles' pin "
+                   "is not applied once and AFTER their edge reporter, so the "
+                   "reporter reads the resting frame while the pinned one is drawn")
+    if files[COMPOSE].count(PIN_GROUND) != 1:
+        out.append(f"check-table-card: {COMPOSE}: pinned header — the header "
+                   "segment does not stand on the ground through the segment gap "
+                   "while pinned, so the rows passing beneath it show in the gap "
+                   "and the corners (the capture of 2026-10-14)")
+    at = files[COMPOSE].find(PLACE_HEAD)
+    place = files[COMPOSE][at:files[COMPOSE].find("\n        }\n    }\n}", at)] if at >= 0 else ""
+    for what, needle in PIN_COMPOSE:
+        if place.count(needle) != 1:
+            out.append(f"check-table-card: {COMPOSE}: pinned header — {what}: "
+                       f"`{needle}` appears {place.count(needle)} time(s) in the "
+                       "table's placement block, wanted 1")
+    return out
+
+
 def census(files):
     """The real predicate. Returns one sentence per finding, naming the
     clause rather than printing a column of counts."""
@@ -620,6 +679,7 @@ def census(files):
                 )
     out.extend(zones(files[SWIFTUI]))
     out.extend(layers(files[COMPOSE]))
+    out.extend(pins(files))
     return out
 
 
@@ -648,7 +708,8 @@ print(
     f"check-table-card: the card is present, padded and flat in all four "
     f"backends, iOS's and Compose's on the CONTENT layer, and the mac "
     f"unwrapped — {len(PRESENT)} clauses + {len(NAMED)} named interiors + "
-    f"{len(BLOCKS)} flatness blocks + {len(ZONE)} layer/zone negatives"
+    f"{len(BLOCKS)} flatness blocks + {len(ZONE)} layer/zone negatives + "
+    f"{len(PIN_SWIFT) + len(PIN_COMPOSE) + 2} pinned-header clauses"
 )
 
 # --- EVERY CLAUSE WATCHED FAILING -------------------------------------
@@ -750,7 +811,33 @@ for label, path, needle, replacement, word in ELEVATE:
 
 # And the two leaks onto the mac, each watched being refused BY NAME —
 # a count of findings would be satisfied by any other clause going red.
-for label, path, needle, replacement, sentence in ZONE:
+PIN = (
+    ("the grown arm drawn unpinned", SWIFTUI,
+     "rows(generation, pinned: true)", "rows(generation, pinned: false)",
+     "the grown arm pins"),
+    ("the iOS pin offset gone", SWIFTUI,
+     "max(0, lead - top)", "0", "keeps the card's top edge"),
+    ("the iOS header block under the rows", SWIFTUI,
+     "        .zIndex(lead == 0 ? 1 : 2)\n", "", "paints over the rows"),
+    ("the iOS titles' pin outside their reporter", SWIFTUI,
+     "Text(headerText(col, title))\n                    .fontWeight(.semibold)\n",
+     "Text(headerText(col, title))\n                    .fontWeight(.semibold)\n"
+     "                    " + PIN_TITLE + "\n",
+     "AFTER their edge reporter"),
+    ("the compose header at its resting top", COMPOSE,
+     "val headerY = maxOf(foldedBlock, node.scrollState.value)",
+     "val headerY = foldedBlock", "the header's top follows the scroll"),
+    ("the compose header segment under the rows", COMPOSE,
+     "headerSeg.place(0, headerY, zIndex = 1f)", "headerSeg.place(0, headerY)",
+     "the header segment paints over"),
+    ("the compose pinned header with no ground under it", COMPOSE,
+     PIN_GROUND, "Box(Modifier.padding(bottom = KAYA_TABLE_SEGMENT_GAP))",
+     "stand on the ground through the segment gap"),
+    ("the compose titles under the rows", COMPOSE,
+     "p.place(padX + colX[c], headerY + padY, zIndex = 1f)",
+     "p.place(padX + colX[c], headerY + padY)", "the titles paint over"),
+)
+for label, path, needle, replacement, sentence in ZONE + PIN:
     applied = real[path].count(needle)
     print(f"check-table-card: self-test — {label} applied {applied} substitution(s)")
     if applied != 1:
@@ -769,7 +856,7 @@ for label, path, needle, replacement, sentence in ZONE:
 
 if failures:
     _die()
-print(f"check-table-card: {len(PRESENT) + len(NAMED) + len(ELEVATE) + len(ZONE)} "
+print(f"check-table-card: {len(PRESENT) + len(NAMED) + len(ELEVATE) + len(ZONE) + len(PIN)} "
       "watched negatives, every one red as demanded")
 
 print("check-table-card: OK")

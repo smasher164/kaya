@@ -21968,6 +21968,37 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
+    fn header_shown(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.columns.len()) else {
+                return "<no such target>".to_string();
+            };
+            let column = core.columns[i].clone();
+            while glib::MainContext::default().iteration(false) {}
+            let Some(header) = table_header(&column) else {
+                return "no columns declared on this container".to_string();
+            };
+            let target: gtk4::Widget = column.clone().upcast();
+            let viewport = f64::from(column.height());
+            let mut outside = Vec::new();
+            for (index, cell) in children_of(&header).iter().enumerate() {
+                let Some(rect) = cell_ink(cell).compute_bounds(&target) else {
+                    return format!("the toolkit places no header cell {index} yet");
+                };
+                let (top, bottom) =
+                    (f64::from(rect.y()), f64::from(rect.y()) + f64::from(rect.height()));
+                if top < -2.0 || bottom > viewport + 2.0 {
+                    outside.push(format!("{index} at {}..{}px", top.round(), bottom.round()));
+                }
+            }
+            if outside.is_empty() {
+                String::new()
+            } else {
+                format!("titles {} outside viewport 0..{}px", outside.join(", "), viewport.round())
+            }
+        })
+    }
+
 
     /// The first VISIBLE row and the collection's declared total, driven
     /// off a fresh report so a poll that finds the band mid-move drives

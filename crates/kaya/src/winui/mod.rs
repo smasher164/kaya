@@ -25253,6 +25253,42 @@ impl crate::harness::Stage for WinUiStage {
     }
 
 
+    fn header_shown(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            let Some((grid, cells)) =
+                table_of(core, t, |table| (table.grid.clone(), table.cells.clone()))
+            else {
+                return Ok("<no such target>".to_string());
+            };
+            grid.UpdateLayout()?;
+            let surface: UIElement = grid.cast()?;
+            let viewport = grid.ActualHeight()?;
+            let mut outside = Vec::new();
+            for (index, cell) in cells.iter().enumerate() {
+                let element: FrameworkElement = cell.cast()?;
+                let top = f64::from(
+                    cell.cast::<UIElement>()?
+                        .TransformToVisual(&surface)?
+                        .TransformPoint(Point { X: 0.0, Y: 0.0 })?
+                        .Y,
+                );
+                let bottom = top + element.ActualHeight()?;
+                if top < -2.0 || bottom > viewport + 2.0 {
+                    outside.push(format!("{index} at {}..{}px", top.round(), bottom.round()));
+                }
+            }
+            if cells.is_empty() {
+                return Ok("no header cells".to_string());
+            }
+            Ok(if outside.is_empty() {
+                String::new()
+            } else {
+                format!("titles {} outside viewport 0..{}px", outside.join(", "), viewport.round())
+            })
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
     fn window_band(&self, t: crate::harness::Target) -> String {
         Self::on_ui_settled(move |core| {
             let Some(id) = container_id(core, t) else {
