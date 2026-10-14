@@ -378,6 +378,35 @@ def lane_health_reading(when):
                                                  *SSH_MUX, HOST], WIN_RUNTIMES)
 
 
+def native_images():
+    """docs/traps.md, the stale .NET native images."""
+    ssh = ["ssh", "-n", "-o", "BatchMode=yes", *SSH_MUX, HOST]
+    t0 = time.monotonic()
+    text, problem = lane_health._run([*ssh, lane_health.ngen_command()], timeout=60)
+    print(f"deploy-win: read the guest's native-image queues in "
+          f"{int((time.monotonic() - t0) * 1000)} ms", flush=True)
+    todo, sentence, refusal = lane_health.ngen_plan(text, problem)
+    if refusal:
+        die(refusal)
+    print(sentence, flush=True)
+    results = []
+    for framework, pending in todo:
+        t1 = time.monotonic()
+        _, why = lane_health._run([*ssh, lane_health.ngen_drain_command(framework)],
+                                  timeout=1800)
+        results.append((framework, pending, why, time.monotonic() - t1))
+    if not results:
+        return
+    text, problem = lane_health._run([*ssh, lane_health.ngen_command()], timeout=60)
+    lines, refusal = lane_health.ngen_verdict(results, text, problem)
+    for line in lines:
+        print(line, flush=True)
+    if refusal:
+        die(refusal)
+
+
+native_images()
+timing("native-images")
 lane_health_reading("start")
 BUILD_EXAMPLES = []
 for _s in SCENES + DEPTH_SCENES:

@@ -167,6 +167,17 @@ def compose_findings(source):
                    f"never runs (S4)")
     if "LaunchedEffect(node.scrollRowSeq)" not in src:
         out.append(f"{COMPOSE}: no effect keyed on scrollRowSeq — the request is never performed")
+    window = block_after(src, "internal class KayaTableWindow(private val node: KayaNode)")
+    park = block_after(window, "fun park(row: Int)")
+    report = block_after(window, "fun report()")
+    launched = block_after(report, "scope.launch")
+    gen = launched.find("if (parked != parkSeq)")
+    write = launched.find("anchorScroll = state.value")
+    if ("parkSeq += 1" not in park or "val parked = parkSeq" not in report
+            or gen < 0 or write < 0 or gen > write or "return@launch" not in launched[gen:write]):
+        out.append(f"{COMPOSE}: a park's scroll writes the park state without checking it is still "
+                   f"the latest park — an earlier park's late scroll cancels the next one "
+                   f"(docs/traps.md, the Compose park cancelled by the scroll before it)")
     verb = block_after(src, "private fun kayaScrolledTo(node: KayaNode, key: String)")
     if "kayaNodeTops[copy.id]" not in verb or "scrollRowRequest" in verb:
         out.append(f"{COMPOSE}: expect_scrolled_to must read the copy's placement, never the "
@@ -300,7 +311,16 @@ for n, (rel, needle) in enumerate(((SWIFT, "sideways ? .horizontal : .vertical")
     watched(f"a sideways scroll on the vertical switch ({rel})", {**REAL, rel: cut},
             "native switch is gone")
 
-gate.negatives_ran(19)
+n16 = gate.doctor("the compose park generation check cut", REAL[COMPOSE],
+                  r"if \(parked != parkSeq\) \{", "if (false) {")
+watched("a Compose park cancelled by the scroll before it", {**REAL, COMPOSE: n16},
+        "still the latest park")
+n17 = gate.doctor("the compose park no longer moving the generation", REAL[COMPOSE],
+                  r"        parkSeq \+= 1\n", "")
+watched("a Compose park that never moves the generation", {**REAL, COMPOSE: n17},
+        "still the latest park")
+
+gate.negatives_ran(21)
 
 for line in census(REAL):
     gate.finding(line)

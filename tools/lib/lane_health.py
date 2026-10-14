@@ -273,13 +273,73 @@ def linux_sentence(text, problem):
             + f"; most CPU since boot: {', '.join(since[:4]) or 'ps listed none'}")
 
 
+# Docker Desktop's own record of its VM (docs/traps.md, the linux lane's
+# "docker VM up 4s"): Resource Saver stops the VM after five idle minutes and
+# the next docker call starts it, so a short uptime is that, a crash or an
+# OOM kill, and only this log says which.
+DOCKER_LOG = pathlib.Path.home() / "Library/Containers/com.docker.docker/Data/log/host/com.docker.backend.log"
+DOCKER_EVENT = re.compile(
+    r"^\[(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)[.\d]*Z\]\[com\.docker\.backend[.\w]*\] "
+    r"(?:(stopping VM|starting VM)\b|idle -> busy \(was idle for (\S+?);|.*S->C.*(oom-kills)\b)",
+    re.M)
+_LINUX_START = {}
+
+
+def docker_events(text):
+    """[(utc stamp, 'stop'|'start'|'woke after <idle>'|'oom kill')] from the backend log."""
+    out = []
+    for m in DOCKER_EVENT.finditer(text):
+        stamp = m.group(1)
+        if m.group(2):
+            out.append((stamp, "stop" if m.group(2) == "stopping VM" else "start"))
+        elif m.group(3):
+            out.append((stamp, f"woke after {m.group(3)}"))
+        elif m.group(4):
+            out.append((stamp, "oom kill"))
+    return out
+
+
+def docker_sentence(events, problem, since=None):
+    if problem:
+        return f"Docker Desktop's VM record unreadable: {problem}"
+    if since is None:
+        starts = [i for i, (_, kind) in enumerate(events) if kind == "start"]
+        if not starts:
+            return "Docker Desktop's VM record: no VM start in its backend log"
+        i = starts[-1]
+        stamp = events[i][0]
+        woke = [k for s, k in events[max(0, i - 1):i + 2] if k.startswith("woke after")]
+        stops = [s for s, k in events[:i] if k == "stop"]
+        why = (f"Resource Saver had stopped it at {stops[-1]}Z and a docker call woke it "
+               f"({woke[-1]})" if stops and woke else
+               f"the previous stop is {'at ' + stops[-1] + 'Z' if stops else 'not in the log'}, "
+               f"and no idle wake was logged beside the start")
+        return f"Docker Desktop's VM last started at {stamp}Z: {why}"
+    during = [(s, k) for s, k in events if s >= since and k in ("stop", "start", "oom kill")]
+    if not during:
+        return f"Docker Desktop's VM since {since}Z: no stop, start or OOM kill"
+    return (f"Docker Desktop's VM since {since}Z: "
+            + ", ".join(f"{k} at {s}Z" for s, k in during)
+            + " — the VM moved under this lane")
+
+
 def linux_report(lane, when, image):
     t0 = time.monotonic()
     host, _ = host_line()
     say(lane, when, host)
+    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
     text, problem = _run(["docker", "run", "--rm", "--pid=host", image, "sh",
                           "-c", LINUX_SHELL], timeout=60)
     say(lane, when, linux_sentence(text, problem))
+    try:
+        log = DOCKER_LOG.read_text(encoding="utf-8", errors="replace")
+        log_problem = None
+    except OSError as error:
+        log, log_problem = "", f"{DOCKER_LOG}: {error.strerror}"
+    since = _LINUX_START.get(lane) if when == "end" else None
+    say(lane, when, docker_sentence(docker_events(log), log_problem, since))
+    if when == "start":
+        _LINUX_START[lane] = now
     say(lane, when, f"the reading took {int((time.monotonic() - t0) * 1000)} ms")
 
 
@@ -290,6 +350,17 @@ def mac_report(lane, when):
 
 
 # --------------------------------------------------------- the windows guest
+
+# docs/traps.md, the stale .NET Framework native images: a .NET update leaves
+# PowerShell's own assemblies StatusPending and every start JIT-compiles them.
+NGEN_FRAMEWORKS = ("FrameworkArm64", "Framework64", "Framework")
+NGEN_EXE = "C:\\Windows\\Microsoft.NET\\{}\\v4.0.30319\\ngen.exe"
+NGEN_READ = (r"""try{foreach($f in @(""" + ",".join(f"'{f}'" for f in NGEN_FRAMEWORKS)
+             + r""")){$e="$env:windir\Microsoft.NET\$f\v4.0.30319\ngen.exe";if(Test-Path $e){$o=& $e display;"ngen="+$f+"|"+$LASTEXITCODE+"|"+@($o|Select-String -SimpleMatch 'StatusPending').Count}else{"ngen="+$f+"|absent|0"}}}catch{"ngen.error="+($_.Exception.Message -replace '\s+',' ')}
+""")
+PS_START = r"""try{$q=New-Object Diagnostics.ProcessStartInfo 'powershell.exe','-NoProfile -Command exit';$q.UseShellExecute=$false;$q.CreateNoWindow=$true;$s=[Diagnostics.Stopwatch]::StartNew();$p=[Diagnostics.Process]::Start($q);$p.WaitForExit();"pscpu="+(N $p.TotalProcessorTime.TotalMilliseconds)+"|"+$s.ElapsedMilliseconds}catch{"pscpu.error="+($_.Exception.Message -replace '\s+',' ')}
+"""
+PS_SLOW_MS = 900
 
 WINDOWS_SCRIPT = r"""$ErrorActionPreference='Stop';$w=[Diagnostics.Stopwatch]::StartNew()
 $I=[Globalization.CultureInfo]::InvariantCulture
@@ -303,6 +374,7 @@ foreach($p in Get-Process){if($p.CPU -ne $null){$d=0;if($a.ContainsKey($p.Id)){$
 try{$m=Get-MpComputerStatus;"mp.rtp="+$m.RealTimeProtectionEnabled;"mp.mode="+$m.AMRunningMode;"mp.qs="+(T $m.QuickScanStartTime);"mp.qe="+(T $m.QuickScanEndTime);"mp.fs="+(T $m.FullScanStartTime);"mp.fe="+(T $m.FullScanEndTime)}catch{"mp.error="+($_.Exception.Message -replace '\s+',' ')}
 try{$f=Get-MpPreference;foreach($x in $f.ExclusionPath){"mp.xpath="+$x};foreach($x in $f.ExclusionProcess){"mp.xproc="+$x}}catch{"mp.preferror="+($_.Exception.Message -replace '\s+',' ')}
 foreach($r in @(RUNTIMES)){$n,$q=$r;if(-not $q){$c=Get-Command $n -ErrorAction SilentlyContinue|Select-Object -First 1;if($c){$q=$c.Source}}elseif(-not(Test-Path $q)){$q='missing:'+$q};"rt="+$n+"|"+$q}
+""" + PS_START + NGEN_READ + r"""
 "took="+$w.ElapsedMilliseconds
 """
 
@@ -329,7 +401,7 @@ def _iso(text):
 
 def windows_sentences(text, problem):
     keys = {}
-    multi = {"cpu": [], "cpuhidden": [], "mp.xpath": [], "mp.xproc": [], "rt": []}
+    multi = {"cpu": [], "cpuhidden": [], "mp.xpath": [], "mp.xproc": [], "rt": [], "ngen": []}
     for line in text.splitlines():
         key, eq, value = line.partition("=")
         if not eq:
@@ -427,9 +499,131 @@ def windows_sentences(text, problem):
             else:
                 verdicts.append(f"{name} SCANNED ({where}; no exclusion covers it)")
         out.append("real-time scanning: " + ("; ".join(verdicts) or "no runtime was named"))
+    out.append(powershell_sentence(keys))
+    out.append("native-image queues: " + ngen_summary(ngen_rows(multi["ngen"]),
+                                                      keys.get("ngen.error")))
     if "took" in keys:
         out.append(f"the guest's reading took {keys['took']} ms (2 s of it the CPU sample)")
     return out
+
+
+def powershell_sentence(keys):
+    if "pscpu.error" in keys:
+        return f"guest PowerShell start unreadable: {keys['pscpu.error']}"
+    cpu, _, wall = keys.get("pscpu", "").partition("|")
+    try:
+        cpu_ms, wall_ms = float(cpu), int(wall)
+    except ValueError:
+        return f"guest PowerShell start unreadable (pscpu={keys.get('pscpu', '')!r})"
+    slow = f"SLOW, past {PS_SLOW_MS} ms: " if cpu_ms > PS_SLOW_MS else ""
+    return (f"guest PowerShell start (-NoProfile -Command exit): {slow}{cpu_ms:.0f} ms of CPU, "
+            f"{wall_ms} ms wall (300-480 ms of CPU measured with current native images, "
+            f"1400-1900 ms with stale ones; docs/traps.md, the stale .NET native images)")
+
+
+def ngen_rows(values):
+    """`ngen=<framework>|<display's exit or absent>|<StatusPending lines>`."""
+    rows = []
+    for value in values:
+        parts = value.split("|")
+        if len(parts) == 3:
+            rows.append(tuple(p.strip() for p in parts))
+    return rows
+
+
+def ngen_pending(rows):
+    """{framework: pending} over the frameworks whose reading counted."""
+    return {f: int(c) for f, rc, c in rows if rc == "0" and c.isdigit()}
+
+
+def ngen_unreadable(rows):
+    return [f"{f} (ngen display exited {rc}, counted {c!r})" for f, rc, c in rows
+            if rc != "absent" and not (rc == "0" and c.isdigit())]
+
+
+def ngen_summary(rows, error):
+    if error:
+        return f"unreadable: {error}"
+    if not rows:
+        return "the guest printed no ngen reading"
+    parts = []
+    for f, rc, c in rows:
+        if rc == "absent":
+            parts.append(f"{f} has no ngen.exe")
+        elif f in ngen_pending(rows):
+            parts.append(f"{f} {c} {'PENDING' if c != '0' else 'pending'}")
+        else:
+            parts.append(f"{f} unreadable (ngen display exited {rc}, counted {c!r})")
+    return ", ".join(parts)
+
+
+def ngen_command():
+    script = r"""$ErrorActionPreference='Stop'
+""" + NGEN_READ
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode()
+    return f"powershell -NoProfile -NonInteractive -EncodedCommand {encoded}"
+
+
+def ngen_drain_command(framework):
+    return f"{NGEN_EXE.format(framework)} executeQueuedItems"
+
+
+def _ngen_refusal(what):
+    cmds = "; ".join(f"`{ngen_drain_command(f)}`" for f in NGEN_FRAMEWORKS)
+    return (f"deploy-win: {what}. Every PowerShell start JIT-compiles an assembly whose "
+            f"native image is StatusPending (1400-1900 ms of CPU against 300-480 ms measured), "
+            f"and every leg starts one. On the VM, as administrator, run {cmds}, then "
+            f"`{NGEN_EXE.format(NGEN_FRAMEWORKS[0])} display` should list nothing "
+            f"StatusPending (docs/traps.md, the stale .NET native images).")
+
+
+def ngen_plan(text, problem, after=""):
+    """(frameworks to drain as (name, pending), sentence, refusal)."""
+    keys, values = {}, []
+    for line in text.splitlines():
+        key, eq, value = line.partition("=")
+        if eq and key.strip() == "ngen":
+            values.append(value.strip())
+        elif eq:
+            keys[key.strip()] = value.strip()
+    rows = ngen_rows(values)
+    if problem or "ngen.error" in keys or not rows:
+        why = problem or keys.get("ngen.error") or "the guest printed no ngen reading"
+        return [], None, _ngen_refusal(f"the guest's .NET native-image queues could not "
+                                       f"be read{after} ({why})")
+    bad = ngen_unreadable(rows)
+    if bad:
+        return [], None, _ngen_refusal("the native-image queue could not be counted for "
+                                       + ", ".join(bad))
+    pending = ngen_pending(rows)
+    if not pending:
+        return [], None, _ngen_refusal("no framework on the guest has an ngen.exe ("
+                                       + ngen_summary(rows, None) + ")")
+    todo = [(f, n) for f, n in pending.items() if n]
+    total = sum(n for _, n in todo)
+    if not todo:
+        return [], f"deploy-win: .NET native images: nothing pending ({ngen_summary(rows, None)})", None
+    return todo, (f"deploy-win: .NET native images: {total} items pending "
+                  f"({ngen_summary(rows, None)}); draining the queue before any leg"), None
+
+
+def ngen_verdict(results, text, problem):
+    """`results` is (framework, pending before, failure or None, seconds) per
+    drain; `text` the reading after them. (lines, refusal)."""
+    lines = [f"deploy-win: ngen executeQueuedItems on {f}: {n} items pending before, "
+             f"{secs:.0f}s, {why or 'exit 0'}" for f, n, why, secs in results]
+    todo, _, refusal = ngen_plan(text, problem, " after the drain")
+    if refusal:
+        return lines, refusal
+    if todo:
+        left = ", ".join(f"{f} {n}" for f, n in todo)
+        failed = "; ".join(f"{f} {why}" for f, _, why, _ in results if why) or "every drain exited 0"
+        return lines, _ngen_refusal(f"{sum(n for _, n in todo)} items are still pending after "
+                                    f"executeQueuedItems ({left}; {failed})")
+    took = sum(secs for _, _, _, secs in results)
+    lines.append(f"deploy-win: .NET native images: drained "
+                 f"{sum(n for _, n, _, _ in results)} items in {took:.0f}s; nothing pending now")
+    return lines, None
 
 
 def windows_report(lane, when, ssh_argv, runtimes):
@@ -542,6 +736,10 @@ rt=java.exe|C:\\jdk\\bin\\java.exe
 rt=node.exe|C:\\kaya\\node24\\node.exe
 rt=go.exe|missing:C:\\kaya\\go127\\go\\bin\\go.exe
 rt=dotnet.exe|
+pscpu=1620.5|910
+ngen=FrameworkArm64|0|64
+ngen=Framework64|0|0
+ngen=Framework|absent|0
 took=3120
 """
 
@@ -550,6 +748,8 @@ now=2026-10-14T12:12:30Z
 sample=0
 mp.error=Get-MpComputerStatus : not recognized
 mp.preferror=Get-MpPreference : not recognized
+pscpu.error=Access is denied
+ngen.error=The term ngen.exe is not recognized
 """
 
 WIN_NA = """boot=2026-10-14T11:12:00Z
@@ -563,7 +763,23 @@ mp.qe=
 mp.fs=2026-10-01T02:00:00Z
 mp.fe=2026-10-01T03:00:00Z
 mp.xpath=N/A: Must be an administrator to view exclusions
+pscpu=390.63|220
+ngen=FrameworkArm64|5|0
+ngen=Framework64|0|x
 """
+
+NGEN_CLEAN = "ngen=FrameworkArm64|0|0\nngen=Framework64|0|0\nngen=Framework|0|0\n"
+NGEN_STALE = "#< CLIXML\nngen=FrameworkArm64|0|64\nngen=Framework64|0|3\nngen=Framework|0|0\n"
+
+
+def _plan(text, problem=None):
+    todo, sentence, refusal = ngen_plan(text, problem)
+    return [f"todo {todo}", f"sentence {sentence}", f"refusal {refusal}"]
+
+
+def _verdict(results, text, problem=None):
+    lines, refusal = ngen_verdict(results, text, problem)
+    return lines + [f"refusal {refusal}"]
 
 PS = """    1     0 05-10:00:00   9:00.00   0.0 /sbin/launchd
   100     1 01:00:00   1:00.00  12.0 /usr/bin/launchd_sim
@@ -594,6 +810,13 @@ ANDROID_ONEFRAME = """bogus
 ==ps
 ==top
  0.0 top
+"""
+
+DOCKER_GOOD = """[2026-10-14T19:07:52.479865000Z][com.docker.backend.idle] stopping VM
+[2026-10-14T20:36:17.499842000Z][com.docker.backend.idle] idle -> busy (was idle for 1h33m25.36s; reason: [x])
+[2026-10-14T20:36:17.500070000Z][com.docker.backend.idle] starting VM
+[2026-10-14T20:40:00.705377000Z][com.docker.backend.ipc] (6c135af2-16) a4ae0185-BackendAPI S->C 19bdc181-init POST /analytics/track/oom-kills (1.4ms): 1
+[2026-10-14T21:08:22.787023000Z][com.docker.backend.idle] stopping VM
 """
 
 LINUX_GOOD = """3600.5 9000.1
@@ -644,6 +867,20 @@ def drive():
     cases.append(("docker VM", "docker VM up 1h00m, load 2.50 1.20 0.80 on 18 cores; most CPU "
                   "since boot: dockerd 12m00s, containerd 1m00s",
                   [linux_sentence(LINUX_GOOD, None)]))
+    events = docker_events(DOCKER_GOOD)
+    cases.append(("docker VM woken", "Docker Desktop's VM last started at 2026-10-14T20:36:17Z: "
+                  "Resource Saver had stopped it at 2026-10-14T19:07:52Z and a docker call woke it "
+                  "(woke after 1h33m25.36s)", [docker_sentence(events[:3], None)]))
+    cases.append(("docker VM moved", "since 2026-10-14T20:36:20Z: oom kill at 2026-10-14T20:40:00Z, "
+                  "stop at 2026-10-14T21:08:22Z — the VM moved under this lane",
+                  [docker_sentence(events, None, "2026-10-14T20:36:20")]))
+    cases.append(("docker VM still", "since 2026-10-14T20:36:20Z: no stop, start or OOM kill",
+                  [docker_sentence(events[:3], None, "2026-10-14T20:36:20")]))
+    cases.append(("docker VM no start", "no VM start in its backend log", [docker_sentence([], None)]))
+    cases.append(("docker VM cold start", "the previous stop is not in the log, and no idle wake",
+                  [docker_sentence(events[2:3], None)]))
+    cases.append(("docker log unreadable", "Docker Desktop's VM record unreadable: x: No such file",
+                  [docker_sentence([], "x: No such file")]))
     cases.append(("docker VM failed", "docker VM reading failed: docker exited 125",
                   [linux_sentence("", "docker exited 125: no such image")]))
     cases.append(("docker VM garbled", "docker VM uptime unreadable, load unreadable; most CPU "
@@ -686,6 +923,64 @@ def drive():
                   [s + "|END" for s in na]))
     cases.append(("exclusions N/A", "Defender exclusions unreadable to this session: N/A: Must be",
                   na))
+    for label, want in (
+            ("slow powershell", "guest PowerShell start (-NoProfile -Command exit): SLOW, past "
+             "900 ms: 1620 ms of CPU, 910 ms wall (300-480 ms"),
+            ("pending images", "native-image queues: FrameworkArm64 64 PENDING, Framework64 0 "
+             "pending, Framework has no ngen.exe")):
+        cases.append((label, want, good))
+    cases.append(("quick powershell", "(-NoProfile -Command exit): 391 ms of CPU, 220 ms wall", na))
+    cases.append(("powershell error", "guest PowerShell start unreadable: Access is denied", quiet))
+    garbled = windows_sentences("now=2026-10-14T12:12:30Z\npscpu=x\n", None)
+    cases.append(("powershell garbled", "guest PowerShell start unreadable (pscpu='x')", garbled))
+    cases.append(("images error", "native-image queues: unreadable: The term ngen.exe", quiet))
+    cases.append(("images unreadable", "native-image queues: FrameworkArm64 unreadable (ngen "
+                  "display exited 5, counted '0'), Framework64 unreadable (ngen display exited 0, "
+                  "counted 'x')", na))
+    cases.append(("images unprinted", "native-image queues: the guest printed no ngen reading",
+                  garbled))
+    cases.append(("plan clean", "sentence deploy-win: .NET native images: nothing pending "
+                  "(FrameworkArm64 0 pending, Framework64 0 pending, Framework 0 pending)",
+                  _plan(NGEN_CLEAN)))
+    cases.append(("plan stale", "sentence deploy-win: .NET native images: 67 items pending "
+                  "(FrameworkArm64 64 PENDING, Framework64 3 PENDING, Framework 0 pending); "
+                  "draining the queue before any leg", _plan(NGEN_STALE)))
+    cases.append(("plan drains only the pending", "todo [('FrameworkArm64', 64), "
+                  "('Framework64', 3)]", _plan(NGEN_STALE)))
+    cases.append(("plan ssh failed", "refusal deploy-win: the guest's .NET native-image queues "
+                  "could not be read (ssh exited 255: x)", _plan("", "ssh exited 255: x")))
+    cases.append(("plan names the command", "run `C:\\Windows\\Microsoft.NET\\FrameworkArm64"
+                  "\\v4.0.30319\\ngen.exe executeQueuedItems`; `C:\\Windows\\Microsoft.NET"
+                  "\\Framework64\\v4.0.30319\\ngen.exe executeQueuedItems`",
+                  _plan("", "ssh exited 255: x")))
+    cases.append(("plan ngen error", "could not be read (The term ngen.exe is not recognized)",
+                  _plan(WIN_QUIET)))
+    cases.append(("plan silent", "could not be read (the guest printed no ngen reading)",
+                  _plan("#< CLIXML\n")))
+    cases.append(("plan uncounted", "the native-image queue could not be counted for "
+                  "FrameworkArm64 (ngen display exited 5, counted '0'), Framework64 (ngen display "
+                  "exited 0, counted 'x')", _plan(WIN_NA)))
+    cases.append(("plan no ngen", "no framework on the guest has an ngen.exe (FrameworkArm64 has "
+                  "no ngen.exe)", _plan("ngen=FrameworkArm64|absent|0\n")))
+    drained = _verdict([("FrameworkArm64", 64, None, 183.2), ("Framework64", 3, None, 4.1)],
+                       NGEN_CLEAN)
+    cases.append(("drain line", "deploy-win: ngen executeQueuedItems on FrameworkArm64: 64 items "
+                  "pending before, 183s, exit 0", drained))
+    cases.append(("drained", "deploy-win: .NET native images: drained 67 items in 187s; nothing "
+                  "pending now", drained))
+    cases.append(("drained without refusal", "refusal None", drained[-1:]))
+    left = _verdict([("FrameworkArm64", 64, "ssh exited 1: x", 20.0)],
+                    "ngen=FrameworkArm64|0|2\nngen=Framework64|0|0\nngen=Framework|0|0\n")
+    cases.append(("drain failed", "refusal deploy-win: 2 items are still pending after "
+                  "executeQueuedItems (FrameworkArm64 2; FrameworkArm64 ssh exited 1: x)", left))
+    cases.append(("drain failed line", "64 items pending before, 20s, ssh exited 1: x", left))
+    cases.append(("drain exited 0 and left items", "(FrameworkArm64 2; every drain exited 0)",
+                  _verdict([("FrameworkArm64", 64, None, 20.0)],
+                           "ngen=FrameworkArm64|0|2\nngen=Framework|0|0\n")))
+    cases.append(("drain unreadable after", "could not be read after the drain (ssh did not "
+                  "answer within 60s)",
+                  _verdict([("Framework", 1, "ssh did not answer within 1800s", 1800.0)], "",
+                           "ssh did not answer within 60s")))
     cases.append(("guest silent", "guest reading failed: ssh exited 255",
                   windows_sentences("", "ssh exited 255: Connection refused")))
     cases.append(("guest printed nothing", "guest reading failed: the guest printed nothing",

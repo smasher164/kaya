@@ -80,7 +80,8 @@ thread_local! {
     static CAPTURES: RefCell<HashMap<u64, GtkCapture>> = RefCell::new(HashMap::new());
     static PENDING: RefCell<std::collections::VecDeque<Pending>> = RefCell::new(Default::default());
     static FLUSH_SCHEDULED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    static WATCH: RefCell<Option<(gst::DeviceMonitor, gst::bus::BusWatchGuard)>> = const { RefCell::new(None) };
+    static WATCH: RefCell<Option<gst::bus::BusWatchGuard>> = const { RefCell::new(None) };
+    static MONITOR: std::cell::OnceCell<std::mem::ManuallyDrop<gst::DeviceMonitor>> = const { std::cell::OnceCell::new() };
     static REOPEN: RefCell<std::collections::HashSet<u64>> = RefCell::new(Default::default());
 }
 
@@ -519,17 +520,24 @@ struct Node {
     native: Option<(i32, i32)>,
 }
 
+/// THE PROCESS'S ONE DEVICE MONITOR, started once and never stopped or
+/// dropped (docs/traps.md, the capture that wedged on a freed monitor).
+fn device_monitor() -> gst::DeviceMonitor {
+    MONITOR.with(|m| {
+        (**m.get_or_init(|| {
+            let monitor = gst::DeviceMonitor::new();
+            monitor.add_filter(Some("Video/Source"), None);
+            monitor.add_filter(Some("Audio/Source"), None);
+            let _ = monitor.start();
+            std::mem::ManuallyDrop::new(monitor)
+        }))
+        .clone()
+    })
+}
+
 /// Every camera and microphone node PipeWire lists now.
 fn nodes() -> Vec<Node> {
-    let monitor = gst::DeviceMonitor::new();
-    monitor.add_filter(Some("Video/Source"), None);
-    monitor.add_filter(Some("Audio/Source"), None);
-    if monitor.start().is_err() {
-        return Vec::new();
-    }
-    let out = monitor.devices().into_iter().filter_map(|d| node_of(&d)).collect();
-    monitor.stop();
-    out
+    device_monitor().devices().into_iter().filter_map(|d| node_of(&d)).collect()
 }
 
 fn node_of(device: &gst::Device) -> Option<Node> {
@@ -619,11 +627,7 @@ fn devices() -> Vec<CaptureDevice> {
 /// watch_capture_devices: each kind's standing permission and the list,
 /// now and whenever a device comes or goes.
 pub(super) fn watch(on: bool) {
-    WATCH.with_borrow_mut(|w| {
-        if let Some((monitor, _)) = w.take() {
-            monitor.stop();
-        }
-    });
+    WATCH.with_borrow_mut(|w| w.take());
     if !on {
         return;
     }
@@ -641,10 +645,7 @@ pub(super) fn watch(on: bool) {
         queue(Pending::Permission(kind, standing, String::new()));
     }
     queue(Pending::Devices(devices()));
-    let monitor = gst::DeviceMonitor::new();
-    monitor.add_filter(Some("Video/Source"), None);
-    monitor.add_filter(Some("Audio/Source"), None);
-    let bus = monitor.bus();
+    let bus = device_monitor().bus();
     let Ok(guard) = bus.add_watch_local(|_, msg| {
         if matches!(msg.view(), gst::MessageView::DeviceAdded(_) | gst::MessageView::DeviceRemoved(_)) {
             queue(Pending::Devices(devices()));
@@ -653,9 +654,7 @@ pub(super) fn watch(on: bool) {
     }) else {
         return;
     };
-    if monitor.start().is_ok() {
-        WATCH.with_borrow_mut(|w| *w = Some((monitor, guard)));
-    }
+    WATCH.with_borrow_mut(|w| *w = Some(guard));
 }
 
 /// The devices resolved and opened, back on the main loop.

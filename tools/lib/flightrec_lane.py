@@ -72,15 +72,51 @@ def mac_power_history(text, code):
             + "\n".join(lines[-200:]) + "\n")
 
 
+REPEATS_KEPT = 20
+
+
+def mac_log_collapse(data):
+    """Each message after its REPEATS_KEPT-th sighting is dropped and counted:
+    a guest's replayd loop wrote 24 MB in 43 s and the newest-kept cut lost
+    the failing step (docs/traps.md, the pooled ink read that never answered)."""
+    records, seen, dropped = [], {}, {}
+    for line in data.decode("utf-8", errors="replace").splitlines(keepends=True):
+        head = re.match(r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+ +\S+ +(.*)", line, re.S)
+        if head or not records:
+            records.append([line, head])
+        else:
+            records[-1][0] += line
+    out = []
+    for text, head in records:
+        if head:
+            key = re.sub(r"0x[0-9a-f]+", "0x#", re.sub(r"(\[\d+):[0-9a-f]+\]", r"\1]",
+                                                       head.group(1).strip()))
+            seen[key] = seen.get(key, 0) + 1
+            if seen[key] > REPEATS_KEPT:
+                dropped[key] = dropped.get(key, 0) + 1
+                continue
+        out.append(text)
+    for key, count in sorted(dropped.items(), key=lambda kv: -kv[1]):
+        out.append(f"== repeated {seen[key]} times, the {count} after the first "
+                   f"{REPEATS_KEPT} dropped: {key[:300]}\n")
+    return "".join(out).encode("utf-8")
+
+
 def mac_unified_log(pid, cap=SECTION_CAP, run=subprocess.run):
-    """The leg's own guest first and its capture service second, each in
-    half the cap and each keeping its NEWEST lines: in one query replayd
-    filled the whole cap in 1.3 s before the leg began and the guest kept
-    no line (docs/traps.md, the toast that outlived its seconds).
-    Returns (text, state)."""
+    """The leg's own guest first, then its capture service, MediaRemote's
+    commands and every process's replayd connection losses, each in its share
+    of the cap, collapsed (mac_log_collapse) and keeping its NEWEST lines: in
+    one query replayd filled the whole cap in 1.3 s before the leg began and
+    the guest kept no line (docs/traps.md, the toast that outlived its
+    seconds; the session_send that never left perl). Returns (text, state)."""
     parts = ([("this leg's guest", f"processID == {pid}"),
               ("replayd and ScreenCaptureKit",
-               'process == "replayd" OR subsystem BEGINSWITH "com.apple.ScreenCaptureKit"')]
+               'process == "replayd" OR subsystem BEGINSWITH "com.apple.ScreenCaptureKit"'),
+              ("MediaRemote's commands",
+               '(process == "mediaremoted" AND eventMessage CONTAINS[c] "command") OR '
+               '(process == "perl" AND subsystem BEGINSWITH "com.apple.amp.mediaremote")'),
+              ("replayd connections cut, every process",
+               'eventMessage == "RPDaemonProxy: connection INTERRUPTED"')]
              if pid else
              [("kaya processes", 'process CONTAINS "kaya" OR senderImagePath CONTAINS '
                                  '"kaya" OR eventMessage CONTAINS "kaya"')])
@@ -98,6 +134,8 @@ def mac_unified_log(pid, cap=SECTION_CAP, run=subprocess.run):
             data, code = str(error).encode(), f"not run: {error.strerror}"
         codes.append(code)
         head = f"== {label} (log show --predicate '{predicate}'): exit {code}, {len(data)} bytes"
+        data = mac_log_collapse(data)
+        head += f", {len(data)} after repeats collapsed"
         if len(data) > room:
             head += f", the oldest {len(data) - room} cut to keep the newest {room}"
             data = data[-room:]
@@ -187,6 +225,8 @@ def ios_launch_pid(out, bundle_id):
     return int(m.group(1)) if m else None
 
 
+IOS_XCTEST_LATE = 5
+
 IOS_XCTEST_IDLE = (
     ("main run loop", "Received request to notify when the main run loop is idle",
      "Sending main run loop idle reply"),
@@ -202,8 +242,9 @@ def ios_xctest_idle(text):
         return "XCTest's idle waits: the app's log slice holds no lines at all"
     out = []
     unanswered = []
+    late = []
     for kind, ask, answer in IOS_XCTEST_IDLE:
-        pending, asked, answered = [], 0, 0
+        pending, asked, answered, longest = [], 0, 0, None
         for l in lines:
             if ask in l:
                 asked += 1
@@ -211,14 +252,24 @@ def ios_xctest_idle(text):
             elif answer in l:
                 answered += 1
                 if pending:
-                    pending.pop(0)
-        out.append(f"{kind} asked {asked}, answered {answered}")
+                    at = pending.pop(0)
+                    t0, t1 = _log_time(at), _log_time(l)
+                    if t0 is not None and t1 is not None:
+                        wait = (t1 - t0).total_seconds()
+                        longest = wait if longest is None else max(longest, wait)
+                        if wait >= IOS_XCTEST_LATE:
+                            late.append(f"{kind} asked at {at} answered {wait:.2f} s later")
+        out.append(f"{kind} asked {asked}, answered {answered}"
+                   + (f", the longest wait {longest:.2f} s" if longest is not None else ""))
         unanswered += [f"{kind} asked at {at}" for at in pending]
     head = "XCTest's idle waits in the app: " + "; ".join(out)
     span = f" (this slice runs {lines[0][:23]} to {lines[-1][:23]})"
+    said = head + span
+    if late:
+        said += f"; ANSWERED LATE (at least {IOS_XCTEST_LATE} s): " + ", ".join(late)
     if unanswered:
-        return head + span + "; NEVER ANSWERED: " + ", ".join(unanswered)
-    return head + span + "; every one answered"
+        return said + "; NEVER ANSWERED: " + ", ".join(unanswered)
+    return said + ("; every one answered" if not late else "")
 
 
 IOS_ANIMATION_HEAD = "KAYA_HARNESS: XCTest's animation tracking "
@@ -254,13 +305,22 @@ def ios_animation_reading(text):
                     "XCTest's count is above 0 while kaya's ledger holds no open UIView "
                     "animation: a start before the ledger was installed, or a stop kaya saw "
                     "and XCTest did not")
-        elif "XCTest idle" in head:
-            said = ("XCTest's count is 0, so a wait at this moment is not on a UIView animation"
+        elif "XCTest not in progress" in head:
+            said = ("XCTest's count is not above 0, so a wait at this moment is not on an "
+                    "open UIView animation"
                     + (f"; kaya's ledger still holds {len(opens)} open" if opens else ""))
         else:
             m = re.search(r"XCTest unread: ([^;]+)", head)
             said = "XCTest's own count was not read: " + (
                 m.group(1) if m else "the reading names no XCTest state at all")
+        blind = re.search(r"XCTest's notifier first seen at ([^;]+); (\d+) stop\(s\) reached it "
+                          r"for animations that started before it loaded", head)
+        if blind:
+            said = (f"XCTest's notifier loaded at {blind.group(1)}, and {blind.group(2)} of "
+                    f"their stops reached it with no start: each held its count at -1 while "
+                    f"it logged, and an animations-idle request read then waits for a later "
+                    f"stop from 1 to 0 or a later request"
+                    + (f"; kaya's ledger still holds {len(opens)} open" if opens else ""))
         refused = re.search(r"kaya's ledger refused: ([^;]+)", head)
         if refused:
             said += "; kaya's ledger was never installed: " + refused.group(1)

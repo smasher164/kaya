@@ -110,7 +110,7 @@ CALLS = [
      " \"window\",\n \"stale layout table=${node.id} laid=$laidOutFirst+$laid band=$bandStart+$bandCount: no report\",\n"
      " )\n return\n }\n val (first, count) = visibleRange(scroll)"),
     ("the table window's moves reach the verb trace",
-     "KayaVTrace.note(\"window\", \"-> park table=${node.id} row=$row count=$count\")\n"
+     "KayaVTrace.note(\"window\", \"-> park #$parkSeq table=${node.id} row=$row count=$count\")\n"
      " KayaPresent.windowMoved(node.id, row.toLong(), count.toLong())"),
 ]
 

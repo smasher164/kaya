@@ -373,7 +373,8 @@ no platform routes the keys to the app.
 
 The mac arm's questions were measured with the depth slice
 (docs/probes/media-mac-2026-09-30.md): the picture is read by a window capture
-by id, in-process through ScreenCaptureKit, converted to sRGB and compared
+by id (screencapture(1); in process through ScreenCaptureKit two guests of
+one executable cut each other off, docs/traps.md), converted to sRGB and compared
 within 2 per channel, once the clip carries the sRGB transfer tag (a BT.709
 transfer reads CF4421 for C83C1E); an `.accessory` guest becomes Now Playing
 muted, and a command reaches it through the system only when sent from

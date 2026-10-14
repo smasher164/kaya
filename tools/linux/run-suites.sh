@@ -330,6 +330,11 @@ python3 /work/tools/linux/door_record.py --self-test || exit 1
 # leg that quietly took the direct route measures the wrong half of §9
 # ruling 5 and stays green.
 python3 /work/tools/linux/capture-leg.py --self-test || exit 1
+# A LEG THAT OUTLIVES ITS CEILING PRINTS ITS STACKS, AND THE BUNDLE NAMES
+# THEIR STATIC FRAMES (docs/traps.md, the toast leg that never started and
+# the capture that wedged on a freed monitor).
+python3 /work/tools/linux/leg-ceiling.py --self-test || exit 1
+python3 /work/tools/linux/stack-names.py --self-test || exit 1
 
 # A LEG WHOSE GTK PRINTED `natural size must be >= min size` IS RED: the
 # layout GTK clamps to is not the one kaya asked for, and the legs stayed
@@ -625,12 +630,12 @@ run_one() {
         rm -rf "$dir"
         case "$proto" in
             x11)
-                XDG_STATE_HOME="$kaya_state" KAYA_SELFTEST=1 GDK_BACKEND=x11 timeout 180 \
+                XDG_STATE_HOME="$kaya_state" KAYA_SELFTEST=1 GDK_BACKEND=x11 python3 /work/tools/linux/leg-ceiling.py 180 \
                     xvfb-run -a -s "-screen 0 1600x1000x24" \
                     /work/tools/linux/record-leg.sh x11 "$dir" "$@"
                 ;;
             wayland)
-                XDG_STATE_HOME="$kaya_state" KAYA_SELFTEST=1 GDK_BACKEND=wayland timeout 180 \
+                XDG_STATE_HOME="$kaya_state" KAYA_SELFTEST=1 GDK_BACKEND=wayland python3 /work/tools/linux/leg-ceiling.py 180 \
                     xvfb-run -a -s "-screen 0 1600x1000x24" \
                     /work/tools/linux/record-leg.sh wayland "$dir" "$@"
                 ;;
@@ -650,7 +655,8 @@ run_one() {
             done
             local kaya_t0="${EPOCHSECONDS:-0}"
             DISPLAY=":$kaya_display" KAYA_SELFTEST=1 GDK_BACKEND=x11 \
-                XDG_STATE_HOME="$kaya_state" KAYA_VERB_TRACE="$LEGS_DIR/$name-$proto.vtrace" timeout 180 "$@"
+                XDG_STATE_HOME="$kaya_state" KAYA_VERB_TRACE="$LEGS_DIR/$name-$proto.vtrace" \
+                python3 /work/tools/linux/leg-ceiling.py 180 "$@"
             local kaya_rc=$?
             if [ "$kaya_rc" -ne 0 ]; then
                 # THE PICTURE IS TAKEN HERE, NOT IN drain(): the reboot
@@ -682,7 +688,8 @@ run_one() {
             local kaya_t0="${EPOCHSECONDS:-0}"
             XDG_RUNTIME_DIR="$kaya_wl" WAYLAND_DISPLAY="$(cat "$kaya_wl/socket")" \
                 SWAYSOCK="$(cat "$kaya_wl/ipc")" KAYA_SELFTEST=1 GDK_BACKEND=wayland \
-                XDG_STATE_HOME="$kaya_state" KAYA_VERB_TRACE="$LEGS_DIR/$name-$proto.vtrace" timeout 180 "$@"
+                XDG_STATE_HOME="$kaya_state" KAYA_VERB_TRACE="$LEGS_DIR/$name-$proto.vtrace" \
+                python3 /work/tools/linux/leg-ceiling.py 180 "$@"
             local kaya_rc=$?
             if [ "$kaya_rc" -ne 0 ]; then
                 # Before the reboot, for the x11 arm's reason above.
@@ -746,6 +753,13 @@ drain() {
                     cat "$LEGS_DIR/$name.log"
                 flightrec_section "$bundle" xvfb "" \
                     sh -c 'cat /tmp/xvfb-*.log 2>/dev/null'
+                if grep -qE '^    \[[0-9a-f]+\]@0x' "$LEGS_DIR/$name.log" 2>/dev/null; then
+                    flightrec_section "$bundle" stack-names "" \
+                        python3 /work/tools/linux/stack-names.py "$LEGS_DIR/$name.log"
+                else
+                    flightrec_skip "$bundle" stack-names \
+                        "flightrec: the leg log carries no thread stacks with build ids — neither the harness's step ceiling nor tools/linux/leg-ceiling.py's 180 s ceiling was reached, so no frame waits to be named"
+                fi
                 # crates/kaya/src/vtrace.rs; run_one names the file.
                 flightrec_adopt "$bundle" verb-trace "$LEGS_DIR/$name.vtrace" \
                     "flightrec: the guest wrote no verb trace ($LEGS_DIR/$name.vtrace). The ring is dumped by the harness on a FAILED verdict and by the step watchdog, so a leg killed before either — the 180s timeout, a crash, a GTK abort — leaves none"

@@ -1266,9 +1266,10 @@ For the maintainer's review, each measured and none asserted by a lane:
     1368-1420 of its 1500 s ceiling before, so it is expected to pass it,
     left for the maintainer rather than raised.
   - The mac's in-process ScreenCaptureKit read hung or was refused
-    ("declined TCCs") for a pooled media_delivery guest four times; the
-    read falls back to screencapture(1) and says so (docs/traps.md). Why
-    replayd drops that client is not known.
+    ("declined TCCs") for a pooled media_delivery guest four times. Named
+    2026-10-14: replayd keys a client on its executable path, so two node
+    guests take it from each other in a loop; the read is screencapture(1)
+    alone now (docs/traps.md).
   - On iOS expect_display_awake reads the player's own setting, since the
     simulator keeps no record of the hold; a device is unmeasured. The iOS
     playback category is held only by check-verbs (its cut stayed green).
@@ -16077,3 +16078,13 @@ nothing open, or an idle count with the request unanswered, points away
 from UIView animations: read `system-log` for testmanagerd letting go of a
 live app. A main thread that did not answer is a hang in the app: read
 `stacks`. Each of those is the next measurement, not a fix to guess at.
+
+A different 60 s wait, 2026-10-14 (`submit-go`, the leg's first `type`): XCTest's
+notifier loaded while the keyboard's animations were open, and an unmatched stop
+holds XCTest's count at -1 while it logs (docs/traps.md, XCTest's notifier
+loaded over an open animation). Fixed by attaching the driver before the first
+step; it does not explain the timecode sightings, where the notifier was loaded
+long before the Return. The readings now say when XCTest's notifier was first
+seen and name any stop that reached it with no start, and the app log lists
+answers 5 s or more late, so the next timecode sighting can rule this cause in
+or out.

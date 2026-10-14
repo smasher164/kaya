@@ -7593,7 +7593,7 @@ fn wedge_stacks() {
         ceiling_capture("processes at the ceiling", "ps", &["-eo", "pid,stat,pcpu,etimes,nlwp,comm", "--sort=-pcpu"])
     );
     let pid = std::process::id().to_string();
-    eprintln!("{}", ceiling_capture("thread stacks at the ceiling", "eu-stack", &["-m", "-p", &pid]));
+    eprintln!("{}", ceiling_capture("thread stacks at the ceiling", "eu-stack", &["-m", "-b", "-p", &pid]));
 }
 
 /// One diagnostic command at the ceiling, its pipes drained WHILE it runs

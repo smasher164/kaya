@@ -1009,8 +1009,16 @@ in docs/deferred.md.
    varied-python entry): the synthesized tier writes its aim, each pass of a
    park, the landing, a cancel or re-park and expect_window's refused reading
    into the verb trace, with the rows above the target drawn against the
-   core's extents; five cuts watched.
-   A hundred and eighty-one watched negatives, counts printed),
+   core's extents; five cuts watched. AND A STALE .NET NATIVE IMAGE IS
+   DRAINED BEFORE ANY LEG since 2026-10-14 (docs/traps.md, the stale .NET
+   native images): after a .NET Framework update PowerShell's own assemblies
+   sit StatusPending, every PowerShell start JIT-compiles them, and every
+   windows leg starts one. deploy-win's native-image phase, after vm-ready
+   and before the start reading, counts them in each framework's `ngen
+   display`, drains a pending queue with executeQueuedItems and refuses,
+   naming the command, if any stay; the windows reading adds one PowerShell
+   start's CPU and the counts. Nine cuts watched.
+   Two hundred and four watched negatives, counts printed),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer
@@ -1521,7 +1529,12 @@ in docs/deferred.md.
    report goes through kayaPlayerReport, which follows the session; the
    publish sets macOS's playbackState before it can return; and
    expect_video_ink's tolerance is the measured 2 in both harnesses that
-   read a video view. AND ON EVERY BACKEND SINCE THE BREADTH: no platform
+   read a video view. AND NO IN-PROCESS SCREEN CAPTURE SINCE 2026-10-14:
+   replayd keys a ScreenCaptureKit client on its executable path, so two
+   node guests cut each other off in a loop, and the ink read is
+   screencapture(1) alone; the session_send helper sends with
+   MediaRemote's reply and waits for it, since perl's exit took the
+   asynchronous send with it (docs/traps.md). Three watched negatives. AND ON EVERY BACKEND SINCE THE BREADTH: no platform
    view with controls of its own (GtkVideo and GtkMediaFile, a
    MediaPlayerElement with transport controls, media3's PlayerView), every
    report through the arm's one door that then sets the platform's playback

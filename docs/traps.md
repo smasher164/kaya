@@ -13885,9 +13885,26 @@ needed. AND EVEN FROM PERL, "SENT" IS NOT "DELIVERED": in back-to-back legs
 MediaRemote answered 1 for a command sent to the guest's own pid and no
 handler ran (a pause, then a next; the probe had seen it once, a play). So
 `session_send` counts handler arrivals and resends only when none came in 2 s
-(an arrival takes about 1 ms); with the counter cut it reports "MediaRemote
-answered sent 5 time(s) and no remote command reached this process's
-handlers".
+(an arrival takes about 1 ms); with the counter cut it reports "sent 5
+time(s) and no remote command reached this process's handlers", followed by
+the helper's last line.
+THE "SENT" WAS NEVER SENT (named 2026-10-14, matrix at e8e4f6d1, under a host
+load of 188): media_session-rust and -csharp sent pause five times each with no
+arrival. The system log of those seconds has perl log the `Pause` request and
+its player-path lookup and then exit; mediaremoted logged no `Received command
+from client` for any of the five, only the client's connection invalidated. A
+delivered play in the same leg reached mediaremoted 1 ms before perl's exit.
+`MRMediaRemoteSendCommand` is asynchronous: its true means queued, and a perl
+that exits first takes the command with it, on every retry alike. It is a thin
+wrapper over `MRMediaRemoteSendCommandToApp`; `MRMediaRemoteSendCommandWithReply
+(command, options, queue, block)` wraps the same call with a reply block taking
+a CFArrayRef of statuses (disassembled with `dyld_info -disassemble`). The
+helper now sends through it and waits up to 5 s for the reply, printing how
+long it took (check-verbs' media arms hold the call and the wait). The bundle
+could not say this: its unified-log section was the guest's pid alone, cut to
+its newest 1 MB, and mediaremoted and perl were in no section. It now carries
+MediaRemote's command lines and perl's (tools/lib/flightrec_lane.py
+`mac_unified_log`).
 
 ## A looping AVPlayer with `actionAtItemEnd = .pause` reports a pause at every loop (measured 2026-09-30)
 Seeking back to zero from the end notification is not seamless: the player's
@@ -14100,11 +14117,27 @@ A fourth pooled sighting (media_delivery-rust) answered at once with
 every other leg's capture was allowed, so an in-process ERROR takes the same
 fallback (forced with a thrown error in a copy: green through screencapture,
 red naming both when screencapture was pointed at no window).
-The pooled mac lane went ALL PASS after it. Why replayd drops that one
-client is not known. THE BUNDLE HAD NOT SAID: the mac unified-log section
+The pooled mac lane went ALL PASS after it. WHY, NAMED 2026-10-14:
+replayd keys a ScreenCaptureKit client on its EXECUTABLE PATH. Two processes of
+one executable that have each used ScreenCaptureKit take the client from each
+other in a loop for as long as both live (a probe calling SCShareableContent,
+run twice at once: 45-178k interrupts and a third of its queries at the 5 s
+bound; the same bytes under another name, or the same name in another
+directory: none). Every JS guest is the same nix node, which is why only node
+pairs were ever seen (the day's log: 09:11, 11:26, 13:44, 13:47, each a pair).
+The matrix at e8e4f6d1 had media_formats-js and a second node media leg loop
+for 25 s, 12k interrupts each, and screencapture's fallback then also ran out
+of its 5 s at a host load of 188. Concurrent screencapture(1) processes do not
+loop (0 interrupts, worst 0.25 s, also during a probe pair's loop). So the
+interpreter reads ink through screencapture(1) alone and names no
+ScreenCaptureKit API (check-verbs' media arms). THE BUNDLE HAD NOT SAID: the mac unified-log section
 took every kaya process and hit its 2 MB cap on other guests' AVPlayer lines
 before the failing step; it now reads the leg's own guest pid, replayd and
-ScreenCaptureKit (tools/lib/flightrec_lane.py).
+ScreenCaptureKit (tools/lib/flightrec_lane.py). And then the loop itself wrote
+24 MB of the guest's log in 43 s, so the newest 1 MB began after the failing
+step; each section now keeps 20 of any one message and counts the rest, and a
+section of every process's `RPDaemonProxy: connection INTERRUPTED` names the
+other process in the loop.
 
 ## A pooled linux media_feed leg never finished its scene-ready wait (seen 2026-09-30)
 
@@ -16525,6 +16558,12 @@ watched red.
 
 ## The windows lane slowed by a rebooted VM's Defender (measured 2026-10-14)
 
+SUPERSEDED THE SAME DAY: Defender's post-boot CPU was real but not the cause.
+The lane stayed ~400 s slow in matrices after it settled; the cause was the
+stale .NET native images below ("The stale .NET native images"). The
+maintainer ruled (2026-10-14) that Defender's exclusions stay as they are: a
+post-reboot scan is a one-time cost and reboots are rare.
+
 The full matrix at 1c7ec8b9 ran the windows lane 1742s net against its
 1650s ceiling: every leg about 50% slower (the legs' sum 3903s against
 2558s the run before, median ratio 1.33x, 314 of 473 shared legs slower),
@@ -16548,6 +16587,41 @@ excluded), MsMpEng at 696 CPU-seconds since boot, and no full scan ever
 recorded; the guest's reading took 3.6 s, 5.5 s from the host. GUARD:
 tools/check-flightrec.py's lane health census and drive, LH1-LH16.
 
+## The stale .NET native images: every PowerShell start JIT-compiled PowerShell (measured 2026-10-14)
+
+After the guest installed KB5127647, KB5127648 and KB5127690 and rebooted,
+`ngen.exe display` (FrameworkArm64) listed 64 assemblies as StatusPending,
+System.Management.Automation, Microsoft.PowerShell.ConsoleHost and
+Microsoft.Management.Infrastructure among them: mscorlib's native image had
+been regenerated, the old images of PowerShell's assemblies were built
+against the old one, and the loader rejects them, so those assemblies ran
+from IL through clrjit.dll. One `powershell -NoProfile -Command exit` cost
+1.4-1.9 s of CPU and 0.7-0.95 s of wall on a quiet guest (6 samples) against
+300-360 ms of CPU in docs/measurements/windows-lane-2026-10-09.md. Every leg
+starts at least one PowerShell (tools/guest/wait-exit.ps1) and every WinUI
+clipboard step one more, so the lane ran about 400 s slower in matrices (the
+legs' sum 3580-3903 s against 2165-2767 s) and about 250 s slower alone
+(suites 1080-1158 s against 777-903 s). Windows compiles the queue only from
+its idle-triggered NGEN maintenance tasks, and a lane VM is rarely idle, so
+it stays pending; it recurs after every .NET Framework update. The
+Defender reading above did not see it.
+
+`ngen.exe executeQueuedItems` for FrameworkArm64, Framework64 and Framework,
+over the lane's own ssh (the session is elevated, High Mandatory Level),
+left 0 pending; three PowerShell starts then cost 484, 406 and 359 ms of
+CPU, and three more 406, 375 and 391 ms (220 ms wall, no window). Reading
+the three queues costs about 0.6 s in the guest, one `ngen display` 0.4-0.55
+s over ssh.
+
+tools/deploy-win.py's native-image phase, after vm-ready and before the
+start reading and every leg, counts StatusPending in each framework's
+`ngen display`, drains every queue that holds any with executeQueuedItems
+(printing the count and the seconds per framework), reads the queues again,
+and refuses naming the three commands if any item stays or a queue cannot be
+read. The windows lane-health reading prints one PowerShell start's CPU and
+wall, called SLOW past 900 ms of CPU, and the pending counts. GUARD:
+tools/check-flightrec.py's lane health census and drive, NG1-NG9.
+
 ## The feed's last row read `in` on WinUI with its scroll at the end (measured 2026-10-14)
 
 media_feed_csharp, and media_feed_js earlier in the month, read `label#1 reads
@@ -16570,3 +16644,123 @@ check-verbs' WinUI media clause holds the arm to it, one watched negative).
 The other four backends compute their own fraction and were not seen doing
 this; a red there reads the same visibility lines, minus the geometry, which
 only WinUI records.
+
+## The capture that wedged on a freed monitor: GStreamer's device providers are shared (measured 2026-10-14)
+
+capture-rust-x11 hit the step ceiling at `expect label#2 "running 0x0@0"`,
+right after Camera off. The ceiling's stacks: the UI thread in
+gst_pipewire_stream_open waiting for the PipeWire thread loop's lock, and the
+PipeWire loop thread, holding that lock, inside a node's destroy ->
+gst_device_provider_device_remove -> gst_bus_post -> a frame eu-stack printed
+as `?` -> g_mutex_lock_slowpath. Named afterwards from the image's own build
+ids through debuginfod: the `?` is gstdevicemonitor.c's bus_sync_message
+taking the MONITOR's object lock, with no living thread holding it.
+The mechanism, GStreamer 1.28: a device provider is a per-factory singleton
+(gst_device_provider_factory_get), and its bus has ONE sync handler, which
+every gst_device_monitor_add_filter silently replaces with itself as an
+unreffed user_data; gst_bus_post reads the handler under the bus lock and
+calls it after unlocking. gtk/capture.rs made a temporary monitor in every
+`nodes()` call (each open, each device event) and dropped it while the
+device watch's monitor kept the shared PipeWire provider started, so the
+provider's next event could call bus_sync_message on a disposed monitor.
+Measured in the lane image (pipewire and wireplumber running): a long-lived
+monitor heard 2 add/remove messages, and after ONE temporary monitor was
+started, read and dropped it heard 0 — the shipped device watch went deaf at
+the first capture open. The use-after-free itself is a few-instruction race
+and did not reproduce in 400 probe rounds. gtk/capture.rs now keeps one
+started monitor for the process, never stopped or dropped. GUARD:
+check-verbs' GTK capture wall (one `DeviceMonitor::new(`, inside
+`fn device_monitor`, ManuallyDrop, no `.stop()`), three watched negatives.
+
+## The toast leg that never started: the ear held the script on an unbounded D-Bus call (seen 2026-10-14)
+
+toast-haskell-wayland ran 180 s and was killed with no `KAYA_HARNESS: epoch`
+line, no verb trace and the scene drawn in its first state: the harness
+thread had never started. The toast scene starts its harness through
+gtk.rs's toast_ear, after an AT-SPI connect, a listener registration and a
+tree walk; the walk's loop was bounded at 10 s but none of its awaits was,
+so one D-Bus call that never answered held the script forever, and nothing
+in the bundle could say which. Cause of the unanswered call: NOT NAMED (one
+sighting, no stacks at a 180 s kill). Now the ear holds the script for 20 s
+at most and then starts it, recording `the ear was still waiting on <the
+call> after 20 s`, which expect_toast_announced prints; a KAYA_DIAG line
+gives the ear's start time and phase on every toast leg. And a linux leg
+that outlives its 180 s ceiling prints its process tree and each non-daemon
+process's stacks (tools/linux/leg-ceiling.py, which replaced run_one's bare
+`timeout 180`), and every red bundle names the stacks' unnamed frames
+(tools/linux/stack-names.py, section `stack-names`, from `eu-stack -b`'s
+build ids through debuginfod, outside any ceiling). GUARDS: toast_routes'
+EAR_BOUND clause and its negative; check-flightrec LC1-LC5.
+
+## The linux lane's "docker VM up 4s" is Resource Saver, not a crash (measured 2026-10-14)
+
+Docker Desktop stops its VM after five idle minutes (Resource Saver) and the
+next docker call starts it, so a lane starting after a quiet spell reads a
+VM a few seconds old. Every VM stop and start in that day's
+com.docker.backend.log was that pair (`idle] stopping VM`, then `idle -> busy
+(was idle for ...)` beside `starting VM`); none fell while a container ran.
+The lane now says which: lane_health's linux reading prints the VM's last
+start with the stop and idle wake before it, and at the end every stop,
+start or OOM kill (`/analytics/track/oom-kills`) since the lane began, with
+"the VM moved under this lane" when there is one. GUARD: lane_health's drive
+cases (check-flightrec's lane health drive).
+
+## The x11 leg whose display would not open, and said nothing (seen 2026-10-14)
+
+capture_denied-go-x11 died in 1 s with GTK's `Failed to open display` on
+pool display :104, while the leg before and after it on the same display
+passed and the display answered xwininfo the moment the leg exited. GTK
+prints that sentence and exits 1 from inside its own startup, naming no
+reason, so the bundle could not say whether the socket was missing, refused
+the connection, or refused the setup (the X server's own "Maximum number of
+clients reached" is a setup refusal). Cause: NOT NAMED (one sighting).
+gtk.rs's run_core now opens the display itself before the application and,
+when that fails, prints `kaya: GTK could not open its display (...)` with
+what the display's socket answers a bare X11 connection setup (or a wayland
+connect): absent, connect error, the server's REFUSED reason, an
+authentication request, or a connection accepted now. GUARDS:
+display_probe's unit test makes every branch print; check-flightrec LC6.
+
+## The Compose park cancelled by the scroll before it (measured 2026-10-14)
+
+`netimage-go` failed on android in the matrix at e8e4f6d1 (host load 188):
+`expect_window column@tracks 150 300` read "286 300" for 15 s after
+`scroll_to_row t299` then `scroll_to_row t150`. KayaTableWindow.report()
+launches a coroutine that scrolls to the parked row's top; the one launched for
+the t299 park finished about 240 ms later, after `park(150)` had replaced the
+park, and then wrote the park state as though it were still its own: it set
+the anchor scroll and, because its scroll had clamped at the end, dropped the
+anchor. The t150 park was gone before its band was laid out, so the window
+reported the bottom rows back to the core. Forced red: holding that
+coroutine's tail until a newer park existed reproduced the matrix sentence
+exactly. Each park now carries a sequence number; a scroll whose park has been
+replaced writes nothing and says `park #N superseded`, and every park record
+names its number and the row it was for (the old record named the current
+row beside the previous row's target). GUARD: check-scroll-to's Compose
+clause, negatives n16 and n17.
+
+## XCTest's notifier loaded over an open animation (measured 2026-10-14)
+
+`submit-go` failed on iOS in the same matrix: `type "milk"`, the leg's first
+driver request, waited 60 s for XCTest's "animations idle" and the queued
+Return then submitted an empty field. Disassembled from Xcode 26.6's simulator
+XCTAutomationSupport: `+[XCTAnimationsIdleNotifier animationDidStop]`
+subtracts 1 and, if the old count was 0, logs "Unexpectedly received
+animationDidStop without a matching animationDidStart" and only then adds the
+1 back; `addAnimationIdleHandler:` answers at once only when the count reads
+exactly 0, and otherwise waits for a stop that takes it from 1 to 0. XCTest's
+agent loads with the first driver request. Here the keyboard's 15 UIView
+animations had started 300 ms earlier (the keyboard came 750 ms late under
+load), so all 15 stops reached XCTest unmatched, and the idle request read the
+count during one of those -1 moments. No later stop went from 1 to 0; the next
+request, 60 s on, read 0 and answered both, which is the pair of replies in
+the app log. A leg whose verbs reach the driver now attaches it after the
+scene mounts and before its first step, once kaya's animation ledger has read
+nothing open or moving for 300 ms, so XCTest sees the start of every
+animation whose stop it sees. The ledger records whether XCTest's notifier
+was loaded at each start and names stops that reached it with no start; the
+app log's lead line gives each idle request kind's longest wait and lists the
+answers 5 s or more late (it used to say "every one answered" for this
+leg). The 60 s wait itself needs that microsecond overlap and did not recur
+in three forced tries; the ledger's naming did. GUARD: check-flightrec, the
+attach-order census and NL9, NH15 to NH18.

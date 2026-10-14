@@ -18451,6 +18451,20 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
     // GApplication built with FLAGS_NONE has no `open` signal to receive a
     // URL on at all, and org.freedesktop.Application.Open is refused
     // before any arm of ours could run.
+    if let Err(e) = gtk4::init() {
+        let var = |k: &str| std::env::var(k).ok();
+        eprintln!(
+            "kaya: GTK could not open its display ({e}); {}",
+            crate::display_probe::display_why_not(
+                var("GDK_BACKEND").as_deref(),
+                var("DISPLAY").as_deref(),
+                var("WAYLAND_DISPLAY").as_deref(),
+                var("XDG_RUNTIME_DIR").as_deref(),
+                std::path::Path::new("/tmp/.X11-unix"),
+            )
+        );
+        return 1;
+    }
     let mut builder = gtk4::Application::builder().flags(gio::ApplicationFlags::HANDLES_OPEN);
     if let Some(id) = app_identity_id() {
         builder = builder.application_id(&id);
@@ -19522,22 +19536,60 @@ mod toast_ear {
         seen
     }
 
+    /// THE EAR HOLDS THE SCRIPT FOR `EAR_BOUND` AT MOST: a D-Bus call that
+    /// never answers left the harness unstarted and the leg silent until the
+    /// runner's 180 s kill (docs/traps.md, the toast leg that never started).
+    const EAR_BOUND: std::time::Duration = std::time::Duration::from_secs(20);
+
+    type Start = Box<dyn FnOnce() + Send>;
+
+    fn begin(slot: &std::sync::Mutex<Option<Start>>, phase: &std::sync::Mutex<&'static str>, since: std::time::Instant) {
+        let Some(start) = slot.lock().unwrap().take() else { return };
+        println!(
+            "KAYA_DIAG toast ear: the script starts after {} ms, the ear waiting on {}",
+            since.elapsed().as_millis(),
+            phase.lock().unwrap()
+        );
+        start();
+    }
+
     /// Registers, walks this process's tree once the window is in it, and
     /// only then starts the script, so the first toast is heard.
     pub fn install_then(start: impl FnOnce() + Send + 'static) {
+        let slot: std::sync::Arc<std::sync::Mutex<Option<Start>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(Some(Box::new(start))));
+        let phase: std::sync::Arc<std::sync::Mutex<&'static str>> =
+            std::sync::Arc::new(std::sync::Mutex::new("the accessibility bus's address"));
+        let since = std::time::Instant::now();
+        {
+            let (slot, phase) = (slot.clone(), phase.clone());
+            std::thread::spawn(move || {
+                std::thread::sleep(EAR_BOUND);
+                if slot.lock().unwrap().is_some() {
+                    deaf(format!(
+                        "the ear was still waiting on {} after {} s, so the script started without it",
+                        phase.lock().unwrap(),
+                        EAR_BOUND.as_secs()
+                    ));
+                    begin(&slot, &phase, since);
+                }
+            });
+        }
         std::thread::spawn(move || {
-            let mut start = Some(start);
+            let at = |what: &'static str| *phase.lock().unwrap() = what;
             atspi::zbus::block_on(async {
                 let conn = match atspi::connection::AccessibilityConnection::new().await {
                     Ok(conn) => conn,
                     Err(e) => return deaf(format!("no accessibility bus: {e}")),
                 };
+                at("the registry's answer to the announcement listener");
                 if let Err(e) = conn.register_event::<atspi::events::object::AnnouncementEvent>().await {
                     return deaf(format!("the registry refused the listener: {e}"));
                 }
                 let mut messages = std::pin::pin!(atspi::zbus::MessageStream::from(conn.connection()));
                 let started = std::time::Instant::now();
                 let mut walked = 0;
+                at("the walk of this process's accessibility tree");
                 while walked < 8 && started.elapsed() < std::time::Duration::from_secs(10) {
                     walked = 0;
                     if let Ok(root) = AccessibleProxy::builder(conn.connection())
@@ -19555,9 +19607,8 @@ mod toast_ear {
                 if walked < 8 {
                     deaf(format!("the window never reached the bus ({walked} nodes after 10 s)"));
                 }
-                if let Some(start) = start.take() {
-                    start();
-                }
+                at("nothing (the walk was done)");
+                begin(&slot, &phase, since);
                 while let Some(message) = std::future::poll_fn(|cx| messages.as_mut().poll_next(cx)).await {
                     let Ok(message) = message else { continue };
                     let header = message.header();
@@ -19579,9 +19630,7 @@ mod toast_ear {
                     HEARD.lock().unwrap().push(said.unwrap_or_else(|e| format!("<an announcement that did not parse: {e}>")));
                 }
             });
-            if let Some(start) = start.take() {
-                start();
-            }
+            begin(&slot, &phase, since);
         });
     }
 }

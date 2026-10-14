@@ -15254,6 +15254,7 @@ internal class KayaTableWindow(private val node: KayaNode) {
     private var lastCount = -1
     private var anchorRow = -1
     private var anchorScroll = -1
+    private var parkSeq = 0
     private var scheduled = false
 
     fun schedule() {
@@ -15274,10 +15275,11 @@ internal class KayaTableWindow(private val node: KayaNode) {
     fun park(row: Int) {
         anchorRow = row
         anchorScroll = -1
+        parkSeq += 1
         val count = if (lastCount > 0) lastCount else 1
         lastFirst = row
         lastCount = count
-        KayaVTrace.note("window", "-> park table=${node.id} row=$row count=$count")
+        KayaVTrace.note("window", "-> park #$parkSeq table=${node.id} row=$row count=$count")
         KayaPresent.windowMoved(node.id, row.toLong(), count.toLong())
         schedule()
     }
@@ -15381,15 +15383,31 @@ internal class KayaTableWindow(private val node: KayaNode) {
                 if (want < 0) return
                 if (want != scroll) {
                     val state = node.scrollState
+                    val parked = parkSeq
+                    val row = anchorRow
                     scope.launch {
                         state.scrollTo(want)
+                        // A LATER PARK OWNS THE STATE (docs/traps.md, the
+                        // Compose park cancelled by the scroll before it).
+                        if (parked != parkSeq) {
+                            KayaVTrace.note(
+                                "window",
+                                "park #$parked superseded table=${node.id} row=$row: its scroll to $want " +
+                                    "landed at ${state.value} after park #$parkSeq row=$anchorRow, which it leaves alone",
+                            )
+                            schedule()
+                            return@launch
+                        }
                         anchorScroll = state.value
-                        KayaVTrace.note("window", "park scrolled table=${node.id} row=$anchorRow to ${state.value} of $want")
+                        KayaVTrace.note("window", "park #$parked scrolled table=${node.id} row=$row to ${state.value} of $want")
                         // A scroll clamped at the collection's end
                         // cannot honour the park, and re-trying it is a
                         // live loop; the park yields (§5's unasserted
                         // end-scroll).
-                        if (state.value != want) anchorRow = -1
+                        if (state.value != want) {
+                            KayaVTrace.note("window", "park #$parked yields table=${node.id} row=$row: clamped at ${state.value}")
+                            anchorRow = -1
+                        }
                         schedule()
                     }
                     return

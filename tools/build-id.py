@@ -97,7 +97,8 @@ GATES = {
     # WinUI guest's own toast-moment capture (the file names it writes).
     "check-flightrec": ["crates/kaya/src/winui/mod.rs", "crates/kaya/src/harness.rs",
                         "swift/KayaSwiftUI.swift",
-                        "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"],
+                        "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt",
+                        "crates/kaya/src/gtk.rs"],
     # No binding: the card is a lowering. swift/ is an input because the
     # iOS synthesized tier draws it and the mac clause reads that file.
     "check-table-card": ["crates", "swift", "android"],
@@ -105,7 +106,8 @@ GATES = {
     # key blind to one root passes stale for the file that just grew one.
     "check-diagnostics": ["crates", "swift", "android", "bindings",
                           "guests", "cmd"],
-    "check-verbs": ["crates", "bindings", "swift", "android", "guests"],
+    "check-verbs": ["crates", "bindings", "swift", "android", "guests",
+                    "tools/mac/mediaremote.c"],
     # tools/checks/ too: its clause B compiles the probe that lives there.
     "check-harness-ceiling": ["crates", "swift", "android", "tools/checks"],
     "check-file-modes": ["crates", "bindings", "swift", "android"],

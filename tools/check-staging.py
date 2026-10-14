@@ -299,13 +299,13 @@ def check(root):
             fail(f"{suites_rel}'s run_one gives its leg no state home of its "
                  f"own ({state_def!r}) — the legs share the container's one "
                  f"harness tree")
-        first_launch = body.find("timeout 180")
+        first_launch = body.find("leg-ceiling.py 180")
         clear = body.find('rm -rf "$kaya_state"')
         if clear < 0 or (first_launch >= 0 and clear > first_launch):
             fail(f"{suites_rel}'s run_one does not empty the leg's state "
                  f"home before it launches — act one reads what the last "
                  f"run of this leg left")
-        launches = [m.start() for m in re.finditer(r"timeout 180", body)]
+        launches = [m.start() for m in re.finditer(r"leg-ceiling\.py 180", body)]
         if len(launches) < 4:
             fail(f"{suites_rel}'s run_one has {len(launches)} launch(es), "
                  f"not the 4 this census was written against — read it "

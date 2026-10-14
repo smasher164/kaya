@@ -70,6 +70,9 @@ WINLIST = "tools/mac/flightrec-winlist.swift"
 HARNESS = "crates/kaya/src/harness.rs"
 SWIFTUI = "swift/KayaSwiftUI.swift"
 DOOR_RECORD = "tools/linux/door_record.py"
+LEG_CEILING = "tools/linux/leg-ceiling.py"
+GTK_RS = "crates/kaya/src/gtk.rs"
+STACK_NAMES = "tools/linux/stack-names.py"
 JOURNAL = "tools/lib/flightrec.py"
 ACT2_EXEC = "tools/linux/act2-exec.sh"
 DOOR_LEGS = ("tools/linux/persist-leg.py", "tools/linux/link-leg.py")
@@ -105,7 +108,7 @@ def sources():
     return {rel: gate.read(rel) for rel in
             (LANE_PY, LANE_SH, LINUX, IOS, ANDROID, WIN,
              STEPS, WINUI, GUEST_PS1, FOCUS_RING, HAND, WINLIST, HARNESS, SWIFTUI,
-             DOOR_RECORD, ACT2_EXEC, COMPOSE, JOURNAL, *DOOR_LEGS,
+             DOOR_RECORD, ACT2_EXEC, COMPOSE, JOURNAL, *DOOR_LEGS, LEG_CEILING, STACK_NAMES, GTK_RS,
              LANE_HEALTH, VALIDATE_ALL, MAC_RUNNER, LINUX_HOST)}
 
 
@@ -1113,24 +1116,43 @@ def mac_power_checks(src, echo=False):
 def mac_unified_log_checks(src, echo=False):
     """docs/traps.md, the toast that outlived its seconds: replayd's flood
     filled the one-query section's cap before the leg and kept the head."""
-    scope = {"subprocess": subprocess, "SECTION_CAP": 1000}
+    kept = re.search(r"^REPEATS_KEPT = (\d+)$", src[LANE_PY], re.M)
+    scope = {"subprocess": subprocess, "re": re, "SECTION_CAP": 1000,
+             "REPEATS_KEPT": int(kept.group(1)) if kept else 0}
+    exec(compile(py_block(src[LANE_PY], "mac_log_collapse"), LANE_PY, "exec"), scope)
     exec(compile(py_block(src[LANE_PY], "mac_unified_log"), LANE_PY, "exec"), scope)
     found = []
     if "mac_unified_log(self._sampler_pid(scratch))" not in py_block(src[LANE_PY], "_capture"):
         found.append("mac: the unified-log section is no longer mac_unified_log "
                      "over the leg's guest pid")
     asked = []
+    stamp = b"2026-10-14 13:44:14.317 Df "
+    loop = stamp + b"node[4242:10904b4c] (ReplayKit) RPDaemonProxy: connection INTERRUPTED\n"
 
     def fake(argv, **_):
         predicate = argv[argv.index("--predicate") + 1]
         asked.append(predicate)
         guest = predicate.startswith("processID == 4242")
-        body = (b"guest-oldest\n" + b"g" * 300 + b"\nguest-newest\n" if guest
+        body = (stamp + b"node[4242:1] guest-oldest\n" + stamp + b"node[4242:1] "
+                + b"g" * 300 + b"\n" + stamp + b"node[4242:1] guest-moment\n" + loop * 400
+                + stamp + b"node[4242:1] guest-newest\n" if guest
                 else b"flood-oldest\n" + b"r" * 5000 + b"\nflood-newest\n")
         return subprocess.CompletedProcess(argv, 0 if guest else 1, body)
-    text, state = scope["mac_unified_log"](4242, cap=1000, run=fake)
-    if len(asked) != 2 or any("processID == 4242" in p and "replayd" in p for p in asked):
+    text, state = scope["mac_unified_log"](4242, cap=20000, run=fake)
+    if any("processID == 4242" in p and "replayd" in p for p in asked):
         found.append(f"mac: the guest's lines share a query with replayd ({asked})")
+    if not any("mediaremoted" in p and "perl" in p for p in asked):
+        found.append("mac: no MediaRemote section — a remote command that never left the "
+                     "helper reads as one the guest dropped (docs/traps.md, the session_send "
+                     "that never left perl)")
+    if not any("RPDaemonProxy: connection INTERRUPTED" in p and "processID" not in p
+               for p in asked):
+        found.append("mac: no every-process replayd connection-loss section — the guest that "
+                     "cut this one's capture off goes unnamed (docs/traps.md, the pooled ink "
+                     "read that never answered)")
+    if "guest-moment" not in text or "repeated 400 times" not in text:
+        found.append("mac: a repeated message filled the guest's share and the step before "
+                     "it was cut (no collapse, or the repeats not counted)")
     if "guest-oldest" not in text or "guest-newest" not in text:
         found.append("mac: the guest's own lines did not survive replayd's flood")
     if "flood-newest" not in text or "flood-oldest" in text:
@@ -1370,14 +1392,15 @@ def census_ios_app_log(src):
 
 
 def ios_app_log_checks(src, echo=False):
-    scope = {"re": re}
-    for name in ("ios_launch_pid", "ios_xctest_idle"):
+    scope = {"re": re, "datetime": datetime}
+    for name in ("ios_launch_pid", "ios_xctest_idle", "_log_time"):
         body = py_block(src[LANE_PY], name)
         if not body:
             return [f"ios: missing app-log reader {name}"]
         exec(compile(body, LANE_PY, "exec"), scope)
-    at = src[LANE_PY].find("IOS_XCTEST_IDLE = (")
-    exec(compile(src[LANE_PY][at:src[LANE_PY].find("\n\n", at)], LANE_PY, "exec"), scope)
+    for const in ("IOS_XCTEST_LATE = ", "IOS_XCTEST_IDLE = ("):
+        at = src[LANE_PY].find(const)
+        exec(compile(src[LANE_PY][at:src[LANE_PY].find("\n\n", at)], LANE_PY, "exec"), scope)
     ask = "[com.apple.dt.xctest:Default] Received request to notify when"
     rows = [
         f"2026-10-12 15:22:51.280 Df go[53460:1] {ask} the main run loop is idle",
@@ -1393,6 +1416,12 @@ def ios_app_log_checks(src, echo=False):
         "2026-10-12 15:23:52.334 Df go[53460:2] [com.apple.UIKit] last line"]
     stalled = scope["ios_xctest_idle"]("\n".join(rows))
     clean = scope["ios_xctest_idle"]("\n".join(rows[:4]))
+    reply = ("[com.apple.dt.xctest:Default] Sending animations idle reply with error: (null)")
+    late = scope["ios_xctest_idle"]("\n".join([
+        f"2026-10-14 13:48:56.105 Df go[84555:1] {ask} animations are idle",
+        f"2026-10-14 13:49:56.232 Df go[84555:1] {ask} animations are idle",
+        f"2026-10-14 13:49:56.232 Df go[84555:2] {reply}",
+        f"2026-10-14 13:49:56.232 Df go[84555:2] {reply}"]))
     empty = scope["ios_xctest_idle"]("Timestamp               Ty Process[PID:TID]\n")
     pid = scope["ios_launch_pid"]("noise\ndev.kaya.timecodego: 53460\n", "dev.kaya.timecodego")
     other = scope["ios_launch_pid"]("dev.kaya.milestone2go: 1\n", "dev.kaya.timecodego")
@@ -1404,8 +1433,15 @@ def ios_app_log_checks(src, echo=False):
         found.append("ios: the app log's idle reading lost the unanswered animations wait")
     if "main run loop asked 2, answered 2" not in stalled or "main run loop asked at" in stalled:
         found.append("ios: the app log's idle reading misreads an answered main run loop wait")
-    if "every one answered" not in clean:
+    if "every one answered" not in clean or "the longest wait 0.00 s" not in clean:
         found.append("ios: the app log's idle reading calls an answered slice unanswered")
+    if echo:
+        print("check-flightrec: iOS app log, late: " + late)
+    if "ANSWERED LATE" not in late or \
+            "animations asked at 2026-10-14 13:48:56.105 answered 60.13 s later" not in late or \
+            "every one answered" in late:
+        found.append("ios: the app log's idle reading calls a 60 s animations wait answered "
+                     "(the submit-go red of 2026-10-14, two replies after XCTest gave up)")
     if "holds no lines at all" not in empty:
         found.append("ios: the app log's idle reading does not say its slice was empty")
     if pid != 53460 or other is not None:
@@ -1440,6 +1476,29 @@ def census_ios_hang_record(src):
     harness = swift[swift.find("let watchdog = KayaStepWatchdog("):]
     if "KayaAnimationLedger.shared.install()" not in harness[:400]:
         found.append("swift: the harness no longer installs the animation ledger when it starts")
+    ready = harness.find('print("KAYA_HARNESS: scene ready after')
+    attach = harness.find('KayaSimdrive.ask("attach", timeout: kayaDriverAttachWait)')
+    first = harness.find("scriptLines: for rawLine in script")
+    gate_at = harness.find('environment["KAYA_DRIVER_ATTACH"] != nil')
+    settle = harness.find("while !KayaAnimationLedger.shared.quiet(for: kayaDriverAttachQuiet), "
+                          "Date() < settled {")
+    if not (0 <= ready < gate_at < settle < attach < first):
+        found.append("swift: the xcui driver is no longer attached between the scene's mount "
+                     "and the first step, after the ledger reads no UIView animation open or "
+                     "moving (docs/traps.md, XCTest's notifier loaded over an open animation)")
+    quiet = re.search(r"kayaDriverAttachSettle: TimeInterval = (\d+)", swift)
+    wait = re.search(r"kayaDriverAttachWait: TimeInterval = (\d+)", swift)
+    if not quiet or not wait or not ceiling or \
+            int(quiet.group(1)) + int(wait.group(1)) >= int(ceiling.group(1)):
+        found.append("swift: the attach's settle and wait are not inside the step ceiling")
+    sim = src[IOS]
+    leg = py_block(sim, "run_swiftui_on")
+    if 'if needs_driver(script):\n        env["SIMCTL_CHILD_KAYA_DRIVER_ATTACH"] = "1"' not in leg:
+        found.append("ios: a leg whose verbs reach the xcui driver is not told to attach it "
+                     "before its first step")
+    watch = py_block(sim, "simdrive_watch")
+    if 'if attached and parts != ["attach"]:' not in watch:
+        found.append("ios: the watcher forwards the harness's attach to the driver as a verb")
     enter = swift[swift.find("    func enter(_ step: String) {\n        lock.lock()\n"
                              "        self.step"):]
     if "KayaAnimationLedger.shared.enter(step)" not in enter[:400]:
@@ -1451,11 +1510,13 @@ def census_ios_hang_record(src):
             ("prevStart(state, startSel, anim)", "the replaced start still called"),
             ("prevStop(state, stopSel, anim, finished)", "the replaced stop still called"),
             ('NSClassFromString("XCTAnimationsIdleNotifier")', "XCTest's own notifier read"),
+            ("blind = loaded && !open[at].xctest", "what XCTest saw start"),
             ('NSSelectorFromString("isAnimationInProgress")', "XCTest's own count read"),
             ("UIResponder.keyboardWillHideNotification", "the keyboard's timeline")):
         if want not in ledger:
             found.append(f"swift: KayaAnimationLedger lost {why} ({want.splitlines()[0]})")
-    for key in ("XCTest's animation tracking ", "XCTest IN PROGRESS", "XCTest idle",
+    for key in ("XCTest's animation tracking ", "XCTest IN PROGRESS", "XCTest not in progress",
+                "XCTest's notifier first seen at ", "for animations that started before it loaded",
                 "XCTest unread: ", "refused: ", "open since",
                 "main thread did not answer"):
         if key not in ledger:
@@ -1515,8 +1576,15 @@ def ios_hang_record_checks(src, echo=False):
         "held": reading(held),
         "uncounted": reading(held.replace("1 open;", "0 open;").replace(
             "  open since", "  event")),
-        "idle": reading(f"{head}15 s into #2 type_b64: XCTest idle (its count 0); {ledger}"
-                        f"0 open; main thread answered in 1 ms, run loop mode m\n"),
+        "idle": reading(f"{head}15 s into #2 type_b64: XCTest not in progress (its count not "
+                        f"above 0); {ledger}0 open; main thread answered in 1 ms, run loop "
+                        f"mode m\n"),
+        "blind": reading(f"{head}15 s into #1 type_b64: XCTest not in progress (its count not "
+                         f"above 0); XCTest's notifier first seen at 13:48:56.104 (step 'type "
+                         f"\"milk\"') with 15 UIView animation(s) open; 15 stop(s) reached it "
+                         f"for animations that started before it loaded, which XCTest logs as "
+                         f"x; the first: started 13:48:55.761; {ledger}0 open; main thread "
+                         f"answered in 8 ms, run loop mode m\n"),
         "unread": reading(f"{head}at the ceiling: XCTest unread: XCTAnimationsIdleNotifier "
                           f"is not loaded in this process; kaya's ledger refused: "
                           f"UIViewAnimationState is not in this process; 0 started, 0 "
@@ -1557,7 +1625,10 @@ def ios_hang_record_checks(src, echo=False):
             ("held", "kaya's ledger holds 1 UIView animation(s) no stop has matched; the "
                      "oldest: open since 11:07:50.974 (step 'press return')"),
             ("uncounted", "XCTest's count is above 0 while kaya's ledger holds no open"),
-            ("idle", "15 s into #2 type_b64: XCTest's count is 0"),
+            ("idle", "15 s into #2 type_b64: XCTest's count is not above 0"),
+            ("blind", "15 s into #1 type_b64: XCTest's notifier loaded at 13:48:56.104 (step "
+                      "'type \"milk\"') with 15 UIView animation(s) open, and 15 of their stops "
+                      "reached it with no start"),
             ("unread", "XCTest's own count was not read: XCTAnimationsIdleNotifier is not "
                        "loaded in this process; kaya's ledger was never installed: "
                        "UIViewAnimationState is not in this process; the main thread did "
@@ -1665,6 +1736,42 @@ def retention_checks(src, echo=False):
                 found.append(f"retention: the {mode} did not print what it kept")
         if plan.count("would keep red bundle") != 3:
             found.append("retention: the plan did not list each kept red bundle")
+    return found
+
+
+def census_leg_ceiling(src):
+    """A LINUX LEG THAT OUTLIVES ITS CEILING PRINTS ITS STACKS, AND THE BUNDLE
+    NAMES THEIR STATIC FRAMES (docs/traps.md, the toast leg that never
+    started and the capture that wedged on a freed monitor): a leg hung
+    before its harness started reached `timeout 180` with nothing said, and
+    the stacks the harness did take printed the deciding frame as `?`."""
+    found = []
+    run_one = sh_block(src[LINUX], "run_one() {", "\n}\n")
+    if "timeout 180" in run_one:
+        found.append(f"{LINUX}: run_one still runs a leg under a bare `timeout 180`, which kills "
+                     f"it with no stacks")
+    wrapped = run_one.count("python3 /work/tools/linux/leg-ceiling.py 180")
+    if wrapped < 4:
+        found.append(f"{LINUX}: run_one runs {wrapped} of its 4 leg arms under {LEG_CEILING}")
+    for script in (LEG_CEILING, STACK_NAMES):
+        if f"python3 /work/{script} --self-test" not in src[LINUX]:
+            found.append(f"{LINUX}: never runs {script}'s self-test")
+    if '"eu-stack", "-m", "-b", "-p"' not in src[LEG_CEILING]:
+        found.append(f"{LEG_CEILING}: its eu-stack carries no build ids (-b), so "
+                     f"{STACK_NAMES} has no frame it can name")
+    if 'ceiling_capture("thread stacks at the ceiling", "eu-stack", &["-m", "-b", "-p"' \
+            not in src[HARNESS]:
+        found.append(f"{HARNESS}: the ceiling's eu-stack carries no build ids (-b), so "
+                     f"{STACK_NAMES} has no frame it can name")
+    body = sh_block(src[LINUX], 'bundle="$(flightrec_bundle linux', "flightrec_finish")
+    if f'python3 /work/{STACK_NAMES} "$LEGS_DIR/$name.log"' not in body:
+        found.append(f"{LINUX}: the drain never runs {STACK_NAMES} over a red leg's log")
+    core = sh_block(src[GTK_RS], "pub(crate) fn run_core(", "gtk4::Application::builder()")
+    if "if let Err(e) = gtk4::init() {" not in core or "display_why_not(" not in core:
+        found.append(f"{GTK_RS}: run_core no longer opens the display itself before the "
+                     f"application and says what the display's socket answered — GTK's own "
+                     f"`Failed to open display` exits 1 naming nothing (docs/traps.md, the x11 "
+                     f"leg whose display would not open)")
     return found
 
 
@@ -1917,6 +2024,26 @@ def census_lane_health(src):
     reading = py_block(src[WIN], "lane_health_reading")
     if 'lane_health.windows_report("windows", when,' not in reading:
         found.append(f"{WIN}: lane_health_reading no longer reads the guest")
+    win = src[WIN]
+    calls = win.count("\nnative_images()\n")
+    order = [win.find('\ntiming("vm-ready")\n'), win.find("\nnative_images()\n"),
+             win.find('\nlane_health_reading("start")\n')]
+    if calls != 1:
+        found.append(f"{WIN}: the native-image phase is called {calls} times at the top "
+                     f"level, wanted once")
+    elif not (0 <= order[0] < order[1] < order[2]):
+        found.append(f"{WIN}: the native-image phase does not run after vm-ready and "
+                     f"before the start reading and every leg")
+    phase = py_block(win, "native_images")
+    for needle, what in (("lane_health.ngen_plan(", "reads the queues"),
+                         ("lane_health.ngen_drain_command(", "drains a pending queue"),
+                         ("lane_health.ngen_verdict(", "reads the queues after the drain")):
+        if needle not in phase:
+            found.append(f"{WIN}: native_images no longer {what} (`{needle}`)")
+    stops = phase.count("die(refusal)")
+    if stops != 2:
+        found.append(f"{WIN}: native_images does not stop the lane on both refusals "
+                     f"(die(refusal) {stops}/2)")
     wait = src[VALIDATE_ALL]
     waiter = wait[wait.find("    def _wait("):wait.find("    waiter = threading.Thread")]
     if "lane_health.host_line()" not in waiter:
@@ -1975,7 +2102,9 @@ def lane_health_checks(src, echo=False):
     for needle, what in (("LastBootUpTime", "boot time"), ("Start-Sleep", "CPU sample"),
                          ("Get-MpComputerStatus", "Defender scan state"),
                          ("Get-MpPreference", "Defender exclusions"),
-                         ("RUNTIMES", "the lane's runtimes")):
+                         ("RUNTIMES", "the lane's runtimes"),
+                         ("StatusPending", "pending native images"),
+                         ("TotalProcessorTime", "PowerShell start's CPU")):
         if needle not in script:
             found.append(f"{LANE_HEALTH}: the windows reading lost its {what} (`{needle}`)")
     tree = ast.parse(src[WIN])
@@ -2044,6 +2173,7 @@ CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("iOS notification side", census_ios_notifications),
             ("linux ceiling stacks", census_wedge_capture),
             ("linux door record", census_door_record),
+            ("linux leg ceiling", census_leg_ceiling),
             ("iOS ceiling stacks", census_ios_stacks),
             ("iOS app log", census_ios_app_log),
             ("iOS hang record", census_ios_hang_record))
@@ -2488,6 +2618,19 @@ for label, before, after, want in (
          '[("this leg\'s guest", f"processID == {pid} OR process == \\"replayd\\""),',
          "share a query with replayd"),
         ("head kept", "data = data[-room:]", "data = data[:room]", "kept its oldest lines"),
+        ("no collapse", "        data = mac_log_collapse(data)\n", "",
+         "the step before it was cut"),
+        ("no MediaRemote section",
+         "              (\"MediaRemote's commands\",\n"
+         "               '(process == \"mediaremoted\" AND eventMessage "
+         "CONTAINS[c] \"command\") OR '\n"
+         "               '(process == \"perl\" AND subsystem BEGINSWITH "
+         "\"com.apple.amp.mediaremote\")'),\n",
+         "", "no MediaRemote section"),
+        ("no connection-loss section",
+         "              (\"replayd connections cut, every process\",\n"
+         "               'eventMessage == \"RPDaemonProxy: connection INTERRUPTED\"')]",
+         "]", "no every-process replayd connection-loss section"),
         ("status", 'state = "ok" if all(c == 0 for c in codes) else "error"', 'state = "ok"',
          "not reported with its exit")):
     changed = doctored(LANE_PY, re.escape(before), after, f"Mac unified log {label} mutation")
@@ -2577,6 +2720,29 @@ for label, pattern, repl, want in (
     gate.negative(label, lambda: census_wedge_capture(changed), want=want)
 
 for label, rel, pattern, repl, want in (
+        ("LC1 an x11 leg back on a bare timeout", LINUX,
+         r'GDK_BACKEND=x11 \\\n(\s+)(XDG_STATE_HOME="\$kaya_state" '
+         r'KAYA_VERB_TRACE="\$LEGS_DIR/\$name-\$proto\.vtrace") \\\n'
+         r'\s+python3 /work/tools/linux/leg-ceiling\.py 180',
+         r'GDK_BACKEND=x11 \\\n\1\2 timeout 180',
+         "bare `timeout 180`"),
+        ("LC2 the lane skipping the ceiling's self-test", LINUX,
+         r"^python3 /work/tools/linux/leg-ceiling\.py --self-test.*\n", "", "never runs"),
+        ("LC3 the ceiling's stacks without build ids", LEG_CEILING,
+         r'"eu-stack", "-m", "-b", "-p"', '"eu-stack", "-m", "-p"', "no build ids"),
+        ("LC4 the harness's stacks without build ids", HARNESS,
+         r'&\["-m", "-b", "-p", &pid\]', '&["-m", "-p", &pid]', "no build ids"),
+        ("LC6 GTK's display failure unmeasured", GTK_RS,
+         r"crate::display_probe::display_why_not\(", "crate::display_probe::unused(",
+         "socket answered"),
+        ("LC5 the drain naming no frame", LINUX,
+         r'python3 /work/tools/linux/stack-names\.py "\$LEGS_DIR/\$name\.log"',
+         'true "$LEGS_DIR/$name.log"', "never runs"),
+    ):
+    changed = doctored(rel, pattern, repl, label)
+    gate.negative(label, lambda changed=changed: census_leg_ceiling(changed), want=want)
+
+for label, rel, pattern, repl, want in (
         ("ND3 persist-leg pushing its launcher itself", DOOR_LEGS[0],
          r"door_record\.push\(", "subprocess_run(", "door_record.push"),
         ("ND4 link-leg printing no record", DOOR_LEGS[1],
@@ -2642,14 +2808,17 @@ for label, rel, pattern, repl, want, check in (
          r"flightrec_lane\.ios_xctest_idle\(body\)", '""', "lead with",
          census_ios_app_log),
         ("NL6 an answer that clears no request", LANE_PY,
-         r"if pending:\n( +)pending\.pop\(0\)", r"if pending:\n\1pass",
+         r"if pending:\n( +)at = pending\.pop\(0\)", r"if pending:\n\1at = pending[0]",
          "misreads an answered", ios_app_log_checks),
         ("NL7 an unanswered wait never listed", LANE_PY,
          r'unanswered \+= \[f"\{kind\} asked at \{at\}" for at in pending\]',
          "unanswered += []", "lost the unanswered", ios_app_log_checks),
         ("NL8 any launch line's pid taken", LANE_PY,
          r'rf"\^\{re\.escape\(bundle_id\)\}: ', r'r"^\\S+: ',
-         "simctl's own line", ios_app_log_checks)):
+         "simctl's own line", ios_app_log_checks),
+        ("NL9 a 60 s idle wait never called late", LANE_PY,
+         r'late\.append\(f"\{kind\} asked at \{at\} answered \{wait:\.2f\} s later"\)',
+         "pass", "calls a 60 s animations wait answered", ios_app_log_checks)):
     changed = doctored(rel, pattern, repl, label)
     gate.negative(label, lambda: check(changed), want=want)
 
@@ -2690,7 +2859,21 @@ for label, rel, pattern, repl, want, check in (
          ios_hang_record_checks),
         ("NH12 a crash report never matched to its pid", LANE_PY,
          r'doc\.get\("pid"\) == pid', "False", "crash reading lost",
-         ios_hang_record_checks)):
+         ios_hang_record_checks),
+        ("NH17 the driver attached without the quiet wait", SWIFTUI,
+         r"while !KayaAnimationLedger\.shared\.quiet\(for: kayaDriverAttachQuiet\), "
+         r"Date\(\) < settled \{",
+         "while false, Date() < settled {", "after the ledger reads no UIView animation",
+         census_ios_hang_record),
+        ("NH18 a driver leg never told to attach early", IOS,
+         r'^    if needs_driver\(script\):\n'
+         r'        env\["SIMCTL_CHILD_KAYA_DRIVER_ATTACH"\] = "1"\n',
+         "", "is not told to attach it", census_ios_hang_record),
+        ("NH15 the reading blind to XCTest loading over an open animation", LANE_PY,
+         r"^( +)if blind:\n", r"\1if False:\n", "blind reading lost", ios_hang_record_checks),
+        ("NH16 the ledger never marking what XCTest saw start", SWIFTUI,
+         r"blind = loaded && !open\[at\]\.xctest", "blind = false",
+         "what XCTest saw start", census_ios_hang_record)):
     changed = doctored(rel, pattern, repl, label)
     gate.negative(label, lambda: check(changed), want=want)
 for label, name, want in (("NH13 iOS animations section unwritten", "animations",
@@ -2799,6 +2982,35 @@ for label, rel, pattern, repl, want, check in (
          "cmd.exe refuses", lane_health_checks)):
     changed = doctored(rel, pattern, repl, label)
     gate.negative(label, lambda: check(changed), want=want)
+for label, rel, pattern, repl, want, check, subs in (
+        ("NG1 the native-image phase cut", WIN, r"^native_images\(\)\n", "",
+         "called 0 times", census_lane_health, 1),
+        ("NG2 the native-image phase after the start reading", WIN,
+         r'^native_images\(\)\ntiming\("native-images"\)\nlane_health_reading\("start"\)\n',
+         'lane_health_reading("start")\nnative_images()\ntiming("native-images")\n',
+         "does not run after vm-ready and before", census_lane_health, 1),
+        ("NG3 a pending queue never drained", WIN,
+         r"lane_health\.ngen_drain_command\(framework\)", "framework", "no longer drains",
+         census_lane_health, 1),
+        ("NG4 a refusal printed and the lane run anyway", WIN, r"^( +)die\(refusal\)\n",
+         r"\1print(refusal)\n", "does not stop the lane", census_lane_health, 2),
+        ("NG5 the pending count read off another word", LANE_HEALTH,
+         r"-SimpleMatch 'StatusPending'", "-SimpleMatch 'Pending'",
+         "lost its pending native images", lane_health_checks, 1),
+        ("NG6 the PowerShell start's CPU not read", LANE_HEALTH,
+         r"\$p\.TotalProcessorTime\.TotalMilliseconds", "0",
+         "lost its PowerShell start's CPU", lane_health_checks, 1),
+        ("NG7 a slow PowerShell start not called slow", LANE_HEALTH,
+         r"if cpu_ms > PS_SLOW_MS else", "if False else",
+         "branch `slow powershell` did not print", lane_health_checks, 1),
+        ("NG8 items left after the drain read as drained", LANE_HEALTH,
+         r"^    if todo:\n        left", "    if False:\n        left",
+         "branch `drain failed` did not print", lane_health_checks, 1),
+        ("NG9 a framework with nothing pending drained", LANE_HEALTH,
+         r"for f, n in pending\.items\(\) if n\]", "for f, n in pending.items()]",
+         "branch `plan drains only the pending` did not print", lane_health_checks, 1)):
+    changed = doctored(rel, pattern, repl, label, want=subs)
+    gate.negative(label, lambda: check(changed), want=want)
 for label, pattern, repl, want in (
         ("VP1 the aim unrecorded", r'^ +note\(node, "scroll_to_row r\\\(index\)"\)\n', "",
          "lost the aim"),
@@ -2814,6 +3026,6 @@ for label, pattern, repl, want in (
     changed = doctored(SWIFTUI, pattern, repl, label)
     gate.negative(label, lambda: census_ios_park(changed), want=want)
 
-gate.negatives_ran(176 + (5 if DRIVES else 0))
+gate.negatives_ran(199 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

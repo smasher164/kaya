@@ -12,7 +12,6 @@ import UserNotifications
 import VideoToolbox
 #if os(macOS)
     import IOKit.pwr_mgt
-    import ScreenCaptureKit
 #endif
 #if os(iOS)
     import PhotosUI
@@ -8979,6 +8978,9 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
     /// answers, and the wait stays inside the leg's `timeout 120`.
     let kayaCeilingStacksWait: TimeInterval = 25
     let kayaDriverSlowReading: TimeInterval = 15
+    let kayaDriverAttachQuiet: TimeInterval = 0.3
+    let kayaDriverAttachSettle: TimeInterval = 10
+    let kayaDriverAttachWait: TimeInterval = 40
 
     /// Every layer still carrying an animation, read on the main thread within
     /// 2 s: XCTest waits for animations to go idle before it acts.
@@ -9034,8 +9036,11 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
         private var started = 0
         private var stopped = 0
         private var unmatched = 0
-        private var open: [(id: ObjectIdentifier, anim: AnyObject, at: String, step: String, what: String)] = []
+        private var open: [(id: ObjectIdentifier, anim: AnyObject, at: String, step: String, what: String, xctest: Bool)] = []
         private var events: [String] = []
+        private var xctestSeen: String?
+        private var xctestBlind: [String] = []
+        private var lastMove = Date()
 
         static func clock() -> String {
             var tv = timeval()
@@ -9070,12 +9075,24 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
             lock.unlock()
         }
 
+        private static func xctestLoaded() -> Bool {
+            NSClassFromString("XCTAnimationsIdleNotifier") != nil
+        }
+
+        private func seeXCTest(_ loaded: Bool) {
+            guard loaded, xctestSeen == nil else { return }
+            xctestSeen = "\(Self.clock()) (step '\(step)') with \(open.count) UIView animation(s) open"
+        }
+
         func began(_ state: AnyObject, _ anim: AnyObject?) {
             let what = Self.describe(anim, state)
             let key = anim ?? state
+            let loaded = Self.xctestLoaded()
             lock.lock()
+            seeXCTest(loaded)
             started += 1
-            open.append((ObjectIdentifier(key), key, Self.clock(), step, what))
+            lastMove = Date()
+            open.append((ObjectIdentifier(key), key, Self.clock(), step, what, loaded))
             lock.unlock()
             note("start \(what)")
         }
@@ -9083,12 +9100,57 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
         func ended(_ state: AnyObject, _ anim: AnyObject?, _ finished: Bool) {
             let what = Self.describe(anim, state)
             let id = ObjectIdentifier(anim ?? state)
+            let loaded = Self.xctestLoaded()
             lock.lock()
+            seeXCTest(loaded)
             stopped += 1
+            lastMove = Date()
             let at = open.firstIndex { $0.id == id }
-            if let at { open.remove(at: at) } else { unmatched += 1 }
+            var blind = false
+            if let at {
+                blind = loaded && !open[at].xctest
+                if blind {
+                    xctestBlind.append("started \(open[at].at) (step '\(open[at].step)'), stopped \(Self.clock()) (step '\(step)'): \(what)")
+                }
+                open.remove(at: at)
+            } else { unmatched += 1 }
             lock.unlock()
-            note("stop finished=\(finished)\(at == nil ? " WITH NO START" : "") \(what)")
+            note("stop finished=\(finished)\(at == nil ? " WITH NO START" : "")"
+                + "\(blind ? " WITH NO START AS XCTEST SAW IT" : "") \(what)")
+        }
+
+        /// docs/traps.md, XCTest's notifier loaded over an open animation.
+        func quiet(for settle: TimeInterval) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return open.isEmpty && Date().timeIntervalSince(lastMove) >= settle
+        }
+
+        func openSummary() -> String {
+            lock.lock()
+            defer { lock.unlock() }
+            let age = Int(Date().timeIntervalSince(lastMove) * 1000)
+            return "\(open.count) UIView animation(s) open, the last start or stop \(age) ms ago"
+                + (open.first.map { "; the oldest open since \($0.at) (step '\($0.step)'): \($0.what)" } ?? "")
+        }
+
+        func xctestLoad() -> String {
+            let loaded = Self.xctestLoaded()
+            lock.lock()
+            seeXCTest(loaded)
+            let seen = xctestSeen
+            let blind = xctestBlind
+            lock.unlock()
+            guard let seen else { return "XCTest's notifier not loaded in this process" }
+            if blind.isEmpty {
+                return "XCTest's notifier first seen at \(seen); no stop has reached it without its start"
+            }
+            return "XCTest's notifier first seen at \(seen); \(blind.count) stop(s) reached it "
+                + "for animations that started before it loaded, which XCTest logs as "
+                + "\"animationDidStop without a matching animationDidStart\"; each holds its count "
+                + "at -1 while it logs, and an animations-idle request read in that moment waits "
+                + "for a later stop from 1 to 0 or a later request; the first: "
+                + blind[0]
         }
 
         func install() {
@@ -9153,7 +9215,7 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
             typealias Ask = @convention(c) (AnyClass, Selector) -> Bool
             return unsafeBitCast(method_getImplementation(m), to: Ask.self)(cls, sel)
                 ? "XCTest IN PROGRESS (+[XCTAnimationsIdleNotifier isAnimationInProgress], its count above 0)"
-                : "XCTest idle (+[XCTAnimationsIdleNotifier isAnimationInProgress], its count 0)"
+                : "XCTest not in progress (+[XCTAnimationsIdleNotifier isAnimationInProgress], its count not above 0)"
         }
 
         func reading(_ moment: String) -> String {
@@ -9208,7 +9270,7 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
                         : got?[entry.id].map { "on \($0)" } ?? "on no layer in any window")
             }
             let more = mine.count > 60 ? ["  open and not listed: \(mine.count - 60) more"] : []
-            return "XCTest's animation tracking \(moment): \(Self.xctest()); \(head); \(main)"
+            return "XCTest's animation tracking \(moment): \(Self.xctest()); \(xctestLoad()); \(head); \(main)"
                 + (lines.isEmpty ? "" : "\n" + (lines + more).joined(separator: "\n"))
                 + (ring.isEmpty ? "" : "\n" + ring.map { "  " + $0 }.joined(separator: "\n"))
         }
@@ -9449,6 +9511,28 @@ private func kayaRunScript(_ script: String) {
         print("KAYA_SELFTEST: FAILED (\(left))")
         watchdog.published(1)
         exit(1)
+    }
+    // docs/traps.md, XCTest's notifier loaded over an open animation.
+    if ProcessInfo.processInfo.environment["KAYA_DRIVER_ATTACH"] != nil {
+        watchdog.enter("<the driver's attach before the first step>")
+        let settled = Date().addingTimeInterval(kayaDriverAttachSettle)
+        while !KayaAnimationLedger.shared.quiet(for: kayaDriverAttachQuiet), Date() < settled {
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        let quiet = KayaAnimationLedger.shared.quiet(for: kayaDriverAttachQuiet)
+        let before = KayaAnimationLedger.shared.openSummary()
+        let (ok, lines) = KayaSimdrive.ask("attach", timeout: kayaDriverAttachWait)
+        let said = "the driver's attach before the first step "
+            + (ok ? "answered" : "refused: \(lines.first ?? "no sentence")")
+            + "; asked \(quiet ? "after" : "WITHOUT") \(Int(kayaDriverAttachQuiet * 1000)) ms "
+            + "with no UIView animation open or moving (\(before)); "
+            + KayaAnimationLedger.shared.xctestLoad()
+        print("KAYA_HARNESS: \(said)")
+        if !ok {
+            print("KAYA_SELFTEST: FAILED (\(said))")
+            watchdog.published(1)
+            exit(1)
+        }
     }
     #endif
     var stepOrdinal = 0
@@ -12079,8 +12163,8 @@ private func kayaRunScript(_ script: String) {
                     kayaAwaitAnswer(answered)
                 } else if sent.sent {
                     failures.append(
-                        "session_send \(action): MediaRemote answered sent \(attempts) time(s) and no "
-                            + "remote command reached this process's handlers")
+                        "session_send \(action): sent \(attempts) time(s) and no remote command "
+                            + "reached this process's handlers; the helper's last line: \(sent.said)")
                 } else {
                     failures.append("session_send \(action): \(sent.said)")
                 }
@@ -33129,48 +33213,9 @@ func kayaMediaRefusal(_ item: String) -> String? {
         let x = corner ? rect.minX + kayaVideoCornerInset : beside ? rect.maxX + kayaVideoGroundOffset : rect.midX
         let px = Int((x * scale).rounded())
         let py = Int(((corner ? rect.minY + kayaVideoCornerInset : rect.midY) * scale).rounded())
-        let done = DispatchSemaphore(value: 0)
-        // Each stage says where a capture stood when the 5 s ran out
-        // (docs/traps.md, the pooled ink read that never answered).
-        let answer = KayaAnswerBox("<no answer from ScreenCaptureKit within 5 s: the capture task never started>")
-        Task.detached {
-            do {
-                answer.said = "<no answer from ScreenCaptureKit within 5 s: SCShareableContent asked, never answered>"
-                let content = try await SCShareableContent.excludingDesktopWindows(
-                    false, onScreenWindowsOnly: true)
-                guard let window = content.windows.first(where: { $0.windowID == wid }) else {
-                    answer.said = "<the window server lists no window \(wid)>"
-                    done.signal()
-                    return
-                }
-                let filter = SCContentFilter(desktopIndependentWindow: window)
-                let config = SCStreamConfiguration()
-                config.width = Int(window.frame.width * scale)
-                config.height = Int(window.frame.height * scale)
-                config.showsCursor = false
-                answer.said =
-                    "<no answer from ScreenCaptureKit within 5 s: window \(wid) listed among "
-                    + "\(content.windows.count), captureImage asked, never answered>"
-                let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
-                answer.said = kayaSRGBPixel(image, px, py) ?? "<the capture is \(image.width)x\(image.height), no pixel at \(px),\(py)>"
-            } catch {
-                answer.said = "<ScreenCaptureKit: \(error.localizedDescription)>"
-                answer.refused = true
-            }
-            done.signal()
-        }
-        if done.wait(timeout: .now() + 5) == .timedOut || answer.refused {
-            // The same window server picture through screencapture(1), its
-            // own process and replayd connection (measured equal,
-            // docs/probes/media-mac-2026-09-30.md): a pooled guest's own
-            // connection was seen interrupted in a loop, and refused as
-            // "declined TCCs" once, both under the pool (docs/traps.md).
-            let hung = answer.said
-            let read = kayaScreencapturePixel(wid, px, py)
-            kayaDiag("video ink: \(hung); screencapture -l\(wid) answered \(read)")
-            return read.hasPrefix("<") ? "\(hung), and screencapture: \(read)" : read
-        }
-        return answer.said
+        // Out of process only (docs/traps.md, the pooled ink read that never answered).
+        let read = kayaScreencapturePixel(wid, px, py)
+        return read.hasPrefix("<") ? "<screencapture -l\(wid): \(read.dropFirst())" : read
     }
 
     /// One pixel of window `wid` as screencapture(1) captures it, in sRGB.
@@ -33193,12 +33238,6 @@ func kayaMediaRefusal(_ item: String) -> String? {
             let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
         else { return "<wrote no image to \(out.lastPathComponent)>" }
         return kayaSRGBPixel(image, x, y) ?? "<the capture is \(image.width)x\(image.height), no pixel at \(x),\(y)>"
-    }
-
-    final class KayaAnswerBox: @unchecked Sendable {
-        var said: String
-        var refused = false
-        init(_ said: String) { self.said = said }
     }
 
     /// One pixel of `image`, converted into sRGB by CoreGraphics.

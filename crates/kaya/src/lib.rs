@@ -89,6 +89,8 @@ mod winui;
 
 #[cfg(target_os = "linux")]
 mod gtk;
+#[cfg(any(target_os = "linux", all(unix, test)))]
+mod display_probe;
 
 
 // pub because kaya::android_main! expands to a JNI entry in the app's

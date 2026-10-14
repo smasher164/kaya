@@ -27,6 +27,7 @@ SWIFT = "swift/KayaSwiftUI.swift"
 SWIFT_ENTRY = "swift/KayaSwiftUIEntry.swift"
 KOTLIN = "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
 HARNESS = "crates/kaya/src/harness.rs"
+MEDIAREMOTE = "tools/mac/mediaremote.c"
 
 
 def real(rel):
@@ -3381,11 +3382,26 @@ def ios_media_rows(code):
     return bad
 
 
-def media_arms(swift_src=None, harness_src=None):
+def media_arms(swift_src=None, harness_src=None, helper_src=None):
     bad = []
     swift = swift_src if swift_src is not None else real(SWIFT)
     harness = harness_src if harness_src is not None else real(HARNESS)
+    helper = re.sub(r"/\*.*?\*/|//[^\n]*", "",
+                    helper_src if helper_src is not None else real(MEDIAREMOTE), flags=re.S)
     code = re.sub(r"//[^\n]*", "", swift)
+    for banned in ("import ScreenCaptureKit", "SCShareableContent", "SCScreenshotManager",
+                   "SCStream", "SCContentFilter"):
+        if banned in code:
+            bad.append(f"KayaSwiftUI.swift names {banned!r} — an in-process capture holds a "
+                       f"replayd client for the guest's life, and two guests of one "
+                       f"executable cut each other's off in a loop (docs/traps.md, the "
+                       f"pooled ink read that never answered)")
+    if 'dlsym(mr, "MRMediaRemoteSendCommandWithReply")' not in helper:
+        bad.append(f"{MEDIAREMOTE} does not send through MRMediaRemoteSendCommandWithReply — "
+                   f"the plain send is asynchronous and perl exits before it leaves "
+                   f"(docs/traps.md, the session_send that never left perl)")
+    if not re.search(r"dispatch_semaphore_wait\(replied,", helper):
+        bad.append(f"{MEDIAREMOTE} does not wait for MediaRemote's reply before it returns")
     for banned in ("AVPlayerView", "AVPlayerViewController", "VideoPlayer(",
                    "import AVKit"):
         if banned in code:
@@ -3489,10 +3505,17 @@ for pattern, repl, label, rel, want in (
      "the iOS load not through the picked hand-off", SWIFT, 1),
     (r"(\n        player\.replaceCurrentItem\(with: nil\)\n)        releaseScope\(\)\n", "",
      "the picked scope kept past release", SWIFT, 1),
+    (r"(// Out of process only[^\n]*\n)", "        _ = SCShareableContent.self\n",
+     "an in-process ScreenCaptureKit read", SWIFT, 1),
+    (r'(dlsym\(mr, )"MRMediaRemoteSendCommandWithReply"', '"MRMediaRemoteSendCommand"',
+     "the helper on the plain asynchronous send", MEDIAREMOTE, 1),
+    (r"(long late = )dispatch_semaphore_wait\(replied, [^;]*;", "0;",
+     "the helper not waiting for the reply", MEDIAREMOTE, 1),
 ):
     cut = g.doctor(f"media arms: {label}", real(rel), pattern,
                    lambda m, repl=repl: m.group(1) + repl, want=want)
-    found = [f for f in media_arms(swift_src=cut) if f not in media_out]
+    found = [f for f in (media_arms(helper_src=cut) if rel == MEDIAREMOTE
+                         else media_arms(swift_src=cut)) if f not in media_out]
     print(f"check-verbs: media-arms negative ({label}): {len(found)} finding(s)")
     if not found:
         fail(f"check-verbs SELF-TEST: the media arms passed with {label}")
@@ -4768,6 +4791,26 @@ def capture_wall_gtk(text=None, gtk_text=None):
     if harness is None or 'std::env::var_os("KAYA_SELFTEST")' not in harness:
         bad.append(f"GTK ({GTK_CAPTURE}): under_harness() no longer reads KAYA_SELFTEST — the wall "
                    f"asks the wrong question")
+    # ONE DEVICE MONITOR PER PROCESS, never stopped or dropped (docs/traps.md,
+    # the capture that wedged on a freed monitor): GStreamer's device
+    # providers are per-factory singletons whose bus has ONE sync handler, so
+    # every monitor made takes it over and a dropped one leaves it on freed
+    # memory, where the PipeWire loop thread waits forever.
+    one = brace_body(code, "fn device_monitor(")
+    made = [m.start() for m in re.finditer(r"DeviceMonitor::new\(", code + rest)]
+    inside = one is not None and one.count("DeviceMonitor::new(") == 1
+    if not inside or len(made) != 1:
+        bad.append(f"GTK ({GTK_CAPTURE}): {len(made)} DeviceMonitor::new( in the GTK backend, "
+                   f"{'one' if inside else 'none'} inside fn device_monitor — every monitor but "
+                   f"the process's one takes the shared provider's sync handler and a dropped one "
+                   f"leaves it on freed memory")
+    if one is None or "ManuallyDrop::new(" not in one or ".start()" not in one:
+        bad.append(f"GTK ({GTK_CAPTURE}): fn device_monitor does not start its monitor and keep it "
+                   f"undropped (ManuallyDrop) — a dropped monitor is the freed sync handler")
+    stops = len(re.findall(r"\.stop\(\)", code))
+    if stops:
+        bad.append(f"GTK ({GTK_CAPTURE}): {stops} .stop() call(s) — the process's one device "
+                   f"monitor is never stopped")
     return bad
 
 
@@ -4779,7 +4822,7 @@ if capture_gtk_out:
     capture_gtk_status = 1
 print(f"check-verbs: the GTK capture wall read ({len(GTK_CAPTURE_REAL)} source names, "
       f"open_devices, "
-      f"the wall, its harness question)")
+      f"the wall, its harness question, the process's one device monitor)")
 for pattern, repl, label in (
     (r"(fn nodes\(\) -> Vec<Node> \{\n)",
      r'\1    let _ = gst::ElementFactory::make("pipewiresrc");\n',
@@ -4793,6 +4836,14 @@ for pattern, repl, label in (
      "the harness question asking another variable"),
     (r'\n\s*\.field\("node\.dont-fallback", true\)', "",
      "a source that may fall back to the default"),
+    (r"(fn nodes\(\) -> Vec<Node> \{\n)",
+     r"\1    let _ = gst::DeviceMonitor::new();\n",
+     "a second, temporary device monitor"),
+    (r"std::mem::ManuallyDrop::new\(monitor\)", "monitor",
+     "the process's monitor droppable"),
+    (r"(WATCH\.with_borrow_mut\(\|w\| w\.take\(\)\);)",
+     r"\1\n    device_monitor().stop();",
+     "the process's monitor stopped by the watch"),
 ):
     cut = g.doctor(f"the GTK capture wall: {label}", real(GTK_CAPTURE), pattern, repl)
     found = [f for f in capture_wall_gtk(cut) if f not in capture_gtk_out]
@@ -5658,6 +5709,12 @@ check_netimage_routes(g)
 from simscreen_routes import run as check_simscreen_routes
 check_simscreen_routes(g)
 
+# The SELF-TEST fail() calls below the drain at "EVERY SELF-TEST FAILURE
+# BELOW THE FIRST DRAIN" reach the exit here.
+if failures:
+    for f_ in failures:
+        print(f"check-verbs: {f_}", file=sys.stderr)
+    raise SystemExit(1)
 if (clip_status or window_status or ink_status or ax_status
         or drop_tol_status
         or words_status or label_status or polish_status
@@ -5688,7 +5745,8 @@ g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"+ the Compose immersive arm read from the insets "
           f"+ every Compose kind's create and render arms "
           f"+ the range's arms in both interpreters "
-          f"+ the media arms (a bare layer, one report door, playbackState first) "
+          f"+ the media arms (a bare layer, one report door, playbackState first, "
+          f"no in-process screen capture, the remote command's reply awaited) "
           f"+ the bound's wake and teardown on 4 arms "
           f"+ the reader's keyframe rule, bound, stop and reporting thread "
           f"+ the WinUI frame mirrored under right to left "

@@ -15,3 +15,6 @@ expect label#1 "r9 whole"
 expect label#0 "r0 out"
 expect_video_ink video#9 "C83C1E"
 expect_player_open 9 yes
+# The resting state once the last player opens and its box settles (docs/traps.md,
+# "The feed's last row read `in` on WinUI with its scroll at the end").
+expect label#1 "r9 whole"

@@ -1499,6 +1499,27 @@ if not needs_bridge('expect label#0 "x"\ntype "an"') \
         "bridge would be started by luck")
 
 
+# Bridge verbs the watcher answers itself (clip_verb, media_verb), never
+# through the device's xcui driver.
+HOST_ONLY_VERBS = frozenset(("clipboard_seed", "expect_clipboard", "expect_video_ink",
+                             "expect_video_corner", "session_send"))
+
+
+def needs_driver(script):
+    """docs/traps.md, XCTest's notifier loaded over an open animation: a leg
+    whose verbs reach the xcui driver attaches it before its first step."""
+    return any(line.split()[0] in BRIDGE_VERBS - HOST_ONLY_VERBS
+               for line in script.splitlines()
+               if line.strip() and not line.lstrip().startswith("#"))
+
+
+if not needs_driver('expect label#0 "x"\ntype "an"') \
+        or needs_driver('clipboard_seed text "x"\nexpect_clipboard "x"') \
+        or not HOST_ONLY_VERBS < BRIDGE_VERBS:
+    die("run-sim: needs_driver does not read the script's driver verbs — the xcui "
+        "driver would attach mid-step again")
+
+
 # docs/traps.md, the iOS save press: the picker's commits stall while the
 # device's LocalStorage file provider indexes (a Spotlight purge after an
 # expired sync anchor ran 0.3-127 s), so they wait for its indexer to idle.
@@ -1613,6 +1634,8 @@ def simdrive_watch(udid, bundle_id, docs_dir, log_path, stop):
                         ok, body = xcuidrive(udid, f"attach {bundle_id}")
                         attached = ok
                         pid = "attached" if ok else "unattached"
+                    elif parts == ["attach"]:
+                        body = "already attached"
                     pid_ms = str(now_ms() - pid_started)
                     quiet, provider = True, ""
                     if attached and parts[0] in PROVIDER_VERBS:
@@ -1622,7 +1645,7 @@ def simdrive_watch(udid, bundle_id, docs_dir, log_path, stop):
                         lg.write(f"KAYA_SIMDRIVE: at={now_ms()} src=watch ev=provider "
                                  f"id={rid or 'none'} verb={parts[0]} idle={quiet} {provider}\n")
                         lg.flush()
-                    if attached:
+                    if attached and parts != ["attach"]:
                         ok, body = xcuidrive(udid, verb, timeout=90)
                         if not ok and "no app attached" in body:
                             attached = False
@@ -2054,6 +2077,8 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
                SIMCTL_CHILD_KAYA_SELFTEST_SCRIPT=script,
                SIMCTL_CHILD_KAYA_SWIFTUI_LIB=(
                    f"{container}/libkaya_swiftui.dylib"))
+    if needs_driver(script):
+        env["SIMCTL_CHILD_KAYA_DRIVER_ATTACH"] = "1"
     # A simulator child sees only SIMCTL_CHILD_-prefixed variables.
     if appearance:
         env["SIMCTL_CHILD_KAYA_APPEARANCE"] = appearance
