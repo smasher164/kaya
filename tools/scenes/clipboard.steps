@@ -4,6 +4,7 @@
 # kaya wrote parses its own malformed header happily. The files are the
 # guest's own, at <scene root>/kaya-clip-<pid>/, so guest and
 # interpreter agree on the path with no runner involvement.
+expect_title "clipboard"
 expect label#0 "ready"
 
 # ---- copying: four representations, one clip ----------------------

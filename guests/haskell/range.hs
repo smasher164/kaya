@@ -36,6 +36,7 @@ main = kayaMain $ \app -> do
   commitsRef <- newIORef (0 :: Int)
 
   (commitText, clipText, trim, trimNode) <- buildTx app $ do
+    window primary [WTitle "range"]
     liveText <- signalText "live: 2 8"
     commitText <- signalText "commits: 0"
     volumeText <- signalText "volume: 0.25"

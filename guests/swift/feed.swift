@@ -10,6 +10,7 @@ enum Post: KayaGen {
 
 KayaApp.run { app in
     app.build { tx in
+        tx.window(title: "feed")
         let feed = postCollection(tx)
         let doneCount = feed.derive(tx) { items in
             let n = items.filter { entry in

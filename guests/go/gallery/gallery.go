@@ -10,6 +10,7 @@ func App() *kaya.App {
 	app := kaya.NewApp()
 
 	app.Build(func(tx *kaya.Tx) {
+		tx.Window(0).Title("gallery")
 		status := tx.Signal("urgent: false")
 		volume := tx.Signal("volume: 50%")
 		pos := tx.Signal(0.5)

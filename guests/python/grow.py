@@ -13,7 +13,7 @@ import kaya
 
 app = kaya.App()
 
-with app.window():
+with app.window(title="grow"):
     probe = kaya.signal("grow probe")
     one = kaya.signal("one")
 

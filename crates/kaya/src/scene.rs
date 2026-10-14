@@ -1086,6 +1086,9 @@ pub(crate) struct Scene {
     /// two facts have one lifetime: a seventh removal site that updated
     /// only one would make an unreachable widget look reachable.
     mounted_windows: HashMap<WindowId, WidgetId>,
+    /// Whether the primary window has been given a title; read by the
+    /// untitled-primary wall (docs/traps.md, the untitled primary).
+    primary_titled: bool,
     /// child -> parent, LIVE ZONE ONLY. The template zone keeps its own
     /// and promotes an unparented node to a root of the stamped copy; the
     /// live zone has nowhere to promote to, so an unclaimed widget
@@ -3551,6 +3554,7 @@ impl Scene {
         // Breakpoints this batch declared, evaluated at the batch tail
         // when the row's children exist (the fold rule's requirement).
         let mut declared_breakpoints: Vec<usize> = Vec::new();
+        let mut mounted_primary = false;
 
         let mut queue: std::collections::VecDeque<(usize, TxOp)> = tx.into_iter().enumerate().collect();
         while let Some((at, op)) = queue.pop_front() {
@@ -3904,6 +3908,8 @@ impl Scene {
                         "kaya: window prop on unknown window {window:?} — \
                          create_window first (0 is the primary)"
                     );
+                    self.primary_titled |=
+                        window == crate::protocol::DEFAULT_WINDOW && prop == WindowProp::Title;
                     match value {
                         PropValue::Const(v) => {
                             check_window_prop_value(prop, &v);
@@ -4800,6 +4806,7 @@ impl Scene {
                         fresh,
                         "kaya: window {window:?} already has a mounted root"
                     );
+                    mounted_primary |= window == crate::protocol::DEFAULT_WINDOW;
                     out.push(ApplyOp::Mount { window, root });
                 }
                 TxOp::CreateCollection { id, variants } => {
@@ -5609,6 +5616,13 @@ impl Scene {
                 self.signals.insert(*sid, old.clone());
             }
             panic!("{}", self.orphan_message(orphan));
+        }
+
+        if let Some(msg) = self.untitled_primary_message(mounted_primary, crate::prefs::selftest()) {
+            for (sid, old) in &rollback {
+                self.signals.insert(*sid, old.clone());
+            }
+            panic!("{msg}");
         }
 
         // Breakpoints declared this batch, against the latched metrics —
@@ -7078,6 +7092,25 @@ impl Scene {
     /// 2026-09-02; docs/deferred.md). Walks each scroll's LIVE subtree —
     /// stamped copies are not in `children_of` — and reads a For container's
     /// template bodies once, at their declaration.
+    /// docs/traps.md, the untitled primary.
+    fn untitled_primary_message(&self, mounted_primary: bool, selftest: bool) -> Option<String> {
+        if !mounted_primary || !selftest || self.primary_titled {
+            return None;
+        }
+        let scene = std::env::var("KAYA_SELFTEST").unwrap_or_default();
+        Some(format!(
+            "kaya: scene {scene:?} mounted the primary window with no title — under the \
+             harness every app declares its window's title in the batch that mounts it, \
+             the string its script's `expect_title` reads, because an untitled window \
+             shows the executable's name (iOS draws it as the screen's large title). \
+             Declare it in the guest's sugar: Rust tx.window(kaya::DEFAULT_WINDOW).title(..), \
+             Python app.window(title=..), JS app.window({{ title: .. }}, ..), Go \
+             tx.Window(0).Title(..), C# tx.Window(title: ..), Java tx.window(0).title(..), \
+             Swift tx.window(title: ..), OCaml window ~title:.. (), Haskell \
+             window primary [WTitle ..], C a KAYA_WPROP_TITLE window prop"
+        ))
+    }
+
     fn grow_in_scroll_message(&self) -> Option<String> {
         let mut scrolls: Vec<WidgetId> = self
             .widgets
@@ -10699,6 +10732,31 @@ mod tests {
         let n = before - tx.len();
         println!("strip_add_child({child:?}): {n} op(s) removed");
         n
+    }
+
+    #[test]
+    fn untitled_primary_is_refused_under_the_harness_alone() {
+        let mount = |titled: bool| {
+            let mut tx = vec![TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Row }];
+            if titled {
+                tx.push(TxOp::SetWindowProp {
+                    window: DEFAULT_WINDOW,
+                    prop: WindowProp::Title,
+                    value: PropValue::Const(Value::Str("t".into())),
+                });
+            }
+            tx.push(TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) });
+            let mut scene = Scene::new();
+            scene.apply(tx);
+            scene
+        };
+        let untitled = mount(false);
+        let refused = untitled.untitled_primary_message(true, true).expect("refused under the harness");
+        assert!(refused.contains("mounted the primary window with no title"), "{refused}");
+        assert!(refused.contains("tx.window(kaya::DEFAULT_WINDOW).title(..)"), "{refused}");
+        assert!(untitled.untitled_primary_message(true, false).is_none(), "outside the harness");
+        assert!(untitled.untitled_primary_message(false, true).is_none(), "a batch that mounted nothing");
+        assert!(mount(true).untitled_primary_message(true, true).is_none(), "a titled primary");
     }
 
     /// A SECOND BREAKPOINT DECLARED AFTER THE METRICS ARE ALREADY LATCHED —

@@ -5,6 +5,7 @@ import Kaya
 
 KayaApp.run { app in
     try app.build { tx in
+        tx.window(title: "a11y")
         // Opened OUT HERE because a container's builder closure does not throw;
         // `try` and no `catch`, as in identity.swift.
         let mark = try KayaAsset("images/a11y-logo.png")

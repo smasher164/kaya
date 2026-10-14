@@ -1,5 +1,6 @@
 # expect_order reads the For's BARE label children, so the order is the
 # notes alone — todo rows nest theirs, and a promoted note leaves it.
+expect_title "feed"
 expect_order column#0 "jot one|jot two"
 expect label#0 "0 done"
 toggle checkbox#0 on

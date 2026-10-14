@@ -33,7 +33,7 @@ def on_sort(column):
     items.set_columns("Name", "Size", sort=indicator)
 
 
-with app.window():
+with app.window(title="table"):
     items = kaya.collection(Item)
     # The root is a row: the For's container is the only column.
     with kaya.row():

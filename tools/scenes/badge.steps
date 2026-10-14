@@ -2,6 +2,7 @@
 # to show a count, read back from the platform's own record. A notification
 # is posted first because on Android the count rides the showing
 # notifications, and a notification posted later carries the current count.
+expect_title "badge"
 expect label#0 "ready"
 click button#0
 expect_notification 21 "Unread messages"

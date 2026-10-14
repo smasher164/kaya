@@ -39,6 +39,7 @@ rowKey [] = ""
 main :: IO ()
 main = kayaMain $ \app -> do
   (statusText, sentText, pinText, passwordField, clearButton, pin) <- buildTx app $ do
+    window primary [WTitle "secure"]
     accounts <- collectionOf @Account
     statusText <- signalText "empty"
     sentText <- signalText "sent: -"

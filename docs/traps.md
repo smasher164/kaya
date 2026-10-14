@@ -16418,3 +16418,42 @@ view's bounds, content size, caret in its own space, A20's cap, the pan and
 the root frame.
 GUARD: tools/lib/safearea_routes.py, the keeper's block, its call and the
 refusal's reading, four cuts watched red.
+
+## The untitled primary: iOS draws the executable's name as the screen's title (seen 2026-10-14)
+
+A guest that declares no window title gets the platform's default caption,
+which is the process name, and on iOS that is the screen's large navigation
+title: the autofill guests drew "autofillkeyboardrs-s…" (2925c9f3) and the
+windowed guest "windowedrs-swiftui" in the pinned-header captures. No scene
+saw either, because 26 of 110 scripts read a title. A census of the guests
+found 23 stems untitled in all nine languages and 9 C guests. Every one now
+declares its scene's title, and two walls hold it. Under the harness the core
+refuses a batch that mounts the primary window while no title was ever set
+for it (`Scene::untitled_primary_message`), on the path every leg in every
+language walks, naming the spelling in all nine bindings and the C floor;
+outside the harness nothing changes (an untitled window keeps the platform's
+caption, which the identity name fills, DESIGN.md I9). And every script reads
+its primary's title with `expect_title`, so the nine guests declare one
+string. Auxiliary windows are exempt: identity's second window is untitled on
+purpose.
+GUARD: the core's refusal, its unit test
+(`untitled_primary_is_refused_under_the_harness_alone`); tools/check-steps.py's
+title clause (one script negative) and wall clause (three cuts).
+
+## The iOS red leg that photographed the home screen (measured 2026-10-14)
+
+`simctl launch --console-pty` returns only once the guest has exited, so
+the runner's fail-time `simctl io screenshot` was SpringBoard's every time
+(the pinned-header captures needed pauses spliced into a copy of the scene
+to get a picture at all). The android and mac lanes had already moved the
+picture into the guest; iOS now does the same: KayaFailShot draws every
+visible window of the app's scenes with `drawHierarchy` into a screen-sized
+PNG at the first failed step and before a failed verdict is published,
+under Documents, and the runner pulls it out of the container as `shot`,
+filing its own screenshot (or the xcui driver's, when a picker verb gave
+up) as `desktop-shot`. What the app cannot draw is said in `shot.when`:
+the software keyboard, the status bar and system sheets belong to other
+processes. Read back on the 2026-10-14 iOS lane: editor-go's `shot` is its
+editor with "save cancelled" under it, its `desktop-shot` the home screen.
+GUARD: tools/check-flightrec.py's iOS app shot census, seven cuts (NP1-NP7)
+watched red.

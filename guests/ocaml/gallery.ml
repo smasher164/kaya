@@ -16,6 +16,7 @@ let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
+     window ~title:"gallery" ();
      let status = signal Scalar.Str ("urgent: false") in
      let volume = signal Scalar.Str ("volume: 50%") in
      let pos = signal Scalar.F64 (0.5) in

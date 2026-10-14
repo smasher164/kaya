@@ -9,6 +9,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
 
     let msgs = kaya::Messages::<Msg>::new();
     let spoken = ctx.apply(|tx| {
+        tx.window(kaya::DEFAULT_WINDOW).title("a11y");
         let status = tx.signal("Ready");
         let cell_name = tx.signal("Name");
         let cell_value = tx.signal("Ada");

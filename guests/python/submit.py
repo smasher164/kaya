@@ -25,7 +25,7 @@ def on_replied(thread, text):
     sent.set(f"sent: {thread.key}: {text}")
 
 
-with app.window():
+with app.window(title="submit"):
     threads = kaya.collection(Thread)
     sent = kaya.signal("sent: -")
 

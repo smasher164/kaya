@@ -19,6 +19,7 @@ static class RangeScene
 
         app.Build(tx =>
         {
+            tx.Window(title: "range");
             var liveText = tx.Signal("live: 2 8");
             var commitText = tx.Signal("commits: 0");
             var volumeText = tx.Signal("volume: 0.25");

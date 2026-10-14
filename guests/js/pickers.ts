@@ -32,7 +32,7 @@ function onReset(): void {
   timeSig.set({ hour: 9, minute: 0 });
 }
 
-const { dateText, timeText, rowText, dateSig, timeSig } = app.window({}, () => {
+const { dateText, timeText, rowText, dateSig, timeSig } = app.window({ title: "pickers" }, () => {
   const dateText = kaya.signal("date: none");
   const timeText = kaya.signal("time: none");
   const rowText = kaya.signal("row: none");

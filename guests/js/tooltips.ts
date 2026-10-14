@@ -11,7 +11,7 @@ function onSave(): void {
   nameHelp.set("Your name, as saved");
 }
 
-const { nameHelp } = app.window({}, () => {
+const { nameHelp } = app.window({ title: "tooltips" }, () => {
   const nameHelp = kaya.signal("Your full name as it appears on the card");
   const accounts = kaya.collection(Account);
   kaya.column((settings) => {

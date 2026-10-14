@@ -14,6 +14,7 @@ enum Msg {
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
     let items = ctx.apply(|tx| {
+        tx.window(kaya::DEFAULT_WINDOW).title("reorder");
         let items = tx.collection::<Item>();
         // THE ROOT IS A ROW so the For's container is the only column:
         // construction order differs per language, column#0 may not.

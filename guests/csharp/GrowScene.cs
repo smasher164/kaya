@@ -8,6 +8,7 @@ static class GrowScene
 
         app.Build(tx =>
         {
+            tx.Window(title: "grow");
             var probe = tx.Signal("grow probe");
             var one = tx.Signal("one");
 

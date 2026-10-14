@@ -20,6 +20,7 @@ let () =
   let commits = ref 0 in
 
   build app (fun () ->
+      window ~title:"range" ();
       let live_text = signal Scalar.Str "live: 2 8" in
       let commit_text = signal Scalar.Str "commits: 0" in
       let volume_text = signal Scalar.Str "volume: 0.25" in

@@ -2,6 +2,7 @@
 # contain (docs/number-field-plan.md §3 rule 5, RULED 2026-10-02). The
 # Arabic-Indic digits arrive by set_text, an IME's commit; the lanes' key
 # routes carry ASCII.
+expect_title "numberfield"
 expect_locale ar-EG
 expect number_field@amount "{fmt:field 0 0.5}"
 expect label@commits "commits: 0"

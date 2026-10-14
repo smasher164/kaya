@@ -280,8 +280,8 @@ RELAUNCH_DOOR = {"tasks": "notify_tap", "taskspersist": "launch",
 # after `expect_focused`, the last statement that reads view-local
 # state (docs/deferred.md's mount entry).
 REMOUNT_SCENE = "todos"
-REMOUNT_STEP = 6
-REMOUNT_LINE = "KAYA_REMOUNT: recreating after step 6 (expect_focused entry#0)"
+REMOUNT_STEP = 7
+REMOUNT_LINE = "KAYA_REMOUNT: recreating after step 7 (expect_focused entry#0)"
 
 # Per-leg exceptions, keyed by LEG NAME: `scene` where the name does not
 # spell it, `tablet` for the one lockless-device leg, `remount` as
@@ -313,7 +313,7 @@ FLAGS = {
     # dialog-family WATCH). Step 3 is the click that opens the picker.
     "remount-filedialog-jvm": {
         "scene": "filedialog",
-        "remount": (3, "KAYA_REMOUNT: recreating after step 3 "
+        "remount": (4, "KAYA_REMOUNT: recreating after step 4 "
                        "(click button#0)")},
     # The dark half of expect_ink's frozen string, one leg instead of a
     # lane re-run (check-appearance holds the leg here).

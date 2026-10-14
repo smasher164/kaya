@@ -31,7 +31,7 @@ TALL_PNG = bytes([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68,
 
 app = kaya.App()
 
-with app.window():
+with app.window(title="align"):
     probe = kaya.signal("align probe")
     base = kaya.signal("base\nline")
     anchor = kaya.signal("anchor")

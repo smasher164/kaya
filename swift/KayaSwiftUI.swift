@@ -1684,6 +1684,60 @@ enum KayaVTrace {
             FileHandle.standardError.write(Data("KAYA_HARNESS: fail shot: \(said)\n".utf8))
         }
     }
+#elseif os(iOS)
+    /// The iOS twin (docs/traps.md, the iOS red leg that photographed the home
+    /// screen): `simctl launch --console-pty` returns only once the guest has
+    /// exited, so the runner's screenshot is of SpringBoard. A relative
+    /// `KAYA_FAIL_SHOT` lands in Documents, the verb trace's directory.
+    enum KayaFailShot {
+        nonisolated(unsafe) private static var taken = false
+
+        static func take(_ why: String) {
+            let raw = ProcessInfo.processInfo.environment["KAYA_FAIL_SHOT"] ?? ""
+            if taken || raw.isEmpty { return }
+            taken = true
+            let named =
+                raw.hasPrefix("/") ? raw : (kayaTempDir() as NSString).appendingPathComponent(raw)
+            let (png, drawn, census) = DispatchQueue.main.sync { () -> (Data?, Int, String) in
+                let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+                let windows = scenes.flatMap { $0.windows }
+                    .filter { !$0.isHidden && $0.bounds.width > 0 && $0.bounds.height > 0 }
+                    .sorted { $0.windowLevel.rawValue < $1.windowLevel.rawValue }
+                let census = "\(scenes.count) scene(s) ["
+                    + scenes.map { "\($0.activationState.rawValue)" }.joined(separator: ",")
+                    + "], \(windows.count) visible window(s) ["
+                    + windows.map { "\(type(of: $0)) \(Int($0.frame.width))x\(Int($0.frame.height))" }
+                        .joined(separator: ", ") + "]"
+                guard let screen = windows.first?.windowScene?.screen else { return (nil, 0, census) }
+                let format = UIGraphicsImageRendererFormat()
+                format.scale = screen.scale
+                let data = UIGraphicsImageRenderer(bounds: screen.bounds, format: format).pngData { _ in
+                    for window in windows {
+                        window.drawHierarchy(in: window.frame, afterScreenUpdates: false)
+                    }
+                }
+                return (data, windows.count, census)
+            }
+            var wrote = "no PNG was rendered"
+            if let png {
+                do {
+                    try png.write(to: URL(fileURLWithPath: named))
+                    wrote = "\(png.count) bytes"
+                } catch {
+                    wrote = "the write failed: \(error)"
+                }
+            }
+            let size = (try? FileManager.default.attributesOfItem(atPath: named)[.size] as? Int) ?? 0
+            let said =
+                size > 0
+                ? "\(drawn) window(s) of this app drawn in process by drawHierarchy at \(why); "
+                    + "the software keyboard and system sheets are other processes and draw "
+                    + "nothing here (desktop-shot is the device's screen); \(census)"
+                : "no picture: \(wrote) at \(why); \(census)"
+            try? (said + "\n").write(toFile: named + ".when", atomically: true, encoding: .utf8)
+            FileHandle.standardError.write(Data("KAYA_HARNESS: fail shot: \(said)\n".utf8))
+        }
+    }
 #endif
 
 #if os(macOS)
@@ -14015,10 +14069,8 @@ private func kayaRunScript(_ script: String) {
                     for text in failures[failuresBefore...] {
                         print("KAYA_HARNESS: step-failed \(text)")
                     }
-                    #if os(macOS)
-                        watchdog.enter("<the fail shot>")
-                        KayaFailShot.take("the first failed step, \(line)")
-                    #endif
+                    watchdog.enter("<the fail shot>")
+                    KayaFailShot.take("the first failed step, \(line)")
                 }
             }
         }
@@ -14095,10 +14147,8 @@ private func kayaRunScript(_ script: String) {
         actOne
         ? "KAYA_SELFTEST: ACT 1 FAILED (\(reported.joined(separator: "; ")))"
         : "KAYA_SELFTEST: FAILED (\(reported.joined(separator: "; ")))"
-    #if os(macOS)
-        watchdog.enter("<the fail shot>")
-        KayaFailShot.take("the failed verdict")
-    #endif
+    watchdog.enter("<the fail shot>")
+    KayaFailShot.take("the failed verdict")
     KayaVTrace.dump("the verdict failed: \(verdict)")
     FileHandle.standardError.write("\(verdict)\n".data(using: .utf8)!)
     kayaWriteActTwoVerdict(verdict)

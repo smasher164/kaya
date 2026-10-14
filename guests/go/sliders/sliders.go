@@ -25,6 +25,7 @@ func App() *kaya.App {
 	commits := 0
 
 	app.Build(func(tx *kaya.Tx) {
+		tx.Window(0).Title("sliders")
 		levelText := tx.Signal("value: 50")
 		commitText := tx.Signal("commits: 0")
 		volumeText := tx.Signal("volume: 0.5")

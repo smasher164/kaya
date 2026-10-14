@@ -42,7 +42,7 @@ def on_query(text):
     visible = wanted
 
 
-with app.window():
+with app.window(title="search"):
     items = kaya.collection(Item)
     count = kaya.signal(f"{len(ITEMS)} items")
 

@@ -7,6 +7,7 @@ let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
+     window ~title:"a11yrows" ();
      let notes = collection () in
      let heads = collection () in
 

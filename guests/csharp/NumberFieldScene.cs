@@ -20,6 +20,7 @@ static class NumberFieldScene
 
         app.Build(tx =>
         {
+            tx.Window(title: "numberfield");
             var commitText = tx.Signal("commits: 0");
             var rowText = tx.Signal("row: none");
             var amountValue = tx.Signal(0.0);

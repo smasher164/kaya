@@ -51,7 +51,7 @@ def on_add_frame():
     frames.insert(f"f{framed}", Frame(name=f"frame {framed}"))
 
 
-with app.window():
+with app.window(title="scrollto"):
     messages = kaya.collection(Message)
     frames = kaya.collection(Frame)
     count = kaya.signal("60 messages")

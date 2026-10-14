@@ -22,6 +22,7 @@ public final class Table {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
+            tx.window(0).title("table");
             var items = TableItemKaya.collection(tx);
             // The root is a row so the For's container is the scene's only
             // column-kind widget (the reorder scene's rule).

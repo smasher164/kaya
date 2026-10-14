@@ -39,6 +39,7 @@ main = kayaMain $ \app -> do
   commitsRef <- newIORef (0 :: Int)
 
   (commitText, rowText, master, levelNode) <- buildTx app $ do
+    window primary [WTitle "sliders"]
     levelText <- signalText "value: 50"
     commitText <- signalText "commits: 0"
     volumeText <- signalText "volume: 0.5"

@@ -1,6 +1,7 @@
 # The format guest under KAYA_LOCALE=ar-EG (docs/compliance-plan.md §6):
 # the platform's Arabic, the ar catalog's six plural forms, and the layout
 # mirrored — read from geometry and the toolkit, never the knob.
+expect_title "format"
 expect_locale ar-EG
 expect label#1 "{fmt:date 2026-09-07 medium}"
 expect label#2 "{fmt:date 2026-09-07 long}"

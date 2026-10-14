@@ -43,6 +43,14 @@ static void build_scene(void) {
     kaya_tx_add_child(&tx, W_ROW, W_ROTATE);
     kaya_tx_add_child(&tx, W_ROW, W_LIFT);
     kaya_tx_add_child(&tx, W_ROW, W_FOR_ITEMS);
+    {
+        size_t start = kaya_wire_begin(&tx, KAYA_TX_SET_WINDOW_PROP);
+        kaya_wire_u64(&tx, 0);
+        kaya_wire_u32(&tx, KAYA_WPROP_TITLE);
+        kaya_wire_u32(&tx, KAYA_SOURCE_CONST);
+        kaya_wire_value(&tx, kaya_str("reorder"));
+        kaya_wire_end(&tx, start);
+    }
     kaya_tx_mount(&tx, 0, W_ROW); /* window 0: the default */
 
     for (unsigned i = 0; i < N_ITEMS; i++)

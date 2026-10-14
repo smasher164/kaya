@@ -22,6 +22,7 @@ func App() *kaya.App {
 	sortedDesc := false
 
 	app.Build(func(tx *kaya.Tx) {
+		tx.Window(0).Title("table")
 		items := ItemCollection(tx)
 		// The root is a row: the For's container is the only column.
 		var table kaya.Widget

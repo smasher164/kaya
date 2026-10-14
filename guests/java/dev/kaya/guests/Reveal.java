@@ -31,6 +31,7 @@ public final class Reveal {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
+            tx.window(0).title("reveal");
             var accounts = RevealAccountKaya.collection(tx);
             KayaApp.Signal<String> statusText = tx.signal("empty");
             KayaApp.Signal<String> sentText = tx.signal("sent: -");

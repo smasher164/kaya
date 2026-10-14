@@ -14,6 +14,7 @@ main = kayaMain $ \app -> do
   -- around the transaction.
   mark <- asset markName
   _ <- buildTx app $ do
+    window primary [WTitle "a11y"]
     spoken <- signalText "Before"
     root <-
       column

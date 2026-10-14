@@ -1,6 +1,7 @@
 # Help text (docs/tooltip-plan.md): the third universal prop, read back from
 # the PLATFORM — the tooltip GTK and WinUI hold on the control, the
 # accessibility help Apple's `.help` lands on — never from kaya's model.
+expect_title "tooltips"
 expect_help button#0 "Saves the draft to disk"
 expect_help entry#0 "Your full name as it appears on the card"
 expect_help slider#0 "How loud the preview plays"

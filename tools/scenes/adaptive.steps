@@ -1,5 +1,6 @@
 # docs/adaptive-layout-plan.md §2. The subject stays `row@dash` through
 # both states: identity is the creation kind, presentation is the prop.
+expect_title "adaptive"
 expect label#0 "alpha"
 expect_axis row@dash "horizontal"
 expect_axis column@steady "vertical"

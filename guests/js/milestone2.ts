@@ -33,7 +33,7 @@ function onRemove(item: kaya.RowHandle<string>): void {
   status.set(`removed ${group}/${item.key}, ${items.at(group).size} left`);
 }
 
-const { steps, status, groups, items } = app.window(() => {
+const { steps, status, groups, items } = app.window({ title: "milestone2" }, () => {
   const steps = kaya.signal(0);
   const status = kaya.signal("step 0");
   const groups = kaya.collection();

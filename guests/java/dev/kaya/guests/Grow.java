@@ -10,6 +10,7 @@ public final class Grow {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
+            tx.window(0).title("grow");
             KayaApp.Signal<String> probe = tx.signal("grow probe");
             KayaApp.Signal<String> one = tx.signal("one");
 

@@ -16,6 +16,7 @@ enum Msg {
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
     let feed = ctx.apply(|tx| {
+        tx.window(kaya::DEFAULT_WINDOW).title("feed");
         let feed = tx.collection::<Post>();
         let done_count = feed.derive(tx, |items| {
             let n = items

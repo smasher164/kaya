@@ -11,6 +11,7 @@ let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
+     window ~title:"feed" ();
      let feed = sum_of post_sum in
      let done_count =
        sum_derive Scalar.Str feed (fun entries ->

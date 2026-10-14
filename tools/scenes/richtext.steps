@@ -4,6 +4,7 @@
 # CORE's document (docs/rich-text-plan.md R9); label#1 is the app's own
 # Document, folded by the binding from the same deltas, so the two must
 # spell the same string.
+expect_title "richtext"
 expect_runs textarea#0 ""
 expect_edit textarea#0 ""
 # THE DECLARATION: text and runs in one write, the widget's whole content.

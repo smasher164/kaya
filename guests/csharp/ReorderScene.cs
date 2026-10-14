@@ -12,6 +12,7 @@ static class ReorderScene
 
         app.Build(tx =>
         {
+            tx.Window(title: "reorder");
             var items = ItemKaya.Collection(tx);
             tx.Mount(tx.Row(root =>
             {

@@ -1,5 +1,6 @@
 # A scroll spans its parent's cross axis (DESIGN.md, ruled 2026-09-02);
 # expect_breadth is what holds it.
+expect_title "scroll"
 expect_breadth scroll@rows
 expect_overflow scroll@rows
 expect label#0 "at top"

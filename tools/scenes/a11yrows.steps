@@ -4,6 +4,7 @@
 # a11y.steps would move that scene's ordinal container targets.
 # THE IDS ARE ELEMENT-SOURCED: expect_ax searches the real tree BY
 # IDENTIFIER and refuses copies sharing a const template id.
+expect_title "a11yrows"
 expect_ax entry#0 "field/First note"
 expect_ax entry#last "field/Second note"
 # THE STAMPED STYLING PROPS (docs/styling-plan.md D3/D4): `heading` is

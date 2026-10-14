@@ -54,6 +54,7 @@ KayaApp.run { app in
     }
 
     app.build { tx in
+        tx.window(title: "dnd")
         let items = itemCollection(tx)
         let items2 = itemCollection(tx)
         let dropStatus = tx.signal(.str("no drop yet"))

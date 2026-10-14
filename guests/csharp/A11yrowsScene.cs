@@ -9,6 +9,7 @@ static class A11yrowsScene
 
         app.Build(tx =>
         {
+            tx.Window(title: "a11yrows");
             var root = tx.Column(root =>
             {
                 // Element-sourced: expect_ax refuses an ambiguous authored id.

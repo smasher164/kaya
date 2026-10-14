@@ -27,6 +27,7 @@ public final class Sliders {
         int[] commits = {0};
 
         app.build(tx -> {
+            tx.window(0).title("sliders");
             KayaApp.Signal<String> levelText = tx.signal("value: 50");
             KayaApp.Signal<String> commitText = tx.signal("commits: 0");
             KayaApp.Signal<String> volumeText = tx.signal("volume: 0.5");

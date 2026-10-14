@@ -4,6 +4,7 @@
 # TEXT ARRIVES BY set_text HERE, where undo.steps insists on keystrokes:
 # a programmatic write leaves nothing on the field's native undo stack
 # (D7), so Edit>Undo has exactly one possible answer.
+expect_title "todos"
 expect label#0 "0 items left"
 set_text entry#0 "buy milk"
 click button#0

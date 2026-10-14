@@ -1,3 +1,4 @@
+expect_title "grid"
 expect label#0 "Name:"
 expect label#1 "Ada Lovelace"
 expect label#2 "Role:"

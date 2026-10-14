@@ -2006,6 +2006,9 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
     # fault.rs's KAYA_PANIC_LOG).
     env["SIMCTL_CHILD_KAYA_VERB_TRACE"] = f"verb-trace-{name}.txt"
     env["SIMCTL_CHILD_KAYA_PANIC_LOG"] = f"panic-{name}.txt"
+    env["SIMCTL_CHILD_KAYA_FAIL_SHOT"] = f"fail-shot-{name}.png"
+    for stale in (f"fail-shot-{name}.png", f"fail-shot-{name}.png.when"):
+        (pathlib.Path(data_container) / "Documents" / stale).unlink(missing_ok=True)
     # WHAT THE DRIVER WAS WAITING FOR while this leg ran: one device runs
     # one leg at a time, so everything appended to its drive.log between
     # here and the verdict belongs to this leg.
@@ -2143,10 +2146,10 @@ def driver_shot(drive_dir, name, log):
     png, said = drive_dir / "failshot.png", drive_dir / "failshot.txt"
     if not (png.is_file() and png.stat().st_size):
         return
-    shot = (LEGS_DIR / f"{name}.log").with_suffix(".shot.png")
+    shot = (LEGS_DIR / f"{name}.log").with_suffix(".desktop-shot.png")
     shutil.move(str(png), shot)
     when = said.read_text(encoding="utf-8", errors="replace").strip() if said.is_file() else ""
-    (LEGS_DIR / f"{name}.log").with_suffix(".shotwhen").write_text(
+    (LEGS_DIR / f"{name}.log").with_suffix(".desktopwhen").write_text(
         f"XCUIScreen's screenshot, taken by the xcui driver inside the leg as the leg's "
         f"first picker verb gave up ({when or 'unnamed'}). The guest was still running.\n",
         encoding="utf-8")
@@ -2166,11 +2169,11 @@ def device_capture(udid, executable, name, log, pid, launched_at):
     app is already leaving, so this is the screen a moment after it went,
     and on a hang killed by the 120s `timeout` the app is still up. A
     reader who is not told which is reading a guess."""
-    shot = (LEGS_DIR / f"{name}.log").with_suffix(".shot.png")
+    shot = (LEGS_DIR / f"{name}.log").with_suffix(".desktop-shot.png")
     got = run(["xcrun", "simctl", "io", udid, "screenshot", str(shot)],
               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if got.returncode == 0 and shot.is_file() and shot.stat().st_size:
-        (LEGS_DIR / f"{name}.log").with_suffix(".shotwhen").write_text(
+        (LEGS_DIR / f"{name}.log").with_suffix(".desktopwhen").write_text(
             f"`simctl io {udid} screenshot`, taken the moment this leg was "
             f"judged failed. The guest's own process has already exited "
             f"unless the runner's `timeout 120` killed it — `simctl launch "
@@ -2287,7 +2290,9 @@ def pull_container_files(udid, bundle_id, name, log):
     data_container = out_of(["xcrun", "simctl", "get_app_container",
                              udid, bundle_id, "data"]).strip()
     for src_name, suffix in ((f"verb-trace-{name}.txt", ".vtrace"),
-                             (f"panic-{name}.txt", ".panic")):
+                             (f"panic-{name}.txt", ".panic"),
+                             (f"fail-shot-{name}.png", ".shot.png"),
+                             (f"fail-shot-{name}.png.when", ".shotwhen")):
         src = pathlib.Path(data_container) / "Documents" / src_name
         if not src.is_file():
             continue

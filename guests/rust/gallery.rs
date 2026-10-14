@@ -11,6 +11,7 @@ enum Msg {
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
     let (status, volume_text, pos) = ctx.apply(|tx| {
+        tx.window(kaya::DEFAULT_WINDOW).title("gallery");
         let status = tx.signal("urgent: false");
         let volume_text = tx.signal("volume: 50%");
         let pos = tx.signal(0.5);

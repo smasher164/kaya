@@ -26,7 +26,7 @@ function onQuarter(): void {
   pos.set(0.25);
 }
 
-const { urgent, status, volume, pos } = app.window(() => {
+const { urgent, status, volume, pos } = app.window({ title: "gallery" }, () => {
   const urgent = kaya.signal(false);
   const status = kaya.fmt`urgent: ${urgent}`;
   const volume = kaya.signal("volume: 50%");

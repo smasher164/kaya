@@ -9,6 +9,7 @@ let () =
   let steps = ref 0 in
   let status, items, remove_button =
     build app (fun () ->
+       window ~title:"milestone2" ();
        let status = signal Scalar.Str ("step 0") in
        let extras = signal Scalar.Bool (false) in
 

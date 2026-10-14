@@ -10,6 +10,7 @@ func App() *kaya.App {
 	app := kaya.NewApp()
 
 	app.Build(func(tx *kaya.Tx) {
+		tx.Window(0).Title("a11yrows")
 		tx.Mount(tx.Column(func() {
 			notes := tx.Collection()
 			for row := range tx.Rows(notes).All() {

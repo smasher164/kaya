@@ -22,6 +22,7 @@ KayaApp.run { app in
     var commits = 0
 
     app.build { tx in
+        tx.window(title: "range")
         let liveText = tx.signal(.str("live: 2 8"))
         let commitText = tx.signal(.str("commits: 0"))
         let volumeText = tx.signal(.str("volume: 0.25"))

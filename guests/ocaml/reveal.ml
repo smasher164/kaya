@@ -26,6 +26,7 @@ let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
+      window ~title:"reveal" ();
       let accounts = collection_of account_record in
       let status_text = signal Scalar.Str "empty" in
       let sent_text = signal Scalar.Str "sent: -" in

@@ -2,6 +2,7 @@
 # two declarations; the app's transaction after `dropped` is the visible
 # effect, and the source learns the outcome through `drag_ended`. A refused
 # drop is not a failure of the verb — the source reads `none`.
+expect_title "dnd"
 expect label#4 "no drop yet"
 expect label#5 "no drag yet"
 drag label#0 to label#1

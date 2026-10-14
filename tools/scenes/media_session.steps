@@ -4,6 +4,7 @@
 # controls would send them: pause and play reach the player by the session's
 # defaults, next reaches the app. The display stays awake exactly while the
 # shown player plays.
+expect_title "media"
 expect label#1 "next 0"
 click button#0
 expect label#0 "playing"

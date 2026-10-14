@@ -1,6 +1,7 @@
 # The segmented control (docs/segmented-plan.md §5): the choice contract as a
 # strip, read and driven through the platform's own segments. The app's
 # Reset writes the index, which the platform must show and which never echoes.
+expect_title "segmented"
 expect segmented@period "Day"
 expect_ax segmented@period "group/Period"
 expect_segments segmented@period "[Day]|Week|Month"

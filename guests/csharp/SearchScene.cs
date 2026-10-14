@@ -20,6 +20,7 @@ static class SearchScene
 
         app.Build(tx =>
         {
+            tx.Window(title: "search");
             var items = SearchItemKaya.Collection(tx);
             var count = tx.Signal($"{Names.Length} items");
 

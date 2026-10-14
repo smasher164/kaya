@@ -20,6 +20,7 @@ let () =
   let commits = ref 0 in
 
   build app (fun () ->
+      window ~title:"sliders" ();
       let level_text = signal Scalar.Str ("value: 50") in
       let commit_text = signal Scalar.Str ("commits: 0") in
       let volume_text = signal Scalar.Str ("volume: 0.5") in

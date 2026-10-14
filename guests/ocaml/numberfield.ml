@@ -20,6 +20,7 @@ let () =
   let commits = ref 0 in
 
   build app (fun () ->
+      window ~title:"numberfield" ();
       let commit_text = signal Scalar.Str ("commits: 0") in
       let row_text = signal Scalar.Str ("row: none") in
       let amount_value = signal Scalar.F64 (0.0) in

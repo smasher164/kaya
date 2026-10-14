@@ -5,6 +5,7 @@
 # second click is what makes work PENDING. THE REPORT IS ASSERTED ONLY
 # OF AN ABSENCE THAT NEVER ENDS, because the margin for a bounded one
 # GROWS WITH THE MACHINE (docs/traps.md, 2542ms on a loaded emulator).
+expect_title "stall"
 expect label#0 "ready"
 
 # IT GOES AWAY AND IT COMES BACK: the queued click is taken, so this is

@@ -16,7 +16,7 @@ function onLift(): void {
   items.moveToFront(items.keys().at(-1)!);
 }
 
-const { items } = app.window(() => {
+const { items } = app.window({ title: "reorder" }, () => {
   const items = kaya.collection(Item);
   kaya.row(() => {
     kaya.button("rotate", { onClick: onRotate });

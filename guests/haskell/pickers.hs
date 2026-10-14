@@ -36,6 +36,7 @@ keyWord = keyText
 main :: IO ()
 main = kayaMain $ \app -> do
   buildTx app $ do
+    window primary [WTitle "pickers"]
     dateText <- signalText "date: none"
     timeText <- signalText "time: none"
     rowText <- signalText "row: none"

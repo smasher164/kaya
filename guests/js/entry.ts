@@ -24,7 +24,7 @@ function onAdd(): void {
   field.focus();
 }
 
-const { status, todos, field } = app.window(() => {
+const { status, todos, field } = app.window({ title: "entry" }, () => {
   const status = kaya.signal("no todos");
   const todos = kaya.collection();
 

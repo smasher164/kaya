@@ -10,6 +10,7 @@ func App() *kaya.App {
 	app := kaya.NewApp()
 
 	app.Build(func(tx *kaya.Tx) {
+		tx.Window(0).Title("a11y")
 		tx.Mount(tx.Column(func() {
 			// Deliberately NOT labelled: the platform speaks the caption.
 			tx.Button("Save", nil).A11yID("save").A11yHint("save the draft")

@@ -9,5 +9,6 @@
 # failed to reach it cannot satisfy, and the label is the platform's own
 # rendering under it — Windows writes left-to-right marks between the
 # fields, so no stored string could hold on five lanes.
+expect_title "format"
 expect_hour_cycle 24
 expect label#3 "{fmt:time 08:30 short}"

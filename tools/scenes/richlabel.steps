@@ -2,6 +2,7 @@
 # R8, §15): the app writes and edits its document, and every arm draws the
 # runs over the role's own font. The widget's runs are read beside the
 # core's on every lane (the corroboration wall).
+expect_title "richlabel"
 expect label#0 ""
 expect_runs label#0 ""
 click button#0

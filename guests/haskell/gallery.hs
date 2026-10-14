@@ -22,6 +22,7 @@ testPng =
 main :: IO ()
 main = kayaMain $ \app -> do
   buildTx app $ do
+    window primary [WTitle "gallery"]
     status <- signalText "urgent: false"
     volume <- signalText "volume: 50%"
     pos <- signalDouble 0.5

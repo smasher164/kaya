@@ -14,6 +14,7 @@ static class SubmitScene
 
         app.Build(tx =>
         {
+            tx.Window(title: "submit");
             var threads = ChatThreadKaya.Collection(tx);
             var sent = tx.Signal("sent: -");
 

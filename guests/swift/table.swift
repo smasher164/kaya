@@ -15,6 +15,7 @@ KayaApp.run { app in
     var sortedDesc = false
 
     app.build { tx in
+        tx.window(title: "table")
         let items = tableItemCollection(tx)
         // The root is a row so the For's container is the scene's only
         // column-kind widget (the reorder scene's rule).

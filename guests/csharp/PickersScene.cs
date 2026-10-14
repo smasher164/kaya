@@ -17,6 +17,7 @@ static class PickersScene
 
         app.Build(tx =>
         {
+            tx.Window(title: "pickers");
             var dateText = tx.Signal("date: none");
             var timeText = tx.Signal("time: none");
             var rowText = tx.Signal("row: none");

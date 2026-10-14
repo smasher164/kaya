@@ -22,6 +22,7 @@ enum Msg {
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
     let (title_text, glaze_text, row_text, title_sig, fill_node) = ctx.apply(|tx| {
+        tx.window(kaya::DEFAULT_WINDOW).title("colorpicker");
         let title_text = tx.signal("color: none");
         let glaze_text = tx.signal("alpha: none");
         let row_text = tx.signal("row: none");

@@ -14,6 +14,7 @@ static class ColorPickerScene
 
         app.Build(tx =>
         {
+            tx.Window(title: "colorpicker");
             var titleText = tx.Signal("color: none");
             var glazeText = tx.Signal("alpha: none");
             var rowText = tx.Signal("row: none");

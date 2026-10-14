@@ -4,6 +4,7 @@
 # synthetic ones (§7): camera 1 a flat C83C1E, camera 2 1E5AC8, microphone 1
 # a 440 Hz tone, microphone 2 660 Hz. expect_capture reads the core's own
 # statistics of the last second, never the app's word.
+expect_title "capture"
 expect label#0 "camera kaya-synthetic-camera-1 front preferred; camera kaya-synthetic-camera-2 external; microphone kaya-synthetic-microphone-1 preferred; microphone kaya-synthetic-microphone-2"
 expect label#1 "camera prompt, microphone prompt"
 expect label#2 "idle"

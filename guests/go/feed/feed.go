@@ -26,6 +26,7 @@ func App() *kaya.App {
 	app := kaya.NewApp()
 
 	app.Build(func(tx *kaya.Tx) {
+		tx.Window(0).Title("feed")
 		feed := PostCollection(tx)
 		doneCount := feed.Derive(tx, func(items []kaya.RecordEntry[string, Post]) string {
 			n := 0

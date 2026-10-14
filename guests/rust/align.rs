@@ -5,6 +5,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     use kaya::Align;
     let msgs = kaya::Messages::<()>::new();
     ctx.apply(|tx| {
+        tx.window(kaya::DEFAULT_WINDOW).title("align");
         let probe = tx.signal("align probe");
         let base = tx.signal("base\nline");
         let anchor = tx.signal("anchor");

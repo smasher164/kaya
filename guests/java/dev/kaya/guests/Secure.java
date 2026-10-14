@@ -28,6 +28,7 @@ public final class Secure {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
+            tx.window(0).title("secure");
             var accounts = SecureAccountKaya.collection(tx);
             KayaApp.Signal<String> statusText = tx.signal("empty");
             KayaApp.Signal<String> sentText = tx.signal("sent: -");

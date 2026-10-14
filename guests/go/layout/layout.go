@@ -10,6 +10,7 @@ func App() *kaya.App {
 	app := kaya.NewApp()
 
 	app.Build(func(tx *kaya.Tx) {
+		tx.Window(0).Title("layout")
 		probe := tx.Signal("Layout probe")
 		tail := tx.Signal("tail")
 		mixed := tx.Signal("mixed")

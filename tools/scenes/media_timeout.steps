@@ -1,6 +1,7 @@
 # The bound (docs/media-plan.md §7c, RULED 2026-10-01): a source the lane's
 # local server sends a byte every 2 s fails `timeout` once the 30 s bound
 # passes, and the same player then plays the floor file, the app's retry.
+expect_title "media"
 expect label#0 "idle"
 click button#0
 expect label#1 "trickle.mp4"

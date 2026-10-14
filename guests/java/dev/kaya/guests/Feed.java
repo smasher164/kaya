@@ -20,6 +20,7 @@ public final class Feed {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
+            tx.window(0).title("feed");
             var feed = PostKaya.collection(tx);
             KayaApp.Signal<String> doneCount = feed.derive(tx, items -> {
                 int n = 0;

@@ -13,6 +13,7 @@ let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
+      window ~title:"scrollto" ();
       let messages = collection_of message_record in
       let frames = collection_of frame_record in
       let count = signal Scalar.Str "60 messages" in

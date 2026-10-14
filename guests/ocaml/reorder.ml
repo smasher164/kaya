@@ -9,6 +9,7 @@ let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
+     window ~title:"reorder" ();
      let items = collection_of item_record in
      let on_rotate () =
        let entries = record_items items in

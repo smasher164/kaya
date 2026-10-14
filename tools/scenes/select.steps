@@ -1,3 +1,4 @@
+expect_title "select"
 expect select#0 "Red"
 expect label#0 "picked: Red"
 choose select#0 2

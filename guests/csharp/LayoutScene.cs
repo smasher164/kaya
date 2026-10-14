@@ -9,6 +9,7 @@ static class LayoutScene
 
         app.Build(tx =>
         {
+            tx.Window(title: "layout");
             var probe = tx.Signal("Layout probe");
             var tail = tx.Signal("tail");
             var mixed = tx.Signal("mixed");

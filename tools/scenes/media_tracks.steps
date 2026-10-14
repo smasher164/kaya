@@ -11,6 +11,7 @@
 # platform's own networking, and a 404 there, which fails the player. `{media:…}` is this lane's table of
 # refused items and `{captions:…}` its table of embedded caption tracks it
 # does not expose (MP4 text on Windows, settled). The look is never asserted.
+expect_title "media tracks"
 expect label#0 "idle"
 click button#0
 expect label#1 "h264_2audio.mp4"

@@ -50,7 +50,7 @@ SECTIONS = {
     "windows": ("leg-log", "verb-trace", "shot", "desktop-shot", "desktop",
                 "foreground", "foreground-text", "desktop-live", "notifications",
                 "toast-moment", "gesture-moment", "media-server", "capture-devices"),
-    "ios": ("leg-log", "verb-trace", "shot", "panic", "app-log", "devices", "binary-stamp",
+    "ios": ("leg-log", "verb-trace", "shot", "desktop-shot", "panic", "app-log", "devices", "binary-stamp",
             "notifications", "stacks", "animations", "system-log"),
     "android": ("leg-log", "verb-trace", "shot", "desktop-shot", "logcat", "devices",
                 "system-events", "anr-history", "shade-history"),
@@ -1411,6 +1411,12 @@ class IosRecorder(LaneRecorder):
         "— the runner reached the fail path with no device in hand, or the "
         "call failed; run-sim.py's own log line beside the verdict says "
         "which")
+    APP_SHOT_ABSENT = (
+        "flightrec: the app wrote no picture of its windows (KayaFailShot): "
+        "it draws one at the first failed step or the failed verdict, so a "
+        "leg with neither — a launch that never mounted, a step ceiling, a "
+        "crash — has none; the leg log carries a `kept fail-shot-…` line "
+        "only when the container held one, and desktop-shot is the device's")
 
     def ios_leg(self, leg, verdict, secs, log, out=None):
         """The one per-leg entry point: the journal takes every leg,
@@ -1454,9 +1460,15 @@ class IosRecorder(LaneRecorder):
                                       "harness's step ceiling fires and asks, so this "
                                       "leg failed some other way, or its second act or "
                                       "probe ran outside that watcher")
+                note = log.with_suffix(".shotwhen")
+                said = note.read_text(encoding="utf-8").strip() if note.is_file() else ""
                 self.adopt_shot(bundle, "shot", log.with_suffix(".shot.png"),
+                                why_absent=(f"flightrec: the app answered: {said}" if said
+                                            else self.APP_SHOT_ABSENT),
+                                note_src=note)
+                self.adopt_shot(bundle, "desktop-shot", log.with_suffix(".desktop-shot.png"),
                                 why_absent=self.SHOT_ABSENT,
-                                note_src=log.with_suffix(".shotwhen"))
+                                note_src=log.with_suffix(".desktopwhen"))
                 self.section(bundle, "devices",
                              ["xcrun", "simctl", "list", "devices",
                               "booted"])

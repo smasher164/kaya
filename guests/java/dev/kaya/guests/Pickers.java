@@ -27,6 +27,7 @@ public final class Pickers {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
+            tx.window(0).title("pickers");
             KayaApp.Signal<String> dateText = tx.signal("date: none");
             KayaApp.Signal<String> timeText = tx.signal("time: none");
             KayaApp.Signal<String> rowText = tx.signal("row: none");

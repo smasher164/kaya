@@ -3,6 +3,7 @@
 # characters it shows unmasked, and the app hears the user's toggle alone.
 # Every type_secret argument is one the leg's transcripts are scanned for
 # (tools/lib/secure_scan.py), so the revealed text must reach no transcript.
+expect_title "reveal"
 expect_placeholder secure_field@password "Password"
 expect_content_type secure_field@password password
 click secure_field@password

@@ -20,6 +20,7 @@ func status(_ text: String) -> String {
 
 KayaApp.run { app in
     app.build { tx in
+        tx.window(title: "secure")
         let accounts = accountCollection(tx)
         let statusText = tx.signal(.str("empty"))
         let sentText = tx.signal(.str("sent: -"))

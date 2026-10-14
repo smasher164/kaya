@@ -23,6 +23,7 @@ static class ScrollToScene
 
         app.Build(tx =>
         {
+            tx.Window(title: "scrollto");
             var messages = ChatMessageKaya.Collection(tx);
             var frames = FrameKaya.Collection(tx);
             var count = tx.Signal("60 messages");

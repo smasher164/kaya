@@ -12,6 +12,7 @@ let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
+      window ~title:"submit" ();
       let threads = collection_of thread_record in
       let sent = signal Scalar.Str "sent: -" in
 

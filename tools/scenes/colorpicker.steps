@@ -2,6 +2,7 @@
 # settled choice through the control's commit door with the surface never
 # opened; expect_color reads the CONTROL's colour back as RRGGBBAA, and the
 # guest's handler writes what it heard in the same spelling.
+expect_title "colorpicker"
 expect_color color_picker#0 "336699FF"
 expect_color color_picker#1 "26A269FF"
 expect label#0 "color: none"

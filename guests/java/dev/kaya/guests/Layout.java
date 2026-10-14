@@ -11,6 +11,7 @@ public final class Layout {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
+            tx.window(0).title("layout");
             KayaApp.Signal<String> probe = tx.signal("Layout probe");
             KayaApp.Signal<String> tail = tx.signal("tail");
             KayaApp.Signal<String> mixed = tx.signal("mixed");

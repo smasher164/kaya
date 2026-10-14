@@ -17,6 +17,7 @@ enum Msg {
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
     let name_help = ctx.apply(|tx| {
+        tx.window(kaya::DEFAULT_WINDOW).title("tooltips");
         let name_help = tx.signal("Your full name as it appears on the card");
         let accounts = tx.collection::<Account>();
         let root = tx

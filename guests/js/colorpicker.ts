@@ -25,7 +25,7 @@ function onReset(): void {
   titleValue.set(kaya.Color.fromHex(0x3584e4ff));
 }
 
-const { titleText, glazeText, rowText, titleValue } = app.window({}, () => {
+const { titleText, glazeText, rowText, titleValue } = app.window({ title: "colorpicker" }, () => {
   const titleText = kaya.signal("color: none");
   const glazeText = kaya.signal("alpha: none");
   const rowText = kaya.signal("row: none");

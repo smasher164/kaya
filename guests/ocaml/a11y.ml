@@ -8,6 +8,7 @@ let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
+     window ~title:"a11y" ();
      (* Safe: the blob table keeps its own reference. *)
      let mark = asset mark_name in
      let spoken = signal Scalar.Str ("Before") in

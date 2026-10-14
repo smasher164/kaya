@@ -10,6 +10,7 @@ struct Item: KayaGen {
 
 KayaApp.run { app in
     app.build { tx in
+        tx.window(title: "reorder")
         let items = itemCollection(tx)
         let root = tx.row { root in
             tx.button("rotate") { tx in

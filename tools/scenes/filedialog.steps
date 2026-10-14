@@ -4,6 +4,7 @@
 # uniquely proves is that the capability SURVIVES CROSSING A THREAD (a
 # security-scoped URL on iOS, a content:// URI plus a JNI reference on
 # Android). The file is the guest's own, named by BASENAME only.
+expect_title "filedialog"
 expect label#0 "no file"
 
 # ARM THE DIRECTORY FIRST: NSOpenPanel honors `directoryURL` only when

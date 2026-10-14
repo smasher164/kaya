@@ -8,6 +8,7 @@ static class EntryScene
 
         var (status, field, add, todos) = app.Build(tx =>
         {
+            tx.Window(title: "entry");
             var status = tx.Signal("no todos");
             var todos = tx.Collection();
 

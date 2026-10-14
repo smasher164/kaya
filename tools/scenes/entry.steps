@@ -1,5 +1,6 @@
 # The second add pins the clear's draft reset: a stale draft reads
 # "added milk, 2 total" here instead.
+expect_title "entry"
 expect label#0 "no todos"
 set_text entry#0 "milk"
 click button#0

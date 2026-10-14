@@ -15,6 +15,7 @@ func App() *kaya.App {
 	app := kaya.NewApp()
 
 	app.Build(func(tx *kaya.Tx) {
+		tx.Window(0).Title("tooltips")
 		nameHelp := tx.Signal("Your full name as it appears on the card")
 		accounts := AccountCollection(tx)
 

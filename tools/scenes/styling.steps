@@ -5,6 +5,7 @@
 # captures instead. expect_inset is RELATIVE because an absolute offer
 # cannot be byte-frozen across platforms — GTK's CSD headerbar sits
 # inside the window's height where macOS's titlebar sits outside it.
+expect_title "styling"
 expect label#0 "Sections"
 expect_ax label#0 "heading/Sections"
 expect_inset 0

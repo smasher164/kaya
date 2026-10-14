@@ -37,7 +37,7 @@ def on_reset():
     time_sig.set(datetime.time(9, 0))
 
 
-with app.window():
+with app.window(title="pickers"):
     date_text = kaya.signal("date: none")
     time_text = kaya.signal("time: none")
     row_text = kaya.signal("row: none")

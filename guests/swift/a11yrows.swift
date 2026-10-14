@@ -6,6 +6,7 @@ import Kaya
 
 KayaApp.run { app in
     app.build { tx in
+        tx.window(title: "a11yrows")
         let notes = tx.collection()
         let heads = tx.collection()
         let root = tx.column { root in

@@ -21,6 +21,7 @@ KayaApp.run { app in
     var commits = 0
 
     app.build { tx in
+        tx.window(title: "sliders")
         let levelText = tx.signal(.str("value: 50"))
         let commitText = tx.signal(.str("commits: 0"))
         let volumeText = tx.signal(.str("volume: 0.5"))

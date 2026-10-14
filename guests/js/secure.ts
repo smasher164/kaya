@@ -35,7 +35,7 @@ function onPin(account: kaya.RowHandle<kaya.Fields<typeof Account.schema>>, text
   pinText.set(`pin ${String(account.key)}: ${[...text].length}`);
 }
 
-const { statusText, sentText, pinText, password } = app.window(() => {
+const { statusText, sentText, pinText, password } = app.window({ title: "secure" }, () => {
   const statusText = kaya.signal("empty");
   const sentText = kaya.signal("sent: -");
   const pinText = kaya.signal("pin: -");

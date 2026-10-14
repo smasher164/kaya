@@ -4,6 +4,7 @@
 # says `submits` publishes on Return and keeps its text. The app writes
 # each submit into a label, which is the observation — an occurrence is
 # asserted by what the app did with it, like every other.
+expect_title "submit"
 expect label@sent "sent: -"
 click entry@name
 expect_focused entry@name

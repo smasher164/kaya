@@ -17,6 +17,7 @@ static class TableScene
 
         app.Build(tx =>
         {
+            tx.Window(title: "table");
             var items = TableItemKaya.Collection(tx);
             // The root is a Row so the For's container is the scene's only
             // column-kind widget (the reorder scene's rule).

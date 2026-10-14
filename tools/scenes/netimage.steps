@@ -3,6 +3,7 @@
 #
 # A live image waiting for its bytes takes its declared box and draws the
 # loading look (N2-N4).
+expect_title "netimage"
 expect_image_phase image@cover loading
 expect_image_size image@cover "96x96"
 # The label in every phase (N5).

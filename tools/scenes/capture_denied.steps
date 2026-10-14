@@ -2,6 +2,7 @@
 # answers the camera's prompt no, and a start that needs the camera fails
 # `denied` while the microphone's own answer stands. Its own scene because a
 # prompt is answered once per process.
+expect_title "capture"
 expect label#1 "camera prompt, microphone prompt"
 answer_permission camera denied
 click button#1

@@ -12,6 +12,7 @@ import KayaApp
 main :: IO ()
 main = kayaMain $ \app -> do
   buildTx app $ do
+    window primary [WTitle "layout"]
     probe <- signalText "Layout probe"
     tailSig <- signalText "tail"
     mixed <- signalText "mixed"

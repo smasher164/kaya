@@ -33,7 +33,7 @@ def on_reset():
     title_value.set(kaya.Color.from_hex(0x3584E4FF))
 
 
-with app.window():
+with app.window(title="colorpicker"):
     title_text = kaya.signal("color: none")
     glaze_text = kaya.signal("alpha: none")
     row_text = kaya.signal("row: none")

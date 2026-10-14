@@ -25,6 +25,7 @@ static class RevealScene
 
         app.Build(tx =>
         {
+            tx.Window(title: "reveal");
             var statusText = tx.Signal("empty");
             var sentText = tx.Signal("sent: -");
             var heardText = tx.Signal("heard: -");

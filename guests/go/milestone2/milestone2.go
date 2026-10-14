@@ -20,6 +20,7 @@ func App() *kaya.App {
 
 	steps := 0
 	app.Build(func(tx *kaya.Tx) {
+		tx.Window(0).Title("milestone2")
 		status = tx.Signal("step 0")
 		extras := tx.Signal(false)
 

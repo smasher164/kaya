@@ -26,7 +26,7 @@ const TALL_PNG = new Uint8Array([
 
 const app = new kaya.App();
 
-app.window(() => {
+app.window({ title: "align" }, () => {
   const probe = kaya.signal("align probe");
   const base = kaya.signal("base\nline");
   const anchor = kaya.signal("anchor");

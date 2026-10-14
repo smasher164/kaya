@@ -11,6 +11,7 @@
 #   - column@fitcol is grow=1 AND align=stretch, the shape that drew a
 #     third of itself with every model observable green; its two asserts
 #     hold the grow half and the stretch half separately.
+expect_title "align"
 expect label#0 "align probe"
 expect_aligned column@root "stretch"
 expect_aligned column@centered "center"

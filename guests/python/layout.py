@@ -12,7 +12,7 @@ import kaya
 
 app = kaya.App()
 
-with app.window():
+with app.window(title="layout"):
     probe = kaya.signal("Layout probe")
     tail = kaya.signal("tail")
     mixed = kaya.signal("mixed")

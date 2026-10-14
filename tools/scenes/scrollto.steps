@@ -4,6 +4,7 @@
 # app's opening frame (S4). Then a handler scrolls to a row (S2), a
 # handler names a key no row holds and nothing moves (S3), and a handler
 # inserts a row and follows it to the end.
+expect_title "scrollto"
 expect label@count "60 messages"
 # The row of three plain buttons, whose captions a cell measured before its
 # text arrived would cut (docs/deferred.md, the WinUI button clip).

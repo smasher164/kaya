@@ -5,6 +5,7 @@
 # leave the player idle without a word. Two clips, the decoy sorting first,
 # since a dialog completes with the only row when nothing is selected
 # (docs/traps.md).
+expect_title "media picked"
 expect label#0 "idle"
 copy_asset media/hevc_aac.mp4 $TMP/kaya-clips-$PID/decoy.mp4
 copy_asset media/h264_aac.mp4 $TMP/kaya-clips-$PID/picked.mp4

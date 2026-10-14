@@ -12,6 +12,7 @@ static class TooltipsScene
 
         app.Build(tx =>
         {
+            tx.Window(title: "tooltips");
             var nameHelp = tx.Signal("Your full name as it appears on the card");
             var accounts = AccountKaya.Collection(tx);
 

@@ -19,6 +19,7 @@ let () =
   let visible = ref names in
 
   build app (fun () ->
+     window ~title:"search" ();
      let items = collection_of item_record in
      let count = signal Scalar.Str ((Printf.sprintf "%d items" (List.length names))) in
 

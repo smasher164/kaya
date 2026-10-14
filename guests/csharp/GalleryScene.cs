@@ -9,6 +9,7 @@ static class GalleryScene
 
         app.Build(tx =>
         {
+            tx.Window(title: "gallery");
             var status = tx.Signal("urgent: false");
             var volume = tx.Signal("volume: 50%");
             var pos = tx.Signal(0.5);

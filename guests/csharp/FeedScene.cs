@@ -18,6 +18,7 @@ static class FeedScene
 
         app.Build(tx =>
         {
+            tx.Window(title: "feed");
             var feed = PostKaya.Collection(tx);
             var doneCount = feed.Derive(tx, items =>
                 $"{items.Count(e => e.Value is Todo { Done: true })} done");

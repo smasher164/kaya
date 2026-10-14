@@ -1,3 +1,4 @@
+expect_title "radio"
 expect radio#0 "Small"
 expect label#0 "size: Small"
 choose radio#0 2

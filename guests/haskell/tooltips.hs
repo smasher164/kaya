@@ -21,6 +21,7 @@ data Account = Account {name :: Text, note :: Text}
 main :: IO ()
 main = kayaMain $ \app -> do
   _ <- buildTx app $ do
+    window primary [WTitle "tooltips"]
     nameHelp <- signalText "Your full name as it appears on the card"
     accounts <- collectionOf @Account
 

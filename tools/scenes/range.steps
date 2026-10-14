@@ -2,6 +2,7 @@
 # read from the CONTROL (expect_value, space-separated, the slider's spelling)
 # and from the labels the guest's handlers write; thumbs are named after the
 # target.
+expect_title "range"
 expect_value range#0 "2 8"
 expect label#0 "live: 2 8"
 expect label#1 "commits: 0"

@@ -15,6 +15,7 @@ enum Msg {
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
     let (items, table) = ctx.apply(|tx| {
+        tx.window(kaya::DEFAULT_WINDOW).title("table");
         let items = tx.collection::<Item>();
         // The root is a row: the For's container is the only column.
         let (root, table) = tx

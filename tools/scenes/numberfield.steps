@@ -2,6 +2,7 @@
 # Return or focus loss and never per keystroke, unreadable text reverts, out
 # of range clamps, a step moves by the step, and an app write never echoes.
 # The text is the platform's number at the step's digits ({fmt:field}).
+expect_title "numberfield"
 expect number_field@amount "{fmt:field 0 0.5}"
 expect_value number_field@amount "0"
 expect label@commits "commits: 0"

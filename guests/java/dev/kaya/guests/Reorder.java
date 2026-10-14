@@ -18,6 +18,7 @@ public final class Reorder {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
+            tx.window(0).title("reorder");
             var items = ItemKaya.collection(tx);
 
             tx.mount(tx.row(cells -> {

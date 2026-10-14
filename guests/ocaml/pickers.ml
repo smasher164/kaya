@@ -9,6 +9,7 @@ let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
+      window ~title:"pickers" ();
       let date_text = signal Scalar.Str ("date: none") in
       let time_text = signal Scalar.Str ("time: none") in
       let row_text = signal Scalar.Str ("row: none") in

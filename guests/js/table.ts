@@ -31,7 +31,7 @@ function onSort(column: number): void {
   items.setColumns(["Name", "Size"], { sort: indicator });
 }
 
-const { items } = app.window(() => {
+const { items } = app.window({ title: "table" }, () => {
   const items = kaya.collection(Item);
   // The root is a row: the For's container is the only column.
   kaya.row(() => {

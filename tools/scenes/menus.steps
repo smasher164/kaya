@@ -1,5 +1,6 @@
 # One command catalog, adapted by each host: native menu chrome on the
 # desktops, overflow plus one promoted item on the phones.
+expect_title "menus"
 expect label#0 "ready"
 expect_menus 3
 expect_menu "File>Save" disabled

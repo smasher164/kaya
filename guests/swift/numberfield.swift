@@ -21,6 +21,7 @@ KayaApp.run { app in
     var commits = 0
 
     app.build { tx in
+        tx.window(title: "numberfield")
         let commitText = tx.signal(.str("commits: 0"))
         let rowText = tx.signal(.str("row: none"))
         let amountValue = tx.signal(.f64(0.0))

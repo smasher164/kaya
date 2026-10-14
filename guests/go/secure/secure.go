@@ -34,6 +34,7 @@ func App() *kaya.App {
 	app := kaya.NewApp()
 
 	app.Build(func(tx *kaya.Tx) {
+		tx.Window(0).Title("secure")
 		statusText := tx.Signal("empty")
 		sentText := tx.Signal("sent: -")
 		pinText := tx.Signal("pin: -")

@@ -1,6 +1,7 @@
 # Network images over HTTP (docs/network-images-plan.md §5, N12): the row
 # image helper against the lane's media server, the app's own client doing
 # the fetch. Each row's picture lands on its own row: three sizes, twelve rows.
+expect_title "netimage_http"
 expect_safe column#0
 expect_column_edges column#0 2
 expect_image_phase image@art[a00] shown

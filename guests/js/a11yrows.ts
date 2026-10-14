@@ -5,7 +5,7 @@ import * as kaya from "kaya-gui";
 
 const app = new kaya.App();
 
-app.window(() => {
+app.window({ title: "a11yrows" }, () => {
   kaya.column(() => {
     // A SCALAR collection: the loop variable IS the element.
     const notes = kaya.collection();

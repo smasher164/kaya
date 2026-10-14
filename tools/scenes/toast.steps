@@ -1,6 +1,7 @@
 # docs/toast-plan.md §5. Every toast read is the platform's own surface,
 # never the model (T13). label#1 counts answers and is written in the same
 # transaction as label#0, so it is read first.
+expect_title "toast"
 expect label#0 "no answer yet"
 expect label#1 "answers 0"
 expect label#2 "nothing undone"

@@ -1,4 +1,5 @@
 # Recorded, not asserted (KAYA_RECORD=1). label#4 is the deepest-nested
 # label, so the pair proves the tree built to the leaf.
+expect_title "layout"
 expect label#0 "Layout probe"
 expect label#4 "deep"

@@ -16,6 +16,7 @@ KayaApp.run { app in
     var visible = names
 
     app.build { tx in
+        tx.window(title: "search")
         let items = searchItemCollection(tx)
         let count = tx.signal(.str("\(names.count) items"))
 

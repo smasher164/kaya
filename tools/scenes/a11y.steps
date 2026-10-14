@@ -4,6 +4,7 @@
 
 # DERIVED names: identified but deliberately unlabelled, so the tree
 # reports whatever the control took from its own caption.
+expect_title "a11y"
 expect_ax button#0 "button/Save"
 expect_ax checkbox#0 "checkbox/Details"
 expect_ax button#1 "button/Reset"

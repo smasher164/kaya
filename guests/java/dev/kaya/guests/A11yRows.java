@@ -11,6 +11,7 @@ public final class A11yRows {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
+            tx.window(0).title("a11yrows");
             KayaApp.Collection notes = tx.collection();
             KayaApp.Collection heads = tx.collection();
 

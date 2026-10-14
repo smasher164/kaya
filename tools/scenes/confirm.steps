@@ -1,3 +1,4 @@
+expect_title "confirm"
 expect label#0 "no decision"
 click button#0
 expect_alert "delete item?"

@@ -9,6 +9,7 @@ KayaApp.run { app in
 
     let (status, items, removeButton) = app.build {
         tx -> (KayaSignal, KayaCollection, KayaNodeHandle) in
+        tx.window(title: "milestone2")
         let status = tx.signal(.str("step 0"))
         let stepCount = tx.signal(.i64(0))
         let groups = tx.collection()

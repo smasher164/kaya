@@ -31,6 +31,7 @@ fn status(text: &str) -> String {
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
     let (status_text, sent_text, pin_text, field, pin_node) = ctx.apply(|tx| {
+        tx.window(kaya::DEFAULT_WINDOW).title("secure");
         let status_text = tx.signal("empty");
         let sent_text = tx.signal("sent: -");
         let pin_text = tx.signal("pin: -");

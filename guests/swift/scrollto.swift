@@ -17,6 +17,7 @@ struct Frame: KayaGen {
 
 KayaApp.run { app in
     app.build { tx in
+        tx.window(title: "scrollto")
         let messages = messageCollection(tx)
         let frames = frameCollection(tx)
         let count = tx.signal(.str("60 messages"))

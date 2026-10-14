@@ -50,7 +50,7 @@ def on_late():
     low_sig.set(6.0)
 
 
-with app.window():
+with app.window(title="range"):
     live_text = kaya.signal("live: 2 8")
     commit_text = kaya.signal("commits: 0")
     volume_text = kaya.signal("volume: 0.25")

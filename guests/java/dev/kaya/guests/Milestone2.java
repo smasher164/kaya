@@ -34,6 +34,7 @@ public final class Milestone2 {
         KayaApp app = new KayaApp();
 
         Scene scene = app.build(tx -> {
+            tx.window(0).title("milestone2");
             KayaApp.Signal<String> status = tx.signal("step 0");
             KayaApp.Signal<Boolean> extras = tx.signal(false);
 

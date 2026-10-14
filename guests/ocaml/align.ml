@@ -31,6 +31,7 @@ let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
+     window ~title:"align" ();
      let probe = signal Scalar.Str ("align probe") in
      let base = signal Scalar.Str ("base\nline") in
      let anchor = signal Scalar.Str ("anchor") in

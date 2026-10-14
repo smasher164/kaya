@@ -18,6 +18,7 @@ public final class Submit {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
+            tx.window(0).title("submit");
             var threads = SubmitThreadKaya.collection(tx);
             KayaApp.Signal<String> sent = tx.signal("sent: -");
 

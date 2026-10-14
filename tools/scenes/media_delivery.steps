@@ -3,6 +3,7 @@
 # trees and DASH, then the three failures: a 404, a local file that is not
 # there (the core's own check), and a port nothing listens on. `{media:…}`
 # is this lane's table, as in media_formats.
+expect_title "media"
 expect label#0 "idle"
 click button#0
 expect label#1 "h264_aac.mp4"

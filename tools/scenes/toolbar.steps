@@ -1,5 +1,6 @@
 # Every host promotes the same first two actions in catalog preorder
 # (docs/chrome-plan.md C2), which is why Save and Find are the two read.
+expect_title "toolbar"
 expect label#0 "ready"
 # BARE, like expect_menu_presentation: capacity k is the platform's own
 # number, so the step may assert the invariant and never a count.

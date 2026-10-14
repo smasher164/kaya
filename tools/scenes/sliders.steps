@@ -2,6 +2,7 @@
 # slider with ticks, a continuous one with ticks, and a stamped stepped
 # one driven by key. Values are read back in the fixed spelling from the
 # CONTROL (expect_value) and from the labels the guest's handlers write.
+expect_title "sliders"
 expect_value slider#0 "50"
 expect_value slider#1 "0.5"
 expect label#0 "value: 50"

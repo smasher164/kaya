@@ -19,6 +19,7 @@ enum Msg {
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
     let sent = ctx.apply(|tx| {
+        tx.window(kaya::DEFAULT_WINDOW).title("submit");
         let threads = tx.collection::<Thread>();
         let sent = tx.signal("sent: -".to_string());
         let root = tx

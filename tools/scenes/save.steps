@@ -5,6 +5,7 @@
 # NAME: a save panel hides a known extension when the user's Finder
 # preference says so, and `expect_save_dialog` would then read the stem
 # on one machine and the whole name on another.
+expect_title "save"
 expect label#0 "no file"
 click button#1
 expect label#0 "nothing open to save"

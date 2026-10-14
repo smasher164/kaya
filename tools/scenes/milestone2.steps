@@ -1,3 +1,4 @@
+expect_title "milestone2"
 expect label#0 "step 0"
 click button#0
 # Each expect gates the next click: button#last is a STAMPED copy, so

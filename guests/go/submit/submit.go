@@ -19,6 +19,7 @@ func App() *kaya.App {
 	app := kaya.NewApp()
 
 	app.Build(func(tx *kaya.Tx) {
+		tx.Window(0).Title("submit")
 		sent := tx.Signal("sent: -")
 		threads := ThreadCollection(tx)
 		var reply kaya.Node

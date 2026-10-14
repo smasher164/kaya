@@ -4,6 +4,7 @@
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::<()>::new();
     ctx.apply(|tx| {
+        tx.window(kaya::DEFAULT_WINDOW).title("layout");
         let probe = tx.signal("Layout probe");
         let tail = tx.signal("tail");
         let mixed = tx.signal("mixed");

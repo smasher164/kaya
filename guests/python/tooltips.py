@@ -22,7 +22,7 @@ def on_save():
     name_help.set("Your name, as saved")
 
 
-with app.window():
+with app.window(title="tooltips"):
     name_help = kaya.signal("Your full name as it appears on the card")
     accounts = kaya.collection(Account)
     with kaya.column() as settings:

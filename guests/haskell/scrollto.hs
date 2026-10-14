@@ -39,6 +39,7 @@ main = kayaMain $ \app -> do
   sent <- newIORef (60 :: Int)
   framed <- newIORef (30 :: Int)
   buildTx app $ do
+    window primary [WTitle "scrollto"]
     messages <- collectionOf @Message
     frames <- collectionOf @Frame
     count <- signalText "60 messages"

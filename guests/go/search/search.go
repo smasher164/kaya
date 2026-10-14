@@ -22,6 +22,7 @@ func App() *kaya.App {
 	visible := append([]string(nil), names...)
 
 	app.Build(func(tx *kaya.Tx) {
+		tx.Window(0).Title("search")
 		items := ItemCollection(tx)
 		count := tx.Signal(fmt.Sprintf("%d items", len(names)))
 

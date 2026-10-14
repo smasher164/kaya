@@ -7,6 +7,7 @@
 # never below a word, and wraps them; the button cannot wrap and keeps its
 # width, and the spacer gets nothing. Before the rule no scene had a row wider than its window on any
 # desktop, and the iOS task manager shipped with its Today row off-screen.
+expect_title "flexshrink"
 expect label#0 "Draft the third chapter"
 expect label#1 "Monday, September the seventh, Thesis"
 # ALL THREE CLAUSES: no label needs more height than its frame (a squeezed

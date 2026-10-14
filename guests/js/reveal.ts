@@ -54,7 +54,7 @@ function onPinToggled(account: kaya.RowHandle<kaya.Fields<typeof Account.schema>
   pinText.set(`pin ${String(account.key)}: ${shown(on)}`);
 }
 
-const { statusText, sentText, heardText, pinText, password } = app.window(() => {
+const { statusText, sentText, heardText, pinText, password } = app.window({ title: "reveal" }, () => {
   const statusText = kaya.signal("empty");
   const sentText = kaya.signal("sent: -");
   const heardText = kaya.signal("heard: -");

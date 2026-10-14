@@ -3,6 +3,7 @@
 # sorts nothing — so the orders below are the GUEST's policy coming back
 # through the toolkit: the same column flips, a new column starts
 # ascending.
+expect_title "table"
 expect_columns column#0 "Name|Size"
 expect_column_edges column#0 2
 # A table is a viewport: rows may leave slack, never exceed the track

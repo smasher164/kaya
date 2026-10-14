@@ -23,6 +23,7 @@ data Todo = Todo {title :: Text}
 main :: IO ()
 main = kayaMain $ \app -> do
   (status, entryField, add, todos) <- buildTx app $ do
+    window primary [WTitle "entry"]
     status <- signalText "no todos"
     todos <- collectionOf @Todo
 

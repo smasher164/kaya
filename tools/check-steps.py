@@ -1083,6 +1083,103 @@ for p in STEPS:
         status = 1
 
 
+
+# EVERY SCRIPT READS ITS PRIMARY WINDOW'S TITLE, and the core refuses a
+# primary mounted untitled under the harness (docs/traps.md, the untitled
+# primary): the wall makes every guest declare one, this makes the nine
+# declare the same string.
+def title_lint(text, path):
+    if re.search(r'^expect_title "', text, re.M):
+        return []
+    return [f"{path}: no `expect_title \"...\"` on the primary window — every "
+            f"scene reads the title its app declares (docs/traps.md, the "
+            f"untitled primary)"]
+
+
+def title_wall_lint(scene_src):
+    found = []
+    apply_at = scene_src.find("pub(crate) fn apply(&mut self, tx: Transaction)")
+    apply_end = scene_src.find("\n    }\n", apply_at)
+    body = scene_src[apply_at:apply_end]
+    if "self.untitled_primary_message(mounted_primary, crate::prefs::selftest())" not in body:
+        found.append("crates/kaya/src/scene.rs: Scene::apply no longer asks "
+                     "untitled_primary_message under the harness")
+    if "mounted_primary |= window == crate::protocol::DEFAULT_WINDOW;" not in body:
+        found.append("crates/kaya/src/scene.rs: the Mount arm no longer records a "
+                     "primary mount for the untitled-primary wall")
+    if ("self.primary_titled |=\n                        window == "
+            "crate::protocol::DEFAULT_WINDOW && prop == WindowProp::Title;") not in body:
+        found.append("crates/kaya/src/scene.rs: the SetWindowProp arm no longer "
+                     "records the primary's title for the untitled-primary wall")
+    return found
+
+
+title_missing = [line for p in STEPS for line in title_lint(STEPS_TEXT[p], steps_rel(p))]
+print(f"check-steps: {len(STEPS) - len(title_missing)} of {len(STEPS)} scripts "
+      f"read their primary window's title")
+if title_missing:
+    print("\n".join(title_missing), file=sys.stderr)
+    status = 1
+scene_rs = read_rel("crates/kaya/src/scene.rs")
+title_wall = title_wall_lint(scene_rs)
+if title_wall:
+    print("\n".join(title_wall), file=sys.stderr)
+    status = 1
+title_victim = next(p for p in STEPS if p.stem == "windowed")
+title_doctored, title_n = sub_count(r'^expect_title "[^"]*"\n', "",
+                                    STEPS_TEXT[title_victim], re.M)
+print(f"check-steps: title self-test removed {title_n} expect_title line(s) "
+      f"from {steps_rel(title_victim)}")
+if title_n < 1 or not title_lint(title_doctored, "-"):
+    selftest_fail("a script that never reads its title passed")
+for label, needle, repl in (
+        ("the apply call", "self.untitled_primary_message(mounted_primary, "
+                           "crate::prefs::selftest())", "None::<String>"),
+        ("the Mount arm's record", "mounted_primary |= window == "
+                                    "crate::protocol::DEFAULT_WINDOW;", ""),
+        ("the SetWindowProp arm's record", "self.primary_titled |=\n", "let _ =\n")):
+    cut, n = scene_rs.replace(needle, repl, 1), scene_rs.count(needle)
+    print(f"check-steps: title-wall self-test cut {label}: {n} match(es)")
+    if n != 1 or not title_wall_lint(cut):
+        selftest_fail(f"the untitled-primary wall with {label} cut passed")
+
+
+# A REMOUNT LEG NAMES THE STATEMENT IT CUTS AFTER BY NUMBER, so a line
+# added above it moves the cut and the leg dies saying the recreation never
+# fired (2026-10-14, the expect_title sweep): the number and the statement
+# its expected line quotes must agree with the script.
+def remount_lint(flags, scripts):
+    found = []
+    for leg, flag in sorted(flags.items()):
+        if "remount" not in flag:
+            continue
+        step, line = flag["remount"]
+        scene = flag.get("scene") or android_lane.scene_of(leg)
+        stmts = [x.strip() for x in scripts[scene].splitlines()
+                 if x.strip() and not x.strip().startswith("#")]
+        said = re.search(r"after step (\d+) \((.*)\)$", line)
+        at = stmts[step - 1] if 0 < step <= len(stmts) else None
+        if not said or int(said.group(1)) != step or at != said.group(2):
+            found.append(f"{leg}: remount step {step} is {at!r} in {scene}.steps, "
+                         f"but its expected line reads {line!r}")
+    return found
+
+
+remount_scripts = {p.stem: STEPS_TEXT[p] for p in STEPS}
+remount_out = remount_lint(android_lane.FLAGS, remount_scripts)
+remount_legs = sum("remount" in f for f in android_lane.FLAGS.values())
+print(f"check-steps: {remount_legs} remount leg(s) name the statement their step counts to")
+if remount_out:
+    print("\n".join(remount_out), file=sys.stderr)
+    status = 1
+remount_doctored, remount_n = sub_first(r"^(expect label#0 \"0 items left\")$",
+                                        r'expect_title "todos"\n\1', remount_scripts["todos"],
+                                        re.M)
+print(f"check-steps: remount self-test added {remount_n} line(s) above the todos cut")
+if remount_n != 1 or not remount_lint(android_lane.FLAGS,
+                                      dict(remount_scripts, todos=remount_doctored)):
+    selftest_fail("a remount step moved by a line above it passed")
+
 # WHICH WIDTHS AN expect_split MAY SAMPLE. The backends disagree about
 # where one pane becomes two (GNOME below 400sp, Material 840dp,
 # TwoPaneView between), so a width inside that band is legitimately one
@@ -2770,7 +2867,8 @@ if sweep_c_floor():
 
 def save_missing_handles(text):
     lines = [line.strip() for line in text.splitlines()
-             if line.strip() and not line.lstrip().startswith("#")]
+             if line.strip() and not line.lstrip().startswith("#")
+             and not line.startswith("expect_title ")]
     prefix = ['expect label#0 "no file"', 'click button#1',
               'expect label#0 "nothing open to save"', 'click button#3',
               'expect label#0 "nothing to reopen"']

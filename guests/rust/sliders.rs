@@ -24,6 +24,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
     let mut commits = 0u32;
     let (level_text, commit_text, volume_text, row_text, pos, level_node) = ctx.apply(|tx| {
+        tx.window(kaya::DEFAULT_WINDOW).title("sliders");
         let level_text = tx.signal("value: 50");
         let commit_text = tx.signal("commits: 0");
         let volume_text = tx.signal("volume: 0.5");

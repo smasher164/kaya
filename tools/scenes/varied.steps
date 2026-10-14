@@ -5,6 +5,7 @@
 # identity, the first index after a move, the declared total, one row's
 # content — and NEVER an extent, which is platform- and
 # history-dependent on this path.
+expect_title "varied"
 expect label#0 "300 rows, 845 lines"
 # A windowed For's total is what the guest INSERTED, never what the
 # platform realized.

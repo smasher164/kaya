@@ -5,7 +5,7 @@ import * as kaya from "kaya-gui";
 
 const app = new kaya.App();
 
-app.window(() => {
+app.window({ title: "grow" }, () => {
   const probe = kaya.signal("grow probe");
   const one = kaya.signal("one");
 

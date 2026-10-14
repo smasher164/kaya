@@ -5,7 +5,7 @@ import * as kaya from "kaya-gui";
 
 const app = new kaya.App();
 
-app.window(() => {
+app.window({ title: "layout" }, () => {
   const probe = kaya.signal("Layout probe");
   const tail = kaya.signal("tail");
   const mixed = kaya.signal("mixed");

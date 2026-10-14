@@ -26,6 +26,7 @@ func App() *kaya.App {
 	commits := 0
 
 	app.Build(func(tx *kaya.Tx) {
+		tx.Window(0).Title("numberfield")
 		commitText := tx.Signal("commits: 0")
 		rowText := tx.Signal("row: none")
 		amountValue := tx.Signal(0.0)

@@ -13,6 +13,7 @@ enum Msg {}
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::<Msg>::new();
     ctx.apply(|tx| {
+        tx.window(kaya::DEFAULT_WINDOW).title("windowed");
         let items = tx.collection::<Item>();
         let root = tx.row(|tx| {
             let rows = items.rows(tx).columns(&["Name", "Size"], kaya::Sort::none());

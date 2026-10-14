@@ -1,5 +1,6 @@
 # A post the PLATFORM holds (its own delivered list), an activation the
 # guest answers, a cancel the platform honours (docs/tasks-s3-plan.md N5).
+expect_title "notify"
 expect label#0 "ready"
 click button#0
 expect label#0 "posted 1"

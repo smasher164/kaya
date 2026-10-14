@@ -1,6 +1,7 @@
 # The expander (docs/expander-plan.md §5): the header and the body read off
 # the platform and driven through the header's own press. The app's Show and
 # Hide write `expanded`, which the platform must show and which never echoes.
+expect_title "expander"
 expect_ax expander@details "button/Details"
 # The summary is spoken, as the header's description (the maintainer, 2026-10-09).
 expect_ax_hint expander@details "One field"

@@ -20,6 +20,7 @@ data Swatch = Swatch {name :: Text, fill :: Color}
 main :: IO ()
 main = kayaMain $ \app -> do
   buildTx app $ do
+    window primary [WTitle "colorpicker"]
     titleText <- signalText "color: none"
     glazeText <- signalText "alpha: none"
     rowText <- signalText "row: none"

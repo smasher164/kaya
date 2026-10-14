@@ -7,7 +7,7 @@ import kaya
 
 app = kaya.App()
 
-with app.window():
+with app.window(title="a11yrows"):
     with kaya.column():
         # A SCALAR collection: the loop variable IS the element.
         notes = kaya.collection()

@@ -11,6 +11,7 @@ struct Swatch: KayaGen {
 
 KayaApp.run { app in
     app.build { tx in
+        tx.window(title: "colorpicker")
         let titleText = tx.signal(.str("color: none"))
         let glazeText = tx.signal(.str("alpha: none"))
         let rowText = tx.signal(.str("row: none"))

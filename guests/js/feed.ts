@@ -31,7 +31,7 @@ function onToggle(post: kaya.RowHandle<Post>, checked: boolean): void {
   if (post instanceof Todo) post.done = checked;
 }
 
-const { feed } = app.window(() => {
+const { feed } = app.window({ title: "feed" }, () => {
   const feed = kaya.collection([Note, Todo]);
   const doneCount = feed.derive(doneCountText);
   kaya.row(() => {

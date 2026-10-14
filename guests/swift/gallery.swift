@@ -14,6 +14,7 @@ let testPNG = Data([
 
 KayaApp.run { app in
     app.build { tx in
+        tx.window(title: "gallery")
         let status = tx.signal(.str("urgent: false"))
         let volume = tx.signal(.str("volume: 50%"))
         let pos = tx.signal(.f64(0.5))

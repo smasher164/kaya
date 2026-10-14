@@ -24,6 +24,7 @@ public final class Search {
         List<String> visible = new ArrayList<>(List.of(NAMES));
 
         app.build(tx -> {
+            tx.window(0).title("search");
             var items = SearchItemKaya.collection(tx);
             KayaApp.Signal<String> count = tx.signal(NAMES.length + " items");
 

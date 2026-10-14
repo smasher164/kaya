@@ -25,6 +25,7 @@ enum Msg {
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
     let (messages, list, count, frames, strip) = ctx.apply(|tx| {
+        tx.window(kaya::DEFAULT_WINDOW).title("scrollto");
         let messages = tx.collection::<Message>();
         let frames = tx.collection::<Frame>();
         let count = tx.signal("60 messages".to_string());

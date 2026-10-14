@@ -28,6 +28,7 @@ rowKey [] = ""
 main :: IO ()
 main = kayaMain $ \app -> do
   (sent, name, find, plain, compose, reply) <- buildTx app $ do
+    window primary [WTitle "submit"]
     threads <- collectionOf @Thread
     sentText <- signalText "sent: -"
 

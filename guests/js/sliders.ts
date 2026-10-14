@@ -36,7 +36,7 @@ function onReset(): void {
   pos.set(25);
 }
 
-const { levelText, commitText, volumeText, rowText, pos } = app.window({}, () => {
+const { levelText, commitText, volumeText, rowText, pos } = app.window({ title: "sliders" }, () => {
   const levelText = kaya.signal("value: 50");
   const commitText = kaya.signal("commits: 0");
   const volumeText = kaya.signal("volume: 0.5");

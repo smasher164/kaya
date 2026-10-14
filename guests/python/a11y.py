@@ -7,7 +7,7 @@ import kaya
 
 app = kaya.App()
 
-with app.window():
+with app.window(title="a11y"):
     with kaya.column() as form:
         # Deliberately NOT labelled: the platform speaks the caption.
         kaya.button("Save").a11y_id("save").a11y_hint("save the draft")

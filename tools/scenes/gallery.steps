@@ -1,5 +1,6 @@
 # image#1 carries deliberately invalid bytes: a failed decode reads 0x0
 # and KEEPS the node (tools/check-empty-child.py).
+expect_title "gallery"
 expect label#0 "urgent: false"
 toggle checkbox#0 on
 set_value slider#0 0.75

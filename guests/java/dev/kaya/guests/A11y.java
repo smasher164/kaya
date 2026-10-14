@@ -10,6 +10,7 @@ public final class A11y {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
+            tx.window(0).title("a11y");
             tx.mount(tx.column(col -> {
                 // Deliberately not labelled: the platform must speak the caption.
                 tx.button("Save").a11yId("save").a11yHint("save the draft");

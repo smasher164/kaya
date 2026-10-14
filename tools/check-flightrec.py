@@ -175,6 +175,49 @@ def census_mac_app_shot(src):
     return found
 
 
+def census_ios_app_shot(src):
+    """docs/traps.md, the iOS red leg that photographed the home screen:
+    `simctl launch --console-pty` returns at exit, so the runner's screenshot
+    is SpringBoard's. The app draws its own windows at its first final
+    failure and before the verdict's publish, the runner pulls that out of
+    the container as `shot`, and the device's screenshot is `desktop-shot`."""
+    found = []
+    sw = src[SWIFTUI]
+    for anchor, what in (('KayaFailShot.take("the first failed step, \\(line)")', "step"),
+                         ('KayaFailShot.take("the failed verdict")', "verdict")):
+        at = sw.find(anchor)
+        if at < 0 or "#if os(macOS)" in sw[sw.rfind("\n", 0, sw.rfind("\n", 0, at)):at]:
+            found.append(f"iOS: the {what}'s fail shot is not taken on iOS (KayaFailShot.take "
+                         f"missing or fenced to macOS)")
+    ios_at = sw.find("#elseif os(iOS)\n    /// The iOS twin")
+    ios = sw[ios_at:sw.find("\n#endif\n", ios_at)] if ios_at >= 0 else ""
+    if "window.drawHierarchy(in: window.frame" not in ios:
+        found.append("iOS: KayaFailShot no longer draws the app's windows (drawHierarchy)")
+    if "kayaTempDir()" not in ios:
+        found.append("iOS: KayaFailShot no longer resolves a relative KAYA_FAIL_SHOT under "
+                     "Documents, where the runner pulls it")
+    leg = py_block(src[IOS], "run_swiftui_on")
+    if 'env["SIMCTL_CHILD_KAYA_FAIL_SHOT"] = f"fail-shot-{name}.png"' not in leg:
+        found.append("iOS: run_swiftui_on no longer names KAYA_FAIL_SHOT for the leg")
+    if '(f"fail-shot-{name}.png", f"fail-shot-{name}.png.when")' not in leg:
+        found.append("iOS: run_swiftui_on does not delete the leg's last fail shot before "
+                     "its launch — a red leg with no picture would adopt an earlier one")
+    if '(f"fail-shot-{name}.png", ".shot.png")' not in py_block(src[IOS], "pull_container_files"):
+        found.append("iOS: pull_container_files does not pull the app's own picture")
+    for fn in ("device_capture", "driver_shot"):
+        if '.with_suffix(".desktop-shot.png")' not in py_block(src[IOS], fn):
+            found.append(f"iOS: {fn} files the device's screen as the leg's `shot` — it is "
+                         f"SpringBoard's once the app has exited")
+    rec = py_block(src[LANE_PY], "IosRecorder")
+    adopts = ('self.adopt_shot(bundle, "shot", log.with_suffix(".shot.png"),',
+              'self.adopt_shot(bundle, "desktop-shot", '
+              'log.with_suffix(".desktop-shot.png"),')
+    if not all(a in rec for a in adopts):
+        found.append("iOS: the recorder does not adopt the app's picture as `shot` and the "
+                     "device's as `desktop-shot`")
+    return found
+
+
 def py_block(text, name):
     """One class or function's source, by name."""
     lines = text.splitlines(keepends=True)
@@ -1884,6 +1927,7 @@ CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("Android history", census_android_history),
             ("Android app shot", census_android_app_shot),
             ("mac app shot", census_mac_app_shot),
+            ("iOS app shot", census_ios_app_shot),
             ("iOS notification side", census_ios_notifications),
             ("linux ceiling stacks", census_wedge_capture),
             ("linux door record", census_door_record),
@@ -1998,6 +2042,39 @@ nm4 = doctored(LANE_PY, r'^ *shutil\.copy2\(fail, bundle / "shot\.png"\)\n', "",
                "NM4 cut the adoption of the guest's picture")
 gate.negative("NM4 the guest's picture never adopted",
               lambda: census_mac_app_shot(nm4), want="does not adopt the guest's own picture")
+
+# The iOS app's own picture, each link cut from a copy.
+np1 = doctored(SWIFTUI, r'^( *)(KayaFailShot\.take\("the first failed step, \\\(line\)"\)\n)',
+               r"\1#if os(macOS)\n\1\2\1#endif\n",
+               "NP1 fenced the step's picture to macOS, as shipped")
+gate.negative("NP1 no iOS picture at a step's final failure",
+              lambda: census_ios_app_shot(np1), want="the step's fail shot is not taken on iOS")
+np2 = doctored(SWIFTUI, r'^( *)(KayaFailShot\.take\("the failed verdict"\)\n)',
+               r"\1#if os(macOS)\n\1\2\1#endif\n", "NP2 fenced the verdict's picture to macOS")
+gate.negative("NP2 no iOS picture at the failed verdict",
+              lambda: census_ios_app_shot(np2), want="the verdict's fail shot is not taken on iOS")
+np3 = doctored(SWIFTUI, r"window\.drawHierarchy\(in: window\.frame", "_ = (window.frame",
+               "NP3 cut the iOS window drawing")
+gate.negative("NP3 an iOS fail shot that draws nothing",
+              lambda: census_ios_app_shot(np3), want="no longer draws the app's windows")
+np4 = doctored(IOS, r'^ *env\["SIMCTL_CHILD_KAYA_FAIL_SHOT"\] = f"fail-shot-\{name\}\.png"\n', "",
+               "NP4 cut the leg's KAYA_FAIL_SHOT")
+gate.negative("NP4 an iOS leg run with no KAYA_FAIL_SHOT",
+              lambda: census_ios_app_shot(np4), want="no longer names KAYA_FAIL_SHOT")
+np5 = doctored(IOS, r'^ *\(f"fail-shot-\{name\}\.png", "\.shot\.png"\),\n', "",
+               "NP5 cut the pull of the app's picture")
+gate.negative("NP5 an iOS picture never pulled",
+              lambda: census_ios_app_shot(np5), want="does not pull the app's own picture")
+np6 = doctored(IOS, r'\.with_suffix\("\.desktop-shot\.png"\)\n    got = run',
+               '.with_suffix(".shot.png")\n    got = run',
+               "NP6 the simulator screenshot filed as the leg's shot, as shipped")
+gate.negative("NP6 SpringBoard's picture as the leg's shot",
+              lambda: census_ios_app_shot(np6), want="device_capture files the device's screen")
+np7 = doctored(IOS, r'^ *for stale in \(f"fail-shot-\{name\}\.png", '
+                    r'f"fail-shot-\{name\}\.png\.when"\):\n.*\n', "",
+               "NP7 cut the pre-launch delete of the last fail shot")
+gate.negative("NP7 a red iOS leg adopting an earlier leg's picture",
+              lambda: census_ios_app_shot(np7), want="does not delete the leg's last fail shot")
 
 # The desktop shot's two idle refusals, each cut from a copy.
 nd1 = doctored(LANE_PY,
@@ -2541,6 +2618,6 @@ for tag, want in (("MD1", "never resolved the guest's pid"),
         label, drive = DRIVES[tag]
         gate.negative(label, lambda: mac_drive_checks(drive), want=want)
 
-gate.negatives_ran(146 + (5 if DRIVES else 0))
+gate.negatives_ran(153 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

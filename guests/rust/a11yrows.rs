@@ -4,6 +4,7 @@
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::<()>::new();
     ctx.apply(|tx| {
+        tx.window(kaya::DEFAULT_WINDOW).title("a11yrows");
         let root = tx
             .column(|tx| {
                 // expect_ax REFUSES copies that share one const id.

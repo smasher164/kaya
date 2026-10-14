@@ -29,7 +29,7 @@ function onForty(): void {
   amountValue.set(40);
 }
 
-const { commitText, rowText, amountValue } = app.window({}, () => {
+const { commitText, rowText, amountValue } = app.window({ title: "numberfield" }, () => {
   const commitText = kaya.signal("commits: 0");
   const rowText = kaya.signal("row: none");
   const amountValue = kaya.signal(0);

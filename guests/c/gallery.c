@@ -104,6 +104,14 @@ static void build_scene(void) {
     kaya_tx_add_child(&tx, W_LEVEL_ROW, W_LEVEL_LABEL);
     kaya_tx_add_child(&tx, W_LEVEL_ROW, W_LEVEL);
     kaya_tx_add_child(&tx, W_COLUMN, W_LEVEL_ROW);
+    {
+        size_t start = kaya_wire_begin(&tx, KAYA_TX_SET_WINDOW_PROP);
+        kaya_wire_u64(&tx, 0);
+        kaya_wire_u32(&tx, KAYA_WPROP_TITLE);
+        kaya_wire_u32(&tx, KAYA_SOURCE_CONST);
+        kaya_wire_value(&tx, kaya_str("gallery"));
+        kaya_wire_end(&tx, start);
+    }
     kaya_tx_mount(&tx, 0, W_COLUMN); /* window 0: the default */
 
     kaya_submit(tx.buf, tx.len);

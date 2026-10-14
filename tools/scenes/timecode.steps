@@ -1,3 +1,4 @@
+expect_title "Timecode"
 expect number_field@position "01:02:03:12"
 expect label@playhead "01:02:03:12"
 expect number_field@drop "00:00:59;29"

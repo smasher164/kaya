@@ -13,6 +13,7 @@ struct Thread: KayaGen {
 
 KayaApp.run { app in
     app.build { tx in
+        tx.window(title: "submit")
         let threads = threadCollection(tx)
         let sent = tx.signal(.str("sent: -"))
 

@@ -41,7 +41,7 @@ function onLate(): void {
   lowSig.set(6);
 }
 
-const { liveText, commitText, volumeText, clipText, lowSig } = app.window({}, () => {
+const { liveText, commitText, volumeText, clipText, lowSig } = app.window({ title: "range" }, () => {
   const liveText = kaya.signal("live: 2 8");
   const commitText = kaya.signal("commits: 0");
   const volumeText = kaya.signal("volume: 0.25");

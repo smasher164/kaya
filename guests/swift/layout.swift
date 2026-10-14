@@ -6,6 +6,7 @@ import Kaya
 
 KayaApp.run { app in
     app.build { tx in
+        tx.window(title: "layout")
         let probe = tx.signal(.str("Layout probe"))
         let tail = tx.signal(.str("tail"))
         let mixed = tx.signal(.str("mixed"))

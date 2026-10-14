@@ -17,6 +17,7 @@ const ITEMS: [&str; 4] = ["apple", "banana", "cherry", "mango"];
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
     let (items, count) = ctx.apply(|tx| {
+        tx.window(kaya::DEFAULT_WINDOW).title("search");
         let items = tx.collection::<Item>();
         let count = tx.signal(format!("{} items", ITEMS.len()));
         let root = tx

@@ -38,6 +38,7 @@ fn shown(on: bool) -> &'static str {
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
     let (status_text, sent_text, heard_text, pin_text, field, pin_node) = ctx.apply(|tx| {
+        tx.window(kaya::DEFAULT_WINDOW).title("reveal");
         let status_text = tx.signal("empty");
         let sent_text = tx.signal("sent: -");
         let heard_text = tx.signal("heard: -");

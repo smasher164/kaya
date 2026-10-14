@@ -3,6 +3,7 @@
 # ledger/varied are Python and stop at the desktops. Every number here
 # is DATA — the band's width belongs to the core's tests and the
 # table-tier probe.
+expect_title "windowed"
 expect_columns column#0 "Name|Size"
 expect_column_edges column#0 2
 # The whole collection is data behind a band of widgets.

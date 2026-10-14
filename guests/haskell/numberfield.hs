@@ -35,6 +35,7 @@ main = kayaMain $ \app -> do
   commitsRef <- newIORef (0 :: Int)
 
   (rowText, qtyNode) <- buildTx app $ do
+    window primary [WTitle "numberfield"]
     commitText <- signalText "commits: 0"
     rowText <- signalText "row: none"
     amountValue <- signalDouble 0.0

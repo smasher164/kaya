@@ -16,6 +16,7 @@ public final class ColorPicker {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
+            tx.window(0).title("colorpicker");
             KayaApp.Signal<String> titleText = tx.signal("color: none");
             KayaApp.Signal<String> glazeText = tx.signal("alpha: none");
             KayaApp.Signal<String> rowText = tx.signal("row: none");

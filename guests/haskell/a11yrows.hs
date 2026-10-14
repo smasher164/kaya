@@ -8,6 +8,7 @@ import KayaApp
 main :: IO ()
 main = kayaMain $ \app -> do
   buildTx app $ do
+    window primary [WTitle "a11yrows"]
     notes <- collection
 
     -- Element-sourced: `expect_ax` refuses an ambiguous authored identifier,

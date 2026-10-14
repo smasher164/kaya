@@ -19,7 +19,7 @@ function onReplied(thread: kaya.RowHandle<kaya.Fields<typeof Thread.schema>>, te
   sent.set(`sent: ${String(thread.key)}: ${text}`);
 }
 
-const { sent } = app.window(() => {
+const { sent } = app.window({ title: "submit" }, () => {
   const threads = kaya.collection(Thread);
   const sent = kaya.signal("sent: -");
 

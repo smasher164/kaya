@@ -4,6 +4,7 @@
 # assertion carries the COVERED TEXT too, since the core converts into
 # the backend's unit and back and two symmetric mistakes cancel. THIS
 # FILE IS PURE ASCII (docs/ranges-units.md §8.7).
+expect_title "ranges"
 expect label#0 "0 matches"
 # NOTHING IS DECORATED YET: a backend that decorated everything, or
 # answered from a stale read, fails here before the next line.

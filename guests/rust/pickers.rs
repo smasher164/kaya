@@ -26,6 +26,7 @@ fn date(year: i32, month: u8, day: u8) -> kaya::Date {
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
     let (date_text, time_text, row_text, date_sig, time_sig, due_node) = ctx.apply(|tx| {
+        tx.window(kaya::DEFAULT_WINDOW).title("pickers");
         let date_text = tx.signal("date: none");
         let time_text = tx.signal("time: none");
         let row_text = tx.signal("row: none");

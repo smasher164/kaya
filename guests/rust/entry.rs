@@ -10,6 +10,7 @@ struct Todo {
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let (status, field, add, todos) = ctx.apply(|tx| {
+        tx.window(kaya::DEFAULT_WINDOW).title("entry");
         let status = tx.signal("no todos");
         let todos = tx.collection::<Todo>();
 

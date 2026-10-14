@@ -2,6 +2,7 @@
 # 6, §5): the range mirrors as the slider does, so the low thumb sits at the
 # right and its place, read from the LEFT, is the mirror of range.steps'; the
 # vertical fader does not flip.
+expect_title "range"
 expect_value range#0 "2 8"
 expect_thumb range#0 low "0.8"
 expect_thumb range#0 high "0.2"

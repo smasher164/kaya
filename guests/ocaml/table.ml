@@ -13,6 +13,7 @@ let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
+     window ~title:"table" ();
      let items = collection_of table_item_record in
      (* The For first, because its handle registers the sort handler and
         re-declares the header. *)

@@ -15,6 +15,7 @@ func App() *kaya.App {
 	app := kaya.NewApp()
 
 	app.Build(func(tx *kaya.Tx) {
+		tx.Window(0).Title("reorder")
 		items := ItemCollection(tx)
 		tx.Mount(tx.Row(func() {
 			tx.Button("rotate", func(tx *kaya.Tx) {

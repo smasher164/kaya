@@ -27,6 +27,7 @@ public final class Range {
         int[] commits = {0};
 
         app.build(tx -> {
+            tx.window(0).title("range");
             KayaApp.Signal<String> liveText = tx.signal("live: 2 8");
             KayaApp.Signal<String> commitText = tx.signal("commits: 0");
             KayaApp.Signal<String> volumeText = tx.signal("volume: 0.25");

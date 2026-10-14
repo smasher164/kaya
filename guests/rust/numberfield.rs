@@ -23,6 +23,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
     let mut commits = 0u32;
     let (commit_text, row_text, amount_value, qty_node) = ctx.apply(|tx| {
+        tx.window(kaya::DEFAULT_WINDOW).title("numberfield");
         let commit_text = tx.signal("commits: 0");
         let row_text = tx.signal("row: none");
         let amount_value = tx.signal(0.0);

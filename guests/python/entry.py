@@ -30,7 +30,7 @@ def on_add():
     field.focus()
 
 
-with app.window():
+with app.window(title="entry"):
     status = kaya.signal("no todos")
     todos = kaya.collection()
 

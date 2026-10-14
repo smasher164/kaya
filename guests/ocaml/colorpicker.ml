@@ -9,6 +9,7 @@ let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
+      window ~title:"colorpicker" ();
       let title_text = signal Scalar.Str "color: none" in
       let glaze_text = signal Scalar.Str "alpha: none" in
       let row_text = signal Scalar.Str "row: none" in

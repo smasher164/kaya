@@ -42,6 +42,7 @@ rowKey [] = ""
 main :: IO ()
 main = kayaMain $ \app -> do
   (statusText, sentText, heardText, pinText, passwordField, showButton, hideButton, clearButton, pin) <- buildTx app $ do
+    window primary [WTitle "reveal"]
     accounts <- collectionOf @Account
     statusText <- signalText "empty"
     sentText <- signalText "sent: -"

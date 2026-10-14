@@ -36,7 +36,7 @@ def on_remove(item):
     status.set(f"removed {group}/{item.key}, {len(items.at(group))} left")
 
 
-with app.window():
+with app.window(title="milestone2"):
     steps = kaya.signal(0)
     status = kaya.signal("step 0")
     groups = kaya.collection()

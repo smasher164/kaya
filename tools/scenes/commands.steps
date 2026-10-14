@@ -1,3 +1,4 @@
+expect_title "commands"
 expect label#0 "ready"
 expect_menus 2
 expect_menu "File>Settings…" enabled

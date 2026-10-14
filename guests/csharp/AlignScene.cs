@@ -8,6 +8,7 @@ static class AlignScene
 
         app.Build(tx =>
         {
+            tx.Window(title: "align");
             var probe = tx.Signal("align probe");
             var @base = tx.Signal("base\nline");
             var anchor = tx.Signal("anchor");

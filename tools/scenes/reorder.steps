@@ -1,6 +1,7 @@
 # The root is a ROW so that column#0 is unambiguously the For container:
 # languages disagree on whether a container is created before its
 # children, so a column root would make the index language-dependent.
+expect_title "reorder"
 expect_order column#0 "a|b|c"
 click button#0
 expect_order column#0 "b|c|a"

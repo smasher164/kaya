@@ -11,6 +11,7 @@ struct Task: KayaGen {
 
 KayaApp.run { app in
     app.build { tx in
+        tx.window(title: "pickers")
         let dateText = tx.signal(.str("date: none"))
         let timeText = tx.signal(.str("time: none"))
         let rowText = tx.signal(.str("row: none"))

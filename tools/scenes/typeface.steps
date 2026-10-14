@@ -4,6 +4,7 @@
 # the family is VENDORED ("Sora" is preinstalled nowhere). THE FAMILY,
 # NEVER THE SCALE: nothing asserts a size (DESIGN.md), which is what
 # lets the two Apple ramps — 13pt on mac, 17pt on iOS — share a script.
+expect_title "typeface"
 expect label#0 "typeface"
 expect_typeface "Sora"
 set_text entry#0 "hi"

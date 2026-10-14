@@ -27,6 +27,7 @@ public final class NumberField {
         int[] commits = {0};
 
         app.build(tx -> {
+            tx.window(0).title("numberfield");
             KayaApp.Signal<String> commitText = tx.signal("commits: 0");
             KayaApp.Signal<String> rowText = tx.signal("row: none");
             KayaApp.Signal<Double> amountValue = tx.signal(0.0);

@@ -5,6 +5,7 @@ import Kaya
 
 KayaApp.run { app in
     app.build { tx in
+        tx.window(title: "grow")
         let probe = tx.signal(.str("grow probe"))
         let one = tx.signal(.str("one"))
 

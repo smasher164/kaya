@@ -37,7 +37,7 @@ def on_forty():
     amount_value.set(40.0)
 
 
-with app.window():
+with app.window(title="numberfield"):
     commit_text = kaya.signal("commits: 0")
     row_text = kaya.signal("row: none")
     amount_value = kaya.signal(0.0)

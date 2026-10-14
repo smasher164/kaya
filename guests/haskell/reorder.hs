@@ -21,6 +21,7 @@ data Item = Item {title :: Text}
 main :: IO ()
 main = kayaMain $ \app -> do
   buildTx app $ do
+    window primary [WTitle "reorder"]
     items <- collectionOf @Item
 
     let onRotate = submitTx app $ do

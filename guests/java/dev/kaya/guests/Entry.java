@@ -27,6 +27,7 @@ public final class Entry {
         KayaApp app = new KayaApp();
 
         Scene scene = app.build(tx -> {
+            tx.window(0).title("entry");
             KayaApp.Signal<String> status = tx.signal("no todos");
             KayaApp.Collection todos = tx.collection();
 

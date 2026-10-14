@@ -30,6 +30,7 @@ data Post = PNote Note | PTodo Todo
 main :: IO ()
 main = kayaMain $ \app -> do
   buildTx app $ do
+    window primary [WTitle "feed"]
     feed <- sumCollectionOf @Post
     doneCount <-
       sumDerive feed $ \entries ->

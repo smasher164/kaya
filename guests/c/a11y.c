@@ -166,6 +166,14 @@ static void build_scene(void) {
     kaya_tx_add_child(&tx, W_FORM, W_ACTIONS);
     kaya_tx_add_child(&tx, W_FORM, W_SPOKEN);
     kaya_tx_add_child(&tx, W_FORM, W_RENAME);
+    {
+        size_t start = kaya_wire_begin(&tx, KAYA_TX_SET_WINDOW_PROP);
+        kaya_wire_u64(&tx, 0);
+        kaya_wire_u32(&tx, KAYA_WPROP_TITLE);
+        kaya_wire_u32(&tx, KAYA_SOURCE_CONST);
+        kaya_wire_value(&tx, kaya_str("a11y"));
+        kaya_wire_end(&tx, start);
+    }
     kaya_tx_mount(&tx, 0, W_FORM); /* window 0: the default */
 
     kaya_submit(tx.buf, tx.len);

@@ -4,6 +4,7 @@
 # control size measures the minimum, not the contract — the textarea's
 # 96pt floor binds, GTK's 34pt button height next, and the 540x330
 # window's 16pt inset leaves tracks of ~63/126/63 at 25/50/25.
+expect_title "grow"
 expect label#0 "grow probe"
 # NOT REDUNDANT (DESIGN.md holds the rules): shares are percentages of
 # the children's SUM, so a hugging root divides nothing and every share

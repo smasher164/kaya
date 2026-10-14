@@ -1,5 +1,6 @@
 # The format guest under KAYA_LOCALE=de-DE (docs/compliance-plan.md §6):
 # the platform's German, and the de catalog's own words.
+expect_title "format"
 expect_locale de-DE
 expect label#1 "{fmt:date 2026-09-07 medium}"
 expect label#3 "{fmt:time 08:30 short}"

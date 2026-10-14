@@ -1,3 +1,4 @@
+expect_title "textarea"
 expect label#0 "0 lines"
 set_text textarea#0 "first line\nsecond line"
 expect textarea#0 "first line\nsecond line"

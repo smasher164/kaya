@@ -28,7 +28,7 @@ function onQuery(text: string): void {
   visible = wanted;
 }
 
-const { items, count } = app.window(() => {
+const { items, count } = app.window({ title: "search" }, () => {
   const items = kaya.collection(Item);
   const count = kaya.signal(`${ITEMS.length} items`);
 

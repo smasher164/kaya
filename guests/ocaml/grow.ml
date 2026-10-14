@@ -6,6 +6,7 @@ let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
+     window ~title:"grow" ();
      let probe = signal Scalar.Str ("grow probe") in
      let one = signal Scalar.Str ("one") in
 

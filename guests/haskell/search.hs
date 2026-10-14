@@ -29,6 +29,7 @@ main :: IO ()
 main = kayaMain $ \app -> do
   visible <- newIORef names
   buildTx app $ do
+    window primary [WTitle "search"]
     items <- collectionOf @Item
     count <- signalText (tshow (length names) <> " items")
 

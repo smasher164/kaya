@@ -3,6 +3,7 @@
 # activation, the native textarea's reach the platform's tier, and the
 # split is by focus. KEYSTROKES throughout: set_text is a programmatic
 # write and the native half is made of the platform's own history.
+expect_title "ownundo"
 expect_menu "Edit>Undo" disabled
 expect_menu "Edit>Redo" disabled
 expect label#0 "undo 0 redo 0"

@@ -7,6 +7,7 @@ let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
+     window ~title:"layout" ();
      let probe = signal Scalar.Str ("Layout probe") in
      let tail = signal Scalar.Str ("tail") in
      let mixed = signal Scalar.Str ("mixed") in

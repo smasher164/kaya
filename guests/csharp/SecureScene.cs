@@ -24,6 +24,7 @@ static class SecureScene
 
         app.Build(tx =>
         {
+            tx.Window(title: "secure");
             var statusText = tx.Signal("empty");
             var sentText = tx.Signal("sent: -");
             var pinText = tx.Signal("pin: -");

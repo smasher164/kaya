@@ -39,6 +39,7 @@ tallPng =
 main :: IO ()
 main = kayaMain $ \app -> do
   buildTx app $ do
+    window primary [WTitle "align"]
     probe <- signalText "align probe"
     base <- signalText "base\nline"
     anchor <- signalText "anchor"

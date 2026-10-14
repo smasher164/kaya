@@ -2,6 +2,7 @@
 # opened by mounting into it, read by title off the platform, written
 # through a field inside it, closed through the platform's own cancel
 # path, and heard by the app post-fact.
+expect_title "sheet"
 expect_sheets 0
 expect label#0 "closed"
 click button#0

@@ -1,4 +1,5 @@
 # The determinate verdict is an INTEGER PERCENT (the slider verdict's
 # spelling), not a fraction.
+expect_title "progress"
 expect progress#0 "25%"
 expect progress#1 "indeterminate"

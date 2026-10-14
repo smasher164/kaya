@@ -19,6 +19,7 @@ static class SlidersScene
 
         app.Build(tx =>
         {
+            tx.Window(title: "sliders");
             var levelText = tx.Signal("value: 50");
             var commitText = tx.Signal("commits: 0");
             var volumeText = tx.Signal("volume: 0.5");

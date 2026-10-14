@@ -32,7 +32,7 @@ def on_quarter():
     pos.set(0.25)
 
 
-with app.window():
+with app.window(title="gallery"):
     status = kaya.signal("urgent: false")
     volume = kaya.signal("volume: 50%")
     pos = kaya.signal(0.5)

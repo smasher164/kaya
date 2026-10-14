@@ -13,6 +13,7 @@ import KayaApp
 main :: IO ()
 main = kayaMain $ \app -> do
   buildTx app $ do
+    window primary [WTitle "grow"]
     probe <- signalText "grow probe"
     one <- signalText "one"
 

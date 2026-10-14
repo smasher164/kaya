@@ -16,6 +16,7 @@ static class Milestone2Scene
         int steps = 0;
         var status = app.Build(tx =>
         {
+            tx.Window(title: "milestone2");
             var status = tx.Signal("step 0");
             var stepCount = tx.Signal(0);
 

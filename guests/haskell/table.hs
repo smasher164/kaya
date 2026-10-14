@@ -26,6 +26,7 @@ main = kayaMain $ \app -> do
   -- The guest's sort policy; the platform never has one.
   sorted <- newIORef (Nothing :: Maybe (Int, Bool))
   (items, table) <- buildTx app $ do
+    window primary [WTitle "table"]
     items <- collectionOf @TableItem
     -- The root is a row so the For's container is the scene's only
     -- column-kind widget (the reorder scene's rule).

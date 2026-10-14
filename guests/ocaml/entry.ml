@@ -8,6 +8,7 @@ let () =
 
   let status, field, add, todos =
     build app (fun () ->
+       window ~title:"entry" ();
        let status = signal Scalar.Str ("no todos") in
        let todos = collection () in
 

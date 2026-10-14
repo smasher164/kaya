@@ -6,6 +6,7 @@
 # play with no picture and no error, and the decodability check fails it
 # as unsupported_codec (docs/media-plan.md §7a). The ink is the window server's picture of the video
 # view, the floor file's flat colour.
+expect_title "media"
 expect label#0 "idle"
 click button#0
 expect label#1 "h264_aac.mp4"

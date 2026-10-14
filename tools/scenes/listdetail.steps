@@ -3,8 +3,9 @@
 # BARE `expect_split` (a regular window must not show ONE pane while its
 # stack holds two) is true at every width a lane can hand it — which is
 # also why there is no `back`. Picking a device outside the 400..840
-# band is the LANE's job. NO expect_title, deliberately: this and
-# `split` are the SAME app, and one app has one title.
+# band is the LANE's job. Its title is "split": this and `split` are
+# the SAME app, and one app has one title.
+expect_title "split"
 expect_entries 0
 expect_split
 click button#0

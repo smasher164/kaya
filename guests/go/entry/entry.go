@@ -18,6 +18,7 @@ func App() *kaya.App {
 	)
 
 	app.Build(func(tx *kaya.Tx) {
+		tx.Window(0).Title("entry")
 		status = tx.Signal("no todos")
 		todos = tx.Collection()
 

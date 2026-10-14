@@ -24,6 +24,7 @@ func shown(_ on: Bool) -> String {
 
 KayaApp.run { app in
     app.build { tx in
+        tx.window(title: "reveal")
         let accounts = accountCollection(tx)
         let statusText = tx.signal(.str("empty"))
         let sentText = tx.signal(.str("sent: -"))

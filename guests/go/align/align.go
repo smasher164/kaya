@@ -33,6 +33,7 @@ func App() *kaya.App {
 	app := kaya.NewApp()
 
 	app.Build(func(tx *kaya.Tx) {
+		tx.Window(0).Title("align")
 		probe := tx.Signal("align probe")
 		base := tx.Signal("base\nline")
 		anchor := tx.Signal("anchor")

@@ -41,6 +41,7 @@ func App() *kaya.App {
 	app := kaya.NewApp()
 
 	app.Build(func(tx *kaya.Tx) {
+		tx.Window(0).Title("reveal")
 		statusText := tx.Signal("empty")
 		sentText := tx.Signal("sent: -")
 		heardText := tx.Signal("heard: -")

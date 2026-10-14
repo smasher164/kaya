@@ -7,6 +7,7 @@ import Kaya
 KayaApp.run { app in
     let (status, field, add, todos) = app.build {
         tx -> (KayaSignal, KayaWidget, KayaWidget, KayaCollection) in
+        tx.window(title: "entry")
         let status = tx.signal(.str("no todos"))
         let todos = tx.collection()
 

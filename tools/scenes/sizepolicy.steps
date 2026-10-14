@@ -3,6 +3,7 @@
 # how the stretch defect shipped green for a milestone. The hash and ink
 # bounds are POLICY-BLIND (§7.1), so `expect_raster` alone discriminates.
 # --- scale, the default -----------------------------------------------
+expect_title "sizepolicy"
 expect_raster canvas@fit "track"
 # Derived by crates/kaya/src/canvas.rs's
 # the_size_policy_scene_expectations_are_derived, never typed from a

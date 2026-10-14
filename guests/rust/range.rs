@@ -26,6 +26,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
     let mut commits = 0u32;
     let (live_text, commit_text, volume_text, clip_text, low_sig, trim_node) = ctx.apply(|tx| {
+        tx.window(kaya::DEFAULT_WINDOW).title("range");
         let live_text = tx.signal("live: 2 8");
         let commit_text = tx.signal("commits: 0");
         let volume_text = tx.signal("volume: 0.25");

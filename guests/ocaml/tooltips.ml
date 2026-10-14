@@ -9,6 +9,7 @@ let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
+      window ~title:"tooltips" ();
       let name_help = signal Scalar.Str ("Your full name as it appears on the card") in
       let accounts = collection_of account_record in
 

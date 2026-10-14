@@ -44,7 +44,7 @@ def on_reset():
     pos.set(25.0)
 
 
-with app.window():
+with app.window(title="sliders"):
     level_text = kaya.signal("value: 50")
     commit_text = kaya.signal("commits: 0")
     volume_text = kaya.signal("volume: 0.5")

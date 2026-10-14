@@ -15,6 +15,7 @@ struct Item {
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let (status, extras, groups, step, items, remove_button) = ctx.apply(|tx| {
+        tx.window(kaya::DEFAULT_WINDOW).title("milestone2");
         let status = tx.signal("step 0");
         let extras = tx.signal(false);
 

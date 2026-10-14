@@ -1,6 +1,7 @@
 # The pickers (docs/datetime-plan.md §5 step 5). Values are read back in
 # FIXED DIGITS from the CONTROL (expect_picker) and from the label the
 # guest's handler writes (expect); nothing asserts a displayed string.
+expect_title "pickers"
 expect_picker date_picker#0 "2026-09-04"
 expect_picker time_picker#0 "14:30"
 expect label#0 "date: none"

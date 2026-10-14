@@ -25,6 +25,7 @@ public final class ScrollTo {
         KayaApp.Widget[] strip = new KayaApp.Widget[1];
 
         app.build(tx -> {
+            tx.window(0).title("scrollto");
             var messages = MessageKaya.collection(tx);
             var frames = FrameKaya.collection(tx);
             KayaApp.Signal<String> count = tx.signal("60 messages");

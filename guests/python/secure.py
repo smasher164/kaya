@@ -44,7 +44,7 @@ def on_pin(account, text):
     pin_text.set(f"pin {account.key}: {len(text)}")
 
 
-with app.window():
+with app.window(title="secure"):
     status_text = kaya.signal("empty")
     sent_text = kaya.signal("sent: -")
     pin_text = kaya.signal("pin: -")

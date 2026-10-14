@@ -64,7 +64,7 @@ def on_pin_toggled(account, on):
     pin_text.set(f"pin {account.key}: {shown(on)}")
 
 
-with app.window():
+with app.window(title="reveal"):
     status_text = kaya.signal("empty")
     sent_text = kaya.signal("sent: -")
     heard_text = kaya.signal("heard: -")

@@ -11,6 +11,7 @@ struct Account: KayaGen {
 
 KayaApp.run { app in
     app.build { tx in
+        tx.window(title: "tooltips")
         let nameHelp = tx.signal(.str("Your full name as it appears on the card"))
         let accounts = accountCollection(tx)
 

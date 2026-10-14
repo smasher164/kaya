@@ -5,7 +5,7 @@ import * as kaya from "kaya-gui";
 
 const app = new kaya.App();
 
-app.window(() => {
+app.window({ title: "a11y" }, () => {
   kaya.column((form) => {
     form.a11yId("form").a11yLabel("Form");
     // Deliberately NOT labelled: the platform speaks the caption.

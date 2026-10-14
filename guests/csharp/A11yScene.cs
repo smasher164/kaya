@@ -8,6 +8,7 @@ static class A11yScene
 
         app.Build(tx =>
         {
+            tx.Window(title: "a11y");
             var form = tx.Column(form =>
             {
                 // Deliberately not labelled: the platform must speak the caption.

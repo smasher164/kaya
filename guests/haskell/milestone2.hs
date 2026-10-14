@@ -12,6 +12,7 @@ main = kayaMain $ \app -> do
   stepsRef <- newIORef (0 :: Int)
 
   (status, items, removeButton) <- buildTx app $ do
+    window primary [WTitle "milestone2"]
     status <- signalText "step 0"
     extras <- signalBool False
 

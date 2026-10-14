@@ -42,7 +42,7 @@ def on_toggle(post, checked):
         post.done = checked
 
 
-with app.window():
+with app.window(title="feed"):
     feed = kaya.collection(Note | Todo)
     done_count = feed.derive(done_count_text)
     with kaya.row():

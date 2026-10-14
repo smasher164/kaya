@@ -4,6 +4,7 @@
 # the only one that fails when the BLIT dropped. The hash can be ONE
 # STRING because every input is fixed and all five lanes are aarch64
 # (docs/measurements/canvas-cross-isa-2026-08-26.txt).
+expect_title "canvas"
 expect label#0 "portfolio value"
 # THE FIGURE IS INSET INSIDE ITS VIEWBOX, so these four numbers can
 # discriminate at all: a drawing that filled its box reads 0,0,100,100

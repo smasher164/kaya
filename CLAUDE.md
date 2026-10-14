@@ -245,7 +245,11 @@ in docs/deferred.md.
    silently reverted any hand-edit to a generated file and then called
    the tree clean),
    `tools/check-steps.py` (also requires the shared save scene's three
-   missing-handle cases, with three counted removal negatives),
+   missing-handle cases, with three counted removal negatives; and every
+   script's `expect_title` on its primary window beside the core's wall,
+   which refuses a primary mounted untitled under the harness, since an
+   untitled window shows the executable's name (docs/traps.md, the untitled
+   primary); one script and three wall cuts watched),
    `tools/check-shell.py`,
    `tools/check-python.py` (check-shell's opposite number, and the
    gate the 2026-08-27 ruling asked for: the gate BODIES are python
@@ -986,7 +990,12 @@ in docs/deferred.md.
    90 days under a 2 GB bound, oldest first (the 2026-10-12 XCTest hang's
    bundle was pruned before anyone needed it). The real pruner runs dry and
    then for real over a synthetic home; eight cuts watched.
-   A hundred and fifty-one watched negatives, counts printed),
+   AND A RED iOS LEG'S PICTURE IS THE APP'S OWN since 2026-10-14: `simctl
+   launch --console-pty` returns at exit, so the runner's screenshot was
+   SpringBoard's; KayaFailShot draws the app's windows before the verdict is
+   published, the runner pulls it out of the container as `shot` and files
+   the device's screen as `desktop-shot` (docs/traps.md); seven cuts watched.
+   A hundred and fifty-eight watched negatives, counts printed),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer

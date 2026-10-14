@@ -5,6 +5,7 @@
 # app thread fails every assertion below the park at once. It does NOT
 # hang (every expect is a bounded retry), so THE CASCADE is the
 # signature: merely slow fails one assertion, wedged fails all of them.
+expect_title "background"
 expect label#0 "idle"
 click button#0
 expect label#0 "working"

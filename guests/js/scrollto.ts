@@ -38,7 +38,7 @@ function onAddFrame(): void {
   frames.insert(`f${framed}`, Frame({ name: `frame ${framed}` }));
 }
 
-const { messages, list, count, frames, strip } = app.window(() => {
+const { messages, list, count, frames, strip } = app.window({ title: "scrollto" }, () => {
   const messages = kaya.collection(Message);
   const frames = kaya.collection(Frame);
   const count = kaya.signal("60 messages");

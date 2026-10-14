@@ -1,6 +1,7 @@
 # The number field guest under KAYA_LOCALE=de-DE (docs/number-field-plan.md
 # §5): numberfield.steps line for line, where a separator a backend reads or
 # writes for itself goes red.
+expect_title "numberfield"
 expect_locale de-DE
 expect number_field@amount "{fmt:field 0 0.5}"
 expect_value number_field@amount "0"

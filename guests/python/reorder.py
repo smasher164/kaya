@@ -24,7 +24,7 @@ def on_lift():
     items.move_to_front(items.keys()[-1])
 
 
-with app.window():
+with app.window(title="reorder"):
     items = kaya.collection(Item)
     with kaya.row():
         kaya.button("rotate", on_click=on_rotate)

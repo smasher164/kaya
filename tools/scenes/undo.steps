@@ -5,6 +5,7 @@
 # GRANULARITY is platform-flavored where the order is not, so every
 # assertion is about the STATE a step restores, and TYPING IS REAL
 # KEYSTROKES (set_text would clear the native history this is made of).
+expect_title "undo"
 expect label#0 "no todos"
 expect label#1 "history empty"
 expect label#2 "no keys"

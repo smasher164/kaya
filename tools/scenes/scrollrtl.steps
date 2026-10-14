@@ -3,6 +3,7 @@
 # its left. Before a backend reads the layout's direction, its start already
 # satisfies the right-edge-at-right-edge reading of "at end", so both verbs
 # agree wrongly; expect_at_start is the read that tells them apart.
+expect_title "scroll"
 expect_overflow scroll@strip
 expect_at_start scroll@strip
 scroll_end scroll@strip

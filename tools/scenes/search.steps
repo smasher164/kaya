@@ -3,6 +3,7 @@
 # field's own affordance empties the text, keeps the focus and reaches the
 # app as text_changed(""). The a11y verdict stays `field` by the
 # normalize-down rule (S7): UIA and Compose have no search identity.
+expect_title "search"
 expect_placeholder search@find "Search"
 expect label@count "4 items"
 expect_order column@list "apple|banana|cherry|mango"

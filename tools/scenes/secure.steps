@@ -3,6 +3,7 @@
 # receives the real text and answers with its length and whether it matches.
 # Every type_secret argument is one the leg's transcripts are scanned for
 # (tools/lib/secure_scan.py), so each is six characters or more, mixed.
+expect_title "secure"
 expect_placeholder secure_field@password "Password"
 expect label@status "empty"
 click secure_field@password

@@ -1,6 +1,7 @@
 # The visit counts pin the echo doctrine both ways: driving the real
 # switcher emits section_selected (visits rise) while the guest's own
 # programmatic select_section (button#0) does not (visits hold).
+expect_title "sections"
 expect_sections 2
 # THE ARM THAT RENDERED, never the declared prop (the expect_split
 # rule): the desktops' horizontal spelling and the phones' bottom bar

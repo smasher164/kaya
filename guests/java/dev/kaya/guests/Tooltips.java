@@ -15,6 +15,7 @@ public final class Tooltips {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
+            tx.window(0).title("tooltips");
             KayaApp.Signal<String> nameHelp =
                 tx.signal("Your full name as it appears on the card");
             var accounts = AccountKaya.collection(tx);

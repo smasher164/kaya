@@ -2,6 +2,7 @@
 # value against what THIS platform's formatter writes for the same input,
 # asked independently by the harness (R9); the catalog's words byte for
 # byte. The everyday locale: whatever the lane's host is set to.
+expect_title "format"
 expect label#0 "{fmt:date 2026-09-07 short}"
 expect label#1 "{fmt:date 2026-09-07 medium}"
 expect label#2 "{fmt:date 2026-09-07 long}"

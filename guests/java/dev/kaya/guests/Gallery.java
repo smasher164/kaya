@@ -11,6 +11,7 @@ public final class Gallery {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
+            tx.window(0).title("gallery");
             KayaApp.Signal<String> status = tx.signal("urgent: false");
             KayaApp.Signal<String> volume = tx.signal("volume: 50%");
             KayaApp.Signal<Double> pos = tx.signal(0.5);
