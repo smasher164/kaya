@@ -10996,7 +10996,8 @@ never running; the loop counted `presses=1` in its own refusal. A loop's
 inner wait is `min(window, left(deadline))`, the window sized from the
 measured dismissal, and the reading per round is printed so the refusal
 can say what each attempt did. tools/check-steps.py holds the arm;
-docs/deferred.md's save-press WATCH holds the sighting.
+docs/deferred.md's save-press entry holds the sighting, answered by
+the iOS save press entry here.
 
 ## A SwiftUI identifier on a row reaches every element inside it and wins over a child's own (2026-09-06)
 
@@ -16308,7 +16309,7 @@ posted to the guest's pid only, run 20261014T063814Z-018643) carried 111
 such lines in the bundle's leg log. GUARD: tools/check-exclusive.py's
 FOREGROUND_CALLS census and the leg clause, negatives 16, 17, 17b-17e.
 
-## The iOS save press: six taps reached the picker and fired no control (seen 2026-10-14)
+## The iOS save press: the picker's file provider purged its Spotlight index under the press (measured 2026-10-14)
 
 The full matrix at 0446a86a failed `editor-go` on iOS: `file_save : the save
 dialog was still up after 6 presses of Save ... keyboards 1->1 sheet still up
@@ -16333,10 +16334,51 @@ system-log slice. A forced red (the driver's Save press moved off the button
 for the name "draft", run 20261014T071401Z-089040) carried the picture at the
 give-up, `Save offered enabled=true hittable=true at 323,92` per press and
 5216 lines of the picker's process. 28 legs over four runs of editor,
-filedialog and save passed with the keyboard up, so the cause stays open
-until the next sighting, whose picture and press readings say whether the
-button was covered or disabled. GUARD: tools/check-steps.py's ios_give_up,
-five negatives watched red.
+filedialog and save passed with the keyboard up.
+
+The next two sightings (the iOS lane at 93b04508, run 20261014T153322Z-024974)
+answered it, and neither was the keyboard. save-swift's six presses each read
+`Save offered enabled=false hittable=true at 323,92`: Save was DISABLED, not
+covered, for the whole 37 s. editor-go's one press fired (control actions, a
+DOCCopyOperation that wrote `draft`), and the app was then handed an empty pick
+("Calling delegate -documentBrowser:didPickDocumentURLs: with an empty array of
+items. This indicates the items failed to be prepared and materialized on
+disk"), which UIKit delivers as documentPickerWasCancelled, so the guest read
+"save cancelled". The simulators' own logs (`log show` on the device, the
+processes the bundle did not carry) put both inside a LocalStorage file
+provider Spotlight purge: `LocalStorageFileProvider ... [spotlight] deleting
+all searchable items ... because "Sync anchor expired"`. save-swift's ran
+08:37:36-08:38:23 (47.1 s); the picker's FPSetLastOpenDateOperation started at
+08:37:38.9 and finished at 08:38:23.24, the span Save read disabled.
+editor-go's ran 08:45:33-08:45:39 (6.2 s); its DOCSetTagsOperation took 3.3 s
+against 37 ms on a green run, and the empty pick came in the middle of it. In
+that lane every pool device purged 6-8 times, 0.3-127 s each, every one to two
+minutes; the indexer's error count (`fileproviderctl dump -l
+com.apple.FileProvider.LocalStorage`, `errors:` with `last error` -1002) read
+31-75. A green full iOS lane on an otherwise quiet host purged once per device,
+at the driver's install, in 0.04-0.22 s, and 75 file-sharing installs or 20,000
+bridge-file writes on an idle device purged nothing: load is part of the
+premise, and the purge waits on searchd, which waits on spotlightknowledged.
+
+REPRODUCED ON DEMAND by stopping the simulators' searchd (SIGSTOP, then
+SIGCONT) from the moment the leg's app appears: the indexer reads `indexing:
+yes` until searchd resumes, and `KAYA_ONLY=save-swift` with the wait cut out
+failed exactly as sighted, `Save offered enabled=false ... keyboards 1->1 sheet
+still up field "final"` and "save cancelled". With the wait in, a 25 s stall
+was waited out (`choose` waited 22.3 s, the leg green in 43 s), and a 110 s one
+failed naming the provider ("pressed after the device's LocalStorage file
+provider was still indexing after 41s (indexing yes, ...)").
+
+The picker's commits now wait for the device's LocalStorage indexer to read
+idle (`indexing: no` in that dump, 0.25 s a read): run-sim waits before
+forwarding `savepress` or `choose` (up to 40 s, inside the guest's 60 s ask,
+the wait an account part of its own) and before launching a leg whose script
+saves or chooses (up to 150 s, outside the leg's ceiling); a lane whose device
+prints no indexer reading refuses to start. The driver waits for Save to be
+enabled before it taps, and a red bundle's system slice carries the provider's
+purge lines with a summary naming each purge's span. GUARD: tools/check-steps.py's
+ios_provider, eight negatives watched red, and the purge summary's four branches
+printed; ios_give_up, five negatives watched red.
 
 
 ## The Compose cover drawn unsmoothed (measured 2026-10-14)

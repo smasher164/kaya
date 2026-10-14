@@ -33,6 +33,7 @@ from lanes import ios as ios_lane
 from lanes import mac as mac_lane
 from lanes import win as win_lane
 from packaging import identity as app_identity
+import flightrec_lane
 from packaging import windows as win_package
 import scene_cut
 import secure_scan
@@ -5055,7 +5056,7 @@ def ios_picker(driver):
                        f"verbs find the sheet by")
     # 3. ONE PRESS OF SAVE GETS ONE WINDOW. savepress presses up to six
     #    times because a press the sheet does not take is a measured
-    #    outcome under a matrix (docs/deferred.md, the save-press WATCH);
+    #    outcome under a matrix (docs/deferred.md, the save-press entry);
     #    an inner wait handed the verb's whole remaining budget makes the
     #    loop one press long, which is what matrix #18 (2026-09-06) ran
     #    into with the five presses that would have followed never coming.
@@ -5151,7 +5152,7 @@ if out:
 for label, pattern, repl, src, which, want in (
         ("savepress's give-up picture", r'\n\s*failShot\(a, "savepress"\)\n', "\n",
          DRIVER_SRC, "driver", "savepress gives up without"),
-        ("the enabled reading", r'enabled=\\\(save\.isEnabled\) ', "",
+        ("the enabled reading", r'enabled=\\\(save\.isEnabled\)', "",
          DRIVER_SRC, "driver", "whether Save was enabled"),
         ("the driver's shot adopted", r"\n\s+driver_shot\(drive_dir, name, log\)\n", "\n",
          RUNSIM_SRC, "runsim", "adopts the driver's own screenshot"),
@@ -5165,6 +5166,119 @@ for label, pattern, repl, src, which, want in (
     args = (doc, RUNSIM_SRC) if which == "driver" else (DRIVER_SRC, doc)
     if hits != 1 or not any(want in b for b in ios_give_up(*args)):
         selftest_fail(f"the iOS give-up negative ({label}) did not fire")
+
+# THE PICKER'S COMMITS WAIT FOR THE DEVICE'S FILE PROVIDER (docs/traps.md, the
+# iOS save press): a LocalStorage Spotlight purge left Save disabled for 44 s in
+# one red and turned a fired Save into an empty pick in another, and no scene can
+# see the wait go, since a quiet host never purges.
+def body_of(src, head, nxt):
+    start = src.find(head)
+    if start < 0:
+        return ""
+    end = src.find(nxt, start + len(head))
+    return src[start:end if end > 0 else len(src)]
+
+
+def ios_provider(driver, runsim, flightrec):
+    bad = []
+    verbs = re.search(r"^PROVIDER_VERBS = frozenset\(\((.*?)\)\)", runsim, re.M)
+    for verb in ("savepress", "choose"):
+        if not verbs or f'"{verb}"' not in verbs.group(1):
+            bad.append(f"tools/ios/run-sim.py: PROVIDER_VERBS no longer holds {verb}, so "
+                       f"its commit reaches the picker while the provider indexes")
+    watch = body_of(runsim, "def simdrive_watch(", "\ndef ")
+    gate = watch.find("provider_quiet(udid, PROVIDER_COMMIT_WAIT)")
+    press = watch.find("xcuidrive(udid, verb, timeout=90)")
+    if gate < 0 or press < 0 or gate > press:
+        bad.append("tools/ios/run-sim.py: simdrive_watch forwards a picker commit without "
+                   "provider_quiet(udid, PROVIDER_COMMIT_WAIT) first")
+    leg = body_of(runsim, "def run_swiftui_on(", "\ndef ")
+    gate = leg.find("provider_quiet(udid, PROVIDER_LAUNCH_WAIT)")
+    launch = leg.find("launched_at = time.time()")
+    if gate < 0 or launch < 0 or gate > launch:
+        bad.append("tools/ios/run-sim.py: run_swiftui_on launches a picker leg without "
+                   "provider_quiet(udid, PROVIDER_LAUNCH_WAIT) first")
+    if "_got = provider_reading(_text)" not in runsim:
+        bad.append("tools/ios/run-sim.py: provider_reading is no longer read over its "
+                   "canned dumps before any leg trusts it")
+    if not re.search(r"provider_indexer\(u\)\][^\n]*\nif _unread:\n\s+die\(", runsim):
+        bad.append("tools/ios/run-sim.py: the lane no longer refuses a device whose "
+                   "indexer it cannot read, so the provider wait would wait blind")
+    capture = body_of(runsim, "def system_capture(", "\ndef ")
+    if 'process == "LocalStorageFileProvider"' not in capture:
+        bad.append("tools/ios/run-sim.py: system_capture no longer reads the LocalStorage "
+                   "provider's purges, so a red picker leg cannot name the stall")
+    if "said.append(ios_provider_purges(lines))" not in flightrec:
+        bad.append("tools/lib/flightrec_lane.py: ios_system_log no longer reports the "
+                   "provider's Spotlight purges")
+    arm = re.search(r'case "savepress":(.*?)case "savecancel":', driver, re.S)
+    arm = arm.group(1) if arm else ""
+    wait = arm.find("{ save.isEnabled }")
+    tap = arm.find('tapSafely(a, save, "the save sheet\'s Save")')
+    if wait < 0 or tap < 0 or wait > tap:
+        bad.append("tools/ios/xcuidrive/KayaDrive.swift: savepress taps Save without "
+                   "waiting for it to be enabled")
+    return bad
+
+
+FLIGHTREC_SRC = read_rel("tools/lib/flightrec_lane.py")
+out = ios_provider(DRIVER_SRC, RUNSIM_SRC, FLIGHTREC_SRC)
+if out:
+    print("check-steps: an iOS picker commit could meet a busy file provider:", file=sys.stderr)
+    print("\n".join(out), file=sys.stderr)
+    status = 1
+for label, pattern, repl, which, want in (
+        ("savepress gated", r'\("savepress", "choose"\)', '("choose",)', "runsim",
+         "no longer holds savepress"),
+        ("the commit gate", r"quiet, provider = provider_quiet\(udid, PROVIDER_COMMIT_WAIT\)",
+         "quiet, provider = True, ''", "runsim", "PROVIDER_COMMIT_WAIT) first"),
+        ("the launch gate", r"_, provider = provider_quiet\(udid, PROVIDER_LAUNCH_WAIT\)",
+         "provider = ''", "runsim", "PROVIDER_LAUNCH_WAIT) first"),
+        ("the reading's self-test", r"_got = provider_reading\(_text\)", "_got = None",
+         "runsim", "canned dumps"),
+        ("the blind refusal", r"if _unread:\n", "if False:\n", "runsim", "wait blind"),
+        ("the purge capture",
+         r"\n\s+' OR \(process == \"LocalStorageFileProvider\"[^\n]*", "", "runsim",
+         "cannot name the stall"),
+        ("the purge report", r"said\.append\(ios_provider_purges\(lines\)\)", "pass",
+         "flightrec", "Spotlight purges"),
+        ("the enabled wait", r"\{ save\.isEnabled \}", "{ true }", "driver",
+         "without waiting for it to be enabled")):
+    srcs = {"driver": DRIVER_SRC, "runsim": RUNSIM_SRC, "flightrec": FLIGHTREC_SRC}
+    doc, hits = sub_count(pattern, repl, srcs[which])
+    srcs[which] = doc
+    print(f"check-steps: iOS provider negative ({label}): {hits} substitution(s)")
+    if hits != 1 or not any(want in b for b in ios_provider(
+            srcs["driver"], srcs["runsim"], srcs["flightrec"])):
+        selftest_fail(f"the iOS provider negative ({label}) did not fire")
+
+_ns = {"re": re, "time": types.SimpleNamespace(monotonic=time.monotonic, sleep=lambda _s: None)}
+exec(body_of(RUNSIM_SRC, "def provider_reading(", "\n\nfor ")
+     + body_of(RUNSIM_SRC, "def provider_quiet(", "\n\ndef "), _ns)
+for _fields, _bound, _want in (
+        ({"indexing": "no", "errors": "75"}, 0, "read idle after"),
+        ({"indexing": "yes", "needs-indexing": "yes", "errors": "75",
+          "last error": "-1002"}, 0, "still indexing after 0s (indexing yes"),
+        (None, 0, "no indexer in fileproviderctl's dump, exit 1")):
+    _ns["provider_indexer"] = lambda _u, _f=_fields: (_f, "exit 1: 'Invalid device'")
+    _quiet, _said = _ns["provider_quiet"]("udid", _bound)
+    print(f"check-steps: provider wait over {_fields}: idle={_quiet} {_said}")
+    if _want not in _said or _quiet != (_want == "read idle after"):
+        selftest_fail(f"the provider wait's sentence missed {_want!r}")
+
+_purge = flightrec_lane.ios_provider_purges
+_start = ("2026-10-14 08:37:36.106 Df LocalStorageFileProvider[51975:1] [spotlight] "
+          "deleting all searchable items in spotlight domain D because \"Sync anchor expired\"")
+_done = ("2026-10-14 08:38:23.219 Df LocalStorageFileProvider[51975:1] [spotlight] "
+         "done deleting all searchable items in 47.111s (because \"Sync anchor expired\")")
+for _lines, _want in (([], "purged no Spotlight index"),
+                      ([_start, _done], "08:37:36.106 to 08:38:23.219 (47.111 s)"),
+                      ([_done], "before the slice to 08:38:23.219"),
+                      ([_start], "08:37:36.106 and still running")):
+    _said = _purge(_lines)
+    print(f"check-steps: provider purge report over {len(_lines)} line(s): {_said}")
+    if _want not in _said:
+        selftest_fail(f"the provider purge report missed {_want!r}")
 
 doc, hits = sub_count(r'if let why = typingRefusal\(a, "the save sheet\x27s name field",',
                       'if let why = missingTypingRefusal(a, "the save sheet\x27s name field",',

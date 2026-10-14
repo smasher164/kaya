@@ -313,7 +313,7 @@ report would come from every backend's asynchronous decode, per stamped copy,
 for an answer the app can do nothing with. Its shape is clear (one report per
 content id, not per stamp). Trigger: an app that shows a need.
 
-## WATCH — the iOS document picker's Save did nothing six times (editor-go, 2026-10-14)
+## ~~WATCH — the iOS document picker's Save did nothing six times (editor-go, 2026-10-14)~~ FIXED 2026-10-14 AT THE CAUSE: the next two sightings (save-swift and editor-go, run 20261014T153322Z-024974) each sat inside a LocalStorage file-provider Spotlight purge ("Sync anchor expired", 47 s and 6 s): save-swift's Save read enabled=false for all six presses while the picker's FPSetLastOpenDateOperation waited 44 s, and editor-go's Save fired but the app was handed an empty pick (DOCSetTagsOperation 3.3 s), which UIKit delivers as a cancel. Reproduced by stopping the simulators' searchd; the picker's commits now wait for the device's LocalStorage indexer to read idle (run-sim's provider_quiet before `savepress`/`choose` and before a picker leg's launch), the driver waits for Save to be enabled, and a red bundle names each purge (docs/traps.md, the iOS save press). GUARD: check-steps' ios_provider, eight negatives watched red. Validation: the full iOS lane 250/250 and KAYA_ONLY=editor,save,filedialog,secure,reveal,autofill 3 x 22/22 with the wait; a 25 s induced stall waited out, the wait cut red as sighted.
 KEY: file_save, document picker, Save, editor-go, keyboards 1->1, hittable
 
 Seen once, in the full matrix at 0446a86a: the picker's own process logged
@@ -10773,11 +10773,12 @@ after its first leg so the next leg's restart prints rather than being
 trusted.
 
 MATRIX #18 THE SAME EVENING was red on this leg again with the driver
-ALIVE — a different shape, held by the save-press WATCH below (the
-driver's own retry loop, one press long after this round's edit).
+ALIVE — a different shape, held by the save-press entry below (the
+driver's own retry loop, one press long after this round's edit; answered
+2026-10-14, docs/traps.md, the iOS save press).
 
 
-## WATCH — `save-swiftui` under a matrix: the save sheet's Save was pressed once and the sheet stayed up (first sighting 2026-09-06)
+## ~~WATCH — `save-swiftui` under a matrix: the save sheet's Save was pressed once and the sheet stayed up (first sighting 2026-09-06)~~ ANSWERED 2026-10-14 by the entry above: under load the LocalStorage provider's Spotlight purge leaves Save disabled or turns a fired Save into an empty pick, and the picker's commits now wait for its indexer (docs/traps.md, the iOS save press). The 2026-09-06 sighting predates the enabled reading and the picker's process log and stays unattributed; a recurrence now carries both, the provider wait's own sentence and the purge summary. The EXCLUSIVE placement below still stands and wants its own measured reason or a move back to the pool.
 EXCLUSIVE SINCE 2026-09-06: `save-swift`, `save-go`, `save-swiftui` and
 `filedialog-go` run holding the matrix-wide exclusive token (tools/lib/exclusive.py,
 tools/lib/lanes/ios.py EXCLUSIVE) with the iOS pool emptied first, so the

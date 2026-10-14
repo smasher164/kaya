@@ -322,7 +322,29 @@ def ios_system_log(text, pid):
                     f"neither suspended nor resumed ({len(marks)} mark(s) at its exit)")
     said.append(f"{len(lost)} line(s) say lost connection or unable to monitor"
                 + (f", the first: {lost[0][:200]}" if lost else ""))
+    said.append(ios_provider_purges(lines))
     return "; ".join(said)
+
+
+def ios_provider_purges(lines):
+    """docs/traps.md, the iOS save press: the LocalStorage provider's Spotlight purges."""
+    spans, open_at = [], None
+    for line in lines:
+        if "LocalStorageFileProvider[" not in line or "deleting all searchable items" not in line:
+            continue
+        if "done deleting" in line:
+            took = re.search(r"in ([0-9.]+)s", line)
+            spans.append(f"{open_at or 'before the slice'} to {line[11:23]} "
+                         f"({took.group(1) if took else '?'} s)")
+            open_at = None
+        else:
+            open_at = line[11:23]
+    if open_at:
+        spans.append(f"{open_at} and still running at the slice's end")
+    if not spans:
+        return "the LocalStorage provider purged no Spotlight index in this slice"
+    return (f"the LocalStorage provider purged its Spotlight index {len(spans)} time(s): "
+            + ", ".join(spans))
 
 
 def ios_crash_reports(directory, pid, since):

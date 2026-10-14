@@ -840,8 +840,18 @@ final class KayaDrive: XCTestCase {
                 let save = bar(a).buttons["Save"]
                 let keyboardsBefore = a.keyboards.count
                 let offeredNow = save.exists
+                // docs/traps.md, the iOS save press: a disabled Save takes the
+                // touch and fires nothing while the picker's provider is busy.
+                var disabledFor = ""
+                if offeredNow && !save.isEnabled {
+                    let since = Date()
+                    let came = waitFor("the save sheet's Save enabled",
+                                       min(savePressWindow, left(deadline))) { save.isEnabled }
+                    disabledFor = String(format: " after %.1fs disabled%@",
+                                         Date().timeIntervalSince(since), came ? "" : " and still")
+                }
                 let saveState = offeredNow
-                    ? " enabled=\(save.isEnabled) hittable=\(save.isHittable)"
+                    ? " enabled=\(save.isEnabled)\(disabledFor) hittable=\(save.isHittable)"
                         + " at \(Int(save.frame.midX)),\(Int(save.frame.midY))"
                     : ""
                 if offeredNow {
@@ -854,7 +864,7 @@ final class KayaDrive: XCTestCase {
                 // matrix #18 (2026-09-06) spent all 44s on a single press
                 // the sheet did not take, and the five presses that would
                 // have followed never came (docs/deferred.md, the
-                // save-press WATCH). The window covers a dismissal measured
+                // save-press entry). The window covers a dismissal measured
                 // at 0.7-1.4s under a matrix several times over.
                 gone = waitForPickerGone(a, min(savePressWindow, left(deadline)))
                 let field = nameField(a)

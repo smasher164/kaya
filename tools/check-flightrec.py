@@ -1475,7 +1475,8 @@ def census_ios_hang_record(src):
 
 def ios_hang_record_checks(src, echo=False):
     scope = {"re": re, "pathlib": pathlib, "json": json, "datetime": datetime}
-    for name in ("ios_animation_reading", "_log_time", "ios_system_log", "ios_crash_reports"):
+    for name in ("ios_animation_reading", "_log_time", "ios_provider_purges", "ios_system_log",
+                 "ios_crash_reports"):
         body = py_block(src[LANE_PY], name)
         if not body:
             return [f"ios: missing hang reader {name}"]

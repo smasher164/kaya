@@ -1498,6 +1498,64 @@ if not needs_bridge('expect label#0 "x"\ntype "an"') \
         "bridge would be started by luck")
 
 
+# docs/traps.md, the iOS save press: the picker's commits stall while the
+# device's LocalStorage file provider indexes (a Spotlight purge after an
+# expired sync anchor ran 0.3-127 s), so they wait for its indexer to idle.
+PROVIDER_VERBS = frozenset(("savepress", "choose"))
+PROVIDER_STEPS = frozenset(("file_save", "file_choose"))
+PROVIDER_COMMIT_WAIT = 40
+PROVIDER_LAUNCH_WAIT = 150
+
+
+def provider_reading(text):
+    """The LocalStorage indexer's fields out of `fileproviderctl dump`, or None."""
+    fields = {}
+    for key in ("indexing", "needs-indexing", "errors", "last error"):
+        m = re.search(rf"^\s*{key}:\s*(.+?)\s*$", text or "", re.M)
+        if m:
+            fields[key] = m.group(1)
+    return fields if fields.get("indexing") in ("yes", "no") else None
+
+
+for _text, _want in (("  + indexer:\n      indexing:       no\n      errors:         75\n", "no"),
+                     ("      indexing:       yes\n      needs-indexing: yes\n", "yes"),
+                     ("Import Cookie: The operation couldn't be completed.\n", None)):
+    _got = provider_reading(_text)
+    if (_got or {}).get("indexing") != _want:
+        die(f"run-sim: provider_reading read {_got} out of a dump whose indexer is "
+            f"{_want} — the picker's commits would wait on a misread")
+
+
+def provider_indexer(udid):
+    """(fields or None, what fileproviderctl printed) for the device's LocalStorage."""
+    got = subprocess.run(["timeout", "20", "xcrun", "simctl", "spawn", udid,
+                          "fileproviderctl", "dump", "-l",
+                          "com.apple.FileProvider.LocalStorage"],
+                         capture_output=True, check=False, **TEXT)
+    said = (got.stdout + got.stderr).strip()
+    return provider_reading(got.stdout), f"exit {got.returncode}: {said[-300:]!r}"
+
+
+def provider_quiet(udid, bound):
+    """(idle, sentence): waits until the device's LocalStorage indexer reads idle,
+    or `bound` seconds pass."""
+    started = time.monotonic()
+    while True:
+        fields, raw = provider_indexer(udid)
+        waited = time.monotonic() - started
+        if fields is not None and fields["indexing"] == "no":
+            return True, (f"the LocalStorage indexer read idle after {waited:.1f}s "
+                          f"(errors {fields.get('errors', '?')})")
+        if waited >= bound:
+            said = (f"indexing {fields['indexing']}, needs-indexing "
+                    f"{fields.get('needs-indexing', '?')}, errors {fields.get('errors', '?')}, "
+                    f"last error {fields.get('last error', 'none')}"
+                    if fields is not None else f"no indexer in fileproviderctl's dump, {raw}")
+            return False, (f"the device's LocalStorage file provider was still indexing "
+                           f"after {waited:.0f}s ({said})")
+        time.sleep(0.5)
+
+
 def simdrive_watch(udid, bundle_id, docs_dir, log_path, stop):
     """Answer the guest's simdrive requests for the life of one leg.
     The protocol is two files: the guest writes `kaya-simdrive-request`
@@ -1555,10 +1613,21 @@ def simdrive_watch(udid, bundle_id, docs_dir, log_path, stop):
                         attached = ok
                         pid = "attached" if ok else "unattached"
                     pid_ms = str(now_ms() - pid_started)
+                    quiet, provider = True, ""
+                    if attached and parts[0] in PROVIDER_VERBS:
+                        account.begin("provider")
+                        quiet, provider = provider_quiet(udid, PROVIDER_COMMIT_WAIT)
+                        account.end()
+                        lg.write(f"KAYA_SIMDRIVE: at={now_ms()} src=watch ev=provider "
+                                 f"id={rid or 'none'} verb={parts[0]} idle={quiet} {provider}\n")
+                        lg.flush()
                     if attached:
                         ok, body = xcuidrive(udid, verb, timeout=90)
                         if not ok and "no app attached" in body:
                             attached = False
+                        if not ok and not quiet:
+                            body = (f"{body}; pressed after {provider} "
+                                    f"(docs/traps.md, the iOS save press)")
                     rc = 0 if ok else 1
                 lg.write(f"KAYA_SIMDRIVE: at={now_ms()} src=watch "
                          f"ev=request id={rid or 'none'} "
@@ -2024,6 +2093,10 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
     # here and the harness keeps the last 20 to publish a verdict. Without
     # it a sheet that never comes is spent one 45s wait at a time and the
     # leg dies unread.
+    if any(line.split()[0] in PROVIDER_STEPS for line in script.splitlines()
+           if line.strip() and not line.lstrip().startswith("#")):
+        _, provider = provider_quiet(udid, PROVIDER_LAUNCH_WAIT)
+        print(f"run-sim: {name} launches with {provider}", file=log)
     if drive_dir.is_dir():
         (drive_dir / "deadline").write_text(f"{time.time() + 100:.3f}\n",
                                             encoding="utf-8")
@@ -2229,11 +2302,14 @@ def system_capture(udid, name, log, launched_at, pid):
     """docs/traps.md, XCTest's animations-idle wait: testmanagerd, the xcui driver's
     runner and runningboardd over the leg, and any crash report naming the app's pid;
     and the document picker's own process, whose `send control actions` is the only
-    record of a press reaching its button (docs/traps.md, the iOS save press)."""
+    record of a press reaching its button, with the LocalStorage provider's Spotlight
+    purges that stall it (docs/traps.md, the iOS save press)."""
     dest = (LEGS_DIR / f"{name}.log").with_suffix(".syslog")
     since = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(launched_at - 1))
     predicate = ('process == "testmanagerd" OR process == "KayaDrive-Runner"'
                  ' OR process == "com.apple.DocumentManager.Service"'
+                 ' OR (process == "LocalStorageFileProvider"'
+                 ' AND eventMessage CONTAINS "searchable items")'
                  + (f' OR (process == "runningboardd" AND eventMessage CONTAINS "{pid}")'
                     if pid is not None else ""))
     with tempfile.NamedTemporaryFile(prefix="kaya-syslog-", delete=False) as tf:
@@ -3162,6 +3238,12 @@ if _keyboard_wrong:
         "no-keyboard refusal (docs/safe-area-plan.md A10)")
 print(f"run-sim: the software keyboard is up on {len(UDIDS) + 1} device(s) "
       f"(read back 0)", file=sys.stderr, flush=True)
+_unread = [f"{u} ({raw})" for u in [*UDIDS, PAD_UDID]
+           for fields, raw in [provider_indexer(u)] if fields is None]
+if _unread:
+    die("run-sim: no LocalStorage indexer reading on " + "; ".join(_unread)
+        + " — the picker legs' provider wait would wait blind (docs/traps.md, "
+        "the iOS save press)")
 xcuidrive_launch_all()
 # BEFORE ANY LEG: can each phone export and reopen a file through
 # LocalStorage? BACKGROUNDED here and JOINED IN queue_leg (prep_join),
