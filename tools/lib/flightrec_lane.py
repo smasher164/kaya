@@ -165,6 +165,21 @@ IOS_NOTIFICATION_PREDICATE = (
     'eventMessage CONTAINS "effectiveSectionInfo"))')
 
 
+# A leg's own account (the iOS driver's waits, XCTest's) is kept whole up to
+# this many lines: a tail cut at 40 and 60 lost the failing verb's own lines
+# while later verbs filled the tail (docs/traps.md, the iOS save press).
+LEG_ACCOUNT_LINES = 4000
+
+
+def whole_or_ends(lines, cap=LEG_ACCOUNT_LINES):
+    """`lines` joined, or its first and last halves of `cap` with the count cut between."""
+    if len(lines) <= cap:
+        return "\n".join(lines)
+    half = cap // 2
+    return "\n".join([*lines[:half], f"... {len(lines) - 2 * half} line(s) cut here ...",
+                      *lines[-half:]])
+
+
 def ios_launch_pid(out, bundle_id):
     """docs/traps.md, the app log selected by process name."""
     m = re.search(rf"^{re.escape(bundle_id)}: (\d+)\s*$", out or "", re.M)

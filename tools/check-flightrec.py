@@ -110,6 +110,9 @@ def census_android_app_shot(src):
                      "taken — the process leaves under it")
     if "android.view.PixelCopy.request(" not in kt[kt.find("object KayaFailShot"):]:
         found.append("android: KayaFailShot no longer copies the window")
+    if "val sheets = sheetLayers(activity, bitmap)" not in kt[kt.find("object KayaFailShot"):]:
+        found.append("android: KayaFailShot no longer draws each sheet's own window over the "
+                     "activity's (docs/traps.md, the quick-add field panned above its sheet's top)")
     runner = src[ANDROID]
     if '["--es", "KAYA_FAIL_SHOT", f"fail-shot-{leg}.png"]' not in runner:
         found.append("android: the runner no longer names KAYA_FAIL_SHOT for the leg")
@@ -118,6 +121,11 @@ def census_android_app_shot(src):
     leg = py_block(runner, "run_apk_on")
     if "app_shot(serial, package, name, log)" not in leg:
         found.append("android: run_apk_on does not pull the app's own picture on a red leg")
+    clear = leg.find('run_as(serial, package, "rm", "-f", f"files/verb-trace-{name}.txt")')
+    start = leg.find('"am", "start", "-W", "-n", component, "--es",')
+    if not 0 <= clear < start:
+        found.append("android: run_apk_on does not delete the leg's verb trace before its launch — "
+                     "the ring appends, so a red bundle carries every earlier red's dump")
     if '.with_suffix(".shot.png")' not in py_block(runner, "app_shot") or \
             '.with_suffix(".desktop-shot.png")' not in py_block(runner, "device_capture"):
         found.append("android: the screencap after the verdict is filed as the leg's `shot` — "
@@ -1961,6 +1969,18 @@ na4 = doctored(ANDROID, r'\.with_suffix\("\.desktop-shot\.png"\)', '.with_suffix
 gate.negative("NA4 the launcher's picture as the leg's shot",
               lambda: census_android_app_shot(na4), want="filed as the leg's `shot`")
 
+na5 = doctored(COMPOSE, r"^ *val sheets = sheetLayers\(activity, bitmap\)\n", "",
+               "NA5 cut the sheets from the app's picture")
+gate.negative("NA5 the app's picture without its sheets",
+              lambda: census_android_app_shot(na5), want="draws each sheet's own window")
+na6 = doctored(ANDROID,
+               r'^ *run_as\(serial, package, "rm", "-f", '
+               r'f"files/verb-trace-\{name\}\.txt"\)\n', "",
+               "NA6 cut the pre-launch verb trace delete, as shipped")
+gate.negative("NA6 a red bundle carrying earlier reds' dumps",
+              lambda: census_android_app_shot(na6),
+              want="delete the leg's verb trace before its launch")
+
 # The mac guest's own picture, each link cut from a copy.
 nm1 = doctored(SWIFTUI, r'^ *KayaFailShot\.take\("the first failed step, \\\(line\)"\)\n',
                "", "NM1 cut the mac step's picture")
@@ -2521,6 +2541,6 @@ for tag, want in (("MD1", "never resolved the guest's pid"),
         label, drive = DRIVES[tag]
         gate.negative(label, lambda: mac_drive_checks(drive), want=want)
 
-gate.negatives_ran(144 + (5 if DRIVES else 0))
+gate.negatives_ran(146 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

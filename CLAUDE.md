@@ -825,12 +825,11 @@ in docs/deferred.md.
    at `file_choose` with every press swallowed while the maintainer's
    browser was frontmost, and AX reported success for all three
    (docs/deferred.md, the swallowed-press entry). The mac lane's
-   `EXCLUSIVE` is the three scenes whose steps press the file panel's own
-   buttons through the accessibility client — DERIVED from the queue, and
-   the whole class, since the interpreter's only three
-   `AXUIElementPerformAction` sites are those drives while `type` is
-   in-process `NSApp.sendEvent` and a drag is a private pasteboard — and
-   the funnel reads HIDIdleTime BEFORE the token, waiting bounded for
+   `EXCLUSIVE` is every leg whose scene script runs a verb in
+   tools/lib/lanes/mac.py's `HOST_VERBS` — the file panel's presses, the
+   Now Playing session, and the takeover verbs below — DERIVED from the
+   scripts, never a hand list (the hand list of four panel scenes had
+   missed chat's `file_choose`), and the funnel reads HIDIdleTime BEFORE the token, waiting bounded for
    twenty seconds of neither key nor pointer, then reads it once more
    INSIDE the hold without sleeping, releasing the token to wait again if
    the human came back. A wait that expires RUNS THE LEG ANYWAY and says
@@ -849,15 +848,23 @@ in docs/deferred.md.
    tools/ script, and a red mac leg's verdict line naming the frontmost
    application AT THE MOMENT OF THE RED (one reader with the bundle's
    window census, tools/lib/flightrec_lane.py's `mac_frontmost`).
-   AND A LEG THAT MOVES THE HOST'S DISPLAY NEVER RUNS WHILE THE MAINTAINER
-   IS ACTIVE (his ruling, 2026-09-28): fullscreen switches the screen to
-   the guest's own Space and takes the keyboard, so its legs are
-   `DISPLAY_LEGS`, which never wait in their queue position: a busy
-   reading DEFERS the leg to the lane's end, where every deferred leg
-   shares ONE 120s bound for 120s idle and on expiry or an unreadable
-   clock is reported NOT RUN instead of run; the funnel and
-   tools/run-leg.py both honour the refusal, and the deferral, the shared
-   bound and the refusal are RUN against a doubled clock. AND THE WINDOWS LANE REFUSES A DISPLAY ITS
+   AND A LEG THAT TAKES THE HOST'S DISPLAY OR KEYBOARD NEVER RUNS WHILE THE
+   MAINTAINER IS ACTIVE (his ruling, 2026-09-28, for fullscreen; his
+   2026-10-14 for the keyboard, after the emoji leg activated the guest and
+   took his typing): a scene running a `takeover` verb — fullscreen, the
+   emoji palette, open_link — makes `TAKEOVER_LEGS`, which never wait in
+   their queue position: a busy reading DEFERS the leg to the lane's end,
+   where every deferred leg shares ONE 120s bound for 120s idle and on
+   expiry or an unreadable clock is reported NOT RUN instead of run; the
+   funnel and tools/run-leg.py both honour the refusal, and the deferral,
+   the shared bound and the refusal are RUN against a doubled clock. The
+   gate censuses the interpreter's foreground-taking calls
+   (`FOREGROUND_CALLS`: NSApp.activate, orderFrontCharacterPalette,
+   toggleFullScreen, NSWorkspace.shared.open) at their counts, each to the
+   takeover verb that reaches it, and holds every harness key to
+   `kayaHarnessSend`, so the leg log's `host key:` line counts only keys the
+   host's keyboard sent (docs/traps.md, the emoji leg took the maintainer's
+   keystrokes). AND THE WINDOWS LANE REFUSES A DISPLAY ITS
    LEGS DO NOT ASSUME since 2026-10-03 (docs/traps.md, the UTM entry): the
    desktop warm-up reads `Screen.AllScreens` in the interactive session and
    deploy-win's desk_warm refuses unless lane.screens_refusal finds exactly
@@ -979,7 +986,7 @@ in docs/deferred.md.
    90 days under a 2 GB bound, oldest first (the 2026-10-12 XCTest hang's
    bundle was pruned before anyone needed it). The real pruner runs dry and
    then for real over a synthetic home; eight cuts watched.
-   A hundred and forty-nine watched negatives, counts printed),
+   A hundred and fifty-one watched negatives, counts printed),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer

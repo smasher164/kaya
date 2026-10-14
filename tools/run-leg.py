@@ -157,10 +157,10 @@ atexit.register(kaya_teardown)
 signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
 signal.signal(signal.SIGINT, lambda *_: sys.exit(130))
 
-# A leg that moves the host's display waits for an idle host by hand too
-# (tools/lib/lanes/mac.py's DISPLAY_SCENES, the maintainer's ruling).
-if scene in lane.DISPLAY_SCENES:
-    refused = lane.display_wait(name)
+# A leg that takes the host's display or keyboard waits for an idle host by
+# hand too (tools/lib/lanes/mac.py's TAKEOVER_SCENES, the maintainer's ruling).
+if scene in lane.TAKEOVER_SCENES:
+    refused = lane.takeover_wait(name)
     if refused:
         print(f"run-leg: exit 3 — {refused}", flush=True)
         sys.exit(3)

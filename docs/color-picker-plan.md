@@ -300,7 +300,8 @@ RRGGBB`, `pick_emoji`'s precedent): GTK's dialog custom editor, WinUI's
 flyout hex box, Android's sheet, iOS's picker through the XCUITest driver.
 On the mac the shared `NSColorPanel` opens on the host's screen, where a
 person at the keyboard would see it and could type into it, so that leg
-joins the mac lane's `HOST_UI_SCENES` (EXCLUSIVE, with the idle-host wait)
+joins the mac lane's `HOST_VERBS` as a takeover verb (EXCLUSIVE, never run
+while the maintainer is active)
 and is driven through accessibility like the emoji palette; the lanes that
 cannot reach a panel's hex field say so in their lane table.
 
@@ -348,7 +349,7 @@ Guards:
   emit sits inside its backend's commit door (§6), because `set_color`
   is one finished choice by construction and a backend that emitted on
   every drag would pass the scene byte for byte.
-- check-exclusive: the mac panel leg is in `HOST_UI_SCENES`.
+- check-exclusive: the mac panel leg's verb is in `HOST_VERBS`.
 
 ## §8. The two rulings
 

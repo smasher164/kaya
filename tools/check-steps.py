@@ -5011,6 +5011,63 @@ if not any("savePressWindow" in b for b in ios_picker(doc)):
     selftest_fail("a savepress that spends its whole budget on one press "
                   "passed")
 
+# A PICKER VERB THAT GIVES UP PHOTOGRAPHS THE SCREEN AND KEEPS WHAT THE
+# PICKER SAID (docs/traps.md, the iOS save press): the host's own picture is
+# taken after the guest exits, and six taps that fired no control left a
+# bundle that could not say whether Save was covered or disabled.
+def ios_give_up(driver, runsim):
+    bad = []
+    for verb, arm in (("savepress", r'case "savepress":(.*?)case "savecancel":'),
+                      ("choose", r'case "choose":(.*?)case "')):
+        m = re.search(arm, driver, re.S)
+        if not m or f'failShot(a, "{verb}")' not in m.group(1):
+            bad.append(f"tools/ios/xcuidrive/KayaDrive.swift: {verb} gives up "
+                       f"without failShot(a, \"{verb}\") — the red's only "
+                       f"picture is the home screen after the guest exits")
+    m = re.search(r'case "savepress":(.*?)case "savecancel":', driver, re.S)
+    if not m or "enabled=\\(save.isEnabled)" not in m.group(1):
+        bad.append("tools/ios/xcuidrive/KayaDrive.swift: a savepress reading no "
+                   "longer says whether Save was enabled when it was pressed")
+    if not re.search(r"device_capture\([^\n]*\n[^\n]*launched_at\)\n\s+"
+                     r"driver_shot\(drive_dir, name, log\)",
+                     runsim):
+        bad.append("tools/ios/run-sim.py: a failed leg no longer adopts the "
+                   "driver's own screenshot (driver_shot after device_capture)")
+    if 'process == \\"com.apple.DocumentManager.Service\\"' not in runsim \
+            and 'process == "com.apple.DocumentManager.Service"' not in runsim:
+        bad.append("tools/ios/run-sim.py: system_capture no longer reads the "
+                   "document picker's process, whose `send control actions` is "
+                   "the only record of a press reaching its button")
+    if runsim.count("flightrec_lane.whole_or_ends(") < 2:
+        bad.append("tools/ios/run-sim.py: the driver's or XCTest's account is "
+                   "cut to its tail again, which lost the failing verb's lines")
+    return bad
+
+
+RUNSIM_SRC = read_rel("tools/ios/run-sim.py")
+out = ios_give_up(DRIVER_SRC, RUNSIM_SRC)
+if out:
+    print("check-steps: an iOS picker red would name nothing:", file=sys.stderr)
+    print("\n".join(out), file=sys.stderr)
+    status = 1
+for label, pattern, repl, src, which, want in (
+        ("savepress's give-up picture", r'\n\s*failShot\(a, "savepress"\)\n', "\n",
+         DRIVER_SRC, "driver", "savepress gives up without"),
+        ("the enabled reading", r'enabled=\\\(save\.isEnabled\) ', "",
+         DRIVER_SRC, "driver", "whether Save was enabled"),
+        ("the driver's shot adopted", r"\n\s+driver_shot\(drive_dir, name, log\)\n", "\n",
+         RUNSIM_SRC, "runsim", "adopts the driver's own screenshot"),
+        ("the picker service's log",
+         r"\n\s+' OR process == \"com\.apple\.DocumentManager\.Service\"'",
+         "", RUNSIM_SRC, "runsim", "document picker's process"),
+        ("the accounts cut to a tail", r"flightrec_lane\.whole_or_ends\(mine\)",
+         "\"\\n\".join(mine[-40:])", RUNSIM_SRC, "runsim", "cut to its tail")):
+    doc, hits = sub_count(pattern, repl, src)
+    print(f"check-steps: iOS give-up negative ({label}): {hits} substitution(s)")
+    args = (doc, RUNSIM_SRC) if which == "driver" else (DRIVER_SRC, doc)
+    if hits != 1 or not any(want in b for b in ios_give_up(*args)):
+        selftest_fail(f"the iOS give-up negative ({label}) did not fire")
+
 doc, hits = sub_count(r'if let why = typingRefusal\(a, "the save sheet\x27s name field",',
                       'if let why = missingTypingRefusal(a, "the save sheet\x27s name field",',
                       DRIVER_SRC)

@@ -503,28 +503,35 @@ def wired_scenes():
     return {scene for _name, scene, _lang in legs()}
 
 
-# The legs that run as the only input-driving leg on the host (tools/lib/
-# exclusive.py), derived from the queue: the four scenes that press the
-# file panel's own buttons through the accessibility client, since a press
-# posted while a human holds the foreground is swallowed and AX still
-# reports success (docs/deferred.md, the swallowed-press entry).
-PANEL_SCENES = ("filedialog", "save", "editor", "media_picked")
-# And the scenes that open system UI on the host's own screen, which a person
-# at the keyboard would see and could type into: the emoji palette
-# (docs/emoji-picker-plan.md), and fullscreen, which switches the display to
-# the guest's own Space (docs/fullscreen-plan.md §4.1).
-HOST_UI_SCENES = ("emoji", "fullscreen")
-# And the media session, which takes the host's Now Playing and has the
-# system send it media commands (docs/media-plan.md §5).
-HOST_UI_SCENES = HOST_UI_SCENES + ("media_session",)
-EXCLUSIVE = {name for name, scene, _lang in legs()
-             if scene in PANEL_SCENES or scene in HOST_UI_SCENES}
-# The scenes whose legs MOVE THE HOST'S DISPLAY and take its keyboard, which
-# never run while the maintainer is active (his ruling of 2026-09-28): their
-# wait admits an idle host only, and an expired or unreadable wait reports
-# the leg NOT RUN rather than running it anyway.
-DISPLAY_SCENES = ("fullscreen",)
-DISPLAY_LEGS = {name for name, scene, _lang in legs() if scene in DISPLAY_SCENES}
+# The verbs that reach the host beyond the guest's own window, as (kind,
+# what the leg takes). EXCLUSIVE, TAKEOVER_SCENES and TAKEOVER_LEGS are
+# derived from them and the scene scripts at the end of this module, and
+# tools/check-exclusive.py holds every interpreter call that activates the
+# guest to a takeover verb here.
+#   panel: presses the file panel's own buttons through the accessibility
+#     client, and a press posted while a human holds the foreground is
+#     swallowed with AX reporting success (docs/deferred.md, the
+#     swallowed-press entry).
+#   session: takes the host's Now Playing, so the system sends the guest
+#     media commands (docs/media-plan.md §5).
+#   takeover: makes the guest the active app or moves the host's display, so
+#     a person typing types into the guest (docs/traps.md, the emoji leg took
+#     the maintainer's keystrokes). Never runs while the maintainer is active
+#     (his ruling of 2026-09-28): an expired or unreadable wait reports the leg
+#     NOT RUN rather than running it anyway.
+HOST_VERBS = {
+    "file_choose": ("panel", "presses the file panel's buttons"),
+    "file_save": ("panel", "presses the file panel's buttons"),
+    "file_dialog_name": ("panel", "types into the file panel's name field"),
+    "session_send": ("session", "takes the host's Now Playing"),
+    "expect_now_playing": ("session", "takes the host's Now Playing"),
+    "pick_emoji": ("takeover", "activates the guest under the emoji palette, "
+                               "taking the host's keyboard"),
+    "open_link": ("takeover", "activates the guest through LaunchServices, "
+                              "taking the host's keyboard"),
+    "user_fullscreen": ("takeover", "moves the host's display"),
+    "expect_fullscreen": ("takeover", "moves the host's display"),
+}
 
 # The host's own idle clock (HIDIdleTime, nanoseconds since the last key or
 # pointer event), read before such a leg is admitted; the wait never
@@ -537,8 +544,8 @@ DISPLAY_LEGS = {name for name, scene, _lang in legs() if scene in DISPLAY_SCENES
 IDLE_S = 20.0
 IDLE_BOUND_S = 60.0
 IDLE_BUDGET_S = 240.0
-DISPLAY_IDLE_S = 120.0
-DISPLAY_BOUND_S = 120.0
+TAKEOVER_IDLE_S = 120.0
+TAKEOVER_BOUND_S = 120.0
 # What a red leg's whole-desktop picture waits for (tools/lib/flightrec_lane.py's
 # shot_desktop): the screen is the maintainer's while he is at it.
 DESKTOP_SHOT_IDLE_S = 120.0
@@ -566,15 +573,15 @@ IDLE_SENTENCES = {
              "idle-wait budget (HIDIdleTime {idle}s){door}",
     "unreadable": "mac: {leg} cannot read HIDIdleTime ({why}) — running "
                   "without the idle wait",
-    "held": "mac: {leg} moves the host's display and the host is still in "
+    "held": "mac: {leg} {takes} and the host is still in "
             "use after {waited}s (HIDIdleTime {idle}s, wants {want}s) — NOT "
             "RUN{door}",
-    "held-unreadable": "mac: {leg} moves the host's display and HIDIdleTime "
+    "held-unreadable": "mac: {leg} {takes} and HIDIdleTime "
                        "cannot be read ({why}) — NOT RUN, since nothing says "
                        "the host is idle",
     "summary": "mac: idle waits — {legs} leg(s) waited {secs}s of the "
-               "{budget}s budget for an idle host; display legs waited "
-               "{display}s, {deferred} deferred to the lane's end",
+               "{budget}s budget for an idle host; takeover legs waited "
+               "{takeover}s, {deferred} deferred to the lane's end",
     "returned": "mac: {leg} took the token and the host is in use again "
                 "(HIDIdleTime {idle}, wants {want}s) — released it to wait "
                 "again{door}",
@@ -582,10 +589,10 @@ IDLE_SENTENCES = {
                        "again (HIDIdleTime {idle}, wants {want}s) after "
                        "{tries} waits — running it anyway, so a red here is "
                        "the host's{door}",
-    "returned-held": "mac: {leg} moves the host's display and the host was in "
+    "returned-held": "mac: {leg} {takes} and the host was in "
                      "use again each of the {tries} times it took the token "
                      "(HIDIdleTime {idle}, wants {want}s) — NOT RUN{door}",
-    "deferred": "mac: {leg} moves the host's display and the host is in use "
+    "deferred": "mac: {leg} {takes} and the host is in use "
                 "(HIDIdleTime {idle}, wants {want}s) — deferred to the lane's "
                 "end{door}",
     "under-token": "mac: {leg} would wait for an idle host while this process "
@@ -595,7 +602,7 @@ IDLE_SENTENCES = {
 }
 
 _idle = {"spent": 0.0, "legs": 0, "door": [], "cleared": False,
-         "display": 0.0, "deferred": 0, "deadline": None}
+         "takeover": 0.0, "deferred": 0, "deadline": None}
 
 
 def _hid_idle_ns():
@@ -646,14 +653,14 @@ def idle_wait(leg, say=None):
     while this process holds it: a wait on a human inside the token made
     every other lane wait on him too (docs/traps.md, the idle waits held the
     token). An unreadable clock, an expired bound and a spent budget each
-    print one sentence and the leg runs, EXCEPT a DISPLAY_LEGS leg, which
-    display_wait holds. Returns None when the leg may run, or the sentence.
+    print one sentence and the leg runs, EXCEPT a TAKEOVER_LEGS leg, which
+    takeover_wait holds. Returns None when the leg may run, or the sentence.
     """
     say = say or _idle_say
     _not_under_token(leg)
     _idle["cleared"] = False
-    if leg in DISPLAY_LEGS:
-        return display_wait(leg, say)
+    if leg in TAKEOVER_LEGS:
+        return takeover_wait(leg, say)
     door = " (doctored)" if os.environ.get(IDLE_DOOR, "") else ""
     ns, why = _hid_idle_ns()
     if ns is None:
@@ -702,52 +709,53 @@ def idle_wait(leg, say=None):
                 bound=int(bound), door=door))
 
 
-def display_wait(leg, say=None):
-    """A DISPLAY_LEGS leg's wait: idle for DISPLAY_IDLE_S within DISPLAY_BOUND_S, or
+def takeover_wait(leg, say=None):
+    """A TAKEOVER_LEGS leg's wait: idle for TAKEOVER_IDLE_S within TAKEOVER_BOUND_S, or
     the leg does not run. Outside the lane's budget, since a leg that waits
     and is then refused costs the lane no run; the lane's end shares ONE bound
-    across its deferred legs (display_deadline). Returns None or the sentence."""
+    across its deferred legs (takeover_deadline). Returns None or the sentence."""
     say = say or _idle_say
     _not_under_token(leg)
     door = " (doctored)" if os.environ.get(IDLE_DOOR, "") else ""
     started = time.monotonic()
-    bound = (DISPLAY_BOUND_S if _idle["deadline"] is None
+    bound = (TAKEOVER_BOUND_S if _idle["deadline"] is None
              else max(0.0, _idle["deadline"] - started))
     told = 0
     while True:
         waited = time.monotonic() - started
         ns, why = _hid_idle_ns()
         if ns is None:
-            refused = IDLE_SENTENCES["held-unreadable"].format(leg=leg, why=why)
+            refused = IDLE_SENTENCES["held-unreadable"].format(leg=leg, why=why,
+                                                              takes=TAKEOVER_LEGS[leg])
             say(refused)
-            _idle["display"] += waited
+            _idle["takeover"] += waited
             return refused
         idle = int(ns / 1e9)
-        if ns / 1e9 >= DISPLAY_IDLE_S:
+        if ns / 1e9 >= TAKEOVER_IDLE_S:
             if waited >= IDLE_POLL_S:
                 say(IDLE_SENTENCES["cleared"].format(
                     leg=leg, waited=int(waited), idle=idle, door=door))
-            _idle["display"] += waited
+            _idle["takeover"] += waited
             _idle["cleared"] = True
             return None
         if waited >= bound:
-            _idle["display"] += waited
+            _idle["takeover"] += waited
             refused = IDLE_SENTENCES["held"].format(
-                leg=leg, waited=int(waited), idle=idle, want=int(DISPLAY_IDLE_S),
+                leg=leg, takes=TAKEOVER_LEGS[leg], waited=int(waited), idle=idle, want=int(TAKEOVER_IDLE_S),
                 door=door)
             say(refused)
             return refused
         if waited >= (told + 1) * IDLE_TELL_S:
             told += 1
             say(IDLE_SENTENCES["waiting"].format(
-                leg=leg, idle=idle, want=int(DISPLAY_IDLE_S), waited=int(waited),
+                leg=leg, idle=idle, want=int(TAKEOVER_IDLE_S), waited=int(waited),
                 bound=int(bound), door=door))
         time.sleep(IDLE_POLL_S)
 
 
 def _reading(leg):
     """(idle seconds as text, met) for the leg's own threshold: ONE reading."""
-    want = DISPLAY_IDLE_S if leg in DISPLAY_LEGS else IDLE_S
+    want = TAKEOVER_IDLE_S if leg in TAKEOVER_LEGS else IDLE_S
     ns, why = _hid_idle_ns()
     if ns is None:
         return f"unreadable: {why}", False, want
@@ -756,15 +764,15 @@ def _reading(leg):
 
 def _defer(leg, idle, want, say):
     door = " (doctored)" if os.environ.get(IDLE_DOOR, "") else ""
-    said = IDLE_SENTENCES["deferred"].format(leg=leg, idle=idle, want=int(want), door=door)
+    said = IDLE_SENTENCES["deferred"].format(leg=leg, takes=TAKEOVER_LEGS[leg], idle=idle, want=int(want), door=door)
     say(said)
     _idle["deferred"] += 1
     return "deferred", said
 
 
-def display_deadline():
-    """Start the lane's end: the deferred legs share one DISPLAY_BOUND_S."""
-    _idle["deadline"] = time.monotonic() + DISPLAY_BOUND_S
+def takeover_deadline():
+    """Start the lane's end: the deferred legs share one TAKEOVER_BOUND_S."""
+    _idle["deadline"] = time.monotonic() + TAKEOVER_BOUND_S
 
 
 def idle_admit(leg, hold, run, say=None):
@@ -772,13 +780,13 @@ def idle_admit(leg, hold, run, say=None):
     or "deferred". The wait runs BEFORE the token; inside it the clock is read
     ONCE, without sleeping, since the human may have come back while hold()
     waited on another lane, and busy again releases the token and waits again,
-    IDLE_RECHECKS times, before the last reading decides. A DISPLAY_LEGS leg
+    IDLE_RECHECKS times, before the last reading decides. A TAKEOVER_LEGS leg
     in its queue position never waits: a busy reading defers it to the lane's
-    end (display_deadline). `hold` makes the token's context manager, `run`
+    end (takeover_deadline). `hold` makes the token's context manager, `run`
     runs the leg."""
     say = say or _idle_say
     door = " (doctored)" if os.environ.get(IDLE_DOOR, "") else ""
-    in_place = leg in DISPLAY_LEGS and _idle["deadline"] is None
+    in_place = leg in TAKEOVER_LEGS and _idle["deadline"] is None
     for tries in range(1, IDLE_RECHECKS + 2):
         if in_place:
             idle, met, want = _reading(leg)
@@ -795,9 +803,9 @@ def idle_admit(leg, hold, run, say=None):
             if in_place:
                 return _defer(leg, idle, want, say)
             if tries > IDLE_RECHECKS:
-                if leg in DISPLAY_LEGS:
+                if leg in TAKEOVER_LEGS:
                     said = IDLE_SENTENCES["returned-held"].format(
-                        leg=leg, tries=tries, idle=idle, want=int(want), door=door)
+                        leg=leg, takes=TAKEOVER_LEGS[leg], tries=tries, idle=idle, want=int(want), door=door)
                     say(said)
                     return "not-run", said
                 say(IDLE_SENTENCES["returned-anyway"].format(
@@ -814,7 +822,7 @@ def idle_summary(say=None):
     zero on a quiet host, which is the number the everyday matrix pays."""
     (say or _idle_say)(IDLE_SENTENCES["summary"].format(
         legs=_idle["legs"], secs=int(_idle["spent"]),
-        budget=int(IDLE_BUDGET_S), display=int(_idle["display"]),
+        budget=int(IDLE_BUDGET_S), takeover=int(_idle["takeover"]),
         deferred=_idle["deferred"]))
 
 
@@ -824,10 +832,10 @@ def idle_waited_seconds(text):
     (docs/traps.md, the idle waits counted against the ceiling)."""
     pattern = re.escape(IDLE_SENTENCES["summary"])
     for key, group in (("legs", r"\d+"), ("secs", r"(?P<secs>\d+)"), ("budget", r"\d+"),
-                       ("display", r"(?P<display>\d+)"), ("deferred", r"\d+")):
+                       ("takeover", r"(?P<takeover>\d+)"), ("deferred", r"\d+")):
         pattern = pattern.replace(re.escape("{" + key + "}"), group)
     m = re.search("^" + pattern + "$", text, re.M)
-    return int(m.group("secs")) + int(m.group("display")) if m else 0
+    return int(m.group("secs")) + int(m.group("takeover")) if m else 0
 
 
 def hid_idle_seconds():
@@ -1508,3 +1516,42 @@ def hs_bin(root, name):
                              text=True, encoding="utf-8", errors="replace")
         _HS_BINS[key] = got.stdout.strip()
     return _HS_BINS[key]
+
+
+def scene_host_verbs(root, scene):
+    """{verb: (kind, takes)} for the HOST_VERBS the leg's own lines run; a
+    scene with no script runs none (tools/check-steps.py refuses that leg)."""
+    out = {}
+    if not (root / f"tools/scenes/{scene}.steps").is_file():
+        return out
+    for line in scene_cut_lines(root, scene)[0]:
+        words = line.split()
+        if words and words[0] in HOST_VERBS:
+            out.setdefault(words[0], HOST_VERBS[words[0]])
+    return out
+
+
+def _host_legs(root):
+    exclusive_legs, takeover = set(), {}
+    for name, scene, _lang in legs():
+        verbs = scene_host_verbs(root, scene)
+        if verbs:
+            exclusive_legs.add(name)
+        takes = sorted({what for kind, what in verbs.values() if kind == "takeover"})
+        if takes:
+            takeover[name] = " and ".join(takes)
+    return exclusive_legs, takeover
+
+
+def _scenes_root():
+    """The tree whose tools/scenes this module reads: its own, or for a
+    gate's doctored copy in scratch, the working directory's."""
+    for root in (*pathlib.Path(__file__).resolve().parents, pathlib.Path.cwd()):
+        if (root / "tools/scenes").is_dir():
+            return root
+    raise RuntimeError(f"{__file__}: no tools/scenes above this file or in "
+                       f"{pathlib.Path.cwd()}, so no leg's host verbs can be read")
+
+
+EXCLUSIVE, TAKEOVER_LEGS = _host_legs(_scenes_root())
+TAKEOVER_SCENES = {scene for name, scene, _lang in legs() if name in TAKEOVER_LEGS}

@@ -124,6 +124,22 @@ final class KayaDrive: XCTestCase {
         }
         return true
     }
+    /// docs/traps.md, the iOS save press: the host photographs the simulator
+    /// only after the guest exits, so a verb that gives up photographs the
+    /// screen itself and says what the bar held. The leg's FIRST give-up keeps
+    /// the picture, since it is the one a reader chases.
+    func failShot(_ a: XCUIApplication, _ verb: String) {
+        guard !driveDir.isEmpty else { return }
+        let path = (driveDir as NSString).appendingPathComponent("failshot.png")
+        let first = !FileManager.default.fileExists(atPath: path)
+        let png = XCUIScreen.main.screenshot().pngRepresentation
+        if first {
+            FileManager.default.createFile(atPath: path, contents: png)
+            append("failshot.txt", "\(verb) gave up at \(stamp())\n")
+        }
+        note("\(verb): \(first ? "photographed the screen as it gave up" : "gave up after an earlier verb's picture") (\(png.count) bytes); the bar: "
+            + bar(a).debugDescription)
+    }
     func byName(_ a: XCUIApplication, _ name: String) -> XCUIElement {
         a.descendants(matching: .any)
             .matching(NSPredicate(format: "label == %@ OR identifier == %@ OR title == %@", name, name, name))
@@ -698,6 +714,7 @@ final class KayaDrive: XCTestCase {
                 gone = waitForPickerGone(a, left(deadline) / 2)
             }
             if !gone {
+                failShot(a, "choose")
                 return (false, "the picker was still up after \(rounds) rounds of choosing \(wanted): the row was offered in \(offered) of them; it now lists \(rows(a).map { $0.0 }) and offers \(strip(a).map { $0.0 })")
             }
             return (true, "chose \(wanted) in \(rounds) round(s)")
@@ -823,6 +840,10 @@ final class KayaDrive: XCTestCase {
                 let save = bar(a).buttons["Save"]
                 let keyboardsBefore = a.keyboards.count
                 let offeredNow = save.exists
+                let saveState = offeredNow
+                    ? " enabled=\(save.isEnabled) hittable=\(save.isHittable)"
+                        + " at \(Int(save.frame.midX)),\(Int(save.frame.midY))"
+                    : ""
                 if offeredNow {
                     offered += 1
                     tapSafely(a, save, "the save sheet's Save")
@@ -837,7 +858,7 @@ final class KayaDrive: XCTestCase {
                 // at 0.7-1.4s under a matrix several times over.
                 gone = waitForPickerGone(a, min(savePressWindow, left(deadline)))
                 let field = nameField(a)
-                let reading = "press \(presses): Save \(offeredNow ? "offered" : "absent")"
+                let reading = "press \(presses): Save \(offeredNow ? "offered" : "absent")\(saveState)"
                     + " keyboards \(keyboardsBefore)->\(a.keyboards.count)"
                     + " sheet \(gone ? "gone" : "still up")"
                     + (gone ? "" : " field \(field.exists ? "\"\((field.value as? String) ?? "")\"" : "absent")")
@@ -845,6 +866,7 @@ final class KayaDrive: XCTestCase {
                 readings.append(reading)
             }
             if !gone {
+                failShot(a, "savepress")
                 return (false, "the save dialog was still up after \(presses) presses of Save: Save was in the strip for \(offered) of them; it now offers \(strip(a).map { $0.0 }); \(readings.joined(separator: "; "))")
             }
             return (true, "saved in \(presses) press(es)")

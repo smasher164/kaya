@@ -239,7 +239,8 @@ picture (KayaFailShot: PixelCopy of its window, off the UI thread) at the
 first failed step, or at the failed verdict when no step failed, into the file
 `KAYA_FAIL_SHOT` names, and the runner pulls it through run-as as the
 bundle's `shot`; the screencap stays as `desktop-shot`. A PixelCopy is the
-app's surface alone: no system bars' icons, no keyboard, no other window.
+app's surface alone: no system bars' icons, no keyboard, no other app's window;
+an open sheet's own dialog window is drawn over it (the quick-add entry below).
 tools/check-flightrec.py holds the order.
 
 ## A SwiftUI modifier behind a branch rebuilt the focused field (measured 2026-10-11)
@@ -16038,6 +16039,35 @@ a probe forcing the cap to its floor read the field 96 -> 37 pt with every step
 green, but no lane's room reaches it. GUARD: tools/lib/safearea_routes.py's A20
 clauses, eleven cuts watched.
 
+## The quick-add field panned above its sheet's top (measured 2026-10-13)
+
+android taskskeyboardland-compose went red once in a matrix (0446a86a) and was
+green before and after: `entry@quick is clipped by its parents: frame
+(96,64,608,56), visible (96,68,608,52)` for 17 s, one reading throughout. The
+pan (kayaPanEvaluate) runs on every layout of the sheet's column, and the
+column moves with the sheet's own enter animation: a probe read the content
+top 248 -> 176 -> 156 -> 126 -> 101 -> 85 -> 76 over ten frames with the
+SheetState offset tracking it, the pan re-aimed at each. The pan aims only the
+field's BOTTOM (8 px above the keyboard) and comes back down only when the
+field sits more than twice that margin above it, a strict test. That run's
+sheet settled at 68 rather than 76: the pan set at 76 (64 px) left the field's
+bottom at 120 against a keyboard top of 136, exactly the dead zone's edge, so
+no evaluation moved it again and its top stayed 4 px above the column's clip.
+Fixed: a field that fits its room and whose top is above the room's top is
+re-aimed whatever the dead zone says (`above`). The bundle could not say any of
+this: the shot was the activity's window without the sheet's dialog window, the
+verb trace held two earlier days' dumps ahead of this leg's (the ring appends
+and nothing deleted the file), and nothing carried the pan. KayaFailShot now
+draws each sheet's window over the activity's, the runner deletes the leg's
+verb trace before launch, and a Compose expect_safe failure ends with `the
+pan:` (the field, the room, the pan, the sheet's content top, handle and
+SheetState offset); the ring alone is not enough, since the step's own retries
+overran it (626 dropped on the forced red). The SwiftUI pan has the same bottom-
+only aim and strict dead zone (swift/KayaSwiftUI.swift kayaPanEvaluate) and no
+reading of it has been taken. GUARD: tools/lib/safearea_routes.py, "Compose's
+pan brings a field that fits back below its room's top" and "Compose's
+expect_safe failure names the pan's inputs"; tools/check-flightrec.py NA5, NA6.
+
 ## A Compose effect keyed on a node's fields, not the node, misses a restamped row (measured 2026-10-13)
 
 KayaRender composes a container's children BY POSITION, with no `key()`, so
@@ -16208,3 +16238,74 @@ the bundle's leg log. Fourteen more media_tracks legs (java and go) passed,
 some of them beside load, so the cause stays open until the next sighting.
 GUARD: tools/check-verbs.py's media arms, "a seek landing unprinted" and "a
 legible push unprinted", both watched red.
+
+## The emoji leg took the maintainer's keystrokes (measured 2026-10-14)
+
+The full matrix at 0446a86a failed `emoji-rust-swiftui`: `pick_emoji "😀": no
+character palette is on screen`, then `entry@message reads "Hi rigin "`. The
+harness had typed "Hi "; "rigin " was the maintainer's own typing. The emoji
+command's arm calls `NSApp.activate(ignoringOtherApps: true)` before
+`orderFrontCharacterPalette`, because the palette inserts into the ACTIVE
+app's first responder, so the guest became the active app and the host's
+keyboard typed into its field. The leg was EXCLUSIVE and in the idle wait,
+but the filedialog legs ahead of it had spent the lane's 240 s budget while
+he typed (`does not wait — this lane has spent its 240s idle-wait budget
+(HIDIdleTime 0s)`), and a panel-class wait runs its leg anyway. So yes: a
+kaya guest that activates itself receives whatever the person at the host
+types, and only the idle rule keeps a leg from doing that to him.
+
+Audit of the interpreter's calls that take the host's foreground:
+`NSApp.activate` (the emoji command, and KAYA_WINDOW_FRONT, the dragwitness
+hand-run knob no lane sets), `orderFrontCharacterPalette` (emoji),
+`toggleFullScreen` (fullscreen) and `NSWorkspace.shared.open` (open_link: its
+OpenConfiguration activates by default, and the links scene's act-two door
+is `open -a` without `-g`). `orderFrontRegardless` orders a window front
+without activating. The file-panel legs do NOT take the keyboard: a hand run
+of filedialog-rust and save-rust with the maintainer typing (HIDIdleTime
+0.1 s) printed no host key, so none of his keys reached the guest, and both
+passed; their AX
+presses risk being swallowed, not his keystrokes. chat-go presses the panel
+too (`file_choose`) and was outside EXCLUSIVE, which was a hand list of four
+scenes.
+
+Since then tools/lib/lanes/mac.py derives EXCLUSIVE and TAKEOVER_LEGS from
+the scene scripts through HOST_VERBS, and the takeover verbs (pick_emoji,
+open_link, user_fullscreen, expect_fullscreen) follow the fullscreen rule:
+deferred to the lane's end on a busy host, NOT RUN when the shared bound
+expires. The interpreter also counts a key down it did not send through
+`kayaHarnessSend` and prints `host key: ... (N so far, app active=...)`, the
+count and never the characters; a forced red (keys
+posted to the guest's pid only, run 20261014T063814Z-018643) carried 111
+such lines in the bundle's leg log. GUARD: tools/check-exclusive.py's
+FOREGROUND_CALLS census and the leg clause, negatives 16, 17, 17b-17e.
+
+## The iOS save press: six taps reached the picker and fired no control (seen 2026-10-14)
+
+The full matrix at 0446a86a failed `editor-go` on iOS: `file_save : the save
+dialog was still up after 6 presses of Save ... keyboards 1->1 sheet still up
+field "draft"`. The leg had passed at 18938cec, a16094b4 and 19c4d8a7 with the
+software keyboard already raised (A10), and passed 4 of 4 runs here. The
+taps were synthesized at (323.8, 92), the same point as a passing run's. The
+document picker's own process (com.apple.DocumentManager.Service, read off
+the simulator afterwards) shows the difference: in the passing run each touch
+produced `send gesture actions` AND `send control actions` and the keyboard
+left; in the red one each of the six touches produced `send gesture actions`
+only, so something other than the Save button took every touch, or the
+button was disabled, and the bundle could not tell which. Its driver log was
+cut to the last 40 lines and XCTest's to the last 60, both after the failing
+verb, and its only picture was taken after the guest exited.
+
+The bundle now carries the driver's and XCTest's accounts whole (up to 4000
+lines, tools/lib/flightrec_lane.py's whole_or_ends), each press's Save
+`enabled=` / `hittable=` / centre, a screenshot the driver takes as the verb
+gives up (`failshot`, adopted as the leg's shot with its own shotwhen), the
+bar's element tree at that moment, and the picker service's log in the
+system-log slice. A forced red (the driver's Save press moved off the button
+for the name "draft", run 20261014T071401Z-089040) carried the picture at the
+give-up, `Save offered enabled=true hittable=true at 323,92` per press and
+5216 lines of the picker's process. 28 legs over four runs of editor,
+filedialog and save passed with the keyboard up, so the cause stays open
+until the next sighting, whose picture and press readings say whether the
+button was covered or disabled. GUARD: tools/check-steps.py's ios_give_up,
+five negatives watched red.
+

@@ -313,6 +313,21 @@ report would come from every backend's asynchronous decode, per stamped copy,
 for an answer the app can do nothing with. Its shape is clear (one report per
 content id, not per stamp). Trigger: an app that shows a need.
 
+## WATCH — the iOS document picker's Save did nothing six times (editor-go, 2026-10-14)
+KEY: file_save, document picker, Save, editor-go, keyboards 1->1, hittable
+
+Seen once, in the full matrix at 0446a86a: the picker's own process logged
+all six Save taps at the point a passing run uses, and each produced only a
+"gesture" action where a passing tap also produces a "control" action (the
+button firing), so something other than an enabled Save took the touch. Not
+reproduced: four runs of editor, filedialog and save, 28/28. The bundle could
+not say whether Save was covered or disabled; since 2026-10-14 it carries the
+driver's and XCTest's logs whole, each press's enabled, hittable and frame
+reading for Save, the driver's own screenshot at the first give-up as the
+leg's picture, and the picker's process log (check-steps holds them;
+docs/traps.md). Read those first on the next sighting (the bundle is kept
+under ~/.local/state/kaya/flightrec/red/ once its run is pruned).
+
 ## WATCH — a mac caption cue never delivered after a seek (media_tracks-java-swiftui, 2026-10-13)
 KEY: media_tracks, caption cue, second cue, AVPlayerItemLegibleOutput, seek, caption delivery
 
@@ -1353,14 +1368,14 @@ on the mac lane. What breadth owes:
     Compose and UIKit each do it in the arm (plan §4, measured per platform).
 
 ## BUILD — the colour picker's panel scene: `pick_color` and a `colorpanel` scene (docs/color-picker-plan.md §5)
-KEY: pick_color, colorpanel, HexTextBox, show-editor, HOST_UI_SCENES colour panel, colour panel hex field
+KEY: pick_color, colorpanel, HexTextBox, show-editor, HOST_VERBS colour panel, colour panel hex field
 
 `set_color` drives every backend's commit door without opening a surface; no
 leg yet opens the real one and types a hex value into it. Each lane's route,
 measured 2026-09-28 and not built:
   - mac: the shared NSColorPanel, in process, but its hex field reads the
     panel's selected colour space (`E01B24` committed `E9332FFF`), so the verb
-    must select sRGB first; the leg joins HOST_UI_SCENES with the idle wait.
+    must select sRGB first; the leg's verb joins HOST_VERBS with the idle wait.
   - iOS: UIColorPickerViewController's Sliders tab has an sRGB hex field the
     XCUITest driver reaches with `tap` and `type_b64`; every parseable prefix
     commits (E01B24 typed over 96D35F committed 9966DD, EE0011, E01B24), so the

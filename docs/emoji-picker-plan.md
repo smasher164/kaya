@@ -63,7 +63,9 @@ observation.
 - macOS: the palette, opened a turn after the field takes focus with the
   app activated, inserts into the field; the leg reads it on screen by its
   own process (`com.apple.CharacterPaletteIM`) and closes with the guest.
-  The leg waits for an idle host (the mac lane's HOST_UI_SCENES).
+  The leg is a takeover leg (`pick_emoji` in the mac lane's HOST_VERBS): the
+  command activates the guest, so it never runs while the maintainer is
+  active (docs/traps.md, the emoji leg took the maintainer's keystrokes).
 - Windows: `CoreInputView.TryShow(Emoji)` answered true with the guest in
   the foreground and opened nothing for a WinUI TextBox, though it opened
   the panel for a Win32 edit. The command sends the user's own shortcut,

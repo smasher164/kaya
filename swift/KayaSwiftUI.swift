@@ -9361,6 +9361,9 @@ private func kayaRunScript(_ script: String) {
     print("KAYA_HARNESS: epoch \(Int(start.timeIntervalSince1970 * 1000))")
     // The verb trace counts from the same zero (crates/kaya/src/vtrace.rs).
     KayaVTrace.begin(start)
+    #if os(macOS)
+    DispatchQueue.main.async { kayaHostKeyWatchInstall() }
+    #endif
     // AN UNCAUGHT NSException IS THE THIRD WAY A RUN ENDS, and the one that
     // left nothing: the failed verdict and the watchdog dump the ring, a crash
     // did not (docs/traps.md, "An NSTableView `frame` read off the main thread
@@ -12374,7 +12377,7 @@ private func kayaRunScript(_ script: String) {
                                     characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}",
                                     isARepeat: false, keyCode: 53)
                             else { return }
-                            NSApp.sendEvent(event)
+                            kayaHarnessSend(event)
                         }
                     #endif
                 }
@@ -19928,6 +19931,33 @@ func kayaPostNotification(_ id: UInt64, at: UInt64, title: String, body: String,
 }
 
 #if os(macOS)
+/// docs/traps.md, the emoji leg took the maintainer's keystrokes: a key down
+/// that reached this process and that the harness did not send came from the
+/// host's keyboard, and the leg log says so (the count, never the characters).
+nonisolated(unsafe) var kayaHarnessKeyDepth = 0
+nonisolated(unsafe) var kayaHostKeys = 0
+
+func kayaHarnessSend(_ event: NSEvent) {
+    kayaHarnessKeyDepth += 1
+    NSApp.sendEvent(event)
+    kayaHarnessKeyDepth -= 1
+}
+
+func kayaHostKeyWatchInstall() {
+    guard ProcessInfo.processInfo.environment["KAYA_SELFTEST"] != nil else { return }
+    _ = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
+        if kayaHarnessKeyDepth == 0 {
+            kayaHostKeys += 1
+            kayaDiag(
+                "host key: a key down the harness did not send reached window "
+                    + "\(event.windowNumber) (\(kayaHostKeys) so far, app active=\(NSApp.isActive))")
+        }
+        return event
+    }
+}
+#endif
+
+#if os(macOS)
 /// Whether the Emoji & Symbols palette has a window on screen, read by the
 /// owner of each window the window server lists, never by what kaya asked for.
 func kayaCharacterPaletteOnScreen() -> Bool {
@@ -23057,7 +23087,7 @@ func kayaUndoInertNote(_ item: KayaMenuItemModel, verb: String) {
                             characters: key, charactersIgnoringModifiers: key,
                             isARepeat: false, keyCode: code)
                     else { return false }
-                    NSApp.sendEvent(event)
+                    kayaHarnessSend(event)
                 }
                 return true
             }
@@ -23087,7 +23117,7 @@ func kayaUndoInertNote(_ item: KayaMenuItemModel, verb: String) {
                         characters: key, charactersIgnoringModifiers: key,
                         isARepeat: false, keyCode: code)
                 else { return false }
-                NSApp.sendEvent(event)
+                kayaHarnessSend(event)
             }
             return true
         }
@@ -23107,7 +23137,7 @@ func kayaUndoInertNote(_ item: KayaMenuItemModel, verb: String) {
                         characters: key, charactersIgnoringModifiers: key,
                         isARepeat: false, keyCode: code)
                 else { return false }
-                NSApp.sendEvent(event)
+                kayaHarnessSend(event)
             }
             return true
         }

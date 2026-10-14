@@ -700,7 +700,7 @@ def _run_leg(name, argv, env, scene=None):
 
 
 def _not_run(name, sentence):
-    """A leg the idle wait refused (lane.DISPLAY_LEGS): no process, no
+    """A leg the idle wait refused (lane.TAKEOVER_LEGS): no process, no
     bundle, and a verdict that is not PASS, so the lane is not ALL PASS."""
     (LEGS_DIR / f"{name}.log").write_text(sentence + "\n", encoding="utf-8")
     (LEGS_DIR / f"{name}.verdict").write_text("NOT RUN\n", encoding="utf-8")
@@ -717,11 +717,11 @@ def _admit(name, argv, env, scene):
 
 
 def run_deferred():
-    """The display legs a busy host deferred, once more at the lane's end,
-    under one shared bound (lane.display_deadline)."""
+    """The takeover legs a busy host deferred, once more at the lane's end,
+    under one shared bound (lane.takeover_deadline)."""
     if not _deferred:
         return
-    lane.display_deadline()
+    lane.takeover_deadline()
     for name, argv, env, scene in _deferred:
         outcome, said = _admit(name, argv, env, scene)
         _leg_names.append(name)

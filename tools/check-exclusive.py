@@ -143,7 +143,7 @@ IDLE_SAYS = {
     "expired": ("HIDIdleTime {idle}s", "running it anyway"),
     "spent": ("idle-wait budget", "HIDIdleTime {idle}s"),
     "unreadable": ("cannot read HIDIdleTime", "running without the idle wait"),
-    "summary": ("idle waits", "budget", "display legs waited", "deferred"),
+    "summary": ("idle waits", "budget", "takeover legs waited", "deferred"),
     "returned": ("in use again", "HIDIdleTime {idle}", "released it"),
     "returned-anyway": ("in use again", "running it anyway"),
     "returned-held": ("in use again", "NOT RUN"),
@@ -160,6 +160,76 @@ def literal(text, name):
     """A module-level `NAME = <number>` as a float, or None."""
     m = re.search(r"^" + re.escape(name) + r" = (\d+(?:\.\d+)?)$", text, re.M)
     return float(m.group(1)) if m else None
+
+
+INTERPRETER = "swift/KayaSwiftUI.swift"
+# Every interpreter call that makes the guest the active app or moves the
+# host's display, as (sites, the scene verbs whose legs reach it, why a site
+# no scene reaches is safe). A leg reaching one takes a present maintainer's
+# keyboard (docs/traps.md, the emoji leg took the maintainer's keystrokes).
+FOREGROUND_CALLS = {
+    "NSApp.activate(": (2, ("pick_emoji",),
+                        "the other site is KAYA_WINDOW_FRONT, tools/mac/dragwitness's hand "
+                        "run knob, which no lane sets"),
+    "orderFrontCharacterPalette(": (1, ("pick_emoji",), ""),
+    "toggleFullScreen(": (1, ("user_fullscreen", "expect_fullscreen"), ""),
+    "NSWorkspace.shared.open(": (1, ("open_link",), ""),
+}
+FOREGROUND_PATTERN = re.compile(
+    r"(?:(\w+)\.)?\b(activate|activateIgnoringOtherApps|orderFrontCharacterPalette|"
+    r"toggleFullScreen)\(|NSWorkspace\.shared\.open\(")
+
+
+def foreground_census(swift, verbs):
+    """Every foreground-taking call in the interpreter is in FOREGROUND_CALLS
+    at its declared count, and every verb that reaches one is a takeover verb."""
+    out = []
+    seen = {}
+    for line_no, line in enumerate(swift.splitlines(), 1):
+        for m in FOREGROUND_PATTERN.finditer(line.split("//", 1)[0]):
+            receiver, method = m.group(1), m.group(2)
+            if method is None:
+                call = "NSWorkspace.shared.open("
+            elif method.startswith("activate"):
+                if receiver == "NSLayoutConstraint":
+                    continue
+                call = f"{receiver or ''}.{method}("
+            else:
+                call = f"{method}("
+            seen.setdefault(call, []).append(line_no)
+    for call, lines in sorted(seen.items()):
+        if call not in FOREGROUND_CALLS:
+            out.append(f"{INTERPRETER}:{lines[0]}: {call} takes the host's foreground and "
+                       f"tools/check-exclusive.py's FOREGROUND_CALLS does not name it — say "
+                       f"which scene verb reaches it, and make that verb a takeover verb in "
+                       f"tools/lib/lanes/mac.py's HOST_VERBS")
+    for call, (count, reached_by, _why) in sorted(FOREGROUND_CALLS.items()):
+        got = len(seen.get(call, []))
+        if got != count:
+            out.append(f"{INTERPRETER}: {call} has {got} site(s), FOREGROUND_CALLS declares "
+                       f"{count} — a new site is reached by a verb nobody has classified "
+                       f"(lines {seen.get(call, [])})")
+        for verb in reached_by:
+            if verbs.get(verb, ("", ""))[0] != "takeover":
+                out.append(f"{MAC_LANE}: {verb} reaches {call} in the interpreter and "
+                           f"HOST_VERBS does not call it a takeover verb, so its legs run "
+                           f"under a present maintainer's keyboard (docs/traps.md, the "
+                           f"emoji leg took the maintainer's keystrokes)")
+    # AND A KEY THE HOST'S KEYBOARD SENT IS NAMED IN THE LEG LOG: every harness
+    # key goes through kayaHarnessSend, so the watch counts only the others.
+    code = [line.split("//", 1)[0] for line in swift.splitlines()]
+    sends = [n for n, line in enumerate(code, 1) if "NSApp.sendEvent(" in line]
+    body = re.search(r"\nfunc kayaHarnessSend\(_ event: NSEvent\) \{\n([\s\S]*?)\n\}\n", swift)
+    if not body or "NSApp.sendEvent(event)" not in body.group(1) or len(sends) != 1:
+        out.append(f"{INTERPRETER}: NSApp.sendEvent( has {len(sends)} site(s) (lines {sends}), "
+                   f"wanted one, inside kayaHarnessSend — a harness key sent around it reads "
+                   f"in the leg log as the host's keyboard reaching the guest")
+    watch = r"if kayaHarnessKeyDepth == 0 \{\n\s*kayaHostKeys \+= 1\n\s*kayaDiag\("
+    if not re.search(watch, swift):
+        out.append(f"{INTERPRETER}: the key-down watch no longer counts and prints a key the "
+                   f"harness did not send, so a red that took the host's keyboard names "
+                   f"nothing (docs/traps.md, the emoji leg took the maintainer's keystrokes)")
+    return out
 
 
 def mac_idle(texts, mod, tools):
@@ -182,7 +252,7 @@ def mac_idle(texts, mod, tools):
                        f"human is at the host (matrix #38's swallowed-press red, "
                        f"docs/deferred.md)")
     for fn, text in (("queue_leg", body), ("run_deferred", deferred), ("_admit", admit_body)):
-        for direct in ("lane.idle_wait(", "lane.display_wait(", "exclusive.hold(\"mac\", name):"):
+        for direct in ("lane.idle_wait(", "lane.takeover_wait(", "exclusive.hold(\"mac\", name):"):
             if direct in text:
                 out.append(f"{MAC_RUNNER}: {fn} calls {direct.rstrip(':')} itself — the "
                            f"order of the idle wait and the token is lane.idle_admit's, "
@@ -191,10 +261,10 @@ def mac_idle(texts, mod, tools):
     if not re.search(r"\ndrain\(\)\nrun_deferred\(\)\n", runner):
         out.append(f"{MAC_RUNNER}: run_deferred() does not follow the lane's last drain() — "
                    f"a display leg a busy host deferred is never run or reported")
-    if "lane.display_deadline()" not in deferred:
-        out.append(f"{MAC_RUNNER}: run_deferred never starts lane.display_deadline() — "
+    if "lane.takeover_deadline()" not in deferred:
+        out.append(f"{MAC_RUNNER}: run_deferred never starts lane.takeover_deadline() — "
                    f"each deferred leg would wait its own "
-                   f"{getattr(mod, 'DISPLAY_BOUND_S', 0):.0f}s")
+                   f"{getattr(mod, 'TAKEOVER_BOUND_S', 0):.0f}s")
     if "lane.idle_summary()" not in runner:
         out.append(f"{MAC_RUNNER}: never prints lane.idle_summary() — what waiting for a "
                    f"quiet host cost this lane would stand nowhere")
@@ -275,33 +345,43 @@ def mac_idle(texts, mod, tools):
     # switches the maintainer's screen to the guest's own Space and activates
     # the guest (docs/fullscreen-plan.md §4.1). Read out of the scene scripts,
     # never a hand list: any leg whose script reads a window fullscreen.
+    verbs = getattr(mod, "HOST_VERBS", {})
+    takeover_legs = set(getattr(mod, "TAKEOVER_LEGS", ()))
     for name, scene, _lang in mod.legs():
-        script = mod.scene_script(ROOT, scene)
-        takes = [line for line in script.splitlines()
-                 if re.match(r"(expect_fullscreen|user_fullscreen)\b.*\bon\s*$", line.strip())]
+        lines = [line.strip() for line in mod.scene_script(ROOT, scene).splitlines()]
+        firsts = {line.split()[0] for line in lines if line}
+        takes = [line for line in lines
+                 if re.match(r"(expect_fullscreen|user_fullscreen)\b.*\bon\s*$", line)]
         if takes and name not in mod.EXCLUSIVE:
             out.append(f"{MAC_LANE}: {name!r} is not EXCLUSIVE, yet its scene takes a window "
-                       f"fullscreen ({takes[0].strip()!r}), which switches the host's display "
+                       f"fullscreen ({takes[0]!r}), which switches the host's display "
                        f"to a new Space and activates the guest (docs/fullscreen-plan.md "
                        f"§4.1)")
-    # AND NEVER WHILE THE MAINTAINER IS ACTIVE (his ruling of 2026-09-28): the
-    # same legs are DISPLAY_LEGS, whose wait refuses on expiry, the funnel and
-    # the hand run each honour the refusal, and the refusal is run, not read.
-    for name, scene, _lang in mod.legs():
-        script = mod.scene_script(ROOT, scene)
-        if any(re.match(r"(expect_fullscreen|user_fullscreen)\b.*\bon\s*$", line.strip())
-               for line in script.splitlines()) \
-                and name not in getattr(mod, "DISPLAY_LEGS", set()):
-            out.append(f"{MAC_LANE}: {name!r} is not a DISPLAY_LEGS leg, so an expired idle "
-                       f"wait runs it anyway and moves a present maintainer's display")
+        reaching = sorted(firsts & set(verbs))
+        if reaching and name not in mod.EXCLUSIVE:
+            out.append(f"{MAC_LANE}: {name!r} is not EXCLUSIVE, yet its scene runs "
+                       f"{reaching[0]}, which HOST_VERBS says reaches the host")
+        # AND NEVER WHILE THE MAINTAINER IS ACTIVE (his ruling of 2026-09-28):
+        # a leg whose scene reaches an interpreter call that activates the guest
+        # or moves the display is a TAKEOVER_LEGS leg, whose wait refuses on
+        # expiry (docs/traps.md, the emoji leg took the maintainer's keystrokes).
+        foreground = sorted(v for v in firsts
+                            if any(v in vs for _n, vs, _r in FOREGROUND_CALLS.values()))
+        if (takes or foreground) and name not in takeover_legs:
+            out.append(f"{MAC_LANE}: {name!r} is not a TAKEOVER_LEGS leg, so an expired idle "
+                       f"wait runs it anyway and "
+                       + (f"its {foreground[0]} activates the guest under a present "
+                          f"maintainer's keyboard" if foreground and not takes else
+                          "moves a present maintainer's display"))
+    out += foreground_census(texts[INTERPRETER], verbs)
     if not (re.search(r'if outcome == "not-run":\n\s+_not_run\(name, said\)', body)
             and re.search(r'if outcome != "ran":\n\s+_not_run\(name, said\)', deferred)):
         out.append(f"{MAC_RUNNER}: queue_leg does not report a leg the idle wait refused "
                    f"as NOT RUN — it runs it, or loses it without a verdict")
     hand = texts["tools/run-leg.py"]
-    if not re.search(r"refused = lane\.display_wait\(name\)\n\s+if refused:\n"
+    if not re.search(r"refused = lane\.takeover_wait\(name\)\n\s+if refused:\n"
                      r"[\s\S]{0,120}?sys\.exit\(3\)", hand):
-        out.append("tools/run-leg.py: a hand run of a DISPLAY_SCENES leg does not wait for "
+        out.append("tools/run-leg.py: a hand run of a TAKEOVER_SCENES leg does not wait for "
                    "an idle host and stop when refused")
     out += display_refusal(mod)
     out += idle_under_token(mod)
@@ -329,24 +409,24 @@ def idle_netted(va, mod):
     if reader is None:
         return out + [f"{MAC_LANE}: no idle_waited_seconds() — validate-all has nothing to "
                       f"read the idle waits back with"]
-    line = mod.IDLE_SENTENCES["summary"].format(legs=4, secs=240, budget=240, display=120,
+    line = mod.IDLE_SENTENCES["summary"].format(legs=4, secs=240, budget=240, takeover=120,
                                                 deferred=9)
     for text, want in ((f"exclusive: mac held 1 legs for 5s\n{line}\nmac: PASS\n", 360),
                        ("mac: PASS\n", 0)):
         got = reader(text)
         if got != want:
             out.append(f"{MAC_LANE}: idle_waited_seconds read {got}s off {text!r}, wanted "
-                       f"{want}s (the summary's own seconds plus its display seconds)")
+                       f"{want}s (the summary's own seconds plus its takeover seconds)")
     return out
 
 
 def display_refusal(mod):
-    """display_wait run against a doubled clock: a busy host is refused with
+    """takeover_wait run against a doubled clock: a busy host is refused with
     a sentence, an idle one admitted, and an unreadable clock refused."""
     import types
-    legs = sorted(getattr(mod, "DISPLAY_LEGS", ()))
+    legs = sorted(getattr(mod, "TAKEOVER_LEGS", ()))
     if not legs:
-        return [f"{MAC_LANE}: DISPLAY_LEGS is empty, so no leg is held off a busy host"]
+        return [f"{MAC_LANE}: TAKEOVER_LEGS is empty, so no leg is held off a busy host"]
     out = []
     saved = (mod._hid_idle_ns, mod.time)
     try:
@@ -377,10 +457,10 @@ def idle_under_token(mod):
     the human returns, and shares one bound across the lane's end."""
     import types
     out = []
-    panel = sorted(getattr(mod, "EXCLUSIVE", set()) - getattr(mod, "DISPLAY_LEGS", set()))
-    display = sorted(getattr(mod, "DISPLAY_LEGS", ()))
+    panel = sorted(set(getattr(mod, "EXCLUSIVE", ())) - set(getattr(mod, "TAKEOVER_LEGS", ())))
+    display = sorted(getattr(mod, "TAKEOVER_LEGS", ()))
     if not panel or len(display) < 2 or not hasattr(mod, "idle_admit"):
-        return [f"{MAC_LANE}: no idle_admit, or too few EXCLUSIVE and DISPLAY_LEGS legs "
+        return [f"{MAC_LANE}: no idle_admit, or too few EXCLUSIVE and TAKEOVER_LEGS legs "
                 f"to run the token's idle rule against"]
     import exclusive
     saved = (mod._hid_idle_ns, mod.time, dict(mod._idle))
@@ -392,7 +472,7 @@ def idle_under_token(mod):
                                      sleep=lambda secs: wall.__setitem__(0, wall[0] + secs))
     mod._hid_idle_ns = lambda: (0, None)
     with tempfile.TemporaryDirectory(prefix="check-exclusive-") as td:
-        for fn, leg in (("idle_wait", panel[0]), ("display_wait", display[0])):
+        for fn, leg in (("idle_wait", panel[0]), ("takeover_wait", display[0])):
             try:
                 with exclusive.hold("check-exclusive", leg, exclusive_dir_=pathlib.Path(td)):
                     getattr(mod, fn)(leg, say=lambda _s: None)
@@ -452,7 +532,7 @@ def idle_under_token(mod):
         )
         for label, leg, idles, deadline, want, holds in cases:
             at = (None if deadline is None else
-                  now[0] + mod.DISPLAY_BOUND_S if deadline == "start" else now[0] - 1)
+                  now[0] + mod.TAKEOVER_BOUND_S if deadline == "start" else now[0] - 1)
             t0 = now[0]
             got, said, st = run_case(leg, idles, at)
             waited = now[0] - t0
@@ -471,7 +551,7 @@ def idle_under_token(mod):
                            f"queue position instead of deferring to the lane's end")
             if deadline == "spent" and waited > mod.IDLE_POLL_S:
                 out.append(f"{MAC_LANE}: idle_admit, {label}: waited {waited:.0f}s after "
-                           f"the lane's end had spent its shared {mod.DISPLAY_BOUND_S:.0f}s")
+                           f"the lane's end had spent its shared {mod.TAKEOVER_BOUND_S:.0f}s")
     finally:
         exclusive._say = quiet
         mod._hid_idle_ns, mod.time = saved[0], saved[1]
@@ -718,7 +798,7 @@ def census(texts, lanes=None, tools=None):
 FILES = [r for _, r, _, _ in LANES] + [LINUX, EXCLUSIVE_PY, EXCLUSIVE_SH, "tools/validate-all.py",
                                         "tools/validate-linux.py", "tools/gates.py",
                                         "tools/lib/flightrec_lane.py", MAC_LANE,
-                                        "tools/run-leg.py"]
+                                        "tools/run-leg.py", INTERPRETER]
 REAL = {rel: gate.read(rel) for rel in FILES}
 MODS = {lane: load_lane(r) for lane, _, _, r in LANES}
 
@@ -861,20 +941,69 @@ watched("a red mac leg whose verdict line names no frontmost app",
         {**REAL, MAC_RUNNER: _blind}, "does not read flightrec_lane.mac_frontmost(ROOT)")
 
 # 16. A FULLSCREEN LEG BACK IN THE POOL.
-_pooled = gate.doctor("fullscreen taken out of the mac host-UI scenes", REAL[MAC_LANE],
-                      r'HOST_UI_SCENES = \("emoji", "fullscreen"\)', 'HOST_UI_SCENES = ("emoji",)')
+_pooled = gate.doctor("the fullscreen verbs taken out of the mac HOST_VERBS", REAL[MAC_LANE],
+                      r'\n    "(?:user|expect)_fullscreen": '
+                      r'\("takeover", "moves the host\'s display"\),',
+                      "", want=2)
 _pooled_mod = gate.scratch() / "mac-fullscreen-pooled.py"
 _pooled_mod.write_text(_pooled, encoding="utf-8")
 watched("a mac fullscreen leg run in the pool", {**REAL, MAC_LANE: _pooled},
         "'fullscreen-rust-swiftui' is not EXCLUSIVE", lanes={**MODS, "mac": load_lane(_pooled_mod)})
 
-# 17. FULLSCREEN NO LONGER A DISPLAY LEG.
-_ran = gate.doctor("fullscreen taken out of the mac display scenes", REAL[MAC_LANE],
-                   r'DISPLAY_SCENES = \("fullscreen",\)', "DISPLAY_SCENES = ()")
-_ran_mod = gate.scratch() / "mac-fullscreen-not-display.py"
+# 17. FULLSCREEN NO LONGER A TAKEOVER LEG.
+_ran = gate.doctor("the fullscreen verbs made session verbs", REAL[MAC_LANE],
+                   r'("(?:user|expect)_fullscreen": \()"takeover"', r'\1"session"', want=2)
+_ran_mod = gate.scratch() / "mac-fullscreen-not-takeover.py"
 _ran_mod.write_text(_ran, encoding="utf-8")
 watched("a mac fullscreen leg an expired wait runs anyway", {**REAL, MAC_LANE: _ran},
-        "is not a DISPLAY_LEGS leg", lanes={**MODS, "mac": load_lane(_ran_mod)})
+        "'fullscreen-rust-swiftui' is not a TAKEOVER_LEGS leg",
+        lanes={**MODS, "mac": load_lane(_ran_mod)})
+
+# 17b. THE SHIPPED EMOJI LEG: pick_emoji's legs run on a busy host once the
+# idle budget is spent (matrix at 0446a86a, docs/traps.md).
+_typed = gate.doctor("pick_emoji made a panel verb", REAL[MAC_LANE],
+                     r'"pick_emoji": \("takeover",', '"pick_emoji": ("panel",')
+_typed_mod = gate.scratch() / "mac-emoji-not-takeover.py"
+_typed_mod.write_text(_typed, encoding="utf-8")
+watched("an emoji leg that takes a present maintainer's keyboard", {**REAL, MAC_LANE: _typed},
+        "'emoji-rust-swiftui' is not a TAKEOVER_LEGS leg",
+        lanes={**MODS, "mac": load_lane(_typed_mod)})
+watched("pick_emoji not classified a takeover verb", {**REAL, MAC_LANE: _typed},
+        "pick_emoji reaches NSApp.activate(", lanes={**MODS, "mac": load_lane(_typed_mod)})
+
+# 17c. A LINK LEG THE SAME WAY: NSWorkspace activates the app it opens.
+_linked = gate.doctor("open_link taken out of the mac HOST_VERBS", REAL[MAC_LANE],
+                      r'\n    "open_link": \("takeover", [^)]*\),', "")
+_linked_mod = gate.scratch() / "mac-links-pooled.py"
+_linked_mod.write_text(_linked, encoding="utf-8")
+watched("a links leg run in the pool under a present maintainer", {**REAL, MAC_LANE: _linked},
+        "'links-rust-swiftui' is not a TAKEOVER_LEGS leg",
+        lanes={**MODS, "mac": load_lane(_linked_mod)})
+
+# 17d. A NEW ACTIVATION SITE IN THE INTERPRETER.
+_activated = gate.doctor("a third NSApp.activate in the interpreter", REAL[INTERPRETER],
+                         r"\n(\s*)NSApp\.orderFrontCharacterPalette\(nil\)\n",
+                         r"\n\1NSApp.orderFrontCharacterPalette(nil)\n"
+                         r"\1NSApp.activate(ignoringOtherApps: true)\n")
+watched("an interpreter activating the guest from an unclassified site",
+        {**REAL, INTERPRETER: _activated}, "NSApp.activate( has 3 site(s)")
+_unnamed = gate.doctor("an unnamed activation in the interpreter", REAL[INTERPRETER],
+                       r"\n(\s*)NSApp\.orderFrontCharacterPalette\(nil\)\n",
+                       r"\n\1NSApp.orderFrontCharacterPalette(nil)\n"
+                       r"\1NSRunningApplication.current.activate(options: [])\n")
+watched("an interpreter activating the guest through a call the census does not name",
+        {**REAL, INTERPRETER: _unnamed}, "current.activate( takes the host's foreground")
+
+# 17e. A HARNESS KEY SENT AROUND THE WATCH, AND THE WATCH SILENCED.
+_around = gate.doctor("one harness key sent around kayaHarnessSend", REAL[INTERPRETER],
+                      r"\n(\s*)kayaHarnessSend\(event\)\n", r"\n\1NSApp.sendEvent(event)\n",
+                      want=4)
+watched("harness keys the leg log would call the host's", {**REAL, INTERPRETER: _around},
+        "NSApp.sendEvent( has 5 site(s)")
+_deaf = gate.doctor("the key-down watch's print cut", REAL[INTERPRETER],
+                    r"(if kayaHarnessKeyDepth == 0 \{\n\s*)kayaHostKeys \+= 1\n", r"\1")
+watched("a host key that reaches the guest unnamed", {**REAL, INTERPRETER: _deaf},
+        "the key-down watch no longer counts")
 
 # 18. THE FUNNEL RUNNING A REFUSED LEG.
 _ignored = gate.doctor("queue_leg running a refused leg", REAL[MAC_RUNNER],
@@ -884,8 +1013,8 @@ watched("a mac funnel that runs a leg its idle wait refused",
         {**REAL, MAC_RUNNER: _ignored}, "does not report a leg the idle wait refused")
 
 # 19. THE WAIT ADMITTING A BUSY HOST.
-_admits = gate.doctor("display_wait admitting on expiry", REAL[MAC_LANE],
-                      r'(        if waited >= bound:\n            _idle\["display"\] \+= waited\n'
+_admits = gate.doctor("takeover_wait admitting on expiry", REAL[MAC_LANE],
+                      r'(        if waited >= bound:\n            _idle\["takeover"\] \+= waited\n'
                       r"[\s\S]*?)return refused\n",
                       r"\1return None\n")
 _admits_mod = gate.scratch() / "mac-display-admits.py"
@@ -895,9 +1024,9 @@ watched("a display wait that runs its leg on a busy host", {**REAL, MAC_LANE: _a
 
 # 20. THE HAND RUN MOVING THE DISPLAY.
 _hand = gate.doctor("run-leg's display wait cut", REAL["tools/run-leg.py"],
-                    r"refused = lane\.display_wait\(name\)", "refused = None")
+                    r"refused = lane\.takeover_wait\(name\)", "refused = None")
 watched("a hand run of a display leg that never waits", {**REAL, "tools/run-leg.py": _hand},
-        "a hand run of a DISPLAY_SCENES leg")
+        "a hand run of a TAKEOVER_SCENES leg")
 
 # 20b. THE WAIT'S OWN WALL CUT: a wait under a held token no longer refuses.
 _LANE_TEXT = gate.read(MAC_LANE)
@@ -923,7 +1052,7 @@ watched("idle_admit sleeping while it holds the token", REAL,
 
 # 20d. A BUSY DISPLAY LEG WAITING IN ITS QUEUE POSITION.
 _in_place = gate.doctor("the display deferral cut", _LANE_TEXT,
-                        r'in_place = leg in DISPLAY_LEGS and _idle\["deadline"\] is None',
+                        r'in_place = leg in TAKEOVER_LEGS and _idle\["deadline"\] is None',
                         "in_place = False")
 _in_place_mod = gate.scratch() / "mac-display-in-place.py"
 _in_place_mod.write_text(_in_place, encoding="utf-8")
@@ -932,9 +1061,9 @@ watched("a busy display leg that waits where it is queued", REAL,
 
 # 20e. EVERY DEFERRED LEG ITS OWN BOUND.
 _own_bound = gate.doctor("the shared deadline ignored", _LANE_TEXT,
-                         r'bound = \(DISPLAY_BOUND_S if _idle\["deadline"\] is None\n'
+                         r'bound = \(TAKEOVER_BOUND_S if _idle\["deadline"\] is None\n'
                          r'\s+else max\(0\.0, _idle\["deadline"\] - started\)\)',
-                         "bound = DISPLAY_BOUND_S")
+                         "bound = TAKEOVER_BOUND_S")
 _own_bound_mod = gate.scratch() / "mac-own-bound.py"
 _own_bound_mod.write_text(_own_bound, encoding="utf-8")
 watched("deferred display legs each waiting a whole bound", REAL,
@@ -1034,7 +1163,7 @@ _unsaid = gate.doctor("the idle seconds cut from the net line", REAL["tools/vali
 watched("a net line that hides the idle seconds",
         {**REAL, "tools/validate-all.py": _unsaid}, "never prints the idle-host seconds")
 _half = gate.doctor("idle_waited_seconds dropping the display seconds", _LANE_TEXT,
-                    r'int\(m\.group\("secs"\)\) \+ int\(m\.group\("display"\)\)',
+                    r'int\(m\.group\("secs"\)\) \+ int\(m\.group\("takeover"\)\)',
                     'int(m.group("secs"))')
 _half_mod = gate.scratch() / "mac-idle-half.py"
 _half_mod.write_text(_half, encoding="utf-8")
@@ -1046,7 +1175,7 @@ watched("an idle reader that misses the display waits", REAL,
 from netimage_server_routes import run as check_netimage_server_routes  # noqa: E402
 check_netimage_server_routes(gate)
 
-gate.negatives_ran(50)
+gate.negatives_ran(57)
 
 gate.counted("windows legs whose scene posts a notification",
              sorted(MODS["windows"].notification_legs(str(ROOT / "tools/scenes"))), floor=2)

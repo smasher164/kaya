@@ -1911,6 +1911,10 @@ def run_apk_on(serial, name, apk, component, script, extras,
     # run (docs/tasks-s9-plan.md R6).
     if two_act:
         run_as(serial, package, "rm", "-rf", ACT2_REL)
+    # The ring APPENDS its dump, so a red leg's bundle carried every earlier
+    # red's dump on this phone ahead of its own (docs/traps.md, the quick-add
+    # field panned above its sheet's top).
+    run_as(serial, package, "rm", "-f", f"files/verb-trace-{name}.txt")
     rec_proc = None
     rec_extra = []
     if os.environ.get("KAYA_RECORD"):

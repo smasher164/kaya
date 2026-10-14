@@ -1600,6 +1600,7 @@ class KayaSheet(val id: Long, val parent: Long) {
     var state: SheetState? = null
     /** The sheet's own dialog window, where the back key lands. */
     var window: android.view.Window? = null
+    var handleDropped = false
 }
 
 /** One menu item — a VERB, never a place (DESIGN.md, Menus). All
@@ -1919,22 +1920,16 @@ object KayaFailShot {
             if (w <= 0 || h <= 0) {
                 "no picture: the window's decor view measured ${w}x$h"
             } else {
-                val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-                val latch = java.util.concurrent.CountDownLatch(1)
-                var result = -1
-                android.view.PixelCopy.request(
-                    activity.window, bitmap,
-                    { r -> result = r; latch.countDown() },
-                    Handler(android.os.Looper.getMainLooper()),
-                )
-                if (!latch.await(2, java.util.concurrent.TimeUnit.SECONDS)) {
+                val (bitmap, result) = copy(activity.window, w, h)
+                if (result == null) {
                     "no picture: PixelCopy did not answer within 2s"
                 } else if (result != android.view.PixelCopy.SUCCESS) {
                     "no picture: PixelCopy answered $result"
                 } else {
+                    val sheets = sheetLayers(activity, bitmap)
                     f.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
                     "PixelCopy of the app's own window (${w}x$h, its surface alone: no system " +
-                        "bars' icons, no keyboard, no other window), taken in process at $why"
+                        "bars' icons, no keyboard, no other app's window)$sheets, taken in process at $why"
                 }
             }
         } catch (e: Exception) {
@@ -1946,6 +1941,38 @@ object KayaFailShot {
             Log.e("kaya", "KAYA_HARNESS: fail shot sentence could not be written: $e")
         }
         Log.i("kaya", "KAYA_HARNESS: fail shot: $said")
+    }
+
+    private fun copy(window: android.view.Window, w: Int, h: Int): Pair<Bitmap, Int?> {
+        val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val latch = java.util.concurrent.CountDownLatch(1)
+        var result = -1
+        android.view.PixelCopy.request(
+            window, bitmap,
+            { r -> result = r; latch.countDown() },
+            Handler(android.os.Looper.getMainLooper()),
+        )
+        return bitmap to (if (latch.await(2, java.util.concurrent.TimeUnit.SECONDS)) result else null)
+    }
+
+    /** Each open sheet's own window drawn over [base] where it sits: a sheet
+     * is a dialog window the activity's copy does not contain (docs/traps.md,
+     * the quick-add field panned above its sheet's top). */
+    private fun sheetLayers(activity: ComponentActivity, base: Bitmap): String {
+        val origin = IntArray(2).also { activity.window.decorView.getLocationOnScreen(it) }
+        val said = ArrayList<String>()
+        for (sheet in KayaSceneModel.sheets.toList()) {
+            val window = sheet.window
+            if (window == null) { said.add("sheet ${sheet.id}: no window"); continue }
+            val decor = window.decorView
+            if (decor.width <= 0 || decor.height <= 0) { said.add("sheet ${sheet.id}: ${decor.width}x${decor.height}"); continue }
+            val (layer, result) = copy(window, decor.width, decor.height)
+            if (result != android.view.PixelCopy.SUCCESS) { said.add("sheet ${sheet.id}: PixelCopy answered $result"); continue }
+            val at = IntArray(2).also { decor.getLocationOnScreen(it) }
+            android.graphics.Canvas(base).drawBitmap(layer, (at[0] - origin[0]).toFloat(), (at[1] - origin[1]).toFloat(), null)
+            said.add("sheet ${sheet.id} drawn over it at (${at[0] - origin[0]},${at[1] - origin[1]}) ${decor.width}x${decor.height}")
+        }
+        return if (said.isEmpty()) "" else "; " + said.joinToString("; ")
     }
 }
 
@@ -10775,7 +10802,7 @@ object KayaCompose {
                         } else {
                             val (got, why) = onUi(activity) { kayaSafeReading(activity, parts[1]) }
                             when {
-                                got == null -> failures.add(why)
+                                got == null -> failures.add(why + (onUi(activity) { kayaPanReading(activity) } ?: ""))
                                 got == wantSafe -> observed.add("${parts[1]} $got")
                                 else -> failures.add("${parts[1]} reads $got, wanted $wantSafe")
                             }
@@ -19080,7 +19107,8 @@ internal fun kayaPanEvaluate() {
         return
     }
     val keyboardTop = decor.height - insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
-    val room = keyboardTop - kayaKeyboardRoomTop(field, insets)
+    val roomTop = kayaKeyboardRoomTop(field, insets)
+    val room = keyboardTop - roomTop
     val gap = 8f * decor.resources.displayMetrics.density
     val want = kayaFieldRoom(field, frame, decor, insets)
     if (want != null) {
@@ -19097,15 +19125,50 @@ internal fun kayaPanEvaluate() {
     val covered = target - keyboardTop
     val current = KayaSceneModel.keyboardPan
     var next = current
+    val above = frame.height <= room && frame.top < roomTop - 0.5f
     if (covered > 0.5f) {
         next = current + covered + margin
-    } else if (current > 0f && covered < -2 * margin) {
+    } else if (current > 0f && (covered < -2 * margin || above)) {
         next = maxOf(0f, current + covered + margin)
     }
     if (kotlin.math.abs(next - current) > 0.5f) {
+        KayaVTrace.note("pan", "pan ${current.toInt()} -> ${next.toInt()}${if (above) " (the field's top above its room)" else ""}: " +
+            kayaPanInputs(field, frame, roomTop, keyboardTop.toFloat()))
         KayaSceneModel.keyboardPanRoot = kayaRootIdOf(field.id)
         KayaSceneModel.keyboardPan = next
     }
+}
+
+/** The focused field's pan inputs, for an expect_safe failure: the verb
+ * trace's ring is overrun by the step's own retries before the verdict. */
+internal fun kayaPanReading(activity: ComponentActivity): String? {
+    val decor = activity.window.decorView
+    val insets = ViewCompat.getRootWindowInsets(decor) ?: return null
+    val field = KayaSceneModel.composeFocusedId?.let { KayaSceneModel.nodes[it] } ?: return null
+    val frame = kayaNodeFrames[field.id] ?: return null
+    val keyboardTop = (decor.height - insets.getInsets(WindowInsetsCompat.Type.ime()).bottom).toFloat()
+    return "; the pan: " + kayaPanInputs(field, frame, kayaKeyboardRoomTop(field, insets), keyboardTop)
+}
+
+/** The pan's inputs for [field], for the verb trace (docs/traps.md, the
+ * quick-add field panned above its sheet's top). */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+internal fun kayaPanInputs(
+    field: KayaNode,
+    frame: androidx.compose.ui.geometry.Rect,
+    roomTop: Float,
+    keyboardTop: Float,
+): String {
+    val rootId = kayaRootIdOf(field.id)
+    val sheet = KayaSceneModel.sheets.firstOrNull { it.root?.id == rootId }
+    val sheetText = sheet?.let { s ->
+        val st = s.state
+        val offset = st?.let { runCatching { it.requireOffset().toInt().toString() }.getOrElse { "unset" } } ?: "no state"
+        "sheet ${s.id} content top ${kayaSheetTops[rootId]?.toInt()}, handle ${if (s.handleDropped) "dropped" else "shown"}, " +
+            "offset $offset, ${st?.currentValue} -> ${st?.targetValue}"
+    } ?: "no sheet, content top ${kayaContentTop.toInt()}"
+    return "field ${field.id} frame ${kayaRectText(frame)}, room ${roomTop.toInt()}..${keyboardTop.toInt()}, " +
+        "pan ${KayaSceneModel.keyboardPan.toInt()} on root ${KayaSceneModel.keyboardPanRoot}, $sheetText"
 }
 
 /** The top of the room a focused field has above the keyboard: below the
@@ -20367,6 +20430,7 @@ private fun KayaSheetView(sheet: KayaSheet, root: KayaNode) {
     // landscape on the pool phone; docs/traps.md, the landscape composer).
     var cramped by remember { mutableStateOf(false) }
     LaunchedEffect(typing) { if (!typing) cramped = false }
+    sheet.handleDropped = cramped
     val hostView = LocalView.current
     ModalBottomSheet(
         dragHandle = if (cramped) null else ({ androidx.compose.material3.BottomSheetDefaults.DragHandle() }),
@@ -20424,6 +20488,8 @@ private fun KayaSheetView(sheet: KayaSheet, root: KayaNode) {
                         kayaKeyboardTop(hostView) - top < field.height + 8f * hostView.resources.displayMetrics.density
                     ) {
                         cramped = true
+                        KayaVTrace.note("sheet", "handle dropped: sheet ${sheet.id} content top ${top.toInt()}, " +
+                            "keyboard top ${kayaKeyboardTop(hostView).toInt()}, field ${kayaRectText(field)}")
                     }
                     kayaPanSoon()
                 }

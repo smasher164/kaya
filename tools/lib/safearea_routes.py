@@ -168,6 +168,15 @@ NATIVE = [
      "else maxOf(safeTop.toFloat(), kayaContentTop)"),
     (COMPOSE, "Compose's sheet pans within its own content",
      "return if (inSheet) maxOf(safeTop.toFloat(), kayaSheetTops[kayaRootIdOf(field.id)] ?: 0f)"),
+    # The pan's dead zone kept a field set against a lower content top 8 px
+    # above its room once the sheet settled (docs/traps.md, the quick-add
+    # field panned above its sheet's top).
+    (COMPOSE, "Compose's pan brings a field that fits back below its room's top",
+     "val above = frame.height <= room && frame.top < roomTop - 0.5f\n"
+     " if (covered > 0.5f) {\n next = current + covered + margin\n"
+     " } else if (current > 0f && (covered < -2 * margin || above)) {"),
+    (COMPOSE, "Compose's expect_safe failure names the pan's inputs",
+     'got == null -> failures.add(why + (onUi(activity) { kayaPanReading(activity) } ?: ""))'),
     (COMPOSE, "Compose's sheet keeps its layout while typing", "val keeps = detented || typing"),
     (COMPOSE, "Compose's cramped sheet drops its handle and its top inset",
      "dragHandle = if (cramped) null else"),
@@ -752,6 +761,12 @@ def run(g):
         ("Compose's sheet pan room under the status bar, as shipped", COMPOSE,
          r"maxOf\(safeTop\.toFloat\(\), kayaSheetTops\[kayaRootIdOf\(field\.id\)\] \?: 0f\)", "safeTop.toFloat()",
          "Compose's sheet pans within its own content"),
+        ("Compose's pan leaving a field above its room inside the dead zone, as shipped", COMPOSE,
+         r"\(covered < -2 \* margin \|\| above\)", "covered < -2 * margin",
+         "Compose's pan brings a field that fits back below its room's top"),
+        ("Compose's expect_safe failure without the pan, as shipped", COMPOSE,
+         r'failures\.add\(why \+ \(onUi\(activity\) \{ kayaPanReading\(activity\) \} \?: ""\)\)',
+         "failures.add(why)", "Compose's expect_safe failure names the pan's inputs"),
         ("Compose's undetented sheet squeezed by Material's keyboard padding, as shipped", COMPOSE,
          r"val keeps = detented \|\| typing", "val keeps = detented", "Compose's sheet keeps its layout while typing"),
         ("Compose's cramped sheet keeping its handle, as shipped", COMPOSE,

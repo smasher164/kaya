@@ -2012,6 +2012,8 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
     drive_dir = _drive_dirs.get(udid) or pathlib.Path("/nonexistent")
     drive_log = drive_dir / "drive.log"
     drive_log_at = drive_log.stat().st_size if drive_log.is_file() else 0
+    for left_over in ("failshot.png", "failshot.txt"):
+        (drive_dir / left_over).unlink(missing_ok=True)
     xcode_log = drive_dir / "xcodebuild.log"
     xcode_log_at = xcode_log.stat().st_size if xcode_log.is_file() else 0
     # THE LEG'S OWN CEILING, HANDED TO THE DRIVER: `timeout 120` below kills
@@ -2051,6 +2053,7 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
         # thing that does not keep.
         device_capture(udid, pathlib.Path(app).stem, name, log,
                        flightrec_lane.ios_launch_pid(out, bundle_id), launched_at)
+        driver_shot(drive_dir, name, log)
         notification_capture(udid, bundle_id, name, installed_at, log)
         system_capture(udid, name, log, launched_at,
                        flightrec_lane.ios_launch_pid(out, bundle_id))
@@ -2064,7 +2067,7 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
                 mine = dl.read().splitlines()
             print(f"== what the xcui driver on {udid} waited for during "
                   f"{name} ({len(mine)} line(s)) ==", file=log)
-            print("\n".join(mine[-40:]) if mine else
+            print(flightrec_lane.whole_or_ends(mine) if mine else
                   "(the driver was never asked for anything)", file=log)
         if xcode_log.is_file():
             with open(xcode_log, "r", encoding="utf-8",
@@ -2072,8 +2075,8 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
                 xl.seek(xcode_log_at)
                 said = xl.read().splitlines()
             print(f"== XCTest's own account on {udid} during {name}, its idle "
-                  f"waits included ({len(said)} line(s), last 60) ==", file=log)
-            print("\n".join(said[-60:]) if said else
+                  f"waits included ({len(said)} line(s)) ==", file=log)
+            print(flightrec_lane.whole_or_ends(said) if said else
                   "(XCTest wrote nothing while this leg ran)", file=log)
     if simdrive_log is not None:
         lines = (len(simdrive_log.read_text(
@@ -2131,6 +2134,24 @@ def secure_refusals(script, name, log, out, slices):
                 f.seek(at)
                 transcripts[label] = f.read()
     return secure_scan.refusals(script, transcripts)
+
+
+def driver_shot(drive_dir, name, log):
+    """The xcui driver's own picture of the screen as a verb gave up, in
+    place of device_capture's, which is taken after the guest has exited
+    (docs/traps.md, the iOS save press)."""
+    png, said = drive_dir / "failshot.png", drive_dir / "failshot.txt"
+    if not (png.is_file() and png.stat().st_size):
+        return
+    shot = (LEGS_DIR / f"{name}.log").with_suffix(".shot.png")
+    shutil.move(str(png), shot)
+    when = said.read_text(encoding="utf-8", errors="replace").strip() if said.is_file() else ""
+    (LEGS_DIR / f"{name}.log").with_suffix(".shotwhen").write_text(
+        f"XCUIScreen's screenshot, taken by the xcui driver inside the leg as the leg's "
+        f"first picker verb gave up ({when or 'unnamed'}). The guest was still running.\n",
+        encoding="utf-8")
+    print(f"run-sim: {name} kept the xcui driver's screenshot from the moment "
+          f"{when or 'a verb gave up'} ({shot.stat().st_size} bytes)", file=log)
 
 
 def device_capture(udid, executable, name, log, pid, launched_at):
@@ -2203,10 +2224,13 @@ def device_capture(udid, executable, name, log, pid, launched_at):
 
 def system_capture(udid, name, log, launched_at, pid):
     """docs/traps.md, XCTest's animations-idle wait: testmanagerd, the xcui driver's
-    runner and runningboardd over the leg, and any crash report naming the app's pid."""
+    runner and runningboardd over the leg, and any crash report naming the app's pid;
+    and the document picker's own process, whose `send control actions` is the only
+    record of a press reaching its button (docs/traps.md, the iOS save press)."""
     dest = (LEGS_DIR / f"{name}.log").with_suffix(".syslog")
     since = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(launched_at - 1))
     predicate = ('process == "testmanagerd" OR process == "KayaDrive-Runner"'
+                 ' OR process == "com.apple.DocumentManager.Service"'
                  + (f' OR (process == "runningboardd" AND eventMessage CONTAINS "{pid}")'
                     if pid is not None else ""))
     with tempfile.NamedTemporaryFile(prefix="kaya-syslog-", delete=False) as tf:
