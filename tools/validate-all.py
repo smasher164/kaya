@@ -6,6 +6,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
 from kaya_gate import ROOT, dev_shell_or_die
 import exclusive
+import lane_health
 from lanes import android as _android, ios as _ios, mac as _mac, win as _win
 
 dev_shell_or_die()
@@ -176,6 +177,8 @@ def run_lane(name, argv, env=None):
     # siblings' time.
     def _wait(name=name, proc=proc, t0=t0):
         rc = proc.wait()
+        print(f"{name}: exited after {int(time.monotonic() - t0)}s; "
+              f"{lane_health.host_line()[0]}", flush=True)
         verdict = "PASS" if rc == 0 else "FAIL"
         if rc == only.REFUSED and only.active():
             verdict = "SKIP"
@@ -197,21 +200,7 @@ T0 = time.monotonic()
 LOAD_AT_LAUNCH = os.getloadavg()
 
 
-def top_consumers(n=4):
-    """The n busiest processes by CPU share, as `pcpu name`."""
-    got = subprocess.run(["ps", "-Ao", "pcpu=,comm="], stdout=subprocess.PIPE,
-                         text=True, encoding="utf-8", errors="replace",
-                         check=False)
-    rows = []
-    for line in got.stdout.splitlines():
-        parts = line.split(None, 1)
-        if len(parts) == 2:
-            try:
-                rows.append((float(parts[0]), pathlib.Path(parts[1]).name))
-            except ValueError:
-                continue
-    rows.sort(reverse=True)
-    return ", ".join(f"{name} {cpu:.0f}%" for cpu, name in rows[:n])
+top_consumers = lane_health.top_consumers
 
 
 # AND THE HOST'S IDLE CLOCK BESIDE THEM (docs/deferred.md, the
@@ -512,6 +501,13 @@ if MODE == "parallel":
             print(f"{name}: {waited}s of that waiting for the exclusive "
                   f"token, {idle}s waiting for an idle host; {net}s net "
                   f"against the {budget}s ceiling")
+        if verdict != "SKIP":
+            shifted, said = lane_health.compare_runs(
+                name, log_text, LANES_KEEP_DIR / "runs", RUN_STAMP, net, budget)
+            print(said)
+            if shifted:
+                for line in lane_health.health_lines(log_text):
+                    print(f"  {line}")
         if budget > 0 and net > budget:
             now = os.getloadavg()
             print(f"{name}: DURATION ANOMALY — {secs}s ({net}s net of the "

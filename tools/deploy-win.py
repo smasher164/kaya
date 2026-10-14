@@ -50,6 +50,7 @@ from packaging import windows as win_package
 import exclusive
 import only  # noqa: E402
 import flightrec_lane
+import lane_health
 import secure_scan
 import media_server
 import contextlib
@@ -367,6 +368,17 @@ GO_WIN_ARM64_SHA256 = "6e0156b9788209931dd340fadc04171ce15063c17b51c92e7b86b5110
 # held to it after the install (the `java -version` string's first field).
 JDK_MAJOR = "21"
 JDK_WINGET_ID = f"Microsoft.OpenJDK.{JDK_MAJOR}"
+WIN_RUNTIMES = (("python.exe", ""), ("java.exe", ""), ("dotnet.exe", ""),
+                ("node.exe", f"{NODE_DIR}\\node.exe"),
+                ("go.exe", "C:\\kaya\\go127\\go\\bin\\go.exe"), ("C:\\kaya", "C:\\kaya"))
+
+
+def lane_health_reading(when):
+    lane_health.windows_report("windows", when, ["ssh", "-n", "-o", "BatchMode=yes",
+                                                 *SSH_MUX, HOST], WIN_RUNTIMES)
+
+
+lane_health_reading("start")
 BUILD_EXAMPLES = []
 for _s in SCENES + DEPTH_SCENES:
     BUILD_EXAMPLES += ["--example", _s]
@@ -2139,6 +2151,7 @@ def run_one_suite(name, slot, log):
             f"C:\\kaya\\flightrec\\{name}-toastwpn.db "
             f"C:\\kaya\\flightrec\\{name}-toastwpn.db-wal "
             f"C:\\kaya\\flightrec\\{name}-toast.bmp "
+            f"C:\\kaya\\flightrec\\{name}-failshot.bmp "
             f"C:\\kaya\\flightrec\\{name}-gesture.bmp 2>nul & schtasks /create /tn "
             f'kaya_{name} /tr "wscript C:\\kaya\\run-hidden.vbs '
             f'run_{name}.cmd {slot}" /sc once /st 00:00 /it /rl highest /f '
@@ -2775,6 +2788,7 @@ else:
 drain_suites()
 capture_devices_stop()
 timing("suites")
+lane_health_reading("end")
 # The media server stops HERE, before the verdict, and proves it is gone
 # (tools/lib/media_server.py raises otherwise).
 try:

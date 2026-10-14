@@ -37,6 +37,7 @@ import only  # noqa: E402
 import scene_cut
 import secure_scan
 import flightrec_lane
+import lane_health
 import media_server
 import emulator_capture
 
@@ -727,6 +728,7 @@ assert_outside_band(TABLET_SERIAL, "tablet")
 
 status = 0
 timing("boot")
+lane_health.android_report("android", "start", [*SERIALS, TABLET_SERIAL])
 
 if os.environ.get("KAYA_RECORD"):
     if not (shutil.which("ffmpeg") and shutil.which("ffprobe")):
@@ -4357,6 +4359,7 @@ except RuntimeError as e:
     status = 1
 
 only.summary("run-emulator", _selected)
+lane_health.android_report("android", "end", [*SERIALS, TABLET_SERIAL])
 
 # Suites accumulate failures rather than abort, so a truncated log must
 # still end with the answer: a killed lane otherwise reads exactly like

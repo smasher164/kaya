@@ -7580,6 +7580,8 @@ impl Scene {
             return (Vec::new(), Vec::new());
         }
         let heard = self.visibility.report(widget, shown);
+        #[cfg(feature = "harness")]
+        crate::media::visibility_reported(widget, shown, heard);
         let mut ops = Vec::new();
         if self.visibility.is_shown(widget) {
             if let Some(player) = self.video_shows.get(&widget).copied() {

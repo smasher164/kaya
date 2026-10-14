@@ -4143,6 +4143,12 @@ def winui_media_arms(media_src=None):
         bad.append("nothing issues a held seek when the one in flight completes")
     if opened is None or "p.shift_pending" not in opened.split("return;", 1)[0]:
         bad.append("fn finish_open does not wait for an http(s) edit list still being read")
+    shown = rust_fn(code, "shown_fraction")
+    if shown is None or "crate::media::shown_in_device_pixels(view, &clips, scale)" not in shown \
+            or re.search(r"/ \(?w \* h\)?", shown):
+        bad.append("fn shown_fraction does not answer through crate::media::shown_in_device_pixels "
+                   "— a DIP fraction read the resting feed's last row 0.2 px clipped, `in` "
+                   "(docs/traps.md, the feed's last row read `in`)")
     return bad
 
 
@@ -4257,6 +4263,9 @@ for pattern, repl, label, want in (
      r"p\.player\.StepBackwardOneFrame\(\)\)", "Pause()", "the paused seek's frame step cut", 1),
     (r"(\|p\| p\.loaded) \|\| p\.shift_pending\)", ")",
      "the open not waiting for the edit list", 1),
+    (r"(\n +)Ok\(crate::media::shown_in_device_pixels\(view, &clips, scale\)\)",
+     "Ok(clips.iter().fold(1.0, |f, _| f))",
+     "the visibility fraction taken without the device-pixel snap", 1),
 ):
     cut = g.doctor(f"winui media: {label}", real(WINUI_MEDIA), pattern,
                    lambda m, repl=repl: m.group(1) + repl, want=want)

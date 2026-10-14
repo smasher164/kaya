@@ -385,7 +385,7 @@ if ($target -eq [IntPtr]::Zero) {
         } else {
             $bmp.Save($shot, [System.Drawing.Imaging.ImageFormat]::Png)
             Emit $out "shot saved ${w}x${hgt} -> $shot"
-            Why 'shot' "PrintWindow of the guest's ${w}x${hgt} window"
+            Why 'shot' ("PrintWindow at collect of the first WinUI window listed, ${w}x${hgt}: " + (Describe $target) + ". The pool runs other legs beside this one and the guest may already have exited, so this is whichever WinUI window was up; the guest's own picture at its failed step is step-shot")
         }
         $bmp.Dispose()
     } catch {
@@ -410,7 +410,7 @@ $desk = Join-Path $dir "$Leg-desktop.png"
 if (Test-Path $desk) { Remove-Item $desk -Force }
 $fgIsGuest = ($fg -ne [IntPtr]::Zero) -and ((ClassOf $fg) -eq 'WinUIDesktopWin32WindowClass')
 if ($fgIsGuest) {
-    $sentence = "the foreground at collect WAS the guest's own window (hwnd=0x{0:x}), so the window shot above is the picture and no desktop grab was taken" -f [int64]$fg
+    $sentence = "the foreground at collect was a WinUI window (" + (Describe $fg) + "), not a shell surface, so no desktop grab was taken; whose window it is the window list above says, and the guest's own picture at its failed step is step-shot"
     Emit $out $sentence
     Why 'desktop-shot' $sentence
 } else {
@@ -447,7 +447,7 @@ Reset $fgtext
 if ($fg -eq [IntPtr]::Zero) {
     Emit $fgtext 'no window held the foreground at collect, so there was nothing to read'
 } elseif ($fgIsGuest) {
-    Emit $fgtext ("the foreground was the guest's own window: " + (Describe $fg))
+    Emit $fgtext ("the foreground was a WinUI window, not a shell surface: " + (Describe $fg))
     Emit $fgtext 'no shell surface was covering it, so no UI Automation walk was made'
 } else {
     Emit $fgtext (Describe $fg)

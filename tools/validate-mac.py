@@ -28,6 +28,7 @@ from lanes import mac as lane
 import exclusive
 import only  # noqa: E402
 import flightrec_lane
+import lane_health
 import media_server
 from host_lib import HOST_LIB, host_lib_stamp
 
@@ -55,6 +56,7 @@ os.chdir(ROOT)
 os.environ["PYTHONPATH"] = str(ROOT / "bindings/python")
 
 _t0 = time.monotonic()
+lane_health.mac_report("mac", "start")
 
 
 def timing(phase):
@@ -984,6 +986,7 @@ if os.environ.get("KAYA_RECORD"):
 
 # The one-line verdict: suites accumulate failures rather than abort,
 # so a truncated log must still end with the answer.
+lane_health.mac_report("mac", "end")
 exclusive.summary("mac")
 lane.idle_summary()
 only.summary("validate-mac", _only_selected)

@@ -9130,6 +9130,36 @@ object KayaCompose {
         }?.index
     }
 
+    /** The K5 reading once the header has drawn what kaya holds (docs/traps.md, the
+     * K5 reading a frame behind the toggle's batch). */
+    private fun kayaCollapsedAncestorDrawn(activity: ComponentActivity, spec: String, deadline: Long): Int? {
+        val began = System.nanoTime()
+        var frames = 0
+        while (true) {
+            val hidden = kayaCollapsedAncestor(activity, spec)
+            val held = hidden != null && onUi(activity) { KayaSceneModel.expanders.getOrNull(hidden)?.expanded == true }
+            val waited = (System.nanoTime() - began) / 1_000_000
+            if (!held) {
+                if (frames > 0) {
+                    val said = "the header drew kaya's ${if (hidden == null) "open" else "collapsed"} " +
+                        "state after $frames frame(s), ${waited}ms"
+                    KayaVTrace.note("reach", "<- $said")
+                    Log.i("kaya", "KAYA_HARNESS: reach $said")
+                }
+                return hidden
+            }
+            if (System.nanoTime() >= deadline) {
+                val said = "kaya holds expander#$hidden open and its header still reads collapsed " +
+                    "after $frames frame(s), ${waited}ms"
+                KayaVTrace.note("reach", "<- $said")
+                Log.i("kaya", "KAYA_HARNESS: reach $said")
+                return hidden
+            }
+            kayaAwaitFrames(activity, 1)
+            frames += 1
+        }
+    }
+
     /** The K5 refusal, harness.rs's `out_of_reach` word for word. */
     private fun kayaOutOfReach(index: Int): String =
         "the target is out of reach inside collapsed expander#$index; expand it first (docs/expander-plan.md K5)"
@@ -9731,7 +9761,7 @@ object KayaCompose {
                 var stepDeadline = stepStart + 15_000_000_000L
                 var retryStep = true
                 if (kayaExpandersDeclared && parts.size > 1 && parts[0] != "expect_out_of_reach") {
-                    val hidden = kayaCollapsedAncestor(activity, parts[1])
+                    val hidden = kayaCollapsedAncestorDrawn(activity, parts[1], stepDeadline)
                     if (hidden != null) {
                         failures.add(kayaOutOfReach(hidden))
                         Log.i("kaya", "KAYA_HARNESS: step-failed ${failures.last()}")

@@ -1582,7 +1582,11 @@ fn tick(core: &mut CoreState) {
     }
     let views: Vec<u64> = core.media.video_ids.clone();
     for widget in views {
-        let shown = core.media.videos.get(&widget).map_or(0.0, |v| shown_fraction(core, v));
+        let (shown, geometry) = core.media.videos.get(&widget).map_or((0.0, String::new()), |v| shown_fraction(core, v));
+        #[cfg(feature = "harness")]
+        crate::media::visibility_geometry(WidgetId(widget), geometry);
+        #[cfg(not(feature = "harness"))]
+        let _ = geometry;
         let (heard, ops) = core.scene.video_visible(WidgetId(widget), shown);
         for op in ops {
             let what = super::op_head(&op);
@@ -1597,15 +1601,22 @@ fn tick(core: &mut CoreState) {
 }
 
 /// How much of a video view shows inside every scroll it sits in: its box
-/// against each ancestor ScrollViewer's, in the window root's coordinates.
-fn shown_fraction(core: &CoreState, video: &WinVideo) -> f64 {
-    (|| -> windows_core::Result<f64> {
+/// against each ancestor ScrollViewer's, in the window root's coordinates
+/// snapped to device pixels (docs/traps.md, the feed's last row read `in`),
+/// and the rectangles and scroll positions it was computed from.
+fn shown_fraction(core: &CoreState, video: &WinVideo) -> (f64, String) {
+    let mut seen = String::new();
+    let shown = (|| -> windows_core::Result<f64> {
         let root = core.window.Content()?;
         let element: FrameworkElement = video.host.cast()?;
         let (w, h) = (element.ActualWidth()?, element.ActualHeight()?);
-        if w <= 0.0 || h <= 0.0 || element.Visibility()? != Visibility::Visible {
+        let shown = element.Visibility()? == Visibility::Visible;
+        seen = format!("box {w:.1}x{h:.1} (frame {:.1}x{:.1})", video.frame.Width()?, video.frame.Height()?);
+        if w <= 0.0 || h <= 0.0 || !shown {
+            seen.push_str(if shown { "; empty" } else { "; collapsed" });
             return Ok(0.0);
         }
+        let scale = element.XamlRoot().and_then(|x| x.RasterizationScale()).unwrap_or(1.0);
         let rect = |e: &FrameworkElement| -> windows_core::Result<(f64, f64, f64, f64)> {
             let at = e
                 .cast::<UIElement>()?
@@ -1614,7 +1625,9 @@ fn shown_fraction(core: &CoreState, video: &WinVideo) -> f64 {
             let (x, y) = (f64::from(at.X), f64::from(at.Y));
             Ok((x, y, x + e.ActualWidth()?, y + e.ActualHeight()?))
         };
-        let (mut l, mut t, mut r, mut b) = rect(&element)?;
+        let view = rect(&element)?;
+        seen.push_str(&format!(" at {:.1},{:.1}..{:.1},{:.1}, scale {scale}", view.0, view.1, view.2, view.3));
+        let mut clips = Vec::new();
         let mut node: Option<super::bindings::Microsoft::UI::Xaml::DependencyObject> =
             VisualTreeHelper::GetParent(&element).ok();
         let mut in_tree = false;
@@ -1625,16 +1638,27 @@ fn shown_fraction(core: &CoreState, video: &WinVideo) -> f64 {
             }
             if let Ok(viewer) = at.cast::<super::bindings::Microsoft::UI::Xaml::Controls::ScrollViewer>() {
                 let (vl, vt, vr, vb) = rect(&viewer.cast()?)?;
-                (l, t, r, b) = (l.max(vl), t.max(vt), r.min(vr), b.min(vb));
+                seen.push_str(&format!(
+                    "; viewer {vl:.1},{vt:.1}..{vr:.1},{vb:.1} offset {:.1} of {:.1}, viewport {:.1}, extent {:.1}",
+                    viewer.VerticalOffset()?,
+                    viewer.ScrollableHeight()?,
+                    viewer.ViewportHeight()?,
+                    viewer.ExtentHeight()?
+                ));
+                clips.push((vl, vt, vr, vb));
             }
             node = VisualTreeHelper::GetParent(&at).ok();
         }
-        if !in_tree || r <= l || b <= t {
+        if !in_tree {
+            seen.push_str("; not under the window's root");
             return Ok(0.0);
         }
-        Ok(((r - l) * (b - t)) / (w * h))
-    })()
-    .unwrap_or(0.0)
+        Ok(crate::media::shown_in_device_pixels(view, &clips, scale))
+    })();
+    match shown {
+        Ok(f) => (f, seen),
+        Err(e) => (0.0, format!("{seen}; unreadable: {e}")),
+    }
 }
 
 // ---- the video view (§3) --------------------------------------------------

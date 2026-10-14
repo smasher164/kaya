@@ -58,8 +58,8 @@ CALLS = [
      "case (propExpanded, valueBool):\n                    kayaScene.nodes[id]!.expanded = raw[body + 24] != 0"),
     (SWIFT, "the props ride the header, never the container", "} else if node.kind == kindExpander && !leaf {"),
     (SWIFT, "toggle presses the header", "let unpressed = kayaExpanderPress(parts[1], parts[2] == \"on\")"),
-    (SWIFT, "the K5 refusal runs before every step",
-     "let hidden = kayaCollapsedAncestor(parts[1])\n            {\n                failures.append(kayaOutOfReach(hidden))"),
+    (SWIFT, "the K5 refusal runs before every step, once the header has drawn kaya's state",
+     "let hidden = kayaCollapsedAncestorDrawn(parts[1], stepDeadline)\n            {\n                failures.append(kayaOutOfReach(hidden))"),
     (SWIFT, "the header reads as a button", 'case "AXDisclosureTriangle": return "button"'),
     (SWIFT, "the header's text observed bare, as harness.rs and Compose observe it",
      "if kayaBytesEqual(gotHeader, wantHeader) {\n observed.append(wantHeader)"),
@@ -103,13 +103,25 @@ COMPOSE_READS = [
 CALLS += [
     (COMPOSE, "the app's write reaches the Compose arm",
      "PROP_EXPANDED -> KayaSceneModel.nodes[id]!!.expanded = readBool(b)"),
-    (COMPOSE, "the Compose K5 refusal runs before every step",
-     "val hidden = kayaCollapsedAncestor(activity, parts[1])\n if (hidden != null) {\n failures.add(kayaOutOfReach(hidden))"),
+    (COMPOSE, "the Compose K5 refusal runs before every step, once the header has drawn kaya's state",
+     "val hidden = kayaCollapsedAncestorDrawn(activity, parts[1], stepDeadline)\n if (hidden != null) {\n failures.add(kayaOutOfReach(hidden))"),
     (COMPOSE, "Compose's toggle presses the header", 'kayaExpanderPress(activity, parts[1], parts[2] == "on")'),
     (COMPOSE, "the Compose hint rides the expander's description, not twice",
      "if (node.a11yHint.isNotEmpty() && node.kind != KayaCompose.KIND_EXPANDER) {"),
     (SWIFT, "the SwiftUI header's hint is the expander's description",
      "let hint = node.kind == kindExpander ? kayaExpanderDescription(node) : node.a11yHint"),
+]
+# docs/traps.md, the K5 reading a frame behind the toggle's batch: (backend, label,
+# opener, what the block must hold). The model only keeps the platform re-read; the
+# answer is the platform's.
+SETTLED = [
+    (COMPOSE, "the Compose K5 wait for the header to draw", "private fun kayaCollapsedAncestorDrawn(",
+     ["val hidden = kayaCollapsedAncestor(activity, spec)",
+      "KayaSceneModel.expanders.getOrNull(hidden)?.expanded == true",
+      "if (System.nanoTime() >= deadline) {", "kayaAwaitFrames(activity, 1)"]),
+    (SWIFT, "the SwiftUI K5 wait for the header to draw", "func kayaCollapsedAncestorDrawn(",
+     ["let hidden = kayaCollapsedAncestor(spec)", "kayaScene.expanders[index].expanded",
+      "if Date() >= deadline {", "Thread.sleep(forTimeInterval: 0.02)"]),
 ]
 # The two widget backends (docs/expander-plan.md §3): (backend, label, opener,
 # what the block must hold, what it may never name).
@@ -299,6 +311,18 @@ def findings(sources, backends=None):
         if len(found) != 1 or flat(join) not in flat(found[0]):
             out.append(f"expander: {rel}'s {opener} no longer joins the summary into the header's "
                        f"description — a summary drawn but not spoken")
+    for rel, label, opener, wants in SETTLED:
+        found = blocks(sources[rel], opener)
+        if len(found) != 1:
+            out.append(f"expander: {label} is gone — {rel} defines {opener} {len(found)} times, wanted once")
+            continue
+        for want in wants:
+            if flat(want) not in flat(found[0]):
+                out.append(f"expander: {label} lacks {want[:70]} — a step right after an expand reads the "
+                           f"header a frame before it draws and refuses")
+        answers = set(re.findall(r"\breturn\b[ \t]*([^\n]*)", found[0]))
+        if answers != {"hidden"}:
+            out.append(f"expander: {label} answers {sorted(answers)}, wanted the platform's reading alone (hidden)")
     for rel, label, call in CALLS:
         if flat(call) not in flat(sources[rel]):
             out.append(f"expander: {label} no longer holds — {rel} lacks {call.splitlines()[0]}")
@@ -321,7 +345,8 @@ def run(g):
     g.counted("expander clauses held",
               len(ARM[1]) + 1 + sum(len(w) + 2 for *_, w in READS) + len(CALLS) + len(SENTENCES)
               + len(COMPOSE_ARM[1]) + 2 + sum(len(w) + 2 for *_, w in COMPOSE_READS) + len(SPOKEN)
-              + sum(len(w) + len(n) for *_, w, n in WIDGET_ROWS), floor=80)
+              + sum(len(w) + len(n) for *_, w, n in WIDGET_ROWS)
+              + sum(len(w) + 1 for *_, w in SETTLED), floor=80)
     g.counted("expander backends still stubbed", len(still), floor=0)
     for line in findings(sources):
         g.finding(line)
@@ -451,6 +476,19 @@ def run(g):
          "the app's height fitted to the screen"),
         ("the WinUI fit off the work area", WINUI, r"clamp_frame\(frame, work\)", "frame",
          "the WinUI fit lacks clamp_frame(frame, work)"),
+        ("the Compose K5 read before the header draws", COMPOSE,
+         r"val hidden = kayaCollapsedAncestorDrawn\(activity, parts\[1\], stepDeadline\)",
+         "val hidden = kayaCollapsedAncestor(activity, parts[1])", "once the header has drawn kaya's state"),
+        ("the Compose K5 wait with no frame", COMPOSE, r"(return hidden\n\s+\}\n)\s+kayaAwaitFrames\(activity, 1\)\n",
+         r"\1", "the Compose K5 wait for the header to draw lacks kayaAwaitFrames"),
+        ("the Compose K5 wait answering from the model", COMPOSE,
+         r"return hidden(\n\s+\}\n\s+if \(System\.nanoTime\(\) >= deadline\) \{)",
+         r"return if (held) hidden else null\1", "answers ['hidden', 'if (held) hidden else null']"),
+        ("the SwiftUI K5 read before the header draws", SWIFT,
+         r"let hidden = kayaCollapsedAncestorDrawn\(parts\[1\], stepDeadline\)",
+         "let hidden = kayaCollapsedAncestor(parts[1])", "once the header has drawn kaya's state"),
+        ("the SwiftUI K5 wait with no pause", SWIFT, r"\n\s+Thread\.sleep\(forTimeInterval: 0\.02\)\n(\s+)reads \+= 1",
+         r"\n\1reads += 1", "the SwiftUI K5 wait for the header to draw lacks Thread.sleep"),
         ("harness.rs reading through a collapsed expander", HARNESS,
          r"\.find_map\(\|t\| stage\.collapsed_ancestor\(\*t\)\)", ".find_map(|_| None::<usize>)",
          "harness.rs refuses a step aimed inside a collapsed expander"),

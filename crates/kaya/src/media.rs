@@ -952,6 +952,34 @@ fn visibility_band(shown: f64) -> u8 {
     }
 }
 
+/// How much of `view` shows inside every rectangle in `clips`, each edge
+/// snapped to the nearest device pixel at `scale` first: a scroll resting at
+/// its end left the WinUI feed's last row 0.2 px past the viewport, read as
+/// `in` (docs/traps.md, the feed's last row read `in`).
+pub(crate) fn shown_in_device_pixels(
+    view: (f64, f64, f64, f64),
+    clips: &[(f64, f64, f64, f64)],
+    scale: f64,
+) -> f64 {
+    let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+    let snap = |r: (f64, f64, f64, f64)| {
+        let s = |v: f64| (v * scale).round() / scale;
+        (s(r.0), s(r.1), s(r.2), s(r.3))
+    };
+    let (l, t, r, b) = snap(view);
+    let area = (r - l) * (b - t);
+    if area <= 0.0 {
+        return 0.0;
+    }
+    let (l, t, r, b) = clips.iter().map(|c| snap(*c)).fold((l, t, r, b), |(l, t, r, b), (cl, ct, cr, cb)| {
+        (l.max(cl), t.max(ct), r.min(cr), b.min(cb))
+    });
+    if r <= l || b <= t {
+        return 0.0;
+    }
+    ((r - l) * (b - t)) / area
+}
+
 /// THE VISIBILITY COALESCING (docs/media-plan.md §7b): a backend reports a
 /// video view's shown fraction as often as its geometry moves, every frame
 /// of a scroll; the app hears it only when the view enters or leaves, when
@@ -987,6 +1015,71 @@ impl Visibility {
     pub(crate) fn gone(&mut self, id: WidgetId) -> bool {
         self.bands.remove(&id).is_some()
     }
+}
+
+#[cfg(feature = "harness")]
+struct Seen {
+    shown: f64,
+    heard: Option<f64>,
+    reports: u64,
+    moved: std::time::Instant,
+    geometry: Option<(String, std::time::Instant)>,
+}
+
+#[cfg(feature = "harness")]
+static VISIBILITY_SEEN: std::sync::Mutex<std::collections::BTreeMap<u64, Seen>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+/// Every visibility report a backend makes, for the failed step's account
+/// (docs/traps.md, the WinUI feed's last row read `in`).
+#[cfg(feature = "harness")]
+pub(crate) fn visibility_reported(id: WidgetId, shown: f64, heard: Option<f64>) {
+    let now = std::time::Instant::now();
+    let mut seen = VISIBILITY_SEEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let entry = seen.entry(id.0).or_insert(Seen { shown, heard: None, reports: 0, moved: now, geometry: None });
+    if entry.shown.to_bits() != shown.to_bits() {
+        entry.moved = now;
+    }
+    entry.shown = shown;
+    entry.reports += 1;
+    if heard.is_some() {
+        entry.heard = heard;
+    }
+}
+
+/// The geometry the backend computed its last fraction from, in its own terms.
+#[cfg(all(feature = "harness", target_os = "windows"))]
+pub(crate) fn visibility_geometry(id: WidgetId, geometry: String) {
+    let now = std::time::Instant::now();
+    let mut seen = VISIBILITY_SEEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let entry = seen.entry(id.0).or_insert(Seen { shown: 0.0, heard: None, reports: 0, moved: now, geometry: None });
+    if entry.geometry.as_ref().is_none_or(|(g, _)| *g != geometry) {
+        entry.geometry = Some((geometry, now));
+    }
+}
+
+/// One line per video view a backend reported: the fraction it last
+/// measured, what the app last heard, how long each has stood, and the
+/// geometry behind it where the backend records one.
+#[cfg(feature = "harness")]
+pub(crate) fn visibility_account() -> Vec<String> {
+    let now = std::time::Instant::now();
+    let seen = VISIBILITY_SEEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    seen.iter()
+        .map(|(id, s)| {
+            let heard = s.heard.map_or("nothing".to_owned(), |h| format!("{h:.4}"));
+            let geometry = s.geometry.as_ref().map_or_else(
+                || "this backend records no geometry".to_owned(),
+                |(g, at)| format!("geometry unchanged {} ms: {g}", now.duration_since(*at).as_millis()),
+            );
+            format!(
+                "video widget {id}: measured {:.4} ({} reports, unchanged {} ms), the app last heard {heard}; {geometry}",
+                s.shown,
+                s.reports,
+                now.duration_since(s.moved).as_millis()
+            )
+        })
+        .collect()
 }
 
 /// Apple opens no DASH manifest, and from a server that ignores `Range` it
@@ -1713,6 +1806,22 @@ mod tests {
     fn a_row_naming_a_player_never_created_is_refused() {
         let (mut scene, _) = feed(&[3]);
         scene.apply(vec![row(0, 9, true)]);
+    }
+
+    #[test]
+    fn a_sub_pixel_overhang_is_not_a_hidden_strip() {
+        let row9 = (16.0, 374.2, 176.0, 464.2);
+        let viewer = (16.0, 70.0, 404.0, 464.0);
+        assert_eq!(shown_in_device_pixels(row9, &[viewer], 1.0), 1.0, "the windows lane's resting feed");
+        assert_eq!(visibility_band(shown_in_device_pixels(row9, &[viewer], 1.0)), 11);
+        let half = shown_in_device_pixels((16.0, 419.0, 176.0, 509.0), &[viewer], 1.0);
+        assert!((half - 0.5).abs() < 1e-9, "{half}");
+        assert!(
+            shown_in_device_pixels((16.0, 374.4, 176.0, 464.4), &[viewer], 2.0) < 0.999,
+            "at 2x a 0.4 px overhang is most of a device pixel and stays hidden"
+        );
+        assert_eq!(shown_in_device_pixels((16.0, 470.0, 176.0, 560.0), &[viewer], 1.0), 0.0);
+        assert_eq!(shown_in_device_pixels((16.0, 100.0, 16.2, 190.0), &[viewer], 1.0), 0.0);
     }
 
     #[test]

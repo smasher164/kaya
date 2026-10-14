@@ -49,6 +49,7 @@ import scene_cut
 import secure_scan
 import simscreen
 import flightrec_lane
+import lane_health
 import media_server
 from swift_sdk import require_ios_sdk
 
@@ -3271,6 +3272,7 @@ if os.environ.get("KAYA_RECORD"):
     prep_join()
 rec_suite_start()
 timing("boot")
+lane_health.ios_report("ios", "start", [u for u in [*UDIDS, PAD_UDID] if u])
 if media_queued():
     MEDIA.enter_context(media_server.serving(
         media_server.HOST, MEDIA_PORT, log=ROOT / "target/ios-media-server.log"))
@@ -3728,6 +3730,7 @@ except RuntimeError as e:
 if not rec_suite_stop():
     status = 1
 timing("stills-extraction")
+lane_health.ios_report("ios", "end", [u for u in [*UDIDS, PAD_UDID] if u])
 if not xcuidrive_census():
     status = 1
 # Suites accumulate failures rather than abort, so a truncated log must

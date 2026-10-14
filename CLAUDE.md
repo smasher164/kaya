@@ -995,7 +995,22 @@ in docs/deferred.md.
    SpringBoard's; KayaFailShot draws the app's windows before the verdict is
    published, the runner pulls it out of the container as `shot` and files
    the device's screen as `desktop-shot` (docs/traps.md); seven cuts watched.
-   A hundred and fifty-eight watched negatives, counts printed),
+   AND A SLOW LANE SAYS WHY since 2026-10-14 (docs/traps.md, the windows
+   lane slowed by a rebooted VM's Defender): every lane prints
+   tools/lib/lane_health.py's readings at its start and before its verdict
+   (the host's load and busiest processes; the windows guest's boot, a 2s
+   CPU sample, Defender's scan state and exclusions of the lane's runtimes;
+   each simulator's and emulator's uptime and busiest processes; the docker
+   VM's), and validate-all compares each lane's shared legs against the
+   newest earlier run in target/validate-lanes/runs, naming the largest
+   movers when the sum moves over 25% or the lane runs over its ceiling.
+   Every sentence is driven from a doctored transcript on each run; sixteen
+   cuts watched. AND THE iOS PARK'S OWN ACCOUNT (docs/deferred.md, the iOS
+   varied-python entry): the synthesized tier writes its aim, each pass of a
+   park, the landing, a cancel or re-park and expect_window's refused reading
+   into the verb trace, with the rows above the target drawn against the
+   core's extents; five cuts watched.
+   A hundred and eighty-one watched negatives, counts printed),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer

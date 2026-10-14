@@ -27618,6 +27618,34 @@ impl crate::harness::Stage for WinUiStage {
         })
     }
 
+    fn failure_picture(&self) -> String {
+        let Some(out) = crate::vtrace::sibling("failshot.bmp") else {
+            return "not taken: no verb trace file is set, so there is nowhere beside it to write".to_owned();
+        };
+        Self::on_ui_read(move |core| {
+            let native: IWindowNative = windows_core::Interface::cast(&core.window)?;
+            let hwnd = native.window_handle()?;
+            let mut outer = Rect::default();
+            // SAFETY: a live HWND with a stack RECT.
+            unsafe { GetWindowRect(hwnd, &mut outer) };
+            let (w, h) = (outer.right - outer.left, outer.bottom - outer.top);
+            const PW_RENDERFULLCONTENT: u32 = 2;
+            let said = capture(w, h, |mem| {
+                // SAFETY: a live HWND and the DIB's own DC.
+                if unsafe { PrintWindow(hwnd, mem, PW_RENDERFULLCONTENT) } == 0 {
+                    return Err(format!("PrintWindow(PW_RENDERFULLCONTENT) of the {w}x{h} window {hwnd:#x} answered 0"));
+                }
+                Ok(())
+            })
+            .and_then(|grab| write_bmp(&out, &grab));
+            Ok(match said {
+                Ok(n) => format!("this process's window {hwnd:#x}, {w}x{h}, {n} bytes -> {}", out.display()),
+                Err(e) => format!("NOT WRITTEN ({}): {e}", out.display()),
+            })
+        })
+        .unwrap_or_else(|e| format!("NOT WRITTEN: the window could not be read: {e}"))
+    }
+
     fn scrolled_to(&self, t: crate::harness::Target, key: &str) -> String {
         let key = key.to_owned();
         Self::on_ui_read(move |core| {

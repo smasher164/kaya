@@ -49,7 +49,8 @@ SECTIONS = {
             "windowserver", "sampler", "sample", "unified-log", "power-history"),
     "windows": ("leg-log", "verb-trace", "shot", "desktop-shot", "desktop",
                 "foreground", "foreground-text", "desktop-live", "notifications",
-                "toast-moment", "gesture-moment", "media-server", "capture-devices"),
+                "toast-moment", "gesture-moment", "media-server", "capture-devices",
+                "step-shot"),
     "ios": ("leg-log", "verb-trace", "shot", "desktop-shot", "panic", "app-log", "devices", "binary-stamp",
             "notifications", "stacks", "animations", "system-log"),
     "android": ("leg-log", "verb-trace", "shot", "desktop-shot", "logcat", "devices",
@@ -1351,6 +1352,35 @@ class WinRecorder(LaneRecorder):
         else:
             self.mark(bundle, "gesture-moment", "ok", bmp.stat().st_size)
 
+    def step_shot(self, bundle, leg):
+        """THE GUEST'S OWN WINDOW AT ITS FIRST FAILED STEP, taken by the guest
+        (crates/kaya/src/winui/mod.rs, `failure_picture`): `shot` is taken at
+        collect, after the guest has exited, of whichever WinUI window the
+        pool still shows (docs/traps.md, the feed's last row read `in`)."""
+        if bundle is None:
+            return
+        bmp = bundle / "step-shot.bmp"
+        got = self._scp_from(f"C:/kaya/flightrec/{leg}-failshot.bmp", bmp)
+        if not (got and bmp.is_file() and bmp.stat().st_size):
+            if bmp.is_file():
+                bmp.unlink()
+            self.skip(bundle, "step-shot",
+                      "flightrec: the guest wrote no picture of its window at a "
+                      f"failed step (C:\\kaya\\flightrec\\{leg}-failshot.bmp); "
+                      "the harness takes one at the first failed expect, so a leg "
+                      "that died before one, or whose failure was a fault or an "
+                      "unresolved target, has none — its leg log says which")
+            return
+        png = bundle / "step-shot.png"
+        rc = subprocess.run(["sips", "-s", "format", "png", str(bmp), "--out", str(png)],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            check=False).returncode
+        if rc == 0 and png.is_file() and png.stat().st_size:
+            bmp.unlink()
+            self.mark(bundle, "step-shot", "ok", png.stat().st_size)
+        else:
+            self.mark(bundle, "step-shot", "ok", bmp.stat().st_size)
+
     def win_leg(self, leg, verdict, secs, log, collected_already, t0,
                 out=None):
         """The one per-leg entry point. A PASS RETURNS AFTER ONE spool
@@ -1396,6 +1426,7 @@ class WinRecorder(LaneRecorder):
                 # foreground wait.
                 self.toast_moment(bundle, leg, t0)
                 self.gesture_moment(bundle, leg)
+                self.step_shot(bundle, leg)
                 self.media_server(bundle, log, t0)
                 self.capture_devices(bundle, leg)
                 # The Rust verb trace (crates/kaya/src/vtrace.rs), dumped by

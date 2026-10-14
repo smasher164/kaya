@@ -16461,6 +16461,29 @@ the root frame.
 GUARD: tools/lib/safearea_routes.py, the keeper's block, its call and the
 refusal's reading, four cuts watched red.
 
+## The K5 reading a frame behind the toggle's batch (measured 2026-10-14)
+
+expander-compose died on the matrix of 1c7ec8b9 at `expect entry@name 'Ada'`
+with the K5 refusal, 16 ms after `toggle expander@details on` returned: the
+toggle's batch had arrived (kaya held the expander open), and the header's
+semantics, which the K5 reading takes from the platform, still said
+collapsed, because Compose changes them only at the next recomposition
+frame. The reading ran once before the step and never again, while
+`expect_expanded` polls through the same lag (steps 15 and 31 of that leg
+took five tries each). Host load was 70; host spinners alone (load 110-227,
+18 legs) did not reproduce it, guest-side spinners (four per emulator) did,
+1 leg in 12 on the old code. The reading now re-reads each frame while kaya
+holds the reported expander open and the header still reads collapsed, up
+to the step's deadline, and answers with the platform's reading; a refusal
+kaya agrees with is immediate. Under the same guest load the fixed code
+went 27 of 27, one of them waiting 258 ms (`KAYA_HARNESS: reach the header
+drew kaya's open state after 1 frame(s)`). The SwiftUI runner had the same
+single read and takes the same wait at its 20 ms re-read. harness.rs keeps
+one read: GTK and WinUI set the platform's state inside the apply, so no lag
+is expected there, but that is not measured under load.
+GUARD: tools/lib/expander_routes.py's SETTLED rows and both runners' call
+sites, five cuts watched red.
+
 ## The untitled primary: iOS draws the executable's name as the screen's title (seen 2026-10-14)
 
 A guest that declares no window title gets the platform's default caption,
@@ -16499,3 +16522,51 @@ processes. Read back on the 2026-10-14 iOS lane: editor-go's `shot` is its
 editor with "save cancelled" under it, its `desktop-shot` the home screen.
 GUARD: tools/check-flightrec.py's iOS app shot census, seven cuts (NP1-NP7)
 watched red.
+
+## The windows lane slowed by a rebooted VM's Defender (measured 2026-10-14)
+
+The full matrix at 1c7ec8b9 ran the windows lane 1742s net against its
+1650s ceiling: every leg about 50% slower (the legs' sum 3903s against
+2558s the run before, median ratio 1.33x, 314 of 473 shared legs slower),
+on the first run after UTM was restarted and the guest booted at 11:12. By
+hand: MsMpEng had 450 CPU-seconds since boot and dwm 262, with C:\kaya
+excluded, so a fresh guest's Defender work (and whatever runtime lives
+outside the exclusion) was the lane's tax. Nothing in the lane's log said
+so. Every lane now prints `lane-health:` readings at start and end
+(tools/lib/lane_health.py), and validate-all prints a `LEG-TIME SHIFT`
+sentence with the largest movers, reprinting those readings, when the
+shared legs' sum moves over 25% from the newest earlier run or the lane runs
+over its ceiling. Cost: mac 55 ms, iOS 175 ms, android 1.3 s (one 1 s top
+sample per emulator, read in parallel), the docker VM 0.3-1.5 s, the windows
+guest about 2.6 s of PowerShell (2 s of it the CPU sample) plus ssh. A side
+finding: Docker Desktop's VM read an uptime of 1 s and then 4 min on two
+probes the same hour, so it is restarted on demand; the linux lane's start
+reading says how long it has been up. The first live reading (18:12Z boot,
+up 1h28m) found python.exe, java.exe and dotnet.exe SCANNED, each outside
+every Defender exclusion (only C:\kaya, which holds node and go, is
+excluded), MsMpEng at 696 CPU-seconds since boot, and no full scan ever
+recorded; the guest's reading took 3.6 s, 5.5 s from the host. GUARD:
+tools/check-flightrec.py's lane health census and drive, LH1-LH16.
+
+## The feed's last row read `in` on WinUI with its scroll at the end (measured 2026-10-14)
+
+media_feed_csharp, and media_feed_js earlier in the month, read `label#1 reads
+"r9 in", wanted "r9 whole"` on the windows lane. The bundle could not say why:
+the label carries the app's last visibility word and nothing recorded the
+geometry behind it. A failed step now prints one `KAYA_HARNESS: visibility`
+line per video view (crate::media's visibility_account: the last measured
+fraction, what the app last heard, how long each stood, and on WinUI the box,
+each clipping ScrollViewer, its offset, viewport and extent). A forced red read
+it back: row 9's box at 374.2..464.2 against a viewer ending at 464.0, offset
+848 of 848, extent 1242. The scroll was at its end; the content sat at a 0.2 px
+phase, so 89.8 of 90 px "showed", 0.9977, under the core's 1e-3 band for whole.
+It is the RESTING state once every row's player has opened (each box shrinks
+from 320x180 to 160x90); the scene passes when its whole-read polls before the
+lower rows' players open, and goes red when the shrink lands first.
+The fraction is now taken in device pixels: crate::media's
+shown_in_device_pixels snaps every edge at the window's rasterization scale
+before intersecting (unit test a_sub_pixel_overhang_is_not_a_hidden_strip;
+check-verbs' WinUI media clause holds the arm to it, one watched negative).
+The other four backends compute their own fraction and were not seen doing
+this; a red there reads the same visibility lines, minus the geometry, which
+only WinUI records.

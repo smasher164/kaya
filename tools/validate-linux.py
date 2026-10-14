@@ -4,6 +4,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
 from kaya_gate import ROOT, dev_shell_or_die
+import lane_health
 
 dev_shell_or_die()
 
@@ -45,6 +46,7 @@ if run(["docker", "build", "-q", "-t", "kaya-linux",
        stdout=subprocess.DEVNULL).returncode != 0:
     sys.exit(1)
 print(f"TIMING image-build {int(time.monotonic() - t0)}s", flush=True)
+lane_health.linux_report("linux", "start", "kaya-linux")
 t0 = time.monotonic()
 
 # THE FLIGHT RECORDER'S HOME IS THE HOST'S, MOUNTED IN: the container is
@@ -71,4 +73,5 @@ rc = run(["timeout", "1800", "docker", "run", "--rm",
           ]).returncode
 print(f"TIMING container-suites {int(time.monotonic() - t0)}s",
       flush=True)
+lane_health.linux_report("linux", "end", "kaya-linux")
 sys.exit(rc)

@@ -9482,13 +9482,13 @@ private func kayaRunScript(_ script: String) {
             // missing it under a five-lane host — the android class one
             // platform over (docs/traps.md); a step's deadline is a per-host
             // number, and tools/check-harness-ceiling.py holds the three equal.
+            let stepDeadline = Date().addingTimeInterval(kayaStepDeadline)
             if kayaExpandersDeclared, parts.count > 1, parts[0] != "expect_out_of_reach",
-                let hidden = kayaCollapsedAncestor(parts[1])
+                let hidden = kayaCollapsedAncestorDrawn(parts[1], stepDeadline)
             {
                 failures.append(kayaOutOfReach(hidden))
                 continue
             }
-            let stepDeadline = Date().addingTimeInterval(kayaStepDeadline)
             var retryStep = true
             var attempt = 0
             while retryStep {
@@ -10675,7 +10675,9 @@ private func kayaRunScript(_ script: String) {
                     // band): the row its viewport shows first, MEASURED
                     // against the placement, never the band's first.
                     if let window = kayaOnMain({ kayaTableWindows[node.id] }) {
-                        return "\(window.visible?.first ?? 0) \(window.total)"
+                        let read = "\(window.visible?.first ?? 0) \(window.total)"
+                        if read != want { window.noteRead(node, read) }
+                        return read
                     }
                     // A For no tier of this backend windows: the whole
                     // collection is realized and its first row is
@@ -17728,6 +17730,60 @@ typealias KayaTablePlaced = () -> Void
     /// the re-arm below hops the main queue: a table that never gets
     /// geometry would otherwise spin it forever.
     @ObservationIgnored private var misses = 0
+    /// docs/deferred.md, the iOS varied-python entry: the park's own account,
+    /// written into the verb trace a red leg's bundle carries.
+    @ObservationIgnored private var parkNotes = 0
+    @ObservationIgnored private var lastNote = ""
+    @ObservationIgnored private var lastRead = ""
+
+    private func note(_ node: KayaNode, _ event: String) {
+        let state = describe(node)
+        if event.isEmpty, state == lastNote { return }
+        lastNote = state
+        if parkNotes >= 60 { return }
+        parkNotes += 1
+        KayaVTrace.attempt(
+            "window#\(node.id)", 0,
+            (event.isEmpty ? "" : event + "; ") + state
+                + (parkNotes == 60 ? "; further passes of this park not recorded" : ""))
+    }
+
+    /// expect_window's mismatch: the state behind the reading it refused.
+    func noteRead(_ node: KayaNode, _ got: String) {
+        let state = "read \(got); " + describe(node)
+        if state == lastRead { return }
+        lastRead = state
+        KayaVTrace.attempt("window#\(node.id)", 0, state)
+    }
+
+    func describe(_ node: KayaNode) -> String {
+        func n(_ x: Double) -> String { String(format: "%.1f", x) }
+        let pitches = placement.rowPitches
+        let drawnFirst = placement.bandFirst
+        let focus = anchorRow ?? visible?.first ?? drawnFirst
+        var rows: [String] = []
+        for index in max(0, focus - 6)...(focus + 2) {
+            let k = index - drawnFirst
+            let drawn = k >= 0 && k < pitches.count ? n(Double(pitches[k])) : "-"
+            rows.append("r\(index) \(drawn)/\(n(KayaHost.rowExtent(node.id, index)))")
+        }
+        var focusTop = "outside the drawn band"
+        if focus >= drawnFirst, focus - drawnFirst <= pitches.count {
+            let above = pitches.prefix(focus - drawnFirst).reduce(0, +)
+            focusTop = n(Double(placement.bandTop) + Double(above))
+        }
+        let core = KayaHost.windowGeometry(node.id).map {
+            "\($0.first)+\($0.count) of \($0.total), offset \(n($0.offset)), extent "
+                + "\(n($0.extent)), anchor_shift \(n($0.anchor_shift)), corrected \($0.corrected)"
+        } ?? "none"
+        return "offset \(n(scrollTop)) viewport \(n(viewportHeight)) visible "
+            + (visible.map { "\($0.first)+\($0.count)" } ?? "none")
+            + " anchor " + (anchorRow.map { "r\($0)" } ?? "none")
+            + " landedAt " + (landedAt.map(n) ?? "none")
+            + "; r\(focus) top \(focusTop); drawn band \(drawnFirst)+\(pitches.count) bandTop "
+            + "\(n(Double(placement.bandTop))) bandOffset \(n(Double(placement.bandOffset)))"
+            + "; core \(core); rows drawn/core " + rows.joined(separator: ", ")
+    }
 
     /// THE COLUMNS' AXIS HAS ITS OWN REGISTRY, and must: an UNGROWN table never
     /// reaches `attach`, and putting it in kayaTableWindows made `expect_window`
@@ -17894,12 +17950,14 @@ typealias KayaTablePlaced = () -> Void
             $0.top != Double(placement.bandTop) || $0.first != drawnFirst
         } ?? true
         let offsetMoved = lastScrollTop.map { abs(scrollTop - $0) > 0.5 } ?? false
+        let previousTop = lastScrollTop
         lastPlacement = (Double(placement.bandTop), drawnFirst)
         lastScrollTop = scrollTop
         measure(node, first: drawnFirst, pitches: pitches)
+        if anchorRow != nil { note(node, "") }
         repark(
             node, drawnFirst: drawnFirst, measured: measured,
-            readerScrolled: offsetMoved && !placementMoved)
+            readerScrolled: offsetMoved && !placementMoved, previousTop: previousTop)
     }
 
     /// The verify half (§2.2): the extents this tier laid the band's rows
@@ -17924,11 +17982,14 @@ typealias KayaTablePlaced = () -> Void
     /// above it looks like. An offset the reader moved cancels the park.
     private func repark(
         _ node: KayaNode, drawnFirst: Int, measured: (first: Int, count: Int),
-        readerScrolled: Bool
+        readerScrolled: Bool, previousTop: Double?
     ) {
         guard let anchor = anchorRow, let proxy else { return }
         if measured.first == anchor {
-            if landedAt == nil { landedAt = scrollTop }
+            if landedAt == nil {
+                landedAt = scrollTop
+                note(node, "landed")
+            }
             return
         }
         // ONLY THE READER'S OWN SCROLL CANCELS A PARK: a correction above the
@@ -17936,12 +17997,22 @@ typealias KayaTablePlaced = () -> Void
         // scroll and let the window free-run at 145..147 (measured 2026-08-29,
         // docs/traps.md).
         if landedAt != nil, readerScrolled {
+            note(
+                node,
+                "park cancelled: the offset moved from "
+                    + (previousTop.map { String(format: "%.1f", $0) } ?? "none")
+                    + " with the drawn band unmoved, read as the reader's scroll; measured first "
+                    + "\(measured.first)")
             anchorRow = nil
             landedAt = nil
             return
         }
         landedAt = nil
-        guard anchor >= drawnFirst, anchor < drawnFirst + node.children.count else { return }
+        guard anchor >= drawnFirst, anchor < drawnFirst + node.children.count else {
+            note(node, "r\(anchor) is not in the drawn band; waiting for the band")
+            return
+        }
+        note(node, "re-park: measured first \(measured.first), scrollTo r\(anchor)")
         proxy.scrollTo(
             KayaRowAnchor(row: node.children[anchor - drawnFirst].id, col: 0), anchor: .top)
     }
@@ -17953,6 +18024,8 @@ typealias KayaTablePlaced = () -> Void
     func scroll(_ node: KayaNode, toRow index: Int) {
         anchorRow = index
         landedAt = nil
+        parkNotes = 0
+        note(node, "scroll_to_row r\(index)")
         let count = visible?.count ?? 1
         reported = (index, count)
         KayaHost.windowMoved(node.id, index, count)
@@ -25359,6 +25432,32 @@ func kayaCollapsedAncestor(_ spec: Substring) -> Int? {
 /// Set on the main thread at an expander's creation and read by the harness
 /// thread, so a scene with no expander pays no hop per step.
 var kayaExpandersDeclared = false
+
+/// The K5 reading once the header has drawn what kaya holds (docs/traps.md, the
+/// K5 reading a frame behind the toggle's batch).
+func kayaCollapsedAncestorDrawn(_ spec: Substring, _ deadline: Date) -> Int? {
+    let began = Date()
+    var reads = 0
+    while true {
+        let hidden = kayaCollapsedAncestor(spec)
+        let held = hidden.map { index in
+            DispatchQueue.main.sync { kayaScene.expanders.indices.contains(index) && kayaScene.expanders[index].expanded }
+        } ?? false
+        let waited = Int(Date().timeIntervalSince(began) * 1000)
+        if !held {
+            if reads > 0 {
+                KayaVTrace.attempt("reach", 0, "<- the header drew kaya's \(hidden == nil ? "open" : "collapsed") state after \(reads) re-read(s), \(waited)ms")
+            }
+            return hidden
+        }
+        if Date() >= deadline {
+            KayaVTrace.attempt("reach", 0, "<- kaya holds expander#\(hidden!) open and its header still reads collapsed after \(reads) re-read(s), \(waited)ms")
+            return hidden
+        }
+        Thread.sleep(forTimeInterval: 0.02)
+        reads += 1
+    }
+}
 
 /// The K5 refusal, harness.rs's `out_of_reach` word for word.
 func kayaOutOfReach(_ index: Int) -> String {

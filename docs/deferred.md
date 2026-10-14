@@ -13756,7 +13756,7 @@ each a stub the runner reads (tools/check-stubs.py):
     case-insensitive variable names).
 
 ## WATCH — iOS varied-python: `scroll_to_row r100` landed the band at 98 (first sighting 2026-09-03)
-KEY: varied-python, scroll_to_row, expect_window, first visible, synthesized tier, variable row heights, "98 300"
+KEY: varied-python, scroll_to_row, expect_window, first visible, synthesized tier, variable row heights, "98 300", window#, park account
 
 On the drag-and-drop core's second matrix (10:05, the pool free, every
 other lane green) the iOS varied leg read `column@varied windows "98 300"`
@@ -13781,6 +13781,32 @@ iOS page that moved with its table): `column@varied windows "202 300"` after
 `scroll_to_row column@varied r200`, the first time PAST the target; 3 of 3
 standalone reruns and the next filtered run passed. Bundle: run
 20261014T103442Z-099347, bundle ios-varied-python (its verb trace).
+
+THE BUNDLE NOW CARRIES THE PARK (2026-10-14, after the third sighting): that
+bundle's verb trace held only the expect_window retries, so whether the park
+landed and was then cancelled, never landed, or landed on a band that moved
+under it could not be read. The synthesized tier now writes `window#<id>`
+records (try=0) into the verb trace: the aim, every pass while a park is
+anchored (deduplicated, capped at 60 per park), the landing offset, each
+re-park with the measured first row, a cancel (the offset it moved from,
+read as the reader's scroll), the anchor waiting outside the drawn band, and
+expect_window's refused reading. Each carries the offset, viewport, measured
+visible range, the anchor's top in the content, the drawn band and its
+top/offset, the core's band, offset, extent, anchor_shift and corrected flag,
+and rows target-6..target+2 as drawn pitch against the core's extent. Proven
+on a forced red (varied.steps doctored to want 201, restored from a copy):
+run 20261014T191003Z-073682, bundle ios-varied-python, 68 records; the park to
+r200 landed, was corrected (anchor_shift 56.7) and re-parked from 199, 198 and
+197 before holding. A second forced run wanting 201 PASSED: the first visible
+row passes through 201 while the park settles, so expect_window can match a
+value on the way. A third (wanting 250) carried expect_window's refused
+readings: `read 202 300` with the core's anchor_shift -85.0 and the drawn band
+at 194, then `read 201 300` with the drawn band at 193 while the core's was
+194, the rows' drawn pitches and the core's extents disagreeing row for row
+(run 20261014T193414Z-091541). The sighting held 202 for 15 s, a value this
+run shows only in passing; whether a cancel, a correction or a band mismatch
+held it there is what the next red's records will say. GUARD: tools/check-flightrec.py VP1-VP5. On the next sighting
+read the `window#` records around the failed expect_window first.
 
 SECOND SIGHTING 2026-09-05, on a standalone iOS lane (not a matrix) run for
 the tooltips help-reader fix: `column@varied windows "98 300"` again, the

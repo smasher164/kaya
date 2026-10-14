@@ -43,12 +43,20 @@ pub fn script(scene: &str) -> Option<&'static str> {
 /// container indices per-language (tools/check-steps.py). `kind@id[key]`
 /// adds the stamped copy's outermost-first string keys, and `index` is
 /// meaningless until the runner normalizes through `Stage::resolve_id`.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct Target {
     pub kind: TargetKind,
     pub index: isize,
     pub id: Option<&'static str>,
     pub keys: Option<&'static str>,
+}
+
+/// A target prints as the scene spells it, in every failure sentence and
+/// step line (`a_failure_names_its_target_as_the_scene_spells_it`).
+impl std::fmt::Debug for Target {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&target_spec(self))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2064,6 +2072,13 @@ pub trait Stage: Send + 'static {
     /// Drive the viewport to its end through the toolkit's REAL scrolling
     /// API.
     fn scroll_end(&self, target: Target);
+    /// The app's own window, photographed at the run's first failed step
+    /// while it is still the leg's, written where the lane's recorder pulls
+    /// it; the sentence says what was written or why nothing was. Empty
+    /// where the backend takes no such picture.
+    fn failure_picture(&self) -> String {
+        String::new()
+    }
     /// Whether the content's end edge coincides with the viewport's (within
     /// two device units): the empty string when it does, otherwise a
     /// description (failure text only).
@@ -4831,6 +4846,7 @@ fn run_with_log(
                 continue;
             }
         }
+        let authored = step;
         let step = &step_norm;
         if let Some((log, start)) = log {
             log(&format!(
@@ -6963,7 +6979,7 @@ fn run_with_log(
                 }))
             }
         };
-        match outcome {
+        match outcome.map(|o| respell(o, authored, step)) {
             Some(Ok(o)) => observed.push(o),
             Some(Err(e)) => {
                 // PRINTED THE MOMENT IT IS FINAL: the verdict below is the
@@ -6973,8 +6989,15 @@ fn run_with_log(
                 // scene's first linux run failed six assertions and aborted
                 // on the alert guard, and diagnosing it meant noticing that
                 // six steps took EXACTLY 15.0s (POLL_DEADLINE).
+                let picture = if failures.is_empty() { stage.failure_picture() } else { String::new() };
                 if let Some((log, _)) = log {
                     log(&format!("KAYA_HARNESS: step-failed {e}"));
+                    for line in crate::media::visibility_account() {
+                        log(&format!("KAYA_HARNESS: visibility {line}"));
+                    }
+                    if !picture.is_empty() {
+                        log(&format!("KAYA_HARNESS: failure picture: {picture}"));
+                    }
                 }
                 if vtrace::on() {
                     vtrace::note(
@@ -7164,6 +7187,41 @@ fn expanded_reading(read: Result<(bool, bool), String>, want: bool) -> Result<St
         Ok((got, _)) if got == want => Ok(format!("expanded {}", word(got))),
         Ok((got, _)) => Err(format!("expanded {}, wanted {}", word(got), word(want))),
     }
+}
+
+/// An outcome names a kind@id target as the scene wrote it, not as the
+/// runner resolved it to an index.
+fn respell(outcome: Result<String, String>, authored: &Step, resolved: &Step) -> Result<String, String> {
+    let (mut authored, mut resolved) = (authored.clone(), resolved.clone());
+    let pairs: Vec<(String, String)> = authored
+        .targets_mut()
+        .into_iter()
+        .zip(resolved.targets_mut())
+        .filter(|(a, _)| a.id.is_some())
+        .map(|(a, r)| (target_spec(r), target_spec(a)))
+        .collect();
+    let fix = |text: String| pairs.iter().fold(text, |text, (from, to)| replace_spelling(&text, from, to));
+    outcome.map(fix).map_err(fix)
+}
+
+/// `from` replaced wherever it stands whole: `label#3` never inside `label#30`.
+fn replace_spelling(text: &str, from: &str, to: &str) -> String {
+    let word = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(from) {
+        let before = rest[..at].chars().last().or_else(|| out.chars().last());
+        let after = rest[at + from.len()..].chars().next();
+        out.push_str(&rest[..at]);
+        if before.is_some_and(word) || after.is_some_and(word) {
+            out.push_str(from);
+        } else {
+            out.push_str(to);
+        }
+        rest = &rest[at + from.len()..];
+    }
+    out.push_str(rest);
+    out
 }
 
 pub(crate) fn target_spec(t: &Target) -> String {
@@ -9627,7 +9685,7 @@ mod tests {
         // The sentence NAMES THE STEP: a fixed sentence would be printed
         // for every wedge and name none of them.
         assert!(
-            log.contains(r#"Expect(Target { kind: Label, index: 0"#),
+            log.contains(r#"Expect(label#0"#),
             "the verdict does not name the step:\n{log}"
         );
         assert!(waited >= CEILING, "the ceiling fired before its own deadline ({waited:?})");
@@ -9854,9 +9912,32 @@ mod tests {
              trace exists for:\n{text}"
         );
         assert!(
-            text.contains("step=0 text=\"Expect(Target { kind: Label"),
+            text.contains("step=0 text=\"Expect(label#"),
             "the wedge dump does not name the step it was inside:\n{text}"
         );
+    }
+
+    /// The failure sentence names its target as the scene wrote it: the
+    /// windows lane's media_feed red printed `Target { kind: Label, ... }`.
+    #[test]
+    fn a_failure_names_its_target_as_the_scene_spells_it() {
+        for (script, want, rx) in [
+            ("expect label#1 \"r9 whole\"", "label#1 reads \"ok-text\", wanted \"r9 whole\""),
+            ("expect label@row \"r9 whole\"", "label@row reads \"ok-text\", wanted \"r9 whole\""),
+            ("expect label#last \"r9 whole\"", "label#last reads \"ok-text\", wanted \"r9 whole\""),
+        ]
+        .map(|(script, want)| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || run(parse(script).unwrap(), MockStage { seen: &SEEN, verdict: tx }));
+            (script, want, rx)
+        }) {
+            let (code, verdict) = rx.recv().unwrap();
+            assert_eq!(code, 1, "{verdict}");
+            assert!(verdict.contains(want), "{script}: the verdict does not say {want:?}: {verdict}");
+            assert!(!verdict.contains("Target {"), "{script}: the verdict prints a Rust struct: {verdict}");
+        }
+        assert_eq!(replace_spelling("label#3 and label#30, xlabel#3", "label#3", "label@row"),
+            "label@row and label#30, xlabel#3");
     }
 
     /// The zero-expect guard fires: a script a transport mangled into
@@ -11276,7 +11357,7 @@ mod tests {
         );
         assert_eq!(
             *NORMALIZED_SEEN.lock().unwrap(),
-            vec!["Target { kind: Column, index: 7, id: None, keys: None }".to_owned()]
+            vec!["column#7".to_owned()]
         );
         assert_eq!(verdict, "KAYA_SELFTEST: OK ()");
     }
@@ -11762,7 +11843,7 @@ mod tests {
         assert_eq!(
             *MENU_SEEN.lock().unwrap(),
             vec![
-                "context_open Target { kind: Label, index: 1, id: None, keys: None }".to_owned(),
+                "context_open label#1".to_owned(),
                 "menu_activate Rename".to_owned(),
                 "shortcut primary+s".to_owned(),
             ]

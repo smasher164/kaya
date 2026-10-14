@@ -74,6 +74,24 @@ JOURNAL = "tools/lib/flightrec.py"
 ACT2_EXEC = "tools/linux/act2-exec.sh"
 DOOR_LEGS = ("tools/linux/persist-leg.py", "tools/linux/link-leg.py")
 COMPOSE = "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
+LANE_HEALTH = "tools/lib/lane_health.py"
+VALIDATE_ALL = "tools/validate-all.py"
+MAC_RUNNER = "tools/validate-mac.py"
+LINUX_HOST = "tools/validate-linux.py"
+# Each lane reads its health at start and at end, the end before its verdict
+# (docs/traps.md, the windows lane slowed by a rebooted VM's Defender).
+HEALTH_CALLS = {
+    WIN: ('lane_health_reading("start")', 'lane_health_reading("end")',
+          'print("deploy-win: ALL PASS")'),
+    IOS: ('lane_health.ios_report("ios", "start"', 'lane_health.ios_report("ios", "end"',
+          'print("run-sim: ALL PASS")'),
+    ANDROID: ('lane_health.android_report("android", "start"',
+              'lane_health.android_report("android", "end"', 'print("run-emulator: ALL PASS")'),
+    MAC_RUNNER: ('lane_health.mac_report("mac", "start")', 'lane_health.mac_report("mac", "end")',
+                 'print("validate-mac: ALL PASS")'),
+    LINUX_HOST: ('lane_health.linux_report("linux", "start"',
+                 'lane_health.linux_report("linux", "end"', "sys.exit(rc)"),
+}
 
 # The recorder class whose body IS each python lane's collect path.
 RECORDERS = {"mac": "MacRecorder", "windows": "WinRecorder",
@@ -87,7 +105,8 @@ def sources():
     return {rel: gate.read(rel) for rel in
             (LANE_PY, LANE_SH, LINUX, IOS, ANDROID, WIN,
              STEPS, WINUI, GUEST_PS1, FOCUS_RING, HAND, WINLIST, HARNESS, SWIFTUI,
-             DOOR_RECORD, ACT2_EXEC, COMPOSE, JOURNAL, *DOOR_LEGS)}
+             DOOR_RECORD, ACT2_EXEC, COMPOSE, JOURNAL, *DOOR_LEGS,
+             LANE_HEALTH, VALIDATE_ALL, MAC_RUNNER, LINUX_HOST)}
 
 
 def census_android_app_shot(src):
@@ -489,7 +508,7 @@ def census_toast_files(src):
     capture from a PREVIOUS run of the same leg as this one's."""
     found = []
     pulled = sorted(set(re.findall(
-        r'C:/kaya/flightrec/\{leg\}-((?:toast|gesture)[\w.-]*)"', src[LANE_PY])))
+        r'C:/kaya/flightrec/\{leg\}-((?:toast|gesture|failshot)[\w.-]*)"', src[LANE_PY])))
     if not pulled:
         return [f"{LANE_PY}: the windows recorder pulls no toast-moment file "
                 f"at all — the section's records are named nowhere this "
@@ -1882,6 +1901,99 @@ def mac_drive_checks(drive):
     return found
 
 
+def census_lane_health(src):
+    found = []
+    for rel, (start, end, verdict) in HEALTH_CALLS.items():
+        text = src[rel]
+        counts = [text.count(start), text.count(end)]
+        if counts != [1, 1]:
+            found.append(f"{rel}: the lane-health reading at start/end is called "
+                         f"{counts[0]}/{counts[1]} times, wanted once each (`{start}`, `{end}`)")
+            continue
+        at = [text.index(start), text.index(end), text.find(verdict)]
+        if not (at[0] < at[1] < at[2]):
+            found.append(f"{rel}: the lane-health end reading does not come after the "
+                         f"start and before the verdict `{verdict}`")
+    reading = py_block(src[WIN], "lane_health_reading")
+    if 'lane_health.windows_report("windows", when,' not in reading:
+        found.append(f"{WIN}: lane_health_reading no longer reads the guest")
+    wait = src[VALIDATE_ALL]
+    waiter = wait[wait.find("    def _wait("):wait.find("    waiter = threading.Thread")]
+    if "lane_health.host_line()" not in waiter:
+        found.append(f"{VALIDATE_ALL}: a lane's exit no longer prints the host's reading")
+    net, cmp = wait.find("net = secs - waited - idle"), wait.find("lane_health.compare_runs(")
+    if net < 0 or cmp < net:
+        found.append(f"{VALIDATE_ALL}: no leg-time comparison after the lane's net seconds")
+    elif "lane_health.health_lines(log_text)" not in wait[cmp:cmp + 600]:
+        found.append(f"{VALIDATE_ALL}: a leg-time shift no longer reprints the lane's readings")
+    return found
+
+
+# docs/deferred.md, the iOS varied-python entry: the synthesized tier's park
+# writes its own account into the verb trace a red bundle carries.
+PARK_LINKS = (
+    ("the aim", "scroll(_ node: KayaNode, toRow index: Int)", 'note(node, "scroll_to_row r'),
+    ("each pass of a park", "private func report(_ node: KayaNode)",
+     'if anchorRow != nil { note(node, "") }'),
+    ("the landing", "private func repark(", 'note(node, "landed")'),
+    ("the cancel", "private func repark(", '"park cancelled: the offset moved from "'),
+    ("the re-park", "private func repark(", 'note(node, "re-park: measured first'),
+    ("the trace write", "private func note(_ node: KayaNode, _ event: String)",
+     'KayaVTrace.attempt('),
+    ("the rows", "func describe(_ node: KayaNode) -> String",
+     'rows.append("r\\(index) \\(drawn)/\\(n(KayaHost.rowExtent(node.id, index)))")'),
+    ("the core's correction", "func describe(_ node: KayaNode) -> String", "anchor_shift"),
+)
+
+
+def census_ios_park(src):
+    text = src[SWIFTUI]
+    start = text.find("@Observable final class KayaSynthesizedWindow {")
+    end = text.find("\nprivate struct KayaScrollBox", start)
+    if start < 0 or end < 0:
+        return ["SwiftUI: cannot locate KayaSynthesizedWindow"]
+    body = text[start:end]
+    found = []
+    for what, opener, needle in PARK_LINKS:
+        at = body.find(opener)
+        if at < 0:
+            found.append(f"SwiftUI: KayaSynthesizedWindow lost `{opener}`")
+            continue
+        close = body.find("\n    }\n", at)
+        if needle not in body[at:close]:
+            found.append(f"SwiftUI: the park's account lost {what} (`{needle}`)")
+    if "if read != want { window.noteRead(node, read) }" not in text:
+        found.append("SwiftUI: expect_window's refused reading no longer records the window")
+    return found
+
+
+def lane_health_checks(src, echo=False):
+    scope = {"__name__": "lane_health_shadow"}
+    exec(compile(src[LANE_HEALTH], LANE_HEALTH, "exec"), scope)
+    found = scope["selftest"](echo=echo)
+    script = scope["WINDOWS_SCRIPT"]
+    for needle, what in (("LastBootUpTime", "boot time"), ("Start-Sleep", "CPU sample"),
+                         ("Get-MpComputerStatus", "Defender scan state"),
+                         ("Get-MpPreference", "Defender exclusions"),
+                         ("RUNTIMES", "the lane's runtimes")):
+        if needle not in script:
+            found.append(f"{LANE_HEALTH}: the windows reading lost its {what} (`{needle}`)")
+    tree = ast.parse(src[WIN])
+    wanted = {"NODE_VERSION", "NODE_DIR", "WIN_RUNTIMES"}
+    body = [n for n in tree.body if isinstance(n, ast.Assign) and any(
+        isinstance(x, ast.Name) and x.id in wanted for x in n.targets)]
+    run = {}
+    exec(compile(ast.Module(body=body, type_ignores=[]), WIN, "exec"), run)
+    size = len(scope["windows_command"](run.get("WIN_RUNTIMES", ())))
+    if "WIN_RUNTIMES" not in run or size >= 8000:
+        found.append(f"{LANE_HEALTH}: the windows reading's command is {size} characters "
+                     f"(cmd.exe refuses past 8191) or names no runtimes")
+    if echo:
+        print(f"check-flightrec: lane health: {len(scope['drive']())} branches driven, "
+              f"windows command {size} characters")
+    return found
+
+
 # ---------------------------------------------------------------- run it
 
 REAL = sources()
@@ -1965,6 +2077,12 @@ for line in retention_checks(REAL, echo=True):
     gate.finding(line, at="red bundle retention")
 for line in census_pass_path(REAL):
     gate.finding(line, at="pass path")
+for line in census_lane_health(REAL):
+    gate.finding(line, at="lane health")
+for line in census_ios_park(REAL):
+    gate.finding(line, at="iOS park account")
+for line in lane_health_checks(REAL, echo=True):
+    gate.finding(line, at="lane health drive")
 for line in absent_tool_checks(REAL):
     gate.finding(line, at="absent capture tool")
 for kind in ("fail", "pass", "nojournal"):
@@ -2200,6 +2318,18 @@ n13 = doctored(WIN,
                "", "N13 dropped the pre-leg delete of the toast database")
 gate.negative("N13 a windows leg that keeps the last run's toast capture",
               lambda: census_toast_files(n13), want="does not delete")
+
+# NS1/NS2: the guest's picture at its failed step, the same three places.
+ns1 = doctored(WINUI, r'crate::vtrace::sibling\("failshot\.bmp"\)',
+               'crate::vtrace::sibling("failshot-elsewhere.bmp")',
+               "NS1 renamed the guest's failed-step picture")
+gate.negative("NS1 a failed-step picture the guest writes under another name",
+              lambda: census_toast_files(ns1), want="failshot.bmp")
+ns2 = doctored(WIN,
+               r'\n *f"C:\\\\kaya\\\\flightrec\\\\\{name\}-failshot\.bmp "',
+               "", "NS2 dropped the pre-leg delete of the failed-step picture")
+gate.negative("NS2 a windows leg that keeps the last run's failed-step picture",
+              lambda: census_toast_files(ns2), want="does not delete")
 
 # N14: the guest's epoch stamp back on PowerShell 5.1's local-time-as-UTC
 # call — the shape every windows bundle carried until 2026-09-17.
@@ -2619,6 +2749,71 @@ for tag, want in (("MD1", "never resolved the guest's pid"),
         label, drive = DRIVES[tag]
         gate.negative(label, lambda: mac_drive_checks(drive), want=want)
 
-gate.negatives_ran(153 + (5 if DRIVES else 0))
+for label, rel, pattern, repl, want, check in (
+        ("LH1 the windows lane's end reading cut", WIN,
+         r'^lane_health_reading\("end"\)\n', "", "called 1/0 times", census_lane_health),
+        ("LH2 the windows lane's start reading cut", WIN,
+         r'^lane_health_reading\("start"\)\n', "", "called 0/1 times", census_lane_health),
+        ("LH3 the iOS end reading after the verdict", IOS,
+         r'^(lane_health\.ios_report\("ios", "end", .*\n)((?:.*\n)*?)(if status == 0:\n'
+         r' +print\("run-sim: ALL PASS"\)\n.*\n.*\n)', r"\2\3\1",
+         "does not come after the start and before the verdict", census_lane_health),
+        ("LH4 the android end reading cut", ANDROID,
+         r'^lane_health\.android_report\("android", "end".*\n', "", "called 1/0 times",
+         census_lane_health),
+        ("LH5 the mac end reading cut", MAC_RUNNER,
+         r'^lane_health\.mac_report\("mac", "end"\)\n', "", "called 1/0 times",
+         census_lane_health),
+        ("LH6 the linux end reading cut", LINUX_HOST,
+         r'^lane_health\.linux_report\("linux", "end".*\n', "", "called 1/0 times",
+         census_lane_health),
+        ("LH7 the guest no longer read", WIN,
+         r"lane_health\.windows_report\(\"windows\", when,", "print(when,",
+         "no longer reads the guest", census_lane_health),
+        ("LH8 a lane's exit without the host's reading", VALIDATE_ALL,
+         r'^ +print\(f"\{name\}: exited after .*\n.*lane_health\.host_line\(\).*\n', "",
+         "no longer prints the host's reading", census_lane_health),
+        ("LH9 the leg-time comparison cut", VALIDATE_ALL,
+         r"lane_health\.compare_runs\(", "dict(", "no leg-time comparison",
+         census_lane_health),
+        ("LH10 a shift without the lane's readings", VALIDATE_ALL,
+         r"lane_health\.health_lines\(log_text\)", "[]", "no longer reprints",
+         census_lane_health),
+        ("LH11 a scan with no end read as finished", LANE_HEALTH,
+         r"elif end is None or start > end:", "elif end is None:",
+         "branch `scan running` did not print", lane_health_checks),
+        ("LH12 a shift under the ceiling never reported", LANE_HEALTH,
+         r"fires = over or abs\(change\) > SHIFT", "fires = over",
+         "branch `shift` did not print", lane_health_checks),
+        ("LH13 a simulator's processes read off the root alone", LANE_HEALTH,
+         r"stack\.append\(child\[\"pid\"\]\)", "pass",
+         "branch `simulator` did not print", lane_health_checks),
+        ("LH14 the runtimes' exclusions compared case-sensitively", LANE_HEALTH,
+         r"low = where\.lower\(\)", "low = where", "branch `excluded path` did not print",
+         lane_health_checks),
+        ("LH15 Defender exclusions no longer read", LANE_HEALTH,
+         r"try\{\$f=Get-MpPreference;", "try{$f=$null;", "lost its Defender exclusions",
+         lane_health_checks),
+        ("LH16 a windows reading past cmd.exe's line", LANE_HEALTH,
+         r'^(\"took=\"\+\$w\.ElapsedMilliseconds\n)', "\\1" + "#" + "x" * 2600 + "\n",
+         "cmd.exe refuses", lane_health_checks)):
+    changed = doctored(rel, pattern, repl, label)
+    gate.negative(label, lambda: check(changed), want=want)
+for label, pattern, repl, want in (
+        ("VP1 the aim unrecorded", r'^ +note\(node, "scroll_to_row r\\\(index\)"\)\n', "",
+         "lost the aim"),
+        ("VP2 a cancelled park unrecorded", r'"park cancelled: the offset moved from "',
+         '"park off "', "lost the cancel"),
+        ("VP3 the park's passes unrecorded", r"if anchorRow != nil \{ note\(node, \"\"\) \}",
+         "_ = anchorRow", "lost each pass of a park"),
+        ("VP4 the rows above the target dropped", r"rows\.append\(\"r\\\(index\) ",
+         'rows.append("', "lost the rows"),
+        ("VP5 expect_window's refusal unrecorded",
+         r"if read != want \{ window\.noteRead\(node, read\) \}", "_ = want",
+         "no longer records the window")):
+    changed = doctored(SWIFTUI, pattern, repl, label)
+    gate.negative(label, lambda: census_ios_park(changed), want=want)
+
+gate.negatives_ran(176 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")
