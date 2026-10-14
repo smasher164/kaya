@@ -820,6 +820,12 @@ def check(source_text, path=SWIFTUI):
              "the way the synthesized tier's columnWidths total is — "
              "without it the columns hold their floors and the table "
              "is cut off at its container."),
+            ("widths = seenFloors",
+             "every column keeps its widest floor so far. Measured from the "
+             "rows on screen alone, a scroll or a pass before the cells "
+             "exist narrowed a column and the divider moved between "
+             "captures of one scene (docs/traps.md, the mac table's "
+             "divider moved with the rows on screen)."),
             ("represent(visible)",
              "a widened column must RE-PRESENT its cells. AppKit "
              "resizes the cell view; the SwiftUI content already "
@@ -1553,6 +1559,17 @@ runtime_refuses("unpublished-content-width",
                 "a hugging container widens to the native table's "
                 "content",
                 "a native tier that reports no content width upward")
+
+doctored["forgotten-floors"] = perturb(
+    REAL, r"widths = seenFloors\n", "_ = seenFloors\n",
+    "the widest floors so far ignored for the rows on screen",
+    "struct KayaNativeTable > class KayaTableDriver > "
+    "func layoutColumns")
+refuses(doctored["forgotten-floors"], "does not call `widths = seenFloors`",
+        "a column sized from the rows on screen alone")
+runtime_refuses("forgotten-floors",
+                "a scroll back to the top never narrows a column",
+                "a column that narrows when its wide rows scroll away")
 
 doctored["unrepresented-widening"] = perturb(
     REAL, r"if widened \{ represent\(visible\) \}",

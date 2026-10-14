@@ -13774,6 +13774,13 @@ placement", is the neighbouring class and not this one). The verb trace
 of the sighting is in the flight recorder: run 20260903T170647Z-004640,
 bundle ios-varied-python (verb-trace.txt, 621 records).
 
+THIRD SIGHTING 2026-10-14, a filtered iOS run (netimage, portfolio, varied,
+windowed, table, scrollto, safearea) for the iOS bar pin (docs/traps.md, the
+iOS page that moved with its table): `column@varied windows "202 300"` after
+`scroll_to_row column@varied r200`, the first time PAST the target; 3 of 3
+standalone reruns and the next filtered run passed. Bundle: run
+20261014T103442Z-099347, bundle ios-varied-python (its verb trace).
+
 SECOND SIGHTING 2026-09-05, on a standalone iOS lane (not a matrix) run for
 the tooltips help-reader fix: `column@varied windows "98 300"` again, the
 identical reading. The lane was rerun once more the same hour for that fix

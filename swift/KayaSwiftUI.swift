@@ -10737,6 +10737,16 @@ private func kayaRunScript(_ script: String) {
                     if registered { break }
                     usleep(20_000)
                 }
+                #if os(iOS)
+                    let pageBefore = DispatchQueue.main.sync { () -> (UInt64, CGFloat, Bool)? in
+                        guard let node = kayaTarget(parts[1], "column", kayaScene.columns) else { return nil }
+                        let root = kayaRootOf(node.id)
+                        guard let top = kayaRootFrames[root]?.minY, let rootNode = kayaScene.nodes[root] else {
+                            return nil
+                        }
+                        return (root, top, kayaRootScrollsAsPage(rootNode))
+                    }
+                #endif
                 let off = DispatchQueue.main.sync { () -> String? in
                     guard let node = kayaTarget(parts[1], "column", kayaScene.columns) else {
                         return "no such target \(parts[1])"
@@ -10762,6 +10772,26 @@ private func kayaRunScript(_ script: String) {
                         + "(no synthesized window registered for it within 5s)"
                 }
                 if let off { failures.append("scroll_to_row: \(off)") }
+                #if os(iOS)
+                    if off == nil, let before = pageBefore, !before.2 {
+                        var moved: CGFloat?
+                        for _ in 0..<15 {
+                            usleep(20_000)
+                            if let now = DispatchQueue.main.sync(execute: { kayaRootFrames[before.0]?.minY }),
+                                abs(now - before.1) > 1
+                            {
+                                moved = now
+                                break
+                            }
+                        }
+                        if let moved {
+                            failures.append(
+                                "scroll_to_row: scrolling \(parts[1]) moved root \(before.0) from y "
+                                    + "\(Int(before.1)) to y \(Int(moved)), a root that does not scroll as a "
+                                    + "page (docs/traps.md, the iOS page that moved with its table)")
+                        }
+                    }
+                #endif
             case "expect_shares":
                 // The container's children as whole-percentage shares of THEIR
                 // SUM, not of the container, so spacing and padding stay out;
@@ -17006,6 +17036,9 @@ private struct KayaNativeTable: View {
             return height.rounded(.up)
         }
 
+        /// docs/traps.md, the mac table's divider moved with the rows on screen.
+        private var seenFloors: [CGFloat] = []
+
         /// docs/tables-plan.md decision 6, the mac tier's spelling: a column's
         /// content is its width FLOOR, leftover distributes, and the table spans
         /// its viewport. Only the realized rows can be measured.
@@ -17033,6 +17066,12 @@ private struct KayaNativeTable: View {
                 tableView.numberOfRows > 0
                 ? max(0, min(tableView.frameOfCell(atColumn: 0, row: 0).minX, 32)) : 0
             let track = scrollView.contentView.bounds.width - 2 * inset
+            if seenFloors.count == widths.count {
+                for column in widths.indices { seenFloors[column] = max(seenFloors[column], widths[column]) }
+            } else {
+                seenFloors = widths
+            }
+            widths = seenFloors
             let floors = widths
             var widened = false
             let total = widths.reduce(0, +)
@@ -17160,6 +17199,7 @@ private struct KayaNativeTable: View {
         private func syncColumns() {
             let titles = node.tableColumns
             if tableView.tableColumns.count != titles.count {
+                seenFloors = []
                 for column in tableView.tableColumns { tableView.removeTableColumn(column) }
                 for (index, title) in titles.enumerated() {
                     let column = NSTableColumn(
@@ -27078,6 +27118,50 @@ struct KayaSheetRoot: View {
     }
 }
 
+/// docs/traps.md, the iOS page that moved with its table.
+@MainActor func kayaRootScrollsAsPage(_ node: KayaNode) -> Bool {
+    if node.kind == kindScroll { return !kayaScrollHorizontal(node) }
+    if !node.tableColumns.isEmpty { return node.grow > 0 }
+    let vertical = (node.axis ?? (node.kind == kindColumn ? 1 : 0)) == 1
+    guard vertical, node.kind == kindColumn || node.kind == kindRow, let first = node.laidOut.first else {
+        return false
+    }
+    return kayaRootScrollsAsPage(first)
+}
+
+#if os(iOS)
+    /// docs/traps.md, the iOS page that moved with its table.
+    struct KayaBarScrollPin: UIViewRepresentable {
+        func makeUIView(context: Context) -> KayaBarScrollPinView { KayaBarScrollPinView() }
+
+        func updateUIView(_ view: KayaBarScrollPinView, context: Context) { view.claim() }
+    }
+
+    final class KayaBarScrollPinView: UIScrollView {
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            isUserInteractionEnabled = false
+            isScrollEnabled = false
+        }
+
+        required init?(coder: NSCoder) { nil }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            claim()
+        }
+
+        func claim() {
+            var next: UIResponder? = self
+            while let r = next, !(r is UIViewController) { next = r.next }
+            guard let controller = next as? UIViewController,
+                controller.contentScrollView(for: .top) !== self
+            else { return }
+            controller.setContentScrollView(self, for: .top)
+        }
+    }
+#endif
+
 #if !os(macOS)
     /// THE ARMED SHEET'S CANCEL ATTEMPT (docs/sheet-plan.md): SwiftUI's
     /// interactiveDismissDisabled sets the presentation modal and reports
@@ -27243,6 +27327,11 @@ struct KayaAuxRoot: View {
             .padding(scene.windows[windowId]?.inset ?? 16)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .navigationTitle(kayaWindowCaption(windowId))
+            #if os(iOS)
+                .background(
+                    scene.windows[windowId]?.root.map { kayaRootScrollsAsPage($0) } == false
+                        ? KayaBarScrollPin() : nil)
+            #endif
             .navigationDestination(for: UInt64.self) { eid in
                 KayaEntryRoot(entryId: eid)
             }
@@ -30459,6 +30548,9 @@ struct KayaRoot: View {
         // prop changes nothing): SwiftUI's blessed window titling path on macOS;
         // harmless on iOS, where the switcher label is stamped in the apply arm.
         .navigationTitle(kayaWindowCaption(0))
+        #if os(iOS)
+            .background(scene.root.map { kayaRootScrollsAsPage($0) } == false ? KayaBarScrollPin() : nil)
+        #endif
         // THE BRAND ACCENT, applied as .tint of the current appearance's derived
         // FILL — a value the core computed, never re-derived here
         // (docs/styling-plan.md D1, D2). The same tint rides the aux, sections

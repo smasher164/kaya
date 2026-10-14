@@ -16338,3 +16338,58 @@ until the next sighting, whose picture and press readings say whether the
 button was covered or disabled. GUARD: tools/check-steps.py's ios_give_up,
 five negatives watched red.
 
+
+## The Compose cover drawn unsmoothed (measured 2026-10-14)
+
+The network images review's Android cover had a stepped disc edge where the
+other four platforms drew a smooth one. `ImageDecoder.setTargetSize` to the
+box (96 px from a 600 px JPEG at density 1.0) lets the codec sample to a
+power of two first (DCT scaling for a JPEG, every Nth pixel for a PNG) and
+then rescales the rest in one bilinear step, which reads 4 source pixels per
+output pixel and drops the others. The shot's 96 px disc had 82 mixed edge
+pixels against 99 for a box filter of the same source. The decode now stops
+the codec's sampling at twice the target (`kayaCodecSample`) and halves the
+rest with `Bitmap.createScaledBitmap(..., true)`, where a 2:1 bilinear is a
+2x2 box, before one last filtered step under 2x (`kayaDownscale`); the
+re-taken disc has 99. No scene can see it: every phase, size and drawn-box
+reading is the same, and an ink probe at an edge pixel is not byte-comparable
+across platforms. GUARD: tools/lib/netimage_compose.py, the codec sample and
+filtered downscale doors, seven cuts watched red.
+
+## The mac table's divider moved with the rows on screen (measured 2026-10-14)
+
+The native tier measured each column's floor from the VISIBLE rows on every
+layout pass and shared the leftover equally, so the Art/Title divider sat at
+a different x in captures of one scene (783-814 px). A temporary reading of
+`layoutColumns` showed two causes: a pass that ran before the visible rows'
+cell views existed read the headers alone (floors 35.9/43.0 against
+36.0/67.5, the 814 px capture), and the Title floor grew with the rows on
+screen (67.5 at rows 0-12, 75.5 at 151, 77.5 at 288). The driver keeps every
+column's widest floor so far (`seenFloors`, reset when the columns are
+rebuilt), so a scroll or an early pass never narrows a column; the divider
+still moves once, toward the wider column, when content wider than any seen
+scrolls in. The soft dark boxes behind the header labels over scrolled rows
+are AppKit's own: a stock NSTableView in .inset and .plain style draws them
+too on macOS 26. GUARD: tools/check-table-tier.py, the static `widths =
+seenFloors` needle and the probe's steady-columns clause (Title 43 -> 201 ->
+201 back at the top), both watched red with the line cut.
+
+## The iOS page that moved with its table (measured 2026-10-14)
+
+Scrolling the netimage table on the phone collapsed the window's large title
+and moved the whole root up 52 pt (root top 166 -> 114), so the controls
+card moved and no title showed. The root is not in a ScrollView; UIKit's
+bar follows the controller's content scroll view, the first scroll view
+under the controller's view, which was the grown table's own (the chat C0
+entry in docs/deferred.md met the same collapse on a pushed screen). A root
+whose first content under the bar is not a vertical scroller
+(`kayaRootScrollsAsPage`) now wears `KayaBarScrollPin`, a UIScrollView that
+never scrolls, sits first and is named through `setContentScrollView(_:for:
+.top)`; a root that scrolls as a page is unchanged. The pin must not exist
+on a page root at all: an inert one (a plain view, nothing named) left on
+netimage's root already stopped the collapse, so on a page root it would
+stop the bar following the page.
+GUARD: the iOS `scroll_to_row` arm fails when a root that does not scroll as
+a page moves within 300 ms of the scroll (watched red with the pin cut:
+`moved root 1 from y 166 to y 114`), and tools/lib/netimage_routes.py holds
+the pin's two sites, its claim and that check, three cuts watched red.

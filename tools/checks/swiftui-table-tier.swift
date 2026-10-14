@@ -739,6 +739,66 @@ enum KayaTableTierProbe {
             clipWidth >= floorTotal, true)
         floorWindow.orderOut(nil)
 
+        // --- Half 6: a scroll never narrows a column (docs/traps.md, the mac
+        // table's divider moved with the rows on screen). The rows past 100
+        // carry a long title; back at the top, the Title column must keep
+        // the width it took for them.
+        let steadyTable = KayaNode(
+            id: 60, kind: UInt32(KAYA_KIND_COLUMN), tag: Array("steady".utf8))
+        steadyTable.tableColumns = ["Art", "Title"]
+        steadyTable.sortTag = Array("steady-sort".utf8)
+        for r in 0..<200 {
+            let row = KayaNode(
+                id: UInt64(61_000 + r), kind: UInt32(KAYA_KIND_ROW),
+                tag: Array("steady-r\(r)".utf8))
+            for (c, value) in ["x", r < 100 ? "t\(r)" : "a much longer title for row \(r)"].enumerated() {
+                let cell = KayaNode(
+                    id: UInt64(62_000 + r * 2 + c), kind: UInt32(KAYA_KIND_LABEL),
+                    tag: Array("steady-c\(r)-\(c)".utf8))
+                cell.text = value
+                row.children.append(cell)
+            }
+            steadyTable.children.append(row)
+        }
+        steadyTable.grow = 1
+        kayaScene.columns.append(steadyTable)
+        let steadyWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 700, height: 300),
+            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        steadyWindow.contentView = NSHostingView(
+            rootView: KayaRender(node: steadyTable, flexVertical: true, flexStretch: false))
+        steadyWindow.orderFront(nil)
+        let steadyDeadline = Date().addingTimeInterval(5)
+        while Date() < steadyDeadline, kayaTableDrivers[steadyTable.id] == nil {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        }
+        func titleWidth() -> CGFloat {
+            guard let content = steadyWindow.contentView, let table = findTableView(content),
+                table.tableColumns.count == 2
+            else { return -1 }
+            return table.tableColumns[1].width
+        }
+        if let driver = kayaTableDrivers[steadyTable.id] {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+            let atTop = titleWidth()
+            driver.scroll(toRow: 150)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+            let atLong = titleWidth()
+            driver.scroll(toRow: 0)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+            let back = titleWidth()
+            print("  steady columns: Title \(atTop) at the top, \(atLong) over the long rows, "
+                + "\(back) back at the top")
+            expectBool("the steady clause read the Title column", atTop > 0 && atLong > 0, true)
+            expectBool("the long rows widened the Title column", atLong > atTop + 0.5, true)
+            expectBool("a scroll back to the top never narrows a column", back >= atLong - 0.5, true)
+        } else {
+            print("swiftui-table-tier: FAIL — no driver materialized for the "
+                + "steady-columns clause, so it was checked against nothing")
+            failures += 1
+        }
+        steadyWindow.orderOut(nil)
+
         if failures == 0 {
             print("swiftui-table-tier: OK — rule, geometry, this host's branch, "
                 + "and the rendered tier")

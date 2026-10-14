@@ -2109,25 +2109,22 @@ internal class KayaPicturePainter(private val picture: KayaPicture) : Painter() 
 
 /** THE IMAGE DECODE, pure and safe on any thread: the natural size from the
  * header, and pixels no larger than `target(width, height)` on the longer
- * side. Null for bytes that do not decode, never a crash. */
+ * side. Null for bytes that do not decode, never a crash. Scaled per
+ * docs/traps.md, the Compose cover drawn unsmoothed. */
 internal fun kayaDecodePicture(data: ByteArray, target: (Int, Int) -> Int): KayaPicture? = try {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
         var wide = 0
         var tall = 0
         var pixels = 0
-        val bitmap = ImageDecoder.decodeBitmap(ImageDecoder.createSource(java.nio.ByteBuffer.wrap(data))) { decoder, info, _ ->
+        val decoded = ImageDecoder.decodeBitmap(ImageDecoder.createSource(java.nio.ByteBuffer.wrap(data))) { decoder, info, _ ->
             wide = info.size.width
             tall = info.size.height
             val long = maxOf(wide, tall)
             pixels = minOf(long, maxOf(1, target(wide, tall)))
-            if (pixels < long) {
-                decoder.setTargetSize(
-                    maxOf(1, Math.round(wide.toDouble() * pixels / long).toInt()),
-                    maxOf(1, Math.round(tall.toDouble() * pixels / long).toInt()),
-                )
-            }
+            decoder.setTargetSampleSize(kayaCodecSample(long, pixels))
             decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
         }
+        val bitmap = kayaDownscale(decoded, wide, tall, pixels)
         KayaPicture(bitmap.asImageBitmap(), wide, tall, pixels, bitmap.allocationByteCount)
     } else {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -2139,9 +2136,9 @@ internal fun kayaDecodePicture(data: ByteArray, target: (Int, Int) -> Int): Kaya
         } else {
             val long = maxOf(wide, tall)
             val pixels = minOf(long, maxOf(1, target(wide, tall)))
-            var sample = 1
-            while (long / (sample * 2) >= pixels) sample *= 2
+            val sample = kayaCodecSample(long, pixels)
             BitmapFactory.decodeByteArray(data, 0, data.size, BitmapFactory.Options().apply { inSampleSize = sample })
+                ?.let { kayaDownscale(it, wide, tall, pixels) }
                 ?.let { KayaPicture(it.asImageBitmap(), wide, tall, pixels, it.allocationByteCount) }
         }
     }
@@ -2149,6 +2146,28 @@ internal fun kayaDecodePicture(data: ByteArray, target: (Int, Int) -> Int): Kaya
     null
 } catch (e: IllegalArgumentException) {
     null
+}
+
+internal fun kayaCodecSample(long: Int, pixels: Int): Int {
+    var sample = 1
+    while (long / (sample * 2) >= 2 * pixels) sample *= 2
+    return sample
+}
+
+internal fun kayaDownscale(decoded: Bitmap, wide: Int, tall: Int, pixels: Int): Bitmap {
+    val long = maxOf(wide, tall)
+    val w = maxOf(1, Math.round(wide.toDouble() * pixels / long).toInt())
+    val h = maxOf(1, Math.round(tall.toDouble() * pixels / long).toInt())
+    var b = decoded
+    while (b.width >= 2 * w && b.height >= 2 * h) {
+        val half = Bitmap.createScaledBitmap(b, b.width / 2, b.height / 2, true)
+        if (half !== b) b.recycle()
+        b = half
+    }
+    if (b.width == w && b.height == h) return b
+    val out = Bitmap.createScaledBitmap(b, w, h, true)
+    if (out !== b) b.recycle()
+    return out
 }
 
 /** The longer side in pixels an image is drawn at: its declared box placed
